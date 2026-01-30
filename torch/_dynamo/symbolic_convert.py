@@ -40,6 +40,7 @@ import operator
 import re
 import sys
 import threading
+import time
 import traceback
 import types
 import weakref
@@ -50,7 +51,7 @@ from typing_extensions import TypeIs
 import torch
 import torch._logging
 from torch._dynamo.exc import ObservedException, TensorifyScalarRestartAnalysis
-from torch._guards import tracing, TracingContext
+from torch._guards import InlineFunctionTiming, tracing, TracingContext
 from torch._logging.structured import dump_file
 from torch.fx.experimental.symbolic_shapes import guard_bool
 from torch.utils._functools import cache_method
@@ -5063,9 +5064,21 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         strict_ctx: Any = contextlib.nullcontext()
         if parent.strict_checks_fn:
             strict_ctx = self.strict_translation_mode(parent.strict_checks_fn)
+
+        # Get caller info from the timing stack before we push ourselves
+        caller_info = TracingContext.get_current_caller()
+
+        # Push ourselves onto the timing stack
+        trace_start_ns = time.time_ns()
+        TracingContext.push_inline_timing(
+            code.co_name, code.co_filename, code.co_firstlineno, trace_start_ns
+        )
+
+        trace_success = False
         try:
             with strict_ctx:
                 self.run()
+            trace_success = True
         except exc.ObservedException as e:
             msg = f"Observed exception DURING INLING {code} : {e}"
             log.debug(msg)
@@ -5080,6 +5093,32 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             log.debug("FAILED INLINING %s", code)
             raise
         finally:
+            # Pop ourselves from the timing stack
+            stack_entry = TracingContext.pop_inline_timing()
+            trace_end_ns = time.time_ns()
+
+            # Record timing for successful traces
+            if trace_success and stack_entry is not None:
+                cumtime_ns = trace_end_ns - trace_start_ns
+                tottime_ns = cumtime_ns - stack_entry.child_time_ns
+
+                timing = InlineFunctionTiming(
+                    func_name=code.co_name,
+                    filename=code.co_filename,
+                    firstlineno=code.co_firstlineno,
+                    cumtime_ns=cumtime_ns,
+                    tottime_ns=tottime_ns,
+                    bytecode_count=len(code.co_code),
+                    inline_depth=self.inline_depth,
+                    caller_func_name=caller_info[0] if caller_info else None,
+                    caller_filename=caller_info[1] if caller_info else None,
+                    caller_firstlineno=caller_info[2] if caller_info else None,
+                )
+                TracingContext.record_inline_function_timing(timing)
+
+                # Add our cumtime to the parent's child_time accumulator
+                TracingContext.add_child_time_to_parent(cumtime_ns)
+
             # Pass inlined tx's error_on_graph_break to parent.
             # Deals with the case where the parent's error_on_graph_break is True
             # while the inlined tx's error_on_graph_break was set to False.

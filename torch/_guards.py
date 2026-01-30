@@ -875,6 +875,102 @@ class CompileContext:
         return TraceId(self.compile_id, self.attempt)
 
 
+@dataclass
+class InlineFunctionTiming:
+    """
+    Timing data for a single inlined function trace.
+
+    Follows cProfile conventions:
+    - cumtime: total time in function including all subcalls (inclusive)
+    - tottime: time in function excluding subcalls (exclusive)
+    - caller info: who called this function (for building call graph)
+    """
+
+    # Function identification
+    func_name: str
+    filename: str
+    firstlineno: int
+    # Timing data (in nanoseconds) - cProfile-style
+    cumtime_ns: int  # Inclusive time (includes subcalls)
+    tottime_ns: int  # Exclusive time (excludes subcalls)
+    # Code stats (for comparing tracing overhead vs function complexity)
+    bytecode_count: int
+    # Nesting depth when this function was traced
+    inline_depth: int
+    # Caller information (for building call graph edges)
+    caller_func_name: str | None = None
+    caller_filename: str | None = None
+    caller_firstlineno: int | None = None
+    # Optional: Python execution time for comparison (in nanoseconds)
+    python_time_ns: int = 0
+    python_call_count: int = 0
+
+    # Backwards compatibility alias
+    @property
+    def trace_time_ns(self) -> int:
+        return self.cumtime_ns
+
+    @property
+    def trace_time_ms(self) -> float:
+        return self.cumtime_ns / 1e6
+
+    @property
+    def cumtime_ms(self) -> float:
+        return self.cumtime_ns / 1e6
+
+    @property
+    def tottime_ms(self) -> float:
+        return self.tottime_ns / 1e6
+
+    @property
+    def python_time_ms(self) -> float:
+        return self.python_time_ns / 1e6
+
+    @property
+    def slowdown_ratio(self) -> float:
+        """Ratio of trace time to Python execution time. Higher = slower to trace."""
+        if self.python_time_ns > 0:
+            return self.cumtime_ns / self.python_time_ns
+        return 0.0
+
+    @property
+    def caller_key(self) -> tuple[str, str, int] | None:
+        """Return caller as a pstats-compatible key tuple."""
+        if self.caller_func_name is not None:
+            return (
+                self.caller_filename or "",
+                self.caller_firstlineno or 0,
+                self.caller_func_name,
+            )
+        return None
+
+    @property
+    def func_key(self) -> tuple[str, int, str]:
+        """Return this function as a pstats-compatible key tuple."""
+        return (self.filename, self.firstlineno, self.func_name)
+
+    def __repr__(self) -> str:
+        ratio_str = (
+            f", slowdown={self.slowdown_ratio:.1f}x" if self.python_time_ns > 0 else ""
+        )
+        return (
+            f"InlineFunctionTiming({self.func_name} at {self.filename}:{self.firstlineno}, "
+            f"cumtime={self.cumtime_ms:.2f}ms, tottime={self.tottime_ms:.2f}ms, "
+            f"bytecode={self.bytecode_count}, depth={self.inline_depth}{ratio_str})"
+        )
+
+
+@dataclass
+class _InlineTimingStackEntry:
+    """Stack entry for tracking inline function timing."""
+
+    func_name: str
+    filename: str
+    firstlineno: int
+    start_time_ns: int
+    child_time_ns: int  # Accumulated time spent in children
+
+
 class TracingContext:
     """
     Provides the currently installed TracingContext, or None.
@@ -945,6 +1041,10 @@ class TracingContext:
         self.hop_dispatch_set_cache = HopDispatchSetCache()
         # list of code objects for inlined functions
         self.traced_code: list[CodeType] = []
+        # Timing data for inlined function tracing (for profiling Dynamo compile time)
+        self.inline_function_timings: list[InlineFunctionTiming] = []
+        # Stack for tracking inline function call chain (for computing tottime)
+        self.inline_timing_stack: list[_InlineTimingStackEntry] = []
 
     def clear(self) -> None:
         # Look at the note in output_graph.py in function `save_global_state`
@@ -1071,6 +1171,62 @@ class TracingContext:
         if tc is None:
             return None
         return tc.traced_code
+
+    @staticmethod
+    def record_inline_function_timing(timing: InlineFunctionTiming) -> None:
+        """Record timing data for an inlined function trace."""
+        tc = TracingContext.try_get()
+        if tc is not None:
+            tc.inline_function_timings.append(timing)
+
+    @staticmethod
+    def get_inline_function_timings() -> list[InlineFunctionTiming] | None:
+        """Get timing data for all inlined function traces."""
+        tc = TracingContext.try_get()
+        if tc is None:
+            return None
+        return tc.inline_function_timings
+
+    @staticmethod
+    def push_inline_timing(
+        func_name: str, filename: str, firstlineno: int, start_time_ns: int
+    ) -> None:
+        """Push a new entry onto the inline timing stack."""
+        tc = TracingContext.try_get()
+        if tc is not None:
+            tc.inline_timing_stack.append(
+                _InlineTimingStackEntry(
+                    func_name=func_name,
+                    filename=filename,
+                    firstlineno=firstlineno,
+                    start_time_ns=start_time_ns,
+                    child_time_ns=0,
+                )
+            )
+
+    @staticmethod
+    def pop_inline_timing() -> _InlineTimingStackEntry | None:
+        """Pop the top entry from the inline timing stack."""
+        tc = TracingContext.try_get()
+        if tc is not None and tc.inline_timing_stack:
+            return tc.inline_timing_stack.pop()
+        return None
+
+    @staticmethod
+    def add_child_time_to_parent(child_cumtime_ns: int) -> None:
+        """Add the child's cumulative time to the parent's child_time accumulator."""
+        tc = TracingContext.try_get()
+        if tc is not None and tc.inline_timing_stack:
+            tc.inline_timing_stack[-1].child_time_ns += child_cumtime_ns
+
+    @staticmethod
+    def get_current_caller() -> tuple[str, str, int] | None:
+        """Get the current caller (top of stack) as (func_name, filename, firstlineno)."""
+        tc = TracingContext.try_get()
+        if tc is not None and tc.inline_timing_stack:
+            entry = tc.inline_timing_stack[-1]
+            return (entry.func_name, entry.filename, entry.firstlineno)
+        return None
 
 
 @contextmanager

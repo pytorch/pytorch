@@ -77,7 +77,7 @@ from torch._C import (
 )
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.metrics_context import MetricsContext, RuntimeMetricsContext
-from torch._guards import CompileId, Source, TracingContext
+from torch._guards import CompileId, InlineFunctionTiming, Source, TracingContext
 from torch._subclasses.meta_utils import is_sparse_compressed
 from torch._utils_internal import (
     justknobs_check,
@@ -886,6 +886,589 @@ def compile_times(  # type: ignore[misc]
 @atexit.register
 def dump_compile_times() -> None:
     log.info(compile_times(repr="str", aggregate=True))
+
+
+def get_inline_function_timings() -> list[InlineFunctionTiming] | None:
+    """
+    Get timing data for all inlined functions traced during compilation.
+
+    Returns a list of InlineFunctionTiming objects containing:
+    - func_name: Name of the function
+    - filename: Source file path
+    - firstlineno: First line number in source
+    - trace_time_ns: Time to trace in nanoseconds
+    - bytecode_count: Size of function bytecode
+    - inline_depth: Nesting depth when traced
+
+    Returns None if no TracingContext is active.
+    """
+    return TracingContext.get_inline_function_timings()
+
+
+def _shorten_filename(filepath: str, max_len: int = 35) -> str:
+    """
+    Shorten a filepath to include parent directory and filename.
+
+    Examples:
+        /data/users/foo/pytorch/torch/_dynamo/utils.py -> _dynamo/utils.py
+        /very/long/path/to/some/module/file.py -> module/file.py
+    """
+    if "/" not in filepath:
+        return (
+            filepath if len(filepath) <= max_len else ".." + filepath[-(max_len - 2) :]
+        )
+
+    parts = filepath.rsplit("/", 2)
+    if len(parts) >= 2:
+        # Get parent_dir/filename
+        short = "/".join(parts[-2:])
+    else:
+        short = parts[-1]
+
+    if len(short) <= max_len:
+        return short
+    # If still too long, truncate from the left
+    return ".." + short[-(max_len - 2) :]
+
+
+def format_inline_function_timings(
+    timings: list[InlineFunctionTiming] | None = None,
+    sort_by: str = "cumtime",
+    top_n: int | None = None,
+) -> str:
+    """
+    Format inline function timing data as a human-readable string.
+
+    Args:
+        timings: List of InlineFunctionTiming objects. If None, fetches from current TracingContext.
+        sort_by: How to sort results. Options: "cumtime", "tottime", "bytecode", "depth"
+        top_n: If provided, only show top N entries
+
+    Returns:
+        Formatted string with timing information, sorted by the specified metric.
+    """
+    if timings is None:
+        timings = get_inline_function_timings()
+
+    if not timings:
+        return "No inline function timing data available."
+
+    # Sort based on requested metric
+    if sort_by == "cumtime" or sort_by == "trace_time":
+        timings = sorted(timings, key=lambda x: x.cumtime_ns, reverse=True)
+    elif sort_by == "tottime":
+        timings = sorted(timings, key=lambda x: x.tottime_ns, reverse=True)
+    elif sort_by == "bytecode":
+        timings = sorted(timings, key=lambda x: x.bytecode_count, reverse=True)
+    elif sort_by == "depth":
+        timings = sorted(timings, key=lambda x: x.inline_depth, reverse=True)
+
+    if top_n is not None:
+        timings = timings[:top_n]
+
+    # Format output - similar to pstats format
+    lines = ["Inline Function Tracing Times:"]
+    lines.append("-" * 130)
+    lines.append(
+        f"{'Function':<35} {'File:Line':<30} {'cumtime':>10} {'tottime':>10} {'Bytecode':>8} {'Depth':>5} {'Caller':<25}"
+    )
+    lines.append("-" * 130)
+
+    for t in timings:
+        func_name = t.func_name[:33] + ".." if len(t.func_name) > 35 else t.func_name
+        short_path = _shorten_filename(t.filename, max_len=22)
+        file_loc = f"{short_path}:{t.firstlineno}"
+        if len(file_loc) > 30:
+            file_loc = ".." + file_loc[-28:]
+
+        caller_str = ""
+        if t.caller_func_name:
+            caller_str = t.caller_func_name[:23] + ".." if len(t.caller_func_name) > 25 else t.caller_func_name
+
+        lines.append(
+            f"{func_name:<35} {file_loc:<30} {t.cumtime_ms:>10.2f} {t.tottime_ms:>10.2f} "
+            f"{t.bytecode_count:>8} {t.inline_depth:>5} {caller_str:<25}"
+        )
+
+    lines.append("-" * 130)
+    lines.append(f"Total functions traced: {len(timings)}")
+    total_cumtime_ms = sum(t.cumtime_ns for t in timings) / 1e6
+    total_tottime_ms = sum(t.tottime_ns for t in timings) / 1e6
+    lines.append(f"Total cumtime: {total_cumtime_ms:.2f}ms, Total tottime: {total_tottime_ms:.2f}ms")
+
+    return "\n".join(lines)
+
+
+def format_inline_function_timings_aggregated(
+    timings: list[InlineFunctionTiming] | None = None,
+    sort_by: str = "cumtime",
+    top_n: int | None = None,
+) -> str:
+    """
+    Format inline function timing data aggregated by unique function.
+
+    This combines multiple calls to the same function into a single entry,
+    showing total cumtime, tottime, call count, and average time per call.
+    Similar to pstats aggregated view.
+
+    Args:
+        timings: List of InlineFunctionTiming objects. If None, fetches from current TracingContext.
+        sort_by: How to sort results. Options: "cumtime", "tottime", "count", "avg_time"
+        top_n: If provided, only show top N entries
+
+    Returns:
+        Formatted string with aggregated timing information.
+    """
+    if timings is None:
+        timings = get_inline_function_timings()
+
+    if not timings:
+        return "No inline function timing data available."
+
+    # Aggregate by (func_name, filename, firstlineno)
+    aggregated: dict[tuple[str, str, int], dict[str, Any]] = {}
+    for t in timings:
+        key = (t.func_name, t.filename, t.firstlineno)
+        if key not in aggregated:
+            aggregated[key] = {
+                "func_name": t.func_name,
+                "filename": t.filename,
+                "firstlineno": t.firstlineno,
+                "cumtime_ns": 0,
+                "tottime_ns": 0,
+                "bytecode_count": t.bytecode_count,
+                "call_count": 0,
+                "prim_count": 0,  # primitive (non-recursive) calls
+                "min_depth": t.inline_depth,
+                "max_depth": t.inline_depth,
+            }
+        agg = aggregated[key]
+        agg["tottime_ns"] += t.tottime_ns  # tottime always added (exclusive)
+        agg["call_count"] += 1
+        agg["min_depth"] = min(agg["min_depth"], t.inline_depth)
+        agg["max_depth"] = max(agg["max_depth"], t.inline_depth)
+
+        # Check if this is a recursive call
+        is_recursive = (
+            t.caller_func_name == t.func_name
+            and t.caller_filename == t.filename
+            and t.caller_firstlineno == t.firstlineno
+        )
+        if not is_recursive:
+            agg["prim_count"] += 1
+            # Only add cumtime for primitive calls to avoid double counting
+            agg["cumtime_ns"] += t.cumtime_ns
+
+    # Convert to list
+    agg_list = list(aggregated.values())
+
+    # Sort based on requested metric
+    if sort_by == "cumtime" or sort_by == "total_time":
+        agg_list.sort(key=lambda x: x["cumtime_ns"], reverse=True)
+    elif sort_by == "tottime":
+        agg_list.sort(key=lambda x: x["tottime_ns"], reverse=True)
+    elif sort_by == "count":
+        agg_list.sort(key=lambda x: x["call_count"], reverse=True)
+    elif sort_by == "avg_time":
+        agg_list.sort(key=lambda x: x["cumtime_ns"] / x["call_count"], reverse=True)
+
+    if top_n is not None:
+        agg_list = agg_list[:top_n]
+
+    # Format output - similar to pstats
+    lines = ["Inline Function Tracing Times (Aggregated):"]
+    lines.append("-" * 130)
+    lines.append(
+        f"{'ncalls':>9} {'tottime':>10} {'percall':>10} {'cumtime':>10} {'percall':>10}  {'filename:lineno(function)':<58}"
+    )
+    lines.append("-" * 130)
+
+    for agg in agg_list:
+        ncalls = agg["call_count"]
+        pcalls = agg["prim_count"]
+        tottime_s = agg["tottime_ns"] / 1e9
+        cumtime_s = agg["cumtime_ns"] / 1e9
+        # percall for cumtime uses primitive calls (like pstats)
+        percall_tot = tottime_s / ncalls if ncalls > 0 else 0
+        percall_cum = cumtime_s / pcalls if pcalls > 0 else 0
+
+        # Format ncalls as "total/prim" if there are recursive calls
+        if ncalls != pcalls:
+            ncalls_str = f"{ncalls}/{pcalls}"
+        else:
+            ncalls_str = str(ncalls)
+
+        short_path = _shorten_filename(agg["filename"], max_len=35)
+        func_loc = f"{short_path}:{agg['firstlineno']}({agg['func_name']})"
+        if len(func_loc) > 58:
+            func_loc = ".." + func_loc[-56:]
+
+        lines.append(
+            f"{ncalls_str:>9} {tottime_s:>10.6f} {percall_tot:>10.6f} {cumtime_s:>10.6f} {percall_cum:>10.6f}  {func_loc:<58}"
+        )
+
+    lines.append("-" * 130)
+    prim_calls = sum(agg["prim_count"] for agg in aggregated.values())
+    lines.append(f"Unique functions: {len(aggregated)}, Total calls: {len(timings)} ({prim_calls} primitive)")
+    total_tottime_ms = sum(agg["tottime_ns"] for agg in aggregated.values()) / 1e6
+    lines.append(f"Total tottime: {total_tottime_ms:.2f}ms")
+
+    return "\n".join(lines)
+
+
+class PythonExecutionProfiler:
+    """
+    Profile Python function execution times to compare with Dynamo tracing times.
+
+    Usage:
+        profiler = PythonExecutionProfiler()
+        with profiler:
+            model(inputs)  # Run in eager mode
+        python_timings = profiler.get_timings()
+
+        # Later, merge with trace timings:
+        merged = merge_python_timings_with_trace_timings(trace_timings, python_timings)
+    """
+
+    def __init__(self) -> None:
+        self._timings: dict[tuple[str, str, int], dict[str, Any]] = {}
+        self._call_stack: list[tuple[tuple[str, str, int], int]] = []
+        self._enabled = False
+
+    def __enter__(self) -> PythonExecutionProfiler:
+        self._timings.clear()
+        self._call_stack.clear()
+        self._enabled = True
+        sys.setprofile(self._profile_callback)
+        return self
+
+    def __exit__(self, *args: Any) -> None:
+        sys.setprofile(None)
+        self._enabled = False
+
+    def _profile_callback(
+        self, frame: Any, event: str, arg: Any
+    ) -> Callable[..., Any] | None:
+        if not self._enabled:
+            return None
+
+        code = frame.f_code
+        key = (code.co_name, code.co_filename, code.co_firstlineno)
+
+        if event == "call":
+            self._call_stack.append((key, time.time_ns()))
+        elif event == "return" and self._call_stack:
+            # Find the matching call on the stack
+            for i in range(len(self._call_stack) - 1, -1, -1):
+                if self._call_stack[i][0] == key:
+                    _, start_time = self._call_stack.pop(i)
+                    elapsed = time.time_ns() - start_time
+                    if key not in self._timings:
+                        self._timings[key] = {
+                            "total_time_ns": 0,
+                            "call_count": 0,
+                            "bytecode_count": len(code.co_code),
+                        }
+                    self._timings[key]["total_time_ns"] += elapsed
+                    self._timings[key]["call_count"] += 1
+                    break
+
+        return self._profile_callback
+
+    def get_timings(self) -> dict[tuple[str, str, int], dict[str, Any]]:
+        """Get the collected Python execution timings."""
+        return dict(self._timings)
+
+
+def merge_python_timings_with_trace_timings(
+    trace_timings: list[InlineFunctionTiming],
+    python_timings: dict[tuple[str, str, int], dict[str, Any]],
+) -> list[InlineFunctionTiming]:
+    """
+    Merge Python execution timings into trace timings to enable slowdown ratio calculation.
+
+    Args:
+        trace_timings: List of InlineFunctionTiming from Dynamo tracing
+        python_timings: Dictionary from PythonExecutionProfiler.get_timings()
+
+    Returns:
+        New list of InlineFunctionTiming with python_time_ns populated
+    """
+    merged = []
+    for t in trace_timings:
+        key = (t.func_name, t.filename, t.firstlineno)
+        if key in python_timings:
+            pt = python_timings[key]
+            # Distribute Python time proportionally if function was called multiple times
+            python_time_per_call = pt["total_time_ns"] // max(pt["call_count"], 1)
+            merged.append(
+                InlineFunctionTiming(
+                    func_name=t.func_name,
+                    filename=t.filename,
+                    firstlineno=t.firstlineno,
+                    cumtime_ns=t.cumtime_ns,
+                    tottime_ns=t.tottime_ns,
+                    bytecode_count=t.bytecode_count,
+                    inline_depth=t.inline_depth,
+                    caller_func_name=t.caller_func_name,
+                    caller_filename=t.caller_filename,
+                    caller_firstlineno=t.caller_firstlineno,
+                    python_time_ns=python_time_per_call,
+                    python_call_count=pt["call_count"],
+                )
+            )
+        else:
+            merged.append(t)
+    return merged
+
+
+def format_inline_timings_with_slowdown(
+    timings: list[InlineFunctionTiming],
+    sort_by: str = "slowdown",
+    top_n: int | None = None,
+    min_trace_time_ms: float = 0.1,
+) -> str:
+    """
+    Format inline function timings with Python execution comparison.
+
+    Args:
+        timings: List of InlineFunctionTiming (should have python_time_ns populated)
+        sort_by: How to sort. Options: "slowdown", "trace_time", "python_time"
+        top_n: If provided, only show top N entries
+        min_trace_time_ms: Filter out functions with trace time below this threshold
+
+    Returns:
+        Formatted string showing tracing overhead vs Python execution.
+    """
+    # Filter by minimum trace time
+    filtered = [t for t in timings if t.trace_time_ms >= min_trace_time_ms]
+
+    if not filtered:
+        return "No inline function timing data available (or all below threshold)."
+
+    # Only include entries with Python timing for slowdown analysis
+    with_python = [t for t in filtered if t.python_time_ns > 0]
+
+    if not with_python:
+        return (
+            "No Python execution timing data available. "
+            "Use PythonExecutionProfiler to collect Python timings first."
+        )
+
+    # Sort based on requested metric
+    if sort_by == "slowdown":
+        with_python.sort(key=lambda x: x.slowdown_ratio, reverse=True)
+    elif sort_by == "trace_time":
+        with_python.sort(key=lambda x: x.trace_time_ns, reverse=True)
+    elif sort_by == "python_time":
+        with_python.sort(key=lambda x: x.python_time_ns, reverse=True)
+
+    if top_n is not None:
+        with_python = with_python[:top_n]
+
+    # Format output
+    lines = ["Inline Function Tracing Slowdown Analysis:"]
+    lines.append("-" * 135)
+    lines.append(
+        f"{'Function':<35} {'File:Line':<35} {'Trace(ms)':>10} {'Python(ms)':>11} {'Slowdown':>10} {'Bytecode':>8} {'Depth':>6}"
+    )
+    lines.append("-" * 135)
+
+    for t in with_python:
+        func_name = t.func_name[:33] + ".." if len(t.func_name) > 35 else t.func_name
+        # Get parent_dir/filename for better context
+        short_path = _shorten_filename(t.filename, max_len=28)
+        file_loc = f"{short_path}:{t.firstlineno}"
+        if len(file_loc) > 35:
+            file_loc = ".." + file_loc[-33:]
+
+        slowdown_str = f"{t.slowdown_ratio:.1f}x"
+
+        lines.append(
+            f"{func_name:<35} {file_loc:<35} {t.trace_time_ms:>10.2f} {t.python_time_ms:>11.4f} {slowdown_str:>10} {t.bytecode_count:>8} {t.inline_depth:>6}"
+        )
+
+    lines.append("-" * 135)
+    avg_slowdown = sum(t.slowdown_ratio for t in with_python) / len(with_python)
+    max_slowdown = max(t.slowdown_ratio for t in with_python)
+    lines.append(
+        f"Functions analyzed: {len(with_python)}, Avg slowdown: {avg_slowdown:.1f}x, Max slowdown: {max_slowdown:.1f}x"
+    )
+
+    return "\n".join(lines)
+
+
+def generate_pstats_from_timings(
+    timings: list[InlineFunctionTiming],
+    output_file: str | None = None,
+) -> Any:
+    """
+    Generate a pstats.Stats-compatible object from inline function timings.
+
+    This allows visualization with tools like snakeviz, pyprof2calltree, gprof2dot, etc.
+    Includes proper tottime (exclusive), cumtime (inclusive), and caller-callee edges.
+
+    Args:
+        timings: List of InlineFunctionTiming from Dynamo tracing
+        output_file: If provided, save the stats to this file (can be loaded with pstats.Stats(file))
+
+    Returns:
+        A pstats.Stats object that can be used for visualization
+
+    Usage:
+        stats = generate_pstats_from_timings(timings, "dynamo_trace.prof")
+        # Visualize with: snakeviz dynamo_trace.prof
+        # Or print stats:
+        stats.sort_stats('cumulative').print_stats()
+        stats.print_callers()  # Show who called each function
+        stats.print_callees()  # Show what each function called
+    """
+    import pstats
+
+    # Aggregate timings by function and build caller edges
+    # pstats key format: (filename, lineno, funcname)
+    aggregated: dict[tuple[str, int, str], dict[str, Any]] = {}
+    # Track caller->callee edges: callers[callee_key][caller_key] = [nc, cc, tt, ct]
+    caller_edges: dict[
+        tuple[str, int, str], dict[tuple[str, int, str], list[float]]
+    ] = {}
+
+    for t in timings:
+        short_filename = _shorten_filename(t.filename, max_len=50)
+        key = (short_filename, t.firstlineno, t.func_name)
+
+        if key not in aggregated:
+            aggregated[key] = {
+                "ncalls": 0,  # total calls
+                "pcalls": 0,  # primitive (non-recursive) calls
+                "tottime": 0.0,
+                "cumtime": 0.0,
+            }
+            caller_edges[key] = {}
+
+        agg = aggregated[key]
+        agg["ncalls"] += 1
+        agg["tottime"] += t.tottime_ns / 1e9  # tottime is always added (exclusive)
+
+        # Check if this is a primitive (non-recursive) call
+        # A call is primitive if the caller is not the same function
+        is_recursive = (
+            t.caller_func_name == t.func_name
+            and t.caller_filename == t.filename
+            and t.caller_firstlineno == t.firstlineno
+        )
+        if not is_recursive:
+            agg["pcalls"] += 1
+            # Only add cumtime for primitive calls to avoid double counting
+            # The primitive call's cumtime already includes all recursive calls
+            agg["cumtime"] += t.cumtime_ns / 1e9
+
+        # Build caller edge if we have caller info
+        if t.caller_func_name is not None:
+            caller_short = _shorten_filename(t.caller_filename or "", max_len=50)
+            caller_key = (caller_short, t.caller_firstlineno or 0, t.caller_func_name)
+
+            if caller_key not in caller_edges[key]:
+                caller_edges[key][caller_key] = [0, 0, 0.0, 0.0]  # nc, cc, tt, ct
+
+            edge = caller_edges[key][caller_key]
+            edge[0] += 1  # nc (total calls from this caller)
+            if not is_recursive:
+                edge[1] += 1  # cc (primitive calls)
+            edge[2] += t.tottime_ns / 1e9  # tt
+            edge[3] += t.cumtime_ns / 1e9  # ct
+
+    # Build the stats dict in pstats format
+    # Format: {(filename, lineno, funcname): (cc, nc, tottime, cumtime, callers)}
+    # cc = primitive calls, nc = total calls
+    # When cc != nc, pstats displays as "nc/cc" (e.g., "50/5" for recursive)
+    # callers format: {caller_key: (nc, cc, tt, ct)}
+    stats_dict: dict[
+        tuple[str, int, str], tuple[int, int, float, float, dict[Any, Any]]
+    ] = {}
+
+    for key, agg in aggregated.items():
+        # Convert caller edge lists to tuples
+        callers_dict = {
+            caller_key: tuple(edge_data)
+            for caller_key, edge_data in caller_edges[key].items()
+        }
+        stats_dict[key] = (
+            agg["pcalls"],  # cc (primitive/non-recursive calls)
+            agg["ncalls"],  # nc (total calls)
+            agg["tottime"],  # tottime (exclusive)
+            agg["cumtime"],  # cumtime (inclusive)
+            callers_dict,
+        )
+
+    # Create a Stats object
+    import cProfile
+
+    pr = cProfile.Profile()
+    pr.enable()
+    pr.disable()
+    stats = pstats.Stats(pr, stream=sys.stdout)
+
+    # Replace the stats with our data
+    stats.stats = stats_dict
+    stats.total_calls = sum(s[1] for s in stats_dict.values())
+    stats.prim_calls = sum(s[0] for s in stats_dict.values())
+    stats.total_tt = sum(s[2] for s in stats_dict.values())
+
+    if output_file:
+        stats.dump_stats(output_file)
+        log.info(
+            "Saved pstats to %s. Visualize with: snakeviz %s", output_file, output_file
+        )
+
+    return stats
+
+
+def generate_flamegraph_from_timings(
+    timings: list[InlineFunctionTiming],
+    output_file: str | None = None,
+) -> str:
+    """
+    Generate flamegraph-compatible collapsed stack format from inline function timings.
+
+    This format can be used with tools like:
+    - speedscope (https://speedscope.app) - just paste the output
+    - flamegraph.pl (https://github.com/brendangregg/FlameGraph)
+
+    Args:
+        timings: List of InlineFunctionTiming from Dynamo tracing
+        output_file: If provided, save to this file
+
+    Returns:
+        String in collapsed stack format: "func1;func2;func3 time_us"
+    """
+    # Group by inline_depth to reconstruct call stacks
+    # Sort by the order they were recorded (which reflects call order)
+    lines = []
+
+    # Build a simple representation: each function with its depth
+    for t in timings:
+        # Simplified stack: just the function at its depth
+        # In a real implementation, we'd reconstruct the full call stack
+        short_filename = (
+            t.filename.rsplit("/", 1)[-1] if "/" in t.filename else t.filename
+        )
+        func_id = f"{short_filename}:{t.func_name}"
+
+        # Create a pseudo-stack based on depth
+        stack = ";".join(["<trace>"] * t.inline_depth + [func_id])
+        time_us = t.trace_time_ns // 1000
+
+        lines.append(f"{stack} {time_us}")
+
+    output = "\n".join(lines)
+
+    if output_file:
+        with open(output_file, "w") as f:
+            f.write(output)
+        log.info("Saved flamegraph data to %s", output_file)
+
+    return output
 
 
 tensortype_to_dtype = {
