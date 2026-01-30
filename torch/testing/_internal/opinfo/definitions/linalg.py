@@ -2579,6 +2579,12 @@ op_db: list[OpInfo] = [
                 device_type="cuda",
                 dtypes=[torch.cdouble],
             ),
+            # NotImplementedError: The operator 'aten::linalg_qr.out' is not currently implemented for the MPS device
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                device_type="mps",
+            ),
         ),
     ),
     OpInfo(
