@@ -6447,7 +6447,11 @@ class ExternKernel(InputsKernel):
         cls, x: IRNode, exact_strides: Sequence[_IntLike], allow_padding: bool = False
     ) -> IRNode:
         return cls.require_strides(
-            x, exact_strides=exact_strides, allow_padding=allow_padding
+            x,
+            exact_strides=[
+                s.node.expr if isinstance(s, torch.SymInt) else s for s in exact_strides
+            ],
+            allow_padding=allow_padding,
         )
 
     @classmethod
@@ -8950,13 +8954,9 @@ class Conditional(ExternKernel):
                 if isinstance(output, ShapeAsConstantBuffer):
                     ret.append(output)
                 else:
-                    fake_strides = [
-                        s.node.expr if isinstance(s, torch.SymInt) else s
-                        for s in fake.stride()
-                    ]
                     ret.append(
                         ExternKernel.require_exact_strides(
-                            TensorBox(output), fake_strides, allow_padding=False
+                            TensorBox(output), fake.stride(), allow_padding=False
                         )
                     )
             return ret
