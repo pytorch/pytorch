@@ -200,7 +200,7 @@ class CPythonTestCase(TestCase):
         suffix = super()._dynamo_test_key()
         test_cls = self.__class__
         test_file = (
-            inspect.getfile(test_cls).rsplit(os.sep, maxsplit=1)[-1].split(".")[0]
+            inspect.getfile(test_cls).rsplit(os.sep, maxsplit=1)[-1].split(".", maxsplit=1)[0]
         )
         py_ver = re.search(r"/([\d_]+)/", inspect.getfile(test_cls))
         if py_ver:
