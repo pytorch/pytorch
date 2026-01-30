@@ -1015,9 +1015,12 @@ class CachingAutotuner(KernelInterface):
 
         copies = {}
         try:
+            device = torch.accelerator.current_accelerator()
+            assert device is not None
+            device_type = device.type
             budget = (
-                torch.get_device_module(self.device_props.type).max_memory_allocated()
-                - torch.get_device_module(self.device_props.type).memory_allocated()
+                torch.get_device_module(device_type).max_memory_allocated()
+                - torch.get_device_module(device_type).memory_allocated()
             )
         except RuntimeError:
             # Possibly a custom CUDA allocator, see https://github.com/pytorch/pytorch/issues/163257

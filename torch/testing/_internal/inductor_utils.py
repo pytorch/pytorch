@@ -177,8 +177,9 @@ requires_triton = functools.partial(unittest.skipIf, not HAS_TRITON, "requires t
 requires_helion = functools.partial(unittest.skipIf, not HAS_HELION, "requires helion")
 
 
-def requires_cuda_with_enough_memory(min_mem_required):
+def requires_gpu_with_enough_memory(min_mem_required):
     def inner(fn):
+        total_memory = sys.maxsize
         if torch.xpu.is_available():
             total_memory = torch.xpu.get_device_properties().total_memory
         elif torch.cuda.is_available():

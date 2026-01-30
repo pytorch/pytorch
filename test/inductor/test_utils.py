@@ -12,7 +12,7 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, skipIfXpu, TestCase
 from torch.utils._sympy.functions import Identity
 
 
@@ -217,6 +217,7 @@ class TestUtils(TestCase):
                     countable_fx(fx_node_2), f"Expected false {f}: {fx_node_2}"
                 )
 
+    @skipIfXpu(msg="get_device_tflops not supported on XPU yet")
     @unittest.skipIf(
         not torch.cuda.is_available() and not torch.xpu.is_available(),
         "skip if no device",

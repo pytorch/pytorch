@@ -7254,7 +7254,7 @@ for shape in [(1,), ()]:
             x = torch.randn(3, 3, requires_grad=True)
             y = torch.randn(3, 3, requires_grad=True)
             z = torch.randn(3, 3, requires_grad=True)
-            if device_type == "cuda" or device_type == "xpu":
+            if device_type in ("cuda", "xpu"):
                 x = x.to(device_type)
                 y = y.to(device_type)
                 z = z.to(device_type)

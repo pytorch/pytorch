@@ -41,6 +41,7 @@ from torch.fx.passes.regional_inductor import regional_inductor
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    skipIfXpu,
     TEST_CUDA,
 )
 from torch.utils.checkpoint import checkpoint
@@ -1048,6 +1049,7 @@ from user code:
         actual = compiled_fn(*inputs)
         self.assertEqual(expected, actual)
 
+    @skipIfXpu(msg="CompiledAOTI need XPU support - xpu-ops: 2806")
     def test_aot_compile_with_aoti(self):
         with torch.device(device_type):
             from torch._dynamo.hooks import Hooks
