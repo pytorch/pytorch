@@ -1025,7 +1025,7 @@ def validate_args_and_maybe_create_graph_inputs(
         )
 
         return _make_inlined(tx, pytree.tree_unflatten)(
-            SourcelessBuilder.create(tx, list(flat_inputs)), tree_spec
+            SourcelessBuilder.create(tx, flat_inputs), tree_spec
         ).unpack_var_sequence(tx)
     else:
         if sub_args_names is not None:
