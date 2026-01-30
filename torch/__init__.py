@@ -132,6 +132,7 @@ __all__ = [
     "sym_min",
     "sym_not",
     "sym_sum",
+    "thread_safe_generator",
     "typename",
     "unravel_index",
     "use_deterministic_algorithms",
@@ -2139,7 +2140,14 @@ _tensor_classes: set[type["torch.Tensor"]] = set()
 from torch import amp as amp, random as random, serialization as serialization
 from torch._tensor_str import set_printoptions
 from torch.amp import autocast, GradScaler
-from torch.random import get_rng_state, initial_seed, manual_seed, seed, set_rng_state
+from torch.random import (
+    get_rng_state,
+    initial_seed,
+    manual_seed,
+    seed,
+    set_rng_state,
+    thread_safe_generator,
+)
 from torch.serialization import load, save
 
 
@@ -2626,7 +2634,7 @@ def compile(
           usage, as we will cache the workspace memory required for the invocation so that we
           do not have to reallocate it on subsequent runs.  Reduction of overhead is not guaranteed
           to work; today, we only reduce overhead for CUDA only graphs which do not mutate inputs.
-          There are other circumstances where CUDA graphs are not applicable; use TORCH_LOG=perf_hints
+          There are other circumstances where CUDA graphs are not applicable; use TORCH_LOGS=perf_hints
           to debug.
 
         - "max-autotune" is a mode that leverages Triton or template based matrix multiplications
@@ -2977,12 +2985,14 @@ def _as_tensor_fullprec(t):
     """
     Like torch.as_tensor, but when given Python data types it will keep
     them in full precision.  Used for calling convention for Dynamo.
+    Python scalars (float, int) are always created on CPU to avoid being
+    affected by DeviceContext.
     """
     ty = type(t)
     if ty is builtins.float:
-        return torch.as_tensor(t, dtype=torch.float64)
+        return torch.as_tensor(t, dtype=torch.float64, device="cpu")
     elif ty is builtins.int:
-        return torch.as_tensor(t, dtype=torch.int64)
+        return torch.as_tensor(t, dtype=torch.int64, device="cpu")
     else:
         return torch.as_tensor(t)
 
