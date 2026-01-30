@@ -115,7 +115,7 @@ class ConstantFolder(torch.fx.Interpreter):
             if (
                 isinstance(inp, torch.fx.Node)
                 and inp.name not in (self.lifted_constant_names or ())
-                and self.env[inp] != self.deferred_value
+                and self.env[inp] is not self.deferred_value
             ):
                 return self.unknown_value
         return self.deferred_value
@@ -253,22 +253,27 @@ class ConstantFolder(torch.fx.Interpreter):
         if isinstance(out, torch._C.ScriptObject):
             return out
 
-        if out == self.unknown_value:
+        if out is self.unknown_value:
             return self.unknown_value
 
         if not is_const_source(node, self.lifted_constant_names) and (
-            isinstance(out, torch.Tensor) or out == self.deferred_value
+            isinstance(out, torch.Tensor) or out is self.deferred_value
         ):
-            if out != self.deferred_value and out.device.type == "meta":
+            if (
+                out is not self.deferred_value
+                and out.device.type == "meta"  # pyrefly: ignore[missing-attribute]
+            ):
                 return out
 
-            if not self.insertable_tensor_check(out):
+            if not self.insertable_tensor_check(
+                out  # pyrefly: ignore[bad-argument-type]
+            ):
                 return out
 
             if self.is_impure(node):
                 return self.unknown_value
 
-            self.add_node_replacement(node, out)
+            self.add_node_replacement(node, out)  # pyrefly: ignore[bad-argument-type]
 
             flattened_node_inps = pytree.arg_tree_leaves(*node.args, **node.kwargs)
 
