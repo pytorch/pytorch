@@ -148,6 +148,7 @@ jobs:
       build-environment: linux-jammy-py3.14t-clang15
       docker-image: ${{ needs.linux-jammy-py3_14t-clang15-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3_14t-clang15-build.outputs.test-matrix }}
+    secrets: inherit
   linux-jammy-py3_10-gcc11-torchfuzz:
     name: linux-jammy-py3.10-gcc11 / torchfuzz
     uses: ./.github/workflows/_linux-test.yml
