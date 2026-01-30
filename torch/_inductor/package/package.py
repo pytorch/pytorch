@@ -56,7 +56,7 @@ def compile_so(aoti_dir: str, aoti_files: list[str], so_path: str) -> str:
         **linker_flags, use_relative_path=config.is_fbcode()
     )
     so_builder = CppBuilder(
-        name=os.path.rsplit(so_path, maxsplit=1)[-1],
+        name=os.path.split(so_path)[-1],
         sources=[output_o, consts_o],
         BuildOption=linker_options,
         output_dir=so_path,

@@ -351,7 +351,7 @@ def check_mingw_win32_flavor(compiler: str) -> str:
     flavor: str | None = None
     for line in out.splitlines():
         if "Thread model" in line:
-            flavor = line.rsplit(":", 1, maxsplit=1)[-1].strip().lower()
+            flavor = line.rsplit(":", maxsplit=1)[-1].strip().lower()
 
     if flavor is None:
         raise RuntimeError(
