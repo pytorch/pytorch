@@ -4594,7 +4594,7 @@ without further error checking.
 Args:
     input (Tensor): the source tensor
     dim (int): the axis along which to index
-    index (LongTensor): the indices of elements to gather
+    index (Tensor): the indices of elements to gather. Must have dtype ``torch.int32`` or ``torch.int64``.
 
 Keyword arguments:
     sparse_grad (bool, optional): If ``True``, gradient w.r.t. :attr:`input` will be a sparse tensor.
