@@ -14,6 +14,7 @@ from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FUSED_ATTENTION,
     SM80OrLater,
+    tf32_on_and_off,
 )
 from torch.testing._internal.common_utils import IS_LINUX, skipIfXpu, TEST_WITH_ROCM
 from torch.testing._internal.inductor_utils import (
@@ -124,6 +125,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                     ):
                         self.assertEqual(arg1.grad, arg2.grad, atol=atol, rtol=rtol)
 
+    @tf32_on_and_off(0.0015)
     def _test_sdpa_rewriter_1(self):
         def dot_prod_attention(
             query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
