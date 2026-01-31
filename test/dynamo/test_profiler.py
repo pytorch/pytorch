@@ -368,8 +368,7 @@ def forward(self, arg0_1):
     @torch._dynamo.config.patch(dynamo_profiler=True)
     def test_function_trace_timing(self):
         """Test that inline function timing data is captured during compilation."""
-        from torch._dynamo.profiler import get_function_trace_timings
-        from torch._guards import FunctionTraceTiming
+        from torch._guards import FunctionTraceTiming, TracingContext
 
         captured_timings = []
 
@@ -383,9 +382,11 @@ def forward(self, arg0_1):
             return nested_helper(x)
 
         def timing_capturing_backend(gm, example_inputs):
-            timings = get_function_trace_timings()
-            if timings:
-                captured_timings.extend(timings)
+            tc = TracingContext.try_get()
+            if tc and tc.profiler_state:
+                timings = tc.profiler_state.get_timings()
+                if timings:
+                    captured_timings.extend(timings)
             return gm.forward
 
         torch._dynamo.reset()
@@ -419,10 +420,8 @@ def forward(self, arg0_1):
         import pstats
         import tempfile
 
-        from torch._dynamo.profiler import (
-            generate_pstats_from_timings,
-            get_function_trace_timings,
-        )
+        from torch._dynamo.profiler import generate_pstats_from_timings
+        from torch._guards import TracingContext
 
         trace_timings = []
 
@@ -433,9 +432,11 @@ def forward(self, arg0_1):
             return helper_fn(x)
 
         def timing_backend(gm, example_inputs):
-            timings = get_function_trace_timings()
-            if timings:
-                trace_timings.extend(timings)
+            tc = TracingContext.try_get()
+            if tc and tc.profiler_state:
+                timings = tc.profiler_state.get_timings()
+                if timings:
+                    trace_timings.extend(timings)
             return gm.forward
 
         torch._dynamo.reset()
@@ -472,10 +473,8 @@ def forward(self, arg0_1):
         """
         import inspect
 
-        from torch._dynamo.profiler import (
-            generate_pstats_from_timings,
-            get_function_trace_timings,
-        )
+        from torch._dynamo.profiler import generate_pstats_from_timings
+        from torch._guards import TracingContext
 
         def sample_function(a, b, c=10):
             """Sample function to inspect."""
@@ -510,9 +509,11 @@ def forward(self, arg0_1):
         trace_timings = []
 
         def timing_capturing_backend(gm, example_inputs):
-            timings = get_function_trace_timings()
-            if timings:
-                trace_timings.extend(timings)
+            tc = TracingContext.try_get()
+            if tc and tc.profiler_state:
+                timings = tc.profiler_state.get_timings()
+                if timings:
+                    trace_timings.extend(timings)
             return gm.forward
 
         torch._dynamo.reset()
@@ -563,10 +564,8 @@ def forward(self, arg0_1):
         """
         import inspect
 
-        from torch._dynamo.profiler import (
-            generate_pstats_from_timings,
-            get_function_trace_timings,
-        )
+        from torch._dynamo.profiler import generate_pstats_from_timings
+        from torch._guards import TracingContext
 
         trace_timings = []
 
@@ -612,9 +611,11 @@ def forward(self, arg0_1):
             return a + b + main_fn(x, depth - 1)
 
         def timing_backend(gm, example_inputs):
-            timings = get_function_trace_timings()
-            if timings:
-                trace_timings.extend(timings)
+            tc = TracingContext.try_get()
+            if tc and tc.profiler_state:
+                timings = tc.profiler_state.get_timings()
+                if timings:
+                    trace_timings.extend(timings)
             return gm.forward
 
         torch._dynamo.reset()
@@ -703,10 +704,8 @@ def forward(self, arg0_1):
         """
         import inspect
 
-        from torch._dynamo.profiler import (
-            generate_pstats_from_timings,
-            get_function_trace_timings,
-        )
+        from torch._dynamo.profiler import generate_pstats_from_timings
+        from torch._guards import TracingContext
 
         trace_timings = []
 
@@ -746,9 +745,11 @@ def forward(self, arg0_1):
             return fn_a(result, depth)
 
         def timing_backend(gm, example_inputs):
-            timings = get_function_trace_timings()
-            if timings:
-                trace_timings.extend(timings)
+            tc = TracingContext.try_get()
+            if tc and tc.profiler_state:
+                timings = tc.profiler_state.get_timings()
+                if timings:
+                    trace_timings.extend(timings)
             return gm.forward
 
         torch._dynamo.reset()
@@ -836,6 +837,7 @@ def forward(self, arg0_1):
         import os
 
         from torch._dynamo.profiler import generate_pstats_from_timings
+        from torch._guards import TracingContext
 
         trace_timings = []
 
@@ -871,9 +873,11 @@ def forward(self, arg0_1):
             return result
 
         def timing_backend(gm, example_inputs):
-            timings = get_function_trace_timings()
-            if timings:
-                trace_timings.extend(timings)
+            tc = TracingContext.try_get()
+            if tc and tc.profiler_state:
+                timings = tc.profiler_state.get_timings()
+                if timings:
+                    trace_timings.extend(timings)
             return gm.forward
 
         torch._dynamo.reset()

@@ -205,53 +205,6 @@ if TYPE_CHECKING:
 _profiler_log = logging.getLogger(__name__)
 
 
-def get_function_trace_timings() -> list[FunctionTraceTiming] | None:
-    """
-    Get timing data for all functions traced during compilation.
-
-    Returns a list of FunctionTraceTiming objects containing:
-    - func_name: Name of the function
-    - filename: Source file path
-    - firstlineno: First line number in source
-    - cumtime_ns: Inclusive time in nanoseconds
-    - tottime_ns: Exclusive time in nanoseconds
-    - bytecode_count: Size of function bytecode
-    - inline_depth: Nesting depth when traced
-
-    Returns None if no TracingContext is active.
-    """
-    tc = TracingContext.try_get()
-    if tc is None or tc.profiler_state is None:
-        return None
-    return tc.profiler_state.get_timings()
-
-
-def _shorten_filename(filepath: str, max_len: int = 35) -> str:
-    """
-    Shorten a filepath to include parent directory and filename.
-
-    Examples:
-        /data/users/foo/pytorch/torch/_dynamo/utils.py -> _dynamo/utils.py
-        /very/long/path/to/some/module/file.py -> module/file.py
-    """
-    if "/" not in filepath:
-        return (
-            filepath if len(filepath) <= max_len else ".." + filepath[-(max_len - 2) :]
-        )
-
-    parts = filepath.rsplit("/", 2)
-    if len(parts) >= 2:
-        # Get parent_dir/filename
-        short = "/".join(parts[-2:])
-    else:
-        short = parts[-1]
-
-    if len(short) <= max_len:
-        return short
-    # If still too long, truncate from the left
-    return ".." + short[-(max_len - 2) :]
-
-
 def _generate_pstats_with_call_paths(
     timings: list[FunctionTraceTiming],
     output_file: str | None = None,
@@ -283,7 +236,7 @@ def _generate_pstats_with_call_paths(
                 "pcalls": 0,
                 "tottime": 0.0,
                 "cumtime": 0.0,
-                "filename": _shorten_filename(t.filename, max_len=50),
+                "filename": t.filename,
                 "lineno": t.firstlineno,
                 "func_name": t.func_name,
             }

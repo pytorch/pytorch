@@ -1025,6 +1025,125 @@ class DynamoProfilerState:
             (entry.func_name, entry.filename, entry.firstlineno) for entry in self.stack
         )
 
+    def generate_pstats(self, output_file: str | None = None) -> "pstats.Stats":
+        """Generate pstats.Stats object from recorded timings with call path encoding."""
+        import cProfile
+        import io
+        import logging
+        import pstats
+
+        log = logging.getLogger(__name__)
+
+        # Build entries keyed by full call path
+        aggregated: dict[tuple[str, ...], dict[str, Any]] = {}
+        caller_edges: dict[tuple[str, ...], dict[tuple[str, ...], list[float]]] = {}
+
+        for t in self.timings:
+            # Build the full path: call_stack + current function
+            stack_names = tuple(entry[0] for entry in t.call_stack)
+            full_path = stack_names + (t.func_name,)
+
+            if full_path not in aggregated:
+                aggregated[full_path] = {
+                    "ncalls": 0,
+                    "pcalls": 0,
+                    "tottime": 0.0,
+                    "cumtime": 0.0,
+                    "filename": t.filename,
+                    "lineno": t.firstlineno,
+                    "func_name": t.func_name,
+                }
+                caller_edges[full_path] = {}
+
+            agg = aggregated[full_path]
+            agg["ncalls"] += 1
+            agg["tottime"] += t.tottime_ns / 1e9
+
+            if t.is_primitive_call:
+                agg["pcalls"] += 1
+                agg["cumtime"] += t.cumtime_ns / 1e9
+
+            # Build caller edge (parent path -> this path)
+            if stack_names:
+                if stack_names not in caller_edges[full_path]:
+                    caller_edges[full_path][stack_names] = [0, 0, 0.0, 0.0]
+                edge = caller_edges[full_path][stack_names]
+                edge[0] += 1
+                if t.is_primitive_call:
+                    edge[1] += 1
+                edge[2] += t.tottime_ns / 1e9
+                edge[3] += t.cumtime_ns / 1e9
+
+        # Build the stats dict in pstats format
+        stats_dict: dict[
+            tuple[str, int, str], tuple[int, int, float, float, dict[Any, Any]]
+        ] = {}
+
+        for path, agg in aggregated.items():
+            # Encode the path in the function name
+            if len(path) > 1:
+                path_prefix = "->".join(path[:-1]) + "->"
+                display_name = path_prefix + agg["func_name"]
+            else:
+                display_name = agg["func_name"]
+
+            key = (agg["filename"], agg["lineno"], display_name)
+
+            # Build callers dict for this entry
+            callers: dict[tuple[str, int, str], tuple[int, int, float, float]] = {}
+            for caller_path, edge_data in caller_edges[path].items():
+                if caller_path in aggregated:
+                    caller_agg = aggregated[caller_path]
+                    if len(caller_path) > 1:
+                        caller_prefix = "->".join(caller_path[:-1]) + "->"
+                        caller_display = caller_prefix + caller_agg["func_name"]
+                    else:
+                        caller_display = caller_agg["func_name"]
+                    caller_key = (
+                        caller_agg["filename"],
+                        caller_agg["lineno"],
+                        caller_display,
+                    )
+                    callers[caller_key] = tuple(edge_data)  # type: ignore[assignment]
+
+            stats_dict[key] = (
+                agg["pcalls"],
+                agg["ncalls"],
+                agg["tottime"],
+                agg["cumtime"],
+                callers,
+            )
+
+        # Create a pstats.Stats object
+        dummy_profile = cProfile.Profile()
+        dummy_profile.enable()
+        dummy_profile.disable()
+        stats = pstats.Stats(dummy_profile, stream=io.StringIO())
+
+        stats.stats = stats_dict
+        stats.total_calls = sum(s[1] for s in stats_dict.values())
+        stats.prim_calls = sum(s[0] for s in stats_dict.values())
+        stats.total_tt = sum(s[2] for s in stats_dict.values())
+
+        if output_file:
+            stats.dump_stats(output_file)
+            log.info("Saved pstats to %s. Visualize with: snakeviz %s", output_file, output_file)
+
+        return stats
+
+    def dump_stats(self, output_file: str | None = None) -> None:
+        """Print profiler stats to stdout and optionally save to file."""
+        if not self.timings:
+            return
+
+        stats = self.generate_pstats(output_file)
+        print("\n=== Dynamo Profiler ===")
+        stats.sort_stats("cumulative").print_stats(30)
+
+        if output_file:
+            print(f"\nProfile saved to: {output_file}")
+            print(f"Visualize with: snakeviz {output_file}")
+
 
 class TracingContext:
     """
