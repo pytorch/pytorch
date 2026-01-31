@@ -224,6 +224,10 @@ class TORCH_API Context {
     return detail::getCUDAHooks().nvrtc();
   }
 
+  static const at::xpu::LevelZero& getLevelZero() {
+    return detail::getXPUHooks().level_zero();
+  }
+
   static bool setFlushDenormal(bool on);
 
   // NB: This method is *purely* whether or not a user requested
