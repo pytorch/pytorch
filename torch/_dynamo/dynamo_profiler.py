@@ -313,8 +313,82 @@ class DynamoProfilerState:
 
         return stats
 
-    def dump_stats(self, output_file: str | None = None) -> None:
-        """Print profiler stats to stdout and optionally save to file."""
+    def generate_svg(
+        self, profile_file: str, svg_file: str | None = None
+    ) -> str | None:
+        """Generate an SVG call graph from a profile file using gprof2dot and graphviz.
+
+        Args:
+            profile_file: Path to the pstats profile file.
+            svg_file: Optional path for the output SVG. If not provided, uses
+                profile_file with .svg extension.
+
+        Returns:
+            Path to the generated SVG file, or None if generation failed.
+        """
+        import shutil
+        import subprocess
+
+        if not shutil.which("gprof2dot"):
+            print("gprof2dot not found. Install with: pip install gprof2dot")
+            return None
+
+        if not shutil.which("dot"):
+            print("graphviz 'dot' not found. Install graphviz package.")
+            return None
+
+        if svg_file is None:
+            svg_file = profile_file.rsplit(".", 1)[0] + ".svg"
+
+        try:
+            # gprof2dot -f pstats profile.prof | dot -Tsvg -o profile.svg
+            gprof2dot = subprocess.Popen(
+                [
+                    "gprof2dot",
+                    "-f",
+                    "pstats",
+                    "--node-label=total-time-percentage",
+                    "--node-label=self-time-percentage",
+                    "--node-label=total-time",
+                    "-n",
+                    "0.1",  # Show nodes with >= 0.1% total time
+                    "-e",
+                    "0.01",  # Show edges with >= 0.01% total time
+                    profile_file,
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            dot = subprocess.Popen(
+                ["dot", "-Tsvg", "-o", svg_file],
+                stdin=gprof2dot.stdout,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            gprof2dot.stdout.close()  # type: ignore[union-attr]
+            _, dot_err = dot.communicate()
+
+            if dot.returncode != 0:
+                print(f"graphviz dot failed: {dot_err.decode()}")
+                return None
+
+            print(f"SVG call graph saved to: {svg_file}")
+            return svg_file
+
+        except Exception as e:
+            print(f"Failed to generate SVG: {e}")
+            return None
+
+    def dump_stats(
+        self, output_file: str | None = None, generate_svg: bool = True
+    ) -> None:
+        """Print profiler stats to stdout and optionally save to file.
+
+        Args:
+            output_file: Optional path to save the pstats profile.
+            generate_svg: If True and output_file is provided, also generate an SVG
+                call graph using gprof2dot and graphviz.
+        """
         import sys
 
         if not self.timings:
@@ -328,3 +402,6 @@ class DynamoProfilerState:
         if output_file:
             print(f"\nProfile saved to: {output_file}")
             print(f"Visualize with: snakeviz {output_file}")
+
+            if generate_svg:
+                self.generate_svg(output_file)
