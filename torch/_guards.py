@@ -36,6 +36,7 @@ if TYPE_CHECKING:
 
     from torch._dynamo.backends.distributed import DDPOptimizerContext
     from torch._dynamo.codegen import PyCodegen
+    from torch._dynamo.dynamo_profiler import DynamoProfilerState
     from torch._functorch._aot_autograd.schemas import ViewAndMutationMeta
     from torch._subclasses.fake_tensor import FakeTensorMode
 
@@ -897,8 +898,6 @@ class TracingContext:
 
     def __init__(self, fake_mode: FakeTensorMode | None) -> None:
         # imported lazily to avoid circular dependency
-        if TYPE_CHECKING:
-            from torch._dynamo.dynamo_profiler import DynamoProfilerState
         self.guards_context = GuardsContext()
         self.module_context = ModuleContext()
         self.global_context = GlobalContext()

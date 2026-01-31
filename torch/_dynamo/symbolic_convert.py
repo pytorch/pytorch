@@ -50,8 +50,9 @@ from typing_extensions import TypeIs
 
 import torch
 import torch._logging
+from torch._dynamo.dynamo_profiler import DynamoProfilerState, FunctionTraceTiming
 from torch._dynamo.exc import ObservedException, TensorifyScalarRestartAnalysis
-from torch._guards import FunctionTraceTiming, tracing, TracingContext
+from torch._guards import tracing, TracingContext
 from torch._logging.structured import dump_file
 from torch.fx.experimental.symbolic_shapes import guard_bool
 from torch.utils._functools import cache_method
@@ -4861,8 +4862,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         # Ensure profiler state is initialized
         tc = TracingContext.get()
         if tc.profiler_state is None:
-            from torch._guards import DynamoProfilerState
-
             tc.profiler_state = DynamoProfilerState()
 
         code = func.get_code()
