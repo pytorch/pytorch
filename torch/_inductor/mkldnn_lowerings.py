@@ -624,7 +624,7 @@ def register_onednn_fusion_ops():
             alpha,
             unary_attr,
             unary_scalars,
-            unary_algorithmm,
+            unary_algorithm,
         ):
             if not isinstance(x_scale, ir.TensorBox):
                 assert type(x_scale) is float
@@ -681,7 +681,7 @@ def register_onednn_fusion_ops():
                     alpha,
                     unary_attr,
                     unary_scalars,
-                    unary_algorithmm,
+                    unary_algorithm,
                 )
             )
 
@@ -1012,7 +1012,7 @@ def register_onednn_fusion_ops():
             alpha,
             unary_attr,
             unary_scalars,
-            unary_algorithmm,
+            unary_algorithm,
             layout=None,
         ):
             x_size = x.get_size()
@@ -1207,7 +1207,7 @@ def register_onednn_fusion_ops():
                                 output_buf,
                                 unary_attr,
                                 scalars=unary_scalars,
-                                algorithm=unary_algorithmm,
+                                algorithm=unary_algorithm,
                             )
 
                         # Step 5: Cast output to Target Dtype
@@ -1284,7 +1284,7 @@ def register_onednn_fusion_ops():
                     binary_alpha=alpha,
                     unary_post_op=unary_attr,
                     unary_post_op_args=unary_scalars,
-                    unary_post_op_algorithm=unary_algorithmm,
+                    unary_post_op_algorithm=unary_algorithm,
                 )
                 if bias is None:
                     kwargs["bias"] = None

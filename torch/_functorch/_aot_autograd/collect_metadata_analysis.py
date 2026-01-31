@@ -1,4 +1,6 @@
-# mypy: allow-untyped-defs
+from __future__ import annotations
+
+
 """
 This module is one of the analysis modules - it takes as input a function or graph
 and some preexisting properties, and returns some data that is useful for deciding
@@ -11,16 +13,17 @@ a functionalized version of the graph under compilation.
 import collections
 import contextlib
 import logging
-from collections.abc import Callable
-from typing import Optional
+from typing import Any, Optional, TYPE_CHECKING
 
 import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._guards import detect_fake_mode
+from torch._library.opaque_object import is_opaque_type
 from torch._logging import getArtifactLogger
 from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
 from torch._subclasses.meta_utils import safe_is_leaf
+from torch.fx.experimental.proxy_tensor import disable_autocast_cache
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._python_dispatch import (
@@ -59,6 +62,9 @@ from .subclass_utils import create_subclass_meta
 from .utils import _get_autocast_states, KNOWN_TYPES, simple_wraps, strict_zip
 
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
 zip = strict_zip
 
 log = logging.getLogger(__name__)
@@ -74,8 +80,9 @@ static_input_logger = getArtifactLogger("torch._dynamo", "cudagraph_static_input
 
 
 # Coercing and collecting traced tangents memory format in one recursive traversal
-# mypy: ignore-errors
-def coerce_tangent_and_suggest_memory_format(x: Tensor):
+def coerce_tangent_and_suggest_memory_format(
+    x: Tensor,
+) -> tuple[Any, MemoryFormatMeta | list[Any] | None, bool]:
     updated = False
     if not isinstance(x, Tensor):
         return x, None, updated
@@ -157,7 +164,7 @@ def coerce_tangent_and_suggest_memory_format(x: Tensor):
 #   Specifically, aliased outputs from the forward get regenerated, and don't participate
 #   in the compiled backward function.
 def run_functionalized_fw_and_collect_metadata(
-    f,
+    f: Callable[..., Any],
     *,
     flat_args_descs: list[AOTInput],
     keep_input_mutations: bool,
@@ -169,7 +176,9 @@ def run_functionalized_fw_and_collect_metadata(
 ) -> Callable[..., ViewAndMutationMeta]:
     memo: dict[Tensor, Tensor] = {}
 
-    def _to_fun(t):
+    # TODO: see if we can rewrite this to be more accurate using
+    # overload
+    def _to_fun(t: object) -> object:
         if isinstance(t, Tensor):
             if t in memo:
                 return memo[t]
@@ -180,9 +189,12 @@ def run_functionalized_fw_and_collect_metadata(
             return t
 
     @simple_wraps(f)
-    def inner(*flat_args):
+    def inner(*flat_args: Any) -> ViewAndMutationMeta:
         # This function is meant to be run with the forward, which expects a flat list of tensor/symint/other args.
-        assert all(isinstance(a, tuple(KNOWN_TYPES)) for a in flat_args)
+        assert all(
+            isinstance(a, tuple(KNOWN_TYPES)) or is_opaque_type(type(a))
+            for a in flat_args
+        )
 
         input_info: list[InputAliasInfo] = []
         output_info: list[OutputAliasInfo] = []
@@ -202,7 +214,7 @@ def run_functionalized_fw_and_collect_metadata(
         fake_mode = detect_fake_mode()
         if fake_mode and (shape_env := fake_mode.shape_env):
             suppress_pending = shape_env.ignore_fresh_unbacked_symbols()
-        with disable_above, mode, suppress_pending:
+        with disable_above, mode, suppress_pending, disable_autocast_cache():
             # precondition: The passed in function already handles unflattening inputs + flattening outputs
             flat_f_args = pytree.tree_map(_to_fun, flat_args)
             flat_f_args_descs = flat_args_descs
@@ -303,12 +315,14 @@ def run_functionalized_fw_and_collect_metadata(
         out_tensor_ids = {id(o): i for i, o in enumerate(flat_f_outs)}
 
         # Keep track of which outputs alias other outputs
-        out_tensor_alias_counts: collections.defaultdict = collections.defaultdict(int)
-        # This tells us, for a given group of outputs that alias each other,
-        # whether they e.g. all came from an unbind call
-        num_aliased_tensors_that_are_multi_output_views: collections.defaultdict = (
+        out_tensor_alias_counts: collections.defaultdict[StorageWeakRef | None, int] = (
             collections.defaultdict(int)
         )
+        # This tells us, for a given group of outputs that alias each other,
+        # whether they e.g. all came from an unbind call
+        num_aliased_tensors_that_are_multi_output_views: collections.defaultdict[
+            StorageWeakRef | None, int
+        ] = collections.defaultdict(int)
 
         out_storage_to_metadata_key_to_tensors: collections.defaultdict[
             Optional[StorageWeakRef],
@@ -449,7 +463,7 @@ def run_functionalized_fw_and_collect_metadata(
                 if not isinstance(o, torch.Tensor)
                 else StorageWeakRef(o.untyped_storage())
             )
-            outs_with_identical_metadata_that_require_grad = (
+            outs_with_identical_metadata_that_require_grad: list[torch.Tensor] = (
                 []
                 if not isinstance(o, Tensor)
                 else [
@@ -686,7 +700,7 @@ from a multi-output view call"
             output_info.append(out_info)
 
         # See Note [AOT Autograd: Views to avoid tangents aliasing inputs]
-        def view_avoid_dupes_with_primals(t):
+        def view_avoid_dupes_with_primals(t: object) -> object:
             if isinstance(t, Tensor) and is_traceable_wrapper_subclass(t):
                 return transform_subclass(
                     t, lambda _, inner_t: view_avoid_dupes_with_primals(inner_t)
@@ -698,14 +712,14 @@ from a multi-output view call"
         # This analysis function returns *only* the outputs that are meant to be tangents to the backwards.
         # Anything that aliases (inputs returned in the fw due to metadata mutations, or outputs that alias inputs/intermediates)
         # are *regenerated* later, and not used directly in the autograd graph
-        def _plain_fake_tensor_like_subclass(x):
+        def _plain_fake_tensor_like_subclass(x: Any) -> torch.Tensor:
             # pyrefly: ignore [bad-context-manager]
             with detect_fake_mode():
                 return torch.empty(
                     x.shape, dtype=x.dtype, device=x.device, layout=x.layout
                 )
 
-        def _is_subclass_mutated_input_tangent_always_subclass(inp):
+        def _is_subclass_mutated_input_tangent_always_subclass(inp: object) -> bool:
             return (
                 isinstance(inp, torch.nested._internal.nested_tensor.NestedTensor)
                 or torch._functorch.config.disable_guess_zero_tangent_for_mutated_input_subclass

@@ -105,6 +105,7 @@ FIXME_hop_that_doesnt_have_opinfo_test_allowlist = [
     "aoti_call_delegate",
     "print",
     "inductor_compiled_code",  # Tested separately in test_inductor_wrap_inductor_compile_regions
+    "invoke_leaf_function",  # Needs torch.compile, tested separately in test_leaf_function*
 ]
 
 torch.library.define(
@@ -123,6 +124,13 @@ def foo_impl_cpu(x, z):
 
 @torch.library.impl("testlib::mutating_custom_op", "cuda")
 def foo_impl_cuda(x, z):
+    x.add_(5)
+    z.add_(5)
+    return x.clone(), z.clone(), x + z
+
+
+@torch.library.impl("testlib::mutating_custom_op", "xpu")
+def foo_impl_xpu(x, z):
     x.add_(5)
     z.add_(5)
     return x.clone(), z.clone(), x + z

@@ -41,6 +41,7 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIfNoCudnn,
     skipCUDAIfNoMiopen,
     skipCUDAIfRocm,
+    skipCUDAIfRocmHipBlasltVersionLessThan,
     skipMeta,
     skipMPS,
 )
@@ -1896,6 +1897,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(expect, actual)
 
     @dtypes(torch.float, torch.cfloat)
+    @tf32_on_and_off(0.005)
     def test_conv3d_same_padding(self, device, dtype):
         if dtype is torch.cfloat:
             rtol, atol = 2e-6, 2e-6
@@ -4185,7 +4187,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(grad_input.shape, input.shape)
         self.assertEqual(grad_weight.shape, weight.shape)
 
-    @skipCUDAIfRocm
+    @skipCUDAIfRocmHipBlasltVersionLessThan((1, 2, 0))
     @onlyCUDA
     @largeTensorTest("40GB")
     @largeTensorTest("24GB", "cpu")
