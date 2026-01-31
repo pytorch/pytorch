@@ -201,13 +201,11 @@ def preprocess(
 
         input_indent = extract_leading_whitespace(input_line)
         if python_block_start:
-            if not input_indent.startswith(last_indent):
-                raise AssertionError("input_indent must start with last_indent")
+            assert input_indent.startswith(last_indent)
             extra_python_indent = input_indent[len(last_indent) :]
             python_indent = indent_stack[-1][1] + extra_python_indent
             indent_stack.append((input_indent, python_indent))
-            if not input_indent.startswith(indent_stack[-1][0]):
-                raise AssertionError("input_indent must start with indent_stack top")
+            assert input_indent.startswith(indent_stack[-1][0])
         else:
             while not input_indent.startswith(indent_stack[-1][0]):
                 del indent_stack[-1]
@@ -225,8 +223,7 @@ def preprocess(
                 blank_lines -= 1
             python_lines.append(python_indent + stripped_input_line.replace("$", ""))
         else:
-            if not input_line.startswith(python_indent):
-                raise AssertionError("input_line must start with python_indent")
+            assert input_line.startswith(python_indent)
             while blank_lines != 0:
                 python_lines.append(python_indent + "print(file=OUT_STREAM)")
                 blank_lines -= 1
@@ -335,8 +332,7 @@ class SPVGenerator:
                         - params_names
                         - {"generate_variant_forall"}
                     )
-                    if len(invalid_keys) != 0:
-                        raise AssertionError(f"Invalid keys found: {invalid_keys}")
+                    assert len(invalid_keys) == 0
 
                     iterated_params = variant.get(
                         "generate_variant_forall", default_iterated_params

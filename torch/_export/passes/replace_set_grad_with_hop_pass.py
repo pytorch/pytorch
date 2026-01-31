@@ -30,8 +30,7 @@ def _is_set_grad_enabled_sub_mod(
     node: torch.fx.Node, omit_if_same_with_ambient: bool = False
 ) -> bool | torch.Tensor:
     if node.op == "call_module":
-        if not isinstance(node.target, str):
-            raise AssertionError(f"expected str target, got {type(node.target)}")
+        assert isinstance(node.target, str)
         subgm = getattr(node.graph.owning_module, node.target)
         first_non_ph = nodes_first(
             subgm.graph.nodes, lambda node: node.op != "placeholder"
@@ -50,36 +49,27 @@ def _is_set_grad_enabled_sub_mod(
 
 
 def _replace_with_hop(node: torch.fx.Node) -> None:
-    if node.op != "call_module":
-        raise AssertionError(f"expected call_module op, got {node.op}")
+    assert node.op == "call_module"
     graph: torch.fx.Graph = node.graph
-    if graph.owning_module is None:
-        raise AssertionError("graph.owning_module must not be None")
+    assert graph.owning_module is not None
     gm: torch.fx.GraphModule = graph.owning_module
-    if not isinstance(node.target, str):
-        raise AssertionError(f"expected str target, got {type(node.target)}")
+    assert isinstance(node.target, str)
     sub_gm = getattr(gm, node.target)
     sub_graph = sub_gm.graph
     set_grad_nodes = nodes_filter(sub_graph.nodes, _is_set_grad_enabled_node)
     if len(set_grad_nodes) > 0:
-        if len(set_grad_nodes) != 1:
-            raise AssertionError(
-                f"expected exactly 1 set_grad node, got {len(set_grad_nodes)}"
-            )
+        assert len(set_grad_nodes) == 1
         set_grad_node = set_grad_nodes[0]
         _replace_with_hop_helper(node, set_grad_node, wrap_with_set_grad_enabled)
         sub_graph.erase_node(set_grad_node)
 
 
 def _remove_set_grad_and_inline(node: torch.fx.Node) -> None:
-    if node.op != "call_module":
-        raise AssertionError(f"expected call_module op, got {node.op}")
+    assert node.op == "call_module"
     graph: torch.fx.Graph = node.graph
-    if graph.owning_module is None:
-        raise AssertionError("graph.owning_module must not be None")
+    assert graph.owning_module is not None
     gm: torch.fx.GraphModule = graph.owning_module
-    if not isinstance(node.target, str):
-        raise AssertionError(f"expected str target, got {type(node.target)}")
+    assert isinstance(node.target, str)
     sub_gm = getattr(gm, node.target)
     sub_graph = sub_gm.graph
     nodes_map(

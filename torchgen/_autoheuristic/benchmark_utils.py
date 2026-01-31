@@ -58,6 +58,5 @@ def get_random_between_pow2(min_power2: int, max_power2: int) -> int:
     i = random.randint(min_power2, max_power2 - 1)
     lower = 2**i + 1
     upper = 2 ** (i + 1) - 1
-    if lower > upper:
-        raise AssertionError("lower must not be greater than upper")
+    assert lower <= upper, "lower must not be greater than upper"
     return random.randint(lower, upper)

@@ -134,11 +134,9 @@ def normalize_ratings(
     if len(ratings) == 0:
         return ratings
     min_rating = min(ratings.values())
-    if min_rating <= 0:
-        raise AssertionError(f"min_rating must be > 0, got {min_rating}")
+    assert min_rating > 0
     max_rating = max(ratings.values())
-    if max_rating <= 0:
-        raise AssertionError(f"max_rating must be > 0, got {max_rating}")
+    assert max_rating > 0
     normalized_ratings = {}
     for tf, rank in ratings.items():
         normalized_ratings[tf] = rank / max_rating * (max_value - min_value) + min_value

@@ -154,8 +154,7 @@ def order(
         new_levels.extend(flat_positional_dims)
 
     # Match tensor to new level structure
-    if data is None:
-        raise AssertionError("Cannot reorder None tensor")
+    assert data is not None, "Cannot reorder None tensor"
     ndata = _match_levels(data, orig_levels, new_levels)
 
     # Handle dimension flattening if requested

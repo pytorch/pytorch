@@ -178,7 +178,7 @@ def _get_flattened_mesh_by_layout(
         The flattened DeviceMesh if it was explicitly created, None otherwise.
     """
     root_mesh = mesh._get_root_mesh()
-    mesh_dim_names = mesh.mesh_dim_names
+    mesh_dim_names = root_mesh.mesh_dim_names
 
     if mesh_dim_names is None:
         return None
@@ -186,10 +186,11 @@ def _get_flattened_mesh_by_layout(
     # Convert mesh dim indices to dim names
     dim_names = tuple(mesh_dim_names[i] for i in mesh_dims)
 
-    # Compute expected layout WITHOUT creating a submesh (avoids tracing issues)
-    # _get_slice_mesh_layout does pure layout math, no tensor operations
-    sliced_layout = mesh._get_slice_mesh_layout(dim_names)
-    expected_layout = sliced_layout.coalesce()
+    # Get the submesh for these dimensions
+    submesh = mesh[dim_names]
+
+    # Compute expected flattened layout
+    expected_layout = submesh._layout.coalesce()
     if len(expected_layout) > 1:
         expected_layout = expected_layout.nest()
 
@@ -1411,6 +1412,8 @@ def redistribute_local_tensor(
     *,
     async_op: bool = False,
     use_graph_based_transform: bool | None = None,
+    # True if user explicitly called DTensor.redistribute()
+    is_explicit: bool = False,
 ) -> torch.Tensor:
     """
     This redistribute the local tensor (torch.Tensor) from the current DTensorSpec to
@@ -1483,6 +1486,7 @@ def redistribute_local_tensor(
                 current_spec.placements,
                 stringify_shard_order,
             ),
+            is_explicit=is_explicit,
         )
         if debug_mode is not None
         else contextlib.nullcontext()
@@ -1668,7 +1672,11 @@ class Redistribute(torch.autograd.Function):
             )
 
             output = redistribute_local_tensor(
-                local_tensor, current_spec, target_spec, async_op=async_op
+                local_tensor,
+                current_spec,
+                target_spec,
+                async_op=async_op,
+                is_explicit=True,
             )
         else:
             # use the same local tensor if placements are the same.
@@ -1736,6 +1744,7 @@ class Redistribute(torch.autograd.Function):
             current_spec,
             previous_spec,
             async_op=async_op,
+            is_explicit=True,
         )
 
         if output.dtype != ctx.original_dtype:

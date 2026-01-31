@@ -117,8 +117,7 @@ def pre_group_native_functions(
     ] = defaultdict(dict)
     for f in native_functions:
         d = pre_grouped_native_functions[f.func.signature()]
-        if f.func.kind() in d:
-            raise AssertionError(f"Duplicate schema kind {f.func.kind()} for {f.func}")
+        assert f.func.kind() not in d
         d[f.func.kind()] = f
     return pre_grouped_native_functions
 
@@ -135,10 +134,8 @@ def get_expected_out_variant_overload_name(overload_name: str | None) -> str:
 #   _add_relu.Scalar_out(Tensor self, Scalar other, Scalar alpha=1, *, Tensor(a!) out)
 def self_to_out_signature(func: FunctionSchema) -> FunctionSchema:
     # Generating an out= schema from an inplace schema.
-    if func.kind() != SchemaKind.inplace:
-        raise AssertionError(f"Expected inplace schema, got {func.kind()}")
-    if func.arguments.self_arg is None:
-        raise AssertionError("Expected self_arg to be non-None")
+    assert func.kind() == SchemaKind.inplace
+    assert func.arguments.self_arg is not None
     # The new out= schema has:
     # - a new out argument with the same type as "func" (but with a mutable annotation)
     # - The returns (if any) now alias the out= argument instead of "func"
@@ -170,8 +167,7 @@ def self_to_out_signature(func: FunctionSchema) -> FunctionSchema:
 #       Tensor(a!) out) -> Tensor(a!)
 def functional_to_out_signature(func: FunctionSchema) -> FunctionSchema:
     # Generating an out= schema from a functional schema.
-    if func.kind() != SchemaKind.functional:
-        raise AssertionError(f"Expected functional schema, got {func.kind()}")
+    assert func.kind() == SchemaKind.functional
 
     new_returns, new_out_args = generate_out_args_from_schema(func)
     # The new out= schema has:
@@ -195,12 +191,12 @@ def generate_out_args_from_schema(
 ) -> tuple[list[Return], list[Argument]]:
     # More of a sanity check - our existing restrictions on schemas should enforce that
     # mutable schema kinds never return their mutable arguments.
-    if any(r.annotation is not None and r.annotation.is_write for r in func.returns):
-        raise AssertionError("Mutable schema kinds should not return mutable arguments")
+    assert not any(
+        r.annotation is not None and r.annotation.is_write for r in func.returns
+    )
 
     tensorlike_rets = [r for r in func.returns if r.type.is_tensor_like()]
-    if len(tensorlike_rets) == 0:
-        raise AssertionError("Expected at least one tensor-like return")
+    assert len(tensorlike_rets) > 0
 
     used_annotations = concatMap(
         lambda a: [] if a.annotation is None else a.annotation.alias_set,
@@ -243,8 +239,7 @@ def generate_out_args_from_schema(
 #   _fused_moving_avg_obs_fq_helper._out(Tensor self, Tensor observer_on, Tensor fake_quant_on, Tensor(a!) running_min, Tensor(b!) running_max, Tensor(c!) scale, Tensor(d!) zero_point, float averaging_const, int quant_min, int quant_max, int ch_axis, bool per_row_fake_quant=False, bool symmetric_quant=False, *, Tensor(e!) out0, Tensor(f!) out1) -> (Tensor(e!), Tensor(f!))  # noqa: B950
 def mutable_to_out_signature(func: FunctionSchema) -> FunctionSchema:
     # Generating an out= schema from a mutable schema.
-    if func.kind() != SchemaKind.mutable:
-        raise AssertionError(f"Expected mutable schema, got {func.kind()}")
+    assert func.kind() == SchemaKind.mutable
     # The new out= schema has:
     # - Any non-aliased tensor-like returns are converted to mutable, aliased out= arguments
     #   (if the argument is a tensor then we also return it for method chaining,
@@ -283,8 +278,7 @@ def generate_function(
     from torchgen.api import cpp
 
     if k == SchemaKind.functional:
-        if f.func.kind() == SchemaKind.functional:
-            raise AssertionError("Cannot generate functional from functional schema")
+        assert f.func.kind() != SchemaKind.functional
         # The new "functional" NativeFunction has:
         # - any mutable arguments have been converted into (immutable) returns.
         #   (if a mutable argument was not also a return, it gets converted to one)
@@ -513,10 +507,7 @@ out= variant is not needed, please add the function name into FUNCTIONAL_OPS_THA
 
 
 def return_str(rets: tuple[Return, ...], names: list[str]) -> str:
-    if len(rets) != len(names):
-        raise AssertionError(
-            f"Returns and names length mismatch: {len(rets)} vs {len(names)}"
-        )
+    assert len(rets) == len(names)
     if len(rets) == 0:
         return ""
     elif len(rets) == 1:

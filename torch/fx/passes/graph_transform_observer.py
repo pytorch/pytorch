@@ -154,8 +154,7 @@ class GraphTransformObserver:
                     e.obj_dict["attributes"]["fillcolor"] = "yellow"
                 else:
                     e.obj_dict["attributes"]["fillcolor"] = "grey"
-            if self.log_url is None:
-                raise AssertionError("log_url is not set")
+            assert self.log_url is not None
             self.input_dot_graph.write(
                 os.path.join(
                     self.log_url,
@@ -210,8 +209,7 @@ class GraphTransformObserver:
             if not new_node:
                 return
 
-            if not isinstance(new_node, Node):
-                raise AssertionError(f"Expected Node, got {type(new_node)}")
+            assert isinstance(new_node, Node)
 
             # replace hook is called once for each user of old
             # this avoids adding duplicated source nodes

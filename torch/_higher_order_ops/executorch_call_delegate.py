@@ -173,10 +173,7 @@ def get_lowered_module_name(
         if not hasattr(root, qualname):
             break
         i += 1
-    if qualname is None:
-        raise AssertionError(
-            "qualname must not be None after finding unused module slot"
-        )
+    assert qualname is not None
 
     root.add_module(qualname, lowered_module)
     return qualname

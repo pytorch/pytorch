@@ -444,11 +444,7 @@ class GenLazyNativeFuncDefinition:
                         f"{self.backend_namespace}::{self.get_tensor_or_wrap_number}({arg.name}, *common_device);"
                     )
             elif isinstance(arg.lazy_type, OptionalCType):
-                if arg.lazy_type.elem != BaseCType(getValueT()):
-                    raise AssertionError(
-                        f"Expected OptionalCType elem to be {BaseCType(getValueT())}, "
-                        f"got {arg.lazy_type.elem}"
-                    )
+                assert arg.lazy_type.elem == BaseCType(getValueT()), arg.lazy_type.elem
                 # TODO(alanwaketan): Maybe we want to apply GetLtcTensorOrCreateForWrappedNumber here, but hold it
                 # until we encounter a real world example.
                 lazy_tensor_decls.append(
@@ -485,8 +481,9 @@ class GenLazyNativeFuncDefinition:
         optional_devices = [
             a.name for a in scalar_args if a.lazy_type == optional_device
         ]
-        if len(value_types_names) == 0 and len(optional_devices) == 0:
-            raise AssertionError("Expected at least one Value or Device type")
+        assert len(value_types_names) > 0 or len(optional_devices) > 0, (
+            "Expected at least one Value or Device type"
+        )
         get_device_str = (
             f"{self.get_device_fn}({', '.join(value_types_names + optional_devices)})"
         )
@@ -496,8 +493,7 @@ class GenLazyNativeFuncDefinition:
 
     def shape_inference(self, func: NativeFunction, schema: LazyIrSchema) -> str:
         metadata = self.backend_index.get_kernel(func)
-        if metadata is None:
-            raise AssertionError(f"No kernel metadata found for {func.func.name}")
+        assert metadata is not None
         all_args = schema.filtered_args()
         returns_length = len(schema.returns)
         # call the meta kernel if it exists, to compute output shape/dtype for our IR
@@ -537,11 +533,7 @@ std::vector<torch::lazy::Shape> shapes{torch::lazy::Shape(out_meta.scalar_type()
             ]
             if is_view_copy_op:
                 # view_copy ops always have a CompositeExplicitAutogradNonFunctional kernel
-                if not func.has_composite_explicit_autograd_non_functional_kernel:
-                    raise AssertionError(
-                        f"view_copy op {func.func.name} must have "
-                        "CompositeExplicitAutogradNonFunctional kernel"
-                    )
+                assert func.has_composite_explicit_autograd_non_functional_kernel
                 dispatch_ns = "compositeexplicitautogradnonfunctional"
             else:
                 dispatch_ns = "meta"
@@ -588,8 +580,9 @@ std::vector<torch::lazy::Shape> shapes{torch::lazy::Shape(out_meta.scalar_type()
         # xla uses an instance method for tensor creation, for the time being
         if self.create_from_first_tensor:
             # TODO(whc) remove this if XLA switches to using static method for creation
-            if first_tensor_name is None:
-                raise AssertionError("Requires first tensor to create lazy tensor")
+            assert first_tensor_name is not None, (
+                "Requires first tensor to create lazy tensor"
+            )
             return f"{first_tensor_name}.{self.create_tensor}"
         return f"{self.backend_namespace}::{self.create_tensor}"
 
@@ -602,10 +595,9 @@ std::vector<torch::lazy::Shape> shapes{torch::lazy::Shape(out_meta.scalar_type()
                 {self.create_lazy_tensor(first_tensor_name)}(std::move(node), *common_device));"""
 
         if returns_length > 1:
-            if len(value_types_names) == 0:
-                raise AssertionError(
-                    "Code below assumes there is at least one tensor arg"
-                )
+            assert len(value_types_names) > 0, (
+                "Code below assumes there is at least one tensor arg"
+            )
             bridge_str = f"""std::vector<{self.lazy_tensor_ptr}> lazy_tensors;
         for (int i = 0; i < {returns_length}; i++) {{
             lazy_tensors.push_back({self.create_lazy_tensor(first_tensor_name)}({getValueT()}(node, i), *common_device));
@@ -613,11 +605,10 @@ std::vector<torch::lazy::Shape> shapes{torch::lazy::Shape(out_meta.scalar_type()
         auto result = {self.tuple_aten_from_ltc_tensors}<{returns_length}>(lazy_tensors);"""
 
         if schema.name.name.inplace or func.func.is_out_fn():
-            if returns_length != 1:
-                raise AssertionError(
-                    "We assumed there was no such case where an op is an in-place variant "
-                    f"and has tuple outputs, but got tuple of len {returns_length}."
-                )
+            assert returns_length == 1, (
+                "We assumed there was no such case where an op is an in-place variant "
+                f"and has tuple outputs, but got tuple of len {returns_length}."
+            )
             bridge_str = f"""lazy_{first_tensor_name}->SetInPlaceIrValue(node);
         auto& result = {first_tensor_name};"""
 
@@ -629,8 +620,7 @@ std::vector<torch::lazy::Shape> shapes{torch::lazy::Shape(out_meta.scalar_type()
     def __call__(self, func: NativeFunction) -> list[str]:
         sig = kernel_signature(func, self.backend_index)
         metadata = self.backend_index.get_kernel(func)
-        if metadata is None:
-            raise AssertionError(f"No kernel metadata found for {func.func.name}")
+        assert metadata is not None
         schema = LazyIrSchema(func.func, symint=metadata.supports_symint())
         return [
             f"""\
@@ -684,8 +674,7 @@ class GenLazyShapeInferenceDefinition:
     @method_with_native_function
     def __call__(self, f: NativeFunction) -> list[str]:
         metadata = self.backend_index.get_kernel(f)
-        if metadata is None:
-            raise AssertionError(f"No kernel metadata found for {f.func.name}")
+        assert metadata is not None
 
         # See Note [Generated LTC Shape Functions]
         is_view_copy_op = "view_copy" in f.tags

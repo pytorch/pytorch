@@ -90,6 +90,5 @@ def get_torchlib_ops() -> tuple[_registration.OnnxDecompMeta, ...]:
     from torch.onnx._internal.exporter._torchlib import ops
 
     del ops
-    if len(_registry) == 0:
-        raise AssertionError("_registry must not be empty")
+    assert len(_registry) != 0
     return tuple(_registry)

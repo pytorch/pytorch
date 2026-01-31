@@ -300,12 +300,9 @@ def nccl_skip_if_lt_x_gpu(backend, x):
 def verify_ddp_error_logged(model_DDP, err_substr):
     # Verify error was logged in ddp_logging_data.
     ddp_logging_data = model_DDP._get_ddp_logging_data()
-    if "iteration" not in ddp_logging_data:
-        raise AssertionError("Expected 'iteration' in ddp_logging_data")
-    if "has_error" not in ddp_logging_data:
-        raise AssertionError("Expected 'has_error' in ddp_logging_data")
-    if "error" not in ddp_logging_data:
-        raise AssertionError("Expected 'error' in ddp_logging_data")
+    assert "iteration" in ddp_logging_data
+    assert "has_error" in ddp_logging_data
+    assert "error" in ddp_logging_data
     logging_err = ddp_logging_data["error"]
     # Remove C++ stacktrace if needed.
     actual = (
@@ -313,10 +310,9 @@ def verify_ddp_error_logged(model_DDP, err_substr):
         if err_substr.find("\nException raised from ") == -1
         else err_substr.split("\nException raised from ")[0]
     )
-    if actual not in logging_err:
-        raise AssertionError(
-            f"Did not find expected {actual} in ddp logging data error: {logging_err}"
-        )
+    assert actual in logging_err, (
+        f"Did not find expected {actual} in ddp logging data error: {logging_err}"
+    )
 
 
 def with_nccl_blocking_wait(func):
@@ -949,8 +945,7 @@ class MultiProcessTestCase(TestCase):
             if signal_send_pipe is not None:
                 signal_send_pipe.send(None)
 
-            if event_listener_thread is None:
-                raise AssertionError("Expected event_listener_thread to not be None")
+            assert event_listener_thread is not None
             event_listener_thread.join()
             # Close pipe after done with test.
             parent_pipe.close()
@@ -1716,8 +1711,7 @@ class MultiProcContinuousTest(TestCase):
 
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file):
-        if rdvz_file is None:
-            raise AssertionError("Expected rdvz_file to not be None")
+        assert rdvz_file is not None
         # rank should be local_rank for tests running on <= 8 gpus which is how all these tests are designed
         # and we expect LOCAL_RANK set by torchrun. Setting it lets init_device_mesh set the device without
         # issuing a warning
@@ -1754,10 +1748,7 @@ class MultiProcContinuousTest(TestCase):
     def _worker_loop(cls, rank, world_size, rdvz_file, task_queue, completion_queue):
         raised_exception = False
         # Sub tests are going to access these values, check first
-        if not (0 <= rank < world_size):
-            raise AssertionError(
-                f"Expected 0 <= rank < world_size, got rank={rank}, world_size={world_size}"
-            )
+        assert 0 <= rank < world_size
         # set class variables for the test class
         cls.rank = rank
         cls.world_size = world_size
@@ -1933,10 +1924,7 @@ class MultiProcContinuousTest(TestCase):
                         raise rv
 
                     # Success
-                    if rv != self.id():
-                        raise AssertionError(
-                            f"Expected rv == self.id(), got {rv} != {self.id()}"
-                        )
+                    assert rv == self.id()
                     logger.debug(
                         f"Main proc detected rank {i} finished {self.id()}"  # noqa: G004
                     )

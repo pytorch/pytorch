@@ -544,8 +544,7 @@ class _SplitterBase:
         - builds a map of fused nodes to their fusions.
         As a result we get self.acc_nodes, self.deps and self.fusions.
         """
-        if not isinstance(module, torch.fx.GraphModule):
-            raise AssertionError(f"Expected GraphModule, got {type(module)}")
+        assert isinstance(module, torch.fx.GraphModule)
 
         self.module = module
         ShapeProp(self.module).propagate(*sample_input)

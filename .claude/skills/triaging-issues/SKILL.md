@@ -111,6 +111,7 @@ The sub-oncall team will handle their own triage. Your job is only to route it t
 | `oncall: quantization` | Quantization issues |
 | `oncall: mobile` | Mobile (iOS/Android), excludes ExecuTorch |
 | `oncall: profiler` | Profiler issues (CPU, GPU, Kineto) |
+| `oncall: releng` | Release engineering, CI infrastructure |
 | `oncall: visualization` | TensorBoard integration |
 
 **Note:** `oncall: cpu inductor` is a sub-queue of PT2. For general triage, just use `oncall: pt2`.

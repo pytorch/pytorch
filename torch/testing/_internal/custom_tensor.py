@@ -44,8 +44,7 @@ class ConstantExtraMetadataTensor(torch.Tensor):
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
-        if meta is None:
-            raise AssertionError("Expected meta to not be None")
+        assert meta is not None
         elem = inner_tensors["elem"]
         out = ConstantExtraMetadataTensor(elem)
         out.constant_attribute = meta

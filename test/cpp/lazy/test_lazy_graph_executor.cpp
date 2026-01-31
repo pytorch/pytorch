@@ -13,7 +13,6 @@ class LazyGraphExecutorTest : public ::testing::Test {
  protected:
   void SetUp() override {
     executor_ = LazyGraphExecutor::Get();
-    executor_->ClearComputationCache();
   }
 
   using CachedComputationType = LazyGraphExecutor::CachedComputation;

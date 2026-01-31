@@ -48,8 +48,7 @@ class AST_Rewriter(ast.NodeTransformer):
         keys_before = set(globals_dict.keys())
         exec(code, globals_dict)
         new_keys = list(set(globals_dict.keys()) - keys_before)
-        if len(new_keys) != 1:
-            raise AssertionError(f"Expected 1 new key, got {len(new_keys)}")
+        assert len(new_keys) == 1
         fn_compiled = globals_dict[new_keys[0]]
 
         # return the compiled function with the original globals
@@ -78,11 +77,9 @@ class AST_Rewriter(ast.NodeTransformer):
         """
         # Create the Call node
         n = ast.parse("torch._assert()", mode="eval")
-        if not isinstance(n, ast.Expression):
-            raise AssertionError(f"Expected ast.Expression, got {type(n)}")
+        assert isinstance(n, ast.Expression)
         call_node = n.body
-        if not isinstance(call_node, ast.Call):
-            raise AssertionError(f"Expected ast.Call, got {type(call_node)}")
+        assert isinstance(call_node, ast.Call)
         msg = node.msg if node.msg else ast.Constant(value="", kind=None)
         call_node.args = [node.test, msg]
 

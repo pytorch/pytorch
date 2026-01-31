@@ -47,8 +47,7 @@ model_opacus = convert_batchnorm_modules(models.resnet18(num_classes=10))
 model_opacus = model_opacus.to(device)
 criterion = nn.CrossEntropyLoss()
 for p_f, p_o in zip(model_functorch.parameters(), model_opacus.parameters()):
-    if not torch.allclose(p_f, p_o):  # Sanity check
-        raise AssertionError("Parameters do not match")
+    assert torch.allclose(p_f, p_o)  # Sanity check
 
 privacy_engine = PrivacyEngine(
     model_opacus,

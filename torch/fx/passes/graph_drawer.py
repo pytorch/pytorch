@@ -187,8 +187,7 @@ if HAS_PYDOT:
             self, module: torch.nn.Module, node: torch.fx.Node
         ) -> torch.nn.Module:
             py_obj = module
-            if not isinstance(node.target, str):
-                raise AssertionError(f"Expected str target, got {type(node.target)}")
+            assert isinstance(node.target, str)
             atoms = node.target.split(".")
             for atom in atoms:
                 if not hasattr(py_obj, atom):
@@ -343,10 +342,8 @@ if HAS_PYDOT:
             result += "|" + "requires_grad" + "=" + str(tm.requires_grad) + r"\n"
             result += "|" + "stride" + "=" + str(tm.stride) + r"\n"
             if tm.is_quantized:
-                if tm.qparams is None:
-                    raise AssertionError("qparams is None for quantized tensor")
-                if "qscheme" not in tm.qparams:
-                    raise AssertionError("qscheme not in qparams")
+                assert tm.qparams is not None
+                assert "qscheme" in tm.qparams
                 qscheme = tm.qparams["qscheme"]
                 if qscheme in {
                     torch.per_tensor_affine,

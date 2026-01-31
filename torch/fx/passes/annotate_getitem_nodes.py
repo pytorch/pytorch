@@ -29,18 +29,11 @@ def annotate_getitem_nodes(graph: torch.fx.Graph) -> None:
                     ):
                         node.type = parameterized_types[0]
                     else:
-                        if len(parameterized_types) <= index_node:
-                            raise AssertionError(
-                                f"Index {index_node} out of range for parameterized_types "
-                                f"(len={len(parameterized_types)})"
-                            )
+                        assert len(parameterized_types) > index_node
                         node_type = parameterized_types[index_node]
                         node.type = node_type
                 elif sequence_node.type._name == "List":
-                    if len(parameterized_types) != 1:
-                        raise AssertionError(
-                            f"Expected 1 parameterized type, got {len(parameterized_types)}"
-                        )
+                    assert len(parameterized_types) == 1
                     node.type = parameterized_types[0]
             # Generic Alias Type
             elif hasattr(sequence_node.type, "__origin__"):
@@ -51,18 +44,11 @@ def annotate_getitem_nodes(graph: torch.fx.Graph) -> None:
                     ):
                         node.type = parameterized_types[0]
                     else:
-                        if len(parameterized_types) <= index_node:
-                            raise AssertionError(
-                                f"Index {index_node} out of range for parameterized_types "
-                                f"(len={len(parameterized_types)})"
-                            )
+                        assert len(parameterized_types) > index_node
                         node_type = parameterized_types[index_node]
                         node.type = node_type
                 elif sequence_node.type.__origin__ is list:
-                    if len(parameterized_types) != 1:
-                        raise AssertionError(
-                            f"Expected 1 parameterized type, got {len(parameterized_types)}"
-                        )
+                    assert len(parameterized_types) == 1
                     node.type = parameterized_types[0]
             # NamedTuple type
             elif hasattr(sequence_node.type, "__annotations__"):

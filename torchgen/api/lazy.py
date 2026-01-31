@@ -237,10 +237,9 @@ class LazyArgument:
 
     @property
     def lazy_type(self) -> CType:
-        if self.lazy_type_ is None:
-            raise AssertionError(
-                f"Attempted to access lazy_type for invalid argument {self.name}"
-            )
+        assert self.lazy_type_ is not None, (
+            f"Attempted to access lazy_type for invalid argument {self.name}"
+        )
         return self.lazy_type_
 
 
@@ -375,10 +374,9 @@ class LazyIrSchema:
                     curr_args = curr_args.all()
                 for arg in curr_args:
                     if isGeneratorType(arg.type):
-                        if self.generator_arg is not None:
-                            raise AssertionError(
-                                "We expect there is only one generator arg"
-                            )
+                        assert self.generator_arg is None, (
+                            "We expect there is only one generator arg"
+                        )
                         self.generator_arg = NamedCType(
                             arg.name,
                             arg.type,  # type:ignore[arg-type]

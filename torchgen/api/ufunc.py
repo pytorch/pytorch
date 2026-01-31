@@ -26,8 +26,7 @@ from torchgen.model import (
 
 
 def schema_kernel_name(func: FunctionSchema, dispatch_key: DispatchKey) -> str:
-    if not func.is_out_fn():
-        raise AssertionError("ufunc.kernel_name should only be invoked on out schemas")
+    assert func.is_out_fn(), "ufunc.kernel_name should only be invoked on out schemas"
     return f"ufunc_{func.name.name}_{dispatch_key}"
 
 
@@ -174,8 +173,7 @@ def ufunctor_arguments(
                 apply.append(ufunctor_apply_argument(a, scalar_t=scalar_t))
         else:
             ctor.append(ufunctor_ctor_argument(a, scalar_t=scalar_t))
-    if scalar_tensor_idx is not None:
-        raise AssertionError("scalar_tensor_idx should be None at end of processing")
+    assert scalar_tensor_idx is None
     return UfunctorBindings(ctor=ctor, apply=apply)
 
 

@@ -158,8 +158,7 @@ def compute_ufunc_cuda_functors(
     else:
         keys = [UfuncKey.CUDAFunctor]
         for k in [UfuncKey.CUDAFunctorOnSelf, UfuncKey.CUDAFunctorOnOther]:
-            if k in loops:
-                raise AssertionError(f"cannot use {k} on non-binary function")
+            assert k not in loops, f"cannot use {k} on non-binary function"
     for k in keys:
         # If the key was directly defined, skip functor codegen; we assume the
         # user already done it for us
@@ -187,13 +186,11 @@ def compute_ufunc_cuda_functors(
                 ufunc_name = loops[lk].name
             else:
                 # See Note [ScalarOnly and Generic must match names for CUDA]
-                if ufunc_name != loops[lk].name:
-                    raise AssertionError(
-                        "ScalarOnly and Generic must have same ufunc name"
-                    )
+                assert ufunc_name == loops[lk].name, (
+                    "ScalarOnly and Generic must have same ufunc name"
+                )
             supported_dtypes |= loops[lk].supported_dtypes
-        if ufunc_name is None:
-            raise AssertionError("ufunc_name must be non-None")
+        assert ufunc_name is not None
 
         name = f"{k}_{ufunc_name}"
         ufunctor_sig = UfunctorSignature(
@@ -406,12 +403,8 @@ def compute_ufunc_cpu_dtype_body(
     inner_loops: dict[UfuncKey, UfuncSignature],
     parent_ctx: Sequence[Binding],
 ) -> str:
-    if UfuncKey.CPUScalar not in inner_loops:
-        raise AssertionError(f"{dtype}, {inner_loops.keys()}")
-    if not inner_loops.keys() <= {UfuncKey.CPUScalar, UfuncKey.CPUVector}:
-        raise AssertionError(
-            f"inner_loops keys must be subset of CPUScalar/CPUVector, got {inner_loops.keys()}"
-        )
+    assert UfuncKey.CPUScalar in inner_loops, f"{dtype}, {inner_loops.keys()}"
+    assert inner_loops.keys() <= {UfuncKey.CPUScalar, UfuncKey.CPUVector}
     scalar_loop = inner_loops[UfuncKey.CPUScalar]
     vec_loop = None
     if UfuncKey.CPUVector in inner_loops:
@@ -456,8 +449,7 @@ def compute_ufunc_cpu_dtype_body(
     for a in g.functional.func.arguments.flat_non_out:
         if not a.type.is_tensor_like():
             continue
-        if a.type != BaseType(BaseTy.Tensor):
-            raise AssertionError(f"Expected Tensor type, got {a.type}")
+        assert a.type == BaseType(BaseTy.Tensor)
         scalar_bindings.append(
             Binding(
                 name=a.name,

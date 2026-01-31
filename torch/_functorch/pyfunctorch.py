@@ -1,9 +1,8 @@
-from __future__ import annotations
-
+# mypy: allow-untyped-defs
 import contextlib
 from abc import ABC, abstractmethod
 from functools import cached_property
-from typing import Any, TYPE_CHECKING
+from typing import Any
 
 import torch
 import torch.utils._pytree as pytree
@@ -19,10 +18,6 @@ from torch._C._functorch import (
     TransformType,
 )
 from torch.autograd.forward_ad import _set_fwd_grad_enabled
-
-
-if TYPE_CHECKING:
-    from collections.abc import Generator
 
 
 """
@@ -58,41 +53,41 @@ interpreter then invokes.
 #
 # Keep the methods in sync with aten/src/ATen/functorch/Interpreter.h
 class FuncTorchInterpreter(ABC):
-    def __init__(self, cptr: Any) -> None:
+    def __init__(self, cptr: Any):
         self._cptr = cptr
 
     # Process an operation. eg for vmap, this is invoking a batching rule.
     # Conceptually this is analogous to Interpreter::process in C++
     @abstractmethod
-    def process(self, op: Any, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+    def process(self, op, args, kwargs):
         pass
 
     # lower an operation from this Interpreter to the next Interpreter on the stack.
     # Concretely, this involves temporarily popping the current Interpreter.
     # Conceptually this is analogous to Interpreter::sendToNextInterpreter in C++
-    def lower(self) -> contextlib.AbstractContextManager[Any]:
+    def lower(self):
         return temporarily_pop_interpreter_stack()
 
-    def level(self) -> int:
+    def level(self):
         return self._cptr.level()
 
-    def key(self) -> TransformType:
+    def key(self):
         return self._cptr.key()
 
-    def get_state(self) -> tuple[Any, ...]:
+    def get_state(self):
         raise NotImplementedError
 
-    def check_state(self, state: tuple[Any, ...]) -> bool:
+    def check_state(self, state):
         return state == self.get_state()
 
-    def __getstate__(self) -> dict[str, Any]:
+    def __getstate__(self):
         state = self.__dict__.copy()
         state.pop("_cptr", None)
         return state
 
 
 @contextlib.contextmanager
-def temporarily_pop_interpreter_stack() -> Generator[None, None, None]:
+def temporarily_pop_interpreter_stack():
     try:
         saved = pop_dynamic_layer_stack()
         yield
@@ -101,8 +96,8 @@ def temporarily_pop_interpreter_stack() -> Generator[None, None, None]:
 
 
 @contextlib.contextmanager
-def temporarily_clear_interpreter_stack() -> Generator[list[Any], None, None]:
-    stack: list[Any] = []
+def temporarily_clear_interpreter_stack():
+    stack = []
     try:
         while torch._C._functorch.peek_interpreter_stack() is not None:
             stack.append(pop_dynamic_layer_stack())
@@ -113,12 +108,8 @@ def temporarily_clear_interpreter_stack() -> Generator[list[Any], None, None]:
 
 
 @contextlib.contextmanager
-def temporarily_restore_interpreter_stack(
-    stack: list[Any] | None,
-) -> Generator[None, None, None]:
-    pushed: list[Any] = []
-    if stack is None:
-        return
+def temporarily_restore_interpreter_stack(stack):
+    pushed = []
     try:
         for s in reversed(stack):
             push_dynamic_layer_stack(s)
@@ -132,7 +123,7 @@ def temporarily_restore_interpreter_stack(
 
 
 class VmapInterpreter(FuncTorchInterpreter):
-    def __init__(self, cdata: CInterpreter) -> None:
+    def __init__(self, cdata: CInterpreter):
         assert cdata.key() == TransformType.Vmap
         # NOTE: [Interpreter cdata vs cptr]
         # cdata is a generic CInterpreter. We wrap it in a CVmapInterpreterPtr
@@ -141,17 +132,17 @@ class VmapInterpreter(FuncTorchInterpreter):
 
     @cached_property
     # pyrefly: ignore [bad-override]
-    def _cptr(self) -> CVmapInterpreterPtr:
+    def _cptr(self):
         return CVmapInterpreterPtr(self._cdata)
 
-    def process(self, op: Any, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+    def process(self, op, args, kwargs):
         kernel = op.functorch_table[TransformType.Vmap]
         return kernel(self, *args, **kwargs)
 
-    def batch_size(self) -> int:
+    def batch_size(self):
         return self._cptr.batchSize()
 
-    def randomness(self) -> str:
+    def randomness(self):
         typ = self._cptr.randomness()
         if typ == RandomnessType.Error:
             return "error"
@@ -161,14 +152,12 @@ class VmapInterpreter(FuncTorchInterpreter):
             return "different"
         raise RuntimeError(f"Unknown RandomnessType: {typ}")
 
-    def get_state(self) -> tuple[Any, ...]:
+    def get_state(self):
         return (self.key().name, self.level(), self.randomness())
 
 
 @contextlib.contextmanager
-def nested(
-    *contexts: contextlib.AbstractContextManager[Any],
-) -> Generator[tuple[contextlib.AbstractContextManager[Any], ...], None, None]:
+def nested(*contexts):
     with contextlib.ExitStack() as stack:
         for ctx in contexts:
             stack.enter_context(ctx)
@@ -176,25 +165,23 @@ def nested(
 
 
 class GradInterpreter(FuncTorchInterpreter):
-    def __init__(self, cdata: CInterpreter) -> None:
+    def __init__(self, cdata: CInterpreter):
         assert cdata.key() == TransformType.Grad
         # See NOTE: [Interpreter cdata vs cptr]
         self._cdata = cdata
 
     @cached_property
     # pyrefly: ignore [bad-override]
-    def _cptr(self) -> CGradInterpreterPtr:
+    def _cptr(self):
         return CGradInterpreterPtr(self._cdata)
 
-    def lift(
-        self, args: tuple[Any, ...], kwargs: dict[str, Any]
-    ) -> tuple[tuple[Any, ...], dict[str, Any]]:
+    def lift(self, args, kwargs):
         args, kwargs = pytree.tree_map_only(
             torch.Tensor, self._cptr.lift, [args, kwargs]
         )
         return args, kwargs
 
-    def process(self, op: Any, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+    def process(self, op, args, kwargs):
         kernel = op.functorch_table[TransformType.Grad]
         args, kwargs = self.lift(args, kwargs)
         return kernel(self, *args, **kwargs)
@@ -202,39 +189,37 @@ class GradInterpreter(FuncTorchInterpreter):
     # GradInterpreter has custom lower because of the no_grad interaction
     # See NOTE [grad and vjp interaction with no_grad]
     # This logic is mirrored from C++ GradInterpreterPtr::sendToNextInterpreter
-    def lower(self) -> contextlib.AbstractContextManager[Any]:
+    def lower(self):
         prev_grad_mode = self.prev_grad_mode()
         if not prev_grad_mode:
             return nested(torch.no_grad(), super().lower())
         return super().lower()
 
-    def prev_grad_mode(self) -> bool:
+    def prev_grad_mode(self):
         return self._cptr.prevGradMode()
 
-    def get_state(self) -> tuple[Any, ...]:
+    def get_state(self):
         return (self.key().name, self.level(), self.prev_grad_mode())
 
 
 class JvpInterpreter(FuncTorchInterpreter):
-    def __init__(self, cdata: CInterpreter) -> None:
+    def __init__(self, cdata: CInterpreter):
         assert cdata.key() == TransformType.Jvp
         # See NOTE: [Interpreter cdata vs cptr]
         self._cdata = cdata
 
     @cached_property
     # pyrefly: ignore [bad-override]
-    def _cptr(self) -> CJvpInterpreterPtr:
+    def _cptr(self):
         return CJvpInterpreterPtr(self._cdata)
 
-    def lift(
-        self, args: tuple[Any, ...], kwargs: dict[str, Any]
-    ) -> tuple[tuple[Any, ...], dict[str, Any]]:
+    def lift(self, args, kwargs):
         args, kwargs = pytree.tree_map_only(
             torch.Tensor, self._cptr.lift, [args, kwargs]
         )
         return args, kwargs
 
-    def process(self, op: Any, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+    def process(self, op, args, kwargs):
         kernel = op.functorch_table[TransformType.Jvp]
         args, kwargs = self.lift(args, kwargs)
         return kernel(self, *args, **kwargs)
@@ -242,37 +227,37 @@ class JvpInterpreter(FuncTorchInterpreter):
     # Jvp has custom lower because of the no_fwd_grad interaction
     # See NOTE [grad and vjp interaction with no_grad] for related info.
     # This logic is mirrored from C++ JvpInterpreterPtr::sendToNextInterpreter
-    def lower(self) -> contextlib.AbstractContextManager[Any]:
+    def lower(self):
         prev_fwd_grad_mode = self.prev_fwd_grad_mode()
         if not prev_fwd_grad_mode:
             return nested(_set_fwd_grad_enabled(False), super().lower())
         return super().lower()
 
-    def prev_fwd_grad_mode(self) -> bool:
+    def prev_fwd_grad_mode(self):
         return self._cptr.prevFwdGradMode()
 
-    def get_state(self) -> tuple[Any, ...]:
+    def get_state(self):
         return (self.key().name, self.level(), self.prev_fwd_grad_mode())
 
 
 class FunctionalizeInterpreter(FuncTorchInterpreter):
-    def __init__(self, cdata: CInterpreter) -> None:
+    def __init__(self, cdata: CInterpreter):
         assert cdata.key() == TransformType.Functionalize
         self._cdata = cdata
 
     @cached_property
     # pyrefly: ignore [bad-override]
-    def _cptr(self) -> CFunctionalizeInterpreterPtr:
+    def _cptr(self):
         return CFunctionalizeInterpreterPtr(self._cdata)
 
-    def process(self, op: Any, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+    def process(self, op, args, kwargs):
         kernel = op.functorch_table[TransformType.Functionalize]
         return kernel(self, *args, **kwargs)
 
-    def functionalize_add_back_views(self) -> bool:
+    def functionalize_add_back_views(self):
         return self._cptr.functionalizeAddBackViews()
 
-    def get_state(self) -> tuple[Any, ...]:
+    def get_state(self):
         return (self.key().name, self.level())
 
 
@@ -318,7 +303,7 @@ def compare_functorch_state(states: list[tuple[Any, ...]]) -> bool:
     )
 
 
-def dispatch_functorch(op: Any, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+def dispatch_functorch(op, args, kwargs):
     interpreter = retrieve_current_functorch_interpreter()
     # In traditional PyTorch operators, DispatchKey::FuncTorchTensorWrapper's
     # unwrap_dead_tensors fallback handles unwrapping dead tensor wrappers.

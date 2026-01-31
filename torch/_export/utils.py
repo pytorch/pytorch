@@ -171,8 +171,7 @@ def _collect_param_buffer_metadata(mod: torch.fx.GraphModule) -> dict[str, Any]:
         t = model
         for item in prefix:
             t = getattr(t, item, None)  # type: ignore[assignment]
-            if t is None:
-                raise AssertionError(f"attribute {item!r} not found in path")
+            assert t is not None
 
         return getattr(t, field)
 
@@ -227,10 +226,9 @@ def _maybe_find_pre_dispatch_tf_mode_for_export():
         if isinstance(mode, PreDispatchTorchFunctionMode)
     ]
 
-    if len(pre_dispatch_tf_modes) > 1:
-        raise AssertionError(
-            f"Expected only one PreDispatchTorchFunctionMode, found {len(pre_dispatch_tf_modes)}"
-        )
+    assert len(pre_dispatch_tf_modes) <= 1, (
+        f"Expected only one PreDispatchTorchFunctionMode, found {len(pre_dispatch_tf_modes)}"
+    )
 
     if len(pre_dispatch_tf_modes) == 0:
         return None
@@ -330,18 +328,12 @@ def get_keystr(key_path: KeyPath) -> str:
     # the arguments come from. Ultimately we ought to serialize the
     # original arg names for the best error message here.
     args_kwargs_key_path = key_path[0]
-    if not isinstance(args_kwargs_key_path, SequenceKey):
-        raise AssertionError(
-            f"expected SequenceKey, got {type(args_kwargs_key_path).__name__}"
-        )
+    assert isinstance(args_kwargs_key_path, SequenceKey)
     if args_kwargs_key_path.idx == 0:
         return f"*args{keystr(key_path[1:])}"
     else:
         kwarg_key = key_path[1]
-        if not isinstance(kwarg_key, (GetAttrKey, MappingKey)):
-            raise AssertionError(
-                f"expected GetAttrKey or MappingKey, got {type(kwarg_key).__name__}"
-            )
+        assert isinstance(kwarg_key, (GetAttrKey, MappingKey))
         name = str(kwarg_key)[1:-1]  # get rid of the enclosed []
         return f"{name}{keystr(key_path[2:])}"
 
@@ -497,10 +489,9 @@ def register_dataclass_as_pytree_node(
     from_dumpable_context: Optional[FromDumpableContextFn] = None,
     return_none_fields: bool = False,
 ) -> None:
-    if not dataclasses.is_dataclass(cls):
-        raise AssertionError(
-            f"Only dataclasses can be registered with this function: {cls}"
-        )
+    assert dataclasses.is_dataclass(cls), (
+        f"Only dataclasses can be registered with this function: {cls}"
+    )
 
     @torch._dynamo.dont_skip_tracing
     def default_flatten_fn(obj: Any) -> tuple[list[Any], Context]:
@@ -808,16 +799,11 @@ def node_inline_(call_mod_node: torch.fx.Node) -> Optional[torch.fx.GraphModule]
     Inline the submodule of the given node into the parent module.
     Note: we only support the case where submodule takes tensors inputs.
     """
-    if call_mod_node.op != "call_module":
-        raise AssertionError(f"expected call_module op, got {call_mod_node.op}")
+    assert call_mod_node.op == "call_module"
     gm = call_mod_node.graph.owning_module
-    if gm is None:
-        raise AssertionError("owning_module should not be None")
+    assert gm is not None
 
-    if not isinstance(call_mod_node.target, str):
-        raise AssertionError(
-            f"expected target to be str, got {type(call_mod_node.target).__name__}"
-        )
+    assert isinstance(call_mod_node.target, str)
     sub_gm = getattr(gm, call_mod_node.target)
 
     phs = (node for node in sub_gm.graph.nodes if node.op == "placeholder")
@@ -827,8 +813,7 @@ def node_inline_(call_mod_node: torch.fx.Node) -> Optional[torch.fx.GraphModule]
     output = [node for node in sub_gm.graph.nodes if node.op == "output"]
 
     for ph, arg in zip(phs, call_mod_node.args):
-        if not isinstance(arg, torch.fx.Node):
-            raise AssertionError(f"expected fx.Node, got {type(arg)}")
+        assert isinstance(arg, torch.fx.Node)
         node_replace_(ph, arg)
 
     with gm.graph.inserting_before(call_mod_node):
@@ -848,10 +833,7 @@ def node_inline_(call_mod_node: torch.fx.Node) -> Optional[torch.fx.GraphModule]
             node_replace_(node, new_node)
 
         if len(output) > 0:
-            if len(output) != 1 or len(output[0].args) != 1:
-                raise AssertionError(
-                    f"expected exactly 1 output with 1 arg, got {len(output)} outputs"
-                )
+            assert len(output) == 1 and len(output[0].args) == 1
             new_output = output[0].args[0]
 
             if isinstance(new_output, torch.fx.Node):
@@ -921,11 +903,10 @@ def _bind_signature_to_inputs(mod, fake_args, fake_kwargs):
         sig = _get_torch_jit_trace_forward_signature(mod)
 
         # Sanity check for placeholder names coming from TorchScript.
-        if len(sig.parameters) != len(fake_args) + len(fake_kwargs):
-            raise AssertionError(
-                "Arguments other than POSITIONAL_OR_KEYWORD kinds in forward() "
-                "are not supported in _get_torch_jit_trace_forward_signature"
-            )
+        assert len(sig.parameters) == len(fake_args) + len(fake_kwargs), (
+            "Arguments other than POSITIONAL_OR_KEYWORD kinds in forward() "
+            "are not supported in _get_torch_jit_trace_forward_signature"
+        )
     else:
         sig = inspect.signature(mod.forward)
 
@@ -1003,8 +984,7 @@ def _assign_new_node_names(
     """
     for node in gm.graph.nodes:
         if node.op == "placeholder":
-            if node.name not in name_map:
-                raise AssertionError(f"placeholder node {node.name!r} not in name_map")
+            assert node.name in name_map
             node.name = node.target = name_map[node.name]
             if node.name in custom_meta:
                 if node.meta.get("custom") is None:
@@ -1156,8 +1136,7 @@ def placeholder_naming_pass(
 
     # modify graph signature (input specs, output specs, user input mutations)
     for spec in export_graph_signature.input_specs:
-        if spec.arg.name not in name_map:
-            raise AssertionError(f"input spec arg {spec.arg.name!r} not in name_map")
+        assert spec.arg.name in name_map
         spec.arg.name = name_map[spec.arg.name]
         if (  # handle targets for custom objects
             spec.kind == InputKind.CUSTOM_OBJ and spec.target in name_map
@@ -1289,8 +1268,7 @@ def _materialize_cpp_cia_ops() -> None:
         namespace, op_name = tuple(op.split("::"))
         split_list = op_name.split(".")
         # Sometime overload could be missing
-        if len(split_list) not in (1, 2):
-            raise AssertionError(f"expected 1 or 2 parts, got {len(split_list)}")
+        assert len(split_list) == 1 or len(split_list) == 2
         op_name = split_list[0]
         op_overload_name = "default"
         if len(split_list) == 2:
@@ -1377,10 +1355,7 @@ def _collect_all_valid_cia_ops() -> set["OperatorBase"]:
     for op_namespace_name in torch.ops._dir:
         # The reason we split here is because aten ops are safe to cache.
         if op_namespace_name != "aten":
-            if not hasattr(torch.ops, op_namespace_name):
-                raise AssertionError(
-                    f"torch.ops does not have attribute {op_namespace_name!r}"
-                )
+            assert hasattr(torch.ops, op_namespace_name)
             op_namespace = getattr(torch.ops, op_namespace_name)
             if isinstance(op_namespace, torch._ops._OpNamespace):
                 cia_ops |= _collect_all_valid_cia_ops_for_namespace(op_namespace)
@@ -1488,18 +1463,15 @@ def register_module_as_pytree_input_node(cls: type[torch.nn.Module]) -> None:
         print(ep)
 
     """
-    if not issubclass(cls, torch.nn.Module):
-        raise AssertionError(f"expected nn.Module subclass, got {cls}")
+    assert issubclass(cls, torch.nn.Module)
 
     import weakref
 
     class PrototypeModule(weakref.ref):
         def __init__(self, m, *args, **kwargs):
             super().__init__(m, *args, **kwargs)  # type: ignore[call-arg]
-            if not isinstance(m, torch.nn.Module):
-                raise AssertionError(f"expected nn.Module, got {type(m).__name__}")
-            if hasattr(self, "_proto_cls"):
-                raise AssertionError("_proto_cls should not be set")
+            assert isinstance(m, torch.nn.Module)
+            assert not hasattr(self, "_proto_cls")
             self._proto_cls = cls
 
         def __eq__(self, other):
@@ -1522,8 +1494,7 @@ def register_module_as_pytree_input_node(cls: type[torch.nn.Module]) -> None:
         if ref is None or ref() is None:
             raise RuntimeError("Module has been garbage collected")
         obj = ref()
-        if flatten_fn is None:
-            raise AssertionError("flatten_fn should not be None")
+        assert flatten_fn is not None
         flattened, _ = flatten_fn(obj)
 
         # NOTE: This helper function will replicate an nn.Module in the exactly same
@@ -1579,8 +1550,7 @@ def register_module_as_pytree_input_node(cls: type[torch.nn.Module]) -> None:
 
     def default_flatten_fn_spec(obj, spec) -> list[Any]:
         flats, context = flatten_fn(obj)
-        if context != spec.context:
-            raise AssertionError(f"context mismatch: {context} != {spec.context}")
+        assert context == spec.context
         return flats
 
     register_pytree_flatten_spec(
@@ -1595,10 +1565,14 @@ def deregister_module_as_pytree_input_node(cls: type[torch.nn.Module]) -> None:
 
 
 def _sync_state(src, dst):
-    if not isinstance(src, torch.nn.Module):
-        raise AssertionError(f"Expected {src} to be a nn.Module")
-    if not isinstance(dst, torch.nn.Module):
-        raise AssertionError(f"Expected {dst} to be a nn.Module")
+    assert isinstance(
+        src,
+        torch.nn.Module,
+    ), f"Expected {src} to be a nn.Module"
+    assert isinstance(
+        dst,
+        torch.nn.Module,
+    ), f"Expected {dst} to be a nn.Module"
     # Share state (params, buffers) between modules.
     # This ensures that state mutations are visible across them.
     # Since tensor constants are not mutable, copying (without sharing) is OK.
@@ -1633,6 +1607,7 @@ def wrap_method(method):
     The wrapped module's forward points to the method, and
     the method's original module state is shared.
     """
-    if not ismethod(method):
-        raise AssertionError(f"Expected {method} to be a method")
+    assert ismethod(
+        method,
+    ), f"Expected {method} to be a method"
     return _WrappedMethod(method)

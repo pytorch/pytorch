@@ -241,10 +241,7 @@ def infer_concrete_type_builder(nn_module, share_types=True):
         if name in user_annotated_ignored_attributes:
             continue
 
-        if not (item is None or isinstance(item, torch.Tensor)):
-            raise AssertionError(
-                f"Expected parameter '{name}' to be None or Tensor, got {type(item)}"
-            )
+        assert item is None or isinstance(item, torch.Tensor)
         attr_type, _ = infer_type(name, item)
         # We currently have the invariant in various places in our code
         # that parameters must be Tensors. However, the nn.Module API also
@@ -258,10 +255,7 @@ def infer_concrete_type_builder(nn_module, share_types=True):
         if name in user_annotated_ignored_attributes:
             continue
 
-        if not (item is None or isinstance(item, torch.Tensor)):
-            raise AssertionError(
-                f"Expected buffer '{name}' to be None or Tensor, got {type(item)}"
-            )
+        assert item is None or isinstance(item, torch.Tensor)
         attr_type, _ = infer_type(name, item)
         concrete_type_builder.add_attribute(name, attr_type.type(), False, True)
         added_names.add(name)
@@ -277,10 +271,7 @@ def infer_concrete_type_builder(nn_module, share_types=True):
             concrete_type_builder.add_attribute(name, attr_type.type(), False, False)
             continue
         if attr_type.success():
-            if not attr_type.type().is_interface_type():
-                raise AssertionError(
-                    f"Expected inferred type to be interface type for '{name}'"
-                )
+            assert attr_type.type().is_interface_type()
             # if the type can be inferred, it should be a module interface type
             sub_concrete_type = torch._C.ConcreteModuleType.from_jit_type(
                 attr_type.type()
@@ -499,8 +490,7 @@ def get_module_concrete_type(nn_module, share_types=True):
     Returns:
         A concrete type for nn_module.
     """
-    if not isinstance(nn_module, Module):
-        raise AssertionError(f"Expected Module, got {type(nn_module)}")
+    assert isinstance(nn_module, Module)
     if isinstance(nn_module, torch.jit.ScriptModule) and hasattr(
         nn_module, "_concrete_type"
     ):
@@ -557,8 +547,7 @@ def create_script_module(nn_module, stubs_fn, share_types=True, is_tracing=False
                 attributes will be baked as constant in the tracing graph. In addition,
                 this check significantly slows down the traced modules when the module size is big.
     """
-    if isinstance(nn_module, torch.jit.RecursiveScriptModule):
-        raise AssertionError("Cannot script a RecursiveScriptModule (already compiled)")
+    assert not isinstance(nn_module, torch.jit.RecursiveScriptModule)
     check_module_initialized(nn_module)
     concrete_type = get_module_concrete_type(nn_module, share_types)
     if not is_tracing:
@@ -597,8 +586,9 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
         #    recursively scripting them.
         for name, sub_concrete_type in concrete_type.get_modules():
             orig_value = getattr(nn_module, name)
-            if not isinstance(orig_value, Module):
-                raise AssertionError(f"Expected Module but got {type(orig_value)}")
+            assert isinstance(orig_value, Module), (
+                f"Expected Module but got {type(orig_value)}"
+            )
             module_type = sub_concrete_type.jit_type
             if isinstance(module_type, torch._C.InterfaceType):
                 # use the interface inference rule to compile the module
@@ -817,8 +807,7 @@ def make_stubs_for_overloads(overload_info):
 
 
 def check_module_initialized(mod) -> None:
-    if not isinstance(mod, torch.nn.Module):
-        raise AssertionError(f"Expected torch.nn.Module, got {type(mod)}")
+    assert isinstance(mod, torch.nn.Module)
     if not hasattr(mod, "_parameters"):
         raise RuntimeError(
             f"'{torch.typename(type(mod))}' has not been initialized, did you forget to call 'super()'?"

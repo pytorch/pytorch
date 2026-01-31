@@ -147,8 +147,7 @@ def gen_vmap_inplace_plumbing(native_function: NativeFunction) -> str | None:
 
     # Check assumptions. If these are invalid we return None
     # and punt the work to handle them to the future.
-    if schema.kind() != SchemaKind.inplace:
-        raise AssertionError(f"Expected inplace schema, got {schema.kind()}")
+    assert schema.kind() == SchemaKind.inplace
     if not is_mutated_arg(schema.arguments.flat_all[0]):
         return None
     if len([arg for arg in schema.arguments.flat_all if is_mutated_arg(arg)]) != 1:

@@ -41,15 +41,10 @@ class TestCodegenModel(expecttest.TestCase):
             parsed_yaml.backend_indices,
         )
         grouped_native_functions = gen.get_grouped_native_functions(native_functions)
-        if len(grouped_native_functions) != 1:
-            raise AssertionError(
-                f"Expected 1 grouped function, got {len(grouped_native_functions)}"
-            )
+        assert len(grouped_native_functions) == 1
         g = grouped_native_functions[0]
-        if not isinstance(g, NativeFunctionsGroup):
-            raise AssertionError(f"Expected NativeFunctionsGroup, got {type(g)}")
-        if not g.out.ufunc_inner_loop:
-            raise AssertionError("Expected g.out.ufunc_inner_loop to be truthy")
+        assert isinstance(g, NativeFunctionsGroup)
+        assert g.out.ufunc_inner_loop
         # this is not ufunc codegen per se, but it does some basic sanity tests for
         # ufunc generation
         gen.compute_meta_function_declaration(g)

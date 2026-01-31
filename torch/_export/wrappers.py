@@ -73,22 +73,14 @@ def export_tracepoint_cpu(*args, **kwargs):
 
 
 def _wrap_submodule(mod, path, module_call_specs):
-    if not isinstance(mod, torch.nn.Module):
-        raise AssertionError(f"expected torch.nn.Module, got {type(mod)}")
-    if path == "":
-        raise AssertionError("path must not be empty")
+    assert isinstance(mod, torch.nn.Module)
+    assert path != ""
     submodule = torch.fx.graph_module._get_attr(mod, path)
 
     def update_module_call_signatures(path, in_spec, out_spec):
         if path in module_call_specs:
-            if module_call_specs[path]["in_spec"] != in_spec:
-                raise AssertionError(
-                    f"in_spec mismatch for {path}: {module_call_specs[path]['in_spec']} != {in_spec}"
-                )
-            if module_call_specs[path]["out_spec"] != out_spec:
-                raise AssertionError(
-                    f"out_spec mismatch for {path}: {module_call_specs[path]['out_spec']} != {out_spec}"
-                )
+            assert module_call_specs[path]["in_spec"] == in_spec
+            assert module_call_specs[path]["out_spec"] == out_spec
         module_call_specs[path] = {"in_spec": in_spec, "out_spec": out_spec}
 
     def check_flattened(flat_args):
@@ -148,8 +140,7 @@ def _register_func_spec_proxy_in_tracer(tracer, name, spec):
     """
     fx_name = name + "0"
     if hasattr(tracer.root, fx_name):
-        if getattr(tracer.root, fx_name) != spec:
-            raise AssertionError(f"spec mismatch for {fx_name}")
+        assert getattr(tracer.root, fx_name) == spec
         return tracer.create_proxy("get_attr", fx_name, (), {})
 
     qualname = tracer.get_fresh_qualname(name)
@@ -227,10 +218,7 @@ def mark_subclass_constructor_exportable_experimental(constructor_subclass):
             return
 
         if not is_traceable_wrapper_subclass_type(type(args[0])):
-            if not constructor_subclass.__qualname__.endswith("__init__"):
-                raise AssertionError(
-                    f"expected __qualname__ to end with '__init__', got {constructor_subclass.__qualname__}"
-                )
+            assert constructor_subclass.__qualname__.endswith("__init__")
             obj_name = constructor_subclass.__qualname__[: -len("__init__")]
             raise RuntimeError(
                 f"Can't intercept {obj_name} in export because this object is not a traceable "
@@ -241,10 +229,7 @@ def mark_subclass_constructor_exportable_experimental(constructor_subclass):
         if mode is None:
             return
 
-        if not isinstance(mode, PreDispatchTorchFunctionMode):
-            raise AssertionError(
-                f"expected PreDispatchTorchFunctionMode, got {type(mode)}"
-            )
+        assert isinstance(mode, PreDispatchTorchFunctionMode)
 
         tracer = mode.tracer
         subclass = args[0]
@@ -326,8 +311,7 @@ def allow_in_pre_dispatch_graph(func):
         with torch._C._ForceDispatchKeyGuard(include_to_set, exclude_to_set):
             out = func(*args, **kwargs)
 
-        if not mode.pre_dispatch:
-            raise AssertionError("Should only do this in predispatch")
+        assert mode.pre_dispatch, "Should only do this in predispatch"
         tracer = mode.tracer
 
         function_cls_name = f"{args[0].__module__}.{args[0].__qualname__}"

@@ -1790,8 +1790,7 @@ class _ScriptProfile:
 
 
 def _unwrap_optional(x):
-    if x is None:
-        raise AssertionError("Unwrapping null optional")
+    assert x is not None, "Unwrapping null optional"
     return x
 
 

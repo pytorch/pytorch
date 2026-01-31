@@ -576,12 +576,9 @@ def _group_quantize_tensor_symmetric(w, n_bit=4, groupsize=32):
     # W is of shape [K x N]
     # We transpose W as Quantization is applied on [N x K]
     w = w.transpose(0, 1).contiguous()
-    if w.dim() != 2:
-        raise AssertionError(f"Expected w.dim() == 2, got {w.dim()}")
-    if groupsize <= 1:
-        raise AssertionError(f"Expected groupsize > 1, got {groupsize}")
-    if w.shape[-1] % groupsize != 0:
-        raise AssertionError(f"Expected w.shape[-1] % groupsize == 0, got {w.shape[-1]} % {groupsize}")
+    assert w.dim() == 2
+    assert groupsize > 1
+    assert w.shape[-1] % groupsize == 0
     # Calculate scale and zeros
     to_quant = w.reshape(-1, groupsize)
     max_val = to_quant.abs().amax(dim=1, keepdim=True)
@@ -1072,8 +1069,7 @@ class QuantizationTestCase(TestCase):
                     mod = getattr(gm, node.target)
                     return type(mod)
                 else:
-                    if node.op not in ("call_function", "call_method"):
-                        raise AssertionError(f"Expected node.op in ('call_function', 'call_method'), got {node.op!r}")
+                    assert node.op in ("call_function", "call_method")
                     return node.target
 
             self.assertTrue(
@@ -1160,27 +1156,14 @@ class QuantizationTestCase(TestCase):
                                         + f"have a shape mismatch at idx {idx}.",
                                     )
                                 else:
-                                    if not isinstance(values_0, tuple):
-                                        raise AssertionError(f"unhandled type {type(values_0)}")
-                                    if len(values_0) != 2:
-                                        raise AssertionError(f"Expected len(values_0) == 2, got {len(values_0)}")
-                                    if len(values_0[1]) != 2:
-                                        raise AssertionError(f"Expected len(values_0[1]) == 2, got {len(values_0[1])}")
-                                    if values_0[0].shape != values_1[0].shape:
-                                        raise AssertionError(
-                                            f"Expected values_0[0].shape == values_1[0].shape, "
-                                            f"got {values_0[0].shape} != {values_1[0].shape}"
-                                        )
-                                    if values_0[1][0].shape != values_1[1][0].shape:
-                                        raise AssertionError(
-                                            f"Expected values_0[1][0].shape == values_1[1][0].shape, "
-                                            f"got {values_0[1][0].shape} != {values_1[1][0].shape}"
-                                        )
-                                    if values_0[1][1].shape != values_1[1][1].shape:
-                                        raise AssertionError(
-                                            f"Expected values_0[1][1].shape == values_1[1][1].shape, "
-                                            f"got {values_0[1][1].shape} != {values_1[1][1].shape}"
-                                        )
+                                    assert isinstance(
+                                        values_0, tuple
+                                    ), f"unhandled type {type(values_0)}"
+                                    assert len(values_0) == 2
+                                    assert len(values_0[1]) == 2
+                                    assert values_0[0].shape == values_1[0].shape
+                                    assert values_0[1][0].shape == values_1[1][0].shape
+                                    assert values_0[1][1].shape == values_1[1][1].shape
 
                         # verify that ref_node_name is valid
                         ref_node_name_0 = layer_data_0["ref_node_name"]
@@ -1281,8 +1264,10 @@ class QuantizationTestCase(TestCase):
 
             # overwrite qconfig_dict with custom_qconfig_dict
             if custom_qconfig_dict is not None:
-                if type(custom_qconfig_dict) not in (QConfigMapping, dict):
-                    raise AssertionError("custom_qconfig_dict should be a QConfigMapping or a dict")
+                assert type(custom_qconfig_dict) in (
+                    QConfigMapping,
+                    dict,
+                ), "custom_qconfig_dict should be a QConfigMapping or a dict"
                 if isinstance(custom_qconfig_dict, QConfigMapping):
                     qconfig_mapping = custom_qconfig_dict
                 else:
@@ -1364,8 +1349,7 @@ class QuantizationTestCase(TestCase):
         # Check unpacked weight values explicitly
         for key in emb_dict:
             if isinstance(emb_dict[key], torch._C.ScriptObject):
-                if not isinstance(loaded_dict[key], torch._C.ScriptObject):
-                    raise AssertionError(f"Expected loaded_dict[{key!r}] to be ScriptObject")
+                assert isinstance(loaded_dict[key], torch._C.ScriptObject)
                 emb_weight = embedding_unpack(emb_dict[key])
                 loaded_weight = embedding_unpack(loaded_dict[key])
                 self.assertEqual(emb_weight, loaded_weight)

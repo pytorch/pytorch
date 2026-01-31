@@ -257,8 +257,7 @@ class Venv:
     @property
     def bindir(self) -> Path:
         """Get the bin directory for the virtual environment."""
-        if not self.is_venv():
-            raise AssertionError("Not a virtual environment")
+        assert self.is_venv()
         if self._bindir is None:
             if WINDOWS:
                 self._bindir = self.prefix / "Scripts"
@@ -269,14 +268,11 @@ class Venv:
     @property
     def executable(self) -> Path:
         """Get the Python executable for the virtual environment."""
-        if not self.is_venv():
-            raise AssertionError("Not a virtual environment")
+        assert self.is_venv()
         if self._executable is None:
             executable = self.bindir / ("python.exe" if WINDOWS else "python")
-            if not (executable.is_file() or executable.is_symlink()):
-                raise AssertionError(f"{executable} is not a file or symlink")
-            if not os.access(executable, os.X_OK):
-                raise AssertionError(f"{executable} is not executable")
+            assert executable.is_file() or executable.is_symlink()
+            assert os.access(executable, os.X_OK), f"{executable} is not executable"
             self._executable = executable
         return self._executable
 
@@ -387,8 +383,7 @@ class Venv:
 
         print(f"Creating venv (Python {self.base_python_version()}): {self.prefix}")
         self.base_python("-m", "venv", str(self.prefix))
-        if not self.is_venv():
-            raise AssertionError("Failed to create virtual environment.")
+        assert self.is_venv(), "Failed to create virtual environment."
         (self.prefix / ".gitignore").write_text("*\n", encoding="utf-8")
 
         if LINUX:
@@ -627,8 +622,7 @@ class Venv:
         """Unpack a wheel into a directory."""
         wheel = Path(wheel).absolute()
         dest = Path(dest).absolute()
-        if not (wheel.is_file() and wheel.suffix.lower() == ".whl"):
-            raise AssertionError(f"{wheel} is not a valid wheel file")
+        assert wheel.is_file() and wheel.suffix.lower() == ".whl"
         return self.wheel("unpack", f"--dest={dest}", str(wheel), **popen_kwargs)
 
     @contextlib.contextmanager

@@ -28,8 +28,7 @@ def get_onnx_implemented_overloads(
     """
     registered_ops: list[_registration.TorchOp] = []
     for onnx_decomp_meta in registry.functions.values():
-        if len(onnx_decomp_meta) == 0:
-            raise AssertionError("onnx_decomp_meta must not be empty")
+        assert len(onnx_decomp_meta) > 0
         # Different OnnxDecompMeta for the same TorchOp should
         # have the same fx_target.
         fx_target = onnx_decomp_meta[0].fx_target

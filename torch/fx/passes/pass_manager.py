@@ -94,8 +94,9 @@ def loop_pass(
         predicate (Callable[Object, bool], optional):
 
     """
-    if not ((n_iter is not None) ^ (predicate is not None)):
-        raise AssertionError("Exactly one of `n_iter`or `predicate` must be specified.")
+    assert (n_iter is not None) ^ (predicate is not None), (
+        "Exactly one of `n_iter`or `predicate` must be specified."
+    )
 
     @wraps(base_pass)
     def new_pass(source):
