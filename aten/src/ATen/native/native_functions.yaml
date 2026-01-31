@@ -2305,6 +2305,7 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: divmod
+  tags: pointwise
 
 - func: dot(Tensor self, Tensor tensor) -> Tensor
   variants: function, method
