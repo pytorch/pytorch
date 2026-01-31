@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """
 This file contains utilities for tracing through __torch_dispatch__ based tensor subclasses and modes.
 AOTAutograd's responsibility is to trace through all pytorch capabilities that live in the pytorch dispatcher,
@@ -6,7 +7,7 @@ and this includes tensor subclasses that implement __torch_dispatch__.
 
 import collections
 import typing
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable
 from typing import Any, Optional, TYPE_CHECKING, TypeGuard, TypeVar, Union
 
 import torch
@@ -28,7 +29,6 @@ from .descriptors import (
     SubclassStrideAOTOutput,
 )
 from .schemas import (
-    FakifiedFlatArgs,
     FxValue,
     MutationType,
     PlainTensorMeta,
@@ -47,9 +47,7 @@ zip = strict_zip
 T = TypeVar("T", bound=torch.Tensor)
 
 
-def requires_subclass_dispatch(
-    args: FakifiedFlatArgs, fw_metadata: ViewAndMutationMeta
-) -> bool:
+def requires_subclass_dispatch(args, fw_metadata: ViewAndMutationMeta) -> bool:
     args_flattened = pytree.arg_tree_leaves(*args)
     any_subclass_args = any(
         is_traceable_wrapper_subclass(x)
@@ -69,7 +67,7 @@ from .schemas import MemoryFormatMeta
 
 
 def maybe_suggest_memory_format(
-    t: Tensor, with_memory_format: bool
+    t, with_memory_format: bool
 ) -> Optional[MemoryFormatMeta]:
     if not with_memory_format:
         return None
@@ -101,7 +99,7 @@ def get_subclass_typing_container(
 
 def create_subclass_metadata(
     a: Any, start_idx: int, count_symints: bool, with_memory_format: bool = False
-) -> tuple[Any, int]:
+):
     if not is_traceable_wrapper_subclass(a):
         idx = start_idx + 1
         return (
@@ -228,7 +226,7 @@ def unwrap_tensor_subclasses(
         desc: AOTDescriptor,
         *,
         out: tuple[list[FxValue], list[AOTDescriptor]],
-    ) -> None:
+    ):
         # unwrap a subclass into plain tensors and their size/stride if "append_symint"
         # is True
         if not is_traceable_wrapper_subclass(t):
@@ -273,14 +271,12 @@ def unwrap_tensor_subclasses(
 # subclass_metas is needed at runtime to compute which indices are symints in
 # the outer_size/outer_stride
 def runtime_unwrap_tensor_subclasses(
-    wrapped_args: list[Tensor | int],
+    wrapped_args: list[Union[Tensor, int]],
     *,
     append_symints: bool,
-    subclass_metas: list[PlainTensorMeta | SubclassCreationMeta] | None = None,
-) -> list[Any]:
-    def flatten_subclass(
-        x: Tensor, meta: SubclassCreationMeta | None, *, out: list[Any]
-    ) -> list[Any]:
+    subclass_metas: Optional[list[Union[PlainTensorMeta, SubclassCreationMeta]]] = None,
+):
+    def flatten_subclass(x: Tensor, meta: Optional[SubclassCreationMeta], *, out):
         if not is_traceable_wrapper_subclass(x):
             out.append(x)
             return out
@@ -334,9 +330,7 @@ def runtime_unwrap_tensor_subclasses(
     return xs_inner
 
 
-def unwrap_tensor_subclasses_with_indices_to_original(
-    wrapped_args: list[Any],
-) -> tuple[list[Any], list[int]]:
+def unwrap_tensor_subclasses_with_indices_to_original(wrapped_args):
     ret_unwrapped = []
     ret_indices_to_original = []
     for i, a in enumerate(wrapped_args):
@@ -350,10 +344,8 @@ def unwrap_tensor_subclasses_with_indices_to_original(
     return ret_unwrapped, ret_indices_to_original
 
 
-def remap_unwrapped_subclass_arg_indices(
-    wrapped_args: list[Any], static_input_indices: list[int]
-) -> list[int]:
-    static_input_indices_set = set(static_input_indices)
+def remap_unwrapped_subclass_arg_indices(wrapped_args, static_input_indices):
+    static_input_indices = set(static_input_indices)
     new_ind = 0
     remapped_static_indices = []
     for i, arg in enumerate(wrapped_args):
@@ -366,7 +358,7 @@ def remap_unwrapped_subclass_arg_indices(
             )
 
         for _ in range(num_indices):
-            if i in static_input_indices_set:
+            if i in static_input_indices:
                 remapped_static_indices.append(new_ind)
 
             new_ind += 1
@@ -377,13 +369,13 @@ def remap_unwrapped_subclass_arg_indices(
 # Turns a flattened list of tensor arguments into (maybe) subclass tensors.
 # This function is used both at trace time and runtime, so we have an is_runtime flag telling us which context we're in.
 def wrap_tensor_subclasses(
-    unwrapped_args: Sequence[Any],
+    unwrapped_args: Union[tuple[Any, ...], list[Any]],
     *,
-    subclass_metas: list[PlainTensorMeta | SubclassCreationMeta],
-    num_fw_outs_saved_for_bw: int | None = None,
+    subclass_metas: list[Union[PlainTensorMeta, SubclassCreationMeta]],
+    num_fw_outs_saved_for_bw: Optional[int] = None,
     included_subclass_symints: bool = False,
     is_runtime: bool = False,
-    make_subclass_override: Callable[..., Any] | None = None,
+    make_subclass_override: Optional[Callable] = None,
 ) -> tuple[Any, ...]:
     wrapped_args = []
     num_args_tallied = 0
@@ -450,11 +442,8 @@ def wrap_tensor_subclasses(
 # - when is_joint_structure is True, args is (primals, tangents)
 # - when is_joint_structure is False, args is [*primals]
 def wrap_tensor_subclasses_maybe_joint(
-    unwrapped_args: Sequence[Any],
-    *,
-    is_joint_structure: bool,
-    meta: ViewAndMutationMeta,
-) -> tuple[Any, ...]:
+    unwrapped_args, *, is_joint_structure: bool, meta: ViewAndMutationMeta
+) -> Union[tuple[Any, ...], list[Any]]:
     # Since this function is reused for both inference and joint graphs,
     if is_joint_structure:
         assert isinstance(unwrapped_args, tuple) and len(unwrapped_args) == 2

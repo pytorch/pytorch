@@ -34,8 +34,7 @@ def _call_symbolic_op(
     # tracer so that all nodes created are recorded the same way as if we were to use
     # onnxscript ops directly.
 
-    if _core.current_tracer is None:
-        raise AssertionError("current_tracer must be non-None")
+    assert _core.current_tracer is not None
     tracer = _core.current_tracer
 
     inputs = list(args)

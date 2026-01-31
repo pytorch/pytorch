@@ -411,8 +411,7 @@ class ScalarType(Enum):
     @staticmethod
     def parse(value: str) -> ScalarType:
         mb_r = ScalarType.maybe_parse(value)
-        if mb_r is None:
-            raise AssertionError(f"unknown dtype {value}")
+        assert mb_r is not None, f"unknown dtype {value}"
         return mb_r
 
     @staticmethod
@@ -634,8 +633,7 @@ class NativeFunction:
         e = ei.copy()
 
         funcs = e.pop("func")
-        if not isinstance(funcs, str):
-            raise AssertionError(f"not a str: {funcs}")
+        assert isinstance(funcs, str), f"not a str: {funcs}"
         # only support one level of namespace. E.g., aten::add
         namespace_helper = NamespaceHelper.from_namespaced_entity(
             namespaced_entity=funcs, max_level=1
@@ -644,29 +642,21 @@ class NativeFunction:
         func = FunctionSchema.parse(namespace_helper.entity_name)
 
         cpp_no_default_args_list = e.pop("cpp_no_default_args", [])
-        if not isinstance(cpp_no_default_args_list, list):
-            raise AssertionError(
-                f"cpp_no_default_args is not a list: {cpp_no_default_args_list}"
-            )
+        assert isinstance(cpp_no_default_args_list, list)
         cpp_no_default_args = set(cpp_no_default_args_list)
 
         use_const_ref_for_mutable_tensors = e.pop(
             "use_const_ref_for_mutable_tensors", False
         )
-        if not isinstance(use_const_ref_for_mutable_tensors, bool):
-            raise AssertionError(
-                f"use_const_ref_for_mutable_tensors is not a bool: {use_const_ref_for_mutable_tensors}"
-            )
+        assert isinstance(use_const_ref_for_mutable_tensors, bool)
 
         if use_const_ref_for_mutable_tensors:
-            if func.arguments.out:
-                raise AssertionError(
-                    "see https://github.com/pytorch/pytorch/issues/145522"
-                )
+            assert not func.arguments.out, (
+                "see https://github.com/pytorch/pytorch/issues/145522"
+            )
 
         variants_s = e.pop("variants", "function")
-        if not isinstance(variants_s, str):
-            raise AssertionError(f"variants is not a str: {variants_s}")
+        assert isinstance(variants_s, str)
         variants: set[Variant] = set()
         for v in variants_s.split(", "):
             if v == "function":
@@ -677,24 +667,23 @@ class NativeFunction:
                 raise AssertionError(f"illegal variant {v}")
 
         manual_kernel_registration = e.pop("manual_kernel_registration", False)
-        if not isinstance(manual_kernel_registration, bool):
-            raise AssertionError(f"not a bool: {manual_kernel_registration}")
+        assert isinstance(manual_kernel_registration, bool), (
+            f"not a bool: {manual_kernel_registration}"
+        )
 
         manual_cpp_binding = e.pop("manual_cpp_binding", False)
-        if not isinstance(manual_cpp_binding, bool):
-            raise AssertionError(f"not a bool: {manual_cpp_binding}")
+        assert isinstance(manual_cpp_binding, bool), f"not a bool: {manual_cpp_binding}"
 
         device_guard = e.pop("device_guard", True)
-        if not isinstance(device_guard, bool):
-            raise AssertionError(f"not a bool: {device_guard}")
+        assert isinstance(device_guard, bool), f"not a bool: {device_guard}"
 
         device_check_s = e.pop("device_check", None)
-        if not (device_check_s is None or isinstance(device_check_s, str)):
-            raise AssertionError(f"not a str: {device_check_s}")
-        if not (
+        assert device_check_s is None or isinstance(device_check_s, str), (
+            f"not a str: {device_check_s}"
+        )
+        assert (
             device_check_s is None or device_check_s in DeviceCheckType.__members__
-        ):
-            raise AssertionError(f"illegal device_check: {device_check_s}")
+        ), f"illegal device_check: {device_check_s}"
         device_check: DeviceCheckType
         if device_check_s is None:
             device_check = DeviceCheckType.ExactSame
@@ -702,54 +691,50 @@ class NativeFunction:
             device_check = DeviceCheckType[device_check_s]
 
         structured = e.pop("structured", False)
-        if not isinstance(structured, bool):
-            raise AssertionError(f"not a bool: {structured}")
+        assert isinstance(structured, bool), f"not a bool: {structured}"
 
         structured_delegate_s = e.pop("structured_delegate", None)
-        if not (
-            structured_delegate_s is None or isinstance(structured_delegate_s, str)
-        ):
-            raise AssertionError(f"not a str: {structured_delegate_s}")
-        if structured_delegate_s is not None and "::" in structured_delegate_s:
-            raise AssertionError(
-                "namespace is not supported in structured delegate,"
-                " using the same namespace as the native function"
-            )
+        assert structured_delegate_s is None or isinstance(
+            structured_delegate_s, str
+        ), f"not a str: {structured_delegate_s}"
+        assert structured_delegate_s is None or "::" not in structured_delegate_s, (
+            "namespace is not supported in structured delegate,"
+            " using the same namespace as the native function"
+        )
         structured_delegate: OperatorName | None = None
         if structured_delegate_s is not None:
             structured_delegate = OperatorName.parse(structured_delegate_s)
 
         structured_inherits = e.pop("structured_inherits", None)
-        if not (structured_inherits is None or isinstance(structured_inherits, str)):
-            raise AssertionError(f"not a str: {structured_inherits}")
-        if structured_inherits is not None and "::" in structured_inherits:
-            raise AssertionError(
-                "namespace is not supported in structured inherits,"
-                " using the same namespace as the native function"
-            )
+        assert structured_inherits is None or isinstance(structured_inherits, str), (
+            f"not a str: {structured_inherits}"
+        )
+        assert structured_inherits is None or "::" not in structured_inherits, (
+            "namespace is not supported in structured inherits,"
+            " using the same namespace as the native function"
+        )
 
         python_module = e.pop("python_module", None)
-        if not (python_module is None or isinstance(python_module, str)):
-            raise AssertionError(f"not a str: {python_module}")
-        if python_module is not None and Variant.method in variants:
-            raise AssertionError("functions in modules cannot be methods")
+        assert python_module is None or isinstance(python_module, str), (
+            f"not a str: {python_module}"
+        )
+        assert python_module is None or Variant.method not in variants, (
+            "functions in modules cannot be methods"
+        )
 
         category_override = e.pop("category_override", None)
-        if not (category_override is None or isinstance(category_override, str)):
-            raise AssertionError(f"not a str: {category_override}")
+        assert category_override is None or isinstance(category_override, str), (
+            f"not a str: {category_override}"
+        )
 
         precomputed_dict = e.pop("precomputed", None)
-        if precomputed_dict is not None and structured is not True:
-            raise AssertionError(
-                f"precomputed requires structured=True, got structured={structured}"
-            )
+        assert precomputed_dict is None or structured is True
         precomputed = Precompute.parse(precomputed_dict) if precomputed_dict else None
 
         tags_inp = e.pop("tags", [])
         if isinstance(tags_inp, str):
             tags_inp = [tags_inp]
-        if not isinstance(tags_inp, list):
-            raise AssertionError(f"tags is not a list: {tags_inp}")
+        assert isinstance(tags_inp, list)
 
         # All aten ops generated by torchgen receive the pt2_compliant tag.
         if namespace == "aten" and "pt2_compliant_tag" in valid_tags:
@@ -757,8 +742,7 @@ class NativeFunction:
 
         tags: set[str] = set()
         for t in tags_inp:
-            if len(valid_tags) == 0:
-                raise AssertionError("valid_tags is empty")
+            assert len(valid_tags) > 0
             # TODO: verify that the tag is valid and has an entry in tags.yaml
             if t in valid_tags:
                 tags.add(t)
@@ -768,39 +752,34 @@ class NativeFunction:
         from torchgen.api import cpp
 
         raw_dispatch = e.pop("dispatch", None)
-        if not (raw_dispatch is None or isinstance(raw_dispatch, dict)):
-            raise AssertionError(f"dispatch is not a dict: {e}")
+        assert raw_dispatch is None or isinstance(raw_dispatch, dict), e
         dispatch: dict[DispatchKey, BackendMetadata] = {}
         num_dispatch_keys: int = 0
         if raw_dispatch is not None:
-            if manual_kernel_registration:
-                raise AssertionError(
-                    "cannot specify both manual_kernel_registration and dispatch; with "
-                    "manual registration, dispatch has no effect!"
-                )
+            assert not manual_kernel_registration, (
+                "cannot specify both manual_kernel_registration and dispatch; with "
+                "manual registration, dispatch has no effect!"
+            )
             redundant_composite_implicit_autograd = False
             for ks, v in raw_dispatch.items():
                 if ks == "__line__":
                     continue  # not worth tracking line numbers for dispatch entries
-                if not isinstance(ks, str):
-                    raise AssertionError(
-                        f"illegal dispatch key '{ks}' in {raw_dispatch}"
-                    )
-                if not isinstance(v, str):
-                    raise AssertionError(
-                        f"illegal dispatch value '{v}' in {raw_dispatch}"
-                    )
+                assert isinstance(ks, str), (
+                    f"illegal dispatch key '{ks}' in {raw_dispatch}"
+                )
+                assert isinstance(v, str), (
+                    f"illegal dispatch value '{v}' in {raw_dispatch}"
+                )
                 for k in ks.split(","):
                     dispatch_key = DispatchKey.parse(k.strip())
                     num_dispatch_keys += 1
 
                     if ignore_keys and dispatch_key in ignore_keys:
                         continue
-                    if dispatch_key not in dispatch_keys:
-                        raise AssertionError(
-                            f"Dispatch key {dispatch_key} of kernel {v} "
-                            "is not a supported dispatch key."
-                        )
+                    assert dispatch_key in dispatch_keys, (
+                        f"Dispatch key {dispatch_key} of kernel {v} "
+                        "is not a supported dispatch key."
+                    )
                     # We only allow at most 3 levels of namespace for kernels.
                     # We will append "native" to a custom kernel namespace.
                     namespace_helper = NamespaceHelper.from_namespaced_entity(
@@ -825,27 +804,27 @@ class NativeFunction:
             # We count the number of dispatch keys which have not been ignored to prevent a dispatch table
             # in which all backend keys are ignored but necessarily kept, remaining compositeimplicit,
             # from being treated as redundant.
-            if num_dispatch_keys == 1 and redundant_composite_implicit_autograd:
-                raise AssertionError(
-                    "unnecessary dispatch table for this function; just delete the dispatch "
-                    "key entirely"
-                )
+            assert not (
+                num_dispatch_keys == 1 and redundant_composite_implicit_autograd
+            ), (
+                "unnecessary dispatch table for this function; just delete the dispatch "
+                "key entirely"
+            )
             # if a function is a structured delegate, deleting the dispatch
             # table is NOT semantics preserving
-            if not (
+            assert (
                 structured_delegate
                 or dispatch.keys() != {DispatchKey.CompositeImplicitAutograd}
                 or dispatch[DispatchKey.CompositeImplicitAutograd].supports_symint()
                 or num_dispatch_keys != 1
-            ):
-                raise AssertionError(
-                    f"unexpected name for singleton CompositeImplicitAutograd dispatch entry: expected {cpp.name(func)} "
-                    f"but got {dispatch[DispatchKey.CompositeImplicitAutograd]}.  Rename your implementation to the expected "
-                    "name, then delete the dispatch table"
-                )
+            ), (
+                f"unexpected name for singleton CompositeImplicitAutograd dispatch entry: expected {cpp.name(func)} "
+                f"but got {dispatch[DispatchKey.CompositeImplicitAutograd]}.  Rename your implementation to the expected "
+                "name, then delete the dispatch table"
+            )
         elif not structured and structured_delegate is None:
             name = str(func.name.name)
-            if (
+            assert not (
                 name.startswith("new_")
                 or name.endswith("_like")
                 # TODO: maybe it's better to test the return
@@ -853,13 +832,12 @@ class NativeFunction:
                     func.arguments.tensor_options
                     and not func.arguments.has_tensor_arg()
                 )
-            ):
-                raise AssertionError(
-                    f"expected {name} to have a CompositeExplicitAutograd "
-                    "dispatch entry, but there was no dispatch table.  Factory functions "
-                    "should not have implicit dispatch as they should not be decomposed "
-                    "for __torch_dispatch__"
-                )
+            ), (
+                f"expected {name} to have a CompositeExplicitAutograd "
+                "dispatch entry, but there was no dispatch table.  Factory functions "
+                "should not have implicit dispatch as they should not be decomposed "
+                "for __torch_dispatch__"
+            )
             dispatch[DispatchKey.CompositeImplicitAutograd] = BackendMetadata(
                 cpp.name(func), structured=False, cpp_namespace=DEFAULT_KERNEL_NAMESPACE
             )
@@ -873,30 +851,25 @@ class NativeFunction:
             or d == DispatchKey.CompositeImplicitAutogradNestedTensor
         ]
 
-        if not (
-            len(composites_in_dispatch) <= 1
-            or (
-                len(composites_in_dispatch) == 2
-                and (
-                    DispatchKey.CompositeExplicitAutogradNonFunctional
-                    not in composites_in_dispatch
-                )
-                and (
-                    DispatchKey.CompositeImplicitAutogradNestedTensor
-                    in composites_in_dispatch
-                )
+        assert len(composites_in_dispatch) <= 1 or (
+            len(composites_in_dispatch) == 2
+            and (
+                DispatchKey.CompositeExplicitAutogradNonFunctional
+                not in composites_in_dispatch
             )
-        ):
-            raise AssertionError(
-                "cannot specify more than one of CompositeExplicitAutograd, CompositeExplicitAutogradNonFunctional, "
-                "or CompositeImplicitAutograd on a single kernel; each "
-                "strictly subsumes the other.  If you wanted to provide an explicit autograd "
-                "implementation, specify CompositeExplicitAutograd; otherwise specify CompositeImplicitAutograd only"
+            and (
+                DispatchKey.CompositeImplicitAutogradNestedTensor
+                in composites_in_dispatch
             )
+        ), (
+            "cannot specify more than one of CompositeExplicitAutograd, CompositeExplicitAutogradNonFunctional, "
+            "or CompositeImplicitAutograd on a single kernel; each "
+            "strictly subsumes the other.  If you wanted to provide an explicit autograd "
+            "implementation, specify CompositeExplicitAutograd; otherwise specify CompositeImplicitAutograd only"
+        )
 
         autogen_str = e.pop("autogen", "")
-        if not isinstance(autogen_str, str):
-            raise AssertionError(f"autogen is not a str: {autogen_str}")
+        assert isinstance(autogen_str, str)
         autogen = (
             []
             if autogen_str == ""
@@ -913,10 +886,8 @@ class NativeFunction:
             for k, vo in raw_ufunc_inner_loop.items():
                 if k == "__line__":
                     continue
-                if not isinstance(k, str):
-                    raise AssertionError(f"ufunc_inner_loop key is not a str: {k}")
-                if not isinstance(vo, str):
-                    raise AssertionError(f"ufunc_inner_loop value is not a str: {vo}")
+                assert isinstance(k, str), f"ufunc_inner_loop key is not a str: {k}"
+                assert isinstance(vo, str), f"ufunc_inner_loop value is not a str: {v}"
                 ufunc_key = UfuncKey.parse(k)
                 ufunc_inner_loop[ufunc_key] = UfuncInnerLoop.parse(vo, ufunc_key)
         else:
@@ -925,18 +896,16 @@ class NativeFunction:
             )
         # Program the BackendIndex for the implicit dispatch entry from ufunc
         if ufunc_inner_loop:
-            if not structured:
-                raise AssertionError("ufunc must be structured")
+            assert structured, "ufunc must be structured"
 
             # Delay import ufunc here to avoid circular import issue
             # See: https://github.com/pytorch/pytorch/issues/81294
             import torchgen.api.ufunc as ufunc
 
             for dispatch_key in UFUNC_DISPATCH_KEYS:
-                if dispatch_key in dispatch:
-                    raise AssertionError(
-                        f"ufunc should not have explicit dispatch entry for {dispatch_key}"
-                    )
+                assert dispatch_key not in dispatch, (
+                    f"ufunc should not have explicit dispatch entry for {dispatch_key}"
+                )
                 dispatch[dispatch_key] = BackendMetadata(
                     kernel=ufunc.schema_kernel_name(func, dispatch_key),
                     structured=True,
@@ -980,17 +949,15 @@ class NativeFunction:
         # don't care if it exists or not; make it easier to use this function
         # with other yaml parsers that aren't setting __line__ in the dict
         e.pop("__line__", None)
-        if e:
-            raise AssertionError(f"leftover entries: {e}")
+        assert not e, f"leftover entries: {e}"
 
         # Asserts that we can't do in post_init, because they rely on backend-specific info
         if structured_delegate is not None:
             for key in STRUCTURED_DISPATCH_KEYS:
-                if key in dispatch:
-                    raise AssertionError(
-                        f"if structured_delegate, then must not have {key} in dispatch dictionary "
-                        "(it is delegated!)"
-                    )
+                assert key not in dispatch, (
+                    f"if structured_delegate, then must not have {key} in dispatch dictionary "
+                    "(it is delegated!)"
+                )
 
         return (
             NativeFunction(
@@ -1025,16 +992,14 @@ class NativeFunction:
     def validate_unstructured(self) -> None:
         # TODO: probably better to accumulate these errors and report them all
         # at once
-        if self.structured:
-            raise AssertionError(
-                "This function is structured, but there was "
-                "no valid functional variant of it."
-            )
-        if not self.structured_delegate:
-            raise AssertionError(
-                "This function delegates to another structured out function, "
-                "but no valid function was found (the delegate may not exist, or it has the wrong type)"
-            )
+        assert not self.structured, (
+            "This function is structured, but there was "
+            "no valid functional variant of it."
+        )
+        assert self.structured_delegate, (
+            "This function delegates to another structured out function, "
+            "but no valid function was found (the delegate may not exist, or it has the wrong type)"
+        )
 
     # __post_init__ functions in dataclasses can be used to do extra
     # validation after construction.
@@ -1045,56 +1010,47 @@ class NativeFunction:
     # encoded in the type system.
     def __post_init__(self) -> None:
         if self.func.arguments.out:
-            if self.variants != {Variant.function}:
-                raise AssertionError(
-                    "Native functions with out arguments MUST "
-                    "be declared with only function variant; e.g., variants: function; "
-                    "otherwise you will tickle a Python argument binding bug "
-                    "(which usually manifests itself as the result variable being undefined.)"
-                )
+            assert self.variants == {Variant.function}, (
+                "Native functions with out arguments MUST "
+                "be declared with only function variant; e.g., variants: function; "
+                "otherwise you will tickle a Python argument binding bug "
+                "(which usually manifests itself as the result variable being undefined.)"
+            )
         if self.structured:
-            if self.func.kind() != SchemaKind.out:
-                raise AssertionError(
-                    "Put structured field on the out= "
-                    "variant of a function; did you mean structured_delegate?"
-                )
-            if not self.device_guard:
-                raise AssertionError(
-                    "device_guard: False is not respected by structured kernels"
-                )
+            assert self.func.kind() == SchemaKind.out, (
+                "Put structured field on the out= "
+                "variant of a function; did you mean structured_delegate?"
+            )
+            assert self.device_guard, (
+                "device_guard: False is not respected by structured kernels"
+            )
         if self.structured_delegate:
-            if self.func.kind() == SchemaKind.out:
-                raise AssertionError(
-                    "structured_delegate field not allowed "
-                    "on out= functions; did you mean structured?"
-                )
-            if not self.device_guard:
-                raise AssertionError(
-                    "device_guard: False is not respected by structured kernels"
-                )
+            assert self.func.kind() != SchemaKind.out, (
+                "structured_delegate field not allowed "
+                "on out= functions; did you mean structured?"
+            )
+            assert self.device_guard, (
+                "device_guard: False is not respected by structured kernels"
+            )
         # Technically, with the asserts above, this assert is impossible to
         # happen
-        if self.structured and self.structured_delegate:
-            raise AssertionError(
-                "Cannot have both structured and structured_delegate on function"
-            )
+        assert not (self.structured and self.structured_delegate), (
+            "Cannot have both structured and structured_delegate on function"
+        )
         defaulted_arguments = {
             a.name for a in self.func.schema_order_arguments() if a.default is not None
         }
         invalid_args = set.difference(self.cpp_no_default_args, defaulted_arguments)
-        if len(invalid_args) != 0:
-            raise AssertionError(f"Invalid cpp_no_default_args: {invalid_args}")
+        assert len(invalid_args) == 0, f"Invalid cpp_no_default_args: {invalid_args}"
         if self.structured_inherits is not None:
-            if not self.structured:
-                raise AssertionError(
-                    "structured_inherits must also imply structured: True"
-                )
+            assert self.structured, (
+                "structured_inherits must also imply structured: True"
+            )
         if str(self.func.name).startswith("_foreach"):
-            if self.device_check != DeviceCheckType.NoCheck:
-                raise AssertionError(
-                    "foreach kernels fall back to slow path when tensor are on different devices, "
-                    "device_check not allowed to be enabled"
-                )
+            assert self.device_check == DeviceCheckType.NoCheck, (
+                "foreach kernels fall back to slow path when tensor are on different devices, "
+                "device_check not allowed to be enabled"
+            )
 
         # NB: if your function accidentally has rand/dropout/... in its name
         # but is not actually random, feel free to amend this to special case
@@ -1113,10 +1069,7 @@ class NativeFunction:
             )
             or self.func.arguments.has_generator_arg()
         ):
-            if "nondeterministic_seeded" not in self.tags:
-                raise AssertionError(
-                    f"nondeterministic_seeded tag missing for {self.func.name}"
-                )
+            assert "nondeterministic_seeded" in self.tags, str(self.func.name)
 
     @property
     def has_composite_kernel(self) -> bool:
@@ -1150,8 +1103,7 @@ class NativeFunction:
     @property
     def view_schema_kind(self) -> ViewSchemaKind:
         if self.is_view_op and self.func.name.name.inplace:
-            if "inplace_view" not in self.tags:
-                raise AssertionError(f"inplace_view tag missing for {self.func.name}")
+            assert "inplace_view" in self.tags
             return ViewSchemaKind.aliasing_inplace
         if self.is_view_op:
             return ViewSchemaKind.aliasing
@@ -1207,63 +1159,33 @@ class NativeFunctionsGroup:
                     "NativeFunctionsGroup constructed from structured and unstructured "
                     f"functions: {self.out.func.name} and {f.func.name}"
                 )
-        if self.functional.func.kind() != SchemaKind.functional:
-            raise AssertionError(
-                f"functional.func.kind() is {self.functional.func.kind()}, expected SchemaKind.functional"
-            )
-        if self.out.func.kind() != SchemaKind.out:
-            raise AssertionError(
-                f"out.func.kind() is {self.out.func.kind()}, expected SchemaKind.out"
-            )
-        if self.functional.namespace != self.out.namespace:
-            raise AssertionError(
-                f"functional.namespace ({self.functional.namespace}) != out.namespace ({self.out.namespace})"
-            )
+        assert self.functional.func.kind() == SchemaKind.functional
+        assert self.out.func.kind() == SchemaKind.out
+        assert self.functional.namespace == self.out.namespace
         if self.inplace is not None:
-            if self.inplace.func.kind() != SchemaKind.inplace:
-                raise AssertionError(
-                    f"inplace.func.kind() is {self.inplace.func.kind()}, expected SchemaKind.inplace"
-                )
-            if self.inplace.namespace != self.functional.namespace:
-                raise AssertionError(
-                    f"inplace.namespace ({self.inplace.namespace}) != functional.namespace ({self.functional.namespace})"
-                )
+            assert self.inplace.func.kind() == SchemaKind.inplace
+            assert self.inplace.namespace == self.functional.namespace
 
         if self.mutable is not None:
-            if self.mutable.func.kind() != SchemaKind.mutable:
-                raise AssertionError(
-                    f"mutable.func.kind() is {self.mutable.func.kind()}, expected SchemaKind.mutable"
-                )
-            if self.mutable.namespace != self.functional.namespace:
-                raise AssertionError(
-                    f"mutable.namespace ({self.mutable.namespace}) != functional.namespace ({self.functional.namespace})"
-                )
+            assert self.mutable.func.kind() == SchemaKind.mutable
+            assert self.mutable.namespace == self.functional.namespace
             # See Note [Overload Ambiguity With Functional Variants]
-            if not self.functional.func.name.name.functional_overload:
-                raise AssertionError(
-                    "functional.func.name.name.functional_overload must be True when mutable is not None"
-                )
+            assert self.functional.func.name.name.functional_overload
 
         if self.structured:
             # For now, structured composite kernels are not supported (need some
             # design work to figure out how to make the composite case work)
-            if (
-                self.out.has_composite_implicit_autograd_kernel
-                or self.out.has_composite_implicit_autograd_nested_tensor_kernel
-            ):
-                raise AssertionError("structured composite kernels are not supported")
+            assert (
+                not self.out.has_composite_implicit_autograd_kernel
+                and not self.out.has_composite_implicit_autograd_nested_tensor_kernel
+            )
 
-            if self.functional.structured_delegate != self.out.func.name:
-                raise AssertionError(
-                    f"{self.functional.func.name} delegates to {self.functional.structured_delegate} "
-                    f"but its actual delegate is {self.out.func.name}"
-                )
+            assert self.functional.structured_delegate == self.out.func.name, (
+                f"{self.functional.func.name} delegates to {self.functional.structured_delegate} "
+                f"but its actual delegate is {self.out.func.name}"
+            )
             if self.inplace is not None:
-                if self.inplace.structured_delegate != self.out.func.name:
-                    raise AssertionError(
-                        f"{self.inplace.func.name} delegates to {self.inplace.structured_delegate} "
-                        f"but its actual delegate is {self.out.func.name}"
-                    )
+                assert self.inplace.structured_delegate == self.out.func.name
 
         generated_fns = sorted(
             [str(f.func.name) for f in self.functions() if "generated" in f.tags]
@@ -1305,8 +1227,7 @@ class NativeFunctionsGroup:
 
     @staticmethod
     def from_dict(d: dict[SchemaKind, NativeFunction]) -> NativeFunctionsGroup | None:
-        if not d:
-            raise AssertionError("from_dict called with empty dict")
+        assert d
         if len(d) == 1:
             return None
         d = dict(d)  # non-destructive updates please
@@ -1314,10 +1235,8 @@ class NativeFunctionsGroup:
         inplace = d.pop(SchemaKind.inplace, None)
         mutable = d.pop(SchemaKind.mutable, None)
         out = d.pop(SchemaKind.out, None)
-        if d:
-            raise AssertionError(f"unexpected keys in dict: {d}")
-        if functional is None:
-            raise AssertionError("functional variant is required")
+        assert not d
+        assert functional is not None
         # There are a few operators which only have functional/inplace variants;
         # these don't count as structured for our purposes here
         if out is None:
@@ -1365,14 +1284,8 @@ class UfuncInnerLoop:
     @staticmethod
     def parse(value: str, ufunc_key: UfuncKey) -> UfuncInnerLoop:
         name, supported_dtypes_str = value.split(" ", 1)
-        if supported_dtypes_str[0] != "(":
-            raise AssertionError(
-                f"expected '(' at start of supported_dtypes, got: {supported_dtypes_str}"
-            )
-        if supported_dtypes_str[-1] != ")":
-            raise AssertionError(
-                f"expected ')' at end of supported_dtypes, got: {supported_dtypes_str}"
-            )
+        assert supported_dtypes_str[0] == "("
+        assert supported_dtypes_str[-1] == ")"
         supported_dtypes: OrderedSet[ScalarType] = OrderedSet()
         for k in supported_dtypes_str[1:-1].split(", "):
             supported_dtypes |= ScalarType.parse_set(k)
@@ -1410,10 +1323,9 @@ class BackendIndex:
     ) -> None:
         for k, v in child_index.items():
             for op_name, metadata in v.items():
-                if op_name in parent_index[k]:
-                    raise AssertionError(
-                        f"duplicate operator {op_name} for dispatch key {k}"
-                    )
+                assert op_name not in parent_index[k], (
+                    f"duplicate operator {op_name} for dispatch key {k}"
+                )
                 parent_index[k][op_name] = metadata
 
     def primary(self, g: NativeFunctionsGroup) -> NativeFunction:
@@ -1536,15 +1448,13 @@ class FunctionSchema:
     def parse(func: str) -> FunctionSchema:
         # We should probably get a proper parser here
         decls = FunctionSchema.decl_re.findall(func)
-        if len(decls) != 1:
-            raise AssertionError(f"Invalid function schema: {func}")
+        assert len(decls) == 1, f"Invalid function schema: {func}"
         ops, args, return_decl = decls[0]
         name = OperatorName.parse(ops)
         arguments = Arguments.parse(args)
         returns = parse_returns(return_decl)
         r = FunctionSchema(name=name, arguments=arguments, returns=returns)
-        if str(r) != func:
-            raise AssertionError(f"{str(r)} != {func}")
+        assert str(r) == func, f"{str(r)} != {func}"
         return r
 
     def returns_are_aliased(self) -> bool:
@@ -1557,19 +1467,16 @@ class FunctionSchema:
 
     def __post_init__(self) -> None:
         for arg, ret in zip(self.arguments.out, self.returns):
-            if arg.annotation != ret.annotation:
-                raise AssertionError(
-                    "Out arguments must have matching return Tensor; furthermore, "
-                    f"the ith-argument needs to correspond to the ith return. "
-                    f"arg.annotation={arg.annotation}, ret.annotation={ret.annotation}"
-                )
+            assert arg.annotation == ret.annotation, (
+                "Out arguments must have matching return Tensor; furthermore, "
+                "the ith-argument needs to correspond to the ith return"
+            )
         # We also enforce that if you have any mutable, positional args, then they are not returned.
         # This makes it easier to group these functions properly with their functional/out= counterparts.
         for a in self.arguments.post_self_positional_mutable:
-            if any(a.annotation == r.annotation for r in self.returns):
-                raise AssertionError(
-                    f"If you have a schema with mutable positional args, we expect them to not be returned. schema: {str(self)}"
-                )
+            assert not any(a.annotation == r.annotation for r in self.returns), (
+                f"If you have a schema with mutable positional args, we expect them to not be returned. schema: {str(self)}"
+            )
         # Invariant: we expect out arguments to appear as keyword arguments in the schema.
         # This means that all mutable returns should be aliased to a keyword argument
         # (except for "self", which we explicitly don't treat as an out argument because of its use in methods)
@@ -1592,16 +1499,14 @@ class FunctionSchema:
         # (1) It's more annoying to handle properly
         # (2) It's unnecessary - you can't method-chain on the first (mutated) output because it's part of a tuple.
         # Instead, we expect the (a!) argument to not be returned.
-        if not (len(mutable_returns) == 0 or len(immutable_returns) == 0):
-            raise AssertionError(
-                f"NativeFunctions must have either only mutable returns, or only immutable returns. Found: {str(self)}"
-            )
+        assert len(mutable_returns) == 0 or len(immutable_returns) == 0, (
+            f"NativeFunctions must have either only mutable returns, or only immutable returns. Found: {str(self)}"
+        )
         for ret in mutable_returns:
-            if not any(ret.annotation == arg.annotation for arg in out_and_self):
-                raise AssertionError(
-                    'All mutable returns must be aliased either to a keyword argument, or to "self". '
-                    "Did you forget to mark an out argument as keyword-only?"
-                )
+            assert any(ret.annotation == arg.annotation for arg in out_and_self), (
+                'All mutable returns must be aliased either to a keyword argument, or to "self". '
+                "Did you forget to mark an out argument as keyword-only?"
+            )
         if self.arguments.out:
             # out= ops that return their mutable inputs are only really useful for method chaining.
             # And method chaining is only really useful if the thing you're returning is a plain Tensor.
@@ -1609,69 +1514,54 @@ class FunctionSchema:
             # and all other types of out= op schemas should return void.
             # There are a bunch of existing out= ops that return tuples of tensors though, so we're stuck with allowing that.
             if any(a.type != BaseType(BaseTy.Tensor) for a in self.arguments.out):
-                if len(self.returns) != 0:
-                    raise AssertionError(
-                        "out= ops that accept tensor lists as out arguments "
-                        "are expected to have no return type (since you can't do method chaining on them)"
-                    )
+                assert len(self.returns) == 0, (
+                    "out= ops that accept tensor lists as out arguments "
+                )
+                "are expected to have no return type (since you can't do method chaining on them)"
             else:
                 # mutable keyword arguments whose name has _scratch_ prefix are
                 # scratch tensors for memory planning and should not be returned
-                non_scratch_out_args = len(
+                assert len(
                     [
                         arg
                         for arg in self.arguments.out
                         if not arg.name.startswith("_scratch_")
                     ]
+                ) == len(self.returns), (
+                    "Must return as many arguments as there are out arguments, or no return at all"
                 )
-                if non_scratch_out_args != len(self.returns):
-                    raise AssertionError(
-                        f"Must return as many arguments as there are out arguments, or no return at all. "
-                        f"Got {non_scratch_out_args} non-scratch out args and {len(self.returns)} returns"
-                    )
 
         if self.name.name.inplace:
             self_a = self.arguments.self_arg
-            if not (
+            assert (
                 self_a
                 and self_a.argument.annotation
                 and self_a.argument.annotation.is_write
-            ):
-                raise AssertionError(
-                    f"Inplace op {self.name} must have a self argument with a mutable annotation"
-                )
+            )
             if self_a.argument.type == BaseType(BaseTy.Tensor):
                 # All inplace ops with an ordinary `Tensor self` argument should return self,
                 # to allow for method chaining.
-                if not (
+                assert (
                     len(self.returns) == 1
                     and self.returns[0].annotation == self_a.argument.annotation
-                ):
-                    raise AssertionError(
-                        f"Inplace op {self.name} with Tensor self must return self"
-                    )
+                )
             else:
                 # You can't method chain on non-tensor self arguments though (like a list[Tensor])
                 # so in all other cases we expect the return type to be none.
-                if len(self.returns) != 0:
-                    raise AssertionError(
-                        f"Inplace op {self.name} with non-Tensor self must have no returns"
-                    )
+                assert len(self.returns) == 0
 
         if self.arguments.tensor_options is not None:
-            if self.kind() != SchemaKind.functional:
-                raise AssertionError(
-                    "Found an operator that is not functional or out variant, but has tensor options arguments."
-                    "This is not allowed- tensor options arguments are only allowed for factory functions."
-                    f"schema: {str(self)}"
-                )
+            assert self.kind() == SchemaKind.functional, (
+                "Found an operator that is not functional or out variant, but has tensor options arguments."
+                "This is not allowed- tensor options arguments are only allowed for factory functions."
+                f"schema: {str(self)}"
+            )
         if self.is_functional_fn():
-            if self.kind() != SchemaKind.functional:
-                raise AssertionError(
-                    "Found an operator that is not functional, but its overload contains the string 'functional'."
-                    "This is a special keyword in the codegen, please use a different overload name."
-                    f"schema: {str(self)}"
-                )
+            assert self.kind() == SchemaKind.functional, (
+                "Found an operator that is not functional, but its overload contains the string 'functional'."
+                "This is a special keyword in the codegen, please use a different overload name."
+                f"schema: {str(self)}"
+            )
 
     def is_functional_fn(self) -> bool:
         return "functional" in self.name.overload_name
@@ -1721,8 +1611,7 @@ class FunctionSchema:
             a.annotation is not None and a.annotation.is_write
             for a in self.arguments.post_self_positional
         )
-        if is_out and is_inplace:
-            raise AssertionError("A schema cannot be both out= and inplace")
+        assert not (is_out and is_inplace)
         # out= and inplace schemas can also have post_self_positional mutable args,
         # but we give precedence to out= and inplace when deciding the schema kind.
         # Tradeoff: we probably don't want to have to teach codegen that looks at inplace ops
@@ -1733,16 +1622,14 @@ class FunctionSchema:
         if is_inplace:
             return SchemaKind.inplace
         elif is_scratch:
-            if not is_out:
-                raise AssertionError(
-                    "invariant: all scratch operators are expected to be out= operators too"
-                )
+            assert is_out, (
+                "invariant: all scratch operators are expected to be out= operators too"
+            )
             return SchemaKind.scratch
         elif is_out:
-            if is_scratch:
-                raise AssertionError(
-                    "We should not categorize a scratch op as an out variant. Check if the order of if statements are expected!"
-                )
+            assert not is_scratch, (
+                "We should not categorize a scratch op as an out variant. Check if the order of if statements are expected!"
+            )  # noqa: B950
             return SchemaKind.out
         elif is_mutable:
             return SchemaKind.mutable
@@ -1937,25 +1824,21 @@ class Annotation:
         #   example.
         m = re.match(r"^([a-z])(\|[a-z])*(!?)( -> (\*|[a-z](\|[a-z])*))?$", ann)
 
-        if m is None:
-            raise AssertionError(f"unrecognized alias annotation {ann}")
+        assert m is not None, f"unrecognized alias annotation {ann}"
         before_alias = m.group(1) + (m.group(2) if m.group(2) else "")
         alias_set = tuple(before_alias.split("|"))
         is_write = m.group(3) == "!"
-        if is_write and len(alias_set) > 1:
-            raise AssertionError(
-                f"alias set larger than 1 is not mutable, got {ann} instead."
-            )
+        assert not (is_write and len(alias_set) > 1), (
+            f"alias set larger than 1 is not mutable, got {ann} instead."
+        )
         after_set = tuple(m.group(5).split("|")) if m.group(5) else ()
-        if len(before_alias) > 1 and len(after_set) > 1:
-            raise AssertionError(
-                f"before alias set and after alias set cannot be larger than 1 at the same time, got {ann} instead."
-            )
+        assert not (len(before_alias) > 1 and len(after_set) > 1), (
+            f"before alias set and after alias set cannot be larger than 1 at the same time, got {ann} instead."
+        )
         r = Annotation(
             alias_set=alias_set, is_write=is_write, alias_set_after=after_set
         )
-        if str(r) != ann:
-            raise AssertionError(f"{r} != {ann}")
+        assert str(r) == ann, f"{r} != {ann}"
         return r
 
     def __str__(self) -> str:
@@ -1979,8 +1862,7 @@ class Type:
     @staticmethod
     def parse(t: str) -> Type:
         r = Type._parse(t)
-        if str(r) != t:
-            raise AssertionError(f"{r} != {t}")
+        assert str(r) == t, f"{r} != {t}"
         return r
 
     @staticmethod
@@ -2188,11 +2070,9 @@ class Argument:
     def parse(arg: str) -> Argument:
         name: str
         default: str | None
-        if " " not in arg:
-            raise AssertionError(f"illegal argument '{arg}'")
+        assert " " in arg, f"illegal argument '{arg}'"
         if "=" in arg:
-            if arg.count("=") != 1:
-                raise AssertionError(f"illegal argument with default value: '{arg}'")
+            assert arg.count("=") == 1, f"illegal argument with default value: '{arg}'"
             type_and_annot_and_name, default = arg.split("=")
             type_and_annot, name = type_and_annot_and_name.rsplit(" ", 1)
             name_and_default = f"{name}={default}"
@@ -2205,10 +2085,11 @@ class Argument:
         annotation: Annotation | None
         if match:
             # If you update this, make sure the __str__ still works too
-            if match.group(2) not in ["", "?", "[]"]:
-                raise AssertionError(
-                    f"unrecognized alias analysis form with Tensor: {match.group(2)}"
-                )
+            assert match.group(2) in [
+                "",
+                "?",
+                "[]",
+            ], "unrecognized alias analysis form with Tensor"
             type_s = "Tensor" + match.group(2)
             annotation = Annotation.parse(match.group(1))
         else:
@@ -2221,8 +2102,7 @@ class Argument:
             default=default,
             annotation=annotation,
         )
-        if str(r) != arg:
-            raise AssertionError(f"{str(r)} != {arg}")
+        assert str(r) == arg, f"{str(r)} != {arg}"
         return r
 
     @property
@@ -2232,8 +2112,7 @@ class Argument:
     def __str__(self) -> str:
         type = f"{self.type}"
         if self.annotation:
-            if type not in ["Tensor", "Tensor?", "Tensor[]"]:
-                raise AssertionError(f"annotation on non-Tensor type: {type}")
+            assert type in ["Tensor", "Tensor?", "Tensor[]"]
             type = type.replace("Tensor", f"Tensor({self.annotation})")
         if self.name is None:
             return type
@@ -2266,10 +2145,11 @@ class Return:
         annotation: Annotation | None
         if match:
             # If you update this, make sure the __str__ still works too
-            if match.group(2) not in ["", "?", "[]"]:
-                raise AssertionError(
-                    f"unrecognized alias analysis form with Tensor: {match.group(2)}"
-                )
+            assert match.group(2) in [
+                "",
+                "?",
+                "[]",
+            ], "unrecognized alias analysis form with Tensor"
             type_s = "Tensor" + match.group(2)
             annotation = Annotation.parse(match.group(1))
         else:
@@ -2281,8 +2161,7 @@ class Return:
             type=type,
             annotation=annotation,
         )
-        if str(r) != arg:
-            raise AssertionError(f"{str(r)} != {arg}")
+        assert str(r) == arg, f"{str(r)} != {arg}"
         return r
 
     @property
@@ -2292,8 +2171,7 @@ class Return:
     def __str__(self) -> str:
         type = f"{self.type}"
         if self.annotation:
-            if type not in ["Tensor", "Tensor?", "Tensor[]"]:
-                raise AssertionError(f"annotation on non-Tensor type: {type}")
+            assert type in ["Tensor", "Tensor?", "Tensor[]"]
             type = type.replace("Tensor", f"Tensor({self.annotation})")
         if self.name is None:
             return type
@@ -2471,8 +2349,7 @@ class Arguments:
         )
 
     def remove_self_annotation(self) -> Arguments:
-        if self.self_arg is None:
-            raise AssertionError("remove_self_annotation called but self_arg is None")
+        assert self.self_arg is not None
         return dataclasses.replace(
             self,
             self_arg=SelfArgument(
@@ -2481,10 +2358,7 @@ class Arguments:
         )
 
     def with_out_args(self, outs: list[Argument]) -> Arguments:
-        if len(self.out) != 0:
-            raise AssertionError(
-                f"with_out_args called but self.out is not empty: {self.out}"
-            )
+        assert len(self.out) == 0
         return dataclasses.replace(
             self,
             out=tuple(outs),
@@ -2503,10 +2377,9 @@ class Arguments:
             if not arg:
                 continue
             if arg == "*":
-                if arguments_acc is not positional:
-                    raise AssertionError(
-                        "invalid syntax: kwarg-only specifier * can only occur once"
-                    )
+                assert arguments_acc is positional, (
+                    "invalid syntax: kwarg-only specifier * can only occur once"
+                )
                 arguments_acc = kwarg_only
                 continue
             parg = Argument.parse(arg)
@@ -2522,10 +2395,7 @@ class Arguments:
                 elif arguments_acc is kwarg_only:
                     arguments_acc = out
             else:
-                if arguments_acc is out:
-                    raise AssertionError(
-                        f"non-mutable argument '{parg.name}' cannot follow mutable out arguments"
-                    )
+                assert arguments_acc is not out
             arguments_acc.append(parg)
 
         return positional, kwarg_only, out
@@ -2586,10 +2456,7 @@ class Arguments:
                     p(a)
                     for p, a in zip(predicates, kwarg_only[i : i + len(predicates)])
                 ):
-                    if kwarg_only_acc is not pre_tensor_options_kwarg_only:
-                        raise AssertionError(
-                            "tensor options arguments can only appear once"
-                        )
+                    assert kwarg_only_acc is pre_tensor_options_kwarg_only
                     # Group them together as one argument
                     tensor_options = TensorOptionsArguments(
                         dtype=kwarg_only[i],
@@ -2626,15 +2493,9 @@ class Arguments:
         # TODO: These invariants are weirdly asymmetric?
         # TODO: Fancier types?
         if self.self_arg is None:
-            if self.pre_self_positional:
-                raise AssertionError(
-                    "pre_self_positional is non-empty but self_arg is None"
-                )
+            assert not self.pre_self_positional
         if self.tensor_options is None:
-            if self.post_tensor_options_kwarg_only:
-                raise AssertionError(
-                    "post_tensor_options_kwarg_only is non-empty but tensor_options is None"
-                )
+            assert not self.post_tensor_options_kwarg_only
 
         # We don't allow any of the following to have argument annotations,
         # to keep things simple.
@@ -2643,10 +2504,9 @@ class Arguments:
             for a in self.pre_self_positional
             if a.annotation is not None and a.annotation.is_write
         ]
-        if len(mutable_pre_self_positionals) != 0:
-            raise AssertionError(
-                f"mutable pre_self_positional arguments are not currently supported in the schema: {mutable_pre_self_positionals}"
-            )
+        assert len(mutable_pre_self_positionals) == 0, (
+            "mutable pre_self_positional arguments are not currently supported in the schema"
+        )
 
 
 # Names that validly are __iXXX__ indicating inplace operations.
@@ -2707,13 +2567,11 @@ class BaseOperatorName:
 
     @staticmethod
     def parse(op: str) -> BaseOperatorName:
-        if op == "":
-            raise AssertionError("operator name cannot be empty")
-        if op.endswith("_out"):
-            raise AssertionError(
-                "_out suffix is reserved and not permitted for operator names; "
-                "did you mean to specify an out overload name instead?"
-            )
+        assert op != ""
+        assert not op.endswith("_out"), (
+            "_out suffix is reserved and not permitted for operator names; "
+            "did you mean to specify an out overload name instead?"
+        )
         # Extract namespace out. Base operator name may or may not contain namespace.
         # E.g., aten::__lshift__ is a valid base operator name, __lshift__ is also valid.
         # We want to split the namespace out from the base operator name.
@@ -2733,10 +2591,7 @@ class BaseOperatorName:
                 # has been historically true for dunder methods
                 # we support  (but, if we ever got, say, __int__, this would
                 # be wrong!)
-                if base[0] == "i":
-                    raise AssertionError(
-                        f"unexpected dunder method starting with 'i': {op}"
-                    )
+                assert base[0] != "i"
         else:
             dunder_method = False
             base = op_without_ns
@@ -2753,10 +2608,7 @@ class BaseOperatorName:
             base = base[: -len(functional_suffix)]
             # This seems complicated and unnecessary, so banning dunder methods
             # for now on ops that have a functional + mutable variant (like native_batch_norm).
-            if dunder_method or inplace:
-                raise AssertionError(
-                    f"functional overload cannot be a dunder method or inplace: {op}"
-                )
+            assert not dunder_method and not inplace
         else:
             functional_overload = False
 
@@ -2767,8 +2619,7 @@ class BaseOperatorName:
             functional_overload=functional_overload,
             namespace=namespace,
         )
-        if str(r) != op:
-            raise AssertionError(f"{str(r)} != {op}")
+        assert str(r) == op, f"{str(r)} != {op}"
         return r
 
     def __str__(self) -> str:
@@ -2802,8 +2653,7 @@ class OperatorName:
             name = op_name
             overload_name = ""
         r = OperatorName(name=BaseOperatorName.parse(name), overload_name=overload_name)
-        if str(r) != op_name:
-            raise AssertionError(f"{str(r)} != {op_name}")
+        assert str(r) == op_name, f"{str(r)} != {op_name}"
         return r
 
     def __str__(self) -> str:
@@ -2876,57 +2726,39 @@ class NativeFunctionsViewGroup:
     view_inplace: NativeFunction | None
 
     def __post_init__(self) -> None:
-        if not self.view.is_view_op:
-            raise AssertionError(f"view is not a view op: {self.view.func.name}")
+        assert self.view.is_view_op
         if self.view_copy is None:
-            if gets_generated_view_copy(self.view):
-                raise AssertionError(
-                    f"{str(self.view.func.name)} appears to be a new operator that aliases its inputs."
-                    " The codegen expects you to add a corresponding operator to native_functions.yaml:"
-                    f" {get_view_copy_name(self.view)!s}."
-                    " See Note [view_copy NativeFunctions] for details."
-                )
+            assert not gets_generated_view_copy(self.view), (
+                f"{str(self.view.func.name)} appears to be a new operator that aliases its inputs."
+                " The codegen expects you to add a corresponding operator to native_functions.yaml:"
+                f" {get_view_copy_name(self.view)!s}."
+                " See Note [view_copy NativeFunctions] for details."
+            )
         else:
-            if not self.view_copy.func.name.name.base.endswith(("_copy", "_scatter")):
-                raise AssertionError(
-                    f"view_copy name must end with '_copy' or '_scatter': {self.view_copy.func.name}"
-                )
-            if self.view.func.signature() != self.view_copy.func.signature(
+            assert self.view_copy.func.name.name.base.endswith(("_copy", "_scatter"))
+            assert self.view.func.signature() == self.view_copy.func.signature(
                 strip_view_copy_name=True,
-            ):
-                view_sig = self.view.func.signature()
-                view_copy_sig = self.view_copy.func.signature(strip_view_copy_name=True)
-                raise AssertionError(
-                    f"view and view_copy signatures don't match: {view_sig} != {view_copy_sig}"
-                )
-            if "view_copy" not in self.view_copy.tags:
-                raise AssertionError(
-                    f"{str(self.view_copy.func.name), str(self.view.tags)} appears to be a view_copy operator. The codegen expects"
-                    " view_copy operators to be annotated with the 'view_copy' tag in native_functions.yaml."
-                    " See Note [view_copy NativeFunction] for details."
-                )
+            )
+            assert "view_copy" in self.view_copy.tags, (
+                f"{str(self.view_copy.func.name), str(self.view.tags)} appears to be a view_copy operator. The codegen expects"
+                " view_copy operators to be annotated with the 'view_copy' tag in native_functions.yaml."
+                " See Note [view_copy NativeFunction] for details."
+            )
         if self.view_inplace is not None:
-            if self.view.func.signature() != self.view_inplace.func.signature():
-                view_sig = self.view.func.signature()
-                view_inplace_sig = self.view_inplace.func.signature()
-                raise AssertionError(
-                    f"view and view_inplace signatures don't match: {view_sig} != {view_inplace_sig}"
-                )
+            assert self.view.func.signature() == self.view_inplace.func.signature()
 
         if self.view.has_composite_implicit_autograd_kernel:
             if self.view_inplace is not None:
-                if not self.view_inplace.has_composite_implicit_autograd_kernel:
-                    raise AssertionError(
-                        f"{str(self.view.func.name)} and {str(self.view_inplace.func.name)} must either"
-                        " both have CompositeImplicitAutograd kernels, or both not have composite kernels."
-                    )
+                assert self.view_inplace.has_composite_implicit_autograd_kernel, (
+                    f"{str(self.view.func.name)} and {str(self.view_inplace.func.name)} must either"
+                    " both have CompositeImplicitAutograd kernels, or both not have composite kernels."
+                )
         if self.view.has_composite_implicit_autograd_nested_tensor_kernel:
             if self.view_inplace is not None:
-                if not self.view_inplace.has_composite_implicit_autograd_nested_tensor_kernel:
-                    raise AssertionError(
-                        f"{str(self.view.func.name)} and {str(self.view_inplace.func.name)} must either"
-                        " both have CompositeImplicitAutogradNestedTensor kernels, or both not have composite kernels."
-                    )
+                assert self.view_inplace.has_composite_implicit_autograd_nested_tensor_kernel, (
+                    f"{str(self.view.func.name)} and {str(self.view_inplace.func.name)} must either"
+                    " both have CompositeImplicitAutogradNestedTensor kernels, or both not have composite kernels."
+                )
 
     def functions(self, *, include_copy: bool = True) -> Iterator[NativeFunction]:
         yield self.view
@@ -2978,10 +2810,7 @@ def get_view_copy_name(f: NativeFunction) -> OperatorName:
     # But we could also just get rid of the assert.
     list_of_ops_with_explicit_view_copy_operators = ["narrow"]
     if str(f.func.name) not in list_of_ops_with_explicit_view_copy_operators:
-        if not gets_generated_view_copy(f):
-            raise AssertionError(
-                f"{f.func.name} does not have a generated view_copy variant"
-            )
+        assert gets_generated_view_copy(f)
 
     base_name = f"{f.func.name.name.base}_copy"
     view_copy_name = OperatorName(
@@ -3021,8 +2850,7 @@ class Precompute:
 
     @staticmethod
     def parse(src: object) -> Precompute:
-        if not isinstance(src, list):
-            raise AssertionError(f"precomputed must be a list, got {type(src)}")
+        assert isinstance(src, list)
 
         # src is a list of strings of the format:
         #   {kernel param name} -> {replacement decl}[, {replacement decl}, ...]
@@ -3039,43 +2867,32 @@ class Precompute:
 
         replace = {}
         for raw_replace_item in src:
-            if not isinstance(raw_replace_item, str):
-                raise AssertionError(
-                    f"precomputed item must be a str, got {type(raw_replace_item)}"
-                )
-            if " -> " not in raw_replace_item:
-                raise AssertionError(
-                    f"precomputed parameters without replacement are allowed only in the last line, got: {raw_replace_item}"
-                )
+            assert isinstance(raw_replace_item, str)
+            assert " -> " in raw_replace_item, (
+                "precomputed parameters without replacement"
+                " are allowed only in the last line"
+            )
 
             arg, with_list_raw = raw_replace_item.split(" -> ")
-            if " " in arg:
-                raise AssertionError(
-                    f"illegal kernel param name '{arg}' in precomputed parameters"
-                )
+            assert " " not in arg, (
+                f"illegal kernel param name '{arg}' in precomputed parameters'"
+            )
             with_list = with_list_raw.split(",")
             with_list_args = [Argument.parse(name.strip()) for name in with_list]
             replace[arg] = with_list_args
 
         r = Precompute(replace=replace, add=add_args)
-        if r.to_list() != src:
-            raise AssertionError(f"r.to_list() != src: {r.to_list()} != {src}")
+        assert r.to_list() == src, "r.to_list() != src"
         return r
 
     def __post_init__(self) -> None:
         # the template parameters are upper so if these are the
         # same then it is ambiguous
         for a in self.add:
-            if a.name.upper() == a.name:
-                raise AssertionError(
-                    f"precomputed argument name must not be all uppercase: {a.name}"
-                )
+            assert a.name.upper() != a.name
         for args in self.replace.values():
             for a in args:
-                if a.name.upper() == a.name:
-                    raise AssertionError(
-                        f"precomputed argument name must not be all uppercase: {a.name}"
-                    )
+                assert a.name.upper() != a.name
 
     def to_list(self) -> list[str]:
         replace_list = []

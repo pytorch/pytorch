@@ -162,12 +162,10 @@ Example:
 @st.composite
 def array_shapes(draw, min_dims=1, max_dims=None, min_side=1, max_side=None, max_numel=None):
     """Return a strategy for array shapes (tuples of int >= 1)."""
-    if min_dims >= 32:
-        raise AssertionError(f"Expected min_dims < 32, got {min_dims}")
+    assert min_dims < 32
     if max_dims is None:
         max_dims = min(min_dims + 2, 32)
-    if max_dims >= 32:
-        raise AssertionError(f"Expected max_dims < 32, got {max_dims}")
+    assert max_dims < 32
     if max_side is None:
         max_side = min_side + 5
     candidate = st.lists(st.integers(min_side, max_side), min_size=min_dims, max_size=max_dims)
@@ -335,8 +333,7 @@ def tensor_conv(
     # Resolve the tensors
     if qparams is not None:
         if isinstance(qparams, (list, tuple)):
-            if len(qparams) != 3:
-                raise AssertionError("Need 3 qparams for X, w, b")
+            assert len(qparams) == 3, "Need 3 qparams for X, w, b"
         else:
             qparams = [qparams] * 3
 
@@ -379,5 +376,4 @@ def assert_deadline_disabled():
         )
         warnings.warn(warning_message, stacklevel=2)
     else:
-        if settings().deadline is not None:
-            raise AssertionError("Expected settings().deadline to be None")
+        assert settings().deadline is None

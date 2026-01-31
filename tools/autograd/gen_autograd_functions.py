@@ -690,12 +690,9 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             # This special case is needed for `_foreach_pow.List` and `_foreach_pow.ScalarAndTensor`
             # as of https://github.com/pytorch/pytorch/pull/105504.
             if type == VectorCType(BaseCType(tensorT)):
-                if not (
+                assert (
                     info.func.func.name.name.base.startswith("_foreach") and is_output
-                ):
-                    raise AssertionError(
-                        "VectorCType(BaseCType(tensorT)) requires foreach function and is_output"
-                    )
+                )
             uses_cpp_saved_variable_cls = True
             saved_variables.append(f"std::vector<SavedVariable> {name}_;")
             saved_variables.append(f"bool {name}_released_ = false;")
@@ -857,15 +854,12 @@ static PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
             # into the saved variable field.  If this is spuriously firing,
             # edit this field.  Otherwise, you probably need to add a case
             # above.
-            if not (
+            assert (
                 "ref" not in type.cpp_type().lower()
                 and "view" not in type.cpp_type().lower()
                 and "*" not in type.cpp_type()
                 and "&" not in type.cpp_type()
-            ):
-                raise AssertionError(
-                    f"{type.cpp_type()} looks like it contains a non-owning reference"
-                )
+            ), f"{type.cpp_type()} looks like it contains a non-owning reference"
             saved_variables.append(f"{type.cpp_type()} {name};")
 
             if type in MISC_GETTER_DEFS:

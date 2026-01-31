@@ -116,11 +116,12 @@ def get_selector(
 
     from torchgen.selective_build.selector import SelectiveBuilder
 
-    if selected_op_list_path is not None and operators_yaml_path is not None:
-        raise AssertionError(
-            "Expected at most one of selected_op_list_path and "
-            "operators_yaml_path to be set."
-        )
+    assert not (
+        selected_op_list_path is not None and operators_yaml_path is not None
+    ), (
+        "Expected at most one of selected_op_list_path and "
+        + "operators_yaml_path to be set."
+    )
 
     if selected_op_list_path is None and operators_yaml_path is None:
         return SelectiveBuilder.get_nop_selector()
@@ -218,10 +219,8 @@ def main() -> None:
     )
 
     os.makedirs(functionalization_install_dir, exist_ok=True)
-    if not os.path.isdir(functionalization_install_dir):
-        raise AssertionError(f"Not a directory: {functionalization_install_dir}")
-    if not os.path.isdir(functionalization_templates_dir):
-        raise AssertionError(f"Not a directory: {functionalization_templates_dir}")
+    assert os.path.isdir(functionalization_install_dir)
+    assert os.path.isdir(functionalization_templates_dir)
 
     gen_functionalization_view_meta_classes(
         options.native_functions_path or NATIVE_FUNCTIONS_PATH,
@@ -238,10 +237,12 @@ def main() -> None:
         lazy_install_dir = os.path.join(install_dir, "lazy", "generated")
         os.makedirs(lazy_install_dir, exist_ok=True)
 
-        if not os.path.isfile(ts_backend_yaml):
-            raise AssertionError(f"Unable to access ts_backend_yaml: {ts_backend_yaml}")
-        if not os.path.isfile(ts_native_functions):
-            raise AssertionError(f"Unable to access {ts_native_functions}")
+        assert os.path.isfile(ts_backend_yaml), (
+            f"Unable to access ts_backend_yaml: {ts_backend_yaml}"
+        )
+        assert os.path.isfile(ts_native_functions), (
+            f"Unable to access {ts_native_functions}"
+        )
         from torchgen.dest.lazy_ir import GenTSLazyIR
         from torchgen.gen_lazy_tensor import run_gen_lazy_tensor
 

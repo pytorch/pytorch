@@ -1072,10 +1072,7 @@ if has_triton():
                     tensor.element_size(),
                 )
             else:
-                if len(block_sizes) != 2:
-                    raise AssertionError(
-                        f"Expected len(block_sizes) == 2, got {len(block_sizes)}"
-                    )
+                assert len(block_sizes) == 2
                 return triton.tools.experimental_descriptor.create_2d_tma_descriptor(
                     tensor.data_ptr(),
                     tensor.size(0),

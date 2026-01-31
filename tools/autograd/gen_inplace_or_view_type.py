@@ -302,8 +302,7 @@ def unpack_args(f: NativeFunction) -> tuple[list[str], list[Binding]]:
     unpacked_bindings: list[Binding] = []
 
     for i, binding in enumerate(extract_bindings(f)):
-        if isinstance(binding.argument, SelfArgument):
-            raise AssertionError("Binding argument should not be SelfArgument")
+        assert not isinstance(binding.argument, SelfArgument)
         if isinstance(binding.argument, TensorOptionsArguments):
             raise RuntimeError("VariableKernel shouldn't take TensorOptions")
 
@@ -548,8 +547,7 @@ def emit_inplace_or_view_body(fn: NativeFunctionWithDifferentiabilityInfo) -> li
         for r in cpp.return_names(f):
             inplace_view_body.append(f"increment_version({r});")
     else:
-        if get_view_info(f) is None:
-            raise AssertionError("Expected view info to be non-None")
+        assert get_view_info(f) is not None
         inplace_view_body.append(
             VIEW_REDISPATCH.substitute(
                 assign_return_values="auto " + TMP_VAR + " = ",
@@ -559,8 +557,7 @@ def emit_inplace_or_view_body(fn: NativeFunctionWithDifferentiabilityInfo) -> li
         )
         call, rhs_value = emit_view_body(fn, TMP_VAR)
         inplace_view_body.append(call)
-        if rhs_value is None:
-            raise AssertionError("Expected rhs_value to be non-None")
+        assert rhs_value is not None
         inplace_view_body.append(
             ASSIGN_RETURN_VALUE.substitute(
                 return_values=tie_return_values(f), rhs_value=rhs_value

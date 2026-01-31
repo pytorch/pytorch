@@ -145,8 +145,7 @@ def remove_const_ref(binding: Binding) -> Binding:
 
 def returns_multi_tensor(fn: NativeFunction) -> bool:
     returns = fn.func.returns
-    if len(returns) != 1:
-        raise AssertionError(f"Expected 1 return, got {len(returns)}")
+    assert len(returns) == 1
     returns_list_like = returns[0].type.is_list_like() is not None
     returns_tensor_like = returns[0].type.is_tensor_like()
     return returns_list_like and returns_tensor_like
@@ -175,8 +174,7 @@ def generate_state_getter_setter(
 
     num_exprs = []
     for i, b in enumerate(bindings):
-        if not isinstance(b.argument, Argument):
-            raise AssertionError(f"Expected Argument, got {type(b.argument)}")
+        assert isinstance(b.argument, Argument)
         if b.argument.type.is_list_like():
             # Handle list-likes.
             num_expr = f"{b.name}.size()"
@@ -240,8 +238,7 @@ def process_function(fn: NativeFunction, template: CodeTemplate) -> str:
     initializers = []
     for b, init_expr in zip(non_self_bindings, init_exprs):
         name = b.nctype.name
-        if not isinstance(name, str):
-            raise AssertionError(f"Expected name to be str, got {type(name)}")
+        assert isinstance(name, str)
         initializers.append(f"{name}({init_expr.expr})")
 
     # Generate call to underlying view op

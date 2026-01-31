@@ -217,8 +217,7 @@ def _parse_arg(
 
 def _node_get(node: _C.Node, key: str):
     """Gets attributes of a node which is polymorphic over return type."""
-    if not isinstance(node, _C.Node):
-        raise AssertionError(f"Expected _C.Node, got {type(node)}")
+    assert isinstance(node, _C.Node)
     sel = node.kindOf(key)
     return getattr(node, sel)(key)
 
@@ -295,8 +294,7 @@ def _unpack_quantized_tensor(tuple_value: _C.Value) -> tuple[_C.Value, ...]:
             tuple_value,
         )
     unpacked = tuple(tuple_node.inputs())
-    if not (len(unpacked) == 3 or len(unpacked) == 4):
-        raise AssertionError(f"Expected 3 or 4 elements, got {len(unpacked)}")
+    assert len(unpacked) == 3 or len(unpacked) == 4
     return unpacked
 
 
@@ -316,9 +314,10 @@ def parse_args(
     ```
     @parse_args('v', 'i', 'fs')
     foo(g, a, b, c):
-        # a is torch._C.Value
-        # b is int
-        # c is list of floats
+        assert isinstance(a, torch._C.Value)
+        assert isinstance(b, int)
+        assert isinstance(c, list)
+        assert isinstance(c[0], float)
     ```
 
     Args:
@@ -348,12 +347,11 @@ def parse_args(
                 "an external library, please file an issue at "
                 "https://github.com/pytorch/pytorch/issues/new?template=bug-report.yml to report this bug."
             )
-            if len(arg_descriptors) < len(args):
-                raise AssertionError(
-                    f"A mismatch between the number of arguments ({len(args)}) and "
-                    f"their descriptors ({len(arg_descriptors)}) was found at "
-                    f"symbolic function '{fn.__name__}'. {FILE_BUG_MSG}"
-                )
+            assert len(arg_descriptors) >= len(args), (
+                f"A mismatch between the number of arguments ({len(args)}) and "
+                f"their descriptors ({len(arg_descriptors)}) was found at symbolic function '{fn.__name__}'. "
+                f"{FILE_BUG_MSG}"
+            )
 
             try:
                 sig = inspect.signature(fn)
@@ -370,20 +368,18 @@ def parse_args(
                 for arg, arg_desc, arg_name in zip(args, arg_descriptors, arg_names)
             ]
             # only support _outputs in kwargs
-            if len(kwargs) > 1:
-                raise AssertionError(
-                    f"Symbolic function {fn.__name__}'s '**kwargs' can contain a single "
-                    f"key/value entry. "
-                    f"{FILE_BUG_MSG}"
-                )
+            assert len(kwargs) <= 1, (
+                f"Symbolic function {fn.__name__}'s '**kwargs' can contain a single "
+                f"key/value entry. "
+                f"{FILE_BUG_MSG}"
+            )
 
             if len(kwargs) == 1:
-                if "_outputs" not in kwargs:
-                    raise AssertionError(
-                        f"Symbolic function {fn.__name__}'s '**kwargs' can only contain "
-                        f"'_outputs' key at '**kwargs'. "
-                        f"{FILE_BUG_MSG}"
-                    )
+                assert "_outputs" in kwargs, (
+                    f"Symbolic function {fn.__name__}'s '**kwargs' can only contain "
+                    f"'_outputs' key at '**kwargs'. "
+                    f"{FILE_BUG_MSG}"
+                )
             return fn(g, *args, **kwargs)
 
         return wrapper
@@ -515,12 +511,10 @@ def quantized_args(
             # support multiple outputs in the future.
             output = fn(g, *non_quantized_args, **kwargs)
 
-            if _scale is None:
-                raise AssertionError("Bug: Scale must be set for quantized operator")
-            if _zero_point is None:
-                raise AssertionError(
-                    "Bug: Zero point must be set for quantized operator"
-                )
+            assert _scale is not None, "Bug: Scale must be set for quantized operator"
+            assert _zero_point is not None, (
+                "Bug: Zero point must be set for quantized operator"
+            )
 
             if quantize_output:
                 return quantize_helper(g, output, _scale, _zero_point)
@@ -612,8 +606,7 @@ def _is_tuple_construct(x: _C.Value) -> bool:
 
 
 def is_complex_value(x: _C.Value) -> bool:
-    if not _is_value(x):
-        raise AssertionError("Expected a Value")
+    assert _is_value(x)
     return _type_utils.JitScalarType.from_value(
         x, _type_utils.JitScalarType.UNDEFINED
     ) in {
@@ -653,14 +646,12 @@ def _get_tensor_dim_size(x: _C.Value, dim: int) -> int | None:
 def _get_dim_for_cross(x: _C.Value, dim: int | None):
     if dim == -1:
         tensor_rank = _get_tensor_rank(x)
-        if tensor_rank is None:
-            raise AssertionError("Expected tensor_rank to be non-None")
+        assert tensor_rank is not None
         return dim + tensor_rank
     # If dim is not given, it defaults to the first dimension found with the size 3
     if dim is None:
         sizes = _get_tensor_sizes(x)
-        if sizes is None:
-            raise AssertionError("Expected sizes to be non-None")
+        assert sizes is not None
         for index, size in enumerate(sizes):
             if size is not None and size == 3:
                 return index
@@ -849,8 +840,7 @@ def _generate_wrapped_number(g: jit_utils.GraphContext, scalar):
     is a floating point type, it is converted to a 0-dim double
     tensor, else it is converted to a 0-dim tensor of its original type
     """
-    if isinstance(scalar, torch.Tensor):
-        raise AssertionError("Expected scalar, not torch.Tensor")
+    assert not isinstance(scalar, torch.Tensor)
     if isinstance(scalar, float):
         return g.op("Constant", value_t=torch.tensor(scalar, dtype=torch.double))
     return g.op("Constant", value_t=torch.tensor(scalar))
@@ -955,8 +945,7 @@ def _squeeze_helper(g: jit_utils.GraphContext, input, axes_i):
         )
     axes_t = axes_i[0]
     axes_rank = _get_tensor_rank(axes_t)
-    if axes_rank is None:
-        raise AssertionError("Expected axes_rank to be non-None")
+    assert axes_rank is not None
     if axes_rank > 1:
         raise errors.SymbolicValueError(
             "For Squeeze axses as input, the axes rank must be one in ONNX spec.", input
@@ -1422,8 +1411,7 @@ def _arange_cast_helper(
                 torch.get_default_dtype()
             )
     else:
-        if not isinstance(dtype, int):
-            raise AssertionError(f"Expected dtype to be int, got {type(dtype)}")
+        assert isinstance(dtype, int)
         # TODO(justinchuby): Check if dtype is indeed a int.
         scalar_type = _type_utils.JitScalarType(dtype)
 
@@ -1538,8 +1526,7 @@ def _batchnorm_helper(
         or running_var is None
         or _is_none(running_var)
     ):
-        if batch_size is None or channel_size is None:
-            raise AssertionError("batch_size and channel_size must be non-None")
+        assert batch_size is not None and channel_size is not None
         reshape_in = _reshape_helper(
             g,
             input,
@@ -1729,16 +1716,14 @@ def quantize_helper(
             tensor,
         )
 
-    if scale is None:
-        raise AssertionError("scale must be non-None")
+    assert scale is not None
     if (
         _type_utils.JitScalarType.from_value(scale, _type_utils.JitScalarType.UNDEFINED)
         != _type_utils.JitScalarType.FLOAT
     ):
         scale = g.op("Cast", scale, to_i=_C_onnx.TensorProtoDataType.FLOAT)
 
-    if zero_point is None:
-        raise AssertionError("zero_point must be non-None")
+    assert zero_point is not None
     if _type_utils.JitScalarType.from_value(
         zero_point, _type_utils.JitScalarType.UNDEFINED
     ) not in {
@@ -1782,8 +1767,7 @@ def requantize_bias_helper(
 
 
 def args_have_same_dtype(args):
-    if not args:
-        raise AssertionError("args must be non-empty")
+    assert args
     base_dtype = _type_utils.JitScalarType.from_value(args[0])
     has_same_dtype = all(
         _type_utils.JitScalarType.from_value(elem) == base_dtype for elem in args

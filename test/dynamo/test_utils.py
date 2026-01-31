@@ -55,7 +55,7 @@ class TestUtils(TestCase):
 
     def test_larger_multiplier_for_even_smaller_tensor(self):
         """
-        Tensor numel <=10
+        Tesnor numel <=10
         """
         fp64_ref = torch.DoubleTensor([0.0])
         a = torch.Tensor([1.0])

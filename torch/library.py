@@ -1468,12 +1468,7 @@ def register_vmap(
         def wrapped_func(keyset, *args, **kwargs):
             interpreter = retrieve_current_functorch_interpreter()
             return custom_function_call_vmap_helper(
-                # pyrefly: ignore[bad-argument-type]
-                interpreter,
-                func,
-                op,
-                *args,
-                **kwargs,
+                interpreter, func, op, *args, **kwargs
             )
 
         lib.impl(opname, wrapped_func, "FuncTorchBatched", with_keyset=True)

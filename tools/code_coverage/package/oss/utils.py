@@ -8,8 +8,7 @@ from ..util.utils import print_error, remove_file
 
 
 def get_oss_binary_folder(test_type: TestType) -> str:
-    if test_type not in {TestType.CPP, TestType.PY}:
-        raise AssertionError(f"Invalid test_type: {test_type}")
+    assert test_type in {TestType.CPP, TestType.PY}
     # TODO: change the way we get binary file -- binary may not in build/bin ?
     return os.path.join(
         get_pytorch_folder(), "build/bin" if test_type == TestType.CPP else "test"
@@ -26,8 +25,7 @@ def get_oss_shared_library() -> list[str]:
 
 
 def get_oss_binary_file(test_name: str, test_type: TestType) -> str:
-    if test_type not in {TestType.CPP, TestType.PY}:
-        raise AssertionError(f"Invalid test_type: {test_type}")
+    assert test_type in {TestType.CPP, TestType.PY}
     binary_folder = get_oss_binary_folder(test_type)
     binary_file = os.path.join(binary_folder, test_name)
     if test_type == TestType.PY:

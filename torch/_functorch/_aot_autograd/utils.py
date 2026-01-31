@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """
 Contains various utils for AOTAutograd, including those for handling collections.
 """
@@ -7,11 +8,11 @@ import dataclasses
 import logging
 import operator
 import warnings
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from contextlib import nullcontext
-from functools import partial, wraps
-from typing import Any, overload, TYPE_CHECKING
-from typing_extensions import ParamSpec, TypeVar, TypeVarTuple, Unpack
+from functools import wraps
+from typing import Any, Optional, TypeVar, Union
+from typing_extensions import ParamSpec
 
 import torch
 import torch.utils._pytree as pytree
@@ -23,10 +24,7 @@ from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import py_sym_types
 
-
-_T = TypeVar("_T")
-if TYPE_CHECKING:
-    from .schemas import AOTConfig, ViewAndMutationMeta
+from .descriptors import AOTOutput
 
 
 KNOWN_TYPES = [
@@ -42,13 +40,27 @@ KNOWN_TYPES = [
     torch.ScriptObject,
 ]
 
+original_zip = zip
+
 aot_graphs_effects_log = getArtifactLogger(__name__, "aot_graphs_effects")
 annotation_log = getArtifactLogger(__name__, "annotation")
 
-strict_zip = partial(zip, strict=True)
+
+def strict_zip(*iterables, strict=True, **kwargs):
+    if not strict:
+        return original_zip(*iterables, **kwargs)
+
+    length = len(iterables[0])
+    for iterable in iterables[1:]:
+        if len(iterable) != length:
+            raise ValueError(
+                "The iterables have different lengths and strict mode is enabled."
+            )
+
+    return original_zip(*iterables, **kwargs)
 
 
-def _get_symint_hints(exprs: Any) -> Any:
+def _get_symint_hints(exprs):
     """
     Get the hints of a list/tuple of int/SymInt.
     """
@@ -60,7 +72,7 @@ def _get_symint_hints(exprs: Any) -> Any:
         return exprs
 
 
-def partial_flatten_asdict(obj: object) -> Any:
+def partial_flatten_asdict(obj: Any) -> Any:
     if dataclasses.is_dataclass(obj):
         return {
             field.name: getattr(obj, field.name) for field in dataclasses.fields(obj)
@@ -73,15 +85,7 @@ def partial_flatten_asdict(obj: object) -> Any:
         return obj
 
 
-@overload
-def normalize_as_list(x: _T) -> list[_T]: ...
-@overload
-def normalize_as_list(x: tuple[_T, ...]) -> list[_T]: ...
-@overload
-def normalize_as_list(x: list[_T]) -> list[_T]: ...
-
-
-def normalize_as_list(x: object) -> list[object]:
+def normalize_as_list(x):
     if isinstance(x, tuple):
         return list(x)
     elif isinstance(x, list):
@@ -89,7 +93,7 @@ def normalize_as_list(x: object) -> list[object]:
     return [x]
 
 
-def _get_autocast_states() -> list[Any]:
+def _get_autocast_states():
     return [
         torch.is_autocast_enabled("cuda"),
         torch.is_autocast_enabled("cpu"),
@@ -99,21 +103,18 @@ def _get_autocast_states() -> list[Any]:
     ]
 
 
-def make_boxed_func(f: Callable[..., Any]) -> Callable[[list[Any]], Any]:
+def make_boxed_func(f):
     @simple_wraps(f)
-    def g(args: list[Any]) -> Any:
+    def g(args):
         return f(*args)
 
-    # pyrefly: ignore[missing-attribute]
-    g._boxed_call = True
+    g._boxed_call = True  # type: ignore[attr-defined]
     return g
 
 
-def make_boxed_compiler(
-    compiler: Callable[..., Any],
-) -> Callable[..., Any]:
+def make_boxed_compiler(compiler):
     @wraps(compiler)
-    def f(fx_g: Any, inps: Any) -> Any:
+    def f(fx_g, inps):
         out_f = compiler(fx_g, inps)
         fx_g = make_boxed_func(out_f)
         return fx_g
@@ -122,11 +123,8 @@ def make_boxed_compiler(
 
 
 def call_func_at_runtime_with_args(
-    f: Callable[..., Any],
-    args: Sequence[Any],
-    steal_args: bool = False,
-    disable_amp: bool = False,
-) -> list[Any]:
+    f, args: Union[tuple[Any], list[Any]], steal_args=False, disable_amp=False
+):
     if not steal_args:
         args = list(args)
     assert isinstance(args, list)
@@ -150,12 +148,12 @@ def call_func_at_runtime_with_args(
 
 # Inspired by autodidax (thanks!)
 class PytreeThunk:
-    spec: pytree.TreeSpec | None = None
+    spec: Optional[pytree.TreeSpec] = None
     # These are some kinda dumb microoptimizations that save about 3-4 us of overhead.
-    is_simple: bool | None = (
+    is_simple: Optional[bool] = (
         None  # if the output spec is a tuple/list, we won't bother unflattening it.
     )
-    is_really_simple: bool | None = None  # if the output spec is a LeafSpec
+    is_really_simple: Optional[bool] = None  # if the output spec is a LeafSpec
 
     def set(self, spec: pytree.TreeSpec) -> None:
         assert self.spec is None or self.spec == spec, (self.spec, spec)
@@ -168,7 +166,7 @@ class PytreeThunk:
         if self.spec.is_leaf():
             self.is_really_simple = True
 
-    def unflatten(self, x: Sequence[Any]) -> Any:
+    def unflatten(self, x: list[Any]) -> Any:
         if self.is_really_simple:
             return x[0]
         if self.is_simple:
@@ -180,18 +178,14 @@ class PytreeThunk:
 # Creates a function that returns flattened inputs and outputs
 # Also returns the output tree spec, which is needed to recover the "unflattened"
 # output tree structure later.
-def create_tree_flattened_fn(
-    fn: Callable[..., Any],
-    args: Sequence[Any],
-    kwargs: dict[str, Any] | None = None,
-) -> tuple[Callable[..., list[Any]], PytreeThunk]:
+def create_tree_flattened_fn(fn, args, kwargs=None) -> tuple[Callable, PytreeThunk]:
     if kwargs is None:
         kwargs = {}
     # Save the args_spec for flat_tensor_args to unflatten while tracing
     _, tensor_args_spec = pytree.tree_flatten((args, kwargs))
     out_spec = PytreeThunk()
 
-    def flat_fn(*flat_args: Any) -> list[Any]:
+    def flat_fn(*flat_args):
         # The input are flattened tensor args. Prepare the args in the
         # order that original function expects. Add static args as well.
         # They will appear as tensor constants in the traced graph.
@@ -216,8 +210,7 @@ def create_tree_flattened_fn(
     # Can't use functools.wraps here because the wrapper has different
     # calling convention
     if hasattr(fn, "_orig_mod"):
-        # pyrefly: ignore[missing-attribute]
-        flat_fn._orig_mod = fn._orig_mod
+        flat_fn._orig_mod = fn._orig_mod  # type: ignore[attr-defined]
 
     return flat_fn, out_spec
 
@@ -235,7 +228,7 @@ def create_tree_flattened_fn(
 # (2) There could be multiple, if this index corresponds to a synthetic base
 #     that has multiple input aliases.
 # (3) If any of those corresponding inputs get metadata mutations, then we clone the base.
-def maybe_to_fresh_input(idx: int, t: Any, meta: "ViewAndMutationMeta") -> Any:
+def maybe_to_fresh_input(idx, t, meta):
     if not isinstance(t, torch.Tensor):
         return t
     if idx in meta.mutated_inp_runtime_indices:
@@ -251,7 +244,7 @@ def maybe_to_fresh_input(idx: int, t: Any, meta: "ViewAndMutationMeta") -> Any:
     return t
 
 
-def is_with_effects(node: torch.fx.Node) -> bool:
+def is_with_effects(node):
     if (
         node.op == "call_function"
         and node.target is torch.ops.higher_order.with_effects
@@ -271,18 +264,12 @@ def is_with_effects(node: torch.fx.Node) -> bool:
             )
             if invoke_subgraph_cache:
                 assert isinstance(invoke_subgraph_cache, InvokeSubgraphCache)
-                # pyrefly: ignore[bad-argument-type]
                 effects = invoke_subgraph_cache.get_effects(node.args[1])
                 return effects is not None
     return False
 
 
-def unlift_tokens(
-    fw_module: torch.fx.GraphModule,
-    fw_metadata: "ViewAndMutationMeta",
-    aot_config: "AOTConfig",
-    bw_module: torch.fx.GraphModule | None = None,
-) -> None:
+def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
     # Remove the tokens from the inputs/outputs of the graph since inductor does
     # not want these extra inputs/outputs, and replace them with
     # _make_token() to create a token, and _sink_tokens() to collect the
@@ -351,9 +338,7 @@ def unlift_tokens(
     num_forward_tokens = len(fw_metadata.tokens)
     num_backward_tokens = fw_metadata.num_backward_tokens
 
-    def replace_input_token_with_make_token(
-        module: torch.fx.GraphModule, node: torch.fx.Node
-    ) -> None:
+    def replace_input_token_with_make_token(module, node):
         with module.graph.inserting_before(node):
             new_token_node = module.graph.call_function(
                 torch.ops.prims._make_token.default, ()
@@ -382,8 +367,8 @@ def unlift_tokens(
     def _unlift_tokens_from_module_helper(
         module: torch.fx.GraphModule,
         subgraph_str: str,
-        expected_num_erased: int | None,
-    ) -> None:
+        expected_num_erased: Optional[int],
+    ):
         input_token_nodes = set()
         output_token_nodes = set()
 
@@ -492,9 +477,7 @@ def unlift_tokens(
 
         module.recompile()
 
-    def unlift_tokens_from_module(
-        module: torch.fx.GraphModule, subgraph_str: str, expected_num_erased: int
-    ) -> None:
+    def unlift_tokens_from_module(module, subgraph_str, expected_num_erased):
         for name, m in module.named_modules():
             if isinstance(m, torch.fx.GraphModule):
                 if name == "":
@@ -549,9 +532,7 @@ def unlift_tokens(
     fw_metadata.num_backward_tokens = 0
 
 
-def root_module_when_exporting_non_strict(
-    flat_fn: Callable[..., Any],
-) -> torch.nn.Module | None:
+def root_module_when_exporting_non_strict(flat_fn):
     # When exporting in non-strict mode, we wrap the root module in a specific pattern.
     # See `_aot_export_non_strict` in torch.export._trace.py.
     # We look for that wrapping pattern here.
@@ -657,18 +638,14 @@ def copy_fwd_metadata_to_bw_nodes(fx_g: torch.fx.GraphModule) -> None:
             _copy_metadata_to_bw_nodes_in_subgraph(submod, fwd_seq_nr_to_node)
 
 
-def register_buffer_assignment_hook(
-    mod: torch.nn.Module, assigned_buffers: dict[str, str]
-) -> Any:
+def register_buffer_assignment_hook(mod, assigned_buffers):
     """
     Register a hook that intercepts buffer assignments.
     This is used to detect when a buffer is assigned to, and then we can
     map that buffer to the corresponding proxy node in the graph.
     """
 
-    def _map_assigned_buffer_to_proxy(
-        _mod: torch.nn.Module, name: str, buffer: Any
-    ) -> Any:
+    def _map_assigned_buffer_to_proxy(_mod, name, buffer):
         # We intercept buffer assignments on the root module through this hook.
         if _mod._buffers is mod._buffers:
             # either buffer is a functional tensor, which wraps a fake tensor
@@ -705,7 +682,7 @@ def contain_metadata_mutation_ops(module: torch.fx.GraphModule) -> bool:
     return False
 
 
-def get_cuda_generator_meta_val(device_idx: int) -> Any:
+def get_cuda_generator_meta_val(device_idx: int):
     """
     Get a generator value to use as a meta val
 
@@ -716,11 +693,11 @@ def get_cuda_generator_meta_val(device_idx: int) -> Any:
     return torch.cuda.default_generators[device_idx].clone_state()
 
 
-def top_saved_tensors_hooks() -> Any:
+def top_saved_tensors_hooks():
     return torch._C._autograd._top_saved_tensors_default_hooks(True)
 
 
-def saved_tensors_hooks_are_inlineable(hooks: Any) -> bool:
+def saved_tensors_hooks_are_inlineable(hooks) -> bool:
     if not hooks:
         return False
     pack, unpack = hooks
@@ -737,9 +714,11 @@ _S = TypeVar("_S")
 def without_output_descs(f: Callable[_P, tuple[_T, _S]]) -> Callable[_P, _T]:
     @wraps(f)
     @simple_wraps(f)
-    def inner(*args: _P.args, **kwargs: _P.kwargs) -> _T:
+    def inner(*args, **kwargs):
+        # pyrefly: ignore [invalid-param-spec]
         return f(*args, **kwargs)[0]
 
+    # pyrefly: ignore [bad-return]
     return inner
 
 
@@ -756,14 +735,7 @@ def simple_wraps(
     return wraps(f, assigned=("__doc__", "__annotations__", "__type_params__"))
 
 
-_Ts = TypeVarTuple("_Ts")
-
-
-def call_and_expect_output_descs(
-    fn: Callable[[*_Ts], tuple[Any, Any]], args: tuple[Unpack[_Ts]]
-) -> tuple[Any, Any]:
-    from .descriptors import AOTOutput
-
+def call_and_expect_output_descs(fn, args):
     outs_pair = fn(*args)
     assert isinstance(outs_pair, tuple) and len(outs_pair) == 2, (fn, outs_pair)
     outs, outs_descs = outs_pair
@@ -791,7 +763,7 @@ def call_and_expect_output_descs(
     return outs_pair
 
 
-def fn_wrappers(fn: Callable[..., Any]) -> list[Callable[..., Any]]:
+def fn_wrappers(fn):
     fns = [fn]
     f = fn
     while hasattr(f, "__wrapped__"):

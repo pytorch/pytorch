@@ -136,10 +136,8 @@ class TestGenAutogradFunctions(unittest.TestCase):
         )
         # grad_z should map to grads[1], not grads[2] because output 1
         # (y) is not differentiable.
-        if "grad_z = grads[2]" in definition:
-            raise AssertionError("grad_z should not map to grads[2]")
-        if "grad_z = grads[1]" not in definition:
-            raise AssertionError("grad_z should map to grads[1]")
+        assert "grad_z = grads[2]" not in definition
+        assert "grad_z = grads[1]" in definition
 
     def test_non_differentiable_output_output_differentiability(self) -> None:
         specification = "func(Tensor a, Tensor b) -> (Tensor x, Tensor y, Tensor z)"
@@ -172,25 +170,15 @@ class TestGenAutogradFunctions(unittest.TestCase):
         )
         # grad_z should map to grads[1], not grads[2] because output 1
         # (y) is not differentiable.
-        if "grad_z = grads[2]" in default_definition:
-            raise AssertionError(
-                "grad_z should not map to grads[2] in default_definition"
-            )
-        if "grad_z = grads[1]" not in default_definition:
-            raise AssertionError("grad_z should map to grads[1] in default_definition")
+        assert "grad_z = grads[2]" not in default_definition
+        assert "grad_z = grads[1]" in default_definition
 
         nested_tensor_definition = gen_autograd_functions.process_function(
             differentiability_info["AutogradNestedTensor"],
             gen_autograd_functions.FUNCTION_DEFINITION,
         )
-        if "grad_z = grads[2]" in nested_tensor_definition:
-            raise AssertionError(
-                "grad_z should not map to grads[2] in nested_tensor_definition"
-            )
-        if "grad_z = grads[1]" not in nested_tensor_definition:
-            raise AssertionError(
-                "grad_z should map to grads[1] in nested_tensor_definition"
-            )
+        assert "grad_z = grads[2]" not in nested_tensor_definition
+        assert "grad_z = grads[1]" in nested_tensor_definition
 
     def test_register_bogus_dispatch_key(self) -> None:
         specification = "func(Tensor a, Tensor b) -> (Tensor x, bool y, Tensor z)"

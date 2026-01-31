@@ -57,10 +57,7 @@ class SpectralFuncPythonRefInfo(SpectralFuncInfo):
         self.torch_opinfo = _find_referenced_opinfo(
             torch_opinfo_name, torch_opinfo_variant, op_db=op_db
         )
-        if not isinstance(self.torch_opinfo, SpectralFuncInfo):
-            raise AssertionError(
-                f"Expected torch_opinfo to be SpectralFuncInfo, got {type(self.torch_opinfo)}"
-            )
+        assert isinstance(self.torch_opinfo, SpectralFuncInfo)
 
         inherited = self.torch_opinfo._original_spectral_func_args
         ukwargs = _inherit_constructor_args(name, op, inherited, kwargs)

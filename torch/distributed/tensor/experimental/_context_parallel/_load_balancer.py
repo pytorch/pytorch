@@ -470,7 +470,6 @@ class _PTRRLoadBalancer(_LoadBalancer):
         indices = indices[ptrr_indices].view(B, -1)  # (B, qkv_size)
 
         if restore:
-            # pyrefly: ignore[missing-argument]
             indices = torch.vmap(torch.argsort)(indices)
 
         return indices

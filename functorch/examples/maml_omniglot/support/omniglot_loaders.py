@@ -209,10 +209,7 @@ class OmniglotNShot:
         self.n_way = n_way  # n way
         self.k_shot = k_shot  # k shot
         self.k_query = k_query  # k query
-        if (k_shot + k_query) > 20:
-            raise AssertionError(
-                f"k_shot + k_query must be <= 20, got {k_shot + k_query}"
-            )
+        assert (k_shot + k_query) <= 20
 
         # save pointer of current read batch in total cache
         self.indexes = {"train": 0, "test": 0}

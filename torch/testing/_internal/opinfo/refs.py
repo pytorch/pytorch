@@ -111,10 +111,7 @@ class PythonRefInfo(OpInfo):
             torch_opinfo_name, torch_opinfo_variant_name, op_db=op_db
         )
         self.validate_view_consistency = validate_view_consistency
-        if not isinstance(self.torch_opinfo, OpInfo):
-            raise AssertionError(
-                f"Expected torch_opinfo to be OpInfo, got {type(self.torch_opinfo)}"
-            )
+        assert isinstance(self.torch_opinfo, OpInfo)
 
         inherited = self.torch_opinfo._original_opinfo_args
         ukwargs = _inherit_constructor_args(name, op, inherited, kwargs)
@@ -141,10 +138,7 @@ class ReductionPythonRefInfo(ReductionOpInfo):
         self.torch_opinfo = _find_referenced_opinfo(
             torch_opinfo_name, torch_opinfo_variant_name, op_db=op_db
         )
-        if not isinstance(self.torch_opinfo, ReductionOpInfo):
-            raise AssertionError(
-                f"Expected torch_opinfo to be ReductionOpInfo, got {type(self.torch_opinfo)}"
-            )
+        assert isinstance(self.torch_opinfo, ReductionOpInfo)
 
         inherited = self.torch_opinfo._original_reduction_args
         ukwargs = _inherit_constructor_args(name, op, inherited, kwargs)
@@ -177,10 +171,7 @@ class ElementwiseUnaryPythonRefInfo(UnaryUfuncInfo):
             torch_opinfo_name, torch_opinfo_variant_name, op_db=op_db
         )
         self.validate_view_consistency = validate_view_consistency
-        if not isinstance(self.torch_opinfo, UnaryUfuncInfo):
-            raise AssertionError(
-                f"Expected torch_opinfo to be UnaryUfuncInfo, got {type(self.torch_opinfo)}"
-            )
+        assert isinstance(self.torch_opinfo, UnaryUfuncInfo)
 
         inherited = self.torch_opinfo._original_unary_ufunc_args
         ukwargs = _inherit_constructor_args(name, op, inherited, kwargs)
@@ -208,10 +199,7 @@ class ElementwiseBinaryPythonRefInfo(BinaryUfuncInfo):
         self.torch_opinfo = _find_referenced_opinfo(
             torch_opinfo_name, torch_opinfo_variant_name, op_db=op_db
         )
-        if not isinstance(self.torch_opinfo, BinaryUfuncInfo):
-            raise AssertionError(
-                f"Expected torch_opinfo to be BinaryUfuncInfo, got {type(self.torch_opinfo)}"
-            )
+        assert isinstance(self.torch_opinfo, BinaryUfuncInfo)
 
         inherited = self.torch_opinfo._original_binary_ufunc_args
         ukwargs = _inherit_constructor_args(name, op, inherited, kwargs)

@@ -74,13 +74,11 @@ def _compare_owner_value(context_id, rref, grad):
     grads = dist_autograd.get_gradients(context_id)
     x = grads[rref.local_value()]
     if x.is_sparse:
-        if not grad.is_sparse:
-            raise AssertionError("Expected grad to be sparse")
+        assert grad.is_sparse
         x = x.to_dense()
         grad = grad.to_dense()
     else:
-        if grad.is_sparse:
-            raise AssertionError("Expected grad to not be sparse")
+        assert not grad.is_sparse
     return torch.equal(x, grad)
 
 
@@ -1943,10 +1941,7 @@ class DistAutogradTest(CommonDistAutogradTest):
         @staticmethod
         @once_differentiable
         def backward(ctx, input):
-            if DistAutogradTest._test_clean_context_backward_context_id is None:
-                raise AssertionError(
-                    "Expected _test_clean_context_backward_context_id to not be None"
-                )
+            assert DistAutogradTest._test_clean_context_backward_context_id is not None
 
             # Release the context to simulate error (use barrier before releasing
             # context to ensure all nodes execute the backward function).
@@ -1956,8 +1951,7 @@ class DistAutogradTest(CommonDistAutogradTest):
             )
 
             # Verify all contexts are cleaned up.
-            if not _all_contexts_cleaned_up():
-                raise AssertionError("Expected all contexts to be cleaned up")
+            assert _all_contexts_cleaned_up()
 
             return input
 
@@ -2057,17 +2051,13 @@ class DistAutogradTest(CommonDistAutogradTest):
         @once_differentiable
         def backward(ctx, input):
             debug_info = dist_autograd._get_debug_info()
-            if debug_info is None:
-                raise AssertionError("Expected debug_info to not be None")
+            assert debug_info is not None
             backward_passes = int(debug_info["num_current_backward_passes"])
 
             # Hard to validate exact numbers because of the distributed nature.
             # We can't use a barrier() here since that would block the single
             # CPU thread available for autograd and can cause deadlocks.
-            if not (1 <= backward_passes <= 4):
-                raise AssertionError(
-                    f"Expected 1 <= backward_passes <= 4, got {backward_passes}"
-                )
+            assert backward_passes >= 1 and backward_passes <= 4
             return input
 
     @dist_init
@@ -2117,8 +2107,7 @@ class DistAutogradTest(CommonDistAutogradTest):
 
         # Validate information
         debug_info = dist_autograd._get_debug_info()
-        if debug_info is None:
-            raise AssertionError("Expected debug_info to not be None")
+        assert debug_info is not None
         self.assertEqual(0, int(debug_info["num_current_backward_passes"]))
         # only have `num_current_backward_passes` and `num_autograd contexts`
         self.assertTrue(len(debug_info) == 2)

@@ -244,8 +244,7 @@ ONNXProgram(
         if self._inference_session is None:
             self.initialize_inference_session()
 
-        if self._inference_session is None:
-            raise AssertionError("_inference_session must be non-None")
+        assert self._inference_session is not None
 
         ort_input = {
             k.name: _to_ort_value(v)
@@ -273,8 +272,7 @@ ONNXProgram(
             for k, v in zip(self.model.graph.inputs, flatten_args)
         }
         outputs = evaluator.run(None, ref_input)  # type: ignore[arg-type]
-        if not isinstance(outputs, Sequence):
-            raise AssertionError(f"Expected Sequence, got {type(outputs)}")
+        assert isinstance(outputs, Sequence)
         return tuple(_from_numpy_array(output) for output in outputs)
 
     def compute_values(

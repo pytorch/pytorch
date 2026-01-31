@@ -99,10 +99,7 @@ def _compile_submod(gm, prefix):
                     dynamic_shapes="from_tracing_context",
                     aot=True,
                 )
-            if not isinstance(compiled_fn, AOTCompiledArtifact):
-                raise AssertionError(
-                    f"Expected AOTCompiledArtifact, got {type(compiled_fn)}"
-                )
+            assert isinstance(compiled_fn, AOTCompiledArtifact)
             # _dummy_wrapper is to make call_function happy
             compiled_submod = _dummy_wrapper(compiled_fn)
             with gm.graph.inserting_after(node):

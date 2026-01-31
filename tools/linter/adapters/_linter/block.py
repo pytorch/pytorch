@@ -134,16 +134,14 @@ class Block:
         return self.start_line < b.start_line and self.end_line >= b.end_line
 
     def __eq__(self, o: object) -> bool:
-        if not isinstance(o, Block):
-            raise AssertionError(f"Expected Block, got {type(o)}")
+        assert isinstance(o, Block)
         return o.tokens is self.tokens and o.index == self.index
 
     def __hash__(self) -> int:
         return super().__hash__()
 
     def __lt__(self, o: Self) -> bool:
-        if not (isinstance(o, Block) and o.tokens is self.tokens):
-            raise AssertionError("Expected Block with same tokens")
+        assert isinstance(o, Block) and o.tokens is self.tokens
         return o.index < self.index
 
 

@@ -76,10 +76,7 @@ class TestCMake(unittest.TestCase):
         # window matches.
         for i in range(len(sequence) - len(subsequence) + 1):
             candidate = sequence[i : i + len(subsequence)]
-            if len(candidate) != len(subsequence):  # sanity check
-                raise AssertionError(
-                    f"candidate length mismatch: {len(candidate)} != {len(subsequence)}"
-                )
+            assert len(candidate) == len(subsequence)  # sanity check
             if candidate == subsequence:
                 return  # found it
         raise AssertionError(f"{subsequence} not found in {sequence}")

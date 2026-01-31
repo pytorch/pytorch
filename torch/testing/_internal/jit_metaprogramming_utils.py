@@ -19,8 +19,7 @@ import math  # noqa: F401
 # Testing utils
 from torch import inf
 
-if torch.get_default_dtype() != torch.float32:
-    raise AssertionError(f"Expected torch.get_default_dtype() == torch.float32, got {torch.get_default_dtype()}")
+assert torch.get_default_dtype() == torch.float32
 
 L = 20
 M = 10

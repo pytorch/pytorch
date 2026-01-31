@@ -56,22 +56,17 @@ class FakeTensorProp(torch.fx.Interpreter):
             # which goes through super.run_node and caches the fake tensor prop.
             # Therefore, we are propagating fake tensor through the subgraphs
             # twice.
-            if not isinstance(n.args[1], str):
-                raise AssertionError(f"Expected str, got {type(n.args[1])}")
-            if not (
+            assert isinstance(n.args[1], str)
+            assert (
                 isinstance(n.args[0], torch.fx.Node)
                 and n.args[0].op == "get_attr"
                 and isinstance(n.args[0].target, str)
-            ):
-                raise AssertionError(
-                    "Expected n.args[0] to be a get_attr Node with str target"
-                )
+            )
             self.seen_subgraphs.add(n.args[1])
             operands = n.args[2:]
             example_inputs = []
             for operand in operands:
-                if not (isinstance(operand, torch.fx.Node) and "val" in operand.meta):
-                    raise AssertionError("Expected Node with 'val' in meta")
+                assert isinstance(operand, torch.fx.Node) and "val" in operand.meta
                 example_inputs.append(operand.meta["val"])
             return FakeTensorProp(
                 getattr(self.module, n.args[0].target), mode=self._mode

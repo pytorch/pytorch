@@ -212,8 +212,7 @@ _SYM_OPS = {
 }
 
 
-if any(isinstance(op, torch._ops.OpOverload) for op in _SYM_OPS):
-    raise AssertionError("_SYM_OPS should not contain OpOverload instances")
+assert not any(isinstance(op, torch._ops.OpOverload) for op in _SYM_OPS)
 
 
 @dataclass
@@ -265,15 +264,17 @@ def deserialize_device(d: Device) -> torch.device:
 
 def deserialize_size(sizes: Sequence[SymInt]) -> tuple[int, ...]:
     for sym_int_size in sizes:
-        if sym_int_size.type != "as_int":
-            raise AssertionError(f"Only as_int is supported, got {sym_int_size.type}")
+        assert sym_int_size.type == "as_int", (
+            f"Only as_int is supported, got {sym_int_size.type}"
+        )
     return tuple(sym_int_size.as_int for sym_int_size in sizes)
 
 
 def deserialize_stride(strides: Sequence[SymInt]) -> tuple[int, ...]:
     for sym_int_stride in strides:
-        if sym_int_stride.type != "as_int":
-            raise AssertionError(f"Only as_int is supported, got {sym_int_stride.type}")
+        assert sym_int_stride.type == "as_int", (
+            f"Only as_int is supported, got {sym_int_stride.type}"
+        )
     return tuple(sym_int_stride.as_int for sym_int_stride in strides)
 
 
@@ -282,8 +283,7 @@ def deserialize_scalar_type(st: ScalarType) -> torch.dtype:
 
 
 def deserialize_storage_offset(offset: SymInt) -> int:
-    if offset.type != "as_int":
-        raise AssertionError(f"Only as_int is supported, got {offset.type}")
+    assert offset.type == "as_int", f"Only as_int is supported, got {offset.type}"
     return offset.as_int
 
 
@@ -298,10 +298,7 @@ def serialize_sym_int(s: Union[int, torch.SymInt]) -> SymInt:
         if symbolic_shapes.is_concrete_int(s):
             return SymInt.create(as_int=int(s))
         else:
-            if not isinstance(s, (torch.SymInt, sympy.Symbol)):
-                raise AssertionError(
-                    f"expected SymInt or Symbol, got {type(s).__name__}"
-                )
+            assert isinstance(s, (torch.SymInt, sympy.Symbol))
             if s.node.hint is None:
                 return SymInt.create(as_expr=SymExpr(_print_sympy(s)))
             else:
@@ -322,10 +319,7 @@ def serialize_sym_float(s: Union[float, torch.SymFloat]) -> SymFloat:
         if symbolic_shapes.is_concrete_float(s):
             return SymFloat.create(as_float=float(s))
         else:
-            if not isinstance(s, (torch.SymFloat, sympy.Symbol)):
-                raise AssertionError(
-                    f"expected SymFloat or Symbol, got {type(s).__name__}"
-                )
+            assert isinstance(s, (torch.SymFloat, sympy.Symbol))
             if s.node.hint is None:
                 return SymFloat.create(as_expr=SymExpr(_print_sympy(s)))
             else:
@@ -387,8 +381,9 @@ def _reconstruct_fake_tensor(
     json_tensor_meta = json.loads(serialized_tensor_meta.decode("utf-8"))
     tensor_meta = _dict_to_dataclass(TensorMeta, json_tensor_meta)
     # Find the current fake mode
-    if _CURRENT_DESERIALIZER is None:
-        raise AssertionError("Need access to current deserializer state")
+    assert _CURRENT_DESERIALIZER is not None, (
+        "Need access to current deserializer state"
+    )
     fake_tensor = _CURRENT_DESERIALIZER.deserialize_tensor_meta(tensor_meta)
     if is_parameter:
         fake_tensor = torch.nn.Parameter(fake_tensor)  # type: ignore[assignment]
@@ -402,8 +397,9 @@ def serialize_torch_artifact(
     if artifact is None:
         return b""
 
-    if FakeTensor in copyreg.dispatch_table:
-        raise AssertionError("Refusing to stomp on existing FakeTensor reducer")
+    assert FakeTensor not in copyreg.dispatch_table, (
+        "Refusing to stomp on existing FakeTensor reducer"
+    )
     try:
         copyreg.pickle(FakeTensor, _reduce_fake_tensor)
         buffer = io.BytesIO()
@@ -440,8 +436,7 @@ def deserialize_torch_artifact(
             type(artifact),
             exc_info=e,
         )
-    if not isinstance(artifact, (tuple, dict)):
-        raise AssertionError(f"expected tuple or dict, got {type(artifact).__name__}")
+    assert isinstance(artifact, (tuple, dict))
     return artifact
 
 
@@ -540,23 +535,16 @@ def is_metadata_matched(config, entry_metadata):
 
 
 def get_triton_kernel_and_cache_entry(node: torch.fx.Node):
-    if (
+    assert (
         node.target
-        is not torch._higher_order_ops.triton_kernel_wrap.triton_kernel_wrapper_functional
-    ):
-        raise AssertionError(
-            f"expected triton_kernel_wrapper_functional, got {node.target}"
-        )
+        is torch._higher_order_ops.triton_kernel_wrap.triton_kernel_wrapper_functional
+    )
 
-    if not has_triton():
-        raise AssertionError("triton required to serialize triton kernels")
+    assert has_triton(), "triton required to serialize triton kernels"
     from triton.runtime.autotuner import Autotuner
     from triton.runtime.jit import JITFunction
 
-    if not isinstance(node.kwargs["kernel_idx"], int):
-        raise AssertionError(
-            f"expected kernel_idx to be int, got {type(node.kwargs['kernel_idx'])}"
-        )
+    assert isinstance(node.kwargs["kernel_idx"], int)
     kernel = torch._higher_order_ops.triton_kernel_wrap.kernel_side_table.get_kernel(
         node.kwargs["kernel_idx"]
     )
@@ -569,18 +557,12 @@ def get_triton_kernel_and_cache_entry(node: torch.fx.Node):
 
     if hasattr(actual_kernel, "device_caches"):
         caches = actual_kernel.device_caches
-        if len(caches.keys()) != 1:
-            raise AssertionError(
-                f"expected exactly 1 device cache, got {len(caches.keys())}"
-            )
+        assert len(caches.keys()) == 1
         cache = next(iter(caches.values()))[0]
     elif hasattr(actual_kernel, "cache"):
         # old path, still used for cpu triton builds
         caches = actual_kernel.cache
-        if len(caches.keys()) != 1:
-            raise AssertionError(
-                f"expected exactly 1 cache key, got {len(caches.keys())}"
-            )
+        assert len(caches.keys()) == 1
         cache = next(iter(caches.values()))
     else:
         raise AssertionError(
@@ -715,8 +697,7 @@ class GraphModuleSerializer(metaclass=Final):
             self.graph_state = saved
 
     def handle_placeholder(self, node: torch.fx.Node):
-        if node.op != "placeholder":
-            raise AssertionError(f"expected placeholder op, got {node.op}")
+        assert node.op == "placeholder"
         val = node.meta["val"]
         log.debug("[handle_placeholder] %s: %s", node.name, val)
         if isinstance(val, torch.Tensor):
@@ -744,12 +725,8 @@ class GraphModuleSerializer(metaclass=Final):
         self.graph_state.inputs.append(graph_input)
 
     def handle_output(self, node: torch.fx.Node):
-        if node.op != "output":
-            raise AssertionError(f"expected output op, got {node.op}")
-        if len(node.args) != 1:
-            raise AssertionError(
-                f"FX.Node's args should have one arg, got {len(node.args)}"
-            )
+        assert node.op == "output"
+        assert len(node.args) == 1, "FX.Node's args should have one arg"
         node_args = node.args[0]
         log.debug("[handle_output] %s: %s", node.name, node_args)
         if isinstance(node_args, torch.fx.Node):
@@ -757,8 +734,7 @@ class GraphModuleSerializer(metaclass=Final):
             self.graph_state.is_single_tensor_return = True
             self.graph_state.outputs = [self.serialize_input(node_args)]
         else:
-            if not isinstance(node_args, (tuple, list)):
-                raise AssertionError(f"expected tuple or list, got {type(node_args)}")
+            assert isinstance(node_args, (tuple, list))
             self.graph_state.outputs = [self.serialize_input(arg) for arg in node_args]
 
     def serialize_operator(self, target) -> str:
@@ -773,8 +749,7 @@ class GraphModuleSerializer(metaclass=Final):
             return f"{target.__module__}.{target.__name__}"
 
     def handle_call_function(self, node: torch.fx.Node):
-        if node.op != "call_function":
-            raise AssertionError(f"expected call_function op, got {node.op}")
+        assert node.op == "call_function"
         meta_val = node.meta.get("val")
         log.debug(
             "[handle_call_function] %s: %s(%s, {%s}) -> %s",
@@ -793,10 +768,7 @@ class GraphModuleSerializer(metaclass=Final):
             meta_val is not None
             and isinstance(meta_val, (torch.SymInt, torch.SymBool, torch.SymFloat))
         ):
-            if len(node.kwargs) != 0:
-                raise AssertionError(
-                    f"expected no kwargs for sym op, got {len(node.kwargs)}"
-                )
+            assert len(node.kwargs) == 0
             ex_node = Node(
                 name=node.name,
                 target=self.serialize_operator(node.target),
@@ -816,10 +788,7 @@ class GraphModuleSerializer(metaclass=Final):
         elif isinstance(node.target, torch._ops.HigherOrderOperator):
 
             def _is_hop_single_tensor_return(node) -> bool:
-                if not isinstance(node.target, torch._ops.HigherOrderOperator):
-                    raise AssertionError(
-                        f"expected HigherOrderOperator, got {type(node.target).__name__}"
-                    )
+                assert isinstance(node.target, torch._ops.HigherOrderOperator)
                 # HOP schema is not always available, so we look at node.meta["val"]
                 meta_val = node.meta.get("val", None)
                 return meta_val is not None and isinstance(meta_val, torch.Tensor)
@@ -830,10 +799,7 @@ class GraphModuleSerializer(metaclass=Final):
 
                 # AOTI lowered module is not serializable, serialize the aoti_path instead
                 lowered_module_name: str = node.args[0].name  # type: ignore[assignment, no-untyped-def, union-attr]
-                if not hasattr(node.graph.owning_module, lowered_module_name):
-                    raise AssertionError(
-                        f"owning_module does not have attribute {lowered_module_name}"
-                    )
+                assert hasattr(node.graph.owning_module, lowered_module_name)
                 lowered_module = getattr(node.graph.owning_module, lowered_module_name)  # type: ignore[no-untyped-def]
                 serializable_args[0] = lowered_module.aoti_path
 
@@ -880,10 +846,7 @@ class GraphModuleSerializer(metaclass=Final):
                 kernel_cache_metadata = kernel_cache_entry.metadata
 
                 meta_val = node.meta["val"]
-                if not isinstance(meta_val, dict):
-                    raise AssertionError(
-                        f"expected meta_val to be dict, got {type(meta_val).__name__}"
-                    )
+                assert isinstance(meta_val, dict)
 
                 output_keys = meta_val.keys()
                 output_indices = []
@@ -893,10 +856,7 @@ class GraphModuleSerializer(metaclass=Final):
                 args_new = ()
                 i = 0
 
-                if not isinstance(node.kwargs["kwargs"], dict):
-                    raise AssertionError(
-                        f"expected kwargs['kwargs'] to be dict, got {type(node.kwargs['kwargs'])}"
-                    )
+                assert isinstance(node.kwargs["kwargs"], dict)
                 for k, v in node.kwargs["kwargs"].items():
                     # don't serialize constexpr since they will
                     # be embedded into the binary and don't
@@ -905,20 +865,16 @@ class GraphModuleSerializer(metaclass=Final):
                         found_constexpr = True
                         continue
 
-                    if found_constexpr:
-                        raise AssertionError(
-                            "non-constexpr args found after constexpr arg(s)"
-                        )
+                    assert not found_constexpr, (
+                        "non-constexpr args found after constexpr arg(s)"
+                    )
 
                     if k in output_keys:
                         output_indices.append(i)
                     args_new += (v,)  # type: ignore[assignment]
                     i += 1
 
-                if not isinstance(node.kwargs["grid"], list):
-                    raise AssertionError(
-                        f"expected grid to be list, got {type(node.kwargs['grid'])}"
-                    )
+                assert isinstance(node.kwargs["grid"], list)
 
                 kernel_name_with_hash = (
                     f"{kernel.fn.__name__}_{kernel_cache_metadata.hash}"
@@ -993,22 +949,15 @@ class GraphModuleSerializer(metaclass=Final):
                 )
         elif type(node.target) in _serialization_registry:
             # Sanity check for unhandled serialization.
-            if type(node.target) not in _serialization_registry:
-                raise AssertionError(
-                    f"{type(node.target)} is not supported in export serialization."
-                )
+            assert type(node.target) in _serialization_registry, (
+                f"{type(node.target)} is not supported in export serialization."
+            )
 
             handler = _serialization_registry[type(node.target)]
             namespace = handler.namespace()
             op_name = handler.to_op_name(node.target)
-            if not isinstance(namespace, str) or not isinstance(op_name, str):
-                raise AssertionError(
-                    f"expected namespace and op_name to be str, got {type(namespace).__name__} and {type(op_name).__name__}"
-                )
-            if ":" in namespace or ":" in op_name:
-                raise AssertionError(
-                    f"namespace and op_name should not contain ':', got {namespace!r} and {op_name!r}"
-                )
+            assert isinstance(namespace, str) and isinstance(op_name, str)
+            assert ":" not in namespace and ":" not in op_name
             ex_node = Node(
                 name=node.name,
                 target=f"#{namespace}:{op_name}",
@@ -1027,8 +976,7 @@ class GraphModuleSerializer(metaclass=Final):
     def _output_node_at_index(self, node, index) -> Optional[torch.fx.Node]:
         user_node = None
         for user in node.users:
-            if user.target is not operator.getitem:
-                raise AssertionError(f"{user} is not a getitem node")
+            assert user.target is operator.getitem, f"{user} is not a getitem node"
             if index == user.args[1]:
                 if user_node is None:
                     user_node = user
@@ -1054,21 +1002,11 @@ class GraphModuleSerializer(metaclass=Final):
         if nn_module_stack := node.meta.get("nn_module_stack"):
 
             def export_nn_module_stack(val):
-                if not isinstance(val, tuple) or len(val) != 2:
-                    val_len = len(val) if isinstance(val, tuple) else "N/A"
-                    raise AssertionError(
-                        f"expected tuple of length 2, got {type(val).__name__} of length {val_len}"
-                    )
+                assert isinstance(val, tuple) and len(val) == 2
                 path, ty = val
 
-                if not isinstance(path, str):
-                    raise AssertionError(
-                        f"expected path to be str, got {type(path).__name__}"
-                    )
-                if not isinstance(ty, str):
-                    raise AssertionError(
-                        f"expected ty to be str, got {type(ty).__name__}"
-                    )
+                assert isinstance(path, str)
+                assert isinstance(ty, str)
 
                 return path + "," + ty
 
@@ -1131,8 +1069,7 @@ class GraphModuleSerializer(metaclass=Final):
         if isinstance(op, torch._ops.OpOverload):
             args_names = [arg.name for arg in op._schema.arguments]
         else:
-            if op not in _SYM_OPS:
-                raise AssertionError(f"op {op} is not in _SYM_OPS")
+            assert op in _SYM_OPS
             args_names = list(inspect.signature(op).parameters.keys())
         serialized_args = []
         for args_name, arg in zip(args_names, args):
@@ -1159,15 +1096,11 @@ class GraphModuleSerializer(metaclass=Final):
             method = args[1]
             schema = target.schema(obj, method)
         else:
-            if not isinstance(
+            assert isinstance(
                 target, (torch._ops.OpOverload, *_registered_extension_types())
-            ):
-                raise AssertionError(
-                    f"expected OpOverload or registered extension type, got {type(target).__name__}"
-                )
+            )
             schema = _get_schema_from_target(target)
-        if schema is None:
-            raise AssertionError("schema should not be None")
+        assert schema is not None
         kwargs = kwargs or {}
 
         for i, schema_arg in enumerate(schema.arguments):
@@ -1254,10 +1187,7 @@ class GraphModuleSerializer(metaclass=Final):
 
         if isinstance(arg, torch.fx.Node):
             if arg.op == "get_attr":
-                if not isinstance(arg.target, str):
-                    raise AssertionError(
-                        f"expected arg.target to be str, got {type(arg.target).__name__}"
-                    )
+                assert isinstance(arg.target, str)
                 attr = getattr(arg.graph.owning_module, arg.target)
 
                 if isinstance(attr, torch.Tensor):
@@ -1276,10 +1206,8 @@ class GraphModuleSerializer(metaclass=Final):
                     # serialize name and backend id of the lowered module
                     module_name = getattr(attr, "module_name", None)
                     backend_id = getattr(attr, "backend_id", None)
-                    if module_name is None:
-                        raise AssertionError("module_name should not be None")
-                    if backend_id is None:
-                        raise AssertionError("backend_id should not be None")
+                    assert module_name is not None, "module_name should not be None"
+                    assert backend_id is not None, "backend_id should not be None"
                     return Argument.create(as_string=f"{module_name}-{backend_id}")
                 else:
                     raise SerializeError(
@@ -1314,16 +1242,14 @@ class GraphModuleSerializer(metaclass=Final):
             # for inductor's ExternalFallbackNode
             # export_extern_kernel_node() is using this function to serialize arguments
             arg_name = arg.get_name()
-            if arg_name is None:
-                raise AssertionError("Buffer must have valid name")
+            assert arg_name is not None, "Buffer must have valid name"
             return Argument.create(as_tensor=TensorArgument(name=arg_name))
         elif isinstance(arg, inductor_ir.TorchBindObject):
             # This is a special branch for handling TorchBindObject
             # for inductor's ExternalFallbackNode
             # export_extern_kernel_node() is using this function to serialize arguments
             arg_name = arg.get_name()
-            if arg_name is None:
-                raise AssertionError("Buffer must have valid name")
+            assert arg_name is not None, "Buffer must have valid name"
             arg_val = arg.get_real_obj()
             class_fqn = arg_val._type().qualified_name()
             self.custom_objs[arg_name] = arg_val
@@ -1368,10 +1294,7 @@ class GraphModuleSerializer(metaclass=Final):
                 if arg_type is not None:
                     if isinstance(arg_type, torch.OptionalType):
                         arg_type = arg_type.getElementType()  # type: ignore[assignment]
-                    if not isinstance(arg_type, torch.ListType):
-                        raise AssertionError(
-                            f"expected ListType, got {type(arg_type).__name__}"
-                        )
+                    assert isinstance(arg_type, torch.ListType)
                     elem_type = arg_type.getElementType()
                     if isinstance(elem_type, torch.OptionalType):
                         elem_type = elem_type.getElementType()
@@ -1543,26 +1466,22 @@ class GraphModuleSerializer(metaclass=Final):
             )
 
     def serialize_tensor_output(self, name, meta_val) -> TensorArgument:
-        if name in self.graph_state.tensor_values:
-            raise AssertionError(f"name {name!r} already in tensor_values")
+        assert name not in self.graph_state.tensor_values
         self.graph_state.tensor_values[name] = serialize_tensor_meta(meta_val)
         return TensorArgument(name=name)
 
     def serialize_sym_int_output(self, name, meta_val) -> SymIntArgument:
-        if name in self.graph_state.sym_int_values:
-            raise AssertionError(f"name {name!r} already in sym_int_values")
+        assert name not in self.graph_state.sym_int_values
         self.graph_state.sym_int_values[name] = serialize_sym_int(meta_val)
         return SymIntArgument.create(as_name=name)
 
     def serialize_sym_float_output(self, name, meta_val) -> SymFloatArgument:
-        if name in self.graph_state.sym_float_values:
-            raise AssertionError(f"name {name!r} already in sym_float_values")
+        assert name not in self.graph_state.sym_float_values
         self.graph_state.sym_float_values[name] = serialize_sym_float(meta_val)
         return SymFloatArgument.create(as_name=name)
 
     def serialize_sym_bool_output(self, name, meta_val) -> SymIntArgument:
-        if name in self.graph_state.sym_bool_values:
-            raise AssertionError(f"name {name!r} already in sym_bool_values")
+        assert name not in self.graph_state.sym_bool_values
         self.graph_state.sym_bool_values[name] = serialize_sym_bool(meta_val)
         return SymBoolArgument.create(as_name=name)
 
@@ -1594,12 +1513,8 @@ class GraphModuleSerializer(metaclass=Final):
                     user_input=UserInputSpec(arg=self.serialize_argument_spec(spec.arg))
                 )
         elif spec.kind == ep.InputKind.PARAMETER:
-            if spec.target is None:
-                raise AssertionError("spec.target should not be None for PARAMETER")
-            if not isinstance(spec.arg, ep.TensorArgument):
-                raise AssertionError(
-                    f"expected TensorArgument, got {type(spec.arg).__name__}"
-                )
+            assert spec.target is not None
+            assert isinstance(spec.arg, ep.TensorArgument)
             return InputSpec.create(
                 parameter=InputToParameterSpec(
                     arg=TensorArgument(name=spec.arg.name),
@@ -1607,14 +1522,9 @@ class GraphModuleSerializer(metaclass=Final):
                 )
             )
         elif spec.kind == ep.InputKind.BUFFER:
-            if spec.target is None:
-                raise AssertionError("spec.target should not be None for BUFFER")
-            if not isinstance(spec.arg, ep.TensorArgument):
-                raise AssertionError(
-                    f"expected TensorArgument, got {type(spec.arg).__name__}"
-                )
-            if spec.persistent is None:
-                raise AssertionError("spec.persistent should not be None for BUFFER")
+            assert spec.target is not None
+            assert isinstance(spec.arg, ep.TensorArgument)
+            assert spec.persistent is not None
             return InputSpec.create(
                 buffer=InputToBufferSpec(
                     arg=TensorArgument(name=spec.arg.name),
@@ -1623,14 +1533,8 @@ class GraphModuleSerializer(metaclass=Final):
                 )
             )
         elif spec.kind == ep.InputKind.CONSTANT_TENSOR:
-            if spec.target is None:
-                raise AssertionError(
-                    "spec.target should not be None for CONSTANT_TENSOR"
-                )
-            if not isinstance(spec.arg, ep.TensorArgument):
-                raise AssertionError(
-                    f"expected TensorArgument, got {type(spec.arg).__name__}"
-                )
+            assert spec.target is not None
+            assert isinstance(spec.arg, ep.TensorArgument)
             return InputSpec.create(
                 tensor_constant=InputToTensorConstantSpec(
                     arg=TensorArgument(name=spec.arg.name),
@@ -1638,12 +1542,8 @@ class GraphModuleSerializer(metaclass=Final):
                 )
             )
         elif spec.kind == ep.InputKind.CUSTOM_OBJ:
-            if spec.target is None:
-                raise AssertionError("spec.target should not be None for CUSTOM_OBJ")
-            if not isinstance(spec.arg, ep.CustomObjArgument):
-                raise AssertionError(
-                    f"expected CustomObjArgument, got {type(spec.arg).__name__}"
-                )
+            assert spec.target is not None
+            assert isinstance(spec.arg, ep.CustomObjArgument)
             return InputSpec.create(
                 custom_obj=InputToCustomObjSpec(
                     arg=CustomObjArgument(
@@ -1653,10 +1553,7 @@ class GraphModuleSerializer(metaclass=Final):
                 )
             )
         elif spec.kind == ep.InputKind.TOKEN:
-            if not isinstance(spec.arg, ep.TokenArgument):
-                raise AssertionError(
-                    f"expected TokenArgument, got {type(spec.arg).__name__}"
-                )
+            assert isinstance(spec.arg, ep.TokenArgument)
             return InputSpec.create(
                 token=InputTokenSpec(
                     arg=TokenArgument(name=spec.arg.name),
@@ -1672,22 +1569,13 @@ class GraphModuleSerializer(metaclass=Final):
                 user_output=UserOutputSpec(arg=self.serialize_argument_spec(spec.arg))
             )
         elif spec.kind == ep.OutputKind.LOSS_OUTPUT:
-            if not isinstance(spec.arg, ep.TensorArgument):
-                raise AssertionError(
-                    f"expected TensorArgument, got {type(spec.arg).__name__}"
-                )
+            assert isinstance(spec.arg, ep.TensorArgument)
             return OutputSpec.create(
                 loss_output=LossOutputSpec(arg=TensorArgument(name=spec.arg.name))
             )
         elif spec.kind == ep.OutputKind.BUFFER_MUTATION:
-            if spec.target is None:
-                raise AssertionError(
-                    "spec.target should not be None for BUFFER_MUTATION"
-                )
-            if not isinstance(spec.arg, ep.TensorArgument):
-                raise AssertionError(
-                    f"expected TensorArgument, got {type(spec.arg).__name__}"
-                )
+            assert spec.target is not None
+            assert isinstance(spec.arg, ep.TensorArgument)
             return OutputSpec.create(
                 buffer_mutation=BufferMutationSpec(
                     arg=TensorArgument(name=spec.arg.name),
@@ -1695,14 +1583,8 @@ class GraphModuleSerializer(metaclass=Final):
                 )
             )
         elif spec.kind == ep.OutputKind.PARAMETER_MUTATION:
-            if spec.target is None:
-                raise AssertionError(
-                    "spec.target should not be None for PARAMETER_MUTATION"
-                )
-            if not isinstance(spec.arg, ep.TensorArgument):
-                raise AssertionError(
-                    f"expected TensorArgument, got {type(spec.arg).__name__}"
-                )
+            assert spec.target is not None
+            assert isinstance(spec.arg, ep.TensorArgument)
             return OutputSpec.create(
                 parameter_mutation=ParameterMutationSpec(
                     arg=TensorArgument(name=spec.arg.name),
@@ -1710,14 +1592,8 @@ class GraphModuleSerializer(metaclass=Final):
                 )
             )
         elif spec.kind == ep.OutputKind.GRADIENT_TO_PARAMETER:
-            if spec.target is None:
-                raise AssertionError(
-                    "spec.target should not be None for GRADIENT_TO_PARAMETER"
-                )
-            if not isinstance(spec.arg, ep.TensorArgument):
-                raise AssertionError(
-                    f"expected TensorArgument, got {type(spec.arg).__name__}"
-                )
+            assert spec.target is not None
+            assert isinstance(spec.arg, ep.TensorArgument)
             return OutputSpec.create(
                 gradient_to_parameter=GradientToParameterSpec(
                     arg=TensorArgument(name=spec.arg.name),
@@ -1725,14 +1601,8 @@ class GraphModuleSerializer(metaclass=Final):
                 )
             )
         elif spec.kind == ep.OutputKind.GRADIENT_TO_USER_INPUT:
-            if spec.target is None:
-                raise AssertionError(
-                    "spec.target should not be None for GRADIENT_TO_USER_INPUT"
-                )
-            if not isinstance(spec.arg, ep.TensorArgument):
-                raise AssertionError(
-                    f"expected TensorArgument, got {type(spec.arg).__name__}"
-                )
+            assert spec.target is not None
+            assert isinstance(spec.arg, ep.TensorArgument)
             return OutputSpec.create(
                 gradient_to_user_input=GradientToUserInputSpec(
                     arg=TensorArgument(name=spec.arg.name),
@@ -1740,14 +1610,8 @@ class GraphModuleSerializer(metaclass=Final):
                 )
             )
         elif spec.kind == ep.OutputKind.USER_INPUT_MUTATION:
-            if spec.target is None:
-                raise AssertionError(
-                    "spec.target should not be None for USER_INPUT_MUTATION"
-                )
-            if not isinstance(spec.arg, ep.TensorArgument):
-                raise AssertionError(
-                    f"expected TensorArgument, got {type(spec.arg).__name__}"
-                )
+            assert spec.target is not None
+            assert isinstance(spec.arg, ep.TensorArgument)
             return OutputSpec.create(
                 user_input_mutation=UserInputMutationSpec(
                     arg=TensorArgument(name=spec.arg.name),
@@ -1755,10 +1619,7 @@ class GraphModuleSerializer(metaclass=Final):
                 )
             )
         elif spec.kind == ep.OutputKind.TOKEN:
-            if not isinstance(spec.arg, ep.TokenArgument):
-                raise AssertionError(
-                    f"expected TokenArgument, got {type(spec.arg).__name__}"
-                )
+            assert isinstance(spec.arg, ep.TokenArgument)
             return OutputSpec.create(
                 token=OutputTokenSpec(
                     arg=TokenArgument(name=spec.arg.name),
@@ -1887,16 +1748,9 @@ class GraphModuleSerializer(metaclass=Final):
                 return_type.getElementType(), torch.TensorType
             )
 
-        if not (
-            node.op == "call_function"
-            and isinstance(
-                node.target, (torch._ops.OpOverload, *_registered_extension_types())
-            )
-        ):
-            raise AssertionError(
-                f"expected call_function with OpOverload or registered extension type, "
-                f"got {node.op} with {type(node.target).__name__}"
-            )
+        assert node.op == "call_function" and isinstance(
+            node.target, (torch._ops.OpOverload, *_registered_extension_types())
+        )
 
         schema = _get_schema_from_target(node.target)
         returns = schema.returns
@@ -1928,40 +1782,27 @@ class GraphModuleSerializer(metaclass=Final):
         output_arguments = []
         for idx, (meta, return_schema) in enumerate(zip(meta_val, returns)):
             if meta is None:
-                if not isinstance(
+                assert isinstance(
                     return_schema.real_type, (torch.OptionalType, torch.TensorType)
-                ):
-                    raise AssertionError(
-                        f"expected OptionalType or TensorType, got {type(return_schema.real_type).__name__}"
-                    )
+                )
                 # When the return type is annotated as Tensor type, the op can also return an
                 # undefined Tensor which will be implicitly converted to None in Python.
                 output_arguments.append(Argument.create(as_none=True))
             elif isinstance(meta, FakeTensor):
-                if not isinstance(
+                assert isinstance(
                     return_schema.real_type, (torch.OptionalType, torch.TensorType)
-                ):
-                    raise AssertionError(
-                        f"expected OptionalType or TensorType, got {type(return_schema.real_type).__name__}"
-                    )
+                )
                 name = self._output_node_name_at_index(node, idx)
                 output_arguments.append(self.serialize_output(name, meta))
             elif isinstance(meta, list):
                 # for List[Tensor] return type
-                if not (
-                    isinstance(return_schema.real_type, torch.ListType)
-                    and isinstance(
-                        return_schema.real_type.getElementType(), torch.TensorType
-                    )
-                ):
-                    raise AssertionError(
-                        f"expected ListType with TensorType element, got {type(return_schema.real_type).__name__}"
-                    )
+                assert isinstance(
+                    return_schema.real_type, torch.ListType
+                ) and isinstance(
+                    return_schema.real_type.getElementType(), torch.TensorType
+                )
                 user_node = self._output_node_at_index(node, idx)
-                if user_node is None:
-                    raise AssertionError(
-                        f"user_node should not be None for list output at index {idx}"
-                    )
+                assert user_node is not None
 
                 args = []
                 for i, m in enumerate(meta):
@@ -1992,10 +1833,7 @@ class GraphModuleSerializer(metaclass=Final):
                 user_node = self._output_node_at_index(node, i)
                 if isinstance(element_meta_val, list):
                     # e.g "-> Tensor[]"
-                    if user_node is None:
-                        raise AssertionError(
-                            f"user_node should not be None for list output at index {i}"
-                        )
+                    assert user_node is not None
 
                     tensors = []
                     for j, m in enumerate(element_meta_val):
@@ -2048,10 +1886,7 @@ class GraphModuleSerializer(metaclass=Final):
             )
         elif isinstance(meta_val, (int, torch.SymInt)):
             # e.g "-> SymInt"
-            if isinstance(meta_val, bool):
-                raise AssertionError(
-                    "meta_val should not be bool when returning SymInt"
-                )
+            assert not isinstance(meta_val, bool)
             return Argument.create(
                 as_sym_int=self.serialize_sym_int_output(name, meta_val)
             )
@@ -2069,8 +1904,9 @@ class GraphModuleSerializer(metaclass=Final):
 
         idx_to_name = {}
         for user in node.users:
-            if user.target is not operator.getitem:
-                raise AssertionError(f"User node {user} of {node} is incorrect")
+            assert user.target is operator.getitem, (
+                f"User node {user} of {node} is incorrect"
+            )
             idx_to_name[user.args[1]] = user.name
 
         for idx, _ in enumerate(meta_val):
@@ -2089,10 +1925,7 @@ class GraphModuleSerializer(metaclass=Final):
         return arg_list
 
     def serialize_graph(self, graph_module: torch.fx.GraphModule) -> Graph:
-        if not isinstance(graph_module, torch.fx.GraphModule):
-            raise AssertionError(
-                f"expected GraphModule, got {type(graph_module).__name__}"
-            )
+        assert isinstance(graph_module, torch.fx.GraphModule)
         log.debug(
             "[serialize_graph]\n\n%s", graph_module.print_readable(print_output=False)
         )
@@ -2178,8 +2011,7 @@ class ExportedProgramSerializer(metaclass=Final):
         # the graph
         constants: dict[str, Any] = gm_serializer.custom_objs.copy()
         for n, t in exported_program.constants.items():
-            if n in constants:
-                raise AssertionError(f"constant name {n!r} already exists in constants")
+            assert n not in constants
             constants[n] = t
 
         serialized_ep = ExportedProgram(
@@ -2341,17 +2173,13 @@ class GraphModuleDeserializer(metaclass=Final):
             if val.hint is None:
                 hint = None
             else:
-                if val.hint.type != "as_int":
-                    raise AssertionError(
-                        f"expected hint type 'as_int', got {val.hint.type!r}"
-                    )
+                assert val.hint.type == "as_int"
                 hint = val.hint.value
 
             sym = self._parse_sym_expr(val.expr_str, hint)
             return self.shape_env.create_symintnode(sym, hint=hint)
         elif s.type == "as_int":
-            if type(val) is not int:
-                raise AssertionError(f"expected int, got {type(val).__name__}")
+            assert type(val) is int
             return val
         else:
             raise SerializeError(
@@ -2365,8 +2193,7 @@ class GraphModuleDeserializer(metaclass=Final):
             sym = self._parse_sym_expr(val.expr_str, hint)
             return self.shape_env.create_symfloatnode(sym, hint=hint)
         elif s.type == "as_float":
-            if not isinstance(val, float):
-                raise AssertionError(f"expected float, got {type(val).__name__}")
+            assert isinstance(val, float)
             return val
         else:
             raise SerializeError(
@@ -2379,8 +2206,7 @@ class GraphModuleDeserializer(metaclass=Final):
             expr = self._parse_sym_expr(val.expr_str)
             return self.shape_env.create_symboolnode(expr)
         elif s.type == "as_bool":
-            if not isinstance(val, bool):
-                raise AssertionError(f"expected bool, got {type(val).__name__}")
+            assert isinstance(val, bool)
             return val
         else:
             raise SerializeError(
@@ -2519,10 +2345,7 @@ class GraphModuleDeserializer(metaclass=Final):
             outputs.append(self.deserialize_graph_output(output))
 
         if serialized_graph.is_single_tensor_return:
-            if len(outputs) != 1:
-                raise AssertionError(
-                    f"expected single output for single_tensor_return, got {len(outputs)}"
-                )
+            assert len(outputs) == 1
             outputs = outputs[0]  # type: ignore[assignment]
         else:
             outputs = tuple(outputs)  # type: ignore[assignment]
@@ -2550,10 +2373,7 @@ class GraphModuleDeserializer(metaclass=Final):
             ):
                 node.meta["unbacked_bindings"] = unbacked_bindings
 
-        if len(self.unbacked_symbols) != 0:
-            raise AssertionError(
-                f"expected no unbacked symbols, got {len(self.unbacked_symbols)}: {self.unbacked_symbols}"
-            )
+        assert len(self.unbacked_symbols) == 0
         return self.graph
 
     def deserialize_node(self, serialized_node: Node, target: Callable) -> None:
@@ -2812,8 +2632,7 @@ class GraphModuleDeserializer(metaclass=Final):
         symbol_name_to_range: Optional[dict[str, symbolic_shapes.ValueRanges]] = None,
     ) -> Result:
         global _CURRENT_DESERIALIZER
-        if _CURRENT_DESERIALIZER is not None:
-            raise AssertionError("_CURRENT_DESERIALIZER is already set")
+        assert _CURRENT_DESERIALIZER is None
         _CURRENT_DESERIALIZER = self
         try:
             log.debug("\n[deserialize]")
@@ -2927,8 +2746,7 @@ class GraphModuleDeserializer(metaclass=Final):
         # overwrite name
         fx_node.name = name
         self.serialized_name_to_node[name] = fx_node
-        if "val" in fx_node.meta:
-            raise AssertionError(f"fx_node {name} already has 'val' in meta")
+        assert "val" not in fx_node.meta
         fx_node.meta["val"] = self.serialized_name_to_meta[name]
 
     def deserialize_sym_op_inputs(self, inputs):
@@ -2963,10 +2781,7 @@ class GraphModuleDeserializer(metaclass=Final):
             if is_positional:
                 args.append(actual_args[schema_arg.name])
             elif keyword.iskeyword(schema_arg.name):
-                if schema_arg.kwarg_only:
-                    raise AssertionError(
-                        f"schema_arg {schema_arg.name} should not be kwarg_only"
-                    )
+                assert not schema_arg.kwarg_only
                 if len(kwargs) > 0:
                     kwargs = OrderedDict()
                     args.extend(list(kwargs.values()))
@@ -3005,10 +2820,7 @@ class GraphModuleDeserializer(metaclass=Final):
         elif typ_ == "as_layout":
             return _SERIALIZE_TO_TORCH_LAYOUT[inp.as_layout]
         elif typ_ == "as_graph":
-            if not isinstance(value, GraphArgument):
-                raise AssertionError(
-                    f"expected GraphArgument, got {type(value).__name__}"
-                )
+            assert isinstance(value, GraphArgument)
             with self.save_graph_module():
                 self.deserialize_graph(value.graph)
                 submodule = ep._create_graph_module_for_export(self.module, self.graph)
@@ -3139,8 +2951,7 @@ class GraphModuleDeserializer(metaclass=Final):
                 deserialized_metadata = self.deserialize_metadata(
                     serialized_node.metadata
                 )
-                if arg is None:
-                    raise AssertionError("arg should not be None")
+                assert arg is not None
                 # pyrefly: ignore [bad-argument-type]
                 self.generate_getitem(meta_val, fx_node, arg, 0, deserialized_metadata)
                 fx_node.meta["val"] = tuple(meta_val)
@@ -3216,8 +3027,7 @@ class GraphModuleDeserializer(metaclass=Final):
                 )
                 continue
 
-            if not isinstance(arg, Argument):
-                raise AssertionError(f"expected Argument, got {type(arg).__name__}")
+            assert isinstance(arg, Argument)
             if arg.type in ("as_tensor", "as_sym_int", "as_sym_float"):
                 self.generate_getitem(
                     meta_val, fx_node, arg.value, idx, deserialized_metadata
@@ -3269,14 +3079,8 @@ class GraphModuleDeserializer(metaclass=Final):
         # serialization, see [NOTE: Multiple outputs]
         meta_val: list[Any] = []
         if len(serialized_node.outputs) == 1:
-            if not isinstance(serialized_node.outputs[0].value, list):
-                raise AssertionError(
-                    f"expected list, got {type(serialized_node.outputs[0].value).__name__}"
-                )
-            if not isinstance(serialized_node.outputs[0].value[0], TensorArgument):
-                raise AssertionError(
-                    f"expected TensorArgument, got {type(serialized_node.outputs[0].value[0]).__name__}"
-                )
+            assert isinstance(serialized_node.outputs[0].value, list)
+            assert isinstance(serialized_node.outputs[0].value[0], TensorArgument)
             self.generate_getitems(
                 meta_val,
                 fx_node,
@@ -3335,10 +3139,7 @@ class GraphModuleDeserializer(metaclass=Final):
                         out.append(metadata[start:end])
                         start = end + 1
                 out.append(metadata[start:])
-                if len(out) != 3:
-                    raise AssertionError(
-                        f"expected metadata_split to return 3 parts, got {len(out)}"
-                    )
+                assert len(out) == 3
                 return out
 
             nn_module_stack = dict(
@@ -3375,8 +3176,7 @@ class GraphModuleDeserializer(metaclass=Final):
         if from_node_data is None:
             return None
 
-        if not isinstance(from_node_data, list):
-            raise AssertionError(f"expected list, got {type(from_node_data).__name__}")
+        assert isinstance(from_node_data, list)
 
         return [
             node_source
@@ -3470,10 +3270,7 @@ class ExportedProgramDeserializer(metaclass=Final):
         *,
         _unsafe_skip_version_check=False,
     ) -> ep.ExportedProgram:
-        if not isinstance(exported_program, ExportedProgram):
-            raise AssertionError(
-                f"expected ExportedProgram, got {type(exported_program).__name__}"
-            )
+        assert isinstance(exported_program, ExportedProgram)
         version = exported_program.schema_version
 
         # TODO(zhxchen17) blocked on thrift schema refactor
@@ -3572,10 +3369,7 @@ def serialize(
         serialized_program = ExportedProgramSerializer(
             opset_version, pickle_protocol
         ).serialize(exported_program)
-    if not isinstance(serialized_program.exported_program, ExportedProgram):
-        raise AssertionError(
-            f"expected ExportedProgram, got {type(serialized_program.exported_program).__name__}"
-        )
+    assert isinstance(serialized_program.exported_program, ExportedProgram)
 
     json_bytes = _to_json_bytes(serialized_program.exported_program)
     artifact = SerializedArtifact(
@@ -3599,26 +3393,21 @@ def _resolve_schema_cls(cls):
 
 def _dict_to_dataclass(cls, data):
     cls = _resolve_schema_cls(cls)
-    if isinstance(cls, str):
-        raise AssertionError(f"Unresolved class type: '{cls}'.")
+    assert not isinstance(cls, str), f"Unresolved class type: '{cls}'."
     if typing.get_origin(cls) is Annotated:
         return _dict_to_dataclass(cls.__origin__, data)
     if typing.get_origin(cls) == typing.Union and type(None) in typing.get_args(cls):
         if data is None:
             return None
         ty_args = typing.get_args(cls)
-        if len(ty_args) != 2:
-            raise AssertionError(f"expected 2 type args, got {len(ty_args)}")
+        assert len(ty_args) == 2
         return _dict_to_dataclass(ty_args[0], data)
     elif isinstance(cls, type) and issubclass(cls, _Union):
-        if not isinstance(data, dict):
-            raise AssertionError(f"expected dict, got {type(data).__name__}")
-        if len(data) != 1:
-            raise AssertionError(f"expected dict with 1 key, got {len(data)}")
+        assert isinstance(data, dict)
+        assert len(data) == 1
         _type = next(iter(data.keys()))
         _value = next(iter(data.values()))
-        if not isinstance(_type, str):
-            raise AssertionError(f"expected str key, got {type(_type).__name__}")
+        assert isinstance(_type, str)
         type_hints = typing.get_type_hints(cls, globalns=vars(schema))
         field_type = type_hints[_type]
         # pyrefly: ignore [missing-attribute]
@@ -3661,10 +3450,7 @@ def deserialize(
     *,
     _unsafe_skip_version_check=False,
 ) -> ep.ExportedProgram:
-    if not isinstance(artifact.exported_program, bytes):
-        raise AssertionError(
-            f"expected bytes, got {type(artifact.exported_program).__name__}"
-        )
+    assert isinstance(artifact.exported_program, bytes)
     serialized_exported_program = _bytes_to_dataclass(
         ExportedProgram, artifact.exported_program
     )
@@ -3742,8 +3528,7 @@ def _canonicalize_graph(
 
     # Stage 1: Reorder named items.
     def for_args(f, a):
-        if not isinstance(a, Argument):
-            raise AssertionError(f"expected Argument, got {type(a).__name__}")
+        assert isinstance(a, Argument)
         pytree.tree_map(f, _get_argument(a))
 
     def sort_nodes(nodes):
@@ -3795,8 +3580,7 @@ def _canonicalize_graph(
 
             def add_def(a):
                 if s := get_name(a):
-                    if s in def_table:
-                        raise AssertionError(f"symbol {s!r} already in def_table")
+                    assert s not in def_table
                     def_table[s] = idx
 
             for o in node.outputs:
@@ -3811,10 +3595,7 @@ def _canonicalize_graph(
                     if s in constants:
                         return
                     if s not in def_table:
-                        if s not in graph_inputs:
-                            raise AssertionError(
-                                f"symbol {s!r} not in def_table or graph_inputs"
-                            )
+                        assert s in graph_inputs
                         return
                     src = def_table[s]
                     edges[src].outs.append(idx)
@@ -3825,8 +3606,7 @@ def _canonicalize_graph(
 
         def add_rank(a):
             if s := get_name(a):
-                if s in rank:
-                    raise AssertionError(f"symbol {s!r} already in rank")
+                assert s not in rank
                 rank[s] = len(rank)
 
         def get_rank(a):
@@ -3859,12 +3639,10 @@ def _canonicalize_graph(
             for o in node.outputs:
                 for_args(add_rank, o)
             ret.append(node)
-            if idx not in edges:
-                raise AssertionError(f"idx {idx} not in edges")
+            assert idx in edges
             for user in edges[idx].outs:
                 e = edges[user]
-                if e.ins <= 0:
-                    raise AssertionError(f"e.ins should be > 0, got {e.ins}")
+                assert e.ins > 0
                 e.ins -= 1
                 if e.ins == 0:
                     add_candidate(user)
@@ -3873,10 +3651,7 @@ def _canonicalize_graph(
         return ret
 
     sorted_nodes = sort_nodes(graph.nodes)
-    if len(sorted_nodes) != len(graph.nodes):
-        raise AssertionError(
-            f"expected {len(graph.nodes)} sorted nodes, got {len(sorted_nodes)}"
-        )
+    assert len(sorted_nodes) == len(graph.nodes)
 
     # Stage 2: Rename nodes.
     name_table: dict[str, str] = {}
@@ -3884,11 +3659,9 @@ def _canonicalize_graph(
     def rename_def(a):
         def _rename(arg_name, values):
             new_name = f"_{len(name_table)}"
-            if arg_name in name_table:
-                raise AssertionError(f"arg_name {arg_name!r} already in name_table")
+            assert arg_name not in name_table
             name_table[arg_name] = new_name
-            if arg_name not in values:
-                raise AssertionError(f"arg_name {arg_name!r} not in values")
+            assert arg_name in values
             values[new_name] = values.pop(arg_name)
             return new_name
 
@@ -4033,19 +3806,12 @@ def canonicalize(
     signature = ep.graph_module.signature
     graph = ep.graph_module.graph
 
-    if len(graph.inputs) != len(signature.input_specs):
-        raise AssertionError(
-            f"graph.inputs length {len(graph.inputs)} != signature.input_specs length {len(signature.input_specs)}"
-        )
-    if len(graph.outputs) != len(signature.output_specs):
-        raise AssertionError(
-            f"graph.outputs length {len(graph.outputs)} != signature.output_specs length {len(signature.output_specs)}"
-        )
+    assert len(graph.inputs) == len(signature.input_specs)
+    assert len(graph.outputs) == len(signature.output_specs)
 
     def rank_input(inp) -> tuple[int, Optional[str], int]:
         idx, (_arg, spec) = inp
-        if not isinstance(spec, InputSpec):
-            raise AssertionError(f"expected InputSpec, got {type(spec).__name__}")
+        assert isinstance(spec, InputSpec)
         if spec.type == "user_input":
             return 5, None, idx
         elif spec.type == "parameter":
@@ -4065,8 +3831,7 @@ def canonicalize(
 
     def rank_output(out) -> tuple[int, Optional[str], int]:
         idx, (_arg, spec) = out
-        if not isinstance(spec, OutputSpec):
-            raise AssertionError(f"expected OutputSpec, got {type(spec).__name__}")
+        assert isinstance(spec, OutputSpec)
         if spec.type == "user_output":
             return 4, None, idx
         elif spec.type == "loss_output":
@@ -4106,8 +3871,7 @@ def canonicalize(
     )
 
     def replace_input(spec):
-        if not isinstance(spec, InputSpec):
-            raise AssertionError(f"expected InputSpec, got {type(spec).__name__}")
+        assert isinstance(spec, InputSpec)
         if spec.type == "user_input":
             arg = spec.user_input.arg
             if arg.type == "as_tensor":
@@ -4162,8 +3926,7 @@ def canonicalize(
             raise AssertionError(f"Unknown input type: {spec}")
 
     def replace_output(out):
-        if not isinstance(spec, OutputSpec):
-            raise AssertionError(f"expected OutputSpec, got {type(spec).__name__}")
+        assert isinstance(spec, OutputSpec)
         if spec.type == "user_output":
             arg = spec.user_output.arg
             if arg.type == "as_tensor":
@@ -4266,22 +4029,16 @@ def register_extension(
     extension_handler: type[ExtensionHandler],
 ):
     """Register custom de/serialization method for a node with non-standard type."""
-    if not issubclass(extension_handler, ExtensionHandler):
-        raise AssertionError(f"Expected ExtensionHandler, got {extension_handler}.")
-    if op_type in _serialization_registry:
-        raise AssertionError(f"{op_type} is already registered.")
-    if not isinstance(op_type, type):
-        raise AssertionError(f"op_type must be a type, got {type(op_type).__name__}")
-    if op_type.__module__.startswith("torch") or op_type.__module__.startswith(
-        "builtins"
-    ):
-        raise AssertionError(
-            f"op_type module {op_type.__module__} should not start with 'torch' or 'builtins'"
-        )
-    if extension_handler.namespace() in _deserialization_registry:
-        raise AssertionError(
-            f"namespace {extension_handler.namespace()!r} is already registered"
-        )
+    assert issubclass(extension_handler, ExtensionHandler), (
+        f"Expected ExtensionHandler, got {extension_handler}."
+    )
+    assert op_type not in _serialization_registry, f"{op_type} is already registered."
+    assert isinstance(op_type, type)  # Maybe a good idea to enforce this first.
+    assert not (
+        op_type.__module__.startswith("torch")
+        or op_type.__module__.startswith("builtins")
+    )
+    assert extension_handler.namespace() not in _deserialization_registry
     _serialization_registry[op_type] = extension_handler
     _deserialization_registry[extension_handler.namespace()] = extension_handler
 

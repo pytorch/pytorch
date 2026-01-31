@@ -509,10 +509,9 @@ class Partitioner:
             no_device_partitions,
         ) = get_device_partition_stats(self.partitions, self.devices)
 
-        if len(no_device_partitions) != 0:
-            raise AssertionError(
-                f"Expect no_device_partitions has 0 device, but get {len(no_device_partitions)}"
-            )
+        assert len(no_device_partitions) == 0, (
+            f"Expect no_device_partitions has 0 device, but get {len(no_device_partitions)}"
+        )
 
         # Devices that hold partitions
         used_devices = [d for d in self.devices if len(device_to_partitions[d]) > 0]

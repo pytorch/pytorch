@@ -211,8 +211,7 @@ def tensorify_python_scalars(
             ):
                 dtype = node.args[0].meta["val"].dtype
 
-                if not isinstance(node.args[0], fx.Node):
-                    raise AssertionError(f"Expected fx.Node, got {node.args[0]}")
+                assert isinstance(node.args[0], fx.Node), node.args[0]
 
                 s = node.meta["val"].node.expr
 

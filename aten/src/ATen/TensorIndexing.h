@@ -495,10 +495,7 @@ inline Tensor handleDimInMultiDimIndexing(
     Tensor result = prev_dim_result;
     const Tensor& tensor = index.tensor();
     auto scalar_type = tensor.scalar_type();
-    bool is_batched = tensor.key_set().has_any(c10::DispatchKeySet(
-        {c10::DispatchKey::FuncTorchBatched,
-         c10::DispatchKey::BatchedNestedTensor}));
-    if (tensor.dim() == 0 && !is_batched &&
+    if (tensor.dim() == 0 &&
         at::isIntegralType(scalar_type, /*includeBool=*/true)) {
       if (scalar_type != at::kByte && scalar_type != at::kBool) {
         result = impl::applySelect(

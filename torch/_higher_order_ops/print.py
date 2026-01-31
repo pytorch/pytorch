@@ -33,8 +33,7 @@ class Print(HigherOrderOperator):
         super().__init__("print")
 
     def __call__(self, format_str: str, *args: object, **kwargs: object) -> None:
-        if not isinstance(format_str, str):
-            raise AssertionError(f"format_str must be a string, got {type(format_str)}")
+        assert isinstance(format_str, str)
         # pyrefly: ignore [missing-attribute]
         return super().__call__(format_str, *args, **kwargs)
 

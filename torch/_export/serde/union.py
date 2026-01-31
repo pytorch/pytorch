@@ -16,19 +16,16 @@ class _UnionTag(str):
     @staticmethod
     def create(t, cls):
         tag = _UnionTag(t)
-        if hasattr(tag, "_cls"):
-            raise AssertionError("tag already has _cls attribute")
+        assert not hasattr(tag, "_cls")
         tag._cls = cls
         return tag
 
     def __eq__(self, cmp) -> bool:
-        if not isinstance(cmp, str):
-            raise AssertionError(f"expected str, got {type(cmp)}")
+        assert isinstance(cmp, str)
         other = str(cmp)
-        if other not in _get_field_names(self._cls):
-            raise AssertionError(
-                f"{other} is not a valid tag for {self._cls}. Available tags: {_get_field_names(self._cls)}"
-            )
+        assert other in _get_field_names(self._cls), (
+            f"{other} is not a valid tag for {self._cls}. Available tags: {_get_field_names(self._cls)}"
+        )
         return str(self) == other
 
     def __hash__(self):
@@ -48,8 +45,7 @@ def _get_field_names(cls) -> set[str]:
 # through every field in the dataclass.
 @dataclass_transform(eq_default=False)
 def _union_dataclass(cls: type[T]) -> type[T]:
-    if not issubclass(cls, _Union):
-        raise AssertionError(f"{cls} must inherit from {_Union}.")
+    assert issubclass(cls, _Union), f"{cls} must inheirt from {_Union}."
     return dataclass(repr=False, eq=False)(cls)
 
 
@@ -58,20 +54,16 @@ class _Union:
 
     @classmethod
     def create(cls, **kwargs):
-        if len(kwargs) != 1:
-            raise AssertionError(f"expected exactly 1 kwarg, got {len(kwargs)}")
+        assert len(kwargs) == 1
         obj = cls(**{**{f.name: None for f in fields(cls)}, **kwargs})  # type: ignore[arg-type]
         obj._type = _UnionTag.create(next(iter(kwargs.keys())), cls)
         return obj
 
     def __post_init__(self):
-        if any(
+        assert not any(
             f.name in ("type", "_type", "create", "value")
             for f in fields(self)  # type: ignore[arg-type, misc]
-        ):
-            raise AssertionError(
-                "field names 'type', '_type', 'create', 'value' are reserved"
-            )
+        )
 
     @property
     def type(self) -> str:

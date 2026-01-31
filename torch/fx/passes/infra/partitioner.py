@@ -31,10 +31,9 @@ class Partition:
             else:
                 nodes_list = list(nodes)
                 node_orders_list = list(node_orders)
-                if len(nodes_list) != len(node_orders_list):
-                    raise AssertionError(
-                        "nodes and node_orders must have the same length"
-                    )
+                assert len(nodes_list) == len(node_orders_list), (
+                    "nodes and node_orders must have the same length"
+                )
                 self.nodes = dict(zip(nodes_list, node_orders_list))
 
     def __repr__(self) -> str:
@@ -203,8 +202,7 @@ class CapabilityBasedPartitioner:
                 assignment.pop(node)
             elif id not in partitions_by_id:
                 assignment[node] = id
-                if node_order is None:
-                    raise AssertionError("node_order is required for new partitions")
+                assert node_order is not None
                 partitions_by_id[id] = Partition(
                     id=id, nodes=[node], node_orders=[node_order]
                 )
@@ -294,10 +292,7 @@ class CapabilityBasedPartitioner:
                 compute_node_count = 0
                 for node in partition.nodes:
                     if node.op == "call_function":
-                        if not callable(node.target):
-                            raise AssertionError(
-                                f"Expected callable target, got {type(node.target)}"
-                            )
+                        assert callable(node.target)
                         if _get_qualified_name(node.target) not in non_compute_ops:
                             compute_node_count += 1
                         if (

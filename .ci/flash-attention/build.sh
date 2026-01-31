@@ -112,17 +112,15 @@ sed -i 's/bare_metal_version != Version("12.8")/bare_metal_version >= Version("1
 BUILD_DATE=$(date +%Y%m%d)
 if [[ "${WHEEL_PLAT}" == "aarch64" ]]; then
     ARCH_TAG="arm"
-    MANYLINUX_PLAT="manylinux_2_34_aarch64"
 else
     ARCH_TAG="x86"
-    MANYLINUX_PLAT="manylinux_2_28_x86_64"
 fi
 export FLASH_ATTN_LOCAL_VERSION="${BUILD_DATE}.cu${CUDA_SHORT}.${ARCH_TAG}"
 
 "$PYTHON" setup.py bdist_wheel \
     -d "$FA_FINAL_PACKAGE_DIR" \
     -k \
-    --plat-name "${MANYLINUX_PLAT}"
+    --plat-name "${WHEEL_PLAT}"
 
 echo "wheel built: "
 find "$FA_FINAL_PACKAGE_DIR" -name '*.whl' -exec ls -la {} \;

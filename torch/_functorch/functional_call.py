@@ -1,7 +1,6 @@
-from __future__ import annotations
-
+# mypy: allow-untyped-defs
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -11,14 +10,14 @@ from torch._functorch.utils import exposed_in
 
 @exposed_in("torch.func")
 def functional_call(
-    module: torch.nn.Module,
-    parameter_and_buffer_dicts: dict[str, Tensor] | Sequence[dict[str, Tensor]],
-    args: Any = None,
-    kwargs: dict[str, Any] | None = None,
+    module: "torch.nn.Module",
+    parameter_and_buffer_dicts: Union[dict[str, Tensor], Sequence[dict[str, Tensor]]],
+    args: Optional[Union[Any, tuple]] = None,
+    kwargs: Optional[dict[str, Any]] = None,
     *,
     tie_weights: bool = True,
     strict: bool = False,
-) -> Any:
+):
     r"""Performs a functional call on the module by replacing the module parameters
     and buffers with the provided ones.
 
@@ -163,7 +162,7 @@ def functional_call(
 
 @exposed_in("torch.func")
 def stack_module_state(
-    models: Sequence[nn.Module] | nn.ModuleList,
+    models: Union[Sequence[nn.Module], nn.ModuleList],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """stack_module_state(models) -> params, buffers
 
@@ -250,7 +249,7 @@ def stack_module_state(
 
 
 def construct_stacked_leaf(
-    tensors: tuple[Tensor, ...] | list[Tensor], name: str
+    tensors: Union[tuple[Tensor, ...], list[Tensor]], name: str
 ) -> Tensor:
     all_requires_grad = all(t.requires_grad for t in tensors)
     none_requires_grad = all(not t.requires_grad for t in tensors)

@@ -59,8 +59,7 @@ from functorch import vjp, vmap
 
 _, vjp_fn = vjp(partial(predict, weight, bias), x)
 (ft_jacobian,) = vmap(vjp_fn)(unit_vectors)
-if not torch.allclose(ft_jacobian, jacobian):
-    raise AssertionError("ft_jacobian does not match jacobian")
+assert torch.allclose(ft_jacobian, jacobian)
 
 # In another tutorial a composition of reverse-mode AD and vmap gave us
 # per-sample-gradients. In this tutorial, composing reverse-mode AD and vmap
@@ -75,8 +74,7 @@ from functorch import jacrev
 
 
 ft_jacobian = jacrev(predict, argnums=2)(weight, bias, x)
-if not torch.allclose(ft_jacobian, jacobian):
-    raise AssertionError("ft_jacobian does not match jacobian")
+assert torch.allclose(ft_jacobian, jacobian)
 
 # Let's compare the performance of the two ways to compute jacobian.
 # The functorch version is much faster (and becomes even faster the more outputs
@@ -188,8 +186,7 @@ batch_jacobian0 = jacrev(predict_with_output_summed, argnums=2)(weight, bias, x)
 
 compute_batch_jacobian = vmap(jacrev(predict, argnums=2), in_dims=(None, None, 0))
 batch_jacobian1 = compute_batch_jacobian(weight, bias, x)
-if not torch.allclose(batch_jacobian0, batch_jacobian1):
-    raise AssertionError("batch_jacobian0 does not match batch_jacobian1")
+assert torch.allclose(batch_jacobian0, batch_jacobian1)
 
 # Finally, batch hessians can be computed similarly. It's easiest to think about
 # them by using vmap to batch over hessian computation, but in some cases the sum

@@ -105,7 +105,6 @@ FIXME_hop_that_doesnt_have_opinfo_test_allowlist = [
     "aoti_call_delegate",
     "print",
     "inductor_compiled_code",  # Tested separately in test_inductor_wrap_inductor_compile_regions
-    "invoke_leaf_function",  # Needs torch.compile, tested separately in test_leaf_function*
 ]
 
 torch.library.define(
@@ -243,8 +242,7 @@ def simple_local_map_hop(inp1, inp2):
 
     gm = torch.fx.symbolic_trace(body_gm)
 
-    if not torch.distributed.is_available():
-        raise AssertionError("Expected torch.distributed to be available")
+    assert torch.distributed.is_available()
     from torch.distributed.tensor.placement_types import Replicate
 
     gm.meta["local_map_kwargs"] = {

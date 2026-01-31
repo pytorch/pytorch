@@ -115,8 +115,7 @@ class ComputeCodegenUnboxedKernels:
         args_code = []
         for arg in args:
             # Using method=False faithful C++ API, so we should not see SelfArgument/TensorOptionsArgument
-            if not isinstance(arg.argument, Argument):
-                raise AssertionError(f"Expected Argument, got {type(arg.argument)}")
+            assert isinstance(arg.argument, Argument)
             if not arg.argument.default:
                 arg_cpp = "c10::IValue(::std::nullopt)"
             else:

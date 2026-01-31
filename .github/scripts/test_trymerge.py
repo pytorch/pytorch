@@ -420,8 +420,7 @@ class TestTryMerge(TestCase):
         pr = GitHubPR("pytorch", "pytorch", 76123)
         approved_by = pr.get_approved_by()
         self.assertGreater(len(approved_by), 0)
-        if pr._reviews is None:  # to pacify mypy
-            raise AssertionError("pr._reviews is None")
+        assert pr._reviews is not None  # to pacify mypy
         self.assertGreater(len(pr._reviews), 100)
 
     def get_co_authors(self, *args: Any) -> None:

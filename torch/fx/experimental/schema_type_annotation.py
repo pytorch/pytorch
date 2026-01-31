@@ -52,8 +52,7 @@ class AnnotateTypesWithSchema(Transformer):
                 # a 2-way dispatch based on a boolean value. Here we check that the `true` and `false`
                 # branches of the dispatch have exactly the same signature. If they do, use the `true`
                 # branch signature for analysis. Otherwise, leave this un-normalized
-                if isinstance(target, str):
-                    raise AssertionError("target should not be a string here")
+                assert not isinstance(target, str)
                 dispatched = boolean_dispatched[target]
                 if_true, if_false = dispatched["if_true"], dispatched["if_false"]
                 # TODO: can we emit the union of these? What are the implications on TorchScript
@@ -77,8 +76,7 @@ class AnnotateTypesWithSchema(Transformer):
         self, target: Target, args: tuple[Argument, ...], kwargs: dict[str, Any]
     ):
         python_ret_type = None
-        if not isinstance(target, str):
-            raise AssertionError(f"Expected str target, got {type(target)}")
+        assert isinstance(target, str)
         submod = self.fetch_attr(target)
         if self.annotate_modules and hasattr(submod.__class__, "__name__"):
             classname = submod.__class__.__name__
@@ -100,8 +98,7 @@ class AnnotateTypesWithSchema(Transformer):
 
         if self.annotate_get_attrs:
             module_itr = self.module
-            if not isinstance(target, str):
-                raise AssertionError(f"Expected str target, got {type(target)}")
+            assert isinstance(target, str)
             atoms = target.split(".")
             for i, atom in enumerate(atoms):
                 if not hasattr(module_itr, atom):
@@ -135,8 +132,7 @@ class AnnotateTypesWithSchema(Transformer):
             Optional[Any]: Return annotation from the `target`, or None if it was
                 not available.
         """
-        if not callable(target):
-            raise AssertionError(f"Expected callable target, got {type(target)}")
+        assert callable(target)
         try:
             sig = inspect.signature(target)
         except (ValueError, TypeError):

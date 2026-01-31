@@ -79,9 +79,6 @@ class ThreadPoolExecutor {
   C10_ALWAYS_INLINE moodycamel::ProducerToken& ptok();
   C10_ALWAYS_INLINE moodycamel::ConsumerToken& ctok();
 
-  // Returns approximate queue size. Useful for testing.
-  size_t queueSizeApprox() const;
-
  private:
   void loop();
 

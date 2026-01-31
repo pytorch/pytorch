@@ -88,11 +88,9 @@ class DecisionTree:
         if left_counts < k or right_counts < k:
             return DecisionTreeNode(class_probs=node.class_probs)
 
-        if node.left is None:
-            raise AssertionError("expected left child to exist")
+        assert node.left is not None, "expected left child to exist"
         node.left = self._prune_tree(node.left, left_df, target_col, k)
-        if node.right is None:
-            raise AssertionError("expected right child to exist")
+        assert node.right is not None, "expected right child to exist"
         node.right = self._prune_tree(node.right, right_df, target_col, k)
 
         return node
@@ -132,11 +130,9 @@ class DecisionTree:
             dot += f'    {parent_id} -> {node_id} [label="{edge_label}"];\n'
 
         if not node.is_leaf():
-            if node.left is None:
-                raise AssertionError("expected left child to exist")
+            assert node.left is not None, "expected left child to exist"
             dot += self._node_to_dot(node.left, node_id, "<=")
-            if node.right is None:
-                raise AssertionError("expected right child to exist")
+            assert node.right is not None, "expected right child to exist"
             dot += self._node_to_dot(node.right, node_id, ">")
 
         return dot
@@ -171,12 +167,10 @@ class DecisionTree:
         node = self.root
         while not node.is_leaf():
             if X[node.feature] <= node.threshold:
-                if node.left is None:
-                    raise AssertionError("expected left child to exist")
+                assert node.left is not None, "expected left child to exist"
                 node = node.left
             else:
-                if node.right is None:
-                    raise AssertionError("expected right child to exist")
+                assert node.right is not None, "expected right child to exist"
                 node = node.right
         return node
 
@@ -214,21 +208,18 @@ class DecisionTree:
                 if name in dummy_col_2_col_val:
                     (orig_name, value) = dummy_col_2_col_val[name]
                     predicate = f"{indent}if str(context.get_value('{orig_name}')) != '{value}':"
-                    if threshold != 0.5:
-                        raise AssertionError(
-                            f"expected threshold to be 0.5 but is {threshold}"
-                        )
+                    assert threshold == 0.5, (
+                        f"expected threshold to be 0.5 but is {threshold}"
+                    )
                 else:
                     predicate = (
                         f"{indent}if context.get_value('{name}') <= {threshold}:"
                     )
                 lines.append(predicate)
-                if node.left is None:
-                    raise AssertionError("expected left child to exist")
+                assert node.left is not None, "expected left child to exist"
                 codegen_node(node.left, depth + 1)
                 lines.append(f"{indent}else:")
-                if node.right is None:
-                    raise AssertionError("expected right child to exist")
+                assert node.right is not None, "expected right child to exist"
                 codegen_node(node.right, depth + 1)
 
         def handle_leaf(

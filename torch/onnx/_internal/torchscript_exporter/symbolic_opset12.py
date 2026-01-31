@@ -330,8 +330,7 @@ def unfold(g: jit_utils.GraphContext, input, dimension, size, step):
         )
 
         ndim = symbolic_helper._get_tensor_rank(input)
-        if ndim is None:
-            raise AssertionError("ndim must be non-None")
+        assert ndim is not None
         perm = list(range(ndim))
         perm.append(perm.pop(dimension))
 

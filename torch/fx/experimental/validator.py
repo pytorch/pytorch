@@ -59,8 +59,7 @@ try:
     #
     #   - Collect a chain of the same operations into one
     def z3str(e: z3.ExprRef) -> str:
-        if not z3.is_expr(e):
-            raise AssertionError(f"unsupported expression type: {e}")
+        assert z3.is_expr(e), f"unsupported expression type: {e}"
 
         def get_args_str(e: z3.ExprRef) -> list[str]:
             return [z3str(e.arg(i)) for i in range(e.num_args())]
@@ -107,12 +106,10 @@ try:
             #   - a < b ==> (Not (<= b a)) ==> (> b a)
             #   - a > b ==> (Not (<= a b)) ==> (> a b)
 
-            if e.num_args() != 1:
-                raise AssertionError(f"Expected 1 arg, got {e.num_args()}")
+            assert e.num_args() == 1
             arg = e.arg(0)
 
-            if not z3.is_app(arg):
-                raise AssertionError("Expected z3 app")
+            assert z3.is_app(arg)
             argkind = arg.decl().kind()
 
             logic_inverse = {
@@ -126,8 +123,7 @@ try:
                 args = get_args_str(arg)
 
         elif kind in (z3.Z3_OP_TO_INT, z3.Z3_OP_TO_REAL):
-            if e.num_args() != 1:
-                raise AssertionError(f"Expected 1 arg, got {e.num_args()}")
+            assert e.num_args() == 1
             argstr = z3str(e.arg(0))
 
             # Check if it's the floor division pattern.
@@ -138,8 +134,7 @@ try:
             return argstr
 
         elif kind == z3.Z3_OP_UNINTERPRETED:
-            if e.num_args() != 0:
-                raise AssertionError(f"Expected 0 args, got {e.num_args()}")
+            assert e.num_args() == 0
             return str(decl)
 
         string = op + " " + " ".join(args)
@@ -367,10 +362,9 @@ try:
                 return super().call_function(z3op(target, self.validator), args, kwargs)  # type: ignore[arg-type]
             # Adds the Z3 expression corresponding to the first argument
             # as a validator input.
-            if len(args) != 1:
-                raise AssertionError(
-                    f"expected 1 argument on assertion. Got: {len(args)} "
-                )
+            assert len(args) == 1, (
+                f"expected 1 argument on assertion. Got: {len(args)} "
+            )
             self.validator.add_source_expr(args[0])  # type: ignore[arg-type]
 
     # Translates SymPy expressions into Z3 expressions.
@@ -507,8 +501,7 @@ try:
 
         # Retrieves the corresponding Z3 variable.
         def z3var(self, symbol: sympy.Symbol) -> z3.ExprRef:
-            if symbol not in self.symbols:
-                raise AssertionError(f"Z3 variable not found for: {symbol}")
+            assert symbol in self.symbols, f"Z3 variable not found for: {symbol}"
             return self.symbols[symbol]
 
         # Create a variable in Z3 of 'type' for 'symbol', if it doesn't already exists.
@@ -538,16 +531,16 @@ try:
         # Checks whether all symbols were already added.
         def _check_freesymbols(self, e: sympy.Basic) -> None:
             for s in e.free_symbols:
-                if not isinstance(s, sympy.Symbol):
-                    raise AssertionError(f"Expected sympy.Symbol, got {type(s)}")
+                assert isinstance(s, sympy.Symbol)
                 # Call 'z3var' just to check whether there's already a
                 # Z3 variable corresponding to 's'.
                 self.z3var(s)
 
         def to_z3_boolean_expr(self, e: sympy.Basic) -> z3.BoolRef:
             z3expr = SympyToZ3(self).run(e)
-            if not isinstance(z3expr, z3.BoolRef):
-                raise AssertionError(f"expected boolean expression. Got: {z3expr}")
+            assert isinstance(z3expr, z3.BoolRef), (
+                f"expected boolean expression. Got: {z3expr}"
+            )
             return z3expr
 
         def add_source_expr(self, e: z3.BoolRef) -> None:
@@ -568,8 +561,7 @@ try:
                 ref = self.to_z3_boolean_expr(e)
             else:
                 ref = e
-            if not isinstance(ref, z3.BoolRef):
-                raise AssertionError(f"Expected z3.BoolRef, got {type(ref)}")
+            assert isinstance(ref, z3.BoolRef)
             if ref not in self._assertions:
                 log.debug("add assertion: %s", z3str(ref))
             self._assertions.add(ref)
@@ -631,8 +623,7 @@ try:
                     )
                 else:
                     # Target expressions are sound.
-                    if r != z3.unsat:
-                        raise AssertionError(f"Expected z3.unsat, got {r}")
+                    assert r == z3.unsat
                     log.debug("translation validation: success")
 
 except ImportError:
@@ -675,17 +666,15 @@ def translation_validation_timeout() -> int:
 
 
 def _assert_z3_installed_if_tv_set():
-    if not (_HAS_Z3 or not config.translation_validation):
-        raise AssertionError(
-            "translation validation requires Z3 package. Please, either install "
-            "z3-solver or disable translation validation."
-        )
+    assert _HAS_Z3 or not config.translation_validation, (
+        "translation validation requires Z3 package. Please, either install "
+        "z3-solver or disable translation validation."
+    )
 
 
 class ValidationException(TorchDynamoException):
     def __init__(self, model, assertions, target_exprs, failed_source_exprs):
-        if not _HAS_Z3:
-            raise AssertionError("Z3 is required")
+        assert _HAS_Z3
 
         def symbolstr(sym) -> str:
             return f"{sym}: {model[sym]}"
@@ -757,8 +746,7 @@ def bisect(shape_env):
 
     # Retrieves the ShapeEnvEvent associated with node.
     def get_node_event(node: torch.fx.Node) -> ShapeEnvEvent:
-        if SHAPEENV_EVENT_KEY not in node.meta:
-            raise AssertionError("SHAPEENV_EVENT_KEY not in node.meta")
+        assert SHAPEENV_EVENT_KEY in node.meta
         return events[node.meta[SHAPEENV_EVENT_KEY]]
 
     # Creates a new instance of fake, but updating every symbolic value's ShapeEnv
@@ -773,8 +761,7 @@ def bisect(shape_env):
             return torch.SymInt(fake.node.with_shape_env(shape_env))
         if isinstance(fake, torch.SymFloat):
             return torch.SymFloat(fake.node.with_shape_env(shape_env))
-        if not isinstance(fake, FakeTensorMeta):
-            raise AssertionError(f"Expected FakeTensorMeta, got {type(fake)}")
+        assert isinstance(fake, FakeTensorMeta)
         return FakeTensorMeta(
             tuple(new_with_shape_env(shape_env, s) for s in fake.size()),
             tuple(new_with_shape_env(shape_env, s) for s in fake.stride()),
@@ -786,8 +773,7 @@ def bisect(shape_env):
     def check_shapeenv_fails(
         shape_env: ShapeEnv, tracked_fakes: Optional[list[Any]]
     ) -> Optional[ValidationException]:
-        if tracked_fakes is None:
-            raise AssertionError("tracked_fakes is None")
+        assert tracked_fakes is not None
         try:
             # This produce_guards call is a best-effort replication, since we
             # don't populate EqualityConstraint list. Reason: we would also have
@@ -857,8 +843,7 @@ def bisect(shape_env):
         else:
             left = mid + 1
 
-    if not (left in exception and isinstance(exception[left], ValidationException)):
-        raise AssertionError("Expected ValidationException at bisect result")
+    assert left in exception and isinstance(exception[left], ValidationException)
 
     node = assert_nodes[left]
     event = get_node_event(node)
@@ -866,23 +851,19 @@ def bisect(shape_env):
     if event.is_evaluate_expr():
         failed_action = "evaluating"
     else:
-        if not event.is_defer_runtime_assert():
-            raise AssertionError(f"unexpected event type: {event}")
+        assert event.is_defer_runtime_assert(), f"unexpected event type: {event}"
         failed_action = "adding runtime assert"
 
     args = event.args
-    if args is None:
-        raise AssertionError("event.args is None")
-    if len(args) < 2:
-        raise AssertionError(
-            f"bisecting expects {event.name} to have at least 2 positional arguments. "
-            f"Got: {len(args)}"
-        )
-    if not isinstance(args[1], sympy.Basic):
-        raise AssertionError(
-            f"bisecting expects {event.name} to have a SymPy expression as its second "
-            f"argument. Got: {type(args[1])}"
-        )
+    assert args is not None
+    assert len(args) >= 2, (
+        f"bisecting expects {event.name} to have at least 2 positional arguments. "
+        f"Got: {len(args)}"
+    )
+    assert isinstance(args[1], sympy.Basic), (
+        f"bisecting expects {event.name} to have a SymPy expression as its second argument. "
+        f"Got: {type(args[1])}"
+    )
 
     raise BisectValidationException(
         exception[left],

@@ -13,11 +13,9 @@ def {case_name}(x):
 '''
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        raise AssertionError(f"expected 2 arguments, got {len(sys.argv)}")
+    assert len(sys.argv) == 2
     root_dir = examples.__name__.replace(".", "/")
-    if not os.path.exists(root_dir):
-        raise AssertionError(f"root_dir does not exist: {root_dir}")
+    assert os.path.exists(root_dir)
     with open(os.path.join(root_dir, sys.argv[1] + ".py"), "w") as f:
         print("Writing to", f.name, "...")
         f.write(TEMPLATE.format(case_name=sys.argv[1]))

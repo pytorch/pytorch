@@ -57,8 +57,7 @@ def lift_subgraph_as_module(
             continue
 
         target = n.target
-        if not isinstance(target, str):
-            raise AssertionError(f"Expected str target, got {type(target)}")
+        assert isinstance(target, str)
         target_name_parts = target.split(".")
         curr = submodule
         orig_gm = gm

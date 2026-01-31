@@ -290,10 +290,7 @@ def _create_node(
                 node.addOutput()
 
     node_outputs = tuple(node.outputs())  # type: ignore[possibly-undefined]
-    if len(node_outputs) != n_outputs:
-        raise AssertionError(
-            f"len(node_outputs)={len(node_outputs)} != n_outputs={n_outputs}"
-        )
+    assert len(node_outputs) == n_outputs
 
     aten = domain_op.startswith("aten::")
 
@@ -318,8 +315,7 @@ def _is_onnx_list(value):
 
 def _scalar(x: torch.Tensor):
     """Convert a scalar tensor into a Python value."""
-    if x.numel() != 1:
-        raise AssertionError(f"Expected numel() == 1, got {x.numel()}")
+    assert x.numel() == 1
     return x[0]
 
 

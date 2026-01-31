@@ -155,8 +155,7 @@ def export_data(data, value_info_proto, f: str) -> None:
                 ).SerializeToString()
             )
         else:
-            if not value_info_proto.type.HasField("tensor_type"):
-                raise AssertionError("Expected tensor_type field to be set")
+            assert value_info_proto.type.HasField("tensor_type")
             opened_file.write(
                 numpy_helper.from_array(data, value_info_proto.name).SerializeToString()
             )
@@ -168,8 +167,7 @@ def _export_file(
     export_map: Mapping[str, bytes],
 ) -> None:
     """export/write model bytes into directory/protobuf/zip"""
-    if len(export_map) != 0:
-        raise AssertionError(f"export_map must be empty, got {len(export_map)} items")
+    assert len(export_map) == 0
     with torch.serialization._open_file_like(f, "wb") as opened_file:
         opened_file.write(model_bytes)
 

@@ -81,16 +81,13 @@ class LintResult:
             lines[self.line - 1] = f"{before}{self.replacement}{after}"
 
     def contains(self, r: LintResult) -> bool:
-        if self.char is None or self.line is None:
-            raise AssertionError("self.char and self.line must not be None")
-        if r.char is None or r.line is None:
-            raise AssertionError("r.char and r.line must not be None")
+        assert self.char is not None and self.line is not None
+        assert r.char is not None and r.line is not None
         return self.line == r.line and self.char <= r.char and self.end >= r.end
 
     @property
     def end(self) -> int:
-        if self.char is None or self.length is None:
-            raise AssertionError("self.char and self.length must not be None")
+        assert self.char is not None and self.length is not None
         return self.char + self.length
 
     def as_message(self, code: str, path: str) -> LintMessage:

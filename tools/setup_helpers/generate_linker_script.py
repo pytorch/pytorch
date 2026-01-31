@@ -27,8 +27,7 @@ def gen_linker_script(
     text_line_start = [
         i for i, line in enumerate(linker_script_lines) if ".text           :" in line
     ]
-    if len(text_line_start) != 1:
-        raise AssertionError("The linker script has multiple text sections!")
+    assert len(text_line_start) == 1, "The linker script has multiple text sections!"
     text_line_start = text_line_start[0]
 
     # ensure that parent directory exists before writing

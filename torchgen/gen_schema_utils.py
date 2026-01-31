@@ -43,8 +43,7 @@ class TypeGen:
         elif isinstance(obj, torch.ScriptObject):
             return CustomClassType(obj._type().name())  # type: ignore[attr-defined]
         elif isinstance(obj, (list, tuple)):
-            if len(obj) == 0:
-                raise AssertionError("list/tuple must be non-empty")
+            assert len(obj) > 0
             all_base_tys = [TypeGen.from_example(x) for x in obj]
             if len(set(all_base_tys)) > 1:
                 raise RuntimeError(

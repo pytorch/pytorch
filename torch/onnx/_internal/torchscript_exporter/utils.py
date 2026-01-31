@@ -947,8 +947,7 @@ def _check_flatten_did_not_remove(original, jit_flattened) -> None:
 
     flattened_with_none = list(flatten(original))
     num_none = len(flattened_with_none) - len(jit_flattened)
-    if num_none < 0:
-        raise AssertionError(f"num_none must be >= 0, got {num_none}")
+    assert num_none >= 0
     if num_none:
         raise ValueError(
             f"args contained {num_none} None's after flattening. "
@@ -1432,8 +1431,7 @@ def _export(
     export_modules_as_functions: Any = False,
     autograd_inlining=True,
 ):
-    if GLOBALS.in_onnx_export is not False:
-        raise AssertionError("GLOBALS.in_onnx_export must be False")
+    assert GLOBALS.in_onnx_export is False
 
     _trigger_symbolic_function_registration()
 
@@ -1593,8 +1591,7 @@ def _export(
                 _C._jit_onnx_log("Exported graph: ", graph)
             onnx_proto_utils._export_file(proto, f, export_map)
     finally:
-        if not GLOBALS.in_onnx_export:
-            raise AssertionError("GLOBALS.in_onnx_export must be True")
+        assert GLOBALS.in_onnx_export
         GLOBALS.in_onnx_export = False
         GLOBALS.autograd_inlining = _autograd_inlining_previous
         _reset_trace_module_map()

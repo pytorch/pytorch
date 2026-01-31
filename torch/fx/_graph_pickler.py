@@ -114,8 +114,7 @@ class GraphPickler(pickle.Pickler):
             return _TracingContextPickleData.reduce_helper(self, obj)
         else:
             # We should never get a raw Node!
-            if isinstance(obj, torch.fx.Node):
-                raise AssertionError("Unexpected raw Node during pickling")
+            assert not isinstance(obj, torch.fx.Node)
             if reduce := _TorchNumpyPickleData.reduce_helper(self, obj):
                 return reduce
 
@@ -378,18 +377,15 @@ class _ShapeEnvPickleData:
         # In theory pickle should recognize that a given ShapeEnv was already
         # pickled and reuse the resulting _ShapeEnvPickleData (so two objects
         # pointing at the same ShapeEnv get the same ShapeEnv out).
-        if env._translation_validation_enabled:
-            raise AssertionError("Translation validation must be disabled for pickling")
+        assert not env._translation_validation_enabled
         self.data = env.__dict__.copy()
         del self.data["tracked_fakes"]
         del self.data["fake_tensor_cache"]
 
     def unpickle(self, unpickle_state: _UnpickleState) -> ShapeEnv:
         # Fill in the existing ShapeEnv rather than creating a new one
-        if not unpickle_state.fake_mode:
-            raise AssertionError("unpickle_state.fake_mode is not set")
-        if not unpickle_state.fake_mode.shape_env:
-            raise AssertionError("unpickle_state.fake_mode.shape_env is not set")
+        assert unpickle_state.fake_mode
+        assert unpickle_state.fake_mode.shape_env
 
         for k, v in self.data.items():
             setattr(unpickle_state.fake_mode.shape_env, k, v)
@@ -420,8 +416,7 @@ class _SymNodePickleData:
         self.hint = node._hint
 
     def _to_sym_node(self) -> SymNode:
-        if self.shape_env is None:
-            raise AssertionError("shape_env is None")
+        assert self.shape_env is not None
         return SymNode(self.expr, self.shape_env, self.pytype, self.hint)
 
     def unpickle_sym_int(self, unpickle_state: _UnpickleState) -> torch.SymInt:
@@ -451,21 +446,18 @@ class _TensorPickleData:
 
         # view_func is fine if it's either None or a _FakeTensorViewFunc. A
         # custom one (which is basically a lambda) can't be serialized.
-        if metadata.view_func and not isinstance(
+        assert not metadata.view_func or isinstance(
             metadata.view_func, torch._subclasses.meta_utils._FakeTensorViewFunc
-        ):
-            raise AssertionError(
-                f"view_func must be None or _FakeTensorViewFunc, got "
-                f"{type(metadata.view_func)}"
-            )
+        )
         self.metadata = dataclasses.replace(metadata, fake_mode=None)
 
         # Some debugging/verification
         for k in MetaTensorDesc._UNSERIALIZABLE:
             if k in ("fake_mode", "view_func"):
                 continue
-            if getattr(self.metadata, k) is not None:
-                raise AssertionError(f"not None: {k}: {getattr(self.metadata, k)}")
+            assert getattr(self.metadata, k) is None, (
+                f"not None: {k}: {getattr(self.metadata, k)}"
+            )
 
     def unpickle(self, unpickle_state: _UnpickleState) -> FakeTensor:
         # TODO: make common w/ _output_from_cache_entry() in fake_tensor.py?
@@ -543,10 +535,7 @@ class _TorchNumpyPickleData:
             return None
 
         # pyrefly: ignore [unbound-name]
-        if np != getattr(importlib.import_module(mod), name):
-            raise AssertionError(
-                f"Numpy object mismatch for {mod}.{name}"  # pyrefly: ignore [unbound-name]
-            )
+        assert np == getattr(importlib.import_module(mod), name)
         # pyrefly: ignore [unbound-name]
         return cls(mod, name)
 
@@ -570,10 +559,7 @@ class _GraphModulePickleData:
             _python_code = gm._real_recompile()
         else:
             _python_code = gm.recompile()
-        if hasattr(gm, "__getstate__"):
-            self.gm_dict = gm.__getstate__()
-        else:
-            self.gm_dict = gm.__dict__.copy()
+        self.gm_dict = gm.__dict__.copy()
         del self.gm_dict["_graph"]
         self.graph = _GraphPickleData(gm._graph, options)
 
@@ -625,8 +611,7 @@ class _NodePickleData:
             _NodePickleData, lambda n: mapping[n], self.kwargs
         )
         target = self.target.unpickle(unpickle_state)
-        if not (callable(target) or isinstance(target, str)):
-            raise AssertionError(f"target must be callable or str, got {type(target)}")
+        assert callable(target) or isinstance(target, str)
         node = graph.create_node(self.op, target, args, kwargs, self.name, self.type)
         node.meta = self.meta
         return node
@@ -646,13 +631,9 @@ class _OpPickleData:
             return _OpStrPickleData(op)
 
         if isinstance(getattr(op, "__wrapped__", None), AOTCompiledArtifact):
-            if not hasattr(op, "__wrapped__"):
-                raise AssertionError("op missing __wrapped__ attribute")
+            assert hasattr(op, "__wrapped__")
             artifact = op.__wrapped__
-            if not isinstance(artifact, AOTCompiledArtifact):
-                raise AssertionError(
-                    f"Expected AOTCompiledArtifact, got {type(artifact)}"
-                )
+            assert isinstance(artifact, AOTCompiledArtifact)
             return _OpPrecompiledPickleData(artifact)
 
         name = torch.fx.Node._pretty_print_target(op)
@@ -723,8 +704,7 @@ class _OpOverloadPickleData(_OpPickleData):
 
     def unpickle(self, unpickle_state: _UnpickleState) -> torch._ops.OpOverload:
         obj = self._lookup_global_by_name(self.name)
-        if not isinstance(obj, torch._ops.OpOverload):
-            raise AssertionError(f"Expected OpOverload, got {type(obj)}")
+        assert isinstance(obj, torch._ops.OpOverload)
         return obj
 
 
@@ -734,8 +714,7 @@ class _OpOverloadPacketPickleData(_OpPickleData):
 
     def unpickle(self, unpickle_state: _UnpickleState) -> torch._ops.OpOverloadPacket:
         obj = self._lookup_global_by_name(self.name)
-        if not isinstance(obj, torch._ops.OpOverloadPacket):
-            raise AssertionError(f"Expected OpOverloadPacket, got {type(obj)}")
+        assert isinstance(obj, torch._ops.OpOverloadPacket)
         return obj
 
 
