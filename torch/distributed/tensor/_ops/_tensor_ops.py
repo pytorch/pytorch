@@ -271,7 +271,11 @@ def new_factory_strategy(op_schema: OpSchema) -> StrategyType:
 
 @register_op_strategy(aten.bucketize.Tensor)
 def gen_bucketize_strategy(op_schema: OpSchema) -> StrategyType:
-    """Just propagate input sharding, but expect replicated for boundaries input."""
+    """
+    Propagate input sharding to output, but expect replicated for boundaries input.
+    For Partial inputs, convert to Replicate since bucketize returns indices
+    which cannot be meaningfully combined with sum/avg reductions.
+    """
     mesh = op_schema.get_mesh_from_args()
     input_strategy, boundaries_strategy = op_schema.args_schema
     bucketize_strategy = OpStrategy([])
@@ -280,9 +284,15 @@ def gen_bucketize_strategy(op_schema: OpSchema) -> StrategyType:
     if not isinstance(boundaries_strategy, OpStrategy):
         raise AssertionError(f"Expected OpStrategy, got {type(boundaries_strategy)}")
     for arg_strategy in input_strategy.strategies:
+        # Convert Partial placements to Replicate - bucketize returns indices
+        # which cannot be combined with sum/avg reductions
+        placements = tuple(
+            Replicate() if isinstance(p, Partial) else p
+            for p in arg_strategy.output_spec.placements
+        )
         arg_spec = DTensorSpec(
             mesh,
-            arg_strategy.output_spec.placements,
+            placements,
             arg_strategy.output_spec.tensor_meta,
         )
         replica_spec = DTensorSpec(
