@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
 import dataclasses
-import gc
 import os
 import tempfile
 import unittest
@@ -864,7 +863,6 @@ class TestDTensorStateDictStager(DTensorTestBase):
             )
             f.result()
 
-            gc.collect()
             baseline = psutil.Process().memory_info().rss / (1024 * 1024)
 
             num_saves = 5
@@ -876,7 +874,6 @@ class TestDTensorStateDictStager(DTensorTestBase):
                 )
                 f.result()
 
-            gc.collect()
             final = psutil.Process().memory_info().rss / (1024 * 1024)
 
             growth = final - baseline

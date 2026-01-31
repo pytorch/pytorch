@@ -1,6 +1,5 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
-import gc
 import inspect
 import os
 import warnings
@@ -300,7 +299,6 @@ def async_save(
                 "A CPU backend must be enabled for async save; try initializing process group with 'cpu:gloo,cuda:nccl'"
             )
 
-    _internally_created_stager = False
     if async_stager is None:
         if storage_writer is not None and isinstance(storage_writer, AsyncStager):
             # bwc with old storage_writers
@@ -314,7 +312,6 @@ def async_save(
                     False,
                 )
             )
-            _internally_created_stager = True
 
     state_dict = _stateful_to_state_dict(state_dict)
 
@@ -339,11 +336,6 @@ def async_save(
         no_dist=no_dist,
         use_collectives=use_collectives,
     )
-
-    def _gc_callback(_: Future) -> None:
-        gc.collect()
-
-    upload_future.add_done_callback(_gc_callback)
 
     if isinstance(staging_future_or_state_dict, Future):
         staging_future = staging_future_or_state_dict
@@ -376,8 +368,6 @@ def async_save(
                 async_stager.synchronize_staging()
 
         maybe_synchronize_staging()
-        if _internally_created_stager:
-            async_stager.close()
         return upload_future
 
 
