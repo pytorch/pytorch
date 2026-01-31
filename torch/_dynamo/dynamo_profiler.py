@@ -75,7 +75,7 @@ class FunctionTraceTiming:
         return self.tottime_ns / 1e6
 
     @property
-    def caller_key(self) -> tuple[str, str, int] | None:
+    def caller_key(self) -> tuple[str, int, str] | None:
         """Return caller as a pstats-compatible key tuple."""
         if self.caller_func_name is not None:
             return (
@@ -298,10 +298,10 @@ class DynamoProfilerState:
         dummy_profile.disable()
         stats = pstats.Stats(dummy_profile, stream=io.StringIO())
 
-        stats.stats = stats_dict
-        stats.total_calls = sum(s[1] for s in stats_dict.values())
-        stats.prim_calls = sum(s[0] for s in stats_dict.values())
-        stats.total_tt = sum(s[2] for s in stats_dict.values())
+        stats.stats = stats_dict  # type: ignore[attr-defined]
+        stats.total_calls = sum(s[1] for s in stats_dict.values())  # type: ignore[attr-defined]
+        stats.prim_calls = sum(s[0] for s in stats_dict.values())  # type: ignore[attr-defined]
+        stats.total_tt = sum(s[2] for s in stats_dict.values())  # type: ignore[attr-defined]
 
         if output_file:
             stats.dump_stats(output_file)
@@ -392,7 +392,7 @@ class DynamoProfilerState:
 
         stats = self.generate_pstats(output_file, print_raw=True)
         print("\n=== Dynamo Profiler (pstats) ===")
-        stats.stream = sys.stdout
+        stats.stream = sys.stdout  # type: ignore[attr-defined]
         stats.sort_stats("cumulative").print_stats()
 
         if output_file:
