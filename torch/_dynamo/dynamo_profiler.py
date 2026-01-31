@@ -106,7 +106,7 @@ class ProfilerStackEntry:
     filename: str
     firstlineno: int
     start_time_ns: int
-    child_time_ns: int  # Accumulated time spent in children
+    child_time_ns: int  # Accumulated time spent in traced children
 
 
 class DynamoProfilerState:
@@ -234,9 +234,11 @@ class DynamoProfilerState:
                 edge = caller_edges[key][caller_key]
                 edge["ncalls"] += 1
                 edge["tottime"] += t.tottime_ns / 1e9
+                # Always add cumtime to edges for visualization (gprof2dot)
+                # Function-level cumtime is already correct (only primitive calls)
+                edge["cumtime"] += t.cumtime_ns / 1e9
                 if t.is_primitive_call:
                     edge["pcalls"] += 1
-                    edge["cumtime"] += t.cumtime_ns / 1e9
 
         if print_raw:
             sorted_items = sorted(

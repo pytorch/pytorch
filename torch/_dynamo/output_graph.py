@@ -29,6 +29,7 @@ import logging
 import operator
 import re
 import sys
+import time
 import traceback
 import warnings
 import weakref
@@ -795,16 +796,66 @@ class OutputGraph(OutputGraphCommon):
         # dynamo_flat_name_to_original_fqn mapping.
         self.used_inlined_inbuilt_modules_names: OrderedSet[str] = OrderedSet()
 
-    def mark_bytecode_tracing_start(self) -> None:
+    def mark_bytecode_tracing_start(self, code: CodeType) -> None:
         self.compiler_trace_stack.enter_context(
             dynamo_timed(
                 "bytecode_tracing",
                 log_pt2_compile_event=True,
             )
         )
+        # Start profiler timing for the root function
+        if config.dynamo_profiler and self.tracing_context is not None:
+            from torch._dynamo.dynamo_profiler import DynamoProfilerState
+
+            if self.tracing_context.profiler_state is None:
+                self.tracing_context.profiler_state = DynamoProfilerState()
+            self._profiler_start_ns = time.time_ns()
+            self._profiler_code = code
+            self._profiler_is_primitive = self.tracing_context.profiler_state.push(
+                code.co_name,
+                code.co_filename,
+                code.co_firstlineno,
+                self._profiler_start_ns,
+            )
 
     def mark_bytecode_tracing_stop(self) -> None:
         self.compiler_trace_stack.close()
+        # Record profiler timing for the root function and dump stats
+        if (
+            config.dynamo_profiler
+            and self.tracing_context is not None
+            and self.tracing_context.profiler_state is not None
+            and hasattr(self, "_profiler_start_ns")
+        ):
+            from torch._dynamo.dynamo_profiler import FunctionTraceTiming
+
+            stack_entry = self.tracing_context.profiler_state.pop()
+            trace_end_ns = time.time_ns()
+            if stack_entry is not None:
+                cumtime_ns = trace_end_ns - self._profiler_start_ns
+                tottime_ns = cumtime_ns - stack_entry.child_time_ns
+                code = self._profiler_code
+                timing = FunctionTraceTiming(
+                    func_name=code.co_name,
+                    filename=code.co_filename,
+                    firstlineno=code.co_firstlineno,
+                    cumtime_ns=cumtime_ns,
+                    tottime_ns=tottime_ns,
+                    bytecode_count=len(code.co_code),
+                    inline_depth=0,
+                    caller_func_name=None,
+                    caller_filename=None,
+                    caller_firstlineno=None,
+                    is_primitive_call=self._profiler_is_primitive,
+                    call_stack=(),
+                )
+                self.tracing_context.profiler_state.record_timing(timing)
+
+            # Dump profiler stats
+            output_file = None
+            if isinstance(config.dynamo_profiler, str):
+                output_file = config.dynamo_profiler
+            self.tracing_context.profiler_state.dump_stats(output_file)
 
     def install_builtins_dict_in_fglobals(self) -> str:
         f_builtins = get_builtins_dict(self.global_scope)

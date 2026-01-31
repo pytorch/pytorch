@@ -56,7 +56,7 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
             self.assertIsInstance(t, FunctionTraceTiming)
             self.assertGreater(t.trace_time_ns, 0)
             self.assertGreater(t.bytecode_count, 0)
-            self.assertGreaterEqual(t.inline_depth, 1)
+            self.assertGreaterEqual(t.inline_depth, 0)  # Root function has depth 0
 
         # Verify we captured the expected functions
         func_names = {t.func_name for t in captured_timings}
