@@ -210,9 +210,6 @@ Tensor& range_cuda_out(const Scalar& start, const Scalar& end, const Scalar& ste
 Tensor& arange_cuda_out(const Scalar& start, const Scalar& end, const Scalar& step, Tensor& result) {
   AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, result.scalar_type(), "arange_cuda", [&]() {
     using accscalar_t = at::acc_type<scalar_t, true>;
-    auto xstart = start.to<accscalar_t>();
-    auto xend = end.to<accscalar_t>();
-    auto xstep = step.to<accscalar_t>();
 
     arange_check_bounds(start, end, step);
 
@@ -223,10 +220,23 @@ Tensor& arange_cuda_out(const Scalar& start, const Scalar& end, const Scalar& st
     // and the effective output size starts differing on CPU vs GPU because of precision issues, which
     // we dont want.
     // the corner-case we do want to take into account is int64_t, which has higher precision than double
+    // However, if any input is floating-point, we must use double to avoid truncation
+    // (e.g., step=0.5 truncated to int64_t=0 would cause division by zero).
+    // See https://github.com/pytorch/pytorch/issues/173574
     double size_d;
+    bool inputs_are_integral = !start.isFloatingPoint() && !end.isFloatingPoint() && !step.isFloatingPoint();
     if constexpr (std::is_same_v<scalar_t, int64_t>) {
-      int64_t sgn = (xstep > 0) - (xstep < 0);
-      size_d = std::ceil((xend - xstart + xstep - sgn) / xstep);
+      if (inputs_are_integral) {
+        auto xstart = start.to<accscalar_t>();
+        auto xend = end.to<accscalar_t>();
+        auto xstep = step.to<accscalar_t>();
+        int64_t sgn = (xstep > 0) - (xstep < 0);
+        size_d = std::ceil((xend - xstart + xstep - sgn) / xstep);
+      } else {
+        // Float inputs with int64_t output: use double to avoid truncation
+        size_d = std::ceil(static_cast<double>(end.to<double>() - start.to<double>())
+                            / step.to<double>());
+      }
     } else {
       size_d = std::ceil(static_cast<double>(end.to<double>() - start.to<double>())
                           / step.to<double>());
@@ -249,11 +259,37 @@ Tensor& arange_cuda_out(const Scalar& start, const Scalar& end, const Scalar& st
     bool is_contiguous = result.is_contiguous();
     Tensor r = !is_contiguous ? at::empty_like(result, LEGACY_CONTIGUOUS_MEMORY_FORMAT) : result;
 
-    gpu_kernel_with_index(r, [xstart, xstep]GPU_LAMBDA(int64_t ind) -> scalar_t {
-        accscalar_t inc = xstep * static_cast<accscalar_t>(ind);
-        accscalar_t val = xstart + inc;
-        return static_cast<scalar_t>(val);
-    });
+    // For value computation, we use double when inputs are floating-point
+    // with an integral output type, to avoid truncation during computation.
+    // See https://github.com/pytorch/pytorch/issues/173574
+    if constexpr (std::is_same_v<scalar_t, int64_t>) {
+      if (!inputs_are_integral) {
+        // Use double for computation, then cast to int64_t
+        auto xstart_d = start.to<double>();
+        auto xstep_d = step.to<double>();
+        gpu_kernel_with_index(r, [xstart_d, xstep_d]GPU_LAMBDA(int64_t ind) -> scalar_t {
+            double inc = xstep_d * static_cast<double>(ind);
+            double val = xstart_d + inc;
+            return static_cast<scalar_t>(val);
+        });
+      } else {
+        auto xstart = start.to<accscalar_t>();
+        auto xstep = step.to<accscalar_t>();
+        gpu_kernel_with_index(r, [xstart, xstep]GPU_LAMBDA(int64_t ind) -> scalar_t {
+            accscalar_t inc = xstep * static_cast<accscalar_t>(ind);
+            accscalar_t val = xstart + inc;
+            return static_cast<scalar_t>(val);
+        });
+      }
+    } else {
+      auto xstart = start.to<accscalar_t>();
+      auto xstep = step.to<accscalar_t>();
+      gpu_kernel_with_index(r, [xstart, xstep]GPU_LAMBDA(int64_t ind) -> scalar_t {
+          accscalar_t inc = xstep * static_cast<accscalar_t>(ind);
+          accscalar_t val = xstart + inc;
+          return static_cast<scalar_t>(val);
+      });
+    }
 
     if(!is_contiguous) {
       result.copy_(r);

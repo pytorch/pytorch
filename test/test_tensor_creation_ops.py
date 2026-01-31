@@ -2601,6 +2601,33 @@ class TestTensorCreation(TestCase):
                                    torch.tensor(3),
                                    torch.tensor(1, dtype=torch.int16)).dtype)
 
+    def test_arange_float_inputs_integral_out(self, device):
+        # Test that arange with float inputs and integral out tensor does not crash
+        # and produces the correct result (truncating float values to integers).
+        # Previously this caused a SIGFPE due to division by zero when step=0.5
+        # was truncated to 0 during size computation.
+        # See https://github.com/pytorch/pytorch/issues/173574
+
+        # Test the exact case from the issue
+        out = torch.full((10,), 2, dtype=torch.int64, device=device)
+        result = torch.arange(2.0, 7.0, 0.5, out=out)
+        # Should have 10 elements: 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0, 6.5
+        # Truncated to integers: 2, 2, 3, 3, 4, 4, 5, 5, 6, 6
+        expected = torch.tensor([2, 2, 3, 3, 4, 4, 5, 5, 6, 6], dtype=torch.int64, device=device)
+        self.assertEqual(result, expected)
+
+        # Test with different float step
+        out2 = torch.empty(5, dtype=torch.int64, device=device)
+        result2 = torch.arange(0.0, 5.0, 1.0, out=out2)
+        expected2 = torch.tensor([0, 1, 2, 3, 4], dtype=torch.int64, device=device)
+        self.assertEqual(result2, expected2)
+
+        # Test that integer inputs with integer output still works
+        out3 = torch.empty(5, dtype=torch.int64, device=device)
+        result3 = torch.arange(0, 5, 1, out=out3)
+        expected3 = torch.tensor([0, 1, 2, 3, 4], dtype=torch.int64, device=device)
+        self.assertEqual(result3, expected3)
+
     # cannot call storage() on meta tensor
     @skipMeta
     def test_empty_strided(self, device):

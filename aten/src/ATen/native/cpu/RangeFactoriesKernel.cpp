@@ -21,6 +21,30 @@ using namespace vec;
 void arange_kernel(TensorIterator& iter, const Scalar& scalar_start, const Scalar& scalar_steps, const Scalar& scalar_step) {
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "arange_cpu", [&]() {
     using accscalar_t = at::acc_type<scalar_t, false>;
+    // Check if inputs are floating-point - if so, we need to use double for int64_t output
+    // to avoid truncation (e.g., step=0.5 truncated to int64_t=0).
+    // See https://github.com/pytorch/pytorch/issues/173574
+    bool inputs_are_integral = !scalar_start.isFloatingPoint() &&
+                               !scalar_steps.isFloatingPoint() &&
+                               !scalar_step.isFloatingPoint();
+    if constexpr (std::is_same_v<scalar_t, int64_t>) {
+      if (!inputs_are_integral) {
+        // Use double for computation, then cast to int64_t
+        auto start = scalar_start.to<double>();
+        auto steps = scalar_steps.to<double>();
+        auto step = scalar_step.to<double>();
+        at::parallel_for(0, static_cast<int64_t>(steps), internal::GRAIN_SIZE, [&](int64_t p_begin, int64_t p_end) {
+          int64_t idx(p_begin);
+          TensorIterator it(iter);
+          cpu_serial_kernel(
+              it,
+              [start, step, &idx]() -> scalar_t {
+                return static_cast<scalar_t>(start + step * (idx++));
+              }, {p_begin, p_end});
+        });
+        return;
+      }
+    }
     auto start = scalar_start.to<accscalar_t>();
     auto steps = scalar_steps.to<accscalar_t>();
     auto step = scalar_step.to<accscalar_t>();
