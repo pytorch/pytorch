@@ -1169,6 +1169,31 @@ class TestLinalg(TestCase):
         self.assertEqual(eigh_out.eigenvalues.sort(descending=True).values[:2], [1.0e5, 511.0], atol=1.0, rtol=1.0e-2)
         self.assertEqual(svd_out.S[:2], [1.0e5, 511.0], atol=1.0, rtol=1.0e-2)
 
+    @onlyCPU
+    @skipCPUIfNoLapack
+    @dtypes(*floating_and_complex_types())
+    def test_eigh_large_matrix_error_message(self, device, dtype):
+        # Test that linalg.eigh provides a clear error message for matrices
+        # that are too large for LAPACK (which uses 32-bit integers)
+        # See issue #92141 and discussion therein
+        # https://github.com/pytorch/pytorch/issues/92141#issuecomment-1382241971# See issue #92141
+
+        # For SYEVD/HEEVD, LAPACK requires workspace length:
+        #     lwork = 2*n^2 + 6*n + 1
+        # When this exceeds INT32_MAX (2,147,483,647), LAPACK overflows.
+        # Solving for n gives n_max ≈ 32760, so n=32761 exceeds the limit.
+        
+        large_size = 32761 # Size imediatly above the theoretical limit for Lapack
+
+        a = torch.randn(large_size, large_size, dtype=dtype, device=device)
+        # Make it symmetric/Hermitian (use mH for complex, t for real)
+        a = a + a.mH
+
+        with self.assertRaisesRegex(
+                RuntimeError,
+                r"linalg\.eigh: Matrix size \(\d+\) exceeds the maximum value \(\d+\) supported by LAPACK"):
+            torch.linalg.eigh(a)
+            
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
