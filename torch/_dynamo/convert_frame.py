@@ -825,7 +825,7 @@ def trace_frame(
 
     def run_tracer() -> None:
         try:
-            tracer.output.mark_bytecode_tracing_start(code)
+            tracer.output.mark_bytecode_tracing_start()
             with tracing(tracer.output.tracing_context), tracer.set_current_tx():
                 tracer.run()
         except exc.UnspecializeRestartAnalysis:
