@@ -825,64 +825,9 @@ def trace_frame(
 
     def run_tracer() -> None:
         try:
-            tracer.output.mark_bytecode_tracing_start()
+            tracer.output.mark_bytecode_tracing_start(code)
             with tracing(tracer.output.tracing_context), tracer.set_current_tx():
-                # Push root function onto profiler stack
-                tc = tracer.output.tracing_context
-                profiler_active = config.dynamo_profiler and tc is not None
-                trace_start_ns = None
-                is_primitive_call = True
-                if profiler_active:
-                    import time
-
-                    from torch._dynamo.dynamo_profiler import DynamoProfilerState
-
-                    if tc.profiler_state is None:
-                        tc.profiler_state = DynamoProfilerState()
-
-                    trace_start_ns = time.time_ns()
-                    is_primitive_call = tc.profiler_state.push(
-                        code.co_name,
-                        code.co_filename,
-                        code.co_firstlineno,
-                        trace_start_ns,
-                    )
-
-                try:
-                    tracer.run()
-                finally:
-                    # Pop root function and record timing
-                    if profiler_active and trace_start_ns is not None:
-                        import time
-
-                        from torch._dynamo.dynamo_profiler import FunctionTraceTiming
-
-                        stack_entry = tc.profiler_state.pop()
-                        trace_end_ns = time.time_ns()
-                        if stack_entry is not None:
-                            cumtime_ns = trace_end_ns - trace_start_ns
-                            tottime_ns = cumtime_ns - stack_entry.child_time_ns
-                            timing = FunctionTraceTiming(
-                                func_name=code.co_name,
-                                filename=code.co_filename,
-                                firstlineno=code.co_firstlineno,
-                                cumtime_ns=cumtime_ns,
-                                tottime_ns=tottime_ns,
-                                bytecode_count=len(code.co_code),
-                                inline_depth=0,
-                                caller_func_name=None,
-                                caller_filename=None,
-                                caller_firstlineno=None,
-                                is_primitive_call=is_primitive_call,
-                                call_stack=(),
-                            )
-                            tc.profiler_state.record_timing(timing)
-
-                        # Dump profiler stats now that all timings are recorded
-                        output_file = None
-                        if isinstance(config.dynamo_profiler, str):
-                            output_file = config.dynamo_profiler
-                        tc.profiler_state.dump_stats(output_file)
+                tracer.run()
         except exc.UnspecializeRestartAnalysis:
             speculation_log.clear()  # type: ignore[has-type]
             raise
