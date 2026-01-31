@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import collections
 import functools
-import itertools
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, NewType, Optional, Protocol, TYPE_CHECKING, TypeVar, Union
@@ -189,13 +188,7 @@ class MemoryFormatMeta:
             or is_traceable_wrapper_subclass(t)
         )
         if not use_memory_format:
-            is_static_shape = True
-            for s in itertools.chain(t.shape, t.stride()):
-                if not isinstance(s, int):
-                    is_static_shape = False
-                    break
-
-            use_memory_format = not is_static_shape
+            use_memory_format = t._has_symbolic_sizes_strides
 
         if use_memory_format:
             return MemoryFormatMeta(
@@ -1027,10 +1020,10 @@ class AOTConfig:
     Configuration for AOTDispatcher
     """
 
-    fw_compiler: Callable
-    bw_compiler: Callable
-    partition_fn: Callable
-    decompositions: dict[OpOverload, Callable]
+    fw_compiler: Callable[..., Any] | None
+    bw_compiler: Callable[..., Any] | None
+    partition_fn: Callable[..., Any] | None
+    decompositions: dict[OpOverload, Callable[..., Any]] | None
     num_params_buffers: int
     aot_id: int
     keep_inference_input_mutations: bool
@@ -1039,7 +1032,7 @@ class AOTConfig:
     dynamic_shapes: bool = False
     aot_autograd_arg_pos_to_source: Optional[list[Source]] = None
     static_input_indices: Optional[list[int]] = None
-    inference_compiler: Optional[Callable] = None
+    inference_compiler: Callable[..., Any] | None = None
     enable_log: bool = True
     # this is always false outside of export.
     pre_dispatch: bool = False
