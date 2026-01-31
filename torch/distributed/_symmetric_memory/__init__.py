@@ -2148,6 +2148,3 @@ __all__ = [
     "get_signal_pad_size",
     "get_mem_pool",
 ]
-
-# Register symm_mem args for all operations
-from . import _register_ops  # noqa: F401

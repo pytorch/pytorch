@@ -856,6 +856,24 @@ class TORCH_API Library final {
   template <class CurClass>
   inline detail::ClassNotSelected class_(detail::SelectiveStr<false> className);
 
+  /// Register which arguments require symmetric memory allocation for an operator.
+  /// This is used by the Inductor to automatically apply comm buffer reuse
+  /// optimizations for operators that use symmetric memory.
+  ///
+  /// \param name The name of the operator (without schema)
+  /// \param arg_names List of argument names that require symmetric memory
+  ///
+  /// ```
+  /// // Example:
+  /// TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
+  ///   m.def("one_shot_all_reduce(Tensor input, str reduce_op, str group_name) -> Tensor");
+  ///   m.register_symm_mem_args("one_shot_all_reduce", {"input"});
+  /// }
+  /// ```
+  Library& register_symm_mem_args(
+      const char* name,
+      std::initializer_list<const char*> arg_names) &;
+
   // De-registers all registrations created with this Library
   void reset();
 
@@ -894,6 +912,12 @@ class TORCH_API Library final {
 #if defined(TORCH_LIBRARY_THREAD_UNSAFE_LAZY_INIT) && defined(C10_MOBILE)
 void initialize_torch_libraries();
 #endif
+
+/// \private
+/// Get the C++ symm_mem args registry. This is used internally by Python
+/// to merge C++ and Python registrations.
+TORCH_API const std::unordered_map<std::string, std::vector<std::string>>&
+getCppSymmMemArgsRegistry();
 
 namespace detail {
 
