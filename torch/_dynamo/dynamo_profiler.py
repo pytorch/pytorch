@@ -350,10 +350,6 @@ class DynamoProfilerState:
                     "--node-label=total-time-percentage",
                     "--node-label=self-time-percentage",
                     "--node-label=total-time",
-                    "-n",
-                    "0.1",  # Show nodes with >= 0.1% total time
-                    "-e",
-                    "0.01",  # Show edges with >= 0.01% total time
                     profile_file,
                 ],
                 stdout=subprocess.PIPE,
