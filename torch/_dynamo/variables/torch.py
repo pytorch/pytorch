@@ -660,29 +660,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         )
         from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
 
-        @register(torch.amp.autocast_mode._enter_autocast)
-        def handle__enter_autocast(
-            self,
-            tx: "InstructionTranslator",
-            *args: VariableTracker,
-            **kwargs: VariableTracker,
-        ) -> VariableTracker:
-            m = AutocastModeVariable([a.as_python_constant() for a in args])
-            m.enter(tx)
-            return m
-
-        @register(torch.amp.autocast_mode._exit_autocast)
-        def handle__exit_autocast(
-            self,
-            tx: "InstructionTranslator",
-            *args: VariableTracker,
-            **kwargs: VariableTracker,
-        ) -> VariableTracker:
-            assert len(args) == 1
-            assert isinstance(args[0], AutocastModeVariable)
-            args[0].exit(tx)
-            return ConstantVariable.create(None)
-
         @register(*tracing_state_functions())
         def handle_tracing_state_functions(
             self,

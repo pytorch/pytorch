@@ -2439,8 +2439,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.accelerator.set_stream",
         "torch.accelerator.synchronize",
         "torch.align_tensors",
-        "torch.amp.autocast_mode._enter_autocast",
-        "torch.amp.autocast_mode._exit_autocast",
         "torch.amp.autocast_mode.autocast_decorator",
         "torch.amp.autocast_mode.custom_bwd",
         "torch.amp.autocast_mode.custom_fwd",
