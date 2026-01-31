@@ -191,6 +191,7 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.VLLM_TEST_HUGGING_FACE_TOKEN }}
           HF_HOME: /mnt/hf_cache
+          TRANSFORMERS_OFFLINE: 1
           # vLLM-related environment variables
           ENGINE_VERSION: v1
           SAVE_TO_PYTORCH_BENCHMARK_FORMAT: 1
