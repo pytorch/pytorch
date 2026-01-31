@@ -21,6 +21,8 @@ from collections.abc import Callable
 from contextlib import nullcontext
 from typing import Any, Optional, TYPE_CHECKING, Union
 
+from torch._library.fake_class_registry import FakeScriptObject
+
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -159,7 +161,7 @@ aten = torch.ops.aten
 # Returns a Callable and a ViewAndMutationMeta.
 # Currently, only export needs the ViewAndMutationMeta after this function.
 # TODO: Refactor this
-DispatchReturn = tuple[Callable, ViewAndMutationMeta]
+DispatchReturn = tuple[Callable[..., Any], ViewAndMutationMeta]
 
 
 def _create_wrappers_for_dispatch(needs_autograd: bool) -> list[CompilerWrapper]:
@@ -538,7 +540,7 @@ def collect_fw_donated_buffer_idxs(
     fw_ins: list[Optional[FakeTensor]],
     user_fw_outs: list[Optional[FakeTensor]],
     bw_outs: list[Optional[FakeTensor]],
-    saved_tensors: list[FakeTensor],
+    saved_tensors: list[FakeTensor | None],
 ) -> list[int]:
     """
     Checks if the saved tensors are donated buffers, which means a saved tensor is not
@@ -1674,6 +1676,7 @@ def _aot_stage2a_partition(
                 fx_g = torch._functorch.config.joint_custom_pass(fx_g, joint_inputs)
 
             static_lifetime_input_indices = fw_metadata.static_input_indices
+            assert aot_config.partition_fn is not None
             fw_module, bw_module = aot_config.partition_fn(
                 fx_g,
                 joint_inputs,
@@ -1719,26 +1722,33 @@ def _aot_stage2a_partition(
             fw_outs_saved_for_bw = fw_outs[num_inner_fwd_outputs:]
             num_fw_outs_saved_for_bw = len(fw_outs_saved_for_bw)
             symint_outs_saved_for_bw = []
+            opaque_outs_saved_for_bw = []
             for idx, node in enumerate(fw_outs_saved_for_bw):
                 if is_sym_node(node):
                     symint_outs_saved_for_bw.append(node)
-                elif (
-                    isinstance(node, torch.fx.Node)
-                    and "val" in getattr(node, "meta", {})
-                    and isinstance(node.meta["val"], FakeTensor)
+                elif isinstance(node, torch.fx.Node) and "val" in getattr(
+                    node, "meta", {}
                 ):
-                    # record dynamic tensor activations
-                    dynamic_dims: set[int] = {
-                        dim
-                        for dim, size in enumerate(node.meta["val"].shape)
-                        if not isinstance(size, int)
-                    }
-                    if dynamic_dims:
-                        fw_metadata.dynamic_saved_tensors_idxs[idx] = dynamic_dims
+                    if isinstance(node.meta["val"], FakeTensor):
+                        # record dynamic tensor activations
+                        dynamic_dims: set[int] = {
+                            dim
+                            for dim, size in enumerate(node.meta["val"].shape)
+                            if not isinstance(size, int)
+                        }
+                        if dynamic_dims:
+                            fw_metadata.dynamic_saved_tensors_idxs[idx] = dynamic_dims
+                    elif isinstance(node.meta["val"], FakeScriptObject):
+                        opaque_outs_saved_for_bw.append(node)
 
             num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
+            num_opaque_objects_saved_for_bw = len(opaque_outs_saved_for_bw)
             fw_metadata.num_symints_saved_for_bw = num_symints_saved_for_bw
+            fw_metadata.num_opaque_objects_saved_for_bw = (
+                num_opaque_objects_saved_for_bw
+            )
             inner_meta.num_symints_saved_for_bw = num_symints_saved_for_bw
+            inner_meta.num_opaque_objects_saved_for_bw = num_opaque_objects_saved_for_bw
 
             # See Note [Activations with no version counter checks in eager]
             # Count tensors saved with no version counter check.
@@ -1993,6 +2003,7 @@ def _aot_stage2b_bw_compile(
                         # GraphModule. Deepcopying tensors under fake mode is not supported and will
                         # raise when attempting to set storage.
                         bw_module_copy = copy.deepcopy(bw_module)
+                    assert aot_config.bw_compiler is not None
                     compiled_bw_func = aot_config.bw_compiler(
                         bw_module_copy, placeholder_list
                     )
@@ -2382,6 +2393,7 @@ def _aot_stage2b_compile_forward_or_inference(
             )
 
         with TracingContext.report_output_strides() as fwd_output_strides:
+            # pyrefly: ignore[not-callable]
             compiled_fw_func = compiler(fw_module, adjusted_flat_args)
 
         # Make boxed if needed
