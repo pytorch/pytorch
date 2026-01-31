@@ -35,7 +35,7 @@ from .common import (
 )
 from .simd import NodeInfo, prefix_is_reduction, SIMDScheduling
 from .simd_kernel_features import SIMDKernelFeatures
-from .triton import gen_common_triton_imports, TritonKernel
+from .triton import TritonKernel
 from .triton_utils import config_of, equal_1_arg_indices, signature_to_meta
 
 
@@ -359,16 +359,19 @@ class ComboKernel(Kernel):
                 code.splice(f"pid_offset = pid // {num_kernels}")
 
     def __init__(
-        self, enable_autotune: bool = False, mixed_sizes: bool = False
+        self,
+        triton_kernel_cls: type[TritonKernel],
+        enable_autotune: bool = False,
+        mixed_sizes: bool = False,
     ) -> None:
         super().__init__()
+        self.triton_kernel_cls = triton_kernel_cls
         self.sub_kernels: list[TritonKernel] = []
         self.iter_vars_count = itertools.count()
         self.grids: list[list[int]] = []
         self.min_x_blocks_list: list[Union[int, str]] = []
         self.x_numels_list: list[Union[int, str]] = []
         self.y_tree_list: list = []
-        self.z_tree_list: list = []
         self.enable_autotune = enable_autotune
         self.mixed_sizes = mixed_sizes
         self.dispatch_class: Optional[
@@ -397,12 +400,13 @@ class ComboKernel(Kernel):
         tiling: dict[str, sympy.Expr],
         features: SIMDKernelFeatures,
         optimize_mask: bool,
+        triton_kernel_cls: type[TritonKernel],
     ) -> TritonKernel:
         """
         Only allow optimize_mask=True when 1) sequential dispatch is used,
         2) numels except x dimension are the same for each sub kernel.
         """
-        return TritonKernel(
+        return triton_kernel_cls(
             tiling,
             features=features,
             pid_cache={"tl.program_id(0)": "pid_offset"},
@@ -622,6 +626,8 @@ class ComboKernel(Kernel):
         size_hints_list: list[dict[str, int]],
         pointwise_with_reduce: bool = False,
     ) -> str:
+        """Write the @triton_heuristics.<heuristics> decorator line for the combo kernel."""
+
         can_use_32bit = all(k.index_dtype == "tl.int32" for k in self.sub_kernels)
         size_dtype = "tl.int32" if can_use_32bit else "tl.int64"
         for i, sub in enumerate(self.sub_kernels):
@@ -643,12 +649,13 @@ class ComboKernel(Kernel):
         mutated_args = self.get_mutated_args_sub_kernels()
         dispatch = self.dispatch_class
         assert dispatch is not None
+
         inductor_meta = {
             "grid_type": dispatch.grid_expr.__name__,
             "combo_grid_meta": self.combo_grid_meta(size_hints_list),
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
             "mutated_arg_names": mutated_args,
-            **TritonKernel.inductor_meta_common(),
+            **self.triton_kernel_cls.inductor_meta_common(),
         }
 
         sub_kernel = selected_kernel
@@ -693,42 +700,27 @@ class ComboKernel(Kernel):
 
     def codegen_blocks(self, code: IndentedBuffer) -> None:
         has_yblock = any(self.y_tree_list)
-        has_zblock = any(self.z_tree_list)
-        has_r1block = any("R1_BLOCK" in b for b in self.block_args)
-
-        # When we have R1_BLOCK (2D reduction tiling), we need smaller reduction
-        # block sizes to stay within Triton's tensor numel limit.
-        reduce_block_size = (
-            self.block_size_2d if has_r1block else self.block_size_reduce
-        )
 
         for block in self.block_args:
-            if "ZBLOCK" in block:
-                code.splice(f"{block}: tl.constexpr = {self.block_size_2d}")
-            elif "YBLOCK" in block:
-                code.splice(f"{block}: tl.constexpr = {self.block_size_2d}")
+            if "YBLOCK" in block:
+                size = self.block_size_2d
             elif "XBLOCK" in block:
-                if has_yblock or has_zblock:
-                    code.splice(f"{block}: tl.constexpr = {self.block_size_2d}")
-                else:
-                    code.splice(f"{block}: tl.constexpr = {self.block_size_1d}")
+                size = self.block_size_2d if has_yblock else self.block_size_1d
             elif "R0_BLOCK" in block:
-                code.splice(f"{block}: tl.constexpr = {reduce_block_size}")
-            elif "R1_BLOCK" in block:
-                code.splice(f"{block}: tl.constexpr = {reduce_block_size}")
+                size = self.block_size_reduce
             else:
                 raise AssertionError(f"{block} is not supported without autotuning")
+            code.splice(f"{block}: tl.constexpr = {size}")
 
     def get_block_args(self) -> list[ConstexprArg]:
         """
         Calculate blocks from sub_kernels and range_trees.
-        Update self.block_args, self.y_tree_list, self.z_tree_list
+        Update self.block_args, self.y_tree_list
         Return the block args
         """
         block_names = {}
         for i, sub_kernel in enumerate(self.sub_kernels):
             y_tree = None
-            z_tree = None
             for tree in sub_kernel.range_trees:
                 if tree.is_reduction and (
                     not sub_kernel.inside_reduction or sub_kernel.persistent_reduction
@@ -738,14 +730,11 @@ class ComboKernel(Kernel):
                     continue
                 if tree.prefix == "y":
                     y_tree = tree
-                elif tree.prefix == "z":
-                    z_tree = tree
                 if config.combo_kernel_per_subkernel_blocks:
                     block_names[f"{tree.prefix.upper()}BLOCK_{i}"] = tree.prefix
                 else:
                     block_names[f"{tree.prefix.upper()}BLOCK"] = tree.prefix
             self.y_tree_list.append(y_tree)
-            self.z_tree_list.append(z_tree)
         self.block_args = list(block_names.keys())
 
         return [ConstexprArg(x) for x in block_names]
@@ -814,7 +803,7 @@ class ComboKernel(Kernel):
         )
         code = IndentedBuffer()
 
-        code.splice(gen_common_triton_imports())
+        code.splice(self.triton_kernel_cls.gen_common_triton_imports())
         if config.benchmark_combo_kernel:
             code.splice(self.imports_for_benchmark_kernel())
 
@@ -1060,15 +1049,13 @@ class ComboKernel(Kernel):
                     else:
                         block_size = (
                             self.block_size_2d
-                            if (any(self.y_tree_list) or any(self.z_tree_list))
+                            if any(self.y_tree_list)
                             else self.block_size_1d
                         )
                         default_config[f"XBLOCK_{num}"] = block_size
 
                     if self.y_tree_list[num]:
                         default_config[f"YBLOCK_{num}"] = self.block_size_2d
-                    if self.z_tree_list[num]:
-                        default_config[f"ZBLOCK_{num}"] = self.block_size_2d
             else:
                 if "YBLOCK" in self.block_args:
                     default_config = {

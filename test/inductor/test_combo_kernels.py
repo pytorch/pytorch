@@ -1,7 +1,9 @@
 # Owner(s): ["module: inductor"]
 
 import contextlib
+import json
 import sys
+import tempfile
 import unittest
 
 import torch
@@ -404,6 +406,78 @@ class ComboKernelTests(TestCase):
         self.assertEqual(out_eager, out_compiled)
         # 3D poi (x, y, z) are separated from combo kernels
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+
+    @requires_gpu_and_triton
+    def test_combo_kernel_per_config_subkernel_block_size(self):
+        from torch.profiler import ProfilerActivity
+
+        def fn(t0, t1, t2, t3, t4, t5, t6, t7):
+            o0 = t0.contiguous(
+                memory_format=torch.channels_last
+            )  # ynumel=12,    xnumel=50176
+            o1 = t1.contiguous(
+                memory_format=torch.channels_last
+            )  # ynumel=192,   xnumel=9
+            o2 = t2.contiguous(
+                memory_format=torch.channels_last
+            )  # ynumel=4096,  xnumel=9
+            o3 = t3.contiguous(
+                memory_format=torch.channels_last
+            )  # ynumel=8192,  xnumel=9
+            o4 = t4.contiguous(
+                memory_format=torch.channels_last
+            )  # ynumel=16384, xnumel=9
+            o5 = t5.contiguous(
+                memory_format=torch.channels_last
+            )  # ynumel=32768, xnumel=9
+            o6 = t6.contiguous(
+                memory_format=torch.channels_last
+            )  # ynumel=65536, xnumel=9
+            o7 = t7.contiguous(
+                memory_format=torch.channels_last
+            )  # ynumel=65536, xnumel=9
+            return o0, o1, o2, o3, o4, o5, o6, o7
+
+        inps = [
+            torch.randn(4, 3, 224, 224, device="cuda"),
+            torch.randn(64, 3, 3, 3, device="cuda"),
+            torch.randn(64, 64, 3, 3, device="cuda"),
+            torch.randn(128, 64, 3, 3, device="cuda"),
+            torch.randn(128, 128, 3, 3, device="cuda"),
+            torch.randn(256, 128, 3, 3, device="cuda"),
+            torch.randn(256, 256, 3, 3, device="cuda"),
+            torch.randn(256, 256, 3, 3, device="cuda"),
+        ]
+        out_eager = fn(*inps)
+        fn_c = torch.compile(fn)
+
+        with tempfile.NamedTemporaryFile(suffix=".json") as trace_file:
+            trace_path = trace_file.name
+
+            with torch.profiler.profile(
+                activities=[ProfilerActivity.CUDA],
+                record_shapes=True,
+            ) as prof:
+                out_compiled, code = run_and_get_code(fn_c, *inps)
+
+            prof.export_chrome_trace(trace_path)
+
+            with open(trace_path) as f:
+                trace_json = json.load(f)
+
+            triton_events = [
+                event
+                for event in trace_json["traceEvents"]
+                if "triton_poi_fused_0" in event["name"]
+            ]
+            if torch._inductor.config.combo_kernel_per_subkernel_blocks:
+                # It uses max for y grid, flatten grid approach will optimize this
+                self.assertEqual([791, 1024, 1], triton_events[0]["args"]["grid"])
+            else:
+                self.assertEqual([791, 4096, 1], triton_events[0]["args"]["grid"])
+
+        self.assertEqual(out_eager, out_compiled)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
 
 class ComboKernelBenchmarkTests(TestCase):

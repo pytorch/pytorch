@@ -2877,7 +2877,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: gcd_out
+    CPU, CUDA, MPS: gcd_out
   tags: pointwise
 
 - func: gcd(Tensor self, Tensor other) -> Tensor
@@ -7328,12 +7328,14 @@
   dispatch:
     CUDA: _scaled_mm_cuda_v2
     XPU: _scaled_mm_xpu_v2
+  tags: needs_exact_strides
 
 - func: _scaled_mm_v2.out(Tensor self, Tensor mat2, Tensor[] scale_a, int[] recipe_a, int[] swizzle_a, Tensor[] scale_b, int[] recipe_b, int[] swizzle_b, Tensor? bias, ScalarType? out_dtype, int[] contraction_dim=[], bool use_fast_accum=False, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
   dispatch:
     CUDA: _scaled_mm_cuda_v2_out
     XPU: _scaled_mm_xpu_v2_out
+  tags: needs_exact_strides
 
 
 - func: _scaled_grouped_mm(Tensor self, Tensor mat2, Tensor scale_a, Tensor scale_b, Tensor? offs=None, Tensor? bias=None, Tensor? scale_result=None, ScalarType? out_dtype=None, bool use_fast_accum=False) -> Tensor
@@ -9062,6 +9064,7 @@
   variants: method
   dispatch:
     CPU, CUDA: geometric_
+    MPS: geometric_mps_
 
   # wrappers for TH functions
   autogen: geometric, geometric.out
@@ -9972,8 +9975,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: atan2_out
-    MPS: atan2_out_mps
+    CPU, CUDA, MPS: atan2_out
   tags: [core, pointwise]
 
 - func: atan2_(Tensor(a!) self, Tensor other) -> Tensor(a!)

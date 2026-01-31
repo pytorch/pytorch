@@ -30,6 +30,7 @@ from torch.utils._ordered_set import OrderedSet
 
 from ..triton_bundler import TritonBundler
 from ..utils import (
+    GPU_KERNEL_BIN_EXTS,
     prefix_is_reduction,
     tlx_only_cuda_options,
     triton_version_uses_attrs_dict,
@@ -68,6 +69,7 @@ from .runtime_utils import (
 from .static_triton_launcher import (
     statically_launched_kernel_by_device,
     StaticallyLaunchedCudaKernel,
+    StaticallyLaunchedXpuKernel,
 )
 from .triton_compat import (
     ASTSource,
@@ -105,7 +107,9 @@ if TYPE_CHECKING:
 
     LauncherType = Any
 
-_KernelType = Union[CompiledKernel, StaticallyLaunchedCudaKernel]
+_KernelType = Union[
+    CompiledKernel, StaticallyLaunchedCudaKernel, StaticallyLaunchedXpuKernel
+]
 _T = TypeVar("_T", bound=_KernelType)
 
 log = logging.getLogger(__name__)
@@ -805,10 +809,11 @@ class CachingAutotuner(KernelInterface):
                     "launch_pdl": compile_meta.get("launch_pdl", False),  # True
                 }
             )
+            if compile_meta.get("disable_ftz", False):
+                options["enable_reflect_ftz"] = False
             for k in tlx_only_cuda_options():
                 if v := getattr(cfg, k, None):
                     options[k] = v
-
         if self.device_props.type == "hip":
             if "waves_per_eu" in compile_meta:
                 options["waves_per_eu"] = compile_meta["waves_per_eu"]
@@ -1669,7 +1674,7 @@ class CannotStaticallyLaunchKernel(Exception):
     pass
 
 
-class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
+class StaticTritonCompileResult(CompileResult[_T]):
     """
     TritonCompileResult that uses StaticCudaLauncher,
     which vastly simplifies the setup and metadata needed to be kept.
@@ -1681,14 +1686,18 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
         inductor_meta: dict[str, Any],
         triton_meta: dict[str, Any],
         heuristic_type: HeuristicType,
-    ) -> StaticallyLaunchedCudaKernel | None:
+    ) -> _KernelType | None:
         if not torch._inductor.config.use_static_triton_launcher:
             return None
 
-        def check_can_launch() -> StaticallyLaunchedCudaKernel:
-            if triton_meta.get("device_type") != "cuda":
-                # Only cuda kernels
-                raise CannotStaticallyLaunchKernel("Non-cuda device")
+        def check_can_launch() -> _KernelType:
+            if triton_meta.get("device_type") not in ("cuda", "xpu"):
+                raise CannotStaticallyLaunchKernel("Non-cuda/XPU device")
+
+            if triton_meta.get("device_type") == "xpu" and XPU_KERNEL_FORMAT == "spv":
+                raise CannotStaticallyLaunchKernel(
+                    "Static XPU Triton kernel launch does not support SPIR-V kernel."
+                )
 
             if torch._inductor.config.cpp_wrapper:
                 # If we're running with cpp wrapper, it doesn't
@@ -1714,10 +1723,13 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
                     "static launch does not support launch attributes"
                 )
 
+            binary_ext = GPU_KERNEL_BIN_EXTS.get(
+                triton_meta.get("device_type"), ".cubin"
+            )
             cubin_location = os.path.join(
                 triton_cache_dir(triton_meta.get("device", 0)),
                 triton_hash_to_path_key(kernel.hash),
-                f"{kernel.src.fn.__name__}.cubin",
+                f"{kernel.src.fn.__name__}{binary_ext}",
             )
 
             if not os.path.exists(cubin_location):
@@ -1751,10 +1763,14 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
         When loading from cache on disk, we want to reload cubin
         files from their appropriate location on disc.
         """
+        device_type = (
+            "hip" if torch.version.hip else self.compile_meta.get("device_type", "cuda")
+        )
+        binary_ext = GPU_KERNEL_BIN_EXTS.get(device_type, "cubin")
         cubin_location = os.path.join(
             triton_cache_dir(self.compile_meta.get("device", 0)),
             triton_hash_to_path_key(self.kernel.hash),
-            f"{self.kernel.name}.cubin",
+            f"{self.kernel.name}{binary_ext}",
         )
         if not os.path.exists(cubin_location):
             if self.kernel.cubin_raw is not None:
@@ -2212,6 +2228,8 @@ def cached_autotune(
     filename=None,
     inductor_meta=None,
     custom_kernel=False,
+    caching_autotuner_cls: type[CachingAutotuner] = CachingAutotuner,
+    debug_autotuner_cls: type[DebugAutotuner] = DebugAutotuner,
 ):
     """
     A copy of triton.autotune that calls our subclass.  Our subclass
@@ -2248,7 +2266,7 @@ def cached_autotune(
                     tconfig.kwargs.pop("XBLOCK")
 
         if inductor_meta.get("profile_bandwidth"):
-            return DebugAutotuner(
+            return debug_autotuner_cls(
                 fn,
                 triton_meta=triton_meta,
                 inductor_meta=inductor_meta,
@@ -2267,7 +2285,7 @@ def cached_autotune(
                 filename=filename,
                 with_bandwidth_info=True,
             )
-        return CachingAutotuner(
+        return caching_autotuner_cls(
             fn,
             triton_meta=triton_meta,
             inductor_meta=inductor_meta,
@@ -4126,50 +4144,67 @@ class ComboKernelGrid(GridExpr):
         znumels = []
         # Check if per-subkernel blocks is enabled
         per_subkernel = "heuristic_0" in combo_meta
-        for num in range(combo_meta["num_kernels"]):
-            assert (
-                combo_meta[f"xnumel_{num}"] is None or combo_meta[f"xnumel_{num}"] > 0
-            )
-            no_x_dims.append(combo_meta[f"no_x_dim_{num}"])
-            xnumels.append(combo_meta[f"xnumel_{num}"] or f"xnumel_{num}")
-            if f"ynumel_{num}" in combo_meta:
-                ynumels.append((combo_meta[f"ynumel_{num}"] or f"ynumel_{num}", num))
-            if f"znumel_{num}" in combo_meta:
-                znumels.append((combo_meta[f"znumel_{num}"] or f"znumel_{num}", num))
+        if per_subkernel:
+            for num in range(combo_meta["num_kernels"]):
+                assert (
+                    combo_meta[f"xnumel_{num}"] is None
+                    or combo_meta[f"xnumel_{num}"] > 0
+                )
+                no_x_dims.append(combo_meta[f"no_x_dim_{num}"])
+                xnumels.append(combo_meta[f"xnumel_{num}"] or f"xnumel_{num}")
+                if f"ynumel_{num}" in combo_meta:
+                    ynumels.append(
+                        (combo_meta[f"ynumel_{num}"] or f"ynumel_{num}", num)
+                    )
+                if f"znumel_{num}" in combo_meta:
+                    znumels.append(
+                        (combo_meta[f"znumel_{num}"] or f"znumel_{num}", num)
+                    )
 
-        self.x_grid = self.combo_x_grid(xnumels, no_x_dims, meta)
-        if combo_meta["min_blocks"]:
-            self.x_grid = self.maximum([self.x_grid, combo_meta["min_blocks"]])
-        if ynumels:
-            if per_subkernel:
+            self.x_grid = self.combo_x_grid(xnumels, no_x_dims, meta, per_subkernel)
+            if combo_meta["min_blocks"]:
+                self.x_grid = self.maximum([self.x_grid, combo_meta["min_blocks"]])
+            if ynumels:
                 self.y_grid = self.maximum(
                     [
                         self.ceildiv(ynumel, meta.get(f"YBLOCK_{num}"))
                         for ynumel, num in ynumels
                     ]
                 )
-            else:
-                self.y_grid = self.ceildiv(
-                    self.maximum([y for y, _ in ynumels]), meta.get("YBLOCK")
-                )
-        if znumels:
-            if per_subkernel:
+            if znumels:
                 self.z_grid = self.maximum(
                     [
                         self.ceildiv(znumel, meta.get(f"ZBLOCK_{num}"))
                         for znumel, num in znumels
                     ]
                 )
-            else:
-                self.z_grid = self.ceildiv(
-                    self.maximum([z for z, _ in znumels]), meta.get("ZBLOCK")
+        else:
+            for num in range(combo_meta["num_kernels"]):
+                assert (
+                    combo_meta[f"xnumel_{num}"] is None
+                    or combo_meta[f"xnumel_{num}"] > 0
                 )
+                no_x_dims.append(combo_meta[f"no_x_dim_{num}"])
+                xnumels.append(combo_meta[f"xnumel_{num}"] or f"xnumel_{num}")
+                if f"ynumel_{num}" in combo_meta:
+                    ynumels.append(combo_meta[f"ynumel_{num}"] or f"ynumel_{num}")
+                if f"znumel_{num}" in combo_meta:
+                    znumels.append(combo_meta[f"znumel_{num}"] or f"znumel_{num}")
+
+            self.x_grid = self.combo_x_grid(xnumels, no_x_dims, meta, False)
+            if combo_meta["min_blocks"]:
+                self.x_grid = self.maximum([self.x_grid, combo_meta["min_blocks"]])
+            if ynumels:
+                self.y_grid = self.ceildiv(self.maximum(ynumels), meta.get("YBLOCK"))
+            if znumels:
+                self.z_grid = self.ceildiv(self.maximum(znumels), meta.get("ZBLOCK"))
 
     def combo_x_grid(
         self,
         xnumels: list[int | str],
         no_x_dims: list[bool],
         meta: dict[str, int],
+        per_subkernel: bool,
     ) -> str | int:
         raise NotImplementedError
 
@@ -4180,12 +4215,20 @@ class SequentialComboKernelGrid(ComboKernelGrid):
         xnumels: list[int | str],
         no_x_dims: list[bool],
         meta: dict[str, int],
+        per_subkernel: bool,
     ) -> str | int:
         assert len(xnumels) == len(no_x_dims)
+        if per_subkernel:
+            return self.summation(
+                [
+                    self.ceildiv(x, 1 if no_x_dim else meta.get(f"XBLOCK_{i}"))
+                    for i, (x, no_x_dim) in enumerate(zip(xnumels, no_x_dims))
+                ]
+            )
         return self.summation(
             [
-                self.ceildiv(x, 1 if no_x_dim else meta.get(f"XBLOCK_{i}"))
-                for i, (x, no_x_dim) in enumerate(zip(xnumels, no_x_dims))
+                self.ceildiv(x, 1 if no_x_dim else meta.get("XBLOCK"))
+                for x, no_x_dim in zip(xnumels, no_x_dims)
             ]
         )
 
@@ -4196,6 +4239,7 @@ class RoundRobinComboKernelGrid(ComboKernelGrid):
         xnumels: list[int | str],
         no_x_dims: list[bool],
         meta: dict[str, int],
+        per_subkernel: bool,
     ) -> str:
         assert len(xnumels) == len(no_x_dims)
         num_kernels = self.inductor_meta["combo_grid_meta"]["num_kernels"]
