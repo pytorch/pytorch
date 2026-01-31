@@ -23,8 +23,16 @@ ThreadPoolExecutor::~ThreadPoolExecutor() {
 
 C10_ALWAYS_INLINE moodycamel::ProducerToken& ThreadPoolExecutor::ptok() {
   // NOLINTNEXTLINE(misc-use-internal-linkage)
-  thread_local moodycamel::ProducerToken ptok(*work_);
-  return ptok;
+  thread_local moodycamel::ProducerToken* pTokPtr = nullptr;
+  thread_local moodycamel::ConcurrentQueue<Work>* associatedQueue = nullptr;
+
+  // Check if token exists AND is for the current queue
+  if (pTokPtr == nullptr || associatedQueue != work_.get()) {
+    delete pTokPtr;
+    pTokPtr = new moodycamel::ProducerToken(*work_);
+    associatedQueue = work_.get();
+  }
+  return *pTokPtr;
 }
 
 C10_ALWAYS_INLINE moodycamel::ConsumerToken& ThreadPoolExecutor::ctok() {
@@ -125,6 +133,10 @@ void ThreadPoolExecutor::stop() {
     auto tmp = moodycamel::ConcurrentQueue<Work>();
     work_->swap(tmp);
   }
+}
+
+size_t ThreadPoolExecutor::queueSizeApprox() const {
+  return work_->size_approx();
 }
 
 void ThreadPoolExecutor::run(

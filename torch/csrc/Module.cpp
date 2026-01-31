@@ -127,6 +127,9 @@
 
 #ifdef USE_XPU
 #include <ATen/native/transformers/xpu/sdp_utils.h>
+#ifndef _WIN32
+#include <torch/csrc/inductor/static_launcher/xpu.h>
+#endif
 #endif
 
 #ifdef USE_DISTRIBUTED
@@ -2106,6 +2109,7 @@ PyMethodDef* THXPModule_methods();
 void THXPStream_init(PyObject* module);
 void THXPEvent_init(PyObject* module);
 void THXPMemPool_init(PyObject* module);
+void THXPGraph_init(PyObject* module);
 namespace torch::xpu {
 void initModule(PyObject* module);
 } // namespace torch::xpu
@@ -2298,6 +2302,9 @@ PyObject* initModule() {
 #if defined(USE_CUDA) && !defined(USE_ROCM)
   ASSERT_TRUE(StaticCudaLauncher_init(module));
 #endif
+#if defined(USE_XPU) && !defined(_WIN32)
+  ASSERT_TRUE(StaticXpuLauncher_init(module));
+#endif
 #ifdef USE_MPS
   torch::mps::initModule(module);
 #endif
@@ -2329,6 +2336,7 @@ PyObject* initModule() {
   THXPStream_init(module);
   THXPEvent_init(module);
   THXPMemPool_init(module);
+  THXPGraph_init(module);
 #endif
 
   torch::distributed::initPlacementBindings(module);
