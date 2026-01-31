@@ -34,7 +34,7 @@ struct dists {
 
   // Zero norm
   struct zero {
-    static __forceinline__ __device__ void inc(scalar_t& agg, const scalar_t diff, const scalar_t /*p*/) { agg += diff != 0.0; }
+    static __forceinline__ __device__ void inc(scalar_t& agg, const scalar_t diff, const scalar_t /*p*/) { agg += std::min(std::ceil(std::abs(diff)), static_cast<scalar_t>(1.0)); }
     static __forceinline__ __device__ scalar_t finish(const scalar_t agg, const scalar_t /*p*/) { return agg; }
     static __forceinline__ __device__ void agg(scalar_t& update, const scalar_t other) { update += other; }
   };

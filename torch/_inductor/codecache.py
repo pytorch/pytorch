@@ -629,6 +629,13 @@ class FxGraphCachePickler(pickle.Pickler):
             # Some configs options may not pickle.
             log.warning("Failed to pickle cache key", exc_info=True)
             raise BypassFxGraphCache("Failed to pickle cache key") from e
+        except RuntimeError as e:
+            # pybind11 raises RuntimeError with message like:
+            # "<pybind11_builtins... object at 0x...> is not pickleable."
+            if "pybind11" in str(e) and "is not pickleable" in str(e):
+                log.warning("Failed to pickle cache key", exc_info=True)
+                raise BypassFxGraphCache("Failed to pickle cache key") from e
+            raise
         finally:
             # Reset our stream for the next dump.
             self._stream.seek(0)
