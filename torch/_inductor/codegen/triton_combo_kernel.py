@@ -467,10 +467,7 @@ class ComboKernel(Kernel):
             if tree.prefix == "x" and sub_kernel.no_x_dim:
                 code.writeline(f"XBLOCK_{num}: tl.constexpr = 1")
                 uniquify_block_sizes.append("XBLOCK")
-            elif (
-                tree.prefix in ("x", "y", "z")
-                and config.combo_kernel_per_subkernel_blocks
-            ):
+            elif tree.prefix in ("x", "y") and config.combo_kernel_per_subkernel_blocks:
                 uniquify_block_sizes.append(f"{tree.prefix.upper()}BLOCK")
             elif tree.is_reduction:
                 if (
