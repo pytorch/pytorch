@@ -192,8 +192,9 @@ class DynamoProfilerState:
 
         # Aggregate by (filename, lineno, func_name)
         aggregated: dict[tuple[str, int, str], dict[str, Any]] = {}
+        # caller_edges[callee_key][caller_key] -> edge stats
         caller_edges: dict[
-            tuple[str, int, str], dict[tuple[str, int, str], list[float]]
+            tuple[str, int, str], dict[tuple[str, int, str], dict[str, Any]]
         ] = {}
 
         for t in self.timings:
@@ -224,13 +225,18 @@ class DynamoProfilerState:
                     t.caller_func_name or "",
                 )
                 if caller_key not in caller_edges[key]:
-                    caller_edges[key][caller_key] = [0, 0, 0.0, 0.0]
+                    caller_edges[key][caller_key] = {
+                        "ncalls": 0,
+                        "pcalls": 0,
+                        "tottime": 0.0,
+                        "cumtime": 0.0,
+                    }
                 edge = caller_edges[key][caller_key]
-                edge[0] += 1
+                edge["ncalls"] += 1
+                edge["tottime"] += t.tottime_ns / 1e9
                 if t.is_primitive_call:
-                    edge[1] += 1
-                edge[2] += t.tottime_ns / 1e9
-                edge[3] += t.cumtime_ns / 1e9
+                    edge["pcalls"] += 1
+                    edge["cumtime"] += t.cumtime_ns / 1e9
 
         if print_raw:
             sorted_items = sorted(
@@ -270,8 +276,13 @@ class DynamoProfilerState:
 
         for key, agg in aggregated.items():
             callers: dict[tuple[str, int, str], tuple[int, int, float, float]] = {}
-            for caller_key, edge_data in caller_edges[key].items():
-                callers[caller_key] = tuple(edge_data)  # type: ignore[assignment]
+            for caller_key, edge in caller_edges[key].items():
+                callers[caller_key] = (
+                    edge["ncalls"],
+                    edge["pcalls"],
+                    edge["tottime"],
+                    edge["cumtime"],
+                )
 
             stats_dict[key] = (
                 agg["pcalls"],
