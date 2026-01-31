@@ -13,7 +13,7 @@ import torch.testing
 # pyrefly: ignore [deprecated]
 from torch._vmap_internals import _vmap, vmap
 from torch.overrides import is_tensor_like
-from torch.types import _TensorOrTensors
+from torch.types import _TensorOrOptionalTensors, _TensorOrTensors
 
 
 # Note: `get_*_jacobian` functions are added here even though we didn't intend to make them public
@@ -2149,7 +2149,7 @@ def _gradcheck_helper(
 def gradgradcheck(
     func: Callable[..., _TensorOrTensors],  # See Note [VarArg of Tensors]
     inputs: _TensorOrTensors,
-    grad_outputs: Optional[_TensorOrTensors] = None,
+    grad_outputs: Optional[_TensorOrOptionalTensors] = None,
     *,
     eps: float = 1e-6,
     atol: float = 1e-5,
@@ -2192,7 +2192,7 @@ def gradgradcheck(
         func (function): a Python function that takes Tensor inputs and returns
             a Tensor or a tuple of Tensors
         inputs (tuple of Tensor or Tensor): inputs to the function
-        grad_outputs (tuple of Tensor or Tensor, optional): The gradients with
+        grad_outputs (tuple of [Tensor or None] or Tensor, optional): The gradients with
             respect to the function's outputs.
         eps (float, optional): perturbation for finite differences
         atol (float, optional): absolute tolerance
