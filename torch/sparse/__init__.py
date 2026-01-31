@@ -54,7 +54,12 @@ When inputs are COO tensors, this function also supports backward for both input
 Supports both CSR and COO storage formats.
 
 .. note::
-    This function doesn't support computing derivatives with respect to CSR matrices.
+    Gradient support:
+
+    - COO @ Dense: backward supported, returns sparse COO gradient
+    - CSR @ Dense: backward supported, returns sparse CSR gradient
+    - Sparse @ Sparse (COO @ COO, CSR @ CSR): forward works but backward is not supported
+    - Mixed format operations (COO @ CSR, CSR @ COO): not supported
 
 Args:
     mat (Tensor): a dense matrix to be added
@@ -74,12 +79,16 @@ mm = _add_docstr(
     :math:`(n \times m)` tensor, :attr:`mat2` is a :math:`(m \times p)` tensor, out will be a
     :math:`(n \times p)` tensor.
     When :attr:`mat1` is a COO tensor it must have `sparse_dim = 2`.
-    When inputs are COO tensors, this function also supports backward for both inputs.
 
     Supports both CSR and COO storage formats.
 
 .. note::
-    This function doesn't support computing derivatives with respect to CSR matrices.
+    Gradient support:
+
+    - COO @ Dense: backward supported, returns sparse COO gradient
+    - CSR @ Dense: backward supported, returns sparse CSR gradient
+    - Sparse @ Sparse (COO @ COO, CSR @ CSR): forward works but backward is not supported
+    - Mixed format operations (COO @ CSR, CSR @ COO): not supported
 
     This function also additionally accepts an optional :attr:`reduce` argument that allows
     specification of an optional reduction operation, mathematically performs the following operation:
