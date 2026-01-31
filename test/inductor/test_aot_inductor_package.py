@@ -322,7 +322,7 @@ class TestAOTInductorPackage(TestCase):
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
     def test_compile_after_package_multi_arch(self):
         if self.device != GPU_TYPE:
-            raise unittest.SkipTest("Only meant to test GPU_TYPE")
+            raise unittest.SkipTest(f"Only meant to test {GPU_TYPE}")
         self.check_package_cpp_only()
 
         class Model(torch.nn.Module):

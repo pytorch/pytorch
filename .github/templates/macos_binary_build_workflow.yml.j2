@@ -89,6 +89,7 @@ jobs:
           export USE_PYTORCH_METAL_EXPORT
           export USE_COREML_DELEGATE
           export TORCH_PACKAGE_NAME
+          "${PYTORCH_ROOT}/.ci/wheel/install_libomp.sh"
           "${PYTORCH_ROOT}/.ci/wheel/build_wheel.sh"
 {%- if config["package_type"] == "wheel" %}
       - name: Test PyTorch wheel
