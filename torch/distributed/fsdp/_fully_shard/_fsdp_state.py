@@ -245,6 +245,12 @@ class FSDPState(_State):
         # When composing with module-hook-based activation checkpointing, the
         # pre-backward hook is responsible for the unshard
         if self._training_state == TrainingState.PRE_BACKWARD:
+            # With nested FSDP and multiple forward passes before backward,
+            # the params might have been resharded by a previous post_backward.
+            # We need to ensure params are unsharded for AC recomputation.
+            if self._fsdp_param_group and not self._fsdp_param_group.is_unsharded:
+                self._fsdp_param_group.unshard()
+                self._fsdp_param_group.wait_for_unshard()
             return args, kwargs
         self._training_state = TrainingState.FORWARD
         args, kwargs = self._root_pre_forward(module, args, kwargs)
@@ -349,10 +355,13 @@ class FSDPState(_State):
     def _register_pre_backward_hook(self, output: Any) -> Any:
         if not torch.is_grad_enabled():
             return output
-        _apply_to_tensors(
-            lambda x: x.register_hook(self._pre_backward) if x.requires_grad else x,
-            output,
-        )
+
+        def _register_hook(t: torch.Tensor) -> torch.Tensor:
+            if t.requires_grad:
+                t.register_hook(self._pre_backward)
+            return t
+
+        _apply_to_tensors(_register_hook, output)
         return output
 
     def _register_root_post_backward_final_callback(self):
