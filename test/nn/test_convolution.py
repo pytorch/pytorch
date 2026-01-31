@@ -1897,6 +1897,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(expect, actual)
 
     @dtypes(torch.float, torch.cfloat)
+    @tf32_on_and_off(0.005)
     def test_conv3d_same_padding(self, device, dtype):
         if dtype is torch.cfloat:
             rtol, atol = 2e-6, 2e-6
