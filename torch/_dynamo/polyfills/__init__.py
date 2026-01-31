@@ -93,7 +93,7 @@ def impl_MATCH_SEQUENCE(a: object) -> bool:
     return isinstance(a, Sequence) and not isinstance(a, (str, bytes, bytearray))
 
 
-def _match_class_attr(obj: Any, name: str, seen: set[str]) -> Any:
+def _match_class_attr(obj: object, name: str, seen: set[str]) -> object:
     if name in seen:
         raise TypeError(f"{type(obj)} got multiple sub-patterns for attribute {name}")
 
@@ -103,8 +103,8 @@ def _match_class_attr(obj: Any, name: str, seen: set[str]) -> Any:
 
 
 def impl_MATCH_CLASS(
-    subject: Any, cls: type, nargs: int, kwargs: tuple[str, ...]
-) -> tuple[Any, ...] | None:
+    subject: object, cls: type, nargs: int, kwargs: tuple[str, ...]
+) -> tuple[object, ...] | None:
     if not isinstance(cls, type):
         raise TypeError("called match pattern must be a class")
 
