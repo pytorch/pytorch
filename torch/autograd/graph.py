@@ -70,6 +70,27 @@ class Node(abc.ABC):
     @property
     @abc.abstractmethod
     def next_functions(self) -> tuple[tuple[Optional["Node"], int], ...]:
+        r"""Return the next functions in the autograd graph.
+
+        Returns a tuple of (Node, int) pairs representing the edges to input nodes
+        in the autograd graph. Each tuple contains:
+        - The Node that produced the corresponding input to this Node's forward function
+          (or None if the input was not a tensor or didn't require grad)
+        - The output index of that Node which corresponds to this input
+
+        This property is used during backpropagation to traverse the computational graph
+        and propagate gradients to the appropriate inputs.
+
+        Example::
+
+            >>> import torch
+            >>> a = torch.tensor([1., 2., 3.], requires_grad=True)
+            >>> b = torch.tensor([4., 5., 6.], requires_grad=True)
+            >>> c = a + b
+            >>> # c.grad_fn is AddBackward0, with next_functions pointing to a and b's accumulators
+            >>> print(c.grad_fn.next_functions)
+            ((<AccumulateGrad object at ...>, 0), (<AccumulateGrad object at ...>, 0))
+        """
         raise NotImplementedError
 
     @abc.abstractmethod
