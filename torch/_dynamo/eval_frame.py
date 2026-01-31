@@ -2498,7 +2498,7 @@ class TorchPatcher:
         }
 
         for opt_mod in optimizer_modules:
-            opt_name = opt_mod.__name__.split(".")[-1]
+            opt_name = opt_mod.__name__.rsplit(".", maxsplit=1)[-1]
             fused_fn_name = f"_fused_{opt_name}"
 
             if hasattr(opt_mod, fused_fn_name):

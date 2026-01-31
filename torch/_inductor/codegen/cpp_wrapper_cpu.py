@@ -392,7 +392,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             )
             self.codegen_tensor_dtype_var_decl(self.prefix, name)
             expected_dtype_name = DTYPE_TO_ATEN[tensor.dtype]
-            dtype_str = str(tensor.dtype).split(".")[-1]
+            dtype_str = str(tensor.dtype).rsplit(".", maxsplit=1)[-1]
             self.prefix.splice(
                 f"""
                     int32_t {name}_expected_dtype = aoti_torch_dtype_{dtype_str}();
@@ -1088,7 +1088,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
     def codegen_tensor_item(
         self, dtype: torch.dtype, tensor: str, scalar: str, indented_buffer=None
     ):
-        dtype_str = str(dtype).split(".")[-1]
+        dtype_str = str(dtype).rsplit(".", maxsplit=1)[-1]
         writer = indented_buffer or self
 
         if dtype == torch.float16 or dtype == torch.bfloat16:
@@ -1639,17 +1639,17 @@ class CppWrapperCpu(PythonWrapperCodegen):
         return f"cached_torch_device_type_{device_str}, {device.index if device.index else 0}"
 
     def codegen_dtype(self, dtype):
-        dtype_str = str(dtype).split(".")[-1]
+        dtype_str = str(dtype).rsplit(".", maxsplit=1)[-1]
         self.used_cached_dtypes.add(dtype_str)
         return f"cached_torch_dtype_{dtype_str}"
 
     def codegen_layout(self, layout):
-        layout_str = str(layout).split(".")[-1]
+        layout_str = str(layout).rsplit(".", maxsplit=1)[-1]
         self.used_cached_layouts.add(layout_str)
         return f"cached_torch_layout_{layout_str}"
 
     def codegen_memory_format(self, memory_format):
-        memory_format_str = str(memory_format).split(".")[-1]
+        memory_format_str = str(memory_format).rsplit(".", maxsplit=1)[-1]
         self.used_cached_memory_formats.add(memory_format_str)
         return f"cached_torch_memory_format_{memory_format_str}"
 

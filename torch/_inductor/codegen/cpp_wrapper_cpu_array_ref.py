@@ -872,7 +872,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
     def codegen_tensor_item(
         self, dtype: torch.dtype, tensor: str, scalar: str, indented_buffer=None
     ):
-        dtype_str = str(dtype).split(".")[-1]
+        dtype_str = str(dtype).rsplit(".", maxsplit=1)[-1]
         writer = indented_buffer or self
 
         if dtype == torch.float16 or dtype == torch.bfloat16:

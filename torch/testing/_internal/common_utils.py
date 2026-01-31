@@ -2842,7 +2842,7 @@ def remove_device_and_dtype_suffixes(test_name: str) -> str:
 
 
 def check_if_enable(test: unittest.TestCase):
-    classname = str(test.__class__).split("'")[1].split(".")[-1]
+    classname = str(test.__class__).split("'")[1].rsplit(".", maxsplit=1)[-1]
     sanitized_testname = remove_device_and_dtype_suffixes(test._testMethodName)
 
     def matches_test(target: str):
@@ -2851,7 +2851,7 @@ def check_if_enable(test: unittest.TestCase):
             # poorly formed target test name
             return False
         target_testname = target_test_parts[0]
-        target_classname = target_test_parts[1][1:-1].split(".")[-1]
+        target_classname = target_test_parts[1][1:-1].rsplit(".", maxsplit=1)[-1]
         # if test method name or its sanitized version exactly matches the disabled
         # test method name AND allow non-parametrized suite names to disable
         # parametrized ones (TestSuite disables TestSuiteCPU)

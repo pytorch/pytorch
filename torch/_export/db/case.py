@@ -150,7 +150,7 @@ def export_case(**kwargs):
         if module is None:
             raise AssertionError("module must not be None")
         _MODULES.add(module)
-        module_name = module.__name__.split(".")[-1]
+        module_name = module.__name__.rsplit(".", maxsplit=1)[-1]
         case = _make_export_case(m, module_name, configs)
         register_db_case(case)
         return case

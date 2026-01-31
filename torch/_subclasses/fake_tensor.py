@@ -570,7 +570,7 @@ def in_kernel_invocation_manager(
 # Return if the function allows Python numbers to bind to Tensors
 def should_allow_numbers_as_tensors(func: OpOverload) -> bool:
     return torch._C._should_allow_numbers_as_tensors(
-        func.name().split("::")[-1].split(".")[0]
+        func.name().rsplit("::", maxsplit=1)[-1].split(".")[0]
     )
 
 

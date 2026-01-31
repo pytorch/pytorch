@@ -1541,7 +1541,7 @@ class _ModuleFrame:
                     (
                         path,
                         ty if path else None,
-                        int(k.split("@")[-1]) if "@" in k else 0,
+                        int(k.rsplit("@", maxsplit=1)[-1]) if "@" in k else 0,
                     )
                     for k, (path, ty) in node.meta["nn_module_stack"].items()
                 ]

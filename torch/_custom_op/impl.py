@@ -651,7 +651,7 @@ def report_error_callback(custom_op: typing.Any, key: str) -> None:
 def custom_op_from_existing(op):
     ns = op.namespace
     lib = torch.library.Library(ns, "FRAGMENT")
-    name = op.name().split("::")[-1]
+    name = op.name().rsplit("::", maxsplit=1)[-1]
     schema_str = str(op._schema)
     # CustomOp expects the schema string without the namespace
     schema_str = schema_str.rsplit("::", maxsplit=1)[-1]

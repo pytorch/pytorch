@@ -2770,7 +2770,7 @@ def _precompile_header(
             cmd_output = subprocess.run(
                 ("openssl", "sha512", filename), capture_output=True, text=True
             )
-            return cmd_output.stdout.split()[-1]
+            return cmd_output.stdout.rsplit(maxsplit=1)[-1]
 
         preprocessor_hash = _get_file_checksum(preprocessor.get_target_file_path())
 

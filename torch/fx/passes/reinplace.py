@@ -169,7 +169,7 @@ def _maybe_get_inplace_op(op):
     # (they'll require extra special handling, aren't aren't really useful for perf anyway)
     if _is_view_op(op):
         return None
-    op_namespace = op.__module__.split(".")[-1]
+    op_namespace = op.__module__.rsplit(".", maxsplit=1)[-1]
     op_base_name = op.overloadpacket.__name__
     maybe_namespace_module = getattr(torch.ops, op_namespace)
     maybe_inplace_op = (

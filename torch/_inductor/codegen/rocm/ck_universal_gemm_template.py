@@ -535,7 +535,7 @@ class CKGemmTemplate(CKTemplate):
 
     # small helper to figure out the prefetch stages on AMD
     def _prefetch_stages(self, op, a_dtype_size, b_dtype_size, warp_size: int = 64):
-        version_str = op.block_gemm_pipeline_version.split("::")[-1]
+        version_str = op.block_gemm_pipeline_version.rsplit("::", maxsplit=1)[-1]
         try:
             version = int(version_str[1:])  # Assuming the format is always 'vX'
         except ValueError as e:

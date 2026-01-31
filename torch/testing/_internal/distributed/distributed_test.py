@@ -394,7 +394,7 @@ class ControlFlowToyModel(nn.Module):
 
 
 def get_timeout(test_id):
-    test_name = test_id.split(".")[-1]
+    test_name = test_id.rsplit(".", maxsplit=1)[-1]
     if test_name in CUSTOMIZED_TIMEOUT:
         return CUSTOMIZED_TIMEOUT[test_name]
     else:

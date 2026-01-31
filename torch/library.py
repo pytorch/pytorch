@@ -263,21 +263,21 @@ class Library:
                 "as the first argument"
             )
 
-        key = self.ns + "/" + name.split("::")[-1] + "/" + dispatch_key
+        key = f"{self.ns}/{name.rsplit('::', maxsplit=1)[-1]}/{dispatch_key}"
         if key in _impls:
             # TODO: in future, add more info about where the existing function is registered (this info is
             # today already returned by the C++ warning when _impl_with_aoti_compile is called but we error out before that)
             raise RuntimeError(
                 "This is not allowed since there's already a kernel registered from python overriding {}"
                 "'s behavior for {} dispatch key and {} namespace.".format(
-                    name.split("::")[-1], dispatch_key, self.ns
+                    name.rsplit("::", maxsplit=1)[-1], dispatch_key, self.ns
                 )
             )
 
         if self.m is None:
             raise AssertionError("Library object has been destroyed")
         impl_fn: Callable = self.m.impl_with_aoti_compile
-        impl_fn(self.ns, name.split("::")[-1], dispatch_key)
+        impl_fn(self.ns, name.rsplit("::", maxsplit=1)[-1], dispatch_key)
 
         _impls.add(key)
         self._op_impls.add(key)
@@ -328,14 +328,14 @@ class Library:
                 "impl should be passed either a name or an OpOverload object as the first argument"
             )
 
-        key = self.ns + "/" + name.split("::")[-1] + "/" + dispatch_key
+        key = self.ns + "/" + name.rsplit("::", maxsplit=1)[-1] + "/" + dispatch_key
         if (not allow_override) and key in _impls:
             # TODO: in future, add more info about where the existing function is registered (this info is
             # today already returned by the C++ warning when impl is called but we error out before that)
             raise RuntimeError(
                 "This is not allowed since there's already a kernel registered from python overriding {}"
                 "'s behavior for {} dispatch key and {} namespace.".format(
-                    name.split("::")[-1], dispatch_key, self.ns
+                    name.rsplit("::", maxsplit=1)[-1], dispatch_key, self.ns
                 )
             )
 

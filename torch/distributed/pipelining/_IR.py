@@ -925,7 +925,7 @@ class Pipe(torch.nn.Module):
                         parent and child is None
                     ):  # parent exists, attribute doesn't -> assign
                         added_attributes[name].append(fqn)
-                        setattr(parent, fqn.split(".")[-1], tensor)
+                        setattr(parent, fqn.rsplit(".", maxsplit=1)[-1], tensor)
 
         # Deferral deletion: Remove the original attributes (to params) from the
         # root GraphModule

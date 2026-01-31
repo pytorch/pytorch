@@ -106,7 +106,7 @@ class CollectTracepointsPass(PassBase):
 
                     module_key = next(reversed(node.meta["nn_module_stack"]))
                     if "@" in module_key:
-                        suffix = module_key.split("@")[-1]
+                        suffix = module_key.rsplit("@", maxsplit=1)[-1]
                         path = f"{path}@{suffix}"
 
                         call_fqn = f"{fqn}@{suffix}"

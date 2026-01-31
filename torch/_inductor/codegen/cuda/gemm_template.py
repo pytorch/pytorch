@@ -1416,7 +1416,9 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
 
         result = False
         if op.gemm_kind == cutlass_lib.GemmKind.Universal3x:
-            epilogue_schedule_str = str(op.epilogue_schedule).split(".")[-1]
+            epilogue_schedule_str = str(op.epilogue_schedule).rsplit(".", maxsplit=1)[
+                -1
+            ]
             result = epilogue_schedule_str.lower().startswith("tma")
         return result
 

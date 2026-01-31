@@ -199,7 +199,11 @@ class CPythonTestCase(TestCase):
     def _dynamo_test_key(self) -> str:
         suffix = super()._dynamo_test_key()
         test_cls = self.__class__
-        test_file = inspect.getfile(test_cls).split(os.sep)[-1].split(".")[0]
+        test_file = (
+            inspect.getfile(test_cls)
+            .rsplit(os.sep, maxsplit=1)[-1]
+            .split(".", maxsplit=1)[0]
+        )
         py_ver = re.search(r"/([\d_]+)/", inspect.getfile(test_cls))
         if py_ver:
             py_ver = py_ver.group().strip(os.sep).replace("_", "")  # type: ignore[assignment]

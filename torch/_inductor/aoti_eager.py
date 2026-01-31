@@ -64,15 +64,20 @@ def load_aoti_eager_cache(
                         for dtype_key in ["dtype", "dtype_value"]:
                             if dtype_key in metadata:
                                 metadata[dtype_key] = getattr(
-                                    torch, metadata[dtype_key].split(".")[-1]
+                                    torch,
+                                    metadata[dtype_key].rsplit(".", maxsplit=1)[-1],
                                 )
                         if "layout_value" in metadata:
                             metadata["layout_value"] = getattr(
-                                torch, metadata["layout_value"].split(".")[-1]
+                                torch,
+                                metadata["layout_value"].rsplit(".", maxsplit=1)[-1],
                             )
                         if "memory_format_value" in metadata:
                             metadata["memory_format_value"] = getattr(
-                                torch, metadata["memory_format_value"].split(".")[-1]
+                                torch,
+                                metadata["memory_format_value"].rsplit(".", maxsplit=1)[
+                                    -1
+                                ],
                             )
 
                 return json_data
