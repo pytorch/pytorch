@@ -875,31 +875,6 @@ class CompileContext:
         return TraceId(self.compile_id, self.attempt)
 
 
-# Lazy import to avoid circular dependency with torch._dynamo
-def _get_dynamo_profiler_classes() -> (
-    tuple[type["DynamoProfilerState"], type["FunctionTraceTiming"], type["ProfilerStackEntry"]]
-):
-    from torch._dynamo.dynamo_profiler import (
-        DynamoProfilerState,
-        FunctionTraceTiming,
-        ProfilerStackEntry,
-    )
-    return DynamoProfilerState, FunctionTraceTiming, ProfilerStackEntry
-
-
-# Re-export for backwards compatibility - these will be imported lazily when accessed
-def __getattr__(name: str) -> Any:
-    if name in ("DynamoProfilerState", "FunctionTraceTiming", "ProfilerStackEntry"):
-        classes = _get_dynamo_profiler_classes()
-        if name == "DynamoProfilerState":
-            return classes[0]
-        elif name == "FunctionTraceTiming":
-            return classes[1]
-        elif name == "ProfilerStackEntry":
-            return classes[2]
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
-
 class TracingContext:
     """
     Provides the currently installed TracingContext, or None.
@@ -921,6 +896,9 @@ class TracingContext:
         )
 
     def __init__(self, fake_mode: FakeTensorMode | None) -> None:
+        # imported lazily to avoid circular dependency
+        if TYPE_CHECKING:
+            from torch._dynamo.dynamo_profiler import DynamoProfilerState
         self.guards_context = GuardsContext()
         self.module_context = ModuleContext()
         self.global_context = GlobalContext()
@@ -971,7 +949,7 @@ class TracingContext:
         # list of code objects for inlined functions
         self.traced_code: list[CodeType] = []
         # Profiler state for tracking function trace timings (only created when profiler is enabled)
-        self.profiler_state: "DynamoProfilerState | None" = None
+        self.profiler_state: DynamoProfilerState | None = None
 
     def clear(self) -> None:
         # Look at the note in output_graph.py in function `save_global_state`
