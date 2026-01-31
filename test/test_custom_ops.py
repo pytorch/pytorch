@@ -2829,6 +2829,46 @@ class TestCustomOpAPI(TestCase):
         self.assertEqual(grad_x, torch.full_like(x2, 2.0))
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_register_autograd_with_grad_grad(self):
+        """Test that register_autograd works with torch.func.grad(grad(...)) (Issue #170834)
+
+        This tests higher-order gradients to ensure the _SingleLevelFunction mechanism
+        properly supports nested functorch transforms.
+        """
+
+        @torch.library.custom_op(
+            "_torch_testing::cube_for_grad_grad", mutates_args=()
+        )
+        def cube(x: torch.Tensor) -> torch.Tensor:
+            return x**3
+
+        def setup_context(ctx, inputs, output):
+            (x,) = inputs
+            ctx.save_for_backward(x)
+
+        def backward(ctx, grad):
+            (x,) = ctx.saved_tensors
+            # d/dx[x^3] = 3x^2
+            # This backward uses differentiable PyTorch ops so grad(grad(...)) works
+            return grad * 3 * x**2
+
+        cube.register_autograd(backward, setup_context=setup_context)
+
+        # Use a scalar tensor for simpler verification
+        x = torch.tensor(2.0)
+
+        # Test grad(grad(...)) - second derivative
+        # f(x) = x^3
+        # f'(x) = 3x^2
+        # f''(x) = 6x
+        grad_fn = torch.func.grad(cube)
+        grad_grad_fn = torch.func.grad(grad_fn)
+        result = grad_grad_fn(x)
+
+        expected = 6 * x  # f''(2.0) = 12.0
+        self.assertEqual(result, expected)
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_manual_schema_error(self):
         with self.assertRaisesRegex(ValueError, "the op mutates {'x'}"):
 
