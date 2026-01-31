@@ -796,7 +796,7 @@ class OutputGraph(OutputGraphCommon):
         # dynamo_flat_name_to_original_fqn mapping.
         self.used_inlined_inbuilt_modules_names: OrderedSet[str] = OrderedSet()
 
-    def mark_bytecode_tracing_start(self, code: CodeType) -> None:
+    def mark_bytecode_tracing_start(self) -> None:
         self.compiler_trace_stack.enter_context(
             dynamo_timed(
                 "bytecode_tracing",
@@ -809,8 +809,8 @@ class OutputGraph(OutputGraphCommon):
 
             if self.tracing_context.profiler_state is None:
                 self.tracing_context.profiler_state = DynamoProfilerState()
+            code = self.root_tx.f_code
             self._profiler_start_ns = time.time_ns()
-            self._profiler_code = code
             self._profiler_is_primitive = self.tracing_context.profiler_state.push(
                 code.co_name,
                 code.co_filename,
@@ -834,7 +834,7 @@ class OutputGraph(OutputGraphCommon):
             if stack_entry is not None:
                 cumtime_ns = trace_end_ns - self._profiler_start_ns
                 tottime_ns = cumtime_ns - stack_entry.child_time_ns
-                code = self._profiler_code
+                code = self.root_tx.f_code
                 timing = FunctionTraceTiming(
                     func_name=code.co_name,
                     filename=code.co_filename,
