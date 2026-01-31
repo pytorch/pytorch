@@ -24,6 +24,7 @@ from torch.distributed.tensor._ops.utils import (
 )
 from torch.distributed.tensor.placement_types import (
     _StridedShard,
+    Partial,
     Placement,
     Replicate,
     Shard,
@@ -794,5 +795,63 @@ register_op_strategy_map(
 register_op_strategy_map(
     aten.transpose.int, torch.transpose, schema_info=RuntimeSchemaInfo(1)
 )
-register_op_strategy_map(aten.view_as_complex.default, torch.view_as_complex)
+
+
+@register_op_strategy(aten.view_as_complex.default)
+def view_as_complex_strategy(op_schema: OpSchema) -> StrategyType:
+    """
+    Strategy for view_as_complex. This operation converts real tensors to complex,
+    and complex numbers don't have a total ordering. Therefore, P(max) and P(min)
+    placements are invalid for the output (you can't reduce complex numbers via min/max).
+    """
+    dim_map = dim_maps[torch.view_as_complex]
+    rules = dim_map(*op_schema.args_schema, **op_schema.kwargs_schema)
+    input_strategy = cast(OpStrategy, op_schema.args_schema[0])
+    mesh = op_schema.get_mesh_from_args(validate=False)
+
+    global_in_shape = input_strategy.shape
+    if global_in_shape is None:
+        raise AssertionError("Shape required.")
+
+    output_strategy = OpStrategy([])
+    for input_placement_strategy in input_strategy.strategies:
+        input_src_spec = input_placement_strategy.output_spec
+
+        # P(max) and P(min) are invalid for complex output - replace with Replicate
+        input_placements = []
+        for p in input_src_spec.placements:
+            if isinstance(p, Partial) and p.reduce_op in ("max", "min"):
+                input_placements.append(Replicate())
+            else:
+                input_placements.append(p)
+
+        input_tgt_placements, output_placements = propagate_shape_and_sharding(
+            input_placements,
+            tuple(global_in_shape),
+            rules,
+            mesh.shape,
+            False,  # strict_view
+        )
+
+        input_tgt_spec = DTensorSpec(
+            placements=tuple(input_tgt_placements),
+            mesh=mesh,
+            tensor_meta=input_src_spec.tensor_meta,
+        )
+        redistribute_costs: list[list[float]] = [
+            generate_redistribute_costs(input_strategy, input_tgt_spec)
+        ]
+
+        output_spec = DTensorSpec(mesh=mesh, placements=tuple(output_placements))
+        output_strategy.strategies.append(
+            OpSpec(
+                output_specs=output_spec,
+                input_specs=(input_tgt_spec,),
+                redistribute_cost=redistribute_costs,
+            )
+        )
+
+    return output_strategy
+
+
 register_op_strategy_map(aten.view_as_real.default, torch.view_as_real)
