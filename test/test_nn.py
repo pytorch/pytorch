@@ -4343,7 +4343,11 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         inp = inp.cuda()
         # otherwise, subsequent warnings will be hidden, and further tests rely on them
         warnings.simplefilter("always")
-        self.assertEqual(m(inp)[0].cpu(), out_expected[0])
+        # Relax tolerances: non-contiguous weights cause cuDNN to use different
+        # algorithms, leading to small numerical differences vs CPU computation.
+        # Observed max: atol ~6.4e-5, rtol ~3.1e-3. Using 1.5x margin.
+        # See https://github.com/pytorch/pytorch/issues/163072
+        self.assertEqual(m(inp)[0].cpu(), out_expected[0], atol=1e-4, rtol=5e-3)
 
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     @set_default_dtype(torch.double)
@@ -5443,6 +5447,13 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             output = torch.pdist(x, p=2)
             # just run a single backward, as gradcheck/gradgradcheck is expensive here
             output.sum().backward()
+
+    # test for issue reported in https://github.com/pytorch/pytorch/issues/173799
+    def test_pdist_inf_nan_propagation(self):
+        x = torch.empty((2, 2), dtype=torch.float64).fill_(float("inf"))
+        for device in device_():
+            result = F.pdist(x.to(device), p=0.0)
+            self.assertTrue(torch.isnan(result).item(), "Expected NaN in pdist output")
 
     def test_cosine_embedding_loss_with_diff_type(self):
         for device in device_():

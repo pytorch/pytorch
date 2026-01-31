@@ -11,7 +11,7 @@ at::DynamicLibrary& getZELibrary() {
 #if defined(_WIN32)
   static at::DynamicLibrary lib("ze_loader.dll");
 #else
-  static at::DynamicLibrary lib("libze_loader.so.1");
+  static at::DynamicLibrary lib("libze_loader.so");
 #endif
   return lib;
 }
@@ -20,8 +20,7 @@ at::DynamicLibrary& getZELibrary() {
   RETTYPE NAME(ARG1 a1) {                                                     \
     auto fn =                                                                 \
         reinterpret_cast<decltype(&NAME)>(get##LIB##Library().sym(__func__)); \
-    if (!fn)                                                                  \
-      throw std::runtime_error("Can't get " C10_STRINGIZE(NAME));             \
+    TORCH_CHECK(fn, "Can't get symbol " C10_STRINGIZE(NAME));                 \
     lazyLevelZero.NAME = fn;                                                  \
     return fn(a1);                                                            \
   }
@@ -30,8 +29,7 @@ at::DynamicLibrary& getZELibrary() {
   RETTYPE NAME(ARG1 a1, ARG2 a2) {                                            \
     auto fn =                                                                 \
         reinterpret_cast<decltype(&NAME)>(get##LIB##Library().sym(__func__)); \
-    if (!fn)                                                                  \
-      throw std::runtime_error("Can't get " C10_STRINGIZE(NAME));             \
+    TORCH_CHECK(fn, "Can't get symbol " C10_STRINGIZE(NAME));                 \
     lazyLevelZero.NAME = fn;                                                  \
     return fn(a1, a2);                                                        \
   }
@@ -40,8 +38,7 @@ at::DynamicLibrary& getZELibrary() {
   RETTYPE NAME(ARG1 a1, ARG2 a2, ARG3 a3) {                                   \
     auto fn =                                                                 \
         reinterpret_cast<decltype(&NAME)>(get##LIB##Library().sym(__func__)); \
-    if (!fn)                                                                  \
-      throw std::runtime_error("Can't get " C10_STRINGIZE(NAME));             \
+    TORCH_CHECK(fn, "Can't get symbol " C10_STRINGIZE(NAME));                 \
     lazyLevelZero.NAME = fn;                                                  \
     return fn(a1, a2, a3);                                                    \
   }
@@ -50,8 +47,7 @@ at::DynamicLibrary& getZELibrary() {
   RETTYPE NAME(ARG1 a1, ARG2 a2, ARG3 a3, ARG4 a4) {                          \
     auto fn =                                                                 \
         reinterpret_cast<decltype(&NAME)>(get##LIB##Library().sym(__func__)); \
-    if (!fn)                                                                  \
-      throw std::runtime_error("Can't get symbol " C10_STRINGIZE(NAME));      \
+    TORCH_CHECK(fn, "Can't get symbol " C10_STRINGIZE(NAME));                 \
     lazyLevelZero.NAME = fn;                                                  \
     return fn(a1, a2, a3, a4);                                                \
   }
@@ -60,8 +56,7 @@ at::DynamicLibrary& getZELibrary() {
   RETTYPE NAME(ARG1 a1, ARG2 a2, ARG3 a3, ARG4 a4, ARG5 a5) {                 \
     auto fn =                                                                 \
         reinterpret_cast<decltype(&NAME)>(get##LIB##Library().sym(__func__)); \
-    if (!fn)                                                                  \
-      throw std::runtime_error("Can't get symbol " C10_STRINGIZE(NAME));      \
+    TORCH_CHECK(fn, "Can't get symbol " C10_STRINGIZE(NAME));                 \
     lazyLevelZero.NAME = fn;                                                  \
     return fn(a1, a2, a3, a4, a5);                                            \
   }
