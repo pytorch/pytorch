@@ -1248,8 +1248,8 @@ class TestOptimRenewed(TestCase):
             and _get_device_type(device) not in optim_info.supports_fused_on
         ):
             self.skipTest(f"{device} is not supported for fused on {opt_name}")
-        elif impl == "capturable" and _get_device_type(device) == "mps":
-            self.skipTest("MPS does not support capturable")
+        elif _get_device_type(device) == "mps":
+            self.skipTest("MPS does not support float64 tensors")
 
         optim_inputs = optim_info.optim_inputs_func(device=device)
         for optim_input in optim_inputs:
