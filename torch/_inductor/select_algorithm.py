@@ -67,6 +67,7 @@ from .codegen.triton import (
     TMACompatibilityChecker,
     TritonKernel,
     TritonScheduling,
+    TritonSymbols,
 )
 from .codegen.triton_utils import config_of, equal_1_arg_indices, signature_to_meta
 from .codegen.wrapper import pexpr
@@ -298,12 +299,14 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
         subgraph_number: int,
         fixed_inputs: dict[str, Any],
         mask: Optional[str],
+        input_shapes: Optional[dict[str, tuple[str, ...]]] = None,
     ):
         super().__init__(V.ops)
         self.name = f"PlaceholderSubstitution_{subgraph_number}"
         self.kernel = kernel
         self.fixed_inputs = fixed_inputs
         self.mask = mask
+        self.input_shapes = input_shapes or {}
 
     def load(self, name: str, index: sympy.Expr):
         """Handle loading from tensor or fixed input."""
@@ -326,11 +329,12 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
             )
             return out
 
+        shape = self.input_shapes.get(name, ())
         return self.kernel.cse.generate(
             self.kernel.compute,
             f"({self.fixed_inputs[name]})",
             dtype=torch.float32,
-            shape=(),
+            shape=shape,
         )
 
     def indirect_indexing(self, index_var: str, size, check, wrap_neg=True):
@@ -351,18 +355,28 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
         assert mode == "atomic_add", "Only atomic_add is supported for inner stores"
 
         buf_name = self._add_kernel_input(name)
-        index_str = self._process_indexing(index)
-        index_str = f"tl.broadcast_to({index_str}, {value}.shape)"
-        store = f"tl.atomic_add({buf_name} + {index_str}, {value}, {self.mask}, sem='relaxed')"
-        return store
+        index_str = self._broadcast_index(index, f"{value}.shape")
+        return f"tl.atomic_add({buf_name} + {index_str}, {value}, {self.mask}, sem='relaxed')"
 
-    def _add_kernel_input(self, name: str):
-        """Add name as input to kernel and return input ref."""
+    def _add_kernel_input(self, name: str) -> str:
         return self.kernel.args.input(name)
 
-    def _process_indexing(self, index):
-        """Process and rename indexing, adding symbols as kernel inputs."""
+    def _process_indexing(self, index: sympy.Expr) -> str:
         return self.kernel.kexpr(self.kernel.rename_indexing(index))
+
+    def _broadcast_index(self, index: sympy.Expr, shape: str) -> str:
+        index_str = self._process_indexing(index)
+        index_shape = TritonSymbols.get_block_shape(index)
+        if (
+            index_shape
+            and len(index_shape) == 1
+            and all(
+                V.graph.sizevars.statically_known_equals(sympy.sympify(d), 1)
+                for d in index_shape
+            )
+        ):
+            return f"tl.broadcast_to(tl.reshape({index_str}, []), {shape})"
+        return f"tl.broadcast_to({index_str}, {shape})"
 
 
 # Function name, followed by args and kwargs.
@@ -863,6 +877,7 @@ class TritonTemplateKernel(TritonKernel):
         subgraph_number: int,
         output_name: Optional[str],
         mask: Optional[str] = None,
+        input_shapes: Optional[dict[str, tuple[str, ...]]] = None,
         **fixed_inputs,
     ) -> str:
         """This creates a modification function for a subgraph.
@@ -873,6 +888,8 @@ class TritonTemplateKernel(TritonKernel):
             output_name (Optional[str]): The name of the output variable to store the result in
             mask (Optional[str]): An optional mask to use for the store operation. If provided, this mask
                 will be applied to the store.
+            input_shapes (Optional[dict[str, tuple[str, ...]]]): Optional mapping of input names to their
+                block shapes. Used for proper shape propagation during codegen.
         """
         num = 0
         out = None
@@ -882,7 +899,7 @@ class TritonTemplateKernel(TritonKernel):
         with self.create_subgraph_body(f"mod_{subgraph_number}_{num}"):
             subgraph = self._get_subgraph(subgraph_number)
             modification_handler = ModificationWrapper(
-                self, subgraph_number, fixed_inputs, mask
+                self, subgraph_number, fixed_inputs, mask, input_shapes
             )
             with V.set_ops_handler(modification_handler):
                 assert isinstance(subgraph, (ir.ComputedBuffer, list)), (
