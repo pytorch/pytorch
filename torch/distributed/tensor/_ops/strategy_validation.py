@@ -145,6 +145,68 @@ def is_fully_replicated(placements: tuple) -> bool:
     return all(isinstance(p, Replicate) for p in placements)
 
 
+def is_trivial_shard(p, shape: tuple[int, ...]) -> bool:
+    """Check if placement is a Shard on a size-1 dimension (equivalent to Replicate)."""
+    return isinstance(p, Shard) and p.dim < len(shape) and shape[p.dim] == 1
+
+
+def normalize_placement(p, shape: tuple[int, ...]):
+    """
+    Normalize a placement for a given tensor shape.
+
+    Converts trivial Shard (on size-1 dimension) to Replicate, since they
+    are semantically equivalent.
+    """
+    if is_trivial_shard(p, shape):
+        return Replicate()
+    return p
+
+
+def normalize_placement_str(p_str: str, shape: tuple[int, ...]) -> str:
+    """Normalize a placement string, converting trivial shards to Replicate."""
+    p = parse_placement(p_str)
+    if p is None:
+        return p_str
+    normalized = normalize_placement(p, shape)
+    if isinstance(normalized, Replicate):
+        return "R"
+    return p_str
+
+
+def normalize_combo_key(
+    combo_key: tuple,
+    input_shapes: tuple[tuple[int, ...], ...],
+    output_shape: tuple[int, ...],
+) -> tuple:
+    """
+    Normalize a combo_key by converting trivial shards to Replicate.
+
+    This deduplicates equivalent placement combinations, e.g.:
+    - P(max) -> S(0) on output [1,1,1] becomes P(max) -> R
+    - S(0), R -> R on input [1,4] becomes R, R -> R
+
+    Args:
+        combo_key: (input_placement_strs, output_placement_str) tuple
+        input_shapes: Shapes of input tensors
+        output_shape: Shape of output tensor
+
+    Returns:
+        Normalized combo_key with trivial shards converted to Replicate
+    """
+    input_placement_strs, output_placement_str = combo_key
+
+    # Normalize input placements
+    normalized_inputs = tuple(
+        normalize_placement_str(p_str, shape)
+        for p_str, shape in zip(input_placement_strs, input_shapes)
+    )
+
+    # Normalize output placement
+    normalized_output = normalize_placement_str(output_placement_str, output_shape)
+
+    return (normalized_inputs, normalized_output)
+
+
 def placements_equivalent(p1, p2, shape: tuple[int, ...]) -> bool:
     """
     Check if two placements are equivalent for a given tensor shape.
@@ -153,17 +215,14 @@ def placements_equivalent(p1, p2, shape: tuple[int, ...]) -> bool:
     sharding a size-1 dimension produces the same result as replicating.
     """
 
-    def is_trivial_shard(p):
-        return isinstance(p, Shard) and p.dim < len(shape) and shape[p.dim] == 1
-
     # Check if both are trivial shards (equivalent to each other and to Replicate)
-    if is_trivial_shard(p1) and is_trivial_shard(p2):
+    if is_trivial_shard(p1, shape) and is_trivial_shard(p2, shape):
         return True
 
     # Check Shard vs Replicate equivalence for size-1 dims
-    if isinstance(p1, Replicate) and is_trivial_shard(p2):
+    if isinstance(p1, Replicate) and is_trivial_shard(p2, shape):
         return True
-    if isinstance(p2, Replicate) and is_trivial_shard(p1):
+    if isinstance(p2, Replicate) and is_trivial_shard(p1, shape):
         return True
 
     # Same type comparisons
@@ -743,6 +802,7 @@ def compare_operator(
                 continue
 
             input_shapes = tuple(t.shape for _, t in tensors)
+            output_shape = tuple(ground_truth.shape)
 
             # Extract non-tensor args and kwargs for context in discrepancy reports
             scalar_args = tuple(
@@ -875,9 +935,22 @@ def compare_operator(
                             output_plc = combo[0]
                             input_plcs = tuple(combo[1 : len(tensors) + 1])
 
-                            dtensor_rules.add(
-                                (tuple(str(p) for p in input_plcs), str(output_plc))
+                            rule_key = (
+                                tuple(str(p) for p in input_plcs),
+                                str(output_plc),
                             )
+                            # Normalize to deduplicate equivalent rules
+                            normalized_rule = normalize_combo_key(
+                                rule_key, input_shapes, output_shape
+                            )
+                            # Skip fully replicated (trivially valid)
+                            if not is_fully_replicated(
+                                tuple(
+                                    parse_placement(p) or Replicate()
+                                    for p in normalized_rule[0]
+                                )
+                            ):
+                                dtensor_rules.add(normalized_rule)
 
             elif aten_op and aten_op in propagator.op_strategy_funcs:
                 # Query op_strategy_funcs for ops like mm, bmm, sum
@@ -929,15 +1002,22 @@ def compare_operator(
                                 s.placements[0] for s in spec.input_specs
                             )
 
-                            # Skip fully replicated (trivially correct, not tested)
-                            if is_fully_replicated(input_plcs) and isinstance(
-                                output_plc, Replicate
-                            ):
-                                continue
-
-                            dtensor_rules.add(
-                                (tuple(str(p) for p in input_plcs), str(output_plc))
+                            rule_key = (
+                                tuple(str(p) for p in input_plcs),
+                                str(output_plc),
                             )
+                            # Normalize to deduplicate equivalent rules
+                            normalized_rule = normalize_combo_key(
+                                rule_key, input_shapes, output_shape
+                            )
+                            # Skip fully replicated (trivially valid)
+                            if not is_fully_replicated(
+                                tuple(
+                                    parse_placement(p) or Replicate()
+                                    for p in normalized_rule[0]
+                                )
+                            ):
+                                dtensor_rules.add(normalized_rule)
                 except Exception as e:
                     if verbose:
                         print(f"        Error querying op_strategy: {e}")
@@ -1057,12 +1137,23 @@ def compare_operator(
                         is_valid = is_valid and non_rounded_negated_valid
 
                     if is_valid:
-                        ground_truth_valid.add(combo_key)
+                        # Normalize combo_key to deduplicate equivalent combinations
+                        # (e.g., P(max)->S(0) on output [1,1,1] becomes P(max)->R)
+                        normalized_key = normalize_combo_key(
+                            combo_key, input_shapes, output_shape
+                        )
+                        # Skip if normalized to fully replicated (trivially valid)
+                        if not is_fully_replicated(
+                            tuple(
+                                parse_placement(p) or Replicate()
+                                for p in normalized_key[0]
+                            )
+                        ):
+                            ground_truth_valid.add(normalized_key)
             ground_truth_time += time.time() - gt_start
 
             # Compare ground truth vs DTensor rules
             if dtensor_rules:
-                output_shape = tuple(ground_truth.shape)
                 for combo_key in ground_truth_valid:
                     if combo_key in dtensor_rules or has_equivalent_rule(
                         combo_key, dtensor_rules, input_shapes, output_shape

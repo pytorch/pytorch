@@ -20,6 +20,10 @@ from torch.distributed.tensor._ops.strategy_validation import (
     get_1d_input_placements_for_tensor,
     get_1d_output_placements_for_tensor,
     is_fully_replicated,
+    is_trivial_shard,
+    normalize_combo_key,
+    normalize_placement,
+    normalize_placement_str,
     parse_placement,
     placement_tuple_to_str,
     PlacementCombination,
@@ -133,6 +137,146 @@ class TestPlacementEquivalence(TestCase):
         self.assertFalse(
             has_equivalent_rule(combo, rules, input_shapes, output_shape_normal)
         )
+
+
+class TestPlacementNormalization(TestCase):
+    """Test placement normalization for trivial shard deduplication."""
+
+    def test_is_trivial_shard_size_1(self):
+        """Shard on size-1 dimension is trivial."""
+        self.assertTrue(is_trivial_shard(Shard(0), (1, 4)))
+        self.assertTrue(is_trivial_shard(Shard(1), (4, 1)))
+        self.assertTrue(is_trivial_shard(Shard(0), (1, 1, 1)))
+        self.assertTrue(is_trivial_shard(Shard(2), (4, 4, 1)))
+
+    def test_is_trivial_shard_normal_size(self):
+        """Shard on non-size-1 dimension is not trivial."""
+        self.assertFalse(is_trivial_shard(Shard(0), (4, 3)))
+        self.assertFalse(is_trivial_shard(Shard(1), (4, 3)))
+
+    def test_is_trivial_shard_replicate(self):
+        """Replicate is not a trivial shard."""
+        self.assertFalse(is_trivial_shard(Replicate(), (1, 4)))
+
+    def test_is_trivial_shard_partial(self):
+        """Partial is not a trivial shard."""
+        self.assertFalse(is_trivial_shard(Partial("sum"), (1, 4)))
+
+    def test_normalize_placement_trivial_shard(self):
+        """Trivial shards should normalize to Replicate."""
+        result = normalize_placement(Shard(0), (1, 4))
+        self.assertIsInstance(result, Replicate)
+
+        result = normalize_placement(Shard(1), (4, 1))
+        self.assertIsInstance(result, Replicate)
+
+    def test_normalize_placement_normal_shard(self):
+        """Non-trivial shards should stay as Shard."""
+        result = normalize_placement(Shard(0), (4, 3))
+        self.assertIsInstance(result, Shard)
+        self.assertEqual(result.dim, 0)
+
+    def test_normalize_placement_replicate(self):
+        """Replicate should stay as Replicate."""
+        result = normalize_placement(Replicate(), (4, 3))
+        self.assertIsInstance(result, Replicate)
+
+    def test_normalize_placement_partial(self):
+        """Partial should stay as Partial."""
+        result = normalize_placement(Partial("sum"), (4, 3))
+        self.assertIsInstance(result, Partial)
+        self.assertEqual(result.reduce_op, "sum")
+
+    def test_normalize_placement_str_trivial_shard(self):
+        """Trivial shard strings should normalize to 'R'."""
+        result = normalize_placement_str("S(0)", (1, 4))
+        self.assertEqual(result, "R")
+
+        result = normalize_placement_str("S(1)", (4, 1))
+        self.assertEqual(result, "R")
+
+    def test_normalize_placement_str_normal_shard(self):
+        """Non-trivial shard strings should stay unchanged."""
+        result = normalize_placement_str("S(0)", (4, 3))
+        self.assertEqual(result, "S(0)")
+
+    def test_normalize_combo_key_trivial_output(self):
+        """Combo keys with trivial output shard should normalize output to R."""
+        # P(max) -> S(0) on output [1,1,1] should become P(max) -> R
+        combo = (("P(max)",), "S(0)")
+        input_shapes = ((4, 3),)
+        output_shape = (1, 1, 1)
+
+        result = normalize_combo_key(combo, input_shapes, output_shape)
+        self.assertEqual(result, (("P(max)",), "R"))
+
+    def test_normalize_combo_key_trivial_input(self):
+        """Combo keys with trivial input shard should normalize input to R."""
+        # S(0),R -> R on input [1,4],[4,4] should become R,R -> R
+        combo = (("S(0)", "R"), "R")
+        input_shapes = ((1, 4), (4, 4))
+        output_shape = (4, 4)
+
+        result = normalize_combo_key(combo, input_shapes, output_shape)
+        self.assertEqual(result, (("R", "R"), "R"))
+
+    def test_normalize_combo_key_all_trivial(self):
+        """All-size-1 tensor should normalize all shards to R."""
+        # S(0),S(1) -> S(2) on shape [1,1,1] should become R,R -> R
+        combo = (("S(0)", "S(1)"), "S(2)")
+        input_shapes = ((1, 1, 1), (1, 1, 1))
+        output_shape = (1, 1, 1)
+
+        result = normalize_combo_key(combo, input_shapes, output_shape)
+        self.assertEqual(result, (("R", "R"), "R"))
+
+    def test_normalize_combo_key_no_change(self):
+        """Normal-sized tensors should not change."""
+        combo = (("S(0)", "S(1)"), "S(0)")
+        input_shapes = ((4, 3), (4, 3))
+        output_shape = (4, 3)
+
+        result = normalize_combo_key(combo, input_shapes, output_shape)
+        self.assertEqual(result, combo)
+
+    def test_normalize_combo_key_partial_unchanged(self):
+        """Partial placements should never be normalized."""
+        combo = (("P(max)", "P(sum)"), "P(max)")
+        input_shapes = ((1, 1), (1, 1))  # Even with all-size-1
+        output_shape = (1, 1)
+
+        result = normalize_combo_key(combo, input_shapes, output_shape)
+        self.assertEqual(result, combo)  # Partials unchanged
+
+    def test_normalize_deduplicates_equivalent_rules(self):
+        """
+        Verify that normalization deduplicates equivalent rules.
+
+        For squeeze on [1,1,1,1] -> [1,1,1], all of these are equivalent:
+        - P(max) -> S(0)
+        - P(max) -> S(1)
+        - P(max) -> S(2)
+        - P(max) -> R
+
+        After normalization, they should all become P(max) -> R.
+        """
+        input_shapes = ((1, 1, 1, 1),)
+        output_shape = (1, 1, 1)
+
+        normalized_rules = set()
+        for shard_dim in [0, 1, 2]:
+            combo = (("P(max)",), f"S({shard_dim})")
+            normalized = normalize_combo_key(combo, input_shapes, output_shape)
+            normalized_rules.add(normalized)
+
+        # Also add the explicit R version
+        combo_r = (("P(max)",), "R")
+        normalized_r = normalize_combo_key(combo_r, input_shapes, output_shape)
+        normalized_rules.add(normalized_r)
+
+        # All should have normalized to the same rule
+        self.assertEqual(len(normalized_rules), 1)
+        self.assertEqual(normalized_rules.pop(), (("P(max)",), "R"))
 
 
 class TestInputPlacements(TestCase):
