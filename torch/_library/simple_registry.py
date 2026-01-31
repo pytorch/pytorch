@@ -41,6 +41,20 @@ class SimpleLibraryRegistry:
             self._data[qualname] = res = SimpleOperatorEntry(qualname)
         return res
 
+    def _load_cpp_symm_mem_registrations(self) -> None:
+        """Load C++ symm_mem registrations into Python registry."""
+        try:
+            import torch._C
+
+            cpp_registry = torch._C._get_cpp_symm_mem_args_registry()
+            for qualname, arg_names in cpp_registry.items():
+                entry = self.find(qualname)
+                # register without validation since C++ already registered
+                entry.symm_mem_args._symm_mem_args = OrderedSet(arg_names)
+        except (ImportError, AttributeError):
+            # c++ binding not available, skip
+            pass
+
 
 singleton: SimpleLibraryRegistry = SimpleLibraryRegistry()
 
@@ -197,3 +211,7 @@ def find_torch_dispatch_rule(
     return singleton.find(op.__qualname__).torch_dispatch_rules.find(
         torch_dispatch_class
     )
+
+
+# load C++ registrations into the singleton registry after all classes are defined
+singleton._load_cpp_symm_mem_registrations()
