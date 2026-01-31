@@ -5084,17 +5084,17 @@ class <lambda>(torch.nn.Module):
 
             body_graph_0 = self.body_graph_0
             map_impl = torch.ops.higher_order.map_impl(body_graph_0, [cos], [arg1_1]);  body_graph_0 = None
-            getitem_2: "f32[2, 2]" = map_impl[0];  map_impl = None
+            getitem: "f32[2, 2]" = map_impl[0];  map_impl = None
 
-            sum_1: "f32[]" = torch.ops.aten.sum.default(getitem_2);  getitem_2 = None
+            sum_1: "f32[]" = torch.ops.aten.sum.default(getitem);  getitem = None
 
             add: "f32[2, 2]" = torch.ops.aten.add.Tensor(cos, sum_1);  sum_1 = None
 
             body_graph_1 = self.body_graph_1
             map_impl_1 = torch.ops.higher_order.map_impl(body_graph_1, [cos], [arg1_1]);  body_graph_1 = cos = arg1_1 = None
-            getitem_5: "f32[2, 2]" = map_impl_1[0];  map_impl_1 = None
+            getitem_1: "f32[2, 2]" = map_impl_1[0];  map_impl_1 = None
 
-            sum_2: "f32[]" = torch.ops.aten.sum.default(getitem_5);  getitem_5 = None
+            sum_2: "f32[]" = torch.ops.aten.sum.default(getitem_1);  getitem_1 = None
 
             add_1: "f32[2, 2]" = torch.ops.aten.add.Tensor(add, sum_2);  add = sum_2 = None
             return (add_1,)
@@ -5149,9 +5149,9 @@ class <lambda>(torch.nn.Module):
 
         body_graph_0 = self.body_graph_0
         map_impl = torch.ops.higher_order.map_impl(body_graph_0, [cos], [arg1_1]);  body_graph_0 = arg1_1 = None
-        getitem_2: "f32[2, 2]" = map_impl[0];  map_impl = None
+        getitem: "f32[2, 2]" = map_impl[0];  map_impl = None
 
-        sum_1: "f32[]" = torch.ops.aten.sum.default(getitem_2);  getitem_2 = None
+        sum_1: "f32[]" = torch.ops.aten.sum.default(getitem);  getitem = None
         add: "f32[2, 2]" = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
         return (
             add,  # PlainAOTOutput(idx=0)
@@ -6451,6 +6451,52 @@ def forward(self, primals_1, tangents_1):
         )
         self.assertIsNotNone(data_dep_edge)
         self.assertEqual(data_dep_edge[2], "data dependency")
+
+    @unittest.skipIf(not USE_NETWORKX, "networkx not available")
+    def test_min_cut_partitioner_getitem_of_banned_multi_output(self):
+        """Test that getitem from a banned multi-output node doesn't cause NetworkXUnbounded.
+
+        Uses selective checkpoint to mark var_mean as MUST_SAVE (banning recomputation),
+        with a custom autograd.Function that returns the mean (getitem from var_mean)
+        directly as the gradient output.
+
+        This test is doing weird things, because ordinarily the returned grad_output will
+        always be a function of the input tangent, preventing it from being returned directly
+        as a forward output. It is still important to test this case because it can actually
+        happen if you use subclasses.
+        """
+        from torch.utils.checkpoint import (
+            checkpoint,
+            create_selective_checkpoint_contexts,
+        )
+
+        class GetitemAsGradOutput(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                var, mean = torch.var_mean(torch.stack([x, x]), dim=0)
+                ctx.save_for_backward(mean)
+                return var
+
+            @staticmethod
+            def backward(ctx, grad_var):
+                return ctx.saved_tensors[0]
+
+        context_fn = partial(
+            create_selective_checkpoint_contexts,
+            [torch.ops.aten.var_mean.correction],
+        )
+
+        @torch.compile(backend="aot_eager_decomp_partition", fullgraph=True)
+        def fn(x):
+            return checkpoint(
+                GetitemAsGradOutput.apply,
+                x,
+                use_reentrant=False,
+                context_fn=context_fn,
+            )
+
+        x = torch.randn(4, requires_grad=True)
+        fn(x).sum().backward()
 
 
 class TestAOTDispatch(AOTTestCase):

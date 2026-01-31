@@ -16,7 +16,7 @@ import torch
 import torch._prims as prims
 import torch._prims_common as utils
 import torch.utils._pytree as pytree
-from torch import sym_float, sym_int
+from torch import sym_float, sym_int, sym_max, sym_min
 from torch._prims_common import (
     BoolLike,
     DeviceLikeType,
@@ -2736,7 +2736,7 @@ def addr(
         )
         torch._check(
             is_weakly_lesser_type(type(alpha), int),
-            lambda: f"expected bool/int alpha but got {type(beta)}",
+            lambda: f"expected bool/int alpha but got {type(alpha)}",
         )
         if not beta:
             return torch.outer(vec1, vec2) if alpha else torch.full_like(self, False)
@@ -4615,10 +4615,16 @@ def diagonal_scatter(
     dim1: int = 0,
     dim2: int = 1,
 ) -> TensorLikeType:
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_or
+
     out = utils.clone_preserve_strides(input)
     diag = out.diagonal(offset, dim1, dim2)
+    # Use sym_or + guard_or_false to handle unbacked symbolic dimensions.
     torch._check(
-        diag.shape == src.shape,
+        diag.ndim == src.ndim
+        and not guard_or_false(
+            sym_or(*(d1 != d2 for d1, d2 in zip(diag.shape, src.shape)))
+        ),
         lambda: "expected src to have a size equal to the diagonal of the input."
         f"Got {src.shape} for a diagonal of shape {diag.shape}",
     )
@@ -4646,16 +4652,13 @@ def diagonal(
 
     storage_offset = self.storage_offset()
 
+    # Use sym_min/sym_max to handle unbacked symbolic dimensions.
     if offset >= 0:
-        diag_size = max(min(self.size()[dim1], self.size()[dim2] - offset), 0)
+        diag_size = sym_max(sym_min(self.size()[dim1], self.size()[dim2] - offset), 0)
+        storage_offset += offset * self.stride()[dim2]
     else:
-        diag_size = max(min(self.size()[dim1] + offset, self.size()[dim2]), 0)
-
-    if diag_size > 0:
-        if offset >= 0:
-            storage_offset += offset * self.stride()[dim2]
-        else:
-            storage_offset -= offset * self.stride()[dim1]
+        diag_size = sym_max(sym_min(self.size()[dim1] + offset, self.size()[dim2]), 0)
+        storage_offset -= offset * self.stride()[dim1]
 
     sizes = [s for i, s in enumerate(self.size()) if i not in (dim1, dim2)]
     sizes.append(diag_size)

@@ -129,16 +129,28 @@ class CollectTracepointsPass(PassBase):
                                 raise AssertionError(f"Unknown tracepoint kind: {kind}")
                         if isinstance(arg, torch.fx.Node):
                             for user in node.users:
-                                assert user.op == "call_function"
-                                assert user.target is operator.getitem
-                                assert isinstance(user.args[1], int)
+                                if user.op != "call_function":
+                                    raise AssertionError(
+                                        f"expected call_function, got {user.op}"
+                                    )
+                                if user.target is not operator.getitem:
+                                    raise AssertionError(
+                                        f"expected getitem target, got {user.target}"
+                                    )
+                                if not isinstance(user.args[1], int):
+                                    raise AssertionError(
+                                        f"expected int arg, got {type(user.args[1])}"
+                                    )
                                 if user.args[1] == i:
                                     user.replace_all_uses_with(arg)
                                     self.sig.replace_all_uses(user.name, arg.name)
                                     break
                     users = list(node.users)
                     for user in users:
-                        assert len(user.users) == 0
+                        if len(user.users) != 0:
+                            raise AssertionError(
+                                f"expected no users, got {len(user.users)}"
+                            )
                         gm.graph.erase_node(user)
                     gm.graph.erase_node(node)
             return PassResult(gm, True)
