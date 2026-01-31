@@ -56,6 +56,7 @@ from torch._inductor.codegen.common import DataTypePropagation, OptimizationCont
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import (
     add_scheduler_init_hook,
+    is_warp_size_64,
     run_and_get_code,
     run_and_get_cpp_code,
     run_and_get_kernels,
@@ -16719,7 +16720,7 @@ if RUN_GPU:
         def test_donated_buffer_inplace(self):
             batch_size = 32
             seq_length = 50
-            hidden_size = 512 if torch.version.hip is not None else 256
+            hidden_size = 512 if is_warp_size_64(torch.device(GPU_TYPE)) else 256
 
             inp = torch.randn(
                 batch_size,
