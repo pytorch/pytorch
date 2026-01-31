@@ -1,11 +1,19 @@
 import dataclasses
 import importlib
 import io
+import itertools
 import pickle
 from abc import abstractmethod
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from typing import Any, NewType, Optional, TypeVar, Union
 from typing_extensions import override, Self
+
+from torch.utils._import_utils import import_dill
+
+
+dill = import_dill()
+if dill is not None:
+    pickle = dill  # noqa: F811
 
 import torch
 import torch.utils._pytree as pytree
@@ -39,14 +47,25 @@ def _ops_filter_safe(name: str) -> bool:
     )
 
 
+def _node_metadata_key_filter_safe(key: str) -> bool:
+    """
+    A metadata filter which allows pickle-safe node metadata. These often times contain
+    stacks with pointers to unserializable objects, so we clear them out.
+    """
+    return key not in ["source_fn_stack", "nn_module_stack", "fwd_source_fn_stack"]
+
+
 @dataclasses.dataclass
 class Options:
     # A filter for which ops will cause the pickler to raise a
     # BypassFxGraphCache exception. If None then all ops are allowed.
     ops_filter: Optional[Callable[[str], bool]] = _ops_filter_safe
-    ignore_metadata_fields: Sequence[str] = dataclasses.field(default_factory=tuple)
+    node_metadata_key_filter: Optional[Callable[[str], bool]] = (
+        _node_metadata_key_filter_safe
+    )
 
 
+# pyrefly: ignore [invalid-inheritance]
 class GraphPickler(pickle.Pickler):
     """
     GraphPickler is a Pickler which helps pickling fx graph - in particular
@@ -112,6 +131,7 @@ class GraphPickler(pickle.Pickler):
             return NotImplemented
 
     @override
+    # pyrefly: ignore [bad-override]
     def persistent_id(self, obj: object) -> Optional[str]:
         if obj is self._unpickle_state:
             return "unpickle_state"
@@ -138,6 +158,194 @@ class GraphPickler(pickle.Pickler):
             unpickler = _GraphUnpickler(stream, state)
             return unpickler.load()
 
+    @classmethod
+    def debug_dumps(
+        cls,
+        obj: object,
+        options: "Options | None" = None,
+        *,
+        max_depth: int = 80,
+        max_iter_items: int = 50,
+        verbose: bool = True,
+    ) -> Optional[str]:
+        """
+        Find the first leaf that GraphPickler.dumps cannot serialize and return its path.
+
+        This is GraphPickler-aware and avoids infinite loops by:
+          - Traversing builtin containers directly (dict/list/tuple/set) instead of
+            exploring their __reduce_ex__ tuples.
+          - Only using __reduce_ex__ / __reduce__ for "opaque" objects.
+          - Bounding recursion depth and iterator expansion.
+
+        Args:
+            obj: The object to attempt to pickle and debug.
+            options: Optional Options instance for the GraphPickler.
+            max_depth: Maximum recursion depth before stopping traversal.
+            max_iter_items: Maximum number of items to materialize from iterators.
+            verbose: If True, prints detailed traversal information.
+
+        Returns:
+            A string representing the path to the first unpicklable leaf,
+            or None if the object is fully picklable.
+        """
+        options = options or Options()
+        pickler = cls(io.BytesIO(), options)
+
+        visited: set[int] = set()
+
+        def log(msg: str) -> None:
+            if verbose:
+                print(msg)
+
+        def fail_exc(o: Any) -> Optional[BaseException]:
+            try:
+                cls.dumps(o, options)
+                return None
+            except Exception as e:
+                return e
+
+        def walk(o: Any, path: str, depth: int) -> Optional[str]:
+            if depth > max_depth:
+                log(f"{'  ' * depth}Depth limit at {path} ({type(o)})")
+                return path + " (depth_limit)"
+
+            key = id(o)
+            if key in visited:
+                return None
+            visited.add(key)
+
+            indent = "  " * depth
+            log(f"{indent}Walking: {path} ({type(o)})")
+
+            e = fail_exc(o)
+            if e is None:
+                log(f"{indent}✓ Pickles fine alone")
+                return None
+            log(f"{indent}[FAIL pickle] {type(o)} -> {e}")
+
+            # 1) Builtin containers: walk contents directly (do NOT call __reduce_ex__)
+            if isinstance(o, dict):
+                for k, v in o.items():
+                    bad = walk(v, f"{path}[{k!r}]", depth + 1)
+                    if bad:
+                        return bad
+                return path
+
+            if isinstance(o, (list, tuple)):
+                for i, v in enumerate(o):
+                    bad = walk(v, f"{path}[{i}]", depth + 1)
+                    if bad:
+                        return bad
+                return path
+
+            if isinstance(o, (set, frozenset)):
+                for i, v in enumerate(o):
+                    bad = walk(v, f"{path}[{i}]", depth + 1)
+                    if bad:
+                        return bad
+                return path
+
+            # 2) Iterator types: materialize a bounded prefix
+            if hasattr(o, "__iter__") and type(o).__name__.endswith("iterator"):
+                try:
+                    prefix = list(itertools.islice(iter(o), max_iter_items + 1))
+                except Exception:
+                    prefix = None
+                if prefix is not None:
+                    if len(prefix) > max_iter_items:
+                        log(
+                            f"{indent}⚠ Iterator has more than {max_iter_items} items, "
+                            f"only checking first {max_iter_items}"
+                        )
+                        prefix = prefix[:max_iter_items]
+                    for i, v in enumerate(prefix):
+                        bad = walk(v, f"{path}[{i}]", depth + 1)
+                        if bad:
+                            return bad
+                    return path
+
+            # 3) GraphPickler reducer_override
+            try:
+                red = pickler.reducer_override(o)
+                log(f"{indent}reducer_override -> {type(red)}")
+            except Exception as e2:
+                log(f"{indent}💥 reducer_override crashed: {e2}")
+                return path
+
+            if red is not NotImplemented:
+                _, args = red
+                log(f"{indent}Using custom reduce, args={len(args)}")
+                for i, a in enumerate(args):
+                    bad = walk(a, f"{path}.reduce_args[{i}]", depth + 1)
+                    if bad:
+                        return bad
+
+            # 4) Dataclasses
+            if dataclasses.is_dataclass(o):
+                for f in dataclasses.fields(o):
+                    try:
+                        v = getattr(o, f.name)
+                    except Exception:
+                        return f"{path}.{f.name}"
+                    bad = walk(v, f"{path}.{f.name}", depth + 1)
+                    if bad:
+                        return bad
+                return path
+
+            # 5) __getstate__ and __dict__/__slots__
+            getstate = getattr(o, "__getstate__", None)
+            if callable(getstate):
+                try:
+                    state = getstate()
+                    log(f"{indent}__getstate__ -> {type(state)}")
+                except Exception as e3:
+                    log(f"{indent}💥 __getstate__ failed: {e3}")
+                    return path + ".__getstate__()"
+                bad = walk(state, path + ".__getstate__()", depth + 1)
+                if bad:
+                    return bad
+
+            if hasattr(o, "__dict__"):
+                for name, v in vars(o).items():
+                    bad = walk(v, f"{path}.{name}", depth + 1)
+                    if bad:
+                        return bad
+                return path
+
+            if hasattr(o, "__slots__"):
+                for slot in o.__slots__:
+                    if hasattr(o, slot):
+                        bad = walk(getattr(o, slot), f"{path}.{slot}", depth + 1)
+                        if bad:
+                            return bad
+                return path
+
+            # 6) Last resort: reduce protocol for non-container / opaque objects
+            reduce_tuple = None
+            try:
+                if hasattr(o, "__reduce_ex__"):
+                    reduce_tuple = o.__reduce_ex__(pickle.HIGHEST_PROTOCOL)
+                    log(f"{indent}__reduce_ex__ -> {type(reduce_tuple)}")
+                elif hasattr(o, "__reduce__"):
+                    reduce_tuple = o.__reduce__()
+                    log(f"{indent}__reduce__ -> {type(reduce_tuple)}")
+            except Exception as e4:
+                log(f"{indent}💥 reduce protocol failed: {e4}")
+                return path
+
+            if isinstance(reduce_tuple, tuple):
+                for i, part in enumerate(reduce_tuple):
+                    if part is None:
+                        continue
+                    bad = walk(part, f"{path}.__reduce__[{i}]", depth + 1)
+                    if bad:
+                        return bad
+
+            return path
+
+        bad = walk(obj, "root", 0)
+        return bad
+
 
 class _UnpickleState:
     def __init__(self, fake_mode: FakeTensorMode) -> None:
@@ -150,12 +358,14 @@ class _UnpickleState:
 _UnpickleStateToken = NewType("_UnpickleStateToken", object)
 
 
+# pyrefly: ignore [invalid-inheritance]
 class _GraphUnpickler(pickle.Unpickler):
     def __init__(self, stream: io.BytesIO, unpickle_state: _UnpickleState) -> None:
         super().__init__(stream)
         self._unpickle_state = unpickle_state
 
     @override
+    # pyrefly: ignore [bad-override]
     def persistent_load(self, pid: object) -> object:
         if pid == "unpickle_state":
             return self._unpickle_state
@@ -360,7 +570,10 @@ class _GraphModulePickleData:
             _python_code = gm._real_recompile()
         else:
             _python_code = gm.recompile()
-        self.gm_dict = gm.__dict__.copy()
+        if hasattr(gm, "__getstate__"):
+            self.gm_dict = gm.__getstate__()
+        else:
+            self.gm_dict = gm.__dict__.copy()
         del self.gm_dict["_graph"]
         self.graph = _GraphPickleData(gm._graph, options)
 
@@ -391,11 +604,15 @@ class _NodePickleData:
         self.type = node.type
         # self.sort_key = node._sort_key
         # self.repr_fn = node._repr_fn
-        self.meta = node.meta
-        if options.ignore_metadata_fields:
-            self.meta = self.meta.copy()
-            for k in options.ignore_metadata_fields:
-                self.meta.pop(k, None)
+        # self.meta = node.meta
+        self.meta = {
+            k: v
+            for k, v in node.meta.items()
+            if (
+                not options.node_metadata_key_filter
+                or options.node_metadata_key_filter(k)
+            )
+        }
 
     def unpickle(
         self,
@@ -593,7 +810,8 @@ class _GraphPickleData:
         nodes: dict[_NodePickleData, torch.fx.Node] = {}
         for nd in self.nodes:
             nodes[nd] = nd.unpickle(graph, nodes, unpickle_state)
-        graph._codegen = self._codegen
+        if hasattr(self, "_codegen"):
+            graph._codegen = self._codegen
 
         return graph
 

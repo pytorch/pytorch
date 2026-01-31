@@ -474,7 +474,7 @@ def propagate_general_copy_metadata(
         ):
             return PropagateStatus.FAIL
 
-        # apply any to a list to avoid short-curcuit
+        # apply any to a list to avoid short-circuit
         changed = any(  # noqa: C419
             [  # noqa: C419
                 copy_chunking_meta(node, meta)

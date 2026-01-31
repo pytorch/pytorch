@@ -305,6 +305,24 @@ class AttrSource(ChainedSource):
 
 
 @dataclass_with_cached_hash(frozen=True)
+class CellContentsSource(AttrSource):
+    """
+    Source for closure cell contents that also stores the freevar name.
+    This allows guard failure messages to show which variable the closure cell refers to.
+    """
+
+    freevar_name: str = dataclasses.field(default="")
+
+    def __post_init__(self) -> None:
+        assert self.base, (
+            "Can't construct a CellContentsSource without a valid base source"
+        )
+        assert self.member == "cell_contents", (
+            "CellContentsSource should only be used for cell_contents"
+        )
+
+
+@dataclass_with_cached_hash(frozen=True)
 class GenericAttrSource(ChainedSource):
     member: str
 
@@ -975,55 +993,27 @@ class GlobalStateSource(Source):
 
 
 @dataclass_with_cached_hash(frozen=True)
-class TorchSource(Source):
-    """Points to the actual `torch` module - used instead of GlobalSource
-    in case the user has overridden `torch` in their local namespace"""
+class ImportSource(Source):
+    """Points to an imported module - used instead of GlobalSource
+    in case the user has overridden the module name in their local namespace"""
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
+    module_name: str
+
+    def __post_init__(self) -> None:
         from .guards import GuardBuilder, install_guard
 
         install_guard(self.make_guard(GuardBuilder.ID_MATCH))
 
-    @property
+    @functools.cached_property
     def _name_template(self) -> str:
-        return "__import__('torch')"
+        return f"__import__('{self.module_name}')"
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.extend_output(
             [
                 codegen.create_load_const(0),  # level
                 create_build_tuple(0),  # fromlist
-                codegen.create_import_name("torch"),
-            ]
-        )
-
-    @property
-    def guard_source(self) -> GuardSource:
-        return GuardSource.GLOBAL
-
-
-@dataclass_with_cached_hash(frozen=True)
-class CollectionsSource(Source):
-    """Points to the actual `collections` module - used instead of GlobalSource
-    in case the user has overridden `collections` in their local namespace"""
-
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
-        from .guards import GuardBuilder, install_guard
-
-        install_guard(self.make_guard(GuardBuilder.ID_MATCH))
-
-    @property
-    def _name_template(self) -> str:
-        return "__import__('collections')"
-
-    def reconstruct(self, codegen: "PyCodegen") -> None:
-        codegen.extend_output(
-            [
-                codegen.create_load_const(0),  # level
-                create_build_tuple(0),  # fromlist
-                codegen.create_import_name("collections"),
+                codegen.create_import_name(self.module_name),
             ]
         )
 
@@ -1164,6 +1154,7 @@ class BackwardStateSource(Source):
         return GuardSource.BACKWARD_STATE
 
 
+@functools.lru_cache
 def get_local_source_name(
     source: Source, *, only_allow_input: bool = False
 ) -> Optional[str]:
@@ -1176,14 +1167,17 @@ def get_local_source_name(
     return source.local_name
 
 
+@functools.lru_cache
 def is_from_local_source(source: Source, *, only_allow_input: bool = False) -> bool:
     return get_local_source_name(source, only_allow_input=only_allow_input) is not None
 
 
+@functools.lru_cache
 def is_from_global_source(source: Source) -> bool:
     return get_global_source_name(source) is not None
 
 
+@functools.lru_cache
 def get_global_source_name(source: Source | None) -> str | None:
     if isinstance(source, ChainedSource):
         return get_global_source_name(source.base)
@@ -1192,6 +1186,7 @@ def get_global_source_name(source: Source | None) -> str | None:
     return source.global_name
 
 
+@functools.lru_cache
 def is_from_nonlocal_source(source: Source) -> bool:
     if isinstance(source, ChainedSource):
         return is_from_nonlocal_source(source.base)
@@ -1202,6 +1197,7 @@ def is_from_nonlocal_source(source: Source) -> bool:
     )
 
 
+@functools.lru_cache
 def is_from_closure_source(source: Source) -> bool:
     if isinstance(source, ClosureSource):
         return True
@@ -1210,6 +1206,7 @@ def is_from_closure_source(source: Source) -> bool:
     return False
 
 
+@functools.lru_cache
 def is_from_source(source: Source, target: Source) -> bool:
     if isinstance(source, ChainedSource):
         return is_from_source(source.base, target)

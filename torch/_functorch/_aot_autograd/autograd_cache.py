@@ -38,6 +38,10 @@ from torch._inductor.codecache import (
     sha256_hash,
     write_atomic,
 )
+from torch._inductor.custom_graph_pass import (
+    CustomKnapsackSolver,
+    CustomRuntimeEstimator,
+)
 from torch._inductor.output_code import OutputCode
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.utils import BoxedBool, should_use_remote_fx_graph_cache
@@ -48,7 +52,7 @@ from torch.compiler._cache import (
     CacheArtifactFactory,
     CacheArtifactManager,
 )
-from torch.fx.experimental.symbolic_shapes import hint_int
+from torch.fx.experimental.symbolic_shapes import size_hint
 from torch.utils._triton import has_triton_package
 
 from .aot_autograd_result import (
@@ -149,6 +153,7 @@ def check_node_safe(node: Node):
         "torch._sym_sqrt",
         "torch.sym_float",
         "torch.sym_sum",
+        "torch.autograd.grad",
     )
     SAFE_NON_TORCH_FUNCTIONS = (
         "einops.einops.rearrange",
@@ -329,6 +334,59 @@ def _collect_context_fn_hashes(gm: torch.fx.GraphModule) -> list:
     return hashes
 
 
+def _get_custom_estimator_solver_uuids(
+    autograd_config,
+) -> tuple[Optional[object], Optional[object]]:
+    """
+    Extract uuid values from custom runtime estimator and solver configs if they have uuid() methods.
+
+    Returns a tuple of (runtime_estimator_uuid, solver_uuid).
+
+    Returns None for each component if:
+    - The config field value is None
+    - The config field value is a string (built-in option like "flops", "greedy")
+
+    Raises BypassAOTAutogradCache if:
+    - The config field value is a raw callable without uuid() method (caching not supported)
+    - The CustomRuntimeEstimator/CustomKnapsackSolver's uuid() method returns None
+    (caching explicitly disabled by implementation)
+    """
+
+    runtime_estimator = getattr(
+        autograd_config, "activation_memory_budget_runtime_estimator", None
+    )
+    solver = getattr(autograd_config, "activation_memory_budget_solver", None)
+
+    runtime_estimator_uuid = None
+    solver_uuid = None
+
+    if isinstance(runtime_estimator, CustomRuntimeEstimator):
+        runtime_estimator_uuid = runtime_estimator.uuid()
+        if runtime_estimator_uuid is None:
+            raise BypassAOTAutogradCache(
+                "CustomRuntimeEstimator.uuid() returned None, bypassing cache"
+            )
+    elif callable(runtime_estimator) and not isinstance(runtime_estimator, str):
+        raise BypassAOTAutogradCache(
+            "activation_memory_budget_runtime_estimator is a raw callable without uuid() method, "
+            "bypassing cache. Use CustomRuntimeEstimator for cache support."
+        )
+
+    if isinstance(solver, CustomKnapsackSolver):
+        solver_uuid = solver.uuid()
+        if solver_uuid is None:
+            raise BypassAOTAutogradCache(
+                "CustomKnapsackSolver.uuid() returned None, bypassing cache"
+            )
+    elif callable(solver) and not isinstance(solver, str):
+        raise BypassAOTAutogradCache(
+            "activation_memory_budget_solver is a raw callable without uuid() method, "
+            "bypassing cache. Use CustomKnapsackSolver for cache support."
+        )
+
+    return runtime_estimator_uuid, solver_uuid
+
+
 class AOTAutogradCacheDetails(FxGraphHashDetails):
     """
     Object to capture all the details for a dynamo graph module relevant to computing
@@ -415,6 +473,12 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
             )
 
         self.sac_context_fn_hashes: list = _collect_context_fn_hashes(gm)
+
+        # Note: We use the live config module, not self.autograd_config (the saved config),
+        # because activation_memory_budget_runtime_estimator and activation_memory_budget_solver
+        # are excluded from save_config (in _save_config_ignore) since they're not serializable.
+        # We must access the config module directly to get the patched runtime values.
+        self.custom_estimator_solver_uuids = _get_custom_estimator_solver_uuids(config)
 
         try:
             # FXGraphCache has constraints on what can be pickled in its inductor
@@ -820,7 +884,10 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult]):
         cls: type[AOTAutogradCache], cache_info: AOTAutogradCacheInfo
     ) -> Optional[str]:
         shape_env = cls._get_shape_env()
-        assert shape_env is not None
+
+        if shape_env is None:
+            return None
+
         symints = cache_info.forward_symints
         guards = shape_env.get_pruned_guards(symints)
         return shape_env.produce_guards_expression(placeholders=symints, guards=guards)
@@ -896,7 +963,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult]):
             remote_cache = AOTAutogradCache.get_remote_cache()
 
         symints = AOTAutogradCache._filter_backed_symints(args)
-        hints = [hint_int(s) for s in symints]
+        hints = [size_hint(s) for s in symints]
         entry = None
         pickled_content = None
         try:
@@ -953,11 +1020,70 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult]):
         write_atomic(path, content)
 
     @staticmethod
+    def _find_unpicklable_field(entry: GenericAOTAutogradResult) -> Optional[str]:
+        """Find which field of entry is causing pickle to fail."""
+        fields = []
+        if hasattr(entry, "__dataclass_fields__"):
+            fields = list(entry.__dataclass_fields__.keys())
+        elif hasattr(entry, "__dict__"):
+            fields = list(entry.__dict__.keys())
+
+        for name in fields:
+            try:
+                pickle.dumps(getattr(entry, name))
+            except Exception:
+                return name
+        return None
+
+    @staticmethod
+    def _pickle_entry(entry: GenericAOTAutogradResult, remote: bool) -> Optional[bytes]:
+        """Pickle entry, returning None on failure."""
+        try:
+            return pickle.dumps(entry)
+        except (pickle.PicklingError, TypeError, AttributeError) as e:
+            bad_field = AOTAutogradCache._find_unpicklable_field(entry)
+            error_str = str(e)
+            log.warning("AOTAutograd cache unable to serialize compiled graph: %s", e)  # noqa: G200
+            torch._logging.trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": "aotautograd_cache_pickle_failure",
+                    "encoding": "json",
+                },
+                payload_fn=lambda: json.dumps({"error": error_str, "field": bad_field}),
+            )
+            if remote:
+                log_cache_bypass(
+                    "bypass_aot_autograd", "Unable to serialize: " + str(e)
+                )
+            if config.strict_autograd_cache:
+                raise
+            return None
+
+    @staticmethod
+    def _handle_save_error(e: Exception, remote: bool, is_bypass: bool) -> None:
+        """Handle exceptions during save, re-raising if strict mode is enabled."""
+        if is_bypass:
+            counters["aot_autograd"]["autograd_cache_bypass"] += 1
+            log.info("Bypassing autograd cache due to: %s", e)  # noqa: G200
+            bypass_reason = str(e)
+        else:
+            log.warning("AOTAutograd cache unable to serialize compiled graph: %s", e)  # noqa: G200
+            bypass_reason = "Unable to serialize: " + str(e)
+        if remote:
+            log_cache_bypass("bypass_aot_autograd", bypass_reason)
+        if config.strict_autograd_cache:
+            raise e
+
+    @staticmethod
     def save(key: str, entry: GenericAOTAutogradResult, remote: bool):
         """Save a single entry into the cache."""
+        content: Optional[bytes] = None
         try:
             entry.pre_save()
-            content = pickle.dumps(entry)
+            content = AOTAutogradCache._pickle_entry(entry, remote)
+            if content is None:
+                return None
             CacheArtifactManager.record_artifact(
                 AOTAutogradCacheArtifact.type(), key, content
             )
@@ -967,32 +1093,19 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult]):
             ):
                 precompile_key = entry.sanitized_aot_config.precompile_backend_id
                 artifact = BundledAOTAutogradCacheArtifact(precompile_key, entry)
-                # Now that we're saving it, the precompile_backend_id field is no longer
-                # useful, remove it from the entry.
                 entry.sanitized_aot_config.precompile_backend_id = None
                 PrecompileContext.record_artifact(artifact)
             AOTAutogradCache._write_to_local_cache(key, content)
             counters["aot_autograd"]["autograd_cache_saved"] += 1
         except BypassAOTAutogradCache as e:
-            counters["aot_autograd"]["autograd_cache_bypass"] += 1
-            log.info("Bypassing autograd cache due to: %s", e)  # noqa: G200
-            if remote:
-                log_cache_bypass("bypass_aot_autograd", str(e))
+            AOTAutogradCache._handle_save_error(e, remote, is_bypass=True)
             return None
         except Exception as e:
-            log.info("AOTAutograd cache unable to serialize compiled graph: %s", e)  # noqa: G200
-            if remote:
-                log_cache_bypass(
-                    "bypass_aot_autograd", "Unable to serialize: " + str(e)
-                )
-            if config.strict_autograd_cache:
-                raise e
+            AOTAutogradCache._handle_save_error(e, remote, is_bypass=False)
             return None
 
         if remote:
-            remote_cache: Optional[RemoteCache[JsonDataTy]] = (
-                AOTAutogradCache.get_remote_cache()
-            )
+            remote_cache = AOTAutogradCache.get_remote_cache()
             if remote_cache is not None:
                 time_taken_ms = int(
                     (entry.forward_time_taken_ns + entry.backward_time_taken_ns) // 1e6

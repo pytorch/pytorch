@@ -429,6 +429,13 @@ class TestTensorDataset(TestCase):
             self.assertEqual(t2[i], source[i][2])
             self.assertEqual(t3[i], source[i][3])
 
+    def test_size_mismatch(self):
+        tensor1 = torch.randn(10, 5)
+        tensor2 = torch.randn(10, 3)
+        tensor3 = torch.randn(20, 7)
+        with self.assertRaisesRegex(AssertionError, "Size mismatch between tensors"):
+            TensorDataset(tensor1, tensor2, tensor3)
+
 
 @unittest.skipIf(
     TEST_WITH_TSAN,
@@ -1059,16 +1066,7 @@ def _test_worker_info_init_fn(worker_id):
         "worker_info should have correct dataset copy"
     )
     assert not hasattr(dataset, "value"), "worker_info should have correct dataset copy"
-    # test that WorkerInfo attributes are read-only
-    try:
-        worker_info.id = 3999
-    except RuntimeError as e:
-        assert str(e) == "Cannot assign attributes to WorkerInfo objects"
-    try:
-        worker_info.a = 3
-    except RuntimeError as e:
-        assert str(e) == "Cannot assign attributes to WorkerInfo objects"
-    for k in ["id", "num_workers", "seed", "dataset"]:
+    for k in ["id", "num_workers", "seed", "dataset", "rng"]:
         assert f"{k}=" in repr(worker_info)
     dataset.value = [worker_id, os.getpid()]
 
