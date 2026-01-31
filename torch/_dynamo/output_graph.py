@@ -2500,9 +2500,15 @@ class OutputGraph(OutputGraphCommon):
 
     def _dump_dynamo_profiler_stats(self) -> None:
         """Dump dynamo profiler stats if enabled."""
-        from torch._dynamo.profiler import dump_dynamo_profiler_stats
+        tc = TracingContext.try_get()
+        if tc is None or tc.profiler_state is None:
+            return
 
-        dump_dynamo_profiler_stats()
+        output_file = None
+        if isinstance(config.dynamo_profiler, str):
+            output_file = config.dynamo_profiler
+
+        tc.profiler_state.dump_stats(output_file)
 
     def call_user_compiler(
         self, gm: fx.GraphModule, example_inputs: list[Tensor]
