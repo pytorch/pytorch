@@ -159,6 +159,19 @@ class ContextWrappingVariable(VariableTracker):
         assert self.cleanup_fn, "multiple exits?"
         self.cleanup()
 
+    def call_method(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        args: list["VariableTracker"],
+        kwargs: dict[str, "VariableTracker"],
+    ) -> "VariableTracker":
+        if name == "__enter__":
+            return self.enter(tx)
+        elif name == "__exit__":
+            return self.exit(tx)
+        return super().call_method(tx, name, args, kwargs)
+
 
 class GenericContextWrappingVariable(UserDefinedObjectVariable):
     # Some methods in ContextWrappingVariable assumes the arguments are

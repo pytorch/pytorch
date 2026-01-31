@@ -1010,6 +1010,22 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         self.assertTrue(res[0].dtype == torch.float16)
         self.assertTrue(res[1].dtype == torch.float16)
 
+    def test__enter__exit_autocast(self):
+        def f(x, y):
+            m = torch.amp.autocast_mode._enter_autocast("cpu")
+            x = x @ y
+            torch.amp.autocast_mode._exit_autocast(m)
+            return x
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        x = torch.randn(3, 3, dtype=torch.float32)
+        y = torch.randn(3, 3, dtype=torch.float32)
+        z = f(x, y)
+        opt_z = opt_f(x, y)
+        self.assertEqual(z, opt_z)
+        self.assertEqual(z.dtype, opt_z.dtype)
+        self.assertFalse(torch.is_autocast_enabled("cpu"))
+
     @parametrize(
         "Ctx",
         [CustomizedCtxManagerWithGraphBreak, customized_ctx_manager_with_graph_break],
