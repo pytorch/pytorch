@@ -118,7 +118,8 @@ class _LazyGraphModule(GraphModule):
         # Calling self.real_recompile can make sure we skip recompilation if
         # we have already done so.
         self.real_recompile()
-        assert not self._needs_recompile()
+        if self._needs_recompile():
+            raise AssertionError("Recompilation required after real_recompile()")
 
         # call `__call__` rather than 'forward' since recompilation may
         # install a wrapper for `__call__` to provide a customized error
