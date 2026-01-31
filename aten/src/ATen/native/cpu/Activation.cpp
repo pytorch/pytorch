@@ -962,29 +962,24 @@ void softplus_kernel(TensorIteratorBase& iter, const Scalar& beta_, const Scalar
             float y = float(a) * beta;
             if (y > threshold) {
               return a;
-            } else if (y <= 0.0f) {
-              return static_cast<scalar_t>(std::log1p(std::exp(y)) / beta);
-            } else {
-              return static_cast<scalar_t>(float(a) + std::log1p(std::exp(-y)) / beta);
             }
+            // Use numerically stable formula: exp(-abs(y)) never overflows
+            float z = std::log1p(std::exp(-std::abs(y))) / beta;
+            return static_cast<scalar_t>((y > 0.0f ? float(a) : 0.0f) + z);
           },
           [beta_vec, threshold_vec, zero_vec](Vectorized<scalar_t> a) -> Vectorized<scalar_t> {
             auto [a0, a1] = convert_to_float<scalar_t>(a);
             Vec y0 = a0 * beta_vec;
             Vec y1 = a1 * beta_vec;
-            // Compute both branches:
-            // negative_result = log1p(exp(y)) / beta
-            // positive_result = x + log1p(exp(-y)) / beta
-            Vec neg_result0 = y0.exp().log1p() / beta_vec;
-            Vec neg_result1 = y1.exp().log1p() / beta_vec;
-            Vec pos_result0 = a0 + (zero_vec - y0).exp().log1p() / beta_vec;
-            Vec pos_result1 = a1 + (zero_vec - y1).exp().log1p() / beta_vec;
-            // Select based on y > 0
-            Vec intermediate0 = Vec::blendv(neg_result0, pos_result0, y0 > zero_vec);
-            Vec intermediate1 = Vec::blendv(neg_result1, pos_result1, y1 > zero_vec);
+            // Use numerically stable formula: exp(-abs(y)) never overflows
+            Vec z0 = y0.abs().neg().exp().log1p() / beta_vec;
+            Vec z1 = y1.abs().neg().exp().log1p() / beta_vec;
+            // For y > 0: result = a + z; For y <= 0: result = z
+            Vec result0 = Vec::blendv(z0, a0 + z0, y0 > zero_vec);
+            Vec result1 = Vec::blendv(z1, a1 + z1, y1 > zero_vec);
             // Select based on y > threshold
-            a0 = Vec::blendv(intermediate0, a0, y0 > threshold_vec);
-            a1 = Vec::blendv(intermediate1, a1, y1 > threshold_vec);
+            a0 = Vec::blendv(result0, a0, y0 > threshold_vec);
+            a1 = Vec::blendv(result1, a1, y1 > threshold_vec);
             return convert_from_float<scalar_t>(a0, a1);
           }
       );
@@ -1003,23 +998,19 @@ void softplus_kernel(TensorIteratorBase& iter, const Scalar& beta_, const Scalar
           scalar_t y = a * beta;
           if (y > threshold) {
             return a;
-          } else if (y <= scalar_t(0)) {
-            return static_cast<scalar_t>(std::log1p(std::exp(y))) / beta;
-          } else {
-            return a + static_cast<scalar_t>(std::log1p(std::exp(-y))) / beta;
           }
+          // Use numerically stable formula: exp(-abs(y)) never overflows
+          scalar_t z = std::log1p(std::exp(-std::abs(y))) / beta;
+          return (y > scalar_t(0) ? a : scalar_t(0)) + z;
         },
         [beta_vec, threshold_vec, zero_vec](Vec a) -> Vec {
           Vec y = a * beta_vec;
-          // Compute both branches:
-          // negative_result = log1p(exp(y)) / beta
-          // positive_result = x + log1p(exp(-y)) / beta
-          Vec neg_result = y.exp().log1p() / beta_vec;
-          Vec pos_result = a + (zero_vec - y).exp().log1p() / beta_vec;
-          // Select based on y > 0
-          Vec intermediate = Vec::blendv(neg_result, pos_result, y > zero_vec);
+          // Use numerically stable formula: exp(-abs(y)) never overflows
+          Vec z = y.abs().neg().exp().log1p() / beta_vec;
+          // For y > 0: result = a + z; For y <= 0: result = z
+          Vec result = Vec::blendv(z, a + z, y > zero_vec);
           // Select based on y > threshold
-          return Vec::blendv(intermediate, a, y > threshold_vec);
+          return Vec::blendv(result, a, y > threshold_vec);
         }
     );
   });
@@ -1035,42 +1026,26 @@ void softplus_backward_kernel(TensorIteratorBase& iter, const Scalar& beta_, con
     const Vec beta_vec(beta);
     const Vec threshold_vec(threshold);
     const Vec one_vec(1.0f);
-    const Vec zero_vec(0.0f);
     cpu_kernel_vec(
         iter,
         [beta, threshold](scalar_t a, scalar_t b) -> scalar_t {
           float y = float(b) * beta;
           if (y > threshold) {
             return a;
-          } else if (y >= 0.0f) {
-            // For y >= 0, use stable formula: sigmoid(y) = 1 / (1 + exp(-y))
-            float sigmoid = 1.0f / (1.0f + std::exp(-y));
-            return static_cast<scalar_t>(float(a) * sigmoid);
-          } else {
-            // For y < 0, original formula is stable
-            float z = std::exp(y);
-            return static_cast<scalar_t>(float(a) * z / (z + 1.0f));
           }
+          // Use numerically stable formula: grad / (1 + exp(-y))
+          // For y >= 0: exp(-y) is small, no overflow
+          // For y < 0: exp(-y) can be large but 1/(1+large) -> 0, which is correct
+          return static_cast<scalar_t>(float(a) / (1.0f + std::exp(-y)));
         },
-        [beta_vec, one_vec, zero_vec, threshold_vec](Vectorized<scalar_t> a, Vectorized<scalar_t> b) -> Vectorized<scalar_t> {
+        [beta_vec, one_vec, threshold_vec](Vectorized<scalar_t> a, Vectorized<scalar_t> b) -> Vectorized<scalar_t> {
           auto [a0, a1] = convert_to_float<scalar_t>(a);
           auto [b0, b1] = convert_to_float<scalar_t>(b);
           Vec y0 = b0 * beta_vec;
           Vec y1 = b1 * beta_vec;
-          // For y >= 0: sigmoid = 1 / (1 + exp(-y))
-          Vec pos_sigmoid0 = one_vec / (one_vec + (zero_vec - y0).exp());
-          Vec pos_sigmoid1 = one_vec / (one_vec + (zero_vec - y1).exp());
-          // For y < 0: sigmoid = exp(y) / (1 + exp(y))
-          Vec z0 = y0.exp();
-          Vec z1 = y1.exp();
-          Vec neg_sigmoid0 = z0 / (z0 + one_vec);
-          Vec neg_sigmoid1 = z1 / (z1 + one_vec);
-          // Select based on y >= 0
-          Vec sigmoid0 = Vec::blendv(neg_sigmoid0, pos_sigmoid0, y0 >= zero_vec);
-          Vec sigmoid1 = Vec::blendv(neg_sigmoid1, pos_sigmoid1, y1 >= zero_vec);
-          // Compute grad * sigmoid
-          Vec result0 = a0 * sigmoid0;
-          Vec result1 = a1 * sigmoid1;
+          // Use numerically stable formula: grad / (1 + exp(-y))
+          Vec result0 = a0 / (one_vec + y0.neg().exp());
+          Vec result1 = a1 / (one_vec + y1.neg().exp());
           // Select based on y > threshold
           a0 = Vec::blendv(result0, a0, y0 > threshold_vec);
           a1 = Vec::blendv(result1, a1, y1 > threshold_vec);
@@ -1085,34 +1060,20 @@ void softplus_backward_kernel(TensorIteratorBase& iter, const Scalar& beta_, con
     const Vec beta_vec(beta);
     const Vec threshold_vec(threshold);
     const Vec one_vec(static_cast<scalar_t>(1.0));
-    const Vec zero_vec(static_cast<scalar_t>(0.0));
     cpu_kernel_vec(
         iter,
         [beta, threshold](scalar_t a, scalar_t b) -> scalar_t {
           scalar_t y = b * beta;
           if (y > threshold) {
             return a;
-          } else if (y >= scalar_t(0)) {
-            // For y >= 0, use stable formula: sigmoid(y) = 1 / (1 + exp(-y))
-            scalar_t sigmoid = scalar_t(1) / (scalar_t(1) + std::exp(-y));
-            return a * sigmoid;
-          } else {
-            // For y < 0, original formula is stable
-            scalar_t z = std::exp(y);
-            return a * z / (z + scalar_t(1));
           }
+          // Use numerically stable formula: grad / (1 + exp(-y))
+          return a / (scalar_t(1) + std::exp(-y));
         },
-        [beta_vec, one_vec, zero_vec, threshold_vec](Vec a, Vec b) -> Vec {
+        [beta_vec, one_vec, threshold_vec](Vec a, Vec b) -> Vec {
           Vec y = b * beta_vec;
-          // For y >= 0: sigmoid = 1 / (1 + exp(-y))
-          Vec pos_sigmoid = one_vec / (one_vec + (zero_vec - y).exp());
-          // For y < 0: sigmoid = exp(y) / (1 + exp(y))
-          Vec z = y.exp();
-          Vec neg_sigmoid = z / (z + one_vec);
-          // Select based on y >= 0
-          Vec sigmoid = Vec::blendv(neg_sigmoid, pos_sigmoid, y >= zero_vec);
-          // Compute grad * sigmoid
-          Vec result = a * sigmoid;
+          // Use numerically stable formula: grad / (1 + exp(-y))
+          Vec result = a / (one_vec + y.neg().exp());
           // Select based on y > threshold
           return Vec::blendv(result, a, y > threshold_vec);
         }

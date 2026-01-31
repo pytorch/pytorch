@@ -37,14 +37,12 @@ void softplus_kernel(
           opmath_t y = aop * beta;
           if (y > threshold) {
             return aop;
-          } else if (y <= opmath_t(0)) {
-            // For y <= 0, exp(y) won't overflow
-            return (::log1p(std::exp(y))) / beta;
-          } else {
-            // For 0 < y <= threshold, use numerically stable formula:
-            // log(1 + exp(y)) / beta = (y + log(1 + exp(-y))) / beta = x + log1p(exp(-y)) / beta
-            return aop + (::log1p(std::exp(-y))) / beta;
           }
+          // Use numerically stable formula: exp(-abs(y)) never overflows
+          // For y > 0: log1p(exp(-abs(y))) / beta + a
+          // For y <= 0: log1p(exp(-abs(y))) / beta + 0
+          opmath_t z = ::log1p(std::exp(-std::abs(y))) / beta;
+          return (y > opmath_t(0) ? aop : opmath_t(0)) + z;
         });
       });
 }
@@ -71,15 +69,10 @@ void softplus_backward_kernel(
               if (y > threshold) {
                 // sigmoid approaches 1
                 return aop;
-              } else if (y >= opmath_t(0)) {
-                // For y >= 0, use stable formula: sigmoid(y) = 1 / (1 + exp(-y))
-                opmath_t sigmoid = opmath_t(1.) / (opmath_t(1.) + std::exp(-y));
-                return aop * sigmoid;
-              } else {
-                // For y < 0, original formula is numerically stable
-                opmath_t z = std::exp(y);
-                return aop * z / (z + opmath_t(1.));
               }
+              // Use numerically stable formula: grad / (1 + exp(-y))
+              // exp(-y) won't overflow for y >= 0, and for y < 0 this is still stable
+              return aop / (opmath_t(1.) + std::exp(-y));
             });
       });
 }
