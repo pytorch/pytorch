@@ -897,7 +897,6 @@ class TracingContext:
         )
 
     def __init__(self, fake_mode: FakeTensorMode | None) -> None:
-        # imported lazily to avoid circular dependency
         self.guards_context = GuardsContext()
         self.module_context = ModuleContext()
         self.global_context = GlobalContext()
@@ -947,7 +946,6 @@ class TracingContext:
         self.hop_dispatch_set_cache = HopDispatchSetCache()
         # list of code objects for inlined functions
         self.traced_code: list[CodeType] = []
-        # Profiler state for tracking function trace timings (only created when profiler is enabled)
         self.profiler_state: DynamoProfilerState | None = None
 
     def clear(self) -> None:
