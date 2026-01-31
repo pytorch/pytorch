@@ -127,7 +127,8 @@ def call_func_at_runtime_with_args(
 ):
     if not steal_args:
         args = list(args)
-    assert isinstance(args, list)
+    if not isinstance(args, list):
+        raise AssertionError(f"args must be a list, got {type(args)}")
 
     context = torch._C._DisableAutocast if disable_amp else nullcontext
     with context():
@@ -156,8 +157,10 @@ class PytreeThunk:
     is_really_simple: Optional[bool] = None  # if the output spec is a LeafSpec
 
     def set(self, spec: pytree.TreeSpec) -> None:
-        assert self.spec is None or self.spec == spec, (self.spec, spec)
-        assert spec is not None
+        if not (self.spec is None or self.spec == spec):
+            raise AssertionError(f"spec mismatch: existing={self.spec}, new={spec}")
+        if spec is None:
+            raise AssertionError("spec must not be None")
         self.spec: pytree.TreeSpec = spec
         if self.spec.type in {tuple, list} and all(
             child.is_leaf() for child in spec.children()
@@ -171,7 +174,8 @@ class PytreeThunk:
             return x[0]
         if self.is_simple:
             return x
-        assert self.spec is not None
+        if self.spec is None:
+            raise AssertionError("spec must be set before calling unflatten")
         return pytree.tree_unflatten(x, self.spec)
 
 
@@ -263,7 +267,10 @@ def is_with_effects(node):
                 torch.ops.higher_order.invoke_subgraph
             )
             if invoke_subgraph_cache:
-                assert isinstance(invoke_subgraph_cache, InvokeSubgraphCache)
+                if not isinstance(invoke_subgraph_cache, InvokeSubgraphCache):
+                    raise AssertionError(
+                        f"expected InvokeSubgraphCache, got {type(invoke_subgraph_cache)}"
+                    )
                 effects = invoke_subgraph_cache.get_effects(node.args[1])
                 return effects is not None
     return False
@@ -402,7 +409,10 @@ def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
                         )
                     )
                     if invoke_subgraph_cache:
-                        assert isinstance(invoke_subgraph_cache, InvokeSubgraphCache)
+                        if not isinstance(invoke_subgraph_cache, InvokeSubgraphCache):
+                            raise AssertionError(
+                                f"expected InvokeSubgraphCache, got {type(invoke_subgraph_cache)}"
+                            )
                         effects = invoke_subgraph_cache.get_effects(identifier)
 
                 if effects is not None:
@@ -414,7 +424,10 @@ def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
                     # through named_modules() below.
 
                     num_tokens = len(effects)
-                    assert num_tokens == 1, "Multiple token subgraph NYI"
+                    if num_tokens != 1:
+                        raise AssertionError(
+                            f"Multiple token subgraph NYI, got {num_tokens} tokens"
+                        )
                     token_args = operands[:num_tokens]
                     non_token_args = operands[num_tokens:]
 
@@ -452,7 +465,8 @@ def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
             return
 
         output_node = next(reversed(module.graph.find_nodes(op="output")))
-        assert output_node is not None
+        if output_node is None:
+            raise AssertionError("output node not found in graph")
         with module.graph.inserting_before(output_node):
             module.graph.call_function(
                 torch.ops.prims._sink_tokens.default,
@@ -464,16 +478,18 @@ def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
         output_node.args = (new_out_args,)
 
         if expected_num_erased:
-            assert len(input_token_nodes) == expected_num_erased, (
-                f"{subgraph_str} num_erased_inputs:{len(input_token_nodes)} "
-                f"{input_token_nodes} != expected {expected_num_erased} \n"
-                f"{fw_module.print_readable(print_output=False)}"
-            )
-            assert len(output_token_nodes) == expected_num_erased, (
-                f"{subgraph_str} num_erased_outs:{len(output_token_nodes)} "
-                f"{output_token_nodes} != expected {expected_num_erased} \n"
-                f"{fw_module.print_readable(print_output=False)}"
-            )
+            if len(input_token_nodes) != expected_num_erased:
+                raise AssertionError(
+                    f"{subgraph_str} num_erased_inputs:{len(input_token_nodes)} "
+                    f"{input_token_nodes} != expected {expected_num_erased} \n"
+                    f"{fw_module.print_readable(print_output=False)}"
+                )
+            if len(output_token_nodes) != expected_num_erased:
+                raise AssertionError(
+                    f"{subgraph_str} num_erased_outs:{len(output_token_nodes)} "
+                    f"{output_token_nodes} != expected {expected_num_erased} \n"
+                    f"{fw_module.print_readable(print_output=False)}"
+                )
 
         module.recompile()
 
@@ -652,10 +668,12 @@ def register_buffer_assignment_hook(mod, assigned_buffers):
             if isinstance(buffer, FunctionalTensor):
                 buffer = buffer.from_functional()
             # or buffer is a fake tensor
-            assert isinstance(buffer, FakeTensor)
+            if not isinstance(buffer, FakeTensor):
+                raise AssertionError(f"expected FakeTensor, got {type(buffer)}")
             # The fake tensor in turn is associated with a proxy node.
             proxy_mode = torch.fx.experimental.proxy_tensor.get_proxy_mode()
-            assert proxy_mode is not None
+            if proxy_mode is None:
+                raise AssertionError("proxy_mode must not be None")
             proxy = torch.fx.experimental.proxy_tensor.get_proxy_slot(
                 buffer, proxy_mode.tracer
             ).proxy.node
@@ -737,29 +755,33 @@ def simple_wraps(
 
 def call_and_expect_output_descs(fn, args):
     outs_pair = fn(*args)
-    assert isinstance(outs_pair, tuple) and len(outs_pair) == 2, (fn, outs_pair)
+    if not (isinstance(outs_pair, tuple) and len(outs_pair) == 2):
+        raise AssertionError(
+            f"expected tuple of length 2, got {type(outs_pair)} with value {outs_pair}"
+        )
     outs, outs_descs = outs_pair
     # The Tensor tests protects against the test when there are no outputs
     out_vals, out_spec = pytree.tree_flatten(outs)
     out_desc_vals, out_desc_spec = pytree.tree_flatten(outs_descs)
-    assert out_spec == out_desc_spec, (
-        fn_wrappers(fn),
-        outs,
-        outs_descs,
-        out_spec,
-        out_desc_spec,
-    )
-    assert not any(isinstance(x, AOTOutput) for x in out_vals), (
-        fn_wrappers(fn),
-        outs,
-        outs_descs,
-        out_vals,
-    )
-    assert all(
+    if out_spec != out_desc_spec:
+        raise AssertionError(
+            f"output spec mismatch: {fn_wrappers(fn)}, outs={outs}, outs_descs={outs_descs}, "
+            f"out_spec={out_spec}, out_desc_spec={out_desc_spec}"
+        )
+    if any(isinstance(x, AOTOutput) for x in out_vals):
+        raise AssertionError(
+            f"unexpected AOTOutput in out_vals: {fn_wrappers(fn)}, outs={outs}, "
+            f"outs_descs={outs_descs}, out_vals={out_vals}"
+        )
+    if not all(
         isinstance(d, AOTOutput)
         for (x, d) in zip(out_vals, out_desc_vals)
         if isinstance(x, (torch.Tensor, torch.SymInt)) or type(x) is int
-    ), (fn_wrappers(fn), outs, outs_descs, out_vals, out_desc_vals)
+    ):
+        raise AssertionError(
+            f"expected all descriptors to be AOTOutput: {fn_wrappers(fn)}, outs={outs}, "
+            f"outs_descs={outs_descs}, out_vals={out_vals}, out_desc_vals={out_desc_vals}"
+        )
     return outs_pair
 
 

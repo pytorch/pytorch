@@ -354,13 +354,8 @@ keep-runtime-typing = true
 "torch/_export/db/examples/dynamic_shape_assert.py" = ["S101"]
 "torch/_export/db/examples/list_contains.py" = ["S101"]
 "torch/_functorch/_activation_checkpointing/**" = ["S101"]
-"torch/_functorch/_aot_autograd/functional_utils.py" = ["S101"]
-"torch/_functorch/_aot_autograd/graph_capture_wrappers.py" = ["S101"]
 "torch/_functorch/_aot_autograd/graph_compile.py" = ["S101"]
 "torch/_functorch/_aot_autograd/runtime_wrappers.py" = ["S101"]
-"torch/_functorch/_aot_autograd/schemas.py" = ["S101"]
-"torch/_functorch/_aot_autograd/subclass_utils.py" = ["S101"]
-"torch/_functorch/_aot_autograd/utils.py" = ["S101"]
 
 [tool.codespell]
 ignore-words = "tools/linter/dictionary.txt"
