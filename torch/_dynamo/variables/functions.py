@@ -62,12 +62,11 @@ from ..source import (
     AttrSource,
     CellContentsSource,
     ClosureSource,
-    CollectionsSource,
     ConstantSource,
     DefaultsSource,
     GetItemSource,
+    ImportSource,
     SkipGuardSource,
-    TorchSource,
     TypeSource,
 )
 from ..utils import (
@@ -134,7 +133,8 @@ class ClosureConversionError(NotImplementedError):
 @functools.lru_cache
 def get_pytree_SUPPORTED_NODES_source() -> AttrSource:
     return AttrSource(
-        AttrSource(AttrSource(TorchSource(), "utils"), "_pytree"), "SUPPORTED_NODES"
+        AttrSource(AttrSource(ImportSource("torch"), "utils"), "_pytree"),
+        "SUPPORTED_NODES",
     )
 
 
@@ -3093,7 +3093,7 @@ class PyTreeGetNodeTypeFunctionVariable(UserFunctionVariable):
             type_source = TypeSource(args[0].source)
         python_type = args[0].python_type()
         if is_namedtuple_class(python_type):
-            type_source = AttrSource(CollectionsSource(), "namedtuple")
+            type_source = AttrSource(ImportSource("collections"), "namedtuple")
             return VariableTracker.build(tx, namedtuple, type_source)
         return VariableTracker.build(tx, python_type, source=type_source)
 
