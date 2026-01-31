@@ -40,6 +40,7 @@ import operator
 import re
 import sys
 import threading
+import time
 import traceback
 import types
 import weakref
@@ -49,6 +50,7 @@ from typing_extensions import TypeIs
 
 import torch
 import torch._logging
+from torch._dynamo.dynamo_profiler import DynamoProfilerState, FunctionTraceTiming
 from torch._dynamo.exc import ObservedException, TensorifyScalarRestartAnalysis
 from torch._guards import tracing, TracingContext
 from torch._logging.structured import dump_file
@@ -4851,8 +4853,65 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        tracer = cls.build_inline_tracer(parent, func, args, kwargs)
-        return tracer.inline_call_()
+        # Fast path: skip all timing overhead if profiler is disabled
+        if not config.dynamo_profiler:
+            tracer = cls.build_inline_tracer(parent, func, args, kwargs)
+            return tracer.inline_call_()
+
+        # Profiler enabled: collect timing data
+        # Ensure profiler state is initialized
+        tc = TracingContext.get()
+        if tc.profiler_state is None:
+            tc.profiler_state = DynamoProfilerState()
+
+        code = func.get_code()
+
+        # Get caller info and full call stack before we push ourselves
+        caller_info = tc.profiler_state.get_current_caller()
+        call_stack = tc.profiler_state.get_call_stack()
+
+        # Push ourselves onto the timing stack BEFORE building the tracer
+        # so that build_inline_tracer overhead is included in this function's time
+        trace_start_ns = time.time_ns()
+        is_primitive_call = tc.profiler_state.push(
+            code.co_name, code.co_filename, code.co_firstlineno, trace_start_ns
+        )
+
+        tracer = None
+        trace_success = False
+        try:
+            tracer = cls.build_inline_tracer(parent, func, args, kwargs)
+            result = tracer.inline_call_()
+            trace_success = True
+            return result
+        finally:
+            # Pop ourselves from the timing stack
+            stack_entry = tc.profiler_state.pop()
+            trace_end_ns = time.time_ns()
+
+            # Record timing for successful traces
+            if trace_success and stack_entry is not None and tracer is not None:
+                cumtime_ns = trace_end_ns - trace_start_ns
+                tottime_ns = cumtime_ns - stack_entry.child_time_ns
+
+                timing = FunctionTraceTiming(
+                    func_name=code.co_name,
+                    filename=code.co_filename,
+                    firstlineno=code.co_firstlineno,
+                    cumtime_ns=cumtime_ns,
+                    tottime_ns=tottime_ns,
+                    bytecode_count=len(code.co_code),
+                    inline_depth=tracer.inline_depth,
+                    caller_func_name=caller_info[0] if caller_info else None,
+                    caller_filename=caller_info[1] if caller_info else None,
+                    caller_firstlineno=caller_info[2] if caller_info else None,
+                    is_primitive_call=is_primitive_call,
+                    call_stack=call_stack,
+                )
+                tc.profiler_state.record_timing(timing)
+
+                # Add our cumtime to the parent's child_time accumulator
+                tc.profiler_state.add_child_time(cumtime_ns)
 
     @staticmethod
     def check_inlineable(
@@ -5063,6 +5122,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         strict_ctx: Any = contextlib.nullcontext()
         if parent.strict_checks_fn:
             strict_ctx = self.strict_translation_mode(parent.strict_checks_fn)
+
         try:
             with strict_ctx:
                 self.run()
