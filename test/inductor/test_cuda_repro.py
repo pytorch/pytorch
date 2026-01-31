@@ -1174,6 +1174,66 @@ class CudaReproTests(TestCase):
 
         self.assertEqual(expected, actual)
 
+    def test_bucketize_nan_values(self):
+        """
+        Test that torch.bucketize handles NaN values consistently between
+        Eager and Inductor modes. NaN values should be placed in the last bucket
+        (index = len(boundaries)) as they are considered greater than all values.
+
+        See https://github.com/pytorch/pytorch/issues/173133
+        """
+
+        thresholds = torch.tensor([0.2, 0.5, 0.8], device="cuda")
+
+        # Test with explicit NaN values
+        def fn_nan(x, thresholds, right):
+            return torch.bucketize(x, thresholds, right=right)
+
+        nan_values = torch.tensor([float("nan"), float("nan")], device="cuda")
+        for right in [True, False]:
+            torch._dynamo.reset()
+            expected = fn_nan(nan_values, thresholds, right)
+            opt_fn = torch.compile(fn_nan, backend="inductor")
+            actual = opt_fn(nan_values, thresholds, right)
+            self.assertEqual(expected, actual)
+
+        # Test with NaN produced by rsqrt of negative numbers (original issue)
+        def fn_rsqrt(x, thresholds, right):
+            # rsqrt of negative number produces NaN
+            return torch.bucketize(torch.rsqrt(x), thresholds, right=right)
+
+        negative_values = torch.tensor([-1.0, -2.0], device="cuda")
+        for right in [True, False]:
+            torch._dynamo.reset()
+            expected = fn_rsqrt(negative_values, thresholds, right)
+            opt_fn_rsqrt = torch.compile(fn_rsqrt, backend="inductor")
+            actual = opt_fn_rsqrt(negative_values, thresholds, right)
+            self.assertEqual(expected, actual)
+
+        # Test mixed values (normal + NaN)
+        def fn_mixed(x, thresholds, right):
+            return torch.bucketize(x, thresholds, right=right)
+
+        mixed_values = torch.tensor([0.3, float("nan"), 0.6, float("nan"), 0.1], device="cuda")
+        for right in [True, False]:
+            torch._dynamo.reset()
+            expected = fn_mixed(mixed_values, thresholds, right)
+            opt_fn_mixed = torch.compile(fn_mixed, backend="inductor")
+            actual = opt_fn_mixed(mixed_values, thresholds, right)
+            self.assertEqual(expected, actual)
+
+        # Test with inf values (should also work correctly)
+        def fn_inf(x, thresholds, right):
+            return torch.bucketize(x, thresholds, right=right)
+
+        inf_values = torch.tensor([float("inf"), float("-inf")], device="cuda")
+        for right in [True, False]:
+            torch._dynamo.reset()
+            expected = fn_inf(inf_values, thresholds, right)
+            opt_fn_inf = torch.compile(fn_inf, backend="inductor")
+            actual = opt_fn_inf(inf_values, thresholds, right)
+            self.assertEqual(expected, actual)
+
     def test_float64_constants(self):
         def fn():
             # NOTE: tensors of all the same value are constant folded, so we
