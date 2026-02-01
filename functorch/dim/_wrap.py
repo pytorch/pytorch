@@ -114,7 +114,8 @@ def patched_dim_method(wrapper: WrappedOperator, *args: Any, **kwargs: Any) -> A
             return wrapper.orig(*args, **kwargs)
 
         with EnableAllLayers(info.levels) as guard:
-            assert info.batchedtensor is not None
+            if info.batchedtensor is None:
+                raise AssertionError("Expected batchedtensor to be non-None")
             guard.inplace_update_layers(info.batchedtensor, info.levels)
             new_args = list(args)
             new_args[0] = handle_from_tensor(info.batchedtensor)
@@ -186,7 +187,8 @@ def patched_dim_method(wrapper: WrappedOperator, *args: Any, **kwargs: Any) -> A
     # Update arguments
     new_args = list(args)
     new_kwargs = kwargs.copy()
-    assert info.tensor is not None
+    if info.tensor is None:
+        raise AssertionError("Expected tensor to be non-None")
     new_args[0] = handle_from_tensor(info.tensor)
 
     # Update dimension argument
