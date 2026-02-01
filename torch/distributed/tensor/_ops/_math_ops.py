@@ -441,6 +441,87 @@ def vector_norm_strategy(op_schema: OpSchema) -> OpStrategy:
     )
 
 
+@register_op_strategy([aten.dist.default], schema_info=RuntimeSchemaInfo(2))
+def dist_strategy(op_schema: OpSchema) -> OpStrategy:
+    """
+    Sharding strategy for torch.dist(input, other, p=2).
+
+    Implements: dist(a, b, p) = linalg.vector_norm(a - b, ord=p)
+
+    Uses linear_pointwise_strategy for input alignment (subtraction), then
+    applies full reduction to scalar. For Shard inputs, output is NormPartial.
+    For Partial inputs (norm is not linear over Partial), inputs are
+    redistributed to Replicate and output is Replicate.
+    """
+    args_schema = op_schema.args_schema
+    input_strategy = cast(OpStrategy, args_schema[0])
+    other_strategy = cast(OpStrategy, args_schema[1])
+    norm_type = args_schema[2] if len(args_schema) > 2 else 2
+
+    if not isinstance(norm_type, (int, float, str)):
+        raise AssertionError(f"Expected int/float/str, got {type(norm_type)}")
+
+    # Lazy import to avoid circular dependency with _pointwise_ops
+    from torch.distributed.tensor._ops._pointwise_ops import linear_pointwise_strategy
+
+    # Align inputs via pointwise subtraction
+    sub_schema = OpSchema(
+        op=aten.sub.Tensor,
+        args_schema=(input_strategy, other_strategy),
+        kwargs_schema={},
+    )
+    aligned_strategy = cast(OpStrategy, linear_pointwise_strategy(sub_schema))
+
+    norm_reduction = NormReduction(norm_type)
+    output_strategy = OpStrategy([])
+
+    # Full reduction: all tensor dims are reduced
+    # Use broadcast shape to handle different-sized inputs correctly
+    broadcast_shape = torch.broadcast_shapes(input_strategy.shape, other_strategy.shape)
+    tensor_ndim = len(broadcast_shape)
+    reduce_dims = list(range(tensor_ndim))
+    reduce_dims_map = [-1] * tensor_ndim
+
+    for aligned_spec in aligned_strategy.strategies:
+        placements = aligned_spec.output_spec.placements
+        aligned_input_specs = aligned_spec.input_specs
+        assert aligned_input_specs is not None
+
+        # Check for incompatible Partial (same logic as common_reduction_strategy)
+        if any(isinstance(p, Partial) for p in placements):
+            # Redistribute Partial to Replicate before norm
+            placements = replicate_reduction_dims(placements, reduce_dims)
+            input_specs = tuple(
+                DTensorSpec(mesh=s.mesh, placements=placements)
+                for s in aligned_input_specs
+            )
+        else:
+            input_specs = tuple(aligned_input_specs)
+
+        out_placements = map_placements_after_reduction(
+            placements, reduce_dims, reduce_dims_map, norm_reduction
+        )
+
+        # Calculate redistribute costs for both inputs
+        redistribute_cost = [
+            generate_redistribute_costs(input_strategy, input_specs[0]),
+            generate_redistribute_costs(other_strategy, input_specs[1]),
+        ]
+
+        output_strategy.strategies.append(
+            OpSpec(
+                output_specs=DTensorSpec(
+                    mesh=input_strategy.mesh,
+                    placements=out_placements,
+                ),
+                input_specs=input_specs,
+                redistribute_cost=redistribute_cost,
+            )
+        )
+
+    return output_strategy
+
+
 @register_op_strategy(
     [aten._foreach_norm.Scalar], schema_info=RuntimeSchemaInfo(1, needs_pytree=True)
 )
