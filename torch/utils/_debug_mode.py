@@ -38,6 +38,7 @@ import inspect
 import logging
 import os
 import traceback
+import warnings
 import weakref
 from collections.abc import Callable
 from typing import Any, TYPE_CHECKING
@@ -45,6 +46,7 @@ from typing import Any, TYPE_CHECKING
 import torch
 from torch._logging import warning_once
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch.fx.experimental import _config as fx_experimental_config
 from torch.fx.graph import _parse_stack_trace
 from torch.utils._dtype_abbrs import dtype_abbrs
 from torch.utils._python_dispatch import (
@@ -243,6 +245,90 @@ def _get_user_stack_trace(stack_trace_str: str) -> str | None:
     if trace:
         return f"File: {trace.file}:{trace.lineno} in {trace.name}, code: {trace.code}"
     return None
+
+
+def _extract_node_meta_from_stack_summary(stack_summary: str) -> dict[str, Any] | None:
+    """
+    Extract FX node metadata from a stack summary string.
+
+    Similar to _augment_frames in torch/cuda/memory.py, this function extracts
+    FX debug information from a stack summary string that may reference
+    FX-generated code (e.g., from inductor).
+
+    Args:
+        stack_summary: A stack summary string in the format:
+            'File: /path/to/fx_generated_xxx.py:13 in forward, code: ...'
+
+    Returns:
+        A dictionary containing node metadata if found, None otherwise.
+        The dictionary may contain:
+        - fx_node_op: FX node operation type (e.g., 'call_function', 'output')
+        - fx_node_name: FX node name (e.g., 't', 'relu_1')
+        - fx_node_target: FX node target (e.g., 'torch.ops.aten.t.default')
+        - fx_original_trace: Original model source code stack trace
+    """
+    import re
+
+    if not stack_summary:
+        return None
+
+    # Parse the stack summary format: "File: {file}:{lineno} in {name}, code: {code}"
+    match = re.match(r"File: (.+):(\d+) in .+, code:", stack_summary)
+    if not match:
+        return None
+
+    filename = match.group(1)
+    filename = filename.split("/")[-1]
+    lineno = int(match.group(2))
+
+    # Check if this looks like an FX generated file
+    from torch.fx.graph_module import FX_GRAPH_MODULE_FILE_PREFIX
+
+    _FX_GENERATED_PATTERN = re.compile(
+        rf"{re.escape(FX_GRAPH_MODULE_FILE_PREFIX)}.*\.py$"
+    )
+
+    if not _FX_GENERATED_PATTERN.search(os.path.basename(filename)):
+        return None
+
+    # Look up metadata from the global registry
+    from torch.fx.traceback import _FX_METADATA_REGISTRY
+
+    metadata = _FX_METADATA_REGISTRY.get(filename)
+    if metadata is None:
+        return None
+
+    lineno_map = metadata.get("lineno_map", {})
+    node_metadata = metadata.get("node_metadata", {})
+    prologue_start = metadata.get("prologue_start", 0)
+
+    # Get the node index for this line
+    node_idx = lineno_map.get(lineno - prologue_start)
+
+    if node_idx is None or node_idx not in node_metadata:
+        return None
+
+    node_info = node_metadata[node_idx]
+    result: dict[str, Any] = {}
+
+    original_trace = node_info.get("stack_trace")
+    node_op = node_info.get("op")
+    node_name = node_info.get("name")
+    node_target = node_info.get("target")
+
+    # Add node metadata
+    if node_op is not None:
+        result["fx_node_op"] = node_op
+    if node_name is not None:
+        result["fx_node_name"] = node_name
+    if node_target is not None:
+        result["fx_node_target"] = str(node_target)
+
+    # Add original trace if available
+    if original_trace:
+        result["fx_original_trace"] = original_trace
+
+    return result if result else None
 
 
 def _maybe_get_autograd_trace() -> str | None:
@@ -1005,6 +1091,17 @@ class DebugMode(TorchDispatchMode):
                 True, check_nan=False
             )
             self.anomaly_for_traces.__enter__()
+
+        if self.record_stack_trace and not fx_experimental_config.dump_code_to_file:
+            # DebugMode cannot reliably turn on this flag for users because the flag needs to be turned on
+            # at compile time, but DebugMode may only wrap around the runtime call.
+            warnings.warn(
+                "If you're using DebugMode on compiled code such as aot_eager (i.e. not eager), you should consider "
+                "turn on torch.fx.experimental._config.dump_code_to_file=True at compiled time to dump "
+                "the FX codegen'd code for the compiled region. "
+                "This will help you to look at the generated code."
+            )
+
         return self
 
     # pyrefly: ignore [bad-override]
@@ -1180,8 +1277,17 @@ class DebugMode(TorchDispatchMode):
                     stack_trace = op.stack_trace
 
                 stack_summary = None
+                original_user_code = None
                 if stack_trace:
                     stack_summary = _get_user_stack_trace(stack_trace)
+                    if stack_summary:
+                        node_metadata = _extract_node_meta_from_stack_summary(
+                            stack_summary
+                        )
+                        if node_metadata:
+                            original_user_code = _get_user_stack_trace(
+                                node_metadata.get("fx_original_trace", "")
+                            )
 
                 if stack_summary and stack_summary != prev_stack_summary:
                     # add blank line before stack trace comment for readability
@@ -1189,6 +1295,10 @@ class DebugMode(TorchDispatchMode):
                         lines.append("")
                     indent = "  " * (op.call_depth + 1)
                     lines.append(indent + "# " + stack_summary)
+                    if original_user_code:
+                        lines.append(
+                            indent + "# Original User Code: " + original_user_code
+                        )
                     prev_stack_summary = stack_summary
 
                 # Add the operation line

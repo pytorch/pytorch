@@ -428,6 +428,7 @@ class _WrappedCall:
             "Call using an FX-traced Module, "
             f"line {err_lineno} of the traced Module's "
             "generated forward function:"
+            "Turn on torch.fx.experimental._config.dump_code_to_file if you want to breakpoint into the fx generated code. "
         )
         before_err = "".join(all_src_lines[err_lineno - 2 : err_lineno])
         marker = "~" * err_line_len + "~~~ <--- HERE"
@@ -448,7 +449,10 @@ class _WrappedCall:
             topmost_framesummary: traceback.FrameSummary = (
                 traceback.StackSummary.extract(traceback.walk_tb(e.__traceback__))[-1]
             )
-            if "eval_with_key" in topmost_framesummary.filename:
+            if (
+                "eval_with_key" in topmost_framesummary.filename
+                or topmost_framesummary.filename.startswith("fx_generated_")
+            ):
                 print(
                     _WrappedCall._generate_error_message(topmost_framesummary),
                     file=sys.stderr,
@@ -878,6 +882,8 @@ class {module_name}(torch.nn.Module):
         python_code = self._graph.python_code(
             root_module="self",
             record_func=fx_experimental_config.enrich_profiler_metadata,
+            # explicitly mark False because _lineno_map doesn't work when verbose is True
+            verbose=False,
         )
         self._code = python_code.src
         self._lineno_map = python_code._lineno_map
@@ -886,8 +892,11 @@ class {module_name}(torch.nn.Module):
         cls = type(self)
         co_fields = self._graph._co_fields if hasattr(self._graph, "_co_fields") else {}
 
-        if fx_experimental_config.enrich_profiler_metadata:
-            # Generate metadata and register for profiler augmentation
+        # Dump code to file and run from file if config is enabled
+        if (
+            fx_experimental_config.dump_code_to_file
+            or fx_experimental_config.enrich_profiler_metadata
+        ):
             node_metadata: dict[int, dict[str, Any]] = {}
             for i, node in enumerate(self._graph.nodes):
                 node_metadata[i] = {
@@ -902,11 +911,6 @@ class {module_name}(torch.nn.Module):
             hash_value = _metadata_hash(self._code, node_metadata)
             file_stem = f"{FX_GRAPH_MODULE_FILE_PREFIX}_{hash_value}"
             filename = f"{file_stem}.py"
-
-            # Only include co_filename to use it directly as the cache key
-            co_fields = {
-                "co_filename": filename,
-            }
 
             # Store metadata in global in-memory registry
             metadata = {
@@ -927,7 +931,36 @@ class {module_name}(torch.nn.Module):
                 f"torch._C._profiler._RecordFunctionFast('## {filename} ##')",
             )
 
-        cls.forward = _forward_from_src(self._code, python_code.globals, co_fields)
+            try:
+                from torch._inductor.codecache import write as codecache_write
+
+                key, file_path = codecache_write(
+                    self._code,
+                    extension="py",
+                    key=filename[0:-3],  # remove .py
+                )
+
+                # Read the code back from file in case user modified the file, i.e. breakpoint
+                with open(file_path, encoding="utf-8") as f:
+                    code_from_file = f.read()
+
+                # Use the file path in co_fields so the compiled code references the real file
+                co_fields = {"co_filename": file_path}
+            except Exception as e:
+                co_fields = {"co_filename": filename}
+                code_from_file = self._code
+
+                warnings.warn(
+                    f"Failed to read or write FX generated code file: {e}. "
+                    "You will not be able to open the file or set breakpoints in generated code. "
+                    "Set torch.fx.experimental._config.dump_code_to_file=False to disable writing codegen'd FX code to file. "
+                )
+
+            cls.forward = _forward_from_src(
+                code_from_file, python_code.globals, co_fields
+            )
+        else:
+            cls.forward = _forward_from_src(self._code, python_code.globals, co_fields)
 
         # Determine whether this class explicitly defines a __call__ implementation
         # to wrap. If it does, save it in order to have wrapped_call invoke it.

@@ -108,5 +108,11 @@ enrich_profiler_metadata: bool = Config(  # type: ignore[var-annotated]
     env_name_default="TORCH_ENRICH_RPOFILER_STACK_TRACE",
 )
 
+# Experimental: If True, dump code to file in /tmp and run from file
+dump_code_to_file: bool = Config(  # type: ignore[var-annotated]
+    default=False,
+    env_name_default="TORCH_FX_DUMP_CODE_TO_FILE",
+)
+
 
 install_config_module(sys.modules[__name__])

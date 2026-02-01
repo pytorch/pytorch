@@ -870,6 +870,32 @@ class TestDTensorDebugMode(TestCase):
     aten::add_.Tensor(t: i64[], 1)  ->  t: i64[]  # {'input_hash': ((2.0, None), {}), 'hash': 3.0}""",
         )
 
+    @torch.fx.experimental._config.patch({"dump_code_to_file": True})
+    def test_debug_trace_with_compile(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l1 = torch.nn.Linear(4, 4)
+                self.l2 = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                y = self.l1(x)
+                return self.l2(y)
+
+        mod = Foo()
+        inp = torch.randn(4, 4)
+        compiled_mod = torch.compile(mod, backend="aot_eager")
+
+        with DebugMode(record_stack_trace=True) as debug_mode:
+            _ = compiled_mod(inp)
+
+        for op in debug_mode.operators:
+            # Should show actual graph module stack trace instead of <eval_with_key> in aot_eager
+            self.assertTrue("fx_generated" in op.stack_trace)
+            self.assertTrue("eval_with_key" not in op.stack_trace)
+
+        print(debug_mode.debug_string(show_stack_trace=True))
+
     @unittest.skipIf(not HAS_GPU, "requires GPU")
     @unittest.skipIf(not has_triton_package(), "requires triton")
     def test_triton_kernel_logs(self):
