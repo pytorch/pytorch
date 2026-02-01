@@ -1274,7 +1274,7 @@ def tensordot(  # noqa: F811
     When called with a non-negative integer argument :attr:`dims` = :math:`d`, and
     the number of dimensions of :attr:`a` and :attr:`b` is :math:`m` and :math:`n`,
     respectively, :func:`~torch.tensordot` computes the tensor :math:`r` of shape
-    ``a.shape[:m-d] + b.shape[d:]`` given by:
+    ``a.shape[:-dims] + b.shape[dims:]`` given by:
 
     .. math::
         r_{i_1,...,i_{m-d}, j_1,...,j_{n-d}}
