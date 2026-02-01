@@ -73,10 +73,7 @@ class GraphPickler(pickle.Pickler):
     """
 
     def __init__(self, file: io.BytesIO, options: Optional[Options] = None) -> None:
-        if dill is not None:
-            super().__init__(file, byref=True)
-        else:
-            super().__init__(file)
+        super().__init__(file)
         self.options = options or Options()
 
         # This abomination is so we can pass external decoding state to the
