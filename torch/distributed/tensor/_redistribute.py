@@ -183,6 +183,11 @@ def _get_flattened_mesh_by_layout(
     if mesh_dim_names is None:
         return None
 
+    # If mesh_dims references dimensions beyond root_mesh's dimensions,
+    # we can't map to flattened mesh (mesh was created from_group or differently)
+    if any(i >= len(mesh_dim_names) for i in mesh_dims):
+        return None
+
     # Convert mesh dim indices to dim names
     dim_names = tuple(mesh_dim_names[i] for i in mesh_dims)
 
