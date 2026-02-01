@@ -3720,9 +3720,12 @@ class TestAutograd(TestCase):
         leaf.grad_dtype = None  # Allow any dtype
         self.assertIsNone(leaf.grad_dtype)
 
-        # get/set grad_dtype is only allowed on leaf tensors
+        # grad_dtype can be read from non-leaf tensors
         non_leaf = leaf * 2
         self.assertFalse(non_leaf.is_leaf)
+        # Should not raise when reading grad_dtype on non-leaf tensor
+        self.assertEqual(non_leaf.grad_dtype, non_leaf.dtype)
+        # But setting grad_dtype on non-leaf tensor should fail
         with self.assertRaisesRegex(
             RuntimeError, "grad_dtype can only be set on leaf tensors"
         ):
@@ -3829,6 +3832,29 @@ class TestAutograd(TestCase):
         z2 = l * 3
         z2.sum().backward()
         self.assertEqual(l.grad.dtype, torch.float32)
+
+    @skipIfTorchDynamo("grad_dtype not supported in compile")
+    def test_grad_dtype_nonleaf(self):
+        # Test that grad_dtype can be read from non-leaf tensors
+        leaf = torch.tensor([1.0, 2.0], requires_grad=True)
+        leaf.grad_dtype = torch.float16
+        
+        # Create non-leaf tensor through operations
+        non_leaf = leaf * 2
+        self.assertFalse(non_leaf.is_leaf)
+        
+        # Reading grad_dtype from non-leaf tensor should work
+        grad_dtype_value = non_leaf.grad_dtype
+        self.assertIsNotNone(grad_dtype_value)
+        
+        # grad_dtype is propagated from the leaf tensor
+        # (the non-leaf tensor inherits the grad_dtype context)
+        
+        # But setting grad_dtype on non-leaf should still fail
+        with self.assertRaisesRegex(
+            RuntimeError, "grad_dtype can only be set on leaf tensors"
+        ):
+            non_leaf.grad_dtype = torch.float32
 
     def test_gc_in_destructor(self):
         """
