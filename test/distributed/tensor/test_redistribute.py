@@ -2343,6 +2343,51 @@ class OptimizeFlattenedReductionsTest(TestCase):
             self.assertIn("non-ascending order", warning_msg)
             self.assertIn("reduce_scatter", warning_msg)
 
+    def test_unflattened_mesh_does_not_crash(self):
+        """Test that meshes created by unflattening a 1D mesh don't crash.
+
+        When a 1D world mesh is unflattened to create a multi-dimensional mesh,
+        the submesh's mesh_dims indices should not be used to index into the
+        root mesh's mesh_dim_names. This was a bug where:
+        - 1D world mesh has mesh_dim_names=('world',)
+        - Unflatten to 2D mesh with mesh_dim_names=('A', 'B')
+        - mesh_dims=(0, 1) are indices into the 2D mesh
+        - But code indexed into root_mesh.mesh_dim_names[1] which doesn't exist
+        """
+        # Create a 1D world mesh and unflatten to 2D
+        world_mesh = init_device_mesh("cpu", (8,), mesh_dim_names=("world",))
+        mesh_2d = world_mesh._unflatten(0, (2, 4), ("A", "B"))
+
+        # Verify the mesh structure that triggers the bug
+        self.assertEqual(mesh_2d.mesh_dim_names, ("A", "B"))
+        self.assertEqual(mesh_2d._get_root_mesh().mesh_dim_names, ("world",))
+
+        # Create transform infos that would trigger optimization attempt
+        transform_infos = [
+            _TransformInfo(
+                mesh_dim=0,
+                src_dst_placements=(Partial("sum"), Replicate()),
+                logical_shape=[8, 8],
+            ),
+            _TransformInfo(
+                mesh_dim=1,
+                src_dst_placements=(Partial("sum"), Replicate()),
+                logical_shape=[8, 8],
+            ),
+        ]
+
+        # This should not crash with IndexError
+        result = _optimize_transform_infos(
+            transform_infos,
+            mesh_2d,
+            (Partial("sum"), Partial("sum")),
+            (Replicate(), Replicate()),
+        )
+
+        # Should return original transforms (no flattened mesh available)
+        self.assertEqual(len(result), 2)
+        self.assertTrue(all(isinstance(r, _TransformInfo) for r in result))
+
 
 class MultiDimRedistributeOptimizationTest(DTensorTestBase):
     """Integration tests for multi-dimensional redistribute correctness and optimization.
