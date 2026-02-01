@@ -107,6 +107,7 @@ class ProfilerStackEntry:
     firstlineno: int
     start_time_ns: int
     child_time_ns: int  # Accumulated time spent in traced children
+    is_primitive_call: bool = True  # Whether this is a non-recursive call
 
 
 class DynamoProfilerState:
@@ -126,12 +127,8 @@ class DynamoProfilerState:
 
     def push(
         self, func_name: str, filename: str, firstlineno: int, start_time_ns: int
-    ) -> bool:
-        """Push a new entry onto the timing stack.
-
-        Returns True if this is a primitive (non-recursive) call, i.e., the function
-        does not already appear anywhere in the call stack.
-        """
+    ) -> None:
+        """Push a new entry onto the timing stack."""
         # Check if this function already exists in the stack (indirect recursion)
         is_primitive = not any(
             entry.func_name == func_name
@@ -146,9 +143,9 @@ class DynamoProfilerState:
                 firstlineno=firstlineno,
                 start_time_ns=start_time_ns,
                 child_time_ns=0,
+                is_primitive_call=is_primitive,
             )
         )
-        return is_primitive
 
     def pop(self) -> ProfilerStackEntry | None:
         """Pop the top entry from the timing stack."""
