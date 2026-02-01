@@ -8,6 +8,7 @@ import contextlib
 import importlib
 import os
 import sys
+import unittest
 from unittest.mock import patch
 
 import torch
@@ -15,6 +16,11 @@ import torch.library
 from torch._dynamo.testing import make_test_cls_with_patches
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.inductor_utils import HAS_CPU
+from torch.utils._import_utils import import_dill
+
+
+dill = import_dill()
+HAS_DILL = dill is not None
 
 
 # Make the helper files in test/ importable
@@ -54,7 +60,7 @@ def make_test_cls(cls, xfail_prop="_expected_failure_graph_pickler"):
 GraphPicklerCommonTemplate = make_test_cls(CommonTemplate)
 
 
-if HAS_CPU:
+if HAS_CPU and HAS_DILL:
 
     class GraphPicklerCpuTests(TestCase):
         common = check_model
@@ -63,6 +69,7 @@ if HAS_CPU:
     copy_tests(GraphPicklerCommonTemplate, GraphPicklerCpuTests, "cpu", test_failures)
 
 
+@unittest.skipUnless(HAS_DILL, "dill not available")
 class TestGraphPickler(TestCase):
     def setUp(self):
         torch._dynamo.reset()
@@ -91,6 +98,7 @@ class TestGraphPickler(TestCase):
         check_model(self, fn, (torch.tensor([False, True]), torch.tensor([True, True])))
 
 
+@unittest.skipUnless(HAS_DILL, "dill not available")
 class TestDebugDumps(TestCase):
     """Tests for GraphPickler.debug_dumps debugging utility."""
 
@@ -238,6 +246,7 @@ class TestDebugDumps(TestCase):
         self.assertIn("data", result)
 
 
+@unittest.skipUnless(HAS_DILL, "dill not available")
 class TestHigherOrderOperatorPickle(TestCase):
     """Tests for HigherOrderOperator pickling support in GraphPickler."""
 
@@ -304,6 +313,7 @@ class TestHigherOrderOperatorPickle(TestCase):
         self.assertIn("not found", str(cm.exception))
 
 
+@unittest.skipUnless(HAS_DILL, "dill not available")
 class TestHopSchemaPickle(TestCase):
     """Tests for HopSchema pickling support."""
 
@@ -363,6 +373,7 @@ class TestHopSchemaPickle(TestCase):
         self.assertEqual(unpickled.is_varret, True)
 
 
+@unittest.skipUnless(HAS_DILL, "dill not available")
 class TestSerializedGraphModule(TestCase):
     """Tests for SerializedGraphModule using GraphPickler."""
 
@@ -409,6 +420,7 @@ class TestSerializedGraphModule(TestCase):
         self.assertEqual(gm(x, y), deserialized(x, y))
 
 
+@unittest.skipUnless(HAS_DILL, "dill not available")
 class TestGraphModuleGetState(TestCase):
     """Tests that _GraphModulePickleData respects custom __getstate__ methods."""
 
@@ -479,6 +491,227 @@ class TestGraphModuleGetState(TestCase):
         )
 
 
+@unittest.skipUnless(HAS_DILL, "dill not available")
+class TestDillSerializationFeatures(TestCase):
+    """
+    Tests for dill-enabled serialization features in GraphPickler.
+    These test cases would have failed with standard pickle because pickle
+    relies on module-level name lookup and cannot handle inner functions,
+    lambdas, locally defined classes, and closures capturing runtime state.
+    """
+
+    def setUp(self):
+        super().setUp()
+        from torch.fx._graph_pickler import GraphPickler, Options
+
+        self.GraphPickler = GraphPickler
+        self.Options = Options
+
+    def test_inner_function_in_graph_metadata(self):
+        """
+        Test that a graph with an inner function in node metadata can be
+        serialized and deserialized. Standard pickle would fail because
+        inner functions are not defined at module level.
+        """
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        class SimpleModule(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        gm = torch.fx.symbolic_trace(SimpleModule())
+
+        def inner_helper(x):
+            return x * 2
+
+        for node in gm.graph.nodes:
+            node.meta["inner_fn"] = inner_helper
+
+        options = self.Options(node_metadata_key_filter=None)
+        serialized = self.GraphPickler.dumps(gm, options)
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+        deserialized = self.GraphPickler.loads(serialized, fake_mode)
+
+        self.assertIsInstance(deserialized, torch.fx.GraphModule)
+        for node in deserialized.graph.nodes:
+            self.assertIn("inner_fn", node.meta)
+            self.assertEqual(node.meta["inner_fn"](5), 10)
+
+    def test_lambda_in_graph_metadata(self):
+        """
+        Test that a graph with a lambda in node metadata can be serialized
+        and deserialized. Standard pickle cannot handle lambdas because they
+        are anonymous functions without module-level names.
+        """
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        class SimpleModule(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        gm = torch.fx.symbolic_trace(SimpleModule())
+
+        for node in gm.graph.nodes:
+            node.meta["lambda_fn"] = lambda x: x * 3  # noqa: E731
+
+        options = self.Options(node_metadata_key_filter=None)
+        serialized = self.GraphPickler.dumps(gm, options)
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+        deserialized = self.GraphPickler.loads(serialized, fake_mode)
+
+        self.assertIsInstance(deserialized, torch.fx.GraphModule)
+        for node in deserialized.graph.nodes:
+            self.assertIn("lambda_fn", node.meta)
+            self.assertEqual(node.meta["lambda_fn"](7), 21)
+
+    def test_closure_capturing_runtime_state(self):
+        """
+        Test that a graph with a closure capturing runtime state can be
+        serialized and deserialized. Standard pickle cannot handle closures
+        because it cannot capture the closed-over variables.
+        """
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        class SimpleModule(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        gm = torch.fx.symbolic_trace(SimpleModule())
+
+        captured_value = 42
+        multiplier = 10
+
+        def closure_fn(x):
+            return x + captured_value * multiplier
+
+        for node in gm.graph.nodes:
+            node.meta["closure_fn"] = closure_fn
+
+        options = self.Options(node_metadata_key_filter=None)
+        serialized = self.GraphPickler.dumps(gm, options)
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+        deserialized = self.GraphPickler.loads(serialized, fake_mode)
+
+        self.assertIsInstance(deserialized, torch.fx.GraphModule)
+        for node in deserialized.graph.nodes:
+            self.assertIn("closure_fn", node.meta)
+            self.assertEqual(node.meta["closure_fn"](8), 8 + 42 * 10)
+
+    def test_locally_defined_class_in_metadata(self):
+        """
+        Test that a graph with locally defined class instances in node
+        metadata can be serialized and deserialized. Standard pickle cannot
+        handle classes not defined at module level.
+        """
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        class SimpleModule(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        gm = torch.fx.symbolic_trace(SimpleModule())
+
+        class LocalConfig:
+            def __init__(self, value, name):
+                self.value = value
+                self.name = name
+
+            def compute(self):
+                return self.value * 2
+
+        local_instance = LocalConfig(value=100, name="test_config")
+        for node in gm.graph.nodes:
+            node.meta["local_class"] = local_instance
+
+        options = self.Options(node_metadata_key_filter=None)
+        serialized = self.GraphPickler.dumps(gm, options)
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+        deserialized = self.GraphPickler.loads(serialized, fake_mode)
+
+        self.assertIsInstance(deserialized, torch.fx.GraphModule)
+        for node in deserialized.graph.nodes:
+            self.assertIn("local_class", node.meta)
+            obj = node.meta["local_class"]
+            self.assertEqual(obj.value, 100)
+            self.assertEqual(obj.name, "test_config")
+            self.assertEqual(obj.compute(), 200)
+
+    def test_nested_closures_with_multiple_captures(self):
+        """
+        Test that deeply nested closures with multiple captured variables
+        can be serialized and deserialized.
+        """
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        class SimpleModule(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        gm = torch.fx.symbolic_trace(SimpleModule())
+
+        outer_val = 5
+
+        def outer_fn(a):
+            inner_val = a * 2
+
+            def inner_fn(b):
+                return b + outer_val + inner_val
+
+            return inner_fn
+
+        nested_closure = outer_fn(10)
+
+        for node in gm.graph.nodes:
+            node.meta["nested_closure"] = nested_closure
+
+        options = self.Options(node_metadata_key_filter=None)
+        serialized = self.GraphPickler.dumps(gm, options)
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+        deserialized = self.GraphPickler.loads(serialized, fake_mode)
+
+        self.assertIsInstance(deserialized, torch.fx.GraphModule)
+        for node in deserialized.graph.nodes:
+            self.assertIn("nested_closure", node.meta)
+            self.assertEqual(node.meta["nested_closure"](3), 3 + 5 + 20)
+
+    def test_lambda_with_default_arguments(self):
+        """
+        Test that lambdas with default arguments can be serialized. Standard
+        pickle has trouble with default argument values that aren't simple
+        literals.
+        """
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        class SimpleModule(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        gm = torch.fx.symbolic_trace(SimpleModule())
+
+        default_list = [1, 2, 3]
+        fn_with_defaults = lambda x, y=default_list: x + sum(y)  # noqa: E731
+
+        for node in gm.graph.nodes:
+            node.meta["fn_with_defaults"] = fn_with_defaults
+
+        options = self.Options(node_metadata_key_filter=None)
+        serialized = self.GraphPickler.dumps(gm, options)
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+        deserialized = self.GraphPickler.loads(serialized, fake_mode)
+
+        self.assertIsInstance(deserialized, torch.fx.GraphModule)
+        for node in deserialized.graph.nodes:
+            self.assertIn("fn_with_defaults", node.meta)
+            self.assertEqual(node.meta["fn_with_defaults"](10), 10 + 6)
+
+
+@unittest.skipUnless(HAS_DILL, "dill not available")
 class TestNodeMetadataKeyFilter(TestCase):
     """Tests for the node_metadata_key_filter option in GraphPickler."""
 
