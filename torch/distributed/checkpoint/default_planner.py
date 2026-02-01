@@ -297,8 +297,12 @@ class DefaultLoadPlanner(LoadPlanner):
         self.original_state_dict = {}
         self.mappings = {}
         self.allow_partial_load = allow_partial_load
-        self.replicate_group = replicate_group
-        self.tensors_to_broadcast: list[torch.Tensor | DTensor] = []
+        self._replicate_group = replicate_group
+        self._tensors_to_broadcast: list[torch.Tensor | DTensor] = []
+        self._enable_hsdp_broadcast = (
+            self._replicate_group is not None 
+            and self._replicate_group.size() > 1
+        )
 
     def set_up_planner(
         self,
@@ -359,18 +363,18 @@ class DefaultLoadPlanner(LoadPlanner):
             self.state_dict, self.metadata, not self.allow_partial_load
         )
 
-        if self.replicate_group is not None:
+        if self._enable_hsdp_broadcast:
             plan = self._filter_plan_for_hsdp_broadcast(plan)
 
         return plan
 
     def _filter_plan_for_hsdp_broadcast(self, plan: LoadPlan) -> LoadPlan:
         """Filter items so only primary rank loads GPU tensors; others receive via broadcast."""
-        if self.replicate_group is None:
+        if not self._enable_hsdp_broadcast:
             raise AssertionError("replicate_group must be set")
 
-        self.tensors_to_broadcast = []
-        is_non_primary = self.replicate_group.rank() > 0
+        self._tensors_to_broadcast = []
+        is_non_primary = self._replicate_group.rank() > 0
 
         if is_non_primary:
             filtered_items = []
@@ -385,8 +389,8 @@ class DefaultLoadPlanner(LoadPlanner):
 
             if is_broadcastable:
                 # NOTE: check the input replicate group is a subset of hsdp replicate group
-                _validate_hsdp_replicate_group(obj, self.replicate_group)
-                self.tensors_to_broadcast.append(obj)
+                _validate_hsdp_replicate_group(obj, self._replicate_group)
+                self._tensors_to_broadcast.append(obj)
             elif is_non_primary:
                 filtered_items.append(item)
 
@@ -430,15 +434,22 @@ class DefaultLoadPlanner(LoadPlanner):
 
     def finish_load(self) -> None:
         """Broadcast tensors from rank 0 to other ranks in the replicate group."""
-        if self.replicate_group is None:
+        if not self._enable_hsdp_broadcast:
             return
-        for tensor in self.tensors_to_broadcast:
-            local_tensor = tensor.to_local() if isinstance(tensor, DTensor) else tensor
-            dist.broadcast(
-                local_tensor,
-                src=dist.get_global_rank(self.replicate_group, 0),
-                group=self.replicate_group,
-            )
+
+        # 1. Prepare local tensors list
+        local_tensors = [
+            t.to_local() if isinstance(t, DTensor) else t 
+            for t in self._tensors_to_broadcast
+        ]
+
+        # 2. Coalesced broadcast
+        dist._broadcast_coalesced(
+            self._replicate_group,
+            local_tensors,
+            buffer_size=256 * 1024 * 1024,  # 256MB bucket size
+            src=0,  # primary rank is always 0 in the replicate group
+        )
 
 
 class _EmptyStateDictLoadPlanner(DefaultLoadPlanner):
