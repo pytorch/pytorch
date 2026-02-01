@@ -5638,7 +5638,7 @@ class Scheduler:
                 write = write.normalize()
             # Operations like index_add_, scatter_add_, etc. require global
             # synchronization - all threads must complete writes before any reads.
-            # These cannot be safely fused into the same kernel. AtomicAdd and TMA stores require synchronization barriers
+            # These cannot be safely fused into the same kernel. Atomic modes and TMA stores require synchronization barriers
             if self.mode_requires_synchronization(write.mode):
                 return False
 
