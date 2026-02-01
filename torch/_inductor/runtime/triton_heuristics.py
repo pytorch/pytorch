@@ -947,6 +947,19 @@ class CachingAutotuner(KernelInterface):
         device_interface = self.get_device_interface()
         stream = device_interface.get_raw_stream(device_interface.current_device())
 
+        # Validate argument count to provide a clear error message
+        # The launcher signature is: def launcher(arg1, arg2, ..., stream)
+        # co_argcount includes 'stream', so expected positional args = co_argcount - 1
+        expected_args = launcher.__code__.co_argcount - 1  # subtract 1 for 'stream'
+        actual_args = len(args)
+        if actual_args != expected_args:
+            kernel_name = self.inductor_meta.get("kernel_name", self.fn.__name__)
+            raise RuntimeError(
+                f"Triton kernel '{kernel_name}' expected {expected_args} arguments, "
+                f"but got {actual_args}. This may indicate a mismatch between the "
+                f"kernel signature and the arguments passed to it."
+            )
+
         cpu_copies = self.copy_args_to_cpu_if_needed(*args, **kwargs)
 
         def kernel_call():
@@ -1475,6 +1488,19 @@ class CachingAutotuner(KernelInterface):
                 _dump_launch_tensors(
                     args, self.filename, self.kernel_hash, self.fn.__name__
                 )
+
+        # Validate argument count to provide a clear error message
+        # The launcher signature is: def launcher(arg1, arg2, ..., stream)
+        # co_argcount includes 'stream', so expected positional args = co_argcount - 1
+        expected_args = launcher.__code__.co_argcount - 1  # subtract 1 for 'stream'
+        actual_args = len(args)
+        if actual_args != expected_args:
+            kernel_name = self.inductor_meta.get("kernel_name", self.fn.__name__)
+            raise RuntimeError(
+                f"Triton kernel '{kernel_name}' expected {expected_args} arguments, "
+                f"but got {actual_args}. This may indicate a mismatch between the "
+                f"kernel signature and the arguments passed to it."
+            )
 
         # it is faster than entering and exiting a context manager, even if the context
         # manager is a nullcontext.

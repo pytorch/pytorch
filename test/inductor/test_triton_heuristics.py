@@ -304,6 +304,46 @@ class TestTritonHeuristics(TestCase):
             )
             self.assertEqual(len(configs), expected_count)
 
+    @skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    def test_argument_count_validation_error_message(self):
+        """
+        Test that CachingAutotuner provides a clear error message when the wrong
+        number of arguments is passed to the kernel launcher.
+        See https://github.com/pytorch/pytorch/issues/146018
+        """
+        args = self._get_cos_kernel_caching_autotuner_args()
+        args["inductor_meta"]["kernel_name"] = "test_kernel"
+        autotuner = CachingAutotuner(**args)
+
+        # Create test tensors
+        in_tensor = torch.randn(16, device=GPU_TYPE)
+        out_tensor = torch.randn(16, device=GPU_TYPE)
+        xnumel = 16
+
+        # Force precompile to get the launcher
+        autotuner.precompile()
+
+        device_interface = autotuner.get_device_interface()
+        stream = device_interface.get_raw_stream(device_interface.current_device())
+
+        # Correct number of args should work (3 args: in_ptr0, out_ptr0, xnumel)
+        autotuner.run(in_tensor, out_tensor, xnumel, stream=stream)
+
+        # Wrong number of args should raise a clear RuntimeError
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"Triton kernel 'test_kernel' expected 3 arguments, but got 2",
+        ):
+            autotuner.run(in_tensor, out_tensor, stream=stream)  # Missing xnumel
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"Triton kernel 'test_kernel' expected 3 arguments, but got 4",
+        ):
+            autotuner.run(
+                in_tensor, out_tensor, xnumel, 42, stream=stream
+            )  # Extra arg
+
 
 class TestArgumentCloneAndRestore(TestCase):
     # Our tensor is large enough. If a unexpected copy happens, the
