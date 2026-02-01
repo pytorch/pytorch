@@ -1304,6 +1304,8 @@ if __name__ == "__main__":
 
     @unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
     def test_repeat_graph_capture_oneDNN_memory(self):
+        if self.expandable_segments:
+            self.skipTest("oneDNN does not support expandable_segments memory")
         (x, y, z) = 1024, 512, 64
         a = torch.rand((x, y), device="xpu")
         b = torch.rand((y, z), device="xpu")
