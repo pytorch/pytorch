@@ -552,6 +552,8 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
       "multi_root_tile_reduce(Tensor[] in_tiles, Tensor(a!) out_tile, int[] roots, str group_name, str reduce_op='sum') -> ()");
 
   // Dispatcher-visible (TorchBind) SymmetricMemory API.
+  // For now, `_rendezvous` and `_barrier` are for testing dispatcher support
+  // only. Please do not use them in production code.
   m.def(
       "_rendezvous(Tensor tensor, str? group_name=None) -> __torch__.torch.classes.c10d.SymmetricMemory");
   m.def("_barrier(__torch__.torch.classes.c10d.SymmetricMemory symm) -> ()");
@@ -570,6 +572,8 @@ void barrier_op(const c10::intrusive_ptr<SymmetricMemory>& symm) {
 }
 
 TORCH_LIBRARY_IMPL(symm_mem, CompositeExplicitAutograd, m) {
+  // For now, `_rendezvous` and `_barrier` are for testing dispatcher support
+  // only. Please do not use them in production code.
   m.impl("_rendezvous", rendezvous_op);
   m.impl("_barrier", barrier_op);
 }
