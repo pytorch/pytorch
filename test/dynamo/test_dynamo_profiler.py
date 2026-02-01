@@ -6,7 +6,8 @@ These tests verify that the dynamo_profiler config flag and related profiling
 infrastructure work correctly for tracking where Dynamo spends time during compilation.
 """
 
-from pstats import SortKey
+import pstats
+import tempfile
 
 import torch
 import torch._dynamo.test_case
@@ -14,13 +15,8 @@ import torch._dynamo.testing
 
 
 class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
-    @torch._dynamo.config.patch(dynamo_profiler=True)
     def test_function_trace_timing(self):
         """Test that inline function timing data is captured during compilation."""
-        from torch._dynamo.dynamo_profiler import FunctionTraceTiming
-        from torch._guards import TracingContext
-
-        captured_timings = []
 
         def helper_fn(x):
             return x * 2 + 1
@@ -31,49 +27,35 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         def main_fn(x):
             return nested_helper(x)
 
-        def timing_capturing_backend(gm, example_inputs):
-            tc = TracingContext.try_get()
-            if tc and tc.profiler_state:
-                timings = tc.profiler_state.get_timings()
-                if timings:
-                    captured_timings.extend(timings)
-            return gm.forward
-
         torch._dynamo.reset()
 
-        @torch.compile(backend=timing_capturing_backend)
-        def test_fn(x):
-            return main_fn(x)
+        with tempfile.NamedTemporaryFile(suffix=".prof", delete=False) as f:
+            profile_path = f.name
 
-        x = torch.randn(10)
-        test_fn(x)
+        with torch._dynamo.config.patch(dynamo_profiler=profile_path):
 
-        # Verify timing data was captured
-        self.assertGreater(len(captured_timings), 0)
+            @torch.compile(backend="eager")
+            def test_fn(x):
+                return main_fn(x)
 
-        # Verify all entries are FunctionTraceTiming instances
-        for t in captured_timings:
-            self.assertIsInstance(t, FunctionTraceTiming)
-            self.assertGreater(t.trace_time_ns, 0)
-            self.assertGreater(t.bytecode_count, 0)
-            self.assertGreaterEqual(t.inline_depth, 0)  # Root function has depth 0
+            x = torch.randn(10)
+            test_fn(x)
+
+        # Load and verify the profile
+        stats = pstats.Stats(profile_path)
+
+        # Verify stats object is valid
+        self.assertGreater(stats.total_calls, 0)
 
         # Verify we captured the expected functions
-        func_names = {t.func_name for t in captured_timings}
+        func_names = {key[2] for key in stats.stats}
         self.assertIn("helper_fn", func_names)
         self.assertIn("nested_helper", func_names)
         self.assertIn("main_fn", func_names)
+        self.assertIn("test_fn", func_names)  # Root function
 
-    @torch._dynamo.config.patch(dynamo_profiler=True)
-    def test_generate_pstats_from_timings(self):
-        """Test generating pstats-compatible output from trace timings."""
-        import pstats
-        import tempfile
-
-        from torch._dynamo.dynamo_profiler import DynamoProfilerState
-        from torch._guards import TracingContext
-
-        trace_timings = []
+    def test_pstats_file_loadable(self):
+        """Test that the generated pstats file can be loaded and analyzed."""
 
         def helper_fn(x):
             return x * 2
@@ -81,37 +63,28 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         def main_fn(x):
             return helper_fn(x)
 
-        def timing_backend(gm, example_inputs):
-            tc = TracingContext.try_get()
-            if tc and tc.profiler_state:
-                timings = tc.profiler_state.get_timings()
-                if timings:
-                    trace_timings.extend(timings)
-            return gm.forward
-
         torch._dynamo.reset()
 
-        @torch.compile(backend=timing_backend)
-        def compiled_fn(x):
-            return main_fn(x)
-
-        x = torch.randn(10)
-        compiled_fn(x)
-
-        # Generate pstats
         with tempfile.NamedTemporaryFile(suffix=".prof", delete=False) as f:
-            profiler_state = DynamoProfilerState()
-            profiler_state.timings = trace_timings
-            stats = profiler_state.generate_pstats(f.name)
-            print(stats.strip_dirs().sort_stats(SortKey.CUMULATIVE).print_stats())
+            profile_path = f.name
 
-            # Verify stats object is valid
-            self.assertIsInstance(stats, pstats.Stats)
-            self.assertGreater(stats.total_calls, 0)
+        with torch._dynamo.config.patch(dynamo_profiler=profile_path):
 
-            # Verify file can be loaded
-            loaded_stats = pstats.Stats(f.name)
-            self.assertEqual(loaded_stats.total_calls, stats.total_calls)
+            @torch.compile(backend="eager")
+            def compiled_fn(x):
+                return main_fn(x)
+
+            x = torch.randn(10)
+            compiled_fn(x)
+
+        # Verify file can be loaded and analyzed
+        stats = pstats.Stats(profile_path)
+        self.assertGreater(stats.total_calls, 0)
+
+        # Verify we can sort and print stats (basic pstats operations)
+        stats.sort_stats("cumulative")
+        # This would raise if the stats format is invalid
+        stats.print_stats(5)
 
 
 if __name__ == "__main__":
