@@ -214,7 +214,7 @@ class Vectorized<double> {
             tmp[i] = std::atan2(tmp[i], tmp_b[i]);
           }
           return loadu(tmp);
-        })
+        });
   }
   Vectorized<double> copysign(const Vectorized<double>& sign) const {
     USE_SLEEF(
@@ -228,7 +228,7 @@ class Vectorized<double> {
             tmp[i] = std::copysign(tmp[i], tmp_sign[i]);
           }
           return loadu(tmp);
-        })
+        });
   }
   Vectorized<double> erf() const {
     return USE_SLEEF(
@@ -271,7 +271,7 @@ class Vectorized<double> {
             tmp[i] = std::fmod(tmp[i], tmp_q[i]);
           }
           return loadu(tmp);
-        })
+        });
   }
   Vectorized<double> hypot(const Vectorized<double>& b) const {
     USE_SLEEF(
@@ -285,7 +285,7 @@ class Vectorized<double> {
             tmp[i] = std::hypot(tmp[i], tmp_b[i]);
           }
           return loadu(tmp);
-        })
+        });
   }
   Vectorized<double> i0() const {
     return map(calc_i0);
@@ -328,7 +328,7 @@ class Vectorized<double> {
             tmp[i] = std::nextafter(tmp[i], tmp_b[i]);
           }
           return loadu(tmp);
-        })
+        });
   }
   Vectorized<double> log() const {
     return USE_SLEEF(
@@ -411,7 +411,7 @@ class Vectorized<double> {
             tmp[i] = std::pow(tmp[i], tmp_b[i]);
           }
           return loadu(tmp);
-        })
+        });
   }
   // Comparison using the _CMP_**_OQ predicate.
   //   `O`: get false if an operand is NaN
