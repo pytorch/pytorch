@@ -4878,9 +4878,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
         # Push ourselves onto the timing stack BEFORE building the tracer
         # so that build_inline_tracer overhead is included in this function's time
-        trace_start_ns = time.time_ns()
-        is_primitive_call = output.profiler_state.push(
-            code.co_name, code.co_filename, code.co_firstlineno, trace_start_ns
+        output.profiler_state.push(
+            code.co_name, code.co_filename, code.co_firstlineno, time.time_ns()
         )
 
         tracer = None
@@ -4897,13 +4896,13 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
             # Record timing for successful traces
             if trace_success and stack_entry is not None and tracer is not None:
-                cumtime_ns = trace_end_ns - trace_start_ns
+                cumtime_ns = trace_end_ns - stack_entry.start_time_ns
                 tottime_ns = cumtime_ns - stack_entry.child_time_ns
 
                 timing = FunctionTraceTiming(
-                    func_name=code.co_name,
-                    filename=code.co_filename,
-                    firstlineno=code.co_firstlineno,
+                    func_name=stack_entry.func_name,
+                    filename=stack_entry.filename,
+                    firstlineno=stack_entry.firstlineno,
                     cumtime_ns=cumtime_ns,
                     tottime_ns=tottime_ns,
                     bytecode_count=len(code.co_code),
@@ -4911,7 +4910,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                     caller_func_name=caller_info[0] if caller_info else None,
                     caller_filename=caller_info[1] if caller_info else None,
                     caller_firstlineno=caller_info[2] if caller_info else None,
-                    is_primitive_call=is_primitive_call,
+                    is_primitive_call=stack_entry.is_primitive_call,
                     call_stack=call_stack,
                 )
                 output.profiler_state.record_timing(timing)
