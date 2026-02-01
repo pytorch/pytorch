@@ -4866,20 +4866,20 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
         # Profiler enabled: collect timing data
         # Ensure profiler state is initialized
-        tc = TracingContext.get()
-        if tc.profiler_state is None:
-            tc.profiler_state = DynamoProfilerState()
+        output = parent.output
+        if output.profiler_state is None:
+            output.profiler_state = DynamoProfilerState()
 
         code = func.get_code()
 
         # Get caller info and full call stack before we push ourselves
-        caller_info = tc.profiler_state.get_current_caller()
-        call_stack = tc.profiler_state.get_call_stack()
+        caller_info = output.profiler_state.get_current_caller()
+        call_stack = output.profiler_state.get_call_stack()
 
         # Push ourselves onto the timing stack BEFORE building the tracer
         # so that build_inline_tracer overhead is included in this function's time
         trace_start_ns = time.time_ns()
-        is_primitive_call = tc.profiler_state.push(
+        is_primitive_call = output.profiler_state.push(
             code.co_name, code.co_filename, code.co_firstlineno, trace_start_ns
         )
 
@@ -4892,7 +4892,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             return result
         finally:
             # Pop ourselves from the timing stack
-            stack_entry = tc.profiler_state.pop()
+            stack_entry = output.profiler_state.pop()
             trace_end_ns = time.time_ns()
 
             # Record timing for successful traces
@@ -4914,10 +4914,10 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                     is_primitive_call=is_primitive_call,
                     call_stack=call_stack,
                 )
-                tc.profiler_state.record_timing(timing)
+                output.profiler_state.record_timing(timing)
 
                 # Add our cumtime to the parent's child_time accumulator
-                tc.profiler_state.add_child_time(cumtime_ns)
+                output.profiler_state.add_child_time(cumtime_ns)
 
     @staticmethod
     def check_inlineable(
