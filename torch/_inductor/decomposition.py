@@ -175,7 +175,38 @@ def _native_layer_norm(
     if input.is_mtia:
         return NotImplemented
     # We can write a util function to update decomp table if we have more ops to fallback.
-    return decomp_native_layer_norm(input, normalized_shape, weight, bias, eps)
+    # Stable implementation avoiding mean(x**2) - mean(x)**2
+    # which overflows for large inputs (~1e37)
+    input_ndim = input.dim()
+    normalized_ndim = len(normalized_shape)
+    axis = input_ndim - normalized_ndim
+    reduction_dims = list(range(axis, input_ndim))
+
+    computation_dtype = input.dtype
+    if input.dtype in [torch.half, torch.bfloat16]:
+        computation_dtype = torch.float32
+
+    input_acc = input.to(computation_dtype)
+    mean = torch.mean(input_acc, dim=reduction_dims, keepdim=True)
+    diff = input_acc - mean
+    var = torch.mean(diff * diff, dim=reduction_dims, keepdim=True)
+    rstd = torch.rsqrt(var + eps)
+    
+    # Normalize
+    out = diff * rstd
+    out = out.to(input.dtype)
+
+    if weight is not None:
+        out = out * weight
+    if bias is not None:
+        out = out + bias
+
+    # Match return types of _refs implementation
+    if input.device.type == "cpu":
+        mean = mean.to(input.dtype)
+        rstd = rstd.to(input.dtype)
+
+    return out, mean, rstd
 
 
 @register_decomposition([aten.sym_constrain_range_for_size.default])
@@ -1319,3 +1350,6 @@ def conv1d_to_conv2d(
 
     # Squeeze dummy dimension back out: (N,C_out,L_out,1) -> (N,C_out,L_out)
     return out_2d.squeeze(-1)
+@register_decomposition(aten.vdot)
+def vdot(a, b):
+    return torch.sum(a.conj() * b)
