@@ -1,4 +1,4 @@
-
+#include <type_traits>
 #define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/native/cuda/SortStable.h>
 
@@ -14,6 +14,7 @@
 
 #include <c10/core/DeviceArray.h>
 #include <limits>
+
 
 namespace at::native {
 
@@ -298,7 +299,8 @@ void launch_stable_sort_kernel(
     const TensorBase& indices) {
 
   AT_DISPATCH_V2(indices.scalar_type(), "launch_stable_sort_kernel", AT_WRAP([&] {
-    scalar_t* indices_ptr = indices.mutable_data_ptr<scalar_t>();
+    using idx_scalar_t = std::make_unsigned_t<scalar_t>;
+    idx_scalar_t* indices_ptr = reinterpret_cast<idx_scalar_t*>(indices.mutable_data_ptr<scalar_t>());
     do_launch_stable_sort_kernel(self, dim, descending, values, indices_ptr);
   }), kChar, kByte, kShort, kUInt16, kInt, kLong);
 
