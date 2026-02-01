@@ -169,6 +169,7 @@ from .variables.user_defined import UserDefinedDictVariable
 
 
 if TYPE_CHECKING:
+    from torch._dynamo.dynamo_profiler import DynamoProfilerState
     from torch._dynamo.package import CompilePackage
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
     from torch.multiprocessing.reductions import StorageWeakRef
@@ -701,6 +702,9 @@ class OutputGraph(OutputGraphCommon):
         self.compiler_fn: Optional[CompilerFn] = compiler_fn
         self.root_tx = root_tx
 
+        # Profiler state for tracking function trace timings
+        self.profiler_state: Optional[DynamoProfilerState] = None
+
         self.package = package
         # Given a source, what are the user stacks of all locations that
         # accessed it?
@@ -804,14 +808,14 @@ class OutputGraph(OutputGraphCommon):
             )
         )
         # Start profiler timing for the root function
-        if config.dynamo_profiler and self.tracing_context is not None:
+        if config.dynamo_profiler:
             from torch._dynamo.dynamo_profiler import DynamoProfilerState
 
-            if self.tracing_context.profiler_state is None:
-                self.tracing_context.profiler_state = DynamoProfilerState()
+            if self.profiler_state is None:
+                self.profiler_state = DynamoProfilerState()
             code = self.root_tx.f_code
             self._profiler_start_ns = time.time_ns()
-            self._profiler_is_primitive = self.tracing_context.profiler_state.push(
+            self._profiler_is_primitive = self.profiler_state.push(
                 code.co_name,
                 code.co_filename,
                 code.co_firstlineno,
@@ -823,13 +827,12 @@ class OutputGraph(OutputGraphCommon):
         # Record profiler timing for the root function and dump stats
         if (
             config.dynamo_profiler
-            and self.tracing_context is not None
-            and self.tracing_context.profiler_state is not None
+            and self.profiler_state is not None
             and hasattr(self, "_profiler_start_ns")
         ):
             from torch._dynamo.dynamo_profiler import FunctionTraceTiming
 
-            stack_entry = self.tracing_context.profiler_state.pop()
+            stack_entry = self.profiler_state.pop()
             trace_end_ns = time.time_ns()
             if stack_entry is not None:
                 cumtime_ns = trace_end_ns - self._profiler_start_ns
@@ -849,13 +852,13 @@ class OutputGraph(OutputGraphCommon):
                     is_primitive_call=self._profiler_is_primitive,
                     call_stack=(),
                 )
-                self.tracing_context.profiler_state.record_timing(timing)
+                self.profiler_state.record_timing(timing)
 
             # Dump profiler stats
             output_file = None
             if isinstance(config.dynamo_profiler, str):
                 output_file = config.dynamo_profiler
-            self.tracing_context.profiler_state.dump_stats(output_file)
+            self.profiler_state.dump_stats(output_file)
 
     def install_builtins_dict_in_fglobals(self) -> str:
         f_builtins = get_builtins_dict(self.global_scope)

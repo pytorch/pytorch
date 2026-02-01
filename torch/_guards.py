@@ -36,7 +36,6 @@ if TYPE_CHECKING:
 
     from torch._dynamo.backends.distributed import DDPOptimizerContext
     from torch._dynamo.codegen import PyCodegen
-    from torch._dynamo.dynamo_profiler import DynamoProfilerState
     from torch._functorch._aot_autograd.schemas import ViewAndMutationMeta
     from torch._subclasses.fake_tensor import FakeTensorMode
 
@@ -946,7 +945,6 @@ class TracingContext:
         self.hop_dispatch_set_cache = HopDispatchSetCache()
         # list of code objects for inlined functions
         self.traced_code: list[CodeType] = []
-        self.profiler_state: DynamoProfilerState | None = None
 
     def clear(self) -> None:
         # Look at the note in output_graph.py in function `save_global_state`
