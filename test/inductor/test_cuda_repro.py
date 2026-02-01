@@ -1214,7 +1214,9 @@ class CudaReproTests(TestCase):
         def fn_mixed(x, thresholds, right):
             return torch.bucketize(x, thresholds, right=right)
 
-        mixed_values = torch.tensor([0.3, float("nan"), 0.6, float("nan"), 0.1], device="cuda")
+        mixed_values = torch.tensor(
+            [0.3, float("nan"), 0.6, float("nan"), 0.1], device="cuda"
+        )
         for right in [True, False]:
             torch._dynamo.reset()
             expected = fn_mixed(mixed_values, thresholds, right)
