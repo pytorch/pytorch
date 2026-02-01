@@ -45,35 +45,45 @@ log = logging.getLogger(__name__)
 annotation_log = getArtifactLogger(__name__, "annotation")
 
 
-# HigherOrderOperators that take callable arguments and require special tracing.
-# These cannot be symbolically traced using the standard Proxy mechanism because
-# the callable arguments need to be traced into subgraphs. For these HOPs, users
-# should use make_fx or dynamo tracing instead.
-_HOPS_WITH_CALLABLE_ARGS = frozenset(
-    {
-        "cond",
-        "while_loop",
-        "map_impl",
-        "scan",
-        "associative_scan",
-        "local_map",
-        "invoke_subgraph",
-        "wrap",
-        "wrap_with_set_grad_enabled",
-        "strict_mode",
-        "hints_wrap",
-        "flex_attention",
-        "flex_attention_backward",
-    }
-)
+def _is_arbitrary_callable(obj: Any) -> bool:
+    """
+    Returns True if obj is an arbitrary callable (function, lambda, method, etc.)
+    that requires special tracing to handle. These cannot be symbolically traced
+    using the standard Proxy mechanism.
+    """
+    import functools
+    import types
+
+    return isinstance(
+        obj,
+        (
+            types.FunctionType,
+            types.MethodType,
+            types.BuiltinFunctionType,
+            types.BuiltinMethodType,
+            functools.partial,
+        ),
+    )
 
 
-def _hop_takes_callable_arg(hop: "torch._ops.HigherOrderOperator") -> bool:
+def _find_arbitrary_callable(args: tuple, kwargs: dict) -> Any:
     """
-    Returns True if the given HigherOrderOperator takes callable arguments
-    that require special tracing (i.e., tracing into subgraphs).
+    Recursively searches args and kwargs for any arbitrary callable.
+    Returns the first arbitrary callable found, or None if none exist.
     """
-    return hop._name in _HOPS_WITH_CALLABLE_ARGS
+    found = None
+
+    def check(obj: Any) -> Any:
+        nonlocal found
+        if found is not None:
+            return obj
+        if _is_arbitrary_callable(obj):
+            found = obj
+        return obj
+
+    map_aggregate(args, check)
+    map_aggregate(kwargs, check)
+    return found
 
 
 @compatibility(is_backward_compatible=False)
@@ -699,12 +709,13 @@ class Proxy:
             )
         else:
             if isinstance(orig_method, torch._ops.HigherOrderOperator):
-                if _hop_takes_callable_arg(orig_method):
+                bad_callable = _find_arbitrary_callable(args, kwargs)
+                if bad_callable is not None:
                     raise RuntimeError(
                         f"Unable to symbolically trace the HigherOrderOperator "
-                        f"{orig_method._name} because it takes callable arguments "
-                        f"that require special tracing. Use make_fx or dynamo tracing "
-                        f"instead."
+                        f"{orig_method._name} because it received an arbitrary "
+                        f"callable argument {bad_callable}. Use make_fx or dynamo "
+                        f"tracing instead."
                     )
             return tracer.create_proxy(
                 "call_function",
