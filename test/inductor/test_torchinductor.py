@@ -17077,6 +17077,21 @@ if RUN_GPU:
             expected = torch.zeros(512, 768, dtype=torch.bfloat16, device=GPU_TYPE)
             torch.testing.assert_close(result, fn(expected, indices, values))
 
+        @skipCUDAIf(not SM80OrLater, "BF16 requires SM >= 80")
+        def test_bf16_scalar_comparison(self):
+            # Scalar comparison should match eager after dtype rounding, see #173987
+            x_bf16 = torch.tensor([3.14], dtype=torch.bfloat16, device=GPU_TYPE)
+            x_fp16 = torch.tensor([3.14], dtype=torch.float16, device=GPU_TYPE)
+
+            def fn(x, scalar):
+                return torch.ops.aten.eq(x, scalar)
+
+            for x in [x_bf16, x_fp16]:
+                ref = fn(x, 3.14)
+                opt = torch.compile(fn, backend="inductor")(x, 3.14)
+                self.assertTrue(ref.item())
+                self.assertEqual(ref, opt)
+
     class RNNTest(TestCase):
         device_type = GPU_TYPE
 
