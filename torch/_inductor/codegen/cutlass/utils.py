@@ -23,7 +23,7 @@ from ...ir import Layout
 from ...runtime.runtime_utils import cache_dir
 from ...virtualized import V
 from ..cpp_utils import DTYPE_TO_CPP
-from .cuda_env import get_cuda_arch, get_cuda_version
+from ..cuda.cuda_env import get_cuda_arch, get_cuda_version
 
 
 log = logging.getLogger(__name__)
@@ -104,8 +104,8 @@ def try_import_cutlass() -> bool:
         torch_root,
         "_inductor",
         "codegen",
-        "cuda",
-        "cutlass_lib_extensions",
+        "cutlass",
+        "lib_extensions",
         "cutlass_mock_imports",
     )
 
