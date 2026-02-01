@@ -29,7 +29,7 @@ on:
       timeout-minutes:
         required: false
         type: number
-        default: 300
+        default: 390
         description: |
           Set the maximum (in minutes) how long the workflow should take to finish
       tests-to-include:
@@ -91,16 +91,8 @@ jobs:
       - name: Setup XPU
         uses: ./.github/actions/setup-xpu
 
-      - name: configure aws credentials
-        id: aws_creds
-        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
-        with:
-          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
-          aws-region: us-east-1
-
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076 # v2.0.1
+      - name: Login to ECR
+        uses: ./.github/actions/ecr-login
 
       - name: Calculate docker image
         id: calculate-docker-image

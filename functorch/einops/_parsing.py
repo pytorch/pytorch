@@ -188,7 +188,7 @@ class ParsedExpression:
                     f"It is discouraged to use axes names that are keywords: {name}",
                     RuntimeWarning,
                 )
-            if name in ["axis"]:
+            if name == "axis":
                 warnings.warn(
                     "It is discouraged to use 'axis' as an axis name and will raise an error in future",
                     FutureWarning,

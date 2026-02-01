@@ -262,10 +262,13 @@ def _cuda_system_info_comment() -> str:
 
     model_str = "# CUDA Info: \n"
     try:
-        cuda_version_out = subprocess.check_output(["nvcc", "--version"])
-        cuda_version_lines = cuda_version_out.decode().split("\n")
-        comment = "".join([f"# {s} \n" for s in cuda_version_lines if s != ""])
-        model_str += f"{comment}\n"
+        if torch.version.hip is None:
+            cuda_version_out = subprocess.check_output(["nvcc", "--version"])
+            cuda_version_lines = cuda_version_out.decode().split("\n")
+            comment = "".join([f"# {s} \n" for s in cuda_version_lines if s != ""])
+            model_str += f"{comment}\n"
+        else:
+            model_str += "# Not searching for nvcc on ROCM setup\n"
     except (FileNotFoundError, subprocess.CalledProcessError):
         model_str += "# nvcc not found\n"
 
@@ -294,7 +297,7 @@ def generate_env_vars_string(*, stable_output: bool = False) -> str:
         return any(string in key for string in allow_list) and key not in skip_list
 
     config_lines = [
-        f"os.environ['{key}'] = '{value}'"
+        f"""os.environ['{key}'] = '{value.replace("'", '"')}'"""
         for key, value in os.environ.items()
         if filter(key)
     ]
@@ -582,7 +585,9 @@ class NopInputReader:
 # TODO: Support bundling the entire repro into a zip file for ease of
 # transferring around
 class InputReader:
-    def __init__(self, save_dir: Optional[str] = None, *, pbar: Optional[tqdm] = None):
+    def __init__(
+        self, save_dir: str | None = None, *, pbar: tqdm | None = None
+    ) -> None:
         # If None, we will generate random data instead.  It's important
         # to natively support this use case as it will allow people to
         # share repros without including the real data, if the problem

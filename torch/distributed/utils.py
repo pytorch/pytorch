@@ -44,7 +44,7 @@ def _pack_kwargs(*args: Any, **kwargs: Any) -> tuple[tuple[Any, ...], tuple[str,
 
 
 def _cast_forward_inputs(
-    dtype: Optional[torch.dtype],
+    dtype: torch.dtype | None,
     *args: Any,
     **kwargs: Any,
 ) -> tuple[Any, Any]:
@@ -179,7 +179,7 @@ def _alloc_storage(tensor: torch.Tensor, size: torch.Size) -> None:
                 tensor_storage_size = tensor._typed_storage()._size()
                 _p_assert(
                     tensor_storage_size == 0,
-                    "Tensor storage should have been resized to be 0 but got PLACEHOLDEr",
+                    "Tensor storage should have been resized to be 0 but got PLACEHOLDER",
                 )
                 tensor._typed_storage()._resize_(size.numel())
 
@@ -257,7 +257,7 @@ def _apply_to_tensors(fn, container):
 
 def _to_kwargs(
     inputs: tuple[Any, ...],
-    kwargs: Optional[dict[str, Any]],
+    kwargs: dict[str, Any] | None,
     target_device: torch.device,
     use_side_stream_for_tensor_copies: bool,
 ) -> tuple[tuple[Any, ...], tuple[dict[str, Any], ...]]:

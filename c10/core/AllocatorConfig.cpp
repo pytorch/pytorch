@@ -1,5 +1,6 @@
 #include <c10/core/AllocatorConfig.h>
 #include <c10/util/env.h>
+#include <array>
 
 namespace c10::CachingAllocator {
 
@@ -12,12 +13,6 @@ constexpr size_t kRoundUpPowerOfTwoEnd = 64 * 1024ul * kMB; // 64GB
 
 AcceleratorAllocatorConfig& AcceleratorAllocatorConfig::instance() {
   static AcceleratorAllocatorConfig instance;
-#define C10_ALLOCATOR_CONFIG_PARSE_ENV(env)    \
-  auto env##_name = c10::utils::get_env(#env); \
-  if (env##_name.has_value()) {                \
-    instance.parseArgs(env##_name.value());    \
-    return true;                               \
-  }
   static bool env_flag [[maybe_unused]] = []() {
     // Parse allocator configuration from environment variables.
     // The first two entries are kept for backward compatibility with legacy
@@ -25,16 +20,23 @@ AcceleratorAllocatorConfig& AcceleratorAllocatorConfig::instance() {
     // (PYTORCH_ALLOC_CONF) should be used going forward.
     // Note: keep the parsing order and logic stable to avoid potential
     // performance regressions in internal tests.
-    C10_ALLOCATOR_CONFIG_PARSE_ENV(PYTORCH_CUDA_ALLOC_CONF)
-    C10_ALLOCATOR_CONFIG_PARSE_ENV(PYTORCH_HIP_ALLOC_CONF)
-    C10_ALLOCATOR_CONFIG_PARSE_ENV(PYTORCH_ALLOC_CONF)
+    constexpr std::array<const char*, 3> vars{
+        "PYTORCH_CUDA_ALLOC_CONF",
+        "PYTORCH_HIP_ALLOC_CONF",
+        "PYTORCH_ALLOC_CONF"};
+    for (const char* var : vars) {
+      if (std::optional<std::string> name = c10::utils::get_env(var)) {
+        instance.parseArgs(*name);
+        return true;
+      }
+    }
     return false;
   }();
-#undef C10_ALLOCATOR_CONFIG_PARSE_ENV
   return instance;
 }
 
 AcceleratorAllocatorConfig::AcceleratorAllocatorConfig() {
+  max_non_split_rounding_size_ = large_segment_size_.load();
   roundup_power2_divisions_.assign(kRoundUpPowerOfTwoIntervals, 0);
 }
 
@@ -56,11 +58,32 @@ size_t AcceleratorAllocatorConfig::roundup_power2_divisions(size_t size) {
   return instance().roundup_power2_divisions_[index];
 }
 
+size_t AcceleratorAllocatorConfig::parseLargeSegmentSize(
+    const ConfigTokenizer& tokenizer,
+    size_t i) {
+  tokenizer.checkToken(++i, ":");
+
+  constexpr size_t min_allowed_segment_size_mb = kMinLargeAlloc / kMB;
+  constexpr size_t max_allowed_segment_size_mb =
+      std::numeric_limits<size_t>::max() / kMB;
+
+  size_t val_env = tokenizer.toSizeT(++i);
+  TORCH_CHECK_VALUE(
+      val_env > min_allowed_segment_size_mb,
+      "CachingAllocator option large_segment_size_mb must be > ",
+      min_allowed_segment_size_mb,
+      " MB");
+  val_env = std::min(val_env, max_allowed_segment_size_mb);
+  large_segment_size_ = val_env * kMB;
+
+  return i;
+}
+
 size_t AcceleratorAllocatorConfig::parseMaxSplitSize(
     const ConfigTokenizer& tokenizer,
     size_t i) {
   tokenizer.checkToken(++i, ":");
-  constexpr size_t min_allowed_split_size_mb = kLargeBuffer / kMB;
+  size_t min_allowed_split_size_mb = large_segment_size_ / kMB;
   constexpr size_t max_allowed_split_size_mb =
       std::numeric_limits<size_t>::max() / kMB;
 
@@ -79,7 +102,7 @@ size_t AcceleratorAllocatorConfig::parseMaxNonSplitRoundingSize(
     const ConfigTokenizer& tokenizer,
     size_t i) {
   tokenizer.checkToken(++i, ":");
-  constexpr size_t min_allowed_split_size_mb = kLargeBuffer / kMB;
+  size_t min_allowed_split_size_mb = large_segment_size_ / kMB;
   constexpr size_t max_allowed_split_size_mb =
       std::numeric_limits<size_t>::max() / kMB;
 
@@ -206,9 +229,22 @@ void AcceleratorAllocatorConfig::parseArgs(const std::string& env) {
   }
 
   ConfigTokenizer tokenizer(env);
+
+  // large_segment_size_mb should be read first because
+  // max_non_split_rounding_size_ must be >= large_segment_size_.
+  for (size_t i = 0; i < tokenizer.size(); ++i) {
+    const auto& key = tokenizer[i];
+    if (key == "large_segment_size_mb") {
+      i = parseLargeSegmentSize(tokenizer, i);
+    }
+  }
+  max_non_split_rounding_size_ = large_segment_size_.load();
+
   for (size_t i = 0; i < tokenizer.size(); i++) {
     const auto& key = tokenizer[i];
-    if (key == "max_split_size_mb") {
+    if (key == "large_segment_size_mb") {
+      i = tokenizer.skipKey(i); // handled previously
+    } else if (key == "max_split_size_mb") {
       i = parseMaxSplitSize(tokenizer, i);
     } else if (key == "max_non_split_rounding_mb") {
       i = parseMaxNonSplitRoundingSize(tokenizer, i);

@@ -1,4 +1,4 @@
-from typing import Optional, Union
+from typing import Optional
 
 from torch import Tensor
 from torch.distributions import constraints
@@ -32,9 +32,9 @@ class Pareto(TransformedDistribution):
 
     def __init__(
         self,
-        scale: Union[Tensor, float],
-        alpha: Union[Tensor, float],
-        validate_args: Optional[bool] = None,
+        scale: Tensor | float,
+        alpha: Tensor | float,
+        validate_args: bool | None = None,
     ) -> None:
         self.scale, self.alpha = broadcast_all(scale, alpha)
         base_dist = Exponential(self.alpha, validate_args=validate_args)

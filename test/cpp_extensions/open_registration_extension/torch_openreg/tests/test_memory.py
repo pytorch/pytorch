@@ -4,7 +4,6 @@ import gc
 import time
 
 import torch
-
 import torch_openreg  # noqa: F401
 from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
 
@@ -67,6 +66,23 @@ class TestDeviceAllocator(TestCase):
         cloned = openreg_tensor.clone()
         self.assertEqual(cloned.device.type, "openreg")
         self.assertTrue(torch.allclose(openreg_tensor.cpu(), cloned.cpu()))
+
+    def test_tensor_shallow_copy(self):
+        # set_data from openreg to cpu
+        self_t = torch.randn(4, 4)
+        from_t = torch.randn(4, 4, device="openreg")
+        self.assertTrue(torch._has_compatible_shallow_copy_type(self_t, from_t))
+        self_t.data = from_t
+        self.assertEqual(self_t, from_t)
+        self.assertEqual(self_t.data_ptr(), from_t.data_ptr())
+
+        # set_data from cpu to openreg
+        self_t = torch.randn(4, 4, device="openreg")
+        from_t = torch.randn(4, 4)
+        self.assertTrue(torch._has_compatible_shallow_copy_type(self_t, from_t))
+        self_t.data = from_t
+        self.assertEqual(self_t, from_t)
+        self.assertEqual(self_t.data_ptr(), from_t.data_ptr())
 
     def test_inplace_operations(self):
         """Test memory stability during inplace operations."""
@@ -390,6 +406,7 @@ class TestMemoryLeaks(TestCase):
 class TestPinMemory(TestCase):
     @skipIfTorchDynamo("unsupported aten.is_pinned.default")
     def test_pin_memory(self):
+        """Test pin memory for tensors, storage, and untyped storage"""
         tensor = torch.randn(10)
         self.assertFalse(tensor.is_pinned())
         pinned_tensor = tensor.pin_memory()
@@ -408,6 +425,45 @@ class TestPinMemory(TestCase):
         self.assertFalse(untyped_storage.is_pinned("openreg"))
         pinned_untyped_storage = untyped_storage.pin_memory("openreg")
         self.assertTrue(pinned_untyped_storage.is_pinned("openreg"))
+
+    @skipIfTorchDynamo("unsupported aten.is_pinned.default")
+    def test_pin_memory_different_devices(self):
+        """Test pin memory on different devices"""
+        tensor = torch.randn(10)
+        pinned_tensor = tensor.pin_memory()
+        self.assertTrue(pinned_tensor.is_pinned())
+
+        # Test pinning to specific device
+        pinned_tensor_openreg = tensor.pin_memory("openreg")
+        self.assertTrue(pinned_tensor_openreg.is_pinned("openreg"))
+
+    @skipIfTorchDynamo("unsupported aten.is_pinned.default")
+    def test_pin_memory_view(self):
+        """Test pin memory with tensor views"""
+        tensor = torch.randn(20)
+        pinned_tensor = tensor.pin_memory()
+
+        # Test various views
+        view1 = pinned_tensor[2:5]
+        self.assertTrue(view1.is_pinned())
+
+        view2 = pinned_tensor[::2]
+        self.assertTrue(view2.is_pinned())
+
+        view3 = pinned_tensor.view(4, 5)
+        self.assertTrue(view3.is_pinned())
+
+    @skipIfTorchDynamo("unsupported aten.is_pinned.default")
+    def test_pin_memory_storage_sharing(self):
+        """Test pin memory with shared storage"""
+        tensor = torch.randn(10)
+        pinned_tensor = tensor.pin_memory()
+
+        # Create another tensor sharing the same storage
+        shared_tensor = torch.tensor((), dtype=torch.float32).set_(
+            pinned_tensor.storage()
+        )
+        self.assertTrue(shared_tensor.is_pinned())
 
 
 class TestMultiDeviceAllocation(TestCase):

@@ -35,47 +35,20 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
         flaky_models.update(
             {
                 "Background_Matting",
-                "alexnet",
-                "demucs",
-                "densenet121",
-                "detectron2_fcos_r_50_fpn",
-                "doctr_det_predictor",
-                "doctr_reco_predictor",
-                "dpn107",
-                "fbnetv3_b",
-                "levit_128",
-                "llava",
-                "microbench_unbacked_tolist_sum",
                 "mnasnet1_0",
-                "mobilenet_v2",
-                "pytorch_CycleGAN_and_pix2pix",
-                "pytorch_stargan",
+                "llava",
                 "repvgg_a2",
                 "resnet152",
                 "resnet18",
                 "resnet50",
-                "resnext50_32x4d",
-                "sam",
-                "sam_fast",
-                "shufflenet_v2_x1_0",
-                "squeezenet1_1",
-                "stable_diffusion_text_encoder",
                 "stable_diffusion_unet",
-                "swsl_resnext101_32x16d",
                 "torchrec_dlrm",
+                "shufflenet_v2_x1_0",
                 "vgg16",
                 "BERT_pytorch",
-                "coat_lite_mini",
-                "mobilenet_v3_large",
-                "vision_maskrcnn",
                 # LLM
-                "meta-llama/Llama-3.2-1B",
                 "google/gemma-2-2b",
-                "google/gemma-3-4b-it",
-                "openai/whisper-tiny",
-                "Qwen/Qwen3-0.6B",
-                "mistralai/Mistral-7B-Instruct-v0.3",
-                "openai/gpt-oss-20b",
+                "tts_angular",  # RuntimeError: Cannot access data pointer of Tensor
             }
         )
 
@@ -83,7 +56,13 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
         accuracy = get_field(actual_csv, model, "accuracy")
         expected_accuracy = get_field(expected_csv, model, "accuracy")
 
-        if accuracy == expected_accuracy:
+        if accuracy is None:
+            status = "MISSING_ACCURACY:"
+            failed.append(model)
+        elif expected_accuracy is None:
+            status = "MISSING_EXPECTED:"
+            failed.append(model)
+        elif accuracy == expected_accuracy:
             status = "PASS" if expected_accuracy == "pass" else "XFAIL"
             print(f"{model:34}  {status}")
             continue

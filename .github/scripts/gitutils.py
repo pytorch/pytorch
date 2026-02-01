@@ -104,13 +104,30 @@ def parse_fuller_format(lines: Union[str, list[str]]) -> GitCommit:
     # TODO: Handle merge commits correctly
     if len(lines) > 1 and lines[1].startswith("Merge:"):
         del lines[1]
-    assert len(lines) > 7
-    assert lines[0].startswith("commit")
-    assert lines[1].startswith("Author: ")
-    assert lines[2].startswith("AuthorDate: ")
-    assert lines[3].startswith("Commit: ")
-    assert lines[4].startswith("CommitDate: ")
-    assert len(lines[5]) == 0
+    if len(lines) <= 7:
+        raise AssertionError(
+            f"Expected at least 8 lines in git log fuller format, got {len(lines)}"
+        )
+    if not lines[0].startswith("commit"):
+        raise AssertionError(f"Expected line 0 to start with 'commit', got: {lines[0]}")
+    if not lines[1].startswith("Author: "):
+        raise AssertionError(
+            f"Expected line 1 to start with 'Author: ', got: {lines[1]}"
+        )
+    if not lines[2].startswith("AuthorDate: "):
+        raise AssertionError(
+            f"Expected line 2 to start with 'AuthorDate: ', got: {lines[2]}"
+        )
+    if not lines[3].startswith("Commit: "):
+        raise AssertionError(
+            f"Expected line 3 to start with 'Commit: ', got: {lines[3]}"
+        )
+    if not lines[4].startswith("CommitDate: "):
+        raise AssertionError(
+            f"Expected line 4 to start with 'CommitDate: ', got: {lines[4]}"
+        )
+    if len(lines[5]) != 0:
+        raise AssertionError(f"Expected line 5 to be empty, got: {lines[5]}")
     return GitCommit(
         commit_hash=lines[0].split()[1].strip(),
         author=lines[1].split(":", 1)[1].strip(),
@@ -271,7 +288,8 @@ class GitRepo:
 
     def cherry_pick_commits(self, from_branch: str, to_branch: str) -> None:
         orig_branch = self.current_branch()
-        assert orig_branch is not None, "Must be on a branch"
+        if orig_branch is None:
+            raise AssertionError("Must be on a branch to cherry pick commits")
         self.checkout(to_branch)
         from_commits, to_commits = self.compute_branch_diffs(from_branch, to_branch)
         if len(from_commits) == 0:
@@ -370,7 +388,10 @@ def patterns_to_regex(allowed_patterns: list[str]) -> Any:
         if idx > 0:
             rc += "|"
         pattern_ = PeekableIterator(pattern)
-        assert not any(c in pattern for c in "{}()[]\\")
+        if any(c in pattern for c in "{}()[]\\"):
+            raise AssertionError(
+                f"Pattern contains invalid characters (braces/parens/brackets/backslash): {pattern}"
+            )
         for c in pattern_:
             if c == ".":
                 rc += "\\."

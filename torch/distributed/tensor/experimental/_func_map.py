@@ -24,11 +24,11 @@ OutputPlacements = Union[PlacementType, tuple[PlacementType, ...]]
 
 
 def local_map(
-    func: Optional[Callable] = None,
+    func: Callable | None = None,
     out_placements: OutputPlacements = None,
     in_placements: InputPlacements = None,
     in_grad_placements: InputPlacements = None,
-    device_mesh: Optional[DeviceMesh] = None,
+    device_mesh: DeviceMesh | None = None,
     *,
     redistribute_inputs: bool = False,
 ):
@@ -163,7 +163,7 @@ def _local_map_wrapped(
     out_placements: OutputPlacements,
     in_placements: InputPlacements,
     in_grad_placements: InputPlacements,
-    device_mesh: Optional[DeviceMesh],
+    device_mesh: DeviceMesh | None,
     redistribute_inputs: bool,
     *args,
     **kwargs,
@@ -263,6 +263,7 @@ def _local_map_wrapped(
                 )
 
                 flat_dist_out.append(
+                    # pyrefly: ignore [bad-argument-type]
                     DTensor.from_local(out, device_mesh, spec, run_check=False)
                 )
             else:

@@ -7,7 +7,6 @@
 #define AT_ATOMIC_IPC_REFCOUNT 1
 #endif
 
-#include <c10/core/CPUAllocator.h>
 
 #include <c10/util/error.h>
 #ifdef _WIN32

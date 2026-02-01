@@ -82,13 +82,16 @@ class RNNCellBase(nn.RNNCellBase):
                 "weight_hh": weight_qparams,
                 "is_decomposed": False,
             }
-        assert len(weight_qparams_dict) == 3, (
-            "Expected length for weight_qparams_dict to be 3 for QuantizedRNNCellBase(Reference)"
-        )
+        if len(weight_qparams_dict) != 3:
+            raise AssertionError(
+                f"Expected length for weight_qparams_dict to be 3 for QuantizedRNNCellBase(Reference), "
+                f"got {len(weight_qparams_dict)}"
+            )
         self._init_weight_qparams_dict(weight_qparams_dict, device)
 
     def _init_weight_qparams_dict(self, weight_qparams_dict, device):
-        assert weight_qparams_dict is not None
+        if weight_qparams_dict is None:
+            raise AssertionError("weight_qparams_dict must not be None")
         self.is_decomposed = weight_qparams_dict["is_decomposed"]
         for key, weight_qparams in weight_qparams_dict.items():
             if key == "is_decomposed":
@@ -98,13 +101,14 @@ class RNNCellBase(nn.RNNCellBase):
             weight_dtype = weight_qparams["dtype"]
             setattr(self, key + "_qscheme", weight_qscheme)
             setattr(self, key + "_dtype", weight_dtype)
-            assert weight_qscheme in [
+            if weight_qscheme not in [
                 None,
                 torch.per_tensor_affine,
                 torch.per_channel_affine,
-            ], Exception(
-                f"qscheme: {weight_qscheme} is not support in {self._get_name()}"
-            )
+            ]:
+                raise AssertionError(
+                    f"qscheme: {weight_qscheme} is not supported in {self._get_name()}"
+                )
             if weight_qscheme is not None:
                 scale = weight_qparams["scale"]
                 scale_tensor = (
@@ -182,12 +186,10 @@ class RNNCell(RNNCellBase):
     # TODO: refactor nn.RNNCell to have a _forward that takes weight_ih and weight_hh as input
     # and remove duplicated code, same for the other two Cell modules
     def forward(self, input: Tensor, hx: Tensor | None = None) -> Tensor:
-        assert input.dim() in (
-            1,
-            2,
-        ), (
-            f"RNNCell: Expected input to be 1-D or 2-D but received {input.dim()}-D tensor"
-        )
+        if input.dim() not in (1, 2):
+            raise AssertionError(
+                f"RNNCell: Expected input to be 1-D or 2-D but received {input.dim()}-D tensor"
+            )
         is_batched = input.dim() == 2
         if not is_batched:
             input = input.unsqueeze(0)
@@ -273,12 +275,10 @@ class LSTMCell(RNNCellBase):
     def forward(
         self, input: Tensor, hx: tuple[Tensor, Tensor] | None = None
     ) -> tuple[Tensor, Tensor]:
-        assert input.dim() in (
-            1,
-            2,
-        ), (
-            f"LSTMCell: Expected input to be 1-D or 2-D but received {input.dim()}-D tensor"
-        )
+        if input.dim() not in (1, 2):
+            raise AssertionError(
+                f"LSTMCell: Expected input to be 1-D or 2-D but received {input.dim()}-D tensor"
+            )
         is_batched = input.dim() == 2
         if not is_batched:
             input = input.unsqueeze(0)
@@ -348,12 +348,10 @@ class GRUCell(RNNCellBase):
         return "QuantizedGRUCell(Reference)"
 
     def forward(self, input: Tensor, hx: Tensor | None = None) -> Tensor:
-        assert input.dim() in (
-            1,
-            2,
-        ), (
-            f"GRUCell: Expected input to be 1-D or 2-D but received {input.dim()}-D tensor"
-        )
+        if input.dim() not in (1, 2):
+            raise AssertionError(
+                f"GRUCell: Expected input to be 1-D or 2-D but received {input.dim()}-D tensor"
+            )
         is_batched = input.dim() == 2
         if not is_batched:
             input = input.unsqueeze(0)
@@ -448,13 +446,14 @@ class RNNBase(nn.RNNBase):
             weight_dtype = weight_qparams["dtype"]
             setattr(self, key + "_qscheme", weight_qscheme)
             setattr(self, key + "_dtype", weight_dtype)
-            assert weight_qscheme in [
+            if weight_qscheme not in [
                 None,
                 torch.per_tensor_affine,
                 torch.per_channel_affine,
-            ], Exception(
-                f"qscheme: {weight_qscheme} is not support in {self._get_name()}"
-            )
+            ]:
+                raise AssertionError(
+                    f"qscheme: {weight_qscheme} is not supported in {self._get_name()}"
+                )
             if weight_qscheme is not None:
                 self.register_buffer(
                     key + "_scale",
@@ -757,12 +756,10 @@ class GRU(RNNBase):
             max_batch_size = int(batch_sizes[0])
         else:
             batch_sizes = None
-            assert input.dim() in (
-                2,
-                3,
-            ), (
-                f"GRU: Expected input to be 2-D or 3-D but received {input.dim()}-D tensor"
-            )
+            if input.dim() not in (2, 3):
+                raise AssertionError(
+                    f"GRU: Expected input to be 2-D or 3-D but received {input.dim()}-D tensor"
+                )
             is_batched = input.dim() == 3
             batch_dim = 0 if self.batch_first else 1
             if not is_batched:

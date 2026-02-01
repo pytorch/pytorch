@@ -134,7 +134,15 @@ class TestCustomLowering(InductorTestCase):
         cls.impl_meta.impl("add_custom", add_custom)
 
         def add_custom_lowering(a, b):
-            fn = partial(ops.inline_asm_elementwise, asm="add.f32 $0, $1, $2;")
+            if torch.version.hip:
+                # ROCm GCN assembly
+                fn = partial(
+                    ops.inline_asm_elementwise,
+                    asm="v_add_f32 $0, $1, $2",
+                    constraints="=v, v, v",
+                )
+            else:
+                fn = partial(ops.inline_asm_elementwise, asm="add.f32 $0, $1, $2;")
             return make_pointwise(fn)(a, b)
 
         register_lowering(
@@ -209,7 +217,7 @@ class TestCustomLowering(InductorTestCase):
 
     @requires_gpu()
     @skipIfRocm
-    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/2328")
+    @skipIfXpu(msg="`tl.inline_asm_elementwise` is not yet supported on Intel GPUs")
     @skipIf(GPU_TYPE == "mps", "Not applicable to MPS")
     def test_tanh_approx(self):
         def fn(inp):
@@ -223,8 +231,7 @@ class TestCustomLowering(InductorTestCase):
         self.assertEqual(a, b)
 
     @requires_gpu()
-    @skipIfRocm
-    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/2328")
+    @skipIfXpu(msg="`tl.inline_asm_elementwise` is not yet supported on Intel GPUs")
     @skipIf(GPU_TYPE == "mps", "Not applicable to MPS")
     def test_multi_inp_asm(self):
         def fn(a, b):

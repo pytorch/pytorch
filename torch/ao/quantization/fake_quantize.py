@@ -186,10 +186,10 @@ class FakeQuantize(FakeQuantizeBase):
                 dtype = getattr(getattr(observer, "p", {}), "keywords", {}).get(
                     "dtype", dtype
                 )
-            # pyrefly: ignore [bad-argument-type]
+
             if torch.iinfo(dtype).min > quant_min:
                 raise AssertionError("quant_min out of bound")
-            # pyrefly: ignore [bad-argument-type]
+
             if quant_max > torch.iinfo(dtype).max:
                 raise AssertionError("quant_max out of bound")
             observer_kwargs.update({"quant_min": quant_min, "quant_max": quant_max})

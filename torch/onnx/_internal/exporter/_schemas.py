@@ -10,10 +10,7 @@ import typing
 from collections.abc import Iterator, Mapping, Sequence
 from typing import Any, Optional, TypeVar, Union
 
-import onnx
-
-import onnxscript
-from onnxscript import ir
+from torch.onnx._internal._lazy_import import onnx, onnx_ir as ir, onnxscript
 
 
 logger = logging.getLogger(__name__)
@@ -307,9 +304,10 @@ def _get_allowed_types_from_type_annotation(
         allowed_types = set()
         subtypes = typing.get_args(type_)
         for subtype in subtypes:
-            assert subtype is not type(None), (
-                "Union should not contain None type because it is handled by _is_optional."
-            )
+            if subtype is type(None):
+                raise AssertionError(
+                    "Union should not contain None type because it is handled by _is_optional."
+                )
             allowed_types.update(_get_allowed_types_from_type_annotation(subtype))
         return allowed_types
 
@@ -407,6 +405,7 @@ class OpSignature:
                 # Set the name of the default attribute because it may have a different name from the parameter
                 default_attr.name = param.name
             params.append(
+                # pyrefly: ignore [bad-argument-type]
                 AttributeParameter(
                     name=param.name,
                     type=ir.AttributeType(param.type),  # type: ignore[arg-type]
@@ -452,7 +451,7 @@ class OpSignature:
 
         for param in py_signature.parameters.values():
             if param.name not in type_hints:
-                logger.warning(
+                logger.debug(
                     "Missing annotation for parameter '%s' from %s. Treating as an Input.",
                     param.name,
                     py_signature,
@@ -541,7 +540,7 @@ class OpSignature:
                 if (
                     return_param_name := _get_type_constraint_name(return_type_i)
                 ) in type_constraints:
-                    # pyrefly: ignore [index-error]
+                    # pyrefly: ignore [bad-index, index-error]
                     type_constraint = type_constraints[return_param_name]
                 else:
                     return_param_name = f"TReturn{i}"

@@ -49,7 +49,7 @@ set(CMAKE_CXX_STANDARD
     CACHE STRING
           "The C++ standard whose features are requested to build this target.")
 set(CMAKE_C_STANDARD
-    11
+    17
     CACHE STRING
           "The C standard whose features are requested to build this target.")
 
@@ -215,7 +215,7 @@ cmake_dependent_option(
 cmake_dependent_option(
   CAFFE2_USE_MSVC_STATIC_RUNTIME "Using MSVC static runtime libraries" ON
   "NOT BUILD_SHARED_LIBS" OFF)
-option(BUILD_TEST "Build C++ test binaries (need gtest and gbenchmark)" OFF)
+option(BUILD_TEST "Build C++ test binaries (need gtest and gbenchmark)" ON)
 option(BUILD_AOT_INDUCTOR_TEST "Build C++ test binaries for aot-inductor" OFF)
 option(BUILD_STATIC_RUNTIME_BENCHMARK
        "Build C++ binaries for static runtime benchmarks (need gbenchmark)" OFF)
@@ -900,9 +900,9 @@ include(ExternalProject)
 
 # ---[ Dependencies ---[ FBGEMM doesn't work on x86 32bit and
 # CMAKE_SYSTEM_PROCESSOR thinks its 64bit
-if(USE_FBGEMM AND NOT CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
+if(USE_FBGEMM AND NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|aarch64)$")
   message(WARNING
-    "x64 operating system is required for FBGEMM. "
+    "x86_64 or aarch64 required for FBGEMM. "
     "Not compiling with FBGEMM. "
     "Turn this warning off by USE_FBGEMM=OFF.")
   set(USE_FBGEMM OFF)
@@ -941,25 +941,25 @@ cmake_dependent_option(
 
 
 IF(USE_ROCM AND "gfx942" IN_LIST PYTORCH_ROCM_ARCH)
-  message(WARNING "Setting USE_FBGEMM_GENAI for gfx942 to ON by default, doing ROCM build")
-  set(USE_FBGEMM_GENAI_DEFAULT ON)
+  message(WARNING "Setting USE_MSLK for gfx942 to ON by default, doing ROCM build")
+  set(USE_MSLK_DEFAULT ON)
 elseif(USE_CUDA AND "$ENV{TORCH_CUDA_ARCH_LIST}" MATCHES "10.0" AND CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.8 AND NOT WIN32)
-  message(STATUS "Setting USE_FBGEMM_GENAI to ON by default , doing CUDA build for SM100a")
-  set(USE_FBGEMM_GENAI_DEFAULT ON)
+  message(STATUS "Setting USE_MSLK to ON by default , doing CUDA build for SM100a")
+  set(USE_MSLK_DEFAULT ON)
 else()
-  set(USE_FBGEMM_GENAI_DEFAULT OFF)
+  set(USE_MSLK_DEFAULT OFF)
 endif()
 
 cmake_dependent_option(
-  USE_FBGEMM_GENAI
-  "Whether to build FBGEMM GenAI quantized GEMM kernels.\
+  USE_MSLK
+  "Whether to build MSLK quantized GEMM kernels.\
   Will be disabled if not supported by the platform"
-  ${USE_FBGEMM_GENAI_DEFAULT}
+  ${USE_MSLK_DEFAULT}
   "(USE_CUDA AND NOT MSVC) OR USE_ROCM"
   OFF)
 
 
-# Set USE_FBGEMM_GENAI to ON for CUDA build on SM100.
+# Set USE_MSLK to ON for CUDA build on SM100.
 if(USE_CUDA AND "$ENV{TORCH_CUDA_ARCH_LIST}" MATCHES "10.0" AND CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.8 AND NOT WIN32)
 endif()
 
@@ -996,8 +996,8 @@ if(USE_FBGEMM)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_FBGEMM")
 endif()
 
-if(USE_FBGEMM_GENAI)
-  string(APPEND CMAKE_CXX_FLAGS " -DUSE_FBGEMM_GENAI")
+if(USE_MSLK)
+  string(APPEND CMAKE_CXX_FLAGS " -DUSE_MSLK")
 endif()
 
 if(USE_PYTORCH_QNNPACK)

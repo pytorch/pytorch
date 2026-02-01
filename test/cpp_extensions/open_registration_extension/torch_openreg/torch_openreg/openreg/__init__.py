@@ -1,12 +1,12 @@
 import torch
 
 import torch_openreg._C  # type: ignore[misc]
-
 from . import meta  # noqa: F401
 from .amp import get_amp_supported_dtype  # noqa: F401
 
 
 _initialized = False
+_is_in_bad_fork = getattr(torch_openreg._C, "_isInBadFork", lambda: False)
 
 
 class device:
@@ -55,13 +55,18 @@ def init():
 
 
 def is_initialized():
-    return _initialized
+    return _initialized and not _is_in_bad_fork()
 
 
 def _lazy_init():
     global _initialized
     if is_initialized():
         return
+    if _is_in_bad_fork():
+        raise RuntimeError(
+            "Cannot re-initialize OpenReg in forked subprocess. To use OpenReg with "
+            "multiprocessing, you must use the 'spawn' start method"
+        )
     torch_openreg._C._init()
     _initialized = True
 

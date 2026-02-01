@@ -278,6 +278,7 @@ class NumBytesMetricTests(TestCase):
         inp = (T(10, 10), T(10, 10))
         self.assertExpectedInline(count_numel(f, *inp), """680""")
 
+    @patch.object(config, "split_cat_fx_passes", False)
     @patch.object(
         config,
         "pre_grad_fusion_options",
@@ -299,6 +300,7 @@ class NumBytesMetricTests(TestCase):
         inp = (T(10, 10) for _ in range(16))
         self.assertExpectedInline(count_numel(f, *inp), """6400""")
 
+    @patch.object(config, "split_cat_fx_passes", False)
     @patch.object(
         config,
         "pre_grad_fusion_options",
@@ -961,7 +963,7 @@ class InplacingTests(TestCase):
             return MySin.apply(x)
 
         x = T(3, grad=True)
-        self.assertExpectedInline(count_numel_train(f, x), """9""")
+        self.assertExpectedInline(count_numel_train(f, x), """18""")
 
     @requires_gpu_and_triton
     def test_triton_kernel_not_fusable_with_users(self):
@@ -1063,7 +1065,7 @@ class InplacingTests(TestCase):
             return MySin.apply(x)
 
         x = T(3, grad=True)
-        self.assertExpectedInline(count_numel_train(f, x), """9""")
+        self.assertExpectedInline(count_numel_train(f, x), """18""")
 
     @requires_gpu_and_triton
     def test_inplace_custom_op(self):

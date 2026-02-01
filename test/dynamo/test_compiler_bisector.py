@@ -108,8 +108,6 @@ class TestCompilerBisector(TestCase):
             args[1] = 2
             nodes[0].args = tuple(args)
 
-        config.pre_grad_custom_pass = pass_fn
-
         def foo(x):
             return x + 1
 
@@ -123,7 +121,8 @@ class TestCompilerBisector(TestCase):
 
             return torch.allclose(out, out_c)
 
-        out = CompilerBisector.do_bisect(test_fn)
+        with config.patch(pre_grad_custom_pass=pass_fn):
+            out = CompilerBisector.do_bisect(test_fn)
         self.assertEqual(out.backend, "inductor")
         self.assertEqual(out.subsystem, "pre_grad_passes")
         self.assertEqual(out.bisect_number, 0)
@@ -141,8 +140,6 @@ class TestCompilerBisector(TestCase):
             args[1] = 2
             nodes[0].args = tuple(args)
 
-        config.joint_custom_post_pass = pass_fn
-
         def foo(x):
             return x + 1
 
@@ -156,7 +153,8 @@ class TestCompilerBisector(TestCase):
 
             return torch.allclose(out, out_c)
 
-        out = CompilerBisector.do_bisect(test_fn)
+        with config.patch(joint_custom_post_pass=pass_fn):
+            out = CompilerBisector.do_bisect(test_fn)
         self.assertEqual(out.backend, "inductor")
         self.assertEqual(out.subsystem, "joint_graph_passes")
         self.assertEqual(out.bisect_number, 4)
@@ -327,6 +325,45 @@ class TestCompilerBisector(TestCase):
         self.assertEqual(out.backend, "inductor")
         self.assertEqual(out.subsystem, "pre_grad_graph")
         self.assertEqual(out.bisect_number, 1)
+
+    def test_cudagraph_bisect_max(self):
+        """Test that cudagraph bisector can limit number of cudagraphed graphs."""
+        import os
+        from unittest.mock import patch
+
+        from torch._dynamo.utils import counters
+        from torch._inductor.compiler_bisector import get_env_val, reset_counters
+
+        def foo(x):
+            return x + 1
+
+        def bar(x):
+            return x * 2
+
+        env = {
+            "TORCH_BISECT_BACKEND": "inductor",
+            "TORCH_BISECT_SUBSYSTEM": "cudagraphs",
+            "TORCH_BISECT_MAX": "0",
+        }
+
+        with patch.dict(os.environ, env):
+            get_env_val.cache_clear()
+            reset_counters()
+            torch._dynamo.reset()
+            counters.clear()
+            CompilerBisector.bisection_enabled = True
+            try:
+                foo_c = torch.compile(foo, mode="reduce-overhead")
+                bar_c = torch.compile(bar, mode="reduce-overhead")
+                x = torch.randn(10, device="cuda")
+                foo_c(x)
+                bar_c(x)
+
+                # With max=0, all graphs should be skipped
+                self.assertGreater(counters["inductor"]["cudagraph_skips"], 0)
+            finally:
+                CompilerBisector.bisection_enabled = False
+                get_env_val.cache_clear()
 
 
 if __name__ == "__main__":

@@ -6,24 +6,62 @@
 
 namespace c10::xpu::XPUCachingAllocator {
 
-C10_XPU_API Allocator* get();
+class XPUAllocator : public DeviceAllocator {
+ public:
+  virtual void init(c10::DeviceIndex device_count) = 0;
+  virtual void* raw_alloc(size_t size) = 0;
+  virtual void raw_delete(void* ptr) = 0;
+};
 
-C10_XPU_API void init(DeviceIndex device_count);
+C10_XPU_API extern std::atomic<XPUAllocator*> allocator;
 
-C10_XPU_API void emptyCache(MempoolId_t mempool_id = {0, 0});
+struct AllocatorConfigInfo {
+  bool expandable_segments;
+  std::string last_allocator_settings;
+};
 
-C10_XPU_API void resetPeakStats(DeviceIndex device);
+struct SnapshotInfo {
+  std::vector<CachingDeviceAllocator::SegmentInfo> segments;
+  std::vector<std::vector<CachingDeviceAllocator::TraceEntry>> device_traces;
+  AllocatorConfigInfo config_metadata;
+};
 
-C10_XPU_API void resetAccumulatedStats(DeviceIndex device);
+inline XPUAllocator* get() {
+  return allocator.load();
+}
 
-C10_XPU_API c10::CachingDeviceAllocator::DeviceStats getDeviceStats(
-    DeviceIndex device);
+inline void init(c10::DeviceIndex device_count) {
+  get()->init(device_count);
+}
 
-C10_XPU_API void* raw_alloc(size_t size);
+inline void emptyCache(MempoolId_t mempool_id = {0, 0}) {
+  get()->emptyCache(mempool_id);
+}
 
-C10_XPU_API void raw_delete(void* ptr);
+inline void resetPeakStats(DeviceIndex device) {
+  get()->resetPeakStats(device);
+}
 
-C10_XPU_API void recordStream(const DataPtr& dataPtr, XPUStream stream);
+inline void resetAccumulatedStats(DeviceIndex device) {
+  get()->resetAccumulatedStats(device);
+}
+
+inline c10::CachingDeviceAllocator::DeviceStats getDeviceStats(
+    DeviceIndex device) {
+  return get()->getDeviceStats(device);
+}
+
+inline void* raw_alloc(size_t size) {
+  return get()->raw_alloc(size);
+}
+
+inline void raw_delete(void* ptr) {
+  get()->raw_delete(ptr);
+}
+
+inline void recordStream(const DataPtr& dataPtr, XPUStream stream) {
+  get()->recordStream(dataPtr, stream);
+}
 
 C10_XPU_API void enablePeerAccess(
     c10::DeviceIndex dev,
@@ -33,7 +71,15 @@ C10_XPU_API double getMemoryFraction(DeviceIndex device);
 
 C10_XPU_API void setMemoryFraction(double fraction, DeviceIndex device);
 
-class XPUAllocator;
+C10_XPU_API void recordHistory(
+    bool enabled,
+    CachingDeviceAllocator::CreateContextFn context_recorder,
+    size_t alloc_trace_max_entries,
+    CachingDeviceAllocator::RecordContext when,
+    bool clearHistory,
+    const std::vector<std::string>& skip_actions);
+
+C10_XPU_API SnapshotInfo snapshot(MempoolId_t mempool_id = {0, 0});
 
 C10_XPU_API void createOrIncrefPool(
     c10::DeviceIndex device,

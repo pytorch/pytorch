@@ -11,9 +11,16 @@
 static PyObject* _initExtension(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
 
+  torch::utils::register_fork_handler_for_device_init(at::kPrivateUse1);
   at::globalContext().lazyInitDevice(c10::DeviceType::PrivateUse1);
 
   Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* _isInBadFork(PyObject* self, PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  return PyBool_FromLong(torch::utils::is_device_in_bad_fork(at::kPrivateUse1));
   END_HANDLE_TH_ERRORS
 }
 
@@ -26,6 +33,7 @@ static PyObject* _getDefaultGenerator(PyObject* self, PyObject* arg) {
       THPUtils_typename(arg));
   auto idx = static_cast<int>(THPUtils_unpackLong(arg));
 
+  torch::utils::register_fork_handler_for_device_init(at::kPrivateUse1);
   return THPGenerator_initDefaultGenerator(
       at::globalContext().defaultGenerator(
           c10::Device(c10::DeviceType::PrivateUse1, idx)));
@@ -74,6 +82,7 @@ PyObject* _getDevice(PyObject* self, PyObject* noargs) {
 
 PyObject* _getDeviceCount(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
+  torch::utils::register_fork_handler_for_device_init(at::kPrivateUse1);
   return THPUtils_packUInt64(c10::openreg::device_count());
   END_HANDLE_TH_ERRORS
 }
@@ -81,6 +90,7 @@ PyObject* _getDeviceCount(PyObject* self, PyObject* noargs) {
 // LITERALINCLUDE START: OPENREG MODULE METHODS
 static PyMethodDef methods[] = {
     {"_init", _initExtension, METH_NOARGS, nullptr},
+    {"_isInBadFork", _isInBadFork, METH_NOARGS, nullptr},
     {"_get_default_generator", _getDefaultGenerator, METH_O, nullptr},
     {"_get_device", _getDevice, METH_NOARGS, nullptr},
     {"_set_device", _setDevice, METH_O, nullptr},

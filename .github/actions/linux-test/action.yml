@@ -64,13 +64,10 @@ runs:
     - name: Setup Linux
       uses: ./.github/actions/setup-linux
 
-    - name: configure aws credentials
-      if : ${{ inputs.aws-role-to-assume != '' }}
-      uses: aws-actions/configure-aws-credentials@v4
+    - name: Login to ECR
+      uses: ./.github/actions/ecr-login
       with:
-        role-to-assume: ${{ inputs.aws-role-to-assume }}
-        role-session-name: gha-linux-test
-        aws-region: us-east-1
+        aws-role-to-assume: ${{ inputs.aws-role-to-assume }}
 
     - name: Calculate docker image
       id: calculate-docker-image

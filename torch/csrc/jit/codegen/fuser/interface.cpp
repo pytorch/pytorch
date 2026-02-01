@@ -3,11 +3,8 @@
 #include <torch/csrc/jit/codegen/fuser/compiler.h>
 #include <torch/csrc/jit/codegen/fuser/executor.h>
 #include <torch/csrc/jit/codegen/fuser/fallback.h>
-#include <torch/csrc/jit/codegen/fuser/kernel_cache.h>
 
 #include <c10/util/Exception.h>
-#include <c10/util/Flags.h>
-#include <stdexcept>
 
 namespace torch::jit {
 

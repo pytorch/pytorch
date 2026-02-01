@@ -8,8 +8,6 @@ on:
     tags:
       - ciflow/vllm/*
   workflow_dispatch:
-  schedule:
-    - cron: '0 */8 * * *'  # every 8 hours at minute 0 (UTC)
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
@@ -20,29 +18,18 @@ permissions:
   contents: read
 
 jobs:
-  get-label-type:
-    name: get-label-type
-    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
-    if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
-    with:
-      triggering_actor: ${{ github.triggering_actor }}
-      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
-      curr_branch: ${{ github.head_ref || github.ref_name }}
-      curr_ref_type: ${{ github.ref_type }}
-      opt_out_experiments: lf
-
-  torch-build:
-    name: ci-vllm-test
+  build:
+    name: vllm-x-pytorch-build
+    if: github.repository_owner == 'pytorch'
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
     with:
       # When building vLLM, uv doesn't like that we rename wheel without changing the wheel metadata
       allow-reuse-old-whl: false
       build-additional-packages: "vision audio"
       build-external-packages: "vllm"
-      build-environment: linux-jammy-cuda12.8-py3.12-gcc11
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3.12-gcc11-vllm
-      cuda-arch-list: '8.0 8.9 9.0'
+      build-environment: linux-jammy-cuda12.9-py3.12-gcc11
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.9-cudnn9-py3.12-gcc11-vllm
+      cuda-arch-list: '8.0 8.9 9.0 10.0'
       runner: linux.24xlarge.memory
       test-matrix: |
         { include: [
@@ -52,6 +39,7 @@ jobs:
           { config: "vllm_regression_test", shard: 1, num_shards: 1, runner: "linux.g6.4xlarge.experimental.nvidia.gpu" },
           { config: "vllm_multi_model_processor_test", shard: 1, num_shards: 1, runner: "linux.g6.4xlarge.experimental.nvidia.gpu" },
           { config: "vllm_pytorch_compilation_unit_tests", shard: 1, num_shards: 1, runner: "linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "vllm_pytorch_compilation_unit_tests", shard: 1, num_shards: 1, runner: "linux.dgx.b200" },
           { config: "vllm_lora_28_failure_test", shard: 1, num_shards: 1, runner: "linux.g6.4xlarge.experimental.nvidia.gpu" },
           { config: "vllm_multi_model_test_28_failure_test", shard: 1, num_shards: 1, runner: "linux.g6.4xlarge.experimental.nvidia.gpu"},
           { config: "vllm_language_model_test_extended_generation_28_failure_test", shard: 1, num_shards: 1, runner: "linux.g6.4xlarge.experimental.nvidia.gpu"},
@@ -65,14 +53,12 @@ jobs:
         ]}
     secrets: inherit
 
-  vllm-test-sm89:
-      name: ci-vllm-test
-      uses: ./.github/workflows/_linux-test.yml
-      needs: [
-        torch-build,
-      ]
-      with:
-        build-environment: linux-jammy-cuda12.8-py3.12-gcc11
-        docker-image: ${{ needs.torch-build.outputs.docker-image }}
-        test-matrix: ${{ needs.torch-build.outputs.test-matrix }}
-      secrets: inherit
+  test:
+    name: vllm-x-pytorch-test
+    uses: ./.github/workflows/_linux-test.yml
+    needs: build
+    with:
+      build-environment: linux-jammy-cuda12.9-py3.12-gcc11
+      docker-image: ${{ needs.build.outputs.docker-image }}
+      test-matrix: ${{ needs.build.outputs.test-matrix }}
+    secrets: inherit

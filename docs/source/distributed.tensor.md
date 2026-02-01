@@ -88,6 +88,12 @@ DTensor supports the following types of {class}`Placement` on each {class}`Devic
 ```
 
 ```{eval-rst}
+.. autoclass:: _StridedShard
+  :members:
+  :undoc-members:
+```
+
+```{eval-rst}
 .. autoclass:: Replicate
   :members:
   :undoc-members:
@@ -100,7 +106,7 @@ DTensor supports the following types of {class}`Placement` on each {class}`Devic
 ```
 
 ```{eval-rst}
-.. autoclass:: MaskPartial
+.. autoclass:: _MaskPartial
   :members:
   :undoc-members:
 ```

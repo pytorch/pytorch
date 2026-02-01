@@ -7,7 +7,7 @@ and configuration with reasonable defaults.
 """
 
 from collections.abc import Callable
-from typing import Any, Optional
+from typing import Any
 
 import torch.distributed as dist
 
@@ -53,8 +53,8 @@ def default_writer_init_fn(rank_info: RankInfo) -> CheckpointWriter:
 
 def make_sync_checkpointer(
     config: CheckpointerConfig = CheckpointerConfig(),
-    rank_info: Optional[RankInfo] = None,
-    commit_hook: Optional[WriterHook] = None,
+    rank_info: RankInfo | None = None,
+    commit_hook: WriterHook | None = None,
 ) -> SyncCheckpointer:
     """
     Factory function to create a SyncCheckpointer instance with sensible defaults.
@@ -112,11 +112,11 @@ def make_sync_checkpointer(
 
 def make_async_checkpointer(
     config: CheckpointerConfig = CheckpointerConfig(),
-    rank_info: Optional[RankInfo] = None,
+    rank_info: RankInfo | None = None,
     subprocess_init_fn: Callable[..., None] = default_subprocess_init_fn,
     subprocess_init_args: tuple[Any, ...] = (),
     checkpoint_writer_init_fn: Callable[..., CheckpointWriter] = default_writer_init_fn,
-    checkpoint_writer_init_args: Optional[dict[str, Any]] = None,
+    checkpoint_writer_init_args: dict[str, Any] | None = None,
 ) -> AsyncCheckpointer:
     """
     Factory function to create an AsyncCheckpointer instance with sensible defaults.

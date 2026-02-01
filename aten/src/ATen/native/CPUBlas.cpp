@@ -28,6 +28,14 @@ extern "C" void sbgemm_(char *transa, char *transb, int *m, int *n, int *k,
                 float *beta,
                 float *c, int *ldc);
 #endif  // BLAS_HAS_SBGEMM
+#ifdef BLAS_HAS_SHGEMM
+extern "C" void shgemm_(char *transa, char *transb, int *m, int *n, int *k,
+                float *alpha,
+                const at::Half *a, int *lda,
+                const at::Half *b, int *ldb,
+                float *beta,
+                float *c, int *ldc);
+#endif  // BLAS_HAS_SHGEMM
 extern "C" void cswap_(int *n, const void *x, int *incx, void *y, int *incy);
 extern "C" void dcopy_(int *n, const double *x, int *incx, double *y, int *incy);
 extern "C" void scopy_(int *n, const float *x, int *incx, float *y, int *incy);
@@ -414,6 +422,34 @@ void gemm(
      return;
    }
 #endif
+#if AT_BUILD_WITH_BLAS() && defined(BLAS_HAS_SHGEMM)
+   if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
+      int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
+      char transa_ = to_blas(transa), transb_ = to_blas(transb);
+      float alpha_ = alpha, beta_ = beta;
+      int c_size = n_ * m_;
+      // C matrix in OpenBLAS shgemm are of type "float" so we have to convert, copy and copy back.
+      std::vector<float> float_v(c_size, 0.0f);
+      for (const auto j : c10::irange(n)) {
+        for (const auto i : c10::irange(m)) {
+          float_v[j * m_ + i] = c10::convert<float>(c[j * ldc_ + i]);
+        }
+      }
+      shgemm_(&transa_, &transb_,
+              &m_, &n_, &k_,
+              &alpha_,
+              a, &lda_,
+              b, &ldb_,
+              &beta_,
+              float_v.data(), &m_);
+      for (const auto j : c10::irange(n)) {
+        for (const auto i : c10::irange(m)) {
+          c[j * ldc_ + i] = c10::convert<at::Half>(float_v[j * m_ + i]);
+        }
+      }
+      return;
+   }
+#endif
    gemm_stub(
       at::kCPU, at::kHalf,
       transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
@@ -471,6 +507,21 @@ void gemm(
     const float beta,
     float *c, int64_t ldc) {
   internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
+#if AT_BUILD_WITH_BLAS() && defined(BLAS_HAS_SHGEMM)
+  if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
+    int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
+    char transa_ = to_blas(transa), transb_ = to_blas(transb);
+    float alpha_ = alpha, beta_ = beta;
+    shgemm_(&transa_, &transb_,
+            &m_, &n_, &k_,
+            &alpha_,
+            a, &lda_,
+            b, &ldb_,
+            &beta_,
+            c, &ldc_);
+    return;
+  }
+#endif
 #ifdef MKL_HAS_SHGEMM
   if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
     int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;

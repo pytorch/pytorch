@@ -1,5 +1,4 @@
 #include <torch/library.h>
-#include <ATen/core/boxing/KernelFunction.h>
 
 using torch::CppFunction;
 

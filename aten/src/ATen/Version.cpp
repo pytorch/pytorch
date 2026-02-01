@@ -7,7 +7,6 @@
 
 #if AT_MKLDNN_ENABLED()
 #include <dnnl.hpp>
-#include <ideep.hpp>
 #endif
 
 #include <caffe2/core/common.h>

@@ -261,3 +261,6 @@ def is_batch_stride_largest_or_zero(mat1, mat2, layout) -> bool:
 
 _KERNEL_TEMPLATE_DIR = Path(__file__).parent / "templates"
 load_kernel_template = partial(load_template, template_dir=_KERNEL_TEMPLATE_DIR)
+
+_KERNEL_TEMPLATE_FB_DIR = Path(__file__).parent.parent / "fb" / "tlx_templates"
+load_fb_kernel_template = partial(load_template, template_dir=_KERNEL_TEMPLATE_FB_DIR)

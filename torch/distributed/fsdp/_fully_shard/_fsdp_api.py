@@ -2,7 +2,7 @@
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Optional, Union
+from typing import Union
 
 import torch
 import torch.distributed as dist
@@ -47,9 +47,9 @@ class MixedPrecisionPolicy:
             forward's floating-point input tensors to ``param_dtype`` or not.
     """
 
-    param_dtype: Optional[torch.dtype] = None
-    reduce_dtype: Optional[torch.dtype] = None
-    output_dtype: Optional[torch.dtype] = None
+    param_dtype: torch.dtype | None = None
+    reduce_dtype: torch.dtype | None = None
+    output_dtype: torch.dtype | None = None
     cast_forward_inputs: bool = True
 
 
@@ -74,7 +74,7 @@ class Comm(ABC):
     @abstractmethod
     def allocate(
         self,
-        size: Sequence[Union[int, torch.SymInt]],
+        size: Sequence[int | torch.SymInt],
         *,
         dtype: torch.dtype,
         device: torch.device,
@@ -108,7 +108,7 @@ class AllGather(Comm):
         input_tensor: torch.Tensor,
         group: dist.ProcessGroup,
         async_op: bool = False,
-    ) -> Optional[dist.Work]: ...
+    ) -> dist.Work | None: ...
 
 
 class ReduceScatter(Comm):
@@ -124,7 +124,7 @@ class ReduceScatter(Comm):
         group: dist.ProcessGroup,
         op: _ReduceOp,
         async_op: bool = False,
-    ) -> Optional[dist.Work]: ...
+    ) -> dist.Work | None: ...
 
 
 @dataclass

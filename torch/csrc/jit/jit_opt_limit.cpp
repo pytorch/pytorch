@@ -1,13 +1,9 @@
-#include <cstdlib>
 #include <sstream>
 #include <string>
 #include <utility>
 
-#include <ATen/core/function.h>
-#include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
 #include <c10/util/env.h>
-#include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/jit_opt_limit.h>
 
 // NOTE: Don't try to migrate jit to C++17 yet

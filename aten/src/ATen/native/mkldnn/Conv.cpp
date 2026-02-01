@@ -843,7 +843,7 @@ Tensor mkldnn_convolution_backward_input(
       padding.vec(),
       padding.vec(),
       groups,
-#if IDEEP_PREREQ(3, 4, 1, 3)
+#if DNNL_PREREQ(3, 4, 1)
       is_channels_last,
       op_attr);
 #else
@@ -851,12 +851,12 @@ Tensor mkldnn_convolution_backward_input(
   if (mkldnn_conv_enabled_fpmath_mode_bf16() &&
       weight.scalar_type() == at::kFloat) {
     TORCH_WARN_ONCE(
-        "Unexpected ideep version to support fpmath_mode_bf16, please update ideep version to align with pytorch main branch");
+        "Unexpected oneDNN version to support fpmath_mode_bf16, please update oneDNN version to align with pytorch main branch");
       }
   if (mkldnn_conv_enabled_fpmath_mode_tf32() &&
       weight.scalar_type() == at::kFloat) {
     TORCH_WARN_ONCE(
-        "Unexpected ideep version to support fpmath_mode_tf32, please update ideep version to align with pytorch main branch");
+        "Unexpected oneDNN version to support fpmath_mode_tf32, please update oneDNN version to align with pytorch main branch");
       }
 #endif
 

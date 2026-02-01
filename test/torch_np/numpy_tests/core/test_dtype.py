@@ -87,7 +87,7 @@ class TestBuiltin(TestCase):
             assert_raises(TypeError, np.dtype, "l8")
             assert_raises(TypeError, np.dtype, "L8")
 
-    # XXX: what is 'q'? on my 64-bit ubuntu matching it's int64, same as 'l'
+    # XXX: what is 'q'? on my 64-bit ubuntu machine it's int64, same as 'l'
     #       if np.dtype('q').itemsize == 8:
     #           assert_raises(TypeError, np.dtype, 'q4')
     #           assert_raises(TypeError, np.dtype, 'Q4')
@@ -351,7 +351,7 @@ class TestFromDTypeAttribute(TestCase):
             np.dtype(dt_instance)
 
 
-@skip(reason="Parameteric dtypes, our stuff is simpler.")
+@skip(reason="Parametric dtypes, our stuff is simpler.")
 @instantiate_parametrized_tests
 class TestClassGetItem(TestCase):
     def test_dtype(self) -> None:

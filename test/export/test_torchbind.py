@@ -461,9 +461,9 @@ def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     attr = self.attr
     _guards_fn = self._guards_fn(x);  _guards_fn = None
-    takes_foo_default_1 = torch.ops._TorchScriptTesting.takes_foo.default(attr, x)
-    takes_foo_default = torch.ops._TorchScriptTesting.takes_foo.default(attr, takes_foo_default_1);  attr = takes_foo_default_1 = None
-    add = torch.ops.aten.add.Tensor(x, takes_foo_default);  x = takes_foo_default = None
+    takes_foo_default = torch.ops._TorchScriptTesting.takes_foo.default(attr, x)
+    takes_foo_default_1 = torch.ops._TorchScriptTesting.takes_foo.default(attr, takes_foo_default);  attr = takes_foo_default = None
+    add = torch.ops.aten.add.Tensor(x, takes_foo_default_1);  x = takes_foo_default_1 = None
     return pytree.tree_unflatten((add,), self._out_spec)""",  # noqa: B950
         )
         self.assertExpectedInline(
@@ -1087,10 +1087,12 @@ def forward(self, token, tq, x):
             str(ep.graph_module.graph).strip(),
             """\
 graph():
+    %token : [num_users=1] = placeholder[target=token]
     %tq : [num_users=2] = placeholder[target=tq]
     %x : [num_users=1] = placeholder[target=x]
-    %queue_push_default : [num_users=0] = call_function[target=torch.ops._TorchScriptTesting.queue_push.default](args = (%tq, %x), kwargs = {})
-    return (tq,)""",  # noqa: B950
+    %with_effects : [num_users=1] = call_function[target=torch.ops.higher_order.with_effects](args = (%token, _TorchScriptTesting.queue_push.default, %tq, %x), kwargs = {})
+    %getitem : [num_users=1] = call_function[target=operator.getitem](args = (%with_effects, 0), kwargs = {})
+    return (getitem, tq)""",  # noqa: B950
         )
 
     def test_deepcopy(self):

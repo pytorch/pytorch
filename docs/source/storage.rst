@@ -86,7 +86,7 @@ Other than ``data_ptr``, untyped storage also have other attributes such as :att
 (in case the storage points to a file on disk), :attr:`~torch.UntypedStorage.device` or
 :attr:`~torch.UntypedStorage.is_cuda` for device checks. A storage can also be manipulated in-place or
 out-of-place with methods like :attr:`~torch.UntypedStorage.copy_`, :attr:`~torch.UntypedStorage.fill_` or
-:attr:`~torch.UntypedStorage.pin_memory`. FOr more information, check the API
+:attr:`~torch.UntypedStorage.pin_memory`. For more information, check the API
 reference below. Keep in mind that modifying storages is a low-level API and comes with risks!
 Most of these APIs also exist on the tensor level: if present, they should be prioritized over their storage
 counterparts.

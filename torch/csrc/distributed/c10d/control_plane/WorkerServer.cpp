@@ -1,7 +1,6 @@
 #include <sstream>
 #include <unordered_map>
 
-#include <ATen/core/interned_strings.h>
 #include <c10/util/Exception.h>
 #include <c10/util/FileSystem.h>
 #include <c10/util/thread_name.h>

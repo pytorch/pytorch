@@ -34,7 +34,7 @@ class AbstractProcessGroupShareTensorTest:
     def _test_multiprocess(self, f, shared_tensors, init_pg, n_output):
         ws = self.world_size
         # file store will delete the test file on destruction
-        file = tempfile.NamedTemporaryFile(delete=False)
+        file = tempfile.NamedTemporaryFile(delete=False)  # noqa: SIM115
         ctx = mp.get_context("spawn")
         c2p = ctx.Queue(2)
         p2c = ctx.Queue(2)

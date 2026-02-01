@@ -82,6 +82,10 @@ PegasusForCausalLM,pass,6
 
 
 
+Qwen/Qwen3-0.6B,eager_fail_to_run,0
+
+
+
 RobertaForCausalLM,pass,5
 
 
@@ -110,20 +114,12 @@ YituTechConvBert,pass,5
 
 
 
-meta-llama/Llama-3.2-1B,eager_failed_to_run,0
+google/gemma-2-2b,eager_fail_to_run,0
 
 
 
-google/gemma-2-2b,eager_failed_to_run,0
+meta-llama/Llama-3.2-1B,eager_fail_to_run,0
 
 
 
-google/gemma-3-4b-it,eager_failed_to_run,0
-
-
-
-openai/whisper-tiny,eager_failed_to_run,0
-
-
-
-Qwen/Qwen3-0.6B,eager_failed_to_run,0
+openai/whisper-tiny,eager_fail_to_run,0

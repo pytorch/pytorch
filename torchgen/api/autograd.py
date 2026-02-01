@@ -523,11 +523,17 @@ def gen_foreach_derivativeinfo(
                 )
             elif foreach_arg.type.is_tensor_like():
                 # Assuming TensorList / Tensor
-                # assert isinstance(foreach_arg.type, ListType), f"{foreach_function.func.name}, {foreach_arg.type}"
-                assert isinstance(foreach_arg.type, ListType) or (
-                    foreach_arg.type == BaseType(BaseTy.Tensor)
-                    and str(foreach_function.func.name) in _foreach_with_tensor_overload
-                ), f"{foreach_function.func.name}, {foreach_arg.type}"
+                if not (
+                    isinstance(foreach_arg.type, ListType)
+                    or (
+                        foreach_arg.type == BaseType(BaseTy.Tensor)
+                        and str(foreach_function.func.name)
+                        in _foreach_with_tensor_overload
+                    )
+                ):
+                    raise AssertionError(
+                        f"{foreach_function.func.name}, {foreach_arg.type}"
+                    )
                 for suffix in ("_p", "_t"):
                     curr_expr = ref_arg.name + suffix
                     if curr_expr in modified_formula:
@@ -631,18 +637,23 @@ def match_differentiability_info(
         if "generated" in f.tags and f_sig in non_functional_info_by_signature:
             info_dict = non_functional_info_by_signature[f_sig]
             # See https://github.com/pytorch/pytorch/pull/76320/files#r874816389
-            assert not any(
+            if any(
                 any("self" in str(input.nctype.name) for input in info.all_saved_inputs)
                 for info in info_dict.values()
-            ), f"""\
-Attempted to convert a derivative formula for a mutable operator
- to be used by automatically by its functional variant ("{str(f.func)}").
- this is not currently supported (we'd need to fix up the formula in the codegen)."""
+            ):
+                raise AssertionError(
+                    f"Attempted to convert a derivative formula for a mutable operator "
+                    f'to be used automatically by its functional variant ("{str(f.func)}"). '
+                    "This is not currently supported (we'd need to fix up the formula in the codegen)."
+                )
             return info_dict, False
 
         # (4) Generate derivative information of foreach functions if none is defined in `derivatives.yaml`
         if is_foreach_func(f):
-            assert f.func not in differentiability_infos
+            if f.func in differentiability_infos:
+                raise AssertionError(
+                    f"Foreach function {f.func.name} already has differentiability info"
+                )
             diff_info, is_generated = gen_foreach_derivativeinfo(
                 f,
                 functional_info_by_signature,
@@ -670,10 +681,11 @@ Attempted to convert a derivative formula for a mutable operator
                 for derivative in info.derivatives:
                     if "self" in derivative.var_names:
                         for saved_input in derivative.saved_inputs:
-                            assert "strides_or_error" not in saved_input.expr, (
-                                "Calling '.strides()' in the 'self' derivative formula of an "
-                                f"in-place function is not supported: {f.func}"
-                            )
+                            if "strides_or_error" in saved_input.expr:
+                                raise AssertionError(
+                                    "Calling '.strides()' in the 'self' derivative formula of an "
+                                    f"in-place function is not supported: {f.func}"
+                                )
 
         if not info_dict:
             result.append(
@@ -712,9 +724,11 @@ Attempted to convert a derivative formula for a mutable operator
                 #     inplace as it should. So add some code that makes sure that we do so if the forward grad
                 #     already exists.
 
-                assert (
-                    len(info.forward_derivatives) == 1
-                )  # Only single output inplace should exist
+                if len(info.forward_derivatives) != 1:
+                    raise AssertionError(
+                        "Only single output inplace should exist, "
+                        f"got {len(info.forward_derivatives)}"
+                    )
                 fw_info = info.forward_derivatives[0]
                 formula = fw_info.formula
 
@@ -793,8 +807,12 @@ Attempted to convert a derivative formula for a mutable operator
                         )
 
                     if directly_do_inplace:
-                        assert op_name is not None
-                        assert between_parens is not None
+                        if op_name is None:
+                            raise AssertionError("op_name must be non-None for inplace")
+                        if between_parens is None:
+                            raise AssertionError(
+                                "between_parens must be non-None for inplace"
+                            )
                         formula = f"self_t_raw.defined() ? self_t_raw.{op_name}_({between_parens}) : {formula}"
                     else:
                         # Make sure that the forward grad is modified inplace when the original formula

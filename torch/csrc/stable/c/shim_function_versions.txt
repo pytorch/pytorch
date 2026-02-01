@@ -1,0 +1,25 @@
+# Auto-generated file listing shim functions and their minimum required versions
+# Format: function_name: TORCH_VERSION_MAJOR_MINOR_PATCH
+#
+# This file is automatically updated by the stable_shim_usage_linter.
+# If a function is not in this file, it was available before 2.10.0.
+# DO NOT EDIT MANUALLY.
+
+ParallelFunc: TORCH_VERSION_2_10_0
+StableListHandle: TORCH_VERSION_2_10_0
+StableListOpaque: TORCH_VERSION_2_10_0
+StringHandle: TORCH_VERSION_2_10_0
+StringOpaque: TORCH_VERSION_2_10_0
+torch_c10_cuda_check_msg: TORCH_VERSION_2_10_0
+torch_c10_cuda_free_error_msg: TORCH_VERSION_2_10_0
+torch_call_dispatcher: TORCH_VERSION_2_10_0
+torch_delete_string: TORCH_VERSION_2_10_0
+torch_get_const_data_ptr: TORCH_VERSION_2_10_0
+torch_get_cuda_stream_from_pool: TORCH_VERSION_2_10_0
+torch_get_mutable_data_ptr: TORCH_VERSION_2_10_0
+torch_get_thread_idx: TORCH_VERSION_2_10_0
+torch_library_impl: TORCH_VERSION_2_10_0
+torch_list_get_item: TORCH_VERSION_2_10_0
+torch_list_set_item: TORCH_VERSION_2_10_0
+torch_parallel_for: TORCH_VERSION_2_10_0
+torch_parse_device_string: TORCH_VERSION_2_10_0

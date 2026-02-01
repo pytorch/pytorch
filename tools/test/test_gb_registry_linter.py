@@ -51,8 +51,13 @@ def test(self):
 
         messages = check_registry_sync(self.test_data_dir, self.registry_path)
 
+        # Parse the replacement to get the actual GB ID that was generated
+        self.assertEqual(len(messages), 1)
+        replacement_registry = json.loads(messages[0].replacement)
+        gb_id = next(iter(replacement_registry.keys()))
+
         expected_registry = {
-            "GB0000": [
+            gb_id: [
                 {
                     "Gb_type": "testing",
                     "Context": "testing",
@@ -271,24 +276,34 @@ def test(self):
             original_content = f.read()
 
         messages = check_registry_sync(self.test_data_dir, self.registry_path)
-        expected_registry = {
-            "GB0000": [
-                {
-                    "Gb_type": "original_testing",
-                    "Context": "original_context",
-                    "Explanation": "original_explanation",
-                    "Hints": ["original_hint"],
-                }
-            ],
-            "GB0001": [
-                {
-                    "Gb_type": "completely_new_testing",
-                    "Context": "completely_new_context",
-                    "Explanation": "completely_new_explanation",
-                    "Hints": ["completely_new_hint"],
-                }
-            ],
-        }
+
+        # Parse the replacement to get the actual GB ID that was generated
+        self.assertEqual(len(messages), 1)
+        replacement_registry = json.loads(messages[0].replacement)
+
+        # Build expected_registry in the same order as replacement_registry
+        # since random insertion means order is not deterministic
+        expected_registry = {}
+        for gb_id in replacement_registry:
+            if gb_id == "GB0000":
+                expected_registry[gb_id] = [
+                    {
+                        "Gb_type": "original_testing",
+                        "Context": "original_context",
+                        "Explanation": "original_explanation",
+                        "Hints": ["original_hint"],
+                    }
+                ]
+            else:
+                expected_registry[gb_id] = [
+                    {
+                        "Gb_type": "completely_new_testing",
+                        "Context": "completely_new_context",
+                        "Explanation": "completely_new_explanation",
+                        "Hints": ["completely_new_hint"],
+                    }
+                ]
+
         expected_replacement = (
             json.dumps(expected_registry, indent=2, ensure_ascii=False) + "\n"
         )
@@ -349,8 +364,13 @@ def test(self):
 
             messages = check_registry_sync(self.test_data_dir, self.registry_path)
 
+            # Parse the replacement to get the actual GB ID that was generated
+            self.assertEqual(len(messages), 1)
+            replacement_registry = json.loads(messages[0].replacement)
+            gb_id = next(iter(replacement_registry.keys()))
+
             expected_registry = {
-                "GB0000": [
+                gb_id: [
                     {
                         "Gb_type": "testing_with_graph_break_hints",
                         "Context": "testing_with_graph_break_hints",
@@ -391,6 +411,55 @@ def test(self):
         finally:
             mock_hints_file.unlink()
             init_py.unlink()
+
+    def test_case7_duplicate_gb_type_in_registry(self):
+        """Test Case 7: Detecting duplicate gb_types across different GB IDs in the registry."""
+        registry_data = {
+            "GB0000": [
+                {
+                    "Gb_type": "duplicate_type",
+                    "Context": "context1",
+                    "Explanation": "explanation1",
+                    "Hints": ["hint1"],
+                }
+            ],
+            "GB0042": [
+                {
+                    "Gb_type": "duplicate_type",
+                    "Context": "context2",
+                    "Explanation": "explanation2",
+                    "Hints": ["hint2"],
+                }
+            ],
+        }
+        with open(self.registry_path, "w") as f:
+            json.dump(registry_data, f, indent=2)
+
+        # Create a callsite with one of the duplicate types
+        callsite_content = """from torch._dynamo.exc import unimplemented
+def test(self):
+    unimplemented(gb_type="duplicate_type", context="context1", explanation="explanation1", hints=["hint1"])
+"""
+        with open(self.callsite_file, "w") as f:
+            f.write(callsite_content)
+
+        messages = check_registry_sync(self.test_data_dir, self.registry_path)
+
+        expected_msg = LintMessage(
+            path=str(self.registry_path),
+            line=None,
+            char=None,
+            code=LINTER_CODE,
+            severity=LintSeverity.ERROR,
+            name="Duplicate gb_type in registry",
+            original=None,
+            replacement=None,
+            description=(
+                "The gb_type 'duplicate_type' appears in multiple GB IDs: GB0000, GB0042. "
+                "Each gb_type must map to exactly one GB ID. Please manually fix the registry."
+            ),
+        )
+        self.assertEqual(messages, [expected_msg])
 
 
 if __name__ == "__main__":

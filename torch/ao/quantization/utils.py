@@ -4,12 +4,12 @@ Utils shared by different modes of quantization (eager/graph)
 """
 
 import functools
-import sys
 import warnings
 from collections import OrderedDict
 from collections.abc import Callable
 from inspect import getfullargspec, signature
-from typing import Any, Union
+from typing import Any
+from typing_extensions import TypeAliasType
 
 import torch
 from torch.ao.quantization.quant_type import QuantType
@@ -17,15 +17,9 @@ from torch.fx import Node
 from torch.nn.utils.parametrize import is_parametrized
 
 
-if sys.version_info < (3, 12):
-    NodePattern = Union[tuple[Node, Node], tuple[Node, tuple[Node, Node]], Any]
-    NodePattern.__module__ = "torch.ao.quantization.utils"
-else:
-    from typing import TypeAliasType
-
-    NodePattern = TypeAliasType(
-        "NodePattern", tuple[Node, Node] | tuple[Node, tuple[Node, Node]] | Any
-    )
+NodePattern = TypeAliasType(
+    "NodePattern", tuple[Node, Node] | tuple[Node, tuple[Node, Node]] | Any
+)
 
 
 # This is the Quantizer class instance from torch/quantization/fx/quantize.py.
@@ -39,24 +33,14 @@ QuantizerCls = Any
 # see pattern.md for docs
 # TODO: not sure if typing supports recursive data types
 
-if sys.version_info < (3, 12):
-    Pattern = Union[
-        Callable,
-        tuple[Callable, Callable],
-        tuple[Callable, tuple[Callable, Callable]],
-        Any,
-    ]
-    Pattern.__module__ = "torch.ao.quantization.utils"
-else:
-    from typing import TypeAliasType
 
-    Pattern = TypeAliasType(
-        "Pattern",
-        Callable
-        | tuple[Callable, Callable]
-        | tuple[Callable, tuple[Callable, Callable]]
-        | Any,
-    )
+Pattern = TypeAliasType(
+    "Pattern",
+    Callable
+    | tuple[Callable, Callable]
+    | tuple[Callable, tuple[Callable, Callable]]
+    | Any,
+)
 
 
 # TODO: maybe rename this to MatchInputNode

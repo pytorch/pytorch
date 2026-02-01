@@ -57,14 +57,14 @@ def lift_subgraph_as_module(
             continue
 
         target = n.target
-        assert isinstance(target, str)
+        if not isinstance(target, str):
+            raise AssertionError(f"Expected str target, got {type(target)}")
         target_name_parts = target.split(".")
         curr = submodule
         orig_gm = gm
 
         for name in target_name_parts[:-1]:
             if not hasattr(curr, name):
-                # pyrefly: ignore [missing-attribute]
                 curr.add_module(name, HolderModule({}))
 
             curr = getattr(curr, name)

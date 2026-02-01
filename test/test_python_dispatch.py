@@ -1,10 +1,12 @@
 # Owner(s): ["module: __torch_dispatch__"]
 # ruff: noqa: F841
 
+import gc
 import pickle
 import sys
 import tempfile
 import unittest
+import weakref
 from copy import deepcopy
 
 import torch
@@ -69,6 +71,22 @@ class TestPythonRegistration(TestCase):
     def tearDown(self):
         if hasattr(torch.ops, self.test_ns):
             del torch.ops._test_python_registration
+
+    def test_global_enter(self):
+        try:
+            v = LoggingTensorMode()
+            v_ref = weakref.ref(v)
+
+            v.__enter__()
+            # The bug trigger when the C++ stack is the only
+            # owner of the mode object.
+            del v
+
+            # Does not segfault
+            str(torch.rand(2))
+
+        finally:
+            v_ref().__exit__(None, None, None)
 
     def test_fallback(self) -> None:
         test_key = "TESTING_ONLY_GenericMode"
@@ -581,6 +599,8 @@ class TestPythonRegistration(TestCase):
         with self.assertRaises(AssertionError):
             test_helper("")  # alias_analysis="FROM_SCHEMA"
 
+        # Run gc to make sure the previous Library is removed.  This is needed in dynamo-wrapped 3.14t
+        gc.collect()
         test_helper("CONSERVATIVE")
 
     def test_error_for_unsupported_ns_or_kind(self) -> None:

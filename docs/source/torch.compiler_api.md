@@ -26,6 +26,7 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
      is_compiling
      is_dynamo_compiling
      is_exporting
+     keep_portable_guards_unsafe
      skip_guard_on_inbuilt_nn_modules_unsafe
      skip_guard_on_all_nn_modules_unsafe
      keep_tensor_guards_unsafe

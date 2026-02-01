@@ -127,7 +127,11 @@ class CausalBias(torch.Tensor):
 
         Raises a warning if the LOWER_RIGHT variant is used with seq_len_q > seq_len_kv, as it may produce NaNs.
         """
-        assert isinstance(variant, CausalVariant)
+        if not isinstance(variant, CausalVariant):
+            raise AssertionError(
+                f"variant must be a CausalVariant, got {type(variant).__name__}"
+            )
+        super().__init__()
         self.variant = variant
         self.seq_len_q = seq_len_q
         self.seq_len_kv = seq_len_kv
@@ -232,13 +236,15 @@ class CausalBias(torch.Tensor):
                 query, key, value, None, dropout_p, is_causal, enable_gqa
             )
             if can_use_flash_attention(sdpa_params):
-                needs_padding = query.size(-1) % 8 != 0
+                alignment = 64 if query.device.type == "xpu" else 8
                 og_head_size = query.size(-1)
                 og_scale = _calculate_scale(og_head_size, scale)
+                needs_padding = og_head_size % alignment != 0
                 if needs_padding:
-                    query = torch.nn.functional.pad(query, (0, 8 - query.size(-1) % 8))
-                    key = torch.nn.functional.pad(key, (0, 8 - key.size(-1) % 8))
-                    value = torch.nn.functional.pad(value, (0, 8 - value.size(-1) % 8))
+                    pad_len = alignment - (og_head_size % alignment)
+                    query = torch.nn.functional.pad(query, (0, pad_len))
+                    key = torch.nn.functional.pad(key, (0, pad_len))
+                    value = torch.nn.functional.pad(value, (0, pad_len))
                 out = torch.ops.aten._scaled_dot_product_flash_attention(
                     query,
                     key,
@@ -327,7 +333,8 @@ def causal_upper_left(*size) -> CausalBias:
     Returns:
         CausalBias: The UPPER_LEFT triangular causal bias variant.
     """
-    assert len(size) == 2, "causal_upper_left only supports 2D tensors"
+    if len(size) != 2:
+        raise AssertionError("causal_upper_left only supports 2D tensors")
     seq_len_q, seq_len_kv = size
     return CausalBias(CausalVariant.UPPER_LEFT, seq_len_q, seq_len_kv)
 
@@ -363,6 +370,7 @@ def causal_lower_right(*size) -> CausalBias:
     Returns:
         CausalBias: The LOWER_RIGHT triangular causal bias variant.
     """
-    assert len(size) == 2, "causal_lower_right only supports 2D tensors"
+    if len(size) != 2:
+        raise AssertionError("causal_lower_right only supports 2D tensors")
     seq_len_q, seq_len_kv = size
     return CausalBias(CausalVariant.LOWER_RIGHT, seq_len_q, seq_len_kv)

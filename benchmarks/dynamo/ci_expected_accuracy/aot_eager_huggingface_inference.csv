@@ -82,6 +82,10 @@ PegasusForCausalLM,pass,0
 
 
 
+Qwen/Qwen3-0.6B,pass,0
+
+
+
 RobertaForCausalLM,pass,0
 
 
@@ -110,28 +114,12 @@ YituTechConvBert,pass,0
 
 
 
-meta-llama/Llama-3.2-1B,pass,0
-
-
-
 google/gemma-2-2b,pass,0
 
 
 
-google/gemma-3-4b-it,pass_due_to_skip,0
+meta-llama/Llama-3.2-1B,pass,0
 
 
 
-openai/whisper-tiny,pass,0
-
-
-
-Qwen/Qwen3-0.6B,pass,0
-
-
-
-mistralai/Mistral-7B-Instruct-v0.3,pass,0
-
-
-
-openai/gpt-oss-20b,pass,0
+openai/whisper-tiny,pass,5

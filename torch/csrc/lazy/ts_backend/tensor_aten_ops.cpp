@@ -1,19 +1,10 @@
 #include <torch/csrc/lazy/ts_backend/tensor_aten_ops.h>
 
-#include <ATen/InferSize.h>
-#include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/lazy/core/helpers.h>
 #include <torch/csrc/lazy/core/ir_builder.h>
-#include <torch/csrc/lazy/core/ir_util.h>
 #include <torch/csrc/lazy/core/lazy_graph_executor.h>
-#include <torch/csrc/lazy/core/metrics.h>
-#include <torch/csrc/lazy/core/ops/arithmetic_ir_ops.h>
 #include <torch/csrc/lazy/core/ops/utils.h>
 #include <torch/csrc/lazy/core/tensor.h>
 #include <torch/csrc/lazy/core/util.h>
-#include <torch/csrc/lazy/generated/LazyIr.h>
-#include <algorithm>
-#include <functional>
 #include <optional>
 
 namespace torch::lazy {

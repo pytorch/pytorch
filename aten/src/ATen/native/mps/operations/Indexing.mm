@@ -702,24 +702,6 @@ Tensor& index_select_out_mps(const Tensor& self, int64_t dim, const Tensor& inde
   return output;
 }
 
-// Checks if one tensor is broadcastable into another
-static bool is_dense_broadcastable(const Tensor& from, const Tensor& into) {
-  if (!from.is_contiguous() || !into.is_contiguous()) {
-    return false;
-  }
-  bool checking_squeezable_dims = false;
-  for (const auto dim : c10::irange(from.ndimension())) {
-    if (checking_squeezable_dims) {
-      if (from.size(-dim - 1) == 1) {
-        continue;
-      }
-      return false;
-    }
-    checking_squeezable_dims = from.size(-dim - 1) != into.size(-dim - 1);
-  }
-  return true;
-}
-
 Tensor& masked_fill__mps(Tensor& self, const Tensor& mask, const Scalar& value) {
   using namespace mps;
 

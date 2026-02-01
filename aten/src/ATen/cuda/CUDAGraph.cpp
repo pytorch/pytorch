@@ -1,3 +1,4 @@
+#include <ATen/core/CachingHostAllocator.h>
 #include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/cuda/CUDAGraph.h>
 #include <ATen/cuda/Exceptions.h>
@@ -95,14 +96,20 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
     TORCH_INTERNAL_ASSERT(mempool_id_.first > 0);
   }
 
+  auto filter = [this](cudaStream_t stream) {
+    cudaStreamCaptureStatus status{};
+    CaptureId_t stream_capture_id = 0;
+    AT_CUDA_CHECK(cudaStreamGetCaptureInfo(stream, &status, &stream_capture_id));
+    return status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive && stream_capture_id == capture_id_;
+  };
+
   // Addendum: beginAllocateStreamToPool is now called before cudaStreamBeginCapture to prevent an
   // autograd thread's free() call triggering an invalid cudaEventRecord in the caching allocator
   // due to the capture status being updated _after_ a capture had already started.
-  c10::cuda::CUDACachingAllocator::beginAllocateToPool(capture_dev_, mempool_id_, [this](cudaStream_t stream) {
-      cudaStreamCaptureStatus status{};
-      CaptureId_t stream_capture_id = 0;
-      AT_CUDA_CHECK(cudaStreamGetCaptureInfo(stream, &status, &stream_capture_id));
-      return status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive && stream_capture_id == capture_id_;
+  c10::cuda::CUDACachingAllocator::beginAllocateToPool(capture_dev_, mempool_id_, filter);
+
+  at::getHostAllocator(at::kCUDA)->begin_allocate_to_pool(mempool_id_, [filter](c10::Stream stream) {
+    return filter(CUDAStream(CUDAStream::UNCHECKED, stream));
   });
 
   // cudaStreamCaptureModeGlobal is the most conservative option to
@@ -119,12 +126,13 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
 void CUDAGraph::capture_end() {
   auto stream = at::cuda::getCurrentCUDAStream();
 
-  TORCH_CHECK(stream == capture_stream_,
+  TORCH_CHECK(stream.stream() == capture_stream_.stream(),
               "Capture must end on the same stream it began on.");
 
   AT_CUDA_CHECK(cudaStreamEndCapture(capture_stream_, &graph_));
 
   c10::cuda::CUDACachingAllocator::endAllocateToPool(capture_dev_, mempool_id_);
+  at::getHostAllocator(at::kCUDA)->end_allocate_to_pool(mempool_id_);
 
   TORCH_CHECK(graph_ != nullptr, "Invalid capture.");
 
@@ -169,21 +177,6 @@ void CUDAGraph::instantiate() {
   // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__GRAPH.html#group__CUDART__GRAPH_1g1accfe1da0c605a577c22d9751a09597
   // cudaGraphInstantiateWithFlags
   // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__GRAPH.html#group__CUDART__GRAPH_1ga2c652a24ba93e52b99a47bec0888233
-  int version = 0;
-  AT_CUDA_CHECK(cudaDriverGetVersion(&version));
-  if (version < 11040) {
-    // Trailing NULL, NULL, 0 arguments were recommended by Cuda driver people,
-    // who prefer not to report error message through these arguments moving forward
-    // (they prefer return value, or errors on api calls internal to the capture)
-    // ROCM appears to fail with HIP error: invalid argument
-#if (defined(CUDA_VERSION) && CUDA_VERSION >= 12000) && !defined(USE_ROCM)
-    AT_CUDA_CHECK(cudaGraphInstantiate(&graph_exec_, graph_, cudaGraphInstantiateFlagUseNodePriority));
-#else
-    AT_CUDA_CHECK(cudaGraphInstantiate(&graph_exec_, graph_, NULL, NULL, 0));
-#endif
-//Since ROCm 6.2, we want to go down this path as hipGraphExecDestroy in the destructor will not immediately free the memory.
-//It will wait for the next sync operation. cudaGraphInstantiateFlagAutoFreeOnLaunch will add async frees after graph launch.
-  } else {
 #if !defined(USE_ROCM)
     AT_CUDA_CHECK(cudaGraphInstantiateWithFlags(&graph_exec_,
                                                 graph_,
@@ -193,7 +186,6 @@ void CUDAGraph::instantiate() {
                                                 graph_,
                                                 cudaGraphInstantiateFlagAutoFreeOnLaunch));
 #endif
-  }
   has_graph_exec_ = true;
 }
 
@@ -214,16 +206,6 @@ void CUDAGraph::replay() {
   }
   // graph_exec_ may be replayed in any stream.
   AT_CUDA_CHECK(cudaGraphLaunch(graph_exec_, at::cuda::getCurrentCUDAStream()));
-
-  int version = 0;
-  AT_CUDA_CHECK(cudaDriverGetVersion(&version));
-  if (version < 11040) {
-    // Workaround for bug in libcuda.so that causes replayed graphs with
-    // certain topologies to be corrupted (kernels elided, internal syncs
-    // ignored) when replayed back to back without a sync in between.
-    // The bug is fixed in CUDA 11.4+.
-    AT_CUDA_CHECK(cudaDeviceSynchronize());
-  }
 }
 
 void CUDAGraph::enable_debug_mode() {
@@ -231,7 +213,6 @@ void CUDAGraph::enable_debug_mode() {
 }
 
 void CUDAGraph::debug_dump(const std::string& debug_path) {
-#if defined(CUDA_VERSION) || defined(USE_ROCM)
   if (_cuda_graphs_debug || keep_graph_) {
     TORCH_WARN("DEBUG: calling debug_dump()");
     if (has_graph_) {
@@ -245,9 +226,6 @@ void CUDAGraph::debug_dump(const std::string& debug_path) {
   } else {
     TORCH_WARN("CUDA Graphs debug not enabled, set with [graph].enable_debug_mode()");
   }
-#else
-  TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.3 or ROCM >= 5.6");
-#endif
 }
 
 cudaGraph_t CUDAGraph::raw_cuda_graph() {
@@ -286,6 +264,7 @@ void CUDAGraph::reset() {
   if (capture_ended_) {
     // notifyCaptureDestroy may throw. How should we handle this?
     c10::cuda::CUDACachingAllocator::releasePool(capture_dev_, mempool_id_);
+    at::getHostAllocator(at::kCUDA)->release_pool(mempool_id_);
     capture_ended_ = false;
   }
   if (has_graph_) {
@@ -316,7 +295,7 @@ CUDAGraph::~CUDAGraph() {
 // They wait for next sync point in order to free the memory, this is to ensure that all
 // hipGraphLaunch are finished before we release any memory. This feature was enabled in rocm6.2.
 // We need to ensure all async operations finish before deleting the object.
-#if (defined(USE_ROCM) && ROCM_VERSION >= 60200)
+#if defined(USE_ROCM)
   if (capture_dev_ != UNDEFINED_DEVICE) // check if capture_dev_ contains the real device id
   {
     AT_CUDA_CHECK(cudaSetDevice(capture_dev_));

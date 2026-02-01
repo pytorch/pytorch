@@ -49,23 +49,18 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
     export SYSROOT_DEP="sysroot_linux-64=2.17"
   fi
 
-# Install correct Python version
-# Also ensure sysroot is using a modern GLIBC to match system compilers
-if [ "$ANACONDA_PYTHON_VERSION" = "3.14" ]; then
-  as_jenkins conda create -n py_$ANACONDA_PYTHON_VERSION -y\
-             python="3.14.0" \
-             ${SYSROOT_DEP} \
-             -c conda-forge
-else
+  if [[ $PYTHON_FREETHREADED == "1" ]]
+  then
+    PYTHON_DEP="python-freethreading=${ANACONDA_PYTHON_VERSION}"
+  else
+    PYTHON_DEP="python=${ANACONDA_PYTHON_VERSION}"
+  fi
   # Install correct Python version
   # Also ensure sysroot is using a modern GLIBC to match system compilers
   as_jenkins conda create -n py_$ANACONDA_PYTHON_VERSION -y\
-             python="$ANACONDA_PYTHON_VERSION" \
-             ${SYSROOT_DEP}
-fi
-  # libstdcxx from conda default channels are too old, we need GLIBCXX_3.4.30
-  # which is provided in libstdcxx 12 and up.
-  conda_install libstdcxx-ng=12.3.0 --update-deps -c conda-forge
+             ${PYTHON_DEP} \
+             ${SYSROOT_DEP} \
+             "icu<78"
 
   # Miniforge installer doesn't install sqlite by default
   if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
@@ -93,6 +88,9 @@ fi
   if [[ "$UBUNTU_VERSION" == "24.04"* ]] ; then
     conda_install_through_forge libstdcxx-ng=14
   fi
+
+  # Needs to be installed here so pip can build 3.14t wheels
+  conda_install cmake=3.31.6
 
   # Install some other packages, including those needed for Python test reporting
   pip_install -r /opt/conda/requirements-ci.txt

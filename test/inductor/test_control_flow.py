@@ -278,6 +278,16 @@ class CondModels:
 
             return torch.cond(x0.sum() > 0, fn, fn)
 
+    class StridePadding(torch.nn.Module):
+        def forward(self, p, x):
+            def true_fn(t):
+                return t.clone().contiguous()
+
+            def false_fn(t):
+                return t.clone().contiguous() + 1
+
+            return torch.cond(p, true_fn, false_fn, [x])
+
 
 class CondTests(TestCase):
     def _run_test(
@@ -335,6 +345,15 @@ class CondTests(TestCase):
             ),
             device=device,
             dynamic=dynamic,
+        )
+
+    @requires_gpu
+    def test_cond_subgraph_output_stride_padding(self):
+        self._run_test(
+            model=CondModels.StridePadding(),
+            # inner dim 19500 triggers stride padding
+            inputs=(torch.randn(15, 19500),),
+            device=GPU_TYPE,
         )
 
     @requires_gpu
@@ -1428,7 +1447,7 @@ class WhileLoopTests(TestCase):
     def test_while_loop_infinite_loop_error(self):
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "while_loop doesn't work unless it is captured completely",
+            "torch.while_loop",
         ):
             self._run_test(
                 model=WhileLoopModels.InfiniteLoop(),

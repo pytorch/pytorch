@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: quantization"]
 
+import copy
 import struct
 import unittest
 
@@ -406,6 +407,13 @@ class TestFloat4Dtype(TestCase):
 
         # can view uint8 as float4_e2m1fn_x2
         x2.view(torch.float4_e2m1fn_x2)
+
+        # can do equality comparisons
+        x3 = copy.deepcopy(x1)
+        self.assertEqual(x1, x3, atol=0, rtol=0)
+
+        # can call contiguous on a dim1 slice (calls `copy_` under the hood)
+        x1[:, 0:2048].contiguous()
 
     def test_f4_save_load(self, device):
         x1 = torch.randint(0, 10, (4, 4), device=device, dtype=torch.uint8).view(

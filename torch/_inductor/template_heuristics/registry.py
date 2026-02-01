@@ -90,23 +90,9 @@ def get_template_heuristic(
     if cache_key in _HEURISTIC_CACHE:
         return _HEURISTIC_CACHE[cache_key]
 
-    keys = [
-        # everything is specified
-        (template_name, device_type, op_name),
-        # heuristic is valid across all devices
-        (template_name, None, op_name),
-        # heuristic is valid across all ops for that device
-        (template_name, device_type, None),
-        # heuristic is always valid for that template
-        (template_name, None, None),
-    ]
-
-    # Look up in registry
-    heuristic_class = None
-    for key in keys:
-        if key in _TEMPLATE_HEURISTIC_REGISTRY:
-            heuristic_class = _TEMPLATE_HEURISTIC_REGISTRY[key]
-            break
+    heuristic_class = get_registered_heuristic_class(
+        template_name, device_type, op_name
+    )
 
     if heuristic_class is None:
         # Log error and return fallback instance (uncached)
@@ -126,6 +112,40 @@ def get_template_heuristic(
     return instance
 
 
+def get_registered_heuristic_class(
+    template_name: str, device_type: str, op_name: str
+) -> None | type[TemplateConfigHeuristics]:
+    """
+    Get the heuristic class registered for the given template/device/op combination.
+
+    This is useful for creating custom heuristics that subclass the appropriate
+    base class for a given template/device/op combination.
+
+    Args:
+        template_name: Name of the template (e.g., "mm", "bmm", "scaled_mm")
+        device_type: Device type ("cuda", "cpu", "xpu")
+        op_name: Name of the operator (e.g., "mm", "bmm", "scaled_mm")
+
+    Returns:
+        The heuristic class if found, None otherwise.
+    """
+    keys = [
+        # everything is specified
+        (template_name, device_type, op_name),
+        # heuristic is valid across all devices
+        (template_name, None, op_name),
+        # heuristic is valid across all ops for that device
+        (template_name, device_type, None),
+        # heuristic is always valid for that template
+        (template_name, None, None),
+    ]
+    for key in keys:
+        if key in _TEMPLATE_HEURISTIC_REGISTRY:
+            return _TEMPLATE_HEURISTIC_REGISTRY[key]
+
+    return None
+
+
 def clear_registry() -> None:
     """
     Clear all registered template heuristics.
@@ -140,16 +160,19 @@ def clear_registry() -> None:
 def override_template_heuristics(
     device_type: str,
     template_op_pairs: list[tuple[str, str]],
+    override_heuristic_class: type[TemplateConfigHeuristics] = TemplateConfigHeuristics,
 ) -> Iterator[None]:
     """
-    Context manager to temporarily override template heuristics with an empty heuristic.
+    Context manager to temporarily override template heuristics.
 
     This is useful for testing purposes, where we want to ensure a specific template/op pair
-    is not used
+    uses a custom heuristic or returns no entries.
 
     Args:
         device_type: Device type ("cuda", "cpu", "xpu")
         template_op_pairs: List of (template_name, op_name) pairs to override.
+        override_heuristic_class: Heuristic class to use for the override.
+            Defaults to TemplateConfigHeuristics (which returns no entries).
     """
     # Save original entries to restore later
     original_entries = {}
@@ -158,12 +181,10 @@ def override_template_heuristics(
     try:
         for template_name, op_name in template_op_pairs:
             assert op_name is not None
-            key = (device_type, template_name, op_name)
+            key = (template_name, device_type, op_name)
             if key in _TEMPLATE_HEURISTIC_REGISTRY:
                 original_entries[key] = _TEMPLATE_HEURISTIC_REGISTRY[key]
-                # TemplateConfigHeuristics base class returns no entries
-                # so we use it for overriding
-            _TEMPLATE_HEURISTIC_REGISTRY[key] = TemplateConfigHeuristics
+            _TEMPLATE_HEURISTIC_REGISTRY[key] = override_heuristic_class
             new_keys.append(key)
         yield
     finally:

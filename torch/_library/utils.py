@@ -71,7 +71,8 @@ def lookup_op(qualname: str) -> OpOverload:
 
 
 def is_builtin(op: OpOverload) -> bool:
-    assert isinstance(op, OpOverload)
+    if not isinstance(op, OpOverload):
+        raise AssertionError(f"op must be OpOverload, got {type(op)}")
     return op.namespace in {"aten", "prim", "prims"}
 
 
@@ -131,7 +132,8 @@ def is_functional_schema(schema: Any, *, allow_valid_view: bool = False) -> bool
 
     if isinstance(schema, str):
         schema = FunctionSchema.parse(schema)
-    assert isinstance(schema, FunctionSchema)
+    if not isinstance(schema, FunctionSchema):
+        raise AssertionError(f"schema must be FunctionSchema, got {type(schema)}")
     return is_functional(schema)
 
 
@@ -214,7 +216,10 @@ def zip_schema(
     Assumes that (args, kwargs) were the inputs to some torch._ops.OpOverload:
     that is, (args, kwargs) must be bindable to the schema (args, kwargs).
     """
-    assert len(schema.arguments) >= len(args) + len(kwargs)
+    if len(schema.arguments) < len(args) + len(kwargs):
+        raise AssertionError(
+            f"schema has {len(schema.arguments)} arguments but got {len(args)} args and {len(kwargs)} kwargs"
+        )
     for i in range(len(schema.arguments)):
         info = schema.arguments[i]
         if info.kwarg_only:
@@ -242,7 +247,10 @@ def hop_schema_from_fx_node(node):
     def _collect_example_val(node):
         meta_val = node.meta.get("val", None)
         if meta_val is None:
-            assert node.op == "get_attr"
+            if node.op != "get_attr":
+                raise AssertionError(
+                    f"node.op must be 'get_attr' when val is None, got {node.op!r}"
+                )
             meta_val = getattr(node.graph.owning_module, node.target)
         return meta_val
 
@@ -271,7 +279,8 @@ def hop_schema_from_fx_node(node):
 
 
 def can_generate_trivial_fake_impl(op: OpOverload) -> bool:
-    assert isinstance(op, OpOverload)
+    if not isinstance(op, OpOverload):
+        raise AssertionError(f"op must be OpOverload, got {type(op)}")
     if is_builtin(op):
         # We control the built-ins. These may (in rare cases)
         # do input metadata mutation (which we have banned on custom ops)
@@ -296,7 +305,10 @@ def requires_set_python_module() -> bool:
 
 
 def handle_dispatch_mode(curr_mode, op_overload, *args, **kwargs):
-    assert isinstance(curr_mode, torch.utils._python_dispatch.TorchDispatchMode)
+    if not isinstance(curr_mode, torch.utils._python_dispatch.TorchDispatchMode):
+        raise AssertionError(
+            f"curr_mode must be TorchDispatchMode, got {type(curr_mode)}"
+        )
     args_flattened, _ = torch.utils._pytree.tree_flatten((args, kwargs.values()))
     # TODO: need to double check the semantics of the "types" argument to torch_dispatch.
     # It's generated in PyInterpreter.cpp, but seems to be generated in two places,
@@ -554,3 +566,94 @@ def get_layout_constraint_tag(fn, *, with_default=True):
 
         return getattr(torch._C.Tag, config.custom_op_default_layout_constraint)
     return None
+
+
+# List of random functions that should be treated as impure
+_RANDOM_FUNCTIONS = {
+    torch.rand,
+    torch.randn,
+    torch.randint,
+    torch.randperm,
+    torch.rand_like,
+    torch.randn_like,
+    torch.randint_like,
+    torch.normal,
+    torch.poisson,
+    torch.bernoulli,
+    torch.multinomial,
+}
+
+
+def is_impure(
+    op: Callable,
+    *,
+    args: Optional[tuple[Any, ...]] = None,
+    kwargs: Optional[dict[str, Any]] = None,
+    impure_random: bool = True,
+) -> bool:
+    """
+    An operator is impure if it:
+    - Mutates its inputs (has a mutable schema)
+    - Has nondeterministic/random behavior that mutates RNG state
+    - Is explicitly marked as effectful via torch.library._register_effectful_op
+
+    Args:
+        op: The operator to check (function, OpOverload, HigherOrderOperator, etc.)
+        args: Optional arguments that would be passed to the callable
+        kwargs: Optional keyword arguments that would be passed to the callable
+        impure_random: Whether to treat random operations as impure (default: True)
+
+    Returns:
+        bool: True if the callable has side effects, False otherwise
+    """
+    # Import here to avoid circular dependencies
+    from torch._higher_order_ops.effects import _get_effect
+    from torch.fx.node import _side_effectful_functions
+
+    if isinstance(op, torch._ops.OpOverload):
+        schema = getattr(op, "_schema", None)
+        if schema is not None and schema.is_mutable:
+            return True
+
+        if op in _side_effectful_functions:
+            return True
+
+        if _get_effect(op) is not None:
+            return True
+
+    if isinstance(op, torch._ops.HigherOrderOperator):
+        if op in (
+            torch.ops.higher_order.auto_functionalized,
+            torch.ops.higher_order.auto_functionalized_v2,
+        ):
+            # Check if the auto-functionalized operator (the first argument) is
+            # side-effectful
+            if args and len(args) > 0:
+                return args[0] in _side_effectful_functions
+
+        if _get_effect(op) is not None:
+            return True
+
+        return False
+
+    # Impure since it mutates RNG state
+    if impure_random and getattr(op, "_nondeterministic_seeded", False):
+        return True
+
+    # Handle Python random functions that don't have _nondeterministic_seeded
+    # but still affect global RNG state (issue #151524)
+    # These should be impure regardless of impure_random setting to maintain
+    # consistency between eager and compiled execution
+    # All random operations are impure to ensure consistent behavior
+    # between eager and compiled execution, regardless of generator usage
+    if op in _RANDOM_FUNCTIONS:
+        return True
+
+    schema = getattr(op, "_schema", None)
+    if schema is not None and schema.is_mutable:
+        return True
+
+    if op in _side_effectful_functions:
+        return True
+
+    return False

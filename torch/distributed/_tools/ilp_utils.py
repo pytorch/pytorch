@@ -128,7 +128,7 @@ def aggregate_stats(
 
     for mod in model.modules():
         if mod_mem_stat := mod_mem_stats.get(mod):
-            if tradeoff_stats := mod_sac_tradeoff_stats.get(mod_mem_stat.mod_fqn, None):
+            if tradeoff_stats := mod_sac_tradeoff_stats.get(mod_mem_stat.mod_fqn):
                 sac_runtime = tradeoff_stats.sac_runtime
                 sac_memory = tradeoff_stats.sac_memory
                 n_segments = tradeoff_stats.n_segments

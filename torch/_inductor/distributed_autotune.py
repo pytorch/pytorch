@@ -19,7 +19,6 @@ from .ir import (
     Layout,
     MultiTemplateBuffer,
     OperationBuffer,
-    ShapeAsConstantBuffer,
     StorageBox,
     TensorBox,
 )
@@ -100,7 +99,7 @@ def graph_context() -> Generator[None, None, None]:
 
 def maybe_autotune_remote(
     name: str, choices: list[ChoiceCaller], inputs: list[Buffer], layout: Layout
-) -> TensorBox | ShapeAsConstantBuffer | None:
+) -> TensorBox | None:
     """
     Used by an op (like `mm`) to determine if the op should be autotuned
     locally (returns None) or remotely (returns a placeholder Buffer).

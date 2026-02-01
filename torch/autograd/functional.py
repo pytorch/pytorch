@@ -192,6 +192,7 @@ def _autograd_grad(
     for out, grad_out in zip(outputs, grad_outputs):
         if out is not None and out.requires_grad:
             new_outputs += (out,)
+            # pyrefly: ignore [bad-assignment]
             new_grad_outputs += (grad_out,)
 
     if len(new_outputs) == 0:
@@ -837,6 +838,7 @@ def jacobian(
                             raise RuntimeError(msg)
                         jac_i_el.append(torch.zeros_like(inp_el))
 
+            # pyrefly: ignore [bad-assignment]
             jacobian += (
                 tuple(
                     torch.stack(jac_i_el, dim=0).view(

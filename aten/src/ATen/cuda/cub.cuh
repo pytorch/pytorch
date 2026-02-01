@@ -250,8 +250,6 @@ inline void inclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
 #endif
 }
 
-# if defined(CUDA_VERSION) || defined(USE_ROCM)
-
 template<typename T>
 struct BlockPrefixCallbackOp
 {
@@ -304,11 +302,11 @@ __global__ void final_scan_kernel(const T* d_in, T* d_out, T* agg, int64_t nelem
   // load agg and reduce my starting value
   T agg_data;
   agg_data = threadIdx.x >= blockIdx.x ? T(0) : agg[threadIdx.x];
-  // if there are fewer threads than previous values to be read,
-  // read another value
-  if (threadIdx.x + blockDim.x < blockIdx.x) {
-    agg_data += agg[threadIdx.x + blockDim.x];
+  // In case there are fewer threads than previous block aggregates to be read, add more aggregates (should be at most 2-3 aggregates per thread)
+  for (unsigned int i=threadIdx.x + blockDim.x; i<blockIdx.x; i+=blockDim.x) {
+    agg_data += agg[i];
   }
+
   T aggregate = BlockReduceT(temp_storage.reduce).Sum(agg_data);
   __syncthreads();
   BlockPrefixCallbackOp prefix_op(aggregate);
@@ -444,8 +442,6 @@ inline void inclusive_deterministic_scan(const scalar_t *  input, scalar_t * out
 
   const int iters_per_cta = (grid_size + num_sms - 1)/num_sms;
   grid_size = std::min(num_sms, grid_size);
-  // simple reduction in scan kernel handles at most 2 items per thread
-  TORCH_INTERNAL_ASSERT(2 * BLOCK_THREADS >= grid_size);
   auto& allocator = *c10::cuda::CUDACachingAllocator::get();
   auto agg = allocator.allocate(grid_size * sizeof(scalar_t));
   calc_block_sums<BLOCK_THREADS, ITEMS_PER_THREAD, false>
@@ -458,7 +454,6 @@ inline void inclusive_deterministic_scan(const scalar_t *  input, scalar_t * out
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
-#endif
 
 template<typename InputIteratorT, typename OutputIteratorT, typename ScanOpT, typename InitValueT, int max_cub_size=impl::max_cub_size>
 inline void exclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT scan_op, InitValueT init_value, int64_t num_items) {

@@ -6,7 +6,7 @@ import math
 import warnings
 from collections.abc import Callable, Iterable
 from copy import deepcopy
-from typing import Any, cast, Literal, Optional, Union
+from typing import Any, cast, Literal, Union
 from typing_extensions import override
 
 import torch
@@ -35,7 +35,26 @@ PARAM_LIST = Union[tuple[Tensor, ...], list[Tensor]]
 
 
 def get_ema_multi_avg_fn(decay=0.999):
-    """Get the function applying exponential moving average (EMA) across multiple params."""
+    """Get the function applying exponential moving average (EMA) across multiple params.
+
+    The EMA is computed as:
+
+    .. math::
+        W_0^{\\text{EMA}} = W_0^{\\text{model}}
+
+    .. math::
+        W_{t+1}^{\\text{EMA}} = \\text{decay} \\times W_t^{\\text{EMA}} + (1 - \\text{decay}) \\times W_{t+1}^{\\text{model}}
+
+    where :math:`W_t^{\\text{EMA}}` is the EMA parameter at step :math:`t`,
+    :math:`W_t^{\\text{model}}` is the model parameter at step :math:`t`,
+    and :math:`\\text{decay}` is the decay rate (default: 0.999).
+
+    Args:
+        decay (float): Decay rate for EMA. Must be in the range [0, 1]. Default: 0.999
+
+    Returns:
+        Callable: A function that updates EMA parameters given current model parameters
+    """
 
     if decay < 0.0 or decay > 1.0:
         raise ValueError(
@@ -65,7 +84,7 @@ def get_swa_multi_avg_fn():
     def swa_update(
         averaged_param_list: PARAM_LIST,
         current_param_list: PARAM_LIST,
-        num_averaged: Union[Tensor, int],
+        num_averaged: Tensor | int,
     ) -> None:
         # foreach lerp only handles float and complex
         if torch.is_floating_point(averaged_param_list[0]) or torch.is_complex(
@@ -93,7 +112,26 @@ def get_swa_multi_avg_fn():
 
 
 def get_ema_avg_fn(decay=0.999):
-    """Get the function applying exponential moving average (EMA) across a single param."""
+    """Get the function applying exponential moving average (EMA) across multiple params.
+
+    The EMA is computed as:
+
+    .. math::
+        W_0^{\\text{EMA}} = W_0^{\\text{model}}
+
+    .. math::
+        W_{t+1}^{\\text{EMA}} = \\text{decay} \\times W_t^{\\text{EMA}} + (1 - \\text{decay}) \\times W_{t+1}^{\\text{model}}
+
+    where :math:`W_t^{\\text{EMA}}` is the EMA parameter at step :math:`t`,
+    :math:`W_t^{\\text{model}}` is the model parameter at step :math:`t`,
+    and :math:`\\text{decay}` is the decay rate (default: 0.999).
+
+    Args:
+        decay (float): Decay rate for EMA. Must be in the range [0, 1]. Default: 0.999
+
+    Returns:
+        Callable: A function that updates EMA parameters given current model parameters
+    """
 
     if decay < 0.0 or decay > 1.0:
         raise ValueError(
@@ -112,7 +150,7 @@ def get_swa_avg_fn():
 
     @torch.no_grad()
     def swa_update(
-        averaged_param: Tensor, current_param: Tensor, num_averaged: Union[Tensor, int]
+        averaged_param: Tensor, current_param: Tensor, num_averaged: Tensor | int
     ):
         return averaged_param + (current_param - averaged_param) / (num_averaged + 1)
 
@@ -223,11 +261,10 @@ class AveragedModel(Module):
     def __init__(
         self,
         model: Module,
-        device: Optional[Union[int, torch.device]] = None,
-        avg_fn: Optional[Callable[[Tensor, Tensor, Union[Tensor, int]], Tensor]] = None,
-        multi_avg_fn: Optional[
-            Callable[[PARAM_LIST, PARAM_LIST, Union[Tensor, int]], None]
-        ] = None,
+        device: int | torch.device | None = None,
+        avg_fn: Callable[[Tensor, Tensor, Tensor | int], Tensor] | None = None,
+        multi_avg_fn: Callable[[PARAM_LIST, PARAM_LIST, Tensor | int], None]
+        | None = None,
         use_buffers=False,
     ) -> None:  # noqa: D107
         super().__init__()
@@ -263,8 +300,8 @@ class AveragedModel(Module):
             if self.use_buffers
             else model.parameters()
         )
-        self_param_detached: list[Optional[Tensor]] = []
-        model_param_detached: list[Optional[Tensor]] = []
+        self_param_detached: list[Tensor | None] = []
+        model_param_detached: list[Tensor | None] = []
         copy_param = bool(self.n_averaged == 0)
         for p_averaged, p_model in zip(self_param, model_param, strict=False):
             p_model_ = p_model.detach().to(p_averaged.device)
@@ -330,7 +367,7 @@ class AveragedModel(Module):
 def update_bn(
     loader: Iterable[Any],
     model: Module,
-    device: Optional[Union[int, torch.device]] = None,
+    device: int | torch.device | None = None,
 ) -> None:
     r"""Update BatchNorm running_mean, running_var buffers in the model.
 

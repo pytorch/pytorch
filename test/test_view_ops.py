@@ -18,6 +18,7 @@ from torch.testing._internal.common_device_type import (
     skipLazy,
     skipMeta,
     skipXLA,
+    skipXPUIf,
 )
 from torch.testing._internal.common_dtype import (
     all_mps_types_and,
@@ -130,7 +131,7 @@ class TestViewOps(TestCase):
             return False
         # Note: only validates storage on native device types
         # because some accelerators, like XLA, do not expose storage
-        if base.device.type == "cpu" or base.device.type == "cuda":
+        if base.device.type in ["cpu", "cuda", "xpu"]:
             if base.untyped_storage().data_ptr() != other.untyped_storage().data_ptr():
                 return False
 
@@ -375,6 +376,28 @@ class TestViewOps(TestCase):
         self.assertTrue(self.is_view_of(x, res))
         self.assertEqual(res.shape, torch.Size([0]))
 
+        # See issue #150050: singleton dimension stride doesn't need to be divisible by 2
+        x = torch.rand(336, 2, 1, device=device)
+        x_transposed = x.transpose(1, 2).contiguous()
+        result = torch.view_as_complex(x_transposed)
+        self.assertEqual(result.shape, torch.Size([336, 1]))
+        self.assertTrue(self.is_view_of(x, result))
+
+        # sparse matrix
+        x = torch.tensor([[2.0, 3.0], [4.0, 5.0]], device=device)
+        indices = torch.tensor([[0, 2], [0, 1]], device=device)
+        size = torch.Size([3, 3, 2])
+        xs = torch.sparse_coo_tensor(indices, x, size)
+        res = torch.view_as_complex(xs)
+        # self.is_view_of() does not work with sparse tensors
+        self.assertTrue(res._is_view())
+        self.assertIs(res._base, xs)
+        self.assertEqual(
+            res._values().untyped_storage().data_ptr(),
+            xs._values().untyped_storage().data_ptr(),
+        )
+        self.assertEqual(res.shape, xs.shape[:-1])
+
     @onlyNativeDeviceTypes
     @dtypes(*complex_types(), torch.complex32)
     @dtypesIfMPS(torch.cfloat, torch.chalf)
@@ -401,6 +424,21 @@ class TestViewOps(TestCase):
         res = torch.view_as_real(x)
         self.assertTrue(self.is_view_of(x, res))
         self.assertEqual(res.shape, torch.Size([2]))
+
+        # sparse matrix
+        x = torch.tensor(2 + 3j, dtype=dtype, device=device)
+        indices = torch.tensor([[0], [0]], device=device)
+        size = torch.Size([3, 3])
+        xs = torch.sparse_coo_tensor(indices, x, size, dtype=dtype)
+        res = torch.view_as_real(xs)
+        # self.is_view_of() does not work with sparse tensors
+        self.assertTrue(res._is_view())
+        self.assertIs(res._base, xs)
+        self.assertEqual(
+            res._values().untyped_storage().data_ptr(),
+            xs._values().untyped_storage().data_ptr(),
+        )
+        self.assertEqual(res.shape, xs.shape + (2,))
 
     @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
@@ -964,7 +1002,7 @@ class TestViewOps(TestCase):
         t[rows, cols] = 0
         self.assertEqual(t[2, 2], 0)
 
-    @unittest.skip("See https://github.com/pytorch/pytorch/pull/32720")
+    @onlyNativeDeviceTypes
     def test_chunk_view(self, device):
         t = torch.zeros(3, 3, device=device)
         l = torch.chunk(t, 3)
@@ -975,7 +1013,7 @@ class TestViewOps(TestCase):
             v[0, 0] = idx + 1
             self.assertEqual(t[idx, 0], v[0, 0])
 
-    @unittest.skip("See https://github.com/pytorch/pytorch/pull/32720")
+    @onlyNativeDeviceTypes
     def test_split_view(self, device):
         t = torch.zeros(3, 3, device=device)
         l = torch.split(t, [1, 1, 1])
@@ -1051,8 +1089,60 @@ class TestViewOps(TestCase):
         self.assertEqual(expected1, out1)
         self.assertEqual(expected2, out2)
 
+    @skipLazy  # Lazy backend has issues with this operation
+    def test_maybe_view_chunk_cat(self, device):
+        """Test _maybe_view_chunk_cat is equivalent to torch.cat(torch.chunk(...))"""
+        from torch._utils import _maybe_view_chunk_cat
+
+        # Helper to test a configuration
+        def test_config(shape, group_size, gather_dim):
+            x = torch.randn(shape, device=device)
+            result = _maybe_view_chunk_cat(
+                x, group_size=group_size, gather_dim=gather_dim
+            )
+            expected = torch.cat(torch.chunk(x, group_size, dim=0), dim=gather_dim)
+            self.assertEqual(result, expected)
+            self.assertTrue(result.is_contiguous())
+
+            # Check that whether result is a view matches the movedim reference implementation
+            # Reference: chunks = torch.unflatten(x, 0, [group_size, -1])
+            #            ref = torch.flatten(torch.movedim(chunks, 0, gather_dim), gather_dim, gather_dim + 1)
+            chunks = torch.unflatten(x, 0, [group_size, -1])
+            ref = torch.flatten(
+                torch.movedim(chunks, 0, gather_dim), gather_dim, gather_dim + 1
+            )
+
+            # Check if result is a view of x by comparing data pointers
+            result_is_view = result.data_ptr() == x.data_ptr()
+            # Check if ref is a view of x by comparing data pointers
+            ref_is_view = ref.data_ptr() == x.data_ptr()
+
+            self.assertEqual(
+                result_is_view,
+                ref_is_view,
+                f"View status mismatch for shape={shape}, group_size={group_size}, "
+                f"gather_dim={gather_dim}: result_is_view={result_is_view}, "
+                f"ref_is_view={ref_is_view}",
+            )
+
+        # Test various configurations - one per line as requested
+        test_config((4, 8, 16), group_size=4, gather_dim=0)  # no-op case
+        test_config((4, 8, 16), group_size=4, gather_dim=1)  # docstring example 1
+        test_config((4, 2, 8), group_size=4, gather_dim=2)  # docstring example 2
+        test_config((2, 10, 20), group_size=2, gather_dim=1)  # different group_size
+        test_config((4, 16), group_size=4, gather_dim=1)  # 2D tensor
+        test_config((4, 8, 6, 10), group_size=4, gather_dim=0)  # 4D, gather_dim=0
+        test_config((4, 8, 6, 10), group_size=4, gather_dim=1)  # 4D, gather_dim=1
+        test_config((4, 8, 6, 10), group_size=4, gather_dim=2)  # 4D, gather_dim=2
+        test_config((4, 8, 6, 10), group_size=4, gather_dim=3)  # 4D, gather_dim=3
+        test_config((8, 4, 6), group_size=8, gather_dim=1)  # group_size=8
+
 
 class TestOldViewOps(TestCase):
+    @skipXPUIf(
+        True,
+        "NotImplementedError with test_ravel, https://github.com/intel/torch-xpu-ops/issues/2358",
+    )
     def test_ravel(self, device):
         def _test_ravel(tensors, size, nc=False):
             for src in tensors:
@@ -1213,6 +1303,10 @@ class TestOldViewOps(TestCase):
             RuntimeError, lambda: x.reshape_as(torch.rand(10, device=device))
         )
 
+    @skipXPUIf(
+        True,
+        "NotImplementedError with test_flatten,https://github.com/intel/torch-xpu-ops/issues/2358",
+    )
     def test_flatten(self, device):
         # Test that flatten returns 1-dim tensor when given a 0-dim tensor
         zero_dim_tensor = torch.tensor(123, device=device)
@@ -2075,8 +2169,10 @@ class TestOldViewOps(TestCase):
         t.col_indices()
 
 
-instantiate_device_type_tests(TestViewOps, globals(), include_lazy=True, allow_mps=True)
-instantiate_device_type_tests(TestOldViewOps, globals())
+instantiate_device_type_tests(
+    TestViewOps, globals(), include_lazy=True, allow_mps=True, allow_xpu=True
+)
+instantiate_device_type_tests(TestOldViewOps, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()

@@ -58,6 +58,7 @@ def _generate_fake_kernel(op_name: str, op_profile: set[OpProfile]) -> Callable:
             fake_strides = [-1] * t.rank
             expected = 1
             fake_stride = expected
+            # pyrefly: ignore [bad-assignment]
             for i in range(t.rank):
                 fake_strides[i] = fake_stride  # type: ignore[assignment]
                 fake_stride = fake_stride * fake_shape[i]  # type: ignore[assignment]
@@ -183,7 +184,8 @@ def unsafe_generate_fake_kernels(op_profiles: dict[str, set[OpProfile]]) -> Gene
         # Restore abstract_fns for CustomOpDefs
         for op_str, old_fake in old_fake_impls.items():
             opdef = _maybe_get_opdef(op_str)
-            assert opdef is not None
+            if opdef is None:
+                raise AssertionError(f"opdef for {op_str} must not be None")
             opdef.register_fake(old_fake)
 
 

@@ -1104,7 +1104,7 @@ static PyObject* any_output_is_alias_to_input_or_output(
   PyObject* outs = PyTuple_GET_ITEM(args, 2);
   std::unordered_set<void*> s;
   visit_tensors<false>(inps, inps_kwargs, [&s](at::Tensor& t) {
-    if (!t.storage()) {
+    if (!t.has_storage()) {
       return false;
     }
     auto* cp = t.storage().unsafeGetStorageImpl();
@@ -1115,7 +1115,7 @@ static PyObject* any_output_is_alias_to_input_or_output(
   });
   bool ret = false;
   visit_tensors<false>(outs, nullptr, [&s, &ret](at::Tensor& t) {
-    if (!t.storage()) {
+    if (!t.has_storage()) {
       return false;
     }
     auto* cp = t.storage().unsafeGetStorageImpl();
@@ -1409,6 +1409,10 @@ static PyObject* pop_torch_dispatch_stack(
   HANDLE_TH_ERRORS
   std::optional<c10::impl::TorchDispatchModeKey> mode_key;
   PyObject* r = nullptr;
+  // Keep the mode alive until after Py_INCREF to prevent use-after-free.
+  // When the shared_ptr is destroyed, ~SafePyObject will Py_DECREF, so we must
+  // Py_INCREF first to give the caller a valid reference.
+  std::shared_ptr<c10::impl::PyObject_TorchDispatchMode> mode;
   if (maybe_mode_key != Py_None) {
     mode_key = py::cast<c10::impl::TorchDispatchModeKey>(maybe_mode_key);
     auto maybe_mode =
@@ -1418,12 +1422,16 @@ static PyObject* pop_torch_dispatch_stack(
         "Attempted to unset ",
         c10::impl::to_string(mode_key.value()),
         ", but there wasn't one active.");
-    auto mode = maybe_mode.value();
-    r = mode->ptr(getPyInterpreter());
+    mode = maybe_mode.value();
   } else {
-    auto mode = c10::impl::TorchDispatchModeTLS::pop_stack();
-    r = mode->ptr(getPyInterpreter());
+    mode = c10::impl::TorchDispatchModeTLS::pop_stack();
   }
+  r = mode->ptr(getPyInterpreter());
+  // Increment refcount to give Python a reference. The SafePyObject destructor
+  // will decref when the shared_ptr is destroyed, so this balances out.
+  // Note: We cannot use release() here because the SafePyObject may be shared
+  // via ThreadLocalState copies, and release() would null out data_ causing
+  // other shared_ptr holders to see nullptr.
   Py_INCREF(r);
   return r;
   END_HANDLE_TH_ERRORS

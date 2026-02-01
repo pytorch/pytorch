@@ -79,6 +79,7 @@ endmacro()
 # MODULE argument is added for clarity that CMake is searching
 # for FindHIP.cmake in Module mode
 find_package_and_print_version(HIP 1.0 MODULE)
+enable_language(HIP)
 
 if(HIP_FOUND)
   set(PYTORCH_FOUND_HIP TRUE)
@@ -90,9 +91,13 @@ if(HIP_FOUND)
     if(NOT DASH_POS EQUAL -1)
       string(SUBSTRING "${HIP_VERSION}" 0 ${DASH_POS} HIP_VERSION_CLEAN)
       set(HIP_VERSION "${HIP_VERSION_CLEAN}")
+    else()
+      set(HIP_VERSION_CLEAN "${HIP_VERSION}")
+    endif()
+    message("HIP version: ${HIP_VERSION}")
+  else()
+    set(HIP_VERSION_CLEAN "")
   endif()
-  message("HIP version: ${HIP_VERSION}")
-endif()
 
 # The rocm-core package was only introduced in ROCm 6.4, so we make it optional.
   find_package(rocm-core CONFIG)

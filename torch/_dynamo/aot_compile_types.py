@@ -1,8 +1,71 @@
 import abc
+import importlib
 import pickle
 from typing import Any
 
 import torch
+
+
+def _serialize_triton_kernel(kernel: Any) -> tuple[str, str]:
+    """
+    Serialize a triton kernel by extracting its module path and function name.
+    Returns (module_path, function_name) tuple.
+
+    Triton JITFunction objects contain unpicklable _thread.RLock objects, so we
+    serialize the import path instead and reimport on load.
+
+    Raises:
+        RuntimeError: If the kernel cannot be serialized (missing attributes).
+    """
+    fn = getattr(kernel, "fn", None)
+    module_path = fn and getattr(fn, "__module__", None)
+    func_name = fn and getattr(fn, "__name__", None)
+    if fn is None or module_path is None or func_name is None:
+        raise RuntimeError(
+            f"Kernel fn missing __module__ or __name__: "
+            f"module={module_path}, name={func_name}. "
+            f"Cannot serialize for precompilation."
+        )
+    return (module_path, func_name)
+
+
+def _deserialize_triton_kernel(kernel_info: tuple[str, str]) -> Any:
+    """
+    Deserialize a triton kernel by reimporting from its module.
+    kernel_info is (module_path, function_name) tuple.
+    """
+    module_path, func_name = kernel_info
+    module = importlib.import_module(module_path)
+    kernel = getattr(module, func_name)
+    return kernel
+
+
+# Note: [Triton Kernel Side Table Serialization]
+#
+# When dynamo captures user-defined triton kernels, it creates FX graph nodes
+# (triton_kernel_wrapper_mutation/functional) with a `kernel_idx` parameter that
+# references the global `kernel_side_table` in triton_kernel_wrap.py. This side
+# table maps integer indices to actual triton kernel objects.
+#
+# For kernels that go through inductor's codegen path, this is fine - inductor
+# looks up the kernel from the side table at codegen time and embeds the kernel
+# source code directly into the generated wrapper. The compiled code doesn't
+# need the side table at runtime.
+#
+# However, not all triton kernels go through inductor codegen. When using
+# regional_inductor, only annotated regions are compiled by inductor. Triton
+# kernels outside these regions are executed via the FX interpreter, which
+# calls the higher-order op directly and needs the kernel to be in the side
+# table at runtime.
+#
+# When serializing/deserializing bundled AOT artifacts across process boundaries,
+# the kernel_side_table is empty in the new process, causing:
+#   AssertionError: Kernel index X not found in id_to_kernel
+#
+# To fix this, we capture the kernel_side_table state during serialization and
+# restore it during deserialization. Kernels are serialized by their import path
+# (module_path, function_name) since triton JITFunction objects contain
+# unpicklable RLock objects.
 
 
 class SerializableCallable(abc.ABC):
@@ -46,8 +109,23 @@ class BundledAOTAutogradSerializableCallable(SerializableCallable):
     def serialize_compile_artifacts(
         cls, fn: "BundledAOTAutogradSerializableCallable"
     ) -> bytes:
+        from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
+
+        # See Note: [Triton Kernel Side Table Serialization]
+        # Capture triton kernel side table state BEFORE serialization.
+        triton_kernels: dict[int, tuple[str, str]] = {
+            idx: _serialize_triton_kernel(kernel)
+            for idx, kernel in kernel_side_table.id_to_kernel.items()
+        }
+        triton_constant_args: dict[int, dict[str, Any]] = dict(
+            kernel_side_table.constant_args
+        )
+
         with torch._functorch.config.patch("bundled_autograd_cache", True):
-            result = pickle.dumps(fn.compiled_fn.serialize())
+            serialized_entry = fn.compiled_fn.serialize()
+            # Bundle the triton kernel side table with the serialized entry
+            bundle = (serialized_entry, triton_kernels, triton_constant_args)
+            result = pickle.dumps(bundle)
             return result
 
     @classmethod
@@ -55,8 +133,31 @@ class BundledAOTAutogradSerializableCallable(SerializableCallable):
         from torch._functorch._aot_autograd.aot_autograd_result import (
             deserialize_bundled_cache_entry,
         )
+        from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
 
-        entry = pickle.loads(data)
+        bundle = pickle.loads(data)
+
+        # Handle both old format (just entry) and new format (entry, kernels, const_args)
+        if isinstance(bundle, tuple) and len(bundle) == 3:
+            entry, triton_kernels, triton_constant_args = bundle
+        else:
+            # Backwards compatibility with old serialized artifacts
+            entry = bundle
+            triton_kernels = {}
+            triton_constant_args = {}
+
+        # See Note: [Triton Kernel Side Table Serialization]
+        # Restore triton kernel side table BEFORE deserializing the compiled function.
+        # The compiled function may reference kernels by index if any triton kernels
+        # don't go through inductor codegen (e.g., triton kernels outside of
+        # regional_inductor compiled regions).
+        for idx, kernel_info in triton_kernels.items():
+            kernel = _deserialize_triton_kernel(kernel_info)
+            kernel_side_table.id_to_kernel[idx] = kernel
+            kernel_side_table.kernel_to_id[kernel] = idx
+
+        for idx, args in triton_constant_args.items():
+            kernel_side_table.constant_args[idx] = args
 
         compiled_fn = deserialize_bundled_cache_entry(entry)
         return cls(compiled_fn)

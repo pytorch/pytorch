@@ -269,7 +269,8 @@ def generate_opcheck_tests(
                 for mark in pytestmark:
                     if isinstance(mark, pytest.Mark) and mark.name == "parametrize":
                         argnames, argvalues = mark.args
-                        assert not mark.kwargs, "NYI"
+                        if mark.kwargs:
+                            raise AssertionError("NYI: mark.kwargs is not empty")
                         # Special case for device, we want to run on all
                         # devices
                         if argnames != "device":
@@ -555,11 +556,20 @@ class OpCheckMode(TorchFunctionMode):
         self.prev_dynamo_disable = os.environ.get("TORCHDYNAMO_DISABLE", "")
         _is_inside_opcheck_mode.value = True
         os.environ["TORCHDYNAMO_DISABLE"] = "1"
+        # When running this test mode, we want to disable
+        # default torch.compile custom op checker
+        self.prev_functorch_config_for_checking_custom_op = (
+            torch._functorch.config.check_custom_op_aliasing
+        )
+        torch._functorch.config.check_custom_op_aliasing = False
         return super().__enter__(*args, **kwargs)
 
     def __exit__(self, *args, **kwargs):
         _is_inside_opcheck_mode.value = self.prev_is_opcheck_mode
         os.environ["TORCHDYNAMO_DISABLE"] = self.prev_dynamo_disable
+        torch._functorch.config.check_custom_op_aliasing = (
+            self.prev_functorch_config_for_checking_custom_op
+        )
         try:
             self.maybe_raise_errors_on_exit()
             if should_update_failures_dict():
@@ -799,8 +809,12 @@ class FailuresDict:
                 }
             else:
                 dct = json.loads(contents)
-                assert "data" in dct
-                assert "_version" in dct and dct["_version"] == VERSION
+                if "data" not in dct:
+                    raise AssertionError("Expected 'data' in dct")
+                if "_version" not in dct or dct["_version"] != VERSION:
+                    raise AssertionError(
+                        f"Expected '_version' in dct with value {VERSION}"
+                    )
         return FailuresDict(path, dct["data"])
 
     def _save(self, to_str=False) -> Optional[str]:

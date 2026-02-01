@@ -4,7 +4,7 @@ import operator
 from dataclasses import dataclass
 from enum import auto, Enum
 from functools import reduce
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch
 from torch.distributed.checkpoint.metadata import (
@@ -62,12 +62,12 @@ class WriteItem:
     type: WriteItemType
 
     # Size of bytesIO data to be written.
-    bytes_io_data: Optional[BytesIOWriteData] = None
+    bytes_io_data: BytesIOWriteData | None = None
 
     # Value present if it's a tensor write
-    tensor_data: Optional[TensorWriteData] = None
+    tensor_data: TensorWriteData | None = None
 
-    def tensor_storage_size(self) -> Optional[int]:
+    def tensor_storage_size(self) -> int | None:
         """
         Calculates the storage size of the underlying tensor, or None if this is not a tensor write.
 
@@ -240,7 +240,7 @@ class SavePlanner(abc.ABC):
     def set_up_planner(
         self,
         state_dict: STATE_DICT_TYPE,
-        storage_meta: Optional[StorageMeta] = None,
+        storage_meta: StorageMeta | None = None,
         is_coordinator: bool = False,
     ) -> None:
         """
@@ -281,7 +281,7 @@ class SavePlanner(abc.ABC):
         """
 
     @abc.abstractmethod
-    def resolve_data(self, write_item: WriteItem) -> Union[torch.Tensor, io.BytesIO]:
+    def resolve_data(self, write_item: WriteItem) -> torch.Tensor | io.BytesIO:
         """
         Transform and prepare ``write_item`` from ``state_dict`` for storage, ensuring idempotency and thread-safety.
 
@@ -379,7 +379,7 @@ class LoadPlanner:
     def set_up_planner(
         self,
         state_dict: STATE_DICT_TYPE,
-        metadata: Optional[Metadata] = None,
+        metadata: Metadata | None = None,
         is_coordinator: bool = False,
     ) -> None:
         """

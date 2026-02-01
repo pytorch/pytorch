@@ -3,6 +3,7 @@
 #include <c10/util/irange.h>
 #include <memory>
 #include <mutex>
+#include <type_traits>
 
 namespace at::native {
 
@@ -16,7 +17,7 @@ struct ParamsHash {
   // contents as char* when hashing
   static_assert(std::is_standard_layout_v<Params>, "Params is not POD");
 
-  size_t operator()(const Params& params) const {
+  size_t operator()(const Params& params) const noexcept {
     auto ptr = reinterpret_cast<const uint8_t*>(&params);
     uint32_t value = 0x811C9DC5;
     for (const auto i : c10::irange(sizeof(Params))) {
@@ -33,7 +34,7 @@ struct ParamsEqual {
   // contents as char* when comparing
   static_assert(std::is_standard_layout_v<Params>, "Params is not POD");
 
-  bool operator()(const Params& a, const Params& b) const {
+  bool operator()(const Params& a, const Params& b) const noexcept {
     auto ptr1 = reinterpret_cast<const uint8_t*>(&a);
     auto ptr2 = reinterpret_cast<const uint8_t*>(&b);
     return memcmp(ptr1, ptr2, sizeof(Params)) == 0;
@@ -48,12 +49,14 @@ struct ParamsWrapper {
   static_assert(
       std::is_standard_layout_v<T>,
       "ParamsWrapper cannot wrap non-POD data");
+  static_assert(std::is_trivially_copyable_v<T>,
+      "ParamsWrapper requires trivially copyable T");
 
-  ParamsWrapper() {
+  ParamsWrapper() noexcept {
     memset(&(this->pod), 0, sizeof(this->pod));
   }
 
-  ParamsWrapper(const ParamsWrapper& other) {
+  ParamsWrapper(const ParamsWrapper& other) noexcept {
     memcpy(&(this->pod), &(other.pod), sizeof(this->pod));
   }
 
@@ -61,7 +64,7 @@ struct ParamsWrapper {
     memcpy(&(this->pod), &(other.pod), sizeof(this->pod));
   }
 
-  ParamsWrapper& operator=(const ParamsWrapper& other) {
+  ParamsWrapper& operator=(const ParamsWrapper& other) noexcept {
     memcpy(&(this->pod), &(other.pod), sizeof(this->pod));
     return *this;
   }
@@ -90,7 +93,7 @@ struct ParamsWrapperHash {
       std::is_standard_layout_v<decltype(ParamsWrapper::pod)>,
       "ParamsWrapper cannot wrap non-POD data");
 
-  size_t operator()(const ParamsWrapper& params_wrapper) const {
+  size_t operator()(const ParamsWrapper& params_wrapper) const noexcept {
     auto ptr = reinterpret_cast<const uint8_t*>(&(params_wrapper.pod));
     uint32_t value = 0x811C9DC5;
     for (const auto i : c10::irange(sizeof(params_wrapper.pod))) {

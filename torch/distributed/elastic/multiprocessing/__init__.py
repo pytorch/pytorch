@@ -102,15 +102,15 @@ __all__ = [
 
 def start_processes(
     name: str,
-    entrypoint: Union[Callable, str],
+    entrypoint: Callable | str,
     args: dict[int, tuple],
     envs: dict[int, dict[str, str]],
     logs_specs: LogsSpecs,
-    log_line_prefixes: Optional[dict[int, str]] = None,
+    log_line_prefixes: dict[int, str] | None = None,
     start_method: str = "spawn",
-    numa_options: Optional[NumaOptions] = None,
-    duplicate_stdout_filters: Optional[list[str]] = None,
-    duplicate_stderr_filters: Optional[list[str]] = None,
+    numa_options: NumaOptions | None = None,
+    duplicate_stdout_filters: list[str] | None = None,
+    duplicate_stderr_filters: list[str] | None = None,
 ) -> PContext:
     """
     Start ``n`` copies of ``entrypoint`` processes with the provided options.

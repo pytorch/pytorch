@@ -1,5 +1,4 @@
 #include <c10/util/Exception.h>
-#include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/inliner.h>
@@ -79,7 +78,7 @@ auto compilation_unit = std::make_shared<CompilationUnit>();
 
 const std::optional<const FunctionSchema*> getInplaceVariant(
     const FunctionSchema& base_schema) {
-  auto inplace_variants =
+  auto& inplace_variants =
       getAllOperatorsFor(c10::Symbol::fromQualString(base_schema.name() + "_"));
 
   for (const auto& variant : inplace_variants) {

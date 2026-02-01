@@ -101,14 +101,23 @@ def test_success_runs_all_steps_and_uses_env_and_workdir(monkeypatch, patch_modu
     cmds = [_get_cmd(c) for c in calls]
     checks = [_get_check(c) for c in calls]
 
-    assert cmds == [
+    expected_cmds = [
         "export A=x && pytest -q",
         "export B=y && pytest -q tests/unit",
     ]
-    assert all(chk is False for chk in checks)
+    if cmds != expected_cmds:
+        raise AssertionError(f"Expected cmds={expected_cmds}, got cmds={cmds}")
+    if not all(chk is False for chk in checks):
+        raise AssertionError(f"Expected all checks to be False, got checks={checks}")
 
-    assert patch_module.workdir_calls == ["tests"]
-    assert patch_module.temp_calls == [{"GLOBAL_FLAG": "1"}]
+    if patch_module.workdir_calls != ["tests"]:
+        raise AssertionError(
+            f"Expected workdir_calls=['tests'], got {patch_module.workdir_calls}"
+        )
+    if patch_module.temp_calls != [{"GLOBAL_FLAG": "1"}]:
+        raise AssertionError(
+            f"Expected temp_calls=[{{'GLOBAL_FLAG': '1'}}], got {patch_module.temp_calls}"
+        )
 
 
 def test_installs_packages_when_present(monkeypatch, patch_module):
@@ -137,7 +146,10 @@ def test_raises_on_missing_plan(patch_module):
     with pytest.raises(RuntimeError) as ei:
         run_test_plan("nope", "cpu", tests_map={})
 
-    assert "test nope not found" in str(ei.value)
+    if "test nope not found" not in str(ei.value):
+        raise AssertionError(
+            f"Expected 'test nope not found' in error, got: {ei.value}"
+        )
 
 
 def test_aggregates_failures_and_raises(monkeypatch, patch_module):
@@ -161,11 +173,15 @@ def test_aggregates_failures_and_raises(monkeypatch, patch_module):
         run_test_plan("mix", "cpu", tests_map)
 
     msg = str(ei.value)
-    assert "2 pytest runs failed" in msg
+    if "2 pytest runs failed" not in msg:
+        raise AssertionError(f"Expected '2 pytest runs failed' in error, got: {msg}")
     # Ensure logger captured failed tests list
     patch_module.logger.error.assert_called_once()
     # And we attempted all three commands
-    assert patch_module.run_command.call_count == 3
+    if patch_module.run_command.call_count != 3:
+        raise AssertionError(
+            f"Expected run_command.call_count=3, got {patch_module.run_command.call_count}"
+        )
 
 
 def test_custom_working_directory_used(patch_module):
@@ -182,4 +198,7 @@ def test_custom_working_directory_used(patch_module):
     patch_module.run_command.return_value = 0
     run_test_plan("customwd", "cpu", tests_map)
 
-    assert patch_module.workdir_calls == ["examples/ci"]
+    if patch_module.workdir_calls != ["examples/ci"]:
+        raise AssertionError(
+            f"Expected workdir_calls=['examples/ci'], got {patch_module.workdir_calls}"
+        )

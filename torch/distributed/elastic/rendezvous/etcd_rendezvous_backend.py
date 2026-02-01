@@ -7,7 +7,7 @@
 
 import binascii
 from base64 import b64decode, b64encode
-from typing import cast, Optional
+from typing import cast
 
 import urllib3.exceptions  # type: ignore[import]
 
@@ -49,8 +49,8 @@ class EtcdRendezvousBackend(RendezvousBackend):
         self,
         client: etcd.Client,
         run_id: str,
-        key_prefix: Optional[str] = None,
-        ttl: Optional[int] = None,
+        key_prefix: str | None = None,
+        ttl: int | None = None,
     ) -> None:
         if not run_id:
             raise ValueError("The run id must be a non-empty string.")
@@ -72,7 +72,7 @@ class EtcdRendezvousBackend(RendezvousBackend):
         """See base class."""
         return "etcd-v2"
 
-    def get_state(self) -> Optional[tuple[bytes, Token]]:
+    def get_state(self) -> tuple[bytes, Token] | None:
         """See base class."""
         try:
             result = self._client.read(self._key)
@@ -86,8 +86,8 @@ class EtcdRendezvousBackend(RendezvousBackend):
         return self._decode_state(result)
 
     def set_state(
-        self, state: bytes, token: Optional[Token] = None
-    ) -> Optional[tuple[bytes, Token, bool]]:
+        self, state: bytes, token: Token | None = None
+    ) -> tuple[bytes, Token, bool] | None:
         """See base class."""
         base64_state = b64encode(state).decode()
 

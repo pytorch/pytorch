@@ -9,7 +9,7 @@ import torch
 from torch import device, dtype, Tensor, types
 from torch.utils._exposed_in import exposed_in
 
-from .opaque_object import _OPAQUE_TYPES, is_opaque_type, OpaqueType, OpaqueTypeStr
+from .opaque_object import _OPAQUE_TYPES, is_opaque_type
 
 
 # This is used as a negative test for
@@ -128,7 +128,7 @@ def infer_schema(
         schema_type = None
         if annotation_type not in SUPPORTED_PARAM_TYPES:
             if is_opaque_type(annotation_type):
-                schema_type = _OPAQUE_TYPES[annotation_type]
+                schema_type = _OPAQUE_TYPES[annotation_type].class_name
             elif annotation_type == torch._C.ScriptObject:
                 error_fn(
                     f"Parameter {name}'s type cannot be inferred from the schema "
@@ -158,7 +158,8 @@ def infer_schema(
         else:
             schema_type = SUPPORTED_PARAM_TYPES[annotation_type]
 
-        assert schema_type is not None
+        if schema_type is None:
+            raise AssertionError(f"schema_type is None for param {name}")
 
         if type(mutates_args) is str:
             if mutates_args != UNKNOWN_MUTATES:
@@ -187,7 +188,10 @@ def infer_schema(
             elif isinstance(param.default, torch.dtype):
                 dtype_repr = str(param.default)
                 torch_dot = "torch."
-                assert dtype_repr.startswith(torch_dot)
+                if not dtype_repr.startswith(torch_dot):
+                    raise AssertionError(
+                        f"dtype repr {dtype_repr!r} must start with 'torch.'"
+                    )
                 default_repr = dtype_repr[len(torch_dot) :]
             else:
                 error_fn(
@@ -252,7 +256,6 @@ def derived_types(
 
 
 def get_supported_param_types():
-    # pyrefly: ignore [bad-assignment]
     data: list[tuple[Union[type, typing._SpecialForm], str, bool, bool, bool]] = [
         # (python type, schema type, type[] variant, type?[] variant, type[]? variant
         (Tensor, "Tensor", True, True, False),
@@ -263,8 +266,13 @@ def get_supported_param_types():
         (types.Number, "Scalar", True, False, False),
         (dtype, "ScalarType", False, False, False),
         (device, "Device", False, False, False),
-        (OpaqueType, OpaqueTypeStr, False, False, False),
     ]
+
+    if torch.distributed.is_available():
+        from torch.distributed.distributed_c10d import GroupName
+
+        data.append((typing.cast(type, GroupName), "str", False, False, False))
+
     result = []
     for line in data:
         result.extend(derived_types(*line))
@@ -296,7 +304,7 @@ def parse_return(annotation, error_fn):
                 f"Return has unsupported type {annotation}. "
                 f"The valid types are: {SUPPORTED_RETURN_TYPES}."
             )
-        # pyrefly: ignore [index-error]
+
         return SUPPORTED_RETURN_TYPES[annotation]
 
     args = typing.get_args(annotation)

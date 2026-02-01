@@ -932,7 +932,7 @@ def generate_tensor_like_override_tests(cls):
                 return [""]
             elif arg_type.startswith("int"):
                 return 0
-            elif arg_type in {"Stream"}:
+            elif arg_type == "Stream":
                 return torch.Stream()
             elif arg_type.startswith("float") or arg_type == "double":
                 return 1.0

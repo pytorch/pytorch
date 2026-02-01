@@ -27,10 +27,10 @@ const int SHUTDOWN_TIMEOUT = 2000; // 2s
 #endif
 
 struct ClientSession {
-  ClientSession(ManagerSocket s) : socket(std::move(s)), pid(0) {}
+  ClientSession(ManagerSocket s) : socket(std::move(s)) {}
 
   ManagerSocket socket;
-  pid_t pid;
+  pid_t pid{0};
 };
 
 static std::vector<struct pollfd> pollfds;

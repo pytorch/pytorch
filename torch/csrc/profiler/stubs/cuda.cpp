@@ -64,8 +64,8 @@ struct CUDAMethods : public ProfilerStubs {
   float elapsed(
       const ProfilerVoidEventStub* event_,
       const ProfilerVoidEventStub* event2_) const override {
-    auto event = (const ProfilerEventStub*)(event_);
-    auto event2 = (const ProfilerEventStub*)(event2_);
+    auto event = (const ProfilerEventStub*)event_;
+    auto event2 = (const ProfilerEventStub*)event2_;
     TORCH_CUDA_CHECK(cudaEventSynchronize(event->get()));
     TORCH_CUDA_CHECK(cudaEventSynchronize(event2->get()));
     float ms = 0;

@@ -2,7 +2,6 @@
 #include <ATen/core/functional.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/type_factory.h>
-#include <ATen/record_function.h>
 #include <c10/util/flat_hash_map.h>
 #include <torch/custom_class.h>
 #include <torch/custom_class_detail.h>

@@ -6,6 +6,7 @@ import heapq
 import logging
 from typing import Optional, TYPE_CHECKING, TypedDict, Union
 
+import torch
 from torch._environment import is_fbcode
 from torch._utils_internal import signpost_event
 from torch.utils._ordered_set import OrderedSet
@@ -22,6 +23,8 @@ if TYPE_CHECKING:
     from .dependencies import Dep
     from .scheduler import BaseSchedulerNode, SchedulerBuffer
 
+from .dependencies import WeakDep
+
 
 torch_log = logging.getLogger(__name__)
 
@@ -37,9 +40,21 @@ class PeakMemoryResult:
 class MemoryPlanningInfoForBuffer:
     size_alloc: int = 0
     size_free: int = 0
+    # succ_nodes used for buffer lifetime/freeing (excludes is_fake WeakDeps)
     succ_nodes: OrderedSet[BaseSchedulerNode] = dataclasses.field(
         default_factory=OrderedSet
     )
+    # succ_nodes used for node ordering (includes is_fake WeakDeps)
+    succ_nodes_for_ordering: OrderedSet[BaseSchedulerNode] = dataclasses.field(
+        default_factory=OrderedSet
+    )
+
+    def __post_init__(self) -> None:
+        torch._check(
+            len(self.succ_nodes) <= len(self.succ_nodes_for_ordering),
+            lambda: f"succ_nodes must be a subset of succ_nodes_for_ordering. "
+            f"len(succ_nodes)={len(self.succ_nodes)}, len(succ_nodes_for_ordering)={len(self.succ_nodes_for_ordering)}",
+        )
 
 
 @dataclasses.dataclass
@@ -85,9 +100,12 @@ def get_freeable_input_buf(
     def _dep_size_hint(dep: Dep) -> int:
         return V.graph.get_dep_size_hint(dep)
 
-    # get freeable input buffers' successor nodes and their sizes
-    # note that different deps can have the same name, so we use name as keys
+    # get freeable input buffers' successor nodes for memory lifetime (excludes is_fake WeakDeps)
+    # and for ordering (includes all deps)
     dep_name_to_succ_nodes: dict[str, OrderedSet[BaseSchedulerNode]] = (
+        collections.defaultdict(OrderedSet)
+    )
+    dep_name_to_succ_nodes_for_ordering: dict[str, OrderedSet[BaseSchedulerNode]] = (
         collections.defaultdict(OrderedSet)
     )
     dep_name_to_size: dict[str, int] = dict()
@@ -96,16 +114,22 @@ def get_freeable_input_buf(
         for dep in node.read_writes.reads:
             if dep.name in graph_inputs:
                 if not is_nonfreeable_buffers(dep):
-                    dep_name_to_succ_nodes[dep.name].add(node)
+                    # All deps contribute to ordering, but fake weak deps do not contribute to
+                    # memory liveness
+                    dep_name_to_succ_nodes_for_ordering[dep.name].add(node)
                     dep_name_to_size[dep.name] = _dep_size_hint(dep)
+                    if not (isinstance(dep, WeakDep) and dep.is_fake):
+                        dep_name_to_succ_nodes[dep.name].add(node)
 
     # create FreeableInputBuffer objects and add them to the returned dictionary
     name_to_freeable_input_buf: dict[str, FreeableInputBuffer] = dict()
-    for dep_name, succ_nodes in dep_name_to_succ_nodes.items():
+    for dep_name in dep_name_to_succ_nodes_for_ordering:
         name_to_freeable_input_buf[dep_name] = FreeableInputBuffer(
             dep_name,
             MemoryPlanningInfoForBuffer(
-                size_free=dep_name_to_size[dep_name], succ_nodes=succ_nodes
+                size_free=dep_name_to_size[dep_name],
+                succ_nodes=dep_name_to_succ_nodes[dep_name],
+                succ_nodes_for_ordering=dep_name_to_succ_nodes_for_ordering[dep_name],
             ),
         )
     return name_to_freeable_input_buf
@@ -210,14 +234,21 @@ def assign_memory_planning_info_for_scheduler_buffers(
     # get buffer sizes
     sched_buf_to_size = compute_size_for_scheduler_buffer(name_to_buf)
 
-    # get buffer's successor nodes
-    # note that different deps can have the same name, so we use name as keys
+    # get buffer's successor nodes for memory lifetime (excludes is_fake WeakDeps)
+    # and for ordering (includes all deps)
     dep_name_to_succ_nodes: dict[str, OrderedSet[BaseSchedulerNode]] = (
+        collections.defaultdict(OrderedSet)
+    )
+    dep_name_to_succ_nodes_for_ordering: dict[str, OrderedSet[BaseSchedulerNode]] = (
         collections.defaultdict(OrderedSet)
     )
     for node in nodes:
         for dep in node.unmet_dependencies:
-            dep_name_to_succ_nodes[dep.name].add(node)
+            # All deps contribute to ordering, but fake weak deps do not contribute to
+            # memory liveness
+            dep_name_to_succ_nodes_for_ordering[dep.name].add(node)
+            if not (isinstance(dep, WeakDep) and dep.is_fake):
+                dep_name_to_succ_nodes[dep.name].add(node)
 
     # iterate in reverse, so dependencies are picked up transitively.
     for mutating_buf_name, real_buf_name in reversed(
@@ -226,6 +257,9 @@ def assign_memory_planning_info_for_scheduler_buffers(
         dep_name_to_succ_nodes[real_buf_name] |= dep_name_to_succ_nodes[
             mutating_buf_name
         ]
+        dep_name_to_succ_nodes_for_ordering[real_buf_name] |= (
+            dep_name_to_succ_nodes_for_ordering[mutating_buf_name]
+        )
 
     # populate the MemoryPlanningInfoForBuffer attribute to each scheduler buffer
     # note: there are scheduler buffers not in dep_name_to_succ_nodes (e.g., graph outputs)
@@ -234,6 +268,7 @@ def assign_memory_planning_info_for_scheduler_buffers(
             size_alloc=sched_buf_to_size[buf_name][0],
             size_free=sched_buf_to_size[buf_name][1],
             succ_nodes=dep_name_to_succ_nodes[buf_name],
+            succ_nodes_for_ordering=dep_name_to_succ_nodes_for_ordering[buf_name],
         )
 
 
@@ -260,7 +295,7 @@ def assign_memory_planning_info_for_scheduler_nodes(
         succ_nodes = OrderedSet(
             succ_node
             for buffer in node.get_outputs()
-            for succ_node in buffer.mpi_buffer.succ_nodes
+            for succ_node in buffer.mpi_buffer.succ_nodes_for_ordering
         )
         node_to_succ_nodes[node] = succ_nodes
 
@@ -269,7 +304,8 @@ def assign_memory_planning_info_for_scheduler_nodes(
             node_to_pred_nodes[succ_node].add(node)
 
         # For each output buffer, add it as predecessor to its successor nodes
-        # TODO - is pred buffers needed ?
+        # Use succ_nodes (not succ_nodes_for_ordering) since pred_buffers is used
+        # for memory lifetime tracking, not ordering
         for buffer in node.get_outputs():
             for succ_node in buffer.mpi_buffer.succ_nodes:
                 node_to_pred_buffers[succ_node].add(buffer)

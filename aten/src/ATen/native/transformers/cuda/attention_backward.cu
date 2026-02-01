@@ -464,6 +464,9 @@ _efficient_attention_backward(
   }
 
   if (bias_requires_grad) {
+    TORCH_CHECK(
+        bias.has_value(),
+        "bias_requires_grad is true but no bias was provided");
     // force alignment for the last dim
     std::vector<int64_t> sz = bias->sizes().vec();
     int64_t lastDim = sz[sz.size() - 1];

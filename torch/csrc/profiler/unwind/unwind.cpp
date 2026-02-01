@@ -2,7 +2,6 @@
 #include <c10/util/Exception.h>
 #include <c10/util/env.h>
 #include <torch/csrc/profiler/unwind/unwind.h>
-#include <torch/csrc/utils/cpp_stacktraces.h>
 
 #if !defined(__linux__) || !defined(__x86_64__) || !defined(__has_include) || \
     !__has_include("ext/stdio_filebuf.h")
@@ -47,9 +46,7 @@ Stats stats() {
 #include <vector>
 
 #include <c10/util/irange.h>
-#include <cxxabi.h>
 #include <torch/csrc/profiler/unwind/communicate.h>
-#include <torch/csrc/profiler/unwind/dwarf_enums.h>
 #include <torch/csrc/profiler/unwind/eh_frame_hdr.h>
 #include <torch/csrc/profiler/unwind/fast_symbolizer.h>
 #include <torch/csrc/profiler/unwind/fde.h>

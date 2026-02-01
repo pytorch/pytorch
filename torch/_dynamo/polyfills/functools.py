@@ -16,8 +16,7 @@ _T = TypeVar("_T")
 _U = TypeVar("_U")
 
 
-class _INITIAL_MISSING:
-    pass
+_initial_missing = object()
 
 
 # Reference: https://docs.python.org/3/library/functools.html#functools.reduce
@@ -25,13 +24,13 @@ class _INITIAL_MISSING:
 def reduce(
     function: Callable[[_U, _T], _U],
     iterable: Iterable[_T],
-    initial: _U = _INITIAL_MISSING,  # type: ignore[assignment]
+    initial: _U = _initial_missing,  # type: ignore[assignment]
     /,
 ) -> _U:
     it = iter(iterable)
 
     value: _U
-    if initial is _INITIAL_MISSING:
+    if initial is _initial_missing:
         try:
             value = next(it)  # type: ignore[assignment]
         except StopIteration:

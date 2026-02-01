@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import math
 import warnings
-from typing import Optional, Union
 
 import torch
 from torch import nan, Tensor
@@ -18,7 +17,8 @@ _log_2 = math.log(2)
 
 
 def _mvdigamma(x: Tensor, p: int) -> Tensor:
-    assert x.gt((p - 1) / 2).all(), "Wrong domain for multivariate digamma function."
+    if not x.gt((p - 1) / 2).all():
+        raise AssertionError("Wrong domain for multivariate digamma function.")
     return torch.digamma(
         x.unsqueeze(-1)
         - torch.arange(p, dtype=x.dtype, device=x.device).div(2).expand(x.shape + (-1,))
@@ -79,17 +79,20 @@ class Wishart(ExponentialFamily):
 
     def __init__(
         self,
-        df: Union[Tensor, Number],
-        covariance_matrix: Optional[Tensor] = None,
-        precision_matrix: Optional[Tensor] = None,
-        scale_tril: Optional[Tensor] = None,
-        validate_args: Optional[bool] = None,
+        df: Tensor | Number,
+        covariance_matrix: Tensor | None = None,
+        precision_matrix: Tensor | None = None,
+        scale_tril: Tensor | None = None,
+        validate_args: bool | None = None,
     ) -> None:
-        assert (covariance_matrix is not None) + (scale_tril is not None) + (
-            precision_matrix is not None
-        ) == 1, (
-            "Exactly one of covariance_matrix or precision_matrix or scale_tril may be specified."
-        )
+        if (
+            (covariance_matrix is not None)
+            + (scale_tril is not None)
+            + (precision_matrix is not None)
+        ) != 1:
+            raise AssertionError(
+                "Exactly one of covariance_matrix or precision_matrix or scale_tril may be specified."
+            )
 
         param = next(
             p
@@ -131,6 +134,7 @@ class Wishart(ExponentialFamily):
                 stacklevel=2,
             )
 
+        # pyrefly: ignore [bad-argument-type]
         super().__init__(batch_shape, event_shape, validate_args=validate_args)
         self._batch_dims = [-(x + 1) for x in range(len(self._batch_shape))]
 

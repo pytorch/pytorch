@@ -18,6 +18,7 @@
 #include <ATen/native/cudnn/ConvShared.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
 #include <limits>
+#include <utility>
 #include <vector>
 
 #include <ATen/cudnn/Types.h>
@@ -27,8 +28,8 @@
 #include <ATen/TensorUtils.h>
 #include <c10/util/irange.h>
 
-#include <stdint.h>
 #include <algorithm>
+#include <cstdint>
 #include <functional>
 #include <iterator>
 #include <memory>
@@ -63,12 +64,11 @@
 // algo, under the hood, cudnn will run with the slower kernel since it sees
 // fastest algorithm combination with a sub optimal mathType.
 
-constexpr size_t operator"" _TiB(unsigned long long n) {
+constexpr size_t operator""_TiB(unsigned long long n) {
   return static_cast<size_t>(n) * 1024 * 1024 * 1024 * 1024;
 }
 
-namespace at {
-namespace native {
+namespace at::native {
 
 // Convenience struct for passing around descriptors and data
 // pointers
@@ -80,11 +80,8 @@ struct ConvolutionArgs {
   const Tensor &input, output, weight;
   ConvolutionDescriptor cdesc;
 
-  ConvolutionArgs(
-      const Tensor& input,
-      const Tensor& output,
-      const Tensor& weight)
-      : input(input), output(output), weight(weight) {}
+  ConvolutionArgs(const Tensor& input, Tensor output, Tensor weight)
+      : input(input), output(std::move(output)), weight(std::move(weight)) {}
 };
 
 std::ostream& operator<<(std::ostream& out, const ConvolutionArgs& args) {
@@ -141,7 +138,7 @@ BenchmarkCache<cudnnConvolutionBwdFilterAlgoPerf_t> bwd_filter_algos;
 // TODO: Stop manually allocating CUDA memory; allocate an ATen byte
 // tensor instead.
 struct Workspace {
-  Workspace(size_t size) : size(size), data(NULL) {
+  Workspace(size_t size) : size(size), data(nullptr) {
     // Sometimes cuDNN returns a workspace size > 2^63, this could makes the
     // allocation of workspace fail with some 64bit indexing error instead of an
     // OOM error. In such case, we manually fail with OOM.
@@ -150,8 +147,17 @@ struct Workspace {
     data = c10::cuda::CUDACachingAllocator::raw_alloc(size);
   }
   Workspace(const Workspace&) = delete;
-  Workspace(Workspace&&) = default;
-  Workspace& operator=(Workspace&&) = default;
+  Workspace(Workspace&& other) noexcept
+      : size(std::exchange(other.size, 0)),
+        data(std::exchange(other.data, nullptr)) {}
+  Workspace& operator=(const Workspace& other) = delete;
+  Workspace& operator=(Workspace&& other) noexcept {
+    if (this != &other) {
+      std::swap(size, other.size);
+      std::swap(data, other.data);
+    }
+    return *this;
+  }
   ~Workspace() {
     if (data) {
       c10::cuda::CUDACachingAllocator::raw_delete(data);
@@ -1236,7 +1242,6 @@ void raw_cudnn_convolution_add_relu_fallback_out(
   output.relu_();
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
 
 #endif

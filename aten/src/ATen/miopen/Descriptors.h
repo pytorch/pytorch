@@ -113,10 +113,11 @@ class TORCH_HIP_CPP_API TensorDescriptor : public Descriptor<
 private:
   void set(miopenDataType_t dataType, IntArrayRef sizes, IntArrayRef strides, size_t pad, bool nhwc);
 
-  void set(miopenDataType_t dataType, int dim, int* size, int* stride, bool nhwc) {
-    std::vector<int> strides_copy(stride, stride + dim);
-    fixSizeOneDimStride<int>(dim, size, strides_copy.data(), nhwc);
-    MIOPEN_CHECK(miopenSetTensorDescriptor(mut_desc(), dataType, dim, size, strides_copy.data()));
+  void set(miopenDataType_t dataType, int dim, size_t* size, size_t* stride, bool nhwc) {
+    std::vector<size_t> strides_copy(stride, stride + dim);
+    fixSizeOneDimStride<size_t>(dim, size, strides_copy.data(), nhwc);
+    // Use V2 API which supports 64-bit size/stride for large tensors
+    MIOPEN_CHECK(miopenSetTensorDescriptorV2(mut_desc(), dataType, dim, size, strides_copy.data()));
   }
 };
 
@@ -134,10 +135,11 @@ class TORCH_HIP_CPP_API FilterDescriptor : public Descriptor<
   void set(const at::Tensor &t, const at::MemoryFormat memory_format, int64_t pad = 0);
 
 private:
-  void set(miopenDataType_t dataType, int dim, int* size, int* stride, bool nhwc) {
-    std::vector<int> strides_copy(stride, stride + dim);
-    fixSizeOneDimStride<int>(dim, size, strides_copy.data(), nhwc);
-    MIOPEN_CHECK(miopenSetTensorDescriptor(mut_desc(), dataType, dim, size, strides_copy.data()));
+  void set(miopenDataType_t dataType, int dim, size_t* size, size_t* stride, bool nhwc) {
+    std::vector<size_t> strides_copy(stride, stride + dim);
+    fixSizeOneDimStride<size_t>(dim, size, strides_copy.data(), nhwc);
+    // Use V2 API which supports 64-bit size/stride for large tensors
+    MIOPEN_CHECK(miopenSetTensorDescriptorV2(mut_desc(), dataType, dim, size, strides_copy.data()));
   }
 };
 
