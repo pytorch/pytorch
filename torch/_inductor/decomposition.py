@@ -103,6 +103,7 @@ inductor_decompositions = get_decompositions(
         aten.triu_indices,
         aten.unbind_copy.int,
         aten.upsample_bilinear2d.vec,
+        aten.polar,
         quantized.linear_dynamic_fp16_unpacked_weight,
         _quantized.wrapped_quantized_linear,
     ]
