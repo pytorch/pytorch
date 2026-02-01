@@ -116,7 +116,7 @@ class FakeBackwardCFunction:
 
     def __getattr__(self, name: str) -> Any:
         if name == "saved_variables":
-            warnings.warn(
+            warnings.warn(  # noqa: B028
                 "'saved_variables' is deprecated; use 'saved_tensors'",
                 DeprecationWarning,
             )

@@ -247,7 +247,10 @@ class MetaTracer(torch.fx.Tracer):
                 raise AssertionError("Dont support composite output yet")
             rv.install_tensor_meta(meta_out)
         except Exception as e:
-            warnings.warn(f"Could not compute metadata for {kind} target {target}: {e}")
+            warnings.warn(
+                f"Could not compute metadata for {kind} target {target}: {e}",
+                stacklevel=2,
+            )
 
         return rv
 
