@@ -814,42 +814,36 @@ class OutputGraph(OutputGraphCommon):
             if self.profiler_state is None:
                 self.profiler_state = DynamoProfilerState()
             code = self.root_tx.f_code
-            self._profiler_start_ns = time.time_ns()
-            self._profiler_is_primitive = self.profiler_state.push(
+            self.profiler_state.push(
                 code.co_name,
                 code.co_filename,
                 code.co_firstlineno,
-                self._profiler_start_ns,
+                time.time_ns(),
             )
 
     def mark_bytecode_tracing_stop(self) -> None:
         self.compiler_trace_stack.close()
         # Record profiler timing for the root function and dump stats
-        if (
-            config.dynamo_profiler
-            and self.profiler_state is not None
-            and hasattr(self, "_profiler_start_ns")
-        ):
+        if config.dynamo_profiler and self.profiler_state is not None:
             from torch._dynamo.dynamo_profiler import FunctionTraceTiming
 
             stack_entry = self.profiler_state.pop()
             trace_end_ns = time.time_ns()
             if stack_entry is not None:
-                cumtime_ns = trace_end_ns - self._profiler_start_ns
+                cumtime_ns = trace_end_ns - stack_entry.start_time_ns
                 tottime_ns = cumtime_ns - stack_entry.child_time_ns
-                code = self.root_tx.f_code
                 timing = FunctionTraceTiming(
-                    func_name=code.co_name,
-                    filename=code.co_filename,
-                    firstlineno=code.co_firstlineno,
+                    func_name=stack_entry.func_name,
+                    filename=stack_entry.filename,
+                    firstlineno=stack_entry.firstlineno,
                     cumtime_ns=cumtime_ns,
                     tottime_ns=tottime_ns,
-                    bytecode_count=len(code.co_code),
+                    bytecode_count=len(self.root_tx.f_code.co_code),
                     inline_depth=0,
                     caller_func_name=None,
                     caller_filename=None,
                     caller_firstlineno=None,
-                    is_primitive_call=self._profiler_is_primitive,
+                    is_primitive_call=stack_entry.is_primitive_call,
                     call_stack=(),
                 )
                 self.profiler_state.record_timing(timing)
