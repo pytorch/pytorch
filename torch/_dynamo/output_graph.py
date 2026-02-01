@@ -795,19 +795,9 @@ class OutputGraph(OutputGraphCommon):
         # dynamo_flat_name_to_original_fqn mapping.
         self.used_inlined_inbuilt_modules_names: OrderedSet[str] = OrderedSet()
 
-        # Cache for AttrSource objects to avoid redundant construction.
-        # Key is (base_source, member), value is the AttrSource.
         self.attr_source_cache: dict[tuple[Source, str], AttrSource] = {}
 
     def get_chained_attr_source(self, base: Source, path: str) -> AttrSource:
-        """
-        Build an AttrSource chain from a dotted path with caching.
-
-        For a path like "a.b.c", this builds:
-            AttrSource(AttrSource(AttrSource(base, "a"), "b"), "c")
-
-        Intermediate sources are cached to avoid redundant construction.
-        """
         parts = path.split(".")
         result: Source = base
         for part in parts:
@@ -820,18 +810,9 @@ class OutputGraph(OutputGraphCommon):
     def get_chained_param_buffer_source(
         self, base: Source, path: str
     ) -> "ParamBufferSource":
-        """
-        Build a ParamBufferSource from a dotted path.
-
-        For a path like "a.b.c", this builds:
-            ParamBufferSource(AttrSource(AttrSource(base, "a"), "b"), "c")
-
-        The intermediate AttrSources are cached.
-        """
         parts = path.split(".")
         if len(parts) == 1:
             return ParamBufferSource(base, path)
-        # Build AttrSource chain for all but the last part
         intermediate_base = self.get_chained_attr_source(base, ".".join(parts[:-1]))
         return ParamBufferSource(intermediate_base, parts[-1])
 
