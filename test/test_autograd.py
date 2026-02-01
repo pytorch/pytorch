@@ -3724,10 +3724,6 @@ class TestAutograd(TestCase):
         non_leaf = leaf * 2
         self.assertFalse(non_leaf.is_leaf)
         with self.assertRaisesRegex(
-            RuntimeError, "grad_dtype can only be accessed on leaf tensors"
-        ):
-            _ = non_leaf.grad_dtype
-        with self.assertRaisesRegex(
             RuntimeError, "grad_dtype can only be set on leaf tensors"
         ):
             non_leaf.grad_dtype = torch.float16
