@@ -3378,8 +3378,11 @@ def _unwrap(x):
 def tensor(data, *, dtype=None, device=None, layout=None, pin_memory=False):
     assert_nyi(layout in (None, torch.strided), f"layout={layout}")
     assert_nyi(not pin_memory, "pin_memory")
-    if isinstance(_unwrap(data), int):
+    unwrapped_data = _unwrap(data)
+    if isinstance(unwrapped_data, int):
         dtype = dtype or torch.int64
+    elif isinstance(unwrapped_data, sympy.logic.boolalg.Boolean):
+        dtype = dtype or torch.bool
     else:
         dtype = dtype or torch.get_default_dtype()
 
