@@ -90,10 +90,14 @@ TEST(SerializationTest, ExtraFileHooksNoSecret) {
   {
     ExtraFilesMap extra;
     extra["metadata.json"] = "";
-    extra["secret.json"] = "";
     jit::load(ss, std::nullopt, extra);
     ASSERT_EQ(extra["metadata.json"], "abc");
-    ASSERT_EQ(extra["secret.json"], "");
+  }
+  ss.seekg(0);
+  {
+    ExtraFilesMap extra;
+    extra["secret.json"] = "";
+    ASSERT_ANY_THROW(jit::load(ss, std::nullopt, extra));
   }
 }
 
