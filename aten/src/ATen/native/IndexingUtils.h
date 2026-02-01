@@ -1,8 +1,8 @@
 #pragma once
 #include <ATen/ExpandUtils.h>
+#include <ATen/core/IListRef.h>
 #include <ATen/native/CanUse32BitIndexMath.h>
 #include <ATen/native/TensorIterator.h>
-#include <ATen/core/IListRef.h>
 #include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -15,9 +15,21 @@
 namespace at::native {
 
 [[noreturn]]
-static void invalid_mask(const Tensor & self, int64_t idx, const Tensor & mask, int64_t maskIdx) {
-  TORCH_CHECK_INDEX(false, "The shape of the mask ", mask.sizes(), " at index ", maskIdx,
-  " does not match the shape of the indexed tensor ", self.sizes(), " at index ", idx);
+static void invalid_mask(
+    const Tensor& self,
+    int64_t idx,
+    const Tensor& mask,
+    int64_t maskIdx) {
+  TORCH_CHECK_INDEX(
+      false,
+      "The shape of the mask ",
+      mask.sizes(),
+      " at index ",
+      maskIdx,
+      " does not match the shape of the indexed tensor ",
+      self.sizes(),
+      " at index ",
+      idx);
 }
 
 [[maybe_unused]] static std::vector<Tensor> expandTensors(
@@ -34,11 +46,12 @@ static void invalid_mask(const Tensor & self, int64_t idx, const Tensor & mask, 
       const auto& index = *index_opt;
       if (index.scalar_type() == kByte || index.scalar_type() == kBool) {
         if (index.scalar_type() == kByte) {
-          TORCH_WARN("indexing with dtype torch.uint8 is now deprecated," \
-          " please use a dtype torch.bool instead.");
+          TORCH_WARN(
+              "indexing with dtype torch.uint8 is now deprecated,"
+              " please use a dtype torch.bool instead.");
         }
-        // The sizes of the ByteTensor mask or bool tensor must match the sizes of the
-        // corresponding dimensions in self
+        // The sizes of the ByteTensor mask or bool tensor must match the sizes
+        // of the corresponding dimensions in self
         for (const auto j : c10::irange(index.dim())) {
           int64_t srcIdx = static_cast<int64_t>(result.size() + j);
           if (index.size(j) != self.size(srcIdx)) {
@@ -49,7 +62,8 @@ static void invalid_mask(const Tensor & self, int64_t idx, const Tensor & mask, 
         at::Tensor nonzero;
         if (ensure_same_device && index.device() != self.device()) {
           bool non_blocking = index.is_cpu() && self.device().is_cuda();
-          auto out = at::empty({0}, index.options().dtype(kLong).pinned_memory(non_blocking));
+          auto out = at::empty(
+              {0}, index.options().dtype(kLong).pinned_memory(non_blocking));
           nonzero = at::nonzero_out(out, index).to(self.device(), non_blocking);
         } else {
           nonzero = index.nonzero();
@@ -74,19 +88,25 @@ static void invalid_mask(const Tensor & self, int64_t idx, const Tensor & mask, 
     if (tensor.has_value() && tensor->defined()) {
       auto scalarType = tensor->scalar_type();
       if (allow_int) {
-        if (scalarType != kLong && scalarType != kByte && scalarType != kBool && scalarType != kInt) {
-            TORCH_CHECK_INDEX(false, "tensors used as indices must be long, int, byte or bool tensors");
+        if (scalarType != kLong && scalarType != kByte && scalarType != kBool &&
+            scalarType != kInt) {
+          TORCH_CHECK_INDEX(
+              false,
+              "tensors used as indices must be long, int, byte or bool tensors");
         }
       } else {
         if (scalarType != kLong && scalarType != kByte && scalarType != kBool) {
-            TORCH_CHECK_INDEX(false, "tensors used as indices must be long, byte or bool tensors");
+          TORCH_CHECK_INDEX(
+              false,
+              "tensors used as indices must be long, byte or bool tensors");
         }
       }
     }
   }
 }
 
-inline torch::List<std::optional<Tensor>> toListOfOptionalTensors(ArrayRef<Tensor> list) {
+inline torch::List<std::optional<Tensor>> toListOfOptionalTensors(
+    ArrayRef<Tensor> list) {
   torch::List<std::optional<Tensor>> result;
   result.reserve(list.size());
   for (const Tensor& a : list) {
@@ -95,20 +115,26 @@ inline torch::List<std::optional<Tensor>> toListOfOptionalTensors(ArrayRef<Tenso
   return result;
 }
 
-inline torch::List<std::optional<Tensor>> toListOfOptionalTensors(ArrayRef<IValue> list) {
+inline torch::List<std::optional<Tensor>> toListOfOptionalTensors(
+    ArrayRef<IValue> list) {
   torch::List<std::optional<Tensor>> result;
   result.reserve(list.size());
   for (const IValue& a : list) {
-    result.push_back(a.isTensor() ? std::optional<Tensor>(a.toTensor()) : std::optional<Tensor>());
+    result.push_back(
+        a.isTensor() ? std::optional<Tensor>(a.toTensor())
+                     : std::optional<Tensor>());
   }
   return result;
 }
 
 [[maybe_unused]] static bool hasContiguousSubspace(TensorList tl) {
   // true if all the non-null tensors are adjacent
-  auto isDefined = [](const Tensor & tensor){ return tensor.defined(); };
-  auto isNull = [](const Tensor & tensor){ return !tensor.defined(); };
+  auto isDefined = [](const Tensor& tensor) { return tensor.defined(); };
+  auto isNull = [](const Tensor& tensor) { return !tensor.defined(); };
   auto start = std::find_if(tl.begin(), tl.end(), isDefined);
+  if (start == tl.end()) {
+    return true;
+  }
   auto stop = std::find_if(tl.rbegin(), tl.rend(), isDefined);
   auto it = std::find_if(start, stop.base(), isNull);
   return it == stop.base();
@@ -163,7 +189,8 @@ transposeToFrontAndInvPerm(const Tensor& self, TensorList indices) {
   for (const auto i : c10::irange(self.dim())) {
     invPerm[dims[i]] = i;
   }
-  return std::make_tuple(self.permute(dims), std::move(transposedIndices), std::move(invPerm));
+  return std::make_tuple(
+      self.permute(dims), std::move(transposedIndices), std::move(invPerm));
 }
 
 struct AdvancedIndex {
@@ -177,5 +204,4 @@ struct AdvancedIndex {
   int64_t dims_after;
 };
 
-
-} //namespace at::native
+} // namespace at::native
