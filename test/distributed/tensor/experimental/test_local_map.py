@@ -196,8 +196,8 @@ class TestLocalMap(DTensorTestBase):
         with comm_mode:
             Y_dt = local_mm_forward(X_dt, W_dt)
 
-        # with uneven sharding support, one all-gather for shape computation
-        self.assertEqual(comm_mode.get_total_counts(), 1)
+        # even sharding - no communication needed
+        self.assertEqual(comm_mode.get_total_counts(), 0)
         for placement in Y_dt.placements:
             self.assertTrue(placement.is_shard(dim=0))
         self.assertEqual(Y_dt.full_tensor(), Y)
@@ -212,7 +212,7 @@ class TestLocalMap(DTensorTestBase):
         with comm_mode_2:
             Y_dt = local_mm_forward(X_dt, W_dt)
 
-        self.assertEqual(comm_mode_2.get_total_counts(), 1)
+        self.assertEqual(comm_mode_2.get_total_counts(), 0)
         for placement in Y_dt.placements:
             self.assertTrue(placement.is_shard(dim=0))
         self.assertEqual(Y_dt.full_tensor(), Y)
@@ -230,7 +230,7 @@ class TestLocalMap(DTensorTestBase):
         with comm_mode_3:
             Y_dt = local_mul_forward(X_dt, 2.0)
 
-        self.assertEqual(comm_mode_3.get_total_counts(), 1)
+        self.assertEqual(comm_mode_3.get_total_counts(), 0)
         for placement in Y_dt.placements:
             self.assertTrue(placement.is_shard(dim=0))
         self.assertEqual(Y_dt.full_tensor(), Y)
@@ -415,11 +415,13 @@ class TestLocalMap(DTensorTestBase):
         ]
         self.assertEqual(local_x_size, expected_sizes[self.rank])
 
+        # with allow_uneven_sharding=True
         local_mm_forward = local_map(
             mm_forward,
             out_placements=row_wise,
             in_placements=(row_wise, replicate),
             device_mesh=device_mesh,
+            allow_uneven_sharding=True,
         )
 
         Y_dt = local_mm_forward(X_dt, W_dt)
@@ -427,6 +429,26 @@ class TestLocalMap(DTensorTestBase):
         self.assertEqual(Y_dt.full_tensor().shape, Y.shape)
         self.assertEqual(Y_dt.full_tensor(), Y)
         for placement in Y_dt.placements:
+            self.assertTrue(placement.is_shard(dim=0))
+
+        # with out_shapes provided (zero overhead)
+        local_mm_forward_shapes = local_map(
+            mm_forward,
+            out_placements=row_wise,
+            in_placements=(row_wise, replicate),
+            device_mesh=device_mesh,
+            out_shapes=[Y.shape],
+        )
+
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            Y_dt_shapes = local_mm_forward_shapes(X_dt, W_dt)
+
+        # should have no communication since shape is provided
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+        self.assertEqual(Y_dt_shapes.full_tensor().shape, Y.shape)
+        self.assertEqual(Y_dt_shapes.full_tensor(), Y)
+        for placement in Y_dt_shapes.placements:
             self.assertTrue(placement.is_shard(dim=0))
 
 
@@ -471,9 +493,8 @@ class TestLocalMap4GPU(DTensorTestBase):
         with comm_mode:
             Y_dt = local_mm_forward(X_dt, W_dt)
 
-        # with uneven sharding support, we do one all-gather to compute global shape
-        # for outputs with Shard placements (output has Shard(1))
-        self.assertEqual(comm_mode.get_total_counts(), 1)
+        # even sharding - no communication needed (fast path)
+        self.assertEqual(comm_mode.get_total_counts(), 0)
         # output local shape should be (8, 4)
         self.assertEqual(Y_dt.to_local().shape, (8, 4))
         # output lives in mesh_2d
@@ -499,6 +520,7 @@ class TestLocalMap4GPU(DTensorTestBase):
             out_placements=[Shard(0), Shard(1)],
             in_placements=([Shard(0), Shard(1)], None),
             device_mesh=device_mesh,
+            allow_uneven_sharding=True,
         )
 
         Y_dt = local_mul_forward(X_dt, scalar)
