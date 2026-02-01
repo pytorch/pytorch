@@ -4261,7 +4261,7 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
                 w.stride(1),
                 z.stride(0),
                 z.stride(1),
-                ALLOW_TF32=torch.backends.cuda.matmul.allow_tf32,
+                ALLOW_TF32=torch.backends.cuda.matmul.fp32_precision == "tf32",
             )
             return z
 
