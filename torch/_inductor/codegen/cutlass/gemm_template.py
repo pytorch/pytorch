@@ -11,7 +11,7 @@ from typing import Any, Optional, Union
 import torch
 import torch.utils._pytree as pytree
 from torch._inductor.autotune_process import TensorMeta
-from torch._inductor.codegen.cuda.cutlass_cache import maybe_fetch_ops
+from torch._inductor.codegen.cutlass.cache import maybe_fetch_ops
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 from torch._inductor.runtime.runtime_utils import dynamo_timed
 from torch._inductor.scheduler import BaseSchedulerNode
@@ -32,11 +32,11 @@ from ...ir import (
 from ...utils import is_dynamic, Placeholder
 from ...virtualized import V
 from ..common import IndentedBuffer
-from . import cutlass_utils
+from . import utils as cutlass_utils
 from .cuda_kernel import CUDATemplateKernel
 from .cuda_template import CUTLASSTemplate
-from .cutlass_python_evt import CutlassEVTCodegen, scaled_mm_evt
-from .cutlass_utils import (
+from .python_evt import CutlassEVTCodegen, scaled_mm_evt
+from .utils import (
     ACCUMULATOR_DTYPES,
     dtype_match,
     torch_dtype_to_cutlass_type,
@@ -1507,7 +1507,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         output_dtype: torch.dtype,
         accumulator_dtype: torch.dtype,
     ) -> tuple[str, str, str, EVTArgRenames]:
-        from .cutlass_lib_extensions.evt_extensions import create_example_tensors, trace
+        from .lib_extensions.evt_extensions import create_example_tensors, trace
 
         acc_dtype = torch_dtype_to_cutlass_type(accumulator_dtype)
         output_dtype = torch_dtype_to_cutlass_type(output_dtype)
@@ -1594,7 +1594,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         assert cutlass_utils.try_import_cutlass()
         import cutlass_library.library as cutlass_lib
 
-        from .cutlass_lib_extensions import gemm_operation_extensions as gemm_extensions
+        from .lib_extensions import gemm_operation_extensions as gemm_extensions
 
         emitter = gemm_extensions.EmitGemmUniversal3xInstanceWithEVT(evt_name=evt_name)  # type: ignore[call-arg]
 
@@ -1734,6 +1734,8 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
 
 
 class CUTLASS2xGemmTemplate(CUTLASSGemmTemplate):
+    """CUTLASS 2x GEMM Template, which is used to generate CUTLASS 2x GEMM kernels"""
+
     def __init__(
         self,
         input_nodes: list[Buffer],
