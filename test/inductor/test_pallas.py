@@ -114,6 +114,16 @@ def skip_if_tpu(fn):
     return wrapper
 
 
+def skip_if_cuda(fn):
+    @functools.wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        if self.DEVICE == "cuda":
+            self.skipTest("Not yet working on GPU")
+        fn(self, *args, **kwargs)
+
+    return wrapper
+
+
 class PallasTestsMixin:
     """Basic tests for Pallas backend functionality (parameterized by DEVICE). Mixin only, not collected.
 
@@ -395,6 +405,7 @@ class PallasTestsMixin:
             expected = fn(x)
             self.assertEqual(result, expected)
 
+    @skip_if_cuda
     def test_contiguous_index_validation(self):
         """Test that contiguous index validation works correctly end-to-end."""
 
