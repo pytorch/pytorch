@@ -73,7 +73,8 @@ class ConcreteProp(torch.fx.Interpreter):
 
     def propagate(self, *args: Any) -> Any:
         mod = self.module
-        assert isinstance(mod, fx.GraphModule)
+        if not isinstance(mod, fx.GraphModule):
+            raise AssertionError(f"expected fx.GraphModule, got {type(mod)}")
         with tqdm(
             desc="Saving intermediates for delta debugging",
             total=len(mod.graph.nodes),
@@ -185,7 +186,10 @@ class ReproState:
 
     def __post_init__(self) -> None:
         ph_nodes = get_placeholders(self.graph)
-        assert len(ph_nodes) == len(self.inps)
+        if len(ph_nodes) != len(self.inps):
+            raise AssertionError(
+                f"len(ph_nodes)={len(ph_nodes)} != len(self.inps)={len(self.inps)}"
+            )
 
 
 def minifier(
@@ -236,7 +240,8 @@ def minifier(
 
     writer = None
     if offload_to_disk:
-        assert save_dir is not None
+        if save_dir is None:
+            raise AssertionError("save_dir must not be None when offload_to_disk=True")
         writer = ContentStoreWriter(save_dir)
 
     ConcreteProp(fail_f, writer=writer, skip_offload=skip_offload).propagate(*inps)
@@ -357,7 +362,10 @@ def minifier(
 
         # output.args[0] is a tuple/list of nodes when returning multiple outputs
         output_args_raw = output.args[0]
-        assert isinstance(output_args_raw, (list, tuple))
+        if not isinstance(output_args_raw, (list, tuple)):
+            raise AssertionError(
+                f"expected output_args_raw to be list or tuple, got {type(output_args_raw)}"
+            )
         output_args = sorted(
             output_args_raw,
             key=lambda x: x.idx if isinstance(x, fx.Node) else int(1e9),  # type: ignore[attr-defined]
@@ -375,7 +383,10 @@ def minifier(
         cur_graph = cur_state.graph
         cur_inps = cur_state.inps
         ph_nodes = list(get_placeholders(cur_graph))
-        assert len(ph_nodes) == len(cur_inps)
+        if len(ph_nodes) != len(cur_inps):
+            raise AssertionError(
+                f"len(ph_nodes)={len(ph_nodes)} != len(cur_inps)={len(cur_inps)}"
+            )
 
         new_inps: list[torch.Tensor] = []
         for idx in range(len(ph_nodes)):
