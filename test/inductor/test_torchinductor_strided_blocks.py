@@ -815,12 +815,15 @@ class CommonTemplate:
         # HIP: Backend scheduling / fusion differences (e.g., Navi vs MI*)
         # may result in off-by-one differences in the number of block pointers.
         # Allow a small tolerance here to avoid backend-specific flakiness.
+        # We expect num_block_pointers to decrease by at most 1, and not increase.
         # The range created here is checked below.
         if torch.version.hip:
             min_num_block_pointers = max(
                 num_block_pointers - 1, 1
             )  # Expected at least one block descriptor for the input
-            max_num_block_pointers = num_block_pointers
+            max_num_block_pointers = (
+                num_block_pointers  # We don't expect num_block_pointers to increase.
+            )
             # Disable strict checking in _run_and_compare; we assert bounds manually below.
             num_block_pointers = None
 
