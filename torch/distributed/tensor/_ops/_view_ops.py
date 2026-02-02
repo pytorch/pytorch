@@ -431,10 +431,9 @@ def dim_transpose(ndim: int, dim1: int, dim2: int) -> DimMap:
 
 
 def dim_squeeze(shape: Shape, dim: DimsType | None = None) -> DimMap:
-    # FIXME: this is wrong when dim=None and one of the dimensions
-    # equals size of the mesh. For example squeeze(DTensor(tensor(4), Shard[0])) could
-    # end up as squeeze(tensor(1)) if we have 4 devices; this would lead to
-    # removal of a dimension that is not actually a singleton.
+    # Note: This function operates on local shape, but sharding_prop rewrites
+    # squeeze ops to squeeze.dims with only globally-singleton dims before
+    # this is called. See _adjust_squeeze_to_global_singletons in sharding_prop.py.
     ndim = len(shape)
     # Normalize dim to set of target dimensions to squeeze
     if dim is None:

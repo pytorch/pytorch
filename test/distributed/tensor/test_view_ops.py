@@ -772,6 +772,46 @@ class TestViewOps(DTensorTestBase):
         self.assertEqual(result13.shape, torch.Size([2, 2]))
         self.assertEqual(result13.placements, (Partial("max"),))
 
+        # Test 14: squeeze on sharded dim should NOT remove it
+        # Global shape [world_size, 8], local shape [1, 8] - dim 0 is NOT globally singleton
+        x14 = torch.arange(self.world_size * 8, device=self.device_type).reshape(
+            self.world_size, 8
+        ).float()
+        dt14 = distribute_tensor(x14, mesh, [Shard(0)])
+        result14 = dt14.squeeze()  # should not squeeze dim 0
+        self.assertEqual(result14.shape, torch.Size([self.world_size, 8]))
+        self.assertEqual(result14._local_tensor.shape, torch.Size([1, 8]))
+        self.assertEqual(result14.placements, (Shard(0),))
+
+        # Test 15: squeeze.dims on sharded dim should NOT remove it
+        x15 = torch.arange(self.world_size * 8, device=self.device_type).reshape(
+            self.world_size, 8
+        ).float()
+        dt15 = distribute_tensor(x15, mesh, [Shard(0)])
+        result15 = dt15.squeeze((0,))  # explicitly try to squeeze dim 0
+        self.assertEqual(result15.shape, torch.Size([self.world_size, 8]))
+        self.assertEqual(result15._local_tensor.shape, torch.Size([1, 8]))
+        self.assertEqual(result15.placements, (Shard(0),))
+
+        # Test 16: squeeze.dims with mixed singleton/non-singleton dims (filtering)
+        # Global shape [1, 4, 1] - dims 0 and 2 are singleton, dim 1 is not
+        # squeeze.dims([0, 1, 2]) should only squeeze dims 0 and 2
+        x16 = torch.randn(1, 4, 1, device=self.device_type)
+        dt16 = distribute_tensor(x16, mesh, [Replicate()])
+        result16 = dt16.squeeze((0, 1, 2))  # asks for all dims, but only 0,2 are singleton
+        self.assertEqual(result16.shape, torch.Size([4]))
+        self.assertEqual(result16.placements, (Replicate(),))
+
+        # Test 17: squeeze.dims filtering with sharded non-singleton dim
+        # Global [1, world_size, 1] sharded on dim 1, local [1, 1, 1]
+        # squeeze.dims([0, 1, 2]) should only squeeze dims 0 and 2 (globally singleton)
+        x17 = torch.randn(1, self.world_size, 1, device=self.device_type)
+        dt17 = distribute_tensor(x17, mesh, [Shard(1)])
+        result17 = dt17.squeeze((0, 1, 2))
+        self.assertEqual(result17.shape, torch.Size([self.world_size]))
+        self.assertEqual(result17._local_tensor.shape, torch.Size([1]))
+        self.assertEqual(result17.placements, (Shard(0),))  # dim shifted after squeeze
+
     @with_comms
     def test_storage_offset_slice(self):
         """
