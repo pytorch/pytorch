@@ -1600,9 +1600,21 @@ class CompileResult(Generic[_T]):
         """
         compile_meta = self.compile_meta
         cfg = self.config
-        known_constants = OrderedSet(
-            arg for i, arg in enumerate(arg_names) if i in constexprs
-        )
+
+        # For user-defined kernels, the signature is the authoritative source for
+        # all constexprs (both tl.constexpr annotated and runtime constants like N=1).
+        # For inductor-generated kernels, use annotation-based constexprs since
+        # size parameters like xnumel may be marked as "constexpr" in the signature
+        # but are handled differently.
+        if self.inductor_meta.get("user_defined_kernel"):
+            signature = compile_meta.get("signature", {})
+            known_constants = OrderedSet(
+                name for name, sig_type in signature.items() if sig_type == "constexpr"
+            )
+        else:
+            known_constants = OrderedSet(
+                arg for i, arg in enumerate(arg_names) if i in constexprs
+            )
 
         """
         https://github.com/pytorch/pytorch/issues/115344
@@ -3946,6 +3958,13 @@ class Grid3D(GridExpr):
         self.x_grid = self.ceildiv("xnumel", meta.get("XBLOCK"))
         self.y_grid = self.ceildiv("ynumel", meta.get("YBLOCK"))
         self.z_grid = self.ceildiv("znumel", meta.get("ZBLOCK"))
+
+
+class BatchMatmulGrid3D(GridExpr):
+    def generate(self, meta: dict[str, int]) -> None:
+        self.z_grid = self.ceildiv("xnumel", meta.get("XBLOCK"))
+        self.y_grid = self.ceildiv("ynumel", meta.get("YBLOCK"))
+        self.x_grid = self.ceildiv("znumel", meta.get("ZBLOCK"))
 
 
 class Grid2DWithYZOverflow(GridExpr):
