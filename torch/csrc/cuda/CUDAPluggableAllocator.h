@@ -11,6 +11,12 @@
 
 namespace torch::cuda::CUDAPluggableAllocator {
 
+#if defined(USE_ROCM)
+using streamType = c10::hip::HIPStream;
+#else
+using streamType = c10::cuda::CUDAStream;
+#endif
+
 TORCH_CUDA_CPP_API std::shared_ptr<
     c10::cuda::CUDACachingAllocator::CUDAAllocator>
 getCurrentAllocator();
@@ -92,15 +98,15 @@ struct TORCH_CUDA_CPP_API CUDAPluggableAllocator
   void cacheInfo(c10::DeviceIndex device, size_t* largestBlock) override;
   void* getBaseAllocation(void* ptr, size_t* size) override;
 
-  void recordStream(const c10::DataPtr& /*ptr*/, c10::cuda::CUDAStream stream)
-      override;
+  void recordStream(const c10::DataPtr& /*ptr*/, streamType stream) override;
 
   c10::CachingDeviceAllocator::DeviceStats getDeviceStats(
       c10::DeviceIndex device) override;
   void resetAccumulatedStats(c10::DeviceIndex device) override;
   void resetPeakStats(c10::DeviceIndex device) override;
   c10::cuda::CUDACachingAllocator::SnapshotInfo snapshot(
-      c10::cuda::MempoolId_t mempool) override;
+      c10::cuda::MempoolId_t mempool,
+      bool include_traces = true) override;
   void beginAllocateToPool(
       c10::DeviceIndex device,
       c10::cuda::MempoolId_t mempool_id,

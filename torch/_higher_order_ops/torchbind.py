@@ -39,7 +39,8 @@ class CallTorchBind(HigherOrderOperator):
         """
         Returns the schema of ``CallTorchbind.__call__``.
         """
-        assert isinstance(obj, torch._inductor.ir.TorchBindObject)
+        if not isinstance(obj, torch._inductor.ir.TorchBindObject):
+            raise AssertionError(f"expected obj to be TorchBindObject, got {type(obj)}")
         val = obj.get_real_obj()
         schema = val._get_method(method).schema
         schema_str = str(schema)
@@ -82,9 +83,10 @@ def enable_torchbind_tracing():
         torch.ScriptMethod.__call__ = torchbind_method_redispatch  # type: ignore[method-assign]
         yield
     finally:
-        assert KNOWN_TYPES.pop() is torch.ScriptObject, (
-            "Someone else messed with KNOWN_TYPES during tracing, exploding."
-        )
+        if KNOWN_TYPES.pop() is not torch.ScriptObject:
+            raise AssertionError(
+                "Someone else messed with KNOWN_TYPES during tracing, exploding."
+            )
         torch.ScriptMethod.__call__ = _orig_scriptmethod_call  # type: ignore[method-assign]
 
 
@@ -128,9 +130,10 @@ def inner(mode, *args, **kwargs):
 
     ret = track_tensor_tree(out, out_proxy, constant=None, tracer=mode.tracer)
     if "val" not in out_proxy.node.meta:
-        assert out is None or isinstance(out, (int, float, bool)), (
-            "Currently, only these constant dtypes are supported to be returned from torchbind methods."
-        )
+        if out is not None and not isinstance(out, (int, float, bool)):
+            raise AssertionError(
+                f"Currently, only these constant dtypes are supported to be returned from torchbind methods, got {type(out)}"
+            )
         out_proxy.node.meta["val"] = out
     return ret
 
