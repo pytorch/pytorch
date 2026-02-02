@@ -16,7 +16,7 @@ struct UnpackedSlice {
 
 // This mirrors Cpython's PySlice_Unpack method
 inline UnpackedSlice __PySlice_Unpack(PyObject* _r) {
-  PySliceObject* r = (PySliceObject*)_r;
+  PySliceObject* r = reinterpret_cast<PySliceObject*>(_r);
   /* this is harder to get right than you might think */
 
   c10::SymInt start_sym, stop_sym, step_sym;
@@ -32,7 +32,7 @@ inline UnpackedSlice __PySlice_Unpack(PyObject* _r) {
       if (r != 0) {
         throw python_error();
       }
-      return (Py_ssize_t)(c10::SymInt::min_representable_int());
+      return static_cast<Py_ssize_t>(c10::SymInt::min_representable_int());
     }
     return val;
   };

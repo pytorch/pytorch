@@ -50,7 +50,7 @@ static inline const char* toString(AttributeKind kind) {
       "tys",
       "ival"};
   AT_ASSERT(size_t(kind) < sizeof(names) / sizeof(*names));
-  return names[int(kind)];
+  return names[static_cast<int>(kind)];
 }
 
 struct AttributeValue {

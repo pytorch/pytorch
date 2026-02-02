@@ -20,7 +20,8 @@ extern TORCH_API PyTypeObject* THPStreamClass;
 void THPStream_init(PyObject* module);
 
 inline bool THPStream_Check(PyObject* obj) {
-  return THPStreamClass && PyObject_IsInstance(obj, (PyObject*)THPStreamClass);
+  return THPStreamClass &&
+      PyObject_IsInstance(obj, reinterpret_cast<PyObject*>(THPStreamClass));
 }
 
 TORCH_PYTHON_API PyObject* THPStream_Wrap(const c10::Stream& stream);

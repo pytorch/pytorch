@@ -171,7 +171,7 @@ void initLazyBindings(PyObject* module) {
       xtensors.emplace_back(TryGetLtcTensor(tensor));
     }
     auto hash = LazyGraphExecutor::Get()->GetGraphHash(xtensors);
-    std::string bin((const char*)&hash, sizeof(hash));
+    std::string bin(reinterpret_cast<const char*>(&hash), sizeof(hash));
     return py::bytes(bin);
   });
   lazy.def(
@@ -243,8 +243,10 @@ void initLazyBindings(PyObject* module) {
 
             auto infoptr = backend_data->info();
             auto deviceDataInfoPtr =
-                (torch::lazy::LazyGraphExecutor::DeviceDataInfo*)infoptr;
-            auto* tsDataPtr = (torch::lazy::TSData*)backend_data.get();
+                static_cast<torch::lazy::LazyGraphExecutor::DeviceDataInfo*>(
+                    infoptr);
+            auto* tsDataPtr =
+                static_cast<torch::lazy::TSData*>(backend_data.get());
 
             // dedup DeviceData by handle
             auto handle = tsDataPtr->GetHandle();
@@ -290,8 +292,8 @@ void initLazyBindings(PyObject* module) {
         TORCH_CHECK(
             cachedComputation,
             "Failed to get computation by hash. Maybe the entry get kicked out of the LRU cache"); // TODO implement a fallback mechanism, or make sure those entries never get kicked out
-        auto computationPtr =
-            (torch::lazy::TSComputation*)cachedComputation->computation.get();
+        auto computationPtr = static_cast<torch::lazy::TSComputation*>(
+            cachedComputation->computation.get());
 
         std::vector<torch::jit::IValue> stack;
         stack.reserve(graph_inputs.size());

@@ -17,7 +17,8 @@ TORCH_API PyObject* THPEvent_new(
     c10::DeviceType device_type,
     c10::EventFlag flag);
 inline bool THPEvent_Check(PyObject* obj) {
-  return THPEventClass && PyObject_IsInstance(obj, (PyObject*)THPEventClass);
+  return THPEventClass &&
+      PyObject_IsInstance(obj, reinterpret_cast<PyObject*>(THPEventClass));
 }
 
 #endif // THP_EVENT_INC

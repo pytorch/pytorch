@@ -71,7 +71,7 @@ struct ConstantTableValue : public SugaredValue {
     int64_t offset = strtoll(field_s + 1, &end, 10);
     if (field.size() < 2 || *end != 0)
       throw(ErrorReport(loc) << "invalid constant specifier: " << field);
-    if (offset < 0 || size_t(offset) >= constants_->size()) {
+    if (offset < 0 || static_cast<size_t>(offset) >= constants_->size()) {
       throw(
           ErrorReport(loc) << "constant index " << offset
                            << " is out of bounds (constant table has "

@@ -1036,7 +1036,7 @@ struct Vectorized<c10::qint32> : public VectorizedQuantizedConverter<
         scale,
         zero_point,
         float_vals.data(),
-        (c10::qint32*)qvals.data(),
+        reinterpret_cast<c10::qint32*>(qvals.data()),
         float_vals.size());
 
     return Vectorized<c10::qint32>::loadu(qvals.data());
@@ -1171,7 +1171,7 @@ struct Vectorized<c10::qint8> : public VectorizedQuantizedConverter<
         scale,
         zero_point,
         float_vals.data(),
-        (c10::qint8*)qvals.data(),
+        reinterpret_cast<c10::qint8*>(qvals.data()),
         float_vals.size());
 
     return Vectorized<c10::qint8>::loadu(qvals.data());
@@ -1295,7 +1295,7 @@ struct Vectorized<c10::quint8> : public VectorizedQuantizedConverter<
         scale,
         zero_point,
         float_vals.data(),
-        (c10::quint8*)qvals.data(),
+        reinterpret_cast<c10::quint8*>(qvals.data()),
         float_vals.size());
 
     return Vectorized<c10::quint8>::loadu(qvals.data());

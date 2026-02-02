@@ -203,7 +203,8 @@ static void fuseListAndListUnpack(Block* b) {
           Node* gather_indices = b->owningGraph()->create(onnx::Constant, 1);
           gather_indices->insertBefore(*it);
           gather_indices->t_(
-              attr::value, at::scalar_to_tensor(at::Scalar(int(i))));
+              attr::value,
+              at::scalar_to_tensor(at::Scalar(static_cast<int>(i))));
           Node* gather_node = b->owningGraph()->create(onnx::Gather, 1);
           gather_node->insertBefore(*it);
           gather_node->addInput(it->input());

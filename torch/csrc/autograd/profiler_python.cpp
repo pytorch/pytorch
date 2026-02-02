@@ -75,7 +75,7 @@ PyCodeObject* getCode<CallType::PyModuleCall>() {
                    .attr("__code__")
                    .ptr();
     TORCH_INTERNAL_ASSERT(PyCode_Check(res));
-    return (PyCodeObject*)res;
+    return reinterpret_cast<PyCodeObject*>(res);
   }();
   return module_call_code;
 }
@@ -90,7 +90,7 @@ PyCodeObject* getCode<CallType::PyOptimizerCall>() {
                    .attr("__code__")
                    .ptr();
     TORCH_INTERNAL_ASSERT(PyCode_Check(res));
-    return (PyCodeObject*)res;
+    return reinterpret_cast<PyCodeObject*>(res);
   }();
   return optimizer_step_code;
 }
@@ -435,7 +435,7 @@ void ValueCache::store<CallType::PyOptimizerCall>(
     const py::handle self{(PyObject*)key};
     std::vector<OptimizerInfo::ParameterInfo> params;
 
-    for (const auto& i : (py::list)self.attr("param_groups")) {
+    for (const auto& i : py::list(self.attr("param_groups"))) {
       for (auto& param : py::cast<py::dict>(i).attr("get")("params")) {
         if (THPVariable_CheckExact(param.ptr())) {
           // While `self.state` is permitted to store data in an arbitrary way,
@@ -636,7 +636,8 @@ struct ThreadLocalResults {
       ValueCache* value_cache,
       PythonTracer* active_tracer)
       : thread_state_{thread_state},
-        ctx_{(TraceContext*)TraceContextType.tp_alloc(&TraceContextType, 0)},
+        ctx_{reinterpret_cast<TraceContext*>(
+            TraceContextType.tp_alloc(&TraceContextType, 0))},
         value_cache_{value_cache},
         active_tracer_{active_tracer} {
     ctx_->thread_local_results_ = this;
@@ -1064,7 +1065,8 @@ PythonTracer::PythonTracer(torch::profiler::impl::RecordQueue* queue)
     // Note:
     //   This profile will not compose with other CPython profilers, and
     //   cannot be round tripped via `sys.settrace(sys.gettrace())`
-    PyEval_SetProfile(PythonTracer::pyProfileFn, (PyObject*)ctx);
+    PyEval_SetProfile(
+        PythonTracer::pyProfileFn, reinterpret_cast<PyObject*>(ctx));
   }
 #if IS_PYTHON_3_12
   registerMonitoringCallback();
@@ -1118,7 +1120,7 @@ void PythonTracer::register_gc_callback() {
   }
   static PyMethodDef method_def = {
       "gc_event_callback",
-      (PyCFunction)gc_event_callback,
+      static_cast<PyCFunction>(gc_event_callback),
       METH_VARARGS,
       nullptr};
   PyObject* capsule = PyCapsule_New(this, nullptr, nullptr);
@@ -1171,7 +1173,8 @@ void PythonTracer::restart() {
     if (thread_state->c_profilefunc == nullptr) {
       auto* ctx = thread_local_results_[cur_thread].ctx_;
       PyThreadState_Swap(thread_state);
-      PyEval_SetProfile(PythonTracer::pyProfileFn, (PyObject*)ctx);
+      PyEval_SetProfile(
+          PythonTracer::pyProfileFn, reinterpret_cast<PyObject*>(ctx));
     }
   }
 #if IS_PYTHON_3_12
@@ -1257,7 +1260,7 @@ void PythonTracer::recordCCall(
   // NB: For C calls a new frame is not created, so we use `frame` rather than
   //     `frame->f_back`.
   auto key = tls.intern<CallType::PyCCall, EventType::PyCCall>(
-      arg, (void*)(fn->m_ml), frame);
+      arg, reinterpret_cast<void*>(fn->m_ml), frame);
   queue_->getSubqueue()->emplace_py_call(key, c10::getApproximateTime());
   ++tls.active_frames_;
 }

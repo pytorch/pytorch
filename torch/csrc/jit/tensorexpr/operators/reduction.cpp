@@ -155,7 +155,7 @@ Tensor computeMax(
           ResultBuf,
           "nnc_aten_max_red",
           {InputBuf},
-          {max_dim, (int64_t)keep_dim}));
+          {max_dim, static_cast<int64_t>(keep_dim)}));
 }
 
 Tensor computeAdaptiveAvgPool2d(
