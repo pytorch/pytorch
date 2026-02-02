@@ -2,6 +2,7 @@
 # Owner(s): ["oncall: distributed"]
 
 from collections.abc import Callable, Sequence
+from contextlib import contextmanager
 from typing import Any, Optional
 from unittest import skip
 
@@ -9,6 +10,8 @@ import torch
 import torch.distributed as dist
 import torch.utils._pytree as pytree
 from torch import Tensor
+from torch.distributed._local_tensor import LocalTensorMode
+from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import (
     DeviceMesh,
     distribute_tensor,
@@ -18,8 +21,6 @@ from torch.distributed.tensor import (
     Replicate,
     Shard,
 )
-from torch.distributed._local_tensor import LocalTensorMode
-from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor._ops._math_ops import _NormPartial
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_utils import (
@@ -686,17 +687,15 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
             self.assertEqual(z.placements, (Partial(partial_op),))
             self.assertEqual(z.full_tensor(), expected_full)
 
-        # test max/min partial: neg flips max<->min
-        # -max(A1, A2) = min(-A1, -A2) and -min(A1, A2) = max(-A1, -A2)
+        # test non-sum/avg partial to assert the partial not getting propagated
+        # since -max(A1, A2) != max(-A1, -A2)
         d_input = DTensor.from_local(input, device_mesh, [Partial("max")])
-        z = torch.neg(d_input)
-        self.assertEqual(z.placements, (Partial("min"),))
-        self.assertEqual(z.to_local(), torch.full((8, 8), -2.0, device=self.device_type))
 
-        d_input = DTensor.from_local(input, device_mesh, [Partial("min")])
         z = torch.neg(d_input)
-        self.assertEqual(z.placements, (Partial("max"),))
-        self.assertEqual(z.to_local(), torch.full((8, 8), -2.0, device=self.device_type))
+        self.assertEqual(z.placements, (Replicate(),))
+        self.assertEqual(
+            z.to_local(), torch.full((8, 8), -2.0, device=self.device_type)
+        )
 
     @with_comms
     def test_maximum_mixed_partials_redistribution(self):
@@ -736,10 +735,6 @@ class PointwisePartialsTest(TestCase):
     These tests verify that Partial placements (P(max), P(min), P(avg), P(sum))
     are correctly preserved or transformed through various pointwise operations
     without requiring communication.
-
-    Note: These tests use LocalTensorMode which only simulates rank 0. Value
-    assertions that depend on distributed reduction are not possible, so we
-    only verify placement propagation and zero communication.
     """
 
     world_size = 2
@@ -754,44 +749,78 @@ class PointwisePartialsTest(TestCase):
         if dist.is_initialized():
             dist.destroy_process_group()
 
-    def test_add_partial_max_with_replicate(self):
-        """Test add: P(max) + R -> P(max)"""
+    @contextmanager
+    def local_tensor_env(self):
+        """Context manager that sets up LocalTensorMode, mesh, and CommDebugMode."""
         with LocalTensorMode(frozenset(range(self.world_size))):
             mesh = init_device_mesh("cpu", (self.world_size,))
             comm_mode = CommDebugMode()
+            yield mesh, comm_mode
 
-            d_input1 = DTensor.from_local(torch.ones(4, 4), mesh, [Partial("max")])
-            d_input2 = distribute_tensor(torch.ones(4, 4) * 10.0, mesh, [Replicate()])
+    def test_add_partial_max_with_replicate(self):
+        """
+        Test add: P(max) + R -> P(max)
+
+        Mathematically: max(a0, a1) + r = max(a0 + r, a1 + r)
+        Adding a replicated constant to P(max) preserves the max structure.
+        """
+        with self.local_tensor_env() as (mesh, comm_mode):
+            # Create P(max) input - each rank contributes to the max
+            input1 = torch.ones(4, 4) * (0 + 1)  # rank 0
+            d_input1 = DTensor.from_local(input1, mesh, [Partial("max")])
+
+            # Create replicated input
+            input2 = torch.ones(4, 4) * 10.0
+            d_input2 = distribute_tensor(input2, mesh, [Replicate()])
 
             with comm_mode:
                 result = d_input1 + d_input2
 
+            # Should preserve P(max) without communication
             self.assertEqual(comm_mode.get_total_counts(), 0)
             self.assertEqual(result.placements, (Partial("max"),))
+
+            # Verify: max(1,2) + 10 = 2 + 10 = 12
+            expected = float(self.world_size) + 10.0
+            self.assertEqual(result.full_tensor()[0, 0].item(), expected)
 
     def test_add_replicate_with_partial_max(self):
-        """Test add: R + P(max) -> P(max)"""
-        with LocalTensorMode(frozenset(range(self.world_size))):
-            mesh = init_device_mesh("cpu", (self.world_size,))
-            comm_mode = CommDebugMode()
+        """
+        Test add: R + P(max) -> P(max)
 
-            d_input1 = distribute_tensor(torch.ones(4, 4) * 10.0, mesh, [Replicate()])
-            d_input2 = DTensor.from_local(torch.ones(4, 4), mesh, [Partial("max")])
+        Mathematically: r + max(a0, a1) = max(r + a0, r + a1)
+        """
+        with self.local_tensor_env() as (mesh, comm_mode):
+            # Create replicated input
+            input1 = torch.ones(4, 4) * 10.0
+            d_input1 = distribute_tensor(input1, mesh, [Replicate()])
+
+            # Create P(max) input
+            input2 = torch.ones(4, 4) * (0 + 1)
+            d_input2 = DTensor.from_local(input2, mesh, [Partial("max")])
 
             with comm_mode:
                 result = d_input1 + d_input2
 
+            # Should preserve P(max) without communication
             self.assertEqual(comm_mode.get_total_counts(), 0)
             self.assertEqual(result.placements, (Partial("max"),))
 
-    def test_add_partial_min_with_replicate(self):
-        """Test add: P(min) + R -> P(min)"""
-        with LocalTensorMode(frozenset(range(self.world_size))):
-            mesh = init_device_mesh("cpu", (self.world_size,))
-            comm_mode = CommDebugMode()
+            expected = 10.0 + float(self.world_size)
+            self.assertEqual(result.full_tensor()[0, 0].item(), expected)
 
-            d_input1 = DTensor.from_local(torch.ones(4, 4), mesh, [Partial("min")])
-            d_input2 = distribute_tensor(torch.ones(4, 4) * 10.0, mesh, [Replicate()])
+    def test_add_partial_min_with_replicate(self):
+        """
+        Test add: P(min) + R -> P(min)
+
+        Mathematically: min(a0, a1) + r = min(a0 + r, a1 + r)
+        """
+        with self.local_tensor_env() as (mesh, comm_mode):
+            input1 = torch.ones(4, 4) * (0 + 1)
+            d_input1 = DTensor.from_local(input1, mesh, [Partial("min")])
+
+            input2 = torch.ones(4, 4) * 10.0
+            d_input2 = distribute_tensor(input2, mesh, [Replicate()])
 
             with comm_mode:
                 result = d_input1 + d_input2
@@ -799,14 +828,23 @@ class PointwisePartialsTest(TestCase):
             self.assertEqual(comm_mode.get_total_counts(), 0)
             self.assertEqual(result.placements, (Partial("min"),))
 
-    def test_add_partial_avg_with_replicate(self):
-        """Test add: P(avg) + R -> P(avg)"""
-        with LocalTensorMode(frozenset(range(self.world_size))):
-            mesh = init_device_mesh("cpu", (self.world_size,))
-            comm_mode = CommDebugMode()
+            # min(1,2) + 10 = 1 + 10 = 11
+            expected = 1.0 + 10.0
+            self.assertEqual(result.full_tensor()[0, 0].item(), expected)
 
-            d_input1 = DTensor.from_local(torch.ones(4, 4), mesh, [Partial("avg")])
-            d_input2 = distribute_tensor(torch.ones(4, 4) * 10.0, mesh, [Replicate()])
+    def test_add_partial_avg_with_replicate(self):
+        """
+        Test add: P(avg) + R -> P(avg)
+
+        Mathematically: avg(a0, a1) + r = avg(a0 + r, a1 + r)
+        Note: This only works when adding to partial, not when partial is added to R.
+        """
+        with self.local_tensor_env() as (mesh, comm_mode):
+            input1 = torch.ones(4, 4) * (0 + 1)
+            d_input1 = DTensor.from_local(input1, mesh, [Partial("avg")])
+
+            input2 = torch.ones(4, 4) * 10.0
+            d_input2 = distribute_tensor(input2, mesh, [Replicate()])
 
             with comm_mode:
                 result = d_input1 + d_input2
@@ -814,29 +852,49 @@ class PointwisePartialsTest(TestCase):
             self.assertEqual(comm_mode.get_total_counts(), 0)
             self.assertEqual(result.placements, (Partial("avg"),))
 
-    def test_sub_replicate_partial_max_gives_partial_min(self):
-        """Test sub: R - P(max) -> P(min)"""
-        with LocalTensorMode(frozenset(range(self.world_size))):
-            mesh = init_device_mesh("cpu", (self.world_size,))
-            comm_mode = CommDebugMode()
+            # avg(1,2) + 10 = 1.5 + 10 = 11.5
+            expected = (
+                sum(i + 1 for i in range(self.world_size)) / self.world_size + 10.0
+            )
+            self.assertEqual(result.full_tensor()[0, 0].item(), expected)
 
-            d_input1 = distribute_tensor(torch.ones(4, 4) * 10.0, mesh, [Replicate()])
-            d_input2 = DTensor.from_local(torch.ones(4, 4), mesh, [Partial("max")])
+    def test_sub_replicate_partial_max_gives_partial_min(self):
+        """
+        Test sub: R - P(max) -> P(min)
+
+        Mathematically: r - max(a0, a1) = min(r - a0, r - a1)
+        Subtracting a max gives a min (negation flips the ordering).
+        """
+        with self.local_tensor_env() as (mesh, comm_mode):
+            input1 = torch.ones(4, 4) * 10.0
+            d_input1 = distribute_tensor(input1, mesh, [Replicate()])
+
+            input2 = torch.ones(4, 4) * (0 + 1)
+            d_input2 = DTensor.from_local(input2, mesh, [Partial("max")])
 
             with comm_mode:
                 result = d_input1 - d_input2
 
             self.assertEqual(comm_mode.get_total_counts(), 0)
+            # R - P(max) should give P(min)
             self.assertEqual(result.placements, (Partial("min"),))
 
-    def test_sub_replicate_partial_min_gives_partial_max(self):
-        """Test sub: R - P(min) -> P(max)"""
-        with LocalTensorMode(frozenset(range(self.world_size))):
-            mesh = init_device_mesh("cpu", (self.world_size,))
-            comm_mode = CommDebugMode()
+            # 10 - max(1,2) = 10 - 2 = 8
+            expected = 10.0 - float(self.world_size)
+            self.assertEqual(result.full_tensor()[0, 0].item(), expected)
 
-            d_input1 = distribute_tensor(torch.ones(4, 4) * 10.0, mesh, [Replicate()])
-            d_input2 = DTensor.from_local(torch.ones(4, 4), mesh, [Partial("min")])
+    def test_sub_replicate_partial_min_gives_partial_max(self):
+        """
+        Test sub: R - P(min) -> P(max)
+
+        Mathematically: r - min(a0, a1) = max(r - a0, r - a1)
+        """
+        with self.local_tensor_env() as (mesh, comm_mode):
+            input1 = torch.ones(4, 4) * 10.0
+            d_input1 = distribute_tensor(input1, mesh, [Replicate()])
+
+            input2 = torch.ones(4, 4) * (0 + 1)
+            d_input2 = DTensor.from_local(input2, mesh, [Partial("min")])
 
             with comm_mode:
                 result = d_input1 - d_input2
@@ -844,14 +902,27 @@ class PointwisePartialsTest(TestCase):
             self.assertEqual(comm_mode.get_total_counts(), 0)
             self.assertEqual(result.placements, (Partial("max"),))
 
-    def test_maximum_partial_min_with_replicate(self):
-        """Test maximum: P(min), R -> P(min)"""
-        with LocalTensorMode(frozenset(range(self.world_size))):
-            mesh = init_device_mesh("cpu", (self.world_size,))
-            comm_mode = CommDebugMode()
+            # 10 - min(1,2) = 10 - 1 = 9
+            expected = 10.0 - 1.0
+            self.assertEqual(result.full_tensor()[0, 0].item(), expected)
 
-            d_input1 = DTensor.from_local(torch.ones(4, 4), mesh, [Partial("min")])
-            d_input2 = distribute_tensor(torch.ones(4, 4) * 0.5, mesh, [Replicate()])
+    def test_maximum_partial_min_with_replicate(self):
+        """
+        Test maximum: P(min), R -> P(min)
+
+        Mathematically: max(min(a0, a1), r) = min(max(a0, r), max(a1, r))
+        When r >= all ai, this simplifies to r (replicate).
+        But for the general case where each rank's value differs,
+        the result is P(min) of the per-rank maximums.
+        """
+        with self.local_tensor_env() as (mesh, comm_mode):
+            # Each rank has a different value: rank 0 has 1, rank 1 has 2
+            input1 = torch.ones(4, 4) * (0 + 1)
+            d_input1 = DTensor.from_local(input1, mesh, [Partial("min")])
+
+            # Replicate input smaller than all rank values for interesting test
+            input2 = torch.ones(4, 4) * 0.5
+            d_input2 = distribute_tensor(input2, mesh, [Replicate()])
 
             with comm_mode:
                 result = torch.maximum(d_input1, d_input2)
@@ -859,14 +930,23 @@ class PointwisePartialsTest(TestCase):
             self.assertEqual(comm_mode.get_total_counts(), 0)
             self.assertEqual(result.placements, (Partial("min"),))
 
-    def test_minimum_partial_max_with_replicate(self):
-        """Test minimum: P(max), R -> P(max)"""
-        with LocalTensorMode(frozenset(range(self.world_size))):
-            mesh = init_device_mesh("cpu", (self.world_size,))
-            comm_mode = CommDebugMode()
+            # min(1,2) vs 0.5 -> max(min(), 0.5) = max(1, 0.5) = 1
+            # Actually: min(max(1, 0.5), max(2, 0.5)) = min(1, 2) = 1
+            self.assertEqual(result.full_tensor()[0, 0].item(), 1.0)
 
-            d_input1 = DTensor.from_local(torch.ones(4, 4), mesh, [Partial("max")])
-            d_input2 = distribute_tensor(torch.ones(4, 4) * 10.0, mesh, [Replicate()])
+    def test_minimum_partial_max_with_replicate(self):
+        """
+        Test minimum: P(max), R -> P(max)
+
+        Mathematically: min(max(a0, a1), r) = max(min(a0, r), min(a1, r))
+        """
+        with self.local_tensor_env() as (mesh, comm_mode):
+            input1 = torch.ones(4, 4) * (0 + 1)
+            d_input1 = DTensor.from_local(input1, mesh, [Partial("max")])
+
+            # Replicate input larger than all rank values
+            input2 = torch.ones(4, 4) * 10.0
+            d_input2 = distribute_tensor(input2, mesh, [Replicate()])
 
             with comm_mode:
                 result = torch.minimum(d_input1, d_input2)
@@ -874,27 +954,38 @@ class PointwisePartialsTest(TestCase):
             self.assertEqual(comm_mode.get_total_counts(), 0)
             self.assertEqual(result.placements, (Partial("max"),))
 
-    def test_neg_partial_max_to_min(self):
-        """Test neg: P(max) -> P(min)"""
-        with LocalTensorMode(frozenset(range(self.world_size))):
-            mesh = init_device_mesh("cpu", (self.world_size,))
-            comm_mode = CommDebugMode()
+            # max(min(1,10), min(2,10)) = max(1,2) = 2
+            self.assertEqual(result.full_tensor()[0, 0].item(), float(self.world_size))
 
-            d_input1 = DTensor.from_local(torch.ones(4, 4), mesh, [Partial("max")])
+    def test_neg_partial_max_to_min(self):
+        """
+        Test neg: P(max) -> P(min)
+
+        Mathematically: -max(a0, a1) = min(-a0, -a1)
+        Negation flips max to min.
+        """
+        with self.local_tensor_env() as (mesh, comm_mode):
+            input1 = torch.ones(4, 4) * (0 + 1)
+            d_input1 = DTensor.from_local(input1, mesh, [Partial("max")])
 
             with comm_mode:
                 result = torch.neg(d_input1)
 
             self.assertEqual(comm_mode.get_total_counts(), 0)
             self.assertEqual(result.placements, (Partial("min"),))
+
+            # -max(1,2) = -2 = min(-1,-2)
+            self.assertEqual(result.full_tensor()[0, 0].item(), -float(self.world_size))
 
     def test_neg_partial_min_to_max(self):
-        """Test neg: P(min) -> P(max)"""
-        with LocalTensorMode(frozenset(range(self.world_size))):
-            mesh = init_device_mesh("cpu", (self.world_size,))
-            comm_mode = CommDebugMode()
+        """
+        Test neg: P(min) -> P(max)
 
-            d_input1 = DTensor.from_local(torch.ones(4, 4), mesh, [Partial("min")])
+        Mathematically: -min(a0, a1) = max(-a0, -a1)
+        """
+        with self.local_tensor_env() as (mesh, comm_mode):
+            input1 = torch.ones(4, 4) * (0 + 1)
+            d_input1 = DTensor.from_local(input1, mesh, [Partial("min")])
 
             with comm_mode:
                 result = torch.neg(d_input1)
@@ -902,13 +993,18 @@ class PointwisePartialsTest(TestCase):
             self.assertEqual(comm_mode.get_total_counts(), 0)
             self.assertEqual(result.placements, (Partial("max"),))
 
-    def test_floor_preserves_partial_max(self):
-        """Test floor: P(max) -> P(max)"""
-        with LocalTensorMode(frozenset(range(self.world_size))):
-            mesh = init_device_mesh("cpu", (self.world_size,))
-            comm_mode = CommDebugMode()
+            # -min(1,2) = -1 = max(-1,-2)
+            self.assertEqual(result.full_tensor()[0, 0].item(), -1.0)
 
-            d_input1 = DTensor.from_local(torch.ones(4, 4) * 0.7, mesh, [Partial("max")])
+    def test_floor_preserves_partial_max(self):
+        """
+        Test floor: P(max) -> P(max)
+
+        floor is monotonic, so floor(max(a0, a1)) = max(floor(a0), floor(a1))
+        """
+        with self.local_tensor_env() as (mesh, comm_mode):
+            input1 = torch.ones(4, 4) * (0 + 0.7)
+            d_input1 = DTensor.from_local(input1, mesh, [Partial("max")])
 
             with comm_mode:
                 result = torch.floor(d_input1)
@@ -916,13 +1012,18 @@ class PointwisePartialsTest(TestCase):
             self.assertEqual(comm_mode.get_total_counts(), 0)
             self.assertEqual(result.placements, (Partial("max"),))
 
-    def test_floor_preserves_partial_min(self):
-        """Test floor: P(min) -> P(min)"""
-        with LocalTensorMode(frozenset(range(self.world_size))):
-            mesh = init_device_mesh("cpu", (self.world_size,))
-            comm_mode = CommDebugMode()
+            # max(floor(0.7), floor(1.7)) = max(0,1) = 1
+            self.assertEqual(
+                result.full_tensor()[0, 0].item(), float(self.world_size - 1)
+            )
 
-            d_input1 = DTensor.from_local(torch.ones(4, 4) * 0.7, mesh, [Partial("min")])
+    def test_floor_preserves_partial_min(self):
+        """
+        Test floor: P(min) -> P(min)
+        """
+        with self.local_tensor_env() as (mesh, comm_mode):
+            input1 = torch.ones(4, 4) * (0 + 0.7)
+            d_input1 = DTensor.from_local(input1, mesh, [Partial("min")])
 
             with comm_mode:
                 result = torch.floor(d_input1)
@@ -930,13 +1031,18 @@ class PointwisePartialsTest(TestCase):
             self.assertEqual(comm_mode.get_total_counts(), 0)
             self.assertEqual(result.placements, (Partial("min"),))
 
-    def test_ceil_preserves_partial_max(self):
-        """Test ceil: P(max) -> P(max)"""
-        with LocalTensorMode(frozenset(range(self.world_size))):
-            mesh = init_device_mesh("cpu", (self.world_size,))
-            comm_mode = CommDebugMode()
+            # min(floor(0.7), floor(1.7)) = min(0,1) = 0
+            self.assertEqual(result.full_tensor()[0, 0].item(), 0.0)
 
-            d_input1 = DTensor.from_local(torch.ones(4, 4) * 0.3, mesh, [Partial("max")])
+    def test_ceil_preserves_partial_max(self):
+        """
+        Test ceil: P(max) -> P(max)
+
+        ceil is monotonic, so ceil(max(a0, a1)) = max(ceil(a0), ceil(a1))
+        """
+        with self.local_tensor_env() as (mesh, comm_mode):
+            input1 = torch.ones(4, 4) * (0 + 0.3)
+            d_input1 = DTensor.from_local(input1, mesh, [Partial("max")])
 
             with comm_mode:
                 result = torch.ceil(d_input1)
@@ -944,13 +1050,19 @@ class PointwisePartialsTest(TestCase):
             self.assertEqual(comm_mode.get_total_counts(), 0)
             self.assertEqual(result.placements, (Partial("max"),))
 
-    def test_exp_preserves_partial_max(self):
-        """Test exp: P(max) -> P(max)"""
-        with LocalTensorMode(frozenset(range(self.world_size))):
-            mesh = init_device_mesh("cpu", (self.world_size,))
-            comm_mode = CommDebugMode()
+            # max(ceil(0.3), ceil(1.3)) = max(1,2) = 2
+            self.assertEqual(result.full_tensor()[0, 0].item(), float(self.world_size))
 
-            d_input1 = DTensor.from_local(torch.ones(4, 4) * 0.1, mesh, [Partial("max")])
+    def test_exp_preserves_partial_max(self):
+        """
+        Test exp: P(max) -> P(max)
+
+        exp is monotonic (strictly increasing), so exp(max(a0, a1)) = max(exp(a0), exp(a1))
+        """
+        with self.local_tensor_env() as (mesh, comm_mode):
+            # Use small values to avoid overflow
+            input1 = torch.ones(4, 4) * (0 * 0.1)
+            d_input1 = DTensor.from_local(input1, mesh, [Partial("max")])
 
             with comm_mode:
                 result = torch.exp(d_input1)
@@ -958,13 +1070,21 @@ class PointwisePartialsTest(TestCase):
             self.assertEqual(comm_mode.get_total_counts(), 0)
             self.assertEqual(result.placements, (Partial("max"),))
 
-    def test_exp_preserves_partial_min(self):
-        """Test exp: P(min) -> P(min)"""
-        with LocalTensorMode(frozenset(range(self.world_size))):
-            mesh = init_device_mesh("cpu", (self.world_size,))
-            comm_mode = CommDebugMode()
+            # exp(max(0, 0.1)) = exp(0.1)
+            import math
 
-            d_input1 = DTensor.from_local(torch.ones(4, 4) * 0.1, mesh, [Partial("min")])
+            expected = math.exp((self.world_size - 1) * 0.1)
+            self.assertAlmostEqual(
+                result.full_tensor()[0, 0].item(), expected, places=5
+            )
+
+    def test_exp_preserves_partial_min(self):
+        """
+        Test exp: P(min) -> P(min)
+        """
+        with self.local_tensor_env() as (mesh, comm_mode):
+            input1 = torch.ones(4, 4) * (0 * 0.1)
+            d_input1 = DTensor.from_local(input1, mesh, [Partial("min")])
 
             with comm_mode:
                 result = torch.exp(d_input1)
@@ -972,20 +1092,33 @@ class PointwisePartialsTest(TestCase):
             self.assertEqual(comm_mode.get_total_counts(), 0)
             self.assertEqual(result.placements, (Partial("min"),))
 
-    def test_add_with_negative_alpha_flips_partial(self):
-        """Test add with alpha=-1: R + alpha*P(max) -> P(min)"""
-        with LocalTensorMode(frozenset(range(self.world_size))):
-            mesh = init_device_mesh("cpu", (self.world_size,))
-            comm_mode = CommDebugMode()
+            # exp(min(0, 0.1)) = exp(0) = 1
+            self.assertAlmostEqual(result.full_tensor()[0, 0].item(), 1.0, places=5)
 
-            d_input1 = distribute_tensor(torch.ones(4, 4) * 10.0, mesh, [Replicate()])
-            d_input2 = DTensor.from_local(torch.ones(4, 4), mesh, [Partial("max")])
+    def test_add_with_negative_alpha_flips_partial(self):
+        """
+        Test add with alpha=-1: R + alpha*P(max) -> P(min)
+
+        When alpha is negative, adding P(max) becomes subtracting P(max),
+        which flips it to P(min).
+        """
+        with self.local_tensor_env() as (mesh, comm_mode):
+            input1 = torch.ones(4, 4) * 10.0
+            d_input1 = distribute_tensor(input1, mesh, [Replicate()])
+
+            input2 = torch.ones(4, 4) * (0 + 1)
+            d_input2 = DTensor.from_local(input2, mesh, [Partial("max")])
 
             with comm_mode:
                 result = torch.add(d_input1, d_input2, alpha=-1)
 
             self.assertEqual(comm_mode.get_total_counts(), 0)
             self.assertEqual(result.placements, (Partial("min"),))
+
+            # 10 + (-1)*max(1,2) = 10 - 2 = 8
+            self.assertEqual(
+                result.full_tensor()[0, 0].item(), 10.0 - float(self.world_size)
+            )
 
 
 instantiate_parametrized_tests(DistElementwiseOpsTest)
