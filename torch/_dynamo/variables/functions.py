@@ -2319,7 +2319,10 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
                 if group_var is not None
                 else signature.parameters["group"].default
             )
-            group = group if group is not None else dist.group.WORLD
+            group: torch.distributed.ProcessGroup = (
+                # pyrefly: ignore[bad-assignment]
+                group if group is not None else dist.group.WORLD
+            )
 
             if group_src_var is not None:
                 local_src = group_src_var.as_python_constant()
