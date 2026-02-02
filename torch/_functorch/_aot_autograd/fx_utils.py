@@ -81,14 +81,18 @@ def get_all_input_and_grad_nodes(
 
             input_index[desc] = (n, None)
         elif n.op == "output":
-            assert "desc" in n.meta, (n, n.meta)
+            if "desc" not in n.meta:
+                raise AssertionError(f"'desc' not in n.meta for {n}: {n.meta}")
             desc = n.meta["desc"]
             for sub_n, sub_desc in zip(n.args[0], desc):
                 if isinstance(sub_desc, SubclassGetAttrAOTOutput):
                     _raise_autograd_subclass_not_implemented(sub_n, sub_desc)
                 if isinstance(sub_desc, GradAOTOutput):
                     inp, grad = input_index[sub_desc.grad_of]
-                    assert grad is None, (sub_n, sub_desc, input_index)
+                    if grad is not None:
+                        raise AssertionError(
+                            f"grad already set for {sub_n}, {sub_desc}, {input_index}"
+                        )
                     input_index[sub_desc.grad_of] = (inp, sub_n)
     return input_index
 
@@ -139,7 +143,10 @@ def get_all_output_and_tangent_nodes(
                 _raise_autograd_subclass_not_implemented(n, desc)
             if isinstance(desc, TangentAOTInput):
                 out, tangent = output_index[desc.output]
-                assert tangent is None, (n, desc, output_index)
+                if tangent is not None:
+                    raise AssertionError(
+                        f"tangent already set for {n}, {desc}, {output_index}"
+                    )
                 output_index[desc.output] = (out, n)
     return output_index
 

@@ -1226,7 +1226,8 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
                 default_config = FlexConfig(64, 64, 3, 4)
             else:
                 default_config = FlexConfig(64, 64, 3, 4)
-            if capability >= (12, 0):
+            # here we are using sm_120_default_flex_config on THOR as well
+            if capability >= (11, 0):
                 default_config = self.sm_120_default_flex_config.get(
                     (dtype, head_dim), default_config
                 )
@@ -1268,6 +1269,8 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
             capability_class = "float32"
         elif major == 12:
             capability_class = "sm12x"
+        elif major == 11:
+            capability_class = "sm11x"
         elif major >= 10:
             capability_class = "sm10x"
         elif capability == (9, 0):
@@ -1298,11 +1301,18 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
                     64, 64, 64, 64, 3 if minor == 6 and h == 128 else 2, 4
                 )
             ),
+            "sm11x": lambda h: (
+                FlexBwDConfig(32, 128, 128, 32, 3, 4)
+                if h < 64
+                else FlexBwDConfig(
+                    64, 64, 64, 64, 1 if h >= 128 else 2, 4
+                )
+            ),
             "sm12x": lambda h: (
                 FlexBwDConfig(32, 128, 128, 32, 3, 4)
                 if h < 64
                 else FlexBwDConfig(
-                    64, 64, 64, 64, 3 if minor == 6 and h == 128 else 2, 4
+                    64, 64, 64, 64, 1 if h >= 128 else 2, 4
                 )
             ),
         }
@@ -1337,6 +1347,8 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
                 default_config = FlexDecodeConfig(64, 1, 2)
             else:
                 default_config = FlexDecodeConfig(64, 3, 2)
+        if capability == (11, 0):
+            default_config = FlexDecodeConfig(16, 1, 2)
         else:
             default_config = FlexDecodeConfig(64, 1, 2)
 

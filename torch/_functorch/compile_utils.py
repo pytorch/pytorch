@@ -69,7 +69,10 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph) -> fx.Graph:
     # when pruning.  This prevents us from deduplicating returned tensors which have
     # experienced identical operations, but are separate data structures in eager mode.
     output_node: fx.Node = list(fx_g.nodes)[-1]
-    assert output_node.op == "output"
+    if output_node.op != "output":
+        raise AssertionError(
+            f"expected output_node.op to be 'output', got '{output_node.op}'"
+        )
 
     def checkable_node(node: fx.Node) -> bool:
         """We can evaluate only nodes that represent tensors with defined storage."""
@@ -192,7 +195,10 @@ def raise_getitems(gm: fx.GraphModule) -> fx.GraphModule:
     # loop through getitem nodes in the graph and raise them to the parent node
     # in reverse order to preserve their original relative order
     for node in reversed(getitem_nodes):
-        assert len(node.all_input_nodes) == 1
+        if len(node.all_input_nodes) != 1:
+            raise AssertionError(
+                f"expected node {node.name} to have 1 input node, got {len(node.all_input_nodes)}"
+            )
         parent = node.all_input_nodes[0]
         parent.append(node)
 

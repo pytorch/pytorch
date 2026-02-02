@@ -302,7 +302,8 @@ class SerializedGraphModule:
 
     def deserialize(self) -> torch.fx.GraphModule:
         gm = self.fn(*self.args)
-        assert isinstance(gm, torch.fx.GraphModule)
+        if not isinstance(gm, torch.fx.GraphModule):
+            raise AssertionError(f"expected fx.GraphModule, got {type(gm)}")
         return gm
 
 
@@ -515,7 +516,8 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
         disable_amp = torch._C._is_any_autocast_enabled()
 
         if needs_autograd:
-            assert self.compiled_bw is not None
+            if self.compiled_bw is None:
+                raise AssertionError("compiled_bw must not be None when needs_autograd")
 
             cached_lazy_backward = None
             if self.serialized_bw_module is not None:
@@ -565,7 +567,8 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
 
             symints = AOTAutogradCache._filter_backed_symints(args)
             check = bool(AOTAutogradCache.evaluate_guards(self.guards_expr, symints))
-            assert check is True
+            if check is not True:
+                raise AssertionError(f"guards check failed: {check}")
 
         return compiled_function
 
@@ -666,7 +669,8 @@ def deserialize_bundled_cache_entry(
     def forward(*runtime_args: Any) -> Any:
         return compiled_fn(list(runtime_args))
 
-    assert hasattr(compiled_fn, "serialize")
+    if not hasattr(compiled_fn, "serialize"):
+        raise AssertionError("compiled_fn must have serialize attribute")
     forward.serialize = compiled_fn.serialize  # type: ignore[attr-defined]
 
     return forward
