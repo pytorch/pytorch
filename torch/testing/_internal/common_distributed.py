@@ -219,7 +219,14 @@ def _maybe_handle_skip_if_lt_x_gpu(args, msg) -> bool:
     return True
 
 
-def _skip_if_lt_x_gpu_internal(x, allow_cpu):
+def skip_if_lt_x_gpu(x, *, allow_cpu=False):
+    """Skip if fewer than x accelerators available.
+
+    Args:
+        x: Minimum number of accelerators required.
+        allow_cpu: If True, run the test on CPU-only machines (no accelerators).
+    """
+
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -238,19 +245,6 @@ def _skip_if_lt_x_gpu_internal(x, allow_cpu):
         return wrapper
 
     return decorator
-
-
-def skip_if_lt_x_gpu(x):
-    return _skip_if_lt_x_gpu_internal(x, allow_cpu=False)
-
-
-def skip_if_lt_x_gpu_unless_cpu(x):
-    """Skip if fewer than x accelerators available, unless no accelerators exist.
-
-    For CPU-only machines (no CUDA/HPU/XPU), always runs the test.
-    For machines with accelerators, skips if device count < x.
-    """
-    return _skip_if_lt_x_gpu_internal(x, allow_cpu=True)
 
 
 def requires_world_size(n: int):
