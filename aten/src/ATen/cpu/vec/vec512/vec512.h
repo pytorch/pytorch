@@ -86,51 +86,64 @@ inline Vectorized<double> cast<double, int64_t>(
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ GATHER ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-#ifndef _MSC_VER
-// MSVC is not working well on complex function overload.
-template <int64_t scale = 1>
-std::enable_if_t<
-    scale == 1 || scale == 2 || scale == 4 || scale == 8,
-    Vectorized<
-        double>> inline gather(const double* base_addr, const Vectorized<int64_t>& vindex) {
-  return _mm512_i64gather_pd(vindex, base_addr, scale);
-}
+#define GATHER_DOUBLE_IMPL(SCALE)                                   \
+  template <>                                                       \
+  Vectorized<double> inline gather<SCALE, double>(                  \
+      const double* base_addr, const Vectorized<int64_t>& vindex) { \
+    return _mm512_i64gather_pd(vindex, base_addr, SCALE);           \
+  }
 
-template <int64_t scale = 1>
-std::enable_if_t<
-    scale == 1 || scale == 2 || scale == 4 || scale == 8,
-    Vectorized<
-        float>> inline gather(const float* base_addr, const Vectorized<int32_t>& vindex) {
-  return _mm512_i32gather_ps(vindex, base_addr, scale);
-}
-#endif
+GATHER_DOUBLE_IMPL(1)
+GATHER_DOUBLE_IMPL(2)
+GATHER_DOUBLE_IMPL(4)
+GATHER_DOUBLE_IMPL(8)
+
+#define GATHER_FLOAT_IMPL(SCALE)                                   \
+  template <>                                                      \
+  Vectorized<float> inline gather<SCALE, float>(                   \
+      const float* base_addr, const Vectorized<int32_t>& vindex) { \
+    return _mm512_i32gather_ps(vindex, base_addr, SCALE);          \
+  }
+
+GATHER_FLOAT_IMPL(1)
+GATHER_FLOAT_IMPL(2)
+GATHER_FLOAT_IMPL(4)
+GATHER_FLOAT_IMPL(8)
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ MASK GATHER ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-#ifndef _MSC_VER
-// MSVC is not working well on complex function overload.
-template <int64_t scale = 1>
-std::
-    enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vectorized<double>> inline mask_gather(
-        const Vectorized<double>& src,
-        const double* base_addr,
-        const Vectorized<int64_t>& vindex,
-        Vectorized<double>& mask) {
-  auto all_ones = _mm512_castsi512_pd(_mm512_set1_epi64(0xFFFFFFFFFFFFFFFF));
-  auto mask_ = _mm512_cmp_pd_mask(all_ones, mask.values, _CMP_EQ_OQ);
-  return _mm512_mask_i64gather_pd(src, mask_, vindex, base_addr, scale);
-}
+#define MASK_GATHER_DOUBLE_IMPL(SCALE)                                     \
+  template <>                                                              \
+  Vectorized<double> inline mask_gather<SCALE, double>(                    \
+      const Vectorized<double>& src,                                       \
+      const double* base_addr,                                             \
+      const Vectorized<int64_t>& vindex,                                   \
+      Vectorized<double>& mask) {                                          \
+    auto all_ones =                                                        \
+        _mm512_castsi512_pd(_mm512_set1_epi64(0xFFFFFFFFFFFFFFFF));        \
+    auto mask_ = _mm512_cmp_pd_mask(all_ones, mask.values, _CMP_EQ_OQ);    \
+    return _mm512_mask_i64gather_pd(src, mask_, vindex, base_addr, SCALE); \
+  }
 
-template <int64_t scale = 1>
-std::
-    enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vectorized<float>> inline mask_gather(
-        const Vectorized<float>& src,
-        const float* base_addr,
-        const Vectorized<int32_t>& vindex,
-        Vectorized<float>& mask) {
-  auto all_ones = _mm512_castsi512_ps(_mm512_set1_epi32(0xFFFFFFFF));
-  auto mask_ = _mm512_cmp_ps_mask(all_ones, mask.values, _CMP_EQ_OQ);
-  return _mm512_mask_i32gather_ps(src, mask_, vindex, base_addr, scale);
-}
-#endif
+MASK_GATHER_DOUBLE_IMPL(1)
+MASK_GATHER_DOUBLE_IMPL(2)
+MASK_GATHER_DOUBLE_IMPL(4)
+MASK_GATHER_DOUBLE_IMPL(8)
+
+#define MASK_GATHER_FLOAT_IMPL(SCALE)                                      \
+  template <>                                                              \
+  Vectorized<float> inline mask_gather<SCALE, float>(                      \
+      const Vectorized<float>& src,                                        \
+      const float* base_addr,                                              \
+      const Vectorized<int32_t>& vindex,                                   \
+      Vectorized<float>& mask) {                                           \
+    auto all_ones = _mm512_castsi512_ps(_mm512_set1_epi32(0xFFFFFFFF));    \
+    auto mask_ = _mm512_cmp_ps_mask(all_ones, mask.values, _CMP_EQ_OQ);    \
+    return _mm512_mask_i32gather_ps(src, mask_, vindex, base_addr, SCALE); \
+  }
+
+MASK_GATHER_FLOAT_IMPL(1)
+MASK_GATHER_FLOAT_IMPL(2)
+MASK_GATHER_FLOAT_IMPL(4)
+MASK_GATHER_FLOAT_IMPL(8)
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CONVERT ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <>
