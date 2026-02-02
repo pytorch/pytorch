@@ -6,6 +6,7 @@ These tests verify that the dynamo_profiler config flag and related profiling
 infrastructure work correctly for tracking where Dynamo spends time during compilation.
 """
 
+import os
 import pstats
 import tempfile
 
@@ -29,30 +30,30 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
 
         torch._dynamo.reset()
 
-        with tempfile.NamedTemporaryFile(suffix=".prof", delete=False) as f:
-            profile_path = f.name
+        with tempfile.TemporaryDirectory() as tmpdir:
+            profile_path = os.path.join(tmpdir, "profile.prof")
 
-        with torch._dynamo.config.patch(dynamo_profiler=profile_path):
+            with torch._dynamo.config.patch(dynamo_profiler=profile_path):
 
-            @torch.compile(backend="eager")
-            def test_fn(x):
-                return main_fn(x)
+                @torch.compile(backend="eager")
+                def test_fn(x):
+                    return main_fn(x)
 
-            x = torch.randn(10)
-            test_fn(x)
+                x = torch.randn(10)
+                test_fn(x)
 
-        # Load and verify the profile
-        stats = pstats.Stats(profile_path)
+            # Load and verify the profile
+            stats = pstats.Stats(profile_path)
 
-        # Verify stats object is valid
-        self.assertGreater(stats.total_calls, 0)
+            # Verify stats object is valid
+            self.assertGreater(stats.total_calls, 0)
 
-        # Verify we captured the expected functions
-        func_names = {key[2] for key in stats.stats}
-        self.assertIn("helper_fn", func_names)
-        self.assertIn("nested_helper", func_names)
-        self.assertIn("main_fn", func_names)
-        self.assertIn("test_fn", func_names)  # Root function
+            # Verify we captured the expected functions
+            func_names = {key[2] for key in stats.stats}
+            self.assertIn("helper_fn", func_names)
+            self.assertIn("nested_helper", func_names)
+            self.assertIn("main_fn", func_names)
+            self.assertIn("test_fn", func_names)  # Root function
 
     def test_pstats_file_loadable(self):
         """Test that the generated pstats file can be loaded and analyzed."""
@@ -65,26 +66,26 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
 
         torch._dynamo.reset()
 
-        with tempfile.NamedTemporaryFile(suffix=".prof", delete=False) as f:
-            profile_path = f.name
+        with tempfile.TemporaryDirectory() as tmpdir:
+            profile_path = os.path.join(tmpdir, "profile.prof")
 
-        with torch._dynamo.config.patch(dynamo_profiler=profile_path):
+            with torch._dynamo.config.patch(dynamo_profiler=profile_path):
 
-            @torch.compile(backend="eager")
-            def compiled_fn(x):
-                return main_fn(x)
+                @torch.compile(backend="eager")
+                def compiled_fn(x):
+                    return main_fn(x)
 
-            x = torch.randn(10)
-            compiled_fn(x)
+                x = torch.randn(10)
+                compiled_fn(x)
 
-        # Verify file can be loaded and analyzed
-        stats = pstats.Stats(profile_path)
-        self.assertGreater(stats.total_calls, 0)
+            # Verify file can be loaded and analyzed
+            stats = pstats.Stats(profile_path)
+            self.assertGreater(stats.total_calls, 0)
 
-        # Verify we can sort and print stats (basic pstats operations)
-        stats.sort_stats("cumulative")
-        # This would raise if the stats format is invalid
-        stats.print_stats(5)
+            # Verify we can sort and print stats (basic pstats operations)
+            stats.sort_stats("cumulative")
+            # This would raise if the stats format is invalid
+            stats.print_stats(5)
 
 
 if __name__ == "__main__":
