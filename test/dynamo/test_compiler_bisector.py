@@ -121,11 +121,11 @@ class TestCompilerBisector(TestCase):
 
             return torch.allclose(out, out_c)
 
-        with config.patch(pre_grad_custom_pass=pass_fn):
+        with config.patch(pre_grad_custom_pass=pass_fn, pattern_matcher=True):
             out = CompilerBisector.do_bisect(test_fn)
         self.assertEqual(out.backend, "inductor")
         self.assertEqual(out.subsystem, "pre_grad_passes")
-        self.assertEqual(out.bisect_number, 0)
+        self.assertEqual(out.bisect_number, 3)
         self.assertTrue("pre_grad_custom_pass" in out.debug_info)
 
     def test_joint_graph(self):
@@ -166,6 +166,8 @@ class TestCompilerBisector(TestCase):
 
         def test_fn():
             torch._dynamo.reset()
+            # fixed seed to make the test deterministic
+            torch.manual_seed(1234)
 
             with preserve_rng_state():
                 out = foo()
