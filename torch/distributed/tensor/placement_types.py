@@ -1459,13 +1459,21 @@ def _register_placements_as_opaque():
         Shard, typ="value", members=allowed_members | {"dim": MemberType.USE_REAL}
     )
     register_opaque_type(Replicate, typ="value", members=allowed_members)
-    register_opaque_type(Partial, typ="value", members=allowed_members)
+    register_opaque_type(
+        Partial,
+        typ="value",
+        members=allowed_members | {"reduce_op": MemberType.USE_REAL},
+    )
     register_opaque_type(
         _StridedShard,
         typ="value",
         members=allowed_members | {"dim": MemberType.USE_REAL},
     )
-    register_opaque_type(_MaskPartial, typ="value", members=allowed_members)
+    register_opaque_type(
+        _MaskPartial,
+        typ="value",
+        members=allowed_members | {"reduce_op": MemberType.USE_REAL},
+    )
 
 
 _register_placements_as_opaque()

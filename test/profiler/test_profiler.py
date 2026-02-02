@@ -2538,6 +2538,67 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
                 payload()
             validate_json(prof, gc_flag)
 
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_parse_kineto_results_timeout_none(self):
+        """Test that _parse_kineto_results works normally without timeout."""
+        with _profile(use_kineto=True) as p:
+            x = torch.randn(10, 10)
+            y = torch.randn(10, 10)
+            z = torch.mm(x, y)
+
+        # Access function_events to trigger parsing
+        events = p.function_events
+        self.assertGreater(len(events), 0)
+        self.assertTrue(any("aten::mm" in e.name for e in events))
+
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_parse_kineto_results_timeout_large(self):
+        """Test that _parse_kineto_results with a large timeout processes all events."""
+        with _profile(use_kineto=True) as p:
+            x = torch.randn(10, 10)
+            y = torch.randn(10, 10)
+            z = torch.mm(x, y)
+
+        # Call _parse_kineto_results directly with a large timeout
+        events_with_timeout = p._parse_kineto_results(p.kineto_results, timeout_s=60.0)
+        events_without_timeout = p._parse_kineto_results(
+            p.kineto_results, timeout_s=None
+        )
+
+        # Both should return the same number of events
+        self.assertEqual(len(events_with_timeout), len(events_without_timeout))
+
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_parse_kineto_results_timeout_zero(self):
+        """Test that _parse_kineto_results with zero timeout returns partial results and logs."""
+        with _profile(use_kineto=True) as p:
+            # Generate some events
+            for _ in range(10):
+                x = torch.randn(10, 10)
+                y = torch.randn(10, 10)
+                z = torch.mm(x, y)
+
+        # Get baseline count without timeout
+        events_no_timeout = p._parse_kineto_results(p.kineto_results, timeout_s=None)
+        baseline_count = len(events_no_timeout)
+
+        # With a zero timeout, we should get fewer events (or possibly zero)
+        # and a warning should be logged
+        import logging
+
+        with self.assertLogs("torch.autograd.profiler", level=logging.WARNING) as cm:
+            events_with_timeout = p._parse_kineto_results(
+                p.kineto_results, timeout_s=0.0
+            )
+
+        # Check that we got a warning about timeout
+        self.assertTrue(
+            any("timed out" in msg and "partial results" in msg for msg in cm.output)
+        )
+
+        # With zero timeout, we should have fewer events than baseline
+        self.assertLess(len(events_with_timeout), baseline_count)
+
 
 class SimpleNet(nn.Module):
     def __init__(self) -> None:
