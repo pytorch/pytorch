@@ -448,6 +448,40 @@ partial_preserving_ops: dict[torch._ops.OpOverload, str] = {
     aten.minimum.out: "min",
 }
 
+# Monotonic ops preserve extremal partials (max/min) because:
+# f(max(a0, a1)) = max(f(a0), f(a1)) for monotonically increasing f
+monotonic_ops = {
+    aten.floor.default,
+    aten.floor.out,
+    aten.ceil.default,
+    aten.ceil.out,
+    aten.trunc.default,
+    aten.trunc.out,
+    aten.exp.default,
+    aten.exp.out,
+    aten.exp2.default,
+    aten.exp2.out,
+    aten.expm1.default,
+    aten.expm1.out,
+    aten.log.default,  # monotonic for positive domain
+    aten.log.out,
+    aten.log2.default,
+    aten.log2.out,
+    aten.log10.default,
+    aten.log10.out,
+    aten.log1p.default,
+    aten.log1p.out,
+    aten.sqrt.default,  # monotonic for non-negative domain
+    aten.sqrt.out,
+    aten.sigmoid.default,
+    aten.sigmoid.out,
+    aten.tanh.default,  # monotonic
+    aten.tanh.out,
+    aten.relu.default,  # monotonic
+    aten.gelu.default,  # approximately monotonic
+    aten.silu.default,  # approximately monotonic
+}
+
 
 def pointwise_strategy(
     op_schema: OpSchema,
@@ -584,9 +618,9 @@ def single_mesh_dim_common_pointwise_strategy(
         kwargs_schema: Keyword arguments schema (may contain "out" tensor for out variants)
         linearity: Type of linearity support:
             -1: No linearity (Partial placements not propagated)
-            0: Unary op linearity (e.g. to_copy, mul.Scalar) - one tensor input
-            1: Add linearity (e.g. add) - requires all inputs Partial, output Partial
-            2: Mul linearity (e.g. mul) - one input Partial, others Replicate, output Partial
+            0: Unary op linearity (e.g. neg, mul.Scalar) - one tensor input
+            1: Add linearity (e.g. add) - additive partial propagation
+            2: Mul linearity (e.g. mul) - one input Partial, others Replicate
         preserve_partial: If set, Partial placements with this reduce_op will be preserved
             through the operation (e.g., "max" for torch.maximum, "min" for torch.minimum).
 
@@ -597,7 +631,6 @@ def single_mesh_dim_common_pointwise_strategy(
     tensor_arg_metas: list[TensorMeta] = [
         arg for arg in args_schema if isinstance(arg, TensorMeta)
     ]
-    # Also collect tensor kwargs (like "out" for out-variant ops)
     tensor_kwarg_metas: list[TensorMeta] = []
     if kwargs_schema:
         for v in kwargs_schema.values():
@@ -605,13 +638,14 @@ def single_mesh_dim_common_pointwise_strategy(
                 tensor_kwarg_metas.append(v)
 
     all_tensor_metas = tensor_arg_metas + tensor_kwarg_metas
+    num_args_tensors = len(tensor_arg_metas)
+    num_total_tensors = len(all_tensor_metas)
 
     common_shape = torch.broadcast_shapes(*[arg.shape for arg in all_tensor_metas])
     placements_list: list[list[Placement | _ShardingPlaceholder]] = []
 
     # Generate sharding rules for each dimension
     for i in range(len(common_shape)):
-        # Shard output dim i, and shard corresponding input dims (handle broadcasting)
         shard_placements: list[Placement | _ShardingPlaceholder] = [
             _ShardingPlaceholder(i)
         ]
@@ -621,15 +655,33 @@ def single_mesh_dim_common_pointwise_strategy(
                 shard_placements.append(_ShardingPlaceholder(common_dim_to_arg_dim[i]))
             else:
                 shard_placements.append(Replicate())
-
         placements_list.append(shard_placements)
 
-    # Generate linearity rules for Partial placements
-    num_args_tensors = len(tensor_arg_metas)
-    num_total_tensors = len(all_tensor_metas)
+    # Helper to add a rule for all tensors having the same placement
+    def add_uniform_rule(placement: Placement) -> None:
+        placements_list.append([placement] * (1 + num_total_tensors))
 
-    # Check for norm_partial_avoidable_redistribute_ops (e.g., mul.Scalar, div.Scalar)
-    # These ops preserve _NormPartial when scalar >= 0
+    # Helper to add a binary rule: [output, input1, input2, *out_tensors]
+    def add_binary_rule(
+        out_p: Placement, in1_p: Placement, in2_p: Placement
+    ) -> None:
+        rule: list[Placement | _ShardingPlaceholder] = [out_p, in1_p, in2_p]
+        for _ in tensor_kwarg_metas:
+            rule.append(out_p)
+        placements_list.append(rule)
+
+    # Helper to add a unary rule: [output, input, *out_tensors]
+    def add_unary_rule(out_p: Placement, in_p: Placement) -> None:
+        rule: list[Placement | _ShardingPlaceholder] = [out_p, in_p]
+        for _ in tensor_kwarg_metas:
+            rule.append(out_p)
+        placements_list.append(rule)
+
+    # Check for special op properties
+    is_neg_op = op in (aten.neg.default, aten.neg_.default)
+    is_sub_op = op in (aten.sub.Tensor, aten.sub_.Tensor)
+    is_add_op = op in (aten.add.Tensor, aten.add_.Tensor)
+    is_monotonic = op in monotonic_ops
     is_norm_partial_op = op in norm_partial_avoidable_redistribute_ops
     scalar_value = args_schema[1] if len(args_schema) > 1 else None
     preserve_norm_partial = (
@@ -638,100 +690,103 @@ def single_mesh_dim_common_pointwise_strategy(
         and scalar_value >= 0
     )
 
+    # Check if alpha argument is negative (for add with alpha)
+    alpha_negative = False
+    if kwargs_schema and "alpha" in kwargs_schema:
+        alpha = kwargs_schema["alpha"]
+        if isinstance(alpha, (int, float)) and alpha < 0:
+            alpha_negative = True
+
+    # Generate Partial rules based on operation type
     if linearity == 0:
-        # Unary op (e.g. to_copy) or binary ops with scalar (e.g. mul.Scalar)
-        # Input and output can both be Partial
+        # Unary op (neg, to_copy) or scalar op (mul.Scalar)
         if num_args_tensors == 1:
-            if preserve_norm_partial or not is_norm_partial_op:
-                # Add Partial rules - the expansion logic will substitute
-                # with the actual Partial subclass (like _NormPartial) from input
-                placements_list.append([Partial("sum")] * (1 + num_total_tensors))
+            # Handle neg specially: flips max<->min
+            if is_neg_op:
+                add_unary_rule(Partial("sum"), Partial("sum"))
+                add_unary_rule(Partial("avg"), Partial("avg"))
+                add_unary_rule(Partial("min"), Partial("max"))
+                add_unary_rule(Partial("max"), Partial("min"))
+            elif preserve_norm_partial or not is_norm_partial_op:
+                add_uniform_rule(Partial("sum"))
                 if not is_norm_partial_op:
-                    placements_list.append([Partial("avg")] * (1 + num_total_tensors))
-            # Add _NormPartial rules for common norm types when this op preserves _NormPartial
+                    add_uniform_rule(Partial("avg"))
             if preserve_norm_partial:
                 for norm_type in (2, 1, float("inf"), float("-inf"), 0):
-                    placements_list.append(
-                        [_NormPartial(norm_type)] * (1 + num_total_tensors)
-                    )
-            # For is_norm_partial_op with negative scalar, don't add any Partial rules
-            # This will cause Partial to be converted to Replicate
+                    add_uniform_rule(_NormPartial(norm_type))
 
     elif linearity == 1:
-        # Binary add ops: (A1 + B1) + (A2 + B2) == (A1 + A2) + (B1 + B2)
-        # Both inputs must be Partial, output is Partial
-        # Note: if num_args_tensors == 1, we have tensor + scalar case
-        # For add/sub with scalar, we do NOT propagate partial (per p_sum_scalar_redistribute_ops)
+        # Add/sub ops: support additive partials and extremal partials
         if num_args_tensors == 2:
-            placements_list.append([Partial("sum")] * (1 + num_total_tensors))
-            placements_list.append([Partial("avg")] * (1 + num_total_tensors))
-        # For num_args_tensors == 1 (scalar case), don't add Partial rules
+            # Additive partials: both inputs same partial -> same output
+            add_uniform_rule(Partial("sum"))
+            add_uniform_rule(Partial("avg"))
+
+            # Extremal partials with Replicate
+            for reduce_op in ("max", "min"):
+                p = Partial(reduce_op)
+                flipped = Partial("min" if reduce_op == "max" else "max")
+
+                if is_sub_op:
+                    # P - R -> P, R - P(max) -> P(min), R - P(min) -> P(max)
+                    add_binary_rule(p, p, Replicate())
+                    add_binary_rule(flipped, Replicate(), p)
+                elif is_add_op:
+                    if alpha_negative:
+                        # R + alpha*P(max) with alpha<0 -> P(min)
+                        add_binary_rule(p, p, Replicate())
+                        add_binary_rule(flipped, Replicate(), p)
+                    else:
+                        # P + R -> P, R + P -> P
+                        add_binary_rule(p, p, Replicate())
+                        add_binary_rule(p, Replicate(), p)
+                else:
+                    # Generic add-like op
+                    add_binary_rule(p, p, Replicate())
+                    add_binary_rule(p, Replicate(), p)
 
     elif linearity == 2:
-        # Binary mul ops: (A * B1) + (A * B2) == A * (B1 + B2)
-        # One input Partial, other Replicate, output is Partial
+        # Mul ops: one Partial, other Replicate
         if num_args_tensors == 2:
-            # First input Partial, second Replicate
-            rule_sum_1: list[Placement | _ShardingPlaceholder] = [
-                Partial("sum"),
-                Partial("sum"),
-                Replicate(),
-            ]
-            rule_avg_1: list[Placement | _ShardingPlaceholder] = [
-                Partial("avg"),
-                Partial("avg"),
-                Replicate(),
-            ]
-            # First input Replicate, second Partial
-            rule_sum_2: list[Placement | _ShardingPlaceholder] = [
-                Partial("sum"),
-                Replicate(),
-                Partial("sum"),
-            ]
-            rule_avg_2: list[Placement | _ShardingPlaceholder] = [
-                Partial("avg"),
-                Replicate(),
-                Partial("avg"),
-            ]
-            # Add out tensor placements if present
-            for _ in tensor_kwarg_metas:
-                rule_sum_1.append(Partial("sum"))
-                rule_avg_1.append(Partial("avg"))
-                rule_sum_2.append(Partial("sum"))
-                rule_avg_2.append(Partial("avg"))
-            placements_list.append(rule_sum_1)
-            placements_list.append(rule_avg_1)
-            placements_list.append(rule_sum_2)
-            placements_list.append(rule_avg_2)
+            for reduce_op in ("sum", "avg"):
+                p = Partial(reduce_op)
+                add_binary_rule(p, p, Replicate())
+                add_binary_rule(p, Replicate(), p)
         elif num_args_tensors == 1:
-            # tensor * scalar case - treat like linearity==0 (unary)
-            placements_list.append([Partial("sum")] * (1 + num_total_tensors))
-            placements_list.append([Partial("avg")] * (1 + num_total_tensors))
+            # tensor * scalar
+            add_uniform_rule(Partial("sum"))
+            add_uniform_rule(Partial("avg"))
 
-    # Generate rules for partial-preserving ops (e.g., max preserves Partial("max"))
+    # Monotonic ops preserve extremal partials
+    if is_monotonic and num_args_tensors == 1:
+        add_unary_rule(Partial("max"), Partial("max"))
+        add_unary_rule(Partial("min"), Partial("min"))
+
+    # Partial-preserving ops (maximum, minimum)
     if preserve_partial is not None:
-        # All inputs and output have the same Partial type
-        # e.g., max(Partial("max"), Partial("max")) -> Partial("max")
-        partial_placement = Partial(preserve_partial)
-        placements_list.append([partial_placement] * (1 + num_total_tensors))
+        p = Partial(preserve_partial)
+        add_uniform_rule(p)
 
-        # Also generate mixed strategies where some inputs are Replicate
-        # This handles the case where inputs have different Partial types
-        # e.g., max(Partial("max"), Replicate) -> Partial("max")
-        # For each input position, generate a strategy where that input is Replicate
+        # Mixed: one input Replicate
         for i in range(num_args_tensors):
-            mixed_strategy: list[Placement | _ShardingPlaceholder] = [
-                partial_placement
-            ]  # output
+            rule: list[Placement | _ShardingPlaceholder] = [p]
             for j in range(num_args_tensors):
-                if j == i:
-                    mixed_strategy.append(Replicate())
-                else:
-                    mixed_strategy.append(partial_placement)
-            # Add out tensor placements if present (for out-variant ops)
+                rule.append(Replicate() if j == i else p)
             for _ in tensor_kwarg_metas:
-                mixed_strategy.append(partial_placement)
-            placements_list.append(mixed_strategy)
+                rule.append(p)
+            placements_list.append(rule)
+
+        # Also handle opposite partial: max(P(min), R) -> P(min)
+        # This works because max(min(a0,a1), r) = min(max(a0,r), max(a1,r))
+        opposite = "min" if preserve_partial == "max" else "max"
+        p_opp = Partial(opposite)
+        for i in range(num_args_tensors):
+            rule = [p_opp]
+            for j in range(num_args_tensors):
+                rule.append(Replicate() if j == i else p_opp)
+            for _ in tensor_kwarg_metas:
+                rule.append(p_opp)
+            placements_list.append(rule)
 
     return placements_list
 
