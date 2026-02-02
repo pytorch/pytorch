@@ -1704,6 +1704,28 @@ except RuntimeError as e:
         self.assertEqual(libtorch_agnostic.ops.get_deleter_call_count(), 1)
         original += 1
 
+    @onlyCUDA
+    @skipIfTorchVersionLessThan(2, 11)
+    def test_my_from_blob_with_cuda_deleter_no_leak(self, device):
+        """Test that from_blob deleter properly frees cudaMalloc'd memory."""
+        import libtorch_agn_2_11 as libtorch_agnostic
+
+        torch.cuda.synchronize(device)
+        init_mem = torch.cuda.memory_allocated(device)
+        numel = 1024 * 1024  # 4 MB per tensor
+
+        for _ in range(10):
+            tensor = libtorch_agnostic.ops.my_from_blob_with_cuda_deleter(numel, device)
+            # Verify tensor was created correctly
+            self.assertEqual(tensor.numel(), numel)
+            self.assertEqual(tensor.device, torch.device(device))
+            del tensor
+            gc.collect()
+            torch.cuda.synchronize(device)
+
+            curr_mem = torch.cuda.memory_allocated(device)
+            self.assertEqual(curr_mem, init_mem)
+
 
 instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
 
