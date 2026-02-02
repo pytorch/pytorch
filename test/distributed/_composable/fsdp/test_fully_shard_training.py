@@ -83,6 +83,11 @@ if device_type.type == "cpu":
     torch.cpu._sleep = _cpu_sleep
 
 
+def _get_device_ids(rank: int) -> list[int] | None:
+    """Return device_ids for replicate(): None for CPU, [rank] otherwise."""
+    return None if device_type.type == "cpu" else [rank]
+
+
 class TestFullyShardForwardInputs(FSDPTestMultiThread):
     @property
     def world_size(self) -> int:
@@ -327,7 +332,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         )
         ref_model = copy.deepcopy(model).to(device_type)
         replicate(
-            ref_model, device_ids=None if device_type.type == "cpu" else [self.rank]
+            ref_model, device_ids=_get_device_ids(self.rank)
         )
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
 
@@ -456,7 +461,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         if test_device_type == device_type.type:
             replicate(
                 ref_model.to(device_type),
-                device_ids=None if device_type.type == "cpu" else [self.rank],
+                device_ids=_get_device_ids(self.rank),
             )
         else:
             gloo_pg = dist.new_group(backend="gloo")
@@ -596,7 +601,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         ref_model = copy.deepcopy(model)
         replicate(
             ref_model,
-            device_ids=None if device_type.type == "cpu" else [self.rank],
+            device_ids=_get_device_ids(self.rank),
         )
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
         fully_shard(model.inner)
@@ -750,7 +755,7 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
             model = Transformer(model_args)
         ref_model = replicate(
             copy.deepcopy(model),
-            device_ids=None if device_type.type == "cpu" else [self.rank],
+            device_ids=_get_device_ids(self.rank),
         )
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
 
@@ -991,7 +996,7 @@ class TestFullyShardSharedParams(FSDPTest):
         ref_model = copy.deepcopy(model).to(device_type)
         replicate(
             ref_model,
-            device_ids=None if device_type.type == "cpu" else [self.rank],
+            device_ids=_get_device_ids(self.rank),
         )
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
         for module in model.modules():
@@ -1331,7 +1336,7 @@ class TestFullyShardNDTraining(FSDPTest):
         ref_model = copy.deepcopy(model).to(device_type)
         replicate(
             ref_model,
-            device_ids=None if device_type.type == "cpu" else [self.rank],
+            device_ids=_get_device_ids(self.rank),
             process_group=dp_pg,
         )
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2, foreach=foreach)
@@ -1406,7 +1411,7 @@ class TestFullyShardHSDP3DTraining(FSDPTest):
         ref_model = copy.deepcopy(model).to(device_type)
         replicate(
             ref_model,
-            device_ids=None if device_type.type == "cpu" else [self.rank],
+            device_ids=_get_device_ids(self.rank),
             process_group=dp_pg,
         )
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2, foreach=foreach)
@@ -1497,7 +1502,7 @@ class TestFullyShardHSDPTraining(FSDPTest):
         ref_model = copy.deepcopy(model).to(device_type)
         replicate(
             ref_model,
-            device_ids=None if device_type.type == "cpu" else [self.rank],
+            device_ids=_get_device_ids(self.rank),
         )
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
         for mlp in model:
@@ -1733,7 +1738,7 @@ class TestFullyShardWorldSize1(FSDPTest):
         )
         ref_model = copy.deepcopy(model).to(device_type)
         replicate(
-            ref_model, device_ids=None if device_type.type == "cpu" else [self.rank]
+            ref_model, device_ids=_get_device_ids(self.rank)
         )
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
 
