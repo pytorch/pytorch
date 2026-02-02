@@ -45,6 +45,12 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   cudaGraph_t raw_cuda_graph();
   cudaGraphExec_t raw_cuda_graph_exec();
 
+  // Returns the mempool_id for this graph (set during capture_begin)
+  MempoolId_t mempool_id() const { return mempool_id_; }
+
+  // Returns the device for this graph (set during capture_begin)
+  c10::DeviceIndex capture_device() const { return capture_dev_; }
+
  protected:
   cudaGraph_t graph_ = nullptr;
   cudaGraphExec_t graph_exec_ = nullptr;

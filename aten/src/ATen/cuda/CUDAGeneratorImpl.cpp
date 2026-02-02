@@ -5,9 +5,11 @@
 #include <ATen/cuda/CUDAGraph.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
 #include <c10/core/StreamGuard.h>
+#include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/util/CallOnce.h>
 #include <deque>
+#include <thread>
 
 namespace at {
 namespace cuda::detail {
@@ -97,13 +99,30 @@ Generator createCUDAGenerator(DeviceIndex device_index) {
 
 /**
  * Allocate tensors and initialize with seed value.
- * Uses a side stream so the fill_ operations are not captured in the graph.
+ *
+ * The RNG state tensors must be allocated in the default memory pool (not the
+ * graph pool) because they persist across graph replays and are managed
+ * internally. During graph capture, allocations are routed to the graph pool
+ * via beginAllocateToPool. We temporarily end that routing, allocate our
+ * tensors (which go to the default pool), then restore the routing.
+ *
+ * We also use a non-capturing side stream for the fill_ operations so they
+ * are not captured in the graph.
  */
-void CUDAGeneratorCaptureState::initialize(uint64_t seed) {
+void CUDAGeneratorCaptureState::initialize(
+    uint64_t seed,
+    c10::DeviceIndex device,
+    c10::MempoolId_t mempool_id) {
   // Allocate GPU tensors for seed and offset if not already allocated
   if (is_initialized()) {
     return;
   }
+
+  // Temporarily stop routing allocations to the graph pool.
+  // This allows our tensor allocations to go to the default pool.
+  // We use the same thread-based filter that beginAllocateCurrentThreadToPool uses.
+  auto tid = std::this_thread::get_id();
+  c10::cuda::CUDACachingAllocator::endAllocateToPool(device, mempool_id);
 
   auto options = at::TensorOptions().device(at::kCUDA).dtype(at::kLong);
   // Create these tensors outside of inference mode to ensure they can be
@@ -112,12 +131,18 @@ void CUDAGeneratorCaptureState::initialize(uint64_t seed) {
   seed_extragraph_ = at::empty({1}, options);
   offset_extragraph_ = at::empty({1}, options);
 
-  // Initialize using a non-capturing side stream so the fill_ ops are not
-  // captured. getNonCapturingStreamFromPool iterates through the stream pool
-  // to find a stream that is not currently capturing.
+  // Restore routing allocations to the graph pool with the same thread filter.
+  c10::cuda::CUDACachingAllocator::beginAllocateToPool(
+      device, mempool_id, [tid](cudaStream_t) {
+        return std::this_thread::get_id() == tid;
+      });
+
+  // Use a non-capturing side stream so the fill_ ops are not captured.
+  // getNonCapturingStreamFromPool iterates through the stream pool to find
+  // a stream that is not currently capturing.
   {
     const auto side_stream = at::cuda::getNonCapturingStreamFromPool();
-    at::cuda::CUDAStreamGuard guard(side_stream);
+    at::cuda::CUDAStreamGuard stream_guard(side_stream);
     offset_intragraph_ = 0;
     seed_extragraph_.fill_(static_cast<int64_t>(seed));
     offset_extragraph_.fill_(0);
@@ -185,15 +210,18 @@ CUDAGeneratorCaptureState* CUDAGeneratorState::get_capture_state(CaptureId_t cap
     }
   }
 
-  // Create a new capture state if not found
-  auto capture_state = make_intrusive<CUDAGeneratorCaptureState>();
-  capture_state->initialize(seed_);
-
-
+  // Get the graph to obtain device and mempool_id for initialize()
   auto* graph = cuda::getGraphFromCaptureId(capture_id);
   TORCH_CHECK(graph != nullptr,
       "RNG op during graph capture but could not find the CUDAGraph object. "
       "This should not happen.");
+
+  // Create and initialize capture state. The initialize() method temporarily
+  // routes allocations to the default pool (not the graph pool) so the RNG
+  // state tensors persist across graph replays.
+  auto capture_state = make_intrusive<CUDAGeneratorCaptureState>();
+  capture_state->initialize(seed_, graph->capture_device(), graph->mempool_id());
+
   graph->register_generator_state(
       c10::intrusive_ptr<CUDAGeneratorState>::reclaim_copy(this));
 
@@ -203,6 +231,8 @@ CUDAGeneratorCaptureState* CUDAGeneratorState::get_capture_state(CaptureId_t cap
     std::lock_guard<std::mutex> lock(capture_states_mutex_);
     auto it = capture_states_.find(capture_id);
     if (it != capture_states_.end()) {
+      // Another thread created it - discard ours and use theirs.
+      // Our tensors will be freed when capture_state goes out of scope.
       return it->second.get();
     }
     auto* ptr = capture_state.get();
@@ -249,10 +279,15 @@ uint64_t CUDAGeneratorState::capture_epilogue(CaptureId_t capture_id) {
 
 /**
  * Called by CUDAGraph::reset - removes capture state when graph is destroyed.
+ * The RNG state tensors are allocated in the default pool (not the graph pool),
+ * so they will be freed normally when the capture state is destroyed.
  */
 void CUDAGeneratorState::remove_capture_state(CaptureId_t capture_id) {
   std::lock_guard<std::mutex> lock(capture_states_mutex_);
-  capture_states_.erase(capture_id);
+  auto it = capture_states_.find(capture_id);
+  if (it != capture_states_.end()) {
+    capture_states_.erase(it);
+  }
 }
 
 /**
