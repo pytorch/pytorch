@@ -149,13 +149,17 @@ void multi_margin_loss_shape_check(
 
     TORCH_CHECK(
         target.dim() <= 1 && target.numel() == nframe,
-        "inconsistent target size, expected ", nframe, " but got ",
-        target.sizes());
+        "multi_margin_loss: target tensor should be 1-D with size equal to "
+        "the number of input samples (batch size). Expected target size [",
+        nframe, "], but got ", target.sizes(),
+        ". Input has shape ", input.sizes(), ".");
     if (weight && weight->defined()) {
       TORCH_CHECK(
           weight->dim() <= 1 && weight->numel() == dim,
-          "inconsistent weight size, expected ", dim, " but got ",
-          weight->sizes());
+          "multi_margin_loss: weight tensor should be 1-D with size equal to "
+          "the number of classes. Expected weight size [",
+          dim, "], but got ", weight->sizes(),
+          ". Input has shape ", input.sizes(), ".");
     }
 }
 
@@ -196,7 +200,11 @@ Tensor& multi_margin_loss_cuda_out(
   AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(), "multi_margin_loss_cuda", [&] {
     const scalar_t margin = margin_.to<scalar_t>();
     if (input.dim() <= 1) {
-      TORCH_CHECK(target.dim() <= 1 && target.numel() == nframe, "inconsistent target size");
+      TORCH_CHECK(
+          target.dim() <= 1 && target.numel() == nframe,
+          "multi_margin_loss: target tensor should be 1-D with size equal to "
+          "the number of input samples. Expected target size [",
+          nframe, "], but got ", target.sizes(), ".");
       dim3 blocks(1);
       dim3 threads(MULTIMARGIN_THREADS);
       if (p == 1) {
@@ -226,8 +234,12 @@ Tensor& multi_margin_loss_cuda_out(
       auto in_sizes = input.sizes();
       TORCH_INTERNAL_ASSERT(in_sizes.size() == 2);
       // allow zero-dim target for 2D input.
-      TORCH_CHECK(in_sizes[1] != 0 && target.dim() <= 1 && target.numel() == nframe,
-                "inconsistent target size");
+      TORCH_CHECK(
+          in_sizes[1] != 0 && target.dim() <= 1 && target.numel() == nframe,
+          "multi_margin_loss: target tensor should be 1-D with size equal to "
+          "the batch size (input.size(0)). Expected target size [",
+          nframe, "], but got ", target.sizes(),
+          ". Input has shape ", in_sizes, ".");
       dim3 blocks(nframe);
       dim3 threads(MULTIMARGIN_THREADS);
 
@@ -363,8 +375,12 @@ Tensor& multi_margin_loss_cuda_backward_out(
     } else {
       auto in_sizes = input.sizes();
       TORCH_INTERNAL_ASSERT(in_sizes.size() == 2);
-      TORCH_CHECK((in_sizes[1] != 0) && (target.dim() <= 1) && (target.numel() == nframe),
-                  "inconsistent target size");
+      TORCH_CHECK(
+          (in_sizes[1] != 0) && (target.dim() <= 1) && (target.numel() == nframe),
+          "multi_margin_loss: target tensor should be 1-D with size equal to "
+          "the batch size (input.size(0)). Expected target size [",
+          nframe, "], but got ", target.sizes(),
+          ". Input has shape ", in_sizes, ".");
       dim3 blocks(in_sizes[0]);
       dim3 threads(MULTIMARGIN_THREADS);
 
