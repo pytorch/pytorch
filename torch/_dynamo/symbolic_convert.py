@@ -4632,6 +4632,10 @@ class InstructionTranslatorBase(
         # Ensure object identity preservation for captured mutable variables:
         # Reconstruct them once, store to local slots, and set LocalSource so
         # compile_subgraph loads from the same slots instead of reconstructing.
+        #
+        # For tensors/symnodes: the comprehension bytecode uses LOAD_FAST to load
+        # them from local slots. If a tensor's source doesn't match its variable
+        # name, we fall back to normal graph break handling.
         pre_subgraph_insts: list[Instruction] = []
         if analysis.captured_vars:
             captured_vars_cg = PyCodegen(self)
@@ -4640,14 +4644,24 @@ class InstructionTranslatorBase(
             for var_name in analysis.captured_vars:
                 if var_name in self.symbolic_locals:
                     var = self.symbolic_locals[var_name]
-
-                    if isinstance(var, (TensorVariable, SymNodeVariable)):
-                        continue
-
-                    if (
+                    in_correct_slot = (
                         isinstance(var.source, LocalSource)
                         and var.source.local_name == var_name
-                    ):
+                    )
+
+                    if isinstance(var, (TensorVariable, SymNodeVariable)):
+                        if not in_correct_slot:
+                            unimplemented(
+                                gb_type="Comprehension with captured tensor not in local slot",
+                                context="",
+                                explanation="Cannot use comprehension optimization when a "
+                                "captured tensor variable is not stored in its expected "
+                                "local slot.",
+                                hints=[],
+                            )
+                        continue
+
+                    if in_correct_slot:
                         continue
 
                     # For python constants, use create_load_const directly
