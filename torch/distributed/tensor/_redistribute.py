@@ -1411,6 +1411,8 @@ def redistribute_local_tensor(
     *,
     async_op: bool = False,
     use_graph_based_transform: bool | None = None,
+    # True if user explicitly called DTensor.redistribute()
+    is_explicit: bool = False,
 ) -> torch.Tensor:
     """
     This redistribute the local tensor (torch.Tensor) from the current DTensorSpec to
@@ -1483,6 +1485,7 @@ def redistribute_local_tensor(
                 current_spec.placements,
                 stringify_shard_order,
             ),
+            is_explicit=is_explicit,
         )
         if debug_mode is not None
         else contextlib.nullcontext()
@@ -1668,7 +1671,11 @@ class Redistribute(torch.autograd.Function):
             )
 
             output = redistribute_local_tensor(
-                local_tensor, current_spec, target_spec, async_op=async_op
+                local_tensor,
+                current_spec,
+                target_spec,
+                async_op=async_op,
+                is_explicit=True,
             )
         else:
             # use the same local tensor if placements are the same.
@@ -1736,6 +1743,7 @@ class Redistribute(torch.autograd.Function):
             current_spec,
             previous_spec,
             async_op=async_op,
+            is_explicit=True,
         )
 
         if output.dtype != ctx.original_dtype:
