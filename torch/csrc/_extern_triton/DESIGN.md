@@ -78,10 +78,12 @@ The abstraction layer exposes the following unified primitives to kernel authors
 
 | Primitive                  | Purpose                                                        |
 |----------------------------|----------------------------------------------------------------|
-| `symm_barrier`             | Barrier across all ranks in the communicator                   |
 | `symm_lsa_barrier`         | Barrier within the LSA (Local Symmetric Access) domain only    |
 | `symm_lsa_barrier_arrive`  | Signal arrival at LSA barrier (split-phase, non-blocking)      |
 | `symm_lsa_barrier_wait`    | Wait for all LSA peers to arrive at barrier (split-phase)      |
+| `symm_barrier`             | Barrier across all ranks in the communicator                   |
+| `symm_barrier_arrive`      | Signal arrival at GIN barrier (full team, split-phase)         |
+| `symm_barrier_wait`        | Wait for all team peers to arrive at GIN barrier (split-phase) |
 | `symm_fence`               | Memory fence with configurable scope (CTA/GPU/system)          |
 | `symm_quiet`               | Ensure all prior one-sided operations have completed           |
 

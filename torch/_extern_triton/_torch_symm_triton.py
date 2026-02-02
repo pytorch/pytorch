@@ -920,6 +920,165 @@ if TRITON_AVAILABLE:
         )
 
     # =========================================================================
+    # SYMM_BARRIER_ARRIVE - GIN BARRIER ARRIVE (SPLIT-PHASE, FULL TEAM)
+    # =========================================================================
+
+    @core.extern
+    def _symm_barrier_arrive_frontend(
+        ctx_ptr,
+        barrier_index,
+        _semantic=None,
+    ):
+        """
+        Frontend GIN barrier arrive operation that dispatches based on SymmContext type.
+
+        Signals arrival at a GIN barrier without waiting for other peers.
+        This is the "arrive" phase of a split-phase barrier, allowing overlapping
+        computation while waiting for peers.
+
+        Unlike LSA barrier which only targets the LSA domain, this GIN barrier
+        targets ALL ranks in the team using GPU-initiated networking.
+
+        This calls the unified frontend function that dynamically dispatches to
+        either NCCL or NVSHMEM backend based on the SymmContext type field.
+
+        For NCCL, uses ncclLsaBarrierSession with ncclTeamTagWorld.
+        For NVSHMEM, uses signal operations on the GIN signal pad.
+
+        Asserts on invalid context.
+        """
+        return core.extern_elementwise(
+            "",  # libname - not used when extern_libs is provided
+            "",  # libpath - not used when extern_libs is provided
+            [ctx_ptr, barrier_index],
+            {
+                # C function signature: (int64, int32) -> int32
+                (
+                    core.dtype("int64"),  # ctx_ptr
+                    core.dtype("int32"),  # barrier_index
+                ): ("symm_barrier_arrive", core.dtype("int32")),
+            },
+            is_pure=False,  # Collective operation has side effects
+            _semantic=_semantic,
+        )
+
+    @core.extern
+    def _nvshmem_symm_barrier_arrive(
+        ctx_ptr,
+        barrier_index,
+        _semantic=None,
+    ):
+        """
+        NVSHMEM-specific GIN barrier arrive operation.
+
+        Signals arrival at a GIN barrier without waiting for other peers.
+        This is the "arrive" phase of a split-phase barrier.
+
+        Uses signal operations on the GIN signal pad to notify all peers of
+        arrival. Each rank atomically increments a designated barrier signal
+        on all peer signal pads.
+
+        This calls the NVSHMEM backend directly, bypassing runtime dispatch.
+        Use this when you know the context is NVSHMEM type.
+
+        Asserts on invalid context.
+        """
+        return core.extern_elementwise(
+            "",  # libname - not used when extern_libs is provided
+            "",  # libpath - not used when extern_libs is provided
+            [ctx_ptr, barrier_index],
+            {
+                # C function signature: (int64, int32) -> int32
+                (
+                    core.dtype("int64"),  # ctx_ptr
+                    core.dtype("int32"),  # barrier_index
+                ): ("nvshmem_symm_barrier_arrive", core.dtype("int32")),
+            },
+            is_pure=False,  # Collective operation has side effects
+            _semantic=_semantic,
+        )
+
+    # =========================================================================
+    # SYMM_BARRIER_WAIT - GIN BARRIER WAIT (SPLIT-PHASE, FULL TEAM)
+    # =========================================================================
+
+    @core.extern
+    def _symm_barrier_wait_frontend(
+        ctx_ptr,
+        barrier_index,
+        _semantic=None,
+    ):
+        """
+        Frontend GIN barrier wait operation that dispatches based on SymmContext type.
+
+        Waits for all peers to arrive at the GIN barrier.
+        This is the "wait" phase of a split-phase barrier.
+
+        Unlike LSA barrier which only waits for LSA domain peers, this GIN barrier
+        waits for ALL ranks in the team.
+
+        This calls the unified frontend function that dynamically dispatches to
+        either NCCL or NVSHMEM backend based on the SymmContext type field.
+
+        For NCCL, uses ncclLsaBarrierSession with ncclTeamTagWorld.
+        For NVSHMEM, waits until the local GIN barrier signal reaches the expected
+        count, then updates the epoch for the next iteration.
+
+        Asserts on invalid context.
+        """
+        return core.extern_elementwise(
+            "",  # libname - not used when extern_libs is provided
+            "",  # libpath - not used when extern_libs is provided
+            [ctx_ptr, barrier_index],
+            {
+                # C function signature: (int64, int32) -> int32
+                (
+                    core.dtype("int64"),  # ctx_ptr
+                    core.dtype("int32"),  # barrier_index
+                ): ("symm_barrier_wait", core.dtype("int32")),
+            },
+            is_pure=False,  # Collective operation has side effects
+            _semantic=_semantic,
+        )
+
+    @core.extern
+    def _nvshmem_symm_barrier_wait(
+        ctx_ptr,
+        barrier_index,
+        _semantic=None,
+    ):
+        """
+        NVSHMEM-specific GIN barrier wait operation.
+
+        Waits for all peers to arrive at the GIN barrier.
+        This is the "wait" phase of a split-phase barrier.
+
+        Waits until the local GIN barrier signal (at gin_signal_pad[barrier_index])
+        reaches the expected count (team_size), indicating all peers have called
+        symm_barrier_arrive. After wait completes, the epoch is updated for
+        the next iteration.
+
+        This calls the NVSHMEM backend directly, bypassing runtime dispatch.
+        Use this when you know the context is NVSHMEM type.
+
+        Asserts on invalid context.
+        """
+        return core.extern_elementwise(
+            "",  # libname - not used when extern_libs is provided
+            "",  # libpath - not used when extern_libs is provided
+            [ctx_ptr, barrier_index],
+            {
+                # C function signature: (int64, int32) -> int32
+                (
+                    core.dtype("int64"),  # ctx_ptr
+                    core.dtype("int32"),  # barrier_index
+                ): ("nvshmem_symm_barrier_wait", core.dtype("int32")),
+            },
+            is_pure=False,  # Collective operation has side effects
+            _semantic=_semantic,
+        )
+
+    # =========================================================================
     # SYMM_FENCE - MEMORY FENCE FOR ORDERING
     # =========================================================================
 
@@ -1521,6 +1680,174 @@ if TRITON_AVAILABLE:
         elif backend == 2:  # BACKEND_NVSHMEM
             # Direct NVSHMEM dispatch
             _nvshmem_symm_lsa_barrier_wait(ctx_ptr, barrier_index)
+        else:
+            # BACKEND_NCCL (1) or unknown - not supported
+            # NCCL does not provide device bitcode library
+            tl.static_assert(
+                False,
+                "NCCL backend not supported (no device bitcode library available)",
+            )
+
+    # =========================================================================
+    # GIN BARRIER PRIMITIVES (Full Team Synchronization)
+    # =========================================================================
+
+    @triton.jit
+    def symm_barrier_arrive(
+        ctx_ptr,
+        barrier_index: tl.constexpr = 0,
+        backend: tl.constexpr = 0,
+    ):
+        """
+        Signal arrival at a GIN (GPU-Initiated Networking) barrier (full team).
+
+        This is the "arrive" phase of a split-phase barrier. It signals that this
+        rank has completed its local operations and is ready to synchronize, but
+        does NOT wait for other ranks to arrive.
+
+        Unlike symm_lsa_barrier_arrive which only targets the LSA domain (local peers),
+        this GIN barrier targets ALL ranks in the team using GPU-initiated networking.
+
+        Split-phase barriers allow overlapping computation with synchronization:
+        1. All ranks call symm_barrier_arrive() after completing local work
+        2. Ranks can perform independent computation
+        3. All ranks call symm_barrier_wait() before accessing peer data
+
+        Multiple independent barriers can be used by specifying different barrier_index
+        values. The same barrier_index must be used in the corresponding wait() call.
+
+        This is useful for:
+        - Synchronizing across all ranks (not just local/LSA domain)
+        - Hiding synchronization latency with computation
+        - Implementing pipelined algorithms across nodes
+
+        Example usage:
+            # Phase 1: Write data to local buffer
+            tl.store(local_ptr + offsets, data, mask=mask)
+
+            # Signal arrival (data is ready) to ALL ranks
+            symm_barrier_arrive(ctx_ptr, barrier_index=0)
+
+            # Do independent computation while waiting for peers
+            result = compute_something_else()
+
+            # Wait for all peers (across all nodes) before reading their data
+            symm_barrier_wait(ctx_ptr, barrier_index=0)
+
+            # Now safe to read peer data
+            peer_data = tl.load(peer_ptr + offsets, mask=mask)
+
+        This function dispatches to either the unified frontend (runtime dispatch)
+        or a backend-specific implementation based on the backend hint.
+
+        Maps to:
+        - NVSHMEM: Signal operations on gin_signal_pad to notify all team peers
+        - NCCL: ncclLsaBarrierSession::arrive() with ncclTeamTagWorld
+
+        Args:
+            ctx_ptr: Pointer to SymmContext (NCCLSymmContext or NVSHMEMSymmContext)
+            barrier_index: Index of the barrier to use (constexpr, default=0).
+                           Multiple independent barriers can be used by specifying
+                           different indices. Must match the corresponding wait() call.
+            backend: Backend hint (constexpr, default=0 for BACKEND_DEFAULT)
+                      - 0 (BACKEND_DEFAULT): Runtime dispatch based on context type
+                      - 1 (BACKEND_NCCL): Direct NCCL dispatch (not functional)
+                      - 2 (BACKEND_NVSHMEM): Direct NVSHMEM dispatch
+
+        Note:
+            When using BACKEND_DEFAULT (0), use @requires_torch_symm decorator.
+            When using BACKEND_NVSHMEM (2), use @requires_torch_symm(backend=BACKEND_NVSHMEM).
+
+            This function asserts on invalid context.
+        """
+        # Use integer literals for comparison since Triton can't access globals
+        # 0 = BACKEND_DEFAULT, 1 = BACKEND_NCCL, 2 = BACKEND_NVSHMEM
+        if backend == 0:  # BACKEND_DEFAULT
+            # Runtime dispatch based on SymmContext type
+            _symm_barrier_arrive_frontend(ctx_ptr, barrier_index)
+        elif backend == 2:  # BACKEND_NVSHMEM
+            # Direct NVSHMEM dispatch
+            _nvshmem_symm_barrier_arrive(ctx_ptr, barrier_index)
+        else:
+            # BACKEND_NCCL (1) or unknown - not supported
+            # NCCL does not provide device bitcode library
+            tl.static_assert(
+                False,
+                "NCCL backend not supported (no device bitcode library available)",
+            )
+
+    @triton.jit
+    def symm_barrier_wait(
+        ctx_ptr,
+        barrier_index: tl.constexpr = 0,
+        backend: tl.constexpr = 0,
+    ):
+        """
+        Wait for all peers to arrive at a GIN (GPU-Initiated Networking) barrier (full team).
+
+        This is the "wait" phase of a split-phase barrier. It blocks until all ranks
+        in the team have called symm_barrier_arrive() with the same barrier_index.
+
+        Unlike symm_lsa_barrier_wait which only waits for LSA domain peers, this GIN
+        barrier waits for ALL ranks in the team.
+
+        Must be called after symm_barrier_arrive() with the same barrier_index.
+        After this returns:
+        - All data written by peers before their arrive() is guaranteed to be visible
+        - The epoch is updated for the next iteration
+
+        Split-phase barriers allow overlapping computation with synchronization:
+        1. All ranks call symm_barrier_arrive() after completing local work
+        2. Ranks can perform independent computation
+        3. All ranks call symm_barrier_wait() before accessing peer data
+
+        Example usage:
+            # Phase 1: Write data to local buffer
+            tl.store(local_ptr + offsets, data, mask=mask)
+
+            # Signal arrival (data is ready) to ALL ranks
+            symm_barrier_arrive(ctx_ptr, barrier_index=0)
+
+            # Do independent computation while waiting for peers
+            result = compute_something_else()
+
+            # Wait for all peers (across all nodes) before reading their data
+            symm_barrier_wait(ctx_ptr, barrier_index=0)
+
+            # Now safe to read peer data
+            peer_data = tl.load(peer_ptr + offsets, mask=mask)
+
+        This function dispatches to either the unified frontend (runtime dispatch)
+        or a backend-specific implementation based on the backend hint.
+
+        Maps to:
+        - NVSHMEM: nvshmem_signal_wait_until on gin_signal_pad, then update epoch
+        - NCCL: ncclLsaBarrierSession::wait() with ncclTeamTagWorld
+
+        Args:
+            ctx_ptr: Pointer to SymmContext (NCCLSymmContext or NVSHMEMSymmContext)
+            barrier_index: Index of the barrier to wait on (constexpr, default=0).
+                           Must match the barrier_index used in the corresponding
+                           arrive() call.
+            backend: Backend hint (constexpr, default=0 for BACKEND_DEFAULT)
+                      - 0 (BACKEND_DEFAULT): Runtime dispatch based on context type
+                      - 1 (BACKEND_NCCL): Direct NCCL dispatch (not functional)
+                      - 2 (BACKEND_NVSHMEM): Direct NVSHMEM dispatch
+
+        Note:
+            When using BACKEND_DEFAULT (0), use @requires_torch_symm decorator.
+            When using BACKEND_NVSHMEM (2), use @requires_torch_symm(backend=BACKEND_NVSHMEM).
+
+            This function asserts on invalid context.
+        """
+        # Use integer literals for comparison since Triton can't access globals
+        # 0 = BACKEND_DEFAULT, 1 = BACKEND_NCCL, 2 = BACKEND_NVSHMEM
+        if backend == 0:  # BACKEND_DEFAULT
+            # Runtime dispatch based on SymmContext type
+            _symm_barrier_wait_frontend(ctx_ptr, barrier_index)
+        elif backend == 2:  # BACKEND_NVSHMEM
+            # Direct NVSHMEM dispatch
+            _nvshmem_symm_barrier_wait(ctx_ptr, barrier_index)
         else:
             # BACKEND_NCCL (1) or unknown - not supported
             # NCCL does not provide device bitcode library
@@ -3286,6 +3613,8 @@ __all__ = [
     "symm_lsa_barrier",
     "symm_lsa_barrier_arrive",
     "symm_lsa_barrier_wait",
+    "symm_barrier_arrive",
+    "symm_barrier_wait",
     "symm_fence",
     # Memory primitives
     "symm_lsa_ptr",

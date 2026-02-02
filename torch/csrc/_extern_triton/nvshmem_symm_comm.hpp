@@ -126,6 +126,7 @@ class TORCH_API NVSHMEMSymmComm {
   uint64_t* lsa_signal_pad_; // LSA signal pad for P2P load/store signaling
   uint64_t* gin_signal_pad_; // GIN signal pad for remote atomic signaling
   uint64_t* lsa_barrier_epoch_; // LSA barrier epoch tracking array
+  uint64_t* gin_barrier_epoch_; // GIN barrier epoch tracking array
 
   // Team structure for multicast operations
   NVSHMEMSymmTeam team_host_;

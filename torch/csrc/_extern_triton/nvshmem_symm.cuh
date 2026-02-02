@@ -371,6 +371,134 @@ __device__ void nvshmem_lsa_barrier_wait_impl(
   __threadfence_system();
 }
 
+// =============================================================================
+// GIN (GPU-Initiated Networking) BARRIER PRIMITIVES
+// These barrier primitives target the full team (all ranks), not just LSA domain
+// =============================================================================
+
+/**
+ * NVSHMEM backend implementation of barrier_arrive (GIN-based).
+ *
+ * Signals arrival at a GIN barrier without waiting for other peers.
+ * This is the "arrive" phase of a split-phase barrier, allowing overlapping
+ * computation while waiting for peers.
+ *
+ * Unlike lsa_barrier_arrive which only targets the LSA domain, this GIN
+ * barrier targets ALL ranks in the team, using GPU-initiated networking
+ * for remote signaling.
+ *
+ * Implementation:
+ * 1. Memory fence to ensure all prior operations are visible
+ * 2. Single thread signals arrival to ALL team peers via nvshmemx_signal_op
+ *
+ * Uses gin_signal_pad for signaling and team_size for the number of peers.
+ *
+ * @param nvshmem_ctx NVSHMEM context with gin_signal_pad and team
+ * @param barrier_index Index of the barrier to use (0..nBarriers-1).
+ *        Multiple independent barriers can be used by specifying different
+ * indices. The same index must be used for the corresponding wait() call.
+ */
+__device__ void nvshmem_barrier_arrive_impl(
+    NVSHMEMSymmContext* nvshmem_ctx,
+    int32_t barrier_index) {
+  // Get the GIN signal pad from the context
+  TORCH_SYMM_CHECK(
+      nvshmem_ctx->gin_signal_pad != nullptr, "gin_signal_pad is null");
+  TORCH_SYMM_CHECK(nvshmem_ctx->team != nullptr, "team is null");
+
+  uint64_t* signal_pad = nvshmem_ctx->gin_signal_pad;
+
+  // Calculate barrier signal address using barrier_index
+  uint64_t* barrier_signal = signal_pad + barrier_index;
+
+  // Get the number of PEs in the team
+  int n_pes = nvshmem_ctx->team->team_size;
+
+  // Ensure all prior memory operations are visible before signaling arrival
+  // All threads participate in the fence for proper memory ordering
+  nvshmem_fence();
+
+  // Only thread 0 of block 0 signals arrival to avoid multiple signals per PE
+  // This ensures exactly one signal per PE regardless of grid configuration
+  if (threadIdx.x == 0 && blockIdx.x == 0) {
+    // Signal arrival to all team peers by atomically adding 1 to their barrier
+    // signal. We signal to all PEs in the team.
+    // NVSHMEM_SIGNAL_ADD = 10 (from nvshmem_common_transport.h)
+    for (int pe = 0; pe < n_pes; pe++) {
+      nvshmemx_signal_op(barrier_signal, 1, NVSHMEM_SIGNAL_ADD, pe);
+    }
+  }
+}
+
+/**
+ * NVSHMEM backend implementation of barrier_wait (GIN-based).
+ *
+ * Waits for all peers to arrive at the GIN barrier.
+ * This is the "wait" phase of a split-phase barrier.
+ *
+ * Unlike lsa_barrier_wait which only waits for LSA domain peers, this GIN
+ * barrier waits for ALL ranks in the team.
+ *
+ * Implementation:
+ * 1. Reads the current epoch from gin_barrier_epoch[barrier_index]
+ * 2. Waits until gin_signal_pad[barrier_index] >= epoch + team_size
+ * 3. Epilogue: Single thread (thread 0 of block 0) increments epoch by
+ * team_size
+ * 4. Epilogue: All CTAs synchronize via __threadfence_system()
+ *
+ * Uses the team's team_size to determine the number of PEs.
+ *
+ * After wait completes:
+ * - All data written by peers before their arrive() is visible
+ * - The epoch is updated to prepare for the next barrier iteration
+ *
+ * @param nvshmem_ctx NVSHMEM context with gin_signal_pad, gin_barrier_epoch,
+ * and team
+ * @param barrier_index Index of the barrier to wait on. Must match the index
+ *        used in the corresponding arrive() call.
+ */
+__device__ void nvshmem_barrier_wait_impl(
+    NVSHMEMSymmContext* nvshmem_ctx,
+    int32_t barrier_index) {
+  // Get the GIN signal pad and epoch array from the context
+  TORCH_SYMM_CHECK(
+      nvshmem_ctx->gin_signal_pad != nullptr, "gin_signal_pad is null");
+  TORCH_SYMM_CHECK(
+      nvshmem_ctx->gin_barrier_epoch != nullptr, "gin_barrier_epoch is null");
+  TORCH_SYMM_CHECK(nvshmem_ctx->team != nullptr, "team is null");
+
+  uint64_t* signal_pad = nvshmem_ctx->gin_signal_pad;
+  uint64_t* epoch_array = nvshmem_ctx->gin_barrier_epoch;
+
+  // Calculate addresses using barrier_index
+  uint64_t* barrier_signal = signal_pad + barrier_index;
+  uint64_t* barrier_epoch = epoch_array + barrier_index;
+
+  // Read current epoch value
+  uint64_t epoch = *barrier_epoch;
+
+  // Get the number of PEs in the team
+  int n_pes = nvshmem_ctx->team->team_size;
+
+  // Expected signal value: epoch + team_size (each PE in team increments by 1)
+  uint64_t expected_count = epoch + static_cast<uint64_t>(n_pes);
+
+  // Wait until the barrier signal reaches the expected count
+  // NVSHMEM_CMP_GE = 3 (from nvshmem's comparison types, 0-based)
+  nvshmem_signal_wait_until(
+      barrier_signal, 3 /* NVSHMEM_CMP_GE */, expected_count);
+
+  // Epilogue: Single thread increments epoch for next barrier iteration
+  // Only thread 0 of block 0 updates the epoch
+  if (threadIdx.x == 0 && blockIdx.x == 0) {
+    *barrier_epoch = expected_count;
+  }
+
+  // Epilogue: All CTAs from current PE must synchronize
+  // Use system-wide fence to ensure epoch update is visible to all CTAs
+  __threadfence_system();
+}
+
 /**
  * NVSHMEM backend implementation of lsa_ptr.
  */
@@ -979,7 +1107,51 @@ __device__ int32_t nvshmem_symm_put_signal_async(
       dest_rank,
       signal_index,
       static_cast<uint64_t>(signal_value),
-      signal_op);
+    signal_op);
+  return 0;
+}
+
+// =============================================================================
+// NVSHMEM GIN BARRIER PRIMITIVES (Full Team Synchronization)
+// =============================================================================
+
+/**
+ * NVSHMEM-specific wrapper for barrier_arrive (GIN-based).
+ *
+ * Signals arrival at a GIN barrier without waiting for other peers.
+ * This is the "arrive" phase of a split-phase barrier that targets all ranks
+ * in the team (not just LSA domain).
+ *
+ * @param ctx_ptr Pointer to SymmContext (as int64)
+ * @param barrier_index Index of the barrier to use. The same index must be
+ *        used for the corresponding wait() call.
+ * @return 0 on success
+ */
+__device__ int32_t
+nvshmem_symm_barrier_arrive(int64_t ctx_ptr, int32_t barrier_index) {
+  SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
+  NVSHMEMSymmContext* nvshmem_ctx = cast_to_nvshmem_context(ctx);
+  nvshmem_barrier_arrive_impl(nvshmem_ctx, barrier_index);
+  return 0;
+}
+
+/**
+ * NVSHMEM-specific wrapper for barrier_wait (GIN-based).
+ *
+ * Waits for all peers in the team to arrive at the GIN barrier.
+ * This is the "wait" phase of a split-phase barrier that targets all ranks
+ * in the team (not just LSA domain).
+ *
+ * @param ctx_ptr Pointer to SymmContext (as int64)
+ * @param barrier_index Index of the barrier to wait on. Must match the index
+ *        used in the corresponding arrive() call.
+ * @return 0 on success
+ */
+__device__ int32_t
+nvshmem_symm_barrier_wait(int64_t ctx_ptr, int32_t barrier_index) {
+  SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
+  NVSHMEMSymmContext* nvshmem_ctx = cast_to_nvshmem_context(ctx);
+  nvshmem_barrier_wait_impl(nvshmem_ctx, barrier_index);
   return 0;
 }
 

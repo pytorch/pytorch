@@ -583,6 +583,12 @@ struct NVSHMEMSymmContext : public SymmContext {
   // After barrier completes, a single thread increments epoch by n_pes.
   uint64_t* lsa_barrier_epoch;
 
+  // GIN barrier epoch tracking (symmetric address)
+  // Similar to lsa_barrier_epoch but for GIN (GPU-Initiated Networking) barriers
+  // that synchronize across all ranks (not just LSA domain).
+  // Used by symm_barrier_arrive/wait for full team synchronization.
+  uint64_t* gin_barrier_epoch;
+
   // Pointer to the associated SymmTeam for this context
   // Provides team membership info (size, rank) and LSA domain info
   // Used by LSA barrier to get the number of PEs in the LSA domain
@@ -608,6 +614,7 @@ struct NVSHMEMSymmContext : public SymmContext {
         lsa_signal_pad(nullptr),
         gin_signal_pad(nullptr),
         lsa_barrier_epoch(nullptr),
+        gin_barrier_epoch(nullptr),
         team(nullptr),
         device_idx(-1),
         offset(0),
@@ -622,6 +629,7 @@ struct NVSHMEMSymmContext : public SymmContext {
       uint64_t* lsa_sig_pad,
       uint64_t* gin_sig_pad,
       uint64_t* barrier_epoch,
+      uint64_t* gin_bar_epoch,
       struct NVSHMEMSymmTeam* team_ptr,
       int32_t dev_idx,
       size_t off,
@@ -633,6 +641,7 @@ struct NVSHMEMSymmContext : public SymmContext {
         lsa_signal_pad(lsa_sig_pad),
         gin_signal_pad(gin_sig_pad),
         lsa_barrier_epoch(barrier_epoch),
+        gin_barrier_epoch(gin_bar_epoch),
         team(team_ptr),
         device_idx(dev_idx),
         offset(off),

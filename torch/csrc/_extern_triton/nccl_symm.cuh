@@ -350,6 +350,85 @@ __device__ void nccl_lsa_barrier_wait_impl(
 #endif
 }
 
+// =============================================================================
+// GIN (GPU-Initiated Networking) BARRIER PRIMITIVES
+// These barrier primitives target the full team (all ranks), not just LSA domain
+// =============================================================================
+
+/**
+ * NCCL backend implementation of barrier_arrive (GIN-based).
+ *
+ * Signals arrival at a GIN barrier without waiting for other peers.
+ * This is the "arrive" phase of a split-phase barrier, allowing overlapping
+ * computation while waiting for peers.
+ *
+ * Unlike lsa_barrier_arrive which only targets the LSA domain, this GIN
+ * barrier targets ALL ranks in the team using ncclTeamTagWorld.
+ *
+ * Uses ncclLsaBarrierSession with ncclTeamTagWorld for full team synchronization.
+ *
+ * @param nccl_ctx NCCL context with device communicator
+ * @param barrier_index Index of the barrier to use (0..nBarriers-1).
+ *        Multiple independent barriers can be used by specifying different
+ * indices. The same index must be used for the corresponding wait() call.
+ */
+__device__ void nccl_barrier_arrive_impl(
+    NCCLSymmContext* nccl_ctx,
+    int32_t barrier_index) {
+#if defined(NCCL_SYMM_TYPES_AVAILABLE)
+  // Use ncclLsaBarrierSession with ncclTeamTagWorld for full team barrier
+  // Call arrive() to signal this rank's arrival without waiting
+  ncclLsaBarrierSession<ncclCoopCta> barrier(
+      ncclCoopCta{},
+      *nccl_ctx->dev_comm,
+      ncclTeamTagWorld{},
+      static_cast<uint32_t>(barrier_index),
+      false // use_multimem
+  );
+  barrier.arrive(ncclCoopCta{}, cuda::memory_order_seq_cst);
+#else
+  // NCCL device types are not available
+  TORCH_SYMM_CHECK(
+      false, "NCCL barrier_arrive requires NCCL_SYMM_TYPES_AVAILABLE");
+#endif
+}
+
+/**
+ * NCCL backend implementation of barrier_wait (GIN-based).
+ *
+ * Waits for all peers to arrive at the GIN barrier.
+ * This is the "wait" phase of a split-phase barrier.
+ *
+ * Unlike lsa_barrier_wait which only waits for LSA domain peers, this GIN
+ * barrier waits for ALL ranks in the team using ncclTeamTagWorld.
+ *
+ * Uses ncclLsaBarrierSession with ncclTeamTagWorld for full team synchronization.
+ *
+ * @param nccl_ctx NCCL context with device communicator
+ * @param barrier_index Index of the barrier to use (0..nBarriers-1).
+ *        Must match the index used in the corresponding arrive() call.
+ */
+__device__ void nccl_barrier_wait_impl(
+    NCCLSymmContext* nccl_ctx,
+    int32_t barrier_index) {
+#if defined(NCCL_SYMM_TYPES_AVAILABLE)
+  // Use ncclLsaBarrierSession with ncclTeamTagWorld for full team barrier
+  // Call wait() to wait for all peers to arrive
+  ncclLsaBarrierSession<ncclCoopCta> barrier(
+      ncclCoopCta{},
+      *nccl_ctx->dev_comm,
+      ncclTeamTagWorld{},
+      static_cast<uint32_t>(barrier_index),
+      false // use_multimem
+  );
+  barrier.wait(ncclCoopCta{}, cuda::memory_order_seq_cst);
+#else
+  // NCCL device types are not available
+  TORCH_SYMM_CHECK(
+      false, "NCCL barrier_wait requires NCCL_SYMM_TYPES_AVAILABLE");
+#endif
+}
+
 /**
  * NCCL backend implementation of lsa_ptr.
  */
@@ -991,6 +1070,50 @@ __device__ int32_t nccl_symm_put_signal_async(
       signal_index,
       static_cast<uint64_t>(signal_value),
       signal_op);
+  return 0;
+}
+
+// =============================================================================
+// NCCL GIN BARRIER PRIMITIVES (Full Team Synchronization)
+// =============================================================================
+
+/**
+ * NCCL-specific wrapper for barrier_arrive (GIN-based).
+ *
+ * Signals arrival at a GIN barrier without waiting for other peers.
+ * This is the "arrive" phase of a split-phase barrier that targets all ranks
+ * in the team (not just LSA domain).
+ *
+ * @param ctx_ptr Pointer to SymmContext (as int64)
+ * @param barrier_index Index of the barrier to use. The same index must be
+ *        used for the corresponding wait() call.
+ * @return 0 on success
+ */
+__device__ int32_t
+nccl_symm_barrier_arrive(int64_t ctx_ptr, int32_t barrier_index) {
+  SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
+  NCCLSymmContext* nccl_ctx = cast_to_nccl_context(ctx);
+  nccl_barrier_arrive_impl(nccl_ctx, barrier_index);
+  return 0;
+}
+
+/**
+ * NCCL-specific wrapper for barrier_wait (GIN-based).
+ *
+ * Waits for all peers in the team to arrive at the GIN barrier.
+ * This is the "wait" phase of a split-phase barrier that targets all ranks
+ * in the team (not just LSA domain).
+ *
+ * @param ctx_ptr Pointer to SymmContext (as int64)
+ * @param barrier_index Index of the barrier to wait on. Must match the index
+ *        used in the corresponding arrive() call.
+ * @return 0 on success
+ */
+__device__ int32_t
+nccl_symm_barrier_wait(int64_t ctx_ptr, int32_t barrier_index) {
+  SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
+  NCCLSymmContext* nccl_ctx = cast_to_nccl_context(ctx);
+  nccl_barrier_wait_impl(nccl_ctx, barrier_index);
   return 0;
 }
 

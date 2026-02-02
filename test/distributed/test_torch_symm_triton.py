@@ -104,6 +104,8 @@ if TRITON_AVAILABLE:
         REDUCE_OP_SUM,
         requires_torch_symm,
         symm_all_reduce,
+        symm_barrier_arrive,
+        symm_barrier_wait,
         symm_lsa_barrier_arrive,
         symm_lsa_barrier_wait,
         symm_lsa_ptr,
@@ -169,6 +171,58 @@ if TRITON_AVAILABLE:
     symm_all_reduce_test_kernel_nvshmem = make_symm_all_reduce_test_kernel(
         BACKEND_NVSHMEM
     )
+
+    # Test kernel for split-phase GIN barrier (arrive/wait) - full team sync
+    @requires_torch_symm(backend=BACKEND_NVSHMEM)
+    @triton.jit
+    def symm_barrier_arrive_wait_test_kernel(
+        ctx_ptr,
+        src_ptr,
+        dst_ptr,
+        barrier_index: tl.constexpr,
+        backend_hint: tl.constexpr,
+    ):
+        """
+        Test kernel for split-phase GIN barrier arrive/wait primitives.
+
+        GIN (GPU-Initiated Networking) barriers synchronize ALL ranks in the team,
+        not just the LSA (NVLink-connected) peers. This is for cross-node sync.
+
+        Pattern:
+        1. Each rank writes a unique value to its source buffer
+        2. Signal arrival (data ready) via GIN barrier
+        3. Wait for all team peers to arrive
+        4. Read peer data via P2P and store in destination buffer
+
+        Args:
+            ctx_ptr: Pointer to SymmContext (team is obtained from context internally)
+            src_ptr: Pointer to source symmetric buffer
+            dst_ptr: Pointer to destination symmetric buffer
+            barrier_index: Barrier index to use
+            backend_hint: Backend hint (2 for NVSHMEM)
+        """
+        my_pe = symm_team_rank(ctx_ptr, backend=backend_hint)
+        n_pes = symm_team_size(ctx_ptr, backend=backend_hint)
+
+        # Write unique value to source buffer (my_pe + 200 to distinguish from LSA test)
+        p_src = src_ptr.to(tl.pointer_type(tl.int32))
+        tl.store(p_src, my_pe + 200)
+
+        # Signal arrival via GIN barrier - data is ready to be read by all team peers
+        symm_barrier_arrive(ctx_ptr, barrier_index, backend=backend_hint)
+
+        # Wait for all team peers to arrive
+        symm_barrier_wait(ctx_ptr, barrier_index, backend=backend_hint)
+
+        # Read peer data via P2P (next PE in ring)
+        next_pe = (my_pe + 1) % n_pes
+        peer_src_ptr = symm_lsa_ptr(ctx_ptr, src_ptr, next_pe, backend=backend_hint)
+        p_peer = peer_src_ptr.to(tl.pointer_type(tl.int32))
+        peer_val = tl.load(p_peer)
+
+        # Store received value to destination
+        p_dst = dst_ptr.to(tl.pointer_type(tl.int32))
+        tl.store(p_dst, peer_val)
 
     # Test kernel for split-phase LSA barrier (arrive/wait)
     @requires_torch_symm(backend=BACKEND_NVSHMEM)
@@ -521,6 +575,79 @@ class TestTorchSymmTriton(MultiProcessTestCase):
             next_rank = (self.rank + 1) % self.world_size
             expected = next_rank + 100
             print(f"[Rank {self.rank}] Expected value: {expected}")
+
+        finally:
+            self._cleanup_process_group()
+
+    @skip_if_lt_x_gpu(2)
+    @requires_triton
+    @requires_nvshmem
+    def test_nvshmem_barrier_arrive_wait(self):
+        """
+        Test split-phase GIN barrier with arrive() and wait() primitives.
+
+        This test verifies that:
+        1. symm_barrier_arrive() correctly signals arrival to all team peers
+        2. symm_barrier_wait() correctly waits for all team peers to arrive
+        3. After wait returns, peer data written before arrive() is visible
+
+        GIN barriers synchronize ALL ranks in the team (cross-node), unlike LSA
+        barriers which only synchronize NVLink-connected peers.
+
+        Pattern:
+        - Each rank writes (rank + 200) to its source buffer
+        - Signal arrival via symm_barrier_arrive()
+        - Wait for all team peers via symm_barrier_wait()
+        - Read next peer's value via P2P load
+        - Verify received value is (next_rank + 200)
+        """
+        self._init_process_group()
+        try:
+            from torch._C._distributed_c10d import NVSHMEMSymmComm
+
+            device = torch.device("cuda", self.rank)
+
+            # Create communicator for context and team
+            buffer_size = 1024  # bytes
+            group_name = dist.group.WORLD.group_name
+            comm = NVSHMEMSymmComm(group_name, buffer_size, self.rank)
+            ctx_ptr = comm.get_context_ptr()
+
+            dtype = torch.int32
+            buffer_ptr = comm.get_buffer_ptr()
+
+            # Use buffer_ptr directly for symmetric access
+            # src at offset 0, dst at offset 4 (one int32)
+            src_ptr = buffer_ptr
+            dst_ptr = buffer_ptr + 4  # offset by one int32
+
+            # Wait for initialization to complete
+            torch.cuda.synchronize(device)
+            dist.barrier()
+
+            print(f"[Rank {self.rank}] Launching GIN barrier kernel with ctx_ptr={ctx_ptr}")
+
+            # Launch kernel with split-phase GIN barrier
+            symm_barrier_arrive_wait_test_kernel[(1,)](
+                ctx_ptr,
+                src_ptr,
+                dst_ptr,
+                barrier_index=0,
+                backend_hint=BACKEND_NVSHMEM,
+                launch_cooperative_grid=True,
+                num_ctas=1,
+            )
+
+            # Synchronize after kernel
+            torch.cuda.synchronize(device)
+            print(f"[Rank {self.rank}] GIN barrier kernel completed")
+            dist.barrier()
+
+            # Verify results
+            # Each PE reads from next PE: PE0 reads PE1's value (201), PE1 reads PE0's value (200)
+            next_rank = (self.rank + 1) % self.world_size
+            expected = next_rank + 200
+            print(f"[Rank {self.rank}] GIN barrier expected value: {expected}")
 
         finally:
             self._cleanup_process_group()

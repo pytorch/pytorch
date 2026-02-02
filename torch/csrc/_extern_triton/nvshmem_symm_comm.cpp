@@ -140,6 +140,7 @@ NVSHMEMSymmComm::NVSHMEMSymmComm(
       lsa_signal_pad_(nullptr),
       gin_signal_pad_(nullptr),
       lsa_barrier_epoch_(nullptr),
+      gin_barrier_epoch_(nullptr),
       team_dev_(nullptr),
       context_dev_(nullptr) {
   initialize();
@@ -228,15 +229,23 @@ void NVSHMEMSymmComm::initialize() {
       lsa_barrier_epoch_ != nullptr,
       "nvshmem_malloc failed to allocate LSA barrier epoch array");
 
+  // Allocate GIN barrier epoch tracking array (same size as signal pad)
+  // This tracks the current epoch for GIN (full team) barriers
+  gin_barrier_epoch_ = static_cast<uint64_t*>(nvshmem_malloc(kSignalPadSize));
+  TORCH_CHECK(
+      gin_barrier_epoch_ != nullptr,
+      "nvshmem_malloc failed to allocate GIN barrier epoch array");
+
   // Zero-initialize the buffer
   if (buffer_ptr_ != nullptr && buffer_size_ > 0) {
     C10_CUDA_CHECK(cudaMemset(buffer_ptr_, 0, buffer_size_));
   }
 
-  // Zero-initialize both signal pads and barrier epoch array
+  // Zero-initialize both signal pads and barrier epoch arrays
   C10_CUDA_CHECK(cudaMemset(lsa_signal_pad_, 0, kSignalPadSize));
   C10_CUDA_CHECK(cudaMemset(gin_signal_pad_, 0, kSignalPadSize));
   C10_CUDA_CHECK(cudaMemset(lsa_barrier_epoch_, 0, kSignalPadSize));
+  C10_CUDA_CHECK(cudaMemset(gin_barrier_epoch_, 0, kSignalPadSize));
 
   // Synchronize to ensure all PEs have completed allocation
   C10_CUDA_CHECK(cudaDeviceSynchronize());
@@ -269,6 +278,7 @@ void NVSHMEMSymmComm::initialize() {
       lsa_signal_pad_,
       gin_signal_pad_,
       lsa_barrier_epoch_,
+      gin_barrier_epoch_,
       team_dev_, // device pointer to team
       device_idx_,
       0, // offset = 0
@@ -331,6 +341,12 @@ void NVSHMEMSymmComm::cleanup() {
     if (lsa_barrier_epoch_ != nullptr) {
       nvshmem_free(lsa_barrier_epoch_);
       lsa_barrier_epoch_ = nullptr;
+    }
+
+    // Free GIN barrier epoch array
+    if (gin_barrier_epoch_ != nullptr) {
+      nvshmem_free(gin_barrier_epoch_);
+      gin_barrier_epoch_ = nullptr;
     }
   } catch (...) {
     // Ignore cleanup errors

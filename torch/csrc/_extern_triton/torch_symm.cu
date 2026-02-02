@@ -298,6 +298,104 @@ symm_lsa_barrier_wait(int64_t ctx_ptr, int32_t barrier_index) {
   }
 }
 
+// =============================================================================
+// GIN (GPU-Initiated Networking) BARRIER PRIMITIVES
+// These barrier primitives target the full team (all ranks), not just LSA domain
+// =============================================================================
+
+/**
+ * Unified barrier_arrive operation (GIN-based, full team).
+ *
+ * Signals arrival at a GIN barrier without waiting for other peers.
+ * This is the "arrive" phase of a split-phase barrier, allowing overlapping
+ * computation while waiting for peers.
+ *
+ * Unlike symm_lsa_barrier_arrive which only targets the LSA domain, this GIN
+ * barrier targets ALL ranks in the team using GPU-initiated networking.
+ *
+ * This is useful for split-phase synchronization across all ranks where:
+ * 1. Ranks signal arrival (symm_barrier_arrive)
+ * 2. Ranks do other work
+ * 3. Ranks wait for all peers (symm_barrier_wait)
+ *
+ * For NCCL, uses ncclLsaBarrierSession with ncclTeamTagWorld.
+ * For NVSHMEM, uses signal operations on the GIN signal pad to notify
+ * all peers of arrival.
+ *
+ * @param ctx_ptr Pointer to SymmContext (as int64)
+ * @param barrier_index Index of the barrier to use (0..nBarriers-1).
+ *        Multiple independent barriers can be used by specifying different
+ * indices. The same index must be used for the corresponding wait() call.
+ * @return 0 on success
+ */
+__device__ int32_t symm_barrier_arrive(int64_t ctx_ptr, int32_t barrier_index) {
+  SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
+  TORCH_SYMM_CHECK(ctx != nullptr, "SymmContext is null");
+
+  switch (ctx->type) {
+#if NCCL_HAS_DEVICE_BITCODE
+    case SymmContext::Type::NCCL: {
+      NCCLSymmContext* nccl_ctx = static_cast<NCCLSymmContext*>(ctx);
+      nccl_barrier_arrive_impl(nccl_ctx, barrier_index);
+      return 0;
+    }
+#endif
+    case SymmContext::Type::NVSHMEM: {
+      NVSHMEMSymmContext* nvshmem_ctx = static_cast<NVSHMEMSymmContext*>(ctx);
+      nvshmem_barrier_arrive_impl(nvshmem_ctx, barrier_index);
+      return 0;
+    }
+    default:
+      TORCH_SYMM_CHECK(false, "Unknown SymmContext type");
+      return -1;
+  }
+}
+
+/**
+ * Unified barrier_wait operation (GIN-based, full team).
+ *
+ * Waits for all peers to arrive at the GIN barrier.
+ * This is the "wait" phase of a split-phase barrier.
+ *
+ * Unlike symm_lsa_barrier_wait which only waits for LSA domain peers, this GIN
+ * barrier waits for ALL ranks in the team.
+ *
+ * Must be called after symm_barrier_arrive to complete the barrier.
+ * After this returns, all data written by peers before their arrive() call
+ * is guaranteed to be visible.
+ *
+ * For NCCL, uses ncclLsaBarrierSession with ncclTeamTagWorld.
+ * For NVSHMEM, waits until the local GIN barrier signal reaches the expected
+ * count, then updates the epoch for the next iteration.
+ *
+ * @param ctx_ptr Pointer to SymmContext (as int64)
+ * @param barrier_index Index of the barrier to wait on (0..nBarriers-1).
+ *        Must match the index used in the corresponding arrive() call.
+ * @return 0 on success
+ */
+__device__ int32_t symm_barrier_wait(int64_t ctx_ptr, int32_t barrier_index) {
+  SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
+  TORCH_SYMM_CHECK(ctx != nullptr, "SymmContext is null");
+
+  switch (ctx->type) {
+#if NCCL_HAS_DEVICE_BITCODE
+    case SymmContext::Type::NCCL: {
+      NCCLSymmContext* nccl_ctx = static_cast<NCCLSymmContext*>(ctx);
+      nccl_barrier_wait_impl(nccl_ctx, barrier_index);
+      return 0;
+    }
+#endif
+    case SymmContext::Type::NVSHMEM: {
+      NVSHMEMSymmContext* nvshmem_ctx = static_cast<NVSHMEMSymmContext*>(ctx);
+      nvshmem_barrier_wait_impl(nvshmem_ctx, barrier_index);
+      return 0;
+    }
+    default:
+      TORCH_SYMM_CHECK(false, "Unknown SymmContext type");
+      return -1;
+  }
+}
+
 /**
  * Unified lsa_ptr operation.
  */
