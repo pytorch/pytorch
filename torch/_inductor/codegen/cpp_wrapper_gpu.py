@@ -764,6 +764,7 @@ class CppWrapperGpu(CppWrapperCpu):
         raw_keys=None,
         raw_args=None,
         triton_meta=None,
+        inductor_meta=None,
         graph_name="",
         original_fxnode_name=None,
     ):
@@ -785,6 +786,7 @@ class CppWrapperGpu(CppWrapperCpu):
                 raw_keys=raw_keys,
                 raw_args=raw_args,
                 triton_meta=triton_meta,
+                inductor_meta=inductor_meta,
             )
 
         if (
@@ -803,6 +805,7 @@ class CppWrapperGpu(CppWrapperCpu):
                 raw_keys=raw_keys,
                 raw_args=raw_args,
                 triton_meta=triton_meta,
+                inductor_meta=inductor_meta,
                 original_fxnode_name=original_fxnode_name,
             )
 
