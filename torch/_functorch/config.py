@@ -92,8 +92,9 @@ autograd_cache_normalize_inputs = not is_fbcode()
 #   - When True: Raises RuntimeError on aliasing violations.
 #   - When False: Emits UserWarning on aliasing violations.
 #
-# Currently error_on_custom_op_aliasing is True only in CI,
-# but in 2.12, we should enable them everywhere.
+# Deprecated: Custom ops returning aliased outputs is deprecated and will
+# become an error in PyTorch 2.12. Currently error_on_custom_op_aliasing
+# is True only in CI.
 check_custom_op_aliasing = True
 error_on_custom_op_aliasing = bool(os.getenv("CI"))
 

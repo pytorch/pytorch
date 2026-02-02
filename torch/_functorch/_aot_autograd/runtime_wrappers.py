@@ -332,7 +332,7 @@ def _check_custom_op_aliasing(name, args, kwargs, result):
         if config.error_on_custom_op_aliasing:
             raise
         else:
-            msg = f"{e} This will become an error in PyTorch 2.12 or later."
+            msg = f"{e} This is deprecated and will become an error in PyTorch 2.12."
             warnings.warn(msg, UserWarning, stacklevel=3)
 
 
