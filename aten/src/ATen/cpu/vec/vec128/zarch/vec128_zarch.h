@@ -2154,11 +2154,13 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_complex<T>()>> {
   }
 
   Vectorized<T> asin() const {
+    // TODO: The vectorized implementation requires special handling for the
+    // case where real number/imag number is 0/Inf/NaN.
     // asin(x)
     // = -i*ln(iz + sqrt(1 -z^2))
     // = -i*ln((ai - b) + sqrt(1 - (a + bi)*(a + bi)))
     // = -i*ln((-b + ai) + sqrt(1 - (a**2 - b**2) - 2*abi))
-#if 1
+#if 0
     vinner_type cnj = conj().vec();
     vinner_type b_a = cnj.swapped();
     vinner_type ab = cnj * b_a;
