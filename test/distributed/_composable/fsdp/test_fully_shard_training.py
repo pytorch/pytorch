@@ -86,7 +86,6 @@ if device_type.type == "cpu":
 
 
 def _get_device_ids(rank: int) -> list[int] | None:
-    """Return device_ids for replicate(): None for CPU, [rank] otherwise."""
     return None if device_type.type == "cpu" else [rank]
 
 
