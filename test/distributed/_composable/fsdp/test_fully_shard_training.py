@@ -94,7 +94,6 @@ class TestFullyShardForwardInputs(FSDPTestMultiThread):
     def world_size(self) -> int:
         return 2
 
-    @skip_if_lt_x_gpu_unless_cpu(1)
     def test_root_move_forward_input_to_device(self):
         device = torch.device(device_type.type, 0)
 
@@ -130,7 +129,6 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
     def world_size(self) -> int:
         return 4
 
-    @skip_if_lt_x_gpu_unless_cpu(1)
     def test_param_registration_after_forward(self):
         """Tests the parameter registration after forward."""
         device = torch.device(device_type.type, 0)
@@ -191,7 +189,6 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
             self._assert_dtensor_params(model.parameters())
             self._assert_same_params(model.parameters(), ref_model.parameters())
 
-    @skip_if_lt_x_gpu_unless_cpu(1)
     def test_param_registration_after_backward(self):
         """Tests the parameter registration after backward."""
         device = torch.device(device_type.type, 0)
@@ -245,7 +242,6 @@ class TestFullyShardCastAfterInit(FSDPTestMultiThread):
     def world_size(self) -> int:
         return 2
 
-    @skip_if_lt_x_gpu_unless_cpu(1)
     @wrapSwapTensorsTest(True)
     def test_to_float64_after_init(self):
         """Tests that the user can cast the module to float64 after init."""
@@ -1738,7 +1734,6 @@ class TestFullyShardWorldSize1(FSDPTest):
     def world_size(self) -> int:
         return 1
 
-    @skip_if_lt_x_gpu_unless_cpu(1)
     def test_train_parity_single_worldsize1(self):
         """
         Tests train parity with DDP for a single FSDP group

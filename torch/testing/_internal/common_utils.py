@@ -5547,7 +5547,6 @@ def get_cycles_per_ms(device: str = "cuda") -> float:
             cycles_per_ms = test_cycles / elapsed_ms if elapsed_ms > 0 else 1000000
             return cycles_per_ms
     else:
-        # CUDA or other accelerator devices (xpu, hpu, etc.)
         def measure() -> float:
             start = torch.cuda.Event(enable_timing=True)
             end = torch.cuda.Event(enable_timing=True)
