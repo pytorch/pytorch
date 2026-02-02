@@ -77,7 +77,7 @@ class TestDTensorDebugMode(TestCase):
   torch.mm(dt$0: f32[8, 8]| S(0), dt$1: f32[8, 32]| S(0))  ->  dt$7: f32[8, 32]| S(0)
     aten::mm(dt$0: f32[8, 8]| S(0), dt$1: f32[8, 32]| S(0))
       -> output: S(0)
-      redistribute_input(1, S(0) -> R)
+      redistribute_input [implicit] (1, S(0) -> R)
         redistribute_input(t$2: f32[1, 32], trace: S(0)->R)
           _c10d_functional::all_gather_into_tensor(t$2: f32[1, 32], 8, 0)  ->  t$3: f32[8, 32]
           _c10d_functional::_wrap_tensor_autograd(t$3: f32[8, 32])  ->  t$4: f32[8, 32]
@@ -190,7 +190,7 @@ class TestDTensorDebugMode(TestCase):
         self.assertIn(
             "aten::add.Tensor(dt: f32[8, 8]| S(0), dt: f32[8, 8]| S(1))", debug_string
         )
-        self.assertIn("redistribute_input(1, S(1) -> S(0))", debug_string)
+        self.assertIn("redistribute_input [implicit] (1, S(1) -> S(0))", debug_string)
         self.assertIn(
             "redistribute_input(t: f32[8, 1], trace: S(1)->S(0))", debug_string
         )
@@ -300,7 +300,7 @@ class TestDTensorDebugMode(TestCase):
             debug_mode.debug_string(),
             """\
   aten::mm(dt: f32[128, 8]| S(0)[0]S(0)[1], dt: f32[8, 128]| S(1)[0]S(1)[1])
-    redistribute_input(1, S(1)[0]S(1)[1] -> RR)
+    redistribute_input [implicit] (1, S(1)[0]S(1)[1] -> RR)
       redistribute_input(t: f32[8, 16], trace: S(1)[0]S(1)[1]->S(1)R->RR)
         _c10d_functional::all_gather_into_tensor(t: f32[8, 16], 2, 3)
         _c10d_functional::_wrap_tensor_autograd(t: f32[16, 16])
@@ -315,6 +315,38 @@ class TestDTensorDebugMode(TestCase):
     aten::mm(t: f32[16, 8], t: f32[8, 128])
   aten::sum(dt: f32[128, 128]| S(0)[0]S(0)[1])
     aten::sum(t: f32[16, 128])""",
+        )
+
+    def test_debug_mode_explicit_redistribute(self):
+        """Test that explicit user-called redistribute shows [explicit] annotation."""
+        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+
+        x = torch.randn(1, 8)
+        x_dtensor = DTensor.from_local(x, mesh, [Shard(0)], run_check=False)
+
+        with DebugMode() as debug_mode:
+            x_dtensor.redistribute(mesh, [Replicate()])
+
+        self.assertExpectedInline(
+            debug_mode.debug_string(),
+            """\
+    redistribute_input [explicit] (t: f32[1, 8], trace: S(0)->R)
+      _c10d_functional::all_gather_into_tensor(t: f32[1, 8], 8, 0)  ->  t: f32[8, 8]
+      _c10d_functional::_wrap_tensor_autograd(t: f32[8, 8])  ->  t: f32[8, 8]
+      _c10d_functional::wait_tensor(t: f32[8, 8])  ->  t: f32[8, 8]""",
+        )
+
+        with DebugMode() as debug_mode:
+            x_dtensor.full_tensor()
+
+        self.assertExpectedInline(
+            debug_mode.debug_string(),
+            """\
+    redistribute_input [explicit] (t: f32[1, 8], trace: S(0)->R)
+      _c10d_functional::all_gather_into_tensor(t: f32[1, 8], 8, 0)  ->  t: f32[8, 8]
+      _c10d_functional::_wrap_tensor_autograd(t: f32[8, 8])  ->  t: f32[8, 8]
+      _c10d_functional::wait_tensor(t: f32[8, 8])  ->  t: f32[8, 8]
+    aten::view(t: f32[8, 8], [8, 8])  ->  t: f32[8, 8]""",
         )
 
     def test_output_placements(self):
@@ -335,7 +367,7 @@ class TestDTensorDebugMode(TestCase):
             """\
   aten::topk(dt: f32[8, 16]| S(1), 4, 1)
     -> output: ('R', 'R')
-    redistribute_input(0, S(1) -> R)
+    redistribute_input [implicit] (0, S(1) -> R)
       redistribute_input(t: f32[8, 2], trace: S(1)->R)
         _c10d_functional::all_gather_into_tensor(t: f32[8, 2], 8, 0)  ->  t: f32[64, 2]
         _c10d_functional::_wrap_tensor_autograd(t: f32[64, 2])  ->  t: f32[64, 2]
@@ -384,7 +416,7 @@ class TestDTensorDebugMode(TestCase):
     aten::view(dt: f32[8, 4, 4, 1, 1]| RP(sum), [1, 8, 16])
       aten::view(t: f32[8, 4, 4, 1, 1], [1, 8, 16])
     aten::bmm(dt: f32[1, 96, 8]| P(sum)R, dt: f32[1, 8, 16]| RP(sum))
-      redistribute_input(0, P(sum)R -> S(2)[0]S(2)[1])
+      redistribute_input [implicit] (0, P(sum)R -> S(2)[0]S(2)[1])
         redistribute_input(t: f32[1, 96, 8], trace: P(sum)R->S(2)R->S(2)[0]S(2)[1])
           aten::chunk(t: f32[1, 96, 8], 4, 2)
           aten::cat(['t: f32[1, 96, 2]', 't: f32[1, 96, 2]', 't: f32[1, 96, 2]', 't: f32[1, 96, 2]'])
@@ -393,7 +425,7 @@ class TestDTensorDebugMode(TestCase):
           _c10d_functional::wait_tensor(t: f32[1, 96, 2])
           aten::chunk(t: f32[1, 96, 2], 2, 2)
           aten::clone(t: f32[1, 96, 1])
-      redistribute_input(1, RP(sum) -> S(1)[0]S(1)[1])
+      redistribute_input [implicit] (1, RP(sum) -> S(1)[0]S(1)[1])
         redistribute_input(t: f32[1, 8, 16], trace: RP(sum)->S(1)P(sum)->S(1)[0]S(1)[1])
           aten::chunk(t: f32[1, 8, 16], 4, 1)
           aten::clone(t: f32[1, 2, 16])
@@ -507,7 +539,9 @@ class TestDTensorDebugMode(TestCase):
                 with inner_mode:
                     torch.mm(x_dtensor, y_dtensor)
 
-        self.assertTrue("redistribute_input(1, S(0) -> R)" in debug_mode.debug_string())
+        self.assertTrue(
+            "redistribute_input [implicit] (1, S(0) -> R)" in debug_mode.debug_string()
+        )
 
     def test_debug_mode_higher_order_cond(self):
         """Test DebugMode with higher order operation."""
@@ -1104,7 +1138,7 @@ class TestDTensorDebugMode(TestCase):
 class TestDebugModeUtils(TestCase):
     """Test DebugMode with NCCL backend without using DTensor."""
 
-    def test_hash_empty_tenor(self):
+    def test_hash_empty_tensor(self):
         t = torch.tensor([])
         # hash tensor fn should not error out with empty tensor
         out = torch.utils._debug_mode.hash_tensor_fn(t)
