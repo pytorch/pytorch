@@ -4911,6 +4911,7 @@ def call_storage_offset(x: Any) -> int:
 def _extract_tensor_dict(t: torch.Tensor) -> dict[str, Any]:
     KEYS_TO_COPY = [
         "_dynamo_static_input_type",
+        "_dynamo_unstatic_input_type",
         "tag",
         "_cudagraph_excluded_sym_dims",
         "_cudagraph_included_sym_dims",

@@ -857,6 +857,8 @@ class CompileContext:
         self.attempt = 0
         # Verbose ShapeEnv guards produced.
         self.shape_env_guards: list[str] = []
+        # Cudagraph annotation (set by @torch._inductor.cudagraph_annotation decorator)
+        self.cudagraph_annotation: Any = None
 
     @staticmethod
     def current_compile_id() -> CompileId | None:

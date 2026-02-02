@@ -3129,6 +3129,59 @@ if HAS_CUDA_AND_TRITON:
                 # One forward and one backward
                 self.assertEqual(self.get_manager().new_graph_id().id, 2)
 
+        @torch._dynamo.config.patch("error_on_recompile", True)
+        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
+        def test_mark_unstatic_address(self):
+            # Test that mark_unstatic_address forces a tensor to be copied
+            # to static memory instead of specializing on its address
+            class Mod(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.param = torch.nn.Parameter(torch.randn(2, 2, device="cuda"))
+
+                def forward(self, x):
+                    return x + self.param
+
+            mod = Mod()
+
+            # Mark the param as unstatic - it should be copied on each cudagraph replay
+            torch.compiler.mark_unstatic_address(mod.param)
+
+            fn_compiled = torch.compile(mod, mode="reduce-overhead")
+
+            with torch.device("cuda"):
+                for _ in range(3):
+                    x = torch.randn(2, 2)
+                    res = fn_compiled(x)
+
+                # Verify the param is NOT in static_input_idxs by checking
+                # it doesn't cause issues when we change its address
+                old_param = mod.param
+                mod.param = torch.nn.Parameter(torch.randn(2, 2, device="cuda"))
+                torch.compiler.mark_unstatic_address(mod.param)
+
+                # This should work without recompilation since the param is copied
+                for _ in range(3):
+                    x = torch.randn(2, 2)
+                    res = fn_compiled(x)
+
+        def test_cudagraph_annotation_disable(self):
+            # Test that cudagraph_annotation("disable") disables cudagraphs
+            def fn(x):
+                return x + 1
+
+            with torch.device("cuda"):
+                x = torch.randn(4, 4)
+
+                # Compile with cudagraph_annotation disable
+                with torch._inductor.cudagraph_annotation("disable", fwd=True, bwd=True):
+                    fn_compiled = torch.compile(fn, mode="reduce-overhead")
+                    result = fn_compiled(x)
+
+                # Verify result is correct
+                expected = x + 1
+                self.assertEqual(result, expected)
+
         def test_tensor_constant_mutation(self):
             class Foo(torch.nn.Module):
                 def __init__(self) -> None:

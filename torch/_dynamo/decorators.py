@@ -1133,6 +1133,23 @@ def mark_static_address(t: Any, guard: bool = False) -> None:
         t._dynamo_static_input_type = "unguarded"  # type: ignore[attr-defined]
 
 
+@forbid_in_graph
+def mark_unstatic_address(t: Any) -> None:
+    """
+    Marks an input tensor whose address should NOT be treated as constant across calls.
+    This is the opposite of mark_static_address: even if the tensor would normally be
+    treated as static (e.g., a parameter), we want to copy it to a static address rather
+    than specializing on its current address.
+
+    This is useful when a tensor's memory comes from a prior cudagraph and you want to
+    copy it to cudagraph-managed memory rather than using its current address directly.
+    """
+    if not isinstance(t, torch.Tensor):
+        raise TypeError(f"mark_unstatic_address expects a tensor but received {type(t)}")
+
+    t._dynamo_unstatic_input_type = True  # type: ignore[attr-defined]
+
+
 # One day, Dynamo will support tracing into einops directly (no allow_in_graph needed)
 # Note that PyTorch supports multiple versions of einops, so when that day comes,
 # we still need to be really careful about version matches.

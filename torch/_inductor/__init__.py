@@ -23,6 +23,7 @@ __all__ = [
     "list_mode_options",
     "list_options",
     "cudagraph_mark_step_begin",
+    "cudagraph_annotation",
     "standalone_compile",
 ]
 
@@ -444,3 +445,59 @@ def standalone_compile(
     return standalone_compile(
         gm, example_inputs, dynamic_shapes=dynamic_shapes, options=options, aot=aot
     )
+
+
+import dataclasses
+import functools
+from typing import Callable, TypeVar
+
+
+_F = TypeVar("_F", bound=Callable[..., Any])
+
+
+@dataclasses.dataclass
+class CudagraphAnnotation:
+    """Stores cudagraph annotation settings for forward and backward graphs."""
+
+    mode: str  # "disable" or "enable" (for future use)
+    fwd: bool  # Apply to forward graph
+    bwd: bool  # Apply to backward graph
+
+
+def cudagraph_annotation(
+    mode: str = "disable", *, fwd: bool = True, bwd: bool = True
+) -> Callable[[_F], _F]:
+    """
+    Decorator to control cudagraph behavior for compiled functions.
+
+    When applied to a function that is then compiled with ``torch.compile``,
+    this annotation controls whether the forward and/or backward graphs use cudagraphs.
+
+    Args:
+        mode: The annotation mode. Currently only "disable" is supported, which
+            disables cudagraphs for the specified graphs.
+        fwd: If True, apply the annotation to the forward graph. Default: True.
+        bwd: If True, apply the annotation to the backward graph. Default: True.
+
+    Example::
+
+        @torch._inductor.cudagraph_annotation("disable", fwd=True, bwd=True)
+        def my_fn(x):
+            return x + 1
+
+        # Then compile the function
+        compiled_fn = torch.compile(my_fn, mode="reduce-overhead")
+        result = compiled_fn(x)  # Cudagraphs disabled for this function
+
+    Note:
+        The annotation is stored on the function and read during compilation.
+        It affects the compiled graph, not runtime behavior.
+    """
+    if mode not in ("disable",):
+        raise ValueError(f"Invalid cudagraph annotation mode: {mode}. Only 'disable' is supported.")
+
+    def decorator(fn: _F) -> _F:
+        fn._cudagraph_annotation = CudagraphAnnotation(mode=mode, fwd=fwd, bwd=bwd)  # type: ignore[attr-defined]
+        return fn
+
+    return decorator

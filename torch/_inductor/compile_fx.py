@@ -15,7 +15,7 @@ import warnings
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from contextlib import AbstractContextManager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from inspect import currentframe
 from itertools import count
 from operator import attrgetter
@@ -2310,14 +2310,30 @@ class CompilerConfigExtra:
     cudagraphs: BoxedBool
     graph_id: int
     forward_device: BoxedDeviceIndex
+    # If True, disable cudagraphs for the backward graph (set by cudagraph_annotation)
+    disable_cudagraphs_for_bwd: BoxedBool
 
 
-def create_compiler_config_extra(config: types.ModuleType) -> CompilerConfigExtra:
+def create_compiler_config_extra(
+    config: types.ModuleType, gm_meta: Optional[dict[str, Any]] = None
+) -> CompilerConfigExtra:
     # Although cudagraphs may have been enabled via config, various
     # conditions (which are tested within the bowels of Inductor) may
     # force cudagraphs to be disabled.  This mutable box lets us retrieve
     # the final determination if cudagraphs actually can be used or not.
     cudagraphs = BoxedBool(config.triton.cudagraphs)
+
+    # Check for cudagraph_annotation in gm.meta
+    disable_cudagraphs_for_bwd = BoxedBool(False)
+    if gm_meta is not None:
+        annotation = gm_meta.get("cudagraph_annotation")
+        if annotation is not None and annotation.mode == "disable":
+            if annotation.fwd:
+                # Disable cudagraphs for forward graph
+                cudagraphs = BoxedBool(False)
+            if annotation.bwd:
+                # Mark to disable cudagraphs for backward graph
+                disable_cudagraphs_for_bwd = BoxedBool(True)
 
     # TODO: The modern style is to use CompileId from TracingContext to
     # identify Inductor compilation.  However, this CompileId cannot
@@ -2332,6 +2348,7 @@ def create_compiler_config_extra(config: types.ModuleType) -> CompilerConfigExtr
         cudagraphs=cudagraphs,
         graph_id=graph_id,
         forward_device=forward_device,
+        disable_cudagraphs_for_bwd=disable_cudagraphs_for_bwd,
     )
 
 
@@ -2475,6 +2492,12 @@ def compile_fx_backward(
             model_outputs_node.meta["user_visible_output_idxs"] = []
 
         fixed = count_tangents(gm)
+
+        # Check if cudagraphs should be disabled for backward via annotation
+        cudagraphs = compiler_config_extra.cudagraphs
+        if compiler_config_extra.disable_cudagraphs_for_bwd.value:
+            cudagraphs = BoxedBool(False)
+
         with (
             config.patch(get_cpp_wrapper_config())
             if config.cpp_wrapper
@@ -2484,7 +2507,7 @@ def compile_fx_backward(
                 gm,
                 example_inputs,
                 static_input_idxs=list(range(fixed)),
-                cudagraphs=compiler_config_extra.cudagraphs,
+                cudagraphs=cudagraphs,
                 is_backward=True,
                 graph_id=compiler_config_extra.graph_id,
                 boxed_forward_device_index=compiler_config_extra.forward_device,
@@ -2768,7 +2791,8 @@ def _compile_fx_main(
 
         num_example_inputs = len(example_inputs_)
 
-        compiler_config_extra = create_compiler_config_extra(config)
+        gm_meta = model_.meta if isinstance(model_, GraphModule) else None
+        compiler_config_extra = create_compiler_config_extra(config, gm_meta)
 
         decompositions = (
             decompositions if decompositions is not None else select_decomp_table()

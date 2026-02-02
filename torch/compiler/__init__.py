@@ -29,6 +29,7 @@ __all__ = [
     "cudagraph_mark_step_begin",
     "cudagraph_exclude_sym_shape",
     "cudagraph_include_sym_shape",
+    "mark_unstatic_address",
     "load_compiled_function",
     "wrap_numpy",
     "is_compiling",
@@ -475,6 +476,35 @@ def cudagraph_include_sym_shape(
     from torch._dynamo.decorators import cudagraph_include_sym_shape as impl
 
     return impl(tensor, dim)
+
+
+def mark_unstatic_address(tensor: torch.Tensor) -> None:
+    """
+    Mark an input tensor whose address should NOT be treated as constant across calls.
+
+    This is the opposite of ``torch._dynamo.mark_static_address``: even if the tensor
+    would normally be treated as static (e.g., a parameter), we want to copy it to
+    cudagraph-managed memory rather than specializing on its current address.
+
+    This is useful when a tensor's memory comes from a prior cudagraph and you want to
+    copy it to cudagraph-managed memory rather than using its current address directly.
+
+    Args:
+        tensor: The tensor whose address should not be specialized
+
+    Example::
+
+        >>> x = torch.randn(8, 8, device="cuda")
+        >>> torch.compiler.mark_unstatic_address(x)  # Force copy on cudagraph replay
+        >>> @torch.compile(mode="reduce-overhead")
+        ... def f(x):
+        ...     return x + 1
+        >>> f(x)  # x will be copied to static memory instead of using its address
+
+    """
+    from torch._dynamo.decorators import mark_unstatic_address as impl
+
+    return impl(tensor)
 
 
 def wrap_numpy(fn):

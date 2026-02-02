@@ -157,6 +157,8 @@ def _try_get_metadata_from_dynamo(
     param_name_to_source = cast(
         dict[str, torch._guards.Source], mod._param_name_to_source
     )
+    # Get param names marked as unstatic (should be copied, not specialized)
+    unstatic_param_names: set[str] = getattr(mod, "_unstatic_param_names", set())
     seen_sources = set()
 
     aot_autograd_arg_pos_to_source: list[torch._guards.Source | None] = []
@@ -170,7 +172,13 @@ def _try_get_metadata_from_dynamo(
         seen_sources.add(source)
         aot_autograd_arg_pos_to_source.append(source)
 
-        static_input_indices.append(i)
+        # Skip params marked as unstatic
+        if name not in unstatic_param_names:
+            static_input_indices.append(i)
+        else:
+            static_inputs_log.debug(
+                "Excluding unstatic param pos %s for name %s", i, name
+            )
 
     # Collect the dynamo graph inputs
     # TODO(mlazos): Revisit if this is still needed. With Dynamo install ID
@@ -192,13 +200,19 @@ def _try_get_metadata_from_dynamo(
         # OutputGraph
         actual_pos = pos + len(param_keys)
 
-        if "tensor_dict" in node.meta and node.meta["tensor_dict"].get(
-            "_dynamo_static_input_type", None
-        ):
+        tensor_dict = node.meta.get("tensor_dict", {})
+        is_static = tensor_dict.get("_dynamo_static_input_type", None)
+        is_unstatic = tensor_dict.get("_dynamo_unstatic_input_type", False)
+
+        if is_static and not is_unstatic:
             static_inputs_log.debug(
                 "Adding static input pos %s for source %s", actual_pos, source_name
             )
             static_input_indices.append(actual_pos)
+        elif is_unstatic:
+            static_inputs_log.debug(
+                "Excluding unstatic input pos %s for source %s", actual_pos, source_name
+            )
         else:
             static_inputs_log.debug(
                 "Non-static input pos %s for source %s", actual_pos, source_name
