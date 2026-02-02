@@ -261,13 +261,15 @@ C10_API std::ostream& operator<<(std::ostream& stream, const CUDAStream& s);
 // hipify v2 backward compat in external projects
 #ifdef USE_ROCM
 namespace c10::hip {
-using c10::cuda::getStreamFromPool;
 using c10::cuda::getStreamFromExternal;
+using c10::cuda::getStreamFromPool;
 // must use inline wrappers instead of reference aliases due to default args
-inline c10::cuda::CUDAStream getDefaultHIPStream(DeviceIndex device_index = -1) {
+inline c10::cuda::CUDAStream getDefaultHIPStream(
+    DeviceIndex device_index = -1) {
   return c10::cuda::getDefaultCUDAStream(device_index);
 }
-inline c10::cuda::CUDAStream getCurrentHIPStream(DeviceIndex device_index = -1) {
+inline c10::cuda::CUDAStream getCurrentHIPStream(
+    DeviceIndex device_index = -1) {
   return c10::cuda::getCurrentCUDAStream(device_index);
 }
 inline auto& setCurrentHIPStream = c10::cuda::setCurrentCUDAStream;
