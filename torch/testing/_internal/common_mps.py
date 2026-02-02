@@ -548,7 +548,6 @@ if torch.backends.mps.is_available():
             "nn.functional.norm": None,
             "nn.functional.threshold": [torch.bool],
             "ormqr": None,
-            "pca_lowrank": None,
             "pow": [torch.bool],
             "remainder": [torch.bool],
             "rounddecimals_0": [
@@ -619,7 +618,6 @@ if torch.backends.mps.is_available():
             "float_power": None,
             "linalg.matrix_rankhermitian": None,
             "linalg.pinvhermitian": None,
-            "linalg.pinvsingular": None,
             "nonzero_static": None,
             # MPS: input sizes must be divisible by output sizes
             "nn.functional.adaptive_avg_pool1d": None,
@@ -911,6 +909,7 @@ if torch.backends.mps.is_available():
             "_upsample_bicubic2d_aa": None,  # `_upsample_bilinear2d_aa_backward_out` not implemented for MPS
             "sparse.mmreduce": [torch.float32],  # csr not supported
             "linalg.householder_product": None,
+            "pca_lowrank": [torch.float32],  # linalg_svd autograd not registered for CPU fallback
             "unique_consecutive": [torch.float16, torch.float32],
             "scalar_tensor": [torch.float16, torch.float32],
             "cdist": None,
