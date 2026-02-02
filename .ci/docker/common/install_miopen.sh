@@ -10,6 +10,12 @@ if [[ -z $ROCM_VERSION ]]; then
     exit 1;
 fi
 
+# Skip for theRock nightly builds - MIOpen is included in the tarball
+if [[ "${ROCM_VERSION}" == "nightly" ]]; then
+    echo "Skipping MIOpen install for theRock nightly (already included in tarball)"
+    exit 0
+fi
+
 IS_UBUNTU=0
 ID=$(grep -oP '(?<=^ID=).+' /etc/os-release | tr -d '"')
 case "$ID" in
