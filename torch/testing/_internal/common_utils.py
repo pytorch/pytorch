@@ -5772,6 +5772,11 @@ def win_safe_rmtree(path):
     if not os.path.exists(path):
         return
 
+    # --- Long Path Fix ---
+    path = os.path.abspath(path)
+    if not path.startswith("\\\\?\\"):
+        path = "\\\\?\\" + path
+
     def handle_error(func, path, exc_info):
         """
         Custom error handler for shutil.rmtree to manage Windows-specific failures.
