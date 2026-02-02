@@ -217,8 +217,9 @@ inline std::vector<c10::Scalar> convert_tensor_to_scalar_list(
       "Expected packed scalar Tensor to be of dimension 1. Got ",
       scalarList_.dim(),
       " instead.");
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND5(
       kComplexHalf,
+      kBComplex32,
       kHalf,
       kBool,
       kBFloat16,

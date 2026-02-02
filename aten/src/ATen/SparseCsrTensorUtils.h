@@ -141,8 +141,8 @@
   AT_DISPATCH_SWITCH(                                   \
       TYPE,                                             \
       NAME,                                             \
-      AT_DISPATCH_CASE_ALL_TYPES_AND_COMPLEX_AND4(      \
-          kComplexHalf, kHalf, kBool, kBFloat16, __VA_ARGS__))
+      AT_DISPATCH_CASE_ALL_TYPES_AND_COMPLEX_AND5(      \
+          kComplexHalf, kBComplex32, kHalf, kBool, kBFloat16, __VA_ARGS__))
 
 namespace at::sparse_csr {
 

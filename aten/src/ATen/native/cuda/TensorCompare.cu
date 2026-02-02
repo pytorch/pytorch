@@ -20,7 +20,7 @@ void where_kernel_impl(TensorIterator &iter) {
           return cond_val ? self_val : other_val;
         });
   },
-  kComplexHalf, kHalf, kBFloat16, kBool, AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_FLOAT8_TYPES));
+  kComplexHalf, kBComplex32, kHalf, kBFloat16, kBool, AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_FLOAT8_TYPES));
 }
 
 void isposinf_kernel_impl(TensorIteratorBase &iter) {

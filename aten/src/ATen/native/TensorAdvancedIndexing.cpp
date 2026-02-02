@@ -2843,8 +2843,9 @@ Tensor count_nonzero_cpu(const Tensor& self, IntArrayRef dims) {
   const auto num_threads = at::get_num_threads();
   DimVector thread_count_nonzero(num_threads);
 
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND5(
       kComplexHalf,
+      kBComplex32,
       kHalf,
       kBFloat16,
       kBool,
@@ -2897,8 +2898,9 @@ Tensor& nonzero_out_cpu(const Tensor& self, Tensor& result) {
   DimVector thread_count_nonzero(num_threads + 1);
 
   // Pass 1: Count nonzero element per-thread
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND5(
       kComplexHalf,
+      kBComplex32,
       kHalf,
       kBFloat16,
       kBool,
@@ -2934,8 +2936,9 @@ Tensor& nonzero_out_cpu(const Tensor& self, Tensor& result) {
   auto out_accessor = result.accessor<int64_t, 2>();
 
   // Pass 2: Write indexes
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND5(
       kComplexHalf,
+      kBComplex32,
       kHalf,
       kBFloat16,
       kBool,
