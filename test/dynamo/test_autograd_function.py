@@ -1576,6 +1576,72 @@ class GraphModule(torch.nn.Module):
         loss.backward()
         self.assertEqual(x + y, z)
 
+    @requires_gpu
+    def test_triton_kernel_backward_mutation_with_aliased_output(self):
+        """Test autograd function where backward triton kernel mutates a buffer
+        that is also returned as a forward output aliasing an input.
+
+        This triggers a specific partitioner case where a forward output depends
+        on backward nodes (the mutation) but should be replaced with the original
+        input.
+        """
+        import triton.language as tl
+
+        @triton.jit
+        def mul_and_mutate_kernel(
+            grad_out_ptr,
+            x_ptr,
+            grad_x_ptr,
+            buffer_ptr,
+            n_elements,
+            BLOCK_SIZE: tl.constexpr,
+        ):
+            pid = tl.program_id(0)
+            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            grad_out = tl.load(grad_out_ptr + offsets, mask=mask)
+            tl.store(grad_x_ptr + offsets, grad_out, mask=mask)
+            buf = tl.load(buffer_ptr + offsets, mask=mask)
+            tl.store(buffer_ptr + offsets, buf + grad_out, mask=mask)
+
+        class TritonAddWithBuffer(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, y):
+                n_elements = x.numel()
+                out = torch.empty_like(x)
+                buffer = x
+
+                grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)  # noqa: E731
+                add_kernel[grid](x, y, out, n_elements, BLOCK_SIZE=1024)
+
+                ctx.save_for_backward(x, buffer)
+                ctx.n_elements = n_elements
+                return out, buffer
+
+            @staticmethod
+            def backward(ctx, grad_out, grad_buffer):
+                x, buffer = ctx.saved_tensors
+                n_elements = ctx.n_elements
+                grad_x = torch.empty_like(x)
+
+                grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)  # noqa: E731
+                mul_and_mutate_kernel[grid](
+                    grad_out, x, grad_x, buffer, n_elements, BLOCK_SIZE=1024
+                )
+
+                return grad_x, grad_x.clone()
+
+        @torch.compile(backend="aot_eager")
+        def compiled_f(x, y):
+            return TritonAddWithBuffer.apply(x, y)
+
+        x = torch.randn(1024, device=device_type, requires_grad=False)
+        y = torch.randn(1024, device=device_type, requires_grad=True)
+
+        out_compiled, buffer_compiled = compiled_f(x, y)
+        loss_compiled = out_compiled.sum()
+        loss_compiled.backward()
+
     def test_nonlocal_list_mutation_in_autograd_function(self):
         """Test that nonlocal list mutation in autograd.Function forward is handled correctly."""
 
