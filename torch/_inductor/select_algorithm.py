@@ -2169,6 +2169,14 @@ class TritonTemplate(KernelTemplate):
             output_tensor_meta=TensorMeta.from_irnodes(layout),
         )
 
+        # Convolution-specific parameters to include in logging
+        CONV_TUNABLE_KEYS = [
+            "KERNEL_H", "KERNEL_W", "KERNEL_D",
+            "STRIDE_H", "STRIDE_W", "STRIDE_D",
+            "PADDING_H", "PADDING_W", "PADDING_D",
+            "GROUPS", "UNROLL",
+        ]
+        
         return TritonTemplateCaller(
             kernel_hash_name,
             codegen_input_nodes,
@@ -2195,6 +2203,11 @@ class TritonTemplate(KernelTemplate):
                 **{
                     k: kwargs[k]
                     for k in AlgorithmSelectorCache.FLEX_ATTENTION_TUNABLE_KEYS
+                    if k in kwargs
+                },
+                **{
+                    k: kwargs[k]
+                    for k in CONV_TUNABLE_KEYS
                     if k in kwargs
                 },
             },
@@ -2558,6 +2571,15 @@ def get_flex_attention_log_filename() -> Optional[str]:
     return str(Path(flex_attention_file_name).with_suffix(".json"))
 
 
+@functools.cache
+def get_conv_log_filename() -> Optional[str]:
+    conv_file_name = os.environ.get("TORCHINDUCTOR_CONV_LOGGING_FILE", None)
+    if not conv_file_name:
+        return None
+
+    return str(Path(conv_file_name).with_suffix(".json"))
+
+
 def append_to_log(filename, data):
     lock_file = filename.replace(".json", ".lock")
     lock = FileLock(lock_file)
@@ -2876,6 +2898,27 @@ class AlgorithmSelectorCache(PersistentCache):
                     )
                 except (ValueError, IndexError):
                     # Skip logging if inputs don't match MM pattern
+                    pass
+
+        if conv_file_name := get_conv_log_filename():
+            # Only log for convolution operations
+            if "conv" in name and len(input_nodes) >= 2:
+                try:
+                    # Extract conv dimensions: input shape [N, C, H, W] or [N, C, H, W, D]
+                    x_size = input_nodes[0].get_size()
+                    w_size = input_nodes[1].get_size()
+                    append_to_log(
+                        conv_file_name,
+                        {
+                            "invoke": {
+                                "input_shape": str(x_size),
+                                "weight_shape": str(w_size),
+                            },
+                            "kernel_type": name,
+                        },
+                    )
+                except (ValueError, IndexError):
+                    # Skip logging if inputs don't match conv pattern
                     pass
 
         if len(choices) == 0:
@@ -4217,25 +4260,35 @@ class AlgorithmSelectorCache(PersistentCache):
             if "backward" in name
             else ("decode" if "decoding" in name else "forward")
         )
-        dims_key = str(
-            (
-                kernel_type,
-                B,
-                Hq,
-                Hkv,
-                seq_len_q,
-                seq_len_kv,
-                qk_head_dim,
-                v_head_dim,
-            )
-        )
+        
+        # Create shape info dictionary
+        shape_info = {
+            "kernel_type": kernel_type,
+            "B": int(B),
+            "Hq": int(Hq),
+            "Hkv": int(Hkv),
+            "seq_len_q": int(seq_len_q),
+            "seq_len_kv": int(seq_len_kv),
+            "qk_head_dim": int(qk_head_dim),
+            "v_head_dim": int(v_head_dim),
+        }
 
         sorted_choices = sorted(timings, key=timings.__getitem__)
+        
+        # Include shape info in each choice
+        choices_with_shapes = []
+        for choice in sorted_choices:
+            choice_info = AlgorithmSelectorCache.get_flex_attention_choice_info(choice, timings)
+            # Merge shape info with choice info
+            choice_info.update(shape_info)
+            choices_with_shapes.append(choice_info)
+        
         out_dict = {
-            dims_key: [
-                AlgorithmSelectorCache.get_flex_attention_choice_info(choice, timings)
-                for choice in sorted_choices
-            ]
+            "query_shape": str(query_size),
+            "key_shape": str(key_size),
+            "value_shape": str(value_size),
+            "kernel_type": kernel_type,
+            "choices": choices_with_shapes,
         }
         append_to_log(flex_attention_filename, out_dict)
 
@@ -4324,6 +4377,9 @@ class AlgorithmSelectorCache(PersistentCache):
                 "BLOCK_N": BLOCK_N,
                 "num_stages": info["num_stages"],
                 "num_warps": info["num_warps"],
+                "waves_per_eu": info.get("waves_per_eu", 0),
+                "matrix_instr_nonkdim": info.get("matrix_instr_nonkdim", 0),
+                "kpack": info.get("kpack", 2),
             }
 
         mm_filename = get_mm_log_filename()
@@ -4341,6 +4397,56 @@ class AlgorithmSelectorCache(PersistentCache):
                 append_to_log(mm_filename, out_dict)
             except (ValueError, IndexError):
                 # Skip logging if inputs don't match MM pattern
+                pass
+
+        conv_filename = get_conv_log_filename()
+        if conv_filename and "conv" in name:
+            # Log convolution operations with detailed tuning results
+            try:
+                x_size = input_nodes[0].get_size()
+                w_size = input_nodes[1].get_size()
+
+                def get_conv_choice_info(choice):
+                    if choice not in timings:
+                        return None
+                    info = choice.info_dict()
+                    
+                    # Start with timing and backend type
+                    result = {
+                        "time": timings[choice],
+                        "backend": info.get("backend", "unknown"),
+                    }
+                    
+                    # Add all parameters from info_dict
+                    # This includes BLOCK_K, BLOCK_M, BLOCK_N, GROUPS, KERNEL_H, KERNEL_W,
+                    # PADDING_H, PADDING_W, STRIDE_H, STRIDE_W, UNROLL, kpack,
+                    # matrix_instr_nonkdim, waves_per_eu, num_stages, num_warps, etc.
+                    for key, value in info.items():
+                        if key != "backend":  # Already added
+                            # Convert non-serializable types to strings
+                            try:
+                                import json
+                                json.dumps(value)  # Test if serializable
+                                result[key] = value
+                            except (TypeError, ValueError):
+                                result[key] = str(value)
+                    
+                    return result
+
+                out_dict = {
+                    "input_shape": str(x_size),
+                    "weight_shape": str(w_size),
+                    "choices": [
+                        get_conv_choice_info(choice)
+                        for choice in timings
+                        if get_conv_choice_info(choice) is not None
+                    ],
+                    "kernel_type": name,
+                }
+
+                append_to_log(conv_filename, out_dict)
+            except (ValueError, IndexError):
+                # Skip logging if inputs don't match conv pattern
                 pass
 
         AlgorithmSelectorCache.maybe_log_flex_attention_results(
