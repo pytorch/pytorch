@@ -3657,7 +3657,7 @@ class TestDynamicQuantizedOps(TestCase):
         return Xq, Hq, Cq
 
     def _get_rnn_weights_and_bias(self, input_size, hidden_size, num_directions, per_channel_quant, rnn_type):
-        hidden_mult_map = {'LSTM': 4, 'LSTMCell': 4, 'GRU': 3, 'GRUCell': 3, 'RNNTanh': 2, 'RNNReLU': 2}
+        hidden_mult_map = {'LSTM': 4, 'LSTMCell': 4, 'GRU': 3, 'GRUCell': 3, 'RNNTanh': 1, 'RNNReLU': 1}
         hidden_mult = hidden_mult_map[rnn_type]
         weights1 = torch.randn(hidden_mult * hidden_size, input_size)
         weights2 = torch.randn(hidden_mult * hidden_size, hidden_size)
