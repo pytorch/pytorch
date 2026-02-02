@@ -110,6 +110,10 @@ class KernelTests(torch._inductor.test_case.TestCase):
 
     @requires_gpu
     def test_triton_kernel_ill_formed(self):
+        if inductor_config.cpp_wrapper:
+            # With lazy compile, kernel errors happen at runtime, not codegen
+            self.skipTest("kernel errors happen at runtime instead of codegen time")
+
         @triton.jit
         def ill_formed_kernel(kernel):
             off_n = tl.program_id(0)
@@ -1765,6 +1769,11 @@ def forward(self, x_1, output_1):
     @common_utils.parametrize("autotune", [False, True])
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_triton_kernel_special_params(self, autotune, backend):
+        if backend == "inductor" and inductor_config.cpp_wrapper:
+            raise unittest.SkipTest(
+                "cpp-wrapper doesn't support num_warps/num_stages as constexpr"
+            )
+
         @triton.jit
         def special_params_kernel(
             in_ptr,
@@ -1836,6 +1845,8 @@ def forward(self, x_1, output_1):
             self.skipTest("requires triton.tools.tensor_descriptor TMA support")
         if tma_version == "old" and not has_triton_experimental_host_tma():
             self.skipTest("requires triton.tools.experimental_descriptor TMA support")
+        if inductor_config.cpp_wrapper:
+            self.skipTest("cpp_wrapper doesn't support TMA")
 
         kernel = (
             add_kernel_on_device_tma_new_api
@@ -1936,6 +1947,8 @@ def forward(self, x_1, output_1):
             self.skipTest("requires triton.tools.tensor_descriptor TMA support")
         if tma_version == "old" and not has_triton_experimental_host_tma():
             self.skipTest("requires triton.tools.experimental_descriptor TMA support")
+        if inductor_config.cpp_wrapper:
+            self.skipTest("cpp_wrapper doesn't support TMA")
 
         from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
 
@@ -2038,6 +2051,8 @@ def forward(self, arg0_1, arg1_1):
             self.skipTest("requires triton.tools.tensor_descriptor TMA support")
         if tma_version == "old" and not has_triton_experimental_host_tma():
             self.skipTest("requires triton.tools.experimental_descriptor TMA support")
+        if inductor_config.cpp_wrapper:
+            self.skipTest("cpp_wrapper doesn't support TMA")
 
         kernel = (
             add_kernel_with_tma_1d_new_api
@@ -2095,6 +2110,8 @@ def forward(self, arg0_1, arg1_1):
             self.skipTest("requires triton.tools.tensor_descriptor TMA support")
         if tma_version == "old" and not has_triton_experimental_host_tma():
             self.skipTest("requires triton.tools.experimental_descriptor TMA support")
+        if inductor_config.cpp_wrapper and backend == "inductor":
+            self.skipTest("cpp_wrapper doesn't support TMA")
 
         kernel = (
             add_kernel_with_tma_1d_new_api
@@ -2161,6 +2178,8 @@ def forward(self, arg0_1, arg1_1):
             self.skipTest("requires triton.tools.tensor_descriptor TMA support")
         if tma_version == "old" and not has_triton_experimental_host_tma():
             self.skipTest("requires triton.tools.experimental_descriptor TMA support")
+        if inductor_config.cpp_wrapper:
+            self.skipTest("cpp_wrapper doesn't support TMA")
 
         kernel = (
             add_kernel_with_tma_1d_new_api
@@ -4400,6 +4419,8 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     @common_utils.parametrize("autotune_at_compile_time", [True, False])
     def test_triton_kernel_reset_to_zero(self, backend, autotune_at_compile_time):
+        if inductor_config.cpp_wrapper:
+            self.skipTest("cpp_wrapper to be enhanced")
         if autotune_at_compile_time and backend != "inductor":
             raise unittest.SkipTest("compile-time autotuning only exists in inductor")
 
@@ -4506,6 +4527,8 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     @common_utils.parametrize("with_perf_model", [True, False])
     def test_triton_kernel_prune_configs_by(self, backend, with_perf_model, non_strict):
+        if inductor_config.cpp_wrapper:
+            self.skipTest("cpp_wrapper to be enhanced")
         # for non-strict mode
         libname = "my_cool_namespace"
         opname = "my_triton_operator"
@@ -4598,6 +4621,8 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     @common_utils.parametrize("with_perf_model", [True, False])
     def test_triton_kernel_prune_configs_by_recompile(self, backend, with_perf_model):
+        if inductor_config.cpp_wrapper:
+            self.skipTest("cpp_wrapper to be enhanced")
         """
         We want to recompile if anyone changes configs in the autotuner object
         In short if for example the following sequence of events happens:
@@ -4694,6 +4719,8 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
     def test_triton_kernel_heuristic(
         self, backend, autotune_at_compile_time, non_strict
     ):
+        if inductor_config.cpp_wrapper:
+            self.skipTest("cpp_wrapper to be enhanced with heuristic tests")
         # for non-strict mode
         libname = "my_cool_namespace"
         opname = "my_triton_operator"
