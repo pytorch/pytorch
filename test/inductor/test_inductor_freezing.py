@@ -17,11 +17,7 @@ from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import override_lowering, run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater, tf32_on_and_off
-from torch.testing._internal.common_utils import (
-    IS_FBCODE,
-    skipIfXpu,
-    TEST_WITH_SLOW_GRADCHECK,
-)
+from torch.testing._internal.common_utils import IS_FBCODE, TEST_WITH_SLOW_GRADCHECK
 
 
 # Make the helper files in test/ importable
@@ -787,7 +783,6 @@ class OptimizeForInferenceTemplate(TestCase):
                 mod_eager = mod(x)
                 self.assertEqual(foo(mod, x), mod_eager)
 
-    @skipIfXpu
     @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
     @unittest.skipIf(
         TEST_WITH_SLOW_GRADCHECK,
