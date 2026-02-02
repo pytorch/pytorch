@@ -5899,46 +5899,66 @@ class Scheduler:
         if is_cudagraph_unsafe_op(node.node):
             return "CUDAGraph-unsafe custom ops"
 
-        # Check for explicitly excluded symints from cudagraph_exclude_sym_shape API
-        # and unbacked symints from ops in cudagraph_unsafe_unbacked_ops
-        if reason := self._uses_cudagraph_excluded_symint(node):
+        if reason := self._uses_cudagraph_unsafe_unbacked_symint(node):
             return reason
 
         # Partition around nodes with dynamic shapes when cudagraph_skip_dynamic_graphs is enabled
         if config.triton.cudagraph_skip_dynamic_graphs:
-            shape_symbols = self._get_node_shape_symbols(node)
-            included = V.graph.cudagraph_included_symints
-            non_included = shape_symbols - included
-            if non_included:
+            if get_scheduler_node_symbol_uses(node):
                 return "dynamic shape ops"
 
         return None
 
-    def _get_node_shape_symbols(
-        self, node: BaseSchedulerNode
-    ) -> OrderedSet[sympy.Symbol]:
-        """Get shape symbols (SIZE, UNBACKED_INT) used by a node, filtering out internal codegen symbols."""
-        result: OrderedSet[sympy.Symbol] = OrderedSet()
-        node_symbols = get_scheduler_node_symbol_uses(node)
-        for sym in node_symbols:
-            simplified = V.graph.sizevars.simplify(sym)
-            for free_sym in simplified.free_symbols:
-                if symbol_is_type(free_sym, (SymT.SIZE, SymT.UNBACKED_INT)):
-                    result.add(free_sym)
-        return result
+    @cache_on_self
+    def _get_cudagraph_unsafe_unbacked_symints(self) -> OrderedSet[sympy.Symbol]:
+        """
+        Collect output unbacked symints from ops in config.cudagraph_unsafe_unbacked_ops.
+        """
+        unsafe_symints: OrderedSet[sympy.Symbol] = OrderedSet()
 
-    def _uses_cudagraph_excluded_symint(
+        if not config.cudagraph_unsafe_unbacked_ops:
+            return unsafe_symints
+
+        for node in self.nodes:
+            ir_node = node.node
+            if ir_node is None:
+                continue
+
+            if not isinstance(ir_node, torch._inductor.ir.FallbackKernel):
+                continue
+
+            op = ir_node.op_overload
+            if op is None:
+                continue
+
+            op_overload_packet_name, op_overload_name = get_op_names(op)
+            if (
+                op_overload_packet_name not in config.cudagraph_unsafe_unbacked_ops
+                and op_overload_name not in config.cudagraph_unsafe_unbacked_ops
+            ):
+                continue
+
+            for sym in ir_node.get_unbacked_symbol_defs():
+                sym = V.graph.sizevars.simplify(sym)
+                if symbol_is_type(sym, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT)):
+                    unsafe_symints.add(sym)
+
+        return unsafe_symints
+
+    def _uses_cudagraph_unsafe_unbacked_symint(
         self, node: BaseSchedulerNode
     ) -> Optional[str]:
-        """Check if a node uses any symints marked for cudagraph exclusion."""
-        excluded_symints = V.graph.cudagraph_excluded_symints
-        if not excluded_symints:
+        unsafe_symints = self._get_cudagraph_unsafe_unbacked_symints()
+        if not unsafe_symints:
             return None
 
-        shape_symbols = self._get_node_shape_symbols(node)
-        for sym in shape_symbols:
-            if sym in excluded_symints:
-                return f"uses cudagraph-excluded symint: {sym}"
+        node_symbols = get_scheduler_node_symbol_uses(node)
+
+        for sym in node_symbols:
+            simplified_sym = V.graph.sizevars.simplify(sym)
+            for free_sym in simplified_sym.free_symbols:
+                if free_sym in unsafe_symints:
+                    return f"uses cudagraph-unsafe unbacked symint: {free_sym}"
 
         return None
 

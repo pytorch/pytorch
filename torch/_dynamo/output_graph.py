@@ -708,8 +708,6 @@ class OutputGraph(OutputGraphCommon):
         )
         # Stores the full fqn of a param or buffer to the relevant source.
         self.param_name_to_source: Optional[dict[str, Source]] = {}
-        # Stores param names that are marked as unstatic (should be copied, not specialized)
-        self.unstatic_param_names: set[str] = set()
         self.side_effects = SideEffects(self)
         # Cached variable trackers. This makes symbolic analysis of LOAD_GLOBAL
         # and LOAD_ATTR for same python objects free.
@@ -1226,10 +1224,6 @@ class OutputGraph(OutputGraphCommon):
             def wrap_name(module_key: str) -> VariableTracker:
                 assert self.param_name_to_source is not None
                 self.param_name_to_source[module_key] = source
-
-                # Track if this param is marked as unstatic
-                if getattr(target, "_dynamo_unstatic_input_type", False):
-                    self.unstatic_param_names.add(module_key)
 
                 # Check if the attr has already been registered. This can happen
                 # when two different sources point to the same tensor.
@@ -2564,7 +2558,6 @@ class OutputGraph(OutputGraphCommon):
 
         # NOTE: can't move these into meta: https://github.com/pytorch/pytorch/issues/141640
         gm._param_name_to_source = self.param_name_to_source  # type: ignore[assignment]
-        gm._unstatic_param_names = self.unstatic_param_names  # type: ignore[assignment]
         gm._source_to_user_stacks = self.source_to_user_stacks  # type: ignore[assignment]
 
         # Check for per-graph backend override (for debugging/bisecting)

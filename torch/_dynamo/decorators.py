@@ -1133,23 +1133,6 @@ def mark_static_address(t: Any, guard: bool = False) -> None:
         t._dynamo_static_input_type = "unguarded"  # type: ignore[attr-defined]
 
 
-@forbid_in_graph
-def mark_unstatic_address(t: Any) -> None:
-    """
-    Marks an input tensor whose address should NOT be treated as constant across calls.
-    This is the opposite of mark_static_address: even if the tensor would normally be
-    treated as static (e.g., a parameter), we want to copy it to a static address rather
-    than specializing on its current address.
-
-    This is useful when a tensor's memory comes from a prior cudagraph and you want to
-    copy it to cudagraph-managed memory rather than using its current address directly.
-    """
-    if not isinstance(t, torch.Tensor):
-        raise TypeError(f"mark_unstatic_address expects a tensor but received {type(t)}")
-
-    t._dynamo_unstatic_input_type = True  # type: ignore[attr-defined]
-
-
 # One day, Dynamo will support tracing into einops directly (no allow_in_graph needed)
 # Note that PyTorch supports multiple versions of einops, so when that day comes,
 # we still need to be really careful about version matches.
@@ -1368,68 +1351,3 @@ def is_dynamo_disable_recursive(method: Callable[[Any], Any]) -> Optional[bool]:
     - None if method is not a disable decorator
     """
     return getattr(method, "_torchdynamo_disable_recursive", None)
-
-
-@forbid_in_graph
-def cudagraph_exclude_sym_shape(
-    t: torch.Tensor, index: Union[int, list[int], tuple[int, ...]]
-) -> None:
-    """
-    Mark a tensor dimension's symbolic shape to be excluded from cudagraph partitions.
-
-    When compiling with dynamic shapes (cudagraph_skip_dynamic_graphs=False),
-    this API excludes the specified dimension's symbolic shape from being
-    included in cudagraph partitions. Nodes using this shape will be
-    partitioned out of cudagraph regions when graph_partition is enabled,
-    or cudagraphs will be disabled for the entire graph otherwise.
-
-    Only affects dimensions that become SymInts during dynamic compilation.
-    Has no effect on static/concrete dimensions.
-
-    This API must be called before torch.compile, not during tracing.
-
-    Args:
-        t: The tensor whose dimension should be excluded from cudagraphs
-        index: The dimension index (or list/tuple of indices) to exclude
-    """
-    if isinstance(index, int):
-        if not hasattr(t, "_cudagraph_excluded_sym_dims"):
-            t._cudagraph_excluded_sym_dims: set[int] = set()
-        t._cudagraph_excluded_sym_dims.add(index)
-        return
-
-    assert isinstance(index, (list, tuple))
-    for i in index:
-        cudagraph_exclude_sym_shape(t, i)
-
-
-@forbid_in_graph
-def cudagraph_include_sym_shape(
-    t: torch.Tensor, index: Union[int, list[int], tuple[int, ...]]
-) -> None:
-    """
-    Mark a tensor dimension's symbolic shape to be included in cudagraph partitions.
-
-    When cudagraph_skip_dynamic_graphs=True (which normally excludes all
-    dynamic shapes from cudagraphs), this API includes the specified
-    dimension's symbolic shape in cudagraph partitions.
-
-    Only affects dimensions that become SymInts during dynamic compilation.
-    Has no effect on static/concrete dimensions.
-
-    This API must be called before torch.compile, not during tracing.
-
-    Args:
-        t: The tensor whose dimension should be included in cudagraphs
-        index: The dimension index (or list/tuple of indices) to include
-    """
-    if isinstance(index, int):
-        if not hasattr(t, "_cudagraph_included_sym_dims"):
-            t._cudagraph_included_sym_dims: set[int] = set()
-        t._cudagraph_included_sym_dims.add(index)
-        return
-
-    assert isinstance(index, (list, tuple))
-    for i in index:
-        cudagraph_include_sym_shape(t, i)
-

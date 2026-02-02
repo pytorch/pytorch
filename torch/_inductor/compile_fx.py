@@ -172,35 +172,6 @@ if TYPE_CHECKING:
     ]
 
 
-def _extract_cudagraph_shape_hints_from_graph(model_: GraphModule) -> None:
-    """Extract cudagraph shape hints from dynamo placeholder nodes and store in gm.meta.
-
-    This is needed because tensor_dict metadata on placeholder nodes is lost when
-    AOT Autograd creates new FX graphs. We extract the hints here and store them
-    in gm.meta which is preserved through the compilation pipeline.
-
-    We store hints by index since placeholder names change through AOT Autograd.
-    """
-    excluded_by_idx: dict[int, set[int]] = {}
-    included_by_idx: dict[int, set[int]] = {}
-
-    placeholder_idx = 0
-    for node in model_.graph.nodes:
-        if node.op != "placeholder":
-            continue
-        tensor_dict = node.meta.get("tensor_dict", {})
-        if "_cudagraph_excluded_sym_dims" in tensor_dict:
-            excluded_by_idx[placeholder_idx] = tensor_dict["_cudagraph_excluded_sym_dims"]
-        if "_cudagraph_included_sym_dims" in tensor_dict:
-            included_by_idx[placeholder_idx] = tensor_dict["_cudagraph_included_sym_dims"]
-        placeholder_idx += 1
-
-    if excluded_by_idx:
-        model_.meta["cudagraph_excluded_sym_dims_by_idx"] = excluded_by_idx
-    if included_by_idx:
-        model_.meta["cudagraph_included_sym_dims_by_idx"] = included_by_idx
-
-
 class FxCompileMode(enum.Enum):
     NORMAL = 0
     # For testing - use the serde FxCompile scheme to debug serialization and
@@ -1652,20 +1623,7 @@ class _InProcessFxCompile(FxCompile):
                     # Collect and dump collective-op schedule for external diagnostics
                     torch._inductor.debug.log_collective_schedule(graph.scheduler.nodes)
 
-                    # When graph_partition is enabled, skip these checks - partitioning handles them
-                    # Check 1: Disable cudagraphs if excluded symints are present (non-partition mode)
-                    if (
-                        cudagraphs
-                        and not config.graph_partition
-                        and not V.graph.disable_cudagraphs_reason
-                        and V.graph.cudagraph_excluded_symints
-                    ):
-                        V.graph.disable_cudagraphs_reason = (
-                            "graph has cudagraph-excluded symbolic shapes. "
-                            "Enable graph_partition to partition around excluded shapes.\n"
-                        )
-
-                    # Check 2: Handle cudagraph_skip_dynamic_graphs with included symints
+                    # When graph_partition is enabled, skip this check - partitioning handles dynamic shapes
                     if (
                         cudagraphs
                         and config.triton.cudagraph_skip_dynamic_graphs
@@ -1673,45 +1631,25 @@ class _InProcessFxCompile(FxCompile):
                         and not V.graph.disable_cudagraphs_reason
                         and torch._inductor.utils.any_is_symbolic(*example_inputs)
                     ):
-                        # Check if all symbolic inputs are in the included set
-                        has_non_included_symbolic = False
-                        included = V.graph.cudagraph_included_symints
-                        for inp in example_inputs:
-                            if not torch._inductor.utils.is_symbolic(inp):
+                        stack_trace = None
+                        for node in gm.graph.nodes:
+                            meta_val = node.meta.get("val", None)
+                            if (
+                                node.op == "placeholder"
+                                or not isinstance(meta_val, torch.Tensor)
+                                or not torch._inductor.utils.any_is_symbolic(meta_val)
+                            ):
                                 continue
-                            if isinstance(inp, torch.Tensor):
-                                for dim in range(inp.ndim):
-                                    size = inp.size(dim)
-                                    if isinstance(size, torch.SymInt):
-                                        for sym in size.node.expr.free_symbols:
-                                            if sym not in included:
-                                                has_non_included_symbolic = True
-                                                break
-                                    if has_non_included_symbolic:
-                                        break
-                            if has_non_included_symbolic:
+
+                            if stack_trace := node.meta.get("stack_trace", None):
                                 break
-
-                        if has_non_included_symbolic:
-                            stack_trace = None
-                            for node in gm.graph.nodes:
-                                meta_val = node.meta.get("val", None)
-                                if (
-                                    node.op == "placeholder"
-                                    or not isinstance(meta_val, torch.Tensor)
-                                    or not torch._inductor.utils.any_is_symbolic(meta_val)
-                                ):
-                                    continue
-
-                                if stack_trace := node.meta.get("stack_trace", None):
-                                    break
-                            disable = "graph with symbolic shapes inputs and config.triton.cudagraph_skip_dynamic_graphs=True."
-                            if stack_trace:
-                                disable = f"{disable} Found from {stack_trace}\n"
-                            else:
-                                disable = f"{disable}\n"
-                            # pyrefly: ignore [unbound-name]
-                            V.graph.disable_cudagraphs_reason = disable
+                        disable = "graph with symbolic shapes inputs and config.triton.cudagraph_skip_dynamic_graphs=True."
+                        if stack_trace:
+                            disable = f"{disable} Found from {stack_trace}\n"
+                        else:
+                            disable = f"{disable}\n"
+                        # pyrefly: ignore [unbound-name]
+                        V.graph.disable_cudagraphs_reason = disable
 
                     # pyrefly: ignore [unbound-name]
                     # When graph_partition is enabled, skip this check - partitioning handles incompatible ops
@@ -2699,27 +2637,6 @@ def _maybe_wrap_and_compile_fx_main(
     But under various conditions, various forms of wrapping might be needed
     around _compile_fx_main.
     """
-    # Extract cudagraph shape hints from dynamo graph placeholders and store in gm.meta.
-    # This is needed because tensor_dict metadata on placeholder nodes is lost when
-    # AOT Autograd creates new FX graphs.
-    _extract_cudagraph_shape_hints_from_graph(model_)
-
-    return _maybe_wrap_and_compile_fx_main_inner(
-        model_,
-        example_inputs_,
-        inner_compile,
-        decompositions,
-        ignore_shape_env,
-    )
-
-
-def _maybe_wrap_and_compile_fx_main_inner(
-    model_: GraphModule,
-    example_inputs_: Sequence[InputType],
-    inner_compile: Callable[..., OutputCode],
-    decompositions: Optional[dict[OpOverload, Callable[..., Any]]],
-    ignore_shape_env: bool,
-) -> CompileFxOutput:
     # Each wrapper below takes a self-contained compile_gm function which is
     # called inside the wrapper. This just recursively calls this function.
     compile_gm = functools.partial(
@@ -2806,13 +2723,6 @@ def _compile_fx_main(
             with dynamo_utils.dynamo_timed("compile_fx.<locals>.fw_compiler_base"):
                 if isinstance(model_, GraphModule):
                     num_orig_model_outputs = get_num_model_outputs(model_)
-                    # Propagate cudagraph shape hints from dynamo graph to AOT graph
-                    for key in (
-                        "cudagraph_excluded_sym_dims_by_idx",
-                        "cudagraph_included_sym_dims_by_idx",
-                    ):
-                        if key in model_.meta:
-                            gm.meta[key] = model_.meta[key]
                 else:
                     num_orig_model_outputs = get_num_model_outputs(gm)
                 return compile_fx_forward(

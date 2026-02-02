@@ -1242,78 +1242,6 @@ if HAS_CUDA_AND_TRITON:
             # 1 partition since ops using unbacked symints are excluded from graph partitions
             self.assertEqual(num_partitions_overload, 1)
 
-        def test_cudagraph_sym_shape_apis_eager_noop(self):
-            """Test that the APIs are no-op in eager mode (don't crash)."""
-            x = torch.randn(8, 8, device="cuda")
-            # Should not raise
-            torch.compiler.cudagraph_exclude_sym_shape(x, 0)
-            torch.compiler.cudagraph_include_sym_shape(x, 1)
-
-            # Tensor should have the attributes set
-            self.assertIn(0, x._cudagraph_excluded_sym_dims)
-            self.assertIn(1, x._cudagraph_included_sym_dims)
-
-        @parametrize("graph_partition", [True, False])
-        @parametrize("dynamic", [True, False])
-        def test_cudagraph_exclude_sym_shape(self, graph_partition, dynamic):
-            """Test cudagraph_exclude_sym_shape with various configurations."""
-            with torch._inductor.config.patch("graph_partition", graph_partition):
-
-                def f(x):
-                    return x + 1
-
-                x = torch.randn(8, 8, device="cuda")
-                torch.compiler.cudagraph_exclude_sym_shape(x, 0)
-
-                f_compiled = torch.compile(f, mode="reduce-overhead", dynamic=dynamic)
-
-                scheduler_log_stream, scheduler_ctx = logs_to_string(
-                    "torch._inductor.scheduler", "cudagraphs"
-                )
-                with scheduler_ctx():
-                    result = f_compiled(x)
-
-                self.assertEqual(result.shape, x.shape)
-
-                if dynamic and graph_partition:
-                    # With dynamic shapes and partition enabled, should see excluded symint
-                    FileCheck().check("reason=uses cudagraph-excluded symint").run(
-                        scheduler_log_stream.getvalue()
-                    )
-                elif not dynamic:
-                    # Static shapes - no symints, so no exclusion message
-                    self.assertNotIn(
-                        "cudagraph-excluded", scheduler_log_stream.getvalue()
-                    )
-
-        @parametrize("graph_partition", [True, False])
-        def test_cudagraph_include_sym_shape(self, graph_partition):
-            """Test cudagraph_include_sym_shape with skip_dynamic_graphs=True."""
-            with torch._inductor.config.patch("graph_partition", graph_partition), \
-                 torch._inductor.config.patch("triton.cudagraph_skip_dynamic_graphs", True):
-
-                def f(x):
-                    return x + 1
-
-                x = torch.randn(8, 8, device="cuda")
-                torch.compiler.cudagraph_include_sym_shape(x, 0)
-
-                f_compiled = torch.compile(f, mode="reduce-overhead", dynamic=True)
-
-                scheduler_log_stream, scheduler_ctx = logs_to_string(
-                    "torch._inductor.scheduler", "cudagraphs"
-                )
-                with scheduler_ctx():
-                    result = f_compiled(x)
-
-                self.assertEqual(result.shape, x.shape)
-
-                if graph_partition:
-                    # With partition enabled, included dims should NOT trigger "dynamic shape ops"
-                    self.assertNotIn(
-                        "reason=dynamic shape ops", scheduler_log_stream.getvalue()
-                    )
-
         @torch._inductor.config.patch("graph_partition", True)
         @torch._inductor.config.patch("implicit_fallbacks", True)
         def test_graph_partition_with_memory_plan_reuse(self):
@@ -3128,42 +3056,6 @@ if HAS_CUDA_AND_TRITON:
                     mod.linear.bias.grad = None
                 # One forward and one backward
                 self.assertEqual(self.get_manager().new_graph_id().id, 2)
-
-        @torch._dynamo.config.patch("error_on_recompile", True)
-        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
-        def test_mark_unstatic_address(self):
-            # Test that mark_unstatic_address forces a tensor to be copied
-            # to static memory instead of specializing on its address
-            class Mod(torch.nn.Module):
-                def __init__(self):
-                    super().__init__()
-                    self.param = torch.nn.Parameter(torch.randn(2, 2, device="cuda"))
-
-                def forward(self, x):
-                    return x + self.param
-
-            mod = Mod()
-
-            # Mark the param as unstatic - it should be copied on each cudagraph replay
-            torch.compiler.mark_unstatic_address(mod.param)
-
-            fn_compiled = torch.compile(mod, mode="reduce-overhead")
-
-            with torch.device("cuda"):
-                for _ in range(3):
-                    x = torch.randn(2, 2)
-                    res = fn_compiled(x)
-
-                # Verify the param is NOT in static_input_idxs by checking
-                # it doesn't cause issues when we change its address
-                old_param = mod.param
-                mod.param = torch.nn.Parameter(torch.randn(2, 2, device="cuda"))
-                torch.compiler.mark_unstatic_address(mod.param)
-
-                # This should work without recompilation since the param is copied
-                for _ in range(3):
-                    x = torch.randn(2, 2)
-                    res = fn_compiled(x)
 
         def test_cudagraph_annotation_disable(self):
             # Test that cudagraph_annotation("disable") disables cudagraphs
