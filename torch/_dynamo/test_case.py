@@ -200,8 +200,7 @@ class CPythonTestCase(TestCase):
         suffix = super()._dynamo_test_key()
         test_cls = self.__class__
         test_file = inspect.getfile(test_cls).split(os.sep)[-1].split(".")[0]
-        # Support both old (3_13) and new (v3_13) path formats
-        py_ver = re.search(r"/v?([\d_]+)/", inspect.getfile(test_cls))
+        py_ver = re.search(r"/v([\d_]+)/", inspect.getfile(test_cls))
         if py_ver:
             py_ver = py_ver.group().strip(os.sep).replace("_", "").lstrip("v")  # type: ignore[assignment]
         else:
@@ -218,11 +217,9 @@ class CPythonTestCase(TestCase):
         # Skip test if python versions doesn't match
         search_path = inspect.getfile(cls)
 
-        # Support both old (dynamo/cpython/3_13) and new (cpython/v3_13) paths
-        old_pattern = re.escape(os.path.join("dynamo", "cpython") + os.path.sep) + r"(\d)_(\d{2})"
         new_pattern = re.escape(os.path.join("cpython") + os.path.sep) + r"v(\d)_(\d{2})"
 
-        m = re.search(old_pattern, search_path) or re.search(new_pattern, search_path)
+        m = re.search(new_pattern, search_path)
         if m:
             test_py_ver = tuple(map(int, m.groups()))
             py_ver = sys.version_info[:2]
