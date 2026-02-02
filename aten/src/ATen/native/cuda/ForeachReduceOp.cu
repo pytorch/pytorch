@@ -591,8 +591,8 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
   bool has_int_or_complex = false;
   if (p == std::numeric_limits<double>::infinity()) {
     for (const auto& t : tensors) {
-      TORCH_CHECK(
-          t.numel() > 0,
+      TORCH_SYM_CHECK(
+          t.sym_numel().sym_gt(0),
           "_foreach_norm cannot compute the infinity norm on an empty tensor because the operation does not have an identity");
       const auto scalar_type = t.scalar_type();
       if (at::isIntegralType(scalar_type, /*includeBool*/ true) ||
