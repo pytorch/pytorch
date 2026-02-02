@@ -38,9 +38,45 @@ void THXPGraph_init(PyObject* module) {
           "instantiate",
           torch::wrap_pybind_function_no_gil(&at::xpu::XPUGraph::instantiate))
       .def(
+          "register_generator_state",
+          [](::at::xpu::XPUGraph& self, py::handle raw_generator) {
+            auto generator = THPGenerator_Unwrap(raw_generator.ptr());
+            // We've unwrapped Python object to C++ object,
+            // so we could release GIL before calling into C++
+            py::gil_scoped_release release;
+            return self.register_generator_state(generator);
+          },
+          py::arg("generator"))
+      .def(
           "replay",
           torch::wrap_pybind_function_no_gil(&at::xpu::XPUGraph::replay))
       .def(
           "reset",
-          torch::wrap_pybind_function_no_gil(&at::xpu::XPUGraph::reset));
+          torch::wrap_pybind_function_no_gil(&at::xpu::XPUGraph::reset))
+      .def(
+          "pool",
+          torch::wrap_pybind_function_no_gil(&at::xpu::XPUGraph::pool))
+      .def(
+          "enable_debug_mode",
+          torch::wrap_pybind_function_no_gil(
+              &at::xpu::XPUGraph::enable_debug_mode))
+      .def(
+          "debug_dump",
+          torch::wrap_pybind_function_no_gil(
+              &at::xpu::XPUGraph::debug_dump),
+          py::arg("debug_path"))
+      .def(
+          "raw_xpu_graph",
+          [](at::xpu::XPUGraph& self) {
+            at::xpu::xpuGraph_t* graph = self.raw_xpu_graph();
+            return reinterpret_cast<uintptr_t>(graph);
+          },
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "raw_xpu_graph_exec",
+          [](at::xpu::XPUGraph& self) {
+            at::xpu::xpuGraphExec_t* graph_exec = self.raw_xpu_graph_exec();
+            return reinterpret_cast<uintptr_t>(graph_exec);
+          },
+          py::call_guard<py::gil_scoped_release>());
 }
