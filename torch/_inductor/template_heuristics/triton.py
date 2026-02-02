@@ -1226,6 +1226,7 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
                 default_config = FlexConfig(64, 64, 3, 4)
             else:
                 default_config = FlexConfig(64, 64, 3, 4)
+            # here we are using sm_120_default_flex_config on THOR as well
             if capability >= (11, 0):
                 default_config = self.sm_120_default_flex_config.get(
                     (dtype, head_dim), default_config
