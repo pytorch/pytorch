@@ -115,6 +115,39 @@ class RedistributeTest(DTensorTestBase):
             self.assertEqual(comm_mode.get_total_counts(), 0)
 
     @with_comms
+    def test_shard_to_replicate_local_tensor_contiguous(self):
+        """Test that redistribute from Shard to Replicate produces contiguous local tensors.
+
+        When the sharded dimension size is not evenly divisible by world_size,
+        padding/unpadding is used. The unpadding operation should ensure the
+        resulting local tensor is contiguous. See GitHub issue #173041.
+        """
+        device_mesh = self.build_device_mesh()
+
+        # Test various shard dimensions with uneven sizes (requires padding)
+        # world_size=4, so sizes like 13, 14, 15 require padding on dims
+        test_cases = [
+            # (shape, shard_dim) - all have uneven shard dim sizes
+            ((4, 13, 8), 1),  # 13 % 4 != 0
+            ((4, 14, 8), 1),  # 14 % 4 != 0
+            ((4, 15, 8), 1),  # 15 % 4 != 0
+            ((13, 8), 0),  # 13 % 4 != 0
+            ((8, 13), 1),  # 13 % 4 != 0
+        ]
+
+        for shape, shard_dim in test_cases:
+            full_tensor = torch.randn(shape, device=self.device_type)
+            dt_rep = distribute_tensor(full_tensor, device_mesh, [Replicate()])
+            dt_shard = dt_rep.redistribute(device_mesh, [Shard(shard_dim)])
+            dt_back_rep = dt_shard.redistribute(device_mesh, [Replicate()])
+
+            self.assertTrue(
+                dt_back_rep._local_tensor.is_contiguous(),
+                f"Local tensor should be contiguous after Shard({shard_dim})->Replicate "
+                f"for shape {shape}. Got stride {dt_back_rep._local_tensor.stride()}",
+            )
+
+    @with_comms
     def test_replicate_to_replicate_forward_backward(self):
         device_mesh = self.build_device_mesh()
         replica_spec = [Replicate()]
