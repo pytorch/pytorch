@@ -2025,6 +2025,7 @@ class BuiltinVariable(VariableTracker):
                 variables.NNModuleVariable,
                 variables.TensorVariable,
                 variables.TupleVariable,
+                variables.DictItemsVariable,
             ),
         ):
             return obj.call_method(tx, "__iter__", [], {})
