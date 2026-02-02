@@ -36,6 +36,12 @@ except unittest.SkipTest:
         sys.exit(0)
     raise
 
+device_type = (
+    acc.type
+    if (acc := torch.accelerator.current_accelerator(check_available=True))
+    else "cpu"
+)
+
 check_model = test_torchinductor.check_model
 BaseTestSelectAlgorithm = test_cpu_select_algorithm.BaseTestSelectAlgorithm
 
@@ -126,6 +132,7 @@ class TestSelectAlgorithmGpu(BaseTestSelectAlgorithm):
         w = torch.rand((out_features, in_features), dtype=dtype, device=device)
         w_int8pack, w_scales = _convert_weight_to_int8pack(w)
         w_scales = w_scales.to(device)
+
         mod = M(w_int8pack).eval()
         self.common(mod, (x, w_scales))
         self.assertEqual(counters["inductor"]["woq_matcher_count"], 1)
