@@ -1156,6 +1156,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return self.value
             # TODO else try reconstructing the object by, e.g., leveraging side
             # effects and `as_python_constant`.
+
+        # TODO - Check that its not mutated
+        if self.constructed_with_eager_fallback_fn:
+            return self.value
         return super().as_python_constant()
 
     def guard_as_python_constant(self) -> object:
