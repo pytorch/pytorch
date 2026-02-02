@@ -8,7 +8,7 @@
 
 namespace torch::cpu {
 
-static char* get_cpu_architecture() {
+static constexpr const char* get_cpu_architecture() {
 #if defined(__x86_64__) || defined(_M_X64)
   return "x86_64";
 #elif defined(__aarch64__) || defined(_M_ARM64)
