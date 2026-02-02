@@ -494,19 +494,13 @@ Tensor& cauchy_mps_(Tensor& self, double median, double sigma, std::optional<Gen
 
     dispatch_sync_with_rethrow(stream->queue(), ^() {
       @autoreleasepool {
-        getMPSProfiler().beginProfileKernel(cauchyPSO, "cauchy", {output});
-
         auto computeEncoder = stream->commandEncoder();
         [computeEncoder setComputePipelineState:cauchyPSO];
-
         auto median_f = static_cast<float>(median);
         auto sigma_f = static_cast<float>(sigma);
-
         mtl_setArgs(
             computeEncoder, output, std::array<float, 2>{median_f, sigma_f}, std::array<long, 2>{seed, base_offset});
         mtl_dispatch1DJob(computeEncoder, cauchyPSO, output.numel());
-
-        getMPSProfiler().endProfileKernel(cauchyPSO);
       }
     });
   }
