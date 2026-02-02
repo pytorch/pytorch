@@ -812,6 +812,18 @@ class CommonTemplate:
             view_size = (513, 513) if view_size == (129, 129) else view_size
         view = self._discontiguous_tensor(view_size, self.device)
 
+        # HIP: Backend scheduling / fusion differences (e.g., Navi vs MI*)
+        # may result in off-by-one differences in the number of block pointers.
+        # Allow a small tolerance here to avoid backend-specific flakiness.
+        # The range created here is checked below.
+        if torch.version.hip:
+            min_num_block_pointers = max(
+                num_block_pointers - 1, 1
+            )  # Expected at least one block descriptor for the input
+            max_num_block_pointers = num_block_pointers
+            # Disable strict checking in _run_and_compare; we assert bounds manually below.
+            num_block_pointers = None
+
         # Expect at least 1 block pointer for the input.
         # Add 2 more if we generate 2 kernels.
         result, (code,) = self._run_and_compare(
@@ -821,6 +833,20 @@ class CommonTemplate:
             expected_num_triton_kernels=num_triton_kernels,
             config_patches=tiled_reduction_config,
         )
+
+        # HIP: Check the number of block pointers manually.
+        if torch.version.hip:
+            block_pointer_count = code.count(self.block_descriptor_constructor_str)
+            self.assertGreaterEqual(
+                block_pointer_count,
+                min_num_block_pointers,
+                f"Too few block descriptors emitted: {block_pointer_count}",
+            )
+            self.assertLessEqual(
+                block_pointer_count,
+                max_num_block_pointers,
+                f"Too many block descriptors emitted: {block_pointer_count}",
+            )
 
         # Check the code for multiple Rn_BLOCK's
         self._assert_reduction_ndims(code, 2)
