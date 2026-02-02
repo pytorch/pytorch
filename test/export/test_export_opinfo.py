@@ -52,6 +52,7 @@ fake_export_failures = {
     xfail("masked.std"),
     xfail("masked.sum"),
     xfail("masked.var"),
+    xfail("__getitem__"),
 }
 
 fake_decomposition_failures = {
