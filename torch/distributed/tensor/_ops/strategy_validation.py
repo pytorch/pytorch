@@ -1220,12 +1220,8 @@ def compare_operator(
     print()
 
     # Count distinct rules (unique placement combinations)
-    fp_rules = {
-        (d.input_placements, d.output_placement) for d in stats.false_positives
-    }
-    fn_rules = {
-        (d.input_placements, d.output_placement) for d in stats.false_negatives
-    }
+    fp_rules = {(d.input_placements, d.output_placement) for d in stats.false_positives}
+    fn_rules = {(d.input_placements, d.output_placement) for d in stats.false_negatives}
 
     print(f"True positives (both agree valid): {stats.true_positives}")
     if stats.false_positives:
@@ -1317,7 +1313,7 @@ def get_registered_op_names():
             base_names.add(parts[1])
 
     # Find which ones have OpInfo
-    opinfo_names = set(op.name for op in op_db)
+    opinfo_names = {op.name for op in op_db}
     return sorted(base_names & opinfo_names)
 
 
@@ -1353,7 +1349,7 @@ if __name__ == "__main__":
         action="store_true",
         help="Only test DTensor's claimed rules (faster, skips missing detection)",
     )
-    parser.add_argument("--device", default="cpu", help="Device to use")
+    parser.add_argument("--device", default="cuda", help="Device to use")
     parser.add_argument("--dtype", default="float32", help="Dtype to use")
     parser.add_argument(
         "--world-size", type=int, default=2, help="Simulated world size"
