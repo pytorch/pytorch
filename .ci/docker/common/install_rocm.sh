@@ -26,85 +26,100 @@ install_ubuntu() {
     apt-get install -y libc++1
     apt-get install -y libc++abi1
 
-    # When ROCM_VERSION=nightly, install ROCm from TheRock nightly wheels
+    # When ROCM_VERSION=nightly, install ROCm from TheRock nightly tarball
     if [[ "${ROCM_VERSION}" == "nightly" ]]; then
-      echo "install_rocm.sh: installing ROCm from TheRock nightly wheels"
+      echo "install_rocm.sh: installing ROCm from TheRock nightly tarball"
 
       # Clean any previous ROCm installation in the base CI image.
-      if [[ -d /opt/rocm ]]; then
+      if [[ -d /opt/rocm ]] || [[ -L /opt/rocm ]]; then
         echo "Removing existing /opt/rocm from base image"
-        rm -rf /opt/rocm
+        rm -rf /opt/rocm*
       fi
 
-      # Determine theRock nightly URL based on GPU architecture
-      # Check BUILD_ENVIRONMENT or PYTORCH_ROCM_ARCH for the target GPU
-      if [[ -z "${THEROCK_NIGHTLY_INDEX_URL:-}" ]]; then
-        if [[ "${BUILD_ENVIRONMENT}" == *"gfx950"* ]] || [[ "${PYTORCH_ROCM_ARCH}" == *"gfx950"* ]]; then
-          # MI350 (gfx950)
-          THEROCK_NIGHTLY_INDEX_URL="https://rocm.nightlies.amd.com/v2/gfx950-dcgpu/"
-          echo "Detected gfx950 architecture - using MI350 theRock nightly repository"
-        else
-          # Default to MI300 (gfx942/gfx94X)
-          THEROCK_NIGHTLY_INDEX_URL="https://rocm.nightlies.amd.com/v2/gfx94X-dcgpu/"
-          echo "Using gfx94X (MI300) theRock nightly repository"
+      # Determine AMDGPU_FAMILY based on GPU architecture
+      if [[ "${BUILD_ENVIRONMENT}" == *"gfx950"* ]] || [[ "${PYTORCH_ROCM_ARCH}" == *"gfx950"* ]]; then
+        AMDGPU_FAMILY="gfx950-dcgpu"
+        echo "Detected gfx950 architecture - using MI350 theRock nightly tarball"
+      else
+        AMDGPU_FAMILY="gfx94X-dcgpu"
+        echo "Using gfx94X (MI300) theRock nightly tarball"
+      fi
+
+      # Get theRock version - use THEROCK_VERSION env var or fetch latest from nightly index
+      if [[ -z "${THEROCK_VERSION:-}" ]]; then
+        echo "Fetching latest theRock nightly version..."
+        # Get the latest tarball version from the nightlies index
+        THEROCK_VERSION=$(curl -sL "https://rocm.nightlies.amd.com/tarball/" | \
+          grep -oP "therock-dist-linux-${AMDGPU_FAMILY}-\K[0-9]+\.[0-9]+\.[0-9]+a[0-9]+" | \
+          sort -V | tail -1)
+        if [[ -z "${THEROCK_VERSION}" ]]; then
+          echo "Error: Could not determine latest theRock version"
+          exit 1
         fi
       fi
 
-      export THEROCK_NIGHTLY_INDEX_URL
-      echo "TheRock Index URL: ${THEROCK_NIGHTLY_INDEX_URL}"
+      echo "TheRock Version: ${THEROCK_VERSION}"
+      echo "AMDGPU Family: ${AMDGPU_FAMILY}"
 
-      python3 -m pip install \
-        --index-url "${THEROCK_NIGHTLY_INDEX_URL}" \
-        "rocm[libraries,devel]"
+      TARBALL_URL="https://rocm.nightlies.amd.com/tarball/therock-dist-linux-${AMDGPU_FAMILY}-${THEROCK_VERSION}.tar.gz"
+      echo "Tarball URL: ${TARBALL_URL}"
 
-      # Use the rocm-sdk CLI helper to populate environment defaults
-      ROCM_HOME="$(rocm-sdk path --root)"
-      ROCM_BIN="$(rocm-sdk path --bin)"
-      ROCM_CMAKE_PREFIX="$(rocm-sdk path --cmake)"
+      # Download tarball
+      TARBALL_FILE="/tmp/rocm-tarball.tar.gz"
+      echo "Downloading theRock tarball..."
+      curl -fsSL -o "$TARBALL_FILE" "$TARBALL_URL" || {
+        echo "Error: Failed to download tarball from $TARBALL_URL"
+        exit 1
+      }
 
-      echo "ROCM_HOME=${ROCM_HOME}"
-      echo "ROCM_BIN=${ROCM_BIN}"
-      echo "ROCM_CMAKE_PREFIX=${ROCM_CMAKE_PREFIX}"
+      # Verify download
+      if [[ ! -f "$TARBALL_FILE" ]] || [[ ! -s "$TARBALL_FILE" ]]; then
+        echo "Error: Downloaded file is empty or does not exist"
+        exit 1
+      fi
 
-      export ROCM_HOME
-      export ROCM_PATH="${ROCM_HOME}"
-      export PATH="${ROCM_BIN}:${PATH}"
-      export CMAKE_PREFIX_PATH="${ROCM_CMAKE_PREFIX}:${CMAKE_PREFIX_PATH:-}"
+      # Install to /opt/rocm-{VERSION}
+      ROCM_INSTALL_DIR="/opt/rocm-${THEROCK_VERSION}"
+      echo "Extracting tarball to ${ROCM_INSTALL_DIR}..."
+      mkdir -p "$ROCM_INSTALL_DIR"
+      tar -xzf "$TARBALL_FILE" -C "$ROCM_INSTALL_DIR"
+      rm -f "$TARBALL_FILE"
 
-      # theRock bundles system dependencies like libdrm, liblzma in rocm_sysdeps
-      ROCM_SYSDEPS="${ROCM_HOME}/lib/rocm_sysdeps"
-      ROCM_SYSDEPS_INCLUDE="${ROCM_SYSDEPS}/include"
-      ROCM_SYSDEPS_PKGCONFIG="${ROCM_SYSDEPS}/lib/pkgconfig"
+      # Create symlink /opt/rocm -> /opt/rocm-{VERSION}
+      ln -sfn "$ROCM_INSTALL_DIR" /opt/rocm
+      echo "Created symlink: /opt/rocm -> $ROCM_INSTALL_DIR"
+
+      # Verify installation
+      echo "Verifying installation..."
+      for dir in bin include lib share; do
+        if [[ ! -d "$ROCM_INSTALL_DIR/$dir" ]]; then
+          echo "Warning: ROCm $dir directory not found in $ROCM_INSTALL_DIR"
+        else
+          echo "ROCm $dir found in $ROCM_INSTALL_DIR/$dir"
+        fi
+      done
 
       # Write environment to file that can be sourced by CI scripts and users
-      cat > /etc/rocm_env.sh << ROCM_ENV
-# ROCm paths
-export ROCM_PATH="${ROCM_HOME}"
-export ROCM_HOME="${ROCM_HOME}"
-export ROCM_SOURCE_DIR="${ROCM_HOME}"
-export ROCM_BIN="${ROCM_BIN}"
-export ROCM_CMAKE="${ROCM_CMAKE_PREFIX}"
-export PATH="${ROCM_BIN}:\${PATH}"
-export CMAKE_PREFIX_PATH="${ROCM_CMAKE_PREFIX}:\${CMAKE_PREFIX_PATH:-}"
+      cat > /etc/rocm_env.sh << 'ROCM_ENV'
+# ROCm paths (theRock tarball installation)
+export ROCM_PATH=/opt/rocm
+export ROCM_HOME=/opt/rocm
+export ROCM_SOURCE_DIR=/opt/rocm
+export PATH=/opt/rocm/bin:/opt/rocm/llvm/bin:${PATH}
+export CMAKE_PREFIX_PATH=/opt/rocm:${CMAKE_PREFIX_PATH:-}
 # Device library paths
-export HIP_DEVICE_LIB_PATH="${ROCM_HOME}/lib/llvm/amdgcn/bitcode"
-export ROCM_DEVICE_LIB_PATH="${ROCM_HOME}/lib/llvm/amdgcn/bitcode"
-# theRock system dependencies
-export ROCM_SYSDEPS_INCLUDE="${ROCM_SYSDEPS_INCLUDE}"
-export CPLUS_INCLUDE_PATH="${ROCM_SYSDEPS_INCLUDE}:\${CPLUS_INCLUDE_PATH:-}"
-export C_INCLUDE_PATH="${ROCM_SYSDEPS_INCLUDE}:\${C_INCLUDE_PATH:-}"
-export PKG_CONFIG_PATH="${ROCM_SYSDEPS_PKGCONFIG}:\${PKG_CONFIG_PATH:-}"
-export LD_LIBRARY_PATH="${ROCM_SYSDEPS}/lib:\${LD_LIBRARY_PATH:-}"
-export LIBRARY_PATH="${ROCM_SYSDEPS}/lib:\${LIBRARY_PATH:-}"
-export MAGMA_HOME="${ROCM_HOME}/magma"
-# Disable MSLK for theRock nightly (not yet supported)
+export HIP_DEVICE_LIB_PATH=/opt/rocm/lib/llvm/amdgcn/bitcode
+export ROCM_DEVICE_LIB_PATH=/opt/rocm/lib/llvm/amdgcn/bitcode
+export MAGMA_HOME=/opt/rocm/magma
+# Disable features not yet supported in theRock nightly
 export USE_MSLK=0
 ROCM_ENV
 
       # Append to bash.bashrc so interactive shells get the env vars
       echo "source /etc/rocm_env.sh" >> /etc/bash.bashrc
 
-      echo "install_rocm.sh: TheRock nightly ROCm install complete"
+      echo "install_rocm.sh: TheRock nightly ROCm tarball install complete"
+      echo "ROCM_PATH=/opt/rocm"
       exit 0
     fi
 
@@ -193,24 +208,6 @@ EOF
     fi
 
     pip_install "git+https://github.com/rocm/composable_kernel@$ROCM_COMPOSABLE_KERNEL_VERSION"
-
-    # Write environment to file that can be sourced by CI scripts and users
-    cat > /etc/rocm_env.sh << ROCM_ENV
-# ROCm paths
-export ROCM_PATH=/opt/rocm
-export ROCM_HOME=/opt/rocm
-export ROCM_SOURCE_DIR=/opt/rocm
-export ROCM_BIN=/opt/rocm/bin
-export ROCM_CMAKE=/opt/rocm
-export PATH=/opt/rocm/bin:/opt/rocm/llvm/bin:\${PATH}
-# Device library paths
-export ROCM_DEVICE_LIB_PATH=/opt/rocm/amdgcn/bitcode
-export HIP_DEVICE_LIB_PATH=/opt/rocm/amdgcn/bitcode
-export MAGMA_HOME=/opt/rocm/magma
-ROCM_ENV
-
-    # Append to bash.bashrc so interactive shells get the env vars
-    echo "source /etc/rocm_env.sh" >> /etc/bash.bashrc
 
     # Cleanup
     apt-get autoclean && apt-get clean
