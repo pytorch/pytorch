@@ -224,6 +224,7 @@ def _find_input_for_invalid_output(
                     # Check if this higher-order op has kwargs with an input
                     if "kwargs" in ho_result.kwargs:
                         kwargs = ho_result.kwargs["kwargs"]
+                        # pyrefly: ignore [not-iterable]
                         if key in kwargs:
                             original_input = kwargs[key]
                             if (
