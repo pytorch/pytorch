@@ -1137,6 +1137,8 @@ class BaseSchedulerNode:
                     users = self.scheduler.name_to_buf[buf.get_name()].users
                     tot = 0
                     for user in users:
+                        if isinstance(user.node, OutputNode):
+                            continue
                         assert isinstance(user.node, BaseSchedulerNode)
                         if isinstance(user.node.node, MultiOutput):
                             for sched_buf in user.node.get_outputs():
@@ -3022,23 +3024,25 @@ class Scheduler:
 
                     align_runtime_estimations_across_all_distributed_ranks(self.nodes)
 
-            from torch._logging import trace_structured
+            # pyrefly: ignore [unbound-name]
+            if config_comms.reorder_sink_verbose_logging:
+                from torch._logging import trace_structured
 
-            trace_structured(
-                "artifact",
-                metadata_fn=lambda: {
-                    "name": "scheduler_nodes_before_comm_overlap",
-                    "encoding": "string",
-                },
-                payload_fn=lambda: "\n\n".join(
-                    [
-                        f"snode[{i}]"
-                        + n.debug_str()
-                        + f" buffer_names:{n.get_buffer_names()}"
-                        for i, n in enumerate(self.nodes)
-                    ]
-                ),
-            )
+                trace_structured(
+                    "artifact",
+                    metadata_fn=lambda: {
+                        "name": "scheduler_nodes_before_comm_overlap",
+                        "encoding": "string",
+                    },
+                    payload_fn=lambda: "\n\n".join(
+                        [
+                            f"snode[{i}]"
+                            + n.debug_str()
+                            + f" buffer_names:{n.get_buffer_names()}"
+                            for i, n in enumerate(self.nodes)
+                        ]
+                    ),
+                )
             self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
         self.process_grouped_nodes()
 
@@ -3331,11 +3335,23 @@ class Scheduler:
                             continue
 
                         assert isinstance(user.node, BaseSchedulerNode)
-                        for other_name in user.node.get_buffer_names():
+                        for out_buf in user.node.get_outputs():
+                            other_name = out_buf.get_name()
                             # this node must run after all prior readers
                             other_name = rename(other_name)
+                            # Check if the prior reader is a true alias (view) vs a clone.
+                            # Views share underlying storage with the mutated buffer, so we
+                            # need a real dependency (is_fake=False) to keep the view's
+                            # buffer alive until after this mutation completes. Clones have
+                            # independent storage, so we only need an ordering dependency
+                            # (is_fake=True) that won't extend their buffer lifetime.
+                            is_alias = alt_name in out_buf.get_aliases()
                             node.add_fake_dep(
-                                WeakDep(other_name, mutating_buf=buf.get_name())
+                                WeakDep(
+                                    other_name,
+                                    mutating_buf=buf.get_name(),
+                                    is_fake=not is_alias,
+                                )
                             )
                             add_user(other_name, node, is_weak=True)
 
