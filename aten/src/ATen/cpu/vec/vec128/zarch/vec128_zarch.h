@@ -2140,6 +2140,9 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_complex<T>()>> {
   }
 
   Vectorized<T> atan() const {
+    // TODO: The vectorized implementation requires special handling for the
+    // case where real number/imag number is 0/Inf/NaN.
+#if 0
     // atan(x) = i/2 * ln((i + z)/(i - z))
     auto ione = Vectorized<T>{vinner_type(image_one<underline_type>())};
     auto sum = ione + *this;
@@ -2147,6 +2150,9 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_complex<T>()>> {
     auto ln = (sum / sub).log(); // ln((i + z)/(i - z))
     return ln *
         Vectorized<T>{vinner_type(image_half<underline_type>())}; // i/2*ln()
+#else
+    return mapOrdinary(std::atan);
+#endif
   }
 
   Vectorized<T> atanh() const {
