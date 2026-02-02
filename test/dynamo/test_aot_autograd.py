@@ -1805,7 +1805,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         )(example_input)
 
         # Compile with dynamic=True and a counter to track recompilations
-        cnt = CompileCounter()
+        cnt = CompileCounterWithBackend(backend="inductor")
         compiled_model = torch.compile(
             fx_model, dynamic=True, fullgraph=True, backend=cnt
         )

@@ -71,6 +71,7 @@ from torch.testing._internal.common_utils import (
     load_tests,
     MI200_ARCH,
     MI300_ARCH,
+    MI350_ARCH,
     parametrize,
     recover_orig_fp32_precision,
     run_tests,
@@ -625,7 +626,7 @@ print(t.is_pinned())
                 gcn_arch = str(
                     torch.cuda.get_device_properties(0).gcnArchName.split(":", 1)[0]
                 )
-                if gcn_arch in ["gfx90a", "gfx942", "gfx950"]:
+                if gcn_arch in ["gfx90a", "gfx942", "gfx950", "gfx1200", "gfx1201"]:
                     self.assertTrue(default == torch._C._BlasBackend.Cublaslt)
                 else:
                     self.assertTrue(default == torch._C._BlasBackend.Cublas)
@@ -3447,6 +3448,25 @@ exit(2)
                 self.assertNotEqual(p.data_ptr(), pg.data_ptr())
                 self.assertNotEqual(p.grad.data_ptr(), pg.grad.data_ptr())
 
+    def test_cuda_graph_inference_mode(self):
+        # This test is to verify that capturing a CUDAGraph in inference mode
+        # doesn't create RNG State tensors as inference tensors which can't
+        # be inplace modified later.
+
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(10, 10, device="cuda")
+
+        with torch.inference_mode():
+            captured_fn = torch.cuda.make_graphed_callables(fn, (x,))
+            inp = torch.ones(10, 10, device="cuda")
+            self.assertEqual(captured_fn(inp), inp + 1)
+
+        torch.cuda.make_graphed_callables(fn, (x,))
+        inp = torch.ones(10, 10, device="cuda") * 10
+        self.assertEqual(fn(inp), inp + 1)
+
     def _test_graphed_optimizer(
         self, steps_warmup, steps_train, optimizer_ctor, kwargs
     ):
@@ -4208,6 +4228,7 @@ class TestCudaMallocAsync(TestCase):
         TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
     )
     @requiresCppContext
+    @skipIfRocmArch(MI350_ARCH)
     def test_memory_plots(self):
         for context, stacks in (
             ("all", "all" if IS_LINUX else "python"),
@@ -6323,6 +6344,119 @@ class TestMemPool(TestCase):
                     v, 0, "Expected to have 0 bytes allocated in the custom pool"
                 )
 
+    def test_snapshot_include_traces(self):
+        """Test that snapshot() include_traces parameter works correctly"""
+        import time
+
+        torch.cuda.empty_cache()
+        torch.cuda.memory._record_memory_history()
+
+        pool = torch.cuda.MemPool()
+
+        # Generate trace entries
+        with torch.cuda.use_mem_pool(pool):
+            tensors = []
+            for i in range(1000):
+                tensors.append(torch.randn(1024, device="cuda"))
+            del tensors
+
+        NUM_RUNS = 10
+        times_pool_full = []
+        times_pool_notrace = []
+        times_global_full = []
+        times_global_notrace = []
+
+        # Measure mempool snapshot without traces
+        for _ in range(NUM_RUNS):
+            # warmup
+            snapshot = pool.snapshot(include_traces=False)
+        for _ in range(NUM_RUNS):
+            start = time.perf_counter()
+            snapshot = pool.snapshot(include_traces=False)
+            times_pool_notrace.append((time.perf_counter() - start) * 1000)
+
+        # Measure global snapshot without traces
+        for _ in range(NUM_RUNS):
+            # warmup
+            snapshot = torch.cuda.memory_snapshot(include_traces=False)
+        for _ in range(NUM_RUNS):
+            start = time.perf_counter()
+            snapshot = torch.cuda.memory_snapshot(include_traces=False)
+            times_global_notrace.append((time.perf_counter() - start) * 1000)
+
+        # Measure mempool snapshot with traces
+        for _ in range(NUM_RUNS):
+            # warmup
+            snapshot = pool.snapshot()
+        for _ in range(NUM_RUNS):
+            start = time.perf_counter()
+            snapshot = pool.snapshot()
+            times_pool_full.append((time.perf_counter() - start) * 1000)
+
+        # Measure global snapshot with traces
+        for _ in range(NUM_RUNS):
+            # warmup
+            snapshot = torch.cuda.memory_snapshot()
+        for _ in range(NUM_RUNS):
+            start = time.perf_counter()
+            snapshot = torch.cuda.memory_snapshot()
+            times_global_full.append((time.perf_counter() - start) * 1000)
+
+        self.assertTrue(len(snapshot) > 0)
+
+        print(f"Mempool with traces:    {sum(times_pool_full) / NUM_RUNS:.1f} ms")
+        print(f"Mempool without traces: {sum(times_pool_notrace) / NUM_RUNS:.1f} ms")
+        print(f"Global with traces:     {sum(times_global_full) / NUM_RUNS:.1f} ms")
+        print(f"Global without traces:  {sum(times_global_notrace) / NUM_RUNS:.1f} ms")
+        print()
+        print(f"Mempool speedup: {sum(times_pool_full) / sum(times_pool_notrace):.1f}x")
+        print(
+            f"Global speedup: {sum(times_global_full) / sum(times_global_notrace):.1f}x"
+        )
+
+        torch.cuda.memory._record_memory_history(enabled=None)
+
+    def test_snapshot_include_traces_correctness(self):
+        """Test that snapshot with include_traces=False still returns correct memory state"""
+        torch.cuda.empty_cache()
+
+        tensor_size = 1024 * 1024
+        dtype = torch.uint8
+        t1 = torch.ones(tensor_size, device="cuda", dtype=dtype)
+        t2 = torch.ones(tensor_size, device="cuda", dtype=dtype)
+        t3 = torch.ones(tensor_size, device="cuda", dtype=dtype)
+
+        snapshot_with_traces = torch.cuda.memory_snapshot(include_traces=True)
+        snapshot_without_traces = torch.cuda.memory_snapshot(include_traces=False)
+
+        # Both should have segment information
+        self.assertTrue(
+            len(snapshot_with_traces) > 0, "Snapshot with traces should have segments"
+        )
+        self.assertTrue(
+            len(snapshot_without_traces) > 0,
+            "Snapshot without traces should have segments",
+        )
+
+        # Count total allocated memory in each snapshot
+        def get_total_allocated(segments):
+            total = 0
+            for segment in segments:
+                for block in segment.get("blocks", []):
+                    if block.get("state") == "active_allocated":
+                        total += block.get("size", 0)
+            return total
+
+        allocated_with_traces = get_total_allocated(snapshot_with_traces)
+        allocated_without_traces = get_total_allocated(snapshot_without_traces)
+
+        # Allocated memory should match between both snapshots
+        self.assertEqual(
+            allocated_with_traces,
+            allocated_without_traces,
+            "Allocated memory should be same with or without traces",
+        )
+
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 @torch.testing._internal.common_utils.markDynamoStrictTest
@@ -6500,6 +6634,8 @@ class TestCudaOptims(TestCase):
                 for p_control, p_graphed in zip(params_control, params_graphed):
                     self.assertEqual(p_control, p_graphed)
 
+    # This test cases compares autocast scaling on a fused optim vs autocast scaling
+    # on a forloop optim.
     @onlyNativeDeviceTypes
     @optims(
         [optim for optim in optim_db if "fused" in optim.supported_impls],
@@ -6537,7 +6673,17 @@ class TestCudaOptims(TestCase):
                 opt_control = optim_cls(mod_control.parameters(), **optimizer_kwargs)
                 scaler_scaling = torch.amp.GradScaler(device, init_scale=128.0)
                 scaler_control = torch.amp.GradScaler(device, init_scale=128.0)
+
                 tracker = TensorTracker()
+                # Increase the tolerance for param and (max_)exp_avg_sq when betas aren't tensors
+                # cuz the discrepancy between double vs float betas becomes too big. When Tensor
+                # betas are used, fused and forloop both would have float betas and the default
+                # tolerances are fine.
+                assert_eq_kwargs = {}
+                if "betas" in opt_control.param_groups[0] and not torch.is_tensor(
+                    opt_control.param_groups[0]["betas"][0]
+                ):
+                    assert_eq_kwargs = {"atol": 2e-5, "rtol": 2e-5}
                 for input, target in data:
                     opt_control.zero_grad()
                     with torch.autocast(device_type=device, dtype=torch.half):
@@ -6565,7 +6711,7 @@ class TestCudaOptims(TestCase):
                         tracker.add(param_control.grad)
                         tracker.pop_check_set(param_scaling.grad, self)
                         tracker.add(param_control)
-                        tracker.pop_check_set(param_scaling, self)
+                        tracker.pop_check_set(param_scaling, self, assert_eq_kwargs)
 
                         state_control, state_scaling = (
                             opt_control.state[param_control],
@@ -6577,7 +6723,13 @@ class TestCudaOptims(TestCase):
                             if k == "step":
                                 actual = actual.squeeze()
                             tracker.add(state_control[k])
-                            tracker.pop_check_set(actual, self)
+                            tracker.pop_check_set(
+                                actual,
+                                self,
+                                assert_eq_kwargs
+                                if k == "exp_avg_sq" or k == "max_exp_avg_sq"
+                                else {},
+                            )
 
     @onlyCUDA
     @parametrize("in_place_unscale", [False, True])
@@ -7203,6 +7355,32 @@ class TestCudaAutocast(TestAutocast):
                     self.assertEqual(h_out, h_out_control)
                 for grad, grad_control in zip(grads, grads_control):
                     self.assertEqual(grad.half(), grad_control)
+
+    @unittest.skipIf(not TEST_CUDNN, "CUDNN not available")
+    def test_rnn_packed_sequence_batch_sizes_must_be_cpu(self):
+        # Verify that passing batch_sizes on CUDA raises an error instead of segfaulting
+        data = torch.randn([18, 16], dtype=torch.float32, device="cuda")
+        batch_sizes = torch.tensor([8, 6, 4], dtype=torch.int64, device="cuda")
+        hx = torch.randn([1, 8, 32], dtype=torch.float32, device="cuda")
+        params = [
+            torch.randn([32, 16], dtype=torch.float32, device="cuda"),
+            torch.randn([32, 32], dtype=torch.float32, device="cuda"),
+        ]
+
+        with self.assertRaisesRegex(
+            RuntimeError, "batch_sizes tensor should be on CPU"
+        ):
+            torch.ops.aten.rnn_relu(
+                data,
+                batch_sizes=batch_sizes,
+                hx=hx,
+                params=params,
+                has_biases=False,
+                num_layers=1,
+                dropout=0.5,
+                train=False,
+                bidirectional=False,
+            )
 
     @serialTest()
     def test_autocast_cache_leak(self):
