@@ -324,7 +324,7 @@ class TestDTensorDebugMode(TestCase):
         x = torch.randn(1, 8)
         x_dtensor = DTensor.from_local(x, mesh, [Shard(0)], run_check=False)
 
-        with DebugMode(record_torchfunction=False) as debug_mode:
+        with DebugMode() as debug_mode:
             x_dtensor.redistribute(mesh, [Replicate()])
 
         self.assertExpectedInline(
@@ -334,6 +334,19 @@ class TestDTensorDebugMode(TestCase):
       _c10d_functional::all_gather_into_tensor(t: f32[1, 8], 8, 0)  ->  t: f32[8, 8]
       _c10d_functional::_wrap_tensor_autograd(t: f32[8, 8])  ->  t: f32[8, 8]
       _c10d_functional::wait_tensor(t: f32[8, 8])  ->  t: f32[8, 8]""",
+        )
+
+        with DebugMode() as debug_mode:
+            x_dtensor.full_tensor()
+
+        self.assertExpectedInline(
+            debug_mode.debug_string(),
+            """\
+    redistribute_input [explicit] (t: f32[1, 8], trace: S(0)->R)
+      _c10d_functional::all_gather_into_tensor(t: f32[1, 8], 8, 0)  ->  t: f32[8, 8]
+      _c10d_functional::_wrap_tensor_autograd(t: f32[8, 8])  ->  t: f32[8, 8]
+      _c10d_functional::wait_tensor(t: f32[8, 8])  ->  t: f32[8, 8]
+    aten::view(t: f32[8, 8], [8, 8])  ->  t: f32[8, 8]""",
         )
 
     def test_output_placements(self):

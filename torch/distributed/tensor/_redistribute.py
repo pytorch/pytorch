@@ -183,14 +183,13 @@ def _get_flattened_mesh_by_layout(
     if mesh_dim_names is None:
         return None
 
-    # Convert mesh dim indices to dim names (indices are relative to the passed-in mesh)
+    # Convert mesh dim indices to dim names
     dim_names = tuple(mesh_dim_names[i] for i in mesh_dims)
 
-    # Get the submesh for these dimensions
-    submesh = mesh[dim_names]
-
-    # Compute expected flattened layout
-    expected_layout = submesh._layout.coalesce()
+    # Compute expected layout WITHOUT creating a submesh (avoids tracing issues)
+    # _get_slice_mesh_layout does pure layout math, no tensor operations
+    sliced_layout = mesh._get_slice_mesh_layout(dim_names)
+    expected_layout = sliced_layout.coalesce()
     if len(expected_layout) > 1:
         expected_layout = expected_layout.nest()
 
