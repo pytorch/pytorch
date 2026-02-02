@@ -669,6 +669,9 @@ class ComboKernel(Kernel):
                 @triton.jit
             """
 
+        self.triton_meta = triton_meta
+        self.inductor_meta = inductor_meta
+
         return heuristics_line
 
     def codegen_blocks(self, code: IndentedBuffer) -> None:
@@ -993,6 +996,8 @@ class ComboKernel(Kernel):
             call_args,
             triton=True,
             arg_types=arg_types,
+            triton_meta=self.triton_meta,
+            inductor_meta=self.inductor_meta,
         )
 
     def combo_grid_meta(self) -> dict[str, Any]:
