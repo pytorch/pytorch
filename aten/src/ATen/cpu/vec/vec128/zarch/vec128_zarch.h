@@ -1484,7 +1484,7 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_quant<T>()>> {
  public:
   Vectorized() {}
 
-  C10_ALWAYS_INLINE Vectorized(const vtype &v) : _vec{v} {}
+  C10_ALWAYS_INLINE Vectorized(const vtype& v) : _vec{v} {}
   Vectorized(const T& val) : _vec(val.val_) {}
 
   C10_ALWAYS_INLINE const vinner_type& vec() const {
@@ -2360,70 +2360,70 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_complex<T>()>> {
   }
 };
 
-#define ZVECTOR_OPERATORS(typex)                                              \
-  template <>                                                                 \
-  Vectorized<typex> C10_ALWAYS_INLINE operator+(                              \
-      const Vectorized<typex>& a, const Vectorized<typex>& b) {               \
-    return Vectorized<typex>{a.vec() + b.vec()};                              \
-  }                                                                           \
-                                                                              \
-  template <>                                                                 \
-  Vectorized<typex> C10_ALWAYS_INLINE operator-(                              \
-      const Vectorized<typex>& a, const Vectorized<typex>& b) {               \
-    return Vectorized<typex>{a.vec() - b.vec()};                              \
-  }                                                                           \
-                                                                              \
-  template <>                                                                 \
-  Vectorized<typex> inline operator*(                                         \
-      const Vectorized<typex>& a, const Vectorized<typex>& b) {               \
-    /* (a + bi)  * (c + di) = (ac - bd) + (ad + bc)i */                       \
-    typename Vectorized<typex>::vinner_type bv = b.vec();                     \
-                                                                              \
-    /* this is more z arch friendly than simulating horizontal from x86 */    \
-    typename Vectorized<typex>::vinner_type vi = bv.mergeo();                 \
-    typename Vectorized<typex>::vinner_type vr = bv.mergee();                 \
-    vi = vi ^                                                                 \
-        typename Vectorized<typex>::vinner_type(                              \
-             rsign_mask<typename Vectorized<typex>::underline_type>());       \
-    typename Vectorized<typex>::vinner_type ret = a.vec() * vr;               \
-    typename Vectorized<typex>::vinner_type vx_swapped = a.vec().swapped();   \
-    ret = fmadd(vx_swapped, vi, ret);                                         \
-                                                                              \
-    return Vectorized<typex>{ret};                                            \
-  }                                                                           \
-                                                                              \
-  template <>                                                                 \
-  Vectorized<typex> inline operator/(                                         \
-      const Vectorized<typex>& a, const Vectorized<typex>& b) {               \
-      /* TODO: The vectorized implementation requires special handling for    \
-         the case where real number/imag number is 0/Inf/NaN. */              \
-    __at_align__ typex tmp1[Vectorized<typex>::size()];                       \
-    __at_align__ typex tmp2[Vectorized<typex>::size()];                       \
-    __at_align__ typex out[Vectorized<typex>::size()];                        \
-    a.store(tmp1);                                                            \
-    b.store(tmp2);                                                            \
-    for (const auto i : c10::irange(Vectorized<typex>::size())) {             \
-        out[i] = tmp1[i] / tmp2[i];                                           \
-    }                                                                         \
-    return Vectorized<typex>::loadu(out);                                     \
-  }                                                                           \
-                                                                              \
-  template <>                                                                 \
-  Vectorized<typex> C10_ALWAYS_INLINE operator&(                              \
-      const Vectorized<typex>& a, const Vectorized<typex>& b) {               \
-    return Vectorized<typex>{a.vec() & b.vec()};                              \
-  }                                                                           \
-                                                                              \
-  template <>                                                                 \
-  Vectorized<typex> C10_ALWAYS_INLINE operator|(                              \
-      const Vectorized<typex>& a, const Vectorized<typex>& b) {               \
-    return Vectorized<typex>{a.vec() | b.vec()};                              \
-  }                                                                           \
-                                                                              \
-  template <>                                                                 \
-  Vectorized<typex> C10_ALWAYS_INLINE operator^(                              \
-      const Vectorized<typex>& a, const Vectorized<typex>& b) {               \
-    return Vectorized<typex>{a.vec() ^ b.vec()};                              \
+#define ZVECTOR_OPERATORS(typex)                                            \
+  template <>                                                               \
+  Vectorized<typex> C10_ALWAYS_INLINE operator+(                            \
+      const Vectorized<typex>& a, const Vectorized<typex>& b) {             \
+    return Vectorized<typex>{a.vec() + b.vec()};                            \
+  }                                                                         \
+                                                                            \
+  template <>                                                               \
+  Vectorized<typex> C10_ALWAYS_INLINE operator-(                            \
+      const Vectorized<typex>& a, const Vectorized<typex>& b) {             \
+    return Vectorized<typex>{a.vec() - b.vec()};                            \
+  }                                                                         \
+                                                                            \
+  template <>                                                               \
+  Vectorized<typex> inline operator*(                                       \
+      const Vectorized<typex>& a, const Vectorized<typex>& b) {             \
+    /* (a + bi)  * (c + di) = (ac - bd) + (ad + bc)i */                     \
+    typename Vectorized<typex>::vinner_type bv = b.vec();                   \
+                                                                            \
+    /* this is more z arch friendly than simulating horizontal from x86 */  \
+    typename Vectorized<typex>::vinner_type vi = bv.mergeo();               \
+    typename Vectorized<typex>::vinner_type vr = bv.mergee();               \
+    vi = vi ^                                                               \
+        typename Vectorized<typex>::vinner_type(                            \
+             rsign_mask<typename Vectorized<typex>::underline_type>());     \
+    typename Vectorized<typex>::vinner_type ret = a.vec() * vr;             \
+    typename Vectorized<typex>::vinner_type vx_swapped = a.vec().swapped(); \
+    ret = fmadd(vx_swapped, vi, ret);                                       \
+                                                                            \
+    return Vectorized<typex>{ret};                                          \
+  }                                                                         \
+                                                                            \
+  template <>                                                               \
+  Vectorized<typex> inline operator/(                                       \
+      const Vectorized<typex>& a, const Vectorized<typex>& b) {             \
+    /* TODO: The vectorized implementation requires special handling for    \
+       the case where real number/imag number is 0/Inf/NaN. */              \
+    __at_align__ typex tmp1[Vectorized<typex>::size()];                     \
+    __at_align__ typex tmp2[Vectorized<typex>::size()];                     \
+    __at_align__ typex out[Vectorized<typex>::size()];                      \
+    a.store(tmp1);                                                          \
+    b.store(tmp2);                                                          \
+    for (const auto i : c10::irange(Vectorized<typex>::size())) {           \
+      out[i] = tmp1[i] / tmp2[i];                                           \
+    }                                                                       \
+    return Vectorized<typex>::loadu(out);                                   \
+  }                                                                         \
+                                                                            \
+  template <>                                                               \
+  Vectorized<typex> C10_ALWAYS_INLINE operator&(                            \
+      const Vectorized<typex>& a, const Vectorized<typex>& b) {             \
+    return Vectorized<typex>{a.vec() & b.vec()};                            \
+  }                                                                         \
+                                                                            \
+  template <>                                                               \
+  Vectorized<typex> C10_ALWAYS_INLINE operator|(                            \
+      const Vectorized<typex>& a, const Vectorized<typex>& b) {             \
+    return Vectorized<typex>{a.vec() | b.vec()};                            \
+  }                                                                         \
+                                                                            \
+  template <>                                                               \
+  Vectorized<typex> C10_ALWAYS_INLINE operator^(                            \
+      const Vectorized<typex>& a, const Vectorized<typex>& b) {             \
+    return Vectorized<typex>{a.vec() ^ b.vec()};                            \
   }
 
 ZVECTOR_OPERATORS(c10::complex<float>)
