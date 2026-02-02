@@ -117,14 +117,18 @@ def _torchscript_schema_to_signature_impl(
         )
         # "from" is a keyword therefore it must be a POSITIONAL_ONLY argument
         if name == "from":
-            assert kind == Parameter.POSITIONAL_OR_KEYWORD
+            if kind != Parameter.POSITIONAL_OR_KEYWORD:
+                raise AssertionError(f"Expected POSITIONAL_OR_KEYWORD, got {kind}")
             # ParameterKind type is internal implementation detail to inspec package
             # which makes it hard to do type annotation
             kind = Parameter.POSITIONAL_ONLY  # type: ignore[assignment]
             # This renders all previous arguments to positional only
 
             for idx, p in enumerate(parameters):
-                assert p.kind == Parameter.POSITIONAL_OR_KEYWORD
+                if p.kind != Parameter.POSITIONAL_OR_KEYWORD:
+                    raise AssertionError(
+                        f"Expected POSITIONAL_OR_KEYWORD for param {p.name}, got {p.kind}"
+                    )
                 parameters[idx] = Parameter(
                     name=p.name,
                     kind=Parameter.POSITIONAL_ONLY,
@@ -415,7 +419,8 @@ def normalize_function(
             # a 2-way dispatch based on a boolean value. Here we check that the `true` and `false`
             # branches of the dispatch have exactly the same signature. If they do, use the `true`
             # branch signature for analysis. Otherwise, leave this un-normalized
-            assert not isinstance(target, str)
+            if isinstance(target, str):
+                raise AssertionError("target should not be a string here")
             dispatched = boolean_dispatched[target]
             if_true, if_false = dispatched["if_true"], dispatched["if_false"]
             if (
@@ -425,13 +430,17 @@ def normalize_function(
                 return None
             target_for_analysis = if_true
 
-        assert callable(target_for_analysis)
+        if not callable(target_for_analysis):
+            raise AssertionError(
+                f"target_for_analysis must be callable, got {type(target_for_analysis)}"
+            )
         sig = inspect.signature(inspect.unwrap(target_for_analysis))
         new_args_and_kwargs = _args_kwargs_to_normalized_args_kwargs(
             sig, args, kwargs, normalize_to_only_use_kwargs
         )
     else:
-        assert callable(target)
+        if not callable(target):
+            raise AssertionError(f"target must be callable, got {type(target)}")
         torch_op_schemas = get_signature_for_torch_op(target)
         matched_schemas = []
         if torch_op_schemas:
