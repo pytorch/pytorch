@@ -151,7 +151,6 @@ dtensor_fails = {
     xfail("broadcast_shapes"),
     xfail("cartesian_prod"),
     xfail("cauchy"),
-    xfail("cdist"),
     xfail("cholesky"),
     xfail("cholesky_inverse"),
     xfail("cholesky_solve"),
