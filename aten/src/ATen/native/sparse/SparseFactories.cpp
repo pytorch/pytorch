@@ -51,6 +51,23 @@ Tensor spdiags(
       offsets_1d.numel() == std::get<0>(at::_unique(offsets_1d)).numel(),
       "Offset tensor contains duplicate values");
 
+  // Handle zero-dimension shapes early - return empty sparse tensor
+  // This matches scipy.sparse.spdiags behavior
+  if (shape[0] == 0 || shape[1] == 0) {
+    auto indices = at::empty({2, 0}, offsets_1d.options());
+    auto values = at::empty({0}, diagonals_2d.options());
+    auto result_coo = at::sparse_coo_tensor(indices, values, shape);
+    if (layout) {
+      if (*layout == Layout::SparseCsr) {
+        return result_coo.to_sparse_csr();
+      }
+      if (*layout == Layout::SparseCsc) {
+        return result_coo.to_sparse_csc();
+      }
+    }
+    return result_coo;
+  }
+
   auto nnz_per_diag = at::where(
       offsets_1d.le(0),
       offsets_1d.add(shape[0]).clamp_max_(diagonals_2d.size(1)),
