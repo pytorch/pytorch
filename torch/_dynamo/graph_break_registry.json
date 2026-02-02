@@ -4153,6 +4153,14 @@
       ]
     }
   ],
+  "GB7425": [
+    {
+      "Gb_type": "Comprehension with captured tensor not in local slot",
+      "Context": "",
+      "Explanation": "Cannot use comprehension optimization when a captured tensor variable is not stored in its expected local slot.",
+      "Hints": []
+    }
+  ],
   "GB0357": [
     {
       "Gb_type": "UnspecializedNNModuleVariable wrapped around ScriptModules unsupported",
