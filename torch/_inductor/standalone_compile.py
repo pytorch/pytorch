@@ -125,7 +125,7 @@ class CacheCompiledArtifact(CompiledArtifact):
         if self._artifacts is None:
             return False
         _, cache_info = self._artifacts
-        if len(cache_info.aot_autograd_artifacts) == 0:
+        if len(cache_info.aot_autograd_artifacts) != 1:
             return False
         return True
 
@@ -146,6 +146,8 @@ class CacheCompiledArtifact(CompiledArtifact):
                     f"ensuring that your model only uses constructs that are serializable. "
                     f"{cache_info}"
                 )
+            # training support not implemented
+            assert len(cache_info.aot_autograd_artifacts) == 1, cache_info
             key = cache_info.aot_autograd_artifacts[0]
 
             if format == "binary":
