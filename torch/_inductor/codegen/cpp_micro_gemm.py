@@ -1164,14 +1164,21 @@ def check_amx_fp16_extra(config, m, n, k, alpha, num_threads, **kwargs):
     return vec_isa.is_amx_fp16_supported() and k % vnni_size == 0 and alpha == 1
 
 
-def get_kernel_input_names(epilogue_nodes):
-    names = set()
-    for node in epilogue_nodes:
-        rws = node.get_read_writes()
-        for rd in rws.reads:
-            if 'GemmOut' not in rd.name:
-                names.add(rd.name)
-    return list(names)
+def get_kernel_input_names(kerel):
+    names = []
+    for outer, inner in kerel.args.input_buffers.items():
+        if outer in kerel.args.inplace_buffers:
+            continue
+        names.append(outer)
+    return names
+
+    # names = set()
+    # for node in epilogue_nodes:
+    #     rws = node.get_read_writes()
+    #     for rd in rws.reads:
+    #         if 'GemmOut' not in rd.name:
+    #             names.add(rd.name)
+    # return list(names)
 
 
 @register_micro_gemm(
@@ -1643,7 +1650,7 @@ MICROGEMM_EPILOGUE_AMX_INJECT_TAIL
             def declare_kernel_hook():
                 res = IndentedBuffer(initial_indent=1)
                 res.writeline(f"{INDEX_TYPE} N_epi,")
-                for input_name in get_kernel_input_names(epilogue_nodes):
+                for input_name in get_kernel_input_names(kernel):
                     if input_name in V.graph.removed_buffers:
                         continue
                     arg_name = kernel.args.input(input_name)
@@ -1654,7 +1661,7 @@ MICROGEMM_EPILOGUE_AMX_INJECT_TAIL
 
             def update_pre_ptrs_main_hook():
                 res = IndentedBuffer(initial_indent=4)
-                for input_name in get_kernel_input_names(epilogue_nodes):
+                for input_name in get_kernel_input_names(kernel):
                     if input_name in V.graph.removed_buffers:
                         continue
                     arg_name = kernel.args.input(input_name)
@@ -1671,7 +1678,7 @@ MICROGEMM_EPILOGUE_AMX_INJECT_TAIL
 
             def update_pre_ptrs_tail_hook():
                 res = IndentedBuffer(initial_indent=4)
-                for input_name in get_kernel_input_names(epilogue_nodes):
+                for input_name in get_kernel_input_names(kernel):
                     if input_name in V.graph.removed_buffers:
                         continue
                     arg_name = kernel.args.input(input_name)
@@ -1688,7 +1695,7 @@ MICROGEMM_EPILOGUE_AMX_INJECT_TAIL
 
             def pre_args_hook():
                 res = IndentedBuffer(initial_indent=5)
-                for input_name in get_kernel_input_names(epilogue_nodes):
+                for input_name in get_kernel_input_names(kernel):
                     if input_name in V.graph.removed_buffers:
                         continue
                     arg_name = kernel.args.input(input_name)
@@ -1706,7 +1713,7 @@ MICROGEMM_EPILOGUE_AMX_INJECT_TAIL
             def declare_pre_ptrs_hook():
                 assert epilogue_nodes is not None
                 res = IndentedBuffer(initial_indent=1)
-                for input_name in get_kernel_input_names(epilogue_nodes):
+                for input_name in get_kernel_input_names(kernel):
                     if input_name in V.graph.removed_buffers:
                         continue
                     arg_name = kernel.args.input(input_name)
@@ -1720,7 +1727,7 @@ MICROGEMM_EPILOGUE_AMX_INJECT_TAIL
 
                 if not parallel_amx_avx:
                     for i, line in enumerate(res._lines):
-                        for input_name in get_kernel_input_names(epilogue_nodes):
+                        for input_name in get_kernel_input_names(kernel):
                             if input_name in V.graph.removed_buffers:
                                 continue
                             arg_name = kernel.args.input(input_name)
@@ -1853,7 +1860,7 @@ MICROGEMM_EPILOGUE_AMX_INJECT_TAIL
             hook_res = IndentedBuffer()
             hook_res.writeline(f"static_cast<{INDEX_TYPE}>(N_epi),")
             hook_res.do_indent(8)
-            for input_name in get_kernel_input_names(epilogue_nodes):
+            for input_name in get_kernel_input_names(kernel):
                 if input_name in V.graph.removed_buffers:
                     continue
                 if input_name in self.fake_buffers_name:

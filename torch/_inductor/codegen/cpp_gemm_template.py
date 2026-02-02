@@ -40,7 +40,7 @@ from .cpp_utils import (
     GemmBlocking,
     get_gemm_template_output_and_compute_dtype,
 )
-
+from .common import RemovedArg
 
 log = logging.getLogger(__name__)
 
@@ -1645,11 +1645,32 @@ class CppGemmTemplate(CppTemplate):
         )  # per core cache size in Bytes
         assert L2_cache_size > 0, f"Expect L2_cache_size > 0 but got {L2_cache_size}"
 
+        # Analyze epilogues to determine if there are multiple outputs.
+        # kernel.args.output_buffers is not populated yet, so we check V.graph manually.
+        output_names = set()
+        if template_buffer_has_other_users:
+            output_names.add(template_buffer.get_name())
+        elif not epilogues:
+            output_names.add(template_buffer.get_name())
+
+        for node in epilogues:
+            if node.get_name() not in V.graph.removed_buffers:
+                output_names.add(node.get_name())
+
+        # Check if we have any output that is NOT Y (or an alias of Y)
+        y_name = Y.get_name()
+        has_other_outputs = False
+        for name in output_names:
+            if name != y_name and name not in Y_aliases:
+                has_other_outputs = True
+                break
+
         fuse_epilogue_into_microkernel = (
             isinstance(micro_gemm, CppMicroGemmAMX)
             and len(epilogues) > 0
             and use_local_acc
             and not self.maybe_k_slicing()
+            and not has_other_outputs
         )
 
         options = dict(
