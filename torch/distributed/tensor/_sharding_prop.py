@@ -33,7 +33,7 @@ from torch.distributed.tensor._utils import (
     compute_local_stride,
     try_find_mesh_from_args,
 )
-from torch.distributed.tensor.placement_types import _StridedShard, Shard
+from torch.distributed.tensor.placement_types import _StridedShard, Shard, Replicate
 
 
 aten = torch.ops.aten
@@ -305,6 +305,53 @@ class ShardingPropagator:
         if schema_info is not None:
             self.op_to_schema_info[op_overload] = schema_info
 
+    def _has_invalid_scalar_sharding(self, spec: DTensorSpec) -> bool:
+        """Check if a DTensorSpec tries to shard a scalar tensor."""
+        if spec.tensor_meta is None or len(spec.tensor_meta.shape) != 0:
+            return False
+        return any(isinstance(p, Shard) for p in spec.placements)
+
+    def _filter_out_invalid_scalar_sharding_strategies(
+        self, op_strategy: StrategyType
+    ) -> StrategyType:
+        if isinstance(op_strategy, OpStrategy):
+            valid_strategies = []
+            for op_spec in op_strategy.strategies:
+                # Collect all specs to check (outputs + inputs)
+                specs_to_check = []
+
+                # Add output specs
+                if isinstance(op_spec.output_specs, DTensorSpec):
+                    specs_to_check.append(op_spec.output_specs)
+                elif isinstance(op_spec.output_specs, tuple):
+                    specs_to_check.extend(
+                        spec
+                        for spec in op_spec.output_specs
+                        if isinstance(spec, DTensorSpec)
+                    )
+
+                # Add input specs
+                if op_spec.input_specs is not None:
+                    specs_to_check.extend(
+                        spec for spec in op_spec.input_specs if spec is not None
+                    )
+
+                # Check if any spec tries to shard a scalar
+                if not any(
+                    self._has_invalid_scalar_sharding(spec) for spec in specs_to_check
+                ):
+                    valid_strategies.append(op_spec)
+
+            return OpStrategy(valid_strategies) if valid_strategies else op_strategy
+        elif isinstance(op_strategy, TupleStrategy):
+            filtered_children = [
+                self._filter_out_invalid_scalar_sharding_strategies(child)
+                for child in op_strategy.children
+            ]
+            return TupleStrategy(filtered_children)
+        else:
+            return op_strategy
+
     def _propagate_tensor_meta_non_cached(
         self, op_schema: OpSchema
     ) -> TensorMeta | Sequence[TensorMeta | None] | None:
@@ -558,6 +605,11 @@ class ShardingPropagator:
                 assert op_strategy_func is not None
                 op_strategy = op_strategy_func(strategy_schema)
 
+            # Filter out invalid strategies that try to shard scalar tensors
+            op_strategy = self._filter_out_invalid_scalar_sharding_strategies(
+                op_strategy
+            )
+
             if isinstance(op_strategy, OpStrategy):
                 # single Op strategy
                 output_strategy = _select_min_cost_strategy(op_strategy, op_schema)
@@ -580,6 +632,23 @@ class ShardingPropagator:
                         if output_strategy.input_specs is None
                         else output_strategy.input_specs[idx]
                     )
+
+                    # If input is a 0D tensor (scalar) and desired_spec tries to
+                    # shard it, replace Shard placements with Replicate since
+                    # 0D tensors cannot be sharded.
+                    if (
+                        input_spec.tensor_meta is not None
+                        and len(input_spec.tensor_meta.shape) == 0
+                        and any(isinstance(p, Shard) for p in desired_spec.placements)
+                    ):
+                        desired_spec = DTensorSpec(
+                            mesh=desired_spec.mesh,
+                            placements=tuple(
+                                Replicate() if isinstance(p, Shard) else p
+                                for p in desired_spec.placements
+                            ),
+                        )
+
                     expected_input_specs.append(
                         desired_spec.shallow_copy_with_tensor_meta(
                             input_spec.tensor_meta
