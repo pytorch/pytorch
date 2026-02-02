@@ -1047,18 +1047,48 @@ class GraphModuleSerializer(metaclass=Final):
 
     def serialize_metadata(self, node: torch.fx.Node) -> dict[str, str]:
         ret = {}
+        print("node:")
+        print(node)
 
+        import re
+        def parse_stack_trace(stack_trace_str):
+            frames = []
+            # Split by lines, group into frames
+            lines = stack_trace_str.split('\n')
+            
+            for i in range(0, len(lines), 2):  # Each frame is 2 lines
+                if i + 1 < len(lines):
+                    # First line: File "path", line X, in function
+                    match = re.match(r'File "([^"]+)", line (\d+), in (.+)', lines[i].strip())
+                    if match:
+                        frames.append({
+                            "file": match.group(1),
+                            "line": int(match.group(2)),
+                            "function": match.group(3),
+                            "code": lines[i + 1] if i + 1 < len(lines) else ""
+                        })
+            
+            return frames
         if stack_trace := node.meta.get("stack_trace"):
-            ret["stack_trace"] = stack_trace
-
+            print("HERE")
+            print(stack_trace)
+            if stack_trace[0] is dict:
+                stack_trace_list = parse_stack_trace(stack_trace)
+                ret["stack_trace"] = stack_trace_list
+            else:
+                ret["stack_trace"] = stack_trace
         if nn_module_stack := node.meta.get("nn_module_stack"):
 
+            print("nn_module_stack")
+            print(nn_module_stack)
+            '''
             def export_nn_module_stack(val):
                 if not isinstance(val, tuple) or len(val) != 2:
                     val_len = len(val) if isinstance(val, tuple) else "N/A"
                     raise AssertionError(
                         f"expected tuple of length 2, got {type(val).__name__} of length {val_len}"
                     )
+                
                 path, ty = val
 
                 if not isinstance(path, str):
@@ -1070,37 +1100,51 @@ class GraphModuleSerializer(metaclass=Final):
                         f"expected ty to be str, got {type(ty).__name__}"
                     )
 
+                print("export_nn_module_stack")
+                print(f"{path} , {ty}")
                 return path + "," + ty
+            '''
 
-            # Serialize to "key,orig_path,type_str"
+            # Serialize to structured dict format
             nn_module_list = [
-                f"{k},{export_nn_module_stack(v)}" for k, v in nn_module_stack.items()
+                {
+                    "key": k,
+                    "orig_path": v[0] if isinstance(v, tuple) and len(v) == 2 else "",
+                    "type_str": self.serialize_operator(v[1]) if isinstance(v, tuple) and len(v) == 2 else str(v)
+                }
+                for k, v in nn_module_stack.items()
             ]
-            ret["nn_module_stack"] = ST_DELIMITER.join(nn_module_list)
+            print("nn_module_list")
+            print(nn_module_list)
+            ret["nn_module_stack"] = nn_module_list
 
         if source_fn_st := node.meta.get("source_fn_stack"):
-            source_fn_list = [
-                f"{source_fn[0]},{self.serialize_operator(source_fn[1])}"
-                for source_fn in source_fn_st
-            ]
-            ret["source_fn_stack"] = ST_DELIMITER.join(source_fn_list)
+            source_fn_list = {
+                "key": source_fn[0],
+                "orig_path": self.serialize_operator(source_fn[1]),
+                "type_str": ""
+            }
+            ret["source_fn_stack"] = source_fn_list
 
         if torch_fn := node.meta.get("torch_fn"):
-            ret["torch_fn"] = ST_DELIMITER.join(list(torch_fn))
+            # Serialize as dict with "name" and "overload" keys
+            torch_fn_list = list(torch_fn)
+            ret["torch_fn"] = {
+                "name": torch_fn_list[0] if len(torch_fn_list) > 0 else "",
+                "overload": torch_fn_list[1] if len(torch_fn_list) > 1 else ""
+            }
 
         if custom := node.meta.get("custom"):
-            try:
-                ret["custom"] = json.dumps(custom)
-            except Exception as e:
-                raise SerializeError(
-                    f"Failed to serialize custom metadata for node {node.name} with error {e}"
-                ) from e
+            # Pass dict directly instead of JSON string
+            ret["custom"] = custom
 
         if "from_node" in node.meta:
             from_node = node.meta["from_node"]
-            # Serialize from_node as JSON since it's a complex nested structure
-            ret["from_node"] = json.dumps(self._serialize_from_node(from_node))
+            # Pass dict directly instead of JSON string
+            ret["from_node"] = self._serialize_from_node(from_node)
 
+        print("ret")
+        print(ret)
         return ret
 
     def _serialize_from_node(
@@ -3294,6 +3338,8 @@ class GraphModuleDeserializer(metaclass=Final):
 
     def deserialize_metadata(self, metadata: dict[str, str]) -> dict[str, Any]:
         ret: dict[str, Any] = {}
+        print("META")
+        print(metadata)
         if stack_trace := metadata.get("stack_trace"):
             ret["stack_trace"] = stack_trace
 
@@ -3341,28 +3387,40 @@ class GraphModuleDeserializer(metaclass=Final):
                     )
                 return out
 
-            nn_module_stack = dict(
-                import_nn_module_stack(*metadata_split(item))
-                for item in nn_module_stack_str.split(ST_DELIMITER)
-            )
+            nn_module_stack = nn_module_stack_str
             ret["nn_module_stack"] = nn_module_stack
 
-        if source_fn_st_str := metadata.get("source_fn_stack"):
-            # Originally serializes to "fx_node_name,op_str"
-            source_fn_st = []
-            for source_fn_str in source_fn_st_str.split(ST_DELIMITER):
-                name, target_str = source_fn_str.split(",")
-                source_fn_st.append((name, deserialize_meta_func(target_str)))
-            ret["source_fn_stack"] = source_fn_st
+        if source_fn_st_data := metadata.get("source_fn_stack"):
+            # Serialized as dict with "key", "orig_path", "type_str"
+            if isinstance(source_fn_st_data, dict):
+                name = source_fn_st_data.get("key", "")
+                target_str = source_fn_st_data.get("orig_path", "")
+                ret["source_fn_stack"] = [(name, deserialize_meta_func(target_str))]
+            elif isinstance(source_fn_st_data, list):
+                source_fn_st = []
+                for item in source_fn_st_data:
+                    name = item.get("key", "")
+                    target_str = item.get("orig_path", "")
+                    source_fn_st.append((name, deserialize_meta_func(target_str)))
+                ret["source_fn_stack"] = source_fn_st
 
-        if torch_fn_str := metadata.get("torch_fn"):
-            ret["torch_fn"] = tuple(torch_fn_str.split(ST_DELIMITER))
+        if torch_fn_data := metadata.get("torch_fn"):
+            # Dict format with "name" and "overload" keys
+            if isinstance(torch_fn_data, dict):
+                ret["torch_fn"] = {
+                    "name": torch_fn_data.get("name", ""),
+                    "overload": torch_fn_data.get("overload", "")
+                }
+            elif isinstance(torch_fn_data, list):
+                ret["torch_fn"] = tuple(torch_fn_data)
 
-        if custom_str := metadata.get("custom"):
-            ret["custom"] = json.loads(custom_str)
+        if custom_data := metadata.get("custom"):
+            # Dict format
+            ret["custom"] = custom_data
 
-        if from_node_str := metadata.get("from_node"):
-            ret["from_node"] = self._deserialize_from_node(json.loads(from_node_str))
+        if from_node_data := metadata.get("from_node"):
+            # Dict/list format
+            ret["from_node"] = self._deserialize_from_node(from_node_data)
 
         return ret
 
@@ -3638,10 +3696,20 @@ def _dict_to_dataclass(cls, data):
     elif isinstance(data, list):
         if len(data) == 0:
             return data
-        d_type = typing.get_args(cls)[0]
+        # Get the element type, with safety check
+        type_args = typing.get_args(cls)
+        if not type_args:
+            # No type args, just return the list as-is
+            return data
+        d_type = type_args[0]
         return [_dict_to_dataclass(d_type, d) for d in data]
     elif isinstance(data, dict):
-        v_type = typing.get_args(cls)[1]
+        # Get the value type, with safety check
+        type_args = typing.get_args(cls)
+        if not type_args or len(type_args) < 2:
+            # No type args, just return the dict as-is
+            return data
+        v_type = type_args[1]
         return {k: _dict_to_dataclass(v_type, v) for k, v in data.items()}
     elif cls is float:
         return float(data)
