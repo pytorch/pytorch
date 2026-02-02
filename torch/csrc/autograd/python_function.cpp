@@ -158,19 +158,13 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
   at::OptionalDeviceGuard _device_guard;
   THPFunction* py_fn = (THPFunction*)obj;
 
-  // Update needs_input_grad to reflect which gradients are actually needed
-  // for this backward pass. This accounts for the `inputs` argument to
-  // backward() which may request gradients for only a subset of tensors.
-  // See https://github.com/pytorch/pytorch/issues/174017
   const auto& is_variable_input = py_fn->is_variable_input;
   size_t num_inputs = is_variable_input.size();
   size_t edge_idx = 0;
   for (const auto i : c10::irange(num_inputs)) {
     if (is_variable_input[i]) {
-      // Check if this output edge actually needs to be computed
       bool should_compute = task_should_compute_output(edge_idx);
       PyObject* current = PyTuple_GET_ITEM(py_fn->needs_input_grad, i);
-      // Only update if current is True but we don't need to compute
       if (current == Py_True && !should_compute) {
         Py_INCREF(Py_False);
         Py_DECREF(current);
@@ -231,19 +225,13 @@ auto PyNode::apply_with_saved_impl(
   at::OptionalDeviceGuard _device_guard;
   THPFunction* py_fn = (THPFunction*)obj;
 
-  // Update needs_input_grad to reflect which gradients are actually needed
-  // for this backward pass. This accounts for the `inputs` argument to
-  // backward() which may request gradients for only a subset of tensors.
-  // See https://github.com/pytorch/pytorch/issues/174017
   const auto& is_variable_input = py_fn->is_variable_input;
   size_t num_inputs = is_variable_input.size();
   size_t edge_idx = 0;
   for (const auto i : c10::irange(num_inputs)) {
     if (is_variable_input[i]) {
-      // Check if this output edge actually needs to be computed
       bool should_compute = task_should_compute_output(edge_idx);
       PyObject* current = PyTuple_GET_ITEM(py_fn->needs_input_grad, i);
-      // Only update if current is True but we don't need to compute
       if (current == Py_True && !should_compute) {
         Py_INCREF(Py_False);
         Py_DECREF(current);
