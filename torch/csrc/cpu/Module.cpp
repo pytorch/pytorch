@@ -40,7 +40,7 @@ static py::dict get_cpu_capabilities() {
     if (!processors) {
       return 0;
     }
-    const auto cache = nullptr;
+    const struct cpuinfo_cache* cache = nullptr;
     switch (level) {
       case 1:
         cache = processors[0].cache.l1d;
