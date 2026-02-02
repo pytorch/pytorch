@@ -37,7 +37,7 @@ struct TORCH_XPU_API XPUGraph {
   void enable_debug_mode();
   void debug_dump(const std::string& debug_path);
   xpuGraph_t* raw_xpu_graph();
-  xpuGraphExec_t* raw_xpu_graph_exec();  
+  xpuGraphExec_t* raw_xpu_graph_exec();
 
  protected:
   std::unique_ptr<xpuGraph_t> graph_;

@@ -53,17 +53,14 @@ void THXPGraph_init(PyObject* module) {
       .def(
           "reset",
           torch::wrap_pybind_function_no_gil(&at::xpu::XPUGraph::reset))
-      .def(
-          "pool",
-          torch::wrap_pybind_function_no_gil(&at::xpu::XPUGraph::pool))
+      .def("pool", torch::wrap_pybind_function_no_gil(&at::xpu::XPUGraph::pool))
       .def(
           "enable_debug_mode",
           torch::wrap_pybind_function_no_gil(
               &at::xpu::XPUGraph::enable_debug_mode))
       .def(
           "debug_dump",
-          torch::wrap_pybind_function_no_gil(
-              &at::xpu::XPUGraph::debug_dump),
+          torch::wrap_pybind_function_no_gil(&at::xpu::XPUGraph::debug_dump),
           py::arg("debug_path"))
       .def(
           "raw_xpu_graph",
