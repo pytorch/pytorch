@@ -161,7 +161,7 @@ Contents
 
    installing
    frontend
-   api/index
+   api-docs/index
    faq
 
 Indices and tables
