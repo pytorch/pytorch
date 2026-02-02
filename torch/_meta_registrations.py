@@ -5909,7 +5909,6 @@ def meta__scaled_dot_product_cudnn_attention(
     S_Q = query.size(2)
     S_KV = key.size(2)
     D_V = value.size(-1)
-    print("HELLO???")
 
     res_shape = (B, H, S_Q, D_V)
     res = alloc_with_matching_layout(query, res_shape)
