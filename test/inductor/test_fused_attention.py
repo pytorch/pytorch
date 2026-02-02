@@ -1255,7 +1255,7 @@ if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENT
                             k = self.key(x1).permute([0, 2, 1, 3])
                             v = self.value(x1).permute([0, 2, 1, 3])
                             t1 = torch.matmul(q, k.transpose(-2, -1))
-                            t2 = t1.div(self.inv_scale)
+                            t2 = t1.mul(self.inv_scale)
                             t3 = t2 + attn_mask
                             t4 = t3.softmax(dim=-1)
                             t5 = t4.matmul(v)
