@@ -817,7 +817,7 @@ class DTensorTest(DTensorTestBase):
                         if not use_compile:
                             MultiOutputFunc.gout1 = grad_out1
                             MultiOutputFunc.gout2 = grad_out2
-                        return grad_out1 * 2, grad_out2
+                        return grad_out1 * 2, grad_out2 * 3
 
                 x_local = torch.randn(4, 4, device=self.device_type, requires_grad=True)
                 y_local = torch.randn(4, 4, device=self.device_type, requires_grad=True)
