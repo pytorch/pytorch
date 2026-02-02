@@ -6,11 +6,14 @@
 #include <ATen/native/Distributions.h>
 #include <ATen/native/TensorFactories.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <limits>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_sample_dirichlet_native.h>
+#include <ATen/ops/_standard_gamma_native.h>
 #include <ATen/ops/argmax.h>
 #include <ATen/ops/bernoulli_native.h>
 #include <ATen/ops/cauchy_native.h>
@@ -21,6 +24,7 @@
 #include <ATen/ops/log_normal_native.h>
 #include <ATen/ops/multinomial_native.h>
 #include <ATen/ops/normal_native.h>
+#include <ATen/ops/poisson_native.h>
 #include <ATen/ops/random_native.h>
 #include <ATen/ops/randperm.h>
 #include <ATen/ops/randperm_native.h>
@@ -527,6 +531,176 @@ Tensor& geometric_mps_(Tensor& self, double p, std::optional<Generator> gen) {
                                       gen,
                                       "geometric_mps_:" + std::to_string(p),
                                       random_op_block);
+}
+
+// ============================================================================
+// Custom Metal Kernels for distributions not supported by MPSGraph
+// ============================================================================
+namespace mps {
+#ifndef PYTORCH_JIT_COMPILE_SHADERS
+static auto& distributionsLib = MetalShaderLibrary::getBundledLibrary();
+#else
+#include <ATen/native/mps/Distributions_metallib.h>
+static auto& distributionsLib = lib;
+#endif
+} // namespace mps
+
+Tensor _s_gamma_mps(const Tensor& alpha, std::optional<Generator> gen) {
+  TORCH_CHECK(alpha.scalar_type() != ScalarType::Double,
+              "MPS does not support _standard_gamma with scalar type: Double");
+  TORCH_CHECK(alpha.scalar_type() == ScalarType::Float || alpha.scalar_type() == ScalarType::Half ||
+                  alpha.scalar_type() == ScalarType::BFloat16,
+              "MPS _standard_gamma only supports Float, Half, and BFloat16, got: ",
+              alpha.scalar_type());
+
+  Tensor result = at::empty_like(alpha);
+  if (result.numel() == 0) {
+    return result;
+  }
+
+  Tensor alpha_contig = alpha.contiguous();
+  auto mps_gen = get_generator_or_default<MPSGeneratorImpl>(gen, at::mps::detail::getDefaultMPSGenerator());
+
+  @autoreleasepool {
+    std::string func_name = "standard_gamma_" + mps::scalarToMetalTypeString(alpha_contig);
+    auto cplState = mps::distributionsLib.getPipelineStateForFunc(func_name);
+
+    std::array<uint32_t, 4> rng_state;
+    {
+      std::lock_guard<std::mutex> lock(mps_gen->mutex_);
+      uint64_t seed = mps_gen->current_seed();
+      uint64_t offset = mps_gen->get_offset();
+      uint64_t numel = static_cast<uint64_t>(result.numel());
+      // Conservative offset increment: rejection sampling may consume
+      // many random values. We use a multiplier of 32 to account for
+      // worst-case Box-Muller (2 randoms) plus rejection sampling
+      // iterations. This wastes some RNG state but ensures
+      // non-overlapping sequences between kernel launches.
+      constexpr uint64_t RANDOMS_PER_SAMPLE = 32;
+      mps_gen->set_offset(offset + numel * RANDOMS_PER_SAMPLE);
+
+      rng_state[0] = static_cast<uint32_t>(seed);
+      rng_state[1] = static_cast<uint32_t>(seed >> 32);
+      rng_state[2] = static_cast<uint32_t>(offset);
+      rng_state[3] = static_cast<uint32_t>(offset >> 32);
+    }
+
+    MPSStream* mpsStream = getCurrentMPSStream();
+    dispatch_sync(mpsStream->queue(), ^() {
+      auto computeEncoder = mpsStream->commandEncoder();
+      getMPSProfiler().beginProfileKernel(cplState, "_s_gamma_mps", {alpha_contig});
+      [computeEncoder setComputePipelineState:cplState];
+      mps::mtl_setArgs(computeEncoder, alpha_contig, result);
+      [computeEncoder setBytes:rng_state.data() length:rng_state.size() * sizeof(uint32_t) atIndex:2];
+      mps::mtl_dispatch1DJob(computeEncoder, cplState, result.numel());
+      getMPSProfiler().endProfileKernel(cplState);
+    });
+  }
+
+  return result;
+}
+
+Tensor _s_poisson_mps(const Tensor& lambda, std::optional<Generator> gen) {
+  TORCH_CHECK(lambda.scalar_type() != ScalarType::Double, "MPS does not support poisson with scalar type: Double");
+  TORCH_CHECK(lambda.scalar_type() == ScalarType::Float || lambda.scalar_type() == ScalarType::Half ||
+                  lambda.scalar_type() == ScalarType::BFloat16,
+              "MPS poisson only supports Float, Half, and BFloat16, got: ",
+              lambda.scalar_type());
+  // Note: Lambda validation is done lazily in the Metal kernel for performance.
+  // Negative lambda values will return 0 (matching the behavior of returning
+  // the expected value for invalid inputs). Users should ensure lambda >= 0.
+
+  Tensor result = at::empty_like(lambda);
+  if (result.numel() == 0) {
+    return result;
+  }
+
+  Tensor lambda_contig = lambda.contiguous();
+  auto mps_gen = get_generator_or_default<MPSGeneratorImpl>(gen, at::mps::detail::getDefaultMPSGenerator());
+
+  @autoreleasepool {
+    std::string func_name = "poisson_" + mps::scalarToMetalTypeString(lambda_contig);
+    auto cplState = mps::distributionsLib.getPipelineStateForFunc(func_name);
+
+    std::array<uint32_t, 4> rng_state;
+    {
+      std::lock_guard<std::mutex> lock(mps_gen->mutex_);
+      uint64_t seed = mps_gen->current_seed();
+      uint64_t offset = mps_gen->get_offset();
+      uint64_t numel = static_cast<uint64_t>(result.numel());
+      // Conservative offset increment: Poisson sampling for large lambda uses
+      // rejection sampling which may consume many random values per sample.
+      // We use a multiplier of 32 to ensure non-overlapping sequences.
+      constexpr uint64_t RANDOMS_PER_SAMPLE = 32;
+      mps_gen->set_offset(offset + numel * RANDOMS_PER_SAMPLE);
+
+      rng_state[0] = static_cast<uint32_t>(seed);
+      rng_state[1] = static_cast<uint32_t>(seed >> 32);
+      rng_state[2] = static_cast<uint32_t>(offset);
+      rng_state[3] = static_cast<uint32_t>(offset >> 32);
+    }
+
+    MPSStream* mpsStream = getCurrentMPSStream();
+    dispatch_sync(mpsStream->queue(), ^() {
+      auto computeEncoder = mpsStream->commandEncoder();
+      getMPSProfiler().beginProfileKernel(cplState, "_s_poisson_mps", {lambda_contig});
+      [computeEncoder setComputePipelineState:cplState];
+      mps::mtl_setArgs(computeEncoder, lambda_contig, result);
+      [computeEncoder setBytes:rng_state.data() length:rng_state.size() * sizeof(uint32_t) atIndex:2];
+      mps::mtl_dispatch1DJob(computeEncoder, cplState, result.numel());
+      getMPSProfiler().endProfileKernel(cplState);
+    });
+  }
+
+  return result;
+}
+
+Tensor _s_dirichlet_mps(const Tensor& alpha, std::optional<Generator> gen) {
+  TORCH_CHECK(alpha.scalar_type() != ScalarType::Double,
+              "MPS does not support _sample_dirichlet with scalar type: Double");
+  TORCH_CHECK(alpha.scalar_type() == ScalarType::Float || alpha.scalar_type() == ScalarType::Half ||
+                  alpha.scalar_type() == ScalarType::BFloat16,
+              "MPS _sample_dirichlet only supports Float, Half, and BFloat16, got: ",
+              alpha.scalar_type());
+
+  // Use float32 for intermediate gamma sampling to prevent underflow issues
+  // when input is half/bfloat16, matching the CPU implementation behavior
+  // (see Distributions.cpp which uses double precision internally)
+  Tensor alpha_for_gamma = alpha;
+  if (alpha.scalar_type() == ScalarType::Half || alpha.scalar_type() == ScalarType::BFloat16) {
+    alpha_for_gamma = alpha.to(ScalarType::Float);
+  }
+
+  Tensor gamma_samples = at::native::_s_gamma_mps(alpha_for_gamma, gen);
+  Tensor gamma_sum = gamma_samples.sum(/*dim=*/-1, /*keepdim=*/true);
+
+  double dtype_min;
+  double dtype_eps;
+  switch (alpha.scalar_type()) {
+    case ScalarType::Half:
+      dtype_min = 6.103515625e-05;
+      dtype_eps = 9.765625e-04;
+      break;
+    case ScalarType::BFloat16:
+      dtype_min = 1.175494350822287508e-38;
+      dtype_eps = 7.8125e-03;
+      break;
+    default:
+      dtype_min = std::numeric_limits<float>::min();
+      dtype_eps = std::numeric_limits<float>::epsilon();
+      break;
+  }
+
+  gamma_sum = gamma_sum.clamp_min(dtype_min);
+  Tensor result = gamma_samples / gamma_sum;
+  result = result.clamp(dtype_min, 1.0 - dtype_eps);
+
+  // Convert back to original dtype if needed
+  if (result.scalar_type() != alpha.scalar_type()) {
+    result = result.to(alpha.scalar_type());
+  }
+
+  return result;
 }
 
 Tensor& randperm_out_mps(int64_t n, std::optional<Generator> generator, Tensor& result) {
