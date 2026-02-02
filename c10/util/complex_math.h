@@ -13,8 +13,23 @@ C10_HOST_DEVICE inline c10::complex<T> exp(const c10::complex<T>& x) {
   return static_cast<c10::complex<T>>(
       thrust::exp(static_cast<thrust::complex<T>>(x)));
 #else
-  return static_cast<c10::complex<T>>(
-      std::exp(static_cast<std::complex<T>>(x)));
+  // Custom implementation to handle overflow consistently with CUDA/thrust.
+  // The formula is: exp(a + bi) = exp(a) * (cos(b) + i*sin(b))
+  // When exp(a) overflows to inf and b is 0, we should return (inf, 0),
+  // not (inf, nan) which would result from inf * sin(0) per IEEE 754.
+  // This matches the C++ standard special case: exp((+inf, 0)) = (+inf, 0)
+  // and extends it to finite values that overflow during computation.
+  T a = x.real();
+  T b = x.imag();
+  T exp_a = std::exp(a);
+
+  // Handle the case where imaginary part is exactly 0
+  // to avoid inf * 0 = nan from sin(0) * inf
+  if (b == T(0)) {
+    return c10::complex<T>(exp_a, std::copysign(T(0), b));
+  }
+
+  return c10::complex<T>(exp_a * std::cos(b), exp_a * std::sin(b));
 #endif
 }
 

@@ -38,6 +38,40 @@ C10_DEFINE_TEST(TestExponential, IPi) {
   }
 }
 
+C10_DEFINE_TEST(TestExponential, OverflowZeroImag) {
+  // exp(large + 0i) should return (inf, 0), not (inf, nan)
+  // This tests that we handle the inf * sin(0) case correctly
+  // (IEEE 754 says inf * 0 = nan, but mathematically the result should be 0)
+  {
+    c10::complex<float> x(100.0f, 0.0f);
+    c10::complex<float> e = std::exp(x);
+    EXPECT_TRUE(std::isinf(e.real()) && e.real() > 0);
+    EXPECT_EQ(e.imag(), 0.0f);
+    EXPECT_FALSE(std::isnan(e.imag()));
+  }
+  {
+    c10::complex<float> x(100.0f, 0.0f);
+    c10::complex<float> e = ::exp(x);
+    EXPECT_TRUE(std::isinf(e.real()) && e.real() > 0);
+    EXPECT_EQ(e.imag(), 0.0f);
+    EXPECT_FALSE(std::isnan(e.imag()));
+  }
+  {
+    c10::complex<double> x(1000.0, 0.0);
+    c10::complex<double> e = std::exp(x);
+    EXPECT_TRUE(std::isinf(e.real()) && e.real() > 0);
+    EXPECT_EQ(e.imag(), 0.0);
+    EXPECT_FALSE(std::isnan(e.imag()));
+  }
+  {
+    c10::complex<double> x(1000.0, 0.0);
+    c10::complex<double> e = ::exp(x);
+    EXPECT_TRUE(std::isinf(e.real()) && e.real() > 0);
+    EXPECT_EQ(e.imag(), 0.0);
+    EXPECT_FALSE(std::isnan(e.imag()));
+  }
+}
+
 C10_DEFINE_TEST(TestExponential, EulerFormula) {
   // exp(ix) = cos(x) + i * sin(x)
   {
