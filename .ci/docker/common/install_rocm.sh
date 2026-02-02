@@ -36,14 +36,9 @@ install_ubuntu() {
         rm -rf /opt/rocm*
       fi
 
-      # Determine AMDGPU_FAMILY based on GPU architecture
-      if [[ "${BUILD_ENVIRONMENT}" == *"gfx950"* ]] || [[ "${PYTORCH_ROCM_ARCH}" == *"gfx950"* ]]; then
-        AMDGPU_FAMILY="gfx950-dcgpu"
-        echo "Detected gfx950 architecture - using MI350 theRock nightly tarball"
-      else
-        AMDGPU_FAMILY="gfx94X-dcgpu"
-        echo "Using gfx94X (MI300) theRock nightly tarball"
-      fi
+      # Use gfx950 (MI350) theRock nightly tarball
+      AMDGPU_FAMILY="gfx950-dcgpu"
+      echo "Using gfx950 (MI350) theRock nightly tarball"
 
       # Get theRock version - use THEROCK_VERSION env var or fetch latest from nightly index
       if [[ -z "${THEROCK_VERSION:-}" ]]; then

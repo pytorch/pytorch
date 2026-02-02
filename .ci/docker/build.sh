@@ -202,6 +202,19 @@ case "$tag" in
       INDUCTOR_BENCHMARKS=yes
     fi
     ;;
+  pytorch-linux-jammy-rocm-nightly-py3)
+    # TheRock nightly tarball build for MI350 (gfx950)
+    ANACONDA_PYTHON_VERSION=3.10
+    GCC_VERSION=11
+    VISION=yes
+    ROCM_VERSION=nightly
+    NINJA_VERSION=1.9.0
+    TRITON=yes
+    KATEX=yes
+    UCX_COMMIT=${_UCX_COMMIT}
+    UCC_COMMIT=${_UCC_COMMIT}
+    PYTORCH_ROCM_ARCH="gfx950"
+    ;;
   pytorch-linux-jammy-xpu-n-1-py3)
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
