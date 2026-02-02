@@ -107,6 +107,23 @@ Check if the issue body contains links to external files that users would need t
 3. Use the `needs_reproduction` template from `templates.json` to request a self-contained reproduction
 4. Do NOT add `triaged` — wait for the user to provide a reproducible example
 
+### 1.6) Edge Cases & Numerical Accuracy
+
+If the issue involves extremal values or numerical precision differences:
+
+**Patterns to detect:**
+- Values near `torch.finfo(dtype).max` or `torch.finfo(dtype).min`
+- NaN/Inf appearing in outputs from valid (but extreme) inputs
+- Differences between CPU and GPU results
+- Precision differences between dtypes (e.g., fp32 vs fp16)
+- Fuzzer-generated edge cases
+
+**Action:**
+1. Add `module: edge cases` label
+2. If from a fuzzer, also add `topic: fuzzer`
+3. Use the `numerical_accuracy` template from `templates.json` to link to the docs
+4. If the issue is clearly expected behavior per the docs, close it with the template comment
+
 ### 2) Transfer (domain library or ExecuTorch)
 
 If the issue belongs in another repo (vision/text/audio/RL/ExecuTorch/etc.), transfer the issue and **STOP**.
