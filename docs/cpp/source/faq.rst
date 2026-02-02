@@ -53,24 +53,6 @@ You can also check for CUDA availability before moving::
 
   torch::Device device(torch::cuda::is_available() ? torch::kCUDA : torch::kCPU);
 
-How do I load a TorchScript model in C++?
-*****************************************
-
-**Problem**: You have a model saved in Python using ``torch.jit.save()`` and want
-to load it in C++.
-
-**Fix**: Use ``torch::jit::load()`` to load the serialized model::
-
-  #include <torch/script.h>
-
-  torch::jit::script::Module module;
-  try {
-    module = torch::jit::load("model.pt");
-  }
-  catch (const c10::Error& e) {
-    std::cerr << "Error loading the model\n";
-    return -1;
-  }
 
 Make sure to compile with the TorchScript headers by including ``<torch/script.h>``.
 
