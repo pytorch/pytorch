@@ -12,6 +12,7 @@
 #include <ATen/ops/empty.h>
 #include <ATen/ops/sparse_coo_tensor.h>
 #include <ATen/ops/where.h>
+#include <ATen/ops/zeros.h>
 #endif
 
 namespace at::native {
@@ -54,18 +55,7 @@ Tensor spdiags(
   // Handle zero-dimension shapes early - return empty sparse tensor
   // This matches scipy.sparse.spdiags behavior
   if (shape[0] == 0 || shape[1] == 0) {
-    auto indices = at::empty({2, 0}, offsets_1d.options());
-    auto values = at::empty({0}, diagonals_2d.options());
-    auto result_coo = at::sparse_coo_tensor(indices, values, shape);
-    if (layout) {
-      if (*layout == Layout::SparseCsr) {
-        return result_coo.to_sparse_csr();
-      }
-      if (*layout == Layout::SparseCsc) {
-        return result_coo.to_sparse_csc();
-      }
-    }
-    return result_coo;
+    return at::zeros(shape, diagonals_2d.options().layout(layout.value_or(Layout::Sparse)));
   }
 
   auto nnz_per_diag = at::where(
