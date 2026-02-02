@@ -5507,6 +5507,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index,union-attr]
 
         self.triton_meta = triton_meta
+        self.inductor_meta = inductor_meta
 
         self.codegen_prologue(self.body)
         self.codegen_body()
@@ -5693,6 +5694,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             triton=True,
             arg_types=arg_types,
             triton_meta=self.triton_meta,
+            inductor_meta=self.inductor_meta,
         )
 
         if deallocate_ws:
