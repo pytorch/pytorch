@@ -3773,10 +3773,11 @@ class InstructionTranslatorBase(
 
     def MATCH_CLASS(self, inst: Instruction) -> None:
         subject, cls, names = self.popn(3)
+        arg = ConstantVariable.create(inst.arg)
         self.push(
             self.inline_user_function_return(
                 VariableTracker.build(self, impl_MATCH_CLASS),
-                [subject, cls, inst.arg, names],
+                [subject, cls, arg, names],
                 {},
             )
         )
