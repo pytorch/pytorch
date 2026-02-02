@@ -10,6 +10,11 @@
       "action": "Add comment and stop",
       "use_when": "Classification is unclear and more details are needed to decide between question vs bug/feature",
       "comment": "Thanks for the report. To triage this, could you share:\n\n- A minimal repro (small script or steps)\n- Full error logs / stack trace\n- Output of `collect_env.py`\n\nOnce we have that, we can classify and route this properly."
+    },
+    "needs_reproduction": {
+      "action": "Edit issue to remove external links, add label 'needs reproduction', and comment",
+      "use_when": "Issue requires downloading external files (.zip, .pt, .pth, .pkl, .safetensors, .onnx, .bin) or links to external storage (Google Drive, Dropbox, OneDrive, Mega, WeTransfer, Hugging Face Hub model files) to reproduce",
+      "comment": "Thanks for the report! To help us investigate:\n\n1. Can you reproduce this without the external files? (e.g., using random weights or synthetic data)\n2. Are there any extreme or special values in the weights/inputs? (e.g., very large values, NaN, inf)\n\nA self-contained script that doesn't require downloading files helps maintainers reproduce and debug the issue faster."
     }
   }
 }
