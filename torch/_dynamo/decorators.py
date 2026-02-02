@@ -360,11 +360,12 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
             # At runtime: real function runs (counter increments to 1, 2, 3, ...)
             # But returned count is always 999 (from fake implementation at compile time)
 
-        - User-defined classes must be registered via :func:`torch.utils._pytree.register_pytree_node`,
-        :func:`torch.utils._pytree.register_dataclass`, or :func:`torch.utils._pytree.register_constant`.
+        - User-defined classes must be registered via :func:`torch.utils._pytree.register_pytree_node`
+        or :func:`torch.utils._pytree.register_dataclass`.
 
         - :class:`torch.nn.Module` can also be passed as input; its parameters and buffers
         are tracked for autograd. The module must exist outside the compile region.
+        Running the module multiple times must not modify its parameters, buffers, or attributes.
 
         **register_fake (required)**:
         Since the function body is not traced, you must
@@ -373,7 +374,7 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
         satisfy the following requirements:
 
         - Must have the same input and output signature (e.g., same pytree structure, same tensor metadata
-          such as shapes, dtypes, device, strides, requires_grad) as the real function
+          such as shapes, dtypes, device, strides) as the real function
         - Must be runnable with FakeTensor inputs
         - Must only use its explicit arguments (no closures over tensors or modules)
 
