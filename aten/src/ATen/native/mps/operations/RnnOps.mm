@@ -132,9 +132,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> _lstm_mps(const Tenso
 
   @autoreleasepool {
     std::string key = "lstm_" + getTensorsStringKey({input, hx[0], hx[1]}) + getMPSTypeString(input) + "_num_layers_" +
-        std::to_string(num_layers) + "_bidirectional_" + std::to_string(bidirectional) + "_has_biases_" +
-        std::to_string(has_biases) + "_dropout_" + std::to_string(dropout_p) + "_batch_first_" +
-        std::to_string(batch_first);
+      std::to_string(num_layers) + "_bidirectional_" + std::to_string(bidirectional) + "_has_biases_" +
+      std::to_string(has_biases) + "_dropout_" + std::to_string(dropout_p) + "_train_" +
+      std::to_string(train) + "_batch_first_" + std::to_string(batch_first);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       NSMutableArray<MPSGraphTensor*>* kernelWeightsList = [[NSMutableArray alloc] initWithCapacity:params.size()];
       NSMutableArray<MPSGraphTensor*>* recurrentKernelWeightsList =
@@ -205,13 +205,13 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> _lstm_mps(const Tenso
                                             name:nil];
 
         inputTensor_ = [outputs objectAtIndex:0];
+        if (dropout_p > 0.0 && train && (i != num_layers - 1)) {
+          inputTensor_ = [mpsGraph dropoutTensor:inputTensor_ rate:dropout_p name:nil];
+        }
         // no need to keep the final layer output copy as it is
         // returned anyway and not used in backprop
         if (i != num_layers - 1) {
           [layersOutputsList addObject:[mpsGraph expandDimsOfTensor:inputTensor_ axis:0 name:nil]];
-        }
-        if (dropout_p > 0.0 && train && (i != num_layers - 1)) {
-          inputTensor_ = [mpsGraph dropoutTensor:inputTensor_ rate:dropout_p name:nil];
         }
 
         if (bidirectional) {
