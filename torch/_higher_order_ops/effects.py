@@ -4,6 +4,7 @@ from typing import Any, Optional, Union
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
+from torch._higher_order_ops.invoke_leaf_function import invoke_leaf_function
 from torch._higher_order_ops.print import print as hop_print
 from torch._higher_order_ops.torchbind import call_torchbind
 from torch._library.custom_ops import CustomOpDef
@@ -62,6 +63,7 @@ _register_effectful_op("aten::_print", _EffectType.ORDERED)
 _register_effectful_op("profiler::_record_function_exit._RecordFunction", None)
 _register_effectful_op(call_torchbind, _EffectType.ORDERED)
 _register_effectful_op(hop_print, _EffectType.ORDERED)
+_register_effectful_op(invoke_leaf_function, _EffectType.ORDERED)
 
 
 class WithEffects(HigherOrderOperator):
@@ -219,8 +221,7 @@ def _get_schema(op, args, kwargs: Optional[dict] = None) -> torch.FunctionSchema
         return op._schema
     elif op == call_torchbind:
         return getattr(args[0], args[1]).schema
-    elif op == hop_print:
-        # hop_print currently expects (format_str, *kwargs) as its arguments
+    elif hasattr(op, "gen_schema"):
         extra_kwargs = kwargs or {}
         return op.gen_schema(*args, **extra_kwargs)
     else:
@@ -298,19 +299,30 @@ def handle_effects(
         )
 
     schema = _get_schema(op, unwrapped_args, unwrapped_kwargs)
-    if len(schema.returns) == 0:
+    from torch._higher_order_ops.schema import HopSchema
+
+    if isinstance(schema, HopSchema):
+        if len(schema.returns) == 0:
+            unwrapped_outs = None  # type: ignore[assignment]
+        else:
+            if len(unwrapped_outs) != len(schema.returns):
+                raise AssertionError(
+                    f"expected {len(schema.returns)} outputs but got {len(unwrapped_outs)}"
+                )
+            unwrapped_outs = tuple(unwrapped_outs)
+    elif len(schema.returns) == 0:
         if unwrapped_outs[0] is not None:
             raise AssertionError(f"expected no outputs but got {unwrapped_outs[0]}")
         unwrapped_outs = None  # type: ignore[assignment]
-    elif len(schema.returns) == 1:
-        if len(unwrapped_outs) != 1:
-            raise AssertionError(f"expected 1 output but got {len(unwrapped_outs)}")
-        unwrapped_outs = unwrapped_outs[0]
     else:
         if len(unwrapped_outs) != len(schema.returns):
             raise AssertionError(
                 f"expected {len(schema.returns)} outputs but got {len(unwrapped_outs)}"
             )
+        if len(schema.returns) > 1:
+            unwrapped_outs = tuple(unwrapped_outs)
+        else:
+            unwrapped_outs = unwrapped_outs[0]
 
     # Add the newly created token into the tokens map for a following call to
     # use this token.
