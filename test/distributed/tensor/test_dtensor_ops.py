@@ -131,8 +131,6 @@ dtensor_fails = {
     # get full support with varying sharding specs
     xfail("__getitem__"),
     xfail("_chunk_cat"),
-    xfail("all"),
-    xfail("any"),
     xfail("arange"),
     xfail("as_strided"),
     xfail("as_strided", "partial_views"),
