@@ -682,9 +682,9 @@ class NNModuleVariable(VariableTracker):
         def wrap_values(
             items: Iterable[tuple[Any, Any]],
         ) -> "variables.ListIteratorVariable":
-            result = []
+            named_children: list[VariableTracker] = []
             for name, submod in items:
-                result.append(
+                named_children.append(
                     tx.output.register_attr_or_module(
                         submod,
                         key,
