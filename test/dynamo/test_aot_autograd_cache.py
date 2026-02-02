@@ -23,6 +23,7 @@ from torch._functorch._aot_autograd.autograd_cache import (
 from torch._functorch._aot_autograd.schemas import AOTConfig
 from torch._guards import TracingContext
 from torch._inductor import config as inductor_config
+from torch._inductor.custom_graph_pass import CustomRuntimeEstimator
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.runtime.triton_compat import tl, triton
 from torch._inductor.test_case import TestCase as InductorTestCase
@@ -2325,6 +2326,161 @@ class AOTAutogradCacheTests(InductorTestCase):
         # Results should be different
         self.assertNotEqual(result1, result2)
 
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @functorch_config.patch({"activation_memory_budget": 0.5})
+    def test_custom_runtime_estimator_cache_hit(self):
+        """Test that CustomRuntimeEstimator with valid uuid() results in cache hit."""
+
+        class MyCustomEstimator(CustomRuntimeEstimator):
+            def __call__(self, node) -> float:
+                return 1.0
+
+            def uuid(self):
+                return "my_custom_estimator_v1"
+
+        def fn(x, y):
+            return torch.mm(x, y) + 1
+
+        with fresh_cache():
+            with functorch_config.patch(
+                {"activation_memory_budget_runtime_estimator": MyCustomEstimator()}
+            ):
+                compiled_fn = torch.compile(fn, backend="inductor")
+
+                x = torch.randn(10, 10, requires_grad=True)
+                y = torch.randn(10, 10, requires_grad=True)
+                result = compiled_fn(x, y)
+                result.sum().backward()
+
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 0)
+
+                self._clear_dynamo_and_codecache()
+
+                x2 = torch.randn(10, 10, requires_grad=True)
+                y2 = torch.randn(10, 10, requires_grad=True)
+                result2 = compiled_fn(x2, y2)
+                result2.sum().backward()
+
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 0)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @functorch_config.patch({"activation_memory_budget": 0.5})
+    def test_custom_estimator_bypasses_cache(self):
+        """Test that cache is bypassed when custom estimator lacks proper uuid."""
+
+        def fn(x, y):
+            return torch.mm(x, y) + 1
+
+        # Test 1: Raw callable without uuid() method bypasses cache
+        def raw_estimator(node) -> float:
+            return 1.0
+
+        with fresh_cache():
+            with functorch_config.patch(
+                {"activation_memory_budget_runtime_estimator": raw_estimator}
+            ):
+                compiled_fn = torch.compile(fn, backend="inductor")
+                x = torch.randn(10, 10, requires_grad=True)
+                y = torch.randn(10, 10, requires_grad=True)
+                result = compiled_fn(x, y)
+                result.sum().backward()
+
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 0)
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 0)
+                self.assertGreater(counters["aot_autograd"]["autograd_cache_bypass"], 0)
+
+        counters.clear()
+        self._clear_dynamo_and_codecache()
+
+        # Test 2: CustomRuntimeEstimator with uuid() returning None bypasses cache
+        class EstimatorWithNullUuid(CustomRuntimeEstimator):
+            def __call__(self, node) -> float:
+                return 1.0
+
+            def uuid(self):
+                return None
+
+        with fresh_cache():
+            with functorch_config.patch(
+                {"activation_memory_budget_runtime_estimator": EstimatorWithNullUuid()}
+            ):
+                compiled_fn = torch.compile(fn, backend="inductor")
+                x = torch.randn(10, 10, requires_grad=True)
+                y = torch.randn(10, 10, requires_grad=True)
+                result = compiled_fn(x, y)
+                result.sum().backward()
+
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 0)
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 0)
+                self.assertGreater(counters["aot_autograd"]["autograd_cache_bypass"], 0)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @functorch_config.patch({"activation_memory_budget": 0.5})
+    def test_different_custom_estimator_uuids_cause_cache_miss(self):
+        """Test that different uuid values cause cache miss."""
+
+        class EstimatorV1(CustomRuntimeEstimator):
+            def __call__(self, node) -> float:
+                return 1.0
+
+            def uuid(self):
+                return "estimator_v1"
+
+        class EstimatorV2(CustomRuntimeEstimator):
+            def __call__(self, node) -> float:
+                return 1.0
+
+            def uuid(self):
+                return "estimator_v2"
+
+        def fn(x, y):
+            return torch.mm(x, y) + 1
+
+        with fresh_cache():
+            with functorch_config.patch(
+                {"activation_memory_budget_runtime_estimator": EstimatorV1()}
+            ):
+                compiled_fn = torch.compile(fn, backend="inductor")
+                x = torch.randn(10, 10, requires_grad=True)
+                y = torch.randn(10, 10, requires_grad=True)
+                result = compiled_fn(x, y)
+                result.sum().backward()
+
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 0)
+
+            self._clear_dynamo_and_codecache()
+
+            with functorch_config.patch(
+                {"activation_memory_budget_runtime_estimator": EstimatorV2()}
+            ):
+                compiled_fn2 = torch.compile(fn, backend="inductor")
+                x2 = torch.randn(10, 10, requires_grad=True)
+                y2 = torch.randn(10, 10, requires_grad=True)
+                result2 = compiled_fn2(x2, y2)
+                result2.sum().backward()
+
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 2)
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 0)
+
 
 @functorch_config.patch({"bundled_autograd_cache": True})
 class AOTAutogradCacheBundledTests(AOTAutogradCacheTests):
@@ -2602,6 +2758,41 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
 
             self.assertEqual(c1, c2)
             self.assertNotEqual(c3, c4)
+
+    def test_pickle_entry_with_unpicklable_field(self):
+        """
+        Test that with dill, we can now serialize graphs that contain inner functions
+        in node metadata. Standard pickle would fail on these because inner functions
+        are not defined at module level, but dill serializes function code objects and
+        closures directly.
+        """
+        from torch.fx._graph_pickler import GraphPickler, Options
+        from torch.utils._import_utils import import_dill
+
+        dill = import_dill()
+        if dill is None:
+            self.skipTest("dill not available")
+
+        def fn(x):
+            return x.sin().cos()
+
+        _, fx_g, example_inputs = self._get_dynamo_output(fn, torch.ones(3))
+
+        def inner_helper(x):
+            return x * 2
+
+        for node in fx_g.graph.nodes:
+            node.meta["inner_fn"] = inner_helper
+
+        options = Options(node_metadata_key_filter=None)
+        serialized = GraphPickler.dumps(fx_g, options)
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+        deserialized = GraphPickler.loads(serialized, fake_mode)
+
+        self.assertIsInstance(deserialized, torch.fx.GraphModule)
+        for node in deserialized.graph.nodes:
+            self.assertIn("inner_fn", node.meta)
+            self.assertEqual(node.meta["inner_fn"](5), 10)
 
 
 def _policy_save_mm(ctx, op, *args, **kwargs):
