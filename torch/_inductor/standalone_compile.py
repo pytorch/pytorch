@@ -121,13 +121,14 @@ class CacheCompiledArtifact(CompiledArtifact):
     def __call__(self, *args: Any) -> Any:
         return self._compiled_fn(*args)
 
-    def is_saveable(self):
+    def is_saveable(self) -> bool:
         if self._artifacts is None:
             return False
         _, cache_info = self._artifacts
-        if len(cache_info.aot_autograd_artifacts) != 1:
-            return False
-        return True
+        # 0 means nothing was saved
+        # >1 means multiple artifacts were saved, which is concerning
+        # (we only expect one)
+        return len(cache_info.aot_autograd_artifacts) == 1
 
     def save(
         self, *, path: str, format: Literal["binary", "unpacked"] = "binary"
@@ -146,8 +147,11 @@ class CacheCompiledArtifact(CompiledArtifact):
                     f"ensuring that your model only uses constructs that are serializable. "
                     f"{cache_info}"
                 )
-            # training support not implemented
-            assert len(cache_info.aot_autograd_artifacts) == 1, cache_info
+            if len(cache_info.aot_autograd_artifacts) > 1:
+                raise AssertionError(
+                    f"CompiledArtifact.save failed to save because there was more than one "
+                    f"artifact but we only expected one. {cache_info}"
+                )
             key = cache_info.aot_autograd_artifacts[0]
 
             if format == "binary":
