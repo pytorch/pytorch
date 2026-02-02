@@ -2,6 +2,9 @@ name: inductor-rocm-mi355
 
 on:
   push:
+    branches:
+      - main
+      - release/*
     tags:
       - ciflow/inductor-rocm-mi355/*
   workflow_dispatch:
