@@ -2699,6 +2699,7 @@ def create_precompile_key(
 # input_nodes: list of input ir.py Nodes
 # choices: list of choices
 # profiled time: Callable that returns a dict mapping from choices to the profiled time
+# precompile_times: mapping from choices to their precompilation time in seconds
 FeedbackFunction = Callable[
     [
         dict[ChoiceCaller, float],
@@ -2706,6 +2707,7 @@ FeedbackFunction = Callable[
         list[Any],
         list[ChoiceCaller],
         Callable[[], dict[ChoiceCaller, float]],
+        dict[ChoiceCaller, float],
     ],
     None,
 ]
@@ -2781,7 +2783,7 @@ class AlgorithmSelectorCache(PersistentCache):
         # no guarantee that the first lowering for a given key will also be the
         # first to benchmark it. share a single precompilation function for all lowerings
         # of a particular key
-        self.precompile_cache: dict[str, Callable[[], None]] = {}
+        self.precompile_cache: dict[str, Callable[[], dict[ChoiceCaller, float]]] = {}
         # cache for prescreening results to ensure deterministic candidate selection
         self.prescreening_cache: dict[str, OrderedSet[str]] = {}
         # list of callbacks that are called after benchmarking
@@ -2833,7 +2835,7 @@ class AlgorithmSelectorCache(PersistentCache):
         return_choice=False,  # TODO: return_choice is temporary and will be refactored soon
         is_collective=False,
     ):
-        from .codegen.cuda.cuda_kernel import CUDATemplateCaller
+        from .codegen.cutlass.cuda_kernel import CUDATemplateCaller
 
         # Run preprocessing functions on choices
         for preprocessing_fn in self.preprocessing_fns:
@@ -2881,8 +2883,8 @@ class AlgorithmSelectorCache(PersistentCache):
 
         if return_multi_template and (config.max_autotune or config.max_autotune_gemm):
             if config.pipeline_max_autotune_gemm:
-                assert not config.epilogue_fusion and not config.prologue_fusion, (
-                    "Pipelined autotuning not compatible yet with fusion benchmarking, will cause contention on gpu"
+                assert not config.benchmark_epilogue_fusion, (
+                    "Benchmarking epilogues will cause gpu contention with pipelined autotuning"
                 )
                 assert all(not isinstance(c, SubgraphChoiceCaller) for c in choices), (
                     "Pipelined autotuning not compatible yet with subgraph choices"
@@ -2896,17 +2898,21 @@ class AlgorithmSelectorCache(PersistentCache):
                 triton_kernels = [
                     c for c in choices if not AlgorithmSelectorCache._is_extern(c)
                 ]
-                precompile_instance = PrecompileThreadPool.get_instance()
-                precompile_future = precompile_instance.submit(
-                    self.do_autotuning,
-                    name,
-                    input_nodes,
-                    layout,
-                    input_gen_fns,
-                    inputs_key,
-                    triton_kernels,
-                    precompile_fn,
-                )
+
+                if triton_kernels:
+                    precompile_instance = PrecompileThreadPool.get_instance()
+                    precompile_future = precompile_instance.submit(
+                        self.do_autotuning,
+                        name,
+                        input_nodes,
+                        layout,
+                        input_gen_fns,
+                        inputs_key,
+                        triton_kernels,
+                        precompile_fn,
+                    )
+                else:
+                    precompile_future = None
 
                 def get_timings(hint_override: Optional[int] = None):
                     assert not hint_override, (
@@ -2914,7 +2920,8 @@ class AlgorithmSelectorCache(PersistentCache):
                     )
                     # Await precompilation future, thread pool
                     precompile_start_ts = time.time()
-                    precompile_future.result()
+                    if precompile_future:
+                        precompile_future.result()
                     precompile_elapse = time.time() - precompile_start_ts
 
                     # Await autotuning in subproc pool
@@ -3129,7 +3136,7 @@ class AlgorithmSelectorCache(PersistentCache):
             NoValidChoicesError: When all choices fail to compile or benchmark, or when all
                 timing results are non-finite.
         """
-        if log.isEnabledFor(logging.DEBUG):
+        if log.isEnabledFor(logging.DEBUG) and not config.pipeline_max_autotune_gemm:
             # Log shape information for debugging timeout issues
             sizevars = V.graph.sizevars
 
@@ -3160,9 +3167,9 @@ class AlgorithmSelectorCache(PersistentCache):
                 log_pt2_compile_event=True,
                 dynamo_compile_column_us="compile_time_autotune_time_us",
             ):
-                precompile_fn()
+                precompile_times = precompile_fn()
         else:
-            precompile_fn()
+            precompile_times = precompile_fn()
 
         precompile_elapse = time.time() - precompile_start_ts
         log.debug("Precompilation elapsed time: %.02fs", precompile_elapse)
@@ -3289,16 +3296,22 @@ class AlgorithmSelectorCache(PersistentCache):
                 is_collective=is_collective,
             )
 
-        def profiler_bench_function():
+        def profiler_bench_function(choices_override=None):
             # we're not running through the normal caching autotuner method here because we want to avoid returning
             # the cached value.
             # Avoid benchmarking in a separate process because it's not easy to signal to the TuningProcess that we
             # should use the profiler.
+            # If choices_override is provided, only benchmark those choices instead of all choices.
+            choices_to_benchmark = (
+                choices_override if choices_override is not None else choices
+            )
             with config.patch(
                 profile_bandwidth_with_do_bench_using_profiling=True,
                 autotune_in_subproc=False,
             ):
-                return self.benchmark(choices, input_nodes, layout, input_gen_fns)
+                return self.benchmark(
+                    choices_to_benchmark, input_nodes, layout, input_gen_fns
+                )
 
         for feedback_fn in self.feedback_saver_fns:
             # re-benchmarking the same choices with profiler is a bit expensive, so pass it in as a thunk.
@@ -3308,6 +3321,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 input_nodes,
                 choices,
                 profiler_bench_function,
+                precompile_times,
             )
 
         return timings
@@ -3330,14 +3344,14 @@ class AlgorithmSelectorCache(PersistentCache):
         name: str,
         inputs_key: str,
         precompilation_timeout_seconds: Optional[int] = 60 * 60,
-    ) -> Callable[[], None]:
+    ) -> Callable[[], dict[ChoiceCaller, float]]:
         """
         Returns a function that precompiles the given choices.
         """
         log.debug("Starting precompilation")
 
-        def no_op(*args, **kwargs):
-            return
+        def no_op(*args, **kwargs) -> dict[ChoiceCaller, float]:
+            return {}
 
         if (
             precompilation_timeout_seconds is None
@@ -3451,7 +3465,12 @@ class AlgorithmSelectorCache(PersistentCache):
 
         @functools.cache
         @restore_stdout_stderr()
-        def wait_on_futures():
+        def wait_on_futures() -> dict[ChoiceCaller, float]:
+            """Wait for all precompilation futures to complete.
+
+            Returns:
+                Dict mapping each choice to its precompilation time in seconds.
+            """
             log.debug("Waiting on futures")
             counters["inductor"]["select_algorithm_precompile"] += 1
             exceptions: list[tuple[ChoiceCaller, BaseException]] = []
@@ -3511,6 +3530,13 @@ class AlgorithmSelectorCache(PersistentCache):
             if not config.pipeline_max_autotune_gemm:
                 # pyrefly: ignore [missing-attribute]
                 executor.shutdown(wait=True)
+
+            # Build and return dict mapping choices to their precompilation times
+            precompile_times: dict[ChoiceCaller, float] = {}
+            for future, choice in futures.items():
+                if future in elapsed_times:
+                    precompile_times[choice] = elapsed_times[future]
+            return precompile_times
 
         self.precompile_cache[precompile_key] = wait_on_futures
 
@@ -3812,7 +3838,9 @@ class AlgorithmSelectorCache(PersistentCache):
                 else:
                     timing = cls.benchmark_choice(choice, autotune_args)
             except CUDACompileError:
-                from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
+                from torch._inductor.codegen.cutlass.cuda_kernel import (
+                    CUDATemplateCaller,
+                )
 
                 if not isinstance(choice, CUDATemplateCaller):
                     log.exception(
@@ -3823,7 +3851,9 @@ class AlgorithmSelectorCache(PersistentCache):
                 log.warning("Not yet implemented", exc_info=True)
                 timing = float("inf")
             except RuntimeError as e:
-                from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
+                from torch._inductor.codegen.cutlass.cuda_kernel import (
+                    CUDATemplateCaller,
+                )
 
                 msg = str(e)
                 if "invalid argument" in msg:
@@ -3986,7 +4016,7 @@ class AlgorithmSelectorCache(PersistentCache):
             return prescreen_winners
 
         # prescreen cutlass
-        from .codegen.cuda.cuda_kernel import CUDATemplateCaller
+        from .codegen.cutlass.cuda_kernel import CUDATemplateCaller
 
         candidates = []
         if (
@@ -4020,7 +4050,7 @@ class AlgorithmSelectorCache(PersistentCache):
         """
         Prune the choices after prescreening.
         """
-        from .codegen.cuda.cuda_kernel import CUDATemplateCaller
+        from .codegen.cutlass.cuda_kernel import CUDATemplateCaller
 
         prescreen_key = f"{name}:{inputs_key}"
 
