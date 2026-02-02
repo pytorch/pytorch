@@ -965,7 +965,7 @@ void softplus_kernel(TensorIteratorBase& iter, const Scalar& beta_, const Scalar
             }
             // Use numerically stable formula: exp(-abs(y)) never overflows
             float z = std::log1p(std::exp(-std::abs(y))) / beta;
-            return static_cast<scalar_t>((y > 0.0f ? float(a) : 0.0f) + z);
+            return (y > 0.0f ? float(a) : 0.0f) + z;
           },
           [beta_vec, threshold_vec, zero_vec](Vectorized<scalar_t> a) -> Vectorized<scalar_t> {
             auto [a0, a1] = convert_to_float<scalar_t>(a);
