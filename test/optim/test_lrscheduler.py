@@ -2678,6 +2678,32 @@ class TestLRScheduler(TestCase):
             optim.param_groups[0]["lr"],
         )
 
+def test_cosineannealinglr_tmax_zero_raises(self):
+    # CosineAnnealingLR relies on T_max as both a divisor and a modulo base
+    # when computing the learning rate.
+    #
+    # When T_max=0, those operations become undefined, but the constructor
+    # does not validate the value. As a result, stepping the scheduler
+    # currently triggers a ZeroDivisionError.
+    #
+    # This test documents the current behavior and makes the failure mode
+    # explicit, so any future change that validates T_max or defines
+    # canonical semantics for T_max=0 will have to update this test.
+
+    model = torch.nn.Linear(1, 1)
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer,
+        T_max=0,
+    )
+
+    # Advance the optimizer once to reach the scheduler stepping logic
+    optimizer.step()
+
+    # current behavior: division/modulo by zero inside scheduler.step()
+    with self.assertRaises(ZeroDivisionError):
+        scheduler.step()
 
 instantiate_parametrized_tests(TestLRScheduler)
 
