@@ -7434,6 +7434,25 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         x = torch.rand([4, 4])
         self.assertEqual(opt_fn(x), fn(x))
 
+    def test_torch_distributions_gamma_dynamic(self):
+        def fn(n: int):
+            distribution = torch.distributions.Gamma(
+                concentration=torch.tensor(2.0),
+                rate=torch.tensor(1.0),
+            )
+            return distribution.sample((n,))
+
+        opt_fn = torch.compile(fn, backend="eager", dynamic=True, fullgraph=True)
+
+        torch.manual_seed(42)
+        expected = fn(5)
+
+        torch.manual_seed(42)
+        result = opt_fn(5)
+
+        self.assertEqual(result.shape, expected.shape)
+        self.assertEqual(result, expected)
+
     def test_guard_failure_fn(self):
         def fn(x, y, k):
             x = x + 1
