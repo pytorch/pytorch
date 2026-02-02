@@ -8229,6 +8229,66 @@ for shape in [(1,), ()]:
         self.assertEqual(y.grad_fn.saved_tensors, ())
         self.assertEqual(y.grad_fn._raw_saved_tensors, ())
 
+    def test_custom_function_needs_input_grad_partial_backward(self):
+        # Test that ctx.needs_input_grad reflects which gradients are actually
+        # needed during a partial backward pass (when inputs= is specified).
+        # See https://github.com/pytorch/pytorch/issues/174017
+        needs_input_grad_values = []
+
+        class MyMatmul(Function):
+            @staticmethod
+            def forward(ctx, a, b):
+                ctx.save_for_backward(a, b)
+                return torch.matmul(a, b)
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                a, b = ctx.saved_tensors
+                # Record what needs_input_grad was during this backward call
+                needs_input_grad_values.append(tuple(ctx.needs_input_grad))
+
+                grad_a = grad_b = None
+                if ctx.needs_input_grad[0]:
+                    grad_a = torch.matmul(grad_output, b.transpose(-1, -2))
+                if ctx.needs_input_grad[1]:
+                    grad_b = torch.matmul(a.transpose(-1, -2), grad_output)
+                return grad_a, grad_b
+
+        # Test 1: Request gradient only for first input
+        a1 = torch.randn(2, 3, requires_grad=True)
+        b1 = torch.randn(3, 4, requires_grad=True)
+        out1 = MyMatmul.apply(a1, b1)
+        torch.autograd.backward(out1.sum(), inputs=[a1])
+        self.assertEqual(needs_input_grad_values[-1], (True, False))
+
+        # Test 2: Request gradient only for second input
+        a2 = torch.randn(2, 3, requires_grad=True)
+        b2 = torch.randn(3, 4, requires_grad=True)
+        out2 = MyMatmul.apply(a2, b2)
+        torch.autograd.backward(out2.sum(), inputs=[b2])
+        self.assertEqual(needs_input_grad_values[-1], (False, True))
+
+        # Test 3: Request gradients for both inputs
+        a3 = torch.randn(2, 3, requires_grad=True)
+        b3 = torch.randn(3, 4, requires_grad=True)
+        out3 = MyMatmul.apply(a3, b3)
+        torch.autograd.backward(out3.sum(), inputs=[a3, b3])
+        self.assertEqual(needs_input_grad_values[-1], (True, True))
+
+        # Test 4: Regular backward (no inputs specified)
+        a4 = torch.randn(2, 3, requires_grad=True)
+        b4 = torch.randn(3, 4, requires_grad=True)
+        out4 = MyMatmul.apply(a4, b4)
+        out4.sum().backward()
+        self.assertEqual(needs_input_grad_values[-1], (True, True))
+
+        # Test 5: Input that doesn't require grad should still be False
+        a5 = torch.randn(2, 3, requires_grad=True)
+        b5 = torch.randn(3, 4, requires_grad=False)
+        out5 = MyMatmul.apply(a5, b5)
+        torch.autograd.backward(out5.sum(), inputs=[a5])
+        self.assertEqual(needs_input_grad_values[-1], (True, False))
+
     def test_autograd_node_isinstance(self):
         # Node is a "virtual" base class of codegen'd nodes. This means that
         # isinstance and issubclass are overridden, but mro is unchanged

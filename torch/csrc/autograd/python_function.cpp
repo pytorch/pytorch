@@ -158,6 +158,28 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
   at::OptionalDeviceGuard _device_guard;
   THPFunction* py_fn = (THPFunction*)obj;
 
+  // Update needs_input_grad to reflect which gradients are actually needed
+  // for this backward pass. This accounts for the `inputs` argument to
+  // backward() which may request gradients for only a subset of tensors.
+  // See https://github.com/pytorch/pytorch/issues/174017
+  const auto& is_variable_input = py_fn->is_variable_input;
+  size_t num_inputs = is_variable_input.size();
+  size_t edge_idx = 0;
+  for (const auto i : c10::irange(num_inputs)) {
+    if (is_variable_input[i]) {
+      // Check if this output edge actually needs to be computed
+      bool should_compute = task_should_compute_output(edge_idx);
+      PyObject* current = PyTuple_GET_ITEM(py_fn->needs_input_grad, i);
+      // Only update if current is True but we don't need to compute
+      if (current == Py_True && !should_compute) {
+        Py_INCREF(Py_False);
+        Py_DECREF(current);
+        PyTuple_SET_ITEM(py_fn->needs_input_grad, i, Py_False);
+      }
+      edge_idx++;
+    }
+  }
+
   // Massage a C++ variable_list into a Python arguments tuple
   THPObjectPtr pyInputs(to_py_args(inputs, &_device_guard));
 
@@ -169,9 +191,9 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
     throw_python_error();
   ensure_tuple(r);
 
-  auto& is_variable_input = py_fn->is_variable_input;
+  const auto& is_variable_input_ = py_fn->is_variable_input;
   auto num_outputs = PyTuple_GET_SIZE(r.get());
-  auto num_forward_inputs = static_cast<Py_ssize_t>(is_variable_input.size());
+  auto num_forward_inputs = static_cast<Py_ssize_t>(is_variable_input_.size());
   // Returning too many results is ok, but only as long as they're all None.
   // Truncate the result tuple in that case.
   if (num_outputs > num_forward_inputs) {
@@ -199,7 +221,7 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
       ")");
 
   // Massage the Python results tuple back into a C++ variable_list
-  return to_variable_list(r.get(), is_variable_input);
+  return to_variable_list(r.get(), is_variable_input_);
 }
 
 auto PyNode::apply_with_saved_impl(
@@ -209,10 +231,31 @@ auto PyNode::apply_with_saved_impl(
   at::OptionalDeviceGuard _device_guard;
   THPFunction* py_fn = (THPFunction*)obj;
 
+  // Update needs_input_grad to reflect which gradients are actually needed
+  // for this backward pass. This accounts for the `inputs` argument to
+  // backward() which may request gradients for only a subset of tensors.
+  // See https://github.com/pytorch/pytorch/issues/174017
+  const auto& is_variable_input = py_fn->is_variable_input;
+  size_t num_inputs = is_variable_input.size();
+  size_t edge_idx = 0;
+  for (const auto i : c10::irange(num_inputs)) {
+    if (is_variable_input[i]) {
+      // Check if this output edge actually needs to be computed
+      bool should_compute = task_should_compute_output(edge_idx);
+      PyObject* current = PyTuple_GET_ITEM(py_fn->needs_input_grad, i);
+      // Only update if current is True but we don't need to compute
+      if (current == Py_True && !should_compute) {
+        Py_INCREF(Py_False);
+        Py_DECREF(current);
+        PyTuple_SET_ITEM(py_fn->needs_input_grad, i, Py_False);
+      }
+      edge_idx++;
+    }
+  }
+
   // Massage a C++ variable_list into a Python arguments tuple
   THPObjectPtr pyInputs(to_py_args(inputs, &_device_guard));
 
-  const auto& is_variable_input = py_fn->is_variable_input;
   const auto& input_infos = py_fn->input_info;
   // input_info only contains info from variable inputs and should be a subset
   TORCH_INTERNAL_ASSERT(is_variable_input.size() >= input_infos.size());
