@@ -448,6 +448,7 @@ class TestValidateCombination(TestCase):
         1. Verifies all listed rules are detected as valid
         2. Verifies all unlisted combinations are detected as invalid
         """
+
         # Concise placement notation: S0=Shard(0), S1=Shard(1), R=Replicate,
         # Psum=Partial(sum), Pmax=Partial(max)
         def p(s):
@@ -527,7 +528,13 @@ class TestValidateCombination(TestCase):
         }
 
         # All possible placements for 2D tensor
-        ALL_PLACEMENTS = [Replicate(), Shard(0), Shard(1), Partial("sum"), Partial("max")]
+        ALL_PLACEMENTS = [
+            Replicate(),
+            Shard(0),
+            Shard(1),
+            Partial("sum"),
+            Partial("max"),
+        ]
 
         # Test each operator
         for op, valid_rule_strs in VALID_RULES.items():
@@ -612,7 +619,9 @@ class TestValidateCombination(TestCase):
                 self.world_size,
                 mesh,
             )
-            self.assertTrue(is_valid, f"R,Pmax->Pmin with alpha=-1 should be valid: {msg}")
+            self.assertTrue(
+                is_valid, f"R,Pmax->Pmin with alpha=-1 should be valid: {msg}"
+            )
 
             # R + alpha*P(max) where alpha=-1 should NOT produce P(max)
             combo_invalid = PlacementCombination(
@@ -699,19 +708,19 @@ class TestCreatePartialInput(TestCase):
         tensor = torch.ones(4, 3)
 
         # Create P(sum) with different tensor_idx values
-        local0 = _create_partial_input(tensor, Partial("sum"), world_size=2, tensor_idx=0)
-        local1 = _create_partial_input(tensor, Partial("sum"), world_size=2, tensor_idx=1)
+        local0 = _create_partial_input(
+            tensor, Partial("sum"), world_size=2, tensor_idx=0
+        )
+        local1 = _create_partial_input(
+            tensor, Partial("sum"), world_size=2, tensor_idx=1
+        )
 
         # Both should reduce to the same original tensor
         self.assertTrue(
-            torch.allclose(
-                local0._local_tensors[0] + local0._local_tensors[1], tensor
-            )
+            torch.allclose(local0._local_tensors[0] + local0._local_tensors[1], tensor)
         )
         self.assertTrue(
-            torch.allclose(
-                local1._local_tensors[0] + local1._local_tensors[1], tensor
-            )
+            torch.allclose(local1._local_tensors[0] + local1._local_tensors[1], tensor)
         )
 
         # But the per-rank values should be DIFFERENT
@@ -732,8 +741,12 @@ class TestCreatePartialInput(TestCase):
         tensor = torch.zeros(4, 3)
 
         # Create P(max) with different tensor_idx values
-        local0 = _create_partial_input(tensor, Partial("max"), world_size=2, tensor_idx=0)
-        local1 = _create_partial_input(tensor, Partial("max"), world_size=2, tensor_idx=1)
+        local0 = _create_partial_input(
+            tensor, Partial("max"), world_size=2, tensor_idx=0
+        )
+        local1 = _create_partial_input(
+            tensor, Partial("max"), world_size=2, tensor_idx=1
+        )
 
         # Both should reduce to the same original tensor
         stacked0 = torch.stack([local0._local_tensors[r] for r in range(2)])
