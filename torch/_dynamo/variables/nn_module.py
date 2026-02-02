@@ -298,24 +298,6 @@ class NNModuleVariable(VariableTracker):
         base_dict = object.__getattribute__(base, "__dict__")
         return key in base_dict
 
-    def get_value_from_generic_dict(
-        self, tx: "InstructionTranslator", key: str
-    ) -> VariableTracker:
-        """Get a value directly from __dict__ without going through var_getattr.
-
-        This avoids property inlining which can cause recursion when a property
-        getter accesses self.__dict__[name].
-        """
-        if tx.output.side_effects.has_pending_mutation_of_attr(self, key):
-            return tx.output.side_effects.load_attr(self, key)
-
-        base = tx.output.get_submodule(self.module_key)
-        base_dict = object.__getattribute__(base, "__dict__")
-        source = None
-        if self.source:
-            source = DictGetItemSource(AttrSource(self.source, "__dict__"), key)
-        return VariableTracker.build(tx, base_dict[key], source)
-
     def _custom_getattr_fallback(
         self,
         base: torch.nn.Module,
