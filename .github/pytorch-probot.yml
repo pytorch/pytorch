@@ -25,6 +25,7 @@ ciflow_push_tags:
 - ciflow/inductor-periodic
 - ciflow/inductor-rocm-mi200
 - ciflow/inductor-rocm-mi300
+- ciflow/inductor-rocm-mi355
 - ciflow/linux-aarch64
 - ciflow/mps
 - ciflow/nightly
@@ -32,6 +33,7 @@ ciflow_push_tags:
 - ciflow/periodic
 - ciflow/periodic-rocm-mi200
 - ciflow/periodic-rocm-mi300
+- ciflow/periodic-rocm-mi355
 - ciflow/pull
 - ciflow/quantization-periodic
 - ciflow/riscv64
