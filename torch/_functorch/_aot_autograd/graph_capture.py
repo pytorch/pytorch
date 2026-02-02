@@ -74,7 +74,8 @@ def _create_graph(
         @simple_wraps(f)
         def inner_f(*args: Any) -> Any:
             nonlocal out_descs
-            assert out_descs is None
+            if out_descs is not None:
+                raise AssertionError("out_descs must be None")
             out, out_descs = call_and_expect_output_descs(f, args)
             return out
 
@@ -133,11 +134,12 @@ def _create_graph(
                         n.meta["desc"] = BackwardTokenAOTInput(j)
                         j += 1
                     else:
-                        assert i < len(flat_args_descs), (
-                            (fn_wrappers(inner_f)),
-                            [n for n in fx_g.graph.nodes if n.op == "placeholder"],
-                            flat_args_descs,
-                        )
+                        if i >= len(flat_args_descs):
+                            raise AssertionError(
+                                f"i={i} >= len(flat_args_descs)={len(flat_args_descs)}: "
+                                f"fn_wrappers={fn_wrappers(inner_f)}, "
+                                f"placeholders={[n for n in fx_g.graph.nodes if n.op == 'placeholder']}"
+                            )
                         n.meta["desc"] = flat_args_descs[i]
                         i += 1
                 elif n.op == "output":
@@ -298,7 +300,10 @@ def aot_dispatch_base_graph(
         fw_module.recompile()
         copy_count2 = assert_functional_graph(fw_module.graph)
         propagate_input_mutation_stacktraces(fw_module.graph)
-        assert copy_count == copy_count2
+        if copy_count != copy_count2:
+            raise AssertionError(
+                f"copy_count={copy_count} != copy_count2={copy_count2}"
+            )
     else:
         fw_module.graph.eliminate_dead_code()
 
@@ -359,9 +364,10 @@ def aot_dispatch_base_graph(
 
     # TODO: should factor this into a separate function for export that always only returns just the graph.
     if aot_config.is_export:
-        assert maybe_subclass_meta is None, (
-            "aot_export_module does not support tensor subclass inputs for now."
-        )
+        if maybe_subclass_meta is not None:
+            raise AssertionError(
+                "aot_export_module does not support tensor subclass inputs for now."
+            )
     return (
         fw_module,
         saved_updated_flat_args_subclasses_desugared,
@@ -516,9 +522,10 @@ def aot_dispatch_autograd_graph(
     # when we need to manually detach() some inputs in the forward.
     # Higher order ops might eventually need to do the same.
     if aot_config.is_export:
-        assert maybe_subclass_meta is None, (
-            "aot_export_module does not support tensor subclass inputs for now."
-        )
+        if maybe_subclass_meta is not None:
+            raise AssertionError(
+                "aot_export_module does not support tensor subclass inputs for now."
+            )
     return (
         fx_g,
         saved_updated_joint_inputs,

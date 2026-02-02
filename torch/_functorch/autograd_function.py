@@ -234,7 +234,10 @@ def wrap_outputs_maintaining_identity(
             result.append(unwrapped_input_to_orig_input[id(output)])
             continue
         if out_dims_specified:
-            assert flat_out_dims is not None
+            if flat_out_dims is None:
+                raise AssertionError(
+                    "flat_out_dims must not be None when out_dims is specified"
+                )
             result.append(wrap_fn(output, flat_out_dims[i]))
         else:
             result.append(wrap_fn(output))
@@ -432,7 +435,8 @@ def custom_function_call_vmap_generate_rule(
     with interpreter.lower():
         outputs = custom_function_call(vmapped_function, *unwrapped_operands)
 
-    assert isinstance(outputs, tuple)
+    if not isinstance(outputs, tuple):
+        raise AssertionError(f"expected outputs to be a tuple, got {type(outputs)}")
     outputs, out_dims = unpack_outputs(outputs)
     return wrap_batched(outputs, out_dims, interpreter.level())
 
@@ -764,7 +768,8 @@ def reductify_leaf(
     # This means that we need to also reduce the grad_input to the shape of the
     # input. This behavior is controlled by the `target_shape_without_bdim_to_reduce_to` flag;
     # if not-None then we do the reducing manually, otherwise, we do not do a reduction.
-    assert input_bdim is not None
+    if input_bdim is None:
+        raise AssertionError("input_bdim must not be None")
 
     if grad_input_bdim is None:
         grad_input = grad_input.unsqueeze(input_bdim)
@@ -850,7 +855,8 @@ class AutogradFunctionApply(HigherOrderOperator):
                 # from the dynamo graph body to the local_map graph body.
                 # This is required for fx_traceback.annotate for work.
 
-                assert saved_values is not None
+                if saved_values is None:
+                    raise AssertionError("saved_values must not be None")
                 return torch.fx.Interpreter(bwd).run(*grad, *saved_values)
 
         return ApplyTemplate.apply(*fwd_args)
