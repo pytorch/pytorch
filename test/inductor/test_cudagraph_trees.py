@@ -3057,6 +3057,23 @@ if HAS_CUDA_AND_TRITON:
                 # One forward and one backward
                 self.assertEqual(self.get_manager().new_graph_id().id, 2)
 
+        def test_cudagraph_annotation_disable(self):
+            # Test that cudagraph_annotation("disable") disables cudagraphs
+            def fn(x):
+                return x + 1
+
+            with torch.device("cuda"):
+                x = torch.randn(4, 4)
+
+                # Compile with cudagraph_annotation disable
+                with torch._inductor.cudagraph_annotation("disable", fwd=True, bwd=True):
+                    fn_compiled = torch.compile(fn, mode="reduce-overhead")
+                    result = fn_compiled(x)
+
+                # Verify result is correct
+                expected = x + 1
+                self.assertEqual(result, expected)
+
         def test_tensor_constant_mutation(self):
             class Foo(torch.nn.Module):
                 def __init__(self) -> None:
