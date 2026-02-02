@@ -3745,6 +3745,33 @@ class TestDistributions(DistributionsTestCase):
                 f"Kumaraswamy example {i + 1}/{len(cases)}, incorrect .variance",
             )
 
+    def test_kumaraswamy_mode(self):
+        # Test the mode property of the Kumaraswamy distribution.
+        # Mode = ((a - 1) / (a * b - 1))^(1/a) where a = concentration1, b = concentration0.
+        # Mode is NaN when a < 1, b < 1, or when a = b = 1.
+        concentrations_and_modes = [
+            ([0.5, 0.5], nan),  # a < 1 and b < 1
+            ([1.0, 0.5], nan),  # b < 1
+            ([0.5, 1.0], nan),  # a < 1
+            ([1.0, 1.0], nan),  # a = b = 1
+            ([3.0, 1.0], 1.0),  # mode at upper boundary
+            ([1.0, 3.0], 0.0),  # mode at lower boundary
+            ([3.0, 5.0], 0.52275795857471021674829618715991546621),
+        ]
+        for (a, b), expected_mode in concentrations_and_modes:
+            dist = Kumaraswamy(torch.tensor(a), torch.tensor(b))
+            if expected_mode != expected_mode:  # NaN check
+                self.assertTrue(
+                    torch.isnan(dist.mode).all(),
+                    f"Kumaraswamy({a}, {b}).mode should be NaN, got {dist.mode}",
+                )
+            else:
+                torch.testing.assert_close(
+                    dist.mode,
+                    torch.tensor(expected_mode),
+                    msg=f"Kumaraswamy({a}, {b}).mode",
+                )
+
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_fishersnedecor(self):
         df1 = torch.randn(2, 3).abs().requires_grad_()
