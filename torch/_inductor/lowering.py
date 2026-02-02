@@ -2370,29 +2370,41 @@ def philox_rand_offset(shape):
 
 @register_lowering(torch.ops.rngprims.philox_rand, type_promotion_kind=None)
 def philox_rand(size, seed, offset, stride, device, dtype):
-    # stride arg is optional and will be used in future for distributed random
-    # ops. Currently, its unused.
+    """
+    Lowering for philox_rand. Uses strides to ensure RNG spatial 
+    alignment with non-contiguous layouts (e.g., transposed/sliced).
+    """
+    if stride is None:
+        stride = ir.FlexibleLayout.contiguous_strides(size)
+    
+    # ir.FixedLayout ensures the indexer respects the physical strides
+    # provided by the decomposition.
     random_pos = ir.FixedLayout(
         device,
         dtype,
         size,
-        ir.FlexibleLayout.contiguous_strides(size),
+        list(stride),
     ).make_indexer()
+    
     seed_loader = seed.make_loader()
     offset_loader = offset.make_loader()
 
     def inner_fn(index):
-        # Both seed and offset in the philox_rand op are tensors.
-        # torch seed and offsets are of type int64, but tl.rand accepts int32
-        seed_index_expr = ops.to_dtype(seed_loader([]), torch.int32)
-        offset_index_expr = ops.to_dtype(offset_loader([]), torch.int32)
-        # Get the offset'd position
-        rand_index_expr = ops.add(
-            ops.index_expr(random_pos(index), torch.int32), offset_index_expr
-        )
+        # Load seed and offset base
+        seed_expr = ops.to_dtype(seed_loader([]), torch.int32)
+        offset_base_expr = ops.to_dtype(offset_loader([]), torch.int32)
+        
+        # Calculate linear physical offset in int64 to prevent overflow 
+        # on large tensors or tensors with large strides.
+        linear_offset = ops.index_expr(random_pos(index), torch.int64)
+        
+        # Combine with base offset
+        rand_index_expr = ops.add(linear_offset, ops.to_dtype(offset_base_expr, torch.int64))
+        
+        # Generate random values using Philox
         result = ops.rand(
-            seed_index_expr,
-            rand_index_expr,
+            seed_expr,
+            ops.to_dtype(rand_index_expr, torch.int32),
         )
         return ops.to_dtype(result, dtype)
 
@@ -2404,8 +2416,8 @@ def philox_rand(size, seed, offset, stride, device, dtype):
     )
 
     offset_node = philox_rand_offset(size)
-    return random_values_node, offset_node
-
+    return random_values_node, offset_node 
+    
 
 @register_lowering(aten.native_dropout, type_promotion_kind=None)
 def native_dropout(x, p, train):

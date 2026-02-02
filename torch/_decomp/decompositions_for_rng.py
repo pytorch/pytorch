@@ -35,8 +35,14 @@ def rand(shape, dtype=None, layout=torch.strided, device=None, pin_memory=False)
         throw_on_non_cuda(device)
     seed, offset = PhiloxStateTracker.get_state_as_tuple()
     dtype = dtype or torch.float32
+
+    # MODIFICATION: Explicitly generate contiguous strides for a new tensor
+    # This matches the 'shape' to its default memory layout.
+    from torch._prims_common import make_contiguous_strides_for
+    stride = make_contiguous_strides_for(shape)
+
     out, offset_jump = torch.ops.rngprims.philox_rand(
-        shape, seed, offset, None, device, dtype
+        shape, seed, offset, stride, device, dtype # <--- Pass 'stride' here
     )
     PhiloxStateTracker.advance_offset(offset_jump)
     return out
@@ -56,8 +62,9 @@ def rand_like(
         throw_on_non_cuda(device)
     dtype = dtype or x.dtype
     seed, offset = PhiloxStateTracker.get_state_as_tuple()
+    # FIX: Pass x.stride() to maintain spatial alignment in Inductor
     out, offset_jump = torch.ops.rngprims.philox_rand(
-        x.shape, seed, offset, None, device, dtype
+        x.shape, seed, offset, x.stride(), device, dtype
     )
     PhiloxStateTracker.advance_offset(offset_jump)
     return out
