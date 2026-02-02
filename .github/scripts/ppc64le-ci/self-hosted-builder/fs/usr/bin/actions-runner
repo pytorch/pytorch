@@ -11,13 +11,6 @@ fi
 
 token_file=registration-token.json
 
-# Fetch GitHub access token
-if [ ! -f /run/runner_secret ]; then
-    echo "Error: Access token file not found at /run/runner_secret."
-    exit 1
-fi
-
-
 ACCESS_TOKEN="$(cat /run/runner_secret)"
 
 # Generate registration token
