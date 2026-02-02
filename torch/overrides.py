@@ -1735,18 +1735,12 @@ def handle_torch_function(
 
     # Check for __torch_function__ mode.
     if _is_torch_function_mode_enabled():
-        # Check skip_one_hop: if set, skip mode dispatch for this call but keep
-        # mode enabled for subsequent operations.
-        if torch._C._get_torch_function_skip_one_hop():
-            torch._C._set_torch_function_skip_one_hop(False)
-            # Skip mode dispatch, fall through to subclass dispatch
-        else:
-            # if we're here, the mode must be set to a TorchFunctionStackMode
-            # this unsets it and calls directly into TorchFunctionStackMode's torch function
-            with _pop_mode_temporarily() as mode:
-                result = mode.__torch_function__(public_api, types, args, kwargs)
-            if result is not NotImplemented:
-                return result
+        # if we're here, the mode must be set to a TorchFunctionStackMode
+        # this unsets it and calls directly into TorchFunctionStackMode's torch function
+        with _pop_mode_temporarily() as mode:
+            result = mode.__torch_function__(public_api, types, args, kwargs)
+        if result is not NotImplemented:
+            return result
 
     # Call overrides
     for overloaded_arg in overloaded_args:

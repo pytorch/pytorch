@@ -316,29 +316,14 @@ inline static bool has_torch_function_attr(PyObject* obj) {
 
 namespace torch {
 auto check_has_torch_function(PyObject* obj, bool ignore_mode) -> bool {
-  PyTypeObject* tp = Py_TYPE(obj);
-  bool has_subclass_torch_function =
-      !THPVariable_CheckTypeExact(tp) && !is_basic_python_type(tp) &&
-      torch::torch_function_enabled() && has_torch_function_attr(obj);
-
   if (!ignore_mode && at::impl::torch_function_mode_enabled()) {
-    // Check skip_one_hop: if set, skip mode dispatch for this call but keep
-    // mode enabled for subsequent operations.
-    if (at::impl::PythonTorchFunctionTLS::get_skip_one_hop()) {
-      if (has_subclass_torch_function) {
-        // There's a subclass with __torch_function__, so we need to dispatch.
-        // Don't clear skip_one_hop here - let handle_torch_function clear it
-        // and skip mode dispatch while still doing subclass dispatch.
-        return true;
-      } else {
-        // No subclass, only mode. Skip the dispatch entirely.
-        at::impl::PythonTorchFunctionTLS::set_skip_one_hop(false);
-        return false;
-      }
-    }
     return true;
   }
-  return has_subclass_torch_function;
+
+  PyTypeObject* tp = Py_TYPE(obj);
+  return (
+      !THPVariable_CheckTypeExact(tp) && !is_basic_python_type(tp) &&
+      torch::torch_function_enabled() && has_torch_function_attr(obj));
 }
 } // namespace torch
 
@@ -365,6 +350,13 @@ inline static bool array_has_torch_function(
 }
 
 PyObject* THPModule_has_torch_function(PyObject* /*unused*/, PyObject* arg) {
+  // Check skip_one_hop first: if set, skip ALL dispatch (mode and subclass)
+  // for this call but keep mode enabled for subsequent operations.
+  if (at::impl::PythonTorchFunctionTLS::get_skip_one_hop()) {
+    at::impl::PythonTorchFunctionTLS::set_skip_one_hop(false);
+    Py_RETURN_FALSE;
+  }
+
   bool result = false;
   if (PyTuple_CheckExact(arg) || PyList_CheckExact(arg)) {
     // Fast path:
@@ -391,6 +383,13 @@ PyObject* THPModule_has_torch_function(PyObject* /*unused*/, PyObject* arg) {
 PyObject* THPModule_has_torch_function_unary(
     PyObject* /*unused*/,
     PyObject* obj) {
+  // Check skip_one_hop first: if set, skip ALL dispatch (mode and subclass)
+  // for this call but keep mode enabled for subsequent operations.
+  if (at::impl::PythonTorchFunctionTLS::get_skip_one_hop()) {
+    at::impl::PythonTorchFunctionTLS::set_skip_one_hop(false);
+    Py_RETURN_FALSE;
+  }
+
   // Special case `THPModule_has_torch_function` for the single arg case.
   if (torch::check_has_torch_function(obj)) {
     Py_RETURN_TRUE;
@@ -402,6 +401,13 @@ PyObject* THPModule_has_torch_function_variadic(
     PyObject* /*unused*/,
     PyObject* const* args,
     Py_ssize_t nargs) {
+  // Check skip_one_hop first: if set, skip ALL dispatch (mode and subclass)
+  // for this call but keep mode enabled for subsequent operations.
+  if (at::impl::PythonTorchFunctionTLS::get_skip_one_hop()) {
+    at::impl::PythonTorchFunctionTLS::set_skip_one_hop(false);
+    Py_RETURN_FALSE;
+  }
+
   if (array_has_torch_function(args, nargs)) {
     Py_RETURN_TRUE;
   }

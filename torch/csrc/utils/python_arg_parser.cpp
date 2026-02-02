@@ -609,26 +609,26 @@ auto handle_torch_function_no_python_arg_parser(
   // subclasses override sizes/strides metadata calls with __torch_dispatch__,
   // which would mean a mode would be **required** to access their metadata.
 
-  bool skipped_mode_dispatch = false;
+  // Check skip_one_hop flag: if set, skip ALL dispatch (mode and subclass)
+  // for this call but keep mode enabled for subsequent operations.
+  if (is_torch_function && at::impl::PythonTorchFunctionTLS::get_skip_one_hop()) {
+    at::impl::PythonTorchFunctionTLS::set_skip_one_hop(false);
+    // Return nullptr to signal to the caller that it should invoke the
+    // original function directly. The mode remains on the stack so
+    // subsequent operations will still trigger mode dispatch.
+    return nullptr;
+  }
+
   if (is_mode_active()) {
-    // Check skip_one_hop flag: if set, skip this mode dispatch but keep mode
-    // enabled for subsequent operations (e.g., inside backward()).
-    if (is_torch_function && at::impl::PythonTorchFunctionTLS::get_skip_one_hop()) {
-      at::impl::PythonTorchFunctionTLS::set_skip_one_hop(false);
-      skipped_mode_dispatch = true;
-      // Skip mode dispatch, fall through to subclass dispatch or return
-      // nullptr so the underlying function is called with mode still enabled.
-    } else {
-      // Step 1: Try to dispatch on any user TorchDispatchModes (including infra
-      // modes, which will always be at the bottom of the mode stack).
-      std::tie(ret, mode_obj) = dispatch_on_mode(
-          args,
-          kwargs,
-          py_types,
-          torch_api_function,
-          is_torch_function,
-          torch_function_name_str);
-    }
+    // Step 1: Try to dispatch on any user TorchDispatchModes (including infra
+    // modes, which will always be at the bottom of the mode stack).
+    std::tie(ret, mode_obj) = dispatch_on_mode(
+        args,
+        kwargs,
+        py_types,
+        torch_api_function,
+        is_torch_function,
+        torch_function_name_str);
   }
 
   // Step 2: Try to dispatch based on any user subclasses,
@@ -654,13 +654,6 @@ auto handle_torch_function_no_python_arg_parser(
   }
 
   if (ret.ptr() == nullptr) {
-    if (skipped_mode_dispatch) {
-      // We intentionally skipped mode dispatch due to skip_one_hop.
-      // Return nullptr to signal to the caller that it should invoke the
-      // original function directly. The mode remains on the stack so
-      // subsequent operations will still trigger mode dispatch.
-      return nullptr;
-    }
     // We didn't successfully dispatch anything, this should be impossible
     TORCH_INTERNAL_ASSERT(
         0,
@@ -671,11 +664,6 @@ auto handle_torch_function_no_python_arg_parser(
         ", is_mode_active = ",
         is_mode_active());
   } else if (ret.ptr() == Py_NotImplemented) {
-    if (skipped_mode_dispatch) {
-      // We intentionally skipped mode dispatch and subclasses all returned
-      // NotImplemented. Return nullptr to invoke original function.
-      return nullptr;
-    }
     // all __torch_function__ implementations in overloaded_args
     // returned NotImplemented, so we raise a TypeError.
     std::stringstream ss;
