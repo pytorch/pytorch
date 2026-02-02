@@ -1730,9 +1730,15 @@ def handle_torch_function(
     """
     # Check skip_one_hop: if set, skip torch function dispatch and call the
     # original function directly. This is used by skip_one_torch_function_hop.
+    # We temporarily clear the flag during the call so that nested operations
+    # inside the function will dispatch normally (mode sees them), then restore
+    # the flag after returning so subsequent calls are also skipped.
     if torch._C._get_torch_function_skip_one_hop():
         torch._C._set_torch_function_skip_one_hop(False)
-        return public_api(*args, **kwargs)
+        try:
+            return public_api(*args, **kwargs)
+        finally:
+            torch._C._set_torch_function_skip_one_hop(True)
 
     # Check for __torch_function__ methods.
     overloaded_args = _get_overloaded_args(relevant_args)
