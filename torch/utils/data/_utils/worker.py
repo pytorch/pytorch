@@ -116,9 +116,9 @@ def get_worker_info() -> WorkerInfo | None:
     * :attr:`seed`: the random seed set for the current worker. This value is
       determined by main process RNG and the worker id. See
       :class:`~torch.utils.data.DataLoader`'s documentation for more details.
-    * :attr:`dataset`: the copy of the dataset object in **this** process/thread. Note
-      that this will be a different object in a different process/thread than the one
-      in the main process.
+    * :attr:`dataset`: the copy of the dataset object in **this** process or thread. Note
+      that this will be a different object in a different process than the one
+      in the main process. For thread, this is the same object as the one in the main process.
     * :attr:`worker_method`: the worker method being used. Either ``"multiprocessing"``
       for process-based workers or ``"thread"`` for thread-based workers.
 
@@ -132,7 +132,8 @@ def get_worker_info() -> WorkerInfo | None:
        sharded dataset, or use ``seed`` to seed other libraries used in dataset
        code.
     """
-    # Try thread-local storage first, fall back to _worker_info
+    # There is no global worker_method flag because it is set in worker info,
+    # so try thread-local storage first, fall back to _worker_info.
     thread_local_worker_info = getattr(_thread_local_worker_info, "worker_info", None)
     if thread_local_worker_info is not None:
         return thread_local_worker_info
@@ -140,19 +141,17 @@ def get_worker_info() -> WorkerInfo | None:
     return _worker_info
 
 
-r"""Dummy class used to signal the end of an IterableDataset"""
-
-
 @dataclass(frozen=True)
 class _IterableDatasetStopIteration:
+    """Dummy class used to signal the end of an IterableDataset"""
+
     worker_id: int
-
-
-r"""Dummy class used to resume the fetching when worker reuse is enabled"""
 
 
 @dataclass(frozen=True)
 class _ResumeIteration:
+    """Dummy class used to resume the fetching when worker reuse is enabled"""
+
     seed: int | None = None
 
 
@@ -265,11 +264,8 @@ def _base_worker_loop(
     auto_collation,
     collate_fn,
     drop_last,
-    seed,
     init_fn,
     worker_id,
-    num_workers,
-    persistent_workers,
     shared_rng=None,
     worker_method="multiprocessing",
     watchdog_constructor=None,
@@ -417,7 +413,6 @@ def _process_worker_loop(
     init_fn,
     worker_id,
     num_workers,
-    persistent_workers,
     shared_seed,
 ):
     # See NOTE [ Data Loader Multiprocessing Shutdown Logic ] for details on the
@@ -433,24 +428,13 @@ def _process_worker_loop(
 
     seed = base_seed + worker_id
     random.seed(seed)
-    torch_generator = torch.manual_seed(seed)
-
-    # Extract the global generators
-    random_generator = random._inst
-    numpy_generator = None
+    torch.manual_seed(seed)
 
     if HAS_NUMPY:
         np_seed = _generate_state(base_seed, worker_id)
         import numpy as np
 
         np.random.seed(np_seed)
-        numpy_generator = np.random.mtrand._rand
-
-    rng = _RNG(
-        random_generator=random_generator,
-        torch_generator=torch_generator,
-        numpy_generator=numpy_generator,
-    )
 
     from torch.utils.data import IterDataPipe
 
@@ -471,7 +455,6 @@ def _process_worker_loop(
         num_workers=num_workers,
         seed=seed,
         dataset=dataset,
-        rng=rng,
         worker_method="multiprocessing",
     )
 
@@ -484,11 +467,8 @@ def _process_worker_loop(
         auto_collation=auto_collation,
         collate_fn=collate_fn,
         drop_last=drop_last,
-        seed=seed,
         init_fn=init_fn,
         worker_id=worker_id,
-        num_workers=num_workers,
-        persistent_workers=persistent_workers,
         shared_rng=shared_rng,
         worker_method="multiprocessing",
         watchdog_constructor=ManagerWatchdog,
@@ -512,7 +492,6 @@ def _thread_worker_loop(
     init_fn,
     worker_id,
     num_workers,
-    persistent_workers,
     pin_memory=False,
 ):
     """
@@ -572,11 +551,8 @@ def _thread_worker_loop(
         auto_collation=auto_collation,
         collate_fn=collate_fn,
         drop_last=drop_last,
-        seed=seed,
         init_fn=init_fn,
         worker_id=worker_id,
-        num_workers=num_workers,
-        persistent_workers=persistent_workers,
         shared_rng=None,  # Not used for thread workers
         worker_method="thread",
         watchdog_constructor=None,  # No watchdog needed for threads

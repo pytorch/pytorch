@@ -1183,7 +1183,6 @@ class _ThreadingDataLoaderIter(_ParallelDataLoaderIter):
                     self._worker_init_fn,
                     i,
                     self._num_workers,
-                    self._persistent_workers,
                     self._pin_memory,
                 ),
                 daemon=True,
@@ -1545,7 +1544,6 @@ class _MultiProcessingDataLoaderIter(_ParallelDataLoaderIter):
                     self._worker_init_fn,
                     i,
                     self._num_workers,
-                    self._persistent_workers,
                     self._shared_seed,
                 ),
             )
@@ -1758,7 +1756,9 @@ class _MultiProcessingDataLoaderIter(_ParallelDataLoaderIter):
         # Check for early exit conditions
         if (
             _utils is None
+            # pyrefly: ignore [unnecessary-comparison]
             or _utils.python_exit_status is True
+            # pyrefly: ignore [unnecessary-comparison]
             or _utils.python_exit_status is None
         ):
             # See NOTE [ Data Loader Multiprocessing Shutdown Logic ] for details.

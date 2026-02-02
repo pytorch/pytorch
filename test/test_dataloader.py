@@ -1086,7 +1086,7 @@ def _test_worker_info_init_fn(worker_id):
         raise AssertionError("worker_info should have correct dataset copy")
     if hasattr(dataset, "value"):
         raise AssertionError("worker_info should have correct dataset copy")
-    for k in ["id", "num_workers", "seed", "dataset", "rng"]:
+    for k in ["id", "num_workers", "seed", "dataset", "rng", "worker_method"]:
         if f"{k}=" not in repr(worker_info):
             raise AssertionError(f"Expected {k} in worker_info repr")
     dataset.value = [worker_id, os.getpid()]
@@ -4314,6 +4314,144 @@ class TestThreadingDataLoader(TestCase):
         self.assertNotEqual(
             worker_info_data[0]["torch_generator_id"],
             worker_info_data[1]["torch_generator_id"],
+        )
+
+    def test_threading_shutdown_iterator_exhausted(self):
+        """Case 1: Iterator completed its work, so shutdown automatically."""
+        import time
+
+        loader = DataLoader(
+            self.dataset,
+            batch_size=10,
+            num_workers=2,
+            worker_method="thread",
+        )
+
+        iterator = iter(loader)
+        worker_threads = list(iterator._workers)
+
+        for _ in iterator:
+            pass
+
+        time.sleep(0.5)
+
+        # All workers should be stopped automatically after exhaustion
+        for w in worker_threads:
+            self.assertFalse(w.is_alive())
+
+    def test_threading_shutdown_persistent_workers_exhausted(self):
+        """Case 2: Iterator completed its work with persistent_workers, don't shutdown
+        automatically, shutdown on calling _shutdown_workers."""
+        import time
+
+        loader = DataLoader(
+            self.dataset,
+            batch_size=10,
+            num_workers=2,
+            worker_method="thread",
+            persistent_workers=True,
+        )
+
+        for _ in loader:
+            pass
+
+        # Workers should still be alive (persistent)
+        worker_threads = list(loader._iterator._workers)
+        for w in worker_threads:
+            self.assertTrue(w.is_alive())
+
+        # Explicitly shutdown
+        loader._iterator._shutdown_workers()
+
+        time.sleep(0.5)
+
+        # All workers should be stopped after explicit shutdown
+        for w in worker_threads:
+            self.assertFalse(w.is_alive())
+
+    def test_threading_shutdown_partial_iteration(self):
+        """Case 3: Iterator did some work but not completely exhausted, workers aren't
+        shutdown, but they shutdown on calling _shutdown_workers."""
+        import time
+
+        loader = DataLoader(
+            self.dataset,
+            batch_size=2,
+            num_workers=3,
+            worker_method="thread",
+        )
+
+        iterator = iter(loader)
+        next(iterator)
+        next(iterator)
+
+        worker_threads = list(iterator._workers)
+
+        for w in worker_threads:
+            self.assertTrue(w.is_alive())
+
+        # Explicitly shutdown workers
+        iterator._shutdown_workers()
+
+        time.sleep(0.5)
+
+        # All workers should be stopped after explicit shutdown
+        for w in worker_threads:
+            self.assertFalse(w.is_alive())
+
+    def test_threading_shutdown_on_program_exit(self):
+        """Case 4: Iterator did some work but not completely exhausted, program exits,
+        workers are shutdown and the program can exit without hanging.
+
+        Note: The main goal is to verify the process doesn't hang. Daemon threads may
+        cause C++ cleanup warnings on abrupt exit, but this is expected behavior.
+        """
+        import subprocess
+        import sys
+
+        # Script that creates a threading DataLoader, partially iterates, then exits
+        script = """
+import torch
+from torch.utils.data import DataLoader, TensorDataset
+
+data = torch.randn(100, 2, 3)
+labels = torch.randperm(50).repeat(2)
+dataset = TensorDataset(data, labels)
+
+loader = DataLoader(
+    dataset,
+    batch_size=2,
+    num_workers=3,
+    worker_method="thread",
+)
+
+# Partially iterate (don't exhaust)
+iterator = iter(loader)
+next(iterator)
+next(iterator)
+
+# Exit without explicit shutdown - daemon threads should allow clean exit
+print("SUCCESS")
+"""
+        # Run the script as a subprocess with a timeout
+        # If workers don't shutdown properly, the process will hang and timeout
+        try:
+            result = subprocess.run(
+                [sys.executable, "-c", script],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+        except subprocess.TimeoutExpired:
+            self.fail("Process hung - threading workers prevented clean exit")
+
+        # The key assertion: SUCCESS was printed, meaning the script completed
+        # Return code may be non-zero due to C++ thread cleanup warnings when
+        # daemon threads are abruptly terminated, but that's acceptable
+        self.assertIn(
+            "SUCCESS",
+            result.stdout,
+            f"Script did not complete successfully. stdout: {result.stdout}, stderr: {result.stderr}",
         )
 
 

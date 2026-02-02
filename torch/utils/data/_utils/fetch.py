@@ -30,8 +30,6 @@ class _IterableDatasetFetcher(_BaseDatasetFetcher):
 
         if self.auto_collation:
             data = []
-            # For iterable datasets indices are ignored,
-            # we just fetch the next element from the dataset iterator.
             for _ in possibly_batched_index:
                 try:
                     data.append(next(self.dataset_iter))
