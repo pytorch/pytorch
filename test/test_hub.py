@@ -68,7 +68,6 @@ class TestHub(TestCase):
             "ailzhang/torchhub_example",
             force_reload=False,
             trust_repo=True,
-            calling_fn=None,
         )
         hub_model = hub.load(
             local_dir, "mnist", source="local", pretrained=True, verbose=False
@@ -283,22 +282,6 @@ class TestHub(TestCase):
     @retry(Exception, tries=3)
     def test_trust_repo_builtin_trusted_owners(self):
         torch.hub.load("pytorch/vision", "resnet18", trust_repo="check")
-        self._assert_trusted_list_is_empty()
-
-    @retry(Exception, tries=3)
-    def test_trust_repo_none(self):
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            torch.hub.load(
-                "ailzhang/torchhub_example", "mnist_zip_1_6", trust_repo=None
-            )
-            assert len(w) == 1
-            assert issubclass(w[-1].category, UserWarning)
-            assert (
-                "You are about to download and run code from an untrusted repository"
-                in str(w[-1].message)
-            )
-
         self._assert_trusted_list_is_empty()
 
     @retry(Exception, tries=3)
