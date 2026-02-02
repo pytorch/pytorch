@@ -2580,8 +2580,9 @@ class CUDAScaledBlackwellTMATemplateConfigHeuristic(
 
     def __init__(self) -> None:
         super().__init__()
-        # TODO: Tune scaled_persistent_mm_configs for Blackwell
-        self.mm_configs = self.blackwell_persistent_addmm_configs
+        # TODO: Tune self.blackwell_scaled_persistent_mm_configs
+        self.mm_configs = self.blackwell_scaled_persistent_mm_configs
+        self.exhaustive_configs = self._generate_exhaustive_configs()
 
 
 @register_template_heuristic(
