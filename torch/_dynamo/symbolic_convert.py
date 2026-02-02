@@ -4599,6 +4599,17 @@ class InstructionTranslatorBase(
 
         analysis = self._analyze_comprehension()
 
+        if self.f_code.co_name.startswith("torch_dynamo_resume"):
+            if analysis.captured_vars:
+                unimplemented(
+                    gb_type="Comprehension graph break in resume function with captured variables",
+                    context=str(analysis.captured_vars),
+                    explanation="Cannot use comprehension optimization inside a resume "
+                    "function when there are captured variables. This can cause issues "
+                    "with deeply nested source chains.",
+                    hints=[],
+                )
+
         assert self.instruction_pointer is not None
         start_ip = self.instruction_pointer - 1  # BUILD_LIST/BUILD_MAP
 

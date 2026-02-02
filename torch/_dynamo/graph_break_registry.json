@@ -2612,6 +2612,14 @@
       ]
     }
   ],
+  "GB2669": [
+    {
+      "Gb_type": "Comprehension graph break in resume function with captured variables",
+      "Context": "str(analysis.captured_vars)",
+      "Explanation": "Cannot use comprehension optimization inside a resume function when there are captured variables. This can cause issues with deeply nested source chains.",
+      "Hints": []
+    }
+  ],
   "GB0223": [
     {
       "Gb_type": "torch.compile call with > 1 args",
