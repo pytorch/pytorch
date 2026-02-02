@@ -181,6 +181,42 @@ def reconstruct_original_args(
         yield new_args, new_kwargs
 
 
+def make_function_wrapper(
+    fn: Callable[..., Any],
+    input_spec: pytree.TreeSpec,
+    captured_out_spec_holder: list[pytree.TreeSpec | None],
+) -> Callable[..., tuple[Any, ...]]:
+    """
+    The wrapper:
+    1. Takes flat_args containing flattened LeafModuleState objects
+    2. Unflattens them with input_spec and converts LeafModuleState back to nn.Module
+    3. Calls fn with reconstructed args/kwargs
+    4. Flattens and validates the output, captures/verifies the output spec
+    """
+    from torch._higher_order_ops.flat_apply import is_valid_output, to_graphable
+
+    def wrapper(*flat_args: Any) -> tuple[Any, ...]:
+        with reconstruct_original_args(input_spec, flat_args) as (args, kwargs):
+            out = fn(*args, **kwargs)
+
+        flat_out, out_spec = to_graphable(out)
+        if captured_out_spec_holder[0] is None:
+            captured_out_spec_holder[0] = out_spec
+        elif captured_out_spec_holder[0] != out_spec:
+            raise AssertionError(
+                f"output structure mismatch: expected {captured_out_spec_holder[0]}, "
+                f"got {out_spec}. Ensure the function returns the same pytree "
+                f"structure every time."
+            )
+        if not is_valid_output(flat_out):
+            raise AssertionError(
+                f"output must be graphable or nested list/tuple of graphables, got {flat_out}"
+            )
+        return tuple(flat_out)
+
+    return wrapper
+
+
 def autograd_grad_with_gradient_info(
     output_infos: Sequence[GradientInfo | None],
     input_infos: Sequence[GradientInfo | None],
