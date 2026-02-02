@@ -607,10 +607,11 @@ class TestCommon(TestCase):
             if skip_bfloat and (
                 (
                     isinstance(sample.input, torch.Tensor)
-                    and sample.input.dtype == torch.bfloat16
+                    and sample.input.dtype in {torch.bfloat16, torch.bcomplex32}
                 )
                 or any(
-                    isinstance(arg, torch.Tensor) and arg.dtype == torch.bfloat16
+                    isinstance(arg, torch.Tensor)
+                    and arg.dtype in {torch.bfloat16, torch.bcomplex32}
                     for arg in sample.args
                 )
             ):
