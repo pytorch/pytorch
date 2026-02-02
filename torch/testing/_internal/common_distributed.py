@@ -238,6 +238,35 @@ def skip_if_lt_x_gpu(x):
     return decorator
 
 
+def skip_if_lt_x_gpu_unless_cpu(x):
+    """Skip if fewer than x accelerators available, unless no accelerators exist.
+
+    For CPU-only machines (no CUDA/HPU/XPU), always runs the test.
+    For machines with accelerators, skips if device count < x.
+    """
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            if torch.cuda.is_available() and torch.cuda.device_count() >= x:
+                return func(*args, **kwargs)
+            if TEST_HPU and torch.hpu.device_count() >= x:
+                return func(*args, **kwargs)
+            if TEST_XPU and torch.xpu.device_count() >= x:
+                return func(*args, **kwargs)
+            # No accelerator available means CPU testing - run the test
+            if not (torch.cuda.is_available() or TEST_HPU or TEST_XPU):
+                return func(*args, **kwargs)
+            # Accelerator present but not enough devices - skip
+            test_skip = TEST_SKIPS[f"multi-gpu-{x}"]
+            if not _maybe_handle_skip_if_lt_x_gpu(args, test_skip.message):
+                sys.exit(test_skip.exit_code)
+
+        return wrapper
+
+    return decorator
+
+
 def requires_world_size(n: int):
     """
     Decorator to request a specific world size for a test. The test harness can
