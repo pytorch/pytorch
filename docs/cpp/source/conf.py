@@ -20,7 +20,6 @@
 # See https://github.com/pytorch/pytorch/issues/79992.
 
 import os
-import textwrap
 
 # sys.path.insert(0, os.path.abspath('.'))
 import pytorch_sphinx_theme2
@@ -31,14 +30,56 @@ import pytorch_sphinx_theme2
 # If your documentation needs a minimal Sphinx version, state it here.
 #
 needs_sphinx = "3.1.2"
-run_doxygen = os.environ.get("RUN_DOXYGEN", "false") == "true"
 
 # Add any Sphinx extension module names here, as strings. They can be
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
 extensions = [
     "sphinx.ext.intersphinx",
-] + (["breathe", "exhale"] if run_doxygen else [])
+    "breathe",
+]
+
+# -- Breathe Configuration ------------------------------------------------
+# Breathe connects Sphinx to Doxygen XML output
+# Use doxygenclass, doxygenfunction, etc. directives in RST files
+# to pull documentation from C++ source code
+
+breathe_projects = {
+    "PyTorch": "../build/xml"
+}
+breathe_default_project = "PyTorch"
+
+# Default members to show when using doxygenclass/doxygenstruct directives
+breathe_default_members = ('members', 'undoc-members')
+
+# Map file extensions to language domains for proper syntax highlighting
+breathe_domain_by_extension = {
+    "h": "cpp",
+    "hpp": "cpp",
+    "cpp": "cpp",
+    "c": "c",
+}
+
+# Implementation detail filters - skip internal/private content
+breathe_implementation_filename_extensions = ['.c', '.cc', '.cpp']
+
+# Show the file where items are defined
+breathe_show_define_initializer = True
+breathe_show_enumvalue_initializer = True
+
+# Control what gets shown in documentation
+breathe_show_include = False  # Don't show #include directives
+
+# Order of member documentation
+breathe_order_parameters_first = False
+
+# Use Sphinx's C++ domain for cross-references
+breathe_use_project_refids = True
+
+# Suppress specific Breathe warnings for cleaner builds
+breathe_debug_trace_directives = False
+breathe_debug_trace_doxygen_ids = False
+breathe_debug_trace_qualification = False
 
 intersphinx_mapping = {"pytorch": ("https://docs.pytorch.org/docs/main", None)}
 
@@ -51,99 +92,6 @@ suppress_warnings = [
     "toc.not_readable",
     "misc.highlighting_failure",
 ]
-
-# Configure Breathe
-breathe_show_define_initializer = True
-breathe_show_enumvalue_initializer = True
-breathe_default_members = ("members", "undoc-members")
-
-
-# Fix for Python 3.10+ compatibility with exhale 2.3.0
-# MutableMapping was moved from collections to collections.abc in Python 3.10
-try:
-    import collections
-    from collections.abc import MutableMapping
-
-    if not hasattr(collections, "MutableMapping"):
-        collections.MutableMapping = MutableMapping
-except ImportError:
-    pass
-
-# Setup absolute paths for communicating with breathe / exhale where
-# items are expected / should be trimmed by.
-# This file is {repo_root}/docs/cpp/source/conf.py
-this_file_dir = os.path.abspath(os.path.dirname(__file__))
-doxygen_xml_dir = os.path.join(
-    os.path.dirname(this_file_dir),  # {repo_root}/docs/cpp
-    "build",  # {repo_root}/docs/cpp/build
-    "xml",  # {repo_root}/docs/cpp/build/xml
-)
-repo_root = os.path.dirname(  # {repo_root}
-    os.path.dirname(  # {repo_root}/docs
-        os.path.dirname(  # {repo_root}/docs/cpp
-            this_file_dir  # {repo_root}/docs/cpp/source
-        )
-    )
-)
-
-breathe_projects = {"PyTorch": doxygen_xml_dir}
-breathe_default_project = "PyTorch"
-
-# Setup the exhale extension
-exhale_args = {
-    ############################################################################
-    # These arguments are required.                                            #
-    ############################################################################
-    "containmentFolder": "./api",
-    "rootFileName": "library_root.rst",
-    "rootFileTitle": "Library API",
-    "doxygenStripFromPath": repo_root,
-    ############################################################################
-    # Suggested optional arguments.                                            #
-    ############################################################################
-    "createTreeView": True,
-    "exhaleExecutesDoxygen": True,
-    "exhaleUseDoxyfile": True,
-    "verboseBuild": True,
-    ############################################################################
-    # HTML Theme specific configurations.                                      #
-    ############################################################################
-    # Fix broken Sphinx RTD Theme 'Edit on GitHub' links
-    # Search for 'Edit on GitHub' on the FAQ:
-    #     http://exhale.readthedocs.io/en/latest/faq.html
-    "pageLevelConfigMeta": ":github_url: https://github.com/pytorch/pytorch",
-    ############################################################################
-    # Individual page layout example configuration.                            #
-    ############################################################################
-    # Example of adding contents directives on custom kinds with custom title
-    "contentsTitle": "Page Contents",
-    "kindsWithContentsDirectives": ["class", "file", "namespace", "struct"],
-    # Exclude PIMPL files from class hierarchy tree and namespace pages.
-    "listingExclude": [r".*Impl$"],
-    ############################################################################
-    # Main library page layout example configuration.                          #
-    ############################################################################
-    "afterTitleDescription": textwrap.dedent(
-        """
-        Welcome to the developer reference for the PyTorch C++ API.
-    """
-    ),
-    ############################################################################
-    # Duplicate handling and error management.                                 #
-    ############################################################################
-    # Note: Using Doxyfile instead of stdin configuration
-    # "exhaleDoxygenStdin" is not compatible with "exhaleUseDoxyfile"
-    # Handle unresolved references more gracefully
-    "unabridgedOrphanKinds": {
-        "function",
-        "define",
-        "enum",
-        "enumvalue",
-        "typedef",
-        "variable",
-    },
-    "fullToctreeMaxDepth": 2,
-}
 
 # Tell sphinx what the primary language being documented is.
 primary_domain = "cpp"
@@ -264,8 +212,9 @@ html_context = {
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
 # NOTE: sharing python docs resources
-html_static_path = [os.path.join(repo_root, "docs", "cpp", "source", "_static")]
+html_static_path = ["_static"]
 html_css_files = ["cpp_theme.css"]
+html_js_files = ["cpp_theme.js"]
 
 # Called automatically by Sphinx, making this `conf.py` an "extension".
 
