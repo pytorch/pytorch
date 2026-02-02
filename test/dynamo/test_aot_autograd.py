@@ -1766,6 +1766,60 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
         self.assertTrue(torch.allclose(result_original, result_compiled))
 
+    def test_layer_norm_double_backward_dynamic_shapes(self):
+        """
+        Test that layer_norm with create_graph=True (double backward) works
+        with dynamic shapes without recompilations.
+
+        This tests the fix for layer_norm_double_backward to use SymInt properly
+        so that dynamic batch sizes don't cause specialization/recompilation.
+        """
+
+        class LayerNormGradModel(torch.nn.Module):
+            def __init__(self, dim=64):
+                super().__init__()
+                self.layer_norm = torch.nn.LayerNorm(dim)
+
+            def forward(self, x: torch.Tensor):
+                x = x.clone().requires_grad_(True)
+                y = self.layer_norm(x)
+                grad_outputs = torch.ones_like(y)
+                # create_graph=True triggers layer_norm_double_backward
+                (grad,) = torch.autograd.grad(
+                    y,
+                    x,
+                    grad_outputs=grad_outputs,
+                    create_graph=True,
+                    allow_unused=True,
+                )
+                return y, grad
+
+        model = LayerNormGradModel(dim=64)
+
+        # Trace with symbolic shapes
+        example_input = torch.randn(10, 64)
+        fx_model = make_fx(
+            model,
+            tracing_mode="symbolic",
+            _allow_non_fake_inputs=True,
+        )(example_input)
+
+        # Compile with dynamic=True and a counter to track recompilations
+        cnt = CompileCounterWithBackend(backend="inductor")
+        compiled_model = torch.compile(
+            fx_model, dynamic=True, fullgraph=True, backend=cnt
+        )
+
+        batch_sizes = [10, 20, 30, 40]
+        for batch_size in batch_sizes:
+            x = torch.randn(batch_size, 64)
+            y, grad = compiled_model(x)
+            self.assertEqual(y.shape, (batch_size, 64))
+            self.assertEqual(grad.shape, (batch_size, 64))
+
+        # Should only compile once regardless of batch size changes
+        self.assertEqual(cnt.frame_count, 1)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
