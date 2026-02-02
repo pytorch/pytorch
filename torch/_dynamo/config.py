@@ -232,6 +232,12 @@ disable = os.environ.get("TORCH_COMPILE_DISABLE", "0") == "1"
 # [@compile_ignored: runtime_behaviour] Get a cprofile trace of Dynamo
 cprofile = os.environ.get("TORCH_COMPILE_CPROFILE", False)
 
+# Enable Dynamo profiler. When enabled, prints pstats output showing
+# time spent tracing each user function. Set to True to enable, or set to a
+# file path to save the .prof file for snakeviz.
+# [@compile_ignored: runtime_behaviour]
+dynamo_profiler: bool | str = os.environ.get("TORCH_COMPILE_DYNAMO_PROFILER", False)
+
 # Legacy config, does nothing now!
 skipfiles_inline_module_allowlist: dict[Any, Any] = {}
 """Allowlist of inline modules to skip during compilation.
