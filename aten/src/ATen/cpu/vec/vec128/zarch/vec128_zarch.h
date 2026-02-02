@@ -2323,12 +2323,23 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_complex<T>()>> {
   }
 
   Vectorized<T> reciprocal() const {
+    // TODO: The vectorized implementation requires special handling for the
+    // case where real number/imag number is 0/Inf/NaN.
+#if 0
     // re + im*i = (a + bi)  / (c + di)
     // re = (ac + bd)/abs_2() = c/abs_2()
     // im = (bc - ad)/abs_2() = d/abs_2()
     vinner_type c_d = _vec ^ vinner_type(isign_mask<underline_type>());
     vinner_type abs = abs_2_();
     return Vectorized<T>{c_d / abs};
+#else
+    __at_align__ T tmp[size()];
+    store(tmp);
+    for (const auto i : c10::irange(size())) {
+      tmp[i] = T(1) / tmp[i];
+    }
+    return loadu(tmp);
+#endif
   }
 
   Vectorized<T> rsqrt() const {
