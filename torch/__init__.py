@@ -132,6 +132,7 @@ __all__ = [
     "sym_min",
     "sym_not",
     "sym_sum",
+    "thread_safe_generator",
     "typename",
     "unravel_index",
     "use_deterministic_algorithms",
@@ -2144,7 +2145,14 @@ _tensor_classes: set[type["torch.Tensor"]] = set()
 from torch import amp as amp, random as random, serialization as serialization
 from torch._tensor_str import set_printoptions
 from torch.amp import autocast, GradScaler
-from torch.random import get_rng_state, initial_seed, manual_seed, seed, set_rng_state
+from torch.random import (
+    get_rng_state,
+    initial_seed,
+    manual_seed,
+    seed,
+    set_rng_state,
+    thread_safe_generator,
+)
 from torch.serialization import load, save
 
 
