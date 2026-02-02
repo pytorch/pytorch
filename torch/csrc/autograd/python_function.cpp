@@ -185,9 +185,8 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
     throw_python_error();
   ensure_tuple(r);
 
-  const auto& is_variable_input_ = py_fn->is_variable_input;
   auto num_outputs = PyTuple_GET_SIZE(r.get());
-  auto num_forward_inputs = static_cast<Py_ssize_t>(is_variable_input_.size());
+  auto num_forward_inputs = static_cast<Py_ssize_t>(is_variable_input.size());
   // Returning too many results is ok, but only as long as they're all None.
   // Truncate the result tuple in that case.
   if (num_outputs > num_forward_inputs) {
@@ -215,7 +214,7 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
       ")");
 
   // Massage the Python results tuple back into a C++ variable_list
-  return to_variable_list(r.get(), is_variable_input_);
+  return to_variable_list(r.get(), is_variable_input);
 }
 
 auto PyNode::apply_with_saved_impl(
