@@ -51,6 +51,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TEST_CUDA,
     TEST_CUDA_GRAPH,
+    TEST_HPU,
     TEST_XPU,
     wrapSwapTensorsTest,
     xfailIf,
@@ -69,6 +70,17 @@ from torch.testing._internal.common_fsdp import get_devtype
 
 
 device_type = torch.device(get_devtype())
+
+
+# Patch torch.cpu._sleep for CPU testing since it's not in the public API
+def _cpu_sleep(cycles: int) -> None:
+    """Spin-wait for approximately the given number of cycles."""
+    for _ in range(cycles):
+        pass
+
+
+if device_type.type == "cpu":
+    torch.cpu._sleep = _cpu_sleep
 
 
 class TestFullyShardForwardInputs(FSDPTestMultiThread):
@@ -341,6 +353,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 _optim.step()
             self.assertEqual(losses[0], losses[1])
 
+    @unittest.skipIf(TEST_HPU or TEST_XPU, "Sleep kernel not supported for HPU/XPU")
     @compiled_fsdp_test(compile_compute_on_module=Transformer)
     def test_train_parity_multi_group(self):
         """
@@ -362,6 +375,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             self._test_train_parity_multi_group,
         )
 
+    @unittest.skipIf(TEST_HPU or TEST_XPU, "sleep kernel not supported on HPU/XPU")
     def test_train_parity_multi_group_cpu_offload_eager(self):
         """
         Tests train parity against DDP when using multiple parameter groups for
@@ -385,6 +399,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             self._test_train_parity_multi_group,
         )
 
+    @unittest.skipIf(TEST_HPU or TEST_XPU, "sleep kernel not supported on HPU/XPU")
     @compiled_fsdp_test(compile_compute_on_module=Transformer)
     def test_train_parity_multi_group_unshard_async_op(self):
         """
@@ -467,13 +482,13 @@ class TestFullyShard1DTrainingCore(FSDPTest):
 
         def delayed_all_gather(*args, **kwargs):
             torch.get_device_module(device_type)._sleep(
-                int(delay_in_ms * get_cycles_per_ms())
+                int(delay_in_ms * get_cycles_per_ms(device_type.type))
             )
             return orig_all_gather(*args, **kwargs)
 
         def delayed_reduce_scatter(*args, **kwargs):
             torch.get_device_module(device_type)._sleep(
-                int(delay_in_ms * get_cycles_per_ms())
+                int(delay_in_ms * get_cycles_per_ms(device_type.type))
             )
             return orig_reduce_scatter(*args, **kwargs)
 
@@ -497,16 +512,17 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                     losses.append(_model(inp).sum())
                     if _model is model and delay_after_forward:
                         torch.get_device_module(test_device_type)._sleep(
-                            int(delay_in_ms * get_cycles_per_ms())
+                            int(delay_in_ms * get_cycles_per_ms(device_type.type))
                         )
                     losses[-1].backward()
                     if _model is model and delay_before_optim:
                         torch.get_device_module(test_device_type)._sleep(
-                            int(delay_in_ms * get_cycles_per_ms())
+                            int(delay_in_ms * get_cycles_per_ms(device_type.type))
                         )
                     _optim.step()
                 self.assertEqual(losses[0], losses[1])
 
+    @unittest.skipIf(TEST_XPU, "Sleep is not supported on XPU")
     def test_non_root_forward_backward(self):
         """
         Tests running forward/backward through the root and then through a
@@ -541,7 +557,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
 
         root_loss = model(inp).sum()
         root_loss.backward()
-        torch.get_device_module(device_type)._sleep(int(100 * get_cycles_per_ms()))
+        torch.get_device_module(device_type)._sleep(int(100 * get_cycles_per_ms(device_type.type)))
         optim.step()
         optim.zero_grad()
         nonroot_loss = model[0](inp).sum()
@@ -634,6 +650,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 _optim.step()
             self.assertEqual(losses[0], losses[1])
 
+    @unittest.skipIf(TEST_HPU or TEST_XPU, "Sleep is not supported on HPU/XPU")
     @unittest.skipIf(not TEST_CUDA, "Numerical precision issue on CPU to investigate")
     def test_post_optim_event(self):
         torch.manual_seed(42)
@@ -673,7 +690,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             optim.step()
             # Sleep after the optimizer step to allow CPU to run ahead into the
             # next iteration's forward, exercising the post-optim stream sync
-            torch.get_device_module(device_type)._sleep(int(25 * get_cycles_per_ms()))
+            torch.get_device_module(device_type)._sleep(int(25 * get_cycles_per_ms(device_type.type)))
         for ref_loss, loss in zip(ref_losses, losses):
             self.assertEqual(ref_loss, loss)
 

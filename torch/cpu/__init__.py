@@ -25,7 +25,6 @@ __all__ = [
     "Stream",
     "StreamContext",
     "Event",
-    "_sleep",
 ]
 
 
@@ -201,18 +200,3 @@ def is_initialized() -> bool:
     N.B. This function only exists to facilitate device-agnostic code
     """
     return True
-
-
-def _sleep(cycles: int) -> None:
-    r"""Spin-wait for approximately the given number of cycles.
-
-    This is a CPU equivalent of torch.cuda._sleep() to facilitate device-agnostic
-    code. Unlike CUDA's stream-blocking sleep, this busy-waits on the CPU.
-
-    Args:
-        cycles: Number of cycles to spin (approximate, not exact cycle count).
-
-    N.B. This function only exists to facilitate device-agnostic code
-    """
-    for _ in range(cycles):
-        pass
