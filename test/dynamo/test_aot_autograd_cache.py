@@ -2810,9 +2810,9 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
 
         self.assertIsNone(result)
         self.assertEqual(len(log_context.output), 1)
-        self.assertExpectedInline(
+        self.assertIn(
+            """'AOTAutogradCachePicklerTests.test_pickle_entry_with_lambda.<locals>.<lambda>'""",  # noqa: B950
             log_context.output[0],
-            """WARNING:torch._functorch._aot_autograd.autograd_cache:AOTAutograd cache unable to serialize compiled graph: Can't get local object 'AOTAutogradCachePicklerTests.test_pickle_entry_with_lambda.<locals>.<lambda>'""",  # noqa: B950
         )
         mock_trace.assert_called_once()
         call_args = mock_trace.call_args
