@@ -47,7 +47,7 @@ addmm = _add_docstr(
 sparse.addmm(mat, mat1, mat2, *, beta=1., alpha=1.) -> Tensor
 
 This function does exact same thing as :func:`torch.addmm` in the forward,
-except that it supports backward for sparse matrix :attr:`mat1`.
+except that it supports backward for sparse COO and CSR matrix :attr:`mat1`.
 When :attr:`mat1` is a COO tensor it must have `sparse_dim = 2`.
 
 Supports both CSR and COO storage formats.
@@ -59,6 +59,7 @@ Supports both CSR and COO storage formats.
       sparse input is returned as a sparse COO tensor.
     - **CSR @ Dense**: Backward is supported for both inputs. The gradient for the
       sparse input is returned as a sparse CSR tensor.
+    - **CSC/BSR/BSC @ Dense**: Not supported.
     - **Sparse @ Sparse** (COO @ COO, CSR @ CSR): Forward works, but backward is
       not supported.
 
@@ -90,6 +91,7 @@ mm = _add_docstr(
       sparse input is returned as a sparse COO tensor.
     - **CSR @ Dense**: Backward is supported for both inputs. The gradient for the
       sparse input is returned as a sparse CSR tensor.
+    - **CSC/BSR/BSC @ Dense**: Not supported.
     - **Sparse @ Sparse** (COO @ COO, CSR @ CSR): Forward works, but backward is
       not supported.
     - **Mixed formats** (COO @ CSR, CSR @ COO): Not supported.
