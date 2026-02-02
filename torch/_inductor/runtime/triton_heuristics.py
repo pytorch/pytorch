@@ -2897,12 +2897,22 @@ def pointwise(
                             )
                         ]
                     )
+            if torch.xpu.is_available():
+                configs.extend(
+                    [  # intel-xpu-backend-for-triton #5133
+                        triton_config_with_settings(size_hints, 32),
+                    ]
+                )
     if len(size_hints) == 2:
         # Only avoiding tuning on TileHint.SQUARE if not on ROCm builds
         # ROCm has observed improvement by diverging here
         if (
             not inductor_meta.get("autotune_pointwise", True)
-            or (torch.version.hip is None and tile_hint == TileHint.SQUARE)
+            or (
+                torch.version.hip is None
+                and tile_hint == TileHint.SQUARE
+                and torch.version.xpu is None
+            )
         ) and not (
             inductor_meta.get("max_autotune")
             or inductor_meta.get("max_autotune_pointwise")
@@ -2936,8 +2946,19 @@ def pointwise(
                         ),  # +30% for some kernels
                     ]
                 )
+            if torch.xpu.is_available():
+                configs.extend(
+                    [
+                        # intel-xpu-backend-for-triton #5198
+                        triton_config_with_settings(size_hints, 32, 32, num_warps=8),
+                        # intel-xpu-backend-for-triton #5199
+                        triton_config_with_settings(size_hints, 4, 256),
+                    ]
+                )
     if len(size_hints) == 3:
-        if not inductor_meta.get("max_autotune_pointwise"):
+        if not (
+            inductor_meta.get("max_autotune_pointwise") or torch.xpu.is_available()
+        ):
             configs = [triton_config_with_settings(size_hints, 16, 16, 16)]
         else:
             configs = [
@@ -4066,6 +4087,13 @@ class Grid3D(GridExpr):
         self.x_grid = self.ceildiv("xnumel", meta.get("XBLOCK"))
         self.y_grid = self.ceildiv("ynumel", meta.get("YBLOCK"))
         self.z_grid = self.ceildiv("znumel", meta.get("ZBLOCK"))
+
+
+class BatchMatmulGrid3D(GridExpr):
+    def generate(self, meta: dict[str, int]) -> None:
+        self.z_grid = self.ceildiv("xnumel", meta.get("XBLOCK"))
+        self.y_grid = self.ceildiv("ynumel", meta.get("YBLOCK"))
+        self.x_grid = self.ceildiv("znumel", meta.get("ZBLOCK"))
 
 
 class Grid2DWithYZOverflow(GridExpr):
