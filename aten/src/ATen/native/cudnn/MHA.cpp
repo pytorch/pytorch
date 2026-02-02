@@ -1516,7 +1516,14 @@ void run_cudnn_SDP_fprop_nestedtensor(
   }
 
   if (return_softmaxstats && !softmaxstats.defined()) {
-    softmaxstats = at::empty({q.size(0), h_q, 1}, q.options().dtype(kFloat));
+    // cuDNN wants T, H, 1, but torch/FA convention is H, T
+    softmaxstats = at::empty({h_q, q.size(0)}, q.options().dtype(kFloat));
+  }
+  auto softmaxstats_ = softmaxstats;
+  if (softmaxstats.dim() == 2) {
+    softmaxstats_ = softmaxstats.unsqueeze(-1).transpose(0, 1);
+  } else {
+    TORCH_CHECK(softmaxstats.dim() == 3);
   }
 
   MHACacheKeyWrapper key(
@@ -1558,7 +1565,7 @@ void run_cudnn_SDP_fprop_nestedtensor(
         k,
         v,
         attn_bias,
-        softmaxstats,
+        softmaxstats_,
         o,
         dropoutseed,
         dropoutoffset,
@@ -1796,6 +1803,12 @@ void run_cudnn_SDP_bprop_nestedtensor(
       !softmaxstats.numel()) {
     return;
   }
+  auto softmaxstats_ = softmaxstats;
+  if (softmaxstats_.dim() == 2) {
+    softmaxstats_ = softmaxstats_.unsqueeze(-1).transpose(0, 1);
+  } else {
+    TORCH_CHECK(softmaxstats_.dim() == 3);
+  }
 
   Tensor dO_ = dO;
   const auto innermost_dO_stride = dO.strides()[dO.strides().size() - 1];
@@ -1865,7 +1878,7 @@ void run_cudnn_SDP_bprop_nestedtensor(
         attn_bias,
         o,
         dO_,
-        softmaxstats,
+        softmaxstats_,
         dQ,
         dK,
         dV,
@@ -1882,7 +1895,7 @@ void run_cudnn_SDP_bprop_nestedtensor(
       {V, v.mutable_data_ptr()},
       {O, o.mutable_data_ptr()},
       {DO, dO_.mutable_data_ptr()},
-      {LSE, softmaxstats.mutable_data_ptr()},
+      {LSE, softmaxstats_.mutable_data_ptr()},
       // outputs
       {DQ, dQ.mutable_data_ptr()},
       {DK, dK.mutable_data_ptr()},
