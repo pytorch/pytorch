@@ -19,7 +19,7 @@ import torch._logging.structured
 import torch.distributed as dist
 import torch.fx as fx
 from torch._inductor.test_case import TestCase
-from torch._logging._internal import TorchLogsFormatter
+from torch._logging._internal import LazyTraceHandler, TorchLogsFormatter
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_utils import find_free_port
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
@@ -1611,6 +1611,25 @@ def forward(self, x_1: "f32[2][1]cpu"):
                 """{"graph_execution_order": [{"compile_id": "0/0"}, {"compile_id": "1/0"}]}""",
             )
             self.assertParses()
+
+    def test_lazy_trace_handler_emits_version_info(self):
+        """Verify LazyTraceHandler emits torch version as the first artifact."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            handler = LazyTraceHandler(root_dir=tmpdir)
+            trace_log.addHandler(handler)
+
+            fn_opt = torch.compile(example_fn, backend="inductor")
+            fn_opt(torch.ones(1000, 1000))
+
+            trace_log.removeHandler(handler)
+            handler.flush()
+
+            with open(handler.stream.name) as f:
+                content = f.read()
+
+            self.assertIn('"name": "torch_version"', content)
+            self.assertIn(f'"torch_version": "{torch.__version__}"', content)
+            handler.close()
 
 
 if __name__ == "__main__":
