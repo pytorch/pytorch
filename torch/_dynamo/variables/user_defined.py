@@ -264,6 +264,22 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         return key in self.value.__dict__
 
+    def get_value_from_generic_dict(
+        self, tx: "InstructionTranslator", key: str
+    ) -> VariableTracker:
+        """Get a value directly from __dict__ without going through var_getattr.
+
+        This avoids property inlining which can cause recursion when a property
+        getter accesses self.__dict__[name].
+        """
+        if tx.output.side_effects.has_pending_mutation_of_attr(self, key):
+            return tx.output.side_effects.load_attr(self, key)
+
+        source = None
+        if self.source:
+            source = DictGetItemSource(AttrSource(self.source, "__dict__"), key)
+        return VariableTracker.build(tx, self.value.__dict__[key], source)
+
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         from . import ConstantVariable, EnumVariable
 
@@ -1508,6 +1524,22 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return not isinstance(mutated_attr, variables.DeletedVariable)
 
         return key in self.value.__dict__
+
+    def get_value_from_generic_dict(
+        self, tx: "InstructionTranslator", key: str
+    ) -> VariableTracker:
+        """Get a value directly from __dict__ without going through var_getattr.
+
+        This avoids property inlining which can cause recursion when a property
+        getter accesses self.__dict__[name].
+        """
+        if tx.output.side_effects.has_pending_mutation_of_attr(self, key):
+            return tx.output.side_effects.load_attr(self, key)
+
+        source = None
+        if self.source:
+            source = DictGetItemSource(AttrSource(self.source, "__dict__"), key)
+        return VariableTracker.build(tx, self.value.__dict__[key], source)
 
     def get_source_by_walking_mro(self, name: str) -> DictGetItemSource:
         assert self.cls_source is not None

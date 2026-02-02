@@ -1356,8 +1356,10 @@ class GetAttrVariable(VariableTracker):
             obj = self.obj
             key = args[0].as_python_constant()
             if obj.has_key_in_generic_dict(tx, key):
-                # redirect to var_getattr on the original obj
-                return obj.var_getattr(tx, key)
+                # Get value directly from __dict__ without going through var_getattr.
+                # Using var_getattr could inline property getters that access
+                # self.__dict__[name], causing infinite recursion.
+                return obj.get_value_from_generic_dict(tx, key)
 
             # Return the default value for get
             if name == "get":
