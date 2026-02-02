@@ -44,13 +44,11 @@ extensions = [
 # Use doxygenclass, doxygenfunction, etc. directives in RST files
 # to pull documentation from C++ source code
 
-breathe_projects = {
-    "PyTorch": "../build/xml"
-}
+breathe_projects = {"PyTorch": "../build/xml"}
 breathe_default_project = "PyTorch"
 
 # Default members to show when using doxygenclass/doxygenstruct directives
-breathe_default_members = ('members', 'undoc-members')
+breathe_default_members = ("members", "undoc-members")
 
 # Map file extensions to language domains for proper syntax highlighting
 breathe_domain_by_extension = {
@@ -61,7 +59,7 @@ breathe_domain_by_extension = {
 }
 
 # Implementation detail filters - skip internal/private content
-breathe_implementation_filename_extensions = ['.c', '.cc', '.cpp']
+breathe_implementation_filename_extensions = [".c", ".cc", ".cpp"]
 
 # Show the file where items are defined
 breathe_show_define_initializer = True
