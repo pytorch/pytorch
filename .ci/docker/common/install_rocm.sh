@@ -84,6 +84,13 @@ install_ubuntu() {
       ln -sfn "$ROCM_INSTALL_DIR" /opt/rocm
       echo "Created symlink: /opt/rocm -> $ROCM_INSTALL_DIR"
 
+      # Create compatibility symlink for device library path
+      # TheRock uses /opt/rocm/lib/llvm/amdgcn/bitcode but traditional ROCm uses /opt/rocm/amdgcn/bitcode
+      if [[ -d "$ROCM_INSTALL_DIR/lib/llvm/amdgcn/bitcode" ]] && [[ ! -e "$ROCM_INSTALL_DIR/amdgcn" ]]; then
+        ln -sfn "$ROCM_INSTALL_DIR/lib/llvm/amdgcn" "$ROCM_INSTALL_DIR/amdgcn"
+        echo "Created compatibility symlink: /opt/rocm/amdgcn -> lib/llvm/amdgcn"
+      fi
+
       # Verify installation
       echo "Verifying installation..."
       for dir in bin include lib share; do
