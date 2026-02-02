@@ -711,6 +711,67 @@ class TestViewOps(DTensorTestBase):
         self.assertEqual(result5.shape, torch.Size([self.world_size, 4]))
         self.assertEqual(result5.placements, (Shard(0),))
 
+        # Test 6: squeeze [1] with Partial("max") -> [] Replicate
+        # When global numel=1, max(x,x,x,...)=x so P(max) becomes R trivially
+        x6 = torch.randn(1, device=self.device_type)
+        dt6 = DTensor.from_local(x6, mesh, [Partial("max")])
+        result6 = dt6.squeeze()
+        self.assertEqual(result6.shape, torch.Size([]))
+        self.assertEqual(result6.placements, (Replicate(),))
+
+        # Test 7: squeeze [1] with Partial("min") -> [] Replicate
+        x7 = torch.randn(1, device=self.device_type)
+        dt7 = DTensor.from_local(x7, mesh, [Partial("min")])
+        result7 = dt7.squeeze()
+        self.assertEqual(result7.shape, torch.Size([]))
+        self.assertEqual(result7.placements, (Replicate(),))
+
+        # Test 8: squeeze [1,1] with Partial("max") -> [] Replicate (numel=1)
+        x8 = torch.randn(1, 1, device=self.device_type)
+        dt8 = DTensor.from_local(x8, mesh, [Partial("max")])
+        result8 = dt8.squeeze()
+        self.assertEqual(result8.shape, torch.Size([]))
+        self.assertEqual(result8.placements, (Replicate(),))
+
+        # Test 9: squeeze [1,4] dim=0 with Partial("max") -> [4] stays Partial
+        # numel=4 > 1, so max reduction is NOT trivial
+        x9 = torch.randn(1, 4, device=self.device_type)
+        dt9 = DTensor.from_local(x9, mesh, [Partial("max")])
+        result9 = dt9.squeeze(0)
+        self.assertEqual(result9.shape, torch.Size([4]))
+        self.assertEqual(result9.placements, (Partial("max"),))
+
+        # Test 10: squeeze [1] with Partial("sum") -> [] stays Partial
+        # sum is NOT trivial even for numel=1: sum(x,x,x,...)=n*x
+        x10 = torch.randn(1, device=self.device_type)
+        dt10 = DTensor.from_local(x10, mesh, [Partial("sum")])
+        result10 = dt10.squeeze()
+        self.assertEqual(result10.shape, torch.Size([]))
+        self.assertEqual(result10.placements, (Partial("sum"),))
+
+        # Test 11: view [1] to [1,1] with Partial("max") -> Replicate
+        # numel=1 even though ndim=2, so P(max) is trivial
+        x11 = torch.randn(1, device=self.device_type)
+        dt11 = DTensor.from_local(x11, mesh, [Partial("max")])
+        result11 = dt11.view(1, 1)
+        self.assertEqual(result11.shape, torch.Size([1, 1]))
+        self.assertEqual(result11.placements, (Replicate(),))
+
+        # Test 12: view [1] to [1,1] with Partial("min") -> Replicate
+        x12 = torch.randn(1, device=self.device_type)
+        dt12 = DTensor.from_local(x12, mesh, [Partial("min")])
+        result12 = dt12.view(1, 1)
+        self.assertEqual(result12.shape, torch.Size([1, 1]))
+        self.assertEqual(result12.placements, (Replicate(),))
+
+        # Test 13: view [4] to [2,2] with Partial("max") stays Partial
+        # numel=4 > 1, not trivial
+        x13 = torch.randn(4, device=self.device_type)
+        dt13 = DTensor.from_local(x13, mesh, [Partial("max")])
+        result13 = dt13.view(2, 2)
+        self.assertEqual(result13.shape, torch.Size([2, 2]))
+        self.assertEqual(result13.placements, (Partial("max"),))
+
     @with_comms
     def test_storage_offset_slice(self):
         """

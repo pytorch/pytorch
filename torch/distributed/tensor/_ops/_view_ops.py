@@ -7,6 +7,7 @@ from typing import cast
 import torch
 from torch import Tensor
 from torch._prims_common import DimsType
+from torch.fx.experimental.symbolic_shapes import statically_known_true
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor._op_schema import (
     OpSchema,
@@ -24,6 +25,7 @@ from torch.distributed.tensor._ops.utils import (
 )
 from torch.distributed.tensor.placement_types import (
     _StridedShard,
+    Partial,
     Placement,
     Replicate,
     Shard,
@@ -508,6 +510,33 @@ dim_maps: dict[Callable[..., torch.Tensor], Callable[..., DimMap]] = {
 }
 
 
+def _dim_size(spec: DimSpec, input_shape: Shape) -> int:
+    """Compute the size of an output dimension from a DimSpec."""
+    if isinstance(spec, Singleton):
+        return 1
+    elif isinstance(spec, InputDim):
+        return input_shape[spec.input_dim]
+    elif isinstance(spec, Broadcast):
+        return spec.dim_size
+    elif isinstance(spec, NewDim):
+        return spec.size
+    elif isinstance(spec, Repeat):
+        return _dim_size(spec.input_dim, input_shape) * spec.times
+    elif isinstance(spec, Flatten):
+        return prod(_dim_size(d, input_shape) for d in spec.input_dims)
+    elif isinstance(spec, Split):
+        return spec.group_shape[spec.split_id]
+    else:
+        raise ValueError(f"Unknown DimSpec type: {type(spec)}")
+
+
+def _output_numel(rule: DimMap, input_shape: Shape) -> int:
+    """Compute total number of elements in output tensor from rule."""
+    if len(rule) == 0:
+        return 1
+    return prod(_dim_size(spec, input_shape) for spec in rule)
+
+
 def propagate_shape_and_sharding(
     input_src_placements: Sequence[Placement],
     global_input_shape: Shape,
@@ -692,8 +721,25 @@ def propagate_shape_and_sharding(
         else:
             return Shard(shard_dim_map[p.dim])
 
+    # When output has numel=1, P(max) and P(min) become Replicate trivially:
+    # max(x,x,...) = min(x,x,...) = x for a single element.
+    # Use statically_known_true to handle unbacked symbols safely.
+    output_numel = _output_numel(rule, global_input_shape)
+    output_numel_is_one = statically_known_true(output_numel == 1)
+
+    def _maybe_partial_to_replicate(p: Placement) -> Placement:
+        if (
+            output_numel_is_one
+            and isinstance(p, Partial)
+            and p.reduce_op in ("max", "min")
+        ):
+            return Replicate()
+        return p
+
     output_placements = [
-        _rewrite_shard_dim(p) if isinstance(p, Shard | _StridedShard) else p
+        _rewrite_shard_dim(p)
+        if isinstance(p, Shard | _StridedShard)
+        else _maybe_partial_to_replicate(p)
         for p in input_tgt_placements
     ]
 
@@ -765,6 +811,7 @@ def register_op_strategy_map(
 
 
 register_op_strategy_map(aten.squeeze.default, torch.squeeze)
+register_op_strategy_map(aten.squeeze_.default, torch.squeeze)
 register_op_strategy_map(
     aten.squeeze_.dim, torch.squeeze, schema_info=RuntimeSchemaInfo(1)
 )
@@ -773,6 +820,9 @@ register_op_strategy_map(
 )
 register_op_strategy_map(
     aten.squeeze.dims, torch.squeeze, schema_info=RuntimeSchemaInfo(1)
+)
+register_op_strategy_map(
+    aten.squeeze_.dims, torch.squeeze, schema_info=RuntimeSchemaInfo(1)
 )
 register_op_strategy_map(
     aten.view.default,
