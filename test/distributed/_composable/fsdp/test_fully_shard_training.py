@@ -32,10 +32,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
 )
 from torch.distributed.tensor import DTensor, init_device_mesh, Shard
 from torch.distributed.tensor.debug import CommDebugMode
-from torch.testing._internal.common_distributed import (
-    skip_if_lt_x_gpu,
-    skip_if_rocm_arch_multiprocess,
-)
+from torch.testing._internal.common_distributed import skip_if_rocm_arch_multiprocess
 from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
     compiled_fsdp_test,
@@ -52,8 +49,8 @@ from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
     MI200_ARCH,
     run_tests,
+    TEST_CUDA,
     TEST_CUDA_GRAPH,
-    TEST_HPU,
     TEST_XPU,
     wrapSwapTensorsTest,
     xfailIf,
@@ -79,19 +76,27 @@ class TestFullyShardForwardInputs(FSDPTestMultiThread):
     def world_size(self) -> int:
         return 2
 
-    @skip_if_lt_x_gpu(1)
     def test_root_move_forward_input_to_device(self):
         device = torch.device(device_type.type, 0)
+
+        def check_device(actual: torch.device, expected: torch.device) -> bool:
+            # For CPU, torch.device("cpu") and torch.device("cpu", 0) are
+            # semantically equivalent but not equal. Check type match for CPU.
+            if expected.type == "cpu":
+                return actual.type == "cpu"
+            return actual == expected
 
         class ParamlessModule(nn.Module):
             def forward(self, x: torch.Tensor, ys: tuple[torch.Tensor, ...]):
                 # Check that FSDP moved the inputs to GPU, including recursing
                 # into the tuple data structure
-                assert x.device == device, f"Expects {device} but got {x.device}"
-                assert ys[0].device == device, (
+                assert check_device(x.device, device), (
+                    f"Expects {device} but got {x.device}"
+                )
+                assert check_device(ys[0].device, device), (
                     f"Expects {device} but got {ys[0].device}"
                 )
-                assert ys[1].device == device, (
+                assert check_device(ys[1].device, device), (
                     f"Expects {device} but got {ys[1].device}"
                 )
                 y = ys[0] + ys[1]
@@ -112,7 +117,6 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
     def world_size(self) -> int:
         return 4
 
-    @skip_if_lt_x_gpu(1)
     def test_param_registration_after_forward(self):
         """Tests the parameter registration after forward."""
         device = torch.device(device_type.type, 0)
@@ -173,7 +177,6 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
             self._assert_dtensor_params(model.parameters())
             self._assert_same_params(model.parameters(), ref_model.parameters())
 
-    @skip_if_lt_x_gpu(1)
     def test_param_registration_after_backward(self):
         """Tests the parameter registration after backward."""
         device = torch.device(device_type.type, 0)
@@ -227,7 +230,6 @@ class TestFullyShardCastAfterInit(FSDPTestMultiThread):
     def world_size(self) -> int:
         return 2
 
-    @skip_if_lt_x_gpu(1)
     @wrapSwapTensorsTest(True)
     def test_to_float64_after_init(self):
         """Tests that the user can cast the module to float64 after init."""
@@ -274,9 +276,10 @@ class TestFullyShardCastAfterInit(FSDPTestMultiThread):
 class TestFullyShard1DTrainingCore(FSDPTest):
     @property
     def world_size(self) -> int:
+        if device_type.type == "cpu":
+            return 8
         return min(8, torch.get_device_module(device_type).device_count())
 
-    @skip_if_lt_x_gpu(2)
     def test_train_parity_single_group_shard_dim0(self):
         """
         Tests train parity with DDP for a single FSDP group when sharding
@@ -294,7 +297,6 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             self._test_train_parity_single_group,
         )
 
-    @skip_if_lt_x_gpu(2)
     def test_train_parity_single_group_shard_largest_dim(self):
         """
         Tests train parity with DDP for a single FSDP group when sharding
@@ -317,7 +319,9 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             nn.Linear(*lin_shapes[0]), nn.ReLU(), nn.Linear(*lin_shapes[1])
         )
         ref_model = copy.deepcopy(model).to(device_type)
-        replicate(ref_model, device_ids=[self.rank])
+        replicate(
+            ref_model, device_ids=None if device_type.type == "cpu" else [self.rank]
+        )
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
 
         def _shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
@@ -337,8 +341,6 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 _optim.step()
             self.assertEqual(losses[0], losses[1])
 
-    @skip_if_lt_x_gpu(2)
-    @unittest.skipIf(TEST_HPU or TEST_XPU, "Sleep kernel not supported for HPU/XPU")
     @compiled_fsdp_test(compile_compute_on_module=Transformer)
     def test_train_parity_multi_group(self):
         """
@@ -360,20 +362,19 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             self._test_train_parity_multi_group,
         )
 
-    @skip_if_lt_x_gpu(2)
-    @unittest.skipIf(TEST_HPU or TEST_XPU, "sleep kernel not supported on HPU/XPU")
     def test_train_parity_multi_group_cpu_offload_eager(self):
         """
         Tests train parity against DDP when using multiple parameter groups for
         communication and CPU offloading.
         """
+        # pin_memory requires an accelerator, so skip it on CPU
+        offload_policies = [CPUOffloadPolicy(pin_memory=False)]
+        if device_type.type != "cpu":
+            offload_policies.append(CPUOffloadPolicy(pin_memory=True))
         self.run_subtests(
             {
                 "reshard_after_forward": [True],  # save CI time
-                "offload_policy": [
-                    CPUOffloadPolicy(pin_memory=True),
-                    CPUOffloadPolicy(pin_memory=False),
-                ],
+                "offload_policy": offload_policies,
                 "test_device_type": [device_type.type],
                 "delay_after_forward": [False, True],
                 "delay_before_all_gather": [False, True],
@@ -384,8 +385,6 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             self._test_train_parity_multi_group,
         )
 
-    @skip_if_lt_x_gpu(2)
-    @unittest.skipIf(TEST_HPU or TEST_XPU, "sleep kernel not supported on HPU/XPU")
     @compiled_fsdp_test(compile_compute_on_module=Transformer)
     def test_train_parity_multi_group_unshard_async_op(self):
         """
@@ -441,7 +440,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         if test_device_type == device_type.type:
             replicate(
                 ref_model.to(device_type),
-                device_ids=[self.rank],
+                device_ids=None if device_type.type == "cpu" else [self.rank],
             )
         else:
             gloo_pg = dist.new_group(backend="gloo")
@@ -508,8 +507,6 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                     _optim.step()
                 self.assertEqual(losses[0], losses[1])
 
-    @skip_if_lt_x_gpu(2)
-    @unittest.skipIf(TEST_XPU, "Sleep is not supported on XPU")
     def test_non_root_forward_backward(self):
         """
         Tests running forward/backward through the root and then through a
@@ -555,7 +552,6 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         self.assertEqual(ref_nonroot_loss, nonroot_loss)
         self.assertEqual(ref_model(inp).sum(), model(inp).sum())
 
-    @skip_if_lt_x_gpu(2)
     def test_multi_forward_module(self):
         """
         Tests parity with DDP when running a module that participates multiple
@@ -583,7 +579,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         ref_model = copy.deepcopy(model)
         replicate(
             ref_model,
-            device_ids=[self.rank],
+            device_ids=None if device_type.type == "cpu" else [self.rank],
         )
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
         fully_shard(model.inner)
@@ -601,7 +597,6 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 _optim.step()
             self.assertEqual(losses[0], losses[1])
 
-    @skip_if_lt_x_gpu(2)
     def test_explicit_prefetching(self):
         torch.manual_seed(42)
         model_args = ModelArgs(n_layers=8, dropout_p=0.0)
@@ -639,8 +634,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 _optim.step()
             self.assertEqual(losses[0], losses[1])
 
-    @skip_if_lt_x_gpu(2)
-    @unittest.skipIf(TEST_HPU or TEST_XPU, "Sleep is not supported on HPU/XPU")
+    @unittest.skipIf(not TEST_CUDA, "Numerical precision issue on CPU to investigate")
     def test_post_optim_event(self):
         torch.manual_seed(42)
         model_args = ModelArgs(dropout_p=0.0)
@@ -689,9 +683,10 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
     def world_size(self) -> int:
         # Since these tests run with a larger transformer model, they may see
         # some numeric drift with >2 GPUs
+        if device_type.type == "cpu":
+            return 2
         return min(torch.get_device_module(device_type).device_count(), 2)
 
-    @skip_if_lt_x_gpu(2)
     @compiled_fsdp_test(compile_compute_on_module=Transformer)
     @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/1661
     def test_train_parity_with_activation_checkpointing(self):
@@ -736,7 +731,7 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
             model = Transformer(model_args)
         ref_model = replicate(
             copy.deepcopy(model),
-            device_ids=[self.rank],
+            device_ids=None if device_type.type == "cpu" else [self.rank],
         )
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
 
@@ -800,7 +795,6 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
                     self, ref_model, model, prefixes_to_ignore=prefixes_to_ignore
                 )
 
-    @skip_if_lt_x_gpu(2)
     def test_double_forward_with_nested_fsdp_and_checkpoint(self):
         """
         Tests that calling model.forward() twice before backward() works correctly
@@ -864,9 +858,10 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
 class TestFullyShardShardPlacementFnMultiProcess(FSDPTest):
     @property
     def world_size(self) -> int:
+        if device_type.type == "cpu":
+            return 8
         return min(8, torch.get_device_module(device_type).device_count())
 
-    @skip_if_lt_x_gpu(2)
     def test_train_parity_shard_placement_fn_shard_largest_dim(self):
         torch.manual_seed(42)
         model_args = ModelArgs(n_layers=3, dropout_p=0.0)
@@ -951,9 +946,10 @@ class TestFullyShardShardPlacementFnMultiThread(FSDPTestMultiThread):
 class TestFullyShardSharedParams(FSDPTest):
     @property
     def world_size(self) -> int:
+        if device_type.type == "cpu":
+            return 4
         return min(4, torch.get_device_module(device_type).device_count())
 
-    @skip_if_lt_x_gpu(2)
     def test_train_parity_with_shared_params(self):
         self.run_subtests(
             {
@@ -974,7 +970,7 @@ class TestFullyShardSharedParams(FSDPTest):
         ref_model = copy.deepcopy(model).to(device_type)
         replicate(
             ref_model,
-            device_ids=[self.rank],
+            device_ids=None if device_type.type == "cpu" else [self.rank],
         )
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
         for module in model.modules():
@@ -1002,9 +998,10 @@ class TestFullyShardSharedParams(FSDPTest):
 class TestFullyShardGradientAccumulation(FSDPTest):
     @property
     def world_size(self) -> int:
+        if device_type.type == "cpu":
+            return 4
         return min(4, torch.get_device_module(device_type).device_count())
 
-    @skip_if_lt_x_gpu(2)
     def test_gradient_accumulation(self):
         """
         Tests gradient accumulation with/without gradient reduction and
@@ -1022,6 +1019,10 @@ class TestFullyShardGradientAccumulation(FSDPTest):
                     mesh_dim_names=("dp_replicate", "dp_shard"),
                 )
             )
+        # pin_memory requires an accelerator, so use pin_memory=False on CPU
+        offload_policies = [OffloadPolicy(), CPUOffloadPolicy(pin_memory=False)]
+        if device_type.type != "cpu":
+            offload_policies.append(CPUOffloadPolicy(pin_memory=True))
         self.run_subtests(
             {
                 "mesh": meshes,
@@ -1031,7 +1032,7 @@ class TestFullyShardGradientAccumulation(FSDPTest):
                 # "some_mlps": disable reduce-scatter for some MLPs
                 "mode": ["all", "root_only", "some_mlps"],
                 "reshard_after_backward": [False, True],
-                "offload_policy": [OffloadPolicy(), CPUOffloadPolicy()],
+                "offload_policy": offload_policies,
                 # For HSDP only:
                 # `True`: reduce-scatter only (no all-reduce) each microbatch
                 # until the last microbatch
@@ -1185,7 +1186,6 @@ class TestFullyShardGradientAccumulation(FSDPTest):
                 # gradient accumulation with and without communication
                 _optim.zero_grad(set_to_none=(iter_idx % 2))
 
-    @skip_if_lt_x_gpu(2)
     def test_1f1b_microbatching(self):
         self.run_subtests(
             {
@@ -1257,6 +1257,8 @@ class TestFullyShardGradientAccumulation(FSDPTest):
 class TestFullyShardNDTraining(FSDPTest):
     @property
     def world_size(self) -> int:
+        if device_type.type == "cpu":
+            return 8
         return min(8, torch.get_device_module(device_type).device_count())
 
     def init_global_mesh(self) -> DeviceMesh:
@@ -1270,7 +1272,6 @@ class TestFullyShardNDTraining(FSDPTest):
         )
 
     @skip_if_rocm_arch_multiprocess(MI200_ARCH)
-    @skip_if_lt_x_gpu(4)
     def test_2d_mlp_with_nd_mesh(self):
         global_mesh = self.init_global_mesh()
         self.run_subtests(
@@ -1304,7 +1305,7 @@ class TestFullyShardNDTraining(FSDPTest):
         ref_model = copy.deepcopy(model).to(device_type)
         replicate(
             ref_model,
-            device_ids=[self.rank],
+            device_ids=None if device_type.type == "cpu" else [self.rank],
             process_group=dp_pg,
         )
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2, foreach=foreach)
@@ -1338,6 +1339,8 @@ class TestFullyShardNDTraining(FSDPTest):
 class TestFullyShardHSDP3DTraining(FSDPTest):
     @property
     def world_size(self) -> int:
+        if device_type.type == "cpu":
+            return 8
         return min(8, torch.get_device_module(device_type).device_count())
 
     def init_global_mesh(self) -> DeviceMesh:
@@ -1347,7 +1350,6 @@ class TestFullyShardHSDP3DTraining(FSDPTest):
             mesh_dim_names=("dp_replicate", "dp_shard", "tp"),
         )
 
-    @skip_if_lt_x_gpu(8)
     def test_3d_mlp_with_nd_mesh(self):
         global_mesh = self.init_global_mesh()
         self.run_subtests(
@@ -1377,7 +1379,7 @@ class TestFullyShardHSDP3DTraining(FSDPTest):
         ref_model = copy.deepcopy(model).to(device_type)
         replicate(
             ref_model,
-            device_ids=[self.rank],
+            device_ids=None if device_type.type == "cpu" else [self.rank],
             process_group=dp_pg,
         )
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2, foreach=foreach)
@@ -1419,9 +1421,10 @@ class TestFullyShardHSDP3DTraining(FSDPTest):
 class TestFullyShardHSDPTraining(FSDPTest):
     @property
     def world_size(self) -> int:
+        if device_type.type == "cpu":
+            return 4
         return min(4, torch.get_device_module(device_type).device_count())
 
-    @skip_if_lt_x_gpu(2)
     def test_train_parity_hsdp(self):
         shard_size = 2 if self.world_size > 2 else 1
         replicate_size = self.world_size // shard_size
@@ -1430,16 +1433,17 @@ class TestFullyShardHSDPTraining(FSDPTest):
             (replicate_size, shard_size),
             mesh_dim_names=("dp_replicate", "dp_shard"),
         )
+        # pin_memory requires an accelerator, so skip it on CPU
+        offload_policies = [CPUOffloadPolicy(pin_memory=False)]
+        if device_type.type != "cpu":
+            offload_policies.append(CPUOffloadPolicy(pin_memory=True))
         self.run_subtests(
             {
                 "reshard_after_forward": [False, True],
                 "use_activation_checkpointing": [False, True],
                 "mlp_dim": [3, 16, 17],
                 "sync_gradients_at_last_batch": [True, False],
-                "offload_policy": [
-                    CPUOffloadPolicy(pin_memory=True),
-                    CPUOffloadPolicy(pin_memory=False),
-                ],
+                "offload_policy": offload_policies,
             },
             functools.partial(self._test_train_parity_hsdp, global_mesh),
         )
@@ -1463,7 +1467,7 @@ class TestFullyShardHSDPTraining(FSDPTest):
         ref_model = copy.deepcopy(model).to(device_type)
         replicate(
             ref_model,
-            device_ids=[self.rank],
+            device_ids=None if device_type.type == "cpu" else [self.rank],
         )
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
         for mlp in model:
@@ -1507,9 +1511,10 @@ class TestFullyShardHSDPTraining(FSDPTest):
 class TestFullyShardCustomForwardMethod(FSDPTest):
     @property
     def world_size(self) -> int:
+        if device_type.type == "cpu":
+            return 2
         return min(torch.get_device_module(device_type).device_count(), 2)
 
-    @skip_if_lt_x_gpu(2)
     def test_register_fsdp_forward_method(self):
         """Based on https://github.com/pytorch/pytorch/issues/109385"""
 
@@ -1557,9 +1562,10 @@ class TestFullyShardCustomForwardMethod(FSDPTest):
 class TestFullyShardShareCommContext(FSDPTest):
     @property
     def world_size(self) -> int:
+        if device_type.type == "cpu":
+            return 2
         return min(torch.get_device_module(device_type).device_count(), 2)
 
-    @skip_if_lt_x_gpu(2)
     def test_share_comm_context(self):
         torch.manual_seed(42)
         n_layers = 3
@@ -1669,7 +1675,6 @@ class TestFullyShardWorldSize1(FSDPTest):
     def world_size(self) -> int:
         return 1
 
-    @skip_if_lt_x_gpu(1)
     def test_train_parity_single_worldsize1(self):
         """
         Tests train parity with DDP for a single FSDP group
@@ -1695,7 +1700,9 @@ class TestFullyShardWorldSize1(FSDPTest):
             nn.Linear(*lin_shapes[0]), nn.ReLU(), nn.Linear(*lin_shapes[1])
         )
         ref_model = copy.deepcopy(model).to(device_type)
-        replicate(ref_model, device_ids=[self.rank])
+        replicate(
+            ref_model, device_ids=None if device_type.type == "cpu" else [self.rank]
+        )
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
 
         def _shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
@@ -1732,7 +1739,6 @@ class TestFullyShardCudaGraph(FSDPTest):
     def world_size(self) -> int:
         return 2
 
-    @skip_if_lt_x_gpu(2)
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
