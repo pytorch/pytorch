@@ -343,12 +343,12 @@ Tensor& tensordot_out(
   auto output_device = result.device();
   auto input1_device = input1.device();
   auto input2_device = input2.device();
-  if(result.defined()) {
+  if (result.defined()) {
     TORCH_CHECK(
-      !(result.requires_grad() && at::GradMode::is_enabled() && result.sizes() != result_tmp.sizes()),
-      "tensordot(): the 'out' tensor was specified and requires gradients, and its shape does not match the expected result. "
-      "Either remove the 'out' argument, ensure it does not require gradients, or make sure its shape matches the expected output."
-    );
+        !(result.requires_grad() && at::GradMode::is_enabled() &&
+          result.sizes() != result_tmp.sizes()),
+        "tensordot(): the 'out' tensor was specified and requires gradients, and its shape does not match the expected result. "
+        "Either remove the 'out' argument, ensure it does not require gradients, or make sure its shape matches the expected output.");
   }
   // check if the input & output tensors are on the same device.
   TORCH_CHECK(
