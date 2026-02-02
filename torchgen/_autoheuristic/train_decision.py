@@ -433,7 +433,8 @@ class AHTrainDecisionTree(AHTrain):
 
         # Compute the winner and speedup for each valid input
         def get_winner_and_speedup(group):
-            assert len(group) >= 2, "Need at least 2 choices"
+            if len(group) < 2:
+                raise AssertionError("Need at least 2 choices")
 
             sorted_group = group.sort_values("median_execution_time")
             winner = sorted_group.iloc[0]["choice"]
@@ -446,9 +447,11 @@ class AHTrainDecisionTree(AHTrain):
             for row in group.itertuples():
                 choice2time[row.choice] = row.median_execution_time
 
-            assert len(unique_choices) == len(group), (
-                f"len(unique_choices) != len(group): {len(unique_choices)} != {len(group)}"
-            )
+            if len(unique_choices) != len(group):
+                raise AssertionError(
+                    f"len(unique_choices) != len(group): "
+                    f"{len(unique_choices)} != {len(group)}"
+                )
 
             return pd.Series(
                 {
@@ -868,9 +871,10 @@ class DecisionEvaluator:
             top_k_choices = self.top_k_classes(
                 self.model, prob, k=self.k, avail_choices=avail_choices
             )
-            assert true in avail_choices, (
-                f"Best choice {true} not in available choices {avail_choices}"
-            )
+            if true not in avail_choices:
+                raise AssertionError(
+                    f"Best choice {true} not in available choices {avail_choices}"
+                )
             default_config = self.train.get_default_config(self.df.iloc[i])
             self.eval_prediction(
                 avail_choices,
