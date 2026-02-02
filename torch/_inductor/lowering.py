@@ -2790,10 +2790,7 @@ def constrain_to_fake_tensor(arg, fake_arg):
     if isinstance(fake_arg, FakeScriptObject):
         return arg
     if isinstance(arg, ir.IRNode):
-        meta_stride_expr = [
-            s.node.expr if isinstance(s, torch.SymInt) else s for s in fake_arg.stride()
-        ]
-        return ir.ExternKernel.require_exact_strides(arg, meta_stride_expr)
+        return ir.ExternKernel.require_exact_strides(arg, fake_arg.stride())
     if isinstance(arg, dict):
         return {key: constrain_to_fake_tensor(arg[key], fake_arg[key]) for key in arg}
     elif isinstance(arg, (tuple, list)):
@@ -6990,6 +6987,9 @@ def addcmul(self, tensor1, tensor2, *, value=1):
         self_val = self_loader(idx)
         t1_val = t1_loader(idx)
         t2_val = t2_loader(idx)
+
+        if value == 1 and use_fma:
+            return ops.fma(t1_val, t2_val, self_val)
 
         # Match eager order: self + value * (tensor1 * tensor2)
         # Compute tensor1 * tensor2 first
