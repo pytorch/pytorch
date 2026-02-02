@@ -102,7 +102,12 @@ from .exc import (
 from .funcname_cache import get_funcname
 from .guards import GuardBuilder, install_guard
 from .output_graph import GraphCompileReason, OutputGraph, StackLocalsMetadata
-from .polyfills import impl_CONTAINS_OP_fallback
+from .polyfills import (
+    impl_CONTAINS_OP_fallback,
+    impl_IS_MAPPING,
+    impl_MATCH_KEYS,
+    impl_MATCH_SEQUENCE,
+)
 from .replay_record import DummyModule, ExecutionRecorder
 from .resume_execution import (
     ContinueExecutionCache,
@@ -1247,22 +1252,28 @@ class InstructionTranslatorBase(
         self.push(fn.call_function(self, args, kwargs))  # type: ignore[arg-type]
 
     def inline_generator_function(
-        self, fn: VariableTracker, args: Sequence[Any], kwargs: dict[str, Any]
-    ) -> Any:
+        self,
+        fn: BaseUserFunctionVariable,
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         """
         Redirect the call to the generator "call_function"
         """
         if not isinstance(fn, LocalGeneratorFunctionVariable):
-            fn = LocalGeneratorFunctionVariable(fn)  # type: ignore[arg-type]
+            fn = LocalGeneratorFunctionVariable(fn)
         return fn.call_function(self, args, kwargs)  # type: ignore[arg-type]
 
     def inline_user_function_return(
-        self, fn: VariableTracker, args: Sequence[Any], kwargs: dict[str, Any]
+        self,
+        fn: BaseUserFunctionVariable,
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
     ) -> Any:
         """
         A call to some user defined function by inlining it.
         """
-        if config.enable_faithful_generator_behavior and is_generator(fn.get_code()):  # type: ignore[attr-defined]
+        if config.enable_faithful_generator_behavior and is_generator(fn.get_code()):
             return self.inline_generator_function(fn, args, kwargs)
         else:
             return InliningInstructionTranslator.inline_call(self, fn, args, kwargs)
@@ -3742,39 +3753,45 @@ class InstructionTranslatorBase(
             self.push(tos.call_method(self, "__len__", [], {}))
 
     def MATCH_MAPPING(self, inst: Instruction) -> None:
+        """
+        If STACK[-1] is an instance of collections.abc.Mapping, push True.
+        Otherwise, push False
+        """
         tos = self.stack[-1]
-        assert isinstance(tos, ConstDictVariable)
-        if isinstance(tos.items, collections.abc.Mapping):
-            self.push(ConstantVariable.create(True))
-        else:
-            self.push(ConstantVariable.create(False))
+        self.push(
+            self.inline_user_function_return(
+                VariableTracker.build(self, impl_IS_MAPPING),
+                [tos],
+                {},
+            )
+        )
 
     def MATCH_SEQUENCE(self, inst: Instruction) -> None:
         tos = self.stack[-1]
-        assert tos.is_python_constant()
-        tos_value = tos.as_python_constant()
-        if isinstance(tos_value, collections.abc.Sequence) and not isinstance(
-            tos_value, (str, bytes, bytearray)
-        ):
-            self.push(ConstantVariable.create(True))
-        else:
-            self.push(ConstantVariable.create(False))
+        self.push(
+            self.inline_user_function_return(
+                VariableTracker.build(self, impl_MATCH_SEQUENCE),
+                [tos],
+                {},
+            )
+        )
 
     def MATCH_KEYS(self, inst: Instruction) -> None:
-        tos = self.stack[-1]
-        assert isinstance(tos, TupleVariable)
-        keys = tos.unpack_var_sequence(self)  # type: ignore[arg-type]
-        tos1 = self.stack[-2]
-        assert isinstance(tos1, ConstDictVariable)
+        keys = self.stack[-1]
+        obj = self.stack[-2]
 
-        if all(k in tos1 for k in keys):  # type: ignore[attr-defined]
-            self.push(TupleVariable([tos1.getitem_const(self, k) for k in keys]))  # type: ignore[attr-defined,arg-type]
-            if sys.version_info < (3, 11):
-                self.push(ConstantVariable.create(True))
-        else:
-            self.push(ConstantVariable.create(None))
-            if sys.version_info < (3, 11):
-                self.push(ConstantVariable.create(False))
+        assert isinstance(keys, TupleVariable)
+
+        self.push(
+            self.inline_user_function_return(
+                VariableTracker.build(self, impl_MATCH_KEYS), [obj, keys], {}
+            )
+        )
+
+        if sys.version_info < (3, 11):
+            # for versions < 3.11, also push the boolean result
+            tos = self.stack[-1]
+            self.push(ConstantVariable.create(not istype(tos, ConstantVariable)))
 
     def LOAD_ASSERTION_ERROR(self, inst: Instruction) -> None:
         self.push(self.load_builtin_from_argval("AssertionError"))
@@ -4838,12 +4855,20 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     parent: InstructionTranslatorBase
 
     @classmethod
-    def inline_call(cls, parent: Any, func: Any, args: Any, kwargs: Any) -> Any:
+    def inline_call(
+        cls,
+        parent: Any,
+        func: BaseUserFunctionVariable,
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         tracer = cls.build_inline_tracer(parent, func, args, kwargs)
         return tracer.inline_call_()
 
     @staticmethod
-    def check_inlineable(func: Any) -> trace_rules.SkipResult:
+    def check_inlineable(
+        func: BaseUserFunctionVariable,
+    ) -> trace_rules.SkipResult:
         if func.has_self():
             unimplemented(
                 gb_type="Inline attempt with __self__",
@@ -4876,7 +4901,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             # _origin marks this as coming from an internal dynamo known function that is safe to
             # trace through.
             if (
-                hasattr(getattr(func, "fn", None), "_origin")
+                hasattr(func, "fn")
+                and hasattr(func.fn, "_origin")
                 and func.fn._origin is produce_trampoline_autograd_apply
             ):
                 # Known sound
@@ -4908,9 +4934,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     @staticmethod
     def build_inline_tracer(
         parent: Any,
-        func: VariableTracker,
-        args: list[VariableTracker],
-        kwargs: Any,
+        func: BaseUserFunctionVariable,
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
     ) -> InliningInstructionTranslator:
         assert isinstance(
             func,
@@ -4918,7 +4944,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 UserFunctionVariable,
                 NestedUserFunctionVariable,
                 LocalGeneratorFunctionVariable,
-                LocalGeneratorObjectVariable,
             ),
         )
         code: types.CodeType = func.get_code()
@@ -4935,15 +4960,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 result = previous_result
 
         if result is None:
-            if isinstance(func, SkipFunctionVariable):
-                unimplemented(
-                    gb_type="Attempted to inline function marked as skipped (SkipFunctionVariable)",
-                    context=f"Attempted to inline a SkipFunctionVariable {func}",
-                    explanation=(
-                        "Attempted to inline a function that was previously determined to be marked as intentionally skipped."
-                    ),
-                    hints=[],
-                )
             result = InliningInstructionTranslator.check_inlineable(func)
             assert result.skipped is False
 
@@ -5214,7 +5230,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         )
 
     def RETURN_VALUE(self, inst: Instruction) -> None:
-        self.symbolic_result = self.pop()  # type: ignore[assignment]
+        self.symbolic_result = self.pop()
         self.instruction_pointer = None
         raise ReturnValueOp
 

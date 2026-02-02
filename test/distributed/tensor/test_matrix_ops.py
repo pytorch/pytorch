@@ -460,6 +460,20 @@ class DistMatrixOpsTest(DTensorTestBase):
             dc.redistribute(device_mesh, [Replicate()]).to_local(),
         )
 
+    @with_comms
+    def test_t_1d(self):
+        # t() on a 1D tensor is a no-op and should preserve the shard placement
+        device_mesh = self.build_device_mesh()
+
+        tensor_1d = torch.randn(8)
+        mat = distribute_tensor(tensor_1d, device_mesh, [Shard(0)])
+        transposed = mat.t()
+        # t() on 1D is a no-op, should stay Shard(0)
+        self.assertEqual(transposed.size(), torch.Size([8]))
+        self.assertEqual(transposed.placements, (Shard(0),))
+        # Verify values match
+        self.assertEqual(transposed.full_tensor(), tensor_1d)
+
     # baddbmm introduces nan occasionally on CPU: https://github.com/pytorch/pytorch/issues/80588
     @with_comms
     @skip_unless_torch_gpu

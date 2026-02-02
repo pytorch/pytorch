@@ -7994,6 +7994,7 @@ class TestMPS(TestCaseMPS):
             ("random_with_range", lambda t: t.random_(0, 10)),
             ("log_normal_", lambda t: t.log_normal_(mean=1.0, std=2.0)),
             ("cauchy_", lambda t: t.cauchy_()),
+            ("geometric_", lambda t: t.geometric_(p=0.9)),
         ]
 
         for name, op_func in ops:
@@ -8045,6 +8046,7 @@ class TestMPS(TestCaseMPS):
             ("random_with_range", lambda t: t.random_(0, 10)),
             ("log_normal_", lambda t: t.log_normal_(mean=1.0, std=2.0)),
             ("cauchy_", lambda t: t.cauchy_()),
+            ("geometric_", lambda t: t.geometric_(p=0.2)),
         ]
         for name, op_func in ops:
             with self.subTest(operation=name):
@@ -12615,7 +12617,6 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.softmin',
         'cross', 'linalg.cross',
         'prod', 'masked.prod',
-        'nextafter',
         'native_layer_norm',
         'nn.functional.layer_norm',
         'nn.functional.interpolate',
@@ -12684,13 +12685,14 @@ class TestConsistency(TestCaseMPS):
                 # TODO: Handle list inputs later
                 if not isinstance(mps_out, torch.Tensor):
                     raise
+                if mps_sample.input.dtype not in [torch.float16, torch.bfloat16]:
+                    raise
 
-                if mps_sample.input.dtype in [torch.float16, torch.bfloat16]:
-                    # Often CPU ops are not implemented for low precision dtypes
-                    # In that case, upcast to higher precision and try again
-                    cpu_sample = transform_opinfo_sample_to_cpu(mps_sample, dtype=torch.float32)
-                    cpu_out = op(cpu_sample.input, *cpu_sample.args, **cpu_sample.kwargs)
-                    cpu_out = cpu_out.to(dtype=mps_out.dtype)
+                # Often CPU ops are not implemented for low precision dtypes
+                # In that case, upcast to higher precision and try again
+                cpu_sample = transform_opinfo_sample_to_cpu(mps_sample, dtype=torch.float32)
+                cpu_out = op(cpu_sample.input, *cpu_sample.args, **cpu_sample.kwargs)
+                cpu_out = cpu_out.to(dtype=mps_out.dtype)
 
         return mps_out, cpu_out, cpu_sample
 
@@ -12745,8 +12747,7 @@ class TestConsistency(TestCaseMPS):
         for mps_sample in op.sample_inputs(
                 device, dtype,
                 requires_grad=(dtype.is_floating_point or dtype.is_complex),
-                # TODO: Enable per-sample seed setting and tweak tolerances / fix xfails
-                set_seed=False):
+                set_seed=True):
             #
             # Forward check
             #
