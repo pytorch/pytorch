@@ -1260,12 +1260,42 @@ class LazyTraceHandler(logging.StreamHandler):
                     delete=False,
                 )
                 log.info("LazyTraceHandler: logging to %s", self.stream.name)
+                self._emit_version_info()
             else:
                 # We go poof, remove and no-op
                 trace_log.removeHandler(self)
                 return
         if self.stream:
             super().emit(record)
+
+    def _emit_version_info(self) -> None:
+        """Emit torch version info as the first artifact in the trace log."""
+        import torch.version as torch_version
+
+        version_info = {
+            "torch_version": torch_version.__version__,
+            "torch_git_version": getattr(torch_version, "git_version", None),
+            "cuda": torch_version.cuda,
+            "hip": torch_version.hip,
+            "debug": torch_version.debug,
+        }
+        payload = json.dumps(version_info, indent=0)
+        h = hashlib.md5(usedforsecurity=False)
+        h.update(payload.encode("utf-8"))
+
+        metadata = {
+            "artifact": {
+                "name": "torch_version",
+                "encoding": "json",
+            },
+            "has_payload": h.hexdigest(),
+        }
+        # tlparse requires glog prefix format: {level}{date} {time} {pid} {file}:{line}]
+        pid = os.getpid()
+        line = f"V0000 00:00:00.000000 {pid} torch/_logging/_internal.py:0] {json.dumps(metadata)}"
+        line += "".join(f"\n\t{l}" for l in payload.split("\n"))
+        self.stream.write(line + "\n")
+        self.stream.flush()
 
 
 @functools.cache
