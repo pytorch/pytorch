@@ -1324,6 +1324,26 @@ static PyObject* is_torch_function_mode_enabled(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* get_torch_function_skip_one_hop(
+    PyObject* _unused,
+    PyObject* _unused2) {
+  HANDLE_TH_ERRORS
+  if (at::impl::PythonTorchFunctionTLS::get_skip_one_hop()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* set_torch_function_skip_one_hop(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(PyBool_Check(arg), "expected a bool");
+  at::impl::PythonTorchFunctionTLS::set_skip_one_hop(arg == Py_True);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* push_on_torch_function_stack(
     PyObject* _unused,
     PyObject* arg) {
@@ -1637,6 +1657,14 @@ static PyMethodDef methods[] = {
     {"_is_torch_function_mode_enabled",
      is_torch_function_mode_enabled,
      METH_NOARGS,
+     nullptr},
+    {"_get_torch_function_skip_one_hop",
+     get_torch_function_skip_one_hop,
+     METH_NOARGS,
+     nullptr},
+    {"_set_torch_function_skip_one_hop",
+     set_torch_function_skip_one_hop,
+     METH_O,
      nullptr},
     {"_push_on_torch_function_stack",
      push_on_torch_function_stack,

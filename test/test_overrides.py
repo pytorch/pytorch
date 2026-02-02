@@ -1913,6 +1913,158 @@ class TestTorchFunctionMode(TestCase):
         finally:
             torch.set_default_device(None)
 
+    def test_skip_torch_function_mode_dispatch_basic(self):
+        """Test that skip_torch_function_mode_dispatch prevents infinite recursion."""
+        from torch.overrides import skip_torch_function_mode_dispatch
+
+        class TrackingMode(TorchFunctionMode):
+            def __init__(self):
+                self.calls = []
+
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                kwargs = kwargs or {}
+                name = func.__name__ if hasattr(func, '__name__') else str(func)
+                self.calls.append(name)
+
+                if func in (torch.autograd.backward, torch.Tensor.backward, torch.autograd.grad):
+                    with skip_torch_function_mode_dispatch(self):
+                        return func(*args, **kwargs)
+
+                return func(*args, **kwargs)
+
+        x = torch.tensor([1.0, 2.0, 3.0], requires_grad=True)
+        y = x * 2
+
+        mode = TrackingMode()
+        with mode:
+            y.sum().backward()
+
+        # Should not cause infinite recursion and should see backward
+        self.assertIn("backward", mode.calls)
+
+    def test_skip_torch_function_mode_dispatch_sees_backward_ops(self):
+        """Test that skip_torch_function_mode_dispatch keeps mode active for ops inside backward."""
+        from torch.overrides import skip_torch_function_mode_dispatch
+
+        class MyMul(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, y):
+                ctx.save_for_backward(x, y)
+                return x * y
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                x, y = ctx.saved_tensors
+                return grad_output * y, grad_output * x
+
+        class TrackingModeWithSkip(TorchFunctionMode):
+            def __init__(self):
+                self.calls = []
+
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                kwargs = kwargs or {}
+                name = func.__name__ if hasattr(func, '__name__') else str(func)
+                self.calls.append(name)
+
+                if func in (torch.autograd.backward, torch.Tensor.backward):
+                    with skip_torch_function_mode_dispatch(self):
+                        return func(*args, **kwargs)
+
+                return func(*args, **kwargs)
+
+        class TrackingModeNoSkip(TorchFunctionMode):
+            def __init__(self):
+                self.calls = []
+
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                kwargs = kwargs or {}
+                name = func.__name__ if hasattr(func, '__name__') else str(func)
+                self.calls.append(name)
+                return func(*args, **kwargs)
+
+        # Without skip
+        x1 = torch.tensor([1.0, 2.0, 3.0], requires_grad=True)
+        y1 = torch.tensor([4.0, 5.0, 6.0], requires_grad=True)
+        mode1 = TrackingModeNoSkip()
+        with mode1:
+            z1 = MyMul.apply(x1, y1)
+            z1.sum().backward()
+
+        # With skip
+        x2 = torch.tensor([1.0, 2.0, 3.0], requires_grad=True)
+        y2 = torch.tensor([4.0, 5.0, 6.0], requires_grad=True)
+        mode2 = TrackingModeWithSkip()
+        with mode2:
+            z2 = MyMul.apply(x2, y2)
+            z2.sum().backward()
+
+        # With skip should see more calls (including ops from backward)
+        self.assertGreater(len(mode2.calls), len(mode1.calls))
+        # Should see mul ops from the backward pass
+        mul_count_after_backward = mode2.calls[mode2.calls.index('backward'):].count('mul')
+        self.assertGreater(mul_count_after_backward, 0)
+
+    def test_skip_torch_function_mode_dispatch_backward_hook(self):
+        """Test that skip_torch_function_mode_dispatch allows mode to see ops in backward hooks."""
+        from torch.overrides import skip_torch_function_mode_dispatch
+
+        class TrackingModeWithSkip(TorchFunctionMode):
+            def __init__(self):
+                self.calls = []
+
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                kwargs = kwargs or {}
+                name = func.__name__ if hasattr(func, '__name__') else str(func)
+                self.calls.append(name)
+
+                if func in (torch.autograd.backward, torch.Tensor.backward):
+                    with skip_torch_function_mode_dispatch(self):
+                        return func(*args, **kwargs)
+
+                return func(*args, **kwargs)
+
+        class TrackingModeNoSkip(TorchFunctionMode):
+            def __init__(self):
+                self.calls = []
+
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                kwargs = kwargs or {}
+                name = func.__name__ if hasattr(func, '__name__') else str(func)
+                self.calls.append(name)
+                return func(*args, **kwargs)
+
+        def my_hook(grad):
+            # Do ops in the hook: grad * 2 + 1
+            return grad * 2 + 1
+
+        # Without skip
+        x1 = torch.tensor([1.0, 2.0, 3.0], requires_grad=True)
+        y1 = x1 * 2
+        y1.register_hook(my_hook)
+        mode1 = TrackingModeNoSkip()
+        with mode1:
+            y1.sum().backward()
+
+        # With skip
+        x2 = torch.tensor([1.0, 2.0, 3.0], requires_grad=True)
+        y2 = x2 * 2
+        y2.register_hook(my_hook)
+        mode2 = TrackingModeWithSkip()
+        with mode2:
+            y2.sum().backward()
+
+        # With skip should see hook ops (mul, add)
+        after_backward1 = mode1.calls[mode1.calls.index('backward'):] if 'backward' in mode1.calls else []
+        after_backward2 = mode2.calls[mode2.calls.index('backward'):] if 'backward' in mode2.calls else []
+
+        # Without skip: shouldn't see mul/add from hook
+        self.assertEqual(after_backward1.count('mul'), 0)
+        self.assertEqual(after_backward1.count('add'), 0)
+
+        # With skip: should see mul/add from hook
+        self.assertGreater(after_backward2.count('mul'), 0)
+        self.assertGreater(after_backward2.count('add'), 0)
+
 
 
 

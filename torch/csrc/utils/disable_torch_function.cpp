@@ -316,12 +316,29 @@ inline static bool has_torch_function_attr(PyObject* obj) {
 
 namespace torch {
 auto check_has_torch_function(PyObject* obj, bool ignore_mode) -> bool {
-  if (!ignore_mode && at::impl::torch_function_mode_enabled())
-    return true;
   PyTypeObject* tp = Py_TYPE(obj);
-  return (
+  bool has_subclass_torch_function =
       !THPVariable_CheckTypeExact(tp) && !is_basic_python_type(tp) &&
-      torch::torch_function_enabled() && has_torch_function_attr(obj));
+      torch::torch_function_enabled() && has_torch_function_attr(obj);
+
+  if (!ignore_mode && at::impl::torch_function_mode_enabled()) {
+    // Check skip_one_hop: if set, skip mode dispatch for this call but keep
+    // mode enabled for subsequent operations.
+    if (at::impl::PythonTorchFunctionTLS::get_skip_one_hop()) {
+      if (has_subclass_torch_function) {
+        // There's a subclass with __torch_function__, so we need to dispatch.
+        // Don't clear skip_one_hop here - let handle_torch_function clear it
+        // and skip mode dispatch while still doing subclass dispatch.
+        return true;
+      } else {
+        // No subclass, only mode. Skip the dispatch entirely.
+        at::impl::PythonTorchFunctionTLS::set_skip_one_hop(false);
+        return false;
+      }
+    }
+    return true;
+  }
+  return has_subclass_torch_function;
 }
 } // namespace torch
 

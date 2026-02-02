@@ -1735,12 +1735,18 @@ def handle_torch_function(
 
     # Check for __torch_function__ mode.
     if _is_torch_function_mode_enabled():
-        # if we're here, the mode must be set to a TorchFunctionStackMode
-        # this unsets it and calls directly into TorchFunctionStackMode's torch function
-        with _pop_mode_temporarily() as mode:
-            result = mode.__torch_function__(public_api, types, args, kwargs)
-        if result is not NotImplemented:
-            return result
+        # Check skip_one_hop: if set, skip mode dispatch for this call but keep
+        # mode enabled for subsequent operations.
+        if torch._C._get_torch_function_skip_one_hop():
+            torch._C._set_torch_function_skip_one_hop(False)
+            # Skip mode dispatch, fall through to subclass dispatch
+        else:
+            # if we're here, the mode must be set to a TorchFunctionStackMode
+            # this unsets it and calls directly into TorchFunctionStackMode's torch function
+            with _pop_mode_temporarily() as mode:
+                result = mode.__torch_function__(public_api, types, args, kwargs)
+            if result is not NotImplemented:
+                return result
 
     # Call overrides
     for overloaded_arg in overloaded_args:
@@ -2115,6 +2121,44 @@ def _enable_torch_function():
         yield
     finally:
         torch._C._set_torch_function_state(old_state)
+
+
+@contextlib.contextmanager
+def skip_torch_function_mode_dispatch(mode):
+    """
+    Context manager to skip the next torch function mode dispatch while keeping
+    the mode active for subsequent operations.
+
+    When used inside a TorchFunctionMode's __torch_function__ method, this pushes
+    the mode back onto the stack (since it was popped by handle_torch_function),
+    sets skip_one_hop, and then calls the function. The immediate dispatch is
+    skipped, but the mode remains active for operations inside the function.
+
+    Args:
+        mode: The TorchFunctionMode instance (typically `self` in __torch_function__)
+
+    Example::
+
+        class MyMode(TorchFunctionMode):
+            def __torch_function__(self, func, types, args, kwargs=None):
+                if func in (torch.autograd.backward, torch.Tensor.backward):
+                    # Skip mode dispatch for backward, but keep mode active
+                    # for gradient computations inside backward
+                    with skip_torch_function_mode_dispatch(self):
+                        return func(*args, **(kwargs or {}))
+                # ... handle other functions
+    """
+    # Push mode back onto stack (it was popped by handle_torch_function)
+    _push_mode(mode)
+    # Set skip flag so the immediate next dispatch is skipped
+    torch._C._set_torch_function_skip_one_hop(True)
+    try:
+        yield
+    finally:
+        # Clear the flag in case it wasn't consumed
+        torch._C._set_torch_function_skip_one_hop(False)
+        # Pop the mode we pushed
+        _pop_mode()
 
 
 @contextlib.contextmanager

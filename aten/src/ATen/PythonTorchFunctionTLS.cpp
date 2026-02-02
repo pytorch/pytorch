@@ -40,6 +40,14 @@ const PythonTorchFunctionTLS& PythonTorchFunctionTLS::get_state() {
   return pythonTorchFunctionState;
 }
 
+void PythonTorchFunctionTLS::set_skip_one_hop(bool skip) {
+  pythonTorchFunctionState.skip_one_hop_ = skip;
+}
+
+bool PythonTorchFunctionTLS::get_skip_one_hop() {
+  return pythonTorchFunctionState.skip_one_hop_;
+}
+
 bool torch_function_mode_enabled() {
   // Manually flatten because gcc is refusing to inline here.  Note
   // that we are still calling __tls_get_addr twice here with GCC,
