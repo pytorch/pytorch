@@ -695,6 +695,34 @@ void check_rnn_cell_forward_hidden(const Tensor& input, const Tensor& hx, const 
     "hidden", hidden_label, " has inconsistent hidden_size: got ", hx.sym_size(1), ", expected ", hidden_size);
 }
 
+// Validate LSTM hidden state shapes to prevent crashes with invalid inputs
+// hx should contain [h_0, c_0] where both have shape (num_layers * num_directions, batch, hidden_size)
+void check_lstm_hidden_state_shapes(TensorList hx, int64_t num_layers, bool bidirectional) {
+  int64_t expected_layers = num_layers * (bidirectional ? 2 : 1);
+
+  // Check h_0 (hx[0]) dimensions
+  TORCH_CHECK(
+      hx[0].dim() == 3,
+      "For batched 3-D input, hx[0] (h_0) should be 3-D but got ", hx[0].dim(), "-D tensor");
+
+  // Check c_0 (hx[1]) dimensions
+  TORCH_CHECK(
+      hx[1].dim() == 3,
+      "For batched 3-D input, hx[1] (c_0) should be 3-D but got ", hx[1].dim(), "-D tensor");
+
+  // Check h_0 first dimension matches expected layers
+  TORCH_CHECK(
+      hx[0].size(0) == expected_layers,
+      "Expected h_0 size(0) to be ", expected_layers,
+      " (num_layers * num_directions), but got ", hx[0].size(0));
+
+  // Check c_0 first dimension matches expected layers
+  TORCH_CHECK(
+      hx[1].size(0) == expected_layers,
+      "Expected c_0 size(0) to be ", expected_layers,
+      " (num_layers * num_directions), but got ", hx[1].size(0));
+}
+
 template<int64_t gate_count>
 inline void check_rnn_cell_forward_weights(const Tensor& w_ih, const Tensor& w_hh, const c10::SymInt& hidden_size){
     TORCH_CHECK(w_ih.size(0) == gate_count * hidden_size, "weight_ih first dim must be ", gate_count, " * hidden_size = ",
@@ -1460,6 +1488,8 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
     return return_values;
   }
 #endif
+  // Validate hidden state shapes before accessing their dimensions
+  check_lstm_hidden_state_shapes(hx, num_layers, bidirectional);
   // if cells are of different size, that means projections are used
   bool has_projections = (hx[0].sym_size(2) != hx[1].sym_size(2));
   if (use_miopen(_input, dropout_p)) {
@@ -1513,6 +1543,8 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
             _params, has_biases, num_layers, dropout_p, train, bidirectional);
     return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
   }
+  // Validate hidden state shapes before accessing their dimensions
+  check_lstm_hidden_state_shapes(hx, num_layers, bidirectional);
   // if cells are of different size, that means projections are used
   bool has_projections = (hx[0].size(2) != hx[1].size(2));
   if (use_miopen(data, dropout_p)) {
