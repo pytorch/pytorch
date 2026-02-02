@@ -79,7 +79,6 @@ ops_dde_xfail = {
     xfail("baddbmm"),
     xfail("bernoulli"),
     xfail("cauchy"),
-    xfail("cdist"),
     xfail("cholesky"),
     xfail("cholesky_inverse"),
     xfail("chunk"),

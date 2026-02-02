@@ -102,7 +102,7 @@ static Tensor cdist_impl(const Tensor& x1, const Tensor& x2, const double p, std
 
   // See Note [cdist relies on cdist_impl redispatching]
   // Keep this condition in sync with the condition at the Note
-  if (!(p == 2 && (mode == 1 || (mode == 0 && (r1 > 25 || r2 > 25))))) {
+  if (!(p == 2 && (mode == 1 || (mode == 0 && (TORCH_GUARD_OR_FALSE(r1.sym_gt(25)) || TORCH_GUARD_OR_FALSE(r2.sym_gt(25))))))) {
     TORCH_CHECK(device1 == kCPU || device1 == kCUDA || device1 == kXPU, "cdist only supports CPU, XPU and CUDA devices, X1 got: ", device1);
     TORCH_CHECK(device2 == kCPU || device2 == kCUDA || device2 == kXPU, "cdist only supports CPU, XPU and CUDA devices, X2 got: ", device2);
   }
@@ -131,14 +131,14 @@ static Tensor cdist_impl(const Tensor& x1, const Tensor& x2, const double p, std
   output_shape.insert(output_shape.end(), {r1, r2});
 
   Tensor result;
-  if (r1 == 0 || r2 == 0 || expand_batch_product == 0) {
+  if (TORCH_GUARD_OR_FALSE(r1.sym_eq(0)) || TORCH_GUARD_OR_FALSE(r2.sym_eq(0)) || TORCH_GUARD_OR_FALSE(expand_batch_product.sym_eq(0))) {
     result = at::empty_symint(output_shape, x1.options());
-  } else if (c1 == 0) {
+  } else if (TORCH_GUARD_OR_FALSE(c1.sym_eq(0))) {
     result = at::zeros_symint(output_shape, x1.options());
-  } else if (p == 2 && (mode == 1 || (mode == 0 && (r1 > 25 || r2 > 25)))) {
+  } else if (p == 2 && (mode == 1 || (mode == 0 && (TORCH_GUARD_OR_FALSE(r1.sym_gt(25)) || TORCH_GUARD_OR_FALSE(r2.sym_gt(25)))))) {
     // See Note [cdist relies on cdist_impl redispatching]
     // Keep the condition above in sync with the condition at the Note
-    Tensor dist = (expand_batch_product == 1) ? at::_euclidean_dist(x1, x2) :
+    Tensor dist = TORCH_GUARD_OR_FALSE(expand_batch_product.sym_eq(1)) ? at::_euclidean_dist(x1, x2) :
                   at::_euclidean_dist(tensor1_expanded, tensor2_expanded);
     result = dist.view_symint(output_shape);
   } else {
@@ -151,14 +151,15 @@ static Tensor cdist_impl(const Tensor& x1, const Tensor& x2, const double p, std
 Tensor cdist(const Tensor& x1, const Tensor& x2, const double p, std::optional<int64_t> compute_mode) {
   TORCH_CHECK(x1.dim() >= 2, "cdist only supports at least 2D tensors, X1 got: ", x1.dim(), "D");
   TORCH_CHECK(x2.dim() >= 2, "cdist only supports at least 2D tensors, X2 got: ", x2.dim(), "D");
-  TORCH_CHECK(x1.sym_size(-1) == x2.sym_size(-1), "X1 and X2 must have the same number of columns. X1: ", x1.sym_size(-1), " X2: ", x2.sym_size(-1));
+  TORCH_SYM_CHECK(x1.sym_size(-1).sym_eq(x2.sym_size(-1)), "X1 and X2 must have the same number of columns. X1: ", x1.sym_size(-1), " X2: ", x2.sym_size(-1));
   auto maybe_outnames = namedinference::compute_cdist_outnames(x1, x2);
   auto result = [&]() {
     NoNamesGuard guard;
     SymInt r1 = x1.sym_size(-2);
     SymInt r2 = x2.sym_size(-2);
     // Special case for empty input: always call the version with explicit autograd to ensure the graph is properly connected
-    if (x1.sym_numel() == 0 || x2.sym_numel() == 0) {
+    // Use TORCH_GUARD_OR_FALSE to handle unbacked symbolic shapes
+    if (TORCH_GUARD_OR_FALSE(x1.sym_numel().sym_eq(0)) || TORCH_GUARD_OR_FALSE(x2.sym_numel().sym_eq(0))) {
         return at::_cdist_forward(x1, x2, p, compute_mode);
     }
     int64_t mode = compute_mode.value_or(0);
@@ -166,7 +167,7 @@ Tensor cdist(const Tensor& x1, const Tensor& x2, const double p, std::optional<i
     // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     // This is for pytorch to figure the backward pass itself
     // when p=2.  Keep this condition in sync with the See Note reference
-    if (p == 2 && (mode == 1 || (mode == 0 && (r1 > 25 || r2 > 25)))) {
+    if (p == 2 && (mode == 1 || (mode == 0 && (TORCH_GUARD_OR_FALSE(r1.sym_gt(25)) || TORCH_GUARD_OR_FALSE(r2.sym_gt(25)))))) {
         return cdist_impl(x1, x2, p, compute_mode);
     } else {
         return at::_cdist_forward(x1, x2, p, compute_mode);
@@ -179,7 +180,7 @@ Tensor cdist(const Tensor& x1, const Tensor& x2, const double p, std::optional<i
 Tensor _cdist_forward(const Tensor& x1, const Tensor& x2, const double p, std::optional<int64_t> compute_mode) {
   TORCH_CHECK(x1.dim() >= 2, "cdist only supports at least 2D tensors, X1 got: ", x1.dim(), "D");
   TORCH_CHECK(x2.dim() >= 2, "cdist only supports at least 2D tensors, X2 got: ", x2.dim(), "D");
-  TORCH_CHECK(x1.size(-1) == x2.size(-1), "X1 and X2 must have the same number of columns. X1: ", x1.size(-1), " X2: ", x2.size(-1));
+  TORCH_SYM_CHECK(x1.sym_size(-1).sym_eq(x2.sym_size(-1)), "X1 and X2 must have the same number of columns. X1: ", x1.sym_size(-1), " X2: ", x2.sym_size(-1));
   auto maybe_outnames = namedinference::compute_cdist_outnames(x1, x2);
   auto result = [&]() {
     NoNamesGuard guard;

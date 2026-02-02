@@ -931,10 +931,10 @@ def squareCheckInputs(self: Tensor, f_name: str):
         raise AssertionError(
             f"{f_name}: The input tensor must have at least 2 dimensions, got {self.dim()}"
         )
-    if self.size(-1) != self.size(-2):
-        raise AssertionError(
-            f"{f_name}: A must be batches of square matrices, but they are {self.size(-2)} by {self.size(-1)} matrices"
-        )
+    torch._check(
+        self.size(-1) == self.size(-2),
+        lambda: f"{f_name}: A must be batches of square matrices, but they are {self.size(-2)} by {self.size(-1)} matrices",
+    )
 
 
 # Validates input shapes and devices
@@ -4058,6 +4058,8 @@ def meta__weight_int8pack_mm(x, w, q_scales):
 
 @register_meta(aten._cdist_forward.default)
 def meta_cdist_forward(x1, x2, p, compute_mode):
+    from torch.fx.experimental.symbolic_shapes import sym_eq
+
     torch._check(
         x1.dim() >= 2,
         lambda: f"cdist only supports at least 2D tensors, X1 got: {x1.dim()}D",
@@ -4067,8 +4069,11 @@ def meta_cdist_forward(x1, x2, p, compute_mode):
         lambda: f"cdist only supports at least 2D tensors, X2 got: {x2.dim()}D",
     )
     torch._check(
-        x1.size(-1) == x2.size(-1),
-        lambda: f"X1 and X2 must have the same number of columns. X1: {x1.size(-1)} X2: {x2.size(-1)}",
+        sym_eq(x1.size(-1), x2.size(-1)),
+        lambda: (
+            f"X1 and X2 must have the same number of columns. "
+            f"X1: {x1.size(-1)} X2: {x2.size(-1)}"
+        ),
     )
     torch._check(
         utils.is_float_dtype(x1.dtype),
