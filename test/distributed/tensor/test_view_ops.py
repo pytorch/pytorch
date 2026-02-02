@@ -812,6 +812,15 @@ class TestViewOps(DTensorTestBase):
         self.assertEqual(result17._local_tensor.shape, torch.Size([1]))
         self.assertEqual(result17.placements, (Shard(0),))  # dim shifted after squeeze
 
+        # Test 18: squeeze with uneven sharding (tensor_dim < mesh_dim)
+        # Global [1, 4] sharded on dim 0 -> rank 0 gets [1, 4], others get [0, 4]
+        # Squeeze should remove dim 0 (global singleton) and redistribute to Replicate
+        x18 = torch.randn(1, 4, device=self.device_type)
+        dt18 = distribute_tensor(x18, mesh, [Shard(0)])
+        result18 = dt18.squeeze()
+        self.assertEqual(result18.shape, torch.Size([4]))
+        self.assertEqual(result18.placements, (Replicate(),))
+
     @with_comms
     def test_storage_offset_slice(self):
         """
