@@ -1240,7 +1240,7 @@ class LocalTensorMode(TorchDispatchMode):
         ] = {}
         # Cache for get_coordinate results, keyed by mesh id
         # Protected by _coordinate_cache_lock for thread safety in MPMD contexts
-        self._coordinate_cache: dict[int, list[int]] = {}
+        self._coordinate_cache: dict[int, list[SymInt]] = {}
         self._coordinate_cache_lock = threading.Lock()
 
     def __enter__(self) -> "LocalTensorMode":
@@ -1557,7 +1557,7 @@ class _LocalDeviceMesh:
     """
 
     @staticmethod
-    def get_coordinate(self: DeviceMesh) -> list[int] | None:
+    def get_coordinate(self: DeviceMesh) -> list[SymInt] | None:
         # NB: In order to support submeshes the code below recreates for each
         # rank submesh with the same mesh dimensions as current mesh. We are
         # doing this because when submesh is created it is created for a particular
