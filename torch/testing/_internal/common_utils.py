@@ -5527,19 +5527,35 @@ def dtype_name(dtype):
 
 
 @functools.lru_cache
-def get_cycles_per_ms() -> float:
-    """Measure and return approximate number of cycles per millisecond for torch.cuda._sleep
-    """
+def get_cycles_per_ms(device: str = "cuda") -> float:
+    """Measure and return approximate number of cycles per millisecond for device _sleep.
 
-    def measure() -> float:
-        start = torch.cuda.Event(enable_timing=True)
-        end = torch.cuda.Event(enable_timing=True)
-        start.record()
-        torch.cuda._sleep(1000000)
-        end.record()
-        end.synchronize()
-        cycles_per_ms = 1000000 / start.elapsed_time(end)
-        return cycles_per_ms
+    Args:
+        device: Device type to measure cycles for ("cuda" or "cpu").
+
+    Works for both CUDA (torch.cuda._sleep) and CPU (torch.cpu._sleep).
+    """
+    if device == "cpu":
+        import time
+
+        def measure() -> float:
+            test_cycles = 1000000
+            start = time.perf_counter()
+            torch.cpu._sleep(test_cycles)
+            end = time.perf_counter()
+            elapsed_ms = (end - start) * 1000
+            cycles_per_ms = test_cycles / elapsed_ms if elapsed_ms > 0 else 1000000
+            return cycles_per_ms
+    else:
+        def measure() -> float:
+            start = torch.cuda.Event(enable_timing=True)
+            end = torch.cuda.Event(enable_timing=True)
+            start.record()
+            torch.cuda._sleep(1000000)
+            end.record()
+            end.synchronize()
+            cycles_per_ms = 1000000 / start.elapsed_time(end)
+            return cycles_per_ms
 
     # Get 10 values and remove the 2 max and 2 min and return the avg.
     # This is to avoid system disturbance that skew the results, e.g.
