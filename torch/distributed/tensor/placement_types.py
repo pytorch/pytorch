@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
+import functools
 import typing
 from dataclasses import dataclass, field
 from typing import cast, TypeVar
@@ -31,6 +32,18 @@ _RankTypeT = TypeVar("_RankTypeT", bound=RankType)
 
 # Appease TestPublicBindings.test_correct_module_names
 Placement.__module__ = "torch.distributed.tensor.placement_types"
+
+
+def _raise_error(method_name, _):
+    raise RuntimeError(
+        f"Placement method '{method_name}' should not be called as "
+        "it should be overridden by the subclass"
+    )
+
+
+Placement.__eq__ = functools.partial(_raise_error, method_name="__eq__")
+Placement.__hash__ = functools.partial(_raise_error, method_name="__hash__")
+Placement.__fx_repr__ = functools.partial(_raise_error, method_name="__fx_repr__")
 
 
 class Shard(torch._C._distributed.Shard):
@@ -110,19 +123,54 @@ class Shard(torch._C._distributed.Shard):
         self,
         tensor: torch.Tensor,
         num_chunks: int,
-        index: int,
+        index: RankType,
         *,
         with_padding: bool = True,
         contiguous: bool = True,
         clone: bool = True,
     ) -> torch.Tensor:
         """
-        Like _split_tensor() but only returns a single Tensor
+        Like _split_tensor() but only returns a single shard at the given index.
+
+        This function splits a tensor into num_chunks shards along the Shard placement
+        dimension and returns only the shard at the specified index.
+
+        Keyword args:
+            with_padding (bool, optional): when True, we pad the tensor on the last
+                few ranks before calling the collectives (i.e. scatter/all_gather, etc.).
+                This is because collectives usually require equal size tensor inputs.
+            contiguous (bool, optional): when True, the returned shard is made contiguous.
+            clone (bool, optional): when True, the returned shard is cloned.
         """
-        shards, _ = self._split_tensor(
-            tensor, num_chunks, with_padding=with_padding, contiguous=False
+        # We don't handle SymInt with_padding yet (because that requires extra
+        # work based on the shard)
+        if isinstance(index, int) or with_padding:
+            shards, _ = self._split_tensor(
+                tensor, num_chunks, with_padding=with_padding, contiguous=False
+            )
+            result = shards[index]
+            if clone:
+                result = result.clone()
+            elif contiguous:
+                result = result.contiguous()
+            return result
+
+        # For the SymInt implementation just compute the value for the tensor we
+        # want rather than computing all of them.
+
+        assert self.dim <= tensor.ndim, (
+            f"Sharding dim {self.dim} greater than tensor ndim {tensor.ndim}"
         )
-        result = shards[index]
+
+        # chunk tensor over dimension `dim` into n slices
+        dim_size = tensor.size(self.dim)
+        split_size = (dim_size + num_chunks - 1) // num_chunks
+        # each split is split_size except (maybe) the last one...
+        last_split = dim_size - split_size * (num_chunks - 1)
+
+        start = split_size * index
+        length = torch.sym_ite(index == num_chunks - 1, last_split, split_size)
+        result = torch.narrow(tensor, self.dim, start, length)
         if clone:
             result = result.clone()
         elif contiguous:
@@ -135,7 +183,7 @@ class Shard(torch._C._distributed.Shard):
         curr_local_size: int,
         num_chunks: int,
         rank: _RankTypeT,
-    ) -> tuple[int, _RankTypeT]:
+    ) -> tuple[_RankTypeT, _RankTypeT]:
         """
         Given the size of the current local tensor (which may already be sharded on some dimensions),
         computes the new local shard size and offset given the desired number of chunks
@@ -152,7 +200,7 @@ class Shard(torch._C._distributed.Shard):
             full_chunk_size = curr_local_size // num_chunks
             # pyrefly: ignore[bad-assignment] # pyrefly bug?
             shard_starting_idx: _RankTypeT = full_chunk_size * rank
-            return full_chunk_size, shard_starting_idx
+            return full_chunk_size, shard_starting_idx  # pyrefly: ignore[bad-return]
 
         # uneven sharding case
         full_chunk_size = (curr_local_size + num_chunks - 1) // num_chunks
@@ -160,6 +208,7 @@ class Shard(torch._C._distributed.Shard):
         shard_starting_idx: _RankTypeT = full_chunk_size * rank
 
         if curr_local_size < shard_starting_idx:
+            # pyrefly: ignore[bad-return]
             return 0, typing.cast(_RankTypeT, curr_local_size)
         else:
             local_shard_size = (
@@ -174,6 +223,7 @@ class Shard(torch._C._distributed.Shard):
         num_chunks: int,
         rank: RankType,
     ) -> tuple[int, RankType]:
+        # pyrefly: ignore[bad-argument-type]  # pyrefly bug
         return Shard.local_shard_size_and_offset(curr_local_size, num_chunks, rank)
 
     @staticmethod
@@ -527,6 +577,13 @@ class Shard(torch._C._distributed.Shard):
         """
         return f"Shard(dim={self.dim})"
 
+    def __fx_repr__(self):
+        """
+        Returns FX-evaluable repr and required globals for Shard placement.
+        Needed for passing this type as an opaque object input to a custom op.
+        """
+        return f"torch.distributed.tensor.placement_types.Shard(dim={self.dim})", {}
+
     def __str__(self) -> str:
         """human readable representation of the Shard placement"""
         return f"S({self.dim})"
@@ -612,6 +669,16 @@ class _StridedShard(torch._C._distributed.StridedShard):
     @maybe_run_for_local_tensor
     def _select_shard(shards: list[torch.Tensor], shard_index) -> torch.Tensor:
         return shards[shard_index].clone()
+
+    def __fx_repr__(self):
+        """
+        Returns FX-evaluable repr and required globals for Shard placement.
+        Needed for passing this type as an opaque object input to a custom op.
+        """
+        return (
+            f"torch.distributed.tensor.placement_types._StridedShard(dim={self.dim}, sf={self.split_factor})",  # noqa: B950
+            {},
+        )
 
     @classmethod
     def _make_shard_tensor(
@@ -747,7 +814,17 @@ class _StridedShard(torch._C._distributed.StridedShard):
         clone: bool = True,
     ) -> torch.Tensor:
         """
-        Like _split_tensor() but only returns a single Tensor
+        Like _split_tensor() but only returns a single shard at the given index.
+
+        This function splits a tensor into num_chunks shards along the _StridedShard
+        placement dimension and returns only the shard at the specified index.
+
+        Keyword args:
+            with_padding (bool, optional): when True, we pad the tensor on the last
+                few ranks before calling the collectives (i.e. scatter/all_gather, etc.).
+                This is because collectives usually require equal size tensor inputs.
+            contiguous (bool, optional): when True, the returned shard is made contiguous.
+            clone (bool, optional): when True, the returned shard is cloned.
         """
         shards, _ = self._split_tensor(
             tensor, num_chunks, with_padding=with_padding, contiguous=False
@@ -918,6 +995,39 @@ class _StridedShard(torch._C._distributed.StridedShard):
 
         return replicate_tensor.contiguous()
 
+    def _replicate_to_strided_shard(
+        self,
+        local_tensor: torch.Tensor,
+        mesh: DeviceMesh,
+        mesh_dim: int,
+        shard_index: int,
+    ) -> torch.Tensor:
+        """
+        Transform from replicated tensor to a strided-sharded tensor on the current rank.
+
+        This performs a local chunking operation using the _StridedShard pattern,
+        where the tensor is split according to the strided sharding semantics
+        (interleaved pieces based on split_factor).
+
+        Args:
+            local_tensor: The replicated tensor on this rank.
+            mesh: The device mesh over which the tensor is distributed.
+            mesh_dim: The mesh dimension for the sharding.
+            shard_index: The index of the shard to select (typically the rank's
+                coordinate on the mesh dimension).
+
+        Returns:
+            The local strided shard for this rank.
+        """
+        num_chunks = mesh.size(mesh_dim=mesh_dim)
+        return self._select_split_tensor(
+            local_tensor,
+            num_chunks,
+            shard_index,
+            with_padding=False,
+            clone=True,
+        )
+
     @staticmethod
     @maybe_run_for_local_tensor
     def _local_shard_size(sharded_indices: list[torch.Tensor], rank: RankType) -> int:
@@ -953,7 +1063,7 @@ class _StridedShard(torch._C._distributed.StridedShard):
             self (_StridedShard): The _StridedShard placement instance.
             curr_local_size (int): The current size of the tensor dimension to be sharded.
             num_chunks (int): Number of chunks to split the dimension into (typically the mesh dimension size).
-            rank (int): The rank index to compute the shard for.
+            rank (RankType): The rank index to compute the shard for.
             return_first_offset (bool): If True, return only the first offset as an int. If False,
                 return all offsets as a list. Defaults to True.
 
@@ -1011,6 +1121,13 @@ class Replicate(torch._C._distributed.Replicate):
         machine readable representation of the Replicate placement
         """
         return "Replicate()"
+
+    def __fx_repr__(self):
+        """
+        Returns FX-evaluable repr and required globals for Replicate placement.
+        Needed for passing this type as an opaque object input to a custom op.
+        """
+        return "torch.distributed.tensor.placement_types.Replicate()", {}
 
     def __str__(self) -> str:
         """
@@ -1154,6 +1271,16 @@ class Partial(torch._C._distributed.Partial):
         machine readable representation of the Partial placement
         """
         return f"Partial({self.reduce_op})"
+
+    def __fx_repr__(self):
+        """
+        Returns FX-evaluable repr and required globals for Partial placement.
+        Needed for passing this type as an input to a custom op.
+        """
+        return (
+            f"torch.distributed.tensor.placement_types.Partial({self.reduce_op!r})",
+            {},
+        )
 
     def __str__(self) -> str:
         """
@@ -1306,3 +1433,47 @@ class _MaskPartial(Partial):
         human readable representation of the _MaskPartial placement
         """
         return f"MaskP({self.reduce_op}, {self.offset_shape}, {self.offset_dim})"
+
+    def __fx_repr__(self):
+        """
+        Returns FX-evaluable repr and required globals for Partial placement.
+        Needed for passing this type as an input to a custom op.
+        """
+        return (
+            f"torch.distributed.tensor.placement_types.MaskPartial(reduce_op={self.reduce_op}, offset_shape={self.offset_shape}, offset_dim={self.offset_dim})",  # noqa: B950
+            {},
+        )
+
+
+def _register_placements_as_opaque():
+    from torch._library.opaque_object import MemberType, register_opaque_type
+
+    allowed_members = {
+        "is_shard": MemberType.USE_REAL,
+        "is_partial": MemberType.USE_REAL,
+        "is_replicate": MemberType.USE_REAL,
+        "__eq__": MemberType.USE_REAL,
+    }
+    register_opaque_type(Placement, typ="value", members=allowed_members)
+    register_opaque_type(
+        Shard, typ="value", members=allowed_members | {"dim": MemberType.USE_REAL}
+    )
+    register_opaque_type(Replicate, typ="value", members=allowed_members)
+    register_opaque_type(
+        Partial,
+        typ="value",
+        members=allowed_members | {"reduce_op": MemberType.USE_REAL},
+    )
+    register_opaque_type(
+        _StridedShard,
+        typ="value",
+        members=allowed_members | {"dim": MemberType.USE_REAL},
+    )
+    register_opaque_type(
+        _MaskPartial,
+        typ="value",
+        members=allowed_members | {"reduce_op": MemberType.USE_REAL},
+    )
+
+
+_register_placements_as_opaque()
