@@ -54,6 +54,12 @@ FORBIDDEN_EXACT = [
     "merge blocking",
 ]
 
+# Redundant label pairs: if the specific label is present, the general label should be stripped
+# Format: (specific_label, general_label_to_remove)
+REDUNDANT_PAIRS = [
+    ("module: rnn", "module: nn"),
+]
+
 
 def is_forbidden(label: str) -> bool:
     """Check if a label matches any forbidden pattern or exact name."""
@@ -94,6 +100,16 @@ def find_nonexistent_labels(labels: list[str], valid_labels: set[str]) -> list[s
     return [label for label in labels if label not in valid_labels]
 
 
+def find_redundant_labels(labels: list[str]) -> list[tuple[str, str]]:
+    """Return list of (specific, general) pairs where both are present."""
+    labels_set = set(labels)
+    return [
+        (specific, general)
+        for specific, general in REDUNDANT_PAIRS
+        if specific in labels_set and general in labels_set
+    ]
+
+
 def main():
     try:
         data = json.load(sys.stdin)
@@ -124,6 +140,23 @@ def main():
                 "Do NOT add any other labels. A human will review this issue.",
                 file=sys.stderr,
             )
+            sys.exit(2)
+
+        redundant = find_redundant_labels(labels)
+        if redundant:
+            debug_log(f"BLOCKING - redundant labels: {redundant}")
+            for specific, general in redundant:
+                print(
+                    f"BLOCKED: Redundant labels detected: '{general}' is redundant when '{specific}' is present.",
+                    file=sys.stderr,
+                )
+            print(file=sys.stderr)
+            print(
+                "ACTION REQUIRED: Remove the general label(s) and keep only the specific one(s).",
+                file=sys.stderr,
+            )
+            generals_to_remove = [general for _, general in redundant]
+            print(f"Remove: {generals_to_remove}", file=sys.stderr)
             sys.exit(2)
 
         valid_labels = load_valid_labels()
