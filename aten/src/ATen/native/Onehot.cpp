@@ -72,4 +72,13 @@ Tensor one_hot(const Tensor &self, int64_t num_classes) {
     return ret;
 }
 
+Tensor one_hot_symint(const Tensor &self, c10::SymInt num_classes) {
+    if (TORCH_GUARD_OR_FALSE(num_classes.sym_eq(-1))) {
+        num_classes = self.max().item().toLong() + 1;
+    }
+    TORCH_SYM_CHECK(num_classes.sym_ge(1), "num_classes should be positive");
+    at::Tensor index = at::arange(num_classes, self.options());
+    return at::eq(self.unsqueeze(-1), index).to(kLong);
+}
+
 } // namespace at::native
