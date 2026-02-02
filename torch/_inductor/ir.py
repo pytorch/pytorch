@@ -8112,7 +8112,7 @@ class FallbackKernel(ExternKernelAlloc):
             return_type = returns[0].real_type
             output_arguments = [handle_single_output(return_type, outputs)]
         else:
-            # For tuple returns, e.g "-> (Tensor, Tensor)" or "-> (Tesnor, Tensor[])"
+            # For tuple returns, e.g "-> (Tensor, Tensor)" or "-> (Tensor, Tensor[])"
             # Not generating output args for self.mutation_outputs
             output_arguments = [
                 handle_single_output(

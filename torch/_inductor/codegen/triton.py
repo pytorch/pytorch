@@ -2221,10 +2221,13 @@ class TMACompatibilityChecker:
         if self.force:
             return True
         if not (
-            V.graph.get_current_device_or_throw().type == "cuda"
-            and torch.cuda.get_device_capability()[0] >= 9
+            (
+                V.graph.get_current_device_or_throw().type == "cuda"
+                and torch.cuda.get_device_capability()[0] >= 9
+                and config.assume_aligned_inputs
+            )
+            or V.graph.get_current_device_or_throw().type == "xpu"
             and config.triton.use_tensor_descriptor
-            and config.assume_aligned_inputs
             and has_triton_stable_tma_api()
             # For CUDA The base ptr needs to be aligned
         ):
@@ -5390,6 +5393,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             ),
             **self.triton_meta_common(),
         }
+
+        if self.cooperative_reduction:
+            # Cooperative reductions rely on multi-block synchronization that
+            # requires cooperative-grid launches to avoid hanging.
+            triton_meta["launch_cooperative_grid"] = True
 
         # Skip memory optimization for forward of the training loop where we expect
         # every new node will increase the peak memory and our greedy approach would
