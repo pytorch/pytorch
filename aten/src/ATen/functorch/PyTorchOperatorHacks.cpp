@@ -111,7 +111,11 @@ Tensor binary_cross_entropy_with_logits_hack(
 Tensor trace_backward_decomp(const Tensor& grad, IntArrayRef sizes) {
   TORCH_CHECK(sizes.size() == 2, "expected matrix input");
   auto grad_input = at::zeros(sizes[0] * sizes[1], grad.options());
-  auto indices = at::arange(0, grad_input.numel(), sizes[1] + 1, grad.options().dtype(at::kLong));
+  // The diagonal length is min(rows, cols). We need exactly that many indices.
+  // Each diagonal index is offset by (cols + 1) from the previous one.
+  auto diag_len = std::min(sizes[0], sizes[1]);
+  auto step = sizes[1] + 1;
+  auto indices = at::arange(0, diag_len * step, step, grad.options().dtype(at::kLong));
   // Workaround using index_put instead of yet unsupported index_fill_
   grad_input = grad_input.index_put({indices}, grad);
   return grad_input.view(sizes);

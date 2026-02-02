@@ -185,7 +185,11 @@ Tensor trace_backward_symint(const Tensor& grad, c10::SymIntArrayRef sizes) {
   TORCH_CHECK(sizes.size() == 2, "expected matrix input");
 
   auto grad_input = at::zeros_symint(sizes[0] * sizes[1], grad.options());
-  auto indices = at::arange(0, grad_input.numel(), sizes[1] + 1, grad.options().dtype(at::kLong));
+  // The diagonal length is min(rows, cols). We need exactly that many indices.
+  // Each diagonal index is offset by (cols + 1) from the previous one.
+  auto diag_len = (sizes[0] < sizes[1]) ? sizes[0] : sizes[1];
+  auto step = sizes[1] + 1;
+  auto indices = at::arange_symint(c10::SymInt(0), diag_len * step, step, grad.options().dtype(at::kLong));
   // for composite compliance, use out-of-place variant of
   // `index_fill` if grad tensor is a Tensor Subclass.
   if (isTensorSubclassLike(grad)) {
