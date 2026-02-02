@@ -132,7 +132,7 @@ class graph:
         )
         if self.capture_stream is None:
             raise AssertionError("capture_stream must not be None")
-        self.stream_ctx = torch.xpu.stream(self.capture_stream)
+        self.stream_ctx = self.capture_stream
         self.xpu_graph = xpu_graph
 
     def __enter__(self) -> None:
