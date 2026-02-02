@@ -19,13 +19,13 @@ hooks:
 This skill helps triage GitHub issues by routing issues, applying labels, and leaving first-line responses.
 
 ## Contents
-
 - [MCP Tools Available](#mcp-tools-available)
 - [Labels You Must NEVER Add](#labels-you-must-never-add)
 - [Issue Triage Steps](#issue-triage-for-each-issue)
   - Step 0: Already Routed — SKIP
   - Step 1: Question vs Bug/Feature
   - Step 2: Transfer
+  - Step 2.5: PT2 Issues — Special Handling
   - Step 3: Redirect to Secondary Oncall
   - Step 4: Label the Issue
   - Step 5: High Priority — REQUIRES HUMAN REVIEW
@@ -34,6 +34,8 @@ This skill helps triage GitHub issues by routing issues, applying labels, and le
 - [V1 Constraints](#v1-constraints)
 
 **Labels reference:** See [labels.json](labels.json) for the full catalog of 305 labels suitable for triage. This file excludes CI triggers, test configs, release notes, and deprecated labels.
+
+**PT2 triage guide:** See [pt2-triage-rubric.md](pt2-triage-rubric.md) for detailed labeling guidance when triaging PT2/torch.compile issues.
 
 **Response templates:** See [templates.json](templates.json) for standard response messages.
 
@@ -91,9 +93,18 @@ That issue belongs to the sub-oncall team. They own their queue.
 
 If the issue belongs in another repo (vision/text/audio/RL/ExecuTorch/etc.), transfer the issue and **STOP**.
 
+### 2.5) PT2 Issues — Special Handling
+
+When triaging PT2 issues (torch.compile, dynamo, inductor), see [pt2-triage-rubric.md](pt2-triage-rubric.md) for detailed labeling decisions.
+
+**Key differences from general triage:**
+- For PT2 issues, you MAY apply `module:` labels (e.g., `module: dynamo`, `module: inductor`, `module: dynamic shapes`)
+- Use the rubric to determine the correct component labels
+- Only redirect to `oncall: cpu inductor` for MKLDNN-specific issues; otherwise keep in PT2 queue
+
 ### 3) Redirect to Secondary Oncall
 
-**CRITICAL:** When redirecting to an oncall queue, apply exactly one `oncall: ...` label and **STOP**. Do NOT:
+**CRITICAL:** When redirecting issues to an oncall queue (**critical** with the exception of PT2), apply exactly one `oncall: ...` label and **STOP**. Do NOT:
 - Add any `module:` labels
 - Mark it `triaged`
 - Do any further triage work
@@ -104,14 +115,12 @@ The sub-oncall team will handle their own triage. Your job is only to route it t
 
 | Label | When to use |
 |-------|-------------|
-| `oncall: pt2` | torch.compile, dynamo, inductor, aotdispatch, dynamic shapes |
 | `oncall: jit` | TorchScript issues |
 | `oncall: distributed` | Distributed training (DDP, FSDP, RPC, c10d) |
 | `oncall: export` | torch.export issues |
 | `oncall: quantization` | Quantization issues |
 | `oncall: mobile` | Mobile (iOS/Android), excludes ExecuTorch |
 | `oncall: profiler` | Profiler issues (CPU, GPU, Kineto) |
-| `oncall: releng` | Release engineering, CI infrastructure |
 | `oncall: visualization` | TensorBoard integration |
 
 **Note:** `oncall: cpu inductor` is a sub-queue of PT2. For general triage, just use `oncall: pt2`.
