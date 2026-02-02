@@ -84,6 +84,9 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
       cudaGraphConditionalHandle handle,
       const Tensor& scalar_cuda_pred_tensor);
 
+  MempoolId_t mempool_id() const { return mempool_id_; }
+  c10::DeviceIndex capture_device() const { return capture_dev_; }
+
  private:
   std::function<bool(cudaStream_t)> create_allocate_filter();
   std::function<bool(cudaStream_t)> create_child_allocate_filter();
