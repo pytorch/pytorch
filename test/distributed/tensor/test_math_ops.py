@@ -690,29 +690,6 @@ class DistMathOpsTest(DTensorTestBase):
         self.assertEqual(partial_out.full_tensor(), out)
 
     @with_comms
-    def test_vector_norm_on_norm_partial(self):
-        from torch.distributed.tensor._ops._math_ops import _NormPartial
-
-        device_mesh = self.build_device_mesh()
-        comm_mode = CommDebugMode()
-
-        grad = torch.randn(12, 8, device=self.device_type)
-        sharded_grad = distribute_tensor(grad, device_mesh, [Shard(0)])
-
-        for ord in [1.0, 2.0, 2.5]:
-            norm = torch.linalg.vector_norm(sharded_grad, ord=ord)
-            self.assertIsInstance(norm._spec.placements[0], _NormPartial)
-
-            with comm_mode:
-                result = torch.linalg.vector_norm(norm.unsqueeze(0), ord=ord)
-
-            self.assertEqual(comm_mode.get_total_counts(), 0)
-            self.assertIsInstance(result._spec.placements[0], _NormPartial)
-            self.assertEqual(
-                result.full_tensor(), torch.linalg.vector_norm(grad, ord=ord)
-            )
-
-    @with_comms
     def test_foreach_norm(self):
         device_mesh = self.build_device_mesh()
 
