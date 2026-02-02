@@ -1728,6 +1728,12 @@ def handle_torch_function(
     ...         return handle_torch_function(func, (a,), a)
     ...     return a + 0
     """
+    # Check skip_one_hop: if set, skip torch function dispatch and call the
+    # original function directly. This is used by skip_torch_function_mode_dispatch.
+    if torch._C._get_torch_function_skip_one_hop():
+        torch._C._set_torch_function_skip_one_hop(False)
+        return public_api(*args, **kwargs)
+
     # Check for __torch_function__ methods.
     overloaded_args = _get_overloaded_args(relevant_args)
     # overloaded_args already have unique types.
