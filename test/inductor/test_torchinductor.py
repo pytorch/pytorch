@@ -10708,6 +10708,29 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         t1[:, 100] = float("nan")
         self.common(fn, (t1,))
 
+    def test_max_min_bool(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/174069
+        # max/min on boolean tensors returned incorrect indices in Triton
+        def fn(x):
+            return (
+                x.max(0),
+                x.min(0),
+                x.max(1),
+                x.min(1),
+            )
+
+        # Unrolled reduction
+        t1 = torch.randint(2, size=(6, 6), dtype=torch.bool)
+        self.common(fn, (t1,))
+
+        # Persistent reduction
+        t1 = torch.randint(2, size=(32, 32), dtype=torch.bool)
+        self.common(fn, (t1,))
+
+        # Non-persistent reduction
+        t1 = torch.randint(2, size=(1028, 1028), dtype=torch.bool)
+        self.common(fn, (t1,))
+
     def test_conv_backward(self):
         def fn(rank4_inps, rank3_inps, rank5_inps):
             out1 = aten.convolution_backward(
