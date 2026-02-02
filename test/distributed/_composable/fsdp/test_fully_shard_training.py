@@ -91,26 +91,20 @@ class TestFullyShardForwardInputs(FSDPTestMultiThread):
     def test_root_move_forward_input_to_device(self):
         device = torch.device(device_type.type, 0)
 
-        def check_device(actual: torch.device, expected: torch.device) -> bool:
-            # For CPU, torch.device("cpu") and torch.device("cpu", 0) are
-            # semantically equivalent but not equal. Check type match for CPU.
-            if expected.type == "cpu":
-                return actual.type == "cpu"
-            return actual == expected
-
         class ParamlessModule(nn.Module):
             def forward(self, x: torch.Tensor, ys: tuple[torch.Tensor, ...]):
                 # Check that FSDP moved the inputs to GPU, including recursing
                 # into the tuple data structure
-                assert check_device(x.device, device), (
-                    f"Expects {device} but got {x.device}"
-                )
-                assert check_device(ys[0].device, device), (
-                    f"Expects {device} but got {ys[0].device}"
-                )
-                assert check_device(ys[1].device, device), (
-                    f"Expects {device} but got {ys[1].device}"
-                )
+                # Skip device check for CPU since torch.device("cpu") and
+                # torch.device("cpu", 0) are semantically equivalent but not equal
+                if device.type != "cpu":
+                    assert x.device == device, f"Expects {device} but got {x.device}"
+                    assert ys[0].device == device, (
+                        f"Expects {device} but got {ys[0].device}"
+                    )
+                    assert ys[1].device == device, (
+                        f"Expects {device} but got {ys[1].device}"
+                    )
                 y = ys[0] + ys[1]
                 return x + y + 1
 
@@ -288,9 +282,10 @@ class TestFullyShardCastAfterInit(FSDPTestMultiThread):
 class TestFullyShard1DTrainingCore(FSDPTest):
     @property
     def world_size(self) -> int:
+        min_world_size = 8
         if device_type.type == "cpu":
-            return 8
-        return min(8, torch.get_device_module(device_type).device_count())
+            return min_world_size
+        return min(min_world_size, torch.get_device_module(device_type).device_count())
 
     def test_train_parity_single_group_shard_dim0(self):
         """
@@ -706,9 +701,10 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
     def world_size(self) -> int:
         # Since these tests run with a larger transformer model, they may see
         # some numeric drift with >2 GPUs
+        min_world_size = 2
         if device_type.type == "cpu":
-            return 2
-        return min(torch.get_device_module(device_type).device_count(), 2)
+            return min_world_size
+        return min(min_world_size, torch.get_device_module(device_type).device_count())
 
     @compiled_fsdp_test(compile_compute_on_module=Transformer)
     @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/1661
@@ -881,9 +877,10 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
 class TestFullyShardShardPlacementFnMultiProcess(FSDPTest):
     @property
     def world_size(self) -> int:
+        min_world_size = 8
         if device_type.type == "cpu":
-            return 8
-        return min(8, torch.get_device_module(device_type).device_count())
+            return min_world_size
+        return min(min_world_size, torch.get_device_module(device_type).device_count())
 
     def test_train_parity_shard_placement_fn_shard_largest_dim(self):
         torch.manual_seed(42)
@@ -969,9 +966,10 @@ class TestFullyShardShardPlacementFnMultiThread(FSDPTestMultiThread):
 class TestFullyShardSharedParams(FSDPTest):
     @property
     def world_size(self) -> int:
+        min_world_size = 4
         if device_type.type == "cpu":
-            return 4
-        return min(4, torch.get_device_module(device_type).device_count())
+            return min_world_size
+        return min(min_world_size, torch.get_device_module(device_type).device_count())
 
     def test_train_parity_with_shared_params(self):
         self.run_subtests(
@@ -1021,9 +1019,10 @@ class TestFullyShardSharedParams(FSDPTest):
 class TestFullyShardGradientAccumulation(FSDPTest):
     @property
     def world_size(self) -> int:
+        min_world_size = 4
         if device_type.type == "cpu":
-            return 4
-        return min(4, torch.get_device_module(device_type).device_count())
+            return min_world_size
+        return min(min_world_size, torch.get_device_module(device_type).device_count())
 
     def test_gradient_accumulation(self):
         """
@@ -1283,9 +1282,10 @@ class TestFullyShardGradientAccumulation(FSDPTest):
 class TestFullyShardNDTraining(FSDPTest):
     @property
     def world_size(self) -> int:
+        min_world_size = 8
         if device_type.type == "cpu":
-            return 8
-        return min(8, torch.get_device_module(device_type).device_count())
+            return min_world_size
+        return min(min_world_size, torch.get_device_module(device_type).device_count())
 
     def init_global_mesh(self) -> DeviceMesh:
         # Prefer to test with >=8 GPUs, but for 2 GPUs, use 2-way TP
@@ -1365,9 +1365,10 @@ class TestFullyShardNDTraining(FSDPTest):
 class TestFullyShardHSDP3DTraining(FSDPTest):
     @property
     def world_size(self) -> int:
+        min_world_size = 8
         if device_type.type == "cpu":
-            return 8
-        return min(8, torch.get_device_module(device_type).device_count())
+            return min_world_size
+        return min(min_world_size, torch.get_device_module(device_type).device_count())
 
     def init_global_mesh(self) -> DeviceMesh:
         return init_device_mesh(
@@ -1447,9 +1448,10 @@ class TestFullyShardHSDP3DTraining(FSDPTest):
 class TestFullyShardHSDPTraining(FSDPTest):
     @property
     def world_size(self) -> int:
+        min_world_size = 4
         if device_type.type == "cpu":
-            return 4
-        return min(4, torch.get_device_module(device_type).device_count())
+            return min_world_size
+        return min(min_world_size, torch.get_device_module(device_type).device_count())
 
     def test_train_parity_hsdp(self):
         shard_size = 2 if self.world_size > 2 else 1
@@ -1539,9 +1541,10 @@ class TestFullyShardHSDPTraining(FSDPTest):
 class TestFullyShardCustomForwardMethod(FSDPTest):
     @property
     def world_size(self) -> int:
+        min_world_size = 2
         if device_type.type == "cpu":
-            return 2
-        return min(torch.get_device_module(device_type).device_count(), 2)
+            return min_world_size
+        return min(min_world_size, torch.get_device_module(device_type).device_count())
 
     def test_register_fsdp_forward_method(self):
         """Based on https://github.com/pytorch/pytorch/issues/109385"""
@@ -1590,9 +1593,10 @@ class TestFullyShardCustomForwardMethod(FSDPTest):
 class TestFullyShardShareCommContext(FSDPTest):
     @property
     def world_size(self) -> int:
+        min_world_size = 2
         if device_type.type == "cpu":
-            return 2
-        return min(torch.get_device_module(device_type).device_count(), 2)
+            return min_world_size
+        return min(min_world_size, torch.get_device_module(device_type).device_count())
 
     def test_share_comm_context(self):
         torch.manual_seed(42)
