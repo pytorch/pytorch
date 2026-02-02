@@ -134,6 +134,7 @@ if RELEASE:
 switcher_version = "main" if not RELEASE else version
 
 html_static_path = ["_static"]
+html_css_files = ["cpp_theme.css"]
 html_theme_options = {
     "analytics_id": "GTM-T8XT4PS",
     "canonical_url": "https://docs.pytorch.org/docs/stable/",
