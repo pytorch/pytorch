@@ -203,7 +203,6 @@ void XPUGraph::debug_dump(const std::string& debug_path) {
   }
 }
 
-// Is it necessary to have keep_graph_ = true to access the raw xpuGraph_t instance?
 xpuGraph_t* XPUGraph::raw_xpu_graph() {
   TORCH_CHECK(keep_graph_, "You cannot access the raw xpuGraph_t instance unless XPUGraph was initialized with keep_graph=true");
   TORCH_CHECK(has_graph_, "You cannot access the raw xpuGraph_t instance until capture_end() has been called");
