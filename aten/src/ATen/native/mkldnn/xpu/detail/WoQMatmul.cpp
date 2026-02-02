@@ -66,8 +66,8 @@ void woq_matmul_int4_impl(
 
   // create usr memory
   auto dst_usr_m = make_onednn_memory(dst_usr_md, engine, dst.data_ptr());
-  auto scale_usr_m = make_onednn_memory(scale_usr_md, engine, scale.data_ptr());
-  auto zp_usr_m = make_onednn_memory(zp_usr_md, engine, zp.data_ptr());
+  auto scale_usr_m = make_onednn_memory_readonly(scale_usr_md, engine, scale.const_data_ptr());
+  auto zp_usr_m = make_onednn_memory_readonly(zp_usr_md, engine, zp.const_data_ptr());
 
   // Construct md for primitive creation
   // The xxx_md describes what kinds of matmul the oneDNN does.
@@ -109,8 +109,8 @@ void woq_matmul_int4_impl(
   dnnl::matmul matmul_p;
   dnnl::matmul::primitive_desc matmul_pd;
 
-  auto m1_usr_m = make_onednn_memory(m1_usr_md, engine, m1.data_ptr());
-  auto m2_usr_m = make_onednn_memory(m2_usr_md, engine, m2.data_ptr());
+  auto m1_usr_m = make_onednn_memory_readonly(m1_usr_md, engine, m1.const_data_ptr());
+  auto m2_usr_m = make_onednn_memory_readonly(m2_usr_md, engine, m2.const_data_ptr());
 
   void* handle_b = m2_usr_m.get_data_handle();
   // reinterpret m2_usr_memory as u4
@@ -264,8 +264,8 @@ void woq_matmul_int4_impl_cache(
       DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS,
       scale.data_ptr(),
       [&]() {
-        return make_onednn_memory(
-            get_onednn_md(scale), engine, scale.data_ptr());
+        return make_onednn_memory_readonly(
+            get_onednn_md(scale), engine, scale.const_data_ptr());
       });
 
   // set zp_md for asymmetric quantization

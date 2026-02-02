@@ -180,11 +180,11 @@ at::Tensor quantized_convolution(
 
   dnnl::memory src_m, weight_m, output_m, bias_m;
 
-  src_m = make_onednn_memory(src_md, engine, act.data_ptr());
+  src_m = make_onednn_memory_readonly(src_md, engine, act.const_data_ptr());
   output_m = make_onednn_memory(output_md, engine, output.data_ptr());
-  weight_m = make_onednn_memory(weight_md, engine, weight.data_ptr());
+  weight_m = make_onednn_memory_readonly(weight_md, engine, weight.const_data_ptr());
   if (bias.has_value()) {
-    bias_m = make_onednn_memory(bias_md, engine, bias.value().data_ptr());
+    bias_m = make_onednn_memory_readonly(bias_md, engine, bias.value().const_data_ptr());
   }
 
   std::unordered_map<int, dnnl::memory> args;

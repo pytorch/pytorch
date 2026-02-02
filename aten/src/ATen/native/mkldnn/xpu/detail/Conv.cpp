@@ -138,13 +138,13 @@ sycl::event convolution(
   dnnl::memory src_m, weight_m, dst_m, bia_m;
   at::Tensor src_blocked, weight_blocked, dst_blocked = dst;
 
-  src_m = make_onednn_memory(src_md, engine, src.data_ptr());
-  weight_m = make_onednn_memory(weight_md, engine, weight.data_ptr());
+  src_m = make_onednn_memory_readonly(src_md, engine, src.const_data_ptr());
+  weight_m = make_onednn_memory_readonly(weight_md, engine, weight.const_data_ptr());
   dst_m = make_onednn_memory(dst_md, engine, dst.data_ptr());
 
   std::unordered_map<int, dnnl::memory> args;
   if (bia.defined()) {
-    bia_m = make_onednn_memory(bia_md, engine, bia.data_ptr());
+    bia_m = make_onednn_memory_readonly(bia_md, engine, bia.const_data_ptr());
     args.insert({DNNL_ARG_BIAS, bia_m});
   }
   auto expected_dst_md = conv_fwd_pd.dst_desc();
@@ -247,8 +247,8 @@ sycl::event convolution_backward_weights(
   at::Tensor expected_src, expected_diff_dst, expected_diff_weight;
   dnnl::memory src_m, diff_dst_m, diff_weight_m;
 
-  src_m = make_onednn_memory(src_md, engine, src.data_ptr());
-  diff_dst_m = make_onednn_memory(dst_md, engine, diff_dst.data_ptr());
+  src_m = make_onednn_memory_readonly(src_md, engine, src.const_data_ptr());
+  diff_dst_m = make_onednn_memory_readonly(dst_md, engine, diff_dst.const_data_ptr());
   diff_weight_m = make_onednn_memory(weight_md, engine, diff_weight.data_ptr());
 
   // insert args
@@ -355,8 +355,8 @@ sycl::event convolution_backward_data(
   dnnl::memory diff_dst_m, wei_m, diff_src_m;
 
   diff_src_m = make_onednn_memory(src_md, engine, diff_src.data_ptr());
-  wei_m = make_onednn_memory(weight_md, engine, weight.data_ptr());
-  diff_dst_m = make_onednn_memory(dst_md, engine, diff_dst.data_ptr());
+  wei_m = make_onednn_memory_readonly(weight_md, engine, weight.const_data_ptr());
+  diff_dst_m = make_onednn_memory_readonly(dst_md, engine, diff_dst.const_data_ptr());
 
   // insert args
   std::unordered_map<int, dnnl::memory> args;
