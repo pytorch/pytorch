@@ -183,28 +183,192 @@ __device__ void nvshmem_fence_impl(
   }
 }
 
+// Forward declarations for arrive/wait primitives
+__device__ void nvshmem_lsa_barrier_arrive_impl(
+    NVSHMEMSymmContext* nvshmem_ctx,
+    int32_t barrier_index);
+__device__ void nvshmem_lsa_barrier_wait_impl(
+    NVSHMEMSymmContext* nvshmem_ctx,
+    int32_t barrier_index);
+
 /**
  * NVSHMEM backend implementation of lsa_barrier.
  *
  * Performs barrier synchronization among ranks in the same LSA (Local Symmetric
- * Access) domain. Only ranks that can directly access each other's memory via
- * load/store operations participate in this barrier.
+ * Access) domain using split-phase barrier primitives (arrive + wait).
  *
- * This is useful for synchronizing within a local group (e.g., GPUs on the same
- * node with NVLink connectivity) without waiting for remote ranks.
+ * This is implemented in terms of nvshmem_lsa_barrier_arrive_impl and
+ * nvshmem_lsa_barrier_wait_impl to provide indexed barrier support.
  *
- * Uses nvshmemx_barrier_block(NVSHMEM_TEAM_SHARED) for synchronization within
- * the LSA domain. NVSHMEM_TEAM_SHARED (value 1) represents PEs that share
- * memory on the same node.
- *
- * @param nvshmem_ctx NVSHMEM context (unused, for API consistency)
+ * @param nvshmem_ctx NVSHMEM context with lsa_signal_pad
+ * @param barrier_index Index of the barrier to use. Maps to signal pad index.
  */
-__device__ void nvshmem_lsa_barrier_impl(NVSHMEMSymmContext* nvshmem_ctx) {
-  // NVSHMEM_TEAM_SHARED (value 1) represents PEs that share memory (same node)
-  constexpr int32_t NVSHMEM_TEAM_SHARED = 1;
+__device__ void nvshmem_lsa_barrier_impl(
+    NVSHMEMSymmContext* nvshmem_ctx,
+    int32_t barrier_index) {
+  // Signal arrival at the barrier
+  nvshmem_lsa_barrier_arrive_impl(nvshmem_ctx, barrier_index);
+  // Wait for all peers to arrive
+  nvshmem_lsa_barrier_wait_impl(nvshmem_ctx, barrier_index);
+}
 
-  // Use nvshmemx_barrier_block with NVSHMEM_TEAM_SHARED for LSA domain barrier
-  nvshmemx_barrier_block(NVSHMEM_TEAM_SHARED);
+// =============================================================================
+// LSA BARRIER ARRIVE/WAIT - SPLIT-PHASE BARRIER PRIMITIVES
+// =============================================================================
+//
+// These primitives implement split-phase barrier semantics similar to NCCL's
+// ncclLsaBarrierSession::arrive() and wait() methods.
+//
+// Design:
+// - Uses signal indices on the lsa_signal_pad for barrier state
+// - Each barrier_index maps to a separate signal in the signal pad
+// - Uses epoch tracking in lsa_barrier_epoch to track barrier iterations
+// - arrive(): Each rank atomically increments the barrier signal on all LSA
+// peers
+// - wait(): Reads epoch, waits until signal >= epoch + n_pes, then updates
+// epoch
+//
+// Epoch-based barrier algorithm:
+// 1. arrive() increments signal at barrier_index on all PEs by 1
+// 2. wait() reads current epoch from lsa_barrier_epoch[barrier_index]
+// 3. wait() waits until signal >= epoch + n_pes
+// 4. wait() epilogue: single thread (first from first block) increments epoch
+// by n_pes
+// 5. wait() epilogue: all CTAs synchronize via fence
+//
+// Memory ordering:
+// - arrive() uses nvshmemx_signal_op which provides release semantics
+// - wait() uses nvshmem_signal_wait_until which provides acquire semantics
+// - This ensures proper memory ordering for data written before arrive()
+//   to be visible to code executing after wait()
+//
+// Signal management:
+// - Signals accumulate across barrier iterations (never reset)
+// - Epoch tracks the expected base value for each barrier iteration
+// - After wait completes, single thread advances epoch by n_pes
+// =============================================================================
+
+/**
+ * NVSHMEM backend implementation of lsa_barrier_arrive.
+ *
+ * Signals arrival at an LSA barrier without waiting for other peers.
+ * This is the "arrive" phase of a split-phase barrier, allowing overlapping
+ * computation while waiting for peers.
+ *
+ * Implementation:
+ * Only thread 0 of block 0 (CTA 0) atomically increments the barrier signal
+ * by 1 on all peers' lsa_signal_pads (including its own) using
+ * nvshmemx_signal_op. This ensures exactly ONE signal per PE regardless of how
+ * many threads/CTAs call this function.
+ *
+ * Uses the team's lsa_size to determine the number of PEs in the LSA domain.
+ *
+ * All threads participate in the fence to ensure memory ordering, but only
+ * the designated thread sends the actual signal.
+ *
+ * @param nvshmem_ctx NVSHMEM context with lsa_signal_pad and team
+ * @param barrier_index Index of the barrier to use. Maps to signal pad index.
+ *        Multiple independent barriers can be used by specifying different
+ * indices.
+ */
+__device__ void nvshmem_lsa_barrier_arrive_impl(
+    NVSHMEMSymmContext* nvshmem_ctx,
+    int32_t barrier_index) {
+  // Get the LSA signal pad from the context
+  TORCH_SYMM_CHECK(
+      nvshmem_ctx->lsa_signal_pad != nullptr, "lsa_signal_pad is null");
+  TORCH_SYMM_CHECK(nvshmem_ctx->team != nullptr, "team is null");
+
+  uint64_t* signal_pad = nvshmem_ctx->lsa_signal_pad;
+
+  // Calculate barrier signal address using barrier_index
+  uint64_t* barrier_signal = signal_pad + barrier_index;
+
+  // Get the number of PEs in the LSA domain from the team
+  int n_lsa_pes = nvshmem_ctx->team->lsa_size;
+
+  // Ensure all prior memory operations are visible before signaling arrival
+  // All threads participate in the fence for proper memory ordering
+  nvshmem_fence();
+
+  // Only thread 0 of block 0 signals arrival to avoid multiple signals per PE
+  // This ensures exactly one signal per PE regardless of grid configuration
+  if (threadIdx.x == 0 && blockIdx.x == 0) {
+    // Signal arrival to all LSA peers by atomically adding 1 to their barrier
+    // signal. We signal to all PEs in the LSA domain.
+    // NVSHMEM_SIGNAL_ADD = 10 (from nvshmem_common_transport.h)
+    int lsa_base = nvshmem_ctx->team->lsa_base_rank;
+    for (int i = 0; i < n_lsa_pes; i++) {
+      int pe = lsa_base + i;
+      nvshmemx_signal_op(barrier_signal, 1, NVSHMEM_SIGNAL_ADD, pe);
+    }
+  }
+}
+
+/**
+ * NVSHMEM backend implementation of lsa_barrier_wait.
+ *
+ * Waits for all peers to arrive at the LSA barrier.
+ * This is the "wait" phase of a split-phase barrier.
+ *
+ * Implementation:
+ * 1. Reads the current epoch from lsa_barrier_epoch[barrier_index]
+ * 2. Waits until lsa_signal_pad[barrier_index] >= epoch + lsa_size
+ * 3. Epilogue: Single thread (thread 0 of block 0) increments epoch by lsa_size
+ * 4. Epilogue: All CTAs synchronize via __threadfence_system()
+ *
+ * Uses the team's lsa_size to determine the number of PEs in the LSA domain.
+ *
+ * After wait completes:
+ * - All data written by peers before their arrive() is visible
+ * - The epoch is updated to prepare for the next barrier iteration
+ *
+ * @param nvshmem_ctx NVSHMEM context with lsa_signal_pad, lsa_barrier_epoch,
+ * and team
+ * @param barrier_index Index of the barrier to wait on. Must match the index
+ *        used in the corresponding arrive() call.
+ */
+__device__ void nvshmem_lsa_barrier_wait_impl(
+    NVSHMEMSymmContext* nvshmem_ctx,
+    int32_t barrier_index) {
+  // Get the LSA signal pad and epoch array from the context
+  TORCH_SYMM_CHECK(
+      nvshmem_ctx->lsa_signal_pad != nullptr, "lsa_signal_pad is null");
+  TORCH_SYMM_CHECK(
+      nvshmem_ctx->lsa_barrier_epoch != nullptr, "lsa_barrier_epoch is null");
+  TORCH_SYMM_CHECK(nvshmem_ctx->team != nullptr, "team is null");
+
+  uint64_t* signal_pad = nvshmem_ctx->lsa_signal_pad;
+  uint64_t* epoch_array = nvshmem_ctx->lsa_barrier_epoch;
+
+  // Calculate addresses using barrier_index
+  uint64_t* barrier_signal = signal_pad + barrier_index;
+  uint64_t* barrier_epoch = epoch_array + barrier_index;
+
+  // Read current epoch value
+  uint64_t epoch = *barrier_epoch;
+
+  // Get the number of PEs in the LSA domain from the team
+  int n_lsa_pes = nvshmem_ctx->team->lsa_size;
+
+  // Expected signal value: epoch + lsa_size (each PE in LSA domain increments
+  // by 1)
+  uint64_t expected_count = epoch + static_cast<uint64_t>(n_lsa_pes);
+
+  // Wait until the barrier signal reaches the expected count
+  // NVSHMEM_CMP_GE = 3 (from nvshmem's comparison types, 0-based)
+  nvshmem_signal_wait_until(
+      barrier_signal, 3 /* NVSHMEM_CMP_GE */, expected_count);
+
+  // Epilogue: Single thread increments epoch for next barrier iteration
+  // Only thread 0 of block 0 updates the epoch
+  if (threadIdx.x == 0 && blockIdx.x == 0) {
+    *barrier_epoch = expected_count;
+  }
+
+  // Epilogue: All CTAs from current PE must synchronize
+  // Use system-wide fence to ensure epoch update is visible to all CTAs
+  __threadfence_system();
 }
 
 /**
@@ -574,12 +738,51 @@ __device__ int32_t nvshmem_symm_fence(int64_t ctx_ptr, int32_t scope) {
  * load/store operations participate in this barrier.
  *
  * @param ctx_ptr Pointer to SymmContext (as int64)
+ * @param barrier_index Index of the barrier to use (ignored for NVSHMEM team
+ * barrier)
  * @return 0 on success
  */
-__device__ int32_t nvshmem_symm_lsa_barrier(int64_t ctx_ptr) {
+__device__ int32_t
+nvshmem_symm_lsa_barrier(int64_t ctx_ptr, int32_t barrier_index) {
   SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
   NVSHMEMSymmContext* nvshmem_ctx = cast_to_nvshmem_context(ctx);
-  nvshmem_lsa_barrier_impl(nvshmem_ctx);
+  nvshmem_lsa_barrier_impl(nvshmem_ctx, barrier_index);
+  return 0;
+}
+
+/**
+ * NVSHMEM-specific wrapper for lsa_barrier_arrive operation.
+ *
+ * Signals arrival at an LSA barrier without waiting for other peers.
+ * This is the "arrive" phase of a split-phase barrier.
+ *
+ * @param ctx_ptr Pointer to SymmContext (as int64)
+ * @param barrier_index Index of the barrier to use. Maps to signal pad index.
+ * @return 0 on success
+ */
+__device__ int32_t
+nvshmem_symm_lsa_barrier_arrive(int64_t ctx_ptr, int32_t barrier_index) {
+  SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
+  NVSHMEMSymmContext* nvshmem_ctx = cast_to_nvshmem_context(ctx);
+  nvshmem_lsa_barrier_arrive_impl(nvshmem_ctx, barrier_index);
+  return 0;
+}
+
+/**
+ * NVSHMEM-specific wrapper for lsa_barrier_wait operation.
+ *
+ * Waits for all peers to arrive at the LSA barrier.
+ * This is the "wait" phase of a split-phase barrier.
+ *
+ * @param ctx_ptr Pointer to SymmContext (as int64)
+ * @param barrier_index Index of the barrier to wait on.
+ * @return 0 on success
+ */
+__device__ int32_t
+nvshmem_symm_lsa_barrier_wait(int64_t ctx_ptr, int32_t barrier_index) {
+  SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
+  NVSHMEMSymmContext* nvshmem_ctx = cast_to_nvshmem_context(ctx);
+  nvshmem_lsa_barrier_wait_impl(nvshmem_ctx, barrier_index);
   return 0;
 }
 
@@ -595,16 +798,15 @@ nvshmem_symm_lsa_ptr(int64_t ctx_ptr, int64_t local_ptr, int32_t peer) {
 
 /**
  * NVSHMEM-specific wrapper for lsa_multicast_ptr operation.
+ * Team is obtained from the context internally.
  */
-__device__ int64_t nvshmem_symm_lsa_multicast_ptr(
-    int64_t ctx_ptr,
-    int64_t local_ptr,
-    int64_t team_ptr) {
+__device__ int64_t
+nvshmem_symm_lsa_multicast_ptr(int64_t ctx_ptr, int64_t local_ptr) {
   SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
   NVSHMEMSymmContext* nvshmem_ctx = cast_to_nvshmem_context(ctx);
-  SymmTeam* team = reinterpret_cast<SymmTeam*>(team_ptr);
-  NVSHMEMSymmTeam* nvshmem_team = cast_to_nvshmem_team(team);
-  return nvshmem_lsa_multicast_ptr_impl(nvshmem_ctx, local_ptr, nvshmem_team);
+  TORCH_SYMM_CHECK(nvshmem_ctx->team != nullptr, "team is null in context");
+  return nvshmem_lsa_multicast_ptr_impl(
+      nvshmem_ctx, local_ptr, nvshmem_ctx->team);
 }
 
 /**
@@ -787,38 +989,46 @@ __device__ int32_t nvshmem_symm_put_signal_async(
 
 /**
  * NVSHMEM-specific wrapper for team_size.
+ * Team is obtained from the context internally.
  */
-__device__ int32_t nvshmem_symm_team_size(int64_t team_ptr) {
-  SymmTeam* team = reinterpret_cast<SymmTeam*>(team_ptr);
-  NVSHMEMSymmTeam* nvshmem_team = cast_to_nvshmem_team(team);
-  return nvshmem_team->team_size;
+__device__ int32_t nvshmem_symm_team_size(int64_t ctx_ptr) {
+  SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
+  NVSHMEMSymmContext* nvshmem_ctx = cast_to_nvshmem_context(ctx);
+  TORCH_SYMM_CHECK(nvshmem_ctx->team != nullptr, "team is null in context");
+  return nvshmem_ctx->team->team_size;
 }
 
 /**
  * NVSHMEM-specific wrapper for team_rank.
+ * Team is obtained from the context internally.
  */
-__device__ int32_t nvshmem_symm_team_rank(int64_t team_ptr) {
-  SymmTeam* team = reinterpret_cast<SymmTeam*>(team_ptr);
-  NVSHMEMSymmTeam* nvshmem_team = cast_to_nvshmem_team(team);
-  return nvshmem_team->team_rank;
+__device__ int32_t nvshmem_symm_team_rank(int64_t ctx_ptr) {
+  SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
+  NVSHMEMSymmContext* nvshmem_ctx = cast_to_nvshmem_context(ctx);
+  TORCH_SYMM_CHECK(nvshmem_ctx->team != nullptr, "team is null in context");
+  return nvshmem_ctx->team->team_rank;
 }
 
 /**
  * NVSHMEM-specific wrapper for team_lsa_size.
+ * Team is obtained from the context internally.
  */
-__device__ int32_t nvshmem_symm_team_lsa_size(int64_t team_ptr) {
-  SymmTeam* team = reinterpret_cast<SymmTeam*>(team_ptr);
-  NVSHMEMSymmTeam* nvshmem_team = cast_to_nvshmem_team(team);
-  return nvshmem_team->lsa_size;
+__device__ int32_t nvshmem_symm_team_lsa_size(int64_t ctx_ptr) {
+  SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
+  NVSHMEMSymmContext* nvshmem_ctx = cast_to_nvshmem_context(ctx);
+  TORCH_SYMM_CHECK(nvshmem_ctx->team != nullptr, "team is null in context");
+  return nvshmem_ctx->team->lsa_size;
 }
 
 /**
  * NVSHMEM-specific wrapper for team_lsa.
+ * Team is obtained from the context internally.
  */
-__device__ int32_t nvshmem_symm_team_lsa(int64_t team_ptr, int32_t peer) {
-  SymmTeam* team = reinterpret_cast<SymmTeam*>(team_ptr);
-  NVSHMEMSymmTeam* nvshmem_team = cast_to_nvshmem_team(team);
-  return nvshmem_team->is_lsa_peer(peer) ? 1 : 0;
+__device__ int32_t nvshmem_symm_team_lsa(int64_t ctx_ptr, int32_t peer) {
+  SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
+  NVSHMEMSymmContext* nvshmem_ctx = cast_to_nvshmem_context(ctx);
+  TORCH_SYMM_CHECK(nvshmem_ctx->team != nullptr, "team is null in context");
+  return nvshmem_ctx->team->is_lsa_peer(peer) ? 1 : 0;
 }
 
 } // extern "C"

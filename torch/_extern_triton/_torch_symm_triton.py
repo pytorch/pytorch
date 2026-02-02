@@ -700,6 +700,7 @@ if TRITON_AVAILABLE:
     @core.extern
     def _symm_lsa_barrier_frontend(
         ctx_ptr,
+        barrier_index,
         _semantic=None,
     ):
         """
@@ -720,13 +721,13 @@ if TRITON_AVAILABLE:
         return core.extern_elementwise(
             "",  # libname - not used when extern_libs is provided
             "",  # libpath - not used when extern_libs is provided
-            [ctx_ptr],
+            [ctx_ptr, barrier_index],
             {
-                # C function signature: (int64) -> int32
-                (core.dtype("int64"),): (
-                    "symm_lsa_barrier",
-                    core.dtype("int32"),
-                ),
+                # C function signature: (int64, int32) -> int32
+                (
+                    core.dtype("int64"),  # ctx_ptr
+                    core.dtype("int32"),  # barrier_index
+                ): ("symm_lsa_barrier", core.dtype("int32")),
             },
             is_pure=False,  # Collective operation has side effects
             _semantic=_semantic,
@@ -735,6 +736,7 @@ if TRITON_AVAILABLE:
     @core.extern
     def _nvshmem_symm_lsa_barrier(
         ctx_ptr,
+        barrier_index,
         _semantic=None,
     ):
         """
@@ -752,13 +754,166 @@ if TRITON_AVAILABLE:
         return core.extern_elementwise(
             "",  # libname - not used when extern_libs is provided
             "",  # libpath - not used when extern_libs is provided
-            [ctx_ptr],
+            [ctx_ptr, barrier_index],
             {
-                # C function signature: (int64) -> int32
-                (core.dtype("int64"),): (
-                    "nvshmem_symm_lsa_barrier",
-                    core.dtype("int32"),
-                ),
+                # C function signature: (int64, int32) -> int32
+                (
+                    core.dtype("int64"),  # ctx_ptr
+                    core.dtype("int32"),  # barrier_index
+                ): ("nvshmem_symm_lsa_barrier", core.dtype("int32")),
+            },
+            is_pure=False,  # Collective operation has side effects
+            _semantic=_semantic,
+        )
+
+    # =========================================================================
+    # SYMM_LSA_BARRIER_ARRIVE - LSA DOMAIN BARRIER ARRIVE (SPLIT-PHASE)
+    # =========================================================================
+
+    @core.extern
+    def _symm_lsa_barrier_arrive_frontend(
+        ctx_ptr,
+        barrier_index,
+        _semantic=None,
+    ):
+        """
+        Frontend LSA barrier arrive operation that dispatches based on SymmContext type.
+
+        Signals arrival at an LSA barrier without waiting for other peers.
+        This is the "arrive" phase of a split-phase barrier, allowing overlapping
+        computation while waiting for peers.
+
+        This calls the unified frontend function that dynamically dispatches to
+        either NCCL or NVSHMEM backend based on the SymmContext type field.
+
+        For NCCL, uses ncclLsaBarrierSession with its arrive() method.
+        For NVSHMEM, uses signal operations on the LSA signal pad.
+
+        Asserts on invalid context.
+        """
+        return core.extern_elementwise(
+            "",  # libname - not used when extern_libs is provided
+            "",  # libpath - not used when extern_libs is provided
+            [ctx_ptr, barrier_index],
+            {
+                # C function signature: (int64, int32) -> int32
+                (
+                    core.dtype("int64"),  # ctx_ptr
+                    core.dtype("int32"),  # barrier_index
+                ): ("symm_lsa_barrier_arrive", core.dtype("int32")),
+            },
+            is_pure=False,  # Collective operation has side effects
+            _semantic=_semantic,
+        )
+
+    @core.extern
+    def _nvshmem_symm_lsa_barrier_arrive(
+        ctx_ptr,
+        barrier_index,
+        _semantic=None,
+    ):
+        """
+        NVSHMEM-specific LSA barrier arrive operation.
+
+        Signals arrival at an LSA barrier without waiting for other peers.
+        This is the "arrive" phase of a split-phase barrier.
+
+        Uses signal operations on the LSA signal pad to notify all peers of
+        arrival. Each rank atomically increments a designated barrier signal
+        on all peer signal pads.
+
+        This calls the NVSHMEM backend directly, bypassing runtime dispatch.
+        Use this when you know the context is NVSHMEM type.
+
+        Asserts on invalid context.
+        """
+        return core.extern_elementwise(
+            "",  # libname - not used when extern_libs is provided
+            "",  # libpath - not used when extern_libs is provided
+            [ctx_ptr, barrier_index],
+            {
+                # C function signature: (int64, int32) -> int32
+                (
+                    core.dtype("int64"),  # ctx_ptr
+                    core.dtype("int32"),  # barrier_index
+                ): ("nvshmem_symm_lsa_barrier_arrive", core.dtype("int32")),
+            },
+            is_pure=False,  # Collective operation has side effects
+            _semantic=_semantic,
+        )
+
+    # =========================================================================
+    # SYMM_LSA_BARRIER_WAIT - LSA DOMAIN BARRIER WAIT (SPLIT-PHASE)
+    # =========================================================================
+
+    @core.extern
+    def _symm_lsa_barrier_wait_frontend(
+        ctx_ptr,
+        barrier_index,
+        _semantic=None,
+    ):
+        """
+        Frontend LSA barrier wait operation that dispatches based on SymmContext type.
+
+        Waits for all peers to arrive at the LSA barrier.
+        This is the "wait" phase of a split-phase barrier.
+
+        This calls the unified frontend function that dynamically dispatches to
+        either NCCL or NVSHMEM backend based on the SymmContext type field.
+
+        For NCCL, uses ncclLsaBarrierSession with its wait() method.
+        For NVSHMEM, waits until the local barrier signal reaches the expected
+        count, then resets the signal for the next iteration.
+
+        Asserts on invalid context.
+        """
+        return core.extern_elementwise(
+            "",  # libname - not used when extern_libs is provided
+            "",  # libpath - not used when extern_libs is provided
+            [ctx_ptr, barrier_index],
+            {
+                # C function signature: (int64, int32) -> int32
+                (
+                    core.dtype("int64"),  # ctx_ptr
+                    core.dtype("int32"),  # barrier_index
+                ): ("symm_lsa_barrier_wait", core.dtype("int32")),
+            },
+            is_pure=False,  # Collective operation has side effects
+            _semantic=_semantic,
+        )
+
+    @core.extern
+    def _nvshmem_symm_lsa_barrier_wait(
+        ctx_ptr,
+        barrier_index,
+        _semantic=None,
+    ):
+        """
+        NVSHMEM-specific LSA barrier wait operation.
+
+        Waits for all peers to arrive at the LSA barrier.
+        This is the "wait" phase of a split-phase barrier.
+
+        Waits until the local barrier signal (at lsa_signal_pad[barrier_index])
+        reaches the expected count (world_size), indicating all peers have called
+        symm_lsa_barrier_arrive. After wait completes, the barrier signal
+        is automatically reset to 0 for the next iteration.
+
+        This calls the NVSHMEM backend directly, bypassing runtime dispatch.
+        Use this when you know the context is NVSHMEM type.
+
+        Asserts on invalid context.
+        """
+        return core.extern_elementwise(
+            "",  # libname - not used when extern_libs is provided
+            "",  # libpath - not used when extern_libs is provided
+            [ctx_ptr, barrier_index],
+            {
+                # C function signature: (int64, int32) -> int32
+                (
+                    core.dtype("int64"),  # ctx_ptr
+                    core.dtype("int32"),  # barrier_index
+                ): ("nvshmem_symm_lsa_barrier_wait", core.dtype("int32")),
             },
             is_pure=False,  # Collective operation has side effects
             _semantic=_semantic,
@@ -1151,6 +1306,7 @@ if TRITON_AVAILABLE:
     @triton.jit
     def symm_lsa_barrier(
         ctx_ptr,
+        barrier_index: tl.constexpr = 0,
         backend: tl.constexpr = 0,
     ):
         """
@@ -1168,6 +1324,9 @@ if TRITON_AVAILABLE:
         - Avoiding the overhead of global synchronization when only local sync is needed
         - Implementing hierarchical synchronization patterns
 
+        Multiple independent barriers can be used by specifying different barrier_index
+        values. All ranks using the same barrier_index synchronize together.
+
         Common usage pattern:
           1. All ranks in LSA domain perform local operations (P2P loads/stores)
           2. Call symm_lsa_barrier to ensure all LSA-local operations are visible
@@ -1182,6 +1341,9 @@ if TRITON_AVAILABLE:
 
         Args:
             ctx_ptr: Pointer to SymmContext (NCCLSymmContext or NVSHMEMSymmContext)
+            barrier_index: Index of the barrier to use (constexpr, default=0).
+                           Multiple independent barriers can be used by specifying
+                           different indices. All ranks must use the same index.
             backend: Backend hint (constexpr, default=0 for BACKEND_DEFAULT)
                       - 0 (BACKEND_DEFAULT): Runtime dispatch based on context type
                       - 1 (BACKEND_NCCL): Direct NCCL dispatch (not functional)
@@ -1197,10 +1359,168 @@ if TRITON_AVAILABLE:
         # 0 = BACKEND_DEFAULT, 1 = BACKEND_NCCL, 2 = BACKEND_NVSHMEM
         if backend == 0:  # BACKEND_DEFAULT
             # Runtime dispatch based on SymmContext type
-            _symm_lsa_barrier_frontend(ctx_ptr)
+            _symm_lsa_barrier_frontend(ctx_ptr, barrier_index)
         elif backend == 2:  # BACKEND_NVSHMEM
             # Direct NVSHMEM dispatch
-            _nvshmem_symm_lsa_barrier(ctx_ptr)
+            _nvshmem_symm_lsa_barrier(ctx_ptr, barrier_index)
+        else:
+            # BACKEND_NCCL (1) or unknown - not supported
+            # NCCL does not provide device bitcode library
+            tl.static_assert(
+                False,
+                "NCCL backend not supported (no device bitcode library available)",
+            )
+
+    @triton.jit
+    def symm_lsa_barrier_arrive(
+        ctx_ptr,
+        barrier_index: tl.constexpr = 0,
+        backend: tl.constexpr = 0,
+    ):
+        """
+        Signal arrival at an LSA (Local Symmetric Access) domain barrier.
+
+        This is the "arrive" phase of a split-phase barrier. It signals that this
+        rank has completed its local operations and is ready to synchronize, but
+        does NOT wait for other ranks to arrive.
+
+        Split-phase barriers allow overlapping computation with synchronization:
+        1. All ranks call symm_lsa_barrier_arrive() after completing local work
+        2. Ranks can perform independent computation
+        3. All ranks call symm_lsa_barrier_wait() before accessing peer data
+
+        Multiple independent barriers can be used by specifying different barrier_index
+        values. The same barrier_index must be used in the corresponding wait() call.
+
+        This is useful for:
+        - Hiding synchronization latency with computation
+        - Implementing pipelined algorithms
+        - Fine-grained control over synchronization timing
+
+        Example usage:
+            # Phase 1: Write data to local buffer
+            tl.store(local_ptr + offsets, data, mask=mask)
+
+            # Signal arrival (data is ready)
+            symm_lsa_barrier_arrive(ctx_ptr, barrier_index=0)
+
+            # Do independent computation while waiting for peers
+            result = compute_something_else()
+
+            # Wait for all peers before reading their data
+            symm_lsa_barrier_wait(ctx_ptr, barrier_index=0)
+
+            # Now safe to read peer data
+            peer_data = tl.load(peer_ptr + offsets, mask=mask)
+
+        This function dispatches to either the unified frontend (runtime dispatch)
+        or a backend-specific implementation based on the backend hint.
+
+        Maps to:
+        - NVSHMEM: Signal operations on lsa_signal_pad to notify peers
+        - NCCL: ncclLsaBarrierSession::arrive() with ncclTeamTagLsa
+
+        Args:
+            ctx_ptr: Pointer to SymmContext (NCCLSymmContext or NVSHMEMSymmContext)
+            barrier_index: Index of the barrier to use (constexpr, default=0).
+                           Multiple independent barriers can be used by specifying
+                           different indices. Must match the corresponding wait() call.
+            backend: Backend hint (constexpr, default=0 for BACKEND_DEFAULT)
+                      - 0 (BACKEND_DEFAULT): Runtime dispatch based on context type
+                      - 1 (BACKEND_NCCL): Direct NCCL dispatch (not functional)
+                      - 2 (BACKEND_NVSHMEM): Direct NVSHMEM dispatch
+
+        Note:
+            When using BACKEND_DEFAULT (0), use @requires_torch_symm decorator.
+            When using BACKEND_NVSHMEM (2), use @requires_torch_symm(backend=BACKEND_NVSHMEM).
+
+            This function asserts on invalid context.
+        """
+        # Use integer literals for comparison since Triton can't access globals
+        # 0 = BACKEND_DEFAULT, 1 = BACKEND_NCCL, 2 = BACKEND_NVSHMEM
+        if backend == 0:  # BACKEND_DEFAULT
+            # Runtime dispatch based on SymmContext type
+            _symm_lsa_barrier_arrive_frontend(ctx_ptr, barrier_index)
+        elif backend == 2:  # BACKEND_NVSHMEM
+            # Direct NVSHMEM dispatch
+            _nvshmem_symm_lsa_barrier_arrive(ctx_ptr, barrier_index)
+        else:
+            # BACKEND_NCCL (1) or unknown - not supported
+            # NCCL does not provide device bitcode library
+            tl.static_assert(
+                False,
+                "NCCL backend not supported (no device bitcode library available)",
+            )
+
+    @triton.jit
+    def symm_lsa_barrier_wait(
+        ctx_ptr,
+        barrier_index: tl.constexpr = 0,
+        backend: tl.constexpr = 0,
+    ):
+        """
+        Wait for all peers to arrive at an LSA (Local Symmetric Access) domain barrier.
+
+        This is the "wait" phase of a split-phase barrier. It blocks until all ranks
+        in the LSA domain have called symm_lsa_barrier_arrive() with the same barrier_index.
+
+        Must be called after symm_lsa_barrier_arrive() with the same barrier_index.
+        After this returns:
+        - All data written by peers before their arrive() is guaranteed to be visible
+        - The barrier state is automatically reset for the next iteration
+
+        Split-phase barriers allow overlapping computation with synchronization:
+        1. All ranks call symm_lsa_barrier_arrive() after completing local work
+        2. Ranks can perform independent computation
+        3. All ranks call symm_lsa_barrier_wait() before accessing peer data
+
+        Example usage:
+            # Phase 1: Write data to local buffer
+            tl.store(local_ptr + offsets, data, mask=mask)
+
+            # Signal arrival (data is ready)
+            symm_lsa_barrier_arrive(ctx_ptr, barrier_index=0)
+
+            # Do independent computation while waiting for peers
+            result = compute_something_else()
+
+            # Wait for all peers before reading their data
+            symm_lsa_barrier_wait(ctx_ptr, barrier_index=0)
+
+            # Now safe to read peer data
+            peer_data = tl.load(peer_ptr + offsets, mask=mask)
+
+        This function dispatches to either the unified frontend (runtime dispatch)
+        or a backend-specific implementation based on the backend hint.
+
+        Maps to:
+        - NVSHMEM: nvshmem_signal_wait_until on lsa_signal_pad, then reset
+        - NCCL: ncclLsaBarrierSession::wait() with ncclTeamTagLsa
+
+        Args:
+            ctx_ptr: Pointer to SymmContext (NCCLSymmContext or NVSHMEMSymmContext)
+            barrier_index: Index of the barrier to wait on (constexpr, default=0).
+                           Must match the barrier_index used in the corresponding
+                           arrive() call.
+            backend: Backend hint (constexpr, default=0 for BACKEND_DEFAULT)
+                      - 0 (BACKEND_DEFAULT): Runtime dispatch based on context type
+                      - 1 (BACKEND_NCCL): Direct NCCL dispatch (not functional)
+                      - 2 (BACKEND_NVSHMEM): Direct NVSHMEM dispatch
+
+        Note:
+            When using BACKEND_DEFAULT (0), use @requires_torch_symm decorator.
+            When using BACKEND_NVSHMEM (2), use @requires_torch_symm(backend=BACKEND_NVSHMEM).
+
+            This function asserts on invalid context.
+        """
+        # Use integer literals for comparison since Triton can't access globals
+        # 0 = BACKEND_DEFAULT, 1 = BACKEND_NCCL, 2 = BACKEND_NVSHMEM
+        if backend == 0:  # BACKEND_DEFAULT
+            # Runtime dispatch based on SymmContext type
+            _symm_lsa_barrier_wait_frontend(ctx_ptr, barrier_index)
+        elif backend == 2:  # BACKEND_NVSHMEM
+            # Direct NVSHMEM dispatch
+            _nvshmem_symm_lsa_barrier_wait(ctx_ptr, barrier_index)
         else:
             # BACKEND_NCCL (1) or unknown - not supported
             # NCCL does not provide device bitcode library
@@ -1356,7 +1676,6 @@ if TRITON_AVAILABLE:
     def _symm_lsa_multicast_ptr_frontend(
         ctx_ptr,
         local_ptr,
-        team_ptr,
         _semantic=None,
     ):
         """
@@ -1368,19 +1687,20 @@ if TRITON_AVAILABLE:
 
         Returns 0 if multicast is not supported by the hardware.
 
+        Team is obtained from the context internally.
+
         This calls the unified frontend function that dynamically dispatches to
         either NCCL or NVSHMEM backend based on the SymmContext type field.
         """
         return core.extern_elementwise(
             "",  # libname - not used when extern_libs is provided
             "",  # libpath - not used when extern_libs is provided
-            [ctx_ptr, local_ptr, team_ptr],
+            [ctx_ptr, local_ptr],
             {
-                # C function signature: (int64, int64, int64) -> int64
+                # C function signature: (int64, int64) -> int64
                 (
                     core.dtype("int64"),  # ctx_ptr
                     core.dtype("int64"),  # local_ptr
-                    core.dtype("int64"),  # team_ptr (pointer to SymmTeam)
                 ): ("symm_lsa_multicast_ptr", core.dtype("int64")),
             },
             is_pure=True,  # Pure function - just returns a pointer
@@ -1391,7 +1711,6 @@ if TRITON_AVAILABLE:
     def _nvshmem_symm_lsa_multicast_ptr(
         ctx_ptr,
         local_ptr,
-        team_ptr,
         _semantic=None,
     ):
         """
@@ -1402,19 +1721,20 @@ if TRITON_AVAILABLE:
 
         Returns 0 if multicast is not supported.
 
+        Team is obtained from the context internally.
+
         This calls the NVSHMEM backend directly, bypassing runtime dispatch.
         Use this when you know the context is NVSHMEM type.
         """
         return core.extern_elementwise(
             "",  # libname - not used when extern_libs is provided
             "",  # libpath - not used when extern_libs is provided
-            [ctx_ptr, local_ptr, team_ptr],
+            [ctx_ptr, local_ptr],
             {
-                # C function signature: (int64, int64, int64) -> int64
+                # C function signature: (int64, int64) -> int64
                 (
                     core.dtype("int64"),  # ctx_ptr
                     core.dtype("int64"),  # local_ptr
-                    core.dtype("int64"),  # team_ptr (pointer to NVSHMEMSymmTeam)
                 ): ("nvshmem_symm_lsa_multicast_ptr", core.dtype("int64")),
             },
             is_pure=True,  # Pure function - just returns a pointer
@@ -1486,7 +1806,6 @@ if TRITON_AVAILABLE:
     def symm_lsa_multicast_ptr(
         ctx_ptr,
         local_ptr,
-        team_ptr,
         backend: tl.constexpr = 0,
     ):
         """
@@ -1500,21 +1819,22 @@ if TRITON_AVAILABLE:
         with multicast capability).
 
         Usage pattern:
-          mc_ptr = symm_lsa_multicast_ptr(ctx, my_local_ptr, team_ptr)
+          mc_ptr = symm_lsa_multicast_ptr(ctx, my_local_ptr)
           if mc_ptr != 0:
               tl.store(mc_ptr + offset, value)  # Broadcast to all peers
 
         This function dispatches to either the unified frontend (runtime dispatch)
         or a backend-specific implementation based on the backend hint.
 
+        Team is obtained from the context internally.
+
         Maps to:
-        - NVSHMEM: nvshmemx_mc_ptr(team, ptr) where team is retrieved from NVSHMEMSymmTeam
+        - NVSHMEM: nvshmemx_mc_ptr(team, ptr) where team is retrieved from context
         - NCCL: ncclGetLsaMultimemPointer() (when device bitcode is available)
 
         Args:
             ctx_ptr: Pointer to SymmContext (NCCLSymmContext or NVSHMEMSymmContext)
             local_ptr: Pointer to local symmetric buffer (device pointer as int64)
-            team_ptr: Pointer to SymmTeam (NCCLSymmTeam or NVSHMEMSymmTeam) as int64
             backend: Backend hint (constexpr, default=0 for BACKEND_DEFAULT)
                      - 0 (BACKEND_DEFAULT): Runtime dispatch based on context type
                      - 1 (BACKEND_NCCL): Direct NCCL dispatch (not functional)
@@ -1531,10 +1851,10 @@ if TRITON_AVAILABLE:
         # 0 = BACKEND_DEFAULT, 1 = BACKEND_NCCL, 2 = BACKEND_NVSHMEM
         if backend == 0:  # BACKEND_DEFAULT
             # Runtime dispatch based on SymmContext type
-            return _symm_lsa_multicast_ptr_frontend(ctx_ptr, local_ptr, team_ptr)
+            return _symm_lsa_multicast_ptr_frontend(ctx_ptr, local_ptr)
         elif backend == 2:  # BACKEND_NVSHMEM
             # Direct NVSHMEM dispatch
-            return _nvshmem_symm_lsa_multicast_ptr(ctx_ptr, local_ptr, team_ptr)
+            return _nvshmem_symm_lsa_multicast_ptr(ctx_ptr, local_ptr)
         else:
             # BACKEND_NCCL (1) or unknown - not supported
             # NCCL does not provide device bitcode library
@@ -1550,18 +1870,19 @@ if TRITON_AVAILABLE:
 
     @core.extern
     def _symm_team_size_frontend(
-        team_ptr,
+        ctx_ptr,
         _semantic=None,
     ):
         """
         Frontend team_size operation.
 
         Returns the number of ranks in the team.
+        Team is obtained from the context internally.
         """
         return core.extern_elementwise(
             "",  # libname - not used when extern_libs is provided
             "",  # libpath - not used when extern_libs is provided
-            [team_ptr],
+            [ctx_ptr],
             {
                 # C function signature: (int64) -> int32
                 (core.dtype("int64"),): ("symm_team_size", core.dtype("int32")),
@@ -1572,16 +1893,17 @@ if TRITON_AVAILABLE:
 
     @core.extern
     def _nvshmem_symm_team_size(
-        team_ptr,
+        ctx_ptr,
         _semantic=None,
     ):
         """
         NVSHMEM-specific team_size operation.
+        Team is obtained from the context internally.
         """
         return core.extern_elementwise(
             "",  # libname - not used when extern_libs is provided
             "",  # libpath - not used when extern_libs is provided
-            [team_ptr],
+            [ctx_ptr],
             {
                 # C function signature: (int64) -> int32
                 (core.dtype("int64"),): ("nvshmem_symm_team_size", core.dtype("int32")),
@@ -1592,18 +1914,19 @@ if TRITON_AVAILABLE:
 
     @core.extern
     def _symm_team_rank_frontend(
-        team_ptr,
+        ctx_ptr,
         _semantic=None,
     ):
         """
         Frontend team_rank operation.
 
         Returns the calling process's rank index within the team.
+        Team is obtained from the context internally.
         """
         return core.extern_elementwise(
             "",  # libname - not used when extern_libs is provided
             "",  # libpath - not used when extern_libs is provided
-            [team_ptr],
+            [ctx_ptr],
             {
                 # C function signature: (int64) -> int32
                 (core.dtype("int64"),): ("symm_team_rank", core.dtype("int32")),
@@ -1614,16 +1937,17 @@ if TRITON_AVAILABLE:
 
     @core.extern
     def _nvshmem_symm_team_rank(
-        team_ptr,
+        ctx_ptr,
         _semantic=None,
     ):
         """
         NVSHMEM-specific team_rank operation.
+        Team is obtained from the context internally.
         """
         return core.extern_elementwise(
             "",  # libname - not used when extern_libs is provided
             "",  # libpath - not used when extern_libs is provided
-            [team_ptr],
+            [ctx_ptr],
             {
                 # C function signature: (int64) -> int32
                 (core.dtype("int64"),): ("nvshmem_symm_team_rank", core.dtype("int32")),
@@ -1634,18 +1958,19 @@ if TRITON_AVAILABLE:
 
     @core.extern
     def _symm_team_lsa_size_frontend(
-        team_ptr,
+        ctx_ptr,
         _semantic=None,
     ):
         """
         Frontend team_lsa_size operation.
 
         Returns the number of ranks in the caller's LSA (Local Symmetric Access) domain.
+        Team is obtained from the context internally.
         """
         return core.extern_elementwise(
             "",  # libname - not used when extern_libs is provided
             "",  # libpath - not used when extern_libs is provided
-            [team_ptr],
+            [ctx_ptr],
             {
                 # C function signature: (int64) -> int32
                 (core.dtype("int64"),): ("symm_team_lsa_size", core.dtype("int32")),
@@ -1656,16 +1981,17 @@ if TRITON_AVAILABLE:
 
     @core.extern
     def _nvshmem_symm_team_lsa_size(
-        team_ptr,
+        ctx_ptr,
         _semantic=None,
     ):
         """
         NVSHMEM-specific team_lsa_size operation.
+        Team is obtained from the context internally.
         """
         return core.extern_elementwise(
             "",  # libname - not used when extern_libs is provided
             "",  # libpath - not used when extern_libs is provided
-            [team_ptr],
+            [ctx_ptr],
             {
                 # C function signature: (int64) -> int32
                 (core.dtype("int64"),): (
@@ -1679,7 +2005,7 @@ if TRITON_AVAILABLE:
 
     @core.extern
     def _symm_team_lsa_frontend(
-        team_ptr,
+        ctx_ptr,
         peer,
         _semantic=None,
     ):
@@ -1687,15 +2013,16 @@ if TRITON_AVAILABLE:
         Frontend team_lsa operation.
 
         Returns whether the peer rank is in the same LSA domain as the caller.
+        Team is obtained from the context internally.
         """
         return core.extern_elementwise(
             "",  # libname - not used when extern_libs is provided
             "",  # libpath - not used when extern_libs is provided
-            [team_ptr, peer],
+            [ctx_ptr, peer],
             {
                 # C function signature: (int64, int32) -> int32
                 (
-                    core.dtype("int64"),  # team_ptr
+                    core.dtype("int64"),  # ctx_ptr
                     core.dtype("int32"),  # peer
                 ): ("symm_team_lsa", core.dtype("int32")),
             },
@@ -1705,21 +2032,22 @@ if TRITON_AVAILABLE:
 
     @core.extern
     def _nvshmem_symm_team_lsa(
-        team_ptr,
+        ctx_ptr,
         peer,
         _semantic=None,
     ):
         """
         NVSHMEM-specific team_lsa operation.
+        Team is obtained from the context internally.
         """
         return core.extern_elementwise(
             "",  # libname - not used when extern_libs is provided
             "",  # libpath - not used when extern_libs is provided
-            [team_ptr, peer],
+            [ctx_ptr, peer],
             {
                 # C function signature: (int64, int32) -> int32
                 (
-                    core.dtype("int64"),  # team_ptr
+                    core.dtype("int64"),  # ctx_ptr
                     core.dtype("int32"),  # peer
                 ): ("nvshmem_symm_team_lsa", core.dtype("int32")),
             },
@@ -1729,33 +2057,35 @@ if TRITON_AVAILABLE:
 
     @triton.jit
     def symm_team_size(
-        team_ptr,
+        ctx_ptr,
         backend: tl.constexpr = 0,
     ):
         """
         Get the number of ranks in the team.
 
         This returns the total number of processes/PEs that are members of the
-        specified team.
+        team associated with the context.
+
+        Team is obtained from the context internally.
 
         Args:
-            team_ptr: Pointer to SymmTeam (as int64 for Triton compatibility)
+            ctx_ptr: Pointer to SymmContext (as int64 for Triton compatibility)
             backend: Backend hint (constexpr, default=0 for BACKEND_DEFAULT)
-                     - 0 (BACKEND_DEFAULT): Runtime dispatch based on team type
+                     - 0 (BACKEND_DEFAULT): Runtime dispatch based on context type
                      - 1 (BACKEND_NCCL): Direct NCCL dispatch (not functional)
                      - 2 (BACKEND_NVSHMEM): Direct NVSHMEM dispatch
 
         Returns:
-            int32: Number of ranks in the team, or -1 if team is invalid
+            int32: Number of ranks in the team, or -1 if context/team is invalid
 
         Note:
             When using BACKEND_DEFAULT (0), use @requires_torch_symm decorator.
             When using BACKEND_NVSHMEM (2), use @requires_torch_symm(backend=BACKEND_NVSHMEM).
         """
         if backend == 0:  # BACKEND_DEFAULT
-            return _symm_team_size_frontend(team_ptr)
+            return _symm_team_size_frontend(ctx_ptr)
         elif backend == 2:  # BACKEND_NVSHMEM
-            return _nvshmem_symm_team_size(team_ptr)
+            return _nvshmem_symm_team_size(ctx_ptr)
         else:
             tl.static_assert(
                 False,
@@ -1765,33 +2095,35 @@ if TRITON_AVAILABLE:
 
     @triton.jit
     def symm_team_rank(
-        team_ptr,
+        ctx_ptr,
         backend: tl.constexpr = 0,
     ):
         """
         Get the calling process's rank index within the team.
 
-        Returns the rank of this process within the specified team (0..team_size-1).
+        Returns the rank of this process within the team (0..team_size-1).
         This is the team-local rank, not the global rank.
 
+        Team is obtained from the context internally.
+
         Args:
-            team_ptr: Pointer to SymmTeam (as int64 for Triton compatibility)
+            ctx_ptr: Pointer to SymmContext (as int64 for Triton compatibility)
             backend: Backend hint (constexpr, default=0 for BACKEND_DEFAULT)
-                     - 0 (BACKEND_DEFAULT): Runtime dispatch based on team type
+                     - 0 (BACKEND_DEFAULT): Runtime dispatch based on context type
                      - 1 (BACKEND_NCCL): Direct NCCL dispatch (not functional)
                      - 2 (BACKEND_NVSHMEM): Direct NVSHMEM dispatch
 
         Returns:
-            int32: Rank index within the team (0..team_size-1), or -1 if team is invalid
+            int32: Rank index within the team (0..team_size-1), or -1 if context/team is invalid
 
         Note:
             When using BACKEND_DEFAULT (0), use @requires_torch_symm decorator.
             When using BACKEND_NVSHMEM (2), use @requires_torch_symm(backend=BACKEND_NVSHMEM).
         """
         if backend == 0:  # BACKEND_DEFAULT
-            return _symm_team_rank_frontend(team_ptr)
+            return _symm_team_rank_frontend(ctx_ptr)
         elif backend == 2:  # BACKEND_NVSHMEM
-            return _nvshmem_symm_team_rank(team_ptr)
+            return _nvshmem_symm_team_rank(ctx_ptr)
         else:
             tl.static_assert(
                 False,
@@ -1801,7 +2133,7 @@ if TRITON_AVAILABLE:
 
     @triton.jit
     def symm_team_lsa_size(
-        team_ptr,
+        ctx_ptr,
         backend: tl.constexpr = 0,
     ):
         """
@@ -1814,24 +2146,26 @@ if TRITON_AVAILABLE:
         - Peers in LSA domain: Use direct memory access (symm_lsa_ptr + tl.load/store)
         - Peers outside LSA: Use explicit put/get operations
 
+        Team is obtained from the context internally.
+
         Args:
-            team_ptr: Pointer to SymmTeam (as int64 for Triton compatibility)
+            ctx_ptr: Pointer to SymmContext (as int64 for Triton compatibility)
             backend: Backend hint (constexpr, default=0 for BACKEND_DEFAULT)
-                     - 0 (BACKEND_DEFAULT): Runtime dispatch based on team type
+                     - 0 (BACKEND_DEFAULT): Runtime dispatch based on context type
                      - 1 (BACKEND_NCCL): Direct NCCL dispatch (not functional)
                      - 2 (BACKEND_NVSHMEM): Direct NVSHMEM dispatch
 
         Returns:
-            int32: Number of ranks in the LSA domain, or -1 if team is invalid
+            int32: Number of ranks in the LSA domain, or -1 if context/team is invalid
 
         Note:
             When using BACKEND_DEFAULT (0), use @requires_torch_symm decorator.
             When using BACKEND_NVSHMEM (2), use @requires_torch_symm(backend=BACKEND_NVSHMEM).
         """
         if backend == 0:  # BACKEND_DEFAULT
-            return _symm_team_lsa_size_frontend(team_ptr)
+            return _symm_team_lsa_size_frontend(ctx_ptr)
         elif backend == 2:  # BACKEND_NVSHMEM
-            return _nvshmem_symm_team_lsa_size(team_ptr)
+            return _nvshmem_symm_team_lsa_size(ctx_ptr)
         else:
             tl.static_assert(
                 False,
@@ -1841,7 +2175,7 @@ if TRITON_AVAILABLE:
 
     @triton.jit
     def symm_team_lsa(
-        team_ptr,
+        ctx_ptr,
         peer,
         backend: tl.constexpr = 0,
     ):
@@ -1852,7 +2186,7 @@ if TRITON_AVAILABLE:
         (e.g., via symm_lsa_ptr), 0 (false) if explicit communication is required.
 
         Usage pattern:
-          is_lsa = symm_team_lsa(team, peer)
+          is_lsa = symm_team_lsa(ctx, peer)
           if is_lsa == 1:
               # Direct memory access available
               peer_ptr = symm_lsa_ptr(ctx, local_ptr, peer)
@@ -1861,25 +2195,27 @@ if TRITON_AVAILABLE:
               # Use explicit get operation
               symm_get(ctx, local_buf, remote_buf, peer, size)
 
+        Team is obtained from the context internally.
+
         Args:
-            team_ptr: Pointer to SymmTeam (as int64 for Triton compatibility)
+            ctx_ptr: Pointer to SymmContext (as int64 for Triton compatibility)
             peer: Peer rank to check (team-local rank, 0..team_size-1)
             backend: Backend hint (constexpr, default=0 for BACKEND_DEFAULT)
-                     - 0 (BACKEND_DEFAULT): Runtime dispatch based on team type
+                     - 0 (BACKEND_DEFAULT): Runtime dispatch based on context type
                      - 1 (BACKEND_NCCL): Direct NCCL dispatch (not functional)
                      - 2 (BACKEND_NVSHMEM): Direct NVSHMEM dispatch
 
         Returns:
-            int32: 1 if peer is in LSA domain, 0 if not, -1 if team is invalid
+            int32: 1 if peer is in LSA domain, 0 if not, -1 if context/team is invalid
 
         Note:
             When using BACKEND_DEFAULT (0), use @requires_torch_symm decorator.
             When using BACKEND_NVSHMEM (2), use @requires_torch_symm(backend=BACKEND_NVSHMEM).
         """
         if backend == 0:  # BACKEND_DEFAULT
-            return _symm_team_lsa_frontend(team_ptr, peer)
+            return _symm_team_lsa_frontend(ctx_ptr, peer)
         elif backend == 2:  # BACKEND_NVSHMEM
-            return _nvshmem_symm_team_lsa(team_ptr, peer)
+            return _nvshmem_symm_team_lsa(ctx_ptr, peer)
         else:
             tl.static_assert(
                 False,
@@ -2948,6 +3284,8 @@ __all__ = [
     "symm_quiet",
     "symm_barrier",
     "symm_lsa_barrier",
+    "symm_lsa_barrier_arrive",
+    "symm_lsa_barrier_wait",
     "symm_fence",
     # Memory primitives
     "symm_lsa_ptr",

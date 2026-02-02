@@ -139,6 +139,7 @@ NVSHMEMSymmComm::NVSHMEMSymmComm(
       buffer_ptr_(nullptr),
       lsa_signal_pad_(nullptr),
       gin_signal_pad_(nullptr),
+      lsa_barrier_epoch_(nullptr),
       team_dev_(nullptr),
       context_dev_(nullptr) {
   initialize();
@@ -220,20 +221,46 @@ void NVSHMEMSymmComm::initialize() {
       gin_signal_pad_ != nullptr,
       "nvshmem_malloc failed to allocate GIN signal pad");
 
+  // Allocate barrier epoch tracking array (same size as signal pad)
+  // This tracks the current epoch for each barrier index
+  lsa_barrier_epoch_ = static_cast<uint64_t*>(nvshmem_malloc(kSignalPadSize));
+  TORCH_CHECK(
+      lsa_barrier_epoch_ != nullptr,
+      "nvshmem_malloc failed to allocate LSA barrier epoch array");
+
   // Zero-initialize the buffer
   if (buffer_ptr_ != nullptr && buffer_size_ > 0) {
     C10_CUDA_CHECK(cudaMemset(buffer_ptr_, 0, buffer_size_));
   }
 
-  // Zero-initialize both signal pads
+  // Zero-initialize both signal pads and barrier epoch array
   C10_CUDA_CHECK(cudaMemset(lsa_signal_pad_, 0, kSignalPadSize));
   C10_CUDA_CHECK(cudaMemset(gin_signal_pad_, 0, kSignalPadSize));
+  C10_CUDA_CHECK(cudaMemset(lsa_barrier_epoch_, 0, kSignalPadSize));
 
   // Synchronize to ensure all PEs have completed allocation
   C10_CUDA_CHECK(cudaDeviceSynchronize());
 
+  // Create host-side team structure with NVSHMEM_TEAM_WORLD
+  // This team includes all PEs and is used for multicast operations
+  // Must be created and copied to device BEFORE creating context
+  team_host_ = NVSHMEMSymmTeam(
+      global_world_size, // size
+      global_rank, // rank
+      global_world_size, // lsa_size (all GPUs in same domain for single-node)
+      0, // lsa_base
+      0, // mask
+      NVSHMEM_TEAM_WORLD // nvshmem_team
+  );
+
+  // Copy team to device (must be done before context creation)
+  C10_CUDA_CHECK(cudaMalloc(&team_dev_, sizeof(NVSHMEMSymmTeam)));
+  C10_CUDA_CHECK(cudaMemcpy(
+      team_dev_, &team_host_, sizeof(NVSHMEMSymmTeam), cudaMemcpyHostToDevice));
+
   // Create host-side context with GLOBAL PE numbers for NVSHMEM
   // The kernel needs global_rank and global_world_size for nvshmem_ptr()
+  // team_dev_ is set so context can access team info
   context_host_ = NVSHMEMSymmContext(
       rank_,
       world_size_,
@@ -241,6 +268,8 @@ void NVSHMEMSymmComm::initialize() {
       buffer_size_,
       lsa_signal_pad_,
       gin_signal_pad_,
+      lsa_barrier_epoch_,
+      team_dev_, // device pointer to team
       device_idx_,
       0, // offset = 0
       global_rank,
@@ -253,22 +282,6 @@ void NVSHMEMSymmComm::initialize() {
       &context_host_,
       sizeof(NVSHMEMSymmContext),
       cudaMemcpyHostToDevice));
-
-  // Create host-side team structure with NVSHMEM_TEAM_WORLD
-  // This team includes all PEs and is used for multicast operations
-  team_host_ = NVSHMEMSymmTeam(
-      global_world_size, // size
-      global_rank, // rank
-      global_world_size, // lsa_size (all GPUs in same domain for single-node)
-      0, // lsa_base
-      0, // mask
-      NVSHMEM_TEAM_WORLD // nvshmem_team
-  );
-
-  // Copy team to device
-  C10_CUDA_CHECK(cudaMalloc(&team_dev_, sizeof(NVSHMEMSymmTeam)));
-  C10_CUDA_CHECK(cudaMemcpy(
-      team_dev_, &team_host_, sizeof(NVSHMEMSymmTeam), cudaMemcpyHostToDevice));
 }
 
 void NVSHMEMSymmComm::cleanup() {
@@ -312,6 +325,12 @@ void NVSHMEMSymmComm::cleanup() {
     if (gin_signal_pad_ != nullptr) {
       nvshmem_free(gin_signal_pad_);
       gin_signal_pad_ = nullptr;
+    }
+
+    // Free LSA barrier epoch array
+    if (lsa_barrier_epoch_ != nullptr) {
+      nvshmem_free(lsa_barrier_epoch_);
+      lsa_barrier_epoch_ = nullptr;
     }
   } catch (...) {
     // Ignore cleanup errors

@@ -419,6 +419,10 @@ struct NCCLSymmContext : public SymmContext {
   // Used for point-to-point signaling operations
   uint64_t** signal_pad_ptrs;
 
+  // Pointer to the associated SymmTeam for this context
+  // Provides team membership info (size, rank) and LSA domain info
+  struct NCCLSymmTeam* team;
+
   // Device index where this context is valid
   int32_t device_idx;
 
@@ -431,6 +435,7 @@ struct NCCLSymmContext : public SymmContext {
         local_buffer(nullptr),
         buffer_size(0),
         signal_pad_ptrs(nullptr),
+        team(nullptr),
         device_idx(-1) {
     for (int i = 0; i < NCCL_SYMM_MAX_WINDOWS; i++) {
       windows[i] = NCCLWindowEntry();
@@ -446,6 +451,7 @@ struct NCCLSymmContext : public SymmContext {
       void* buf,
       size_t size,
       uint64_t** sig_pads,
+      struct NCCLSymmTeam* team_ptr,
       int32_t dev_idx)
       : SymmContext(Type::NCCL, rank, world_size),
         num_windows(0),
@@ -455,6 +461,7 @@ struct NCCLSymmContext : public SymmContext {
         local_buffer(buf),
         buffer_size(size),
         signal_pad_ptrs(sig_pads),
+        team(team_ptr),
         device_idx(dev_idx) {
     for (int i = 0; i < NCCL_SYMM_MAX_WINDOWS; i++) {
       windows[i] = NCCLWindowEntry();
@@ -535,10 +542,22 @@ struct NCCLSymmContext : public SymmContext {
  * while symm_lsa_signal_ptr returns pointers to lsa_signal_pad (for P2P
  * access).
  *
+ * Barrier Epoch Tracking:
+ * The lsa_barrier_epoch array tracks the current epoch for each barrier index.
+ * This is used by the split-phase barrier (arrive/wait) to determine when all
+ * PEs have arrived. The epoch is incremented by n_pes after each barrier
+ * completes, allowing barriers to be reused without resetting signals.
+ *
  * This context is created on the host and passed to device kernels.
  * NVSHMEM provides libnvshmem_device.bc which can be linked with Triton
  * kernels, making this implementation fully functional.
  */
+
+// Maximum number of barrier indices supported
+#ifndef NVSHMEM_MAX_BARRIER_INDICES
+#define NVSHMEM_MAX_BARRIER_INDICES 256
+#endif
+
 struct NVSHMEMSymmContext : public SymmContext {
   // Local buffer pointer (the base address of this PE's symmetric memory)
   // This is the symmetric address that can be used with nvshmem_ptr()
@@ -556,6 +575,18 @@ struct NVSHMEMSymmContext : public SymmContext {
   // This is used with nvshmemx_signal_op() for GPU-initiated networking
   // Used by symm_signal for atomic signal operations
   uint64_t* gin_signal_pad;
+
+  // LSA barrier epoch tracking (symmetric address)
+  // Each entry tracks the current epoch for a barrier index.
+  // The epoch represents the accumulated signal count from all previous
+  // barrier iterations. When waiting, we expect signal >= epoch + n_pes.
+  // After barrier completes, a single thread increments epoch by n_pes.
+  uint64_t* lsa_barrier_epoch;
+
+  // Pointer to the associated SymmTeam for this context
+  // Provides team membership info (size, rank) and LSA domain info
+  // Used by LSA barrier to get the number of PEs in the LSA domain
+  struct NVSHMEMSymmTeam* team;
 
   // Device index where this context is valid
   int32_t device_idx;
@@ -576,6 +607,8 @@ struct NVSHMEMSymmContext : public SymmContext {
         buffer_size(0),
         lsa_signal_pad(nullptr),
         gin_signal_pad(nullptr),
+        lsa_barrier_epoch(nullptr),
+        team(nullptr),
         device_idx(-1),
         offset(0),
         global_rank(-1),
@@ -588,6 +621,8 @@ struct NVSHMEMSymmContext : public SymmContext {
       size_t size,
       uint64_t* lsa_sig_pad,
       uint64_t* gin_sig_pad,
+      uint64_t* barrier_epoch,
+      struct NVSHMEMSymmTeam* team_ptr,
       int32_t dev_idx,
       size_t off,
       int32_t g_rank,
@@ -597,6 +632,8 @@ struct NVSHMEMSymmContext : public SymmContext {
         buffer_size(size),
         lsa_signal_pad(lsa_sig_pad),
         gin_signal_pad(gin_sig_pad),
+        lsa_barrier_epoch(barrier_epoch),
+        team(team_ptr),
         device_idx(dev_idx),
         offset(off),
         global_rank(g_rank),

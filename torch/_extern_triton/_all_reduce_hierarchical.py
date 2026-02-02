@@ -74,7 +74,6 @@ if TRITON_AVAILABLE:
             ctx_ptr,
             ptr_data,
             ptr_scratch,
-            team_ptr,
             num_elements,
             my_rank,
             team_size,
@@ -93,7 +92,6 @@ if TRITON_AVAILABLE:
                 ctx_ptr: Pointer to SymmContext
                 ptr_data: Symmetric data buffer (input/output)
                 ptr_scratch: Symmetric scratch buffer for inter-domain communication
-                team_ptr: Pointer to SymmTeam for multicast operations (0 to use unicast)
                 num_elements: Total number of float32 elements
                 my_rank: Current rank in the team (0..team_size-1)
                 team_size: Total number of ranks in the team
@@ -320,8 +318,9 @@ if TRITON_AVAILABLE:
             # -----------------------------------------------------------------
 
             # Try to get multicast pointer (returns 0 if not supported)
+            # Team is obtained from the context internally
             mc_ptr_raw = symm_lsa_multicast_ptr(
-                ctx_ptr, ptr_data, team_ptr, backend_hint
+                ctx_ptr, ptr_data, backend_hint
             )
 
             if mc_ptr_raw != 0:

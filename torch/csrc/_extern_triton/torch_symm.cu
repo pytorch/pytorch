@@ -181,9 +181,12 @@ __device__ int32_t symm_fence(int64_t ctx_ptr, int32_t scope) {
  * For NCCL, uses ncclLsaBarrierSession with ncclTeamTagLsa.
  *
  * @param ctx_ptr Pointer to SymmContext (as int64)
+ * @param barrier_index Index of the barrier to use (0..nBarriers-1).
+ *        Multiple independent barriers can be used by specifying different
+ * indices.
  * @return 0 on success
  */
-__device__ int32_t symm_lsa_barrier(int64_t ctx_ptr) {
+__device__ int32_t symm_lsa_barrier(int64_t ctx_ptr, int32_t barrier_index) {
   SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
   TORCH_SYMM_CHECK(ctx != nullptr, "SymmContext is null");
 
@@ -191,13 +194,102 @@ __device__ int32_t symm_lsa_barrier(int64_t ctx_ptr) {
 #if NCCL_HAS_DEVICE_BITCODE
     case SymmContext::Type::NCCL: {
       NCCLSymmContext* nccl_ctx = static_cast<NCCLSymmContext*>(ctx);
-      nccl_lsa_barrier_impl(nccl_ctx);
+      nccl_lsa_barrier_impl(nccl_ctx, barrier_index);
       return 0;
     }
 #endif
     case SymmContext::Type::NVSHMEM: {
       NVSHMEMSymmContext* nvshmem_ctx = static_cast<NVSHMEMSymmContext*>(ctx);
-      nvshmem_lsa_barrier_impl(nvshmem_ctx);
+      nvshmem_lsa_barrier_impl(nvshmem_ctx, barrier_index);
+      return 0;
+    }
+    default:
+      TORCH_SYMM_CHECK(false, "Unknown SymmContext type");
+      return -1;
+  }
+}
+
+/**
+ * Unified lsa_barrier_arrive operation.
+ *
+ * Signals arrival at an LSA barrier without waiting for other peers.
+ * This is the "arrive" phase of a split-phase barrier, allowing overlapping
+ * computation while waiting for peers.
+ *
+ * This is useful for split-phase synchronization where:
+ * 1. Ranks signal arrival (symm_lsa_barrier_arrive)
+ * 2. Ranks do other work
+ * 3. Ranks wait for all peers (symm_lsa_barrier_wait)
+ *
+ * For NCCL, uses ncclLsaBarrierSession with its arrive() method.
+ * For NVSHMEM, uses signal operations on the LSA signal pad to notify
+ * all peers of arrival.
+ *
+ * @param ctx_ptr Pointer to SymmContext (as int64)
+ * @param barrier_index Index of the barrier to use (0..nBarriers-1).
+ *        Multiple independent barriers can be used by specifying different
+ * indices. The same index must be used for the corresponding wait() call.
+ * @return 0 on success
+ */
+__device__ int32_t
+symm_lsa_barrier_arrive(int64_t ctx_ptr, int32_t barrier_index) {
+  SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
+  TORCH_SYMM_CHECK(ctx != nullptr, "SymmContext is null");
+
+  switch (ctx->type) {
+#if NCCL_HAS_DEVICE_BITCODE
+    case SymmContext::Type::NCCL: {
+      NCCLSymmContext* nccl_ctx = static_cast<NCCLSymmContext*>(ctx);
+      nccl_lsa_barrier_arrive_impl(nccl_ctx, barrier_index);
+      return 0;
+    }
+#endif
+    case SymmContext::Type::NVSHMEM: {
+      NVSHMEMSymmContext* nvshmem_ctx = static_cast<NVSHMEMSymmContext*>(ctx);
+      nvshmem_lsa_barrier_arrive_impl(nvshmem_ctx, barrier_index);
+      return 0;
+    }
+    default:
+      TORCH_SYMM_CHECK(false, "Unknown SymmContext type");
+      return -1;
+  }
+}
+
+/**
+ * Unified lsa_barrier_wait operation.
+ *
+ * Waits for all peers to arrive at the LSA barrier.
+ * This is the "wait" phase of a split-phase barrier.
+ *
+ * Must be called after symm_lsa_barrier_arrive to complete the barrier.
+ * After this returns, all data written by peers before their arrive() call
+ * is guaranteed to be visible.
+ *
+ * For NCCL, uses ncclLsaBarrierSession with its wait() method.
+ * For NVSHMEM, waits until the local barrier signal reaches the expected
+ * count, then resets the signal for the next iteration.
+ *
+ * @param ctx_ptr Pointer to SymmContext (as int64)
+ * @param barrier_index Index of the barrier to wait on (0..nBarriers-1).
+ *        Must match the index used in the corresponding arrive() call.
+ * @return 0 on success
+ */
+__device__ int32_t
+symm_lsa_barrier_wait(int64_t ctx_ptr, int32_t barrier_index) {
+  SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
+  TORCH_SYMM_CHECK(ctx != nullptr, "SymmContext is null");
+
+  switch (ctx->type) {
+#if NCCL_HAS_DEVICE_BITCODE
+    case SymmContext::Type::NCCL: {
+      NCCLSymmContext* nccl_ctx = static_cast<NCCLSymmContext*>(ctx);
+      nccl_lsa_barrier_wait_impl(nccl_ctx, barrier_index);
+      return 0;
+    }
+#endif
+    case SymmContext::Type::NVSHMEM: {
+      NVSHMEMSymmContext* nvshmem_ctx = static_cast<NVSHMEMSymmContext*>(ctx);
+      nvshmem_lsa_barrier_wait_impl(nvshmem_ctx, barrier_index);
       return 0;
     }
     default:
@@ -233,13 +325,12 @@ symm_lsa_ptr(int64_t ctx_ptr, int64_t local_ptr, int32_t peer) {
 
 /**
  * Unified lsa_multicast_ptr operation.
+ *
+ * Gets the team from context and uses it for multicast operations.
  */
-__device__ int64_t
-symm_lsa_multicast_ptr(int64_t ctx_ptr, int64_t local_ptr, int64_t team_ptr) {
+__device__ int64_t symm_lsa_multicast_ptr(int64_t ctx_ptr, int64_t local_ptr) {
   SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
-  SymmTeam* team = reinterpret_cast<SymmTeam*>(team_ptr);
   TORCH_SYMM_CHECK(ctx != nullptr, "SymmContext is null");
-  TORCH_SYMM_CHECK(team != nullptr, "SymmTeam is null");
 
   switch (ctx->type) {
 #if NCCL_HAS_DEVICE_BITCODE
@@ -250,9 +341,9 @@ symm_lsa_multicast_ptr(int64_t ctx_ptr, int64_t local_ptr, int64_t team_ptr) {
 #endif
     case SymmContext::Type::NVSHMEM: {
       NVSHMEMSymmContext* nvshmem_ctx = static_cast<NVSHMEMSymmContext*>(ctx);
-      NVSHMEMSymmTeam* nvshmem_team = cast_to_nvshmem_team(team);
+      TORCH_SYMM_CHECK(nvshmem_ctx->team != nullptr, "team is null in context");
       return nvshmem_lsa_multicast_ptr_impl(
-          nvshmem_ctx, local_ptr, nvshmem_team);
+          nvshmem_ctx, local_ptr, nvshmem_ctx->team);
     }
     default:
       TORCH_SYMM_CHECK(false, "Unknown SymmContext type");
@@ -555,38 +646,118 @@ __device__ int32_t symm_put_signal_async(
 
 /**
  * Get the number of ranks in the team.
+ * Team is obtained from the context.
  */
-__device__ int32_t symm_team_size(int64_t team_ptr) {
-  SymmTeam* team = reinterpret_cast<SymmTeam*>(team_ptr);
-  TORCH_SYMM_CHECK(team != nullptr, "SymmTeam is null");
-  return team->team_size;
+__device__ int32_t symm_team_size(int64_t ctx_ptr) {
+  SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
+  TORCH_SYMM_CHECK(ctx != nullptr, "SymmContext is null");
+
+  switch (ctx->type) {
+#if NCCL_HAS_DEVICE_BITCODE
+    case SymmContext::Type::NCCL: {
+      NCCLSymmContext* nccl_ctx = static_cast<NCCLSymmContext*>(ctx);
+      TORCH_SYMM_CHECK(
+          nccl_ctx->team != nullptr, "team is null in NCCL context");
+      return nccl_ctx->team->team_size;
+    }
+#endif
+    case SymmContext::Type::NVSHMEM: {
+      NVSHMEMSymmContext* nvshmem_ctx = static_cast<NVSHMEMSymmContext*>(ctx);
+      TORCH_SYMM_CHECK(
+          nvshmem_ctx->team != nullptr, "team is null in NVSHMEM context");
+      return nvshmem_ctx->team->team_size;
+    }
+    default:
+      TORCH_SYMM_CHECK(false, "Unknown SymmContext type");
+      return 0;
+  }
 }
 
 /**
  * Get the calling process's rank index within the team.
+ * Team is obtained from the context.
  */
-__device__ int32_t symm_team_rank(int64_t team_ptr) {
-  SymmTeam* team = reinterpret_cast<SymmTeam*>(team_ptr);
-  TORCH_SYMM_CHECK(team != nullptr, "SymmTeam is null");
-  return team->team_rank;
+__device__ int32_t symm_team_rank(int64_t ctx_ptr) {
+  SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
+  TORCH_SYMM_CHECK(ctx != nullptr, "SymmContext is null");
+
+  switch (ctx->type) {
+#if NCCL_HAS_DEVICE_BITCODE
+    case SymmContext::Type::NCCL: {
+      NCCLSymmContext* nccl_ctx = static_cast<NCCLSymmContext*>(ctx);
+      TORCH_SYMM_CHECK(
+          nccl_ctx->team != nullptr, "team is null in NCCL context");
+      return nccl_ctx->team->team_rank;
+    }
+#endif
+    case SymmContext::Type::NVSHMEM: {
+      NVSHMEMSymmContext* nvshmem_ctx = static_cast<NVSHMEMSymmContext*>(ctx);
+      TORCH_SYMM_CHECK(
+          nvshmem_ctx->team != nullptr, "team is null in NVSHMEM context");
+      return nvshmem_ctx->team->team_rank;
+    }
+    default:
+      TORCH_SYMM_CHECK(false, "Unknown SymmContext type");
+      return 0;
+  }
 }
 
 /**
  * Get the number of ranks in the caller's LSA domain.
+ * Team is obtained from the context.
  */
-__device__ int32_t symm_team_lsa_size(int64_t team_ptr) {
-  SymmTeam* team = reinterpret_cast<SymmTeam*>(team_ptr);
-  TORCH_SYMM_CHECK(team != nullptr, "SymmTeam is null");
-  return team->lsa_size;
+__device__ int32_t symm_team_lsa_size(int64_t ctx_ptr) {
+  SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
+  TORCH_SYMM_CHECK(ctx != nullptr, "SymmContext is null");
+
+  switch (ctx->type) {
+#if NCCL_HAS_DEVICE_BITCODE
+    case SymmContext::Type::NCCL: {
+      NCCLSymmContext* nccl_ctx = static_cast<NCCLSymmContext*>(ctx);
+      TORCH_SYMM_CHECK(
+          nccl_ctx->team != nullptr, "team is null in NCCL context");
+      return nccl_ctx->team->lsa_size;
+    }
+#endif
+    case SymmContext::Type::NVSHMEM: {
+      NVSHMEMSymmContext* nvshmem_ctx = static_cast<NVSHMEMSymmContext*>(ctx);
+      TORCH_SYMM_CHECK(
+          nvshmem_ctx->team != nullptr, "team is null in NVSHMEM context");
+      return nvshmem_ctx->team->lsa_size;
+    }
+    default:
+      TORCH_SYMM_CHECK(false, "Unknown SymmContext type");
+      return 0;
+  }
 }
 
 /**
  * Check if a peer rank is in the same LSA domain as the caller.
+ * Team is obtained from the context.
  */
-__device__ int32_t symm_team_lsa(int64_t team_ptr, int32_t peer) {
-  SymmTeam* team = reinterpret_cast<SymmTeam*>(team_ptr);
-  TORCH_SYMM_CHECK(team != nullptr, "SymmTeam is null");
-  return team->is_lsa_peer(peer) ? 1 : 0;
+__device__ int32_t symm_team_lsa(int64_t ctx_ptr, int32_t peer) {
+  SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
+  TORCH_SYMM_CHECK(ctx != nullptr, "SymmContext is null");
+
+  switch (ctx->type) {
+#if NCCL_HAS_DEVICE_BITCODE
+    case SymmContext::Type::NCCL: {
+      NCCLSymmContext* nccl_ctx = static_cast<NCCLSymmContext*>(ctx);
+      TORCH_SYMM_CHECK(
+          nccl_ctx->team != nullptr, "team is null in NCCL context");
+      return nccl_ctx->team->is_lsa_peer(peer) ? 1 : 0;
+    }
+#endif
+    case SymmContext::Type::NVSHMEM: {
+      NVSHMEMSymmContext* nvshmem_ctx = static_cast<NVSHMEMSymmContext*>(ctx);
+      TORCH_SYMM_CHECK(
+          nvshmem_ctx->team != nullptr, "team is null in NVSHMEM context");
+      return nvshmem_ctx->team->is_lsa_peer(peer) ? 1 : 0;
+    }
+    default:
+      TORCH_SYMM_CHECK(false, "Unknown SymmContext type");
+      return 0;
+  }
 }
 
 } // extern "C"

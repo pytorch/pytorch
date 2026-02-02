@@ -173,9 +173,6 @@ class TestAllReduceHierarchical(MultiProcessTestCase):
             # For single-machine testing, LSA size = world_size (all GPUs in same domain)
             lsa_size = world_size
 
-            # Get team pointer for multicast operations
-            team_ptr = comm.get_team_ptr()
-
             # Scratch buffer starts after data buffer
             scratch_ptr = buffer_ptr + data_buffer_size
 
@@ -220,7 +217,6 @@ class TestAllReduceHierarchical(MultiProcessTestCase):
                 ctx_ptr,
                 buffer_ptr,
                 scratch_ptr,
-                team_ptr,
                 num_elements,
                 my_rank,
                 world_size,
@@ -407,9 +403,6 @@ class TestAllReduceHierarchicalLargeScale(MultiProcessTestCase):
             # For single-machine testing, LSA size = world_size (all GPUs in same domain)
             lsa_size = world_size
 
-            # Get team pointer for multicast operations
-            team_ptr = comm.get_team_ptr()
-
             scratch_ptr = buffer_ptr + data_buffer_size
 
             # Initialize with rank-specific values
@@ -442,7 +435,6 @@ class TestAllReduceHierarchicalLargeScale(MultiProcessTestCase):
                 ctx_ptr,
                 buffer_ptr,
                 scratch_ptr,
-                team_ptr,
                 num_elements,
                 my_rank,
                 world_size,

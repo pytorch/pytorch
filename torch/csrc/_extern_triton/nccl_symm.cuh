@@ -246,18 +246,22 @@ __device__ void nccl_fence_impl(NCCLSymmContext* nccl_ctx, int32_t scope) {
  * can directly access each other's memory via load/store operations.
  *
  * @param nccl_ctx NCCL context with device communicator
+ * @param barrier_index Index of the barrier to use (0..nBarriers-1).
+ *        Multiple independent barriers can be used by specifying different
+ * indices.
  */
-__device__ void nccl_lsa_barrier_impl(NCCLSymmContext* nccl_ctx) {
+__device__ void nccl_lsa_barrier_impl(
+    NCCLSymmContext* nccl_ctx,
+    int32_t barrier_index) {
 #if defined(NCCL_SYMM_TYPES_AVAILABLE)
   // Use ncclLsaBarrierSession with ncclTeamTagLsa for LSA domain barrier
   // This synchronizes only with ranks in the same LSA domain (same node with
   // NVLink connectivity)
-  // Barrier index 0 is used for LSA barriers, use_multimem = false
   ncclLsaBarrierSession<ncclCoopCta> barrier(
       ncclCoopCta{},
       *nccl_ctx->dev_comm,
       ncclTeamTagLsa{},
-      0, // barrier_index
+      static_cast<uint32_t>(barrier_index),
       false // use_multimem
   );
   barrier.sync(ncclCoopCta{}, cuda::memory_order_seq_cst);
@@ -265,6 +269,84 @@ __device__ void nccl_lsa_barrier_impl(NCCLSymmContext* nccl_ctx) {
   // NCCL device types are not available
   TORCH_SYMM_CHECK(
       false, "NCCL lsa_barrier requires NCCL_SYMM_TYPES_AVAILABLE");
+#endif
+}
+
+/**
+ * NCCL backend implementation of lsa_barrier_arrive.
+ *
+ * Signals arrival at an LSA barrier without waiting for other peers.
+ * This is the "arrive" phase of a split-phase barrier, allowing overlapping
+ * computation while waiting for peers.
+ *
+ * Uses ncclLsaBarrierSession with its arrive() method to signal this rank's
+ * arrival at the barrier. The corresponding wait can be done with a separate
+ * call to symm_lsa_barrier_wait with the same barrier_index.
+ *
+ * The ncclTeamTagLsa tag selects the LSA team which contains only ranks that
+ * can directly access each other's memory via load/store operations.
+ *
+ * @param nccl_ctx NCCL context with device communicator
+ * @param barrier_index Index of the barrier to use (0..nBarriers-1).
+ *        Multiple independent barriers can be used by specifying different
+ * indices. The same index must be used for the corresponding wait() call.
+ */
+__device__ void nccl_lsa_barrier_arrive_impl(
+    NCCLSymmContext* nccl_ctx,
+    int32_t barrier_index) {
+#if defined(NCCL_SYMM_TYPES_AVAILABLE)
+  // Use ncclLsaBarrierSession with ncclTeamTagLsa for LSA domain barrier
+  // Call arrive() to signal this rank's arrival without waiting
+  ncclLsaBarrierSession<ncclCoopCta> barrier(
+      ncclCoopCta{},
+      *nccl_ctx->dev_comm,
+      ncclTeamTagLsa{},
+      static_cast<uint32_t>(barrier_index),
+      false // use_multimem
+  );
+  barrier.arrive(ncclCoopCta{}, cuda::memory_order_seq_cst);
+#else
+  // NCCL device types are not available
+  TORCH_SYMM_CHECK(
+      false, "NCCL lsa_barrier_arrive requires NCCL_SYMM_TYPES_AVAILABLE");
+#endif
+}
+
+/**
+ * NCCL backend implementation of lsa_barrier_wait.
+ *
+ * Waits for all peers to arrive at the LSA barrier.
+ * This is the "wait" phase of a split-phase barrier.
+ *
+ * Uses ncclLsaBarrierSession with its wait() method to wait for all LSA peers
+ * to have signaled their arrival. This must be called after
+ * symm_lsa_barrier_arrive with the same barrier_index.
+ *
+ * The ncclTeamTagLsa tag selects the LSA team which contains only ranks that
+ * can directly access each other's memory via load/store operations.
+ *
+ * @param nccl_ctx NCCL context with device communicator
+ * @param barrier_index Index of the barrier to use (0..nBarriers-1).
+ *        Must match the index used in the corresponding arrive() call.
+ */
+__device__ void nccl_lsa_barrier_wait_impl(
+    NCCLSymmContext* nccl_ctx,
+    int32_t barrier_index) {
+#if defined(NCCL_SYMM_TYPES_AVAILABLE)
+  // Use ncclLsaBarrierSession with ncclTeamTagLsa for LSA domain barrier
+  // Call wait() to wait for all peers to arrive
+  ncclLsaBarrierSession<ncclCoopCta> barrier(
+      ncclCoopCta{},
+      *nccl_ctx->dev_comm,
+      ncclTeamTagLsa{},
+      static_cast<uint32_t>(barrier_index),
+      false // use_multimem
+  );
+  barrier.wait(ncclCoopCta{}, cuda::memory_order_seq_cst);
+#else
+  // NCCL device types are not available
+  TORCH_SYMM_CHECK(
+      false, "NCCL lsa_barrier_wait requires NCCL_SYMM_TYPES_AVAILABLE");
 #endif
 }
 
@@ -486,12 +568,50 @@ __device__ int32_t nccl_symm_fence(int64_t ctx_ptr, int32_t scope) {
  * load/store operations participate in this barrier.
  *
  * @param ctx_ptr Pointer to SymmContext (as int64)
+ * @param barrier_index Index of the barrier to use
  * @return 0 on success
  */
-__device__ int32_t nccl_symm_lsa_barrier(int64_t ctx_ptr) {
+__device__ int32_t
+nccl_symm_lsa_barrier(int64_t ctx_ptr, int32_t barrier_index) {
   SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
   NCCLSymmContext* nccl_ctx = cast_to_nccl_context(ctx);
-  nccl_lsa_barrier_impl(nccl_ctx);
+  nccl_lsa_barrier_impl(nccl_ctx, barrier_index);
+  return 0;
+}
+
+/**
+ * NCCL-specific wrapper for lsa_barrier_arrive operation.
+ *
+ * Signals arrival at an LSA barrier without waiting for other peers.
+ * This is the "arrive" phase of a split-phase barrier.
+ *
+ * @param ctx_ptr Pointer to SymmContext (as int64)
+ * @param barrier_index Index of the barrier to use
+ * @return 0 on success
+ */
+__device__ int32_t
+nccl_symm_lsa_barrier_arrive(int64_t ctx_ptr, int32_t barrier_index) {
+  SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
+  NCCLSymmContext* nccl_ctx = cast_to_nccl_context(ctx);
+  nccl_lsa_barrier_arrive_impl(nccl_ctx, barrier_index);
+  return 0;
+}
+
+/**
+ * NCCL-specific wrapper for lsa_barrier_wait operation.
+ *
+ * Waits for all peers to arrive at the LSA barrier.
+ * This is the "wait" phase of a split-phase barrier.
+ *
+ * @param ctx_ptr Pointer to SymmContext (as int64)
+ * @param barrier_index Index of the barrier to wait on
+ * @return 0 on success
+ */
+__device__ int32_t
+nccl_symm_lsa_barrier_wait(int64_t ctx_ptr, int32_t barrier_index) {
+  SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
+  NCCLSymmContext* nccl_ctx = cast_to_nccl_context(ctx);
+  nccl_lsa_barrier_wait_impl(nccl_ctx, barrier_index);
   return 0;
 }
 
@@ -507,11 +627,10 @@ nccl_symm_lsa_ptr(int64_t ctx_ptr, int64_t local_ptr, int32_t peer) {
 
 /**
  * NCCL-specific wrapper for lsa_multicast_ptr operation.
+ * Team is obtained from the context internally.
  */
-__device__ int64_t nccl_symm_lsa_multicast_ptr(
-    int64_t ctx_ptr,
-    int64_t local_ptr,
-    int64_t team_ptr) {
+__device__ int64_t
+nccl_symm_lsa_multicast_ptr(int64_t ctx_ptr, int64_t local_ptr) {
   SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
   NCCLSymmContext* nccl_ctx = cast_to_nccl_context(ctx);
   return nccl_lsa_multicast_ptr_impl(nccl_ctx, local_ptr);
@@ -881,38 +1000,46 @@ __device__ int32_t nccl_symm_put_signal_async(
 
 /**
  * NCCL-specific wrapper for team_size.
+ * Team is obtained from the context internally.
  */
-__device__ int32_t nccl_symm_team_size(int64_t team_ptr) {
-  SymmTeam* team = reinterpret_cast<SymmTeam*>(team_ptr);
-  NCCLSymmTeam* nccl_team = cast_to_nccl_team(team);
-  return nccl_team->team_size;
+__device__ int32_t nccl_symm_team_size(int64_t ctx_ptr) {
+  SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
+  NCCLSymmContext* nccl_ctx = cast_to_nccl_context(ctx);
+  TORCH_SYMM_CHECK(nccl_ctx->team != nullptr, "team is null in context");
+  return nccl_ctx->team->team_size;
 }
 
 /**
  * NCCL-specific wrapper for team_rank.
+ * Team is obtained from the context internally.
  */
-__device__ int32_t nccl_symm_team_rank(int64_t team_ptr) {
-  SymmTeam* team = reinterpret_cast<SymmTeam*>(team_ptr);
-  NCCLSymmTeam* nccl_team = cast_to_nccl_team(team);
-  return nccl_team->team_rank;
+__device__ int32_t nccl_symm_team_rank(int64_t ctx_ptr) {
+  SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
+  NCCLSymmContext* nccl_ctx = cast_to_nccl_context(ctx);
+  TORCH_SYMM_CHECK(nccl_ctx->team != nullptr, "team is null in context");
+  return nccl_ctx->team->team_rank;
 }
 
 /**
  * NCCL-specific wrapper for team_lsa_size.
+ * Team is obtained from the context internally.
  */
-__device__ int32_t nccl_symm_team_lsa_size(int64_t team_ptr) {
-  SymmTeam* team = reinterpret_cast<SymmTeam*>(team_ptr);
-  NCCLSymmTeam* nccl_team = cast_to_nccl_team(team);
-  return nccl_team->lsa_size;
+__device__ int32_t nccl_symm_team_lsa_size(int64_t ctx_ptr) {
+  SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
+  NCCLSymmContext* nccl_ctx = cast_to_nccl_context(ctx);
+  TORCH_SYMM_CHECK(nccl_ctx->team != nullptr, "team is null in context");
+  return nccl_ctx->team->lsa_size;
 }
 
 /**
  * NCCL-specific wrapper for team_lsa.
+ * Team is obtained from the context internally.
  */
-__device__ int32_t nccl_symm_team_lsa(int64_t team_ptr, int32_t peer) {
-  SymmTeam* team = reinterpret_cast<SymmTeam*>(team_ptr);
-  NCCLSymmTeam* nccl_team = cast_to_nccl_team(team);
-  return nccl_team->is_lsa_peer(peer) ? 1 : 0;
+__device__ int32_t nccl_symm_team_lsa(int64_t ctx_ptr, int32_t peer) {
+  SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
+  NCCLSymmContext* nccl_ctx = cast_to_nccl_context(ctx);
+  TORCH_SYMM_CHECK(nccl_ctx->team != nullptr, "team is null in context");
+  return nccl_ctx->team->is_lsa_peer(peer) ? 1 : 0;
 }
 
 } // extern "C"

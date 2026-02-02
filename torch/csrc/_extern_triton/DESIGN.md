@@ -68,50 +68,56 @@ The abstraction layer exposes the following unified primitives to kernel authors
 
 ### 2.1 Memory Access Primitives
 
-| Primitive                | Purpose                                                      |
-|--------------------------|--------------------------------------------------------------|
-| `symm_lsa_ptr`           | Get pointer to symmetric memory on a peer rank (P2P access)  |
-| `symm_lsa_multicast_ptr` | Get multicast address for broadcasting to all team members   |
-| `symm_lsa_signal_ptr`    | Get pointer to peer's signal pad for direct load/store       |
+| Primitive                | Purpose                                                                                 |
+|--------------------------|-----------------------------------------------------------------------------------------|
+| `symm_lsa_ptr`           | Get pointer to symmetric memory on a peer rank (P2P access)                             |
+| `symm_lsa_multicast_ptr` | Get multicast address for broadcasting to all LSA team members (team from ctx)          |
+| `symm_lsa_signal_ptr`    | Get pointer to peer's signal pad for direct load/store                                  |
 
 ### 2.2 Synchronization Primitives
 
-| Primitive                | Purpose                                                      |
-|--------------------------|--------------------------------------------------------------|
-| `symm_barrier`           | Barrier across all ranks in the communicator                 |
-| `symm_lsa_barrier`       | Barrier within the LSA (Local Symmetric Access) domain only  |
-| `symm_fence`             | Memory fence with configurable scope (CTA/GPU/system)        |
-| `symm_quiet`             | Ensure all prior one-sided operations have completed         |
+| Primitive                  | Purpose                                                        |
+|----------------------------|----------------------------------------------------------------|
+| `symm_barrier`             | Barrier across all ranks in the communicator                   |
+| `symm_lsa_barrier`         | Barrier within the LSA (Local Symmetric Access) domain only    |
+| `symm_lsa_barrier_arrive`  | Signal arrival at LSA barrier (split-phase, non-blocking)      |
+| `symm_lsa_barrier_wait`    | Wait for all LSA peers to arrive at barrier (split-phase)      |
+| `symm_fence`               | Memory fence with configurable scope (CTA/GPU/system)          |
+| `symm_quiet`               | Ensure all prior one-sided operations have completed           |
 
 ### 2.3 Signaling Primitives
 
-| Primitive                | Purpose                                                      |
-|--------------------------|--------------------------------------------------------------|
-| `symm_signal`            | Atomically update a signal at a remote rank's signal pad     |
-| `symm_signal_wait_until` | Block until a local signal meets a specified condition       |
-| `symm_signal_reset`      | Reset a local signal to zero for reuse                       |
+| Primitive                | Purpose                                                        |
+|--------------------------|----------------------------------------------------------------|
+| `symm_signal`            | Atomically update a signal at a remote rank's signal pad       |
+| `symm_signal_wait_until` | Block until a local signal meets a specified condition         |
+| `symm_signal_reset`      | Reset a local signal to zero for reuse                         |
 
 ### 2.4 Data Transfer Primitives
 
-| Primitive                | Purpose                                                      |
-|--------------------------|--------------------------------------------------------------|
-| `symm_put_async`         | Non-blocking one-sided put (local → remote)                  |
-| `symm_put_signal_async`  | Non-blocking put with remote signal notification on arrival  |
+| Primitive                | Purpose                                                        |
+|--------------------------|----------------------------------------------------------------|
+| `symm_put_async`         | Non-blocking one-sided put (local → remote)                    |
+| `symm_put_signal_async`  | Non-blocking put with remote signal notification on arrival    |
 
 ### 2.5 Team (Topology) Primitives
 
-| Primitive                | Purpose                                                      |
-|--------------------------|--------------------------------------------------------------|
-| `symm_team_size`         | Get number of ranks in the team                              |
-| `symm_team_rank`         | Get this process's rank within the team                      |
-| `symm_team_lsa_size`     | Get number of ranks in the LSA domain                        |
-| `symm_team_lsa`          | Check if a peer is in the same LSA domain (NVLink-connected) |
+All team primitives obtain the team information from the `SymmContext` internally.
+The context stores a pointer to its associated `SymmTeam`, eliminating the need to
+pass a separate `team_ptr` parameter.
+
+| Primitive            | Signature                  | Purpose                                              |
+|----------------------|----------------------------|------------------------------------------------------|
+| `symm_team_size`     | `(ctx_ptr) -> int32`       | Get number of ranks in the team                      |
+| `symm_team_rank`     | `(ctx_ptr) -> int32`       | Get this process's rank within the team              |
+| `symm_team_lsa_size` | `(ctx_ptr) -> int32`       | Get number of ranks in the LSA domain                |
+| `symm_team_lsa`      | `(ctx_ptr, peer) -> int32` | Check if peer is in same LSA domain (NVLink-connected)|
 
 ### 2.6 Collective Primitives (Demonstration Only)
 
-| Primitive                | Purpose                                                      |
-|--------------------------|--------------------------------------------------------------|
-| `symm_all_reduce`        | **Demo only** - Simple all-reduce (not production-ready)     |
+| Primitive                | Purpose                                                        |
+|--------------------------|----------------------------------------------------------------|
+| `symm_all_reduce`        | **Demo only** - Simple all-reduce (not production-ready)       |
 
 ---
 
@@ -131,6 +137,7 @@ backend-specific state. It is created on the host and passed to device kernels.
 |  Type type            <- Backend identifier (NCCL=0, NVSHMEM=1)      |
 |  int32_t rank         <- Process rank in the communicator            |
 |  int32_t world_size   <- Total number of processes                   |
+|  SymmTeam* team       <- Pointer to associated team (for team ops)   |
 +----------------------------------------------------------------------+
               ^                                      ^
               |                                      |
@@ -184,6 +191,56 @@ provides topology information:
 The LSA domain represents peers that can directly access each other's memory via
 load/store operations (e.g., GPUs connected via NVLink on the same node). The team
 tracks LSA membership to enable optimized local-only operations.
+
+#### 3.1.3 Team-Context Integration
+
+The `SymmContext` stores a pointer to its associated `SymmTeam`, enabling team
+operations to be invoked with only a context pointer. This simplifies the kernel
+API by eliminating the need to pass separate `ctx_ptr` and `team_ptr` parameters.
+
+**API Design:**
+
+```cpp
+// Team primitives take ctx_ptr and retrieve team internally
+__device__ int32_t symm_team_size(int64_t ctx_ptr) {
+    SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
+    // Access ctx->team to get team information
+    switch (ctx->type) {
+        case SymmContext::Type::NVSHMEM:
+            return static_cast<NVSHMEMSymmContext*>(ctx)->team->team_size;
+        case SymmContext::Type::NCCL:
+            return static_cast<NCCLSymmContext*>(ctx)->team->team_size;
+    }
+}
+
+// symm_lsa_multicast_ptr also gets team from context internally
+__device__ int64_t symm_lsa_multicast_ptr(int64_t ctx_ptr, int64_t local_ptr) {
+    SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
+    // Access ctx->team for team-scoped multicast pointer
+    ...
+}
+```
+
+**Benefits:**
+
+- Simpler kernel signatures (fewer parameters to pass)
+- Team information is always consistent with context
+- No risk of passing mismatched context/team pairs
+- Cleaner Triton wrapper functions
+
+**Python Usage:**
+
+```python
+@triton.jit
+def my_kernel(ctx_ptr, data_ptr, backend_hint: tl.constexpr):
+    # Team operations use ctx_ptr directly
+    my_rank = symm_team_rank(ctx_ptr, backend=backend_hint)
+    team_size = symm_team_size(ctx_ptr, backend=backend_hint)
+    lsa_size = symm_team_lsa_size(ctx_ptr, backend=backend_hint)
+
+    # Multicast pointer also uses ctx_ptr only
+    mc_ptr = symm_lsa_multicast_ptr(ctx_ptr, data_ptr, backend=backend_hint)
+```
 
 ### 3.2 Kernel Structure: Frontend and Backend
 
