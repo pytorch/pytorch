@@ -54,9 +54,8 @@ class ReplicateTest(MultiProcContinuousTest):
 
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file):
-        # Set device before initializing process group to ensure
-        # each rank is bound to the correct GPU
-        torch.cuda.set_device(rank)
+        if torch.accelerator.is_available():
+            torch.accelerator.set_device_index(rank)
         super()._init_pg(rank, world_size, rdvz_file)
 
     def init_replicate_tp_mesh(self) -> DeviceMesh:
