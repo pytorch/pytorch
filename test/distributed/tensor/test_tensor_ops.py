@@ -59,6 +59,24 @@ class DistTensorOpsTest(DTensorTestBase):
             self.assertEqual(cloned_mat.to_local(), mat.to_local())
 
     @with_comms
+    def test_searchsorted(self):
+        """Test torch.searchsorted with DTensor sharding."""
+        mesh = self.build_device_mesh()
+
+        # Test S(innermost), R -> P(sum) strategy
+        # This is the interesting mathematical property: sharding the search dim
+        # and summing local indices gives the correct global index
+        sorted_seq = torch.arange(16, dtype=torch.float, device=self.device_type)
+        values = torch.tensor([1.5, 7.5, 14.5], device=self.device_type)
+        expected = torch.searchsorted(sorted_seq, values)
+
+        dt_sorted = distribute_tensor(sorted_seq, mesh, [Shard(0)])
+        dt_values = distribute_tensor(values, mesh, [Replicate()])
+        result = torch.searchsorted(dt_sorted, dt_values)
+        self.assertEqual(result.placements, (Partial(),))
+        self.assertEqual(result.full_tensor(), expected)
+
+    @with_comms
     def test_copy_(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
 
