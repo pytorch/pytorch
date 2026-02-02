@@ -2305,6 +2305,34 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
             kwargs["op"] = variables.ConstantVariable.create(
                 REDUCE_OP_TO_STR[reduce_op]
             )
+
+        if self.fn is dist.broadcast:
+            # Convert global rank (src) to group-local rank
+            # Legacy API: src is global rank, group_src is group-local rank
+            # Functional API: src expects group-local rank
+            src_var = kwargs.get("src")
+            group_src_var = kwargs.get("group_src")
+            group_var = kwargs.get("group")
+
+            group = (
+                group_var.as_python_constant()
+                if group_var is not None
+                else signature.parameters["group"].default
+            )
+            group = group if group is not None else dist.group.WORLD
+
+            if group_src_var is not None:
+                local_src = group_src_var.as_python_constant()
+            elif src_var is not None:
+                global_src = src_var.as_python_constant()
+                local_src = dist.get_group_rank(group, global_src)
+            else:
+                raise ValueError("Must specify src or group_src for broadcast")
+
+            kwargs["src"] = variables.ConstantVariable.create(local_src)
+            # Remove group_src since broadcast_inplace doesn't have it
+            kwargs.pop("group_src", None)
+
         return self.replacement_var.call_function(tx, args, kwargs)
 
 
