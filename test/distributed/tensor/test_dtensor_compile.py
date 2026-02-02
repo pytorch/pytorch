@@ -63,6 +63,54 @@ from torch.utils.checkpoint import checkpoint
 dev_type = torch.device(get_devtype())
 
 
+class PytreeTuple:
+    """
+    Tuple-like values that are treated as leaves of a PyTree.
+    """
+
+    def __init__(self, *values):
+        self._values = tuple(values)
+
+    def __repr__(self):
+        pr = repr(self._values)[1:-1]
+        return f"{type(self).__name__}({pr})"
+
+    def __getitem__(self, i):
+        return self._values[i]
+
+    def __iter__(self):
+        return iter(self._values)
+
+    def __len__(self):
+        return len(self._values)
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, self.__class__):
+            return self._values == other._values
+        elif isinstance(other, tuple):
+            return self._values == other
+        return False
+
+    def __hash__(self) -> int:
+        return hash(self._values)
+
+    def __add__(self, other):
+        if isinstance(other, (self.__class__, tuple)):
+            return self.__class__(*self, *other)
+        raise NotImplementedError(type(other))
+
+    def __radd__(self, other):
+        if isinstance(other, (self.__class__, tuple)):
+            return self.__class__(*other, *self)
+        raise NotImplementedError(type(other))
+
+    def index(self, value):
+        return self._values.index(value)
+
+    def count(self, value):
+        return self._values.count(value)
+
+
 class SimpleModel(nn.Module):
     def __init__(self, device):
         super().__init__()
@@ -855,7 +903,7 @@ def forward(self, b_parametrizations_buffer_original0, x):
         out_dt.to_local().sum().backward()
 
     def test_dynamo_to_local_grad_placements_sequence(self):
-        placements = [Shard(0)]
+        placements = PytreeTuple([Shard(0)])
 
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -874,7 +922,7 @@ def forward(self, b_parametrizations_buffer_original0, x):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
         def fn(x):
-            placements = [Shard(0)]
+            placements = PytreeTuple([Shard(0)])
             return dt.to_local(grad_placements=placements) + 2
 
         fn_opt = torch.compile(fn, backend="aot_eager", fullgraph=True)
@@ -888,7 +936,7 @@ def forward(self, b_parametrizations_buffer_original0, x):
     def test_dynamo_from_local_grad_placements_sequence_intermediate(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
-        placements = [Shard(0)]
+        placements = PytreeTuple(Shard(0))
 
         def fn(x):
             dt = DTensor.from_local(
@@ -909,7 +957,7 @@ def forward(self, b_parametrizations_buffer_original0, x):
     def test_dynamo_from_local_grad_placements_sequence_intermediate_as_args(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
-        placements = [Shard(0)]
+        placements = PytreeTuple(Shard(0))
 
         def fn(x):
             dt = DTensor.from_local(
@@ -1394,6 +1442,43 @@ class outer_fn(torch.nn.Module):
             1,
             f"Expected 1 compilation, got {compile_counter.frame_count}",
         )
+
+    def test_compile_redistribute_flattened_mesh(self):
+        """
+        Test that redistribute works with pre-flattened meshes during compile.
+
+        When redistributing from [Shard, Shard, Replicate] to [Replicate, Replicate, Replicate]
+        on a 3D mesh, DTensor can optimize by using a single all-gather on the flattened
+        mesh instead of 2 sequential all-gathers. This requires the flattened mesh to be
+        pre-created before compile to avoid tracing issues.
+        """
+        dist.destroy_process_group()
+        dist.init_process_group("fake", store=FakeStore(), rank=0, world_size=8)
+
+        mesh = init_device_mesh(
+            self.device_type, (2, 2, 2), mesh_dim_names=("fsdp", "cp", "tp")
+        )
+        # Pre-create flattened mesh for fsdp+cp before compile
+        mesh["fsdp", "cp"]._flatten()
+
+        def redistribute_fn(x):
+            return x.redistribute(placements=[Replicate(), Replicate(), Replicate()])
+
+        input_dt = DTensor.from_local(
+            torch.randn(4, 8, device=self.device_type, requires_grad=True),
+            device_mesh=mesh,
+            placements=[Shard(0), Shard(0), Replicate()],
+            run_check=False,
+        )
+
+        compiled_fn = torch.compile(
+            redistribute_fn, fullgraph=True, backend="aot_eager"
+        )
+        result = compiled_fn(input_dt)
+        self.assertEqual(result.placements, (Replicate(), Replicate(), Replicate()))
+
+        # Test backward pass
+        result.sum().backward()
 
 
 @instantiate_parametrized_tests

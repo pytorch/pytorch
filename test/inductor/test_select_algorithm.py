@@ -85,6 +85,11 @@ class TestSelectAlgorithm(TestCase):
         # Clear preprocessing functions to ensure clean state
         select_algorithm.clear_preprocessing_fns()
 
+    def tearDown(self):
+        super().tearDown()
+        V.choices_handler = None
+        select_algorithm.clear_preprocessing_fns()
+
     @patches
     def test_linear_relu(self):
         @torch.compile
