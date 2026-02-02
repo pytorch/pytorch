@@ -1,0 +1,151 @@
+---
+name: pr-review
+description: Review PyTorch pull requests for code quality, test coverage, security, and backward compatibility. Use when reviewing PRs, when asked to review code changes, or when the user mentions "review PR", "code review", or "check this PR".
+---
+
+# PyTorch PR Review Skill
+
+Review PyTorch pull requests focusing on what CI cannot check: code quality, test coverage adequacy, security vulnerabilities, and backward compatibility. Linting, formatting, type checking, and import ordering are handled by CI.
+
+## Usage Modes
+
+### Local CLI Mode
+
+The user provides a PR number or URL:
+
+```
+/pr-review 12345
+/pr-review https://github.com/pytorch/pytorch/pull/12345
+```
+
+For a detailed review with line-by-line specific comments:
+
+```
+/pr-review 12345 detailed
+/pr-review 12345 in depth
+```
+
+Use `gh` CLI to fetch PR data:
+
+```bash
+# Get PR details
+gh pr view <PR_NUMBER> --json title,body,author,baseRefName,headRefName,files,additions,deletions,commits
+
+# Get the diff
+gh pr diff <PR_NUMBER>
+
+# Get PR comments
+gh pr view <PR_NUMBER> --json comments,reviews
+```
+
+### GitHub Actions Mode
+
+When invoked via workflow, PR data is passed as context. The PR number or diff will be available in the prompt.
+
+## Review Workflow
+
+### Step 1: Fetch PR Information
+
+For local mode, use `gh` commands to get:
+1. PR metadata (title, description, author)
+2. List of changed files
+3. Full diff of changes
+4. Existing comments/reviews
+
+### Step 2: Analyze Changes
+
+Read through the diff systematically:
+1. Identify the purpose of the change from title/description
+2. Group changes by type (new code, tests, config, docs)
+3. Note the scope of changes (files affected, lines changed)
+
+### Step 3: Deep Review
+
+Perform thorough line-by-line analysis using the review checklist. See [review-checklist.md](review-checklist.md) for detailed criteria covering:
+- Code quality and design
+- Testing adequacy
+- Security considerations
+- Performance implications
+
+### Step 4: Check Backward Compatibility
+
+Evaluate BC implications. See [bc-guidelines.md](bc-guidelines.md) for:
+- What constitutes a BC-breaking change
+- Required deprecation patterns
+- Common BC pitfalls
+
+### Step 5: Formulate Review
+
+Structure your review with actionable feedback organized by category.
+
+## Review Areas
+
+| Area | Focus | Reference |
+|------|-------|-----------|
+| Code Quality | Abstractions, patterns, complexity | [review-checklist.md](review-checklist.md) |
+| Testing | Coverage, patterns, edge cases | [review-checklist.md](review-checklist.md) |
+| Security | Injection, credentials, input handling | [review-checklist.md](review-checklist.md) |
+| Performance | Regressions, device handling, memory | [review-checklist.md](review-checklist.md) |
+| BC | Breaking changes, deprecation | [bc-guidelines.md](bc-guidelines.md) |
+
+## Output Format
+
+Structure your review as follows:
+
+```markdown
+## PR Review: #<number>
+
+### Summary
+Brief overall assessment of the PR (1-2 sentences).
+
+### Code Quality
+[Issues and suggestions, or "No concerns" if none]
+
+### Testing
+- [ ] Tests exist for new functionality
+- [ ] Edge cases covered
+- [ ] Tests follow PyTorch patterns (TestCase, assertEqual)
+[Additional testing feedback]
+
+### Security
+[Issues if any, or "No security concerns identified"]
+
+### Backward Compatibility
+[BC concerns if any, or "No BC-breaking changes"]
+
+### Performance
+[Performance concerns if any, or "No performance concerns"]
+
+### Recommendation
+**Approve** / **Request Changes** / **Needs Discussion**
+
+[Brief justification for recommendation]
+```
+
+### Specific Comments (Detailed Review Only)
+
+**Only include this section if the user requests a "detailed" or "in depth" review.**
+
+When requested, add file-specific feedback with line references:
+
+```markdown
+### Specific Comments
+- `src/module.py:42` - Consider extracting this logic into a named function for clarity
+- `test/test_feature.py:100-105` - Missing test for error case when input is None
+- `torch/nn/modules/linear.py:78` - This allocation could be moved outside the loop
+```
+
+## Key Principles
+
+1. **Focus on what CI cannot check** - Don't comment on formatting, linting, or type errors
+2. **Be specific** - Reference file paths and line numbers
+3. **Be actionable** - Provide concrete suggestions, not vague concerns
+4. **Be proportionate** - Minor issues shouldn't block, but note them
+5. **Assume competence** - The author knows PyTorch; explain only non-obvious context
+
+## Files to Reference
+
+When reviewing, consult these project files for context:
+- `CLAUDE.md` - Coding style philosophy and testing patterns
+- `CONTRIBUTING.md` - PR requirements and review process
+- `torch/testing/_internal/common_utils.py` - Test patterns and utilities
