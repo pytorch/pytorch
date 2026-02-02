@@ -4189,6 +4189,8 @@ class SourcelessBuilder:
         handlers[collections.OrderedDict] = handlers[dict]
         handlers[immutable_dict] = handlers[dict]
         handlers[immutable_list] = handlers[list]
+        # Sourceless MappingProxyType object can be encountered while tracing
+        # type.__dict__["__dict__"].__get__
         handlers[types.MappingProxyType] = lambda tx, value: MappingProxyVariable(
             ConstDictVariable(
                 {create(tx, k): create(tx, v) for k, v in value.items()},
@@ -4198,6 +4200,9 @@ class SourcelessBuilder:
         )
         handlers[types.GetSetDescriptorType] = (
             lambda tx, value: GetSetDescriptorVariable(value)
+        )
+        handlers[inspect.Parameter] = lambda tx, value: UserDefinedObjectVariable(
+            value, mutation_type=ValueMutationNew()
         )
         handlers[random.Random] = lambda tx, value: RandomClassVariable()
         handlers[types.ModuleType] = lambda tx, value: PythonModuleVariable(value)

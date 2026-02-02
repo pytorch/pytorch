@@ -36,11 +36,11 @@ static py::dict get_cpu_capabilities() {
   }
 
   auto get_cache_size = [](int level) -> uint32_t {
-    const struct cpuinfo_processor* processors = cpuinfo_get_processors();
+    const auto processors = cpuinfo_get_processors();
     if (!processors) {
       return 0;
     }
-    const struct cpuinfo_cache* cache = nullptr;
+    const auto cache = nullptr;
     switch (level) {
       case 1:
         cache = processors[0].cache.l1d;
@@ -54,6 +54,17 @@ static py::dict get_cpu_capabilities() {
 
     return cache ? cache->size : 0;
   };
+
+  // CPU name from package info
+  const auto packages = cpuinfo_get_packages();
+  if (packages && cpuinfo_get_packages_count() > 0) {
+    capabilities["cpu_name"] = packages[0].name;
+  }
+
+  // Core and processor counts
+  capabilities["num_sockets"] = cpuinfo_get_packages_count();
+  capabilities["num_physical_cores"] = cpuinfo_get_cores_count();
+  capabilities["num_logical_cores"] = cpuinfo_get_processors_count();
 
   // Cache sizes (in bytes)
   capabilities["l1d_cache_size"] = get_cache_size(1);

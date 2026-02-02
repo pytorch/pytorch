@@ -6,6 +6,7 @@ to facilitate writing device-agnostic code.
 
 from collections.abc import Mapping
 from contextlib import AbstractContextManager
+from functools import lru_cache
 from types import MappingProxyType
 from typing import Any
 
@@ -30,10 +31,8 @@ __all__ = [
     "get_capabilities",
 ]
 
-# Cached CPU capabilities - populated on first access
-_capabilities: Mapping[str, Any] | None = None
 
-
+@lru_cache(None)
 def get_capabilities() -> Mapping[str, Any]:
     """
     Returns an immutable mapping of CPU capabilities detected at runtime.
@@ -67,7 +66,7 @@ def get_capabilities() -> Mapping[str, Any]:
 
     Returns:
         MappingProxyType: An immutable mapping where keys are capability names
-        (e.g., 'avx2', 'avx512_vnni', 'neon') and values are booleans indicating
+        (e.g., 'avx2', 'sve') and values are booleans indicating
         support, or integers for properties like vector lengths.
 
     Example:
@@ -76,10 +75,7 @@ def get_capabilities() -> Mapping[str, Any]:
         ...     print("AVX2 is supported")
         >>> print(f"Architecture: {caps['architecture']}")
     """
-    global _capabilities
-    if _capabilities is None:
-        _capabilities = MappingProxyType(torch._C._cpu._get_cpu_capability())
-    return _capabilities
+    return MappingProxyType(torch._C._cpu._get_cpu_capability())
 
 
 def _is_avx2_supported() -> bool:
