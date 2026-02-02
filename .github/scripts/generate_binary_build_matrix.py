@@ -399,6 +399,7 @@ def generate_wheels_matrix(
                 "linux",
                 "linux-aarch64",
                 "linux-s390x",
+                "linux-ppc64le",
                 "macos-arm64",
                 "windows",
             ] and (python_version == "3.14" or python_version == "3.14t"):
