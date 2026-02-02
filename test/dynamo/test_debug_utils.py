@@ -61,11 +61,29 @@ def forward(self, x_1):
     """,  # NOQA: B950
         )
 
-    @patch.dict(os.environ, {"TORCHINDUCTOR_MAX_AUTOTUNE": "1", "TEST_ENV": "1"})
+    @patch.dict(
+        os.environ,
+        {
+            "TORCHINDUCTOR_MAX_AUTOTUNE": "1",
+            "TEST_ENV": "1",
+            "TORCHINDUCTOR_ENV_SINGLE_QUOTES": "inductor_'env'",
+            "TORCHINDUCTOR_ENV_DOUBLE_QUOTES": 'inductor_"env"',
+        },
+    )
     def test_generate_env_vars_string(self):
         env_strings = generate_env_vars_string()
         self.assertIn(
             """os.environ['TORCHINDUCTOR_MAX_AUTOTUNE'] = '1'
+""",
+            env_strings,
+        )
+        self.assertIn(
+            """os.environ['TORCHINDUCTOR_ENV_SINGLE_QUOTES'] = 'inductor_"env"'
+""",
+            env_strings,
+        )
+        self.assertIn(
+            """os.environ['TORCHINDUCTOR_ENV_DOUBLE_QUOTES'] = 'inductor_"env"'
 """,
             env_strings,
         )
