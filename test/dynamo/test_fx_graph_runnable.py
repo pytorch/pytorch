@@ -66,6 +66,29 @@ if has_triton():
         output = x + y
         tl.atomic_add(output_ptr + offsets, output, mask=mask)
 
+    # Triton kernels with sub-function dependencies for transitive closure testing
+    @triton.jit
+    def _sub_function_leaf(x):
+        return x * 2
+
+    @triton.jit
+    def _sub_function_nested(x):
+        return _sub_function_leaf(x) + 1
+
+    @triton.jit
+    def main_kernel_with_subfunctions(
+        in_ptr0,
+        out_ptr,
+        n_elements,
+        BLOCK_SIZE: tl.constexpr,
+    ):
+        pid = tl.program_id(0)
+        offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        x = tl.load(in_ptr0 + offsets, mask=mask)
+        result = _sub_function_nested(x)
+        tl.store(out_ptr + offsets, result, mask=mask)
+
 
 from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.testing._internal.triton_utils import requires_gpu
@@ -187,6 +210,65 @@ class FxGraphRunnableTest(TestCase):
 
         torch.compile(add)(x, y)
         self._exec_and_verify_payload()
+
+    @unittest.skipUnless(has_triton(), "Triton not available")
+    @requires_gpu
+    def test_triton_kernel_with_subfunctions(self):
+        """Test that fx_graph_runnable includes transitive closure of Triton sub-functions."""
+
+        def fn(x: torch.Tensor) -> torch.Tensor:
+            output = torch.empty_like(x)
+            n_elements = x.numel()
+
+            def grid(meta):
+                return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+            main_kernel_with_subfunctions[grid](x, output, n_elements, BLOCK_SIZE=1024)
+            return output
+
+        x = torch.randn(1024, device=GPU_TYPE, dtype=torch.float32)
+        torch.compile(fn)(x)
+
+        # Verify the payload contains all sub-functions defined (not just called)
+        payload = self.buffer.getvalue()
+        self.assertIn("def _sub_function_nested", payload)
+        self.assertIn("def _sub_function_leaf", payload)
+
+        self._exec_and_verify_payload()
+
+    @unittest.skipUnless(has_triton(), "Triton not available")
+    def test_transitive_closure_includes_nested_subfunctions(self):
+        """Test _get_triton_kernel_transitive_closure_source includes all nested sub-functions."""
+        from torch._dynamo.repro.after_aot import (
+            _get_triton_kernel_transitive_closure_source,
+        )
+
+        source = _get_triton_kernel_transitive_closure_source(
+            main_kernel_with_subfunctions
+        )
+
+        # Verify main kernel source is present
+        self.assertIn("def main_kernel_with_subfunctions", source)
+        # Verify nested sub-function is defined (not just called)
+        self.assertIn("def _sub_function_nested", source)
+        # Verify leaf sub-function is defined (not just called)
+        self.assertIn("def _sub_function_leaf", source)
+        # Verify decorators are added for sub-functions
+        self.assertIn("@triton.jit", source)
+
+    @unittest.skipUnless(has_triton(), "Triton not available")
+    def test_transitive_closure_simple_kernel(self):
+        """Test _get_triton_kernel_transitive_closure_source with a simple kernel."""
+        from torch._dynamo.repro.after_aot import (
+            _get_triton_kernel_transitive_closure_source,
+        )
+
+        # add_kernel has no sub-function dependencies
+        source = _get_triton_kernel_transitive_closure_source(add_kernel)
+
+        self.assertIn("def add_kernel", source)
+        self.assertIn("tl.program_id", source)
+        self.assertIn("tl.load", source)
 
     def test_two_inputs_matmul(self):
         def f(a, b):

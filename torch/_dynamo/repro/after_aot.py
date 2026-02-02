@@ -53,6 +53,92 @@ except ImportError:
         pass
 
 
+def _get_triton_kernel_transitive_closure_source(kernel: JITFunction) -> str:
+    """
+    Given a Triton kernel, collect the transitive closure of its dependencies
+    (sub-functions, constexpr functions, constants) and return the combined source.
+    """
+    import dis
+
+    try:
+        import triton
+        from triton.language import constexpr
+    except ImportError:
+        return kernel.src
+
+    from torch._inductor.utils import OrderedSet
+
+    lines = [kernel.src]
+    symbols_included = OrderedSet([kernel.__name__])
+
+    def traverse(cur_kernel: JITFunction) -> None:
+        # Extract unqualified global names loaded in the kernel code
+        try:
+            unqualified_loads = OrderedSet(
+                inst.argval
+                for inst in dis.Bytecode(cur_kernel.fn)
+                if inst.opname == "LOAD_GLOBAL"
+            )
+        except Exception:
+            return
+
+        global_annotations = cur_kernel.fn.__globals__.get("__annotations__", {})
+
+        for symbol_name in cur_kernel.fn.__code__.co_names:
+            if symbol_name in symbols_included:
+                continue
+            if symbol_name not in cur_kernel.fn.__globals__:
+                continue
+
+            symbol = cur_kernel.fn.__globals__[symbol_name]
+
+            if isinstance(symbol, JITFunction):
+                lines.append("")
+                lines.append("@triton.jit")
+                lines.append(symbol.src.strip())
+                symbols_included.add(symbol_name)
+                traverse(symbol)
+            elif hasattr(triton, "constexpr_function") and isinstance(
+                symbol,
+                triton.runtime.jit.ConstexprFunction,
+            ):
+                lines.append("")
+                lines.append("@triton.constexpr_function")
+                lines.append(symbol.src.strip())
+                symbols_included.add(symbol_name)
+                traverse(symbol)
+            elif isinstance(symbol, (int, str, bool, constexpr)):
+                if isinstance(symbol, constexpr):
+                    symbol_str = f"tl.constexpr({symbol.value!r})"
+                else:
+                    symbol_str = f"{symbol!r}"
+                annotation = global_annotations.get(symbol_name)
+                if annotation:
+                    if isinstance(annotation, type):
+                        annotation_code = (
+                            f": {annotation.__module__}.{annotation.__name__}"
+                        )
+                    else:
+                        annotation_code = f": {annotation!r}"
+                    lines.append(f"{symbol_name}{annotation_code} = {symbol_str}")
+                else:
+                    lines.append(f"{symbol_name} = {symbol_str}")
+                symbols_included.add(symbol_name)
+            elif (
+                symbol_name in unqualified_loads
+                and symbol_name != "tl"  # already imported
+                and hasattr(symbol, "__module__")
+                and symbol.__module__.startswith("triton")
+            ):
+                lines.append(
+                    f"from {symbol.__module__} import {symbol.__name__} as {symbol_name}"
+                )
+                symbols_included.add(symbol_name)
+
+    traverse(kernel)
+    return "\n".join(lines)
+
+
 import torch
 import torch.fx as fx
 import torch.nn as nn
@@ -414,7 +500,12 @@ if "__compile_source__" in globals():
 
             model_str += "\n@triton.jit\n"
             # pyrefly: ignore [missing-attribute]
-            src_code = kernel.src if isinstance(kernel, JITFunction) else kernel.fn.src
+            jit_fn = kernel if isinstance(kernel, JITFunction) else kernel.fn
+            try:
+                src_code = _get_triton_kernel_transitive_closure_source(jit_fn)
+            except Exception:
+                # Fallback to kerne's src if transitive closure fails
+                src_code = jit_fn.src
             fn_name = (
                 # pyrefly: ignore [missing-attribute]
                 kernel._fn_name
