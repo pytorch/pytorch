@@ -1913,9 +1913,9 @@ class TestTorchFunctionMode(TestCase):
         finally:
             torch.set_default_device(None)
 
-    def test_skip_torch_function_mode_dispatch_basic(self):
-        """Test that skip_torch_function_mode_dispatch prevents infinite recursion."""
-        from torch.overrides import skip_torch_function_mode_dispatch
+    def test_skip_one_torch_function_hop_basic(self):
+        """Test that skip_one_torch_function_hop prevents infinite recursion."""
+        from torch.overrides import skip_one_torch_function_hop
 
         class TrackingMode(TorchFunctionMode):
             def __init__(self):
@@ -1927,7 +1927,7 @@ class TestTorchFunctionMode(TestCase):
                 self.calls.append(name)
 
                 if func in (torch.autograd.backward, torch.Tensor.backward, torch.autograd.grad):
-                    with skip_torch_function_mode_dispatch(self):
+                    with skip_one_torch_function_hop(self):
                         return func(*args, **kwargs)
 
                 return func(*args, **kwargs)
@@ -1942,9 +1942,9 @@ class TestTorchFunctionMode(TestCase):
         # Should not cause infinite recursion and should see backward
         self.assertIn("backward", mode.calls)
 
-    def test_skip_torch_function_mode_dispatch_sees_backward_ops(self):
-        """Test that skip_torch_function_mode_dispatch keeps mode active for ops inside backward."""
-        from torch.overrides import skip_torch_function_mode_dispatch
+    def test_skip_one_torch_function_hop_sees_backward_ops(self):
+        """Test that skip_one_torch_function_hop keeps mode active for ops inside backward."""
+        from torch.overrides import skip_one_torch_function_hop
 
         class MyMul(torch.autograd.Function):
             @staticmethod
@@ -1967,7 +1967,7 @@ class TestTorchFunctionMode(TestCase):
                 self.calls.append(name)
 
                 if func in (torch.autograd.backward, torch.Tensor.backward):
-                    with skip_torch_function_mode_dispatch(self):
+                    with skip_one_torch_function_hop(self):
                         return func(*args, **kwargs)
 
                 return func(*args, **kwargs)
@@ -2004,9 +2004,9 @@ class TestTorchFunctionMode(TestCase):
         mul_count_after_backward = mode2.calls[mode2.calls.index('backward'):].count('mul')
         self.assertGreater(mul_count_after_backward, 0)
 
-    def test_skip_torch_function_mode_dispatch_backward_hook(self):
-        """Test that skip_torch_function_mode_dispatch allows mode to see ops in backward hooks."""
-        from torch.overrides import skip_torch_function_mode_dispatch
+    def test_skip_one_torch_function_hop_backward_hook(self):
+        """Test that skip_one_torch_function_hop allows mode to see ops in backward hooks."""
+        from torch.overrides import skip_one_torch_function_hop
 
         class TrackingModeWithSkip(TorchFunctionMode):
             def __init__(self):
@@ -2018,7 +2018,7 @@ class TestTorchFunctionMode(TestCase):
                 self.calls.append(name)
 
                 if func in (torch.autograd.backward, torch.Tensor.backward):
-                    with skip_torch_function_mode_dispatch(self):
+                    with skip_one_torch_function_hop(self):
                         return func(*args, **kwargs)
 
                 return func(*args, **kwargs)

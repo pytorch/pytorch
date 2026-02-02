@@ -609,16 +609,6 @@ auto handle_torch_function_no_python_arg_parser(
   // subclasses override sizes/strides metadata calls with __torch_dispatch__,
   // which would mean a mode would be **required** to access their metadata.
 
-  // Check skip_one_hop flag: if set, skip ALL dispatch (mode and subclass)
-  // for this call but keep mode enabled for subsequent operations.
-  if (is_torch_function && at::impl::PythonTorchFunctionTLS::get_skip_one_hop()) {
-    at::impl::PythonTorchFunctionTLS::set_skip_one_hop(false);
-    // Return nullptr to signal to the caller that it should invoke the
-    // original function directly. The mode remains on the stack so
-    // subsequent operations will still trigger mode dispatch.
-    return nullptr;
-  }
-
   if (is_mode_active()) {
     // Step 1: Try to dispatch on any user TorchDispatchModes (including infra
     // modes, which will always be at the bottom of the mode stack).

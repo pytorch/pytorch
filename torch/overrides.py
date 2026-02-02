@@ -1729,7 +1729,7 @@ def handle_torch_function(
     ...     return a + 0
     """
     # Check skip_one_hop: if set, skip torch function dispatch and call the
-    # original function directly. This is used by skip_torch_function_mode_dispatch.
+    # original function directly. This is used by skip_one_torch_function_hop.
     if torch._C._get_torch_function_skip_one_hop():
         torch._C._set_torch_function_skip_one_hop(False)
         return public_api(*args, **kwargs)
@@ -2124,9 +2124,9 @@ def _enable_torch_function():
 
 
 @contextlib.contextmanager
-def skip_torch_function_mode_dispatch(mode):
+def skip_one_torch_function_hop(mode):
     """
-    Context manager to skip the next torch function mode dispatch while keeping
+    Context manager to skip the next torch function dispatch while keeping
     the mode active for subsequent operations.
 
     When used inside a TorchFunctionMode's __torch_function__ method, this pushes
@@ -2144,7 +2144,7 @@ def skip_torch_function_mode_dispatch(mode):
                 if func in (torch.autograd.backward, torch.Tensor.backward):
                     # Skip mode dispatch for backward, but keep mode active
                     # for gradient computations inside backward
-                    with skip_torch_function_mode_dispatch(self):
+                    with skip_one_torch_function_hop(self):
                         return func(*args, **(kwargs or {}))
                 # ... handle other functions
     """
