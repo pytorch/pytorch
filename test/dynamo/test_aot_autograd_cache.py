@@ -2772,6 +2772,41 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(c1, c2)
             self.assertNotEqual(c3, c4)
 
+    def test_dill_serialization_with_inner_functions(self):
+        """
+        Test that with dill, we can now serialize graphs that contain inner functions
+        in node metadata. Standard pickle would fail on these because inner functions
+        are not defined at module level, but dill serializes function code objects and
+        closures directly.
+        """
+        from torch.fx._graph_pickler import GraphPickler, Options
+        from torch.utils._import_utils import import_dill
+
+        dill = import_dill()
+        if dill is None:
+            self.skipTest("dill not available")
+
+        def fn(x):
+            return x.sin().cos()
+
+        _, fx_g, example_inputs = self._get_dynamo_output(fn, torch.ones(3))
+
+        def inner_helper(x):
+            return x * 2
+
+        for node in fx_g.graph.nodes:
+            node.meta["inner_fn"] = inner_helper
+
+        options = Options(node_metadata_key_filter=None)
+        serialized = GraphPickler.dumps(fx_g, options)
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+        deserialized = GraphPickler.loads(serialized, fake_mode)
+
+        self.assertIsInstance(deserialized, torch.fx.GraphModule)
+        for node in deserialized.graph.nodes:
+            self.assertIn("inner_fn", node.meta)
+            self.assertEqual(node.meta["inner_fn"](5), 10)
+
     def test_pickle_entry_with_unpicklable_field(self):
         from weakref import WeakValueDictionary
 
@@ -2811,7 +2846,7 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         self.assertIsNone(result)
         self.assertEqual(len(log_context.output), 1)
         self.assertIn(
-            """'AOTAutogradCachePicklerTests.test_pickle_entry_with_lambda.<locals>.<lambda>'""",  # noqa: B950
+            """AOTAutogradCachePicklerTests.test_pickle_entry_with_lambda.<locals>.<lambda>""",  # noqa: B950
             log_context.output[0],
         )
         mock_trace.assert_called_once()
