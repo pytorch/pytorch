@@ -33,7 +33,7 @@ Usage 1: Launching two trainers as a function
      entrypoint=trainer,
      args={0: (1, 2, 3), 1: (4, 5, 6)},
      envs={0: {"LOCAL_RANK": 0}, 1: {"LOCAL_RANK": 1}},
-     log_dir="/tmp/foobar",
+     log_dir=tempfile.gettempdir(),
      redirects=Std.ALL,  # write all worker stdout/stderr to a log file
      tee={0: Std.ERR},  # tee only local rank 0's stderr to console
  )
@@ -51,7 +51,7 @@ Usage 2: Launching 2 echo workers as a binary
  ctx = start_processes(
          name="echo"
          entrypoint="echo",
-         log_dir="/tmp/foobar",
+         log_dir=tempfile.gettempdir(),
          args={0: "hello", 1: "world"},
          redirects={1: Std.OUT},
         )
@@ -159,7 +159,7 @@ def start_processes(
     Example:
     ::
 
-     log_dir = "/tmp/test"
+     log_dir = tempfile.gettempdir()
 
      # ok; two copies of foo: foo("bar0"), foo("bar1")
      start_processes(

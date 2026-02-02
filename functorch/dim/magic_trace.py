@@ -6,14 +6,17 @@
 import os
 import signal
 import subprocess
+import tempfile
 from collections.abc import Generator
 from contextlib import contextmanager
 
 
 @contextmanager
 def magic_trace(
-    output: str = "trace.fxt", magic_trace_cache: str = "/tmp/magic-trace"
+    output: str = "trace.fxt", magic_trace_cache: str | None = None
 ) -> Generator[None, None, None]:
+    if magic_trace_cache is None:
+        magic_trace_cache = os.path.join(tempfile.gettempdir(), "magic-trace")
     pid = os.getpid()
     if not os.path.exists(magic_trace_cache):
         print(f"Downloading magic_trace to: {magic_trace_cache}")

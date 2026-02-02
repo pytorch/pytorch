@@ -39,7 +39,7 @@ if not (IS_WINDOWS or IS_MACOS or IS_ARM64):
         def setUp(self):
             super().setUp()
             self.max_interval = 0.01
-            self.file_path = f"/tmp/test_file_path_{os.getpid()}_{uuid.uuid4()}"
+            self.file_path = os.path.join(tempfile.gettempdir(), f"test_file_path_{os.getpid()}_{uuid.uuid4()}")
             self.server = timer.FileTimerServer(
                 self.file_path, "test", self.max_interval
             )
@@ -206,7 +206,7 @@ if not (IS_WINDOWS or IS_MACOS or IS_ARM64):
     class FileTimerServerTest(TestCase):
         def setUp(self):
             super().setUp()
-            self.file_path = f"/tmp/test_file_path_{os.getpid()}_{uuid.uuid4()}"
+            self.file_path = os.path.join(tempfile.gettempdir(), f"test_file_path_{os.getpid()}_{uuid.uuid4()}")
             self.max_interval = 0.01
             self.server = timer.FileTimerServer(
                 self.file_path, "test", self.max_interval
