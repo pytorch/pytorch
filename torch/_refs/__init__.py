@@ -2736,7 +2736,7 @@ def addr(
         )
         torch._check(
             is_weakly_lesser_type(type(alpha), int),
-            lambda: f"expected bool/int alpha but got {type(beta)}",
+            lambda: f"expected bool/int alpha but got {type(alpha)}",
         )
         if not beta:
             return torch.outer(vec1, vec2) if alpha else torch.full_like(self, False)
