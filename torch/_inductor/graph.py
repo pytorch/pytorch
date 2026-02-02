@@ -375,10 +375,6 @@ class GraphLowering(torch.fx.Interpreter):
         )
         self.bound_unbacked_symbols = OrderedSet[sympy.Symbol]()
 
-        # Cudagraph shape control: symints explicitly excluded/included via APIs
-        self.cudagraph_excluded_symints: OrderedSet[sympy.Symbol] = OrderedSet()
-        self.cudagraph_included_symints: OrderedSet[sympy.Symbol] = OrderedSet()
-
         self.sizevars = SizeVarAllocator(shape_env)
         self.graph_input_names: list[str] = []
         self.graph_inputs: dict[str, Union[TensorBox, TorchBindObject, sympy.Expr]] = {}
@@ -583,68 +579,6 @@ class GraphLowering(torch.fx.Interpreter):
         size = [sympy.Integer(i) for i in ex.size()]
         stride = [sympy.Integer(i) for i in ex.stride()]
         return size, stride
-
-    def _register_cudagraph_shape_hints(
-        self,
-        example: torch.Tensor,
-        tensor_dict: dict[str, Any],
-    ) -> None:
-        """
-        Register cudagraph shape hints from tensor metadata.
-
-        Extracts sympy symbols from tensor dimensions marked for cudagraph
-        exclusion/inclusion and adds them to the graph's tracking sets.
-        Only registers symbols for dimensions that are actually symbolic.
-        """
-        excluded_dims = tensor_dict.get("_cudagraph_excluded_sym_dims")
-        included_dims = tensor_dict.get("_cudagraph_included_sym_dims")
-
-        if not excluded_dims and not included_dims:
-            return
-
-        for dim, symint_set in [
-            (excluded_dims, self.cudagraph_excluded_symints),
-            (included_dims, self.cudagraph_included_symints),
-        ]:
-            if not dim:
-                continue
-            for d in dim:
-                if d < 0 or d >= example.ndim:
-                    continue
-                size = example.size(d)
-                if isinstance(size, torch.SymInt):
-                    expr = size.node.expr
-                    for sym in expr.free_symbols:
-                        symint_set.add(sym)
-
-    def _register_cudagraph_unsafe_unbacked_symints(
-        self,
-        op: object,
-        new_unbacked_defs: OrderedSet[sympy.Symbol],
-    ) -> None:
-        """
-        Register unbacked symints from cudagraph-unsafe ops.
-
-        If the op is in config.cudagraph_unsafe_unbacked_ops, its unbacked output
-        symints are added to cudagraph_excluded_symints to trigger partitioning.
-        """
-        if not isinstance(op, torch._ops.OperatorBase):
-            return
-
-        op_overload_packet_name = op.name()
-        op_overload_name = (
-            f"{op_overload_packet_name}.{op._overloadname}"
-            if isinstance(op, torch._ops.OpOverload)
-            else op_overload_packet_name
-        )
-
-        if (
-            op_overload_packet_name not in config.cudagraph_unsafe_unbacked_ops
-            and op_overload_name not in config.cudagraph_unsafe_unbacked_ops
-        ):
-            return
-
-        self.cudagraph_excluded_symints.update(new_unbacked_defs)
 
     def get_allocation_size(
         self,
@@ -1305,31 +1239,6 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_inputs_original[target] = tensor.data.data  # type: ignore[union-attr]
         if self.current_node.users:  # cudagraphs should work with an unused CPU input
             self.add_device_info(example.device)
-
-        # Extract cudagraph shape hints from tensor metadata
-        # Read from gm.meta which was populated from dynamo graph placeholders in compile_fx
-        tensor_dict = self.current_node.meta.get("tensor_dict", {})
-        if not tensor_dict.get("_cudagraph_excluded_sym_dims") and not tensor_dict.get(
-            "_cudagraph_included_sym_dims"
-        ):
-            # Read from gm.meta where compile_fx stored hints from dynamo placeholders
-            # Use placeholder_idx as the key (matches order in dynamo graph)
-            excluded_by_idx = self.module.meta.get(
-                "cudagraph_excluded_sym_dims_by_idx", {}
-            )
-            included_by_idx = self.module.meta.get(
-                "cudagraph_included_sym_dims_by_idx", {}
-            )
-            tensor_dict = {}
-            if self.placeholder_idx in excluded_by_idx:
-                tensor_dict["_cudagraph_excluded_sym_dims"] = excluded_by_idx[
-                    self.placeholder_idx
-                ]
-            if self.placeholder_idx in included_by_idx:
-                tensor_dict["_cudagraph_included_sym_dims"] = included_by_idx[
-                    self.placeholder_idx
-                ]
-        self._register_cudagraph_shape_hints(example, tensor_dict)
 
         # Note: [Input Alignment handling in Inductor]
         # Alignment matters for generating efficient code. Some operations,
@@ -2033,10 +1942,6 @@ class GraphLowering(torch.fx.Interpreter):
             and shape_env.is_unbacked_symint(result)
         ):
             new_unbacked_defs.add(result)
-
-        # Register unbacked symints from cudagraph-unsafe ops for partitioning
-        if new_unbacked_defs and config.cudagraph_unsafe_unbacked_ops:
-            self._register_cudagraph_unsafe_unbacked_symints(n.target, new_unbacked_defs)
 
         def format_new_defs() -> str:
             r = [

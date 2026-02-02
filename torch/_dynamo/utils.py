@@ -2215,10 +2215,6 @@ def clone_input(
             y.grad = clone_input(x.grad, dtype=dtype)
         if hasattr(x, "_dynamo_dynamic_indices"):
             y._dynamo_dynamic_indices = x._dynamo_dynamic_indices.copy()  # type: ignore[attr-defined]
-        if hasattr(x, "_cudagraph_excluded_sym_dims"):
-            y._cudagraph_excluded_sym_dims = x._cudagraph_excluded_sym_dims.copy()  # type: ignore[attr-defined]
-        if hasattr(x, "_cudagraph_included_sym_dims"):
-            y._cudagraph_included_sym_dims = x._cudagraph_included_sym_dims.copy()  # type: ignore[attr-defined]
         return y
 
     with torch.no_grad():
@@ -4912,8 +4908,6 @@ def _extract_tensor_dict(t: torch.Tensor) -> dict[str, Any]:
     KEYS_TO_COPY = [
         "_dynamo_static_input_type",
         "tag",
-        "_cudagraph_excluded_sym_dims",
-        "_cudagraph_included_sym_dims",
     ]
 
     tensor_dict = {
