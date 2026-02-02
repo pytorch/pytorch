@@ -2065,6 +2065,42 @@ class TestTorchFunctionMode(TestCase):
         self.assertGreater(after_backward2.count('mul'), 0)
         self.assertGreater(after_backward2.count('add'), 0)
 
+    def test_skip_one_torch_function_hop_cpp_ops(self):
+        """Test that C++ ops in skip block are skipped (requires rebuild)."""
+        from torch.overrides import skip_one_torch_function_hop
+
+        calls_seen = []
+
+        class TrackingMode(TorchFunctionMode):
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                kwargs = kwargs or {}
+                name = func.__name__ if hasattr(func, '__name__') else str(func)
+                calls_seen.append(name)
+
+                # When we see 'mul', enter skip block and call C++ ops
+                if name == 'mul':
+                    with skip_one_torch_function_hop(self):
+                        # These C++ ops should be skipped
+                        x = torch.tensor([1.0, 2.0])
+                        y = torch.add(x, x)
+                        return func(*args, **kwargs)
+
+                return func(*args, **kwargs)
+
+        mode = TrackingMode()
+        a = torch.tensor([1.0, 2.0])
+        b = torch.tensor([3.0, 4.0])
+
+        with mode:
+            result = torch.mul(a, b)
+
+        # 'mul' should be in calls (we saw it before entering skip block)
+        self.assertIn('mul', calls_seen)
+
+        # 'tensor' and 'add' should NOT be in calls (skipped in skip block)
+        self.assertNotIn('tensor', calls_seen)
+        self.assertNotIn('add', calls_seen)
+
 
 
 

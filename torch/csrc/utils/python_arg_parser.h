@@ -388,6 +388,11 @@ inline PythonArgs PythonArgParser::parse(PyObject* self, ParsedArgs<0>& dst) {
 }
 
 inline bool PythonArgs::has_torch_function() {
+  // Check skip_one_hop: if set, skip torch function dispatch for this call.
+  // The flag stays true for all calls in the skip block.
+  if (at::impl::PythonTorchFunctionTLS::get_skip_one_hop()) {
+    return false;
+  }
   return !overloaded_args.empty() || at::impl::torch_function_mode_enabled();
 }
 
