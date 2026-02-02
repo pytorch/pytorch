@@ -380,6 +380,8 @@ class Shard(torch._C._distributed.Shard):
             full_chunk_size = (logical_dim_size + num_chunks - 1) // num_chunks
             unpad_size = full_chunk_size * num_chunks - logical_dim_size  # type: ignore[possibly-undefined]
             local_tensor = unpad_tensor(local_tensor, self.dim, unpad_size)
+            if not local_tensor.is_contiguous():
+                local_tensor = local_tensor.contiguous()
 
         return local_tensor
 
