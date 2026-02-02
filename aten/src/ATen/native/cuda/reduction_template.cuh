@@ -344,7 +344,7 @@ struct ReduceJitOp {
       const auto values_vec = memory::load_vector<input_vec_size>(data, idx);
       #pragma unroll
       for (uint32_t i = 0; i < input_vec_size; i++) {
-        value_list[i] = ops.reduce(value_list[i], values_vec.val[i], shift + idx * input_vec_size + i);
+        value_list[i] = reducer::reduce(value_list[i], values_vec.val[i], shift + idx * input_vec_size + i);
       }
       idx += stride;
     }
