@@ -1231,7 +1231,6 @@ if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENT
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_24
         )
 
-        @skipIfXpu(msg="FIXME: ENable for XPU")
         def test_skip_non_tf32(self):
             with allow_nonbracketed_mutation():
                 backend = (
