@@ -33,7 +33,7 @@ This skill helps triage GitHub issues by routing issues, applying labels, and le
   - Step 7: Mark Triaged
 - [V1 Constraints](#v1-constraints)
 
-**Labels reference:** See [labels.json](labels.json) for the full catalog of 305 labels suitable for triage. This file excludes CI triggers, test configs, release notes, and deprecated labels.
+**Labels reference:** See [labels.json](labels.json) for the full catalog of 305 labels suitable for triage. **ONLY apply labels that exist in this file.** Do not invent or guess label names. This file excludes CI triggers, test configs, release notes, and deprecated labels.
 
 **PT2 triage guide:** See [pt2-triage-rubric.md](pt2-triage-rubric.md) for detailed labeling guidance when triaging PT2/torch.compile issues.
 
@@ -58,6 +58,7 @@ Use these GitHub MCP tools for triage:
 
 | Prefix/Category | Reason |
 |-----------------|--------|
+| Labels not in `labels.json` | Only apply labels that exist in the allowlist |
 | `ciflow/*` | CI job triggers for PRs only |
 | `test-config/*` | Test suite selectors for PRs only |
 | `release notes: *` | Auto-assigned for release notes |
@@ -68,7 +69,7 @@ Use these GitHub MCP tools for triage:
 
 **If blocked:** When a label is blocked by the hook, add ONLY `triage review` and stop. A human will handle it.
 
-These forbidden labels are enforced by a PreToolUse hook.
+These rules are enforced by a PreToolUse hook that validates all labels against `labels.json`.
 
 ---
 
