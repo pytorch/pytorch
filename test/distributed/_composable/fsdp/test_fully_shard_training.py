@@ -381,14 +381,13 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         Tests train parity against DDP when using multiple parameter groups for
         communication and CPU offloading.
         """
-        # pin_memory requires an accelerator, so skip it on CPU
-        offload_policies = [CPUOffloadPolicy(pin_memory=False)]
-        if device_type.type != "cpu":
-            offload_policies.append(CPUOffloadPolicy(pin_memory=True))
         self.run_subtests(
             {
                 "reshard_after_forward": [True],  # save CI time
-                "offload_policy": offload_policies,
+                "offload_policy": [
+                    CPUOffloadPolicy(pin_memory=True),
+                    CPUOffloadPolicy(pin_memory=False),
+                ],
                 "test_device_type": [device_type.type],
                 "delay_after_forward": [False, True],
                 "delay_before_all_gather": [False, True],
@@ -438,6 +437,13 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             + delay_before_reduce_scatter
             + delay_before_optim
             in (2, 3)
+        ):
+            return
+        # pin_memory requires an accelerator, skip on CPU
+        if (
+            device_type.type == "cpu"
+            and isinstance(offload_policy, CPUOffloadPolicy)
+            and offload_policy.pin_memory
         ):
             return
         assert test_device_type in ("cuda", "hpu", "xpu", "cpu"), f"{test_device_type}"
@@ -1036,10 +1042,6 @@ class TestFullyShardGradientAccumulation(FSDPTest):
                     mesh_dim_names=("dp_replicate", "dp_shard"),
                 )
             )
-        # pin_memory requires an accelerator, so use pin_memory=False on CPU
-        offload_policies = [OffloadPolicy(), CPUOffloadPolicy(pin_memory=False)]
-        if device_type.type != "cpu":
-            offload_policies.append(CPUOffloadPolicy(pin_memory=True))
         self.run_subtests(
             {
                 "mesh": meshes,
@@ -1049,7 +1051,7 @@ class TestFullyShardGradientAccumulation(FSDPTest):
                 # "some_mlps": disable reduce-scatter for some MLPs
                 "mode": ["all", "root_only", "some_mlps"],
                 "reshard_after_backward": [False, True],
-                "offload_policy": offload_policies,
+                "offload_policy": [OffloadPolicy(), CPUOffloadPolicy()],
                 # For HSDP only:
                 # `True`: reduce-scatter only (no all-reduce) each microbatch
                 # until the last microbatch
@@ -1081,6 +1083,13 @@ class TestFullyShardGradientAccumulation(FSDPTest):
             or (mesh.ndim != 2 and reduce_scatter_only)
         ):
             return  # skip since not common or applicable
+        # pin_memory requires an accelerator, skip on CPU
+        if (
+            device_type.type == "cpu"
+            and isinstance(offload_policy, CPUOffloadPolicy)
+            and offload_policy.pin_memory
+        ):
+            return
 
         torch.manual_seed(42)
         batch_size, lin_dim, num_mlps, num_microbatches = (2, 32, 3, 3)
@@ -1450,17 +1459,16 @@ class TestFullyShardHSDPTraining(FSDPTest):
             (replicate_size, shard_size),
             mesh_dim_names=("dp_replicate", "dp_shard"),
         )
-        # pin_memory requires an accelerator, so skip it on CPU
-        offload_policies = [CPUOffloadPolicy(pin_memory=False)]
-        if device_type.type != "cpu":
-            offload_policies.append(CPUOffloadPolicy(pin_memory=True))
         self.run_subtests(
             {
                 "reshard_after_forward": [False, True],
                 "use_activation_checkpointing": [False, True],
                 "mlp_dim": [3, 16, 17],
                 "sync_gradients_at_last_batch": [True, False],
-                "offload_policy": offload_policies,
+                "offload_policy": [
+                    CPUOffloadPolicy(pin_memory=True),
+                    CPUOffloadPolicy(pin_memory=False),
+                ],
             },
             functools.partial(self._test_train_parity_hsdp, global_mesh),
         )
@@ -1474,6 +1482,9 @@ class TestFullyShardHSDPTraining(FSDPTest):
         sync_gradients_at_last_batch: bool,
         offload_policy: CPUOffloadPolicy,
     ):
+        # pin_memory requires an accelerator, skip on CPU
+        if device_type.type == "cpu" and offload_policy.pin_memory:
+            return
         torch.manual_seed(42)
         model = nn.Sequential(
             nn.LayerNorm(mlp_dim, bias=False),
