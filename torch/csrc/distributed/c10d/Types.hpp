@@ -20,11 +20,11 @@ struct TORCH_API _SupplementBase : torch::CustomClassHolder {
 
 // Supplementary data specific to NCCL PREMUL_SUM
 // The point of use in ProcessGroupNCCL knows how to unpack it.
-struct NCCLPreMulSumSupplement : _SupplementBase {
+struct PreMulSumSupplement : _SupplementBase {
   double double_factor{0.0};
   at::Tensor tensor_factor;
-  NCCLPreMulSumSupplement(double f) : double_factor{f} {}
-  NCCLPreMulSumSupplement(at::Tensor t) : tensor_factor{std::move(t)} {
+  PreMulSumSupplement(double f) : double_factor{f} {}
+  PreMulSumSupplement(at::Tensor t) : tensor_factor{std::move(t)} {
     TORCH_CHECK_EQ(tensor_factor.numel(), 1);
   }
 };
@@ -103,10 +103,10 @@ struct TORCH_API ReduceOp : torch::CustomClassHolder {
 };
 
 template <typename T>
-ReduceOp makeNCCLPreMulSum(const T& factor) {
+ReduceOp makePreMulSum(const T& factor) {
   ReduceOp rop;
   rop.op_ = ReduceOp::PREMUL_SUM;
-  rop.supplement_ = c10::make_intrusive<NCCLPreMulSumSupplement>(factor);
+  rop.supplement_ = c10::make_intrusive<PreMulSumSupplement>(factor);
   return rop;
 }
 
