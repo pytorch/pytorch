@@ -799,22 +799,25 @@ class OutputGraph(OutputGraphCommon):
 
     def get_chained_attr_source(self, base: Source, path: str) -> AttrSource:
         parts = path.split(".")
-        result: Source = base
-        for part in parts:
+        key = (base, parts[0])
+        if key not in self.attr_source_cache:
+            self.attr_source_cache[key] = AttrSource(base, parts[0])
+        result = self.attr_source_cache[key]
+        for part in parts[1:]:
             key = (result, part)
             if key not in self.attr_source_cache:
                 self.attr_source_cache[key] = AttrSource(result, part)
             result = self.attr_source_cache[key]
-        return result  # type: ignore[return-value]
+        return result
 
     def get_chained_param_buffer_source(
         self, base: Source, path: str
     ) -> "ParamBufferSource":
-        parts = path.split(".")
+        parts = path.rsplit(".", 1)
         if len(parts) == 1:
             return ParamBufferSource(base, path)
-        intermediate_base = self.get_chained_attr_source(base, ".".join(parts[:-1]))
-        return ParamBufferSource(intermediate_base, parts[-1])
+        intermediate_base = self.get_chained_attr_source(base, parts[0])
+        return ParamBufferSource(intermediate_base, parts[1])
 
     def mark_bytecode_tracing_start(self) -> None:
         self.compiler_trace_stack.enter_context(
