@@ -3522,6 +3522,39 @@ class GraphModule(torch.nn.Module):
 
         self._test_leaf_function_helper(PointModule, args_fn, loss_fn)
 
+    def test_leaf_function_fake_requires_grad_ignored(self):
+        @leaf_function
+        def my_fn(x):
+            return (x * 2,)
+
+        @my_fn.register_fake
+        def my_fn_fake(x):
+            return (torch.empty_like(x).requires_grad_(False),)
+
+        from torch._dynamo.testing import EagerAndRecordGraphs
+
+        backend = EagerAndRecordGraphs()
+
+        @torch.compile(backend=backend, fullgraph=True)
+        def fn(x):
+            return my_fn(x)
+
+        x = torch.randn(3, 3, requires_grad=True)
+        out = fn(x)
+
+        self.assertTrue(out[0].requires_grad)
+        out[0].sum().backward()
+        self.assertIsNotNone(x.grad)
+
+        graph = backend.graphs[0]
+        for node in graph.graph.nodes:
+            if node.op == "call_function" and "invoke_leaf_function" in str(
+                node.target
+            ):
+                example_value = node.meta.get("example_value")
+                self.assertIsNotNone(example_value)
+                self.assertTrue(example_value[0].requires_grad)
+
 
 instantiate_parametrized_tests(DecoratorTests)
 
