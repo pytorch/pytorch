@@ -4971,8 +4971,11 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         # there is no backed assert on them. The reason this is ok is
         # because dynamo will only skip the assert statement, but not
         # the instructions before it.
+
+        # The code generation can non-deterministically use either form
+        generated_code = str(graph.code).strip().replace(".gt(0)", " > 0")
         self.assertExpectedInline(
-            str(graph.code).strip(),
+            generated_code,
             """\
 def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
     l_x_ = L_x_
