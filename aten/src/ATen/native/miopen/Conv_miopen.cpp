@@ -34,7 +34,7 @@ namespace at::native {
 at::Tensor miopen_convolution(
     const Tensor& input, const Tensor& weight, const std::optional<Tensor>& bias_opt /* optional */,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
-    int64_t groups, bool benchmark, bool deterministic) {
+    int64_t groups, bool benchmark, bool deterministic, bool allow_tf32) {
   TORCH_CHECK(false, "miopen_convolution: ATen not compiled with MIOpen support");
 }
 
@@ -187,6 +187,7 @@ struct ConvolutionParams
   int dilation[max_dim];
   int64_t groups;
   bool deterministic;
+  bool allow_tf32;
   c10::DeviceIndex device_id; //This is needed to distinguish between miopen handles of multiple gpus.
   // NB: transposed purposely omitted: transposed just swaps
   // forward and backward, so you can reuse the benchmark entry,
@@ -202,7 +203,8 @@ void setConvolutionParams(
     IntArrayRef dilation,
     int64_t groups,
     bool deterministic,
-    at::MemoryFormat memory_format) {
+    at::MemoryFormat memory_format,
+    bool allow_tf32) {
   miopenDataType_t dataType = getMiopenDataType(input);
   memset(params, 0, sizeof(ConvolutionParams));
   params->dataType = dataType;
@@ -224,6 +226,7 @@ void setConvolutionParams(
   }
   params->groups = groups;
   params->deterministic = deterministic;
+  params->allow_tf32 = allow_tf32;
   params->device_id = at::cuda::current_device();
 }
 
@@ -657,6 +660,7 @@ static inline void split_batch_dim_to_32bit_out(
     bool benchmark,
     bool deterministic,
     bool depthwise,
+    bool allow_tf32,
     int64_t max_worksize,
     func_t func_indexing) {
   constexpr int64_t int_max = std::numeric_limits<int>::max();
@@ -675,7 +679,8 @@ static inline void split_batch_dim_to_32bit_out(
         groups,
         benchmark,
         deterministic,
-        depthwise);
+        depthwise,
+        allow_tf32);
     return;
   }
   // else, if C * D1 * D2 * ... <= int_max, then we just need to split across
@@ -704,7 +709,8 @@ static inline void split_batch_dim_to_32bit_out(
           groups,
           benchmark,
           deterministic,
-          depthwise);
+          depthwise,
+          allow_tf32);
     }
     return;
   }
@@ -719,7 +725,8 @@ static inline void split_batch_dim_to_32bit_out(
       groups,
       benchmark,
       deterministic,
-      depthwise);
+      depthwise,
+      allow_tf32);
 }
 
 // ---------------------------------------------------------------------
@@ -821,7 +828,8 @@ void raw_miopen_convolution_forward_out_32bit(
     int64_t groups,
     bool benchmark,
     bool deterministic,
-    bool depthwise=false) {
+    bool depthwise = false,
+    bool allow_tf32 = true) {
   auto dataType = getMiopenDataType(input);
   miopenConvolutionMode_t c_mode = depthwise ? miopenDepthwise : miopenConvolution;
 
@@ -838,7 +846,8 @@ void raw_miopen_convolution_forward_out_32bit(
       dilation,
       groups,
       deterministic,
-      memory_format);
+      memory_format,
+      allow_tf32);
   args.idesc.set(input, memory_format);
   args.wdesc.set(weight, memory_format, 0);
   args.odesc.set(output, memory_format);
@@ -851,7 +860,8 @@ void raw_miopen_convolution_forward_out_32bit(
       args.params.dilation,
       args.params.groups,
       benchmark,
-      deterministic);
+      deterministic,
+      allow_tf32);
 
   if (at::globalContext().immediateMiopen()) {
       uint64_t solution_id;
@@ -904,7 +914,8 @@ void raw_miopen_convolution_forward_out(
     int64_t groups,
     bool benchmark,
     bool deterministic,
-    bool depthwise=false) {
+    bool depthwise = false,
+    bool allow_tf32 = true) {
   split_batch_dim_to_32bit_out(
       output,
       input,
@@ -916,6 +927,7 @@ void raw_miopen_convolution_forward_out(
       benchmark,
       deterministic,
       depthwise,
+      allow_tf32,
       1024 * 1024 * 256,
       raw_miopen_convolution_forward_out_32bit);
 }
@@ -931,7 +943,8 @@ void miopen_convolution_forward_out(
     int64_t groups,
     bool benchmark,
     bool deterministic,
-    bool depthwise=false) {
+    bool depthwise = false,
+    bool allow_tf32 = true) {
   checkAllSameType(c, {input, weight});
   checkAllSameGPU(c, {input, weight});
 
@@ -952,7 +965,8 @@ void miopen_convolution_forward_out(
       groups,
       benchmark,
       deterministic,
-      depthwise);
+      depthwise,
+      allow_tf32);
 }
 
 Tensor miopen_convolution(
@@ -964,7 +978,8 @@ Tensor miopen_convolution(
     IntArrayRef dilation,
     int64_t groups,
     bool benchmark,
-    bool deterministic) {
+    bool deterministic,
+    bool allow_tf32) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> bias_t_maybe_owned = at::borrow_from_optional_tensor(bias_t_opt);
   const Tensor& bias_t = *bias_t_maybe_owned;
@@ -991,7 +1006,9 @@ Tensor miopen_convolution(
       dilation,
       groups,
       benchmark,
-      deterministic);
+      deterministic,
+      false,
+      allow_tf32);
   if (bias->defined()) {
     miopen_convolution_add_bias_(c, output, bias);
   }
@@ -1109,7 +1126,8 @@ void raw_miopen_convolution_backward_input_out_32bit(
     int64_t groups,
     bool benchmark,
     bool deterministic,
-    bool depthwise=false) {
+    bool depthwise = false,
+    bool allow_tf32 = true) {
   auto dataType = getMiopenDataType(grad_output);
   miopenConvolutionMode_t c_mode = depthwise ? miopenDepthwise : miopenConvolution;
 
@@ -1127,7 +1145,8 @@ void raw_miopen_convolution_backward_input_out_32bit(
       dilation,
       groups,
       deterministic,
-      memory_format);
+      memory_format,
+      allow_tf32);
   args.idesc.set(grad_input, memory_format);
   args.wdesc.set(weight, memory_format, 0);
   args.odesc.set(grad_output, memory_format);
@@ -1140,7 +1159,8 @@ void raw_miopen_convolution_backward_input_out_32bit(
       args.params.dilation,
       args.params.groups,
       benchmark,
-      deterministic);
+      deterministic,
+      allow_tf32);
 
   if (at::globalContext().immediateMiopen()) {
       uint64_t solution_id;
@@ -1187,7 +1207,8 @@ void raw_miopen_convolution_backward_input_out(
     int64_t groups,
     bool benchmark,
     bool deterministic,
-    bool depthwise=false) {
+    bool depthwise = false,
+    bool allow_tf32 = true) {
   split_batch_dim_to_32bit_out(
       grad_input,
       grad_output,
@@ -1199,6 +1220,7 @@ void raw_miopen_convolution_backward_input_out(
       benchmark,
       deterministic,
       depthwise,
+      allow_tf32,
       1024 * 1024 * 128,
       raw_miopen_convolution_backward_input_out_32bit);
 }
@@ -1283,7 +1305,8 @@ void raw_miopen_convolution_backward_weight_out_32bit(
     int64_t groups,
     bool benchmark,
     bool deterministic,
-    bool depthwise=false) {
+    bool depthwise = false,
+    bool allow_tf32 = true) {
   auto dataType = getMiopenDataType(input);
   miopenConvolutionMode_t c_mode = depthwise ? miopenDepthwise : miopenConvolution;
 
@@ -1301,7 +1324,8 @@ void raw_miopen_convolution_backward_weight_out_32bit(
       dilation,
       groups,
       deterministic,
-      memory_format);
+      memory_format,
+      allow_tf32);
   args.idesc.set(input, memory_format);
   args.wdesc.set(grad_weight, memory_format, 0);
   args.odesc.set(grad_output, memory_format);
@@ -1314,7 +1338,8 @@ void raw_miopen_convolution_backward_weight_out_32bit(
       args.params.dilation,
       args.params.groups,
       benchmark,
-      deterministic);
+      deterministic,
+      allow_tf32);
 
   if (at::globalContext().immediateMiopen()) {
       uint64_t solution_id;
@@ -1361,7 +1386,8 @@ void raw_miopen_convolution_backward_weight_out(
     int64_t groups,
     bool benchmark,
     bool deterministic,
-    bool depthwise=false) {
+    bool depthwise = false,
+    bool allow_tf32 = true) {
   constexpr int64_t int_max = std::numeric_limits<int>::max();
   const int64_t ni = input.numel();
   const int64_t no = grad_output.numel();
@@ -1378,7 +1404,8 @@ void raw_miopen_convolution_backward_weight_out(
         groups,
         benchmark,
         deterministic,
-        depthwise);
+        depthwise,
+        allow_tf32);
     return;
   }
   // else, if C * D1 * D2 * ... <= int_max, then we just need to split across
@@ -1415,7 +1442,8 @@ void raw_miopen_convolution_backward_weight_out(
           groups,
           benchmark,
           deterministic,
-          depthwise);
+          depthwise,
+          allow_tf32);
       grad_weight_accumulator.add_(grad_weight_);
     }
     grad_weight.copy_(grad_weight_accumulator);

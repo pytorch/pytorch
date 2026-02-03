@@ -1563,7 +1563,7 @@ at::Tensor _convolution(
       check_input_same_type_as_parameters(input, weight, bias);
       output = at::miopen_convolution(
           input.contiguous(backend_memory_format), weight, bias, params.padding, params.stride,
-          params.dilation, params.groups, params.benchmark, params.deterministic);
+          params.dilation, params.groups, params.benchmark, params.deterministic, params.allow_tf32);
       break;
     case ConvBackend::MiopenDepthwise:
       output = at::miopen_depthwise_convolution(
