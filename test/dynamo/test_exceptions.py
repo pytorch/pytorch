@@ -1008,6 +1008,41 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertIn("in g", str(ctx.exception))
         self.assertIn('raise Exception("Invalid")', str(ctx.exception))
 
+    def test_user_exception_with_untraceable_fstring(self):
+        # When an exception message contains untraceable operations (like repr
+        # on complex types), dynamo should surface the user's original exception
+        # as an ObservedException instead of a tracing error about repr.
+        from torch.utils._pytree import tree_map_with_path
+
+        def check_tensor(path, x):
+            if not isinstance(x, torch.Tensor):
+                raise ValueError(f"Expected Tensor at {path=}")
+            return x * 2
+
+        def fn(tree):
+            return tree_map_with_path(check_tensor, tree)
+
+        tree = {"a": torch.randn(10), "b": 5}  # b is not a tensor
+
+        # Eager mode raises ValueError
+        with self.assertRaises(ValueError) as eager_ctx:
+            fn(tree)
+        self.assertIn("Expected Tensor at path=", str(eager_ctx.exception))
+
+        # Compiled mode should raise Unsupported with "Observed exception"
+        # (not "Failed to trace builtin operator repr")
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaises(Unsupported) as compiled_ctx:
+            compiled_fn(tree)
+
+        # The exception should be an observed exception with the user's message
+        exc_str = str(compiled_ctx.exception)
+        self.assertIn("Observed exception", exc_str)
+        self.assertIn("Expected Tensor at path=", exc_str)
+        self.assertIn("MappingKey", exc_str)
+        # Should NOT be a tracing error about repr
+        self.assertNotIn("Failed to trace builtin operator", exc_str)
+
 
 instantiate_parametrized_tests(ExceptionTests)
 

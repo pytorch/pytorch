@@ -1306,6 +1306,130 @@ class InstructionTranslatorBase(
         if self.is_trace_source_log_enabled:
             trace_source_log.debug("%s", LazyString(self.get_log_starts_line_log_str))
 
+    def _try_raise_user_exception_from_stack(self) -> None:
+        """Try to reconstruct and raise the user exception as an ObservedException.
+
+        When tracing fails during exception construction, this method attempts to
+        evaluate the exception using the actual Python values and raise it as an
+        ObservedException. This ensures that user exceptions are surfaced instead
+        of tracing errors, and that dynamo's exception handling can process them.
+        """
+        # Try to get the exception by evaluating the source line directly
+        # with the real local variables
+        if self.lineno is None:
+            return
+
+        def get_real_value(var: VariableTracker) -> Any:
+            """Try to get the real Python value from a VariableTracker."""
+            # Special handling for FrozenDataClassVariable - need to reconstruct
+            # from fields since value object has uninitialized slots
+            if type(var).__name__ == "FrozenDataClassVariable":
+                fields = getattr(var, "fields", None)
+                value_type = getattr(var, "value_type", None)
+                if fields and value_type:
+                    # Reconstruct the dataclass from fields
+                    kwargs = {}
+                    for name, field_var in fields.items():
+                        kwargs[name] = get_real_value(field_var)
+                    try:
+                        return value_type(**kwargs)
+                    except Exception:
+                        pass  # Fall through to other methods
+
+            # For UserDefinedObjectVariable and similar, get the stored value first
+            # Wrap in try-except because some VariableTrackers raise on .value access
+            try:
+                if hasattr(var, "value"):
+                    val = var.value
+                    if val is not None:
+                        return val
+            except (NotImplementedError, AttributeError):
+                pass
+            # For TupleVariable/ListVariable, recursively get real values
+            # Check this before is_python_constant() to avoid triggering errors
+            items = getattr(var, "items", None)
+            if items is not None:
+                result_items = []
+                for item in items:
+                    result_items.append(get_real_value(item))
+                if hasattr(var, "python_type"):
+                    return var.python_type()(result_items)
+                return tuple(result_items)
+            # Try to get as constant
+            try:
+                if var.is_python_constant():
+                    return var.as_python_constant()
+            except NotImplementedError:
+                pass
+            # Can't get real value
+            raise ValueError(f"Cannot get real value for {type(var).__name__}")
+
+        try:
+            # Get the source line that's raising the exception
+            line = linecache.getline(self.f_code.co_filename, self.lineno).strip()
+            if not line or not line.startswith("raise "):
+                return
+
+            # Build a namespace with real values from symbolic_locals and f_locals
+            namespace: dict[str, Any] = {}
+            namespace.update(self.f_globals)
+            namespace.update(self.f_builtins)
+
+            # Get real values from symbolic locals where possible
+            for name, var in self.symbolic_locals.items():
+                try:
+                    namespace[name] = get_real_value(var)
+                except (ValueError, NotImplementedError):
+                    if name in self.f_locals:
+                        namespace[name] = self.f_locals[name]
+
+            # Try to evaluate the exception (not execute the raise)
+            # Extract the exception expression from "raise ExceptionType(...)"
+            exc_expr = line[6:].strip()  # Remove "raise " prefix
+            if not exc_expr:
+                return
+
+            # Evaluate the exception expression to get the exception instance
+            user_exc = eval(
+                compile(exc_expr, self.f_code.co_filename, "eval"), namespace
+            )  # noqa: PGH001
+
+            if not isinstance(user_exc, Exception):
+                # Only handle Exception subclasses, not BaseException
+                # (like KeyboardInterrupt, SystemExit)
+                return
+
+            # Create an ExceptionVariable with the evaluated exception message
+            exc_type: type[Exception] = type(user_exc)
+            exc_args = tuple(
+                variables.ConstantVariable.create(arg) for arg in user_exc.args
+            )
+            exception_vt = ExceptionVariable(exc_type, exc_args)
+
+            # Attach traceback and set as current exception
+            self._attach_traceback_to_exception(exception_vt)
+            self.exn_vt_stack.set_current_exception(exception_vt)
+
+            # Raise the appropriate ObservedException
+            observed_exc_type = exc.get_dynamo_observed_exception(exc_type)
+            raise observed_exc_type(*user_exc.args)
+
+        except SyntaxError:
+            # The line might not be a complete statement
+            return
+        except NameError:
+            # Missing variable in namespace - our reconstruction failed
+            return
+        except Unsupported:
+            # Don't catch our own exceptions
+            raise
+        except exc.ObservedException:
+            # Successfully raised an observed exception - propagate it
+            raise
+        except Exception:
+            # Failed to evaluate the exception - don't interfere
+            return
+
     def step(self) -> bool:
         """Process exactly one instruction, return False we should exit"""
         self.error_on_graph_break = _get_error_on_graph_break()
@@ -1359,6 +1483,23 @@ class InstructionTranslatorBase(
         except (ReturnValueOp, YieldValueOp):
             return False
         except (Unsupported, StepUnsupported) as e:
+            # If we're in exception construction context, try to evaluate the
+            # exception in eager mode and raise it instead of the tracing error.
+            # This ensures user exceptions are surfaced instead of dynamo tracing
+            # errors. The method checks if the source line is a raise statement.
+            # However, don't do this if the error is about the exception constructor
+            # itself being unsupported (e.g., keyword args in exception constructor).
+            if (
+                isinstance(e, Unsupported)
+                and "exception constructor" not in str(e).lower()
+            ):
+                try:
+                    self._try_raise_user_exception_from_stack()
+                except exc.ObservedException as observed_e:
+                    # Successfully converted to an observed exception - handle it
+                    self.exception_handler(observed_e)
+                    return True
+
             # More restrictive condition than should_compile_partial_graph:
             # if this condition is true, then we SHOULD NOT attempt to find
             # a previous checkpoint to resume from and try to resume - we should
