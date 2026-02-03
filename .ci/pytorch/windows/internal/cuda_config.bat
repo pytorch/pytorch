@@ -17,7 +17,7 @@ if "%CUDA_VER%"=="126" (
 ) else if "%CUDA_VER%"=="129" (
     set "CUDA_DOTTED_VERSION=12.9"
     set "CUDA_ARCH_LIST=7.5;8.0;8.6;9.0;10.0;12.0"
-    set "VISION_GENCODE=-gencode=arch=compute_70,code=sm_70 -gencode=arch=compute_75,code=sm_75 -gencode=arch=compute_80,code=compute_80 -gencode=arch=compute_86,code=compute_86 -gencode=arch=compute_90,code=compute_90 -gencode=arch=compute_100,code=compute_100 -gencode=arch=compute_120,code=compute_120"
+    set "VISION_GENCODE=-gencode=arch=compute_75,code=sm_75 -gencode=arch=compute_80,code=compute_80 -gencode=arch=compute_86,code=compute_86 -gencode=arch=compute_90,code=compute_90 -gencode=arch=compute_100,code=compute_100 -gencode=arch=compute_120,code=compute_120"
 ) else if "%CUDA_VER%"=="130" (
     set "CUDA_DOTTED_VERSION=13.0"
     set "CUDA_ARCH_LIST=7.5;8.0;8.6;9.0;10.0;12.0"
