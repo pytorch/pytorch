@@ -133,7 +133,8 @@ def temporarily_restore_interpreter_stack(
 
 class VmapInterpreter(FuncTorchInterpreter):
     def __init__(self, cdata: CInterpreter) -> None:
-        assert cdata.key() == TransformType.Vmap
+        if cdata.key() != TransformType.Vmap:
+            raise AssertionError(f"expected TransformType.Vmap, got {cdata.key()}")
         # NOTE: [Interpreter cdata vs cptr]
         # cdata is a generic CInterpreter. We wrap it in a CVmapInterpreterPtr
         # so that we can access methods specific to the vmap interpreter
@@ -177,7 +178,8 @@ def nested(
 
 class GradInterpreter(FuncTorchInterpreter):
     def __init__(self, cdata: CInterpreter) -> None:
-        assert cdata.key() == TransformType.Grad
+        if cdata.key() != TransformType.Grad:
+            raise AssertionError(f"expected TransformType.Grad, got {cdata.key()}")
         # See NOTE: [Interpreter cdata vs cptr]
         self._cdata = cdata
 
@@ -217,7 +219,8 @@ class GradInterpreter(FuncTorchInterpreter):
 
 class JvpInterpreter(FuncTorchInterpreter):
     def __init__(self, cdata: CInterpreter) -> None:
-        assert cdata.key() == TransformType.Jvp
+        if cdata.key() != TransformType.Jvp:
+            raise AssertionError(f"expected TransformType.Jvp, got {cdata.key()}")
         # See NOTE: [Interpreter cdata vs cptr]
         self._cdata = cdata
 
@@ -257,7 +260,10 @@ class JvpInterpreter(FuncTorchInterpreter):
 
 class FunctionalizeInterpreter(FuncTorchInterpreter):
     def __init__(self, cdata: CInterpreter) -> None:
-        assert cdata.key() == TransformType.Functionalize
+        if cdata.key() != TransformType.Functionalize:
+            raise AssertionError(
+                f"expected TransformType.Functionalize, got {cdata.key()}"
+            )
         self._cdata = cdata
 
     @cached_property
@@ -291,7 +297,8 @@ def coerce_cinterpreter(cinterpreter: CInterpreter) -> FuncTorchInterpreter:
 
 def retrieve_current_functorch_interpreter() -> FuncTorchInterpreter:
     interpreter = torch._C._functorch.peek_interpreter_stack()
-    assert interpreter is not None
+    if interpreter is None:
+        raise AssertionError("interpreter must not be None")
     return coerce_cinterpreter(interpreter)
 
 

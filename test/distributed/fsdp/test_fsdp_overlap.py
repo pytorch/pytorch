@@ -12,7 +12,7 @@ from torch import distributed as dist, Event
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTest
+from torch.testing._internal.common_fsdp import FSDPTestContinuous
 from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
     run_tests,
@@ -96,7 +96,7 @@ class Min10:
         return mean(self.data)
 
 
-class TestForwardOverlapWorldSizeOne(FSDPTest):
+class TestForwardOverlapWorldSizeOne(FSDPTestContinuous):
     @property
     def world_size(self):
         return 1
