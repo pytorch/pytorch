@@ -761,16 +761,43 @@ class GraphModuleSerializer(metaclass=Final):
                 raise AssertionError(f"expected tuple or list, got {type(node_args)}")
             self.graph_state.outputs = [self.serialize_input(arg) for arg in node_args]
 
-    def serialize_operator(self, target) -> str:
-        if isinstance(target, str):
+    def _serialize_value(self, target):
+        if target is None:
+            return None
+        if isinstance(target, (str, int, float, bool)):
             return target
-        elif target.__module__.startswith("torch._ops"):
-            # TODO(zhxchen17) Maybe provide a function name helper in FX.
-            # From torch.fx.node._get_qualified_name
+        elif isinstance(target, dict):
+            return {k: self._serialize_value(v) for k, v in target.items()}
+        elif isinstance(target, (list, tuple)):
+            return [self._serialize_value(item) for item in target]
+        elif hasattr(target, '__module__') and target.__module__.startswith("torch._ops"):
             module = target.__module__.replace("torch._ops", "torch.ops")
             return f"{module}.{target.__name__}"
-        else:  # TODO(zhxchen17) Don't catch all here.
+        elif hasattr(target, '__module__') and hasattr(target, '__name__'):
             return f"{target.__module__}.{target.__name__}"
+        else:
+            raise AssertionError(
+                f"cannot serialize target of type {type(target).__name__}"
+            )
+
+    def serialize_operator(self, target):
+        if target is None:
+            return None
+        if isinstance(target, str):
+            return target
+        elif isinstance(target, (int, float, bool)):
+            return target
+        elif isinstance(target, (dict, list, tuple)):
+            return json.dumps(self._serialize_value(target))
+        elif hasattr(target, '__module__') and target.__module__.startswith("torch._ops"):
+            module = target.__module__.replace("torch._ops", "torch.ops")
+            return f"{module}.{target.__name__}"
+        elif hasattr(target, '__module__') and hasattr(target, '__name__'):
+            return f"{target.__module__}.{target.__name__}"
+        else:
+            raise AssertionError(
+                f"cannot serialize target of type {type(target).__name__}"
+            )
 
     def handle_call_function(self, node: torch.fx.Node):
         if node.op != "call_function":
@@ -1097,7 +1124,8 @@ class GraphModuleSerializer(metaclass=Final):
             return frames
 
         if stack_trace := node.meta.get("stack_trace"):
-            ret["stack_trace"] = parse_stack_trace(stack_trace)
+            stack_trace_list = parse_stack_trace(stack_trace)
+            ret["stack_trace"] = self.serialize_operator(stack_trace_list)
 
         if nn_module_stack := node.meta.get("nn_module_stack"):
             nn_module_list = [
@@ -1108,22 +1136,24 @@ class GraphModuleSerializer(metaclass=Final):
                 }
                 for k, v in nn_module_stack.items()
             ]
-            ret["nn_module_stack"] = nn_module_list
+            test = self.serialize_operator(nn_module_list)
+            ret["nn_module_stack"] = self.serialize_operator(nn_module_list)
 
         if source_fn_st := node.meta.get("source_fn_stack"):
-            source_fn_list = {
+            source_fn_dict = {
                 "key": source_fn[0],
                 "orig_path": self.serialize_operator(source_fn[1]),
                 "type_str": ""
             }
-            ret["source_fn_stack"] = source_fn_list
+            ret["source_fn_stack"] = self.serialize_operator(source_fn_dict)
 
         if torch_fn := node.meta.get("torch_fn"):
             torch_fn_list = list(torch_fn)
-            ret["torch_fn"] = {
+            torch_fn_dict = {
                 "name": torch_fn_list[0] if len(torch_fn_list) > 0 else "",
                 "overload": torch_fn_list[1] if len(torch_fn_list) > 1 else ""
             }
+            ret["torch_fn"] = self.serialize_operator(torch_fn_dict)
 
         if custom := node.meta.get("custom"):
             # Pass dict directly instead of JSON string
@@ -3327,42 +3357,61 @@ class GraphModuleDeserializer(metaclass=Final):
 
     def deserialize_metadata(self, metadata: dict[str, str]) -> dict[str, Any]:
         ret: dict[str, Any] = {}
-        if stack_trace := metadata.get("stack_trace"):
-            ret["stack_trace"] = stack_trace
 
-        def deserialize_meta_func(serialized_target: str):
-            module = None
-            if serialized_target.startswith("torch.nn"):
-                module = torch.nn
-                serialized_target_names = serialized_target.split(".")[2:]
-            elif serialized_target.startswith("torch"):
-                module = torch
-                serialized_target_names = serialized_target.split(".")[1:]
-            else:
-                return self.deserialize_operator(serialized_target)
-
-            target = module
-            for name in serialized_target_names:
-                if not hasattr(target, name):
-                    return serialized_target
+        def deserialize_meta_func(serialized_target):
+            if serialized_target is None:
+                return None
+            if isinstance(serialized_target, (int, float, bool)):
+                return serialized_target
+            elif isinstance(serialized_target, dict):
+                return {k: deserialize_meta_func(v) for k, v in serialized_target.items()}
+            elif isinstance(serialized_target, list):
+                return [deserialize_meta_func(item) for item in serialized_target]
+            elif isinstance(serialized_target, str):
+                if serialized_target.startswith("[") or serialized_target.startswith("{"):
+                    parsed = json.loads(serialized_target)
+                    return deserialize_meta_func(parsed)
+                module = None
+                if serialized_target.startswith("torch.nn"):
+                    module = torch.nn
+                    serialized_target_names = serialized_target.split(".")[2:]
+                elif serialized_target.startswith("torch"):
+                    module = torch
+                    serialized_target_names = serialized_target.split(".")[1:]
                 else:
-                    target = getattr(target, name)
-            return target
+                    return self.deserialize_operator(serialized_target)
+
+                target = module
+                for name in serialized_target_names:
+                    if not hasattr(target, name):
+                        return serialized_target
+                    else:
+                        target = getattr(target, name)
+                return target
+            else:
+                raise AssertionError(
+                    f"cannot deserialize target of type {type(serialized_target).__name__}"
+                )
+
+        if stack_trace := metadata.get("stack_trace"):
+            ret["stack_trace"] = deserialize_meta_func(stack_trace)
 
         if nn_module_stack := metadata.get("nn_module_stack"):
-            ret["nn_module_stack"] = nn_module_stack
+            test = deserialize_meta_func(nn_module_stack)
+            ret["nn_module_stack"] = deserialize_meta_func(nn_module_stack)
 
         if source_fn_st_data := metadata.get("source_fn_stack"):
-            if isinstance(source_fn_st_data, dict):
+            source_fn_st_dict = deserialize_meta_func(source_fn_st_data)
+            if isinstance(source_fn_st_dict, dict):
                 name = source_fn_st_data.get("key", "")
                 target_str = source_fn_st_data.get("orig_path", "")
-                ret["source_fn_stack"] = [(name, deserialize_meta_func(target_str))]
+                ret["source_fn_stack"] = [(name, target_str)]
             elif isinstance(source_fn_st_data, list):
                 source_fn_st = []
                 for item in source_fn_st_data:
                     name = item.get("key", "")
                     target_str = item.get("orig_path", "")
-                    source_fn_st.append((name, deserialize_meta_func(target_str)))
+                    source_fn_st.append((name, target_str))
                 ret["source_fn_stack"] = source_fn_st
 
         if torch_fn_data := metadata.get("torch_fn"):
