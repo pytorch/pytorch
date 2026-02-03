@@ -2154,6 +2154,22 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
             if disallow_stores:
                 assert not sb, "unexpected store inside swap_buffers"
 
+    def emit_kernel_override(
+        self,
+        wrapper,
+        src_code: str,
+        kernel_name: str,
+        node_schedule,
+        kernel_path: str,
+        get_kernel_metadata,
+    ) -> bool:
+        """Override kernel emission. Return True if overridden, False to use default.
+
+        External template handlers (e.g. Helion) can override this method
+        to implement custom kernel emission to the wrapper.
+        """
+        return False
+
     def load(self, name: str, index: sympy.Expr) -> CSEVariable:
         raise NotImplementedError
 
