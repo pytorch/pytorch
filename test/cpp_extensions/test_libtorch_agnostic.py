@@ -265,9 +265,11 @@ class TestLibtorchAgnostic(TestCase):
                 _make_cuda_tensors(init_mem)
                 curr_mem = torch.cuda.memory_allocated(device)
                 self.assertEqual(curr_mem, init_mem)
-    
+
     @xfailIfTorchDynamo
-    @skipIfTorchVersionLessThan(2, 11)  # Can only run with 2.11 because of float8_e8m0fnu
+    @skipIfTorchVersionLessThan(
+        2, 11
+    )  # Can only run with 2.11 because of float8_e8m0fnu
     def test_my_ones_like_float8_e8m0fnu(self, device):
         import libtorch_agn_2_9 as libtorch_agnostic
 

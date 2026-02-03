@@ -628,8 +628,8 @@ torch_set_requires_grad(AtenTensorHandle tensor, bool requires_grad) {
 }
 
 // Most other dtypes defined in torch/csrc/inductor/aoti_torch/shim_common.cpp
-#define TORCH_DTYPE_IMPL(dtype, stype) \
-  int32_t torch_dtype_##dtype() {      \
+#define TORCH_DTYPE_IMPL(dtype, stype)                    \
+  int32_t torch_dtype_##dtype() {                         \
     return (int32_t)torch::headeronly::ScalarType::stype; \
   }
 
