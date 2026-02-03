@@ -44,6 +44,7 @@ from .flex_flash_attention import (
     create_flex_flash_attention_backward_kernel,
     create_flex_flash_attention_kernel,
     is_trivial_mask_graph,
+    is_trivial_score_graph,
 )
 
 
@@ -399,7 +400,9 @@ def flex_attention(
                 "num_buffers_warp_spec", num_buffers_warp_spec
             )
 
-        cur_kernel_options.setdefault("USE_TMA", False)
+        # Intel GPU enables TMA by default
+        cur_kernel_options.setdefault("USE_TMA", bool(torch.xpu.is_available()))
+
         if cur_kernel_options["USE_TMA"] and not can_use_tma(query, key, value):
             cur_kernel_options["USE_TMA"] = False
 
@@ -759,6 +762,16 @@ def flex_attention_backward(*args, **kwargs):
         score_mod_other_buffers=score_mod_other_buffers,
     ):
         needs_block_mask = not is_trivial_mask_graph(mask_graph.graph_module)
+        if (
+            torch.are_deterministic_algorithms_enabled()
+            and not torch.is_deterministic_algorithms_warn_only_enabled()
+            and needs_block_mask
+        ):
+            raise NotImplementedError(
+                "Deterministic backward for flex_attention with block_mask using the FLASH backend "
+                "is not yet implemented. The TRITON backend supports deterministic backward."
+            )
+        score_is_trivial = is_trivial_score_graph(fw_graph.graph_module)
         return create_flex_flash_attention_backward_kernel(
             query,
             key,
@@ -768,8 +781,10 @@ def flex_attention_backward(*args, **kwargs):
             grad_out,
             scale,
             kernel_options,
-            fw_subgraph_buffer=fw_subgraph_buffer,
-            joint_subgraph_buffer=joint_outputs.grad_input,
+            fw_subgraph_buffer=None if score_is_trivial else fw_subgraph_buffer,
+            joint_subgraph_buffer=None
+            if score_is_trivial
+            else joint_outputs.grad_input,
             score_mod_other_buffers=list(score_mod_other_buffers),
             mask_graph_buffer=mask_graph_buffer if needs_block_mask else None,
             q_num_blocks=q_num_blocks if needs_block_mask else None,
@@ -930,7 +945,6 @@ def flex_attention_backward(*args, **kwargs):
             **cur_kernel_options,
         )
     inputs_for_autotuning = (
-        # pyrefly: ignore [unsupported-operation]
         [
             query,
             key,
@@ -1001,11 +1015,9 @@ def get_bwd_subgraph_outputs(
     joint_outputs: JointOutputResult,
 ) -> list[Optional[Union[ComputedBuffer, TensorBox]]]:
     subgraph_buffer = (
-        # pyrefly: ignore [bad-assignment]
         subgraph_buffer if isinstance(subgraph_buffer, Sequence) else [subgraph_buffer]
     )
     mask_graph_buffer = (
-        # pyrefly: ignore [bad-assignment]
         mask_graph_buffer
         if isinstance(mask_graph_buffer, Sequence)
         else [mask_graph_buffer]
@@ -1017,5 +1029,4 @@ def get_bwd_subgraph_outputs(
         *joint_outputs.mutated_grads,
     ]
 
-    # pyrefly: ignore [not-iterable]
     return [*subgraph_buffer, *mask_graph_buffer, *joint_output_buffers]

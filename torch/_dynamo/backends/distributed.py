@@ -489,7 +489,7 @@ class DDPOptimizer:
         """
         Implements graph splitting, first determining a set of of buckets by counting
         parameter sizes in reverse graph order, then invoking the user/backend compiler
-        to compile each subgraph. Finally, stiches compiled graphs into one graphmodule
+        to compile each subgraph. Finally, stitches compiled graphs into one graphmodule
         and returns its callable.
         """
         # 1: compute the partition map according to DDP bucket logic

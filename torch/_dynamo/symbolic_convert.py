@@ -40,6 +40,7 @@ import operator
 import re
 import sys
 import threading
+import time
 import traceback
 import types
 import weakref
@@ -49,8 +50,9 @@ from typing_extensions import TypeIs
 
 import torch
 import torch._logging
+from torch._dynamo.dynamo_profiler import DynamoProfilerState, FunctionTraceTiming
 from torch._dynamo.exc import ObservedException, TensorifyScalarRestartAnalysis
-from torch._guards import tracing, TracingContext
+from torch._guards import InlinedCodeCache, tracing, TracingContext
 from torch._logging.structured import dump_file
 from torch.fx.experimental.symbolic_shapes import guard_bool
 from torch.utils._functools import cache_method
@@ -102,7 +104,13 @@ from .exc import (
 from .funcname_cache import get_funcname
 from .guards import GuardBuilder, install_guard
 from .output_graph import GraphCompileReason, OutputGraph, StackLocalsMetadata
-from .polyfills import impl_CONTAINS_OP_fallback
+from .polyfills import (
+    impl_CONTAINS_OP_fallback,
+    impl_IS_MAPPING,
+    impl_MATCH_CLASS,
+    impl_MATCH_KEYS,
+    impl_MATCH_SEQUENCE,
+)
 from .replay_record import DummyModule, ExecutionRecorder
 from .resume_execution import (
     ContinueExecutionCache,
@@ -235,6 +243,7 @@ class SpeculationEntry:
     instruction_pointer: int
     inst: Instruction  # for debugging only
     _failed: bool = False
+    # TX error_on_graph_break setting at the time of failure
     error_on_graph_break: Optional[bool] = None
     reason: Optional[GraphCompileReason] = None
 
@@ -270,6 +279,9 @@ class SpeculationLog:
 
     entries: list[SpeculationEntry] = dataclasses.field(default_factory=list)
     index: int = 0
+    # If True, graph break at autograd.grad instead of tracing it.
+    # Set when we detect that autograd.grad consumed grad_fns that are returned.
+    graph_break_on_autograd_grad: bool = False
 
     def restart(self) -> None:
         self.index = 0
@@ -410,7 +422,7 @@ def temporarely_allow_writes_to_output_graph(
 class BlockStackEntry:
     # Current instruction that pushes something to block_stack
     inst: Instruction
-    target: Instruction
+    target: Instruction | None
     stack_index: int
     with_context: Optional[
         Union[ContextWrappingVariable, GenericContextWrappingVariable]
@@ -830,6 +842,34 @@ def generic_jump(
     return inner
 
 
+def _reconstruct_block_stack(
+    tx: InstructionTranslatorBase, cg: PyCodegen, cleanup: list[Instruction]
+) -> None:
+    """Generates bytecode to restore the block stack for running the unsupported instruction
+    in the compiled bytecode."""
+    # Reconstruct the context variable CLASS in the block stack
+    all_txes: list[InstructionTranslatorBase] = []
+    cur_tx: Optional[InstructionTranslatorBase] = tx
+    while cur_tx is not None:
+        all_txes.append(cur_tx)
+        cur_tx = cur_tx.parent
+    for tx in reversed(all_txes):
+        for b in tx.block_stack:
+            # Don't exit any modes we have entered,
+            # output bytecode will mutate the tf mode stack accordingly
+            if isinstance(b.with_context, TorchFunctionModeVariable):
+                cg.extend_output(
+                    b.resume_fn().try_except_torch_function_mode(
+                        cg.code_options, cleanup
+                    )
+                )
+                continue
+            assert b.with_context is not None
+            assert isinstance(b.with_context, (ContextWrappingVariable))
+            b.with_context.reconstruct_type(cg)
+            cg.extend_output(b.resume_fn().try_finally(cg.code_options, cleanup))
+
+
 # NOTE: for the purposes of nested graph breaks, break_graph_if_unsupported only works on instructions
 # with 0 or 1 outputs. If you wish to support bytecodes with 2+ outputs, either rewrite the instruction
 # into a sequence of simpler instructions, or file an issue for consultation.
@@ -919,21 +959,7 @@ def break_graph_if_unsupported(
             )
             cg = PyCodegen(self.output.root_tx)
             cleanup: list[Instruction] = []
-            # Reconstruct the context variable CLASS in the block stack
-            for b in self.block_stack:
-                # Don't exit any modes we have entered,
-                # output bytecode will mutate the tf mode stack accordingly
-                if isinstance(b.with_context, TorchFunctionModeVariable):
-                    cg.extend_output(
-                        b.resume_fn().try_except_torch_function_mode(
-                            cg.code_options, cleanup
-                        )
-                    )
-                    continue
-                assert b.with_context is not None
-                assert isinstance(b.with_context, (ContextWrappingVariable))
-                b.with_context.reconstruct_type(cg)
-                cg.extend_output(b.resume_fn().try_finally(cg.code_options, cleanup))
+            _reconstruct_block_stack(self, cg, cleanup)
             self.output.add_output_instructions(cg.get_instructions())
             del cg
 
@@ -1128,8 +1154,12 @@ class InstructionTranslatorBase(
     exec_recorder: Optional[ExecutionRecorder]
     strict_checks_fn: Optional[Callable[[VariableTracker], bool]]
     start_point: Optional[int]
-    is_leaf_tracer: bool
+    # Does this function make no inlined function calls?
+    has_no_inlined_calls: bool
     parent: Optional[InstructionTranslatorBase]
+    # Does this tx currently have a child tx tracing?
+    # Used to correctly implement should_compile_partial_graph
+    is_child_tracer_active: bool
     debug_locals: list[tuple[VariableTracker, list[VariableTracker]]]
     package: Optional[CompilePackage]
     latest_bytecode_queue: deque[str]
@@ -1225,23 +1255,28 @@ class InstructionTranslatorBase(
         self.push(fn.call_function(self, args, kwargs))  # type: ignore[arg-type]
 
     def inline_generator_function(
-        self, fn: VariableTracker, args: Sequence[Any], kwargs: dict[str, Any]
-    ) -> Any:
+        self,
+        fn: BaseUserFunctionVariable,
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         """
         Redirect the call to the generator "call_function"
         """
         if not isinstance(fn, LocalGeneratorFunctionVariable):
-            fn = LocalGeneratorFunctionVariable(fn)  # type: ignore[arg-type]
+            fn = LocalGeneratorFunctionVariable(fn)
         return fn.call_function(self, args, kwargs)  # type: ignore[arg-type]
 
     def inline_user_function_return(
-        self, fn: VariableTracker, args: Sequence[Any], kwargs: dict[str, Any]
+        self,
+        fn: BaseUserFunctionVariable,
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
     ) -> Any:
         """
         A call to some user defined function by inlining it.
         """
-        self.is_leaf_tracer = False
-        if config.enable_faithful_generator_behavior and is_generator(fn.get_code()):  # type: ignore[attr-defined]
+        if config.enable_faithful_generator_behavior and is_generator(fn.get_code()):
             return self.inline_generator_function(fn, args, kwargs)
         else:
             return InliningInstructionTranslator.inline_call(self, fn, args, kwargs)
@@ -1456,7 +1491,6 @@ class InstructionTranslatorBase(
         log.debug("step triggered compile")
         all_stack_locals_metadata = self.output.compile_subgraph(
             self,
-            partial_convert=True,
             reason=GraphCompileReason("step_unsupported", [self.frame_summary()]),
         )
         # current frame state
@@ -1494,6 +1528,9 @@ class InstructionTranslatorBase(
             )
             skip_code(leaf_resume_code)
 
+            cleanup: list[Instruction] = []
+            _reconstruct_block_stack(self.parent, cg, cleanup)
+
             # current frame state
             # cells,
             # [
@@ -1503,6 +1540,8 @@ class InstructionTranslatorBase(
             #   frame 1 stack + locals,
             # ], [frame N cells], [frame N locals],
             self.codegen_call_resume([leaf_resume_code], [leaf_resume_name], cg)
+
+            cg.extend_output(cleanup)
 
             # current frame state
             # cells,
@@ -1525,48 +1564,48 @@ class InstructionTranslatorBase(
                 ]
             )
 
-            # add the leaf_resume result to frame N-1 stack
+            # current frame state
+            # cells, frame_values, leaf_resume result
+            # extract frame N-1 stack
             num_stack = all_stack_locals_metadata[1].num_stack
             cg.extend_output(
                 [
-                    create_instruction("BUILD_LIST", arg=1),
                     *create_copy(2),
                     cg.create_load_const(0),
                     cg.create_binary_subscr(),
-                    *create_binary_slice(num_stack, num_stack, True),
+                    *create_binary_slice(0, num_stack),
+                ]
+            )
+
+            # current frame state
+            # cells, frame_values, leaf_resume result, frame N-1 stack
+            # add the leaf_resume result to frame N-1 stack
+            cg.extend_output(
+                [
+                    *create_swap(2),
+                    create_instruction("LIST_APPEND", arg=1),
                 ]
             )
             self.parent.push(UnknownVariable())
             all_stack_locals_metadata[1].num_stack += 1
 
             # current frame state
-            # cells, frame_values
-            # extract frame N-1 stack to stack
-            cg.extend_output(
-                [
-                    create_dup_top(),
-                    cg.create_load_const(0),
-                    cg.create_binary_subscr(),
-                    *create_binary_slice(0, num_stack + 1),
-                ]
-            )
-
-            # current frame state
             # cells, frame_values, frame N-1 stack + leaf_resume result
             # remove frame N-1 stack from frame_values
-            cg.extend_output(
-                # frame_values[0] = frame_values[0][num_stack + 1:]
-                [
-                    *create_copy(2),
-                    cg.create_load_const(0),
-                    cg.create_binary_subscr(),
-                    create_dup_top(),
-                    *create_binary_slice(num_stack + 1, None),
-                    *create_swap(2),
-                    cg.create_load_const(0),
-                    create_instruction("STORE_SUBSCR"),
-                ]
-            )
+            if num_stack > 0:
+                cg.extend_output(
+                    # frame_values[0] = frame_values[0][num_stack:]
+                    [
+                        *create_copy(2),
+                        cg.create_load_const(0),
+                        cg.create_binary_subscr(),
+                        create_dup_top(),
+                        *create_binary_slice(num_stack, None),
+                        *create_swap(2),
+                        cg.create_load_const(0),
+                        create_instruction("STORE_SUBSCR"),
+                    ]
+                )
 
             # current frame state
             # cells, frame_values, frame N-1 stack + leaf_resume result
@@ -1595,6 +1634,13 @@ class InstructionTranslatorBase(
                 )
             )
         else:
+            # NOTE: if WithExitFunctionVariable is reconstructed here, then the generated bytecode will be wrong.
+            # However, we don't expect this to happen since WithExitFunctionVariable can only be present on the stack,
+            # which must be empty in step graph breaks.
+            # If we do decide to support step graph breaks with WithExitFunctionVariable in the future, we should
+            # either call a skipped resume function as in the nested step graph break case, or reconstruct the
+            # proper context manager object from the class (like what we used to do historically in variables/ctx_manager.py).
+
             # pop cells
             self.output.add_output_instructions(
                 [
@@ -2022,7 +2068,7 @@ class InstructionTranslatorBase(
     def load_builtin(self, inst: Instruction) -> None:
         self.push(self.load_builtin_from_argval(inst.argval))
 
-    def jump(self, inst: Instruction) -> None:
+    def jump(self, inst: Instruction | BlockStackEntry) -> None:
         assert self.instruction_pointer is not None
         assert self.start_point is not None
         assert inst.target is not None
@@ -2277,6 +2323,7 @@ class InstructionTranslatorBase(
             val = self.stack[-2]
             assert self._isinstance_exception(val)
             typ = BuiltinVariable(val.exc_type)  # type: ignore[attr-defined]
+
             tb = val.var_getattr(self, "__traceback__")
 
         args += [typ, val, tb]
@@ -2375,7 +2422,7 @@ class InstructionTranslatorBase(
 
                 # Push a dummy block stack entry of EXCEPT_HANDLER
                 # https://github.com/python/cpython/blob/3.10/Python/ceval.c#L1456
-                except_handler_inst = Instruction(1e6, "EXCEPT_HANDLER", None, 0)
+                except_handler_inst = Instruction(int(1e6), "EXCEPT_HANDLER", None, 0)
                 self.block_stack.append(
                     BlockStackEntry(except_handler_inst, None, len(self.stack))
                 )
@@ -2388,6 +2435,7 @@ class InstructionTranslatorBase(
                     # Traceback is currently mapped to UnknownVariable
                     self.push(variables.UnknownVariable())
                     self.push(old_exception)
+
                     self.push(variables.BuiltinVariable(old_exception.exc_type))
                 else:
                     # Push empty exception tb, value, type
@@ -2399,6 +2447,7 @@ class InstructionTranslatorBase(
                 # Traceback is currently mapped to UnknownVariable
                 self.push(variables.UnknownVariable())
                 self.push(exception_var)
+
                 self.push(variables.BuiltinVariable(exception_var.exc_type))
 
                 # Jump to target
@@ -2904,12 +2953,12 @@ class InstructionTranslatorBase(
         stack_len = len(self.stack) - len(meta.stack_null_idxes)
 
         assert self.current_instruction.offset is not None
-
         new_code: types.CodeType = ContinueExecutionCache.lookup(
             self.f_code,
             self.lineno,
             self.current_instruction.offset,
             resume_inst.offset,
+            # pyre: ignore[missing-attribute]
             tuple(b.target.offset for b in self.block_stack),
             stack_len,
             argnames,
@@ -3251,7 +3300,8 @@ class InstructionTranslatorBase(
         return (
             all(b.can_restore() for b in self.block_stack)
             and not self.one_graph
-            and not self.error_on_graph_break
+            # Only the leaf tracer's error_on_graph_break should be used
+            and (self.is_child_tracer_active or not self.error_on_graph_break)
             and not self.is_tracing_resume_prologue
             and not self.active_generic_context_managers
             # Do not allow nested graph breaks in HOPs
@@ -3488,11 +3538,12 @@ class InstructionTranslatorBase(
         push=False, msg_prefix="Encountered intentional debugging graph break"
     )
     def graph_break_on_leaf_function(self, inst: Instruction) -> None:
-        if self.is_leaf_tracer:
+        if self.has_no_inlined_calls:
             unimplemented(
                 gb_type="Forced graph break on leaf function",
                 context="",
-                explanation="Forced graph break for nested graph break testing purposes",
+                explanation="Forced graph break on non-inlining function for "
+                "nested graph break testing purposes",
                 hints=[
                     "Set torch._dynamo.config.debug_force_graph_break_on_leaf_return = False",
                 ],
@@ -3705,39 +3756,61 @@ class InstructionTranslatorBase(
             self.push(tos.call_method(self, "__len__", [], {}))
 
     def MATCH_MAPPING(self, inst: Instruction) -> None:
+        """
+        If STACK[-1] is an instance of collections.abc.Mapping, push True.
+        Otherwise, push False
+        """
         tos = self.stack[-1]
-        assert isinstance(tos, ConstDictVariable)
-        if isinstance(tos.items, collections.abc.Mapping):
-            self.push(ConstantVariable.create(True))
-        else:
-            self.push(ConstantVariable.create(False))
+        self.push(
+            self.inline_user_function_return(
+                VariableTracker.build(self, impl_IS_MAPPING),
+                [tos],
+                {},
+            )
+        )
 
     def MATCH_SEQUENCE(self, inst: Instruction) -> None:
         tos = self.stack[-1]
-        assert tos.is_python_constant()
-        tos_value = tos.as_python_constant()
-        if isinstance(tos_value, collections.abc.Sequence) and not isinstance(
-            tos_value, (str, bytes, bytearray)
-        ):
-            self.push(ConstantVariable.create(True))
-        else:
-            self.push(ConstantVariable.create(False))
+        self.push(
+            self.inline_user_function_return(
+                VariableTracker.build(self, impl_MATCH_SEQUENCE),
+                [tos],
+                {},
+            )
+        )
+
+    def MATCH_CLASS(self, inst: Instruction) -> None:
+        subject, cls, names = self.popn(3)
+        arg = ConstantVariable.create(inst.arg)
+        self.push(
+            self.inline_user_function_return(
+                VariableTracker.build(self, impl_MATCH_CLASS),
+                [subject, cls, arg, names],
+                {},
+            )
+        )
+
+        if sys.version_info < (3, 11):
+            # for versions < 3.11, also push the boolean result
+            tos = self.stack[-1]
+            self.push(ConstantVariable.create(not istype(tos, ConstantVariable)))
 
     def MATCH_KEYS(self, inst: Instruction) -> None:
-        tos = self.stack[-1]
-        assert isinstance(tos, TupleVariable)
-        keys = tos.unpack_var_sequence(self)  # type: ignore[arg-type]
-        tos1 = self.stack[-2]
-        assert isinstance(tos1, ConstDictVariable)
+        keys = self.stack[-1]
+        obj = self.stack[-2]
 
-        if all(k in tos1 for k in keys):  # type: ignore[attr-defined]
-            self.push(TupleVariable([tos1.getitem_const(self, k) for k in keys]))  # type: ignore[attr-defined,arg-type]
-            if sys.version_info < (3, 11):
-                self.push(ConstantVariable.create(True))
-        else:
-            self.push(ConstantVariable.create(None))
-            if sys.version_info < (3, 11):
-                self.push(ConstantVariable.create(False))
+        assert isinstance(keys, TupleVariable)
+
+        self.push(
+            self.inline_user_function_return(
+                VariableTracker.build(self, impl_MATCH_KEYS), [obj, keys], {}
+            )
+        )
+
+        if sys.version_info < (3, 11):
+            # for versions < 3.11, also push the boolean result
+            tos = self.stack[-1]
+            self.push(ConstantVariable.create(not istype(tos, ConstantVariable)))
 
     def LOAD_ASSERTION_ERROR(self, inst: Instruction) -> None:
         self.push(self.load_builtin_from_argval("AssertionError"))
@@ -4288,7 +4361,6 @@ class InstructionTranslatorBase(
             )
         else:
             user_stack = get_stack_above_dynamo() + user_stack  # type: ignore[assignment]
-            # pyrefly: ignore [bad-argument-type]
             user_stack = collapse_resume_frames(user_stack)
         user_stack_formatted = "".join(traceback.format_list(user_stack))
 
@@ -4390,6 +4462,8 @@ class InstructionTranslatorBase(
         # This determines whether to use the execution recorder.
         closure: Optional[tuple[types.CellType]] = None,
         package: Optional[CompilePackage] = None,
+        # Pre-computed indexof for cache reuse
+        indexof: Optional[dict[Instruction, int]] = None,
     ) -> None:
         super().__init__()
         self.speculation_log = speculation_log
@@ -4421,7 +4495,9 @@ class InstructionTranslatorBase(
 
         # Properties of the input/output code
         self.instructions: list[Instruction] = instructions
-        self.indexof: dict[Instruction, int] = get_indexof(self.instructions)
+        self.indexof: dict[Instruction, int] = (
+            indexof if indexof is not None else get_indexof(self.instructions)
+        )
         self.f_locals: dict[str, Any] = (
             f_locals  # needed for recording accessed locals for replay
         )
@@ -4460,8 +4536,9 @@ class InstructionTranslatorBase(
 
         self.strict_checks_fn = None
 
-        self.is_leaf_tracer = True
+        self.has_no_inlined_calls = True
         self.parent = None
+        self.is_child_tracer_active = False
         self.debug_locals = []
 
         self.package = package
@@ -4626,7 +4703,9 @@ class InstructionTranslator(InstructionTranslatorBase):
                     # 2. This conveniently allows codegen to prune away
                     # mutations to these cells, unless they escape the frame.
                     contents_source = LocalSource(
-                        name, is_input=True, is_derefed_cell_contents=True
+                        name,
+                        is_input=True,
+                        is_derefed_cell_contents=True,
                     )
                     contents_var: VariableTracker = LazyVariableTracker.create(
                         value, contents_source
@@ -4799,12 +4878,76 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     parent: InstructionTranslatorBase
 
     @classmethod
-    def inline_call(cls, parent: Any, func: Any, args: Any, kwargs: Any) -> Any:
-        tracer = cls.build_inline_tracer(parent, func, args, kwargs)
-        return tracer.inline_call_()
+    def inline_call(
+        cls,
+        parent: Any,
+        func: BaseUserFunctionVariable,
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # Fast path: skip all timing overhead if profiler is disabled
+        if not config.dynamo_profiler:
+            tracer = cls.build_inline_tracer(parent, func, args, kwargs)
+            return tracer.inline_call_()
+
+        # Profiler enabled: collect timing data
+        # Ensure profiler state is initialized
+        output = parent.output
+        if output.profiler_state is None:
+            output.profiler_state = DynamoProfilerState()
+
+        code = func.get_code()
+
+        # Get caller info and full call stack before we push ourselves
+        caller_info = output.profiler_state.get_current_caller()
+        call_stack = output.profiler_state.get_call_stack()
+
+        # Push ourselves onto the timing stack BEFORE building the tracer
+        # so that build_inline_tracer overhead is included in this function's time
+        output.profiler_state.push(
+            code.co_name, code.co_filename, code.co_firstlineno, time.time_ns()
+        )
+
+        tracer = None
+        trace_success = False
+        try:
+            tracer = cls.build_inline_tracer(parent, func, args, kwargs)
+            result = tracer.inline_call_()
+            trace_success = True
+            return result
+        finally:
+            # Pop ourselves from the timing stack
+            stack_entry = output.profiler_state.pop()
+            trace_end_ns = time.time_ns()
+
+            # Record timing for successful traces
+            if trace_success and stack_entry is not None and tracer is not None:
+                cumtime_ns = trace_end_ns - stack_entry.start_time_ns
+                tottime_ns = cumtime_ns - stack_entry.child_time_ns
+
+                timing = FunctionTraceTiming(
+                    func_name=stack_entry.func_name,
+                    filename=stack_entry.filename,
+                    firstlineno=stack_entry.firstlineno,
+                    cumtime_ns=cumtime_ns,
+                    tottime_ns=tottime_ns,
+                    bytecode_count=len(code.co_code),
+                    inline_depth=tracer.inline_depth,
+                    caller_func_name=caller_info[0] if caller_info else None,
+                    caller_filename=caller_info[1] if caller_info else None,
+                    caller_firstlineno=caller_info[2] if caller_info else None,
+                    is_primitive_call=stack_entry.is_primitive_call,
+                    call_stack=call_stack,
+                )
+                output.profiler_state.record_timing(timing)
+
+                # Add our cumtime to the parent's child_time accumulator
+                output.profiler_state.add_child_time(cumtime_ns)
 
     @staticmethod
-    def check_inlineable(func: Any) -> trace_rules.SkipResult:
+    def check_inlineable(
+        func: BaseUserFunctionVariable,
+    ) -> trace_rules.SkipResult:
         if func.has_self():
             unimplemented(
                 gb_type="Inline attempt with __self__",
@@ -4837,7 +4980,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             # _origin marks this as coming from an internal dynamo known function that is safe to
             # trace through.
             if (
-                hasattr(getattr(func, "fn", None), "_origin")
+                hasattr(func, "fn")
+                and hasattr(func.fn, "_origin")
                 and func.fn._origin is produce_trampoline_autograd_apply
             ):
                 # Known sound
@@ -4869,9 +5013,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     @staticmethod
     def build_inline_tracer(
         parent: Any,
-        func: VariableTracker,
-        args: list[VariableTracker],
-        kwargs: Any,
+        func: BaseUserFunctionVariable,
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
     ) -> InliningInstructionTranslator:
         assert isinstance(
             func,
@@ -4879,7 +5023,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 UserFunctionVariable,
                 NestedUserFunctionVariable,
                 LocalGeneratorFunctionVariable,
-                LocalGeneratorObjectVariable,
             ),
         )
         code: types.CodeType = func.get_code()
@@ -4896,15 +5039,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 result = previous_result
 
         if result is None:
-            if isinstance(func, SkipFunctionVariable):
-                unimplemented(
-                    gb_type="Attempted to inline function marked as skipped (SkipFunctionVariable)",
-                    context=f"Attempted to inline a SkipFunctionVariable {func}",
-                    explanation=(
-                        "Attempted to inline a function that was previously determined to be marked as intentionally skipped."
-                    ),
-                    hints=[],
-                )
             result = InliningInstructionTranslator.check_inlineable(func)
             assert result.skipped is False
 
@@ -5012,11 +5146,14 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
     def inline_call_(self) -> VariableTracker:
         parent = self.parent
+        parent.has_no_inlined_calls = False
+        parent.is_child_tracer_active = True
         code = self.f_code
 
         strict_ctx: Any = contextlib.nullcontext()
         if parent.strict_checks_fn:
             strict_ctx = self.strict_translation_mode(parent.strict_checks_fn)
+
         try:
             with strict_ctx:
                 self.run()
@@ -5034,7 +5171,11 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             log.debug("FAILED INLINING %s", code)
             raise
         finally:
+            # Pass inlined tx's error_on_graph_break to parent.
+            # Deals with the case where the parent's error_on_graph_break is True
+            # while the inlined tx's error_on_graph_break was set to False.
             parent.error_on_graph_break = self.error_on_graph_break
+            parent.is_child_tracer_active = False
 
         if self.output.should_exit:
             # graph break
@@ -5094,23 +5235,26 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         if not isinstance(f_builtins, dict):
             f_builtins = f_builtins.__dict__
 
-        # Get the cached instructions. These instructions are safe to cache
-        # because we dont mutate them in transform_code_object (those
-        # instructions are for the top most Instruction translator).  Also, we
-        # have to be careful about not using _cached_cleaned_instructions here
-        # because that function is global, while we want the cache to be
-        # alive only during a compilation.
+        # Get the cached code data. This cache combines instructions, indexof, and
+        # code_options to avoid recomputing them for frequently-inlined functions.
         tracing_ctx = parent.output.tracing_context
-        instructions = None
-        if tracing_ctx:
-            if tracing_ctx.previously_cleaned_instructions.get(code):
-                instructions = tracing_ctx.previously_cleaned_instructions[code]
+        cached = tracing_ctx.inlined_code_cache.get(code) if tracing_ctx else None
 
-        if instructions is None:
+        if cached is not None:
+            instructions = cached.instructions
+            indexof = cached.indexof
+            code_options = cached.code_options
+        else:
             instructions = cleaned_instructions(code)
             propagate_line_nums(instructions)
+            indexof = get_indexof(instructions)
+            code_options = {k: getattr(code, k) for k in get_code_keys()}
             if tracing_ctx:
-                tracing_ctx.previously_cleaned_instructions[code] = instructions
+                tracing_ctx.inlined_code_cache[code] = InlinedCodeCache(
+                    instructions=instructions,
+                    indexof=indexof,
+                    code_options=code_options,
+                )
 
         super().__init__(
             output=parent.output,
@@ -5122,7 +5266,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             symbolic_torch_function_state=symbolic_torch_function_state,
             symbolic_stream_state=symbolic_stream_state,
             instructions=instructions,
-            code_options={k: getattr(code, k) for k in get_code_keys()},
+            code_options=code_options,
             f_code=code,
             export=parent.export,
             inline_depth=parent.inline_depth + 1,
@@ -5130,6 +5274,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             exn_vt_stack=parent.exn_vt_stack,
             distributed_state=parent.distributed_state,
             package=parent.package,
+            indexof=indexof,
         )
         self.funcvar = funcvar
         self.parent = parent
@@ -5169,7 +5314,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         )
 
     def RETURN_VALUE(self, inst: Instruction) -> None:
-        self.symbolic_result = self.pop()  # type: ignore[assignment]
+        self.symbolic_result = self.pop()
         self.instruction_pointer = None
         raise ReturnValueOp
 

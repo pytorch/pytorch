@@ -605,7 +605,7 @@ class GraphModule(torch.nn.Module):
 
         fwd_body_0 = self.fwd_body_0
         bwd_body_0 = self.bwd_body_0
-        autograd_function_apply = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_weird_b, l_weird_c, l_x_, l_z_, non_differentiable_idx = []);  fwd_body_0 = bwd_body_0 = l_weird_b = l_weird_c = l_x_ = l_z_ = None
+        autograd_function_apply = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_weird_b, l_weird_c, l_x_, l_z_, non_differentiable_idx = [], saved_for_backward_idx = [0, 1]);  fwd_body_0 = bwd_body_0 = l_weird_b = l_weird_c = l_x_ = l_z_ = None
         getitem: "f32[]" = autograd_function_apply[0];  autograd_function_apply = None
         return (getitem,)
 
@@ -1127,7 +1127,7 @@ class GraphModule(torch.nn.Module):
 
         fwd_body_0 = self.fwd_body_0
         bwd_body_0 = self.bwd_body_0
-        autograd_function_apply = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_weight_, l_x_, non_differentiable_idx = []);  fwd_body_0 = bwd_body_0 = l_weight_ = l_x_ = None
+        autograd_function_apply = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_weight_, l_x_, non_differentiable_idx = [], saved_for_backward_idx = [0, 1]);  fwd_body_0 = bwd_body_0 = l_weight_ = l_x_ = None
         getitem: "f32[5, 4]" = autograd_function_apply[0];  autograd_function_apply = None
         return (getitem,)
 
@@ -1342,7 +1342,7 @@ class GraphModule(torch.nn.Module):
 
         fwd_body_0 = self.fwd_body_0
         bwd_body_0 = self.bwd_body_0
-        autograd_function_apply = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_x_, l_y_, non_differentiable_idx = [1]);  fwd_body_0 = bwd_body_0 = l_x_ = l_y_ = None
+        autograd_function_apply = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_x_, l_y_, non_differentiable_idx = [1], saved_for_backward_idx = []);  fwd_body_0 = bwd_body_0 = l_x_ = l_y_ = None
         getitem: "f32[]" = autograd_function_apply[0]
         getitem_1: "f32[]" = autograd_function_apply[1];  autograd_function_apply = None
         return (getitem, getitem_1)
@@ -1664,7 +1664,7 @@ class GraphModule(torch.nn.Module):
         arg_1: "f32[s17, 8]" = torch.cos(l_y_);  l_y_ = None
         fwd_body_0 = self.fwd_body_0
         bwd_body_0 = self.bwd_body_0
-        autograd_function_apply = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, s77, arg, s17, arg_1, non_differentiable_idx = []);  fwd_body_0 = bwd_body_0 = s77 = arg = s17 = arg_1 = None
+        autograd_function_apply = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, s77, arg, s17, arg_1, non_differentiable_idx = [], saved_for_backward_idx = [1, 2, 3]);  fwd_body_0 = bwd_body_0 = s77 = arg = s17 = arg_1 = None
         getitem: "f32[s17, 8]" = autograd_function_apply[0]
         getitem_1: "f32[s17, 8]" = autograd_function_apply[1];  autograd_function_apply = None
 
@@ -1752,7 +1752,7 @@ class GraphModule(torch.nn.Module):
 
         fwd_body_0 = self.fwd_body_0
         bwd_body_0 = self.bwd_body_0
-        autograd_function_apply = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_x_, l_y_, non_differentiable_idx = []);  fwd_body_0 = bwd_body_0 = l_x_ = l_y_ = None
+        autograd_function_apply = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_x_, l_y_, non_differentiable_idx = [], saved_for_backward_idx = [0]);  fwd_body_0 = bwd_body_0 = l_x_ = l_y_ = None
         getitem: "f32[8, 8]" = autograd_function_apply[0]
         getitem_1: "f32[8, 8]" = autograd_function_apply[1]
         getitem_2: "f32[8, 8]" = autograd_function_apply[2];  autograd_function_apply = None
@@ -1826,7 +1826,7 @@ class GraphModule(torch.nn.Module):
 
         fwd_body_0 = self.fwd_body_0
         bwd_body_0 = self.bwd_body_0
-        autograd_function_apply = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_x_, non_differentiable_idx = []);  fwd_body_0 = bwd_body_0 = l_x_ = None
+        autograd_function_apply = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_x_, non_differentiable_idx = [], saved_for_backward_idx = []);  fwd_body_0 = bwd_body_0 = l_x_ = None
         y: "f32[8, 8]" = autograd_function_apply[0];  autograd_function_apply = None
 
         sin: "f32[8, 8]" = torch.sin(y);  y = None
@@ -1912,7 +1912,7 @@ class GraphModule(torch.nn.Module):
 
         fwd_body_0 = self.fwd_body_0
         bwd_body_0 = self.bwd_body_0
-        autograd_function_apply = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_module_b, l_input_data_values, l_x_, non_differentiable_idx = []);  fwd_body_0 = bwd_body_0 = l_module_b = l_input_data_values = None
+        autograd_function_apply = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_module_b, l_input_data_values, l_x_, non_differentiable_idx = [], saved_for_backward_idx = []);  fwd_body_0 = bwd_body_0 = l_module_b = l_input_data_values = None
         getitem: "f32[4, 4]" = autograd_function_apply[0]
         getitem_1: "f32[4, 4]" = autograd_function_apply[1];  autograd_function_apply = None
 
@@ -2007,6 +2007,123 @@ class GraphModule(torch.nn.Module):
         opt_fn = torch.compile(fn, fullgraph=True, backend=backend)
         res = opt_fn(input_data, x)
         self.assertEqual(ref, res)
+
+
+class AutogradFunctionFunctorchTests(torch._dynamo.test_case.TestCase):
+    """Tests for autograd.Function compatibility with torch.func transforms.
+
+    See https://github.com/pytorch/pytorch/issues/174067
+    """
+
+    def test_new_style_autograd_function_with_grad_no_compile(self):
+        """Baseline: new-style autograd.Function works with torch.func.grad."""
+
+        class NewStyleOp(torch.autograd.Function):
+            @staticmethod
+            def forward(x):
+                return x * 2
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                (x,) = inputs
+                ctx.save_for_backward(x)
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output * 2
+
+        def fn(x):
+            return NewStyleOp.apply(x).sum()
+
+        x = torch.tensor([1.0, 2.0], requires_grad=True)
+        result = torch.func.grad(fn)(x)
+        self.assertEqual(result, torch.tensor([2.0, 2.0]))
+
+    def test_old_style_autograd_function_with_grad_no_compile(self):
+        """Baseline: old-style autograd.Function fails with torch.func.grad."""
+
+        class OldStyleOp(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output * 2
+
+        def fn(x):
+            return OldStyleOp.apply(x).sum()
+
+        x = torch.tensor([1.0, 2.0], requires_grad=True)
+        with self.assertRaisesRegex(
+            RuntimeError, "must override the setup_context staticmethod"
+        ):
+            torch.func.grad(fn)(x)
+
+    def test_new_style_autograd_function_with_grad_compiled(self):
+        """New-style autograd.Function compiled should work with torch.func.grad.
+
+        This is the main bug from https://github.com/pytorch/pytorch/issues/174067.
+        torch.compile wraps autograd.Function in ApplyTemplate which lacks
+        setup_context, breaking torch.func compatibility.
+        """
+
+        class NewStyleOp(torch.autograd.Function):
+            @staticmethod
+            def forward(x):
+                return x * 2
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                (x,) = inputs
+                ctx.save_for_backward(x)
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output * 2
+
+        def fn(x):
+            return NewStyleOp.apply(x)
+
+        compiled_fn = torch.compile(fn, backend="eager")
+
+        def loss_fn(x):
+            return compiled_fn(x).sum()
+
+        x = torch.tensor([1.0, 2.0], requires_grad=True)
+        result = torch.func.grad(loss_fn)(x)
+        self.assertEqual(result, torch.tensor([2.0, 2.0]))
+
+    def test_old_style_autograd_function_with_grad_compiled(self):
+        """Old-style autograd.Function compiled should work with torch.func.grad.
+
+        Even though the original function is old-style, the compiled version
+        (ApplyTemplate) can support torch.func transforms because it uses
+        traced graphs.
+        """
+
+        class OldStyleOp(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output * 2
+
+        def fn(x):
+            return OldStyleOp.apply(x)
+
+        compiled_fn = torch.compile(fn, backend="eager")
+
+        def loss_fn(x):
+            return compiled_fn(x).sum()
+
+        x = torch.tensor([1.0, 2.0], requires_grad=True)
+        result = torch.func.grad(loss_fn)(x)
+        self.assertEqual(result, torch.tensor([2.0, 2.0]))
 
 
 if __name__ == "__main__":
