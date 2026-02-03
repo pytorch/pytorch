@@ -20,7 +20,6 @@
 
 PyObject* guard_error_hook = NULL;
 PyObject* guard_complete_hook = NULL;
-PyObject* bytecode_debugger_callback = NULL;
 
 // Singleton sentinel for NULL stack values
 static PyObject* null_stack_value_singleton = NULL;

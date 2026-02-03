@@ -319,3 +319,31 @@ py::list _get_frame_value_stack_at_depth(
   }
   return py::reinterpret_steal<py::list>(result);
 }
+
+// NullStackValue singleton
+NullStackValue& NullStackValue::get_singleton() {
+  static NullStackValue instance;
+  return instance;
+}
+
+py::object get_null_stack_value() {
+  return py::cast(
+      NullStackValue::get_singleton(), py::return_value_policy::reference);
+}
+
+// Bytecode debugger callback - stored as py::object for automatic refcounting
+namespace {
+py::object bytecode_debugger_callback_obj;
+} // namespace
+
+void set_bytecode_debugger_callback(py::object callback) {
+  if (callback.is_none()) {
+    bytecode_debugger_callback_obj = py::object();
+  } else {
+    bytecode_debugger_callback_obj = std::move(callback);
+  }
+}
+
+py::object get_bytecode_debugger_callback() {
+  return bytecode_debugger_callback_obj;
+}

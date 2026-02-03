@@ -5,6 +5,7 @@
 #include <torch/csrc/dynamo/debug_macros.h>
 #include <torch/csrc/dynamo/eval_frame.h>
 #include <torch/csrc/dynamo/eval_frame_cpp.h>
+#include <torch/csrc/dynamo/extra_state.h>
 #include <torch/csrc/dynamo/framelocals_mapping.h>
 #include <torch/csrc/utils/python_compat.h>
 
@@ -180,8 +181,8 @@ PyObject* dynamo__custom_eval_frame(
     DEBUG_NULL_CHECK(cached_code);
     // Call bytecode debugger callback if set, to allow instruction-level
     // debugging of the Dynamo-generated code
-    if (bytecode_debugger_callback != nullptr) {
-      py::handle debugger_cb(bytecode_debugger_callback);
+    py::object debugger_cb = get_bytecode_debugger_callback();
+    if (debugger_cb) {
       debugger_cb(py::handle((PyObject*)cached_code));
     }
     eval_result = dynamo_eval_custom_code(

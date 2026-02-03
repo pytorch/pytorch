@@ -211,4 +211,16 @@ py::list _get_frame_value_stack_at_depth(
     const py::handle& frame_obj,
     int depth);
 
+// NullStackValue - sentinel for NULL stack values
+struct NullStackValue {
+  static NullStackValue& get_singleton();
+};
+
+// Get the NULL_STACK_VALUE singleton as a py::object
+py::object get_null_stack_value();
+
+// Bytecode debugger callback management
+void set_bytecode_debugger_callback(py::object callback);
+py::object get_bytecode_debugger_callback();
+
 #endif
