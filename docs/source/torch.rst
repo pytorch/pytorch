@@ -320,9 +320,23 @@ Constants
 ~~~~~~~~~~~~~~~~~~~~~~
 
 ======================================= ===========================================
+``e``                                       The mathematical constant *e*, the base of natural logarithms. Alias for :attr:`math.e`.
 ``inf``                                     A floating-point positive infinity. Alias for :attr:`math.inf`.
 ``nan``                                     A floating-point "not a number" value. This value is not a legal number. Alias for :attr:`math.nan`.
+``pi``                                      The mathematical constant π (pi). Alias for :attr:`math.pi`.
 ======================================= ===========================================
+
+Example::
+
+    >>> import torch
+    >>> torch.e
+    2.718281828459045
+    >>> torch.pi
+    3.141592653589793
+    >>> torch.inf
+    inf
+    >>> torch.nan
+    nan
 
 Pointwise Ops
 ~~~~~~~~~~~~~~~~~~~~~~
