@@ -342,20 +342,15 @@ keep-runtime-typing = true
 "tools/linter/**" = [
     "LOG015" # please fix
 ]
-"benchmarks/**" = [
-    "S101"
-]
-"test/**" = [
-    "S101"
-]
+# Remaining files that still need S101 migration
+# Test files with S101 still need migration - doing incrementally
+"test/**" = ["S101"]
+# Exceptions - files already migrated:
+"test/ao/sparsity/test_sparsifier.py" = []
+"test/ao/sparsity/test_activation_sparsifier.py" = []
 "torch/_dynamo/**" = ["S101"]
 "torch/_inductor/**" = ["S101"]
 "torch/distributed/**" = ["S101"]
-"torch/_export/db/examples/dynamic_shape_assert.py" = ["S101"]
-"torch/_export/db/examples/list_contains.py" = ["S101"]
-"torch/_functorch/_activation_checkpointing/**" = ["S101"]
-"torch/_functorch/_aot_autograd/graph_compile.py" = ["S101"]
-"torch/_functorch/_aot_autograd/runtime_wrappers.py" = ["S101"]
 
 [tool.codespell]
 ignore-words = "tools/linter/dictionary.txt"
