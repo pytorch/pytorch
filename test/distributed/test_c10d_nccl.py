@@ -59,7 +59,6 @@ from torch.testing._internal.common_distributed import (
     requires_nccl_version,
     requires_world_size,
     skip_if_lt_x_gpu,
-    skip_if_rocm_multiprocess,
     sm_is_or_higher_than,
     TEST_SKIPS,
     with_dist_debug_levels,
@@ -3537,6 +3536,119 @@ class DistributedDataParallelTest(
 
         torch.cuda.synchronize(device=device_id)
 
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_bucket_cap_mb_list_initialization(self):
+        """Test that bucket_cap_mb_list is properly converted to bucket_bytes_cap_list"""
+        process_group = self._get_process_group()
+        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+
+        # Create a simple model for testing
+        model = nn.Sequential(
+            nn.Linear(10, 20),
+            nn.ReLU(),
+            nn.Linear(20, 10),
+        ).to(device_id)
+
+        bucket_cap_mb_list = [10, 25, 50]
+
+        ddp_model = DistributedDataParallel(
+            model,
+            device_ids=[device_id],
+            process_group=process_group,
+            bucket_cap_mb_list=bucket_cap_mb_list,
+        )
+
+        # Verify bucket_bytes_cap_list was set correctly
+        expected_bucket_bytes_cap_list = [
+            int(cap * 1024 * 1024) for cap in bucket_cap_mb_list
+        ]
+        self.assertEqual(
+            ddp_model.bucket_bytes_cap_list,
+            expected_bucket_bytes_cap_list,
+            f"bucket_bytes_cap_list should be {expected_bucket_bytes_cap_list}",
+        )
+
+        # Verify bucket_bytes_cap is set to max value
+        expected_bucket_bytes_cap = int(max(bucket_cap_mb_list) * 1024 * 1024)
+        self.assertEqual(
+            ddp_model.bucket_bytes_cap,
+            expected_bucket_bytes_cap,
+            f"bucket_bytes_cap should be {expected_bucket_bytes_cap}",
+        )
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_bucket_cap_mb_list_default_behavior(self):
+        """Test that default bucket_cap_mb is used when neither parameter is provided"""
+        process_group = self._get_process_group()
+        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+
+        model = nn.Sequential(
+            nn.Linear(10, 20),
+            nn.ReLU(),
+            nn.Linear(20, 10),
+        ).to(device_id)
+
+        # Neither bucket_cap_mb nor bucket_cap_mb_list provided
+        ddp_model = DistributedDataParallel(
+            model,
+            device_ids=[device_id],
+            process_group=process_group,
+        )
+
+        # Default should be 25 MB
+        expected_bucket_bytes_cap = int(25 * 1024 * 1024)
+        self.assertEqual(
+            ddp_model.bucket_bytes_cap,
+            expected_bucket_bytes_cap,
+            "Default bucket_bytes_cap should be 25 MB",
+        )
+
+        # bucket_bytes_cap_list should be empty
+        self.assertEqual(
+            ddp_model.bucket_bytes_cap_list,
+            [],
+            "bucket_bytes_cap_list should be empty when not provided",
+        )
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_bucket_cap_mb_alone(self):
+        """Test that bucket_cap_mb works correctly when provided alone"""
+        process_group = self._get_process_group()
+        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+
+        model = nn.Sequential(
+            nn.Linear(10, 20),
+            nn.ReLU(),
+            nn.Linear(20, 10),
+        ).to(device_id)
+
+        bucket_cap_mb = 100
+
+        ddp_model = DistributedDataParallel(
+            model,
+            device_ids=[device_id],
+            process_group=process_group,
+            bucket_cap_mb=bucket_cap_mb,
+        )
+
+        # Verify bucket_bytes_cap is set correctly
+        expected_bucket_bytes_cap = int(bucket_cap_mb * 1024 * 1024)
+        self.assertEqual(
+            ddp_model.bucket_bytes_cap,
+            expected_bucket_bytes_cap,
+            f"bucket_bytes_cap should be {expected_bucket_bytes_cap}",
+        )
+
+        # bucket_bytes_cap_list should be empty
+        self.assertEqual(
+            ddp_model.bucket_bytes_cap_list,
+            [],
+            "bucket_bytes_cap_list should be empty when bucket_cap_mb_list not provided",
+        )
+
 
 class WorkHookTest(MultiProcessTestCase):
     @property
@@ -3814,7 +3926,6 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
     @requires_nccl()
     @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
-    @skip_if_rocm_multiprocess
     @skip_but_pass_in_sandcastle("Test does not pass when run locally")
     def test_nccl_errors_nonblocking(self):
         self._reduce_timeout()
