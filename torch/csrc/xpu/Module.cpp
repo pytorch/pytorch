@@ -326,24 +326,24 @@ static void registerXpuDeviceProperties(PyObject* module) {
 #define THXP_FORALL_DEVICE_PROPERTIES(_)                         \
   py::class_<DeviceProp>(m, "_XpuDeviceProperties")              \
       ._(name)                                                   \
-      _(platform_name)                                           \
-      _(vendor)                                                  \
-      _(device_id)                                               \
-      _(driver_version)                                          \
-      _(version)                                                 \
-      _(max_compute_units)                                       \
-      _(gpu_eu_count)                                            \
-      _(max_work_group_size)                                     \
-      _(max_num_sub_groups)                                      \
-      _(sub_group_sizes)                                         \
-      _(local_mem_size)                                          \
-      _(has_fp16)                                                \
-      _(has_fp64)                                                \
-      _(has_atomic64)                                            \
-      _(has_bfloat16_conversions)                                \
-      _(has_subgroup_matrix_multiply_accumulate)                 \
-      _(has_subgroup_matrix_multiply_accumulate_tensor_float32)  \
-      _(has_subgroup_2d_block_io)
+      ._(platform_name)                                          \
+      ._(vendor)                                                 \
+      ._(device_id)                                              \
+      ._(driver_version)                                         \
+      ._(version)                                                \
+      ._(max_compute_units)                                      \
+      ._(gpu_eu_count)                                           \
+      ._(max_work_group_size)                                    \
+      ._(max_num_sub_groups)                                     \
+      ._(sub_group_sizes)                                        \
+      ._(local_mem_size)                                         \
+      ._(has_fp16)                                               \
+      ._(has_fp64)                                               \
+      ._(has_atomic64)                                           \
+      ._(has_bfloat16_conversions)                               \
+      ._(has_subgroup_matrix_multiply_accumulate)                \
+      ._(has_subgroup_matrix_multiply_accumulate_tensor_float32) \
+      ._(has_subgroup_2d_block_io)
 
   THXP_FORALL_DEVICE_PROPERTIES(DEFINE_READONLY_MEMBER)
       .def_readonly("total_memory", &DeviceProp::global_mem_size)
