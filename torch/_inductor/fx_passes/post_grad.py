@@ -136,6 +136,14 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     fake_tensor_updater = FakeTensorUpdater(gm.graph)
 
+    # Decompose functional custom ops to out variants for CUDAGraph compatibility
+    if config.decompose_functional_to_out:
+        from .decompose_functional_to_out import decompose_functional_to_out
+
+        GraphTransformObserver(gm, "decompose_functional_to_out").apply_graph_pass(
+            decompose_functional_to_out
+        )
+
     if post_grad_custom_pre_pass := config.post_grad_custom_pre_pass:
         GraphTransformObserver(gm, "post_grad_custom_pre_pass").apply_graph_pass(
             post_grad_custom_pre_pass
