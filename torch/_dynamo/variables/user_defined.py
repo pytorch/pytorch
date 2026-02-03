@@ -1086,6 +1086,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         cls_source: TypeSource | None = None,
         base_cls_vt: VariableTracker | None = None,
         init_args: Sequence[VariableTracker] | None = None,
+        constructed_with_eager_fallback_fn: VariableTracker | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -1103,6 +1104,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         #   obj = base_cls.__new__(user_cls, *args)
         self.base_cls_vt = base_cls_vt
         self.init_args = init_args
+        self.constructed_with_eager_fallback_fn = constructed_with_eager_fallback_fn
 
         # This records names of the attributes that were modified via instance
         # `__dict__` directly, rather than the normal setattr path.
@@ -1154,6 +1156,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return self.value
             # TODO else try reconstructing the object by, e.g., leveraging side
             # effects and `as_python_constant`.
+
+        # TODO - Check that its not mutated
+        if self.constructed_with_eager_fallback_fn:
+            return self.value
         return super().as_python_constant()
 
     def guard_as_python_constant(self) -> object:
