@@ -1796,8 +1796,8 @@ if(USE_ROCM)
     endif()
   endif()
   # Since PyTorch files contain HIP headers, this is also needed to capture the includes.
-  # ROCM_INCLUDE_DIRS is defined in LoadHIP.cmake
-  target_include_directories(torch_hip PRIVATE ${Caffe2_HIP_INCLUDE} ${ROCM_INCLUDE_DIRS})
+  # ROCM_INCLUDE_DIRS is defined in LoadHIP.cmake and added as SYSTEM includes in cmake/Dependencies.cmake
+  target_include_directories(torch_hip PRIVATE ${Caffe2_HIP_INCLUDE})
   target_include_directories(torch_hip INTERFACE $<INSTALL_INTERFACE:include>)
 endif()
 
