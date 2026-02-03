@@ -134,7 +134,10 @@ class TestMemoryPlanning(TestCase):
 
         # check allocation is done after the unbacked symint is computed
         FileCheck().check("auto u0 = u0_raw;").check(
-            "const int64_t int_array_2[] = {10L, 8L*u0, 32L};"
+            # Shows up as one of the following:
+            #   const int64_t int_array_2[] = {10L, 8L*u0, 32L};
+            #   const int64_t int_array_3[] = {10L, 8L*u0, 32L};
+            "[] = {10L, 8L*u0, 32L};"
         ).check("AtenTensorHandle pool0_handle;").check(
             "aoti_torch_empty_strided(3, int_array_2, int_array_3"
         ).run(code)
