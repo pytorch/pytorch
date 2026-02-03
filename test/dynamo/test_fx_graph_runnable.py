@@ -26,6 +26,26 @@ if has_triton():
         return lambda nargs: nargs[name].zero_()
 
     @triton.jit
+    def subtract_kernel_inner(
+        x_ptr, y_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr
+    ):
+        pid = tl.program_id(axis=0)
+        block_start = pid * BLOCK_SIZE
+        offsets = block_start + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+
+        x = tl.load(x_ptr + offsets, mask=mask)
+        y = tl.load(y_ptr + offsets, mask=mask)
+        output = x - y
+        tl.store(output_ptr + offsets, output, mask=mask)
+
+    @triton.jit
+    def nested_kernel_with_inner_call(
+        x_ptr, y_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr
+    ):
+        subtract_kernel_inner(x_ptr, y_ptr, output_ptr, n_elements, BLOCK_SIZE)
+
+    @triton.jit
     def add_kernel(x_ptr, y_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
         pid = tl.program_id(axis=0)
 
@@ -185,6 +205,23 @@ class FxGraphRunnableTest(TestCase):
         y = torch.ones((4096,), device=GPU_TYPE, dtype=torch.float16)
 
         torch.compile(add)(x, y)
+        self._exec_and_verify_payload()
+
+    @unittest.skipUnless(has_triton(), "Triton not available")
+    @requires_gpu
+    def test_user_defined_nested_triton_kernel(self):
+        def subtract_nested(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            output = torch.empty_like(x)
+            n_elements = x.numel()
+            nested_kernel_with_inner_call[(n_elements,)](
+                x, y, output, n_elements, BLOCK_SIZE=1024
+            )
+            return output
+
+        x = torch.ones((4096,), device=GPU_TYPE, dtype=torch.float16)
+        y = torch.ones((4096,), device=GPU_TYPE, dtype=torch.float16) * 0.5
+
+        torch.compile(subtract_nested)(x, y)
         self._exec_and_verify_payload()
 
     def test_two_inputs_matmul(self):

@@ -20,6 +20,7 @@ the Dynamo AOT compilation pipeline, particularly for the Inductor backend.
 from __future__ import annotations
 
 import argparse
+import ast
 import copy
 import functools
 import io
@@ -380,11 +381,62 @@ if "__compile_source__" in globals():
     kernel_side_table_prefix = (
         "torch._higher_order_ops.triton_kernel_wrap.kernel_side_table"
     )
+
+    def get_nested_jit_functions(
+        kernel: Any,
+    ) -> list[JITFunction]:
+        jit_fn = kernel if isinstance(kernel, JITFunction) else kernel.fn
+        if not getattr(jit_fn, "fn", None) or not getattr(jit_fn, "src", None):
+            return []
+
+        fn_globals = getattr(jit_fn.fn, "__globals__", {})
+        src = jit_fn.src  # pyrefly: ignore [missing-attribute]
+        full_src = src if src.strip().startswith("def ") else "def " + src
+
+        # Find all function names called in the source
+        called_names: set[str] = set()
+
+        for node in ast.walk(ast.parse(full_src)):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                called_names.add(node.func.id)
+
+        return [
+            val
+            for name in called_names
+            if (val := fn_globals.get(name))
+            and isinstance(val, JITFunction)
+            and val is not jit_fn
+        ]
+
+    def write_jit_function(
+        jit_fn: JITFunction,
+        written_fns: set[str],
+    ) -> str:
+        result = ""
+        fn_name = jit_fn._fn_name.split(".")[-1]  # pyrefly: ignore [missing-attribute]
+        if fn_name in written_fns:
+            return ""
+        # Write nested dependencies first (recursively)
+        for nested_fn in get_nested_jit_functions(jit_fn):
+            result += write_jit_function(nested_fn, written_fns)
+        # Now write this function
+        if fn_name not in written_fns:
+            result += "\n@triton.jit\n"
+            result += jit_fn.src  # pyrefly: ignore [missing-attribute]
+            result += "\n"
+            written_fns.add(fn_name)
+        return result
+
+    written_kernel_names: set[str] = set()
     # Track which grid entry corresponds to the best config
     for id in kernel_side_table.id_to_kernel:
         kernel = kernel_side_table.get_kernel(id)
 
         try:
+            # First, write out any nested kernel dependencies
+            for nested_fn in get_nested_jit_functions(kernel):
+                model_str += write_jit_function(nested_fn, written_kernel_names)
+
             if isinstance(kernel, Autotuner):
                 # pyrefly: ignore [missing-attribute]
                 if isinstance(kernel.fn, Heuristics):
@@ -412,7 +464,6 @@ if "__compile_source__" in globals():
                 )
                 """).strip()
 
-            model_str += "\n@triton.jit\n"
             # pyrefly: ignore [missing-attribute]
             src_code = kernel.src if isinstance(kernel, JITFunction) else kernel.fn.src
             fn_name = (
@@ -423,8 +474,12 @@ if "__compile_source__" in globals():
             )
             fn_name = fn_name.split(".")[-1]
 
-            model_str += src_code
-            model_str += "\n"
+            # Only write the kernel if not already written (could have been a nested dep)
+            if fn_name not in written_kernel_names:
+                model_str += "\n@triton.jit\n"
+                model_str += src_code
+                model_str += "\n"
+                written_kernel_names.add(fn_name)
             model_str += f"{kernel_side_table_prefix}.add_kernel({fn_name})\n"
         except AttributeError as e:
             model_str += "ERROR: Repro will not work as intended, "
