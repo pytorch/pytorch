@@ -16339,10 +16339,6 @@ op_db: list[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_rms_norm,
-           skips=(
-               # Exception: Failed to create function state object for: pow_scalar_dense_float2_float2_float
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.complex64,)),
-           ),
            error_inputs_func=error_inputs_rms_norm,),
     OpInfo('nn.functional.local_response_norm',
            dtypes=floating_types_and(torch.int64, torch.float16, torch.bfloat16),
@@ -19086,15 +19082,6 @@ op_db: list[OpInfo] = [
                    supports_fwgrad_bwgrad=True,
                    promotes_int_to_float=True,
                    skips=(
-                       # RuntimeError: Failed to create function state object for: pow_scalar_dense_float2_float2_float
-                       DecorateInfo(
-                           unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager',
-                           device_type='mps', dtypes=(torch.complex64,)
-                       ),
-                       DecorateInfo(
-                           unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
-                           device_type='mps', dtypes=(torch.complex64,)
-                       ),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                     dtypes=(torch.cfloat, torch.cdouble)),
                        # AssertionError: Tensor-likes are not close!
