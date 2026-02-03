@@ -68,7 +68,7 @@ def run(fn: Optional[Callable[_P, _R]] = None) -> Any:
     return RunOnlyContext()
 
 
-def disable(fn=None, recursive=True, *, reason=None, wrapping=True):  # type: ignore[no-untyped-def]
+def disable(fn=None, recursive=True, *, reason=None, wrapping=False):  # type: ignore[no-untyped-def]
     """
     Decorator to disable TorchDynamo
 
