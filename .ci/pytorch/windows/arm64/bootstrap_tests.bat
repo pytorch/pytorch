@@ -14,6 +14,13 @@ where python
 :: add APL to PATH for runtime dependencies
 if exist "%DEPENDENCIES_DIR%\armpl_24.10\bin" set PATH=%DEPENDENCIES_DIR%\armpl_24.10\bin;%PATH%
 
+:: Ensure MSVC ARM64 runtime DLLs are discoverable at runtime
+for /d %%D in (
+  "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Redist\MSVC\*\arm64\Microsoft.VC143.CRT"
+) do (
+  set PATH=%%D;%PATH%
+)
+
 :: install dependencies
 python -m pip install --upgrade pip
 pip install -r requirements.txt
