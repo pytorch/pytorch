@@ -352,7 +352,8 @@ def _check_custom_op_aliasing(
         if config.error_on_custom_op_aliasing:
             raise
         else:
-            warnings.warn(str(e), UserWarning, stacklevel=3)
+            msg = f"{e} This is deprecated and will become an error in PyTorch 2.12."
+            warnings.warn(msg, UserWarning, stacklevel=3)
 
 
 @functools.lru_cache(None)
