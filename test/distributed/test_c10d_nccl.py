@@ -1204,6 +1204,48 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @parametrize("split_share", [0, 1])
+    def test_comm_split_share(self, split_share: int):
+        # Test `ncclCommSplit` for smaller subgroups of the world when
+        # we've passed a specific device_id to init_process_group.
+        store = c10d.FileStore(self.file_name, self.world_size)
+        device = torch.device(f"cuda:{self.rank}")
+        pg_opts = c10d.ProcessGroupNCCL.Options()
+        pg_opts.config.split_share = split_share
+        # pg = self._create_process_group_nccl(store, pg_opts, device_id=device)
+        c10d.init_process_group(
+            "nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+            pg_options=pg_opts,
+            device_id=device,
+        )
+        pg = c10d.distributed_c10d._get_default_group()
+        tensor = torch.full((1,), self.rank).cuda(device)
+
+        free, total = torch.cuda.mem_get_info(device)
+        used_before_split = float(total - free)
+
+        # Create subgroup between ranks 0, 1
+        subg_ranks = [0, 1]
+        ng1 = c10d.split_group(pg, [subg_ranks], pg_options=pg_opts)
+
+        free, total = torch.cuda.mem_get_info(device)
+        used_after_split = float(total - free)
+
+        # is part of ng1; otherwise, -1
+        if dist.get_rank(ng1) >= 0:
+            dist.broadcast(tensor, dist.get_global_rank(ng1, 0), group=ng1)
+            self.assertEqual(tensor, torch.full((1,), 0))
+
+        print(
+            f"used_before_split: {used_before_split}, used_after_split: {used_after_split}"
+        )
+        dist.destroy_process_group()
+
+    @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_non_blocking_init(self):
         # Test creating a pg using nonblocking mode but not eagerly
         os.environ["TORCH_NCCL_USE_COMM_NONBLOCKING"] = "1"
