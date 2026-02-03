@@ -19,7 +19,7 @@ static std::mutex capture_id_to_graph_mutex;
 static ska::flat_hash_map<CaptureId_t, CUDAGraph*> capture_id_to_graph;
 
 // Get the CUDAGraph associated with a capture ID, if any.
-CUDAGraph* getGraphFromCaptureId(CaptureId_t capture_id) {
+CUDAGraph* get_graph_from_capture_id(CaptureId_t capture_id) {
   std::lock_guard<std::mutex> lock(capture_id_to_graph_mutex);
   auto it = capture_id_to_graph.find(capture_id);
   if (it != capture_id_to_graph.end()) {
