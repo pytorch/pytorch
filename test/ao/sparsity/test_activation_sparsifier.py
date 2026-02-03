@@ -116,7 +116,10 @@ class TestActivationSparsifier(TestCase):
                     raise AssertionError(
                         f"Expected key '{key}' in data_groups['{name}']"
                     )
-                assert value == data_groups[name][key]
+                if value != data_groups[name][key]:
+                    raise AssertionError(
+                        f"Expected data_groups['{name}']['{key}'] == {value}, got {data_groups[name][key]}"
+                    )
 
             # get_mask should raise error
             with self.assertRaises(ValueError):
@@ -147,10 +150,12 @@ class TestActivationSparsifier(TestCase):
         for i in range(1, len(data_list)):
             data_agg_actual = agg_fn(data_agg_actual, data_list[i])
 
-        assert "data" in activation_sparsifier.data_groups[layer_name]
-        assert torch.all(
+        if "data" not in activation_sparsifier.data_groups[layer_name]:
+            raise AssertionError(f"Expected 'data' key in data_groups['{layer_name}']")
+        if not torch.all(
             activation_sparsifier.data_groups[layer_name]["data"] == data_agg_actual
-        )
+        ):
+            raise AssertionError("Aggregated data does not match expected")
 
         return data_agg_actual
 
@@ -167,7 +172,8 @@ class TestActivationSparsifier(TestCase):
         """
         model = activation_sparsifier.model
         layer_name = module_to_fqn(model, model.conv1)
-        assert layer_name is not None
+        if layer_name is None:
+            raise AssertionError("Expected layer_name to be not None")
 
         reduce_fn = activation_sparsifier.data_groups[layer_name]["reduce_fn"]
 
@@ -178,10 +184,12 @@ class TestActivationSparsifier(TestCase):
 
         mask_model = activation_sparsifier.get_mask(layer_name)
 
-        assert torch.all(mask_model == mask_actual)
+        if not torch.all(mask_model == mask_actual):
+            raise AssertionError("Mask from sparsifier does not match computed mask")
 
         for config in activation_sparsifier.data_groups.values():
-            assert "data" not in config
+            if "data" in config:
+                raise AssertionError("Expected 'data' to be removed from config after step")
 
     def _check_squash_mask(self, activation_sparsifier, data):
         """Makes sure that squash_mask() works as usual. Specifically, checks
@@ -206,7 +214,8 @@ class TestActivationSparsifier(TestCase):
             def hook(module, input, output):
                 input_data = input[0]
                 if features is None:
-                    assert torch.all(mask * input_data == output)
+                    if not torch.all(mask * input_data == output):
+                        raise AssertionError("Output does not match mask * input")
                 else:
                     for feature_idx in range(len(features)):
                         feature = torch.Tensor(
@@ -219,9 +228,12 @@ class TestActivationSparsifier(TestCase):
                             output, feature_dim, feature
                         )
 
-                        assert torch.all(
+                        if not torch.all(
                             mask[feature_idx] * inp_data_feature == out_data_feature
-                        )
+                        ):
+                            raise AssertionError(
+                                f"Output for feature {feature_idx} does not match mask * input"
+                            )
 
             return hook
 
@@ -246,28 +258,41 @@ class TestActivationSparsifier(TestCase):
         # create an empty new sparsifier
         sparsifier2 = ActivationSparsifier(new_model)
 
-        assert sparsifier2.defaults != sparsifier1.defaults
-        assert len(sparsifier2.data_groups) != len(sparsifier1.data_groups)
+        if sparsifier2.defaults == sparsifier1.defaults:
+            raise AssertionError("Expected sparsifier defaults to be different before load")
+        if len(sparsifier2.data_groups) == len(sparsifier1.data_groups):
+            raise AssertionError("Expected data_groups lengths to be different before load")
 
         sparsifier2.load_state_dict(state_dict)
 
-        assert sparsifier2.defaults == sparsifier1.defaults
+        if sparsifier2.defaults != sparsifier1.defaults:
+            raise AssertionError("Expected sparsifier defaults to match after load")
 
         for name, state in sparsifier2.state.items():
-            assert name in sparsifier1.state
+            if name not in sparsifier1.state:
+                raise AssertionError(f"Expected '{name}' in sparsifier1.state")
             mask1 = sparsifier1.state[name]["mask"]
             mask2 = state["mask"]
 
             if mask1 is None:
-                assert mask2 is None
+                if mask2 is not None:
+                    raise AssertionError("Expected mask2 to be None when mask1 is None")
             else:
-                assert type(mask1) is type(mask2)
+                if type(mask1) is not type(mask2):
+                    raise AssertionError(
+                        f"Expected same mask types, got {type(mask1)} and {type(mask2)}"
+                    )
                 if isinstance(mask1, list):
-                    assert len(mask1) == len(mask2)
+                    if len(mask1) != len(mask2):
+                        raise AssertionError(
+                            f"Expected mask lengths to match, got {len(mask1)} and {len(mask2)}"
+                        )
                     for idx in range(len(mask1)):
-                        assert torch.all(mask1[idx] == mask2[idx])
+                        if not torch.all(mask1[idx] == mask2[idx]):
+                            raise AssertionError(f"Masks at index {idx} do not match")
                 else:
-                    assert torch.all(mask1 == mask2)
+                    if not torch.all(mask1 == mask2):
+                        raise AssertionError("Masks do not match")
 
         # make sure that the state dict is stored as torch sparse
         for state in state_dict["state"].values():
@@ -275,14 +300,17 @@ class TestActivationSparsifier(TestCase):
             if mask is not None:
                 if isinstance(mask, list):
                     for idx in range(len(mask)):
-                        assert mask[idx].is_sparse
+                        if not mask[idx].is_sparse:
+                            raise AssertionError(f"Expected mask[{idx}] to be sparse")
                 else:
-                    assert mask.is_sparse
+                    if not mask.is_sparse:
+                        raise AssertionError("Expected mask to be sparse")
 
         dg1, dg2 = sparsifier1.data_groups, sparsifier2.data_groups
 
         for layer_name, config in dg1.items():
-            assert layer_name in dg2
+            if layer_name not in dg2:
+                raise AssertionError(f"Expected '{layer_name}' in dg2")
 
             # exclude hook and layer
             config1 = {
@@ -296,7 +324,8 @@ class TestActivationSparsifier(TestCase):
                 if key not in ["hook", "layer"]
             }
 
-            assert config1 == config2
+            if config1 != config2:
+                raise AssertionError(f"Configs for '{layer_name}' do not match")
 
     @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     def test_activation_sparsifier(self):
