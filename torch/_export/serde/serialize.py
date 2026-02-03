@@ -1055,7 +1055,6 @@ class GraphModuleSerializer(metaclass=Final):
             
             for i in range(0, len(lines), 2):  # Each frame is 2 lines
                 if i + 1 < len(lines):
-                    # First line: File "path", line X, in function
                     match = re.match(r'File "([^"]+)", line (\d+), in (.+)', lines[i].strip())
                     if match:
                         frames.append({
