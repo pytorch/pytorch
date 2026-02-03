@@ -584,7 +584,10 @@ test_inductor_cpp_wrapper_shard() {
     -k 'take' \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
-
+  TRITON_AUTOTUNE_AT_COMPILE_TIME=0 python test/run_test.py \
+    --include inductor/test_torchinductor \
+    --shard "$1" "$NUM_TEST_SHARDS" \
+    --verbose
   if [[ "${BUILD_ENVIRONMENT}" == *xpu* ]]; then
     python test/run_test.py \
       --include inductor/test_mkldnn_pattern_matcher \

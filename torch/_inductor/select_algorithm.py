@@ -1532,6 +1532,9 @@ class TritonTemplateKernel(TritonKernel):
         call_args.extend(additional_call_args)
         arg_types.extend(additional_arg_types)
 
+        # Use FixedGrid which properly handles grid values passed as arguments
+        inductor_meta = FixedGrid.setup_grid_as_args() if additional_call_args else None
+
         if self.workspace_arg is not None:
             wrapper.generate_workspace_allocation(self.workspace_arg)
         wrapper.generate_kernel_call(
@@ -1539,6 +1542,7 @@ class TritonTemplateKernel(TritonKernel):
             call_args,
             arg_types=arg_types,
             triton_meta=self.triton_meta,
+            inductor_meta=inductor_meta,
             triton=True,
         )
         if self.workspace_arg is not None:
