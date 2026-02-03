@@ -1587,9 +1587,7 @@ class TensorVariable(VariableTracker):
         # custom grad_placements do not work with  as_python_constant,
         # to support them we need to handle UserDefinedObject
         def extract_python_value(vt: VariableTracker) -> Any:
-            if vt.is_python_constant():
-                return vt.as_python_constant()
-            elif isinstance(vt, variables.UserDefinedObjectVariable):
+            if isinstance(vt, variables.UserDefinedObjectVariable):
                 return vt.value
             else:
                 return vt.as_python_constant()
