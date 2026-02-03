@@ -465,6 +465,66 @@ class FxGraphRunnableTest(TestCase):
         self._exec_and_verify_payload()
 
 
+@unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
+class TestFxGraphRunnableMultiProcessGroup(TestCase):
+    @unittest.skipIf(
+        not torch.distributed.is_available(), "Torch distributed not available."
+    )
+    def test_multiple_process_groups(self):
+        import tempfile
+
+        from torch._dynamo.repro.after_aot import generate_standalone_repro
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=4, store=store)
+
+        try:
+            tp_pg = dist.new_group([0, 1])
+            dp_pg = dist.new_group([0, 2])
+
+            torch._C._distributed_c10d._register_process_group("tp", tp_pg)
+            torch._C._distributed_c10d._register_process_group("dp", dp_pg)
+
+            def f(x):
+                y = torch.ops._c10d_functional.all_gather_into_tensor(x, 2, "tp")
+                z = torch.ops._c10d_functional.wait_tensor(y)
+                w = torch.ops._c10d_functional.all_reduce(z, "sum", "dp")
+                v = torch.ops._c10d_functional.wait_tensor(w)
+                return (v * 2,)
+
+            args = [torch.randn(4, 4)]
+            gm = make_fx(f)(*args)
+            repro = generate_standalone_repro(gm, args)
+
+            self.assertIn("setup_fake_process_groups", repro)
+            self.assertIn("'tp'", repro)
+            self.assertIn("'dp'", repro)
+            self.assertIn("'size': 2", repro)
+
+            # Write to temp file and execute
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".py", delete=False
+            ) as tmp:
+                tmp.write(repro)
+                tmp.flush()
+                result = subprocess.run(
+                    [sys.executable, tmp.name],
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                )
+
+            self.assertEqual(
+                result.returncode,
+                0,
+                f"Generated repro failed to execute:\nSTDERR:\n{result.stderr}",
+            )
+
+        finally:
+            dist.destroy_process_group()
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
