@@ -8289,6 +8289,19 @@ for shape in [(1,), ()]:
         torch.autograd.backward(out5.sum(), inputs=[a5])
         self.assertEqual(needs_input_grad_values[-1], (True, False))
 
+        # Test 6: Reuse graph with retain_graph=True to show needs_input_grad
+        # can transition from (False, True) to (True, True) on the same graph.
+        # This validates that we overwrite needs_input_grad, not just downgrade.
+        a6 = torch.randn(2, 3, requires_grad=True)
+        b6 = torch.randn(3, 4, requires_grad=True)
+        out6 = MyMatmul.apply(a6, b6)
+        # First backward: only need grad for b
+        torch.autograd.backward(out6.sum(), inputs=[b6], retain_graph=True)
+        self.assertEqual(needs_input_grad_values[-1], (False, True))
+        # Second backward on same graph: need grad for both
+        torch.autograd.backward(out6.sum(), inputs=[a6, b6])
+        self.assertEqual(needs_input_grad_values[-1], (True, True))
+
     def test_autograd_node_isinstance(self):
         # Node is a "virtual" base class of codegen'd nodes. This means that
         # isinstance and issubclass are overridden, but mro is unchanged

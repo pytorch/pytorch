@@ -163,13 +163,12 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
   size_t edge_idx = 0;
   for (const auto i : c10::irange(num_inputs)) {
     if (is_variable_input[i]) {
-      bool should_compute = task_should_compute_output(edge_idx);
+      PyObject* new_value =
+          task_should_compute_output(edge_idx) ? Py_True : Py_False;
       PyObject* current = PyTuple_GET_ITEM(py_fn->needs_input_grad, i);
-      if (current == Py_True && !should_compute) {
-        Py_INCREF(Py_False);
-        Py_DECREF(current);
-        PyTuple_SET_ITEM(py_fn->needs_input_grad, i, Py_False);
-      }
+      Py_INCREF(new_value);
+      Py_DECREF(current);
+      PyTuple_SET_ITEM(py_fn->needs_input_grad, i, new_value);
       edge_idx++;
     }
   }
@@ -229,13 +228,12 @@ auto PyNode::apply_with_saved_impl(
   size_t edge_idx = 0;
   for (const auto i : c10::irange(num_inputs)) {
     if (is_variable_input[i]) {
-      bool should_compute = task_should_compute_output(edge_idx);
+      PyObject* new_value =
+          task_should_compute_output(edge_idx) ? Py_True : Py_False;
       PyObject* current = PyTuple_GET_ITEM(py_fn->needs_input_grad, i);
-      if (current == Py_True && !should_compute) {
-        Py_INCREF(Py_False);
-        Py_DECREF(current);
-        PyTuple_SET_ITEM(py_fn->needs_input_grad, i, Py_False);
-      }
+      Py_INCREF(new_value);
+      Py_DECREF(current);
+      PyTuple_SET_ITEM(py_fn->needs_input_grad, i, new_value);
       edge_idx++;
     }
   }
