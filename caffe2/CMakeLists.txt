@@ -1786,14 +1786,18 @@ if(USE_ROCM)
   target_link_libraries(torch_hip PUBLIC torch_cpu_library ${Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS})
   target_link_libraries(torch_hip PRIVATE ${Caffe2_HIP_DEPENDENCY_LIBS})
 
+  if(USE_ROCM_CK_SDPA)
+    target_link_libraries(torch_hip PRIVATE ck_sdpa)
+  endif()
+
   if(USE_MSLK)
     if(USE_ROCM)
       target_link_libraries(torch_hip PRIVATE mslk)
     endif()
   endif()
   # Since PyTorch files contain HIP headers, this is also needed to capture the includes.
-  # ROCM_INCLUDE_DIRS is defined in LoadHIP.cmake
-  target_include_directories(torch_hip PRIVATE ${Caffe2_HIP_INCLUDE} ${ROCM_INCLUDE_DIRS})
+  # ROCM_INCLUDE_DIRS is defined in LoadHIP.cmake and added as SYSTEM includes in cmake/Dependencies.cmake
+  target_include_directories(torch_hip PRIVATE ${Caffe2_HIP_INCLUDE})
   target_include_directories(torch_hip INTERFACE $<INSTALL_INTERFACE:include>)
 endif()
 
