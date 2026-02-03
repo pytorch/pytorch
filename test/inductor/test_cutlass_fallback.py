@@ -15,7 +15,7 @@ The fix ensures:
 import os
 import unittest
 import unittest.mock as mock
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import torch
 from torch._inductor import config
@@ -30,7 +30,7 @@ from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 
 # Check if CUTLASS is available
 try:
-    from torch._inductor.codegen.cuda.cutlass_utils import try_import_cutlass
+    from torch._inductor.codegen.cutlass.utils import try_import_cutlass
     HAS_CUTLASS = try_import_cutlass()
 except ImportError:
     HAS_CUTLASS = False
@@ -78,7 +78,7 @@ class TestCutlassFallback(TestCase):
         This tests the fix for issue #171094 where kernels with timing=inf
         were incorrectly selected, causing CUDA illegal memory access errors.
         """
-        from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
+        from torch._inductor.codegen.cutlass.cuda_kernel import CUDATemplateCaller
 
         # Track which kernel type was selected
         selected_choice_types = []
@@ -100,9 +100,7 @@ class TestCutlassFallback(TestCase):
                 "cuda.cutlass_max_profiling_configs": 4,
             }
         ):
-            with patch.object(
-                CUDATemplateCaller, "benchmark", mock_cuda_benchmark
-            ):
+            with patch.object(CUDATemplateCaller, "benchmark", mock_cuda_benchmark):
                 torch._dynamo.reset()
                 clear_caches()
 
@@ -132,7 +130,7 @@ class TestCutlassFallback(TestCase):
         This verifies the fix that adds ATen choices to prescreening so they
         can be benchmarked alongside CUTLASS kernels and serve as fallback.
         """
-        from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
+        from torch._inductor.codegen.cutlass.cuda_kernel import CUDATemplateCaller
 
         prescreening_candidates = []
 
@@ -154,11 +152,7 @@ class TestCutlassFallback(TestCase):
                 "cuda.cutlass_prescreening": True,
             }
         ):
-            with patch.object(
-                AlgorithmSelectorCache,
-                "prescreen_choices",
-                capturing_prescreen,
-            ):
+            with patch.object(AlgorithmSelectorCache, "prescreen_choices", capturing_prescreen):
                 torch._dynamo.reset()
                 clear_caches()
 
@@ -191,7 +185,7 @@ class TestCutlassFallback(TestCase):
         This tests the fix for the TypeError where instantiation_level was passed
         as int instead of str when generating the cache hash key.
         """
-        from torch._inductor.codegen.cuda.cutlass_cache import get_config_request_key
+        from torch._inductor.codegen.cutlass.cache import get_config_request_key
 
         # This should not raise TypeError even when instantiation_level is an int
         # The fix ensures str() is called on instantiation_level
@@ -221,7 +215,7 @@ class TestCutlassFallback(TestCase):
         Similar to test_fallback_to_aten_when_cutlass_benchmarks_fail but
         specifically tests the addmm path which was affected by issue #171094.
         """
-        from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
+        from torch._inductor.codegen.cutlass.cuda_kernel import CUDATemplateCaller
 
         def mock_cuda_benchmark(*args, **kwargs):
             return float("inf")
@@ -233,9 +227,7 @@ class TestCutlassFallback(TestCase):
                 "cuda.cutlass_max_profiling_configs": 4,
             }
         ):
-            with patch.object(
-                CUDATemplateCaller, "benchmark", mock_cuda_benchmark
-            ):
+            with patch.object(CUDATemplateCaller, "benchmark", mock_cuda_benchmark):
                 torch._dynamo.reset()
                 clear_caches()
 

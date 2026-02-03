@@ -3833,7 +3833,7 @@ class AlgorithmSelectorCache(PersistentCache):
         """
         Benchmark a list of choices and return timing dict.
         """
-        from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
+        from torch._inductor.codegen.cutlass.cuda_kernel import CUDATemplateCaller
 
         # Reorder choices to benchmark stable kernels (ATen/cuBLAS) BEFORE potentially
         # unstable CUTLASS kernels. This ensures we have valid fallback timings before
@@ -4091,11 +4091,10 @@ class AlgorithmSelectorCache(PersistentCache):
         if len(candidates) < 10:
             return []
 
-        # TODO(#171094): Re-enable once we understand why this causes test failures.
-        # The intent was to include ATen choices in prescreening as fallback,
-        # ensuring valid fallback timings exist before potentially buggy CUTLASS kernels run.
-        # extern_choices = [c for c in choices if isinstance(c, ExternKernelCaller)]
-        # candidates = extern_choices + candidates
+        # Include ATen choices in prescreening as fallback (#171094).
+        # This ensures valid fallback timings exist before potentially buggy CUTLASS kernels run.
+        extern_choices = [c for c in choices if isinstance(c, ExternKernelCaller)]
+        candidates = extern_choices + candidates
 
         return candidates  # type: ignore[return-value]
 
