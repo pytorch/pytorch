@@ -446,6 +446,8 @@ test_einops() {
   time python test/run_test.py --einops --verbose --upload-artifacts-while-running
   pip install einops==0.8.1
   time python test/run_test.py --einops --verbose --upload-artifacts-while-running
+  pip install einops==0.8.2
+  time python test/run_test.py --einops --verbose --upload-artifacts-while-running
   assert_git_not_dirty
 }
 
