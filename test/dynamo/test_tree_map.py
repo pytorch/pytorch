@@ -934,6 +934,100 @@ class TreeMapCompileTests(TestCase):
             logger.removeHandler(handler)
             logger.setLevel(old_level)
 
+    @parametrize("tree_map_name,tree_map_impl", TREE_MAP_IMPLEMENTATIONS)
+    def test_namedtuple_tree_map(self, tree_map_name: str, tree_map_impl) -> None:
+        """Test tree_map with namedtuple uses fast path."""
+        from collections import namedtuple
+
+        Point = namedtuple("Point", ["x", "y"])
+
+        tree = {
+            "point": Point(torch.ones(2), torch.zeros(2)),
+            "nested": [Point(torch.ones(3), torch.ones(3) * 2)],
+        }
+
+        def mapper(node):
+            if isinstance(node, torch.Tensor):
+                return node + 1
+            return node
+
+        def fn(arg):
+            return tree_map_impl(mapper, arg)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        expected = fn(tree)
+        result = compiled(tree)
+
+        self.assertIsInstance(result["point"], Point)
+        self.assertTrue(torch.allclose(result["point"].x, torch.ones(2) + 1))
+        self.assertTrue(torch.allclose(result["point"].y, torch.zeros(2) + 1))
+        self.assertIsInstance(result["nested"][0], Point)
+        self.assertTrue(torch.allclose(result["nested"][0].x, torch.ones(3) + 1))
+        self.assertTrue(torch.allclose(result["nested"][0].y, torch.ones(3) * 2 + 1))
+        _assert_trees_allclose(self, expected, result)
+
+    @parametrize("tree_map_name,tree_map_impl", TREE_MAP_IMPLEMENTATIONS)
+    def test_namedtuple_tree_map_multiple_trees(
+        self, tree_map_name: str, tree_map_impl
+    ) -> None:
+        """Test tree_map with multiple namedtuple trees."""
+        from collections import namedtuple
+
+        Point = namedtuple("Point", ["x", "y"])
+
+        tree1 = {"point": Point(torch.ones(2), torch.zeros(2))}
+        tree2 = {"point": Point(torch.ones(2) * 2, torch.ones(2) * 3)}
+
+        def mapper(a, b):
+            if isinstance(a, torch.Tensor):
+                return a + b
+            return a
+
+        def fn(t1, t2):
+            return tree_map_impl(mapper, t1, t2)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        expected = fn(tree1, tree2)
+        result = compiled(tree1, tree2)
+
+        self.assertIsInstance(result["point"], Point)
+        self.assertTrue(torch.allclose(result["point"].x, torch.ones(2) * 3))
+        self.assertTrue(torch.allclose(result["point"].y, torch.ones(2) * 3))
+        _assert_trees_allclose(self, expected, result)
+
+    @parametrize("tree_map_name,tree_map_impl", TREE_MAP_IMPLEMENTATIONS)
+    def test_namedtuple_with_is_leaf(self, tree_map_name: str, tree_map_impl) -> None:
+        """Test tree_map with namedtuple and is_leaf predicate."""
+        from collections import namedtuple
+
+        Point = namedtuple("Point", ["x", "y"])
+
+        tree = {"point": Point(torch.ones(2), torch.zeros(2)), "val": torch.ones(3)}
+
+        def is_leaf_fn(node):
+            # Treat Point as a leaf
+            return isinstance(node, Point)
+
+        def mapper(node):
+            if isinstance(node, Point):
+                return Point(node.x * 2, node.y * 2)
+            if isinstance(node, torch.Tensor):
+                return node + 10
+            return node
+
+        def fn(arg):
+            return tree_map_impl(mapper, arg, is_leaf=is_leaf_fn)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        expected = fn(tree)
+        result = compiled(tree)
+
+        self.assertIsInstance(result["point"], Point)
+        self.assertTrue(torch.allclose(result["point"].x, torch.ones(2) * 2))
+        self.assertTrue(torch.allclose(result["point"].y, torch.zeros(2) * 2))
+        self.assertTrue(torch.allclose(result["val"], torch.ones(3) + 10))
+        _assert_trees_allclose(self, expected, result)
+
 
 if __name__ == "__main__":  # pragma: no cover
     run_tests()

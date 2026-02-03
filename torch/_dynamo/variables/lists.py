@@ -1487,9 +1487,9 @@ class NamedTupleVariable(UserDefinedTupleVariable):
             try:
                 leaf_decision = pred_result.as_python_constant()
             except NotImplementedError:
-                # For namedtuples, they're always pytree containers, so is_leaf
-                # should return False. Assume False and proceed with fast path.
-                leaf_decision = False
+                return self._tree_map_fallback(
+                    tx, tree_map_fn, map_fn, rest, tree_map_kwargs
+                )
             if leaf_decision:
                 return map_fn.call_function(tx, [self, *rest], {})
 
