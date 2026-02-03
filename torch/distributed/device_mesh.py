@@ -41,6 +41,7 @@ if not is_available():
 
 else:
     from torch._C._distributed_c10d import Backend as C10dBackend
+    from torch.distributed import config as dist_config
     from torch.distributed.distributed_c10d import (
         _get_default_group,
         _resolve_process_group,
@@ -55,7 +56,6 @@ else:
         ProcessGroup,
         split_group,
     )
-    from torch.distributed import config as dist_config
 
     logger = logging.getLogger(__name__)
 

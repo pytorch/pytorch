@@ -9,9 +9,9 @@ import torch.distributed as dist
 import torch.distributed._functional_collectives as funcol
 from torch._C._distributed_c10d import Backend as C10dBackend
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.distributed import config as dist_config
 from torch.distributed._mesh_layout import _MeshLayout as _Layout
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh, init_device_mesh
-from torch.distributed import config as dist_config
 from torch.distributed.distributed_c10d import (
     _get_default_group,
     _TORCHCOMM_AVAILABLE,
@@ -1569,20 +1569,14 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
         self.assertEqual(gpu_tensor, expected_gpu_tensor)
 
     @unittest.skipIf(not _TORCHCOMM_AVAILABLE, "TorchComms is not installed")
-    @dist_config.patch(use_torchcomms=True, backend="cuda:ncclx")
+    @dist_config.patch(use_torchcomms=True)
     @with_comms(backend="cpu:gloo,cuda:ncclx")
     def test_device_mesh_w_torchcomms(self) -> None:
         mesh_shape = (2, 2, self.world_size // 4)
-        backend_override = {
-            "pp": "ncclx",
-            "dp": "ncclx",
-            "tp": "ncclx",
-        }
         mesh_3d = init_device_mesh(
             self.device_type,
             mesh_shape,
             mesh_dim_names=("pp", "dp", "tp"),
-            backend_override=backend_override,
         )
         dp_rank = mesh_3d.get_local_rank("dp")
         expected_dp_rank = 0 if self.rank % 4 <= 1 else 1

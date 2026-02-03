@@ -53,10 +53,10 @@ from torch.monitor import _WaitCounter
 from torch.overrides import handle_torch_function, has_torch_function
 from torch.utils._typing_utils import not_none
 
+from . import config as dist_config
 from .c10d_logger import _exception_logger, _time_logger
 from .constants import default_pg_nccl_timeout, default_pg_timeout
 from .rendezvous import register_rendezvous_handler, rendezvous  # noqa: F401
-from . import config as dist_config
 
 
 __all__ = [
@@ -153,6 +153,7 @@ if _TORCHCOMM_AVAILABLE:
 def _use_torchcomms_enabled() -> bool:
     """Check if torchcomms is enabled via config."""
     return _TORCHCOMM_AVAILABLE and dist_config.use_torchcomms
+
 
 _pickler = pickle.Pickler
 _unpickler = pickle.Unpickler
@@ -724,9 +725,22 @@ class _World:
         """Add a comm object to the global list."""
         global _comms, _comms_atexit_registered
         if not _comms_atexit_registered:
-            atexit.register(_finalize_comms)
+            atexit.register(self.finalize_comms)
             _comms_atexit_registered = True
         _comms.append(comm)
+
+    def finalize_comms(self) -> None:
+        """Finalize all torchcomm comm objects.
+
+        This method is safe to call multiple times - subsequent calls are no-ops
+        if comms have already been finalized.
+        """
+        global _comms
+        if not _comms:
+            return
+        for comm in _comms:
+            comm.finalize()
+        _comms.clear()
 
     @property
     def pg_config_info(self) -> list[dict[str, Any]]:
@@ -783,14 +797,6 @@ class GroupMember(metaclass=_WorldMeta):
     """Group member class."""
 
     NON_GROUP_MEMBER = -100
-
-
-def _finalize_comms() -> None:
-    """Finalize all torchcomm comm objects in the global list."""
-    global _comms
-    for comm in _comms:
-        comm.finalize()
-    _comms.clear()
 
 
 def _get_default_timeout(backend: Backend) -> timedelta:
@@ -1609,6 +1615,8 @@ def _set_pg_timeout(timeout: timedelta, group: ProcessGroup | None = None) -> No
             backends.add(backend)  # type: ignore[arg-type]
         elif is_gloo_available() and isinstance(backend, ProcessGroupGloo):
             backends.add(backend)  # type: ignore[arg-type]
+        elif _use_torchcomms_enabled() and isinstance(backend, _BackendWrapper):
+            backends.add(backend)  # type: ignore[arg-type]
     if len(backends) == 0:
         warnings.warn(
             "Set timeout is now only supported for either nccl or gloo.", stacklevel=2
@@ -2086,7 +2094,9 @@ def _new_process_group_helper(
                 backend_str,
             )
             # TODO: figure out pg option conversion for torchComms.
-            comm = new_comm(backend_str, torch_device, name=group_name, store=backend_prefix_store)
+            comm = new_comm(
+                backend_str, torch_device, name=group_name, store=backend_prefix_store
+            )
             # We need to keep a reference to the python object otherwise after this function the object gets delete.
             # This also help us perform bookkeeping of comms so that we can do finalize when the program finishes.
             _world.add_comm(comm)
@@ -2342,6 +2352,10 @@ def destroy_process_group(group: ProcessGroup | None = None):
         # We only reset this when WORLD is being destroyed because if this
         # process group is in good state, we aren't dealing with failures.
         _world.group_count = 0
+
+        # Finalize torchcomm comm objects when destroying all process groups
+        if _use_torchcomms_enabled():
+            _world.finalize_comms()
     else:
         pg.shutdown()
         del _world.pg_map[pg]
