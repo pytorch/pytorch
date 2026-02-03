@@ -2171,12 +2171,19 @@ class TritonTemplate(KernelTemplate):
 
         # Convolution-specific parameters to include in logging
         CONV_TUNABLE_KEYS = [
-            "KERNEL_H", "KERNEL_W", "KERNEL_D",
-            "STRIDE_H", "STRIDE_W", "STRIDE_D",
-            "PADDING_H", "PADDING_W", "PADDING_D",
-            "GROUPS", "UNROLL",
+            "KERNEL_H",
+            "KERNEL_W",
+            "KERNEL_D",
+            "STRIDE_H",
+            "STRIDE_W",
+            "STRIDE_D",
+            "PADDING_H",
+            "PADDING_W",
+            "PADDING_D",
+            "GROUPS",
+            "UNROLL",
         ]
-        
+
         return TritonTemplateCaller(
             kernel_hash_name,
             codegen_input_nodes,
@@ -2205,11 +2212,7 @@ class TritonTemplate(KernelTemplate):
                     for k in AlgorithmSelectorCache.FLEX_ATTENTION_TUNABLE_KEYS
                     if k in kwargs
                 },
-                **{
-                    k: kwargs[k]
-                    for k in CONV_TUNABLE_KEYS
-                    if k in kwargs
-                },
+                **{k: kwargs[k] for k in CONV_TUNABLE_KEYS if k in kwargs},
             },
             mutated_inputs=mutated_inputs,
             workspace_arg=workspace_arg,
@@ -4260,7 +4263,7 @@ class AlgorithmSelectorCache(PersistentCache):
             if "backward" in name
             else ("decode" if "decoding" in name else "forward")
         )
-        
+
         # Create shape info dictionary
         shape_info = {
             "kernel_type": kernel_type,
@@ -4274,15 +4277,17 @@ class AlgorithmSelectorCache(PersistentCache):
         }
 
         sorted_choices = sorted(timings, key=timings.__getitem__)
-        
+
         # Include shape info in each choice
         choices_with_shapes = []
         for choice in sorted_choices:
-            choice_info = AlgorithmSelectorCache.get_flex_attention_choice_info(choice, timings)
+            choice_info = AlgorithmSelectorCache.get_flex_attention_choice_info(
+                choice, timings
+            )
             # Merge shape info with choice info
             choice_info.update(shape_info)
             choices_with_shapes.append(choice_info)
-        
+
         out_dict = {
             "query_shape": str(query_size),
             "key_shape": str(key_size),
@@ -4410,13 +4415,13 @@ class AlgorithmSelectorCache(PersistentCache):
                     if choice not in timings:
                         return None
                     info = choice.info_dict()
-                    
+
                     # Start with timing and backend type
                     result = {
                         "time": timings[choice],
                         "backend": info.get("backend", "unknown"),
                     }
-                    
+
                     # Add all parameters from info_dict
                     # This includes BLOCK_K, BLOCK_M, BLOCK_N, GROUPS, KERNEL_H, KERNEL_W,
                     # PADDING_H, PADDING_W, STRIDE_H, STRIDE_W, UNROLL, kpack,
@@ -4426,11 +4431,12 @@ class AlgorithmSelectorCache(PersistentCache):
                             # Convert non-serializable types to strings
                             try:
                                 import json
+
                                 json.dumps(value)  # Test if serializable
                                 result[key] = value
                             except (TypeError, ValueError):
                                 result[key] = str(value)
-                    
+
                     return result
 
                 out_dict = {
