@@ -1049,19 +1049,49 @@ class GraphModuleSerializer(metaclass=Final):
         ret = {}
 
         def parse_stack_trace(stack_trace_str):
+            if not isinstance(stack_trace_str, str):
+                raise AssertionError(
+                    f"expected stack_trace to be str, got {type(stack_trace_str).__name__}"
+                )
+
             frames = []
             # Split by lines, group into frames
             lines = stack_trace_str.split('\n')
 
+            if not isinstance(lines, list):
+                raise AssertionError(
+                    f"expected lines to be list, got {type(lines).__name__}"
+                )
+
             for i in range(0, len(lines), 2):  # Each frame is 2 lines
                 if i + 1 < len(lines):
-                    match = re.match(r'File "([^"]+)", line (\d+), in (.+)', lines[i].strip())
+                    line = lines[i].strip()
+                    if not isinstance(line, str):
+                        raise AssertionError(
+                            f"expected line to be str, got {type(line).__name__}"
+                        )
+
+                    match = re.match(r'File "([^"]+)", line (\d+), in (.+)', line)
                     if match:
+                        file_path = match.group(1)
+                        line_num = match.group(2)
+                        function_name = match.group(3)
+                        code = lines[i + 1] if i + 1 < len(lines) else ""
+
+                        if not isinstance(file_path, str):
+                            raise AssertionError(
+                                f"expected file to be str, got {type(file_path).__name__}"
+                            )
+                        if not isinstance(function_name, str):
+                            raise AssertionError(
+                                f"expected function to be str, got {type(function_name).__name__}"
+                            )
+
                         frames.append({
-                            "file": match.group(1),
-                            "line": int(match.group(2)),
-                            "function": match.group(3),
-                            "code": lines[i + 1] if i + 1 < len(lines) else ""
+                            "file": file_path,
+                            "line": int(line_num),
+                            "function": function_name,
+                            "code": code
                         })
 
             return frames
