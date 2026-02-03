@@ -2221,10 +2221,13 @@ class TMACompatibilityChecker:
         if self.force:
             return True
         if not (
-            V.graph.get_current_device_or_throw().type == "cuda"
-            and torch.cuda.get_device_capability()[0] >= 9
+            (
+                V.graph.get_current_device_or_throw().type == "cuda"
+                and torch.cuda.get_device_capability()[0] >= 9
+                and config.assume_aligned_inputs
+            )
+            or V.graph.get_current_device_or_throw().type == "xpu"
             and config.triton.use_tensor_descriptor
-            and config.assume_aligned_inputs
             and has_triton_stable_tma_api()
             # For CUDA The base ptr needs to be aligned
         ):
@@ -3819,12 +3822,22 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 else value
             )
 
-        original_dtypes = [val.dtype for val in pytree.tree_leaves(value)]
-        value = pytree.tree_map(maybe_upcast, value)
-        if any(x in [torch.float16, torch.bfloat16] for x in original_dtypes):
+        do_upcast = pytree.tree_any(
+            lambda v: v.dtype in (torch.float16, torch.bfloat16), value
+        )
+        if do_upcast:
             # Only promote FB16/BF16; do not promote other integer/boolean dtypes
-            src_dtype = torch.promote_types(src_dtype, torch.float32)
-            dtype = torch.promote_types(dtype, torch.float32)
+            pytree.tree_map_(maybe_upcast, value)
+            src_dtype = (
+                torch.promote_types(src_dtype, torch.float32)
+                if src_dtype.is_floating_point
+                else src_dtype
+            )
+            dtype = (
+                torch.promote_types(dtype, torch.float32)
+                if dtype.is_floating_point
+                else dtype
+            )
 
         assert self.inside_reduction
         masks = OrderedSet(f"{tree.prefix}mask" for tree in self.range_trees)
@@ -4260,27 +4273,20 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             assert all(isinstance(x, TritonCSEVariable) for x in result_var)
             self.outside_loop_vars.update(result_var)
 
-            # Match output dtype with input dtype
-            if reduction_type in ("welford_reduce", "online_softmax_reduce"):
-                assert len(original_dtypes) == 1
-                original_dtypes = len(result_var) * original_dtypes
-
-            assert len(result_var) == len(original_dtypes)
-            for var, orig_dtype in zip(result_var, original_dtypes):
-                assert orig_dtype is not None
-                if var.dtype != orig_dtype:
+            # Match output dtype with expected dtype
+            for result in result_var:
+                if result.dtype != dtype:
                     self.post_loop_combine.writeline(
-                        f"{var} = {var}.to({triton_compute_type(orig_dtype)})"
+                        f"{result} = {result}.to({triton_compute_type(dtype)})"
                     )
         else:
             assert isinstance(result_var, TritonCSEVariable)
             self.outside_loop_vars.add(result_var)
 
             # Match output dtype with input dtype
-            if result_var.dtype != original_dtypes[0]:
-                assert original_dtypes[0] is not None
+            if result_var.dtype != dtype:
                 self.post_loop_combine.writeline(
-                    f"{result_var} = {result_var}.to({triton_compute_type(original_dtypes[0])})"
+                    f"{result_var} = {result_var}.to({triton_compute_type(dtype)})"
                 )
 
         return result_var
@@ -5390,6 +5396,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             **self.triton_meta_common(),
         }
 
+        if self.cooperative_reduction:
+            # Cooperative reductions rely on multi-block synchronization that
+            # requires cooperative-grid launches to avoid hanging.
+            triton_meta["launch_cooperative_grid"] = True
+
         # Skip memory optimization for forward of the training loop where we expect
         # every new node will increase the peak memory and our greedy approach would
         # introduce a lot of unnecessary cpu copies.
@@ -5650,6 +5661,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 return triton_heuristics.Grid2DWithYZOverflow
             return triton_heuristics.Grid2D
         elif n == 3:
+            if self.is_native_matmul:
+                return triton_heuristics.BatchMatmulGrid3D
             return triton_heuristics.Grid3D
         raise ValueError(f"Unsupported number of dimensions: {n}")
 
@@ -5719,6 +5732,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     def iteration_ranges_ranges_code(self, entry: IterationRangesRoot) -> str:
         assert entry.tensor_dim is not None
         size = self.indexing_size_str(entry.tensor_dim)
+        # For batch matmul, we always set the ZBLOCK=1.
+        # In this case, we found not broadcasting tl.arange(0, ZBLOCK) is faster.
+        if (
+            self.is_native_matmul
+            and entry.tensor_dim == 0
+            and self.triton_tensor_ndim() == 4
+        ):
+            size = ""
         index_dtype = self.index_dtype
         suffix = f".to({index_dtype})" if index_dtype != "tl.int32" else ""
         if (
@@ -5747,6 +5768,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             # For each z dimension, there are tl.num_programs(1) yblocks which is passed by grad(x,y,z).
             # So, we need to add tl.program_id(z) * tl.num_programs(y) *YBLOCK to get the correct yoffset.
             key = f"({key} + tl.program_id({entry.grid_dim + 1}) * tl.num_programs({entry.grid_dim}))"
+
+        # For batched matmul, we intentionally remap program_id axes so that the
+        # batch dimension is placed on CUDA gridDim.x (the fastest-varying launch axis).
+        # - gridDim.x scales to much larger sizes than gridDim.z (limited to 65536 in CUDA)
+        if self.is_native_matmul and self.triton_tensor_ndim() == 4:
+            reversed_pid_map = {0: 2, 1: 1, 2: 0}
+            key = f"tl.program_id({reversed_pid_map[entry.grid_dim]})"
+
         pid = entry.pid_cache.get(key, key)
         if self.index_dtype != "tl.int32":
             return f"{pid}.to({self.index_dtype})"
