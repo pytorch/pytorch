@@ -576,8 +576,6 @@ class OpDispatcher:
 
         def extract_local(v: object) -> object:
             if isinstance(v, dtensor.DTensor):
-                if nonlocal_compute_mesh[0] is None:
-                    nonlocal_compute_mesh[0] = v.device_mesh
                 return v._local_tensor
             return v
 
