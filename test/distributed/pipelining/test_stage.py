@@ -1,6 +1,8 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 
+import os
+
 from model_registry import ExampleCode, ModelWithKwargs, MultiMLP
 
 import torch
@@ -14,6 +16,7 @@ from torch.distributed.pipelining import (
 from torch.distributed.pipelining._utils import PipeliningShapeError
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
+    MultiProcessTestCase,
     requires_accelerator_dist_backend,
 )
 from torch.testing._internal.common_utils import (
@@ -331,18 +334,35 @@ class StageTest(MultiProcContinuousTest):
 instantiate_parametrized_tests(StageTest)
 
 
-class StageNegativeTest(MultiProcContinuousTest):
-    @classmethod
-    def backend_str(cls) -> str:
-        return backend
-
-    @classmethod
-    def device_type(cls) -> str:
-        return device_type
+class StageNegativeTest(MultiProcessTestCase):
+    @property
+    def world_size(self) -> int:
+        return torch.get_device_module(device_type).device_count()
 
     @property
     def device(self) -> torch.device:
         return torch.device(device_type, self.rank)
+
+    def setUp(self):
+        super().setUp()
+        self._spawn_processes()
+
+    def tearDown(self):
+        super().tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    def init_pg(self):
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend=backend,
+            store=store,
+            rank=self.rank,
+            world_size=self.world_size,
+            device_id=self.device,
+        )
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
@@ -350,6 +370,8 @@ class StageNegativeTest(MultiProcContinuousTest):
     )
     def test_shape_prop_mismatch(self):
         """Tests shape prop errors are raised"""
+        self.init_pg()
+
         full_mod = MultiMLP(d_hid, n_layers=self.world_size)
         full_mod.to(self.device)
         stage_mod = full_mod.get_submodule(f"layers.{self.rank}")
@@ -398,6 +420,8 @@ class StageNegativeTest(MultiProcContinuousTest):
     )
     def test_custom_dw_errors(self):
         """Tests expected errors are raised"""
+        self.init_pg()
+
         full_mod = MultiMLP(d_hid, n_layers=self.world_size)
         full_mod.to(self.device)
         stage_mod = full_mod.get_submodule(f"layers.{self.rank}")
