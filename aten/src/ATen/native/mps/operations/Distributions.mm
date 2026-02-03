@@ -507,7 +507,7 @@ Tensor& log_normal_mps_(Tensor& self, double mean, double std, std::optional<Gen
 
 Tensor& geometric_mps_(Tensor& self, double p, std::optional<Generator> gen) {
   TORCH_CHECK(p > 0.0 && p < 1.0, "geometric_ expects p to be in (0, 1), but got p=", p);
-  double log_one_minus_p = std::log(1.0 - p);
+  double log_one_minus_p = std::log1p(-p);
   return distribution_kernel_mps_impl(self, log_one_minus_p, 0.0, "geometric", 1, gen);
 }
 
