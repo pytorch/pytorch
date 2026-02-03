@@ -12,6 +12,7 @@ from torch._inductor.config import (
 from torch._inductor.runtime.benchmarking import (
     Benchmarker,
     InductorBenchmarker,
+    ProfilingBenchmarker,
     TritonBenchmarker,
 )
 from torch._inductor.test_case import run_tests, TestCase
@@ -25,6 +26,7 @@ from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 
 ALL_BENCHMARKER_CLASSES = (
     Benchmarker,
+    ProfilingBenchmarker,
     TritonBenchmarker,
 )
 
@@ -153,6 +155,23 @@ class TestBenchmarker(TestCase):
 
         self.assertEqual(captured_kwargs["warmup"], custom_warmup)
         self.assertEqual(captured_kwargs["rep"], custom_rep)
+
+    @unittest.skipIf(not HAS_GPU, "requires GPU")
+    def test_profiling_benchmarker_returns_positive_timing(self):
+        """Test that ProfilingBenchmarker.benchmark_gpu returns a positive timing."""
+        benchmarker = ProfilingBenchmarker()
+        _, _callable = self.make_params(GPU_TYPE)
+        timing = benchmarker.benchmark_gpu(_callable, warmup=10, rep=20)
+        self.assertGreater(timing, 0)
+
+    @unittest.skipIf(not HAS_GPU, "requires GPU")
+    def test_do_bench_using_profiling_backwards_compat(self):
+        """Test that utils.do_bench_using_profiling still works."""
+        from torch._inductor.utils import do_bench_using_profiling
+
+        _, _callable = self.make_params(GPU_TYPE)
+        timing = do_bench_using_profiling(_callable, warmup=10, rep=20)
+        self.assertGreater(timing, 0)
 
 
 class TestBenchmarkerSingleton(TestCase):
