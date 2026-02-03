@@ -45,15 +45,9 @@ def remove_dupe_metadata(
     keep_arg_mask: list[bool],
     add_dupe_map: list[int],
 ) -> ViewAndMutationMeta:
-    if len(m.input_info) != len(keep_arg_mask):
-        raise AssertionError(
-            f"len(m.input_info)={len(m.input_info)} != len(keep_arg_mask)={len(keep_arg_mask)}"
-        )
+    assert len(m.input_info) == len(keep_arg_mask)
     # Easy invariant: the first argument should never be a dupe (it will be kept)
-    if len(keep_arg_mask) == 0 or not keep_arg_mask[0]:
-        raise AssertionError(
-            "keep_arg_mask must be non-empty and keep_arg_mask[0] must be True"
-        )
+    assert len(keep_arg_mask) > 0 and keep_arg_mask[0]
 
     # Filter dupe'd mutated inputs out of traced_tangents
     num_data_mutations = len([x for x in m.input_info if x.mutates_data])
@@ -77,8 +71,7 @@ def remove_dupe_metadata(
         filtered_inp_traced_tangents_descs + other_traced_tangents_descs
     )
 
-    if m.subclass_tangent_meta is None:
-        raise AssertionError("m.subclass_tangent_meta must not be None")
+    assert m.subclass_tangent_meta is not None
     subclass_tangent_meta = [
         PlainTensorMeta(
             0, memory_format=MemoryFormatMeta(memory_format=torch.contiguous_format)
@@ -153,10 +146,7 @@ def create_synthetic_base_metadata(
         # (aka if "a" and "b" are views, then a.is_leaf == b.is_leaf)
         any_leaf = any(m.input_info[x].is_leaf for x in outer_indices)
         all_leaf = all(m.input_info[x].is_leaf for x in outer_indices)
-        if any_leaf != all_leaf:
-            raise AssertionError(
-                f"any_leaf={any_leaf} != all_leaf={all_leaf} for outer_indices={outer_indices}"
-            )
+        assert any_leaf == all_leaf
 
         mutates_data = (
             True
@@ -284,8 +274,7 @@ def create_synthetic_base_metadata(
         inner_mutated_tangents_descs
         + m.traced_tangents_descs[len(inner_mutated_tangents) :]
     )
-    if m.subclass_tangent_meta is None:
-        raise AssertionError("m.subclass_tangent_meta must not be None")
+    assert m.subclass_tangent_meta is not None
     subclass_tangent_meta = [
         # pyrefly: ignore[bad-argument-type]
         PlainTensorMeta(0, memory_format=x)
@@ -320,8 +309,7 @@ def compute_overlapping_inputs(
     tracing_context = torch._guards.TracingContext.try_get()
 
     if tracing_context is not None:
-        if tracing_context.fake_mode is None:
-            raise AssertionError("tracing_context.fake_mode must not be None")
+        assert tracing_context.fake_mode is not None
         shape_env = tracing_context.fake_mode.shape_env
 
         # Check whether we can actually get the dynamo sources from within AOTAutograd.
@@ -397,10 +385,7 @@ def _graph_input_names(gm: torch.fx.GraphModule) -> list[str]:
 
 def _graph_output_names(gm: torch.fx.GraphModule) -> list[Any]:
     output_node = next(iter(reversed(gm.graph.nodes)))
-    if output_node.op != "output" or len(output_node.args) != 1:
-        raise AssertionError(
-            f"expected output node with 1 arg, got op={output_node.op}, args={len(output_node.args)}"
-        )
+    assert output_node.op == "output" and len(output_node.args) == 1
     return_args = output_node.args[0]
     return [getattr(return_arg, "name", None) for return_arg in return_args]
 
@@ -431,10 +416,7 @@ def create_graph_signature(
     num_user_args = len(graph_input_names) - num_params_buffers - num_tokens
 
     if trace_joint:
-        if num_user_fw_outs is None:
-            raise AssertionError(
-                "num_user_fw_outs must not be None when trace_joint=True"
-            )
+        assert num_user_fw_outs is not None
         num_fw_outs = num_user_fw_outs + fw_metadata.num_mutated_inp_runtime_indices
         backward_output_names = graph_output_names[num_fw_outs:]
 
@@ -453,18 +435,12 @@ def create_graph_signature(
             if user_input.requires_grad
         }
 
-        if len(gradients_to_parameters) + len(gradients_to_user_inputs) != len(
+        assert len(gradients_to_parameters) + len(gradients_to_user_inputs) == len(
             backward_output_names
-        ):
-            raise AssertionError(
-                f"len(gradients_to_parameters)={len(gradients_to_parameters)} + "
-                f"len(gradients_to_user_inputs)={len(gradients_to_user_inputs)} != "
-                f"len(backward_output_names)={len(backward_output_names)}"
-            )
+        )
 
         # Check that we have fully accounted for all graph outputs
-        if loss_index is None:
-            raise AssertionError("loss_index must not be None")
+        assert loss_index is not None
         backward_signature = BackwardSignature(
             gradients_to_parameters,
             gradients_to_user_inputs,

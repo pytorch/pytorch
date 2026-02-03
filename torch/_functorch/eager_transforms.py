@@ -98,8 +98,7 @@ _TensorsU = TypeVar("_TensorsU", bound=_Tensors)
 def _undo_create_differentiable(inps: _TensorsT, level: int | None = None) -> _TensorsT:
     def unwrap_tensors(x: _TensorsU) -> _TensorsU:
         if isinstance(x, torch.Tensor):
-            if level is None:
-                raise AssertionError("level must not be None when unwrapping tensors")
+            assert level is not None
             # pyrefly: ignore[bad-return]
             return _unwrap_for_grad(x, level)
         # TODO: Remove the following hack for namedtuples
@@ -411,10 +410,7 @@ def _vjp_with_argnums(
             results = _undo_create_differentiable(primals_out, level)
 
             for primal_out in flat_primals_out:
-                if not isinstance(primal_out, torch.Tensor):
-                    raise AssertionError(
-                        f"expected primal_out to be a Tensor, got {type(primal_out)}"
-                    )
+                assert isinstance(primal_out, torch.Tensor)
                 if primal_out.is_floating_point() or primal_out.is_complex():
                     continue
                 raise RuntimeError(
@@ -454,8 +450,7 @@ def _vjp_with_argnums(
 
 
 def _safe_zero_index(x: tuple[_R, ...]) -> _R:
-    if len(x) != 1:
-        raise AssertionError(f"expected tuple of length 1, got length {len(x)}")
+    assert len(x) == 1
     return x[0]
 
 
@@ -646,10 +641,7 @@ def jacrev(
                 if chunk_size == 1:
                     # sanity check.
                     for t in flat_basis_chunk:
-                        if t.size(0) != 1:
-                            raise AssertionError(
-                                f"expected t.size(0) to be 1, got {t.size(0)}"
-                            )
+                        assert t.size(0) == 1
 
                     flat_basis_chunk = tree_map(
                         lambda t: torch.squeeze(t, 0), flat_basis_chunk
@@ -709,10 +701,7 @@ def jacrev(
                 if chunk_size == 1:
                     # sanity check.
                     for t in flat_basis_chunk:
-                        if t.size(0) != 1:
-                            raise AssertionError(
-                                f"expected t.size(0) to be 1, got {t.size(0)}"
-                            )
+                        assert t.size(0) == 1
 
                     flat_basis_chunk = [torch.squeeze(t, 0) for t in flat_basis_chunk]
 
@@ -853,14 +842,9 @@ def _chunked_standard_basis_for_(
     # NOTE: Argument `chunk_size` is used to generate chunked basis instead of
     #       one huge basis matrix. `chunk_size` dictates the maximum size of the
     #       basis matrix along dim=0.
-    if len(tensors) != len(tensor_numels):
-        raise AssertionError(
-            f"len(tensors)={len(tensors)} != len(tensor_numels)={len(tensor_numels)}"
-        )
-    if len(tensors) == 0:
-        raise AssertionError("tensors must have at least one element")
-    if chunk_size is not None and chunk_size <= 0:
-        raise AssertionError(f"chunk_size must be > 0 or None, got {chunk_size}")
+    assert len(tensors) == len(tensor_numels)
+    assert len(tensors) > 0
+    assert chunk_size is None or chunk_size > 0
     total_numel = sum(tensor_numels)
     if chunk_size and chunk_size < total_numel:
         chunk_numels = get_chunk_sizes(total_numel, chunk_size)
@@ -1212,10 +1196,7 @@ def _jvp_with_argnums(
 
 def safe_unflatten(tensor: torch.Tensor, dim: int, shape: torch.Size) -> torch.Tensor:
     if len(shape) == 0:
-        if tensor.shape[dim] != 1:
-            raise AssertionError(
-                f"expected tensor.shape[{dim}] to be 1, got {tensor.shape[dim]}"
-            )
+        assert tensor.shape[dim] == 1
         return tensor.squeeze(dim)
     return tensor.unflatten(dim, shape)
 
@@ -1340,8 +1321,7 @@ def jacfwd(
         flat_primals, primals_spec = tree_flatten(primals)
         flat_primals_numels = tuple(p.numel() for p in flat_primals)
         flat_basis = _construct_standard_basis_for(flat_primals, flat_primals_numels)
-        if flat_basis is None:
-            raise AssertionError("flat_basis must not be None")
+        assert flat_basis is not None
         basis = tree_unflatten(flat_basis, primals_spec)
 
         def push_jvp(basis: Any) -> Any:

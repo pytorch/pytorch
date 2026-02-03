@@ -216,10 +216,7 @@ def check_node_safe(node: Node) -> None:
             # But if user explicitly specified cache hash - allow to cache it.
             if node.meta.get("user_cache_hash", None):
                 return
-        if isinstance(node.target, str):
-            raise AssertionError(
-                f"expected node.target to not be a string, got {node.target}"
-            )
+        assert not isinstance(node.target, str)
         if not is_cacheable_function(node.target):
             module = getattr(node.target, "__module__", None)
             name = getattr(node.target, "__name__", None)
@@ -230,10 +227,7 @@ def check_node_safe(node: Node) -> None:
         method_name = node.target
         method_target = node.args[0]
         # Only support method calls on base tensors
-        if not isinstance(method_target, Node):
-            raise AssertionError(
-                f"expected method_target to be Node, got {type(method_target)}"
-            )
+        assert isinstance(method_target, Node)
         if not is_tensor(method_target):
             module = getattr(method_target, "__module__", None)
             name = getattr(method_target, "__name__", None)
@@ -403,8 +397,7 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
         self,
         gm: torch.fx.GraphModule,
     ) -> list[str]:
-        if not has_triton_package():
-            raise AssertionError("Triton is not available")
+        assert has_triton_package(), "Triton is not available"
 
         triton_kernels = []
         for module in gm.modules():
@@ -588,10 +581,7 @@ def normalize_placeholder_names(
                 n.target = target
                 n._rename(name)
                 i += 1
-        if i != len(old_placeholder_names):
-            raise AssertionError(
-                f"i={i} != len(old_placeholder_names)={len(old_placeholder_names)}"
-            )
+        assert i == len(old_placeholder_names)
         # Now restore the old namespace's used names
         gm.graph._graph_namespace._used_names = old_used_names
         gm.recompile()
@@ -963,8 +953,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
         if torch._inductor.config.unsafe_skip_cache_dynamic_shape_guards:
             return True
         shape_env = AOTAutogradCache._get_shape_env()
-        if shape_env is None:
-            raise AssertionError("shape_env must not be None")
+        assert shape_env is not None
         result = shape_env.evaluate_guards_expression(guard_expr, hints)
         return result
 
@@ -1020,10 +1009,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
             if config.strict_autograd_cache:
                 raise e
         if entry is not None:
-            if pickled_content is None:
-                raise AssertionError(
-                    "pickled_content must not be None when entry is not None"
-                )
+            assert pickled_content is not None
             return (entry, pickled_content)
         else:
             return None
@@ -1135,18 +1121,15 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
             def unwrap_output_code(obj: object) -> OutputCode:
                 while hasattr(obj, "__wrapped__"):
                     obj = obj.__wrapped__
-                if not isinstance(obj, OutputCode):
-                    raise AssertionError(f"expected OutputCode, got {type(obj)}")
+                assert isinstance(obj, OutputCode)
                 return obj
 
             compiled_fw_graph = unwrap_output_code(compiled_fw_func)
             bundled_compiled_forward = BundledCompiledForward(compiled_fw_graph)
             bundled_compiled_backward = None
             if compiled_bw_func is not None:
-                if backward_state_indices is None:
-                    raise AssertionError("backward_state_indices must not be None")
-                if num_symints_saved_for_bw is None:
-                    raise AssertionError("num_symints_saved_for_bw must not be None")
+                assert backward_state_indices is not None
+                assert num_symints_saved_for_bw is not None
                 compiled_bw_graph = unwrap_output_code(compiled_bw_func)
                 bundled_compiled_backward = BundledCompiledBackward(
                     compiled_bw_graph, backward_state_indices, num_symints_saved_for_bw
@@ -1176,8 +1159,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
                 compiled_fw_func, "_fx_graph_cache_debug_lines", []
             )
 
-            if fw_key is None:
-                raise AssertionError("fw_key must not be None")
+            assert fw_key is not None
             compiled_forward = CompiledForward(
                 fx_graph_cache_info=(fw_key, fw_debug_lines),
                 fx_graph_guard_expr=getattr(compiled_fw_func, "guards_expr", None),
@@ -1188,12 +1170,9 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
                 bw_debug_lines = getattr(
                     compiled_bw_func, "_fx_graph_cache_debug_lines", []
                 )
-                if bw_key is None:
-                    raise AssertionError("bw_key must not be None")
-                if backward_state_indices is None:
-                    raise AssertionError("backward_state_indices must not be None")
-                if num_symints_saved_for_bw is None:
-                    raise AssertionError("num_symints_saved_for_bw must not be None")
+                assert bw_key is not None
+                assert backward_state_indices is not None
+                assert num_symints_saved_for_bw is not None
                 compiled_backward = CompiledBackward(
                     fx_graph_cache_info=(bw_key, bw_debug_lines),
                     fx_graph_guard_expr=getattr(compiled_bw_func, "guards_expr", None),

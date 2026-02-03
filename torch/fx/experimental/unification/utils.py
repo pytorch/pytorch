@@ -56,8 +56,7 @@ def _toposort(edges):
         n = S.pop()
         L.append(n)
         for m in edges.get(n, ()):
-            if n not in incoming_edges[m]:
-                raise AssertionError(f"Expected {n} in incoming_edges[{m}]")
+            assert n in incoming_edges[m]
             incoming_edges[m].remove(n)
             if not incoming_edges[m]:
                 S.add(m)

@@ -200,10 +200,7 @@ def transform_get_item_tensor(constraint, counter):
 
      slice with default arguments does not change the rank
     """
-    if not isinstance(constraint.index_tuple, tuple):
-        raise AssertionError(
-            f"Expected tuple for index_tuple, got {type(constraint.index_tuple)}"
-        )
+    assert isinstance(constraint.index_tuple, tuple)
 
     # generate a result tensor of the expected size
     dims, counter = gen_tensor_dims(constraint.tensor_size, counter)
@@ -283,8 +280,7 @@ def generate_binconstraint_t(constraint, counter):
 
     # matching
     elif constraint.op == op_matching:
-        if not isinstance(constraint.rhs, TensorType):
-            raise AssertionError(f"Expected TensorType, got {type(constraint.rhs)}")
+        assert isinstance(constraint.rhs, TensorType)
         d1 = constraint.rhs.__args__[0]
         d2 = constraint.rhs.__args__[1]
         d3 = constraint.rhs.__args__[2]
@@ -327,8 +323,7 @@ def generate_binconstraint_t(constraint, counter):
         return Disj([c_dyn, c_tensor_1, c_tensor_2, c_tensor_3, c_tensor_4]), counter
 
     elif constraint.op == op_leq:
-        if not isinstance(constraint.rhs, int):
-            raise AssertionError(f"Expected int, got {type(constraint.rhs)}")
+        assert isinstance(constraint.rhs, int)
         disj = [BinConstraintT(constraint.lhs, Dyn, op_eq)]
         for i in range(1, constraint.rhs + 1):
             dims = []
@@ -813,10 +808,7 @@ def calc_last_two_dims(constraint, d: list[DVar]):
 
     """
 
-    if not isinstance(constraint, (CalcConv, CalcMaxPool)):
-        raise AssertionError(
-            f"Expected CalcConv or CalcMaxPool, got {type(constraint)}"
-        )
+    assert isinstance(constraint, (CalcConv, CalcMaxPool))
 
     b3 = constraint.matching_constraint[2]
     b4 = constraint.matching_constraint[3]
@@ -947,8 +939,7 @@ def gen_all_reshape_possibilities(list_of_dims, target):
         p = list(p)
 
         for constraint in p:
-            if not isinstance(constraint, BinConstraintD):
-                raise AssertionError(f"Expected BinConstraintD, got {type(constraint)}")
+            assert isinstance(constraint, BinConstraintD)
             if constraint.op == op_neq:
                 to_multiply.append(constraint.lhs)
 
@@ -982,8 +973,7 @@ def broadcast_dim(tensor_input1, tensor_input2, res1, res2, index, padding=False
 
     """
     if tensor_input1[index] is None:
-        if not padding:
-            raise AssertionError("Expected padding when tensor_input1[index] is None")
+        assert padding
 
     if not padding:
         # then the inputs are the same length so they all have dimensions at "index"
@@ -1045,8 +1035,7 @@ def apply_padding(
 
         simulate_padding = [None] * (len(d2) - i)
 
-        if len(simulate_padding + d1) != len(d2):
-            raise AssertionError("Padding + d1 length must equal d2 length")
+        assert len(simulate_padding + d1) == len(d2)
 
         # for every padding size, we also consider broadcasting
         broadcast_padding = [
@@ -1232,10 +1221,9 @@ def gen_greatest_upper_bound(constraint: TGreatestUpperBound, counter: int):
             BinConstraintT(constraint.res, c3tensor, op_eq),
         ] + gen_nat_constraints(dims1 + dims2 + dims3)
 
-        if not (
+        assert (
             len(c3tensor.__args__) == len(c1tensor.__args__) == len(c2tensor.__args__)
-        ):
-            raise AssertionError("Tensor args lengths must be equal")
+        )
         for i in range(len(c3tensor.__args__)):
             c.append(
                 DGreatestUpperBound(

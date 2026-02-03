@@ -110,10 +110,7 @@ def fn_input_mutations_to_outputs(
     @simple_wraps(fn)
     def inner_fn(*args: FxValue) -> tuple[tuple[Any, ...], tuple[Any, ...]]:
         outs, outs_descs = call_and_expect_output_descs(fn, args)
-        if len(meta.output_info) != len(outs):
-            raise AssertionError(
-                f"output_info length ({len(meta.output_info)}) != outs length ({len(outs)})"
-            )
+        assert len(meta.output_info) == len(outs)
         # The compiled fw will return mutated input tensors, *including* metadata-only mutation.
         # However, if keep_data_input_mutations is set, the compiled fw only needs to return metadata-mutated inputs.
         # (because data-only input mutations are handled directly in the compiled graph)
@@ -175,13 +172,9 @@ def fn_prepped_for_autograd(
         ]
 
         outs, outs_descs = call_and_expect_output_descs(fn, args_maybe_cloned)  # type: ignore[arg-type]
-        if not isinstance(outs, (tuple, list)):
-            raise AssertionError(f"expected outs to be tuple or list, got {type(outs)}")
+        assert isinstance(outs, (tuple, list))
         outs = list(outs)
-        if len(meta.output_info) != len(outs):
-            raise AssertionError(
-                f"output_info length ({len(meta.output_info)}) != outs length ({len(outs)})"
-            )
+        assert len(meta.output_info) == len(outs)
 
         mutated_input_pairs = [
             (x, InputMutationAOTOutput(src))
@@ -199,17 +192,13 @@ def fn_prepped_for_autograd(
         intermediate_bases_descs = []
         for o, info, o_desc in zip(outs, meta.output_info, outs_descs):
             if info.output_type == OutputType.alias_of_intermediate_save_as_output:
-                if not isinstance(o, torch.Tensor):
-                    raise AssertionError(
-                        f"Expected tensor for intermediate base, got {type(o)}"
-                    )
+                assert isinstance(o, torch.Tensor), (
+                    f"Expected tensor for intermediate base, got {type(o)}"
+                )
                 intermediate_bases.append(o._base)
                 intermediate_bases_descs.append(IntermediateBaseAOTOutput(o_desc))
 
-        if meta.num_intermediate_bases != len(intermediate_bases):
-            raise AssertionError(
-                f"num_intermediate_bases ({meta.num_intermediate_bases}) != len(intermediate_bases) ({len(intermediate_bases)})"
-            )
+        assert meta.num_intermediate_bases == len(intermediate_bases)
 
         # the compiled forward should return (mutated_inputs, user_outs, intermediate_bases)
         fw_outs_to_return = *mutated_inputs_to_return, *outs, *intermediate_bases
@@ -248,10 +237,7 @@ def fn_prepped_for_autograd(
         out_grad_mask = (
             mutated_inputs_grad_mask + output_grad_mask + intermediate_base_grad_mask
         )
-        if len(out_grad_mask) != len(fw_outs_to_return):
-            raise AssertionError(
-                f"out_grad_mask length ({len(out_grad_mask)}) != fw_outs_to_return length ({len(fw_outs_to_return)})"
-            )
+        assert len(out_grad_mask) == len(fw_outs_to_return)
 
         # Take care to grab and sync the updated inputs from primals_after_cloning (the inputs we actually mutate!)
         # and not primals (the preserved inputs, pre-mutation, that we pass to grad())
@@ -308,18 +294,14 @@ def create_joint(
         outs_descs = None
         if primals_descs is None:
             outs, tangent_mask = fn(*primals)
-            if pytree.tree_any(lambda x: isinstance(x, AOTOutput), tangent_mask):
-                raise AssertionError(
-                    "tangent_mask should not contain AOTOutput instances"
-                )
+            assert not pytree.tree_any(lambda x: isinstance(x, AOTOutput), tangent_mask)
         else:
             (outs, tangent_mask), (outs_descs, _) = call_and_expect_output_descs(
                 fn,
                 primals,  # type: ignore[arg-type]
             )
         mode = get_proxy_mode()
-        if mode is None:
-            raise AssertionError("Expected non-None proxy mode")
+        assert mode is not None, "Expected non-None proxy mode"
         for node in mode.tracer.graph.nodes:
             node.meta["partitioner_tag"] = "is_forward"
 
@@ -327,17 +309,11 @@ def create_joint(
         if joint_fn_handle and joint_fn_handle.post_forward:
             joint_fn_handle.post_forward(primals)
 
-        if len(tangent_mask) != len(outs):
-            raise AssertionError(
-                f"tangent_mask length ({len(tangent_mask)}) != outs length ({len(outs)})"
-            )
+        assert len(tangent_mask) == len(outs)
         outs_to_grad = [
             o for needs_tangent, o in zip(tangent_mask, outs) if needs_tangent
         ]
-        if len(outs_to_grad) != len(tangents):
-            raise AssertionError(
-                f"outs_to_grad length ({len(outs_to_grad)}) != tangents length ({len(tangents)})"
-            )
+        assert len(outs_to_grad) == len(tangents)
 
         # Get the inputs that need gradients
         grad_primals: list[torch.Tensor] = []
@@ -347,8 +323,7 @@ def create_joint(
         for p in primals:
             if isinstance(p, Tensor) and p.requires_grad:
                 inputs_needs_grads.append(True)
-                if not isinstance(p, torch.Tensor):  # Help mypy understand the type
-                    raise AssertionError(f"expected Tensor, got {type(p)}")
+                assert isinstance(p, torch.Tensor)  # Help mypy understand the type
                 grad_primals.append(p)
             else:
                 inputs_needs_grads.append(False)
@@ -368,10 +343,9 @@ def create_joint(
                 # Return out if the result of out.shape==tangent.shape is unknown or known to be true.
                 # otherwise if its a known false return out.view(tangent.shape).
                 # tangent should also be a tensor since it corresponds to a tensor output
-                if not isinstance(tangent, torch.Tensor):
-                    raise AssertionError(
-                        f"Expected tensor tangent, got {type(tangent)}"
-                    )
+                assert isinstance(tangent, torch.Tensor), (
+                    f"Expected tensor tangent, got {type(tangent)}"
+                )
                 needed_outs.append(
                     out
                     if guard_or_true(sym_eq(out.shape, tangent.shape))
@@ -417,25 +391,14 @@ def create_joint(
                 else:
                     # Disable autocast, then enable anything in `backward_pass_autocast`.
                     stack.enter_context(disable_autocast())
-                    if not isinstance(backward_pass_autocast, list):
-                        raise AssertionError(
-                            f"expected backward_pass_autocast to be a list, got {type(backward_pass_autocast)}"
-                        )
+                    assert isinstance(backward_pass_autocast, list)
                     for kwargs in backward_pass_autocast:
-                        if not isinstance(kwargs, dict):
-                            raise AssertionError(
-                                f"expected kwargs to be a dict, got {type(kwargs)}"
-                            )
+                        assert isinstance(kwargs, dict)
                         stack.enter_context(torch.amp.autocast(**kwargs))
 
                 # for full graph export, we always export a joint graph where we assume no tangents are needed.
                 if aot_config.no_tangents:
-                    if not (
-                        len(needed_tangents) == 1 and needed_tangents[0].numel() == 1
-                    ):
-                        raise AssertionError(
-                            f"expected single scalar tangent for no_tangents mode, got {len(needed_tangents)} tangents"
-                        )
+                    assert len(needed_tangents) == 1 and needed_tangents[0].numel() == 1
                     backward_out = torch.autograd.grad(
                         needed_outs,
                         grad_primals,
@@ -455,8 +418,7 @@ def create_joint(
         )
         if primals_descs is None:
             return final_outs  # type: ignore[return-value]
-        if outs_descs is None:
-            raise AssertionError("outs_descs must not be None")
+        assert outs_descs is not None
         # pyrefly: ignore[bad-return]
         return final_outs, (
             outs_descs,
@@ -614,8 +576,7 @@ def create_functionalized_rng_ops_wrapper(
 @contextmanager
 def set_partitioner_tag(tag: str) -> Generator[None, None, None]:
     meta_key = "partitioner_tag"
-    if not fx_traceback.has_preserved_node_meta():
-        raise AssertionError("expected preserved node meta")
+    assert fx_traceback.has_preserved_node_meta()
 
     original_val = fx_traceback.current_meta.get(meta_key, None)
     fx_traceback.current_meta[meta_key] = tag
@@ -715,10 +676,7 @@ def apply_in_graph_mutations(
     mcs: Optional[MutationCounters] = None,
     applied_mcs: Optional[MutationCounters] = None,
 ) -> None:
-    if input_info.mutation_type != MutationType.MUTATED_IN_GRAPH:
-        raise AssertionError(
-            f"expected mutation_type MUTATED_IN_GRAPH, got {input_info.mutation_type}"
-        )
+    assert input_info.mutation_type == MutationType.MUTATED_IN_GRAPH
     # See Note [set_() Input Mutations in AOTAutograd]
     # all mutations on the input must be under no_grad, so it is safe to put in the graph
     # Here, we're saying that if an input experienced a set call, inp.set_(other),
@@ -754,8 +712,7 @@ def apply_in_graph_mutations(
             # resizing is not supported on subclasses (we error earlier if this happens)
             from torch._subclasses.functional_tensor import FunctionalTensor
 
-            if not isinstance(f_inpt, FunctionalTensor):
-                raise AssertionError(f"expected FunctionalTensor, got {type(f_inpt)}")
+            assert isinstance(f_inpt, FunctionalTensor)
             old_storage_size = torch._functionalize_get_storage_size(  # type: ignore[attr-defined]
                 f_inpt.elem, before=True
             )
@@ -763,11 +720,10 @@ def apply_in_graph_mutations(
                 f_inpt.elem, before=False
             )
             if old_storage_size != new_storage_size:
-                if not (old_storage_size == 0 or new_storage_size == 0):
-                    raise AssertionError(f"""\
+                assert old_storage_size == 0 or new_storage_size == 0, f"""\
         Encosize during tracing on input {input_idx}. Old nbytes={old_storage_size}, new nbytes={new_storage_size}
         We oresizing on graph inputs as long as the input either starts or ends with a storage size of 0
-        (thee for FSDP)""")
+        (thee for FSDP)"""
                 torch.ops.inductor.resize_storage_bytes_(inpt_old, new_storage_size)
             if new_storage_size == 0:
                 # Even if we marked the input as having a data mutation (thus needing a copy_()),
@@ -897,14 +853,11 @@ def create_functionalized_fn(
                 # - We could in theory have our analysis pass differentiate mutations in the fw from mutations in
                 #   the bw by running our analysis first on the fw-only graph, and then on the joint graph. This would
                 #   require an extra round of tracing though, so it's more efficient to do in-line here.
-                if not (
+                assert (
                     isinstance(args, tuple)
                     and len(args) == 2
                     and isinstance(args[0], (list, tuple))
-                ):
-                    raise AssertionError(
-                        f"expected args to be tuple of (list/tuple, ...), got {type(args)}"
-                    )
+                )
                 # Only look at mutations that happened to forward inputs (e.g. fw buffers that were saved for bw)
                 primals_before = args[0]
                 primals_after = pytree.tree_map(from_fun, f_args[0])
@@ -920,17 +873,15 @@ def create_functionalized_fn(
 
                     # Ban metadata mutations on fw inputs during the bw
                     if not inpt_info.mutates_metadata:
-                        if joint_mutates_metadata:
-                            raise AssertionError(
-                                "Found a graph input that had its metadata mutated in the backward. This is not supported"
-                            )
+                        assert not joint_mutates_metadata, (
+                            "Found a graph input that had its metadata mutated in the backward. This is not supported"
+                        )
 
                     # Ban storage resizing on fw inputs during the bw
                     if not inpt_info.mutation_inductor_storage_resize:
-                        if was_inductor_storage_resized(f_inpt):
-                            raise AssertionError(
-                                "Found a graph input that had storage resizing in the backward. This is not supported"
-                            )
+                        assert not was_inductor_storage_resized(f_inpt), (
+                            "Found a graph input that had storage resizing in the backward. This is not supported"
+                        )
 
                     # Allow data mutations on fw inputs during the bw, but only if they do not require grad
                     # So we can guarantee that we can keep the mutations in the graph
@@ -947,13 +898,9 @@ def create_functionalized_fn(
                             set_partitioner_tag_must_be_in_backward(),
                         ):
                             # before and after should be tensors if we're calling copy_ on them
-                            if not (
-                                isinstance(before, torch.Tensor)
-                                and isinstance(after, torch.Tensor)
-                            ):
-                                raise AssertionError(
-                                    f"expected both before and after to be Tensors, got {type(before)} and {type(after)}"
-                                )
+                            assert isinstance(before, torch.Tensor) and isinstance(
+                                after, torch.Tensor
+                            )
                             before.copy_(after)
                         meta.indices_of_inputs_that_requires_grad_with_mutations_in_bw.append(
                             idx
@@ -966,13 +913,11 @@ def create_functionalized_fn(
                 for f_inpt, before, after in zip(
                     f_args[1], tangents_before, tangents_after
                 ):
-                    if has_metadata_mutation(
+                    assert not has_metadata_mutation(
                         f_inpt, before, check_only_storage_mutation=False
-                    ):
-                        raise AssertionError(
-                            "Found an input to the backward that had metadata mutated "
-                            "during the backward pass. This is not supported"
-                        )
+                    ), (
+                        "Found an input to the backward that had metadata mutated during the backward pass. This is not supported"
+                    )
                     if has_data_mutation(f_inpt):
                         can_be_in_graph = _check_if_mutation_can_be_in_graph(
                             keep_input_mutations=True,
@@ -990,20 +935,15 @@ def create_functionalized_fn(
                             ),
                             requires_grad=f_inpt.requires_grad,
                         )
-                        if not can_be_in_graph:
-                            raise AssertionError(
-                                "a backward input that had data mutated in an autograd-aware way. This is not supported"
-                            )
+                        assert can_be_in_graph, (
+                            "a backward input that had data mutated in an autograd-aware way. This is not supported"
+                        )
                         # Perform the input mutation
                         with torch.fx.traceback.preserve_node_meta():
                             # before and after should be tensors if we're calling copy_ on them
-                            if not (
-                                isinstance(before, torch.Tensor)
-                                and isinstance(after, torch.Tensor)
-                            ):
-                                raise AssertionError(
-                                    f"expected both before and after to be Tensors, got {type(before)} and {type(after)}"
-                                )
+                            assert isinstance(before, torch.Tensor) and isinstance(
+                                after, torch.Tensor
+                            )
                             before.copy_(after)
 
             if aot_config.keep_inference_input_mutations:
@@ -1084,10 +1024,7 @@ def create_functionalized_fn(
                 ):
                     if not isinstance(f_inpt, torch.Tensor):
                         continue
-                    if not is_fun(f_inpt):
-                        raise AssertionError(
-                            f"expected functional tensor, got {type(f_inpt)}"
-                        )
+                    assert is_fun(f_inpt)
                     inpt_new = from_fun(f_inpt)
                     if (
                         meta.input_info[idx].mutation_type
@@ -1132,8 +1069,7 @@ def create_functionalized_fn(
                     if info.output_type != OutputType.is_input:
                         continue
 
-                    if info.base_idx is None:
-                        raise AssertionError("info.base_idx must not be None")
+                    assert info.base_idx is not None
                     if (
                         meta.input_info[info.base_idx].mutation_type
                         == MutationType.MUTATED_IN_GRAPH
@@ -1180,18 +1116,13 @@ def handle_effect_tokens_fn(
         with disable_above:
             # See Note [Side-Effectful Tokens in AOTAutograd]
             if trace_joint:
-                if not (isinstance(args, tuple) and isinstance(args[0], (list, tuple))):
-                    raise AssertionError(
-                        f"expected args to be tuple with first element as list/tuple, got {type(args)}"
-                    )
+                assert isinstance(args, tuple) and isinstance(args[0], (list, tuple))
                 tokens = args[0][:num_tokens]
-                if not all(token.numel() == 0 for token in tokens):
-                    raise AssertionError("all tokens must have numel() == 0")
+                assert all(token.numel() == 0 for token in tokens)
                 args = (args[0][num_tokens:], *args[1:])
             else:
                 tokens = args[:num_tokens]
-                if not all(token.numel() == 0 for token in tokens):
-                    raise AssertionError("all tokens must have numel() == 0")
+                assert all(token.numel() == 0 for token in tokens)
                 args = args[num_tokens:]
 
             # Populate the current FunctionalTensorMode with the tokens per
@@ -1199,8 +1130,7 @@ def handle_effect_tokens_fn(
             functional_tensor_mode = torch.utils._python_dispatch._detect_infra_mode(
                 torch._C._TorchDispatchModeKey.FUNCTIONAL
             )
-            if functional_tensor_mode is None:
-                raise AssertionError("functional_tensor_mode must not be None")
+            assert functional_tensor_mode is not None
             f_tokens = pytree.tree_map(to_fun, tokens)
             for i, k in enumerate(meta.tokens.keys()):
                 functional_tensor_mode._tokens[k] = f_tokens[i]
@@ -1211,14 +1141,8 @@ def handle_effect_tokens_fn(
         # Return both the tokens and the outputs
         # See Note [Side-Effectful Tokens in AOTAutograd]
         if trace_joint:
-            if len(outs) != 2:
-                raise AssertionError(
-                    f"expected len(outs) == 2 for joint trace, got {len(outs)}"
-                )
-            if len(functional_tensor_mode._tokens_forward_output) != num_tokens:
-                raise AssertionError(
-                    f"expected {num_tokens} forward output tokens, got {len(functional_tensor_mode._tokens_forward_output)}"
-                )
+            assert len(outs) == 2
+            assert len(functional_tensor_mode._tokens_forward_output) == num_tokens
             fwd_out_tokens = functional_tensor_mode._tokens_forward_output.values()
 
             bwd_out_tokens = functional_tensor_mode._tokens.values()
@@ -1321,10 +1245,10 @@ def aot_dispatch_subclass(
             # See Note: [Computing Subclass Metadata about grad_inputs]
             # We also stash subclass info on our grad_inputs, if we're tracing the joint.
             nonlocal subclass_meta
-            if not (isinstance(wrapped_outs, tuple) and len(wrapped_outs) == 2):
-                raise AssertionError(
-                    f"expected wrapped_outs to be tuple of length 2, got {type(wrapped_outs)}, {wrapped_outs_descs}"
-                )
+            assert isinstance(wrapped_outs, tuple) and len(wrapped_outs) == 2, (
+                wrapped_outs,
+                wrapped_outs_descs,
+            )
             # Don't need fw outs since we already have subclass metadata on them
             grad_inputs = wrapped_outs[1]
             subclass_meta.grad_input_metas = create_subclass_meta(grad_inputs)
@@ -1463,10 +1387,7 @@ def create_functional_call(
         if isinstance(params_spec, TreeSpec):
             params = pytree.tree_unflatten(flat_params, params_spec)
         else:
-            if not isinstance(params_spec, list):
-                raise AssertionError(
-                    f"expected params_spec to be a list, got {type(params_spec)}"
-                )
+            assert isinstance(params_spec, list)
             params = dict(zip(params_spec, flat_params))
         with (
             stateless._reparametrize_module(mod, params),
@@ -1488,8 +1409,7 @@ def create_functional_call(
                     )
                     with torch.autograd.detect_anomaly(check_nan=False):
                         fake_mode = detect_fake_mode()
-                        if fake_mode is None:
-                            raise AssertionError("fake_mode must not be None")
+                        assert fake_mode is not None
                         fake_mode.epoch += 1
                         out = PropagateUnbackedSymInts(mod).run(*args)
             else:
