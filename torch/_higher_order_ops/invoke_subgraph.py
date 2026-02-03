@@ -913,9 +913,14 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, *operands):
 
         with dynamo_timed("invoke_subgraph_proxy_tensor", log_pt2_compile_event=True):
             subgraph_decomp_table = _extract_nested_region_config(subgraph)
-            graph = reenter_make_fx(
-                subgraph, subgraph_decomp_table=subgraph_decomp_table
-            )(*operands)
+
+            # NB: invoke_subgraph subgraph re-trace seq_nr
+            # The joint graph seq_nr will get wrong in the subsequent re-trace (all nodes will have the same seq_nr),
+            # so we preserve the original graph's seq_nr here.
+            with torch.fx.traceback._preserve_node_seq_nr():
+                graph = reenter_make_fx(
+                    subgraph, subgraph_decomp_table=subgraph_decomp_table
+                )(*operands)
 
         from torch._guards import detect_fake_mode
 
