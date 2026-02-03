@@ -4177,10 +4177,24 @@ class numpy_operator_wrapper(Generic[_P, R]):
 def defake(x: Any) -> Any:
     if not isinstance(x, FakeTensor):
         return x
-    from torch._inductor.virtualized import V
-
-    size = V.graph.sizevars.optimization_hints(x.size())
-    stride = V.graph.sizevars.optimization_hints(x.stride())
+    size: torch._prims_common.ShapeType
+    stride: torch._prims_common.StrideType
+    if x._has_symbolic_sizes_strides:
+        size = []
+        for s in x.size():
+            if isinstance(s, torch.SymInt):
+                size.append(s.node.shape_env.size_hint(s.node.expr))
+            else:
+                size.append(s)
+        stride = []
+        for s in x.stride():
+            if isinstance(s, torch.SymInt):
+                stride.append(s.node.shape_env.size_hint(s.node.expr))
+            else:
+                stride.append(s)
+    else:
+        size = x.size()
+        stride = x.stride()
     y = torch.empty_strided(
         size,
         stride,
