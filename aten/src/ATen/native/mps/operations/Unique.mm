@@ -8,9 +8,9 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_unique.h>
-#include <ATen/ops/_unique_native.h>
 #include <ATen/ops/_unique2.h>
 #include <ATen/ops/_unique2_native.h>
+#include <ATen/ops/_unique_native.h>
 #include <ATen/ops/arange.h>
 #include <ATen/ops/argsort.h>
 #include <ATen/ops/cat.h>
@@ -318,9 +318,7 @@ std::tuple<Tensor, Tensor, Tensor> _unique2_mps(const Tensor& self,
   return _unique_impl_mps(self, return_inverse, return_counts, false, std::nullopt);
 }
 
-std::tuple<Tensor, Tensor> _unique_mps(const Tensor& self,
-                                       const bool sorted,
-                                       const bool return_inverse) {
+std::tuple<Tensor, Tensor> _unique_mps(const Tensor& self, const bool sorted, const bool return_inverse) {
   auto [output, inverse_indices, _] = _unique_impl_mps(self, return_inverse, false, false, std::nullopt);
   return std::make_tuple(std::move(output), std::move(inverse_indices));
 }
