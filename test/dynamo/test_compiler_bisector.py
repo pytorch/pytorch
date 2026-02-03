@@ -121,7 +121,7 @@ class TestCompilerBisector(TestCase):
 
             return torch.allclose(out, out_c)
 
-        with config.patch(pre_grad_custom_pass=pass_fn, pattern_matcher=True):
+        with config.patch(pre_grad_custom_pass=pass_fn):
             out = CompilerBisector.do_bisect(test_fn)
         self.assertEqual(out.backend, "inductor")
         self.assertEqual(out.subsystem, "pre_grad_passes")
