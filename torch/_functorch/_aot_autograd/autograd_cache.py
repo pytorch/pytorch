@@ -1043,7 +1043,9 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
         write_atomic(path, content)
 
     @staticmethod
-    def _find_unpicklable_field(entry: GenericAOTAutogradResult[Any, Any]) -> Optional[str]:
+    def _find_unpicklable_field(
+        entry: GenericAOTAutogradResult[Any, Any],
+    ) -> Optional[str]:
         """Find which field of entry is causing pickle to fail."""
         fields = []
         if hasattr(entry, "__dataclass_fields__"):
@@ -1059,7 +1061,9 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
         return None
 
     @staticmethod
-    def _pickle_entry(entry: GenericAOTAutogradResult[Any, Any], remote: bool) -> Optional[bytes]:
+    def _pickle_entry(
+        entry: GenericAOTAutogradResult[Any, Any], remote: bool
+    ) -> Optional[bytes]:
         """Pickle entry, returning None on failure."""
         try:
             return pickle.dumps(entry)

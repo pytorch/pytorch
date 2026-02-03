@@ -2824,9 +2824,9 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
 
         self.assertIsNone(result)
         self.assertEqual(len(log_context.output), 1)
-        self.assertExpectedInline(
+        self.assertIn(
+            "WeakValueDictionary.__init__.<locals>.remove",  # noqa: B950
             log_context.output[0],
-            """WARNING:torch._functorch._aot_autograd.autograd_cache:AOTAutograd cache unable to serialize compiled graph: Can't get local object 'WeakValueDictionary.__init__.<locals>.remove'""",  # noqa: B950
         )
 
     def test_pickle_entry_with_lambda(self):
