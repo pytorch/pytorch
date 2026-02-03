@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import logging
 import uuid
 from collections import defaultdict
 from collections.abc import Iterable
@@ -6,6 +7,9 @@ from dataclasses import dataclass
 from time import perf_counter_ns
 from typing import Any, Optional
 from warnings import warn
+
+
+log = logging.getLogger(__name__)
 
 import torch
 import torch.cuda
@@ -556,8 +560,23 @@ class profile:
             raise AssertionError("Expected profiling results")
         return self._function_events.self_cpu_time_total
 
-    def _parse_kineto_results(self, result: _ProfilerResult):
+    def _parse_kineto_results(
+        self, result: _ProfilerResult, timeout_s: Optional[float] = None
+    ):
         # result.events() has most of the events - PyTorch op-level and device-level events
+
+        timeout_ns = int(timeout_s * 1e9) if timeout_s is not None else None
+        start_time_ns = perf_counter_ns()
+        timed_out = False
+
+        def _check_timeout() -> bool:
+            """Check if timeout has been exceeded. Returns True if timed out."""
+            nonlocal timed_out
+            if timeout_ns is not None and not timed_out:
+                elapsed_ns = perf_counter_ns() - start_time_ns
+                if elapsed_ns >= timeout_ns:
+                    timed_out = True
+            return timed_out
 
         trace_start_ns = result.trace_start_ns()
         mem_records = [
@@ -599,6 +618,9 @@ class profile:
         device_corr_map: dict[int, list[FunctionEvent]] = {}
         max_evt_id = 0
         for kineto_event in result.events():
+            if _check_timeout():
+                break
+
             if (
                 _filter_name(kineto_event.name())
                 or getattr(kineto_event, "is_hidden_event", lambda: False)()
@@ -728,15 +750,29 @@ class profile:
 
         # output top-level memory events
         for mem_record in mem_records:
+            if _check_timeout():
+                break
+
             if not mem_record[1]:
                 max_evt_id += 1
                 fe = createFunctionEventForMemoryEvents(mem_record[0])
                 all_function_events.append(fe)
 
         for oom_record in oom_records:
+            if _check_timeout():
+                break
+
             max_evt_id += 1
             fe = createFunctionEventForMemoryEvents(oom_record)
             all_function_events.append(fe)
+
+        if timed_out:
+            log.warning(
+                "Profiler _parse_kineto_results timed out after %.3f seconds, "
+                "returning partial results with %d events",
+                timeout_s,
+                len(all_function_events),
+            )
 
         all_function_events.sort(
             key=lambda evt: [evt.time_range.start, -evt.time_range.end]
