@@ -105,6 +105,7 @@ class DeviceContext(TorchFunctionMode):
                 )
         if self.prev_mode is not None:
             _push_mode(self.prev_mode)
+            self.prev_mode = None
 
         for mode in reversed(cur_stack):
             _push_mode(mode)
