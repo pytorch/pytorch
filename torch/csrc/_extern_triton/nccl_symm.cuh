@@ -701,7 +701,7 @@ nccl_symm_lsa_barrier_wait(int64_t ctx_ptr, int32_t barrier_index) {
  * NCCL-specific wrapper for lsa_ptr operation.
  */
 __device__ int64_t
-nccl_symm_lsa_ptr(int64_t ctx_ptr, int64_t local_ptr, int32_t peer) {
+nccl_symm_remote_ptr(int64_t ctx_ptr, int64_t local_ptr, int32_t peer) {
   SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
   NCCLSymmContext* nccl_ctx = cast_to_nccl_context(ctx);
   return nccl_lsa_ptr_impl(nccl_ctx, local_ptr, peer);
@@ -711,8 +711,7 @@ nccl_symm_lsa_ptr(int64_t ctx_ptr, int64_t local_ptr, int32_t peer) {
  * NCCL-specific wrapper for lsa_multicast_ptr operation.
  * Team is obtained from the context internally.
  */
-__device__ int64_t
-nccl_symm_lsa_multicast_ptr(int64_t ctx_ptr, int64_t local_ptr) {
+__device__ int64_t nccl_symm_multicast_ptr(int64_t ctx_ptr, int64_t local_ptr) {
   SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
   NCCLSymmContext* nccl_ctx = cast_to_nccl_context(ctx);
   return nccl_lsa_multicast_ptr_impl(nccl_ctx, local_ptr);
@@ -752,7 +751,7 @@ __device__ int32_t nccl_symm_signal(
  * @param peer Peer rank to get signal pad pointer for
  * @return Device pointer to peer's signal pad, or 0 if not accessible
  */
-__device__ int64_t nccl_symm_lsa_signal_ptr(int64_t ctx_ptr, int32_t peer) {
+__device__ int64_t nccl_symm_signal_ptr(int64_t ctx_ptr, int32_t peer) {
   SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
   NCCLSymmContext* nccl_ctx = cast_to_nccl_context(ctx);
   return nccl_lsa_signal_ptr_impl(nccl_ctx, peer);

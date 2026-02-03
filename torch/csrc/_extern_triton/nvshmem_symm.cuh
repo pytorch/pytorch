@@ -919,7 +919,7 @@ nvshmem_symm_lsa_barrier_wait(int64_t ctx_ptr, int32_t barrier_index) {
  * NVSHMEM-specific wrapper for lsa_ptr operation.
  */
 __device__ int64_t
-nvshmem_symm_lsa_ptr(int64_t ctx_ptr, int64_t local_ptr, int32_t peer) {
+nvshmem_symm_remote_ptr(int64_t ctx_ptr, int64_t local_ptr, int32_t peer) {
   SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
   NVSHMEMSymmContext* nvshmem_ctx = cast_to_nvshmem_context(ctx);
   return nvshmem_lsa_ptr_impl(nvshmem_ctx, local_ptr, peer);
@@ -930,7 +930,7 @@ nvshmem_symm_lsa_ptr(int64_t ctx_ptr, int64_t local_ptr, int32_t peer) {
  * Team is obtained from the context internally.
  */
 __device__ int64_t
-nvshmem_symm_lsa_multicast_ptr(int64_t ctx_ptr, int64_t local_ptr) {
+nvshmem_symm_multicast_ptr(int64_t ctx_ptr, int64_t local_ptr) {
   SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
   NVSHMEMSymmContext* nvshmem_ctx = cast_to_nvshmem_context(ctx);
   TORCH_SYMM_CHECK(nvshmem_ctx->team != nullptr, "team is null in context");
@@ -974,7 +974,7 @@ __device__ int32_t nvshmem_symm_signal(
  * @param peer Peer PE number to get signal pad pointer for
  * @return Device pointer to peer's LSA signal pad, or 0 if not accessible
  */
-__device__ int64_t nvshmem_symm_lsa_signal_ptr(int64_t ctx_ptr, int32_t peer) {
+__device__ int64_t nvshmem_symm_signal_ptr(int64_t ctx_ptr, int32_t peer) {
   SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
   NVSHMEMSymmContext* nvshmem_ctx = cast_to_nvshmem_context(ctx);
   return nvshmem_lsa_signal_ptr_impl(nvshmem_ctx, peer);

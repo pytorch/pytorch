@@ -108,7 +108,7 @@ if TRITON_AVAILABLE:
         symm_all_reduce,
         symm_barrier_arrive,
         symm_barrier_wait,
-        symm_lsa_ptr,
+        symm_remote_ptr,
         symm_team_rank,
         symm_team_size,
         TorchSymmLibFinder,
@@ -221,7 +221,7 @@ if TRITON_AVAILABLE:
 
         # Read peer data via P2P (next PE in ring)
         next_pe = (my_pe + 1) % n_pes
-        peer_src_ptr = symm_lsa_ptr(ctx_ptr, src_ptr, next_pe, backend=backend_hint)
+        peer_src_ptr = symm_remote_ptr(ctx_ptr, src_ptr, next_pe, backend=backend_hint)
         p_peer = peer_src_ptr.to(tl.pointer_type(tl.int32))
         peer_val = tl.load(p_peer)
 

@@ -539,7 +539,7 @@ struct NCCLSymmContext : public SymmContext {
  *   Used for remote signaling via nvshmemx_signal_op()
  *
  * The symm_signal primitive uses gin_signal_pad (for remote atomic signals),
- * while symm_lsa_signal_ptr returns pointers to lsa_signal_pad (for P2P
+ * while symm_signal_ptr returns pointers to lsa_signal_pad (for P2P
  * access).
  *
  * Barrier Epoch Tracking:
@@ -568,7 +568,7 @@ struct NVSHMEMSymmContext : public SymmContext {
 
   // LSA signal pad pointer (symmetric address for P2P load/store signaling)
   // This is accessible via nvshmem_ptr() for direct memory access
-  // Used by symm_lsa_signal_ptr to get peer's signal pad address
+  // Used by symm_signal_ptr to get peer's signal pad address
   uint64_t* lsa_signal_pad;
 
   // GIN signal pad pointer (symmetric address for remote atomic signaling)

@@ -124,9 +124,9 @@ All constants are available in two forms:
 
 | Primitive              | Signature                                          | Purpose                                                 |
 |------------------------|----------------------------------------------------|---------------------------------------------------------|
-| `symm_lsa_ptr`         | `(ctx_ptr, local_ptr, peer, backend) -> int64`     | Get pointer to symmetric memory on a peer rank (P2P)    |
-| `symm_lsa_multicast_ptr` | `(ctx_ptr, local_ptr, backend) -> int64`         | Get multicast address for broadcasting to all LSA peers |
-| `symm_lsa_signal_ptr`  | `(ctx_ptr, peer, backend) -> int64`                | Get pointer to peer's signal pad for direct load/store  |
+| `symm_remote_ptr`      | `(ctx_ptr, local_ptr, peer, backend) -> int64`     | Get pointer to symmetric memory on a peer rank (P2P)    |
+| `symm_multicast_ptr`   | `(ctx_ptr, local_ptr, backend) -> int64`           | Get multicast address for broadcasting to all LSA peers |
+| `symm_signal_ptr`      | `(ctx_ptr, peer, backend) -> int64`                | Get pointer to peer's signal pad for direct load/store  |
 
 ### 2.3 Synchronization Primitives
 
@@ -244,13 +244,13 @@ def my_kernel(ctx_ptr, data_ptr, backend_hint: tl.constexpr):
     peer_scope = symm_team_peer(ctx_ptr, peer, backend=backend_hint)
     if peer_scope == TL_SCOPE_LSA:
         # Direct memory access via NVLink
-        peer_ptr = symm_lsa_ptr(ctx_ptr, data_ptr, peer, backend=backend_hint)
+        peer_ptr = symm_remote_ptr(ctx_ptr, data_ptr, peer, backend=backend_hint)
     else:
         # Use explicit put/get for cross-node communication
         pass
 
     # Multicast pointer also uses ctx_ptr only
-    mc_ptr = symm_lsa_multicast_ptr(ctx_ptr, data_ptr, backend=backend_hint)
+    mc_ptr = symm_multicast_ptr(ctx_ptr, data_ptr, backend=backend_hint)
 ```
 
 ### 2.7 Collective Primitives (Demonstration Only)
@@ -353,8 +353,8 @@ __device__ int32_t symm_team_size(int64_t ctx_ptr) {
     }
 }
 
-// symm_lsa_multicast_ptr also gets team from context internally
-__device__ int64_t symm_lsa_multicast_ptr(int64_t ctx_ptr, int64_t local_ptr) {
+// symm_multicast_ptr also gets team from context internally
+__device__ int64_t symm_multicast_ptr(int64_t ctx_ptr, int64_t local_ptr) {
     SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
     // Access ctx->team for team-scoped multicast pointer
     ...
@@ -386,13 +386,13 @@ def my_kernel(ctx_ptr, data_ptr, backend_hint: tl.constexpr):
     peer_scope = symm_team_peer(ctx_ptr, peer, backend=backend_hint)
     if peer_scope == TL_SCOPE_LSA:
         # Direct memory access via NVLink
-        peer_ptr = symm_lsa_ptr(ctx_ptr, data_ptr, peer, backend=backend_hint)
+        peer_ptr = symm_remote_ptr(ctx_ptr, data_ptr, peer, backend=backend_hint)
     else:
         # Use explicit put/get for cross-node communication
         pass
 
     # Multicast pointer also uses ctx_ptr only
-    mc_ptr = symm_lsa_multicast_ptr(ctx_ptr, data_ptr, backend=backend_hint)
+    mc_ptr = symm_multicast_ptr(ctx_ptr, data_ptr, backend=backend_hint)
 ```
 
 ### 3.2 Kernel Structure: Frontend and Backend
@@ -411,7 +411,7 @@ Each primitive has a **frontend kernel** (in `torch_symm.cu`) and **backend kern
           v
 +-----------------------------------+
 |    Python Frontend Wrapper        |  <- _torch_symm_triton.py
-|    (symm_lsa_ptr)                 |     Handles backend_hint routing
+|    (symm_remote_ptr)              |     Handles backend_hint routing
 +-----------------------------------+
           |
           | Static dispatch (compile-time) if backend_hint != DEFAULT
@@ -419,7 +419,7 @@ Each primitive has a **frontend kernel** (in `torch_symm.cu`) and **backend kern
           v
 +-----------------------------------+
 |    CUDA Frontend Function         |  <- torch_symm.cu
-|    (symm_lsa_ptr)                 |     extern "C" __device__
+|    (symm_remote_ptr)              |     extern "C" __device__
 +-----------------------------------+
           |
           | Dynamic dispatch based on ctx->type
@@ -448,7 +448,7 @@ field. This is implemented via a `switch` statement:
 
 ```cpp
 // torch_symm.cu - Dynamic dispatch example
-__device__ int64_t symm_lsa_ptr(int64_t ctx_ptr, int64_t local_ptr, int32_t peer) {
+__device__ int64_t symm_remote_ptr(int64_t ctx_ptr, int64_t local_ptr, int32_t peer) {
     SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
     TORCH_SYMM_CHECK(ctx != nullptr, "SymmContext is null");
 
@@ -483,13 +483,13 @@ When a specific backend is chosen, only that backend's function is called:
 
 ```python
 # _torch_symm_triton.py - Static dispatch routing
-def symm_lsa_ptr(ctx_ptr, local_ptr, peer, backend=BACKEND_DEFAULT):
+def symm_remote_ptr(ctx_ptr, local_ptr, peer, backend=BACKEND_DEFAULT):
     if backend == BACKEND_NVSHMEM:
-        return _nvshmem_symm_lsa_ptr(ctx_ptr, local_ptr, peer)  # Direct call
+        return _nvshmem_symm_remote_ptr(ctx_ptr, local_ptr, peer)  # Direct call
     elif backend == BACKEND_NCCL:
-        return _nccl_symm_lsa_ptr(ctx_ptr, local_ptr, peer)     # Direct call
+        return _nccl_symm_remote_ptr(ctx_ptr, local_ptr, peer)     # Direct call
     else:
-        return _symm_lsa_ptr_frontend(ctx_ptr, local_ptr, peer)  # Dynamic dispatch
+        return _symm_remote_ptr_frontend(ctx_ptr, local_ptr, peer)  # Dynamic dispatch
 ```
 
 **Trade-offs:**
@@ -584,7 +584,7 @@ def my_kernel(...):
     | @requires_torch_symm(backend=BACKEND_NVSHMEM)
     | @triton.jit
     | def kernel(ctx_ptr, data_ptr, ...):
-    |     peer_ptr = symm_lsa_ptr(ctx_ptr, data_ptr, peer, BACKEND_NVSHMEM)
+    |     peer_ptr = symm_remote_ptr(ctx_ptr, data_ptr, peer, BACKEND_NVSHMEM)
     |     ...
     +------------------+
             |
@@ -616,8 +616,8 @@ def my_kernel(...):
             v
 [5] DEVICE EXECUTION
     +------------------+
-    | symm_lsa_ptr(ctx_ptr, local_ptr, peer)
-    |     -> nvshmem_lsa_ptr_impl()
+    | symm_remote_ptr(ctx_ptr, local_ptr, peer)
+    |     -> nvshmem_remote_ptr_impl()
     |         -> nvshmem_ptr(local_ptr, peer)
     |             -> Returns peer's GPU memory address
     +------------------+
@@ -826,7 +826,7 @@ struct NCCLxSymmContext : public NCCLSymmContext {
 
 ```cpp
 // In torch_symm.cu - NCCLx dispatches to NCCL implementation
-__device__ int64_t symm_lsa_ptr(int64_t ctx_ptr, int64_t local_ptr, int32_t peer) {
+__device__ int64_t symm_remote_ptr(int64_t ctx_ptr, int64_t local_ptr, int32_t peer) {
     SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
 
     switch (ctx->type) {
@@ -834,12 +834,12 @@ __device__ int64_t symm_lsa_ptr(int64_t ctx_ptr, int64_t local_ptr, int32_t peer
         case SymmContext::Type::NCCL:
         case SymmContext::Type::NCCLX: {  // NCCLx uses same device APIs
             NCCLSymmContext* nccl_ctx = static_cast<NCCLSymmContext*>(ctx);
-            return nccl_lsa_ptr_impl(nccl_ctx, local_ptr, peer);
+            return nccl_remote_ptr_impl(nccl_ctx, local_ptr, peer);
         }
 #endif
         case SymmContext::Type::NVSHMEM: {
             NVSHMEMSymmContext* nvshmem_ctx = static_cast<NVSHMEMSymmContext*>(ctx);
-            return nvshmem_lsa_ptr_impl(nvshmem_ctx, local_ptr, peer);
+            return nvshmem_remote_ptr_impl(nvshmem_ctx, local_ptr, peer);
         }
         default:
             return 0;
@@ -1415,7 +1415,7 @@ import triton
 from torch._extern_triton import (
     BACKEND_NCCL,
     requires_torch_symm,
-    symm_lsa_ptr,
+    symm_remote_ptr,
     symm_barrier,
 )
 from torch._extern_triton._torchcomms_integration import (
@@ -1442,7 +1442,7 @@ def run_with_torchcomms():
     @triton.jit
     def my_kernel(ctx_ptr, buffer_ptr, peer: tl.constexpr):
         # Get pointer to peer's buffer
-        peer_ptr = symm_lsa_ptr(ctx_ptr, buffer_ptr, peer, BACKEND_NCCL)
+        peer_ptr = symm_remote_ptr(ctx_ptr, buffer_ptr, peer, BACKEND_NCCL)
         # ... kernel logic ...
         symm_barrier(ctx_ptr, BACKEND_NCCL)
 

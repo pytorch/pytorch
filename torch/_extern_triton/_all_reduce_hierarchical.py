@@ -8,7 +8,7 @@ three phases:
 
 Phase 1: Intra-LSA Reduce-Scatter (Pull-based)
    - Each rank reduces its assigned chunk by pulling data from LSA peers.
-   - Uses symm_lsa_ptr for direct memory access within the LSA domain.
+   - Uses symm_remote_ptr for direct memory access within the LSA domain.
 
 Phase 2: Inter-Domain Ring All-Reduce (Push-based with signaling)
    - Ring reduce-scatter across LSA domains (nodes)
@@ -18,7 +18,7 @@ Phase 2: Inter-Domain Ring All-Reduce (Push-based with signaling)
 
 Phase 3: Intra-LSA Broadcast (Push-based)
    - Each rank broadcasts its fully reduced chunk to all LSA peers.
-   - Uses symm_lsa_ptr for direct memory stores.
+   - Uses symm_remote_ptr for direct memory stores.
 
 The kernel obtains topology information (rank, team_size, lsa_size) directly
 from the SymmContext using symm_team_size and symm_team_rank primitives.
@@ -43,14 +43,16 @@ if TRITON_AVAILABLE:
         BACKEND_NVSHMEM,
         requires_torch_symm,
         symm_barrier,
-        symm_lsa_multicast_ptr,
-        symm_lsa_ptr,
+        symm_multicast_ptr,
+        symm_remote_ptr,
         symm_put_signal_async,
         symm_signal_wait_until,
         symm_team_rank,
         symm_team_size,
         TL_SCOPE_LSA,
         TL_SCOPE_WORLD,
+        TL_SIGNAL_CMP_GE,
+        TL_SIGNAL_OP_ADD,
     )
 
     def make_all_reduce_hierarchical_kernel(backend: int):
@@ -139,7 +141,7 @@ if TRITON_AVAILABLE:
             # Phase 1: Intra-LSA Reduce-Scatter (Pull Model)
             # -----------------------------------------------------------------
             # Each rank reduces its assigned chunk by pulling data from
-            # all LSA peers. This uses direct memory access via symm_lsa_ptr.
+            # all LSA peers. This uses direct memory access via symm_remote_ptr.
             # After this phase, each rank has the partial sum of its chunk
             # from all GPUs within the same node.
             # -----------------------------------------------------------------
@@ -157,7 +159,7 @@ if TRITON_AVAILABLE:
                     peer_global_rank = node_id * lsa_size + peer_local_idx
 
                     # Get direct pointer to peer's symmetric buffer
-                    peer_ptr_raw = symm_lsa_ptr(
+                    peer_ptr_raw = symm_remote_ptr(
                         ctx_ptr, ptr_data, peer_global_rank, backend_hint
                     )
                     peer_ptr = peer_ptr_raw.to(tl.pointer_type(tl.float32))
@@ -212,7 +214,7 @@ if TRITON_AVAILABLE:
                         )
 
                     # Send scratch buffer to dest_rank with signal
-                    # Use signal_op = 1 (SIGNAL_OP_ADD) for counting
+                    # Use TL_SIGNAL_OP_ADD for counting
                     symm_put_signal_async(
                         ctx_ptr,
                         ptr_scratch,  # dest buffer (symmetric address)
@@ -222,16 +224,16 @@ if TRITON_AVAILABLE:
                         dest_rank,
                         local_rank,  # signal_index
                         sig_val,  # signal_value (step + 1)
-                        1,  # signal_op = SIGNAL_OP_ADD
+                        TL_SIGNAL_OP_ADD,
                         backend_hint,
                     )
 
                     # Wait for data from previous node
-                    # Compare: signal >= step + 1 (SIGNAL_CMP_GE = 2)
+                    # Compare: signal >= step + 1 (TL_SIGNAL_CMP_GE)
                     symm_signal_wait_until(
                         ctx_ptr,
                         local_rank,  # signal_index
-                        2,  # SIGNAL_CMP_GE
+                        TL_SIGNAL_CMP_GE,
                         sig_val,  # wait for step + 1
                         backend_hint,
                     )
@@ -292,7 +294,7 @@ if TRITON_AVAILABLE:
                         dest_rank,
                         local_rank,
                         sig_val,
-                        1,  # SIGNAL_OP_ADD
+                        TL_SIGNAL_OP_ADD,
                         backend_hint,
                     )
 
@@ -300,7 +302,7 @@ if TRITON_AVAILABLE:
                     symm_signal_wait_until(
                         ctx_ptr,
                         local_rank,
-                        2,  # SIGNAL_CMP_GE
+                        TL_SIGNAL_CMP_GE,
                         sig_val,
                         backend_hint,
                     )
@@ -324,13 +326,13 @@ if TRITON_AVAILABLE:
             # Phase 3: Intra-LSA Broadcast (Multicast Push with Unicast Fallback)
             # -----------------------------------------------------------------
             # Each rank broadcasts its fully reduced chunk to all LSA peers.
-            # Uses hardware multicast if available (via symm_lsa_multicast_ptr),
-            # otherwise falls back to unicast via symm_lsa_ptr.
+            # Uses hardware multicast if available (via symm_multicast_ptr),
+            # otherwise falls back to unicast via symm_remote_ptr.
             # -----------------------------------------------------------------
 
             # Try to get multicast pointer (returns 0 if not supported)
             # Team is obtained from the context internally
-            mc_ptr_raw = symm_lsa_multicast_ptr(
+            mc_ptr_raw = symm_multicast_ptr(
                 ctx_ptr, ptr_data, backend_hint
             )
 
@@ -353,7 +355,7 @@ if TRITON_AVAILABLE:
                     peer_local_idx = (local_rank + i) % lsa_size
                     peer_global_rank = node_id * lsa_size + peer_local_idx
 
-                    peer_ptr_raw = symm_lsa_ptr(
+                    peer_ptr_raw = symm_remote_ptr(
                         ctx_ptr, ptr_data, peer_global_rank, backend_hint
                     )
                     peer_ptr = peer_ptr_raw.to(tl.pointer_type(tl.float32))

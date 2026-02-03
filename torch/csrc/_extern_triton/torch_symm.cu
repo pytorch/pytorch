@@ -401,7 +401,7 @@ __device__ int32_t symm_barrier_wait(int64_t ctx_ptr, int32_t barrier_index) {
  * Unified lsa_ptr operation.
  */
 __device__ int64_t
-symm_lsa_ptr(int64_t ctx_ptr, int64_t local_ptr, int32_t peer) {
+symm_remote_ptr(int64_t ctx_ptr, int64_t local_ptr, int32_t peer) {
   SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
   TORCH_SYMM_CHECK(ctx != nullptr, "SymmContext is null");
 
@@ -427,7 +427,7 @@ symm_lsa_ptr(int64_t ctx_ptr, int64_t local_ptr, int32_t peer) {
  *
  * Gets the team from context and uses it for multicast operations.
  */
-__device__ int64_t symm_lsa_multicast_ptr(int64_t ctx_ptr, int64_t local_ptr) {
+__device__ int64_t symm_multicast_ptr(int64_t ctx_ptr, int64_t local_ptr) {
   SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
   TORCH_SYMM_CHECK(ctx != nullptr, "SymmContext is null");
 
@@ -508,7 +508,7 @@ __device__ int32_t symm_signal(
  * @param peer Peer rank to get signal pad pointer for
  * @return Device pointer to peer's signal pad, or 0 if not accessible
  */
-__device__ int64_t symm_lsa_signal_ptr(int64_t ctx_ptr, int32_t peer) {
+__device__ int64_t symm_signal_ptr(int64_t ctx_ptr, int32_t peer) {
   SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
   TORCH_SYMM_CHECK(ctx != nullptr, "SymmContext is null");
 
