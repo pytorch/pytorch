@@ -59,6 +59,7 @@ from ..utils import (
 from ..virtualized import V
 from .b2b_gemm import B2B_GEMM_PASS
 from .ddp_fusion import fuse_ddp_communication
+from .decompose_to_out_variant import decompose_to_out_variant
 from .group_batch_fusion import group_batch_fusion_passes, POST_GRAD_FUSIONS
 from .micro_pipeline_tp import micro_pipeline_tp_pass
 from .pre_grad import is_same_dict, save_inductor_dict
@@ -351,6 +352,9 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     # ./fx_passes/README.md for a discussion of mutation invariants.
     GraphTransformObserver(gm, "reinplace_inplaceable_ops").apply_graph_pass(
         functools.partial(reinplace_inplaceable_ops, fake_tensor_updater),
+    )
+    GraphTransformObserver(gm, "decompose_to_out_variant").apply_graph_pass(
+        decompose_to_out_variant,
     )
     GraphTransformObserver(
         gm, "decompose_triton_kernel_wrapper_functional"

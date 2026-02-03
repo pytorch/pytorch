@@ -3,6 +3,11 @@ import unittest
 
 import torch
 from torch import Tensor
+from torch._inductor import config
+from torch._inductor.fx_passes.decompose_to_out_variant import decompose_to_out_variant
+from torch._inductor.utils import run_and_get_code
+from torch._library._autogen_out import to_out_variant
+from torch.testing import FileCheck
 from torch.testing._internal.common_utils import run_tests, TEST_CUDA, TestCase
 
 
@@ -58,6 +63,9 @@ class TestAutogenOut(TestCase):
         self.assertEqual(out1, res1)
         self.assertEqual(out2, res2)
 
+        out_op = to_out_variant(torch.ops._TestAutogenOut.multi_out_test.default)
+        self.assertEqual(out_op, torch.ops._TestAutogenOut.multi_out_test.out)
+
     def test_overload(self):
         @torch.library.custom_op(
             "_TestAutogenOut::overloaded_op.scalar",
@@ -80,6 +88,9 @@ class TestAutogenOut(TestCase):
         out = torch.empty(3, 4)
         torch.ops._TestAutogenOut.overloaded_op.scalar_out(x, 3, result=out)
         self.assertEqual(out, res)
+
+        out_op = to_out_variant(torch.ops._TestAutogenOut.overloaded_op.scalar)
+        self.assertEqual(out_op, torch.ops._TestAutogenOut.overloaded_op.scalar_out)
 
     def test_output_resizing(self):
         @torch.library.custom_op(
@@ -158,6 +169,119 @@ class TestAutogenOut(TestCase):
             "Could not run '_TestAutogenOut::cpu_only_test.out' with arguments from the 'CUDA' backend.",  # noqa: B950
         ):
             torch.ops._TestAutogenOut.cpu_only_test.out(x_cuda, out=out_cuda)
+
+    @config.patch(decompose_to_out_variant=True)
+    def test_compile_single_out(self):
+        @torch.library.custom_op(
+            "_TestAutogenOut::decompose_test", mutates_args=(), autogen_out=["out"]
+        )
+        def decompose_test(x: Tensor) -> Tensor:
+            return x * 2
+
+        @decompose_test.register_fake
+        def _(x):
+            return torch.empty_like(x)
+
+        def f(x):
+            x = x + x
+            a = torch.ops._TestAutogenOut.decompose_test(
+                x
+            )  # x is used again, cannot replace with out variant
+            b = torch.ops._TestAutogenOut.decompose_test(x)
+            return a + b
+
+        compiled_f = torch.compile(f)
+        inputs = (torch.randn(3),)
+        out, codes = run_and_get_code(compiled_f, *inputs)
+
+        self.assertEqual(f(*inputs), out)
+        FileCheck().check_count(
+            "= torch.ops._TestAutogenOut.decompose_test.default(", 1, exactly=True
+        ).run(codes[0])
+        FileCheck().check_count(
+            "= torch.ops._TestAutogenOut.decompose_test.out(", 1, exactly=True
+        ).run(codes[0])
+
+    @config.patch(decompose_to_out_variant=True)
+    def test_replace_multiple_out(self):
+        @torch.library.custom_op(
+            "_TestAutogenOut::multi_out_decompose",
+            mutates_args=(),
+            autogen_out=["out1", "out2"],
+        )
+        def multi_out_decompose(x: Tensor, y: Tensor) -> tuple[Tensor, Tensor]:
+            return x * 2, y * 3
+
+        @multi_out_decompose.register_fake
+        def _(x, y):
+            return torch.empty_like(x), torch.empty_like(y)
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                x = x + x
+                y = y + y
+                a, b = torch.ops._TestAutogenOut.multi_out_decompose(x, y)
+                return a + b
+
+        inputs = (torch.randn(3), torch.randn(3))
+        ep = torch.export.export(M(), inputs, strict=True)
+        ep._graph = decompose_to_out_variant(ep.graph)
+        ep.graph_module.recompile()
+        self.assertExpectedInline(
+            ep.graph_module.code.strip(),
+            """\
+def forward(self, x, y):
+    add = torch.ops.aten.add.Tensor(x, x);  x = None
+    add_1 = torch.ops.aten.add.Tensor(y, y);  y = None
+    multi_out_decompose_out = torch.ops._TestAutogenOut.multi_out_decompose.out(add, add_1, out1 = add, out2 = add_1);  add = add_1 = None
+    getitem = multi_out_decompose_out[0]
+    getitem_1 = multi_out_decompose_out[1];  multi_out_decompose_out = None
+    add_2 = torch.ops.aten.add.Tensor(getitem, getitem_1);  getitem = getitem_1 = None
+    return (add_2,)""",  # noqa: B950
+        )
+
+        self.assertEqual(ep.module()(*inputs), M()(*inputs))
+
+    @config.patch(decompose_to_out_variant=True)
+    def test_replace_multiple_out_one_in(self):
+        @torch.library.custom_op(
+            "_TestAutogenOut::multi_result",
+            mutates_args=(),
+            autogen_out=["out1", "out2"],
+        )
+        def multi_result(x: Tensor) -> tuple[Tensor, Tensor]:
+            return x * 2, x * 3
+
+        @multi_result.register_fake
+        def _(x):
+            return torch.empty_like(x), torch.empty_like(x)
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                x = x + x
+                a, b = torch.ops._TestAutogenOut.multi_result(x)
+                return a + b
+
+        inputs = (torch.randn(3),)
+        ep = torch.export.export(M(), inputs, strict=True)
+        decompose_to_out_variant(ep.graph)
+        ep.graph_module.recompile()
+        # With only one input but two outputs, only one buffer can be reused.
+        # The pass still converts to out variant, allocating a fresh buffer for the second output.
+        self.assertExpectedInline(
+            ep.graph_module.code.strip(),
+            """\
+def forward(self, x):
+    add = torch.ops.aten.add.Tensor(x, x);  x = None
+    empty = torch.empty([3], dtype = torch.float32, device = device(type='cpu'))
+    multi_result_out = torch.ops._TestAutogenOut.multi_result.out(add, out1 = add, out2 = empty);  add = empty = None
+    getitem = multi_result_out[0]
+    getitem_1 = multi_result_out[1];  multi_result_out = None
+    add_1 = torch.ops.aten.add.Tensor(getitem, getitem_1);  getitem = getitem_1 = None
+    return (add_1,)""",  # noqa: B950
+        )
+
+        self.assertEqual(ep.module()(*inputs), M()(*inputs))
 
 
 if __name__ == "__main__":

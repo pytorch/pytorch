@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import dataclasses
+import logging
 from typing import TYPE_CHECKING
 
 import torch
 from torch import _C
+from torchgen.model import FunctionSchema, SchemaKind
 
 
 if TYPE_CHECKING:
     from .custom_ops import CustomOpDef
+
+log = logging.getLogger(__name__)
 
 
 def generate_out_variant(custom_op: CustomOpDef, out_names: list[str]) -> None:
@@ -67,7 +72,6 @@ def generate_out_variant(custom_op: CustomOpDef, out_names: list[str]) -> None:
 
     def out_fake(*args, **kwargs):
         out_tensors = [kwargs.pop(name) for name in out_names]
-
         if len(out_tensors) == 1:
             return out_tensors[0]
         return tuple(out_tensors)
@@ -119,7 +123,6 @@ def _functional_to_out_schema(
     Input:  "mylib::foo(Tensor x, float scale) -> Tensor", out_names=["result"], out_overload_name="out"
     Output: "mylib::foo.out(Tensor x, float scale, *, Tensor(a!) result) -> Tensor(a!)"
     """
-    # Add the out parameters as keyword-only args
     # Use alias annotations a, b, c, ...
     alias_chars = "abcdefghijklmnopqrstuvwxyz"
     if len(out_names) > len(alias_chars):
@@ -174,3 +177,56 @@ def _functional_to_out_schema(
     )
 
     return str(out_schema)
+
+
+def to_out_variant(op: torch._ops.OpOverload) -> torch._ops.OpOverload | None:
+    """
+    Given a functional operator overload, return its corresponding out variant.
+
+    Uses signature matching to find the correct out variant among all overloads.
+    """
+    native_schema = _pybind_schema_to_native_schema(op._schema)
+    if native_schema is None:
+        return None
+
+    # Only convert functional ops
+    if native_schema.kind() != SchemaKind.functional:
+        return None
+
+    # Get the normalized signature for matching
+    signature = dataclasses.replace(native_schema.signature(), returns=())
+
+    # Get the op packet to access all overloads
+    namespace = op.namespace
+    op_name = op._schema.name.split("::")[1]
+    torch_packet = getattr(getattr(torch.ops, namespace), op_name)
+
+    # Search through all overloads for matching out variant
+    overload_names = torch._C._jit_get_operation(op._schema.name)[1]
+    for overload_name in overload_names:
+        candidate = getattr(torch_packet, overload_name)
+        candidate_native_schema = _pybind_schema_to_native_schema(candidate._schema)
+        if candidate_native_schema is None:
+            continue
+
+        if candidate_native_schema.kind() != SchemaKind.out:
+            continue
+
+        candidate_signature = dataclasses.replace(
+            candidate_native_schema.signature(), returns=()
+        )
+        if candidate_signature == signature:
+            return candidate
+
+    return None
+
+
+def _pybind_schema_to_native_schema(
+    schema: torch._C.FunctionSchema,
+) -> FunctionSchema | None:
+    """Convert a pybind FunctionSchema to a torchgen FunctionSchema."""
+    try:
+        return FunctionSchema.parse(str(schema))
+    except Exception:
+        log.debug("Failed to parse schema: %s", schema)
+        return None
