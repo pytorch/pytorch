@@ -35,7 +35,7 @@ from .common import (
 )
 from .simd import prefix_is_reduction, SIMDScheduling
 from .simd_kernel_features import SIMDKernelFeatures
-from .triton import gen_common_triton_imports, TritonKernel
+from .triton import enable_pdl_codegen, gen_common_triton_imports, TritonKernel
 from .triton_utils import config_of, equal_1_arg_indices, signature_to_meta
 
 
@@ -625,6 +625,10 @@ class ComboKernel(Kernel):
 
         # pyrefly: ignore [unsupported-operation]
         triton_meta["configs"] = [config_of(signature)]
+
+        if enable_pdl_codegen():
+            triton_meta["launch_pdl"] = True
+
         mutated_args = self.get_mutated_args_sub_kernels()
         dispatch = self.dispatch_class
         assert dispatch is not None

@@ -3355,7 +3355,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 lambda: current_load_index == self._load_index,
                 f"0; {GDC_LAUNCH} # gdc launch for {result_var}",
             )
-            self.cse.generate(launch_buffer, launch_if_last_load, dtype=torch.int32)
+            self.cse.generate(
+                launch_buffer, launch_if_last_load, dtype=torch.int32, shape=()
+            )
 
     def partial_accumulate(
         self, name: str, reduction_type, val, extra_meta: dict[str, Any]
