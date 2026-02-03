@@ -1637,52 +1637,57 @@ class TestTritonKernelSerialization(torch._inductor.test_case.TestCase):
         )
         from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
 
-        # Create a mock kernel-like object that mimics triton JITFunction structure.
-        # Triton JITFunction has a `fn` attribute pointing to the wrapped function.
-        class MockTritonKernel:
-            def __init__(self, fn):
-                self.fn = fn
+        try:
+            # Create a mock kernel-like object that mimics triton JITFunction structure.
+            # Triton JITFunction has a `fn` attribute pointing to the wrapped function.
+            class MockTritonKernel:
+                def __init__(self, fn):
+                    self.fn = fn
 
-        # Use a real importable function (torch.sin) as the wrapped function
-        mock_kernel = MockTritonKernel(torch.sin)
+            # Use a real importable function (torch.sin) as the wrapped function
+            mock_kernel = MockTritonKernel(torch.sin)
 
-        # Add the kernel to the side table (this is what dynamo does during tracing)
-        kernel_idx = kernel_side_table.add_kernel(mock_kernel)
+            # Add the kernel to the side table (this is what dynamo does during tracing)
+            kernel_idx = kernel_side_table.add_kernel(mock_kernel)
 
-        # Add some constant args too
-        const_args = {"BLOCK_SIZE": 128, "num_warps": 4}
-        const_args_idx = kernel_side_table.add_constant_args(const_args)
+            # Add some constant args too
+            const_args = {"BLOCK_SIZE": 128, "num_warps": 4}
+            const_args_idx = kernel_side_table.add_constant_args(const_args)
 
-        # Simulate serialization: capture the kernel side table state
-        triton_kernels = {
-            idx: _serialize_triton_kernel(kernel)
-            for idx, kernel in kernel_side_table.id_to_kernel.items()
-        }
-        triton_constant_args = dict(kernel_side_table.constant_args)
+            # Simulate serialization: capture the kernel side table state
+            triton_kernels = {
+                idx: _serialize_triton_kernel(kernel)
+                for idx, kernel in kernel_side_table.id_to_kernel.items()
+            }
+            triton_constant_args = dict(kernel_side_table.constant_args)
 
-        # Simulate a new process by clearing the side table
-        kernel_side_table.reset_table()
+            # Simulate a new process by clearing the side table
+            kernel_side_table.reset_table()
 
-        # Verify the table is empty - looking up the kernel should fail
-        with self.assertRaisesRegex(AssertionError, "not found in id_to_kernel"):
-            kernel_side_table.get_kernel(kernel_idx)
+            # Verify the table is empty - looking up the kernel should fail
+            with self.assertRaisesRegex(AssertionError, "not found in id_to_kernel"):
+                kernel_side_table.get_kernel(kernel_idx)
 
-        # Simulate deserialization: restore the kernel side table
-        for idx, kernel_info in triton_kernels.items():
-            restored_kernel = _deserialize_triton_kernel(kernel_info)
-            kernel_side_table.id_to_kernel[idx] = restored_kernel
-            kernel_side_table.kernel_to_id[restored_kernel] = idx
+            # Simulate deserialization: restore the kernel side table
+            for idx, kernel_info in triton_kernels.items():
+                restored_kernel = _deserialize_triton_kernel(kernel_info)
+                kernel_side_table.id_to_kernel[idx] = restored_kernel
+                kernel_side_table.kernel_to_id[restored_kernel] = idx
 
-        for idx, args in triton_constant_args.items():
-            kernel_side_table.constant_args[idx] = args
+            for idx, args in triton_constant_args.items():
+                kernel_side_table.constant_args[idx] = args
 
-        # Now the kernel lookup should succeed
-        restored = kernel_side_table.get_kernel(kernel_idx)
-        # The restored kernel is torch.sin (the underlying function), not the mock wrapper
-        self.assertIs(restored, torch.sin)
+            # Now the kernel lookup should succeed
+            restored = kernel_side_table.get_kernel(kernel_idx)
+            # The restored kernel is torch.sin (the underlying function), not the mock wrapper
+            self.assertIs(restored, torch.sin)
 
-        # Constant args should also be restored
-        self.assertEqual(kernel_side_table.constant_args[const_args_idx], const_args)
+            # Constant args should also be restored
+            self.assertEqual(
+                kernel_side_table.constant_args[const_args_idx], const_args
+            )
+        finally:
+            kernel_side_table.reset_table()
 
 
 if __name__ == "__main__":
