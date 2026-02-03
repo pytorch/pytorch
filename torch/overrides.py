@@ -593,7 +593,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.div: lambda input, other, rounding_mode=None, out=None: -1,
         torch.divide: lambda input, other, rounding_mode=None, out=None: -1,
         torch.dot: lambda input, other, out=None: -1,
-        torch.dropout: lambda input, p, train, inplace=False: -1,
+        torch.dropout: lambda input, p, train, inplace=False, generator=None: -1,
         torch.dsmm: lambda input, mat2, out_dtype=None: -1,
         torch.hsmm: lambda mat1, mat2: -1,
         torch.dsplit: lambda input, indices_or_sections: -1,
@@ -633,7 +633,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.fbgemm_pack_gemm_matrix_fp16: lambda input: -1,
         torch.fbgemm_pack_quantized_matrix: lambda input, a, b: -1,
         torch.feature_alpha_dropout: lambda input, p, train: -1,
-        torch.feature_dropout: lambda input, p, train: -1,
+        torch.feature_dropout: lambda input, p, train, generator=None: -1,
         torch.fft.ifft: lambda input, n=None, dim=-1, norm=None: -1,
         torch.fft.rfft: lambda input, n=None, dim=-1, norm=None: -1,
         torch.fft.irfft: lambda input, n=None, dim=-1, norm=None: -1,
@@ -833,7 +833,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.nan_to_num: lambda input, nan=0.0, posinf=None, neginf=None, out=None: -1,
         torch.native_batch_norm: lambda input, weight, bias, running_mean, running_var, training, momentum, eps: -1,
         torch._native_batch_norm_legit: lambda input, weight, bias, training, momentum, eps: -1,
-        torch.native_dropout: lambda input, p, train: -1,
+        torch.native_dropout: lambda input, p, train, generator=None: -1,
         torch.native_layer_norm: lambda input, normalized_shape, weight=None, bias=None, eps=1e-05: -1,
         torch._fused_rms_norm: lambda input, normalized_shape, weight=None, eps=1e-05: -1,
         torch.native_group_norm: lambda input, weight, bias, N, C, HxW, group, eps: -1,
@@ -880,10 +880,10 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.nn.functional.ctc_loss: (
             lambda log_probs, targets, input_lengths, target_lengths, blank=0, reduction="mean", zero_infinity=False: -1
         ),
-        torch.nn.functional.dropout: lambda input, p=0.5, training=True, inplace=False: -1,
-        torch.nn.functional.dropout1d: lambda input, p=0.5, training=True, inplace=False: -1,
-        torch.nn.functional.dropout2d: lambda input, p=0.5, training=True, inplace=False: -1,
-        torch.nn.functional.dropout3d: lambda input, p=0.5, training=True, inplace=False: -1,
+        torch.nn.functional.dropout: lambda input, p=0.5, training=True, inplace=False, generator=None: -1,
+        torch.nn.functional.dropout1d: lambda input, p=0.5, training=True, inplace=False, generator=None: -1,
+        torch.nn.functional.dropout2d: lambda input, p=0.5, training=True, inplace=False, generator=None: -1,
+        torch.nn.functional.dropout3d: lambda input, p=0.5, training=True, inplace=False, generator=None: -1,
         torch.nn.functional.elu: lambda input, alpha=1.0, inplace=False: -1,
         torch.nn.functional.embedding: (
             lambda input, weight, padding_idx=None, max_norm=None, norm_type=2.0, scale_grad_by_freq=False, sparse=False: -1  # noqa: B950

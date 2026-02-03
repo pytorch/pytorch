@@ -3,6 +3,7 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Functions.h>
+#include <ATen/Generator.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/NestedTensorImpl.h>
 #include <ATen/ScalarOps.h>
@@ -482,7 +483,11 @@ Tensor select_nested(const Tensor& self, int64_t dim, int64_t index) {
 
 }
 
-std::tuple<Tensor,Tensor> native_dropout_nested(const Tensor& input, double p, std::optional<bool> train) {
+std::tuple<Tensor,Tensor> native_dropout_nested(
+    const Tensor& input,
+    double p,
+    std::optional<bool> train,
+    std::optional<Generator> generator) {
   auto input_ptr = get_nested_tensor_impl(input);
   const Tensor& input_buffer = input_ptr-> get_unsafe_storage_as_tensor(),
       & sizemat = input_ptr->get_nested_sizes(),
@@ -494,7 +499,7 @@ std::tuple<Tensor,Tensor> native_dropout_nested(const Tensor& input, double p, s
     mask_buffer = input_buffer.clone();
   }
   else {
-    std::tie(output_buffer, mask_buffer) = at::native_dropout(input_buffer, p, train);
+    std::tie(output_buffer, mask_buffer) = at::native_dropout(input_buffer, p, train, generator);
   }
   // regular tensor dropout reuses input size and stride
   // i.e. if input is not contiguous, then output is also discontiguous

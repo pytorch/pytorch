@@ -24,7 +24,7 @@ RegisterNNCLoweringsFunction::RegisterNNCLoweringsFunction(
 namespace {
 int nnc_lowerings_lazy_registration() {
   RegisterNNCLoweringsFunction aten_dropout(
-      {"aten::dropout(Tensor input, float p, bool train) -> (Tensor)"},
+      {"aten::dropout(Tensor input, float p, bool train, Generator? generator=None) -> (Tensor)"},
       computeNoop);
   RegisterNNCLoweringsFunction aten_contiguous(
       {"aten::contiguous(Tensor(a) self, *, MemoryFormat memory_format=contiguous_format) -> (Tensor(a))"},

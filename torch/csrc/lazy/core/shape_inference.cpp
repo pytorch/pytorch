@@ -661,7 +661,8 @@ std::vector<Shape> compute_shape_mv(
 std::vector<Shape> compute_shape_native_dropout(
     const at::Tensor& input,
     double p,
-    ::std::optional<bool> train) {
+    ::std::optional<bool> train,
+    ::std::optional<at::Generator> generator) {
   return {
       Shape(input.scalar_type(), input.sizes().vec()),
       Shape(c10::ScalarType::Bool, input.sizes().vec())};

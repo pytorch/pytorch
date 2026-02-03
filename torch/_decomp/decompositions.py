@@ -1172,16 +1172,26 @@ def logit_backward(
 @register_decomposition(aten.dropout)
 @aten.dropout.default.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten.dropout.default.py_impl(DispatchKey.Autograd)
-def dropout(input: Tensor, p: float, train: Optional[bool]):
+def dropout(
+    input: Tensor,
+    p: float,
+    train: Optional[bool],
+    generator: Optional[torch.Generator] = None,
+):
     if train and p != 0:
-        return aten.native_dropout(input, p, train)[0]
+        return aten.native_dropout(input, p, train, generator)[0]
     else:
         return input.clone()
 
 
 @register_decomposition(aten.native_dropout)
 @out_wrapper("out0", "out1")
-def native_dropout(input: Tensor, p: float, train: Optional[bool]):
+def native_dropout(
+    input: Tensor,
+    p: float,
+    train: Optional[bool],
+    generator: Optional[torch.Generator] = None,
+):
     if train and p != 0:
         if p == 1:
             return (torch.zeros_like(input), torch.zeros_like(input, dtype=torch.bool))
@@ -1189,7 +1199,7 @@ def native_dropout(input: Tensor, p: float, train: Optional[bool]):
             raise RuntimeError(
                 "result type Float can't be cast to the desired output type Long"
             )
-        bool_mask = torch.rand_like(input) > p
+        bool_mask = torch.rand_like(input, generator=generator) > p
         res = bool_mask * input * float(1.0 / (1.0 - p))
         return (res, bool_mask)
     else:

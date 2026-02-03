@@ -1,6 +1,7 @@
 #include <ATen/functorch/DynamicLayer.h>
 #include <torch/library.h>
 #include <ATen/ATen.h>
+#include <ATen/Generator.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/functorch/TensorWrapper.h>
 #include <ATen/functorch/BatchedTensorImpl.h>
@@ -160,7 +161,11 @@ Tensor multiply(const Tensor& input, const Tensor& noise) {
 }
 
 template<bool feature_dropout, bool alpha_dropout, bool inplace, typename T>
-Ctype<inplace> _dropout_impl(T& input, double p, bool train) {
+Ctype<inplace> _dropout_impl(
+    T& input,
+    double p,
+    bool train,
+    std::optional<Generator> generator) {
   TORCH_CHECK(p >= 0 && p <= 1, "dropout probability has to be between 0 and 1, but got ", p);
   if (p == 0 || !train || input.numel() == 0) {
     return input;
@@ -176,11 +181,11 @@ Ctype<inplace> _dropout_impl(T& input, double p, bool train) {
   Tensor noise;
   if (feature_dropout) {
     auto empty = make_feature_noise(input);
-    noise = at::bernoulli(empty, 1 - p);
+    noise = at::bernoulli(empty, 1 - p, generator);
   } else {
     // NB: it is important that this is at::empty and not at::empty_like
     auto empty = at::empty({}, input.options()).expand(input.sizes());
-    noise = at::bernoulli(empty, 1 - p);
+    noise = at::bernoulli(empty, 1 - p, generator);
   }
 
   if (alpha_dropout) {
@@ -210,44 +215,56 @@ ALIAS_SPECIALIZATION(_feature_dropout,       true,  false)
 ALIAS_SPECIALIZATION(_alpha_dropout,         false, true )
 ALIAS_SPECIALIZATION(_feature_alpha_dropout, true,  true )
 
-Tensor dropout(const Tensor& input, double p, bool train) {
+Tensor dropout(
+    const Tensor& input,
+    double p,
+    bool train,
+    std::optional<Generator> generator) {
   auto result = [&]() {
     NoNamesGuard guard;
     if (train && is_fused_kernel_acceptable(input, p)) {
-      return std::get<0>(at::native_dropout(input, p, train));
+      return std::get<0>(at::native_dropout(input, p, train, generator));
     }
-    return _dropout<false>(input, p, train);
+    return _dropout<false>(input, p, train, generator);
   }();
   namedinference::propagate_names(result, input);
   return result;
 }
 
-Tensor& dropout_(Tensor& input, double p, bool train) {
-  return _dropout<true>(input, p, train);
+Tensor& dropout_(Tensor& input, double p, bool train, std::optional<Generator> generator) {
+  return _dropout<true>(input, p, train, generator);
 }
 
-Tensor feature_dropout(const Tensor& input, double p, bool train) {
-  return _feature_dropout<false>(input, p, train);
+Tensor feature_dropout(
+    const Tensor& input,
+    double p,
+    bool train,
+    std::optional<Generator> generator) {
+  return _feature_dropout<false>(input, p, train, generator);
 }
 
-Tensor& feature_dropout_(Tensor& input, double p, bool train) {
-  return _feature_dropout<true>(input, p, train);
+Tensor& feature_dropout_(
+    Tensor& input,
+    double p,
+    bool train,
+    std::optional<Generator> generator) {
+  return _feature_dropout<true>(input, p, train, generator);
 }
 
 Tensor alpha_dropout(const Tensor& input, double p, bool train) {
-  return _alpha_dropout<false>(input, p, train);
+  return _alpha_dropout<false>(input, p, train, std::nullopt);
 }
 
 Tensor& alpha_dropout_(Tensor& input, double p, bool train) {
-  return _alpha_dropout<true>(input, p, train);
+  return _alpha_dropout<true>(input, p, train, std::nullopt);
 }
 
 Tensor feature_alpha_dropout(const Tensor& input, double p, bool train) {
-  return _feature_alpha_dropout<false>(input, p, train);
+  return _feature_alpha_dropout<false>(input, p, train, std::nullopt);
 }
 
 Tensor& feature_alpha_dropout_(Tensor& input, double p, bool train) {
-  return _feature_alpha_dropout<true>(input, p, train);
+  return _feature_alpha_dropout<true>(input, p, train, std::nullopt);
 }
 
 }

@@ -1421,6 +1421,8 @@ def dropout(
     p: float = 0.5,
     training: bool = True,
     inplace: bool = False,
+    *,
+    generator: Optional[torch.Generator] = None,
 ) -> Tensor:
     r"""During training, randomly zeroes some elements of the input tensor with probability :attr:`p`.
 
@@ -1432,15 +1434,24 @@ def dropout(
         p: probability of an element to be zeroed. Default: 0.5
         training: apply dropout if is ``True``. Default: ``True``
         inplace: If set to ``True``, will do this operation in-place. Default: ``False``
+        generator: a pseudorandom number generator for sampling. Default: ``None``
     """
     if has_torch_function_unary(input):
         return handle_torch_function(
-            dropout, (input,), input, p=p, training=training, inplace=inplace
+            dropout,
+            (input,),
+            input,
+            p=p,
+            training=training,
+            inplace=inplace,
+            generator=generator,
         )
     if p < 0.0 or p > 1.0:
         raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
     return (
-        _VF.dropout_(input, p, training) if inplace else _VF.dropout(input, p, training)
+        _VF.dropout_(input, p, training, generator)
+        if inplace
+        else _VF.dropout(input, p, training, generator)
     )
 
 
@@ -1472,6 +1483,8 @@ def dropout1d(
     p: float = 0.5,
     training: bool = True,
     inplace: bool = False,
+    *,
+    generator: Optional[torch.Generator] = None,
 ) -> Tensor:
     r"""Randomly zero out entire channels (a channel is a 1D feature map).
 
@@ -1486,10 +1499,17 @@ def dropout1d(
         p: probability of a channel to be zeroed. Default: 0.5
         training: apply dropout if is ``True``. Default: ``True``
         inplace: If set to ``True``, will do this operation in-place. Default: ``False``
+        generator: a pseudorandom number generator for sampling. Default: ``None``
     """
     if has_torch_function_unary(input):
         return handle_torch_function(
-            dropout1d, (input,), input, p=p, training=training, inplace=inplace
+            dropout1d,
+            (input,),
+            input,
+            p=p,
+            training=training,
+            inplace=inplace,
+            generator=generator,
         )
     if p < 0.0 or p > 1.0:
         raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
@@ -1507,9 +1527,9 @@ def dropout1d(
         input = input.unsqueeze_(0) if inplace else input.unsqueeze(0)
 
     result = (
-        _VF.feature_dropout_(input, p, training)
+        _VF.feature_dropout_(input, p, training, generator)
         if inplace
-        else _VF.feature_dropout(input, p, training)
+        else _VF.feature_dropout(input, p, training, generator)
     )
 
     if not is_batched:
@@ -1523,6 +1543,8 @@ def dropout2d(
     p: float = 0.5,
     training: bool = True,
     inplace: bool = False,
+    *,
+    generator: Optional[torch.Generator] = None,
 ) -> Tensor:
     r"""Randomly zero out entire channels (a channel is a 2D feature map).
 
@@ -1537,10 +1559,17 @@ def dropout2d(
         p: probability of a channel to be zeroed. Default: 0.5
         training: apply dropout if is ``True``. Default: ``True``
         inplace: If set to ``True``, will do this operation in-place. Default: ``False``
+        generator: a pseudorandom number generator for sampling. Default: ``None``
     """
     if has_torch_function_unary(input):
         return handle_torch_function(
-            dropout2d, (input,), input, p=p, training=training, inplace=inplace
+            dropout2d,
+            (input,),
+            input,
+            p=p,
+            training=training,
+            inplace=inplace,
+            generator=generator,
         )
     if p < 0.0 or p > 1.0:
         raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
@@ -1570,9 +1599,9 @@ def dropout2d(
         )
 
     result = (
-        _VF.feature_dropout_(input, p, training)
+        _VF.feature_dropout_(input, p, training, generator)
         if inplace
-        else _VF.feature_dropout(input, p, training)
+        else _VF.feature_dropout(input, p, training, generator)
     )
 
     return result
@@ -1583,6 +1612,8 @@ def dropout3d(
     p: float = 0.5,
     training: bool = True,
     inplace: bool = False,
+    *,
+    generator: Optional[torch.Generator] = None,
 ) -> Tensor:
     r"""Randomly zero out entire channels (a channel is a 3D feature map).
 
@@ -1597,10 +1628,17 @@ def dropout3d(
         p: probability of a channel to be zeroed. Default: 0.5
         training: apply dropout if is ``True``. Default: ``True``
         inplace: If set to ``True``, will do this operation in-place. Default: ``False``
+        generator: a pseudorandom number generator for sampling. Default: ``None``
     """
     if has_torch_function_unary(input):
         return handle_torch_function(
-            dropout3d, (input,), input, p=p, training=training, inplace=inplace
+            dropout3d,
+            (input,),
+            input,
+            p=p,
+            training=training,
+            inplace=inplace,
+            generator=generator,
         )
     if p < 0.0 or p > 1.0:
         raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
@@ -1620,9 +1658,9 @@ def dropout3d(
         input = input.unsqueeze_(0) if inplace else input.unsqueeze(0)
 
     result = (
-        _VF.feature_dropout_(input, p, training)
+        _VF.feature_dropout_(input, p, training, generator)
         if inplace
-        else _VF.feature_dropout(input, p, training)
+        else _VF.feature_dropout(input, p, training, generator)
     )
 
     if not is_batched:

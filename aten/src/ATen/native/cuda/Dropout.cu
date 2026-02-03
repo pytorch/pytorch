@@ -413,7 +413,11 @@ dropout_cuda(CUDAGeneratorImpl* gen, const Tensor& self, double p){
 }
 
 std::tuple<Tensor,Tensor>
-native_dropout_cuda(const Tensor& self, double p, std::optional<bool> train){
+native_dropout_cuda(
+    const Tensor& self,
+    double p,
+    std::optional<bool> train,
+    std::optional<Generator> generator){
   // short-cut for train == false
   if (train.has_value() && !train.value()) {
     return std::make_tuple(self.clone(), at::ones_like(self, self.options().dtype(c10::CppTypeToScalarType<bool>::value)));
@@ -427,7 +431,7 @@ native_dropout_cuda(const Tensor& self, double p, std::optional<bool> train){
     return std::tuple<Tensor,Tensor>(ret, mask);
   }
 
-  auto gen = get_generator_or_default<CUDAGeneratorImpl>(std::nullopt, cuda::detail::getDefaultCUDAGenerator());
+  auto gen = get_generator_or_default<CUDAGeneratorImpl>(generator, cuda::detail::getDefaultCUDAGenerator());
   double p1m = 1. - p;
   return dropout_cuda<bool>(gen, self, p1m);
 }
