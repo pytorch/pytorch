@@ -269,13 +269,6 @@ def common_reduction_strategy(
                     break
 
         for p in op_spec.output_spec.placements:
-            # NormPartial(p) is compatible with NormReduction(p) of the same norm_type
-            if (
-                isinstance(p, _NormPartial)
-                and isinstance(reduction_op, NormReduction)
-                and p.norm_type == reduction_op.norm_type
-            ):
-                continue
             # when the partial reduction op matches the global reduction op,
             # we can delay redistribution (i.e max, max)
             if isinstance(p, Partial) and p.reduce_op != reduction_op:
@@ -1461,7 +1454,6 @@ _SINGLE_INPUT_OP_TO_NUM_OUTPUTS: dict[OpOverload, int] = {
     aten.linalg_eig.default: 2,
     aten._linalg_eigh.default: 2,
     aten.linalg_qr.default: 2,
-    aten._linalg_det.default: 3,
     aten.linalg_lu_factor_ex.default: 3,
     aten.linalg_lu.default: 3,
     aten._linalg_svd.default: 3,
@@ -1492,81 +1484,6 @@ def single_input_linalg_strategy(
         num_batch_dims=num_batch_dims,
         num_outputs=num_outputs,
         num_inputs=1,
-    )
-
-
-# =============================================================================
-# Two-input solve operators (A, B -> X or A, B -> (X, ...))
-# =============================================================================
-
-# Map from operator to number of outputs
-_TWO_INPUT_SOLVE_OP_TO_NUM_OUTPUTS: dict[OpOverload, int] = {
-    aten._linalg_solve_ex.default: 4,  # X, LU, pivots, info
-    aten.linalg_solve_triangular.default: 1,  # X
-}
-
-
-@register_single_dim_strategy(
-    list(_TWO_INPUT_SOLVE_OP_TO_NUM_OUTPUTS.keys()),
-    schema_info=RuntimeSchemaInfo(1),
-)
-def two_input_solve_strategy(
-    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
-) -> list[list[Placement | _ShardingPlaceholder]]:
-    """
-    Strategy for solve operators with two matrix inputs (A, B).
-
-    Can shard on batch dimensions when both inputs shard on the same dim.
-    """
-    A_meta = cast(TensorMeta, args_schema[0])
-    B_meta = cast(TensorMeta, args_schema[1])
-    A_ndim = len(A_meta.shape)
-    B_ndim = len(B_meta.shape)
-    num_batch_dims = max(0, min(A_ndim - 2, B_ndim - 2))
-    num_outputs = _TWO_INPUT_SOLVE_OP_TO_NUM_OUTPUTS[op]
-
-    return batch_dim_rules(
-        num_batch_dims=num_batch_dims,
-        num_outputs=num_outputs,
-        num_inputs=2,
-    )
-
-
-# =============================================================================
-# Three-input solve operators (LU/LD, pivots, B -> X)
-# =============================================================================
-
-# Map from operator to number of outputs
-_THREE_INPUT_SOLVE_OP_TO_NUM_OUTPUTS: dict[OpOverload, int] = {
-    aten.linalg_lu_solve.default: 1,  # LU, pivots, B -> X
-    aten.linalg_ldl_solve.default: 1,  # LD, pivots, B -> X
-}
-
-
-@register_single_dim_strategy(
-    list(_THREE_INPUT_SOLVE_OP_TO_NUM_OUTPUTS.keys()),
-    schema_info=RuntimeSchemaInfo(1),
-)
-def three_input_solve_strategy(
-    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
-) -> list[list[Placement | _ShardingPlaceholder]]:
-    """
-    Strategy for solve operators using pre-computed factorizations.
-
-    Takes (LU/LD, pivots, B) and returns X. Can shard on batch dimensions.
-    """
-    # First arg is LU/LD matrix, third arg is B matrix
-    factor_meta = cast(TensorMeta, args_schema[0])
-    B_meta = cast(TensorMeta, args_schema[2])
-    factor_ndim = len(factor_meta.shape)
-    B_ndim = len(B_meta.shape)
-    num_batch_dims = max(0, min(factor_ndim - 2, B_ndim - 2))
-    num_outputs = _THREE_INPUT_SOLVE_OP_TO_NUM_OUTPUTS[op]
-
-    return batch_dim_rules(
-        num_batch_dims=num_batch_dims,
-        num_outputs=num_outputs,
-        num_inputs=3,
     )
 
 
