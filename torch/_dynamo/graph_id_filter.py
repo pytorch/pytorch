@@ -250,3 +250,159 @@ def get_backend_override_for_compile_id(
         )
         return lookup_backend_with_mode(backend_str)
     return None
+
+
+class GraphConfigRouter:
+    """
+    Routes graphs to different inductor configs based on their IDs.
+
+    The router parses a configuration string with rules in the format:
+        "filter1:config1;filter2:config2;..."
+
+    Rules are evaluated in order, and the first matching rule wins.
+    Config format is "key=value" or "key1=value1,key2=value2" for multiple settings.
+
+    Examples:
+        "0-5:triton.cudagraph_skip_dynamic_graphs=False"
+        ">10:triton.cudagraphs=False,triton.cudagraph_trees=False"
+    """
+
+    def __init__(self, config_str: str) -> None:
+        self._rules: list[tuple[GraphIdFilter, dict[str, Any]]] = []
+        self._configs: list[Optional[dict[str, Any]]] = []
+        self._overflow_config: Optional[dict[str, Any]] = None
+        self._parse(config_str)
+        self._precompute()
+
+    def _parse_value(self, value_str: str) -> Any:
+        """Parse a string value into the appropriate Python type."""
+        value_str = value_str.strip()
+        if value_str.lower() == "true":
+            return True
+        if value_str.lower() == "false":
+            return False
+        if value_str.lower() == "none":
+            return None
+        try:
+            if "." in value_str:
+                return float(value_str)
+            return int(value_str)
+        except ValueError:
+            return value_str
+
+    def _parse_config(self, config_str: str) -> dict[str, Any]:
+        """Parse a config string like 'key1=val1,key2=val2' into a dict."""
+        result: dict[str, Any] = {}
+        for item in config_str.split(","):
+            item = item.strip()
+            if not item:
+                continue
+            if "=" not in item:
+                log.warning("Invalid config item (missing '='): %s", item)
+                continue
+            key, value = item.split("=", 1)
+            result[key.strip()] = self._parse_value(value)
+        return result
+
+    def _parse(self, config_str: str) -> None:
+        if not config_str or not config_str.strip():
+            return
+
+        rule_strs = config_str.split(";")
+        for rule_str in rule_strs:
+            rule_str = rule_str.strip()
+            if not rule_str:
+                continue
+
+            colon_idx = rule_str.find(":")
+            if colon_idx == -1:
+                log.warning("Invalid config override rule (missing ':'): %s", rule_str)
+                continue
+
+            filter_str = rule_str[:colon_idx].strip()
+            config_part = rule_str[colon_idx + 1 :].strip()
+
+            if not filter_str or not config_part:
+                log.warning("Invalid config override rule: %s", rule_str)
+                continue
+
+            config_dict = self._parse_config(config_part)
+            if config_dict:
+                self._rules.append((GraphIdFilter(filter_str), config_dict))
+
+    def _precompute(self) -> None:
+        if not self._rules:
+            return
+
+        max_id = 0
+        for f, _ in self._rules:
+            if f._explicit_ids:
+                max_id = max(max_id, *f._explicit_ids)
+            for _, val in f._conditions:
+                max_id = max(max_id, val)
+
+        for i in range(max_id + 1):
+            self._configs.append(self._match_rules(i))
+
+        self._overflow_config = self._match_rules(max_id + 1)
+
+    def _match_rules(self, graph_id: int) -> Optional[dict[str, Any]]:
+        for f, config_dict in self._rules:
+            if graph_id in f:
+                return config_dict
+        return None
+
+    def get_config_for_graph(self, graph_id: int) -> Optional[dict[str, Any]]:
+        """
+        Get the config override for a given graph ID.
+        Returns None if no override matches.
+        """
+        if graph_id < len(self._configs):
+            return self._configs[graph_id]
+        return self._overflow_config
+
+    def is_empty(self) -> bool:
+        """Check if no rules are configured."""
+        return len(self._rules) == 0
+
+    def __repr__(self) -> str:
+        if not self._rules:
+            return "GraphConfigRouter(empty)"
+        return f"GraphConfigRouter({self._rules})"
+
+
+@functools.lru_cache
+def _create_config_router(config_str: str) -> GraphConfigRouter:
+    """
+    Create and cache GraphConfigRouter instances based on config string.
+    """
+    return GraphConfigRouter(config_str)
+
+
+def get_inductor_config_override_for_compile_id(
+    compile_id: Optional[CompileId],
+    config_str: str,
+) -> Optional[dict[str, Any]]:
+    """
+    Get the inductor config override for a given CompileId.
+
+    Returns a dict of config patches to apply, or None if no override applies.
+    """
+    if compile_id is None or not config_str:
+        return None
+
+    graph_id = compile_id.frame_id
+    if graph_id is None:
+        return None
+
+    router = _create_config_router(config_str)
+    config_dict = router.get_config_for_graph(graph_id)
+    if config_dict:
+        log.info(
+            "Graph %s (frame_id=%d) overridden with inductor config: %s",
+            compile_id,
+            graph_id,
+            config_dict,
+        )
+        return config_dict
+    return None

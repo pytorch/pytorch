@@ -322,6 +322,81 @@ instantiate_device_type_tests(
 )
 
 
+class TestInductorConfigOverrideIntegration(TestCase):
+    def setUp(self):
+        super().setUp()
+        torch._dynamo.reset()
+
+    def tearDown(self):
+        torch._dynamo.reset()
+        super().tearDown()
+
+    def test_config_router_single_graph(self, device):
+        from torch._dynamo.graph_id_filter import GraphConfigRouter
+
+        router = GraphConfigRouter("0:triton.cudagraph_skip_dynamic_graphs=False")
+        self.assertEqual(
+            router.get_config_for_graph(0),
+            {"triton.cudagraph_skip_dynamic_graphs": False},
+        )
+        self.assertIsNone(router.get_config_for_graph(1))
+
+    def test_config_router_multiple_options(self, device):
+        from torch._dynamo.graph_id_filter import GraphConfigRouter
+
+        router = GraphConfigRouter(
+            "0:triton.cudagraphs=False,triton.cudagraph_trees=False"
+        )
+        self.assertEqual(
+            router.get_config_for_graph(0),
+            {"triton.cudagraphs": False, "triton.cudagraph_trees": False},
+        )
+
+    def test_config_router_comparison(self, device):
+        from torch._dynamo.graph_id_filter import GraphConfigRouter
+
+        router = GraphConfigRouter(">1:triton.cudagraphs=True")
+        self.assertIsNone(router.get_config_for_graph(0))
+        self.assertIsNone(router.get_config_for_graph(1))
+        self.assertEqual(router.get_config_for_graph(2), {"triton.cudagraphs": True})
+
+    def test_config_router_range(self, device):
+        from torch._dynamo.graph_id_filter import GraphConfigRouter
+
+        router = GraphConfigRouter("1-3:triton.cudagraphs=False")
+        self.assertIsNone(router.get_config_for_graph(0))
+        self.assertEqual(router.get_config_for_graph(1), {"triton.cudagraphs": False})
+        self.assertEqual(router.get_config_for_graph(2), {"triton.cudagraphs": False})
+        self.assertEqual(router.get_config_for_graph(3), {"triton.cudagraphs": False})
+        self.assertIsNone(router.get_config_for_graph(4))
+
+    def test_config_router_value_types(self, device):
+        from torch._dynamo.graph_id_filter import GraphConfigRouter
+
+        router = GraphConfigRouter(
+            "0:bool_opt=True,int_opt=42,float_opt=3.14,str_opt=hello,none_opt=None"
+        )
+        config = router.get_config_for_graph(0)
+        self.assertEqual(config["bool_opt"], True)
+        self.assertEqual(config["int_opt"], 42)
+        self.assertAlmostEqual(config["float_opt"], 3.14)
+        self.assertEqual(config["str_opt"], "hello")
+        self.assertIsNone(config["none_opt"])
+
+    def test_get_inductor_config_override_empty(self, device):
+        from torch._dynamo.graph_id_filter import (
+            get_inductor_config_override_for_compile_id,
+        )
+
+        result = get_inductor_config_override_for_compile_id(None, "")
+        self.assertIsNone(result)
+
+
+instantiate_device_type_tests(
+    TestInductorConfigOverrideIntegration, globals(), only_for=["cpu", "cuda"]
+)
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 

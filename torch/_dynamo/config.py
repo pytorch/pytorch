@@ -51,6 +51,17 @@ verify_correctness = False
 # [@compile_ignored: debug]
 debug_backend_override: str = os.environ.get("TORCH_COMPILE_OVERRIDE_BACKENDS", "")
 
+# Override inductor config for specific graphs (for debugging/bisecting).
+# Format: "filter1:config1;filter2:config2;..." where filter uses same syntax as
+# debug_backend_override, and config is "key=value" or "key=value,key2=value2".
+# Examples:
+#   "0-5:triton.cudagraph_skip_dynamic_graphs=False"  - Disable skip for graphs 0-5
+#   ">10:triton.cudagraphs=False"                     - Disable cudagraphs for graphs > 10
+# [@compile_ignored: debug]
+debug_inductor_config_override: str = os.environ.get(
+    "TORCH_COMPILE_OVERRIDE_INDUCTOR_CONFIGS", ""
+)
+
 # Validate that fake_fn and real_fn in @leaf_function decorators produce outputs
 # with matching shapes and dtypes in eager mode. Helps catch mismatches early.
 # Disabled by default to avoid runtime overhead.
