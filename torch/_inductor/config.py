@@ -643,6 +643,11 @@ use_pre_grad_passes: bool = True
 use_joint_graph_passes: bool = True
 use_post_grad_passes: bool = True
 
+# Decompose functional custom ops to out variants for CUDAGraph compatibility.
+# When enabled, functional ops with registered out variants will be converted
+# to their out variants during compilation (pre-allocated buffers).
+decompose_functional_to_out: bool = False
+
 
 cutedsl_enable_autotuning: bool = (
     os.environ.get("CUTEDSL_ENABLE_AUTOTUNING", "0") == "1"
