@@ -23,7 +23,7 @@ import re
 import sys
 import types
 import unittest
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Generator, Sequence
 from typing import Any, Optional, overload, TypeVar, Union
 from typing_extensions import ParamSpec
 from unittest.mock import patch
@@ -587,7 +587,9 @@ _testing_invoke_subgraph_inductor_compile_captured_gms = None
 
 
 @contextlib.contextmanager
-def _testing_capture_invoke_subgraph_inductor_compile_gms():
+def _testing_capture_invoke_subgraph_inductor_compile_gms() -> Generator[
+    list[torch.fx.GraphModule]
+]:
     """
     Context manager to capture graph modules compiled by invoke_subgraph_inductor_compile.
 

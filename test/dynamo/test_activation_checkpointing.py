@@ -2097,6 +2097,39 @@ class GraphModule(torch.nn.Module):
         finally:
             cleanup()
 
+    def test_checkpoint_with_record_function(self):
+        # Test that record_function ops are allowed inside checkpointed functions.
+        # record_function is technically "impure" but safe to duplicate during
+        # activation checkpointing recompute since it only sets up profiling spans.
+        # This test verifies:
+        # 1. No assertion error about impure ops in AC
+        # 2. Forward graph contains record_function ops
+        # 3. Code produces correct results
+        def gn(x, y):
+            with torch.profiler.record_function("matmul_region"):
+                return torch.sigmoid(torch.matmul(x, y))
+
+        def fn(x, y):
+            return torch.utils.checkpoint.checkpoint(
+                gn, torch.sin(x), y, use_reentrant=False
+            )
+
+        x = torch.randn(4, 4, requires_grad=True)
+        y = torch.randn(4, 4, requires_grad=True)
+
+        # Verify record_function_enter_new appears in forward graph
+        fw_compiler = functools.partial(
+            count_ops, freq=1, op=torch.ops.profiler._record_function_enter_new.default
+        )
+        backend = aot_autograd(
+            fw_compiler=fw_compiler,
+            bw_compiler=nop,
+            partition_fn=default_partition,
+        )
+        # Enable capture_profiler_record_function to trace record_function ops
+        with torch._dynamo.config.patch(capture_profiler_record_function=True):
+            self._validate(fn, backend, x, y)
+
 
 class RematerializeACNodesPassTests(torch._dynamo.test_case.TestCase):
     """Tests for AC reordering optimization in full graph (forward+backward in one graph)."""
@@ -2205,7 +2238,7 @@ def forward(self, arg0_1, arg1_1):
         ):
             self._compile_and_capture(fwd_bwd_with_rng, True, (x,))
 
-    def test_ac_rematerialize_with_no_annotations_warns_and_returns_unchanged(self):
+    def test_ac_rematerialize_with_no_annotations_returns_unchanged(self):
         x = torch.randn(4, 4, requires_grad=True)
 
         def fwd_bwd(x):
@@ -2215,21 +2248,7 @@ def forward(self, arg0_1, arg1_1):
             loss = z.sum()
             return _grad(loss, x)[0]
 
-        # Without backward annotations, the pass should warn and return unchanged
-        # We verify this by checking that remat_using_tags=True produces the same
-        # graph as remat_using_tags=False (i.e., no recomputation happens)
-        import warnings
-
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            result_with, gm_with = self._compile_and_capture(fwd_bwd, True, (x,))
-
-            # Check warning was issued
-            self.assertTrue(
-                any("no backward region" in str(warning.message) for warning in w),
-                f"Expected warning about no backward region, got: {[str(warning.message) for warning in w]}",
-            )
-
+        result_with, gm_with = self._compile_and_capture(fwd_bwd, True, (x,))
         # Get the graph without the pass for comparison
         result_without, gm_without = self._compile_and_capture(fwd_bwd, False, (x,))
 

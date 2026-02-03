@@ -144,14 +144,14 @@ struct C10_API DeviceGuardImplInterface {
   virtual Stream exchangeStream(Stream) const = 0;
 
   /**
-   * Returns the raw, backend-specific opaque pointer associated with the given
+   * Returns a backend-specific, opaque native handle associated with the given
    * stream.
    *
-   * The returned pointer is owned by the backend and must not be freed or
-   * modified by the caller.
+   * The returned pointer is owned and managed by PyTorch. Callers must not
+   * modify or free it.
    */
-  virtual void* getStreamHandle(const Stream) const {
-    TORCH_CHECK(false, "Backend doesn't support getting stream data pointer.")
+  virtual void* getStreamNativeHandle(const Stream) const {
+    TORCH_CHECK(false, "Backend doesn't support getting stream native handle.")
   }
 
   /**

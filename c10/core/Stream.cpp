@@ -3,9 +3,9 @@
 
 namespace c10 {
 
-void* Stream::stream_handle() const {
+void* Stream::native_handle() const {
   impl::VirtualGuardImpl impl{device_.type()};
-  return impl.getStreamHandle(*this);
+  return impl.getStreamNativeHandle(*this);
 }
 
 // Return whether all asynchronous work previously enqueued on this stream

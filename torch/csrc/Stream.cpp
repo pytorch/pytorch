@@ -130,13 +130,13 @@ static PyObject* THPStream_get_device(THPStream* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPStream_get_stream_handle(THPStream* self, void* unused) {
+static PyObject* THPStream_get_native_handle(THPStream* self, void* unused) {
   HANDLE_TH_ERRORS
   auto stream = c10::Stream::unpack3(
       self->stream_id,
       static_cast<c10::DeviceIndex>(self->device_index),
       static_cast<c10::DeviceType>(self->device_type));
-  return PyLong_FromVoidPtr(stream.stream_handle());
+  return PyLong_FromVoidPtr(stream.native_handle());
   END_HANDLE_TH_ERRORS
 }
 
@@ -412,8 +412,8 @@ static const std::initializer_list<PyGetSetDef> THPStream_properties = {
      nullptr,
      nullptr,
      nullptr},
-    {"stream_handle",
-     reinterpret_cast<getter>(THPStream_get_stream_handle),
+    {"native_handle",
+     reinterpret_cast<getter>(THPStream_get_native_handle),
      nullptr,
      nullptr,
      nullptr},

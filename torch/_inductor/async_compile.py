@@ -315,6 +315,12 @@ class AsyncCompile:
         if get_compile_threads() <= 1:
             return False
 
+        # Proton instrumentation backend requires compilation to happen in the main
+        # process so it can instrument the Triton IR during JIT compilation.
+        # Force synchronous compilation when proton profiling is enabled.
+        if config.triton.proton_profiling:
+            return False
+
         # Create a dummy job to check if the pool is ready. Submit it here instead of at
         # pool creation so we don't launch the full pool of worker subprocesses until
         # we're sure they're needed.
@@ -400,7 +406,7 @@ class AsyncCompile:
             env_vars = ["TORCHINDUCTOR_CACHE_DIR", "TRITON_CACHE_DIR"]
             extra_env = {v: os.environ[v] for v in env_vars if v in os.environ}
             extra_config = {
-                "use_static_cuda_launcher": torch._inductor.config.use_static_cuda_launcher
+                "use_static_triton_launcher": torch._inductor.config.use_static_triton_launcher
             }
 
             if len(torch._inductor.config.autotune_lookup_table) > 0:
@@ -630,6 +636,50 @@ class AsyncCompile:
                 )
 
             return PallasKernelWrapper(getattr(mod, main_func_name), kernel_path=path)
+
+        if get_compile_threads() <= 1:
+            return task()
+        else:
+            future = self.submit(task)
+            return LambdaFuture(lambda: future.result())
+
+    def nv_universal_gemm(self, kernel_name: str, source_code: str):
+        """
+        Compile NVIDIA Universal GEMM kernels.
+
+        Args:
+            kernel_name: Name of the kernel to be defined
+            source_code: Source code of the kernel, as a string
+
+        Note:
+            NVIDIA Universal GEMM kernels are Python code that calls the cutlass_api library.
+            We use the PyCodeCache to write the source code to a file and load it.
+        """
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
+            NVUniversalGemmKernelWrapper,
+        )
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_scheduling import (
+            MAIN_SUFFIX,
+        )
+
+        kernel_code_log.info("NVIDIA Universal GEMM Kernel:\n%s", source_code)
+
+        def task():
+            key, path = torch._inductor.codecache.PyCodeCache.write(source_code)
+            mod = torch._inductor.codecache.PyCodeCache.load_by_key_path(key, path)
+
+            # Find our special entry point named function
+            main_func_name = f"{kernel_name}_{MAIN_SUFFIX}"
+            if not hasattr(mod, main_func_name):
+                available = [name for name in dir(mod) if callable(getattr(mod, name))]
+                raise RuntimeError(
+                    f"Could not find NVIDIA Universal GEMM main kernel function "
+                    f"'{main_func_name}'. Available callables: {available}"
+                )
+
+            return NVUniversalGemmKernelWrapper(
+                getattr(mod, main_func_name), kernel_path=path
+            )
 
         if get_compile_threads() <= 1:
             return task()
