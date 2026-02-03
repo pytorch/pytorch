@@ -5958,10 +5958,26 @@ class TestLinalg(TestCase):
             # launched per PyTorch API. The kernels have string
             # that always starts with `Cijk*`
             mm_key = 'Cijk'
-            events = prof.key_averages()
-            for evt in events:
-                if mm_key in evt.key:
-                    self.assertEqual(evt.count, 1)
+            from tempfile import NamedTemporaryFile
+            from json import load
+            from os import unlink
+            with NamedTemporaryFile(suffix='.json', delete=False) as f:
+                trace_path = f.name
+
+            prof.export_chrome_trace(trace_path)
+            with open(trace_path, 'r') as f:
+                trace_data = load(f)
+            # Clean up immediately
+            unlink(trace_path)
+
+            kernel_names = [
+                event['args']['kernel']
+                for event in trace_data.get('traceEvents', [])
+                if event.get('name') == 'hipExtModuleLaunchKernel'
+            ]
+
+            for kernel_name in kernel_names:
+                if mm_key in kernel_name:
                     kernel_count = kernel_count + 1
 
             # There must be exactly three kernels only
