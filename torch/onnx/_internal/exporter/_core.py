@@ -367,9 +367,13 @@ def _handle_getitem_node(
     This function only handles the first case
     """
     if len(node.all_input_nodes) != 1:
-        raise AssertionError(f"Expected 1 input node, got {len(node.all_input_nodes)}")
+        raise AssertionError("Expected exactly one input node")
     source = node.all_input_nodes[0]
     source_outputs = node_name_to_values[source.name]
+    if not isinstance(source_outputs, Sequence):
+        raise AssertionError(
+            f"Expected {source.name} to output sequence, got {node_name_to_values[source.name]}"
+        )
     if not isinstance(source_outputs, Sequence):
         raise AssertionError(
             f"Expected {source.name} to output sequence, got {node_name_to_values[source.name]}"
@@ -412,7 +416,7 @@ def _handle_call_function_node(
             else:
                 value = node_name_to_values[input_.name]
                 if isinstance(value, Sequence):
-                    raise AssertionError(f"Unexpected sequence value for {input_.name}")
+                    raise AssertionError("Expected value not to be a Sequence")
                 inputs.append(value)
         else:
             attributes[f"arg_{i}"] = input_
@@ -740,9 +744,13 @@ def _handle_output_node(
         node_name_to_values: A mapping of FX node names to their produced ONNX ``Value``.
         graph_like: The ONNX graph at construction.
     """
-    # node.args[0] can be a tuple with more than one elements. This happens when,
-    # for example, a subgraph has multiple outputs. We flatten them all as ONNX graph outputs
-    for output in node.args[0]:  # type: ignore[index,union-attr]
+    if not isinstance(node.args[0], Sequence):
+        output_nodes = (node.args[0],)
+    else:
+        # node.args[0] can be a tuple with more than one elements. This happens when,
+        # for example, a subgraph has multiple outputs. We flatten them all as ONNX graph outputs
+        output_nodes = node.args[0]
+    for output in output_nodes:
         if output is None:
             logger.warning(
                 "Output node %s has None output. The output is ignored in the exported graph. Please ensure the graph output order is expected",
@@ -750,6 +758,8 @@ def _handle_output_node(
             )
             continue
         output_value_name = output.name  # type: ignore[union-attr]
+        if not isinstance(output_value_name, str):
+            raise AssertionError(f"Bug: Expected {output_value_name!r} to be a string")
         if not isinstance(output_value_name, str):
             raise AssertionError(f"Bug: Expected {output_value_name!r} to be a string")
         values = node_name_to_values[output_value_name]
@@ -854,6 +864,10 @@ def _get_inputs_and_attributes(
         return inputs, {}, [], [node.name]  # type: ignore[return-value]
 
     # The target should be an ATen operator now
+    if not hasattr(node.target, "_schema"):
+        raise AssertionError(
+            f"The target should be an ATen operator now, but node target {node.target} has no schema"
+        )
     if not hasattr(node.target, "_schema"):
         raise AssertionError(
             f"The target should be an ATen operator now, but node target {node.target} has no schema"
@@ -1128,7 +1142,7 @@ def _exported_program_to_onnx_program(
     if name != "":
         raise AssertionError("The last module processed should be the root module")
     if values is None:
-        raise AssertionError("values must be non-None")
+        raise AssertionError("values is None")
 
     # Clear the input/output of the main graph and add them back in step 2-3
     # using the more accurate graph signature
@@ -1159,6 +1173,10 @@ def _exported_program_to_onnx_program(
         persistent = spec.persistent
         value = values[value_name]
 
+        if isinstance(value, Sequence):
+            raise AssertionError(
+                f"Input '{value_name}' should not be a sequence. This is unexpected."
+            )
         if isinstance(value, Sequence):
             raise AssertionError(
                 f"Input '{value_name}' should not be a sequence. This is unexpected."
@@ -1383,12 +1401,12 @@ def export(
                 failed_results.append(result)
             if result.success:
                 if result.exported_program is None:
-                    raise AssertionError("exported_program must be non-None on success")
+                    raise AssertionError("result.exported_program is None")
                 program = result.exported_program
                 break
 
         if result is None:
-            raise AssertionError("result must be non-None")
+            raise AssertionError("result is None")
         capture_strategy = result.strategy
         if result.exported_program is None:
             # If all strategies fail, produce an error report and raise the first error
@@ -1415,7 +1433,7 @@ def export(
 
             first_error = failed_results[0].exception
             if first_error is None:
-                raise AssertionError("first_error must be non-None")
+                raise AssertionError("first_error is None")
 
             # NOTE: We only throw the torch.export (first) exception because we want to
             # focus on the torch.export.export error. Errors from other strategies like
@@ -1432,7 +1450,7 @@ def export(
             ) from first_error
 
     if program is None:
-        raise AssertionError("program must be non-None")
+        raise AssertionError("program is None")
 
     if dump_exported_program:
         verbose_print("Dumping ExportedProgram because `dump_exported_program=True`...")
@@ -1522,9 +1540,9 @@ def export(
 
             try:
                 if pre_decomp_unique_ops is None:
-                    raise AssertionError("pre_decomp_unique_ops must be non-None")
+                    raise AssertionError("pre_decomp_unique_ops is None")
                 if post_decomp_unique_ops is None:
-                    raise AssertionError("post_decomp_unique_ops must be non-None")
+                    raise AssertionError("post_decomp_unique_ops is None")
 
                 # Run the analysis to get the error report
                 _reporting.create_onnx_export_report(
@@ -1553,7 +1571,7 @@ def export(
     profile_result = _maybe_stop_profiler_and_get_result(profiler)
 
     if onnx_program.exported_program is None:
-        raise AssertionError("exported_program must be non-None")
+        raise AssertionError("onnx_program.exported_program is None")
 
     # Converter opset version and optimize
     if opset_version is not None:
@@ -1577,9 +1595,9 @@ def export(
         if report:
             try:
                 if pre_decomp_unique_ops is None:
-                    raise AssertionError("pre_decomp_unique_ops must be non-None")
+                    raise AssertionError("pre_decomp_unique_ops is None")
                 if post_decomp_unique_ops is None:
-                    raise AssertionError("post_decomp_unique_ops must be non-None")
+                    raise AssertionError("post_decomp_unique_ops is None")
                 report_path = artifacts_dir / _reporting.construct_report_file_name(
                     timestamp, export_status
                 )
@@ -1617,9 +1635,9 @@ def export(
         if report:
             try:
                 if pre_decomp_unique_ops is None:
-                    raise AssertionError("pre_decomp_unique_ops must be non-None")
+                    raise AssertionError("pre_decomp_unique_ops is None")
                 if post_decomp_unique_ops is None:
-                    raise AssertionError("post_decomp_unique_ops must be non-None")
+                    raise AssertionError("post_decomp_unique_ops is None")
                 report_path = artifacts_dir / _reporting.construct_report_file_name(
                     timestamp, export_status
                 )
@@ -1691,9 +1709,9 @@ def export(
     if report:
         try:
             if pre_decomp_unique_ops is None:
-                raise AssertionError("pre_decomp_unique_ops must be non-None")
+                raise AssertionError("pre_decomp_unique_ops is None")
             if post_decomp_unique_ops is None:
-                raise AssertionError("post_decomp_unique_ops must be non-None")
+                raise AssertionError("post_decomp_unique_ops is None")
 
             traceback_lines = []
             if failed_results:
