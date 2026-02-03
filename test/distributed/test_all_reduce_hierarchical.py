@@ -213,14 +213,12 @@ class TestAllReduceHierarchical(MultiProcessTestCase):
 
             # Launch kernel with single CTA
             # Use cooperative grid for NVSHMEM barriers to work correctly
+            # Topology info (rank, team_size, lsa_size) obtained from context
             kernel_func[(1,)](
                 ctx_ptr,
                 buffer_ptr,
                 scratch_ptr,
                 num_elements,
-                my_rank,
-                world_size,
-                lsa_size,
                 block_size,
                 backend_hint,
                 launch_cooperative_grid=True,
@@ -429,6 +427,7 @@ class TestAllReduceHierarchicalLargeScale(MultiProcessTestCase):
             dist.barrier()
 
             # Launch kernel with single CTA (cooperative grid requirement)
+            # Topology info (rank, team_size, lsa_size) obtained from context
             block_size = 64
 
             all_reduce_hierarchical_nvshmem[(1,)](
@@ -436,9 +435,6 @@ class TestAllReduceHierarchicalLargeScale(MultiProcessTestCase):
                 buffer_ptr,
                 scratch_ptr,
                 num_elements,
-                my_rank,
-                world_size,
-                lsa_size,
                 block_size,
                 BACKEND_NVSHMEM,
                 launch_cooperative_grid=True,
