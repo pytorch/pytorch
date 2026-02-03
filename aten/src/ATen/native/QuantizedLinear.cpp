@@ -170,7 +170,7 @@ Tensor fbgemm_linear_int8_weight_fp32_activation(
       fbgemm::fbgemmPacked(
           /*packA=*/pack_a,
           /*packB=*/pack_b,
-          /*C=*/output.const_data_ptr<float>(),
+          /*C=*/output.mutable_data_ptr<float>(),
           /*C_buffer=*/buffer.mutable_data_ptr<int32_t>(),
           /*ldc=*/N,
           /*outProcess=*/output_proc_obj,
