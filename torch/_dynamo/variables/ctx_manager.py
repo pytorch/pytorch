@@ -125,12 +125,10 @@ class ContextWrappingVariable(VariableTracker):
         assert len(args) == 1
         assert isinstance(
             args[0],
-            (
-                NestedUserFunctionVariable,
-                SkipFunctionVariable,
-                UserMethodVariable,
-                UserFunctionVariable,
-            ),
+            NestedUserFunctionVariable
+            | SkipFunctionVariable
+            | UserMethodVariable
+            | UserFunctionVariable,
         )
 
         if isinstance(args[0], NestedUserFunctionVariable):
@@ -235,6 +233,14 @@ class RepararametrizeModuleContextVariable(GenericContextWrappingVariable):
             tx.output.side_effects.stop_ignoring_mutations_on(self.old_buffer_var)
             tx.output.side_effects.stop_ignoring_mutations_on(self.old_parameters_var)
             return x
+
+    def exit_on_graph_break(self) -> bool:
+        """
+        Returns False to indicate that this context manager does not
+        require graph breaks, enabling it to work with higher-order
+        operators that require full graph capture.
+        """
+        return False
 
     # Forward all other method calls to self.cm_vt
     def __getattr__(self, name: str) -> Any:
@@ -1565,9 +1571,7 @@ class WithExitFunctionVariable(VariableTracker):
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
-        assert isinstance(
-            ctx, (ContextWrappingVariable, GenericContextWrappingVariable)
-        )
+        assert isinstance(ctx, ContextWrappingVariable | GenericContextWrappingVariable)
         self.ctx = ctx
         self.target = target
 

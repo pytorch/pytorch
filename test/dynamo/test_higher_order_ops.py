@@ -4622,6 +4622,53 @@ class GraphModule(torch.nn.Module):
         )
         self.assertEqual(actual, expected)
 
+    def test_functional_call_with_cond(self):
+        """Test that functional_call works with torch.cond"""
+        mod = nn.Linear(10, 10)
+        params = dict(mod.named_parameters())
+        buffers = dict(mod.named_buffers())
+        x = torch.randn(10)
+
+        def step_fn(x):
+            return torch.func.functional_call(mod, (params, buffers), (x,))
+
+        def run_logic(pred, x):
+            return torch.cond(
+                pred,
+                step_fn,  # True branch: calls functional_call
+                lambda x: x.clone(),  # False branch: return non-aliased tensor
+                [x],  # Operands
+            )
+
+        # Compile once and test both branches
+        compiled_fn = torch.compile(run_logic, fullgraph=True)
+        true_pred = torch.tensor(True)
+        false_pred = torch.tensor(False)
+
+        self.assertEqual(run_logic(true_pred, x), compiled_fn(true_pred, x))
+        self.assertEqual(run_logic(false_pred, x), compiled_fn(false_pred, x))
+
+    def test_functional_call_with_scan(self):
+        """Test that functional_call works with torch.scan"""
+        from torch._higher_order_ops.scan import scan
+
+        mod = nn.Linear(10, 10)
+        params = dict(mod.named_parameters())
+        buffers = dict(mod.named_buffers())
+
+        def combine_fn(carry, x):
+            # Use functional_call in combine function
+            y = torch.func.functional_call(mod, (params, buffers), (x,))
+            return carry + y, y
+
+        init = torch.zeros(10)
+        xs = torch.randn(5, 10)  # 5 steps
+
+        def run_scan(xs):
+            return scan(combine_fn, init, xs, dim=0)
+
+        self._compile_check(run_scan, (xs,), fullgraph=True)
+
     def test_grad(self):
         counters.clear()
 
