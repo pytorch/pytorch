@@ -9,7 +9,11 @@ from torch.nn.parallel import DistributedDataParallel
 from torch.optim import SGD
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTest, get_devtype, get_full_params
+from torch.testing._internal.common_fsdp import (
+    FSDPTestContinuous,
+    get_devtype,
+    get_full_params,
+)
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 
 
@@ -43,7 +47,7 @@ class Model(Module):
         return self.outer(i + j)
 
 
-class TestMultiForward(FSDPTest):
+class TestMultiForward(FSDPTestContinuous):
     def _dist_train(self, wrap_fsdp):
         # keep everything deterministic for input data
         torch.manual_seed(0)
