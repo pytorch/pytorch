@@ -342,20 +342,30 @@ keep-runtime-typing = true
 "tools/linter/**" = [
     "LOG015" # please fix
 ]
-"benchmarks/**" = [
-    "S101"
-]
+# Remaining benchmarks files that still need S101 migration
+"benchmarks/distributed/rpc/**" = ["S101"]
+"benchmarks/dynamo/cachebench.py" = ["S101"]
+"benchmarks/dynamo/combine_csv.py" = ["S101"]
+"benchmarks/dynamo/microbenchmarks/bench_mm_fusion.py" = ["S101"]
+"benchmarks/dynamo/microbenchmarks/microbench.py" = ["S101"]
+"benchmarks/dynamo/parse_logs.py" = ["S101"]
+"benchmarks/dynamo/pr_time_benchmarks/**" = ["S101"]
+"benchmarks/dynamo/summarize_perf.py" = ["S101"]
+"benchmarks/dynamo/torchbench.py" = ["S101"]
+"benchmarks/dynamo/training_loss.py" = ["S101"]
+"benchmarks/operator_benchmark/pt/matmul_test.py" = ["S101"]
+"benchmarks/operator_benchmark/pt/mm_test.py" = ["S101"]
+"benchmarks/operator_benchmark/pt/qcat_test.py" = ["S101"]
+"benchmarks/record_function_benchmark/**" = ["S101"]
+"benchmarks/tensorexpr/**" = ["S101"]
+"benchmarks/transformer/attention_bias_benchmarks.py" = ["S101"]
+"benchmarks/upload_scribe.py" = ["S101"]
 "test/**" = [
     "S101"
 ]
 "torch/_dynamo/**" = ["S101"]
 "torch/_inductor/**" = ["S101"]
 "torch/distributed/**" = ["S101"]
-"torch/_export/db/examples/dynamic_shape_assert.py" = ["S101"]
-"torch/_export/db/examples/list_contains.py" = ["S101"]
-"torch/_functorch/_activation_checkpointing/**" = ["S101"]
-"torch/_functorch/_aot_autograd/graph_compile.py" = ["S101"]
-"torch/_functorch/_aot_autograd/runtime_wrappers.py" = ["S101"]
 
 [tool.codespell]
 ignore-words = "tools/linter/dictionary.txt"
