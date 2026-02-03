@@ -89,7 +89,7 @@ Generator createCUDAGenerator(DeviceIndex device_index) {
  *
  * Generator states are registered lazily with CUDA graphs. When an RNG operation
  * is performed during graph capture, the generator state is automatically registered
- * with the capturing graph via getGraphFromCaptureId().
+ * with the capturing graph via get_graph_from_capture_id().
  *
  * Each (generator, capture_id) pair gets its own CUDAGeneratorCaptureState, which
  * holds the GPU tensors and offset tracking for that specific capture. This design
@@ -211,7 +211,7 @@ CUDAGeneratorCaptureState* CUDAGeneratorState::get_capture_state(CaptureId_t cap
   }
 
   // Get the graph to obtain device and mempool_id for initialize()
-  auto* graph = cuda::getGraphFromCaptureId(capture_id);
+  auto* graph = cuda::get_graph_from_capture_id(capture_id);
   TORCH_CHECK(graph != nullptr,
       "RNG op during graph capture but could not find the CUDAGraph object. "
       "This should not happen.");

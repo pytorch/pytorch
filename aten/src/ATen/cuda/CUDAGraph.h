@@ -35,7 +35,7 @@ struct CUDAGraph;
 
 // Get the CUDAGraph associated with a capture ID, if any.
 // Returns nullptr if no graph is associated with the given capture ID.
-TORCH_CUDA_CPP_API CUDAGraph* getGraphFromCaptureId(CaptureId_t capture_id);
+TORCH_CUDA_CPP_API CUDAGraph* get_graph_from_capture_id(CaptureId_t capture_id);
 
 struct TORCH_CUDA_CPP_API CUDAGraph {
   CUDAGraph(bool keep_graph=false);

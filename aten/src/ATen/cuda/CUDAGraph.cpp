@@ -21,8 +21,8 @@ static bool _cuda_graphs_debug = false;
 // was originally a thread_local std::stack<CUDAGraph*>, but that was
 // not acceptable since stream capture does span threads in certain
 // circumstances (in particular, during autograd).
-static std::mutex _currently_capturing_graphs_mutex;
-static ska::flat_hash_map<CaptureId_t, CUDAGraph*> _currently_capturing_graphs;
+static std::mutex capture_id_to_graph_mutex;
+static ska::flat_hash_map<CaptureId_t, CUDAGraph*> capture_id_to_graph;
 
 std::optional<CaptureId_t> getCaptureId(std::optional<cudaStream_t> stream) {
   cudaStream_t s = stream.value_or(c10::cuda::getCurrentCUDAStream());
@@ -35,10 +35,10 @@ std::optional<CaptureId_t> getCaptureId(std::optional<cudaStream_t> stream) {
   return std::nullopt;
 }
 
-CUDAGraph* getGraphFromCaptureId(CaptureId_t capture_id) {
-  std::lock_guard<std::mutex> lock(_currently_capturing_graphs_mutex);
-  auto it = _currently_capturing_graphs.find(capture_id);
-  if (it != _currently_capturing_graphs.end()) {
+CUDAGraph* get_graph_from_capture_id(CaptureId_t capture_id) {
+  std::lock_guard<std::mutex> lock(capture_id_to_graph_mutex);
+  auto it = capture_id_to_graph.find(capture_id);
+  if (it != capture_id_to_graph.end()) {
     return it->second;
   }
   return nullptr;
@@ -135,8 +135,8 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*={0,0}*/, cudaStreamCaptureMode 
   capture_id_ = capture_id_opt.value();
 
   {
-    std::lock_guard<std::mutex> lock(_currently_capturing_graphs_mutex);
-    _currently_capturing_graphs.emplace(capture_id_, this);
+    std::lock_guard<std::mutex> lock(capture_id_to_graph_mutex);
+    capture_id_to_graph.emplace(capture_id_, this);
   }
 }
 
@@ -149,11 +149,11 @@ void CUDAGraph::capture_end() {
   AT_CUDA_CHECK(cudaStreamEndCapture(capture_stream_, &graph_));
 
   {
-    std::unique_lock<std::mutex> lock(_currently_capturing_graphs_mutex);
+    std::unique_lock<std::mutex> lock(capture_id_to_graph_mutex);
     TORCH_CHECK(
-        _currently_capturing_graphs.count(capture_id_),
+        capture_id_to_graph.count(capture_id_),
         "capture_end() called before capture_begin().");
-    _currently_capturing_graphs.erase(capture_id_);
+    capture_id_to_graph.erase(capture_id_);
   }
 
   c10::cuda::CUDACachingAllocator::endAllocateToPool(capture_dev_, mempool_id_);
@@ -298,8 +298,8 @@ void CUDAGraph::reset() {
 
   // Remove this graph from the global capture_id_to_graph map
   if (capture_id_ != 0) {
-    std::lock_guard<std::mutex> lock(_currently_capturing_graphs_mutex);
-    _currently_capturing_graphs.erase(capture_id_);
+    std::lock_guard<std::mutex> lock(capture_id_to_graph_mutex);
+    capture_id_to_graph.erase(capture_id_);
     capture_id_ = 0;
   }
 
@@ -345,7 +345,7 @@ CUDAGraph::~CUDAGraph() {
 }
 
 CUDAGraph* CUDAGraph::get_currently_capturing_graph() {
-  std::unique_lock<std::mutex> lock(_currently_capturing_graphs_mutex);
+  std::unique_lock<std::mutex> lock(capture_id_to_graph_mutex);
   cudaStreamCaptureStatus status{};
   CaptureId_t current_capture_id = 0;
   auto stream = at::cuda::getCurrentCUDAStream();
@@ -354,9 +354,9 @@ CUDAGraph* CUDAGraph::get_currently_capturing_graph() {
       status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive,
       "The current stream is not currently capturing.");
   TORCH_CHECK(
-      _currently_capturing_graphs.count(current_capture_id),
+      capture_id_to_graph.count(current_capture_id),
       "get_currently_capturing_graph() can be used only between capture_begin() and capture_end(). Did you use a stream without making it depend upon the original stream used for capture?");
-  return _currently_capturing_graphs.at(current_capture_id);
+  return capture_id_to_graph.at(current_capture_id);
 }
 
 void CUDAGraph::begin_capture_to_if_node(
@@ -473,8 +473,8 @@ getCurrentCUDAStream(), &cond_node, nullptr, 1, cudaStreamSetCaptureDependencies
   conditional_node_streams_.emplace(child_stream);
 
   {
-    std::unique_lock<std::mutex> lock(_currently_capturing_graphs_mutex);
-    _currently_capturing_graphs.emplace(
+    std::unique_lock<std::mutex> lock(capture_id_to_graph_mutex);
+    capture_id_to_graph.emplace(
         conditional_graph_capture_ids_.top(), this);
   }
 
@@ -513,12 +513,12 @@ void CUDAGraph::end_capture_to_conditional_node() {
   }
 
   {
-    std::unique_lock<std::mutex> lock(_currently_capturing_graphs_mutex);
+    std::unique_lock<std::mutex> lock(capture_id_to_graph_mutex);
     CaptureId_t capture_id = conditional_graph_capture_ids_.top();
     TORCH_CHECK(
-        _currently_capturing_graphs.count(capture_id),
+        capture_id_to_graph.count(capture_id),
         "capture_end() called before capture_begin().");
-    _currently_capturing_graphs.erase(capture_id);
+    capture_id_to_graph.erase(capture_id);
   }
 
   CUDAStream stream = conditional_node_streams_.top().current_stream();
