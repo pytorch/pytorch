@@ -178,6 +178,30 @@ def call_hook_from_backward_state(
     return getattr(bw_state, hook_name)(*args, **kwargs)
 
 
+class _ApplyBackwardHook(torch.autograd.Function):
+    """Custom autograd function that applies a hook during backward.
+
+    This is used to implement register_hook on intermediate tensors without
+    requiring compiled autograd. The hook function is captured in the context
+    and applied during the backward pass.
+    """
+
+    @staticmethod
+    # pyre-ignore[14]: Inconsistent override is expected for autograd.Function
+    def forward(
+        ctx: Any, tensor: torch.Tensor, hook_fn: Callable[..., Any]
+    ) -> torch.Tensor:  # type: ignore[override]
+        ctx.hook_fn = hook_fn
+        return tensor.view_as(tensor)
+
+    @staticmethod
+    def backward(ctx: Any, grad: torch.Tensor) -> tuple[torch.Tensor, None]:  # type: ignore[override]
+        result = ctx.hook_fn(grad)
+        if result is None:
+            result = grad
+        return result, None
+
+
 def call_module_hooks_from_backward_state(
     _: Any, result: Any, *args: Any, bw_state: Any, hooks_name: str, module_name: str
 ) -> Any:

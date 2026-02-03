@@ -51,11 +51,24 @@ verify_correctness = False
 # [@compile_ignored: debug]
 debug_backend_override: str = os.environ.get("TORCH_COMPILE_OVERRIDE_BACKENDS", "")
 
+# Validate that fake_fn and real_fn in @leaf_function decorators produce outputs
+# with matching shapes and dtypes in eager mode. Helps catch mismatches early.
+# Disabled by default to avoid runtime overhead.
+# [@compile_ignored: debug]
+leaf_function_validate_outputs = False
+
+# Check for escaped gradients in @leaf_function. When a leaf_function closes over
+# a tensor with requires_grad=True, gradients won't flow back to it. This check
+# walks the autograd graph to detect such cases and raises an error.
+# Disabled by default to avoid runtime overhead. Enable for debugging.
+# [@compile_ignored: debug]
+leaf_function_check_escaped_gradients = False
+
 # need this many ops to create an FX graph (deprecated: not used)
 minimum_call_count = 1
 
 # turn on/off DCE pass (deprecated: always true)
-dead_code_elimination = True
+dead_code_elimination = None
 
 # Enable or disable side effect replay after graph execution.
 # When False, mutations to Python objects (lists, dicts, attributes) won't be
@@ -439,6 +452,11 @@ error_on_nested_jit_trace = True
 # If true, error with a better message if we symbolically trace over a
 # dynamo-optimized function. If false, silently suppress dynamo.
 error_on_nested_fx_trace = True
+
+# If true, force dynamo compilation even when inside FX symbolic tracing.
+# This allows nested compilation where the outer tracer (e.g., make_fx) can
+# trace over dynamo-compiled functions. Use with error_on_nested_fx_trace=False.
+force_compile_during_fx_trace = False
 
 # Disables graph breaking on rnn. YMMV with backends.
 allow_rnn = False
