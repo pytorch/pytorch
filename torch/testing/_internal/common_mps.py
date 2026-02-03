@@ -43,6 +43,7 @@ if torch.backends.mps.is_available():
             "acos",
             "atan",
             "baddbmm",
+            "block_diag",
             "broadcast_tensors",
             "broadcast_to",
             "chalf",
