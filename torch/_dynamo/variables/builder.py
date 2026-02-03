@@ -4053,8 +4053,21 @@ class SourcelessBuilder:
     @staticmethod
     def create(
         tx: "InstructionTranslatorBase",
-        value: type[set[Any]] | type[dict[Any, Any]] | type[tuple[Any, ...]],
+        value: type[set[Any]]
+        | type[dict[Any, Any]]
+        | type[tuple[Any, ...]]
+        | type[list[Any]],
     ) -> BuiltinVariable: ...
+
+    @overload
+    @staticmethod
+    def create(tx: "InstructionTranslatorBase", value: list[Any]) -> ListVariable: ...
+
+    @overload
+    @staticmethod
+    def create(
+        tx: "InstructionTranslatorBase", value: tuple[Any, ...]
+    ) -> TupleVariable: ...
 
     @overload
     @staticmethod
