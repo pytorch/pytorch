@@ -721,4 +721,3 @@ void initModule(PyObject* module) {
 }
 
 } // namespace torch::xpu
- 
