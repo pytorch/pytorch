@@ -932,12 +932,16 @@ class InputObserver:
                     if err_abs > atol:
                         success = False
                     err = (
-                        (torch_tensor - ort_tensor).abs()
-                        / (torch_tensor.abs() + rtol)
-                    ).max().item()
+                        (
+                            (torch_tensor - ort_tensor).abs()
+                            / (torch_tensor.abs() + rtol)
+                        )
+                        .max()
+                        .item()
+                    )
                     err_rel = max(err_rel, err)
                     if err_rel > rtol:
-                        success=False
+                        success = False
                 diff = dict(SUCCESS=success, abs=err_abs, rel=err_rel)
             diff.update(
                 dict(
