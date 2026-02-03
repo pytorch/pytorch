@@ -19,7 +19,7 @@ from concurrent.futures import as_completed, ThreadPoolExecutor
 from io import StringIO
 from pathlib import Path
 from types import ModuleType
-from typing import Any, NamedTuple, Optional, TYPE_CHECKING, Union
+from typing import Any, cast, NamedTuple, Optional, TYPE_CHECKING, Union
 from typing_extensions import Self
 from unittest.mock import patch
 
@@ -63,11 +63,11 @@ from .codegen.common import (
 from .codegen.simd_kernel_features import SIMDKernelFeatures
 from .codegen.subgraph import SubgraphChoiceCaller
 from .codegen.triton import (
-    gen_common_triton_imports,
     texpr,
     TMACompatibilityChecker,
     TritonKernel,
     TritonScheduling,
+    TritonSymbols,
 )
 from .codegen.triton_utils import config_of, equal_1_arg_indices, signature_to_meta
 from .codegen.wrapper import pexpr
@@ -89,6 +89,7 @@ from .utils import (
     sympy_dot,
     sympy_index_symbol,
     sympy_product,
+    tlx_only_cuda_options,
     triton_type,
     triton_type_to_torch,
     unique,
@@ -119,6 +120,8 @@ class KernelNamespace:
 
 # these objects are imported from the generated wrapper code
 extern_kernels = KernelNamespace()
+
+WORKSPACE_ARG_PLACEHOLDER = "ws_placeholder"
 
 
 @dataclasses.dataclass
@@ -296,12 +299,14 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
         subgraph_number: int,
         fixed_inputs: dict[str, Any],
         mask: Optional[str],
+        input_shapes: Optional[dict[str, tuple[str, ...]]] = None,
     ):
         super().__init__(V.ops)
         self.name = f"PlaceholderSubstitution_{subgraph_number}"
         self.kernel = kernel
         self.fixed_inputs = fixed_inputs
         self.mask = mask
+        self.input_shapes = input_shapes or {}
 
     def load(self, name: str, index: sympy.Expr):
         """Handle loading from tensor or fixed input."""
@@ -324,11 +329,12 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
             )
             return out
 
+        shape = self.input_shapes.get(name, ())
         return self.kernel.cse.generate(
             self.kernel.compute,
             f"({self.fixed_inputs[name]})",
             dtype=torch.float32,
-            shape=(),
+            shape=shape,
         )
 
     def indirect_indexing(self, index_var: str, size, check, wrap_neg=True):
@@ -349,18 +355,28 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
         assert mode == "atomic_add", "Only atomic_add is supported for inner stores"
 
         buf_name = self._add_kernel_input(name)
-        index_str = self._process_indexing(index)
-        index_str = f"tl.broadcast_to({index_str}, {value}.shape)"
-        store = f"tl.atomic_add({buf_name} + {index_str}, {value}, {self.mask}, sem='relaxed')"
-        return store
+        index_str = self._broadcast_index(index, f"{value}.shape")
+        return f"tl.atomic_add({buf_name} + {index_str}, {value}, {self.mask}, sem='relaxed')"
 
-    def _add_kernel_input(self, name: str):
-        """Add name as input to kernel and return input ref."""
+    def _add_kernel_input(self, name: str) -> str:
         return self.kernel.args.input(name)
 
-    def _process_indexing(self, index):
-        """Process and rename indexing, adding symbols as kernel inputs."""
+    def _process_indexing(self, index: sympy.Expr) -> str:
         return self.kernel.kexpr(self.kernel.rename_indexing(index))
+
+    def _broadcast_index(self, index: sympy.Expr, shape: str) -> str:
+        index_str = self._process_indexing(index)
+        index_shape = TritonSymbols.get_block_shape(index)
+        if (
+            index_shape
+            and len(index_shape) == 1
+            and all(
+                V.graph.sizevars.statically_known_equals(sympy.sympify(d), 1)
+                for d in index_shape
+            )
+        ):
+            return f"tl.broadcast_to(tl.reshape({index_str}, []), {shape})"
+        return f"tl.broadcast_to({index_str}, {shape})"
 
 
 # Function name, followed by args and kwargs.
@@ -436,7 +452,7 @@ class TritonTemplateKernel(TritonKernel):
             reduction_idx = None
             for i, prefix in enumerate(tiling):
                 rt = prefix_to_range_tree[prefix]
-                # pyrefly: ignore  # missing-argument
+
                 if rt.is_reduction:
                     reduction_idx = i
                     break
@@ -619,7 +635,7 @@ class TritonTemplateKernel(TritonKernel):
         ninplace_args = len(unique(self.args.inplace_buffers.values()))
         num_bytes = []
         for i, inp in enumerate(itertools.chain(self.input_nodes, (self.output_node,))):
-            size = V.graph.sizevars.size_hints(inp.get_size(), fallback=0)
+            size = V.graph.sizevars.optimization_hints(inp.get_size(), fallback=0)
             numel = functools.reduce(operator.mul, size, 1)
             dtype_size = get_dtype_size(inp.get_dtype())
             num_bytes.append(numel * dtype_size * (1 + int(i < ninplace_args)))
@@ -630,7 +646,9 @@ class TritonTemplateKernel(TritonKernel):
             for fx_node in node._current_origins:
                 f = count_flops_fx(fx_node)
                 if f is not None:
-                    return V.graph.sizevars.size_hint(f, fallback=0)
+                    if isinstance(f, torch.SymInt):
+                        f = f.node.expr
+                    return V.graph.sizevars.optimization_hint(f, fallback=0)
         return 0
 
     def jit_lines(self):
@@ -661,6 +679,10 @@ class TritonTemplateKernel(TritonKernel):
         if kpack:
             triton_meta["kpack"] = kpack
 
+        for k in tlx_only_cuda_options():
+            if v := self.meta.get(k, None):
+                triton_meta[k] = v
+
         self.triton_meta = triton_meta
 
         inductor_meta = {
@@ -689,6 +711,13 @@ class TritonTemplateKernel(TritonKernel):
             num_consumer_groups={self.num_consumer_groups},
             num_buffers_warp_spec={self.num_buffers_warp_spec},
         """
+
+        for k in tlx_only_cuda_options():
+            if v := self.meta.get(k, None):
+                template_args += f"""
+                    {k}={v},
+                """
+                self.triton_meta[k] = v
 
         return f"""
             @triton_heuristics.template(
@@ -771,7 +800,7 @@ class TritonTemplateKernel(TritonKernel):
             # python_argdefs() cannot be run until after the rest of the template lazily adds more args
             arg_defs, *_ = self.args.python_argdefs()
             code = IndentedBuffer()
-            code.splice(gen_common_triton_imports())
+            code.splice(self.gen_common_triton_imports())
             code.splice(self.jit_lines())
             code.writeline(
                 f"def {self.kernel_name}({', '.join(x.full_name() for x in arg_defs)}):"
@@ -848,6 +877,7 @@ class TritonTemplateKernel(TritonKernel):
         subgraph_number: int,
         output_name: Optional[str],
         mask: Optional[str] = None,
+        input_shapes: Optional[dict[str, tuple[str, ...]]] = None,
         **fixed_inputs,
     ) -> str:
         """This creates a modification function for a subgraph.
@@ -858,6 +888,8 @@ class TritonTemplateKernel(TritonKernel):
             output_name (Optional[str]): The name of the output variable to store the result in
             mask (Optional[str]): An optional mask to use for the store operation. If provided, this mask
                 will be applied to the store.
+            input_shapes (Optional[dict[str, tuple[str, ...]]]): Optional mapping of input names to their
+                block shapes. Used for proper shape propagation during codegen.
         """
         num = 0
         out = None
@@ -867,7 +899,7 @@ class TritonTemplateKernel(TritonKernel):
         with self.create_subgraph_body(f"mod_{subgraph_number}_{num}"):
             subgraph = self._get_subgraph(subgraph_number)
             modification_handler = ModificationWrapper(
-                self, subgraph_number, fixed_inputs, mask
+                self, subgraph_number, fixed_inputs, mask, input_shapes
             )
             with V.set_ops_handler(modification_handler):
                 assert isinstance(subgraph, (ir.ComputedBuffer, list)), (
@@ -1221,7 +1253,6 @@ class TritonTemplateKernel(TritonKernel):
                                 val_shape[i],
                                 i,
                                 len(val_shape),
-                                # pyrefly: ignore [missing-argument]
                                 block_name=range_tree.symt.name,
                             )
                         )
@@ -1235,7 +1266,7 @@ class TritonTemplateKernel(TritonKernel):
                         )
                         # Update the val_shape information to use consistent naming
                         # after the remapping.
-                        # pyrefly: ignore [missing-argument]
+
                         val_shape_copy[i] = range_tree.symt.name
                     # pyrefly: ignore [bad-assignment]
                     val_shape = tuple(val_shape_copy)
@@ -1310,7 +1341,6 @@ class TritonTemplateKernel(TritonKernel):
                 if output_index == contiguous_index:
                     output_index = sympy.Symbol("xindex", integer=True)
 
-            # pyrefly: ignore [bad-assignment]
             self.template_out_shape = val_shape if val_shape else val
             acc_dtype = (
                 triton_type_to_torch(self.meta["ACC_TYPE"])
@@ -2036,39 +2066,50 @@ class TritonTemplate(KernelTemplate):
         codegen_input_nodes = (
             tuple(input_nodes) + kernel_input_nodes[len(expected_input_args) :]
         )
-        extra_args = V.graph.sizevars.size_hints(
-            map(sympy.expand, result.kernel_args_sizevars_keys),
-            fallback=config.unbacked_symint_fallback,
-            hint_override=hint_override,
+
+        extra_args = tuple(
+            V.graph.sizevars.optimization_hint_with_override(
+                sympy.expand(e),
+                hint_override=hint_override,
+            )
+            for e in result.kernel_args_sizevars_keys
         )
 
         kernel_hash_name = f"triton_{self.name}_{next(self.index_counter)}"
 
+        # Extract workspace metadata for async autotuning (don't create tensor here
+        # as it can't be pickled for subprocess communication)
+        workspace_size_bytes: Optional[int] = None
+        workspace_zero_fill = False
         workspace_args = []
         if workspace_arg is not None:
-            # Create workspace tensor
-            workspace_size = workspace_arg.count
-            workspace_tensor = torch.empty_strided(
-                (workspace_size,),
-                (1,),
-                dtype=torch.uint8,
-                device=layout.device.type,
+            workspace_size_bytes = workspace_arg.count
+            workspace_zero_fill = (
+                workspace_arg.zero_mode != WorkspaceZeroMode.UNINITIALIZED
             )
 
-            # Handle zero initialization if needed
-            if workspace_arg.zero_mode != WorkspaceZeroMode.UNINITIALIZED:
-                workspace_tensor.zero_()
-
-            workspace_args.append(workspace_tensor)
+            workspace_args.append(WORKSPACE_ARG_PLACEHOLDER)
 
         options = result.kernel_options
 
         def make_kernel_render(out_node, hint_override: Optional[int] = None):
             assert result is not None
+            # Create a new unique name for the workspace arg buffer for each render
+            # to prevent buffer reuse of the same workspace arg
+            kernel_workspace_arg = workspace_arg
+            if workspace_arg is not None:
+                kernel_workspace_arg = WorkspaceArg(
+                    count=workspace_arg.count,
+                    zero_mode=workspace_arg.zero_mode,
+                    device=workspace_arg.device,
+                    outer_name=WorkspaceArg.unique_name(),
+                    inner_name=workspace_arg.inner_name,
+                    dtype=workspace_arg.dtype,
+                )
             kernel = self.kernel_type(
                 kernel_name=str(Placeholder.KERNEL_NAME),
                 output_node=out_node,
-                workspace_arg=workspace_arg,
+                workspace_arg=kernel_workspace_arg,
                 use_jit=False,
                 hint_override=hint_override,
                 tma_store=tma_store,
@@ -2084,10 +2125,10 @@ class TritonTemplate(KernelTemplate):
 
         # create the BenchmarkRequest
         assert result.mod.__file__ is not None
+
         grid = self.grid(
-            *V.graph.sizevars.size_hints(
+            *V.graph.sizevars.optimization_hints_with_override(
                 call_sizes,
-                fallback=config.unbacked_symint_fallback,
                 hint_override=hint_override,
             ),
             kwargs,
@@ -2109,6 +2150,8 @@ class TritonTemplate(KernelTemplate):
             matrix_instr_nonkdim=kwargs.get("matrix_instr_nonkdim", 0),
             waves_per_eu=kwargs.get("waves_per_eu", 0),
             kpack=kwargs.get("kpack", 2),
+            workspace_size=workspace_size_bytes,
+            workspace_zero_fill=workspace_zero_fill,
             input_tensor_meta=TensorMeta.from_irnodes(kernel_input_nodes),  # type: ignore[arg-type]
             output_tensor_meta=TensorMeta.from_irnodes(layout),
         )
@@ -2305,15 +2348,17 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         )
 
     def output_node(self):
-        return ir.TensorBox.create(
-            ir.TritonTemplateBuffer(
-                layout=self.layout,
-                inputs=self.input_nodes,
-                make_kernel_render=self.make_kernel_render,
-                mutated_inputs=self.mutated_inputs,
-                allowed_prologue_inps=self.allowed_prologue_inps,
-            )
+        buffer = ir.TritonTemplateBuffer(
+            layout=self.layout,
+            inputs=self.input_nodes,
+            make_kernel_render=self.make_kernel_render,
+            mutated_inputs=self.mutated_inputs,
+            allowed_prologue_inps=self.allowed_prologue_inps,
         )
+        # Pass KTC annotation to the buffer for encoding
+        if "ktc" in self.annotations:
+            buffer.annotations["ktc"] = self.annotations["ktc"]
+        return ir.TensorBox.create(buffer)
 
     def info_dict(self) -> dict[str, Union[PrimitiveInfoType, list[PrimitiveInfoType]]]:
         """Information returned here is logged to the autotune log file when that is enabled."""
@@ -2461,6 +2506,9 @@ class ExternKernelCaller(ChoiceCaller):
                 kwargs=self.kwargs,
             )
 
+        # Pass KTC annotation to the buffer for encoding
+        if "ktc" in self.annotations:
+            inner.annotations["ktc"] = self.annotations["ktc"]
         return ir.TensorBox.create(inner)
 
     def info_dict(self) -> dict[str, Union[PrimitiveInfoType, list[PrimitiveInfoType]]]:
@@ -2572,7 +2620,7 @@ class DataProcessorTemplateWrapper:
             self._postprocessor = lambda x: x
         assert "input_nodes" in kwargs
         assert "layout" in kwargs
-        # pyrefly: ignore [not-callable]
+
         kwargs["input_nodes"], kwargs["layout"] = preprocessor(
             kwargs["input_nodes"], kwargs["layout"]
         )
@@ -2651,6 +2699,7 @@ def create_precompile_key(
 # input_nodes: list of input ir.py Nodes
 # choices: list of choices
 # profiled time: Callable that returns a dict mapping from choices to the profiled time
+# precompile_times: mapping from choices to their precompilation time in seconds
 FeedbackFunction = Callable[
     [
         dict[ChoiceCaller, float],
@@ -2658,6 +2707,7 @@ FeedbackFunction = Callable[
         list[Any],
         list[ChoiceCaller],
         Callable[[], dict[ChoiceCaller, float]],
+        dict[ChoiceCaller, float],
     ],
     None,
 ]
@@ -2733,7 +2783,7 @@ class AlgorithmSelectorCache(PersistentCache):
         # no guarantee that the first lowering for a given key will also be the
         # first to benchmark it. share a single precompilation function for all lowerings
         # of a particular key
-        self.precompile_cache: dict[str, Callable[[], None]] = {}
+        self.precompile_cache: dict[str, Callable[[], dict[ChoiceCaller, float]]] = {}
         # cache for prescreening results to ensure deterministic candidate selection
         self.prescreening_cache: dict[str, OrderedSet[str]] = {}
         # list of callbacks that are called after benchmarking
@@ -2763,7 +2813,6 @@ class AlgorithmSelectorCache(PersistentCache):
             choice for choice in choices if isinstance(choice, ExternKernelChoice)
         ]
         if len(externs) > 0:
-            # pyrefly: ignore [bad-return]
             return externs[0]
         else:
             return choices[0]
@@ -2786,7 +2835,7 @@ class AlgorithmSelectorCache(PersistentCache):
         return_choice=False,  # TODO: return_choice is temporary and will be refactored soon
         is_collective=False,
     ):
-        from .codegen.cuda.cuda_kernel import CUDATemplateCaller
+        from .codegen.cutlass.cuda_kernel import CUDATemplateCaller
 
         # Run preprocessing functions on choices
         for preprocessing_fn in self.preprocessing_fns:
@@ -2834,8 +2883,8 @@ class AlgorithmSelectorCache(PersistentCache):
 
         if return_multi_template and (config.max_autotune or config.max_autotune_gemm):
             if config.pipeline_max_autotune_gemm:
-                assert not config.epilogue_fusion and not config.prologue_fusion, (
-                    "Pipelined autotuning not compatible yet with fusion benchmarking, will cause contention on gpu"
+                assert not config.benchmark_epilogue_fusion, (
+                    "Benchmarking epilogues will cause gpu contention with pipelined autotuning"
                 )
                 assert all(not isinstance(c, SubgraphChoiceCaller) for c in choices), (
                     "Pipelined autotuning not compatible yet with subgraph choices"
@@ -2849,17 +2898,21 @@ class AlgorithmSelectorCache(PersistentCache):
                 triton_kernels = [
                     c for c in choices if not AlgorithmSelectorCache._is_extern(c)
                 ]
-                precompile_instance = PrecompileThreadPool.get_instance()
-                precompile_future = precompile_instance.submit(
-                    self.do_autotuning,
-                    name,
-                    input_nodes,
-                    layout,
-                    input_gen_fns,
-                    inputs_key,
-                    triton_kernels,
-                    precompile_fn,
-                )
+
+                if triton_kernels:
+                    precompile_instance = PrecompileThreadPool.get_instance()
+                    precompile_future = precompile_instance.submit(
+                        self.do_autotuning,
+                        name,
+                        input_nodes,
+                        layout,
+                        input_gen_fns,
+                        inputs_key,
+                        triton_kernels,
+                        precompile_fn,
+                    )
+                else:
+                    precompile_future = None
 
                 def get_timings(hint_override: Optional[int] = None):
                     assert not hint_override, (
@@ -2867,7 +2920,8 @@ class AlgorithmSelectorCache(PersistentCache):
                     )
                     # Await precompilation future, thread pool
                     precompile_start_ts = time.time()
-                    precompile_future.result()
+                    if precompile_future:
+                        precompile_future.result()
                     precompile_elapse = time.time() - precompile_start_ts
 
                     # Await autotuning in subproc pool
@@ -3082,16 +3136,16 @@ class AlgorithmSelectorCache(PersistentCache):
             NoValidChoicesError: When all choices fail to compile or benchmark, or when all
                 timing results are non-finite.
         """
-        if log.isEnabledFor(logging.DEBUG):
+        if log.isEnabledFor(logging.DEBUG) and not config.pipeline_max_autotune_gemm:
             # Log shape information for debugging timeout issues
             sizevars = V.graph.sizevars
+
             shapes = [
                 "x".join(
                     map(
                         str,
-                        sizevars.size_hints(
+                        sizevars.optimization_hints_with_override(
                             node.get_size(),
-                            fallback=config.unbacked_symint_fallback,
                             hint_override=hint_override,
                         ),
                     )
@@ -3113,9 +3167,9 @@ class AlgorithmSelectorCache(PersistentCache):
                 log_pt2_compile_event=True,
                 dynamo_compile_column_us="compile_time_autotune_time_us",
             ):
-                precompile_fn()
+                precompile_times = precompile_fn()
         else:
-            precompile_fn()
+            precompile_times = precompile_fn()
 
         precompile_elapse = time.time() - precompile_start_ts
         log.debug("Precompilation elapsed time: %.02fs", precompile_elapse)
@@ -3242,16 +3296,22 @@ class AlgorithmSelectorCache(PersistentCache):
                 is_collective=is_collective,
             )
 
-        def profiler_bench_function():
+        def profiler_bench_function(choices_override=None):
             # we're not running through the normal caching autotuner method here because we want to avoid returning
             # the cached value.
             # Avoid benchmarking in a separate process because it's not easy to signal to the TuningProcess that we
             # should use the profiler.
+            # If choices_override is provided, only benchmark those choices instead of all choices.
+            choices_to_benchmark = (
+                choices_override if choices_override is not None else choices
+            )
             with config.patch(
                 profile_bandwidth_with_do_bench_using_profiling=True,
                 autotune_in_subproc=False,
             ):
-                return self.benchmark(choices, input_nodes, layout, input_gen_fns)
+                return self.benchmark(
+                    choices_to_benchmark, input_nodes, layout, input_gen_fns
+                )
 
         for feedback_fn in self.feedback_saver_fns:
             # re-benchmarking the same choices with profiler is a bit expensive, so pass it in as a thunk.
@@ -3261,6 +3321,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 input_nodes,
                 choices,
                 profiler_bench_function,
+                precompile_times,
             )
 
         return timings
@@ -3283,14 +3344,14 @@ class AlgorithmSelectorCache(PersistentCache):
         name: str,
         inputs_key: str,
         precompilation_timeout_seconds: Optional[int] = 60 * 60,
-    ) -> Callable[[], None]:
+    ) -> Callable[[], dict[ChoiceCaller, float]]:
         """
         Returns a function that precompiles the given choices.
         """
         log.debug("Starting precompilation")
 
-        def no_op(*args, **kwargs):
-            return
+        def no_op(*args, **kwargs) -> dict[ChoiceCaller, float]:
+            return {}
 
         if (
             precompilation_timeout_seconds is None
@@ -3404,7 +3465,12 @@ class AlgorithmSelectorCache(PersistentCache):
 
         @functools.cache
         @restore_stdout_stderr()
-        def wait_on_futures():
+        def wait_on_futures() -> dict[ChoiceCaller, float]:
+            """Wait for all precompilation futures to complete.
+
+            Returns:
+                Dict mapping each choice to its precompilation time in seconds.
+            """
             log.debug("Waiting on futures")
             counters["inductor"]["select_algorithm_precompile"] += 1
             exceptions: list[tuple[ChoiceCaller, BaseException]] = []
@@ -3465,6 +3531,13 @@ class AlgorithmSelectorCache(PersistentCache):
                 # pyrefly: ignore [missing-attribute]
                 executor.shutdown(wait=True)
 
+            # Build and return dict mapping choices to their precompilation times
+            precompile_times: dict[ChoiceCaller, float] = {}
+            for future, choice in futures.items():
+                if future in elapsed_times:
+                    precompile_times[choice] = elapsed_times[future]
+            return precompile_times
+
         self.precompile_cache[precompile_key] = wait_on_futures
 
         return wait_on_futures
@@ -3495,7 +3568,8 @@ class AlgorithmSelectorCache(PersistentCache):
         }
         example_inputs = list(unique_example_inputs.values())
         example_inputs_extern = []
-        for input_node in input_nodes:
+
+        for i, input_node in enumerate(input_nodes):
             if unique_example_inputs[input_node.get_name()].is_mkldnn:
                 example_inputs_extern.append(
                     unique_example_inputs[input_node.get_name()]
@@ -3503,34 +3577,34 @@ class AlgorithmSelectorCache(PersistentCache):
             else:
                 base = unique_example_inputs[input_node.get_name()]
                 base = base if base._base is None else base._base
-                sizes = tuple(
-                    V.graph.sizevars.atomically_apply_size_hint(
-                        size,
-                        fallback=config.unbacked_symint_fallback,
+
+                if i in input_gen_fns:
+                    # Use tensor's actual shape from input_gen_fn
+                    generated_tensor = unique_example_inputs[input_node.get_name()]
+                    sizes = tuple(generated_tensor.size())
+                    strides = tuple(generated_tensor.stride())
+                    storage_offset = generated_tensor.storage_offset()
+                else:
+                    # Use IR node's shape resolved via size hints
+                    sizes = V.graph.sizevars.optimization_hints_with_override(
+                        input_node.get_size(),
                         hint_override=hint_override,
                     )
-                    for size in input_node.get_size()
-                )
-                strides = tuple(
-                    V.graph.sizevars.atomically_apply_size_hint(
-                        stride,
-                        fallback=config.unbacked_symint_fallback,
+                    strides = V.graph.sizevars.optimization_hints_with_override(
+                        input_node.get_stride(),
                         hint_override=hint_override,
                     )
-                    for stride in input_node.get_stride()
-                )
-                storage_offset = V.graph.sizevars.atomically_apply_size_hint(
-                    input_node.get_layout().offset,
-                    fallback=config.unbacked_symint_fallback,
-                    hint_override=hint_override,
-                )
+                    storage_offset = V.graph.sizevars.optimization_hint_with_override(
+                        input_node.get_layout().offset,
+                        hint_override=hint_override,
+                    )
 
                 # Check if the required storage size exceeds the current storage
                 # to avoid illegal memory access
                 needed_size = torch._prims_common.compute_required_storage_length(
-                    sizes, strides, storage_offset
+                    sizes, strides, cast(int, storage_offset)
                 )
-                current_size = base.storage().size()
+                current_size = base.untyped_storage().size()
 
                 if needed_size > current_size:
                     # Create a new base tensor with sufficient storage
@@ -3764,7 +3838,9 @@ class AlgorithmSelectorCache(PersistentCache):
                 else:
                     timing = cls.benchmark_choice(choice, autotune_args)
             except CUDACompileError:
-                from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
+                from torch._inductor.codegen.cutlass.cuda_kernel import (
+                    CUDATemplateCaller,
+                )
 
                 if not isinstance(choice, CUDATemplateCaller):
                     log.exception(
@@ -3775,7 +3851,9 @@ class AlgorithmSelectorCache(PersistentCache):
                 log.warning("Not yet implemented", exc_info=True)
                 timing = float("inf")
             except RuntimeError as e:
-                from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
+                from torch._inductor.codegen.cutlass.cuda_kernel import (
+                    CUDATemplateCaller,
+                )
 
                 msg = str(e)
                 if "invalid argument" in msg:
@@ -3938,12 +4016,12 @@ class AlgorithmSelectorCache(PersistentCache):
             return prescreen_winners
 
         # prescreen cutlass
-        from .codegen.cuda.cuda_kernel import CUDATemplateCaller
+        from .codegen.cutlass.cuda_kernel import CUDATemplateCaller
 
         candidates = []
         if (
-            config.cuda.cutlass_prescreening
-            and len(config.cuda.cutlass_max_profiling_swizzle_options) > 1
+            config.cutlass.cutlass_prescreening
+            and len(config.cutlass.cutlass_max_profiling_swizzle_options) > 1
         ):
             candidates.extend(
                 [
@@ -3972,7 +4050,7 @@ class AlgorithmSelectorCache(PersistentCache):
         """
         Prune the choices after prescreening.
         """
-        from .codegen.cuda.cuda_kernel import CUDATemplateCaller
+        from .codegen.cutlass.cuda_kernel import CUDATemplateCaller
 
         prescreen_key = f"{name}:{inputs_key}"
 
@@ -4151,14 +4229,14 @@ class AlgorithmSelectorCache(PersistentCache):
         )
         if not (config.max_autotune or config.max_autotune_gemm) or not PRINT_AUTOTUNE:
             return
+
         sizes = ", ".join(
             [
                 "x".join(
                     map(
                         str,
-                        V.graph.sizevars.size_hints(
+                        V.graph.sizevars.optimization_hints_with_override(
                             n.get_size(),
-                            fallback=config.unbacked_symint_fallback,  # type: ignore[arg-type]
                             hint_override=hint_override,
                         ),
                     )
@@ -4266,38 +4344,23 @@ class AlgorithmSelectorCache(PersistentCache):
         # So we need call as_strided in the end to 'view' the tensor with the correct
         # sizes/strides
         return AlgorithmSelectorCache.generate_example_value(
-            tuple(
-                V.graph.sizevars.atomically_apply_size_hint(
-                    size,
-                    fallback=config.unbacked_symint_fallback,
-                    hint_override=hint_override,
-                )
-                for size in node.get_size()
+            V.graph.sizevars.optimization_hints_with_override(
+                node.get_size(),
+                hint_override=hint_override,
             ),
-            tuple(
-                V.graph.sizevars.atomically_apply_size_hint(
-                    stride,
-                    fallback=config.unbacked_symint_fallback,
-                    hint_override=hint_override,
-                )
-                for stride in node.get_stride()
+            V.graph.sizevars.optimization_hints_with_override(
+                node.get_stride(),
+                hint_override=hint_override,
             ),
             node.get_device(),
             node.get_dtype(),
-            V.graph.sizevars.atomically_apply_size_hint(
-                # pyrefly: ignore [missing-attribute]
+            V.graph.sizevars.optimization_hint_with_override(
                 node.layout.offset,
-                fallback=config.unbacked_symint_fallback,
                 hint_override=hint_override,
             ),
-            tuple(
-                V.graph.sizevars.atomically_apply_size_hint(
-                    size,
-                    fallback=config.unbacked_symint_fallback,
-                    hint_override=hint_override,
-                )
-                # pyrefly: ignore [bad-argument-type]
-                for size in V.graph.get_allocation_size(node)
+            V.graph.sizevars.optimization_hints_with_override(
+                V.graph.get_allocation_size(node),
+                hint_override=hint_override,
             ),
         )
 
@@ -4335,21 +4398,9 @@ class AlgorithmSelectorCache(PersistentCache):
         return (
             node.get_device().type,
             str(node.get_dtype()),
-            *sizevars.size_hints(
-                node.get_size(),
-                fallback=config.unbacked_symint_fallback,
-            ),
-            *tuple(
-                V.graph.sizevars.atomically_apply_size_hint(
-                    stride,
-                    fallback=config.unbacked_symint_fallback,
-                )
-                for stride in node.get_stride()
-            ),
-            sizevars.size_hint(
-                node.get_layout().offset,
-                fallback=config.unbacked_symint_fallback,
-            ),
+            *sizevars.optimization_hints(node.get_size()),
+            *V.graph.sizevars.optimization_hints(node.get_stride()),
+            sizevars.optimization_hint(node.get_layout().offset),
         )
 
     def add_feedback_saver(self, fn: FeedbackFunction):
@@ -4496,12 +4547,7 @@ def _autotune_metadata(input_nodes):
         # argument, and extracting those out there directly
         "autotune_strides_hinted": ", ".join(
             [
-                str(
-                    V.graph.sizevars.size_hints(
-                        n.get_stride(),
-                        fallback=config.unbacked_symint_fallback,
-                    )
-                )
+                str(V.graph.sizevars.optimization_hints(n.get_stride()))
                 for n in input_nodes
             ]
         ),
@@ -4510,10 +4556,7 @@ def _autotune_metadata(input_nodes):
                 "x".join(
                     map(
                         str,
-                        V.graph.sizevars.size_hints(
-                            n.get_size(),
-                            fallback=config.unbacked_symint_fallback,
-                        ),
+                        V.graph.sizevars.optimization_hints(n.get_size()),
                     )
                 )
                 for n in input_nodes

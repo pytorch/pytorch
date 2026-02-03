@@ -86,7 +86,10 @@ def reduce_add(inputs, destination=None):
     input_size = inputs[0].size()
     root_index = None  # index of input tensor that already is on the correct device
     for i, inp in enumerate(inputs):
-        assert inp.device.type != "cpu", "reduce_add expects all inputs to be on GPUs"
+        if inp.device.type == "cpu":
+            raise AssertionError(
+                f"reduce_add expects all inputs to be on GPUs, but input {i} is on CPU"
+            )
         if inp.get_device() == destination:
             root_index = i
         if inp.size() != input_size:
