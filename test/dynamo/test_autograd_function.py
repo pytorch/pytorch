@@ -2009,6 +2009,123 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(ref, res)
 
 
+class AutogradFunctionFunctorchTests(torch._dynamo.test_case.TestCase):
+    """Tests for autograd.Function compatibility with torch.func transforms.
+
+    See https://github.com/pytorch/pytorch/issues/174067
+    """
+
+    def test_new_style_autograd_function_with_grad_no_compile(self):
+        """Baseline: new-style autograd.Function works with torch.func.grad."""
+
+        class NewStyleOp(torch.autograd.Function):
+            @staticmethod
+            def forward(x):
+                return x * 2
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                (x,) = inputs
+                ctx.save_for_backward(x)
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output * 2
+
+        def fn(x):
+            return NewStyleOp.apply(x).sum()
+
+        x = torch.tensor([1.0, 2.0], requires_grad=True)
+        result = torch.func.grad(fn)(x)
+        self.assertEqual(result, torch.tensor([2.0, 2.0]))
+
+    def test_old_style_autograd_function_with_grad_no_compile(self):
+        """Baseline: old-style autograd.Function fails with torch.func.grad."""
+
+        class OldStyleOp(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output * 2
+
+        def fn(x):
+            return OldStyleOp.apply(x).sum()
+
+        x = torch.tensor([1.0, 2.0], requires_grad=True)
+        with self.assertRaisesRegex(
+            RuntimeError, "must override the setup_context staticmethod"
+        ):
+            torch.func.grad(fn)(x)
+
+    def test_new_style_autograd_function_with_grad_compiled(self):
+        """New-style autograd.Function compiled should work with torch.func.grad.
+
+        This is the main bug from https://github.com/pytorch/pytorch/issues/174067.
+        torch.compile wraps autograd.Function in ApplyTemplate which lacks
+        setup_context, breaking torch.func compatibility.
+        """
+
+        class NewStyleOp(torch.autograd.Function):
+            @staticmethod
+            def forward(x):
+                return x * 2
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                (x,) = inputs
+                ctx.save_for_backward(x)
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output * 2
+
+        def fn(x):
+            return NewStyleOp.apply(x)
+
+        compiled_fn = torch.compile(fn, backend="eager")
+
+        def loss_fn(x):
+            return compiled_fn(x).sum()
+
+        x = torch.tensor([1.0, 2.0], requires_grad=True)
+        result = torch.func.grad(loss_fn)(x)
+        self.assertEqual(result, torch.tensor([2.0, 2.0]))
+
+    def test_old_style_autograd_function_with_grad_compiled(self):
+        """Old-style autograd.Function compiled should work with torch.func.grad.
+
+        Even though the original function is old-style, the compiled version
+        (ApplyTemplate) can support torch.func transforms because it uses
+        traced graphs.
+        """
+
+        class OldStyleOp(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output * 2
+
+        def fn(x):
+            return OldStyleOp.apply(x)
+
+        compiled_fn = torch.compile(fn, backend="eager")
+
+        def loss_fn(x):
+            return compiled_fn(x).sum()
+
+        x = torch.tensor([1.0, 2.0], requires_grad=True)
+        result = torch.func.grad(loss_fn)(x)
+        self.assertEqual(result, torch.tensor([2.0, 2.0]))
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
