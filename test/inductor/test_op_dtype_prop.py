@@ -123,9 +123,7 @@ class TestCase(InductorTestCase):
     )
     @parametrize("input_dtype", [torch.float16, torch.bfloat16])
     @config.patch("triton.use_block_ptr", True)
-    def test_low_precision_reduction(
-        self, input_shape, reduction_func, input_dtype
-    ):
+    def test_low_precision_reduction(self, input_shape, reduction_func, input_dtype):
         @torch.compile
         def func(a, b, c, d):
             return reduction_func(a * b * c * d)
