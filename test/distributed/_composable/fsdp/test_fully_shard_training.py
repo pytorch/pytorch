@@ -74,17 +74,6 @@ from torch.testing._internal.common_fsdp import get_devtype
 device_type = torch.device(get_devtype())
 
 
-# Patch torch.cpu._sleep for CPU testing since it's not in the public API
-def _cpu_sleep(cycles: int) -> None:
-    """Spin-wait for approximately the given number of cycles."""
-    for _ in range(cycles):
-        pass
-
-
-if device_type.type == "cpu":
-    torch.cpu._sleep = _cpu_sleep
-
-
 def _get_device_ids(rank: int) -> list[int] | None:
     return None if device_type.type == "cpu" else [rank]
 
