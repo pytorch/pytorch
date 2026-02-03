@@ -5,7 +5,12 @@ from pathlib import Path
 from setuptools import find_packages, setup
 
 import torch
-from torch.utils.cpp_extension import BuildExtension, CppExtension, CUDAExtension
+from torch.utils.cpp_extension import (
+    BuildExtension,
+    CppExtension,
+    CUDAExtension,
+    IS_WINDOWS,
+)
 
 
 ROOT_DIR = Path(__file__).parent
@@ -34,11 +39,13 @@ class clean(distutils.command.clean.clean):
 def get_extension():
     extra_compile_args = {
         "cxx": [
-            "-fdiagnostics-color=always",
             "-DTORCH_STABLE_ONLY",
             "-DTORCH_TARGET_VERSION=0x0209000000000000",
         ],
     }
+    if not IS_WINDOWS:
+        extra_compile_args["cxx"].append("-fdiagnostics-color=always")
+
     sources = list(CSRC_DIR.glob("**/*.cpp"))
 
     extension = CppExtension

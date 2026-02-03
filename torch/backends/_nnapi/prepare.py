@@ -47,7 +47,8 @@ class NnapiModule(torch.nn.Module):
 
     @torch.jit.export
     def init(self, args: list[torch.Tensor]):
-        assert self.comp is None
+        if self.comp is not None:
+            raise AssertionError("comp must be None before initialization")
         self.out_templates = self.shape_compute_module.prepare(self.ser_model, args)  # type: ignore[operator]
         self.weights = [w.contiguous() for w in self.weights]
         comp = torch.classes._nnapi.Compilation()
@@ -64,10 +65,14 @@ class NnapiModule(torch.nn.Module):
         if self.comp is None:
             self.init(args)
         comp = self.comp
-        assert comp is not None
+        if comp is None:
+            raise AssertionError("comp must not be None")
         outs = [torch.empty_like(out) for out in self.out_templates]
 
-        assert len(args) == len(self.inp_mem_fmts)
+        if len(args) != len(self.inp_mem_fmts):
+            raise AssertionError(
+                f"args length {len(args)} != inp_mem_fmts length {len(self.inp_mem_fmts)}"
+            )
         fixed_args = []
         for idx in range(len(args)):
             fmt = self.inp_mem_fmts[idx]
@@ -80,7 +85,10 @@ class NnapiModule(torch.nn.Module):
             else:
                 raise ValueError("Invalid mem_fmt")
         comp.run(fixed_args, outs)
-        assert len(outs) == len(self.out_mem_fmts)
+        if len(outs) != len(self.out_mem_fmts):
+            raise AssertionError(
+                f"outs length {len(outs)} != out_mem_fmts length {len(self.out_mem_fmts)}"
+            )
         for idx in range(len(self.out_templates)):
             fmt = self.out_mem_fmts[idx]
             # These constants match the values in DimOrder in serializer.py
