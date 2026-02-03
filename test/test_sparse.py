@@ -19,7 +19,7 @@ from numbers import Number
 from typing import Any
 from packaging import version
 from torch.testing._internal.common_cuda import \
-    (SM53OrLater, SM80OrLater, TEST_MULTIGPU)
+    (SM80OrLater, TEST_MULTIGPU)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, dtypesIfCUDA, dtypesIfMPS, onlyCPU, onlyCUDA, precisionOverride,
      deviceCountAtLeast, OpDTypes, onlyNativeDeviceTypes, skipCUDAIf, expectedFailureMPS,
@@ -3796,7 +3796,7 @@ class TestSparse(TestSparseBase):
     @coalescedonoff
     @dtypes(*floating_and_complex_types())
     @dtypesIfMPS(*all_mps_types())
-    @dtypesIfCUDA(*floating_types_and(*[torch.half] if SM53OrLater and not TEST_WITH_ROCM else [],
+    @dtypesIfCUDA(*floating_types_and(*[torch.half] if not TEST_WITH_ROCM else [],
                                       *[torch.bfloat16] if SM80OrLater and not TEST_WITH_ROCM else [],
                                       torch.complex64,
                                       *[torch.complex128]
@@ -4172,6 +4172,12 @@ class TestSparse(TestSparseBase):
             # some normal cases
             yield (make_diags((1, 5)), make_offsets([0]), (5, 5))
             yield (make_diags((3, 3)), make_offsets([-1, 0, 1]), (4, 4))
+            # zero-dimension shapes (regression test for issue #171505)
+            yield (make_diags((1, 3)), make_offsets([0]), (0, 4))
+            yield (make_diags((1, 3)), make_offsets([0]), (4, 0))
+            yield (make_diags((1, 3)), make_offsets([0]), (0, 0))
+            yield (make_diags((1, 3)), make_offsets([0]), (0, 4), torch.sparse_csr)
+            yield (make_diags((1, 3)), make_offsets([0]), (0, 4), torch.sparse_csc)
             # non-contiguous diags
             yield (make_diags((5, 4), noncontiguous=True), make_offsets([-1, 1, 0, 2, -2]), (5, 5))
             # non-contiguous offsets

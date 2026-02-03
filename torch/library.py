@@ -302,7 +302,7 @@ class Library:
                          registered.
 
         Example::
-
+            >>> # xdoctest: +SKIP("Requires Python <= 3.11")
             >>> my_lib = Library("aten", "IMPL")
             >>> def div_cpu(self, other):
             >>>     return self * (1 / other)
@@ -632,6 +632,7 @@ def impl(
             will be tied to the lifetime of the Library object.
 
     Examples:
+        >>> # xdoctest: +SKIP("Requires Python <= 3.11")
         >>> import torch
         >>> import numpy as np
         >>> # Example 1: Register function.
@@ -1467,7 +1468,12 @@ def register_vmap(
         def wrapped_func(keyset, *args, **kwargs):
             interpreter = retrieve_current_functorch_interpreter()
             return custom_function_call_vmap_helper(
-                interpreter, func, op, *args, **kwargs
+                # pyrefly: ignore[bad-argument-type]
+                interpreter,
+                func,
+                op,
+                *args,
+                **kwargs,
             )
 
         lib.impl(opname, wrapped_func, "FuncTorchBatched", with_keyset=True)

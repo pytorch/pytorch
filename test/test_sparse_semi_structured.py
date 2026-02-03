@@ -22,7 +22,7 @@ from torch.sparse._semi_structured_conversions import (
 )
 
 from torch.testing import make_tensor
-from torch.testing._internal.common_cuda import _get_torch_cuda_version, PLATFORM_SUPPORTS_FP8, xfailIfSM89PreCUDA13
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, xfailIfSM89PreCUDA13
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
@@ -330,7 +330,7 @@ class TestSparseSemiStructured(TestCase):
         B = torch.rand(dense_input_shape, device=A_sparse.device).to(dtype)
 
         # Currently we don't support int matmul on GPU, so evaluate on CPU and copy over
-        if dtype is torch.int8 and dense_input_shape in {(1, 128)}:
+        if dtype is torch.int8 and dense_input_shape == (1, 128):
             # padding with int8 throws an error because transposing B yields a contiguous output
             # and row-row 2:4 sparse @ dense with NN is not supported by cuSPARSELt or CUTLASS.
             if backend == "cutlass":
@@ -1280,14 +1280,10 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         torch.testing.assert_close(sparse_result, dense_result, rtol=1e-3, atol=1e-3)
 
     def test_cusparselt_backend(self):
-        version = _get_torch_cuda_version()
         assert torch.backends.cusparselt.is_available()
 
         # PyTorch CUDA 12.4+ using cuSPARSELt v0.6.2+
-        if version >= (12, 4):
-            assert torch.backends.cusparselt.version() >= 602
-        else:
-            assert torch.backends.cusparselt.version() is None
+        assert torch.backends.cusparselt.version() >= 602
 
 if len(SEMI_STRUCTURED_SUPPORTED_BACKENDS) > 0:
     instantiate_device_type_tests(TestSparseSemiStructured, globals(), only_for="cuda")

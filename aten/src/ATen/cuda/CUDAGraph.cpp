@@ -213,7 +213,6 @@ void CUDAGraph::enable_debug_mode() {
 }
 
 void CUDAGraph::debug_dump(const std::string& debug_path) {
-#if defined(CUDA_VERSION) || defined(USE_ROCM)
   if (_cuda_graphs_debug || keep_graph_) {
     TORCH_WARN("DEBUG: calling debug_dump()");
     if (has_graph_) {
@@ -227,9 +226,6 @@ void CUDAGraph::debug_dump(const std::string& debug_path) {
   } else {
     TORCH_WARN("CUDA Graphs debug not enabled, set with [graph].enable_debug_mode()");
   }
-#else
-  TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.3 or ROCM >= 5.6");
-#endif
 }
 
 cudaGraph_t CUDAGraph::raw_cuda_graph() {
@@ -299,7 +295,7 @@ CUDAGraph::~CUDAGraph() {
 // They wait for next sync point in order to free the memory, this is to ensure that all
 // hipGraphLaunch are finished before we release any memory. This feature was enabled in rocm6.2.
 // We need to ensure all async operations finish before deleting the object.
-#if (defined(USE_ROCM) && ROCM_VERSION >= 60200)
+#if defined(USE_ROCM)
   if (capture_dev_ != UNDEFINED_DEVICE) // check if capture_dev_ contains the real device id
   {
     AT_CUDA_CHECK(cudaSetDevice(capture_dev_));

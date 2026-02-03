@@ -103,7 +103,8 @@ class NodeSource:
         elif not isinstance(action, list):
             action = [action]
         for a in action:
-            assert isinstance(a, NodeSourceAction)
+            if not isinstance(a, NodeSourceAction):
+                raise AssertionError(f"Expected NodeSourceAction, got {type(a)}")
         self.action = action
         if node:
             self.node_info = self.NodeInfo(
@@ -168,7 +169,8 @@ class NodeSource:
                 "from_node": [node.to_dict() for node in self.from_node],
             }
 
-        assert self._dict is not None
+        if self._dict is None:
+            raise AssertionError("_dict is None after initialization")
         return self._dict
 
     def __eq__(self, other: object):
@@ -199,7 +201,8 @@ class NodeSource:
         if d is None:
             return None
 
-        assert isinstance(d, dict), f"Expected a dict, got {type(d)}"
+        if not isinstance(d, dict):
+            raise AssertionError(f"Expected a dict, got {type(d)}")
 
         # Create a NodeSource object directly without going through the constructor
         # to avoid issues with graph ID and node creation
@@ -379,7 +382,8 @@ def reset_grad_fn_seq_nr():
     global current_meta
     if should_preserve_node_meta:
         current_level = current_meta.get("in_grad_fn", 0)
-        assert current_level > 0
+        if current_level <= 0:
+            raise AssertionError(f"Expected current_level > 0, got {current_level}")
         if current_level == 1:
             del current_meta["in_grad_fn"]
             del current_meta["grad_fn_seq_nr"]
@@ -486,7 +490,8 @@ def get_graph_provenance_json(graph: Graph) -> dict[str, Any]:
 
 
 def _get_custom_metadata(gm: GraphModule) -> str:
-    assert isinstance(gm, GraphModule)
+    if not isinstance(gm, GraphModule):
+        raise AssertionError(f"Expected GraphModule, got {type(gm)}")
 
     def helper(gm: GraphModule):
         custom_metadata = []
