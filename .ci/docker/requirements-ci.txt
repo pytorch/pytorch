@@ -174,7 +174,7 @@ pillow==11.0.0
 #Pinned versions: 11.0.0
 #test that import:
 
-protobuf==6.33.2
+protobuf==6.33.5
 #Description:  Google's data interchange format
 #Pinned versions: 6.33.2
 #test that import: test_tensorboard.py, test/onnx/*
@@ -411,6 +411,5 @@ tqdm>=4.66.0
 #Description: progress bar library required for dynamo benchmarks
 #test that import: benchmarks/dynamo/*
 
-Jinja2==3.1.6
 aiohttp==3.13.3
 #Description: required for torch.distributed.debug
