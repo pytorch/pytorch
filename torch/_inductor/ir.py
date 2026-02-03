@@ -1917,7 +1917,7 @@ class Reduction(Loops):
         ) -> OpsValue:
             return intermediate_loader([*index, *reduction_index])
 
-        numel_hint = V.graph.sizevars.size_hint(sympy_product(original_ranges))
+        numel_hint = V.graph.sizevars.optimization_hint(sympy_product(original_ranges))
         reduction_hint = cls._multilayer_second_step_hint(
             split, numel_hint, reduction_hint
         )
