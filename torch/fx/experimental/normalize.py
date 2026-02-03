@@ -51,7 +51,8 @@ class NormalizeArgs(Transformer):
             return type(arg)
 
         arg_types = map_aggregate(n.args, get_type)
-        assert isinstance(arg_types, tuple)
+        if not isinstance(arg_types, tuple):
+            raise AssertionError(f"Expected tuple, got {type(arg_types)}")
         arg_types = tuple(create_type_hint(i) for i in arg_types)
         kwarg_types = {k: get_type(v) for k, v in kwargs.items()}
         if n.op == "call_function":
@@ -72,7 +73,8 @@ class NormalizeArgs(Transformer):
         arg_types: Optional[tuple[Any, ...]] = None,
         kwarg_types: Optional[dict[str, Any]] = None,
     ):
-        assert callable(target)
+        if not callable(target):
+            raise AssertionError(f"Expected callable target, got {type(target)}")
         new_args_and_kwargs = normalize_function(
             target,
             args,  # type: ignore[arg-type]
@@ -92,7 +94,8 @@ class NormalizeArgs(Transformer):
     def call_module(
         self, target: Target, args: tuple[Argument, ...], kwargs: dict[str, Any]
     ):
-        assert isinstance(target, str)
+        if not isinstance(target, str):
+            raise AssertionError(f"Expected str target, got {type(target)}")
         new_args_and_kwargs = normalize_module(
             self.module,
             target,
@@ -148,7 +151,8 @@ class NormalizeOperators(AnnotateTypesWithSchema):
         # Normalize operators according to the magic methods implemented on tensors here:
         # https://github.com/pytorch/pytorch/blob/28c5d90b679c6b38bf4183ec99f16d933c2f1bcd/tools/autograd/templates/python_variable_methods.cpp#L1137 # noqa: B950
 
-        assert callable(target)
+        if not callable(target):
+            raise AssertionError(f"Expected callable target, got {type(target)}")
 
         if target in self.binary_magic_method_remap:
             if len(args) != 2:
