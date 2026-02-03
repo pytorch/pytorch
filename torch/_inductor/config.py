@@ -1608,7 +1608,9 @@ class triton:
 
     # Tune the generated Triton kernels at compile time instead of first time they run
     # Setting to None means uninitialized
-    autotune_at_compile_time: Optional[bool] = None
+    autotune_at_compile_time: Optional[bool] = {"0": False, "1": True}.get(
+        os.environ.get("TRITON_AUTOTUNE_AT_COMPILE_TIME", ""), None
+    )
 
     # We use random tensors for autotune by default. Setting this as true will let us
     # use inputs from sample inputs to autotune user defined triton kernels.
