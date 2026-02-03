@@ -2967,6 +2967,13 @@ class Scheduler:
             distributed_autotune.schedule(self)
             self.compute_ancestors()
 
+        # Stream assignments must be populated BEFORE fusion
+        # to prevent fusing nodes across stream boundaries
+        self.node_to_stream: dict[BaseSchedulerNode, int] = {}
+        self.buff_to_stream: dict[str, int] = {}
+        self._multi_stream_nodes: bool = False
+        self._populate_stream_assignments()
+
         self.nodes = self.fuse_nodes(self.nodes)
         if config._post_fusion_custom_pass is not None:
             self.nodes = config._post_fusion_custom_pass(self.nodes)
@@ -3117,6 +3124,55 @@ class Scheduler:
                     defining_op=None,
                 )
         return name_to_donated_buf
+
+    def _populate_stream_assignments(self) -> None:
+        """Populate node_to_stream and buff_to_stream from FX node metadata.
+
+        Reads the 'custom.stream' metadata from FX nodes to determine which
+        stream each scheduler node should run on. This metadata is set by
+        dynamo when tracing torch.cuda.stream() context managers.
+        """
+        from .stream_utils import DEFAULT_STREAM_IDX
+
+        # Map user_object_index to stream index (1-indexed for side streams)
+        user_obj_to_stream_idx: dict[int, int] = {}
+        next_stream_idx = 1  # 0 is reserved for default stream
+
+        for node in self.nodes:
+            stream_idx = DEFAULT_STREAM_IDX
+
+            # Get the origin FX nodes to read metadata.
+            # Each scheduler node may have multiple origin FX nodes (via origins).
+            if node.node is not None:
+                origins = node.node.get_origins()
+                for fx_node in origins:
+                    if not hasattr(fx_node, "meta"):
+                        continue
+                    custom_meta = fx_node.meta.get("custom", {})
+                    if "stream" in custom_meta:
+                        user_obj_idx = custom_meta["stream"]
+                        if user_obj_idx not in user_obj_to_stream_idx:
+                            user_obj_to_stream_idx[user_obj_idx] = next_stream_idx
+                            next_stream_idx += 1
+                        stream_idx = user_obj_to_stream_idx[user_obj_idx]
+                        # Use the first stream found
+                        break
+
+            self.node_to_stream[node] = stream_idx
+
+            # Also populate buff_to_stream for all buffers produced by this node
+            for buf in node.get_buffer_names():
+                self.buff_to_stream[buf] = stream_idx
+
+        # Check if we have any nodes on non-default streams
+        self._multi_stream_nodes = any(
+            stream_idx != DEFAULT_STREAM_IDX
+            for stream_idx in self.node_to_stream.values()
+        )
+
+    def _has_multi_stream_nodes(self) -> bool:
+        """Check if any nodes are assigned to non-default streams."""
+        return self._multi_stream_nodes
 
     @property
     def current_device(self) -> Optional[torch.device]:
@@ -5365,6 +5421,13 @@ class Scheduler:
         if node1 is node2:
             return False
 
+        # Prevent fusion across stream boundaries
+        if self._has_multi_stream_nodes():
+            stream1 = self.node_to_stream.get(node1)
+            stream2 = self.node_to_stream.get(node2)
+            if stream1 is not None and stream2 is not None and stream1 != stream2:
+                return False
+
         if isinstance(node1, FusedMixOrderReductions):
             return node1.can_fuse_with(node2)
         if isinstance(node2, FusedMixOrderReductions):
@@ -6735,11 +6798,27 @@ class Scheduler:
                     if self.current_device and device_need_guard(
                         self.current_device.type
                     ):
+                        # Exit stream context before exiting device guard
+                        if self.current_stream_idx is not None:
+                            self.generate_stream_ctx_exit()
                         V.graph.wrapper_code.codegen_device_guard_exit()
                     self.current_device = device
                     if device_need_guard(device.type):
                         assert device.index is not None, "device should have an index"
-                        V.graph.wrapper_code.codegen_device_guard_enter(device.index)
+                        # Compute num_streams if we have multi-stream nodes
+                        num_streams = 1
+                        if self._has_multi_stream_nodes():
+                            # Count unique streams (excluding default stream 0)
+                            unique_streams = set(self.node_to_stream.values())
+                            num_streams = max(unique_streams) + 1 if unique_streams else 1
+                        V.graph.wrapper_code.codegen_device_guard_enter(
+                            device.index, num_streams
+                        )
+
+                # Handle stream context switching for multi-stream scheduling
+                # Only do this for nodes with a device, inside the device guard
+                if self._has_multi_stream_nodes():
+                    self.generate_stream_ctx_switching(node)
 
             self.current_node = node
             self.buffer_names_to_free.update(node.last_usage)
