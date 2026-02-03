@@ -1052,7 +1052,7 @@ class GraphModuleSerializer(metaclass=Final):
             frames = []
             # Split by lines, group into frames
             lines = stack_trace_str.split('\n')
-            
+
             for i in range(0, len(lines), 2):  # Each frame is 2 lines
                 if i + 1 < len(lines):
                     match = re.match(r'File "([^"]+)", line (\d+), in (.+)', lines[i].strip())
@@ -1063,7 +1063,7 @@ class GraphModuleSerializer(metaclass=Final):
                             "function": match.group(3),
                             "code": lines[i + 1] if i + 1 < len(lines) else ""
                         })
-            
+
             return frames
 
         if stack_trace := node.meta.get("stack_trace"):

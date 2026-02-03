@@ -324,7 +324,7 @@ def _parse_stack_trace(
             lineno = str(frame['line'])
             name = frame['function']
             code = frame['code']
-            
+
             if filter_fn and not filter_fn(file, name, code):
                 continue
             return _ParsedStackTrace(file, lineno, name, code)
