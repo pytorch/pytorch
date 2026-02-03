@@ -7,6 +7,7 @@ import unittest
 import warnings
 
 import torch
+import torch._dynamo
 import torch.distributed as dist
 import torch.testing._internal.common_methods_invocations as common_ops
 from torch.distributed._local_tensor import LocalTensorMode, reconcile_args
@@ -24,6 +25,7 @@ from torch.testing._internal.common_device_type import (
     ops,
 )
 from torch.testing._internal.common_methods_invocations import DecorateInfo, op_db
+from torch.testing._internal.common_ops_unbacked import ops_dde_xfail, ops_unbacked_skip
 from torch.testing._internal.common_utils import run_tests, suppress_warnings, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorConverter,
@@ -32,7 +34,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 )
 from torch.utils import _pytree as pytree
 from torch.utils._debug_mode import _OpCall, DebugMode
-from torch.utils._pytree import tree_map
+from torch.utils._pytree import tree_flatten, tree_map
 
 
 # rewrite common size variables to sth can be sharded evenly
@@ -128,232 +130,61 @@ dtensor_fails = {
     # we need to remove many of them from list once op
     # get full support with varying sharding specs
     xfail("__getitem__"),
-    xfail("__rsub__"),
     xfail("_chunk_cat"),
-    xfail("_native_batch_norm_legit"),
-    xfail("_upsample_bilinear2d_aa"),
-    xfail("addbmm"),
-    xfail("addmv"),
-    xfail("addr"),
     xfail("all"),
-    xfail("allclose"),
-    xfail("alias_copy"),
-    xfail("aminmax"),
     xfail("any"),
     xfail("arange"),
     xfail("as_strided"),
     xfail("as_strided", "partial_views"),
-    xfail("as_strided_copy"),
-    xfail("as_strided_scatter"),
     xfail("bernoulli"),
-    xfail("_batch_norm_with_update"),
     xfail("block_diag"),
     xfail("broadcast_shapes"),
     xfail("cartesian_prod"),
-    xfail("cauchy"),
-    xfail("cdist"),
-    xfail("cholesky"),
     xfail("cholesky_inverse"),
     xfail("cholesky_solve"),
-    xfail("combinations"),
-    xfail("complex"),
-    xfail("count_nonzero"),
-    xfail("cross"),
-    xfail("cummax"),
-    xfail("cummin"),
-    xfail("diagonal_scatter"),
-    xfail("dist"),
-    xfail("expand_copy"),
-    xfail("exponential"),
     xfail("eye"),
-    xfail("fft.fft2"),
-    xfail("fft.fft"),
-    xfail("fft.fftn"),
-    xfail("fft.fftshift"),
-    xfail("fft.ifft2"),
-    xfail("fft.ifft"),
-    xfail("fft.ifftshift"),
-    xfail("fft.ihfft2"),
-    xfail("fft.ihfft"),
-    xfail("fft.ihfftn"),
-    xfail("fft.irfft2"),
-    xfail("fft.irfftn"),
-    xfail("fft.rfft2"),
-    xfail("fft.rfft"),
-    xfail("fft.rfftn"),
-    xfail("fill"),
     xfail("flatten"),
-    xfail("flip"),
-    xfail("fliplr"),
-    xfail("flipud"),
-    xfail("floor_divide"),
-    xfail("frexp"),
     xfail("full"),
-    xfail("geometric"),
-    xfail("geqrf"),
-    xfail("grid_sampler_2d"),
-    xfail("histogram"),
-    xfail("histogramdd"),
-    xfail("index_add"),
-    xfail("index_copy"),
-    xfail("index_fill"),
     xfail("index_put"),
-    xfail("index_reduce", "prod"),
-    xfail("index_reduce", "mean"),
-    xfail("index_reduce", "amax"),
-    xfail("index_reduce", "amin"),
-    xfail("index_select"),
-    xfail("isin"),
-    xfail("kthvalue"),
     xfail("kron"),
-    xfail("linalg.cholesky"),
-    xfail("linalg.cholesky_ex"),
-    xfail("linalg.cross"),
     xfail("linalg.det"),
-    xfail("linalg.eig"),
-    xfail("linalg.eigvals"),
-    xfail("linalg.householder_product"),
-    xfail("linalg.inv"),
-    xfail("linalg.inv_ex"),
-    xfail("linalg.ldl_factor"),
-    xfail("linalg.ldl_factor_ex"),
-    xfail("linalg.ldl_solve"),
-    xfail("linalg.lstsq"),
-    xfail("linalg.lstsq", "grad_oriented"),
-    xfail("linalg.lu"),
-    xfail("linalg.lu_factor"),
-    xfail("linalg.lu_factor_ex"),
-    xfail("linalg.lu_solve"),
     xfail("linalg.matrix_power"),
-    xfail("linalg.pinv"),
-    xfail("linalg.pinv", "hermitian"),
     xfail("linalg.slogdet"),
-    xfail("linalg.solve"),
-    xfail("linalg.solve_ex"),
-    xfail("linalg.solve_triangular"),
-    xfail("linalg.tensorinv"),
-    xfail("linalg.tensorsolve"),
-    xfail("linalg.vander"),
     xfail("linalg.vecdot"),
     xfail("linspace"),
     xfail("linspace", "tensor_overload"),
-    xfail("log_normal"),
-    xfail("logcumsumexp"),
     xfail("logdet"),
     xfail("logspace"),
     xfail("logspace", "tensor_overload"),
-    xfail("logsumexp"),
-    xfail("lu"),
-    xfail("lu_solve"),
-    xfail("lu_unpack"),
     xfail("masked_fill"),
     xfail("masked_scatter"),
     xfail("masked_select"),
-    xfail("masked.logsumexp"),
-    xfail("masked.median"),
-    xfail("matrix_exp"),
-    xfail("median"),
-    xfail("mode"),
-    xfail("multinomial"),
-    xfail("mv"),
-    xfail("max_pool2d_with_indices_backward", ""),
-    xfail("nanmean"),
-    xfail("nanmedian"),
     xfail("nanquantile"),
-    xfail("nansum"),
-    xfail("native_batch_norm"),
-    xfail("narrow_copy"),
-    xfail("ne"),
     xfail("transpose"),
     xfail("nn.functional.adaptive_avg_pool1d"),
-    xfail("nn.functional.adaptive_avg_pool2d"),
     xfail("nn.functional.adaptive_avg_pool3d"),
-    xfail("nn.functional.adaptive_max_pool1d"),
-    xfail("nn.functional.adaptive_max_pool2d"),
-    xfail("nn.functional.adaptive_max_pool3d"),
     xfail("nn.functional.alpha_dropout"),
-    xfail("nn.functional.avg_pool1d"),
-    xfail("nn.functional.avg_pool2d"),
-    xfail("nn.functional.avg_pool3d"),
-    xfail("nn.functional.batch_norm"),
-    xfail("nn.functional.batch_norm", "without_cudnn"),
-    xfail("nn.functional.bilinear"),
-    xfail("nn.functional.binary_cross_entropy"),
-    xfail("nn.functional.binary_cross_entropy_with_logits"),
-    xfail("nn.functional.celu"),
     xfail("nn.functional.conv1d"),
     xfail("nn.functional.conv2d"),
     xfail("nn.functional.conv3d"),
     xfail("nn.functional.conv_transpose1d"),
     xfail("nn.functional.conv_transpose2d"),
     xfail("nn.functional.conv_transpose3d"),
-    xfail("nn.functional.cosine_similarity"),
-    xfail("nn.functional.ctc_loss"),
     xfail("nn.functional.dropout"),
-    xfail("nn.functional.elu"),
     xfail("nn.functional.fractional_max_pool2d"),
     xfail("nn.functional.fractional_max_pool3d"),
-    xfail("nn.functional.glu"),
-    xfail("nn.functional.grid_sample"),
-    xfail("nn.functional.group_norm"),
-    xfail("nn.functional.hardshrink"),
-    xfail("nn.functional.hardsigmoid"),
-    xfail("nn.functional.hardswish"),
-    xfail("nn.functional.hardtanh"),
-    xfail("nn.functional.huber_loss"),
-    xfail("nn.functional.instance_norm"),
     xfail("nn.functional.interpolate", "area"),
     xfail("nn.functional.interpolate", "nearest"),
     xfail("nn.functional.interpolate", "nearest-exact"),
-    xfail("nn.functional.leaky_relu"),
-    xfail("nn.functional.local_response_norm"),
-    xfail("nn.functional.logsigmoid"),
-    xfail("nn.functional.margin_ranking_loss"),
-    xfail("nn.functional.max_pool1d"),
-    xfail("nn.functional.max_pool2d"),
-    xfail("nn.functional.max_pool3d"),
-    xfail("nn.functional.max_unpool1d"),
-    xfail("nn.functional.max_unpool1d", "grad"),
-    xfail("nn.functional.max_unpool2d"),
-    xfail("nn.functional.max_unpool2d", "grad"),
-    xfail("nn.functional.max_unpool3d"),
-    xfail("nn.functional.max_unpool3d", "grad"),
-    xfail("nn.functional.mish"),
-    xfail("nn.functional.mse_loss"),
-    xfail("nn.functional.multi_margin_loss"),
-    xfail("nn.functional.multilabel_margin_loss"),
-    xfail("nn.functional.multilabel_soft_margin_loss"),
     xfail("nn.functional.pad", "reflect"),
     xfail("nn.functional.pad", "replicate"),
     xfail("nn.functional.pad", "replicate_negative"),
-    xfail("nn.functional.pairwise_distance"),
-    xfail("nn.functional.pdist"),
-    xfail("nn.functional.pixel_shuffle"),
-    xfail("nn.functional.pixel_unshuffle"),
-    xfail("nn.functional.prelu"),
-    xfail("nn.functional.relu6"),
-    xfail("nn.functional.rrelu"),
-    xfail("nn.functional.selu"),
-    xfail("nn.functional.smooth_l1_loss"),
-    xfail("nn.functional.soft_margin_loss"),
-    xfail("nn.functional.softplus"),
-    xfail("nn.functional.softshrink"),
-    xfail("nn.functional.threshold"),
-    xfail("nn.functional.triplet_margin_loss"),
-    xfail("nn.functional.triplet_margin_with_distance_loss"),
     xfail("nn.functional.unfold"),
-    xfail("nn.functional.upsample_nearest"),
-    xfail("nonzero"),
     xfail("normal"),
     xfail("normal", "number_mean"),
     xfail("normal", "in_place"),
-    xfail("ormqr"),
     xfail("ones"),
     xfail("pca_lowrank"),
-    xfail("permute_copy"),
-    xfail("pinverse"),
-    xfail("polar"),
-    xfail("put"),
     xfail("quantile"),
     xfail("rand_like"),
     xfail("randint_like"),
@@ -361,60 +192,15 @@ dtensor_fails = {
     xfail("randn"),
     xfail("randn_like"),
     xfail("ravel"),
-    xfail("renorm"),
     xfail("repeat_interleave"),
-    xfail("resize_"),
-    xfail("resize_as_"),
     xfail("reshape"),
     xfail("reshape_as"),
     xfail("roll"),
-    xfail("rot90"),
-    xfail("rsub"),
     xfail("scalar_tensor"),
-    xfail("scatter_reduce", "amax"),
-    xfail("scatter_reduce", "amin"),
-    xfail("scatter_reduce", "mean"),
-    xfail("scatter_reduce", "prod"),
-    xfail("scatter_reduce", "sum"),
     xfail("searchsorted"),
-    xfail("select_scatter"),
     xfail("sparse.sampled_addmm"),
     xfail("sparse.mm", "reduce"),
-    xfail("special.airy_ai"),
-    xfail("special.bessel_j0"),
-    xfail("special.bessel_j1"),
-    xfail("special.bessel_y0"),
-    xfail("special.bessel_y1"),
-    xfail("special.chebyshev_polynomial_t"),
-    xfail("special.chebyshev_polynomial_u"),
-    xfail("special.chebyshev_polynomial_v"),
-    xfail("special.chebyshev_polynomial_w"),
-    xfail("special.entr"),
-    xfail("special.erfcx"),
-    xfail("special.hermite_polynomial_h"),
-    xfail("special.hermite_polynomial_he"),
-    xfail("special.i0e"),
-    xfail("special.i1"),
-    xfail("special.i1e"),
-    xfail("special.laguerre_polynomial_l"),
-    xfail("special.legendre_polynomial_p"),
-    xfail("special.log_ndtr"),
-    xfail("special.modified_bessel_i0"),
-    xfail("special.modified_bessel_i1"),
-    xfail("special.modified_bessel_k0"),
-    xfail("special.modified_bessel_k1"),
-    xfail("special.ndtri"),
-    xfail("special.scaled_modified_bessel_k0"),
-    xfail("special.scaled_modified_bessel_k1"),
-    xfail("special.shifted_chebyshev_polynomial_t"),
-    xfail("special.shifted_chebyshev_polynomial_u"),
-    xfail("special.shifted_chebyshev_polynomial_v"),
-    xfail("special.shifted_chebyshev_polynomial_w"),
-    xfail("special.spherical_bessel_j0"),
-    xfail("special.xlog1py"),
-    xfail("special.zeta"),
     xfail("squeeze", "multiple"),
-    xfail("squeeze_copy"),
     xfail("signal.windows.bartlett"),
     xfail("signal.windows.blackman"),
     xfail("signal.windows.cosine"),
@@ -427,35 +213,16 @@ dtensor_fails = {
     xfail("signal.windows.nuttall"),
     xfail("signal.windows.kaiser"),
     xfail("stack"),
-    xfail("std_mean"),
-    xfail("std_mean", "unbiased"),
-    xfail("stft"),
     xfail("svd_lowrank"),
-    xfail("t_copy"),
-    xfail("take"),
     xfail("take_along_dim"),
     xfail("tensor_split"),
-    xfail("to_sparse"),
-    xfail("trace"),
-    xfail("triangular_solve"),
     xfail("unbind"),
-    xfail("unbind_copy"),
-    xfail("unfold"),
-    xfail("unfold_copy"),
     xfail("uniform"),
     xfail("unflatten"),
-    xfail("unique_consecutive"),
-    xfail("unique"),
-    xfail("unsafe_split"),
-    xfail("unsafe_chunk"),
     xfail("_unsafe_masked_index"),
     xfail("_unsafe_masked_index_put_accumulate"),
-    xfail("var_mean"),
-    xfail("var_mean", "unbiased"),
-    xfail("vdot"),
     xfail("view"),
     xfail("view_as"),
-    xfail("view_copy"),
     xfail("zeros"),
     # /TODO(whc) debug/triage
     # ops inside this might even fail without dtensor
@@ -511,6 +278,246 @@ dtensor_multi_threaded_fails = {
     skip("nn.functional.multi_head_attention_forward"),
 }
 
+# Ops in dtensor_fails that have no sharding strategy (NotImplementedError).
+# These will error during sharding propagation and affect unbacked tests too.
+dtensor_fails_no_strategy = {
+    xfail("__rsub__"),
+    xfail("_batch_norm_with_update"),
+    xfail("_native_batch_norm_legit"),
+    xfail("_upsample_bilinear2d_aa"),
+    xfail("addbmm"),
+    xfail("addmv"),
+    xfail("addr"),
+    xfail("alias_copy"),
+    xfail("allclose"),
+    xfail("aminmax"),
+    xfail("as_strided_copy"),
+    xfail("as_strided_scatter"),
+    xfail("cauchy"),
+    xfail("cdist"),
+    xfail("cholesky"),
+    xfail("combinations"),
+    xfail("complex"),
+    xfail("count_nonzero"),
+    xfail("cross"),
+    xfail("cummax"),
+    xfail("cummin"),
+    xfail("diagonal_scatter"),
+    xfail("dist"),
+    xfail("expand_copy"),
+    xfail("exponential"),
+    xfail("fft.fft"),
+    xfail("fft.fft2"),
+    xfail("fft.fftn"),
+    xfail("fft.fftshift"),
+    xfail("fft.ifft"),
+    xfail("fft.ifft2"),
+    xfail("fft.ifftshift"),
+    xfail("fft.ihfft"),
+    xfail("fft.ihfft2"),
+    xfail("fft.ihfftn"),
+    xfail("fft.irfft2"),
+    xfail("fft.irfftn"),
+    xfail("fft.rfft"),
+    xfail("fft.rfft2"),
+    xfail("fft.rfftn"),
+    xfail("fill"),
+    xfail("flip"),
+    xfail("fliplr"),
+    xfail("flipud"),
+    xfail("floor_divide"),
+    xfail("frexp"),
+    xfail("geometric"),
+    xfail("geqrf"),
+    xfail("grid_sampler_2d"),
+    xfail("histogram"),
+    xfail("histogramdd"),
+    xfail("index_add"),
+    xfail("index_copy"),
+    xfail("index_fill"),
+    xfail("index_reduce", "prod"),
+    xfail("index_reduce", "mean"),
+    xfail("index_reduce", "amax"),
+    xfail("index_reduce", "amin"),
+    xfail("index_select"),
+    xfail("isin"),
+    xfail("kthvalue"),
+    xfail("linalg.cholesky"),
+    xfail("linalg.cholesky_ex"),
+    xfail("linalg.cross"),
+    xfail("linalg.eig"),
+    xfail("linalg.eigvals"),
+    xfail("linalg.householder_product"),
+    xfail("linalg.inv"),
+    xfail("linalg.inv_ex"),
+    xfail("linalg.ldl_factor"),
+    xfail("linalg.ldl_factor_ex"),
+    xfail("linalg.ldl_solve"),
+    xfail("linalg.lstsq"),
+    xfail("linalg.lstsq", "grad_oriented"),
+    xfail("linalg.lu"),
+    xfail("linalg.lu_factor"),
+    xfail("linalg.lu_factor_ex"),
+    xfail("linalg.lu_solve"),
+    xfail("linalg.pinv"),
+    xfail("linalg.pinv", "hermitian"),
+    xfail("linalg.solve"),
+    xfail("linalg.solve_ex"),
+    xfail("linalg.solve_triangular"),
+    xfail("linalg.tensorinv"),
+    xfail("linalg.tensorsolve"),
+    xfail("linalg.vander"),
+    xfail("log_normal"),
+    xfail("logcumsumexp"),
+    xfail("logsumexp"),
+    xfail("lu"),
+    xfail("lu_solve"),
+    xfail("lu_unpack"),
+    xfail("masked.logsumexp"),
+    xfail("masked.median"),
+    xfail("matrix_exp"),
+    xfail("max_pool2d_with_indices_backward"),
+    xfail("median"),
+    xfail("mode"),
+    xfail("multinomial"),
+    xfail("mv"),
+    xfail("nanmean"),
+    xfail("nanmedian"),
+    xfail("nansum"),
+    xfail("narrow_copy"),
+    xfail("native_batch_norm"),
+    xfail("ne"),
+    xfail("nn.functional.adaptive_avg_pool2d"),
+    xfail("nn.functional.adaptive_max_pool1d"),
+    xfail("nn.functional.adaptive_max_pool2d"),
+    xfail("nn.functional.adaptive_max_pool3d"),
+    xfail("nn.functional.avg_pool1d"),
+    xfail("nn.functional.avg_pool2d"),
+    xfail("nn.functional.avg_pool3d"),
+    xfail("nn.functional.batch_norm"),
+    xfail("nn.functional.batch_norm", "without_cudnn"),
+    xfail("nn.functional.bilinear"),
+    xfail("nn.functional.binary_cross_entropy"),
+    xfail("nn.functional.binary_cross_entropy_with_logits"),
+    xfail("nn.functional.celu"),
+    xfail("nn.functional.cosine_similarity"),
+    xfail("nn.functional.ctc_loss"),
+    xfail("nn.functional.elu"),
+    xfail("nn.functional.glu"),
+    xfail("nn.functional.grid_sample"),
+    xfail("nn.functional.group_norm"),
+    xfail("nn.functional.hardshrink"),
+    xfail("nn.functional.hardsigmoid"),
+    xfail("nn.functional.hardswish"),
+    xfail("nn.functional.hardtanh"),
+    xfail("nn.functional.huber_loss"),
+    xfail("nn.functional.instance_norm"),
+    xfail("nn.functional.leaky_relu"),
+    xfail("nn.functional.local_response_norm"),
+    xfail("nn.functional.logsigmoid"),
+    xfail("nn.functional.margin_ranking_loss"),
+    xfail("nn.functional.max_pool1d"),
+    xfail("nn.functional.max_pool2d"),
+    xfail("nn.functional.max_pool3d"),
+    xfail("nn.functional.max_unpool1d"),
+    xfail("nn.functional.max_unpool1d", "grad"),
+    xfail("nn.functional.max_unpool2d"),
+    xfail("nn.functional.max_unpool2d", "grad"),
+    xfail("nn.functional.max_unpool3d"),
+    xfail("nn.functional.max_unpool3d", "grad"),
+    xfail("nn.functional.mish"),
+    xfail("nn.functional.mse_loss"),
+    xfail("nn.functional.multi_margin_loss"),
+    xfail("nn.functional.multilabel_margin_loss"),
+    xfail("nn.functional.multilabel_soft_margin_loss"),
+    xfail("nn.functional.pairwise_distance"),
+    xfail("nn.functional.pdist"),
+    xfail("nn.functional.pixel_shuffle"),
+    xfail("nn.functional.pixel_unshuffle"),
+    xfail("nn.functional.prelu"),
+    xfail("nn.functional.relu6"),
+    xfail("nn.functional.rrelu"),
+    xfail("nn.functional.selu"),
+    xfail("nn.functional.smooth_l1_loss"),
+    xfail("nn.functional.soft_margin_loss"),
+    xfail("nn.functional.softplus"),
+    xfail("nn.functional.softshrink"),
+    xfail("nn.functional.threshold"),
+    xfail("nn.functional.triplet_margin_loss"),
+    xfail("nn.functional.triplet_margin_with_distance_loss"),
+    xfail("nn.functional.upsample_nearest"),
+    xfail("nonzero"),
+    xfail("ormqr"),
+    xfail("permute_copy"),
+    xfail("pinverse"),
+    xfail("polar"),
+    xfail("put"),
+    xfail("renorm"),
+    xfail("resize_"),
+    xfail("resize_as_"),
+    xfail("rot90"),
+    xfail("rsub"),
+    xfail("scatter_reduce", "amax"),
+    xfail("scatter_reduce", "amin"),
+    xfail("scatter_reduce", "mean"),
+    xfail("scatter_reduce", "prod"),
+    xfail("scatter_reduce", "sum"),
+    xfail("select_scatter"),
+    xfail("special.airy_ai"),
+    xfail("special.bessel_j0"),
+    xfail("special.bessel_j1"),
+    xfail("special.bessel_y0"),
+    xfail("special.bessel_y1"),
+    xfail("special.chebyshev_polynomial_t"),
+    xfail("special.chebyshev_polynomial_u"),
+    xfail("special.chebyshev_polynomial_v"),
+    xfail("special.chebyshev_polynomial_w"),
+    xfail("special.entr"),
+    xfail("special.erfcx"),
+    xfail("special.hermite_polynomial_h"),
+    xfail("special.hermite_polynomial_he"),
+    xfail("special.i0e"),
+    xfail("special.i1"),
+    xfail("special.i1e"),
+    xfail("special.laguerre_polynomial_l"),
+    xfail("special.legendre_polynomial_p"),
+    xfail("special.log_ndtr"),
+    xfail("special.modified_bessel_i0"),
+    xfail("special.modified_bessel_i1"),
+    xfail("special.modified_bessel_k0"),
+    xfail("special.modified_bessel_k1"),
+    xfail("special.ndtri"),
+    xfail("special.scaled_modified_bessel_k0"),
+    xfail("special.scaled_modified_bessel_k1"),
+    xfail("special.shifted_chebyshev_polynomial_t"),
+    xfail("special.shifted_chebyshev_polynomial_u"),
+    xfail("special.shifted_chebyshev_polynomial_v"),
+    xfail("special.shifted_chebyshev_polynomial_w"),
+    xfail("special.spherical_bessel_j0"),
+    xfail("special.xlog1py"),
+    xfail("special.zeta"),
+    xfail("squeeze_copy"),
+    xfail("std_mean"),
+    xfail("std_mean", "unbiased"),
+    xfail("stft"),
+    xfail("t_copy"),
+    xfail("take"),
+    xfail("to_sparse"),
+    xfail("trace"),
+    xfail("triangular_solve"),
+    xfail("unbind_copy"),
+    xfail("unfold"),
+    xfail("unfold_copy"),
+    xfail("unique"),
+    xfail("unique_consecutive"),
+    xfail("unsafe_chunk"),
+    xfail("unsafe_split"),
+    xfail("var_mean"),
+    xfail("var_mean", "unbiased"),
+    xfail("vdot"),
+    xfail("view_copy"),
+}
+
 # Add a list of ops that are currently failing BW pass
 skip_bw = [
     None,  # corresponds to the transpose ops 'H' and 'T'
@@ -539,26 +546,50 @@ class TestDTensorOps(TestCase):
     def world_size(self) -> int:
         return OP_DB_WORLD_SIZE
 
-    def run_opinfo_test(
-        self, dtype, op, requires_grad=True, sample_inputs_filter=lambda s: True
+    def iter_valid_samples(
+        self,
+        op,
+        dtype,
+        requires_grad=False,
+        sample_filter=None,
+        needs_deepcopy=False,
     ):
+        """
+        Iterate over valid samples for an op, yielding (args, kwargs) tuples.
+
+        Args:
+            op: The OpInfo object
+            dtype: The dtype to use for sample inputs
+            requires_grad: Whether tensors should require grad
+            sample_filter: Optional callable(args, kwargs) -> bool to filter samples
+            needs_deepcopy: If True, yields deepcopied args/kwargs and skips
+                            samples that can't be deepcopied
+        """
+        samples = op.sample_inputs(DEVICE_TYPE, dtype, requires_grad=requires_grad)
+        for sample in samples:
+            args = [sample.input] + list(sample.args)
+            kwargs = sample.kwargs
+
+            if sample_filter and not sample_filter(args, kwargs):
+                continue
+
+            if needs_deepcopy:
+                try:
+                    args = copy.deepcopy(args)
+                    kwargs = copy.deepcopy(kwargs)
+                except NotImplementedError:
+                    continue
+
+            yield args, kwargs
+
+    def run_opinfo_test(self, dtype, op, requires_grad=True, sample_filter=None):
         self.mesh = init_device_mesh(DEVICE_TYPE, (self.world_size,))
 
-        # test each op with dist tensor inputs and normal inputs
         def test():
-            samples = op.sample_inputs(DEVICE_TYPE, dtype, requires_grad=requires_grad)
-            for sample_input in samples:
-                if not sample_inputs_filter(sample_input):
-                    continue
-                args = [sample_input.input] + list(sample_input.args)
-                kwargs = sample_input.kwargs
-
+            for args, kwargs in self.iter_valid_samples(
+                op, dtype, requires_grad=requires_grad, sample_filter=sample_filter
+            ):
                 self.run_dtensor_crossref(op.op, args, kwargs)
-                # we need to figure out a way to test the out variant, out variant testing
-                # is tricky, as we need to pre allocate the dtensor out, some of them rely
-                # on sharding placements to be pre-known (i.e. mm.out)
-                # if isinstance(expected, torch.Tensor) and op.supports_out:
-                #     func(*args, **kwargs, out=expected)
 
         self.check_dtensor_func(test, op)
 
@@ -688,7 +719,7 @@ class TestDTensorOps(TestCase):
             torch.int64,
             op,
             requires_grad=False,
-            sample_inputs_filter=lambda s: s.kwargs["num_classes"] != -1,
+            sample_filter=lambda args, kwargs: kwargs.get("num_classes") != -1,
         )
 
     def run_mean(self):
@@ -753,7 +784,7 @@ class TestMultiThreadedDTensorOps(DTensorOpTestBase, TestDTensorOps):
         _op_db,
         "TestMultiThreadedDTensorOps",
         "test_dtensor_op_db",
-        dtensor_fails | dtensor_multi_threaded_fails,
+        dtensor_fails | dtensor_multi_threaded_fails | dtensor_fails_no_strategy,
     )
     def test_dtensor_op_db(self, dtype, op):
         self.run_opinfo_test(dtype, op)
@@ -791,7 +822,7 @@ class TestLocalDTensorOps(TestDTensorOps):
         _op_db,
         "TestLocalDTensorOps",
         "test_dtensor_op_db",
-        dtensor_fails,
+        dtensor_fails | dtensor_fails_no_strategy,
     )
     def test_dtensor_op_db(self, dtype, op):
         self.run_opinfo_test(dtype, op)
@@ -803,14 +834,286 @@ class TestLocalDTensorOps(TestDTensorOps):
     def test_one_hot(self):
         self.run_one_hot()
 
-    def run_opinfo_test(
-        self, dtype, op, requires_grad=True, sample_inputs_filter=lambda s: True
-    ):
+    def run_opinfo_test(self, dtype, op, requires_grad=True, sample_filter=None):
         with LocalTensorMode(frozenset(range(self.world_size))):
-            super().run_opinfo_test(dtype, op, requires_grad, sample_inputs_filter)
+            super().run_opinfo_test(dtype, op, requires_grad, sample_filter)
 
     def assertEqualOnRank(self, x, y, msg=None, *, rank=0):
         self.assertEqual(x, y, msg)
+
+
+# Ops where DTensor shard prop has DDEs with unbacked (base tensor passes).
+# This list only contains ops NOT in ops_dde_xfail - those are base tensor issues.
+ops_unbacked_dtensor_dde = {
+    xfail("__getitem__"),
+    xfail("__radd__"),
+    xfail("__rdiv__"),
+    xfail("__rmatmul__"),
+    xfail("__rmod__"),
+    xfail("__rmul__"),
+    xfail("__rpow__"),
+    xfail("_segment_reduce", "lengths"),
+    xfail("_segment_reduce", "offsets"),
+    xfail("_softmax_backward_data"),
+    xfail("_unsafe_masked_index"),
+    xfail("add"),
+    xfail("addcdiv"),
+    xfail("addcmul"),
+    xfail("addmm"),
+    xfail("addmm", "decomposed"),
+    xfail("all"),
+    xfail("any"),
+    xfail("argmax"),
+    xfail("argmin"),
+    xfail("argsort"),
+    xfail("argwhere"),
+    xfail("as_strided"),
+    xfail("as_strided", "partial_views"),
+    xfail("atan2"),
+    xfail("block_diag"),
+    xfail("bmm"),
+    xfail("broadcast_tensors"),
+    skip("broadcast_to"),
+    xfail("bucketize"),
+    xfail("cartesian_prod"),
+    xfail("cat"),
+    xfail("cholesky_solve"),
+    xfail("clamp"),
+    xfail("clamp_max"),
+    xfail("clamp_min"),
+    xfail("column_stack"),
+    xfail("constant_pad_nd"),
+    xfail("copysign"),
+    xfail("cumprod"),
+    xfail("cumsum"),
+    xfail("diag"),
+    xfail("diagflat"),
+    xfail("div", "floor_rounding"),
+    xfail("div", "no_rounding_mode"),
+    xfail("div", "trunc_rounding"),
+    xfail("dot"),
+    xfail("dstack"),
+    xfail("einsum"),
+    xfail("eq"),
+    xfail("expand"),
+    xfail("expand_as"),
+    xfail("flatten"),
+    xfail("float_power"),
+    xfail("fmax"),
+    xfail("fmin"),
+    xfail("fmod"),
+    xfail("gather"),
+    xfail("ge"),
+    xfail("gt"),
+    xfail("heaviside"),
+    xfail("histc"),
+    xfail("hstack"),
+    xfail("hypot"),
+    xfail("igamma"),
+    xfail("igammac"),
+    xfail("index_put"),
+    xfail("isclose"),
+    xfail("ldexp"),
+    xfail("le"),
+    xfail("lerp"),
+    xfail("linalg.vecdot"),
+    xfail("logaddexp"),
+    xfail("logaddexp2"),
+    xfail("logical_and"),
+    xfail("logical_or"),
+    xfail("logical_xor"),
+    xfail("lt"),
+    xfail("masked.normalize"),
+    xfail("masked_fill"),
+    xfail("masked_scatter"),
+    xfail("masked_select"),
+    xfail("matmul"),
+    xfail("max", "binary"),
+    xfail("max", "reduction_with_dim"),
+    xfail("maximum"),
+    xfail("meshgrid", "list_of_tensors"),
+    xfail("meshgrid", "variadic_tensors"),
+    xfail("min", "binary"),
+    xfail("min", "reduction_with_dim"),
+    xfail("minimum"),
+    xfail("mm"),
+    xfail("msort"),
+    xfail("mul"),
+    xfail("narrow"),
+    xfail("native_dropout_backward"),
+    xfail("new_empty"),
+    xfail("new_empty_strided"),
+    xfail("new_full"),
+    xfail("new_ones"),
+    xfail("new_zeros"),
+    xfail("nextafter"),
+    xfail("nn.functional.cosine_embedding_loss"),
+    xfail("nn.functional.hinge_embedding_loss"),
+    xfail("nn.functional.interpolate", "nearest"),
+    xfail("nn.functional.interpolate", "nearest-exact"),
+    xfail("nn.functional.linear"),
+    xfail("nn.functional.normalize"),
+    xfail("nn.functional.pad", "constant"),
+    xfail("nn.functional.poisson_nll_loss"),
+    xfail("nonzero_static"),
+    xfail("outer"),
+    xfail("pow"),
+    xfail("prod"),
+    xfail("ravel"),
+    xfail("remainder"),
+    xfail("reshape"),
+    xfail("reshape_as"),
+    xfail("select"),
+    xfail("slice"),
+    xfail("slice_scatter"),
+    xfail("sort"),
+    xfail("split", "list_args"),
+    xfail("split_with_sizes"),
+    xfail("split_with_sizes_copy"),
+    xfail("squeeze"),
+    xfail("squeeze", "multiple"),
+    xfail("stack"),
+    xfail("std"),
+    xfail("std", "unbiased"),
+    xfail("sub"),
+    xfail("topk"),
+    xfail("torch.ops.aten._safe_softmax.default"),
+    xfail("transpose_copy"),
+    xfail("tril"),
+    xfail("triu"),
+    xfail("true_divide"),
+    xfail("unflatten"),
+    xfail("unsqueeze_copy"),
+    xfail("var"),
+    xfail("var", "unbiased"),
+    xfail("view"),
+    xfail("view_as"),
+    xfail("vstack"),
+    xfail("where"),
+    xfail("xlogy"),
+}
+
+
+class TestUnbackedDTensorOps(TestDTensorOps):
+    """
+    Test suite for DTensor ops with unbacked symints.
+
+    This runs correctness tests with tensor dimensions marked as unbacked
+    and the op compiled with fullgraph=True to catch DDEs during tracing.
+    """
+
+    _op_db = repurpose_ops(op_db, "TestDTensorOps", "TestUnbackedDTensorOps")
+
+    def setUp(self) -> None:
+        super().setUp()
+        torch.distributed.init_process_group("fake", rank=0, world_size=self.world_size)
+
+    def tearDown(self):
+        super().tearDown()
+        from torch.distributed.tensor.debug import _clear_sharding_prop_cache
+
+        _clear_sharding_prop_cache()
+        torch._dynamo.reset()
+        try:
+            dist.destroy_process_group()
+        except AssertionError:
+            pass
+
+    def assertEqualOnRank(self, x, y, msg=None, *, rank=0):
+        self.assertEqual(x, y, msg)
+
+    def _has_valid_unbacked_dims(self, t: torch.Tensor) -> bool:
+        """Check if tensor has dimensions that can be marked as unbacked."""
+        return t.ndim > 0 and any(s >= 2 for s in t.shape)
+
+    def _sample_has_valid_unbacked_dims(self, args, kwargs) -> bool:
+        """Check if any tensor in args/kwargs has valid unbacked dimensions."""
+        all_tensors = [
+            x for x in tree_flatten((args, kwargs))[0] if isinstance(x, torch.Tensor)
+        ]
+        return any(self._has_valid_unbacked_dims(t) for t in all_tensors)
+
+    def _mark_unbacked(self, t: torch.Tensor) -> None:
+        """Mark all eligible dimensions of a tensor as unbacked."""
+        for i in range(t.ndim):
+            if t.shape[i] >= 2:
+                torch._dynamo.decorators.mark_unbacked(t, i)
+
+    def run_dtensor_crossref(self, func, args, kwargs):
+        """
+        Override to add unbacked marking and fullgraph compilation.
+
+        Same as parent but:
+        1. Marks DTensor dimensions as unbacked before running
+        2. Wraps the op in @torch.compile(backend="eager", fullgraph=True)
+        """
+        to_dtensor = DTensorConverter(self.mesh, args, kwargs)
+
+        def concat_res_if_necessary(func, res: object) -> object:
+            if (resolve_name(func) is not None) and ("split" in resolve_name(func)):
+                dim = args[2] if len(args) == 3 else 0
+                return torch.cat(res, dim=dim)
+            return res
+
+        op_args, op_kwargs = reconcile_args(args, kwargs)
+        rs = func(*op_args, **op_kwargs)
+        rs = concat_res_if_necessary(func, rs)
+
+        def to_replicate(e: object) -> object:
+            return e.full_tensor() if isinstance(e, DTensor) else e
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            for dtensor_args, dtensor_kwargs in to_dtensor:
+                try:
+                    if not to_dtensor.successful():
+                        raise RuntimeError(
+                            f"Failed to convert args to DTensor; "
+                            f"originally (*{args}, **{kwargs})"
+                        )
+
+                    pytree.tree_map_only(
+                        lambda x: isinstance(x, DTensor)
+                        and self._has_valid_unbacked_dims(x),
+                        self._mark_unbacked,
+                        (dtensor_args, dtensor_kwargs),
+                    )
+
+                    # Compile with fullgraph=True to catch DDEs
+                    torch._dynamo.reset()
+
+                    @torch.compile(backend="eager", fullgraph=True)
+                    def compiled_func(*a, **kw):
+                        return func(*a, **kw)
+
+                    compiled_func(*dtensor_args, **dtensor_kwargs)
+
+                except Exception as e:
+                    raise RuntimeError(
+                        f"{str(e)}\n\nFailed to run: {resolve_name(func)}, "
+                        f"with (*{dtensor_args}, **{dtensor_kwargs})"
+                    ) from e
+        return rs
+
+    @suppress_warnings
+    @ops(_op_db, allowed_dtypes=(torch.float,))
+    @skipOps(
+        _op_db,
+        "TestUnbackedDTensorOps",
+        "test_unbacked_dtensor_op_db",
+        ops_dde_xfail
+        | ops_unbacked_dtensor_dde
+        | dtensor_fails_no_strategy
+        | ops_unbacked_skip,
+    )
+    def test_unbacked_dtensor_op_db(self, dtype, op):
+        # Filter to samples with valid unbacked dimensions
+        self.run_opinfo_test(
+            dtype,
+            op,
+            requires_grad=False,
+            sample_filter=self._sample_has_valid_unbacked_dims,
+        )
 
 
 class TestSingleDimStrategies(DTensorOpTestBase):
@@ -929,6 +1232,10 @@ instantiate_device_type_tests(
 )
 
 instantiate_device_type_tests(TestLocalDTensorOps, globals(), only_for=(DEVICE_TYPE,))
+
+instantiate_device_type_tests(
+    TestUnbackedDTensorOps, globals(), only_for=(DEVICE_TYPE,)
+)
 
 instantiate_device_type_tests(
     TestSingleDimStrategies, globals(), only_for=(DEVICE_TYPE,)

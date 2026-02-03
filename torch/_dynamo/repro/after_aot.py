@@ -485,6 +485,19 @@ if "__compile_source__" in globals():
                     and stride.node.hint is not None
                 ):
                     used_syms[str(stride.node)] = stride.node.hint
+            # Extract symbols from storage nbytes (can be a symbolic expression)
+            storage = arg.untyped_storage()
+            nbytes = storage.nbytes()
+            # pyrefly: ignore [unbound-name]
+            if isinstance(nbytes, torch.SymInt):
+                expr = nbytes.node.expr
+                shape_env = nbytes.node.shape_env
+                for sym in expr.free_symbols:
+                    sym_name = str(sym)
+                    if sym_name not in used_syms and shape_env is not None:
+                        hint = shape_env.backed_var_to_val.get(sym)
+                        if hint is not None:
+                            used_syms[sym_name] = int(hint)
     # Add symbolic variable definitions to the top of the generated code
     if used_syms:
         hint_lines = "\n".join(
