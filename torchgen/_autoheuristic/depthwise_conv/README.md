@@ -4,7 +4,7 @@ To regenerate the current heuristic with the original data, run the following sc
 ```
 bash get_depthwiseconv_dataset.sh
 
-python train_decision_depthwiseconv.py depthwiseconv_data/*
+python train_decision_depthwiseconv.py *.csv
 ```
 
 ## Benchmarking

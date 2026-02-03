@@ -19,6 +19,7 @@ class BenchmarkRunnerDepthwiseConv:
         self.nb_iters = 100
 
         self.columns = [
+            "sm",
             "bs",
             "ch",
             "w",
@@ -43,6 +44,9 @@ class BenchmarkRunnerDepthwiseConv:
         self.parser = argparse.ArgumentParser()
         self.add_base_arguments()
         self.args = None
+
+        major, minor = torch.cuda.get_device_capability()
+        self.sm = major * 10 + minor
 
     def add_base_arguments(self):
         self.parser.add_argument(
@@ -149,6 +153,7 @@ class BenchmarkRunnerDepthwiseConv:
             tmp_df = pd.DataFrame(
                 [
                     [
+                        self.sm,
                         batch_size,
                         c,
                         h,

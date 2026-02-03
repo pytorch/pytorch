@@ -8,7 +8,7 @@ from sklearn.tree import DecisionTreeClassifier
 
 class TrainDecisionTreeDepthwiseConv:
     def __init__(self):
-        self.features = ["bs", "ch", "w", "filter", "stride"]
+        self.features = ["sm", "bs", "ch", "w", "filter", "stride"]
         self.target = "cudnn_speedup_all"
         self.classes = ["false", "true"]
         self.output_file = (
@@ -77,12 +77,14 @@ class TrainDecisionTreeDepthwiseConv:
         Load data and prepare for binary classification.
         Filters out label 2 (equal performance within tolerance).
         """
-        dfs = [
-            pd.read_csv(input_file)[[*self.features, self.target]]
-            for input_file in input_files
-        ]
-        features = dfs[0][self.features].values.astype(np.float32)
-        speedup_values = np.mean([df[self.target].values for df in dfs], axis=0)
+        df = pd.concat(
+            [
+                pd.read_csv(input_file)[[*self.features, self.target]]
+                for input_file in input_files
+            ]
+        )
+        features = df[self.features].values
+        speedup_values = df[self.target].values
         sample_weights = abs(speedup_values - 1.0) - tolerance
 
         # Create original labels (0, 1, 2)
@@ -157,11 +159,15 @@ class TrainDecisionTreeDepthwiseConv:
             + """
 
 #include <ATen/core/Tensor.h>
+#include <ATen/detail/CUDAHooksInterface.h>
 
 namespace at::native {
 
 template <typename T>
 static bool check_cudnn_depthwise_workload_with_filter(const at::Tensor& input, T stride, const at::Tensor& weight) {
+  static int sm = at::detail::getCUDAHooks().getDeviceCapability();
+  if (sm == 0) return false; // CUDA not available
+
   // 1D conv
   if(at::symint::size<T>(input, 2) == 1 && stride == 1){
     return true;

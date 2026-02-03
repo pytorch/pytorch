@@ -69,6 +69,7 @@ struct CUDAHooks : public at::CUDAHooksInterface {
   const std::vector<std::string>& getHipblasltSupportedArchs() const override;
 #endif
   void deviceSynchronize(DeviceIndex device_index) const override;
+  int getDeviceCapability(DeviceIndex device_index = -1) const override;
 };
 
 } // at::cuda::detail
