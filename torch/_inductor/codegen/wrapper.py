@@ -802,7 +802,7 @@ class EnterCudaStreamContextLine(WrapperLine):
         # Over or under indenting usually means that :meth:`MultiCudaStreamScheduler.codegen`
         # introduced bugs on stream context switching. This check also applies to stream context
         # exiting, as in :meth:`ExitCudaStreamContextLine.codegen`.
-        assert code._indent == 3
+        assert code._indent == 3, f"indent={code._indent}, expected 3"
 
 
 @dataclasses.dataclass
