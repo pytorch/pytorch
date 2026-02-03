@@ -19,14 +19,13 @@ import functools
 import itertools
 
 from torch._inductor import config
+from torch._inductor.codegen.wrapper import IndentedBuffer, WrapperLine
 from torch._inductor.stream_utils import (
     DEFAULT_STREAM_IDX,
     ENTRANCE_EVENT,
     EVENT_NAME_TEMPLATE,
     get_stream_name,
 )
-
-from torch._inductor.codegen.wrapper import IndentedBuffer, WrapperLine
 from torch.utils._ordered_set import OrderedSet
 
 
@@ -132,7 +131,9 @@ class CudaEventSym:
 class _CudaEventRecordLine(WrapperLine):
     event: CudaEventSym
     stream: str
-    _reuse_cuda_event: bool = dataclasses.field(default_factory=lambda: config.reuse_cuda_event)
+    _reuse_cuda_event: bool = dataclasses.field(
+        default_factory=lambda: config.reuse_cuda_event
+    )
 
     def codegen(self, code: IndentedBuffer) -> None:
         assert 0 <= self.event.ref_count
