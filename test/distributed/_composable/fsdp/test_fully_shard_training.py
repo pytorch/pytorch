@@ -49,6 +49,7 @@ from torch.testing._internal.common_fsdp import (
     patch_reduce_scatter,
 )
 from torch.testing._internal.common_utils import (
+    device_sleep,
     get_cycles_per_ms,
     MI200_ARCH,
     run_tests,
@@ -480,14 +481,14 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         orig_reduce_scatter = dist.reduce_scatter_tensor
 
         def delayed_all_gather(*args, **kwargs):
-            torch.get_device_module(device_type)._sleep(
-                int(delay_in_ms * get_cycles_per_ms(device_type.type))
+            device_sleep(
+                device_type.type, int(delay_in_ms * get_cycles_per_ms(device_type.type))
             )
             return orig_all_gather(*args, **kwargs)
 
         def delayed_reduce_scatter(*args, **kwargs):
-            torch.get_device_module(device_type)._sleep(
-                int(delay_in_ms * get_cycles_per_ms(device_type.type))
+            device_sleep(
+                device_type.type, int(delay_in_ms * get_cycles_per_ms(device_type.type))
             )
             return orig_reduce_scatter(*args, **kwargs)
 
@@ -510,13 +511,15 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                     _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
                     losses.append(_model(inp).sum())
                     if _model is model and delay_after_forward:
-                        torch.get_device_module(test_device_type)._sleep(
-                            int(delay_in_ms * get_cycles_per_ms(device_type.type))
+                        device_sleep(
+                            test_device_type,
+                            int(delay_in_ms * get_cycles_per_ms(device_type.type)),
                         )
                     losses[-1].backward()
                     if _model is model and delay_before_optim:
-                        torch.get_device_module(test_device_type)._sleep(
-                            int(delay_in_ms * get_cycles_per_ms(device_type.type))
+                        device_sleep(
+                            test_device_type,
+                            int(delay_in_ms * get_cycles_per_ms(device_type.type)),
                         )
                     _optim.step()
                 self.assertEqual(losses[0], losses[1])
@@ -557,9 +560,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
 
         root_loss = model(inp).sum()
         root_loss.backward()
-        torch.get_device_module(device_type)._sleep(
-            int(100 * get_cycles_per_ms(device_type.type))
-        )
+        device_sleep(device_type.type, int(100 * get_cycles_per_ms(device_type.type)))
         optim.step()
         optim.zero_grad()
         nonroot_loss = model[0](inp).sum()
@@ -694,8 +695,8 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             optim.step()
             # Sleep after the optimizer step to allow CPU to run ahead into the
             # next iteration's forward, exercising the post-optim stream sync
-            torch.get_device_module(device_type)._sleep(
-                int(25 * get_cycles_per_ms(device_type.type))
+            device_sleep(
+                device_type.type, int(25 * get_cycles_per_ms(device_type.type))
             )
         for ref_loss, loss in zip(ref_losses, losses):
             self.assertEqual(ref_loss, loss)

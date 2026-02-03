@@ -5526,6 +5526,32 @@ def dtype_name(dtype):
     return str(dtype).split('.')[1]
 
 
+def _cpu_sleep(cycles: int) -> None:
+    """Spin-wait for approximately the given number of cycles."""
+    for _ in range(cycles):
+        pass
+
+
+def device_sleep(device: str, cycles: int) -> None:
+    """Sleep for the given number of cycles on the specified device.
+
+    For CPU, temporarily patches torch.cpu._sleep if needed.
+    For CUDA/other devices, uses torch.get_device_module(device)._sleep.
+    """
+    if device == "cpu":
+        orig = getattr(torch.cpu, "_sleep", None)
+        torch.cpu._sleep = _cpu_sleep
+        try:
+            torch.cpu._sleep(cycles)
+        finally:
+            if orig is None:
+                delattr(torch.cpu, "_sleep")
+            else:
+                torch.cpu._sleep = orig
+    else:
+        torch.get_device_module(device)._sleep(cycles)
+
+
 @functools.lru_cache
 def get_cycles_per_ms(device: str = "cuda") -> float:
     """Measure and return approximate number of cycles per millisecond for device _sleep.
@@ -5540,16 +5566,9 @@ def get_cycles_per_ms(device: str = "cuda") -> float:
     if device == "cpu":
         import time
 
-        def _cpu_sleep(cycles: int) -> None:
-            for _ in range(cycles):
-                pass
-
-        if not hasattr(torch.cpu, "_sleep"):
-            torch.cpu._sleep = _cpu_sleep
-
         def measure() -> float:
             start = time.perf_counter()
-            torch.cpu._sleep(test_cycles)
+            _cpu_sleep(test_cycles)
             end = time.perf_counter()
             elapsed_ms = (end - start) * 1000
             cycles_per_ms = test_cycles / elapsed_ms if elapsed_ms > 0 else 1000000
