@@ -809,10 +809,11 @@ class CachingAutotuner(KernelInterface):
                     "launch_pdl": compile_meta.get("launch_pdl", False),  # True
                 }
             )
+            if compile_meta.get("disable_ftz", False):
+                options["enable_reflect_ftz"] = False
             for k in tlx_only_cuda_options():
                 if v := getattr(cfg, k, None):
                     options[k] = v
-
         if self.device_props.type == "hip":
             if "waves_per_eu" in compile_meta:
                 options["waves_per_eu"] = compile_meta["waves_per_eu"]
@@ -2227,6 +2228,8 @@ def cached_autotune(
     filename=None,
     inductor_meta=None,
     custom_kernel=False,
+    caching_autotuner_cls: type[CachingAutotuner] = CachingAutotuner,
+    debug_autotuner_cls: type[DebugAutotuner] = DebugAutotuner,
 ):
     """
     A copy of triton.autotune that calls our subclass.  Our subclass
@@ -2263,7 +2266,7 @@ def cached_autotune(
                     tconfig.kwargs.pop("XBLOCK")
 
         if inductor_meta.get("profile_bandwidth"):
-            return DebugAutotuner(
+            return debug_autotuner_cls(
                 fn,
                 triton_meta=triton_meta,
                 inductor_meta=inductor_meta,
@@ -2282,7 +2285,7 @@ def cached_autotune(
                 filename=filename,
                 with_bandwidth_info=True,
             )
-        return CachingAutotuner(
+        return caching_autotuner_cls(
             fn,
             triton_meta=triton_meta,
             inductor_meta=inductor_meta,
@@ -2779,12 +2782,22 @@ def pointwise(
                             )
                         ]
                     )
+            if torch.xpu.is_available():
+                configs.extend(
+                    [  # intel-xpu-backend-for-triton #5133
+                        triton_config_with_settings(size_hints, 32),
+                    ]
+                )
     if len(size_hints) == 2:
         # Only avoiding tuning on TileHint.SQUARE if not on ROCm builds
         # ROCm has observed improvement by diverging here
         if (
             not inductor_meta.get("autotune_pointwise", True)
-            or (torch.version.hip is None and tile_hint == TileHint.SQUARE)
+            or (
+                torch.version.hip is None
+                and tile_hint == TileHint.SQUARE
+                and torch.version.xpu is None
+            )
         ) and not (
             inductor_meta.get("max_autotune")
             or inductor_meta.get("max_autotune_pointwise")
@@ -2818,8 +2831,19 @@ def pointwise(
                         ),  # +30% for some kernels
                     ]
                 )
+            if torch.xpu.is_available():
+                configs.extend(
+                    [
+                        # intel-xpu-backend-for-triton #5198
+                        triton_config_with_settings(size_hints, 32, 32, num_warps=8),
+                        # intel-xpu-backend-for-triton #5199
+                        triton_config_with_settings(size_hints, 4, 256),
+                    ]
+                )
     if len(size_hints) == 3:
-        if not inductor_meta.get("max_autotune_pointwise"):
+        if not (
+            inductor_meta.get("max_autotune_pointwise") or torch.xpu.is_available()
+        ):
             configs = [triton_config_with_settings(size_hints, 16, 16, 16)]
         else:
             configs = [
@@ -3903,6 +3927,13 @@ class Grid3D(GridExpr):
         self.x_grid = self.ceildiv("xnumel", meta.get("XBLOCK"))
         self.y_grid = self.ceildiv("ynumel", meta.get("YBLOCK"))
         self.z_grid = self.ceildiv("znumel", meta.get("ZBLOCK"))
+
+
+class BatchMatmulGrid3D(GridExpr):
+    def generate(self, meta: dict[str, int]) -> None:
+        self.z_grid = self.ceildiv("xnumel", meta.get("XBLOCK"))
+        self.y_grid = self.ceildiv("ynumel", meta.get("YBLOCK"))
+        self.x_grid = self.ceildiv("znumel", meta.get("ZBLOCK"))
 
 
 class Grid2DWithYZOverflow(GridExpr):
