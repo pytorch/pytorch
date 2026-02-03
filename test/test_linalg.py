@@ -605,7 +605,7 @@ class TestLinalg(TestCase):
         a = torch.rand(2, 2, 2, 2, dtype=dtype, device=device)
         b = torch.rand(2, 2, 2, dtype=dtype, device=device)
 
-        if device != 'cpu':
+        if device == 'cuda':
             with self.assertRaisesRegex(RuntimeError, '`driver` other than `gels` is not supported on CUDA'):
                 torch.linalg.lstsq(a, b, driver='fictitious_driver')
         # if on cpu
