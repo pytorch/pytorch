@@ -47,14 +47,21 @@ addmm = _add_docstr(
 sparse.addmm(mat, mat1, mat2, *, beta=1., alpha=1.) -> Tensor
 
 This function does exact same thing as :func:`torch.addmm` in the forward,
-except that it supports backward for sparse COO matrix :attr:`mat1`.
+except that it supports backward for sparse COO and CSR matrix :attr:`mat1`.
 When :attr:`mat1` is a COO tensor it must have `sparse_dim = 2`.
-When inputs are COO tensors, this function also supports backward for both inputs.
 
 Supports both CSR and COO storage formats.
 
 .. note::
-    This function doesn't support computing derivatives with respect to CSR matrices.
+    **Gradient support:**
+
+    - **COO @ Dense**: Backward is supported for both inputs. The gradient for the
+      sparse input is returned as a sparse COO tensor.
+    - **CSR @ Dense**: Backward is supported for both inputs. The gradient for the
+      sparse input is returned as a sparse CSR tensor.
+    - **CSC/BSR/BSC @ Dense**: Not supported.
+    - **Sparse @ Sparse** (COO @ COO, CSR @ CSR): Forward works, but backward is
+      not supported.
 
 Args:
     mat (Tensor): a dense matrix to be added
@@ -74,12 +81,20 @@ mm = _add_docstr(
     :math:`(n \times m)` tensor, :attr:`mat2` is a :math:`(m \times p)` tensor, out will be a
     :math:`(n \times p)` tensor.
     When :attr:`mat1` is a COO tensor it must have `sparse_dim = 2`.
-    When inputs are COO tensors, this function also supports backward for both inputs.
 
     Supports both CSR and COO storage formats.
 
 .. note::
-    This function doesn't support computing derivatives with respect to CSR matrices.
+    **Gradient support:**
+
+    - **COO @ Dense**: Backward is supported for both inputs. The gradient for the
+      sparse input is returned as a sparse COO tensor.
+    - **CSR @ Dense**: Backward is supported for both inputs. The gradient for the
+      sparse input is returned as a sparse CSR tensor.
+    - **CSC/BSR/BSC @ Dense**: Not supported.
+    - **Sparse @ Sparse** (COO @ COO, CSR @ CSR): Forward works, but backward is
+      not supported.
+    - **Mixed formats** (COO @ CSR, CSR @ COO): Not supported.
 
     This function also additionally accepts an optional :attr:`reduce` argument that allows
     specification of an optional reduction operation, mathematically performs the following operation:

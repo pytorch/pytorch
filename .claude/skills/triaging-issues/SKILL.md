@@ -24,6 +24,7 @@ This skill helps triage GitHub issues by routing issues, applying labels, and le
 - [Issue Triage Steps](#issue-triage-for-each-issue)
   - Step 0: Already Routed — SKIP
   - Step 1: Question vs Bug/Feature
+  - Step 1.5: Needs Reproduction — External Files
   - Step 2: Transfer
   - Step 2.5: PT2 Issues — Special Handling
   - Step 3: Redirect to Secondary Oncall
@@ -89,6 +90,39 @@ That issue belongs to the sub-oncall team. They own their queue.
 
 - If it is a question (not a bug report or feature request): close and use the `redirect_to_forum` template from `templates.json`.
 - If unclear whether it is a bug/feature vs a question: request additional information using the `request_more_info` template and stop.
+
+### 1.5) Needs Reproduction — External Files
+
+Check if the issue body contains links to external files that users would need to download to reproduce.
+
+**Patterns to detect:**
+- File attachments: `.zip`, `.pt`, `.pth`, `.pkl`, `.safetensors`, `.onnx`, `.bin` files
+- External storage: Google Drive, Dropbox, OneDrive, Mega, WeTransfer links
+- Model hubs: Hugging Face Hub links to model files
+
+**Action:**
+1. **Edit the issue body** to remove/redact the download links
+   - Replace with: `[Link removed - external file downloads are not permitted for security reasons]`
+2. Add `needs reproduction` label
+3. Use the `needs_reproduction` template from `templates.json` to request a self-contained reproduction
+4. Do NOT add `triaged` — wait for the user to provide a reproducible example
+
+### 1.6) Edge Cases & Numerical Accuracy
+
+If the issue involves extremal values or numerical precision differences:
+
+**Patterns to detect:**
+- Values near `torch.finfo(dtype).max` or `torch.finfo(dtype).min`
+- NaN/Inf appearing in outputs from valid (but extreme) inputs
+- Differences between CPU and GPU results
+- Precision differences between dtypes (e.g., fp32 vs fp16)
+- Fuzzer-generated edge cases
+
+**Action:**
+1. Add `module: edge cases` label
+2. If from a fuzzer, also add `topic: fuzzer`
+3. Use the `numerical_accuracy` template from `templates.json` to link to the docs
+4. If the issue is clearly expected behavior per the docs, close it with the template comment
 
 ### 2) Transfer (domain library or ExecuTorch)
 
