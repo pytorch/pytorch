@@ -625,7 +625,9 @@ class ShardingPropagator:
                 # squeeze ops need dim arg rewritten to only globally-singleton dims
                 if op_schema.op in self.squeeze_op_to_dims_variant:
                     schema = suggestion_schema or op_schema
-                    suggestion_schema = self._adjust_squeeze_to_global_singletons(schema)
+                    suggestion_schema = self._adjust_squeeze_to_global_singletons(
+                        schema
+                    )
                     needs_redistribute = True
                     use_val_from_redistribute_schema = True
 
@@ -822,7 +824,8 @@ class ShardingPropagator:
         """
         input_spec = schema.args_schema[0]
         assert isinstance(input_spec, DTensorSpec)
-        global_shape = input_spec.tensor_meta.shape  # type: ignore[union-attr]
+        assert input_spec.tensor_meta is not None, "squeeze requires tensor metadata"
+        global_shape = input_spec.tensor_meta.shape
         ndim = len(global_shape)
 
         def is_singleton(d: int) -> bool:

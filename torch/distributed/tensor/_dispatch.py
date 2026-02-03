@@ -522,9 +522,12 @@ class OpDispatcher:
                 else:
                     new_local_args.append(arg_spec)
 
-        # Append extra args from rewritten schema (e.g., squeeze.default -> squeeze.dims)
+        # Append extra args from rewritten schema (e.g., squeeze.default -> squeeze.dims).
+        # These are non-tensor args (like dims tuple) that can be appended directly.
         if use_val_from_redistribute_schema:
-            for i in range(len(op_info.flat_args_schema), len(flatten_args_schema_to_reshard)):
+            for i in range(
+                len(op_info.flat_args_schema), len(flatten_args_schema_to_reshard)
+            ):
                 new_local_args.append(flatten_args_schema_to_reshard[i])
 
         op_info.local_args = tuple(new_local_args)

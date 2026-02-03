@@ -7,7 +7,6 @@ from typing import cast
 import torch
 from torch import Tensor
 from torch._prims_common import DimsType
-from torch.fx.experimental.symbolic_shapes import statically_known_true
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor._op_schema import (
     OpSchema,
@@ -689,12 +688,25 @@ def propagate_shape_and_sharding(
         if in_dim is not None:
             shard_dim_map[in_dim.input_dim] = dim
 
+    # When output numel=1, P(max) and P(min) reduce to Replicate: with only one
+    # element, all ranks compute the same max/min result. Trigger via redistribution.
+    output_numel = _output_numel(rule, global_input_shape)
+
+    def _maybe_reduce_partial(p: Placement) -> Placement:
+        if (
+            output_numel == 1
+            and isinstance(p, Partial)
+            and p.reduce_op in ("max", "min")
+        ):
+            return Replicate()
+        return p
+
     input_tgt_placements = [
         (
             Replicate()
             if isinstance(p, Shard | _StridedShard)
             and not shardable_dims[p.dim][mesh_dim]
-            else p
+            else _maybe_reduce_partial(p)
         )
         for mesh_dim, p in enumerate(input_src_placements)
     ]
@@ -720,25 +732,8 @@ def propagate_shape_and_sharding(
         else:
             return Shard(shard_dim_map[p.dim])
 
-    # When output has numel=1, P(max) and P(min) become Replicate trivially:
-    # max(x,x,...) = min(x,x,...) = x for a single element.
-    # Use statically_known_true to handle unbacked symbols safely.
-    output_numel = _output_numel(rule, global_input_shape)
-    output_numel_is_one = statically_known_true(output_numel == 1)
-
-    def _maybe_partial_to_replicate(p: Placement) -> Placement:
-        if (
-            output_numel_is_one
-            and isinstance(p, Partial)
-            and p.reduce_op in ("max", "min")
-        ):
-            return Replicate()
-        return p
-
     output_placements = [
-        _rewrite_shard_dim(p)
-        if isinstance(p, Shard | _StridedShard)
-        else _maybe_partial_to_replicate(p)
+        _rewrite_shard_dim(p) if isinstance(p, Shard | _StridedShard) else p
         for p in input_tgt_placements
     ]
 
