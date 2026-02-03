@@ -3254,7 +3254,13 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               py::arg("backend"),
               py::arg("gloo_backend"))
           .def_property_readonly(
-              "wrapped_pg", &::c10d::ProcessGroupWrapper::getWrappedPg);
+              "wrapped_pg", &::c10d::ProcessGroupWrapper::getWrappedPg)
+          .def_property_readonly(
+              "options", &::c10d::ProcessGroupWrapper::getBackendOptions)
+          .def(
+              "get_error",
+              &::c10d::ProcessGroupWrapper::getError,
+              py::call_guard<py::gil_scoped_release>());
 #endif
 
 #ifdef USE_C10D_NCCL
