@@ -50,7 +50,8 @@ at::Tensor allocate_all_gather_output(
   } else {
     output_size[0] *= group_size;
   }
-  auto options = at::TensorOptions().dtype(input.dtype()).device(input.device());
+  auto options =
+      at::TensorOptions().dtype(input.dtype()).device(input.device());
 
   // Use comm-optimized allocator if enabled and available
   if (usePgAllocator() && group != nullptr) {
@@ -80,7 +81,8 @@ at::Tensor allocate_reduce_scatter_output(
                  << group_size << ").";
   }
   output_size[0] /= group_size;
-  auto options = at::TensorOptions().dtype(input.dtype()).device(input.device());
+  auto options =
+      at::TensorOptions().dtype(input.dtype()).device(input.device());
 
   // Use comm-optimized allocator if enabled and available
   if (usePgAllocator() && group != nullptr) {
@@ -232,7 +234,8 @@ std::vector<at::Tensor> reduce_scatter_tensor_coalesced(
   outputs.reserve(inputs.size());
   for (const auto& tensor : inputs) {
     TORCH_CHECK(tensor.is_contiguous());
-    outputs.push_back(allocate_reduce_scatter_output(tensor, group_size, group));
+    outputs.push_back(
+        allocate_reduce_scatter_output(tensor, group_size, group));
   }
 
   auto work = group->reduce_scatter_tensor_coalesced(outputs, inputs, opts);
