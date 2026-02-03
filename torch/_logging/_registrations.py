@@ -161,6 +161,11 @@ register_artifact(
     visible=True,
 )
 register_artifact(
+    "side_effects",
+    "Prints all side effects that Dynamo codegenerates, including mutations to variables, attributes, cells, and globals. Useful for debugging side effect handling",
+    visible=True,
+)
+register_artifact(
     "not_implemented",
     "Prints log messages whenever we return NotImplemented in a multi-dispatch, letting you trace through each object we attempted to dispatch to",
 )
@@ -197,6 +202,12 @@ register_artifact(
 register_artifact(
     "loop_tiling",
     "Logs related to loop ordering",
+    off_by_default=True,
+)
+
+register_artifact(
+    "auto_chunker",
+    "Logs related to the auto chunker",
     off_by_default=True,
 )
 
@@ -257,3 +268,8 @@ register_artifact(
     off_by_default=True,
 )
 register_artifact("custom_format_test_artifact", "Testing only", log_format="")
+register_artifact(
+    "caching",
+    "Detailed Inductor caching information.",
+    off_by_default=True,
+)
