@@ -136,15 +136,6 @@ op_db: list[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         # See https://github.com/pytorch/pytorch/pull/78358
         check_batched_forward_grad=False,
-        skips=(
-            # AssertionError: Tensor-likes are not close!
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_non_standard_bool_values",
-                device_type="mps",
-            ),
-        ),
     ),
     SpectralFuncInfo(
         "fft.fft2",
@@ -187,13 +178,6 @@ op_db: list[OpInfo] = [
                 "test_out_warning",
                 device_type="mps",
             ),
-            # AssertionError: Tensor-likes are not close!
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_non_standard_bool_values",
-                device_type="mps",
-            ),
         ),
     ),
     SpectralFuncInfo(
@@ -233,13 +217,6 @@ op_db: list[OpInfo] = [
                 "test_out_warning",
                 device_type="mps",
             ),
-            # AssertionError: Tensor-likes are not close!
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_non_standard_bool_values",
-                device_type="mps",
-            ),
         ),
     ),
     SpectralFuncInfo(
@@ -271,13 +248,6 @@ op_db: list[OpInfo] = [
                 "TestSchemaCheckModeOpInfo",
                 "test_schema_correctness",
                 dtypes=(torch.complex64, torch.complex128),
-            ),
-            # AssertionError: Tensor-likes are not close!
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_non_standard_bool_values",
-                device_type="mps",
             ),
         ),
     ),
@@ -324,13 +294,6 @@ op_db: list[OpInfo] = [
                 "test_complex_half_reference_testing",
                 device_type="cuda",
             ),
-            # AssertionError: Tensor-likes are not close!
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_non_standard_bool_values",
-                device_type="mps",
-            ),
         ),
     ),
     SpectralFuncInfo(
@@ -365,13 +328,6 @@ op_db: list[OpInfo] = [
                 "TestSchemaCheckModeOpInfo",
                 "test_schema_correctness",
             ),
-            # AssertionError: Tensor-likes are not close!
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_non_standard_bool_values",
-                device_type="mps",
-            ),
         ),
     ),
     SpectralFuncInfo(
@@ -390,15 +346,6 @@ op_db: list[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         check_batched_grad=False,
-        skips=(
-            # AssertionError: Tensor-likes are not close!
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_non_standard_bool_values",
-                device_type="mps",
-            ),
-        ),
         check_batched_gradgrad=False,
     ),
     SpectralFuncInfo(
@@ -421,15 +368,6 @@ op_db: list[OpInfo] = [
         decorators=[
             precisionOverride({torch.float: 1e-4}),
         ],
-        skips=(
-            # AssertionError: Tensor-likes are not close!
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_non_standard_bool_values",
-                device_type="mps",
-            ),
-        ),
     ),
     SpectralFuncInfo(
         "fft.rfftn",
@@ -451,15 +389,6 @@ op_db: list[OpInfo] = [
         decorators=[
             precisionOverride({torch.float: 1e-4}),
         ],
-        skips=(
-            # AssertionError: Tensor-likes are not close!
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_non_standard_bool_values",
-                device_type="mps",
-            ),
-        ),
     ),
     SpectralFuncInfo(
         "fft.ifft",
@@ -484,13 +413,6 @@ op_db: list[OpInfo] = [
                 unittest.expectedFailure,
                 "TestCommon",
                 "test_out",
-                device_type="mps",
-            ),
-            # AssertionError: Tensor-likes are not close!
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_non_standard_bool_values",
                 device_type="mps",
             ),
         ),
@@ -532,13 +454,6 @@ op_db: list[OpInfo] = [
                 unittest.expectedFailure,
                 "TestCommon",
                 "test_out_warning",
-                device_type="mps",
-            ),
-            # AssertionError: Tensor-likes are not close!
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_non_standard_bool_values",
                 device_type="mps",
             ),
         ),
@@ -583,13 +498,6 @@ op_db: list[OpInfo] = [
                 "test_out_warning",
                 device_type="mps",
             ),
-            # AssertionError: Tensor-likes are not close!
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_non_standard_bool_values",
-                device_type="mps",
-            ),
         ),
     ),
     SpectralFuncInfo(
@@ -608,13 +516,6 @@ op_db: list[OpInfo] = [
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and(torch.bool, torch.half),
         skips=(
-            # AssertionError: Tensor-likes are not close!
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_non_standard_bool_values",
-                device_type="mps",
-            ),
             # AssertionError: Resizing an out= argument with no elements threw a resize warning!
             DecorateInfo(
                 unittest.expectedFailure, "TestCommon", "test_out", device_type="mps"
@@ -651,15 +552,6 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_out"),
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_out_warnings"),
         ),
-        skips=(
-            # AssertionError: Tensor-likes are not close!
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_non_standard_bool_values",
-                device_type="mps",
-            ),
-        ),
     ),
     SpectralFuncInfo(
         "fft.ihfftn",
@@ -689,15 +581,6 @@ op_db: list[OpInfo] = [
                 precisionOverride({torch.float: 2e-4}), "TestFFT", "test_reference_nd"
             ),
         ],
-        skips=(
-            # AssertionError: Tensor-likes are not close!
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_non_standard_bool_values",
-                device_type="mps",
-            ),
-        ),
     ),
     SpectralFuncInfo(
         "fft.irfft",
@@ -717,15 +600,6 @@ op_db: list[OpInfo] = [
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.complex32),
         check_batched_gradgrad=False,
-        skips=(
-            # AssertionError: Tensor-likes are not close!
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_non_standard_bool_values",
-                device_type="mps",
-            ),
-        ),
     ),
     SpectralFuncInfo(
         "fft.irfft2",
@@ -752,15 +626,6 @@ op_db: list[OpInfo] = [
                 "test_reference_nd",
             )
         ],
-        skips=(
-            # AssertionError: Tensor-likes are not close!
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_non_standard_bool_values",
-                device_type="mps",
-            ),
-        ),
     ),
     SpectralFuncInfo(
         "fft.irfftn",
@@ -787,15 +652,6 @@ op_db: list[OpInfo] = [
                 "test_reference_nd",
             )
         ],
-        skips=(
-            # AssertionError: Tensor-likes are not close!
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_non_standard_bool_values",
-                device_type="mps",
-            ),
-        ),
     ),
     OpInfo(
         "fft.fftshift",
