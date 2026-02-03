@@ -2740,6 +2740,7 @@ class BuiltinVariable(VariableTracker):
         if isinstance(
             obj,
             (
+                variables.PlacementVariable,
                 variables.NamedTupleVariable,
                 variables.UserDefinedObjectVariable,
                 variables.NestedUserFunctionVariable,
