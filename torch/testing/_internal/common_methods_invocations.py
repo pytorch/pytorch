@@ -12355,10 +12355,6 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
 
                DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_quick'),
-               DecorateInfo(
-                   unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
-                   device_type='mps', dtypes=(torch.int64,),
-               ),
            )),
     OpInfo('log_normal',
            op=lambda inp, *args, **kwargs: wrapper_set_seed(torch.Tensor.log_normal_, inp, *args, **kwargs),
