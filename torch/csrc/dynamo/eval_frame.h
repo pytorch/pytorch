@@ -33,8 +33,6 @@ THPPyInterpreterFrame* THPPyInterpreterFrame_New(
 
 extern bool is_skip_guard_eval_unsafe;
 
-extern PyObject* bytecode_debugger_callback;
-
 void clear_old_frame_if_python_312_plus(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame);
@@ -54,10 +52,6 @@ PyObject* dynamo_eval_custom_code(
     PyCodeObject* code,
     const char* trace_annotation,
     int throw_flag);
-
-// Get stack values at a known depth (for when stacktop is invalid).
-// Returns a new reference to a PyList, or NULL on error.
-PyObject* get_frame_value_stack_at_depth_impl(PyFrameObject* frame, int depth);
 
 #ifdef __cplusplus
 

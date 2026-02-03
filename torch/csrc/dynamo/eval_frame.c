@@ -10,41 +10,8 @@
 #include <torch/csrc/dynamo/eval_frame_cpp.h>
 #include <torch/csrc/utils/python_compat.h>
 
-#if IS_PYTHON_3_14_PLUS && defined(_WIN32)
-#define Py_BUILD_CORE
-#include <internal/pycore_stackref.h>
-#include <internal/pycore_code.h>
-#include <internal/pycore_interpframe.h>
-#undef Py_BUILD_CORE
-#endif
-
 PyObject* guard_error_hook = NULL;
 PyObject* guard_complete_hook = NULL;
-
-// Singleton sentinel for NULL stack values
-static PyObject* null_stack_value_singleton = NULL;
-
-// NullStackValue type - a simple sentinel object
-static PyObject* NullStackValue_repr(PyObject* self) {
-  return PyUnicode_FromString("<NULL>");
-}
-
-static PyTypeObject NullStackValueType = {
-    PyVarObject_HEAD_INIT(NULL, 0)
-    .tp_name = "torch._C._dynamo.eval_frame.NullStackValue",
-    .tp_doc = "Sentinel representing a NULL value on the bytecode stack",
-    .tp_basicsize = sizeof(PyObject),
-    .tp_flags = Py_TPFLAGS_DEFAULT,
-    .tp_repr = NullStackValue_repr,
-};
-
-static PyObject* get_null_stack_value(void) {
-  if (null_stack_value_singleton == NULL) {
-    null_stack_value_singleton = PyObject_New(PyObject, &NullStackValueType);
-  }
-  Py_INCREF(null_stack_value_singleton);
-  return null_stack_value_singleton;
-}
 
 typedef struct {
   int active_dynamo_threads;
@@ -68,7 +35,8 @@ void eval_frame_callback_set(PyObject* obj) {
 }
 
 // 3.15 Not supported at all. See cpython_defs.c for hints
-#if !(IS_PYTHON_3_15_PLUS)
+// 3.14 currently not fully supported on Windows
+#if !(IS_PYTHON_3_15_PLUS || (IS_PYTHON_3_14_PLUS && defined(_WIN32)))
 
 #define DECLARE_PYOBJ_ATTR(name)                        \
   static PyObject* THPPyInterpreterFrame_##name(        \
@@ -557,109 +525,6 @@ static PyTypeObject THPPyInterpreterFrameType = {
 
 #endif // !(IS_PYTHON_3_15_PLUS)
 
-// Get stack values at a known depth (for when stacktop is invalid)
-PyObject* get_frame_value_stack_at_depth_impl(PyFrameObject* frame, int depth) {
-  PyObject* result = PyList_New(0);
-  if (result == NULL) {
-    return NULL;
-  }
-
-  if (depth <= 0) {
-    return result;
-  }
-
-#if IS_PYTHON_3_11_PLUS
-  _PyInterpreterFrame* iframe = frame->f_frame;
-  if (iframe == NULL) {
-    return result;
-  }
-
-  PyCodeObject* code = F_CODE(iframe);
-  if (code == NULL) {
-    return result;
-  }
-
-  int nlocalsplus = code->co_nlocalsplus;
-  int stacksize = code->co_stacksize;
-
-  // Clamp depth to valid range
-  if (depth > stacksize) {
-    depth = stacksize;
-  }
-
-  int stack_start = nlocalsplus;
-
-#if IS_PYTHON_3_14_PLUS
-  // For Python 3.14+, use stackpointer-based access
-  if (iframe->stackpointer == NULL) {
-    return result;
-  }
-  if (iframe->localsplus == NULL) {
-    return result;
-  }
-  _PyStackRef* stack_base = iframe->localsplus + nlocalsplus;
-  for (int i = 0; i < depth; i++) {
-    PyObject* obj = THP_PyStackRef_AsPyObjectBorrow(&stack_base[i]);
-    if (obj == NULL) {
-      // Use singleton sentinel for NULL stack slots
-      obj = get_null_stack_value();
-      if (obj == NULL) {
-        Py_DECREF(result);
-        return NULL;
-      }
-      if (PyList_Append(result, obj) < 0) {
-        Py_DECREF(obj);
-        Py_DECREF(result);
-        return NULL;
-      }
-      Py_DECREF(obj);
-    } else {
-      Py_INCREF(obj);
-      if (PyList_Append(result, obj) < 0) {
-        Py_DECREF(obj);
-        Py_DECREF(result);
-        return NULL;
-      }
-      Py_DECREF(obj);
-    }
-  }
-#else
-  // Python 3.12/3.13 - read 'depth' values from the stack area
-  if (iframe->localsplus == NULL) {
-    return result;
-  }
-  for (int i = 0; i < depth; i++) {
-    PyObject* obj = iframe->localsplus[stack_start + i];
-    if (obj == NULL) {
-      // Use singleton sentinel for NULL stack slots
-      obj = get_null_stack_value();
-      if (obj == NULL) {
-        Py_DECREF(result);
-        return NULL;
-      }
-      if (PyList_Append(result, obj) < 0) {
-        Py_DECREF(obj);
-        Py_DECREF(result);
-        return NULL;
-      }
-      Py_DECREF(obj);
-    } else {
-      Py_INCREF(obj);
-      if (PyList_Append(result, obj) < 0) {
-        Py_DECREF(obj);
-        Py_DECREF(result);
-        return NULL;
-      }
-      Py_DECREF(obj);
-    }
-  }
-#endif
-
-#endif // IS_PYTHON_3_11_PLUS
-
-  return result;
-}
-
 void clear_old_frame_if_python_312_plus(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame) {
@@ -823,14 +688,6 @@ static PyObject* set_guard_complete_hook(PyObject* dummy, PyObject* obj) {
   }
 }
 
-static PyObject* set_bytecode_debugger_callback(PyObject* dummy, PyObject* obj) {
-  if (obj == Py_None) {
-    obj = NULL;
-  }
-  Py_XSETREF(bytecode_debugger_callback, Py_XNewRef(obj));
-  Py_RETURN_NONE;
-}
-
 // Debugging function for GNU C only.
 // Used to set gdb breakpoints in hot CPython sites from Python.
 // Code example:
@@ -875,10 +732,6 @@ static PyMethodDef _methods[] = {
      NULL},
     {"set_guard_error_hook", set_guard_error_hook, METH_O, NULL},
     {"set_guard_complete_hook", set_guard_complete_hook, METH_O, NULL},
-    {"set_bytecode_debugger_callback",
-     set_bytecode_debugger_callback,
-     METH_O,
-     NULL},
     {"raise_sigtrap", raise_sigtrap, METH_NOARGS, NULL},
     {NULL, NULL, 0, NULL}};
 
@@ -925,19 +778,6 @@ PyObject* torch_c_dynamo_eval_frame_init(void) {
           module,
           "_PyInterpreterFrame",
           (PyObject*)&THPPyInterpreterFrameType) != 0) {
-    return NULL;
-  }
-
-  // Initialize NullStackValue type and add singleton to module
-  if (PyType_Ready(&NullStackValueType) < 0) {
-    return NULL;
-  }
-  PyObject* null_value = get_null_stack_value();
-  if (null_value == NULL) {
-    return NULL;
-  }
-  if (PyModule_AddObject(module, "NULL_STACK_VALUE", null_value) != 0) {
-    Py_DECREF(null_value);
     return NULL;
   }
 

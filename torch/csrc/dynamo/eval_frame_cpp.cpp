@@ -7,10 +7,103 @@
 #include <torch/csrc/dynamo/eval_frame_cpp.h>
 #include <torch/csrc/dynamo/extra_state.h>
 #include <torch/csrc/dynamo/framelocals_mapping.h>
+#include <torch/csrc/dynamo/stackref_bridge.h>
 #include <torch/csrc/utils/python_compat.h>
 
 extern "C" {
 extern PyObject* guard_complete_hook;
+}
+
+// Bytecode debugger callback - stored as py::object for automatic refcounting
+namespace {
+py::object bytecode_debugger_callback_obj;
+} // namespace
+
+void set_bytecode_debugger_callback(py::object callback) {
+  if (callback.is_none()) {
+    bytecode_debugger_callback_obj = py::object();
+  } else {
+    bytecode_debugger_callback_obj = std::move(callback);
+  }
+}
+
+py::object get_bytecode_debugger_callback() {
+  return bytecode_debugger_callback_obj;
+}
+
+// NullStackValue singleton for representing NULL stack values
+NullStackValue& NullStackValue::get_singleton() {
+  static NullStackValue instance;
+  return instance;
+}
+
+py::object get_null_stack_value() {
+  return py::cast(
+      NullStackValue::get_singleton(), py::return_value_policy::reference);
+}
+
+py::list _get_frame_value_stack_at_depth(
+    const py::handle& frame_obj,
+    int depth) {
+  if (!PyFrame_Check(frame_obj.ptr())) {
+    throw py::type_error("expected a frame object!");
+  }
+
+  py::list result;
+  if (depth <= 0) {
+    return result;
+  }
+
+#if IS_PYTHON_3_11_PLUS
+  PyFrameObject* frame = (PyFrameObject*)frame_obj.ptr();
+  _PyInterpreterFrame* iframe = frame->f_frame;
+  if (iframe == nullptr) {
+    return result;
+  }
+
+  PyCodeObject* code = F_CODE(iframe);
+  if (code == nullptr) {
+    return result;
+  }
+
+  int nlocalsplus = code->co_nlocalsplus;
+  int stacksize = code->co_stacksize;
+
+  // Clamp depth to valid range
+  if (depth > stacksize) {
+    depth = stacksize;
+  }
+
+#if IS_PYTHON_3_14_PLUS
+  // For Python 3.14+, use stackpointer-based access
+  if (iframe->stackpointer == nullptr) {
+    return result;
+  }
+  _PyStackRef* stack_base = iframe->localsplus + nlocalsplus;
+  for (int i = 0; i < depth; i++) {
+    PyObject* obj = THP_PyStackRef_AsPyObjectBorrow(&stack_base[i]);
+    if (obj == nullptr) {
+      result.append(get_null_stack_value());
+    } else {
+      result.append(py::reinterpret_borrow<py::object>(py::handle(obj)));
+    }
+  }
+#else
+  // Python 3.11/3.12/3.13 - read 'depth' values from the stack area
+  int stack_start = nlocalsplus;
+  for (int i = 0; i < depth; i++) {
+    PyObject* obj = iframe->localsplus[stack_start + i];
+    if (obj == nullptr) {
+      result.append(get_null_stack_value());
+    } else {
+      result.append(py::reinterpret_borrow<py::object>(py::handle(obj)));
+    }
+  }
+#endif
+
+#endif // IS_PYTHON_3_11_PLUS
+
+  return result;
 }
 
 static constexpr const char* cache_lookup_profiler_str =

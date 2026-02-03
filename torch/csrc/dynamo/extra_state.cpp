@@ -2,10 +2,12 @@
 #include <torch/csrc/dynamo/extra_state.h>
 
 #include <torch/csrc/dynamo/cache_entry.h>
+#include <torch/csrc/dynamo/cpython_includes.h>
 #include <torch/csrc/dynamo/debug_macros.h>
 #include <torch/csrc/dynamo/eval_frame.h>
 #include <torch/csrc/dynamo/framelocals_mapping.h>
 #include <torch/csrc/dynamo/guards.h>
+#include <torch/csrc/dynamo/stackref_bridge.h>
 #include <torch/csrc/utils/python_compat.h>
 
 #if IS_PYTHON_3_12_PLUS
@@ -303,47 +305,4 @@ py::list _debug_get_precompile_entries(const py::handle& code_obj) {
     }
   }
   return result;
-}
-
-py::list _get_frame_value_stack_at_depth(
-    const py::handle& frame_obj,
-    int depth) {
-  if (!PyFrame_Check(frame_obj.ptr())) {
-    throw py::type_error("expected a frame object!");
-  }
-
-  PyObject* result = get_frame_value_stack_at_depth_impl(
-      (PyFrameObject*)frame_obj.ptr(), depth);
-  if (result == nullptr) {
-    return py::list();
-  }
-  return py::reinterpret_steal<py::list>(result);
-}
-
-// NullStackValue singleton
-NullStackValue& NullStackValue::get_singleton() {
-  static NullStackValue instance;
-  return instance;
-}
-
-py::object get_null_stack_value() {
-  return py::cast(
-      NullStackValue::get_singleton(), py::return_value_policy::reference);
-}
-
-// Bytecode debugger callback - stored as py::object for automatic refcounting
-namespace {
-py::object bytecode_debugger_callback_obj;
-} // namespace
-
-void set_bytecode_debugger_callback(py::object callback) {
-  if (callback.is_none()) {
-    bytecode_debugger_callback_obj = py::object();
-  } else {
-    bytecode_debugger_callback_obj = std::move(callback);
-  }
-}
-
-py::object get_bytecode_debugger_callback() {
-  return bytecode_debugger_callback_obj;
 }
