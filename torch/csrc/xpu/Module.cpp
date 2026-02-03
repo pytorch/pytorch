@@ -324,7 +324,12 @@ static void registerXpuDeviceProperties(PyObject* module) {
   def_readonly(#member, &DeviceProp::member)
 
 #define THXP_FORALL_DEVICE_PROPERTIES(_)                         \
-  py::class_<DeviceProp>(m, "_XpuDeviceProperties")              \
+  py::class_<DeviceProp>(m, "_XpuDeviceProperties", R"doc(       \
+Properties of an XPU device.                                     \
+Attributes:                                                      \
+    name (str): Device name as reported by the driver.           \
+    total_memory (int): Total device memory in bytes.            \
+)doc")                                                           \
       ._(name)                                                   \
       ._(platform_name)                                          \
       ._(vendor)                                                 \
