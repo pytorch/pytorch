@@ -1,5 +1,6 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
+import dataclasses
 import functools
 import logging
 from collections.abc import Callable, Sequence
@@ -17,6 +18,7 @@ from torch.distributed._composable_state import (
 )
 from torch.distributed.device_mesh import _get_device_handle
 from torch.distributed.utils import _apply_to_tensors, _to_kwargs
+from torch.utils._pytree import tree_flatten
 
 from ._fsdp_api import MixedPrecisionPolicy
 from ._fsdp_common import (
@@ -25,7 +27,11 @@ from ._fsdp_common import (
     detect_compiled_autograd,
     TrainingState,
 )
-from ._fsdp_param_group import FSDPCommContext, FSDPParamGroup
+from ._fsdp_param_group import (
+    flatten_output_tensors,
+    FSDPCommContext,
+    FSDPParamGroup,
+)
 
 
 if TYPE_CHECKING:
@@ -355,13 +361,10 @@ class FSDPState(_State):
     def _register_pre_backward_hook(self, output: Any) -> Any:
         if not torch.is_grad_enabled():
             return output
-
-        def _register_hook(t: torch.Tensor) -> torch.Tensor:
-            if t.requires_grad:
+        tensors = flatten_output_tensors(output)
+        if tensors:
+            for t in tensors:
                 t.register_hook(self._pre_backward)
-            return t
-
-        _apply_to_tensors(_register_hook, output)
         return output
 
     def _register_root_post_backward_final_callback(self):

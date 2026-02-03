@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import contextlib
+import dataclasses
 import logging
 from collections.abc import Callable
 from typing import Any, cast, NamedTuple
@@ -10,8 +11,8 @@ import torch.nn as nn
 from torch.distributed.device_mesh import _get_device_handle
 from torch.distributed.fsdp._common_utils import _named_parameters_with_duplicates
 from torch.distributed.tensor import Shard
-from torch.distributed.utils import _apply_to_tensors
 from torch.profiler import record_function
+from torch.utils._pytree import tree_flatten, tree_unflatten
 from torch.utils.hooks import RemovableHandle
 
 from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
@@ -37,6 +38,72 @@ from ._fsdp_common import (
     TrainingState,
 )
 from ._fsdp_param import alloc_storage, FSDPParam, ParamModuleInfo, ShardedState
+
+
+def flatten_output_tensors(output: Any) -> tuple[torch.Tensor, ...]:
+    """
+    Recursively flatten tensors in the output and return tensors which require gradients.
+
+    This handles both standard pytree structures and unregistered dataclasses.
+    """
+    flat_outputs, _ = tree_flatten(output)
+    tensors_list: list[torch.Tensor] = []
+    for item in flat_outputs:
+        if torch.is_tensor(item) and item.requires_grad:
+            tensors_list.append(item)
+        elif dataclasses.is_dataclass(item) and not isinstance(item, type):
+            # tree_flatten treated this dataclass as a leaf (unregistered)
+            tensors_list.extend(
+                t
+                for field in dataclasses.fields(item)
+                for t in flatten_output_tensors(getattr(item, field.name))
+            )
+    return tuple(tensors_list)
+
+
+def replace_output_tensors(
+    output: Any, replacement_map: dict[int, torch.Tensor]
+) -> Any:
+    """
+    Replace tensors in output structure using replacement_map keyed by tensor id.
+
+    Returns a new structure with tensors replaced. Handles pytree structures
+    and unregistered dataclasses.
+    """
+    if torch.is_tensor(output):
+        return replacement_map.get(id(output), output)
+    elif dataclasses.is_dataclass(output) and not isinstance(output, type):
+        changes = {}
+        for field in dataclasses.fields(output):
+            old_val = getattr(output, field.name)
+            new_val = replace_output_tensors(old_val, replacement_map)
+            if new_val is not old_val:
+                changes[field.name] = new_val
+        if changes:
+            return dataclasses.replace(output, **changes)
+        return output
+    elif isinstance(output, dict):
+        new_dict = {}
+        any_changed = False
+        for k, v in output.items():
+            new_v = replace_output_tensors(v, replacement_map)
+            new_dict[k] = new_v
+            if new_v is not v:
+                any_changed = True
+        return new_dict if any_changed else output
+    elif isinstance(output, (list, tuple)):
+        new_items = []
+        any_changed = False
+        for item in output:
+            new_item = replace_output_tensors(item, replacement_map)
+            new_items.append(new_item)
+            if new_item is not item:
+                any_changed = True
+        if any_changed:
+            return type(output)(new_items)
+        return output
+    else:
+        return output
 
 
 logger = logging.getLogger("torch.distributed.fsdp.fully_shard")
@@ -714,25 +781,23 @@ class FSDPParamGroup:
             return args, kwargs
         if not torch.is_grad_enabled():
             return args, kwargs
-        # Collect all tensors that require gradients
-        inp_tensors: list[torch.Tensor] = []
-        _apply_to_tensors(
-            lambda t: inp_tensors.append(t) or t if t.requires_grad else t,
-            (args, kwargs),
-        )
+
+        # Collect all tensors that require gradients (including from dataclasses)
+        inp_tensors = flatten_output_tensors((args, kwargs))
         if len(inp_tensors) == 0:
-            return args, kwargs  # no tensors that require gradients
+            return args, kwargs
+
         # Apply RegisterPostBackwardFunction to all tensors at once
         out_tensors = RegisterPostBackwardFunction.apply(self, *inp_tensors)
-        # Replace original tensors with transformed ones
-        out_iter = iter(out_tensors)
-        args = _apply_to_tensors(
-            lambda t: next(out_iter) if t.requires_grad else t, args
-        )
-        kwargs = _apply_to_tensors(
-            lambda t: next(out_iter) if t.requires_grad else t, kwargs
-        )
-        return args, kwargs
+
+        # Build replacement map from old tensor ids to new tensors
+        replacement_map: dict[int, torch.Tensor] = {
+            id(old_t): new_t for old_t, new_t in zip(inp_tensors, out_tensors)
+        }
+
+        # Replace tensors in the structure
+        new_args, new_kwargs = replace_output_tensors((args, kwargs), replacement_map)
+        return new_args, new_kwargs
 
     def _register_state_dict_hooks(self) -> None:
         num_pre_save_hooks = len(self._module_to_pre_save_state_dict_hook_handle)
