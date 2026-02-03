@@ -44,7 +44,7 @@ from ..utils import (
     range_iterator,
     set_example_value,
 )
-from .base import ValueMutationNew, VariableTracker
+from .base import AsPythonConstantNotImplementedError, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 from .functions import UserFunctionVariable
 from .iter import IteratorVariable
@@ -238,11 +238,25 @@ class BaseListVariable(VariableTracker):
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
 
-            return tx.inline_user_function_return(
-                VariableTracker.build(tx, polyfills.index),
-                [self] + list(args),
-                kwargs,
-            )
+            try:
+                # Speedup trace times for constant data structures
+                items = [item.as_python_constant() for item in self.items]
+                const_args = [arg.as_python_constant() for arg in args]
+                const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+                try:
+                    return ConstantVariable.create(
+                        items.index(*const_args, **const_kwargs)
+                    )
+                except ValueError:
+                    raise_observed_exception(
+                        ValueError, tx, args=[ConstantVariable.create("tuple.index()")]
+                    )
+            except AsPythonConstantNotImplementedError:
+                return tx.inline_user_function_return(
+                    VariableTracker.build(tx, polyfills.index),
+                    [self] + list(args),
+                    kwargs,
+                )
         elif name == "count":
             if len(args) != 1:
                 raise_args_mismatch(
@@ -862,6 +876,8 @@ class ListVariable(CommonListMethodsVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        from .tensor import SymNodeVariable
+
         if name == "__setitem__" and self.is_mutable():
             if kwargs or len(args) != 2:
                 raise_args_mismatch(
@@ -897,9 +913,10 @@ class ListVariable(CommonListMethodsVariable):
                         args=list(map(ConstantVariable.create, exc.args)),
                     )
             else:
-                # Use guard_if_dyn to handle SymNodeVariable and LazyVariableTracker
-                # that may realize to SymNodeVariable
-                key = guard_if_dyn(key)
+                if isinstance(key, SymNodeVariable):
+                    key = key.evaluate_expr()
+                else:
+                    key = key.as_python_constant()
 
                 try:
                     # pyrefly: ignore[unsupported-operation]
@@ -1492,13 +1509,6 @@ class NamedTupleVariable(UserDefinedTupleVariable):
             return False
         return True
 
-    def is_python_equal(self, other: Any) -> bool:
-        if isinstance(other, UserDefinedTupleVariable):
-            return super().is_python_equal(other)
-        elif isinstance(other, TupleVariable):
-            return all(a.is_python_equal(b) for (a, b) in zip(self.items, other.items))
-        return False
-
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -1509,14 +1519,6 @@ class NamedTupleVariable(UserDefinedTupleVariable):
         if self._is_method_overridden(name):
             # Fall back to UserDefinedTupleVariable
             return super().call_method(tx, name, args, kwargs)
-        elif name == "__eq__":
-            if len(args) != 1 or kwargs:
-                raise ValueError("Improper arguments for method.")
-            return ConstantVariable(self.is_python_equal(args[0]))
-        elif name == "__ne__":
-            if len(args) != 1 or kwargs:
-                raise ValueError("Improper arguments for method.")
-            return ConstantVariable(not self.is_python_equal(args[0]))
         elif name == "__setattr__":
             if kwargs or len(args) != 2:
                 raise_args_mismatch(
