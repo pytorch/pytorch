@@ -68,7 +68,7 @@ leaf_function_check_escaped_gradients = False
 minimum_call_count = 1
 
 # turn on/off DCE pass (deprecated: always true)
-dead_code_elimination = True
+dead_code_elimination = None
 
 # Enable or disable side effect replay after graph execution.
 # When False, mutations to Python objects (lists, dicts, attributes) won't be
@@ -524,6 +524,12 @@ inline_inbuilt_nn_modules = Config(  # type: ignore[var-annotated]
 # Resume tracing in nested frames if a nested graph break occurs
 # Old behavior is to bubble up the graph break to the top level frame.
 nested_graph_breaks = False
+
+# If True, error if Dynamo attempts to trace more code while running compiled code in fullgraph=True.
+# If Dynamo determines that it should skip tracing the code (either at the C/C++ or Python level),
+# no error will be raised.
+# Set to false if force falling back to eager is desired.
+error_on_dynamo_callback_in_fullgraph_compiled_code = False
 
 # Install "free" tensor variables (globals, non-locals, nn module attributes)
 # as graph attributes.  This is useful for export, as it
