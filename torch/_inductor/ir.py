@@ -118,7 +118,7 @@ if TYPE_CHECKING:
     from torch.fx.experimental.symbolic_shapes import SympyBoolean
     from torch.fx.node import Argument
 
-    from .codegen.cuda.cuda_template import CUDATemplate
+    from .codegen.cutlass.cuda_template import CUDATemplate
     from .codegen.wrapper import PythonWrapperCodegen
     from .graph import GraphLowering
     from .utils import IndentedBuffer
@@ -7861,12 +7861,6 @@ class FallbackKernel(ExternKernelAlloc):
             return
 
         def has_functionalize_impl(op: torch._ops.OpOverload) -> bool:
-            """Check if an op has a Functionalize dispatch key implementation.
-
-            If an op has a Functionalize kernel registered, it means the
-            framework knows how to handle this op during functionalization.
-            """
-            # Check C++ dispatch table
             return torch._C._dispatch_has_kernel_for_dispatch_key(
                 op.name(), torch._C.DispatchKey.Functionalize
             ) or (
@@ -8130,7 +8124,7 @@ class FallbackKernel(ExternKernelAlloc):
             return_type = returns[0].real_type
             output_arguments = [handle_single_output(return_type, outputs)]
         else:
-            # For tuple returns, e.g "-> (Tensor, Tensor)" or "-> (Tesnor, Tensor[])"
+            # For tuple returns, e.g "-> (Tensor, Tensor)" or "-> (Tensor, Tensor[])"
             # Not generating output args for self.mutation_outputs
             output_arguments = [
                 handle_single_output(
