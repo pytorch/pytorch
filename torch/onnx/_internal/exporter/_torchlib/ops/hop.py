@@ -264,9 +264,7 @@ def higher_order_while_loop(
     )
 
     if len(cond_func.outputs) != 1:
-        raise AssertionError(
-            "Condition function must return a single boolean value."
-        )
+        raise AssertionError("Condition function must return a single boolean value.")
 
     # ONNX Runtime complains about duplicate output names if we don't rename them
     for func_out, out in zip(body_func.outputs, body_node.outputs):
@@ -316,9 +314,7 @@ def higher_order_while_loop(
     )
 
     if len(initial_outputs) != 1:
-        raise AssertionError(
-            "Condition function must return a single boolean value."
-        )
+        raise AssertionError("Condition function must return a single boolean value.")
 
     # Create the Loop operator call
     # Loop(M, cond, v_initial) where M is empty (no trip count limit)
