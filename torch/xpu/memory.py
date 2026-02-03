@@ -200,8 +200,9 @@ def mem_get_info(device: Device = None) -> tuple[int, int]:
             if :attr:`device` is ``None`` (default).
 
     Returns:
-        int: the memory available on the device in units of bytes.
-        int: the total memory on the device in units of bytes
+        tuple[int, int]: a tuple of two integers (free_memory, total_memory) in bytes.
+            The first value is the free memory on the device (available across all processes and applications),
+            The second value is the device's total hardware memory capacity.
     """
     _lazy_init()
     device = _get_device_index(device, optional=True)
