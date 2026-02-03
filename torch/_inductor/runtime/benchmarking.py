@@ -10,6 +10,11 @@ from statistics import median
 from typing import Any, ClassVar, Concatenate, Optional, TYPE_CHECKING, Union
 from typing_extensions import ParamSpec, Self, TypeVar
 
+
+if TYPE_CHECKING:
+    from torch._dynamo.device_interface import DeviceInterface
+    from torch.autograd.profiler_util import FunctionEvent
+
 import torch
 import torch._inductor.config as inductor_config
 import torch.utils._pytree as pytree
@@ -256,7 +261,14 @@ class Benchmarker:
         raise NotImplementedError
 
 
-class TritonBenchmarker(Benchmarker):
+class TritonBenchmarker(Benchmarker):  # noqa: docstring_linter
+    def __init__(self: Self) -> None:
+        if getattr(self, "_initialized", False):
+            return
+        super().__init__()
+        self._cache_zero_cost: dict[str, float] = {}
+        self._cache_zero_cost_lock: threading.Lock = threading.Lock()
+
     @cached_property
     def triton_do_bench(self: Self) -> Callable[..., Any]:
         """Lazily import Triton's `do_bench`."""
@@ -265,6 +277,28 @@ class TritonBenchmarker(Benchmarker):
         except ImportError as e:
             raise NotImplementedError("requires Triton") from e
         return do_bench
+
+    def _get_cache_zero_cost(
+        self: Self,
+        device_type: str,
+        device_interface: "type[DeviceInterface]",
+        cache: torch.Tensor,
+    ) -> float:
+        """Get or compute the cached cache.zero_() cost for a device type."""
+        with self._cache_zero_cost_lock:
+            if device_type not in self._cache_zero_cost:
+                # Measure cache.zero_() cost
+                start_event = device_interface.Event(enable_timing=True)
+                end_event = device_interface.Event(enable_timing=True)
+                start_event.record()
+                for _ in range(100):
+                    cache.zero_()
+                end_event.record()
+                device_interface.synchronize()
+                self._cache_zero_cost[device_type] = (
+                    start_event.elapsed_time(end_event) / 100
+                )
+            return self._cache_zero_cost[device_type]
 
     @may_distort_benchmarking_result
     @time_and_count
@@ -303,6 +337,125 @@ class TritonBenchmarker(Benchmarker):
         elif "return_mode" in kwargs:
             return self.triton_do_bench(_callable, **kwargs)
         return self.triton_do_bench(_callable, **kwargs, return_mode="median")
+
+    @may_distort_benchmarking_result
+    @time_and_count
+    def benchmark_many_gpu(
+        self: Self,
+        callables: list[Callable[[], Any]],
+        warmup: int = 25,
+        rep: int = 100,
+        is_vetted_benchmarking: bool = False,
+        skip_initial_warmup: bool = False,
+        **kwargs: Any,
+    ) -> list[float]:
+        """Benchmark multiple GPU callables using CUDA events.
+
+        This is more efficient than calling benchmark_gpu for each callable
+        individually, as it amortizes warmup and setup costs.
+
+        Arguments:
+        - callables: List of GPU callables to benchmark.
+
+        Keyword Arguments:
+        - warmup: The duration, in milliseconds, to run cache.zero_() for
+          GPU memory warmup.
+        - rep: Target repeat time in milliseconds per callable.
+        - is_vetted_benchmarking: In deterministic mode, we only allow
+          benchmarking in vetted cases.
+        - skip_initial_warmup: Skip initial single-call warmup phase.
+        - **kwargs: Additional kwargs (ignored for compatibility).
+
+        Returns:
+        - List of benchmark times in milliseconds, same order as input.
+        """
+        from torch._dynamo.device_interface import get_interface_for_device
+        from torch._inductor.utils import get_gpu_type
+
+        if not callables:
+            raise ValueError("At least one callable required")
+
+        if not is_vetted_benchmarking:
+            may_ban_benchmarking()
+
+        device_type = get_gpu_type()
+        device_interface = get_interface_for_device(device_type)
+
+        device_interface.synchronize()
+
+        # Initial warmup: run each callable once
+        if not skip_initial_warmup:
+            for fn in callables:
+                fn()
+            device_interface.synchronize()
+
+        # Create cache buffer (256MB, same as ProfilingBenchmarker)
+        cache = torch.empty(int(256e6 // 4), dtype=torch.int, device=device_type)
+        cache.zero_()
+
+        # Estimate runtime by running all callables once with cache clears
+        start_event = device_interface.Event(enable_timing=True)
+        end_event = device_interface.Event(enable_timing=True)
+        start_event.record()
+        for _ in range(5):
+            for fn in callables:
+                cache.zero_()
+                fn()
+        end_event.record()
+        device_interface.synchronize()
+        estimate_ms = start_event.elapsed_time(end_event) / 5
+
+        # Compute n_repeat based on target repeat time
+        # rep is per-callable, so total target time is rep * len(callables)
+        total_rep_ms = rep * len(callables)
+        n_repeat = max(1, int(total_rep_ms / estimate_ms)) if estimate_ms > 0 else 1
+
+        # Memory warmup - compute n_warmup using cached cache zero cost
+        cache_zero_cost_ms = self._get_cache_zero_cost(
+            device_type, device_interface, cache
+        )
+        n_warmup = max(1, int(warmup / cache_zero_cost_ms))
+        for _ in range(n_warmup):
+            cache.zero_()
+
+        device_interface.synchronize()
+
+        # Create event pairs for each callable for each repeat
+        callable_event_pairs: list[list[tuple[Any, Any]]] = [
+            [
+                (
+                    device_interface.Event(enable_timing=True),
+                    device_interface.Event(enable_timing=True),
+                )
+                for _ in range(n_repeat)
+            ]
+            for _ in callables
+        ]
+
+        # Benchmark all callables
+        for repeat_idx in range(n_repeat):
+            for fn_idx, fn in enumerate(callables):
+                cache.zero_()
+                start_event, end_event = callable_event_pairs[fn_idx][repeat_idx]
+                start_event.record()
+                fn()
+                end_event.record()
+
+        device_interface.synchronize()
+
+        # Explicitly delete the cache buffer
+        del cache
+
+        # Extract minimum timing for each callable
+        timings = [
+            min(
+                start_event.elapsed_time(end_event)
+                for start_event, end_event in event_pairs
+            )
+            for event_pairs in callable_event_pairs
+        ]
+
+        return timings
 
 
 class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter

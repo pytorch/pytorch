@@ -327,5 +327,99 @@ class TestProfilingBenchmarkerMany(TestCase):
         self.assertEqual(counter_value, 1)
 
 
+@unittest.skipIf(not HAS_GPU, "requires GPU")
+class TestTritonBenchmarkerMany(TestCase):
+    """Tests for TritonBenchmarker.benchmark_many_gpu method."""
+
+    def setUp(self):
+        super().setUp()
+        torch.manual_seed(12345)
+        counters.clear()
+
+    @staticmethod
+    def make_callable(size=100):
+        """Create a simple GPU callable."""
+        tensor = torch.randn(size, device=GPU_TYPE)
+        return lambda: torch.sum(tensor)
+
+    def test_single_callable_returns_positive_timing(self):
+        """Single callable should return a positive timing."""
+        benchmarker = TritonBenchmarker()
+        callables = [self.make_callable()]
+        timings = benchmarker.benchmark_many_gpu(callables, warmup=10, rep=20)
+        self.assertEqual(len(timings), 1)
+        self.assertGreater(timings[0], 0)
+
+    def test_multiple_callables_returns_correct_count(self):
+        """Number of results should match input callables."""
+        benchmarker = TritonBenchmarker()
+        callables = [self.make_callable() for _ in range(3)]
+        timings = benchmarker.benchmark_many_gpu(callables, warmup=10, rep=20)
+        self.assertEqual(len(timings), 3)
+        for timing in timings:
+            self.assertGreater(timing, 0)
+
+    def test_multiple_callables_preserves_relative_order(self):
+        """Larger operations should have larger timings."""
+        benchmarker = TritonBenchmarker()
+        # Create callables with different sizes - larger should take longer
+        small_tensor = torch.randn(10, device=GPU_TYPE)
+        large_tensor = torch.randn(10000, 10000, device=GPU_TYPE)
+
+        def small_fn():
+            return torch.sum(small_tensor)
+
+        def large_fn():
+            return torch.mm(large_tensor, large_tensor)
+
+        callables = [small_fn, large_fn]
+        timings = benchmarker.benchmark_many_gpu(callables, warmup=5, rep=20)
+        self.assertEqual(len(timings), 2)
+        # Large matmul should take longer than small sum
+        self.assertGreater(timings[1], timings[0])
+
+    def test_empty_list_raises_error(self):
+        """Empty list should raise ValueError."""
+        benchmarker = TritonBenchmarker()
+        with self.assertRaises(ValueError) as context:
+            benchmarker.benchmark_many_gpu([])
+        self.assertIn("At least one callable required", str(context.exception))
+
+    def test_skip_initial_warmup(self):
+        """skip_initial_warmup should be respected (no crash)."""
+        benchmarker = TritonBenchmarker()
+        # Pre-warm the callables ourselves
+        callables = [self.make_callable()]
+        for fn in callables:
+            fn()
+        torch.cuda.synchronize()
+
+        timings = benchmarker.benchmark_many_gpu(
+            callables, warmup=10, rep=20, skip_initial_warmup=True
+        )
+        self.assertEqual(len(timings), 1)
+        self.assertGreater(timings[0], 0)
+
+    def test_counter_incremented(self):
+        """Benchmark counter should be incremented."""
+        benchmarker = TritonBenchmarker()
+        callables = [self.make_callable()]
+        benchmarker.benchmark_many_gpu(callables, warmup=10, rep=20)
+        counter_value = counters["inductor"][
+            "benchmarking.TritonBenchmarker.benchmark_many_gpu"
+        ]
+        self.assertEqual(counter_value, 1)
+
+    def test_inherited_by_inductor_benchmarker(self):
+        """InductorBenchmarker should inherit benchmark_many_gpu from TritonBenchmarker."""
+        from torch._inductor.runtime.benchmarking import InductorBenchmarker
+
+        benchmarker = InductorBenchmarker()
+        callables = [self.make_callable()]
+        timings = benchmarker.benchmark_many_gpu(callables, warmup=10, rep=20)
+        self.assertEqual(len(timings), 1)
+        self.assertGreater(timings[0], 0)
+
+
 if __name__ == "__main__":
     run_tests()
