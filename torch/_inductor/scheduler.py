@@ -11,6 +11,7 @@ import math
 import operator
 import os
 import pprint
+import re
 import textwrap
 import traceback
 import typing
@@ -29,7 +30,7 @@ if TYPE_CHECKING:
     from types import ModuleType
 
     from torch._inductor.codegen.wrapper import EnterCudaStreamContextLine
-    from torch._inductor.event import CudaEventFactory, CudaEventSym
+    from torch._inductor.event import CudaEventSym
 
 import sympy
 
@@ -40,10 +41,10 @@ from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor.codecache import LambdaFuture, PyCodeCache
 from torch._inductor.ir import TritonTemplateCallerBase
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
+from torch._inductor.stream_utils import DEFAULT_STREAM_IDX, get_stream_name
 from torch.fx.experimental.symbolic_shapes import free_symbols
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 from torch.utils._triton import has_triton
-from torch._inductor.stream_utils import DEFAULT_STREAM_IDX, get_stream_name
 
 from . import comms, config, config_comms, dependencies, ir, metrics
 from .analyze_preserves_zero_mask import can_codegen_without_upcasts
@@ -3087,8 +3088,10 @@ class Scheduler:
                 originate_stream_idx=self.current_stream_idx,  # type: ignore[arg-type]
             ),
         )
-        self.unjoined_events: dict[int, set[CudaEventSym]] = collections.defaultdict(set)
-        self.buffers_requiring_device_check: set[str] = set()
+        self.unjoined_events: dict[int, OrderedSet[CudaEventSym]] = (
+            collections.defaultdict(OrderedSet)
+        )
+        self.buffers_requiring_device_check: OrderedSet[str] = OrderedSet()
         # The only source of which stream context are we currently in at the scheduling phase.
         self._current_stream_ctx: Optional[EnterCudaStreamContextLine] = None
 
@@ -6940,13 +6943,13 @@ class Scheduler:
             return None
 
     @property
-    def buffers_recorded_on_current_stream(self) -> set[str]:
+    def buffers_recorded_on_current_stream(self) -> OrderedSet[str]:
         """Buffer names that have been recorded on the current stream context."""
         assert self._current_stream_ctx is not None
         return self._current_stream_ctx.buffers_recorded_on_this_stream
 
     @buffers_recorded_on_current_stream.setter
-    def buffers_recorded_on_current_stream(self, buffs: set[str]) -> None:
+    def buffers_recorded_on_current_stream(self, buffs: OrderedSet[str]) -> None:
         """Set buffer names that have been recorded on the current stream context.
 
         Note:
@@ -6954,28 +6957,32 @@ class Scheduler:
             buffers recorded on the previous stream context.
         """
         assert self._current_stream_ctx is not None
-        assert buffs.issuperset(self._current_stream_ctx.buffers_recorded_on_this_stream)
+        assert buffs.issuperset(
+            self._current_stream_ctx.buffers_recorded_on_this_stream
+        )
         self._current_stream_ctx.buffers_recorded_on_this_stream = buffs
 
     def debug_str_short(self, node: BaseSchedulerNode) -> str:
         """Generate short string representing scheduler node's calling function or indices."""
         if node.is_extern() and isinstance(node.node, ir.MultiOutput):
+            # pyrefly: ignore[missing-attribute]
             kernel_str = node.node.codegen_list_tuple_access(
                 basename="getitem",
                 indices=node.node.indices,
             )
             return f"{node.get_name()} ({kernel_str})"
         elif node.is_extern():
+            # pyrefly: ignore[missing-attribute]
             kernel_name = node.node.get_kernel_name() or str(node.node.op_overload)
             return f"{node.get_name()} ({kernel_name})"
         else:
             return node.get_name()
 
-    def get_last_event(self, events: set[CudaEventSym]) -> CudaEventSym:
+    def get_last_event(self, events: OrderedSet[CudaEventSym]) -> CudaEventSym:
         """Identify the latest generated CUDA event among all given events."""
         return sorted(events, reverse=True)[0]  # CudaEventSym is total-ordering.
 
-    def get_final_events_to_sync(self) -> set[CudaEventSym]:
+    def get_final_events_to_sync(self) -> OrderedSet[CudaEventSym]:
         """Return the CUDA Events that need to be synced at the end of the program.
 
         Raises:
@@ -6986,20 +6993,25 @@ class Scheduler:
             raise ValueError(
                 f"Unexpected {self.unjoined_events[DEFAULT_STREAM_IDX]=} on default stream",
             )
-        events_to_sync = set()
+        events_to_sync: OrderedSet[CudaEventSym] = OrderedSet()
         for stream, events in self.unjoined_events.items():
             if len(events) == 0:
-                schedule_log.debug(f"All events on stream{stream} have been consumed")
+                log.debug("All events on stream%d have been consumed", stream)
                 continue
             last_event = self.get_last_event(events)
             if 1 < len(events):
-                schedule_log.debug(
-                    f"Seeing multiple hanging {events=} on stream{stream}, scheduling the "
-                    f"{last_event=} to sync",
+                log.debug(
+                    "Seeing multiple hanging events=%s on stream%d, scheduling the "
+                    "last_event=%s to sync",
+                    events,
+                    stream,
+                    last_event,
                 )
             else:
-                schedule_log.debug(
-                    f"Scheduling the {last_event=} on stream{stream} to sync",
+                log.debug(
+                    "Scheduling the last_event=%s on stream%d to sync",
+                    last_event,
+                    stream,
                 )
             events_to_sync.add(last_event)
         return events_to_sync
@@ -7028,7 +7040,7 @@ class Scheduler:
             ValueError: If this function is called out side of any stream context.
         """
         if isinstance(node, NopKernelSchedulerNode) and node.unmet_dependencies:
-            upstream_events = set()
+            upstream_events = OrderedSet()
             for dep in node.unmet_dependencies:
                 assert dep.name in self.buff_to_event
                 upstream_events.add(self.buff_to_event[dep.name])
@@ -7040,18 +7052,25 @@ class Scheduler:
             for i, buff in enumerate(sorted(node.get_buffer_names())):
                 if i == 0:
                     downstream_event = self.buff_to_event[buff]
-                    assert downstream_event.originate_stream_idx == self.current_stream_idx
+                    assert (
+                        downstream_event.originate_stream_idx == self.current_stream_idx
+                    )
                 else:
+                    # pyrefly: ignore[unbound-name]
                     self.buff_to_event[buff] = downstream_event
+            # pyrefly: ignore[missing-attribute]
             if (node_stream := self.node_to_stream[node]) != DEFAULT_STREAM_IDX:
+                # pyrefly: ignore[unbound-name]
                 self.unjoined_events[node_stream].add(downstream_event)
+            # pyrefly: ignore[unbound-name]
             V.graph.wrapper_code.writeline(downstream_event.record(node_stream))
+        # pyrefly: ignore[unbound-name]
         return downstream_event
 
     def get_cross_stream_dependencies(
         self,
         node: BaseSchedulerNode,
-    ) -> tuple[set[CudaEventSym], set[str]]:
+    ) -> tuple[OrderedSet[CudaEventSym], OrderedSet[str]]:
         """Get CUDA Event and buffer dependencies of an IR node.
 
         Args:
@@ -7063,19 +7082,25 @@ class Scheduler:
             buffer_from_other_streams: A set of buffer names, these buffers need to be recorded on
                 the CUDA Stream that `node` is running on.
         """
+        # pyrefly: ignore[missing-attribute]
         assert node in self.node_to_stream
 
         # Process cross-cuda-stream dependencies.
+        # pyrefly: ignore[missing-attribute]
         node_stream = self.node_to_stream[node]
-        events_on_stream: dict[int, set[CudaEventSym]] = collections.defaultdict(set)
-        buffers_from_other_streams = set()
+        events_on_stream: dict[int, OrderedSet[CudaEventSym]] = collections.defaultdict(
+            OrderedSet
+        )
+        buffers_from_other_streams = OrderedSet()
         if not node.unmet_dependencies and node_stream != DEFAULT_STREAM_IDX:
             # Graph entries on side streams should wait upon the main stream entrance.
             entrance_event = self.event_factory.get_entrance_event()
             events_on_stream[DEFAULT_STREAM_IDX].add(entrance_event)
         for dep in node.read_writes.reads:
             buff = dep.name  # To track stream number and cuda events.
-            buff_real = self.mutation_real_name.get(buff, buff)  # The real name in code.
+            buff_real = self.mutation_real_name.get(
+                buff, buff
+            )  # The real name in code.
             if dep not in node.unmet_dependencies and not isinstance(dep, WeakDep):
                 # Materialized dependencies should be recorded on this stream.
                 buffers_from_other_streams.add(buff_real)
@@ -7087,7 +7112,7 @@ class Scheduler:
                 # MultiOutputLayout issues.
                 if node.is_extern() and re.match(
                     r"aten._scaled_dot_product_.*_attention_backward",
-                    str(node.node.op_overload),
+                    str(node.node.op_overload),  # pyrefly: ignore[missing-attribute]
                 ):
                     self.buffers_requiring_device_check.add(buff_real)
                 continue
@@ -7095,22 +7120,30 @@ class Scheduler:
                 # Skip unmaterialized dependencies.
                 continue
             assert buff in self.buff_to_event
+            # pyrefly: ignore[missing-attribute]
             assert buff in self.buff_to_stream
             buff_event = self.buff_to_event[buff]
+            # pyrefly: ignore[missing-attribute]
             buff_stream = self.buff_to_stream[buff]
             events_on_stream[buff_stream].add(buff_event)
             if buff_stream != node_stream:
                 if node.is_extern() and isinstance(node.node, ir.MultiOutput):
                     assert len(node.read_writes.reads) == 1
+                    # pyrefly: ignore[missing-attribute]
                     buff_real = node.node.codegen_list_tuple_access(
                         basename=buff_real,
                         indices=node.node.indices,
                     )
-                    self.buffers_requiring_device_check |= {buff_real, node.node.get_name()}
+                    self.buffers_requiring_device_check |= OrderedSet(
+                        [
+                            buff_real,
+                            node.node.get_name(),
+                        ]
+                    )
                 buffers_from_other_streams.add(buff_real)
 
         # Should only wait for the latest event from each stream.
-        upstream_events = set()
+        upstream_events = OrderedSet()
         for stream, events in events_on_stream.items():
             if stream != node_stream:
                 last_event = self.get_last_event(events)
@@ -7121,10 +7154,12 @@ class Scheduler:
     def generate_stream_ctx_enter(self, node: BaseSchedulerNode) -> None:
         """Code-gen to enter the Stream context assigned to node."""
         assert not isinstance(node, NopKernelSchedulerNode)
-        wrapper_code = cast("MultiStreamWrapperCodegen", V.graph.wrapper_code)
-        upstream_events, buffers_from_other_streams = self.get_cross_stream_dependencies(node)
+        upstream_events, buffers_from_other_streams = (
+            self.get_cross_stream_dependencies(node)
+        )
+        # pyrefly: ignore[missing-attribute]
         node_stream = self.node_to_stream[node]
-        self._current_stream_ctx = wrapper_code.codegen_cuda_stream_enter(
+        self._current_stream_ctx = V.graph.wrapper_code.codegen_cuda_stream_enter(
             stream_idx=node_stream,
             upstream_events=upstream_events,
             buffers_from_other_streams=buffers_from_other_streams,
@@ -7134,8 +7169,7 @@ class Scheduler:
     def generate_stream_ctx_exit(self) -> None:
         """Code-gen to exit from the current Stream context."""
         assert self._current_stream_ctx is not None
-        wrapper_code = cast("MultiStreamWrapperCodegen", V.graph.wrapper_code)
-        wrapper_code.codegen_cuda_stream_exit()
+        V.graph.wrapper_code.codegen_cuda_stream_exit()
         self._current_stream_ctx = None
 
     def propagate_cross_stream_dependencies(self, node: BaseSchedulerNode) -> None:
@@ -7150,15 +7184,16 @@ class Scheduler:
                 in :meth:`schedule_multi_cuda_streams`.
         """
         assert self.current_stream_idx is not None
-        wrapper_code = cast("MultiStreamWrapperCodegen", V.graph.wrapper_code)
-        upstream_events, buffers_from_other_streams = self.get_cross_stream_dependencies(node)
+        upstream_events, buffers_from_other_streams = (
+            self.get_cross_stream_dependencies(node)
+        )
         buffers_from_other_streams -= self.buffers_recorded_on_current_stream
-        wrapper_code.codegen_buffers_record_stream(
+        V.graph.wrapper_code.codegen_buffers_record_stream(
             buffers=buffers_from_other_streams,
             stream_idx=self.current_stream_idx,
             buffers_requiring_device_check=self.buffers_requiring_device_check,
         )
-        wrapper_code.codegen_events_wait_stream(
+        V.graph.wrapper_code.codegen_events_wait_stream(
             events=upstream_events,
             stream_idx=self.current_stream_idx,
         )
@@ -7171,8 +7206,14 @@ class Scheduler:
         the previous node's stream. If the node is a no-op, its code will be generated in the same
         context of previous node.
         """
+        # pyrefly: ignore[missing-attribute]
         assert node in self.node_to_stream
-        stream = None if isinstance(node, NopKernelSchedulerNode) else self.node_to_stream[node]
+        stream = (
+            None
+            if isinstance(node, NopKernelSchedulerNode)
+            # pyrefly: ignore[missing-attribute]
+            else self.node_to_stream[node]
+        )
         if self.current_stream_idx == stream:
             if stream is not None:
                 self.propagate_cross_stream_dependencies(node)
