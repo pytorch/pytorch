@@ -671,7 +671,8 @@ static PyObject* THXPModule_isCurrentStreamCapturing_wrap(
     PyObject* self,
     PyObject* noargs) {
   HANDLE_TH_ERRORS
-  if (at::xpu::currentStreamCaptureStatus() == at::xpu::CaptureStatus::Executing) {
+  if (at::xpu::currentStreamCaptureStatus() ==
+      at::xpu::CaptureStatus::Executing) {
     Py_RETURN_FALSE;
   } else {
     Py_RETURN_TRUE;
