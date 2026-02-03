@@ -7,7 +7,9 @@ import contextlib
 import inspect
 import time
 from typing import Any, TYPE_CHECKING
+
 import torch
+
 from ._onnx_program import _ort_session_initializer
 
 
@@ -180,6 +182,7 @@ class InputCandidate:
         """
         if self._position_to_args_kwargs is None:
             self.build_mappings()
+        # pyrefly: ignore [bad-return]
         return self._position_to_args_kwargs
 
     @property
@@ -187,6 +190,7 @@ class InputCandidate:
         """Returns the number of flat tensors in every args or kwargs."""
         if self._n_tensors_for_args_kwargs is None:
             self.build_mappings()
+        # pyrefly: ignore [bad-return]
         return self._n_tensors_for_args_kwargs
 
     def _set_aligned_flat_list(
@@ -236,7 +240,9 @@ class InputCandidate:
                 flat.extend(ts)
                 continue
             # If the argument i is not specified or is None or an empty container.
-            flat.extend([None for _ in range(best_candidate.n_tensors_for_args_kwargs[i])])
+            flat.extend(
+                [None for _ in range(best_candidate.n_tensors_for_args_kwargs[i])]
+            )
 
         for k in best_candidate.kwargs:
             if k in kwargs and (isinstance(kwargs[k], torch.Tensor) or kwargs[k]):
@@ -252,7 +258,9 @@ class InputCandidate:
                 flat.extend(ts)
                 continue
             # If the argument k is not specified or is None or an empty container.
-            flat.extend([None for _ in range(best_candidate.n_tensors_for_args_kwargs[k])])
+            flat.extend(
+                [None for _ in range(best_candidate.n_tensors_for_args_kwargs[k])]
+            )
 
         self._set_aligned_flat_list(flat, best_candidate.spec)
 
@@ -279,7 +287,9 @@ class InputObserverInfo:
     """
 
     def __init__(
-        self, signature_names: list[str], default_values: dict[str, int | bool | str | float]
+        self,
+        signature_names: list[str],
+        default_values: dict[str, int | bool | str | float],
     ):
         self.default_values = default_values
         self.inputs: list[InputCandidate] = []
@@ -387,8 +397,11 @@ class InputObserverInfo:
                 nested structured.
         """
         self.align_inputs_none_values()
+        assert self._best_candidate is not None  # pyrefly missing case
+        assert self._best_candidate.flat_list is not None  # pyrefly missing case
+        assert self._best_candidate.aligned_flat_list is not None  # pyrefly missing case
 
-        def _set_batch_dimension(name_or_position):
+        def _set_batch_dimension(name_or_position) -> bool:
             if not set_batch_dimension_for:
                 return False
             if (
@@ -404,10 +417,15 @@ class InputObserverInfo:
                     return True
             return False
 
-        def _set_batch_dimension_for_flat_index(index):
-            return _set_batch_dimension(self._best_candidate.position_to_args_kwargs[index])
+        def _set_batch_dimension_for_flat_index(index) -> bool:
+            return _set_batch_dimension(
+                # pyrefly: ignore[missing-attribute]
+                self._best_candidate.position_to_args_kwargs[index]
+            )
 
-        if len(self._best_candidate.flat_list) != len(self._best_candidate.aligned_flat_list):
+        if len(self._best_candidate.flat_list) != len(
+            self._best_candidate.aligned_flat_list
+        ):
             raise NotImplementedError(
                 "infer_dynamic_shapes is not implemented "
                 "when the best candidate is not 'aligned'."
@@ -455,7 +473,9 @@ class InputObserverInfo:
             pos_names = self.signature_names[:n_args]
             return {
                 **dict(zip(pos_names, flat_dynamic_shapes[:n_args])),
-                **dict(zip(list(self._best_candidate.kwargs), flat_dynamic_shapes[n_args:])),
+                **dict(
+                    zip(list(self._best_candidate.kwargs), flat_dynamic_shapes[n_args:])
+                ),
                 **dict.fromkeys(self._best_candidate.cst_kwargs, None),
             }
 
@@ -493,7 +513,10 @@ class InputObserverInfo:
             change_function=change_function,
         )
         if self._best_candidate.cst_kwargs:
-            ds_kwargs = {**ds_kwargs, **dict.fromkeys(self._best_candidate.cst_kwargs, None)}
+            ds_kwargs = {
+                **ds_kwargs,
+                **dict.fromkeys(self._best_candidate.cst_kwargs, None),
+            }
         if not ds_kwargs:
             return tuple(ds_args)
         if not ds_args:
@@ -503,12 +526,12 @@ class InputObserverInfo:
 
     def infer_arguments(
         self, index_or_candidate: InputCandidate | int | None = None, flat: bool = False
-    ) -> list[torch.Tensor] | tuple[torch.Tensor, ...] | dict[str, torch.Tensor]:
+    ) -> list[torch.Tensor | None] | tuple[torch.Tensor, ...] | dict[str, torch.Tensor]:
         """Infers arguments based on the collected tensors."""
         # This is already checked by _build_inputs_completed_with_none_values
         # but this is not always well captured by tools checking types.
         self.align_inputs_none_values()
-        torch._check(self._best_candidate is not None, lambda: "No input was captured.")
+        assert self._best_candidate is not None  # pyrefly missing case
         candidate = None
         if index_or_candidate is None:
             for cand in self.inputs:
@@ -530,7 +553,7 @@ class InputObserverInfo:
         else:
             candidate = index_or_candidate
 
-        torch._check(candidate is not None, "No input was captured.")
+        assert candidate is not None  # pyrefly missing case
         if candidate.aligned_flat_list is None:
             raise RuntimeError(
                 f"Candidate {candidate} has no aligned flat list of tensors, "
@@ -539,8 +562,10 @@ class InputObserverInfo:
             )
 
         aligned_flat_list = candidate.aligned_flat_list
+        assert aligned_flat_list is not None  # pyrefly missing case
         if any(t is None for t in aligned_flat_list):
             dynamic_shapes = self.infer_dynamic_shapes(return_flat=True)
+            assert isinstance(dynamic_shapes, list)  # pyrefly missing case
             aligned_flat_list = aligned_flat_list.copy()
             for index in range(len(aligned_flat_list)):
                 if aligned_flat_list[index] is not None:
@@ -563,6 +588,7 @@ class InputObserverInfo:
                     aligned_flat_list[index] = tensor
                     continue
                 if not shape:
+                    # pyrefly: ignore[unsupported-operation]
                     aligned_flat_list[index] = torch.zeros(
                         tensor.shape, dtype=tensor.dtype, device=tensor.device
                     )
@@ -577,15 +603,18 @@ class InputObserverInfo:
                 )
                 new_shape = list(tensor.shape)
                 new_shape[dim] = 0
+                # pyrefly: ignore[unsupported-operation]
                 aligned_flat_list[index] = torch.empty(
                     tuple(new_shape), dtype=tensor.dtype, device=tensor.device
                 )
         if flat:
             return aligned_flat_list
         args, kwargs = torch.utils._pytree.tree_unflatten(
+            # pyrefly: ignore[bad-argument-type]
             aligned_flat_list, candidate.aligned_spec
         )
         if self._best_candidate.cst_kwargs:
+            # pyrefly: ignore[invalid-argument]
             kwargs = {**kwargs, **self._best_candidate.cst_kwargs}
 
         if not kwargs:
@@ -742,7 +771,7 @@ class InputObserver:
         self,
         index_or_args_or_kwargs: tuple[Any] | dict[str, Any] | int | None = None,
         flat: bool = False,
-    ) -> list[torch.Tensor] | tuple[torch.Tensor, ...] | dict[str, torch.Tensor]:
+    ) -> list[torch.Tensor | None] | tuple[torch.Tensor, ...] | dict[str, torch.Tensor]:
         """Infers arguments based on the collected tensors.
 
         Args:
@@ -760,6 +789,7 @@ class InputObserver:
             Inferred arguments, every optional tensor is replaced by a empty tensor.
         """
         self._check_captured()
+        assert self.info is not None  # pyrefly missing case
         index_or_candidate: int | InputCandidate | None = None
         if index_or_args_or_kwargs is None or isinstance(index_or_args_or_kwargs, int):
             index_or_candidate = index_or_args_or_kwargs
@@ -790,7 +820,9 @@ class InputObserver:
                 )
             self.info.align_inputs_none_values()
             index_or_candidate.align_with(
+                # pyrefly: ignore[bad-argument-type]
                 self.info._best_candidate,
+                # pyrefly: ignore[bad-argument-type]
                 self.info._captured_inputs,
                 self.info.signature_names,
             )
@@ -831,11 +863,15 @@ class InputObserver:
         """
         # For big models, we should consider taking a filename to avoid the users
         # creating the model proto twice.
+        self._check_captured()
+        assert self.info is not None  # pyrefly missing case
+
         onnx_program.initialize_inference_session(initializer)
 
         input_names = [i.name for i in onnx_program.model.graph.inputs]
-        self._check_captured()
-        io_sets = list(zip(self.info.inputs, self.info.flat_outputs, self.info.latencies))
+        io_sets = list(
+            zip(self.info.inputs, self.info.flat_outputs, self.info.latencies)
+        )
         if progress_bar:
             from tqdm import tqdm
 
@@ -844,18 +880,22 @@ class InputObserver:
             loop = io_sets
         data: list[dict[str, Any]] = []
         for inputs, outputs, latency in loop:
+            assert inputs.aligned_flat_list is not None  # pyrefly missing case
             if len(input_names) != len(inputs.aligned_flat_list):
                 raise RuntimeError(
                     f"There are ({len(inputs.aligned_flat_list)}) "
                     f"tensors but the model expects {len(input_names)}."
                 )
             n_none = sum([t is None for t in inputs.aligned_flat_list])
-            n_empty = sum([t is None or t.numel() == 0 for t in inputs.aligned_flat_list])
+            n_empty = sum(
+                [t is None or t.numel() == 0 for t in inputs.aligned_flat_list]
+            )
 
             feeds = dict(zip(input_names, self.info.infer_arguments(inputs, flat=True)))
 
             begin = time.perf_counter()
             try:
+                # pyrefly: ignore[bad-unpacking]
                 ort_outputs = onnx_program(**feeds)
                 error = None
             except Exception as e:
@@ -865,26 +905,36 @@ class InputObserver:
             duration = time.perf_counter() - begin
             if error:
                 diff: dict[str, Any] = dict(error=error, SUCCESS=False)
-            elif len(outputs) != len(ort_outputs):
-                diff = dict(SUCCESS=False, error="not the same number of outputs")
+            elif ort_outputs is None or len(outputs) != len(ort_outputs):
+                diff = dict(SUCCESS=False, error = "not the same number of outputs")
             else:
                 success = True
-                err_abs = 0
-                err_rel = 0
+                err_abs = 0.0
+                err_rel = 0.0
                 error = ""
+                # pyrefly: ignore[no-matching-overload]
                 for torch_tensor, ort_tensor in zip(outputs, ort_outputs):
+                    if torch_tensor is None or ort_tensor is None:
+                        if type(torch_tensor) is not type(ort_tensor):
+                            success = False
+                            error = "missing output"
+                            break
+                        continue
                     if torch_tensor.shape != ort_tensor.shape:
-                        success=False
-                        error="not the same shape"
+                        success = False
+                        error = "not the same shape"
                         break
                     if torch_tensor.dtype != ort_tensor.dtype:
-                        error="not the same type"
+                        error = "not the same type"
                         break
                     err = (torch_tensor - ort_tensor).abs().max().item()
                     err_abs = max(err_abs, err)
                     if err_abs > atol:
-                        success=False
-                    err = ((torch_tensor - ort_tensor).abs() / (torch_tensor + min(1, 1.0/rtol))).max().item()
+                        success = False
+                    err = (
+                        (torch_tensor - ort_tensor).abs()
+                        / (torch_tensor.abs() + rtol)
+                    ).max().item()
                     err_rel = max(err_rel, err)
                     if err_rel > rtol:
                         success=False
