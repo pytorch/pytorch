@@ -317,7 +317,6 @@ def _parse_stack_trace(
         return None
 
     if isinstance(stack_trace, list):
-        # Iterate backwards through the list (innermost frame last)
         for idx in range(len(stack_trace) - 1, -1, -1):
             frame = stack_trace[idx]
             file = frame['file']

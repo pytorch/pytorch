@@ -3346,11 +3346,9 @@ class GraphModuleDeserializer(metaclass=Final):
                 ret["torch_fn"] = tuple(torch_fn_data)
 
         if custom_data := metadata.get("custom"):
-            # Dict format
             ret["custom"] = custom_data
 
         if from_node_data := metadata.get("from_node"):
-            # Dict/list format
             ret["from_node"] = self._deserialize_from_node(from_node_data)
 
         return ret
@@ -3627,18 +3625,14 @@ def _dict_to_dataclass(cls, data):
     elif isinstance(data, list):
         if len(data) == 0:
             return data
-        # Get the element type, with safety check
         type_args = typing.get_args(cls)
         if not type_args:
-            # No type args, just return the list as-is
             return data
         d_type = type_args[0]
         return [_dict_to_dataclass(d_type, d) for d in data]
     elif isinstance(data, dict):
-        # Get the value type, with safety check
         type_args = typing.get_args(cls)
         if not type_args or len(type_args) < 2:
-            # No type args, just return the dict as-is
             return data
         v_type = type_args[1]
         return {k: _dict_to_dataclass(v_type, v) for k, v in data.items()}
