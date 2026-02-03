@@ -800,6 +800,30 @@ class OutputGraph(OutputGraphCommon):
         # dynamo_flat_name_to_original_fqn mapping.
         self.used_inlined_inbuilt_modules_names: OrderedSet[str] = OrderedSet()
 
+        self.attr_source_cache: dict[tuple[Source, str], AttrSource] = {}
+
+    def get_chained_attr_source(self, base: Source, path: str) -> AttrSource:
+        parts = path.split(".")
+        key = (base, parts[0])
+        if key not in self.attr_source_cache:
+            self.attr_source_cache[key] = AttrSource(base, parts[0])
+        result = self.attr_source_cache[key]
+        for part in parts[1:]:
+            key = (result, part)
+            if key not in self.attr_source_cache:
+                self.attr_source_cache[key] = AttrSource(result, part)
+            result = self.attr_source_cache[key]
+        return result
+
+    def get_chained_param_buffer_source(
+        self, base: Source, path: str
+    ) -> "ParamBufferSource":
+        parts = path.rsplit(".", 1)
+        if len(parts) == 1:
+            return ParamBufferSource(base, path)
+        intermediate_base = self.get_chained_attr_source(base, parts[0])
+        return ParamBufferSource(intermediate_base, parts[1])
+
     def mark_bytecode_tracing_start(self) -> None:
         self.compiler_trace_stack.enter_context(
             dynamo_timed(
@@ -1336,7 +1360,7 @@ class OutputGraph(OutputGraphCommon):
 
             def register_leaf_name(leaf_name: str) -> None:
                 assert self.param_name_to_source is not None
-                new_source = ParamBufferSource(source, leaf_name)
+                new_source = self.get_chained_param_buffer_source(source, leaf_name)
                 new_name = f"{name}.{leaf_name}"
                 self.param_name_to_source[new_name] = new_source
                 if isinstance(source, LocalSource):
@@ -2944,7 +2968,7 @@ class OutputGraph(OutputGraphCommon):
 
         def register_leaf_name(leaf_name: str) -> None:
             assert self.param_name_to_source is not None
-            new_source = ParamBufferSource(source, leaf_name)
+            new_source = self.get_chained_param_buffer_source(source, leaf_name)
             new_name = f"{name}.{leaf_name}"
             self.param_name_to_source[new_name] = new_source
             if isinstance(source, LocalSource):
