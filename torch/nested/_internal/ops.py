@@ -22,16 +22,10 @@ def _get_padding_value(dtype, padding_type):
         return (
             torch.finfo(dtype).max if padding_type == "max" else torch.finfo(dtype).min
         )
-    elif dtype == torch.int64:
-        # Largest int64 value exactly representable in float64 (IEEE 754 double precision).
-        # Avoids overflow when padding_value is passed as double to _jagged_to_padded_dense_forward.
-        int64_safe_max = (1 << 53) - 1
-        int64_safe_min = -int64_safe_max
-        return int64_safe_max if padding_type == "max" else int64_safe_min
     else:
-        return (
-            torch.iinfo(dtype).max if padding_type == "max" else torch.iinfo(dtype).min
-        )
+        # For integer dtypes, use infinity sentinels which the C++ implementation
+        # clamps to dtype min/max, avoiding precision loss through double.
+        return float("inf") if padding_type == "max" else float("-inf")
 
 
 def _outer_to_inner_dim(ndim, dim, ragged_dim, canonicalize=False):
@@ -713,6 +707,7 @@ def to_copy_default(func, *args, **kwargs):
         # Temporary hack until we have the union find
         tgt = mb_unwrap_functional_tensor(new_thing)
         src = mb_unwrap_functional_tensor(ragged_source)
+        # pyrefly: ignore[missing-attribute]
         tgt.nested_int_memo = src.nested_int_memo
     else:
         _tensor_symint_registry[new_thing] = _tensor_symint_registry[ragged_source]
@@ -811,6 +806,7 @@ def like_factory_default(func, *args, **kwargs):
             # Temporary hack until we have the union find
             tgt = mb_unwrap_functional_tensor(new_thing)
             src = mb_unwrap_functional_tensor(ragged_source)
+            # pyrefly: ignore[missing-attribute]
             tgt.nested_int_memo = src.nested_int_memo
         else:
             _tensor_symint_registry[new_thing] = _tensor_symint_registry[ragged_source]

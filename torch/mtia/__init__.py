@@ -243,7 +243,7 @@ def empty_cache() -> None:
 
 
 def set_stream(stream: Stream):
-    r"""Set the current stream.This is a wrapper API to set the stream.
+    r"""Set the current stream. This is a wrapper API to set the stream.
         Usage of this function is discouraged in favor of the ``stream``
         context manager.
 

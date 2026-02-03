@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-import warnings
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterator
 from enum import auto, Enum
@@ -10,6 +9,7 @@ import torch
 import torch.nn as nn
 from torch.autograd.graph import save_on_cpu
 from torch.distributed.utils import _pack_kwargs, _replace_by_prefix, _unpack_kwargs
+from torch.utils._typing_utils import copy_method_params
 from torch.utils.checkpoint import checkpoint as torch_utils_checkpoint
 
 
@@ -54,6 +54,7 @@ class ActivationWrapper(torch.nn.Module, ABC):
         """Forward indexing calls in case the module is a nn.Sequential."""
         return self._checkpoint_wrapped_module.__getitem__(key)  # type: ignore[operator]
 
+    @copy_method_params(torch.nn.Module.named_parameters)
     def named_parameters(
         self,
         *args,
@@ -227,15 +228,6 @@ def checkpoint_wrapper(
         (nn.Module):
             Wrapped module
     """
-
-    if checkpoint_impl == CheckpointImpl.REENTRANT:
-        warnings.warn(
-            f"Please specify {CheckpointImpl.NO_REENTRANT} as "
-            f"{CheckpointImpl.REENTRANT} will soon be removed as "
-            "the default and eventually deprecated.",
-            FutureWarning,
-            stacklevel=2,
-        )
     return CheckpointWrapper(
         module,
         checkpoint_impl,

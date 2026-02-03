@@ -1182,7 +1182,7 @@ static inline void _to_sparse_check_arguments(
               ": tensor sparse size (",
               self.size(sparse_row_dim),
               ",",
-              self.size(sparse_row_dim),
+              self.size(sparse_col_dim),
               ") must be divisible by given blocksize (",
               blocksize_to[0],
               ",",

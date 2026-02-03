@@ -228,7 +228,8 @@ class graph:
         self.capture_stream = (
             stream if stream is not None else self.__class__.default_capture_stream
         )
-        assert self.capture_stream is not None
+        if self.capture_stream is None:
+            raise AssertionError("capture_stream must not be None")
         self.stream_ctx = torch.cuda.stream(self.capture_stream)
         self.cuda_graph = cuda_graph
         self.capture_error_mode = capture_error_mode
@@ -381,25 +382,28 @@ def make_graphed_callables(
 
     for c, args in zip(callables, _sample_args):
         if isinstance(c, torch.nn.Module):
-            assert (
+            if not (
                 len(c._backward_hooks) == 0
                 and len(c._forward_hooks) == 0
                 and len(c._forward_pre_hooks) == 0
-            ), (
-                "Modules must not have hooks registered at the time they are passed. However, registering hooks "
-                + "on modules after passing them through make_graphed_callables is allowed."
-            )
-            assert all(b.requires_grad is False for b in c.buffers()), (
-                "In any :class:`~torch.nn.Module` passed to "
-                + ":func:`~make_graphed_callables`, only parameters may be trainable. All buffers must have "
-                + "``requires_grad=False``."
-            )
+            ):
+                raise AssertionError(
+                    "Modules must not have hooks registered at the time they are passed. However, registering hooks "
+                    + "on modules after passing them through make_graphed_callables is allowed."
+                )
+            if not all(b.requires_grad is False for b in c.buffers()):
+                raise AssertionError(
+                    "In any :class:`~torch.nn.Module` passed to "
+                    + ":func:`~make_graphed_callables`, only parameters may be trainable. All buffers must have "
+                    + "``requires_grad=False``."
+                )
         flatten_arg = torch.utils._pytree.arg_tree_leaves(*args)
         flatten_sample_args.append(tuple(flatten_arg))
-        assert all(isinstance(arg, torch.Tensor) for arg in flatten_arg), (
-            "In the beta API, sample_args "
-            + "for each callable must contain only Tensors. Other types are not allowed."
-        )
+        if not all(isinstance(arg, torch.Tensor) for arg in flatten_arg):
+            raise AssertionError(
+                "In the beta API, sample_args "
+                + "for each callable must contain only Tensors. Other types are not allowed."
+            )
 
     # If a callable is an nn.Module, its graph's full input surface is the args the user explicitly
     # passes to forward (ie, its sample_args) AND the module's parameter attributes.
@@ -529,14 +533,20 @@ def make_graphed_callables(
                     if static_input_surface[i].data_ptr() != inputs[i].data_ptr():
                         static_input_surface[i].copy_(inputs[i])
                 fwd_graph.replay()
-                assert isinstance(static_outputs, tuple)
+                if not isinstance(static_outputs, tuple):
+                    raise AssertionError(
+                        f"static_outputs must be tuple, got {type(static_outputs)}"
+                    )
                 return tuple(o.detach() for o in static_outputs)
 
             @staticmethod
             @torch.autograd.function.once_differentiable
             # pyrefly: ignore [bad-override]
             def backward(ctx: object, *grads: Tensor) -> tuple[Tensor, ...]:
-                assert len(grads) == len(static_grad_outputs)
+                if len(grads) != len(static_grad_outputs):
+                    raise AssertionError(
+                        f"len(grads)={len(grads)} != len(static_grad_outputs)={len(static_grad_outputs)}"
+                    )
                 for g, grad in zip(static_grad_outputs, grads):
                     if g is not None:
                         # don't copy if autograd gods have been kind and the
@@ -546,7 +556,10 @@ def make_graphed_callables(
                 bwd_graph.replay()
 
                 # Input args that didn't require grad expect a None gradient.
-                assert isinstance(static_grad_inputs, tuple)
+                if not isinstance(static_grad_inputs, tuple):
+                    raise AssertionError(
+                        f"static_grad_inputs must be tuple, got {type(static_grad_inputs)}"
+                    )
                 return tuple(
                     # pyrefly: ignore [bad-argument-type]
                     b.detach() if b is not None else b

@@ -5,9 +5,9 @@ from __future__ import annotations
 
 import logging
 
+import onnx_ir as ir
 import pytest
 import transformers
-from onnxscript import ir
 
 import torch
 from torch.onnx._internal.exporter import _testing as onnx_testing
@@ -24,7 +24,6 @@ class _WithExport:
             args,
             kwargs=kwargs,
             dynamo=True,
-            fallback=False,
             verbose=False,
             **options,
         )
