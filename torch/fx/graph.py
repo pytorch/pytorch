@@ -311,13 +311,11 @@ class _ParsedStackTrace:
 
 # get File:lineno code from stack_trace
 def _parse_stack_trace(
-    stack_trace, 
-    filter_fn: Optional[Callable[[str, str, str], bool]] = None
+    stack_trace: str, filter_fn: Optional[Callable[[str, str, str], bool]] = None
 ):
     if stack_trace is None:
         return None
-    
-    # Handle new format: list of dicts
+
     if isinstance(stack_trace, list):
         # Iterate backwards through the list (innermost frame last)
         for idx in range(len(stack_trace) - 1, -1, -1):
@@ -331,6 +329,7 @@ def _parse_stack_trace(
                 continue
             return _ParsedStackTrace(file, lineno, name, code)
         return None
+
     return None
 
 

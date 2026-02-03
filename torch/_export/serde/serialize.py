@@ -1047,10 +1047,7 @@ class GraphModuleSerializer(metaclass=Final):
 
     def serialize_metadata(self, node: torch.fx.Node) -> dict[str, str]:
         ret = {}
-        print("node:")
-        print(node)
 
-        import re
         def parse_stack_trace(stack_trace_str):
             frames = []
             # Split by lines, group into frames
@@ -1069,43 +1066,15 @@ class GraphModuleSerializer(metaclass=Final):
                         })
             
             return frames
+
         if stack_trace := node.meta.get("stack_trace"):
-            print("HERE")
-            print(stack_trace)
             if stack_trace[0] is dict:
                 stack_trace_list = parse_stack_trace(stack_trace)
                 ret["stack_trace"] = stack_trace_list
             else:
                 ret["stack_trace"] = stack_trace
+
         if nn_module_stack := node.meta.get("nn_module_stack"):
-
-            print("nn_module_stack")
-            print(nn_module_stack)
-            '''
-            def export_nn_module_stack(val):
-                if not isinstance(val, tuple) or len(val) != 2:
-                    val_len = len(val) if isinstance(val, tuple) else "N/A"
-                    raise AssertionError(
-                        f"expected tuple of length 2, got {type(val).__name__} of length {val_len}"
-                    )
-                
-                path, ty = val
-
-                if not isinstance(path, str):
-                    raise AssertionError(
-                        f"expected path to be str, got {type(path).__name__}"
-                    )
-                if not isinstance(ty, str):
-                    raise AssertionError(
-                        f"expected ty to be str, got {type(ty).__name__}"
-                    )
-
-                print("export_nn_module_stack")
-                print(f"{path} , {ty}")
-                return path + "," + ty
-            '''
-
-            # Serialize to structured dict format
             nn_module_list = [
                 {
                     "key": k,
@@ -1114,8 +1083,6 @@ class GraphModuleSerializer(metaclass=Final):
                 }
                 for k, v in nn_module_stack.items()
             ]
-            print("nn_module_list")
-            print(nn_module_list)
             ret["nn_module_stack"] = nn_module_list
 
         if source_fn_st := node.meta.get("source_fn_stack"):
@@ -1127,7 +1094,6 @@ class GraphModuleSerializer(metaclass=Final):
             ret["source_fn_stack"] = source_fn_list
 
         if torch_fn := node.meta.get("torch_fn"):
-            # Serialize as dict with "name" and "overload" keys
             torch_fn_list = list(torch_fn)
             ret["torch_fn"] = {
                 "name": torch_fn_list[0] if len(torch_fn_list) > 0 else "",
@@ -1143,8 +1109,6 @@ class GraphModuleSerializer(metaclass=Final):
             # Pass dict directly instead of JSON string
             ret["from_node"] = self._serialize_from_node(from_node)
 
-        print("ret")
-        print(ret)
         return ret
 
     def _serialize_from_node(
@@ -3338,8 +3302,6 @@ class GraphModuleDeserializer(metaclass=Final):
 
     def deserialize_metadata(self, metadata: dict[str, str]) -> dict[str, Any]:
         ret: dict[str, Any] = {}
-        print("META")
-        print(metadata)
         if stack_trace := metadata.get("stack_trace"):
             ret["stack_trace"] = stack_trace
 
@@ -3362,36 +3324,10 @@ class GraphModuleDeserializer(metaclass=Final):
                     target = getattr(target, name)
             return target
 
-        if nn_module_stack_str := metadata.get("nn_module_stack"):
-            # Originally serialized to "key,orig_path,type_str"
-            def import_nn_module_stack(key, path, ty):
-                return key, (path, ty)
-
-            # Helper function to split string by commas, accounting for nested parentheses/brackets
-            def metadata_split(metadata):
-                out = []
-                start, n = 0, 0
-                a, b = "[(", ")]"
-                for end, c in enumerate(metadata):
-                    if c in a:
-                        n += 1
-                    elif c in b:
-                        n -= 1
-                    elif c == "," and n == 0:
-                        out.append(metadata[start:end])
-                        start = end + 1
-                out.append(metadata[start:])
-                if len(out) != 3:
-                    raise AssertionError(
-                        f"expected metadata_split to return 3 parts, got {len(out)}"
-                    )
-                return out
-
-            nn_module_stack = nn_module_stack_str
+        if nn_module_stack := metadata.get("nn_module_stack"):
             ret["nn_module_stack"] = nn_module_stack
 
         if source_fn_st_data := metadata.get("source_fn_stack"):
-            # Serialized as dict with "key", "orig_path", "type_str"
             if isinstance(source_fn_st_data, dict):
                 name = source_fn_st_data.get("key", "")
                 target_str = source_fn_st_data.get("orig_path", "")
