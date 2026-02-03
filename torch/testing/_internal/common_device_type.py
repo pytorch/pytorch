@@ -1828,6 +1828,15 @@ def has_hipsolver():
     return rocm_version >= (5, 3)
 
 
+# Skips a test on CUDA if cuSOLVER is not available,
+# and on ROCm if MAGMA is not available.
+def skipCUDAIfNoCusolverROCMIfNoMagma(fn):
+    if TEST_WITH_ROCM:
+        return skipCUDAIfNoMagma(fn)
+    else:
+        return skipCUDAIfNoCusolver(fn)
+
+
 # Skips a test on CUDA/ROCM if cuSOLVER/hipSOLVER is not available
 def skipCUDAIfNoCusolver(fn):
     return skipCUDAIf(
