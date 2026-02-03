@@ -1204,6 +1204,52 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @parametrize("split_share", [0, 1])
+    def test_comm_split_share(self, split_share: int):
+        # Test `ncclCommSplit` with split_share options
+        store = c10d.FileStore(self.file_name, self.world_size)
+        device = torch.device(f"cuda:{self.rank}")
+        pg_opts = c10d.ProcessGroupNCCL.Options()
+        pg_opts.config.split_share = split_share
+        shape = (128, 1024, 1024)
+        tensor = torch.full(shape, self.rank).cuda(device)
+        free_before_init, total = torch.cuda.mem_get_info(device)
+
+        c10d.init_process_group(
+            "nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+            pg_options=pg_opts,
+            device_id=device,
+        )
+        pg = c10d.distributed_c10d._get_default_group()
+
+        # Run a collective to cause NCCL to allocate channels (consuming memory)
+        dist.all_reduce(tensor)
+
+        free_after_init, total = torch.cuda.mem_get_info(device)
+        used_by_init = float(free_before_init - free_after_init)
+
+        # Create subgroup between ranks 0, 1
+        subg_ranks = [0, 1]
+        ng1 = c10d.split_group(pg, [subg_ranks], pg_options=pg_opts)
+
+        free_after_split, total = torch.cuda.mem_get_info(device)
+        used_by_split = float(free_after_init - free_after_split)
+
+        # is part of ng1; otherwise, -1
+        if dist.get_rank(ng1) >= 0:
+            dist.broadcast(tensor, dist.get_global_rank(ng1, 0), group=ng1)
+            self.assertEqual(tensor, torch.full(shape, 1))
+
+        print(
+            f"used_by_init: {used_by_init / 1e6} MiB, used_by_split: {used_by_split / 1e6} MiB"
+        )
+        dist.destroy_process_group()
+
+    @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_non_blocking_init(self):
         # Test creating a pg using nonblocking mode but not eagerly
         os.environ["TORCH_NCCL_USE_COMM_NONBLOCKING"] = "1"
