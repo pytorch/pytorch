@@ -149,10 +149,10 @@ PyObject* to_py_size(const std::vector<c10::SymInt>& size) {
 
 namespace torch::autograd {
 
-// Populates py_fn->needs_input_grad based on which outputs the backward graph
-// actually needs to compute. Uses task_should_compute_output to check if each
-// edge is needed. The Py_XDECREF handles the retain_graph=True case where
-// backward runs multiple times on the same graph.
+// Overwrites py_fn->needs_input_grad (which was initially set during forward
+// based on requires_grad) with the actual values needed for this backward pass.
+// Uses task_should_compute_output to check if each edge is needed, which
+// accounts for partial backward (when inputs= is specified).
 static void set_needs_input_grad(
     THPFunction* py_fn,
     PyNode* node) {
@@ -170,7 +170,7 @@ static void set_needs_input_grad(
     Py_INCREF(value);
     PyTuple_SET_ITEM(needs_input_grad.get(), i, value);
   }
-  Py_XDECREF(py_fn->needs_input_grad);
+  Py_DECREF(py_fn->needs_input_grad);
   py_fn->needs_input_grad = needs_input_grad.release();
 }
 
@@ -913,6 +913,7 @@ struct UnpackedInput {
 struct InputFlags {
   bool is_executable = false;
   edge_list next_edges;
+  THPObjectPtr needs_input_grad;
   std::vector<bool> is_variable_input;
 };
 
@@ -924,6 +925,7 @@ std::pair<UnpackedInput, InputFlags> unpack_input(PyObject* args) {
 
   auto num_args = PyTuple_GET_SIZE(args);
   unpacked.input_tuple = PyTuple_New(num_args);
+  flags.needs_input_grad = PyTuple_New(num_args);
   bool profiler_need_input = torch::autograd::profiler::profilerEnabled() &&
       torch::autograd::profiler::getProfilerConfig().report_input_shapes;
 
@@ -940,6 +942,8 @@ std::pair<UnpackedInput, InputFlags> unpack_input(PyObject* args) {
             "expected a Tensor argument, but got ", THPUtils_typename(arg));
         throw python_error();
       }
+      Py_INCREF(Py_False);
+      PyTuple_SET_ITEM(flags.needs_input_grad.get(), i, Py_False);
 
       if (profiler_need_input) {
         // The following conversion from PyObject to IValue is expensive
@@ -953,6 +957,9 @@ std::pair<UnpackedInput, InputFlags> unpack_input(PyObject* args) {
     } else {
       const auto& tensor = THPVariable_Unpack(arg);
       unpacked.input_vars.push_back(tensor);
+      PyObject* needs_grad = tensor.requires_grad() ? Py_True : Py_False;
+      Py_INCREF(needs_grad);
+      PyTuple_SET_ITEM(flags.needs_input_grad.get(), i, needs_grad);
       unpacked.record_function_inputs.emplace_back(tensor);
     }
     Py_INCREF(arg);
@@ -1357,6 +1364,7 @@ PyObject* THPFunction_apply(PyObject* cls, PyObject* inputs) {
   // Initialize backward function (and ctx)
   bool is_executable = input_info.is_executable;
   cdata->set_next_edges(std::move(input_info.next_edges));
+  ctx->needs_input_grad = input_info.needs_input_grad.release();
   ctx->is_variable_input = std::move(input_info.is_variable_input);
 
   // autograd.Function may optionally override a setup_context staticmethod.
