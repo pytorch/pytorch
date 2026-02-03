@@ -652,8 +652,7 @@ def create_aot_state(
                     )
 
     if fw_metadata.num_intermediate_bases > 0:
-        if req_subclass_dispatch:
-            raise AssertionError(f"""\
+        assert not req_subclass_dispatch, f"""\
 torch.compile is currently being used with tensor subclass inputs.
 We are attempting to a compile a graph with two graph outputs
 that alias one another, specifically output indices:
@@ -662,7 +661,7 @@ that alias one another, specifically output indices:
 
 ANY output aliasing (even for regular tensors) is currently unsupported if
 there are any subclass outputs. If you run into this, please file a github
-issue""")
+issue"""
 
     if aot_config.is_export:
         # aot_export: ban input metadata mutations for now to keep shared code paths simpler.
@@ -948,8 +947,7 @@ def prepare_aot_module_simplified(
     PytreeThunk | None,
 ]:
     if not flatten:
-        if kwargs is not None:
-            raise AssertionError("kwargs must be None when flatten=False")
+        assert kwargs is None
     elif kwargs is None:
         kwargs = {}
 
@@ -1166,8 +1164,7 @@ def aot_module_simplified(
                 bw_compiler,
                 inference_compiler,
             )
-    if compiled_fn is None:
-        raise AssertionError("compiled_fn must not be None")
+    assert compiled_fn is not None
     if isinstance(mod, torch._dynamo.utils.GmWrapper):
         # This function is called by the flatten_graph_inputs wrapper, which boxes
         # the inputs so that they can be freed before the end of this scope.
@@ -1179,8 +1176,7 @@ def aot_module_simplified(
             flat_args.extend(params_buffers_flat)
             flat_args.extend(runtime_args)
             runtime_args.clear()
-            if compiled_fn is None:
-                raise AssertionError("compiled_fn must not be None")
+            assert compiled_fn is not None
             return compiled_fn(flat_args)
 
     else:
@@ -1195,8 +1191,7 @@ def aot_module_simplified(
             full_args.extend(params_buffers_flat)
             # pyrefly: ignore[bad-argument-type]
             full_args.extend(runtime_args)
-            if compiled_fn is None:
-                raise AssertionError("compiled_fn must not be None")
+            assert compiled_fn is not None
             return compiled_fn(full_args)
 
     # Just for convenience
@@ -1351,10 +1346,8 @@ def aot_export_joint_with_descriptors(
     # NB: no cache lookup!
     aot_graph_capture = aot_stage1_graph_capture(aot_state, functional_call)
 
-    if out_spec is None or out_spec.spec is None:
-        raise AssertionError("out_spec and out_spec.spec must not be None")
-    if in_spec is None:
-        raise AssertionError("in_spec must not be None")
+    assert out_spec is not None and out_spec.spec is not None
+    assert in_spec is not None
     return JointWithDescriptors(
         _aot_state=aot_state,
         _aot_graph_capture=aot_graph_capture,
@@ -1630,32 +1623,24 @@ We require the output marked as the loss (at index {output_loss_index}) to be a 
                 )
             ]
             fw_outs, gradients = fx_g(args, fake_tangents)
-            if len(gradients) != len(args):
-                raise AssertionError(
-                    f"len(gradients)={len(gradients)} != len(args)={len(args)}"
-                )
+            assert len(gradients) == len(args)
             output_gradients = []
             for a, grad in zip(args, gradients):
                 if isinstance(a, torch.Tensor) and a.requires_grad:
-                    if grad is None:
-                        raise AssertionError("""\
+                    assert grad is not None, """\
 Found a parameter that did not receive a gradient.
 "This is most likely a bug, but if this needs to be supported please comment on this Github issue:
 https://github.com/pytorch/pytorch/issues/101192
-""")
+"""
                     output_gradients.append(grad)
                 else:
-                    if grad is not None:
-                        raise AssertionError(
-                            f"expected grad to be None for non-tensor or non-requires_grad input, got {type(grad)}"
-                        )
+                    assert grad is None
             return *fw_outs, *output_gradients
 
         fx_g = make_fx(flattened_joint, record_module_stack=True)(*full_args)
 
     user_args_flat = pytree.arg_tree_leaves(*args, **kwargs)
-    if out_spec is None:
-        raise AssertionError("out_spec must not be None")
+    assert out_spec is not None
     return fx_g, create_graph_signature(
         # type: ignore[bad-argument-type]
         fx_g,
@@ -1745,8 +1730,7 @@ def aot_export_joint_simple(
             f"aot_export_joint_simple requires individual inputs not to be pytrees. in_spec={str(in_spec)}"
         )
 
-    if out_spec is None:
-        raise AssertionError("out_spec must not be None")
+    assert out_spec is not None
     if out_spec.is_leaf():
         raise RuntimeError(
             f"aot_export_joint_simple requires outputs to be a single list/tuple. out_spec={str(out_spec)}"

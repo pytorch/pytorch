@@ -41,16 +41,10 @@ def supercedes(a, b):
                 p1 += 1
                 p2 += 1
             elif isvariadic(cur_a):
-                if p1 != len(a) - 1:
-                    raise AssertionError(
-                        f"Expected p1={p1} to equal len(a)-1={len(a) - 1}"
-                    )
+                assert p1 == len(a) - 1
                 return p2 == len(b) - 1 and issubclass(cur_a, cur_b)
             elif isvariadic(cur_b):
-                if p2 != len(b) - 1:
-                    raise AssertionError(
-                        f"Expected p2={p2} to equal len(b)-1={len(b) - 1}"
-                    )
+                assert p2 == len(b) - 1
                 if not issubclass(cur_a, cur_b):
                     return False
                 p1 += 1
@@ -115,8 +109,7 @@ def ambiguities(signatures):
 def super_signature(signatures):
     """A signature that would break ambiguities"""
     n = len(signatures[0])
-    if not all(len(s) == n for s in signatures):
-        raise AssertionError("All signatures must have the same length")
+    assert all(len(s) == n for s in signatures)
 
     return [max((type.mro(sig[i]) for sig in signatures), key=len)[0] for i in range(n)]
 

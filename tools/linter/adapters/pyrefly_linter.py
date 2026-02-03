@@ -139,7 +139,8 @@ def in_github_actions() -> bool:
 
 
 def check_files(
-    code: str, config: str, remove_unused_ignores: bool, suppress: bool
+    code: str,
+    config: str,
 ) -> list[LintMessage]:
     try:
         pyrefly_commands = [
@@ -149,10 +150,6 @@ def check_files(
             config,
             "--output-format=json",
         ]
-        if remove_unused_ignores:
-            pyrefly_commands.append("--remove-unused-ignores")
-        if suppress:
-            pyrefly_commands.append("--suppress-errors")
         proc = run_command(
             [*pyrefly_commands],
             extra_env={},
@@ -268,16 +265,6 @@ def main() -> None:
         required=True,
         help="path to an mypy .ini config file",
     )
-    parser.add_argument(
-        "--remove-unused-ignores",
-        action="store_true",
-        help="clean up unused ignores",
-    )
-    parser.add_argument(
-        "--suppress",
-        action="store_true",
-        help="add suppressions",
-    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -287,7 +274,7 @@ def main() -> None:
     )
 
     lint_messages = check_pyrefly_installed(args.code) + check_files(
-        args.code, args.config, args.remove_unused_ignores, args.suppress
+        args.code, args.config
     )
     for lint_message in lint_messages:
         print(json.dumps(lint_message._asdict()), flush=True)

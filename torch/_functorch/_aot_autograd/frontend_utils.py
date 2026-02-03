@@ -163,13 +163,10 @@ def _try_get_metadata_from_dynamo(
     static_input_indices = []
     # Collect the new inputs lifted by aotdispatch
     for i, name in enumerate(param_keys):
-        if name not in param_name_to_source:
-            raise AssertionError(f"{name} not found in param_name_to_source")
+        assert name in param_name_to_source, f"{name} not found."
         source = param_name_to_source[name]
-        if source in seen_sources:
-            raise AssertionError(f"source {source} already in seen_sources")
-        if source is None:
-            raise AssertionError(f"source must not be None for {name}")
+        assert source not in seen_sources, source
+        assert source is not None
         seen_sources.add(source)
         aot_autograd_arg_pos_to_source.append(source)
 
@@ -179,14 +176,12 @@ def _try_get_metadata_from_dynamo(
     # TODO(mlazos): Revisit if this is still needed. With Dynamo install ID
     # matched tensors back into the Fx graph, this might not be necessary.
     for pos, node in enumerate(mod.graph.find_nodes(op="placeholder")):
-        if not hasattr(node, "_dynamo_source"):
-            raise AssertionError(f"node {node} must have _dynamo_source attribute")
+        assert hasattr(node, "_dynamo_source")
         source = node._dynamo_source
         # `source`` specifies the source from user code. ddp optimizer may have
         # intermediate values becoming submodule placeholders which does not
         # have a source
-        if source is not None and source in seen_sources:
-            raise AssertionError(f"source {source} already in seen_sources")
+        assert source is None or source not in seen_sources, source
         seen_sources.add(source)
         aot_autograd_arg_pos_to_source.append(source)
         source_name = source.name if source else str(source)
@@ -209,10 +204,7 @@ def _try_get_metadata_from_dynamo(
                 "Non-static input pos %s for source %s", actual_pos, source_name
             )
 
-    if full_args_num != len(aot_autograd_arg_pos_to_source):
-        raise AssertionError(
-            f"full_args_num={full_args_num} != len(aot_autograd_arg_pos_to_source)={len(aot_autograd_arg_pos_to_source)}"
-        )
+    assert full_args_num == len(aot_autograd_arg_pos_to_source)
     return aot_autograd_arg_pos_to_source, static_input_indices
 
 

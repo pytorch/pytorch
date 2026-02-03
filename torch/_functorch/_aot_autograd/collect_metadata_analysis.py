@@ -191,11 +191,10 @@ def run_functionalized_fw_and_collect_metadata(
     @simple_wraps(f)
     def inner(*flat_args: Any) -> ViewAndMutationMeta:
         # This function is meant to be run with the forward, which expects a flat list of tensor/symint/other args.
-        if not all(
+        assert all(
             isinstance(a, tuple(KNOWN_TYPES)) or is_opaque_type(type(a))
             for a in flat_args
-        ):
-            raise AssertionError("all flat_args must be KNOWN_TYPES or opaque types")
+        )
 
         input_info: list[InputAliasInfo] = []
         output_info: list[OutputAliasInfo] = []
@@ -224,11 +223,12 @@ def run_functionalized_fw_and_collect_metadata(
             # Assert that f does NOT have an AOTOutputs in it, easy mistake to
             # make!  You need to drop the second output before calling this
             # function
-            if pytree.tree_any(lambda x: isinstance(x, AOTOutput), flat_f_outs):
-                raise AssertionError(
-                    f"{f} returned AOTOutput when it shouldn't. Did you remember to wrap the "
-                    "function with without_output_descs before passing it here?"
-                )
+            assert not pytree.tree_any(
+                lambda x: isinstance(x, AOTOutput), flat_f_outs
+            ), (
+                f"{f} returned AOTOutput when it shouldn't. Did you remember to wrap the "
+                "function with without_output_descs before passing it here?"
+            )
 
             # NB: this is just to setup the input descriptors, we will
             # recreate these descriptors (with the same convention!) when we
@@ -543,8 +543,7 @@ alias each other from a multi-output view call"
             elif functional_tensor_storage_changed and id(o) in inp_tensor_ids:
                 # When there is a set_() on an input, we cannot rely on checking storages
                 # to detect if we are returning an input (since the inputs storage is different)
-                if curr_storage is None:
-                    raise AssertionError("curr_storage must not be None")
+                assert curr_storage is not None
                 base_idx = inp_storage_refs[curr_storage]
                 output_type = OutputType.is_input
 

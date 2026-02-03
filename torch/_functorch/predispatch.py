@@ -148,8 +148,7 @@ def lazy_load_decompositions() -> None:
         from torch._decomp import decomposition_table
 
         def _register_python_decomposition_vmap(decomp: torch._ops.OpOverload) -> None:
-            if VMAP_DECOMPOSITIONS_LIB is None:
-                raise AssertionError("VMAP_DECOMPOSITIONS_LIB must not be None")
+            assert VMAP_DECOMPOSITIONS_LIB is not None
             if decomp in decomposition_table:
                 VMAP_DECOMPOSITIONS_LIB.impl(decomp, decomposition_table[decomp])
             else:

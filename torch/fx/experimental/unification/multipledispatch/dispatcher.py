@@ -91,8 +91,7 @@ def variadic_signature_matches_iter(types, full_signature):
         try:
             sig = next(sigiter)
         except StopIteration:
-            if not isvariadic(sig):
-                raise AssertionError("Expected variadic signature") from None
+            assert isvariadic(sig)
             yield True
         else:
             # We have signature items left over, so all of our arguments
@@ -102,8 +101,7 @@ def variadic_signature_matches_iter(types, full_signature):
 
 def variadic_signature_matches(types, full_signature):
     # No arguments always matches a variadic signature
-    if not full_signature:
-        raise AssertionError("full_signature is empty")
+    assert full_signature
     return all(variadic_signature_matches_iter(types, full_signature))
 
 

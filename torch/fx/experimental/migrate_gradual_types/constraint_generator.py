@@ -138,10 +138,8 @@ def get_attr_inference_rule(n: Node, symbols, constraints, counter):
     """
     If the attribute is "device" then the tensor shape is preserved
     """
-    if not isinstance(n.args[0], Node):
-        raise AssertionError(f"Expected Node, got {type(n.args[0])}")
-    if not isinstance(n.args[1], str):
-        raise AssertionError(f"Expected str, got {type(n.args[1])}")
+    assert isinstance(n.args[0], Node)
+    assert isinstance(n.args[1], str)
     output, counter = gen_tvar(counter)
     symbols[n] = output
 
@@ -161,10 +159,8 @@ def bmm_inference_rule(n: Node, symbols, constraints, counter):
     and switch the dimensions according to the rules
     of batch multiplication
     """
-    if not isinstance(n.args[0], Node):
-        raise AssertionError(f"Expected Node, got {type(n.args[0])}")
-    if not isinstance(n.args[1], Node):
-        raise AssertionError(f"Expected Node, got {type(n.args[1])}")
+    assert isinstance(n.args[0], Node)
+    assert isinstance(n.args[1], Node)
 
     bmm_output, counter = gen_tvar(counter)
     symbols[n] = bmm_output
@@ -234,12 +230,9 @@ def index_select_inference_rule(n: Node, symbols, constraints, counter):
     at the position given by the index (first argument)
     """
     # print(n.args)
-    if not isinstance(n.args[0], Node):
-        raise AssertionError(f"Expected Node, got {type(n.args[0])}")
-    if not isinstance(n.args[1], int):
-        raise AssertionError(f"Expected int, got {type(n.args[1])}")
-    if not isinstance(n.args[2], Node):
-        raise AssertionError(f"Expected Node, got {type(n.args[2])}")
+    assert isinstance(n.args[0], Node)
+    assert isinstance(n.args[1], int)
+    assert isinstance(n.args[2], Node)
 
     index_select, counter = gen_tvar(counter)
     symbols[n] = index_select
@@ -285,8 +278,7 @@ def expand_inference_rule(n: Node, symbols, constraints, counter):
     the rank of this expression to be equal to len(n.args[1:]) so that only
     those cases get considered for the output
     """
-    if not isinstance(n.args[0], Node):
-        raise AssertionError(f"Expected Node, got {type(n.args[0])}")
+    assert isinstance(n.args[0], Node)
 
     # define the output for expand
     expand, counter = gen_tvar(counter)
@@ -298,11 +290,9 @@ def expand_inference_rule(n: Node, symbols, constraints, counter):
 
     e2_nat_constraints = []
     for arg in n.args[1:]:
-        if not isinstance(arg, (Node, int)):
-            raise AssertionError(f"Expected Node or int, got {type(arg)}")
+        assert isinstance(arg, (Node, int))
         if isinstance(arg, Node):
-            if not isinstance(symbols[arg], DVar):
-                raise AssertionError(f"Expected DVar, got {type(symbols[arg])}")
+            assert isinstance(symbols[arg], DVar)
             e2_nat_constraints.append(BinConstraintD(0, symbols[arg], op_leq))
 
     e2_constraint = BinConstraintT(
@@ -356,15 +346,13 @@ def equality_inference_rule(n: Node, symbols, constraints, counter):
         # then we have dimension variables
         else:
             for arg in n.args:
-                if not isinstance(symbols[arg], DVar):
-                    raise AssertionError(f"Expected DVar, got {type(symbols[arg])}")
+                assert isinstance(symbols[arg], DVar)
         my_size = [symbols[arg] for arg in n.args]
         return [BinConstraintT(output, TensorType(my_size), op_eq)], counter
 
     elif isinstance(n.args[0], tuple):
         # then the tuple is the size
-        if len(n.args[0]) > 4:
-            raise AssertionError(f"Expected len <= 4, got {len(n.args[0])}")
+        assert len(n.args[0]) <= 4
         my_size = [symbols[arg] for arg in n.args[0]]
         return [BinConstraintT(output, TensorType(my_size), op_eq)], counter
     else:
@@ -376,19 +364,15 @@ def transpose_inference_rule(n: Node, symbols, constraints, counter):
     """
     Can be considered as a sequence of two index selects, so we generate constraints accordingly
     """
-    if not isinstance(n.args[0], Node):
-        raise AssertionError(f"Expected Node, got {type(n.args[0])}")
-    if not isinstance(n.args[1], int):
-        raise AssertionError(f"Expected int, got {type(n.args[1])}")
-    if not isinstance(n.args[2], int):
-        raise AssertionError(f"Expected int, got {type(n.args[2])}")
+    assert isinstance(n.args[0], Node)
+    assert isinstance(n.args[1], int)
+    assert isinstance(n.args[2], int)
 
     output, counter = gen_tvar(counter)
     symbols[n] = output
 
     from_arg = symbols[n.args[0]]
-    if not isinstance(from_arg, TVar):
-        raise AssertionError(f"Expected TVar, got {type(from_arg)}")
+    assert isinstance(from_arg, TVar)
 
     # input and output are dyn
     is_dyn = Conj(
@@ -411,10 +395,8 @@ def type_inference_rule(n: Node, symbols, constraints, counter):
     """
     We generate the constraint: input = output
     """
-    if not isinstance(n.args[0], Node):
-        raise AssertionError(f"Expected Node, got {type(n.args[0])}")
-    if not isinstance(n.args[1], Node):
-        raise AssertionError(f"Expected Node, got {type(n.args[1])}")
+    assert isinstance(n.args[0], Node)
+    assert isinstance(n.args[1], Node)
 
     output, counter = gen_tvar(counter)
     symbols[n] = output
@@ -422,10 +404,8 @@ def type_inference_rule(n: Node, symbols, constraints, counter):
     from_arg = symbols[n.args[0]]
     to_arg = symbols[n.args[1]]
 
-    if not isinstance(from_arg, TVar):
-        raise AssertionError(f"Expected TVar, got {type(from_arg)}")
-    if not isinstance(to_arg, TVar):
-        raise AssertionError(f"Expected TVar, got {type(to_arg)}")
+    assert isinstance(from_arg, TVar)
+    assert isinstance(to_arg, TVar)
 
     return [
         BinConstraintT(from_arg, to_arg, op_consistency),
@@ -441,10 +421,8 @@ def masked_fill_inference_rule(n: Node, symbols, constraints, counter):
     it is a condition. We will leave this out for now.
     """
 
-    if not isinstance(n.args[0], Node):
-        raise AssertionError(f"Expected Node, got {type(n.args[0])}")
-    if not isinstance(n.args[1], Node):
-        raise AssertionError(f"Expected Node, got {type(n.args[1])}")
+    assert isinstance(n.args[0], Node)
+    assert isinstance(n.args[1], Node)
 
     # We will retrieve the type variables from the symbol table
     # and confirm they are tensor variables
@@ -464,8 +442,7 @@ def masked_fill_inference_rule(n: Node, symbols, constraints, counter):
 
 @register_inference_rule(torch.nn.functional.embedding)
 def embedding_inference_rule_functional(n: Node, symbols, constraints, counter):
-    if not isinstance(n.args[0], Node):
-        raise AssertionError(f"Expected Node, got {type(n.args[0])}")
+    assert isinstance(n.args[0], Node)
 
     embedding_dim_weights = symbols[n.args[1]]
 
@@ -484,8 +461,7 @@ def embedding_inference_rule(n: Node, module_instance, symbols, constraints, cou
     """
     The output shape differs from the input shape in the last dimension
     """
-    if not isinstance(n.args[0], Node):
-        raise AssertionError(f"Expected Node, got {type(n.args[0])}")
+    assert isinstance(n.args[0], Node)
     return gen_embedding_rules(n, symbols, module_instance.embedding_dim, counter)
 
 
@@ -535,8 +511,7 @@ def view_inference_rule(n: Node, symbols, constraints, counter):
     """
     Similar to reshape but with an extra condition on the strides
     """
-    if not isinstance(n.args[0], Node):
-        raise AssertionError(f"Expected Node, got {type(n.args[0])}")
+    assert isinstance(n.args[0], Node)
 
     # generate the new variable
     my_view, counter = gen_tvar(counter)
@@ -634,11 +609,9 @@ def cumsum_inference_rule(n: Node, symbols, constraints, counter):
     Input and output shapes should be equal
     We should verify that the index is valid
     """
-    if not isinstance(n.args[0], Node):
-        raise AssertionError(f"Expected Node, got {type(n.args[0])}")
+    assert isinstance(n.args[0], Node)
     arg_1 = n.args[1] if len(n.args) > 1 else n.kwargs["dim"]
-    if not isinstance(arg_1, int):
-        raise AssertionError(f"Expected int, got {type(arg_1)}")
+    assert isinstance(arg_1, int)
 
     output, counter = gen_tvar(counter)
     symbols[n] = output
@@ -669,15 +642,13 @@ def cumsum_inference_rule(n: Node, symbols, constraints, counter):
 
 @register_inference_rule(_assert_is_none)
 def assert_inference_rule(n: Node, symbols, constraints, counter):
-    if len(n.users) != 0:
-        raise AssertionError(f"Expected no users, got {len(n.users)}")
+    assert len(n.users) == 0
     return [], counter
 
 
 @register_inference_rule(operator.getitem)
 def getitem_inference_rule(n: Node, symbols, constraints, counter):
-    if not isinstance(n.args[0], Node):
-        raise AssertionError(f"Expected Node, got {type(n.args[0])}")
+    assert isinstance(n.args[0], Node)
 
     # dimension output case
     if isinstance(n.args[1], int):
@@ -687,8 +658,7 @@ def getitem_inference_rule(n: Node, symbols, constraints, counter):
 
         # retrieve arg variables
         get_item_arg = symbols[n.args[0]]
-        if not isinstance(get_item_arg, TVar):
-            raise AssertionError(f"Expected TVar, got {type(get_item_arg)}")
+        assert isinstance(get_item_arg, TVar)
 
         # if the input is dynamic, we accept any index and return
         # a dynamic dimension as output
@@ -719,8 +689,7 @@ def getitem_inference_rule(n: Node, symbols, constraints, counter):
         # retrieve arg variables
         if n.args[0] in symbols:
             get_item_arg = symbols[n.args[0]]
-            if not isinstance(get_item_arg, TVar):
-                raise AssertionError(f"Expected TVar, got {type(get_item_arg)}")
+            assert isinstance(get_item_arg, TVar)
 
             input_dyn = BinConstraintT(get_item_arg, Dyn, op_eq)
             output_dyn = BinConstraintT(get_item_output, Dyn, op_eq)  # type: ignore[assignment]
@@ -742,10 +711,8 @@ def getitem_inference_rule(n: Node, symbols, constraints, counter):
 
 @register_inference_rule(operator.gt)
 def gt_inference_rule(n: Node, symbols, constraints, counter):
-    if not isinstance(n.args[0], (Node, int)):
-        raise AssertionError(f"Expected Node or int, got {type(n.args[0])}")
-    if not isinstance(n.args[1], (Node, int)):
-        raise AssertionError(f"Expected Node or int, got {type(n.args[1])}")
+    assert isinstance(n.args[0], (Node, int))
+    assert isinstance(n.args[1], (Node, int))
 
     # We make sure this node will not be used again. We do not
     # generate a constraint about that node. Only about the operands.
@@ -805,10 +772,8 @@ def gt_inference_rule(n: Node, symbols, constraints, counter):
 
 @register_inference_rule(operator.eq)
 def eq_inference_rule(n: Node, symbols, constraints, counter):
-    if not isinstance(n.args[0], (Node, int)):
-        raise AssertionError(f"Expected Node or int, got {type(n.args[0])}")
-    if not isinstance(n.args[1], (Node, int)):
-        raise AssertionError(f"Expected Node or int, got {type(n.args[1])}")
+    assert isinstance(n.args[0], (Node, int))
+    assert isinstance(n.args[1], (Node, int))
 
     e1 = symbols[n.args[0]] if isinstance(n.args[0], Node) else n.args[0]
     e2 = symbols[n.args[1]] if isinstance(n.args[1], Node) else n.args[1]
@@ -856,19 +821,14 @@ def neq_inference_rule(n: Node, symbols, constraints, counter):
     is false. We are working on making this operation work
     when the condition is true as well)
     """
-    if not isinstance(n.args[0], Node):
-        raise AssertionError(f"Expected Node, got {type(n.args[0])}")
-    if not isinstance(n.args[1], tuple):
-        raise AssertionError(f"Expected tuple, got {type(n.args[1])}")
+    assert isinstance(n.args[0], Node)
+    assert isinstance(n.args[1], tuple)
 
     # implementing for size 3 and 4
     if len(n.args[1]) == 3:
-        if not isinstance(n.args[1][0], (Node, int)):
-            raise AssertionError(f"Expected Node or int, got {type(n.args[1][0])}")
-        if not isinstance(n.args[1][1], (Node, int)):
-            raise AssertionError(f"Expected Node or int, got {type(n.args[1][1])}")
-        if not isinstance(n.args[1][2], (Node, int)):
-            raise AssertionError(f"Expected Node or int, got {type(n.args[1][2])}")
+        assert isinstance(n.args[1][0], (Node, int))
+        assert isinstance(n.args[1][1], (Node, int))
+        assert isinstance(n.args[1][2], (Node, int))
 
         lhs = symbols[n.args[0]]
 
@@ -907,14 +867,10 @@ def neq_inference_rule(n: Node, symbols, constraints, counter):
         equality_constraint = BinConstraintD(my_ne, ne_constraint, op_eq)
 
     elif len(n.args[1]) == 4:
-        if not isinstance(n.args[1][0], (Node, int)):
-            raise AssertionError(f"Expected Node or int, got {type(n.args[1][0])}")
-        if not isinstance(n.args[1][1], (Node, int)):
-            raise AssertionError(f"Expected Node or int, got {type(n.args[1][1])}")
-        if not isinstance(n.args[1][2], (Node, int)):
-            raise AssertionError(f"Expected Node or int, got {type(n.args[1][2])}")
-        if not isinstance(n.args[1][3], (Node, int)):
-            raise AssertionError(f"Expected Node or int, got {type(n.args[1][3])}")
+        assert isinstance(n.args[1][0], (Node, int))
+        assert isinstance(n.args[1][1], (Node, int))
+        assert isinstance(n.args[1][2], (Node, int))
+        assert isinstance(n.args[1][3], (Node, int))
 
         lhs = symbols[n.args[0]]
 
@@ -974,10 +930,8 @@ def neq_inference_rule(n: Node, symbols, constraints, counter):
 
 @register_inference_rule(operator.lt)
 def lt_inference_rule(n: Node, symbols, constraints, counter):
-    if not isinstance(n.args[0], (Node, int)):
-        raise AssertionError(f"Expected Node or int, got {type(n.args[0])}")
-    if not isinstance(n.args[1], (Node, int)):
-        raise AssertionError(f"Expected Node or int, got {type(n.args[1])}")
+    assert isinstance(n.args[0], (Node, int))
+    assert isinstance(n.args[1], (Node, int))
 
     # We make sure this node will not be used again. We do not
     # generate a constraint about that node. Only about the operands.
@@ -1023,8 +977,7 @@ def full_inference_rule(n: Node, symbols, constraints, counter):
     symbols[n] = full
     res = []
 
-    if not isinstance(n.args[0], Iterable):
-        raise AssertionError(f"Expected Iterable, got {type(n.args[0])}")
+    assert isinstance(n.args[0], Iterable)
     for arg in n.args[0]:
         dim = arg if isinstance(arg, int) else symbols[arg]
         res.append(dim)
@@ -1169,8 +1122,7 @@ def broadcasting_inference_rule(n: Node, symbols, constraints, counter):
 
 @register_inference_rule(torch.flatten)
 def flatten_inference_rule(n: Node, symbols, constraints, counter):
-    if not isinstance(n.args[0], Node):
-        raise AssertionError(f"Expected Node, got {type(n.args[0])}")
+    assert isinstance(n.args[0], Node)
 
     # generate the new variable
     flattened, counter = gen_tvar(counter)
@@ -1183,13 +1135,11 @@ def flatten_inference_rule(n: Node, symbols, constraints, counter):
     end_dim = -1
 
     if len(n.args) > 1:
-        if not isinstance(n.args[1], int):
-            raise AssertionError(f"Expected int, got {type(n.args[1])}")
+        assert isinstance(n.args[1], int)
         start_dim = n.args[1]
 
     if len(n.args) > 2:
-        if not isinstance(n.args[2], int):
-            raise AssertionError(f"Expected int, got {type(n.args[2])}")
+        assert isinstance(n.args[2], int)
         end_dim = n.args[2]
 
     c1 = BinConstraintT(input, Dyn, op_eq)
@@ -1211,8 +1161,7 @@ def layer_norm_functional(n: Node, symbols, constraints, counter):
     """
     We generate the constraint: input = output
     """
-    if not isinstance(n.args[0], Node):
-        raise AssertionError(f"Expected Node, got {type(n.args[0])}")
+    assert isinstance(n.args[0], Node)
     return gen_layer_norm_constraints(n, n.args[1], symbols, counter)
 
 
@@ -1222,8 +1171,7 @@ def layer_norm_inference_rule(n: Node, module_instance, symbols, constraints, co
     Input and output shapes should be equal.
     Input should be consistent with the normalized_shape
     """
-    if not isinstance(n.args[0], Node):
-        raise AssertionError(f"Expected Node, got {type(n.args[0])}")
+    assert isinstance(n.args[0], Node)
     return gen_layer_norm_constraints(
         n, module_instance.normalized_shape, symbols, counter
     )
@@ -1262,13 +1210,11 @@ def relu_inference_rule(n: Node, module_instance, symbols, constraints, counter)
     """
     Input and output shapes should be equal.
     """
-    if not isinstance(n.args[0], Node):
-        raise AssertionError(f"Expected Node, got {type(n.args[0])}")
+    assert isinstance(n.args[0], Node)
     output, counter = gen_tvar(counter)
     symbols[n] = output
     input = symbols[n.args[0]]
-    if not isinstance(input, TVar):
-        raise AssertionError(f"Expected TVar, got {type(input)}")
+    assert isinstance(input, TVar)
     return [BinConstraintT(input, output, op_eq)], counter
 
 
@@ -1278,8 +1224,7 @@ def linear_inference_rule(n: Node, module_instance, symbols, constraints, counte
     Input and output sizes should be the same except for the last dimension
     If the input is Dyn, then so should the output
     """
-    if not isinstance(n.args[0], Node):
-        raise AssertionError(f"Expected Node, got {type(n.args[0])}")
+    assert isinstance(n.args[0], Node)
     return linear_constraints(
         n, module_instance.in_features, module_instance.out_features, symbols, counter
     )
@@ -1287,8 +1232,7 @@ def linear_inference_rule(n: Node, module_instance, symbols, constraints, counte
 
 @register_inference_rule("dim")
 def torch_dim_inference_rule(n: Node, symbols, constraints, counter):
-    if not isinstance(n.args[0], Node):
-        raise AssertionError(f"Expected Node, got {type(n.args[0])}")
+    assert isinstance(n.args[0], Node)
     my_dim, counter = gen_dvar(counter)
     symbols[n] = my_dim
     input = symbols[n.args[0]]
@@ -1314,8 +1258,7 @@ def torch_dim_inference_rule(n: Node, symbols, constraints, counter):
 
 @register_inference_rule(torch._C._nn.linear)
 def torch_linear_inference_rule(n: Node, symbols, constraints, counter):
-    if not isinstance(n.args[0], Node):
-        raise AssertionError(f"Expected Node, got {type(n.args[0])}")
+    assert isinstance(n.args[0], Node)
     weight_dims, counter = gen_tensor_dims(2, counter)
     equality_constraint = BinConstraintT(
         symbols[n.args[1]], TensorType(weight_dims), op_eq
@@ -1379,8 +1322,7 @@ def add_layer_norm_constraints(input_dim, normalized_dim):
 
 
 def add_linear_constraints(dims1, dims2, in_features, out_features):
-    if len(dims1) != len(dims2):
-        raise AssertionError(f"Expected same length, got {len(dims1)} vs {len(dims2)}")
+    assert len(dims1) == len(dims2)
     constraints = []
     for i in range(len(dims1)):
         if i == len(dims1) - 1:
@@ -1394,8 +1336,7 @@ def add_linear_constraints(dims1, dims2, in_features, out_features):
 
 @register_inference_rule(torch.reshape)
 def reshape_inference_rule(n: Node, symbols, constraints, counter):
-    if not isinstance(n.args[0], Node):
-        raise AssertionError(f"Expected Node, got {type(n.args[0])}")
+    assert isinstance(n.args[0], Node)
 
     # generate the new variable
     my_reshape, counter = gen_tvar(counter)
@@ -1412,8 +1353,7 @@ def reshape_inference_rule(n: Node, symbols, constraints, counter):
 
 @register_inference_rule(BatchNorm2d)
 def batchnorm_inference_rule(n: Node, module_instance, symbols, constraints, counter):
-    if not isinstance(n.args[0], Node):
-        raise AssertionError(f"Expected Node, got {type(n.args[0])}")
+    assert isinstance(n.args[0], Node)
 
     # generate the new variable
     batchnorm_output, counter = gen_tvar(counter)
@@ -1435,8 +1375,7 @@ def batchnorm_inference_rule(n: Node, module_instance, symbols, constraints, cou
 
 @register_inference_rule(torch.nn.AdaptiveAvgPool2d)
 def adaptive_inference_rule(n: Node, module_instance, symbols, constraints, counter):
-    if not isinstance(n.args[0], Node):
-        raise AssertionError(f"Expected Node, got {type(n.args[0])}")
+    assert isinstance(n.args[0], Node)
 
     avg_pool, counter = gen_tvar(counter)
 
@@ -1463,8 +1402,7 @@ def adaptive_inference_rule(n: Node, module_instance, symbols, constraints, coun
 
 @register_inference_rule(Conv2d)
 def conv2d_inference_rule(n: Node, module_instance, symbols, constraints, counter):
-    if not isinstance(n.args[0], Node):
-        raise AssertionError(f"Expected Node, got {type(n.args[0])}")
+    assert isinstance(n.args[0], Node)
 
     my_conv, counter = gen_tvar(counter)
     symbols[n] = my_conv
@@ -1497,8 +1435,7 @@ def conv2d_inference_rule(n: Node, module_instance, symbols, constraints, counte
 
 @register_inference_rule(torch.nn.MaxPool2d)
 def maxpool_inference_rule(n: Node, module_instance, symbols, constraints, counter):
-    if not isinstance(n.args[0], Node):
-        raise AssertionError(f"Expected Node, got {type(n.args[0])}")
+    assert isinstance(n.args[0], Node)
     maxpool, counter = gen_tvar(counter)
     symbols[n] = maxpool
     input_var = symbols[n.args[0]]
@@ -1565,8 +1502,7 @@ class ConstraintGenerator:
             if n.type != Dyn and (not isinstance(n.type, TensorType)):
                 if n.type == torch.nn.parameter.Parameter:
                     # since we have a parameter, the shape must be static
-                    if "example_value" not in n.meta:
-                        raise AssertionError("example_value not in n.meta")
+                    assert "example_value" in n.meta
                     my_type = TensorType(n.meta["example_value"].size())
                 else:
                     my_type = Dyn

@@ -636,21 +636,6 @@ class AOTInductorModelBase {
       size_t data_size = this->constant_data_size(i);
       int32_t const_device_type = this->constant_device_type(i);
       bool device_type_matches = const_device_type == device_type_;
-
-      // Mixed-device constants are only supported when the secondary device is
-      // CPU. If a constant was compiled for a non-CPU device but we're loading
-      // on a different device, we cannot safely create the tensor.
-      AOTI_RUNTIME_CHECK(
-          device_type_matches ||
-              const_device_type == aoti_torch_device_type_cpu(),
-          "Mixed-device constants are only supported when the secondary "
-          "device is CPU. Constant '" +
-              name +
-              "' was compiled for a non-CPU device. "
-              "Hint: This can happen if you compiled on GPU but are loading "
-              "on CPU, which is not supported. In AOTI, you must compile and "
-              "load on the same device type.");
-
       uint8_t* internal_ptr = nullptr;
       if (data_size != 0) {
         if (device_type_matches) {

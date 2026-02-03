@@ -139,8 +139,7 @@ class NodeInfo:
         return n in self.unclaimed_nodes
 
     def get_fw_order(self, n: fx.Node) -> int:
-        if n not in self._required_fw_nodes:
-            raise AssertionError(f"Node {n} not in fw nodes!")
+        assert n in self._required_fw_nodes, f"Node {n} not in fw nodes!"
         return self.fw_order[n]
 
 
@@ -181,10 +180,7 @@ def has_recomputable_rng_ops(fx_g: fx.GraphModule) -> bool:
 def sym_node_size(node: fx.Node) -> int:
     if isinstance(node.meta["val"], (torch.SymInt, torch.SymBool)):
         return 1
-    if not isinstance(node.meta["val"], torch.SymFloat):
-        raise AssertionError(
-            f"expected node.meta['val'] to be SymFloat, got {type(node.meta['val'])}"
-        )
+    assert isinstance(node.meta["val"], torch.SymFloat)
     return 4
 
 
@@ -277,8 +273,9 @@ def _extract_graph_with_inputs_outputs(
         if isinstance(x, fx.Node):
             if x not in env:
                 raise RuntimeError(f"Node {x} couldn't be found in env")
-            if isinstance(env[x], InvalidNodeBase):
-                raise AssertionError(f"Node {x} was invalid, but is output")
+            assert not isinstance(env[x], InvalidNodeBase), (
+                f"Node {x} was invalid, but is output"
+            )
             output_values.append(env[x])
         else:
             output_values.append(x)
@@ -952,8 +949,7 @@ def _extract_fwd_bwd_modules(
         elif _is_backward_state(node):
             # BackwardState is saved directly
             _remove_by_name(saved_values, node.name)
-            if not backward_state_inputs:
-                raise AssertionError("backward_state_inputs must not be empty")
+            assert backward_state_inputs
 
     # Now that we have the finalized list of saved values, we need to ensure
     # we propagate all symbols which are referenced by backwards inputs.
@@ -1024,10 +1020,9 @@ def _extract_fwd_bwd_modules(
     # require VC checks, they should all have node metadata indicating so.
     for i, node in enumerate(saved_values):
         if i >= no_vc_check_start_idx:
-            if not node.meta.get("saved_tensor_with_no_vc_check", False):
-                raise AssertionError(
-                    f"i={i}, no_vc_check_start_idx={no_vc_check_start_idx}, len(saved_values)={len(saved_values)}"
-                )
+            assert node.meta.get("saved_tensor_with_no_vc_check", False), (
+                f"i={i}, no_vc_check_start_idx={no_vc_check_start_idx}, len(saved_values)={len(saved_values)}"
+            )
 
     # Now, we re-generate the fwd/bwd graphs.
     # NB: This might increase compilation time, but I doubt it matters
@@ -1105,8 +1100,7 @@ def default_partition(
     for node in joint_module.graph.nodes:
         if _has_tag_is_forward(node) or _is_primal(node) or _is_fwd_seed_offset(node):
             last_node = node
-    if last_node is None:
-        raise AssertionError("last_node must not be None")
+    assert last_node is not None
     for node in joint_module.graph.nodes:
         if not _is_tangent(node):
             forward_nodes.append(node)
@@ -1210,14 +1204,16 @@ def default_partition(
             saved_values.append(node)
             continue
         if is_impure(node):
-            if graph_has_recomputable_ops:
-                raise AssertionError(
-                    f"Trying to apply AC on a graph with impure op: {node}, {node.target}"
-                )
+            assert not graph_has_recomputable_ops, (
+                "Trying to apply AC on a graph with impure op",
+                node,
+                node.target,
+            )
             saved_values.append(node)
             continue
-        if not is_tensor(node) and node.op == "call_function":
-            raise AssertionError(f"Expected {node} to be a tensor")
+        assert is_tensor(node) or node.op != "call_function", (
+            f"Expected {node} to be a tensor"
+        )
         backward_usages = [n for n in node.users if n.name not in forward_node_names]
         if all(is_sym_node(n) for n in backward_usages):
             # If we have a tensor in the forward, where only its sizes/strides are needed in the backward,
@@ -1478,8 +1474,7 @@ def apply_graphsafe_rng_functionalization(
     For more details: https://github.com/pytorch/pytorch/issues/113541
     """
     device_idx = device.index
-    if device_idx is None:
-        raise AssertionError("device_idx must not be None")
+    assert device_idx is not None
     fw_graph = fw_module.graph
     bw_graph = bw_module.graph
     graphsafe_run_with_rng_state = torch._prims.rng_prims.graphsafe_run_with_rng_state
@@ -1590,8 +1585,7 @@ def functionalize_rng_ops(
         from torch._guards import detect_fake_mode  # noqa: F401
 
         fake_mode = detect_fake_mode()
-        if fake_mode is None:
-            raise AssertionError("fake_mode must not be None")
+        assert fake_mode is not None
         with fake_mode:
             if device is not None and device.type == "cuda":
                 return fake_mode.from_tensor(torch.cuda.get_rng_state())
@@ -1821,8 +1815,7 @@ def is_getitem_of_multi_output(node: fx.Node) -> bool:
     if node.target != operator.getitem:
         return False
     parent = node.args[0]
-    if type(parent) is not fx.Node:
-        raise AssertionError(f"expected parent to be fx.Node, got {type(parent)}")
+    assert type(parent) is fx.Node
     return "tensor_meta" not in parent.meta and node.op == "call_function"
 
 
@@ -1929,8 +1922,7 @@ def solve_min_cut(
         mutable_arg_names = b.kwargs["tensors_to_clone"]
         for name in mutable_arg_names:  # pyrefly: ignore [not-iterable]
             kwargs: Any = b.kwargs["kwargs"]
-            if kwargs is None:
-                raise AssertionError("kwargs must not be None")
+            assert kwargs is not None
             arg = kwargs[name]
             if a is arg:
                 return True
@@ -2496,10 +2488,7 @@ def solve_min_cut(
 
     cut_nodes: OrderedSet[str] = OrderedSet()
     for node_in, node_out in cutset:
-        if node_in[:-3] != node_out[:-4]:
-            raise AssertionError(
-                f"node_in[:-3]={node_in[:-3]} != node_out[:-4]={node_out[:-4]}"
-            )
+        assert node_in[:-3] == node_out[:-4]
         node_name = node_in[:-3]
         cut_nodes.add(node_name)
 
@@ -3030,10 +3019,7 @@ def choose_saved_values_set(
             except BaseException:  # noqa: B036
                 pass
 
-        if not dont_ban.issubset(all_recomputable_banned_nodes):
-            raise AssertionError(
-                "dont_ban must be a subset of all_recomputable_banned_nodes"
-            )
+        assert dont_ban.issubset(all_recomputable_banned_nodes)
 
         saved_values, _ = solve_min_cut(
             joint_graph,
