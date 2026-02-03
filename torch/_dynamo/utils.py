@@ -2616,25 +2616,21 @@ def specialize_symnode(arg: Any) -> Any:
     from .variables import ConstantVariable, LazyVariableTracker, SymNodeVariable
 
     # Guard and specialize
-    if isinstance(arg, LazyVariableTracker):
-        if not arg.is_realized():
-            # Find if the arg would be realized as SymNodeVariable later on. If yes,
-            # realize it and specialize. Else return the arg.
+    if isinstance(arg, LazyVariableTracker) and not arg.is_realized():
+        # Find if the arg would be realized as SymNodeVariable later on. If yes,
+        # realize it and specialize. Else return the arg.
 
-            source = arg.original_source()
-            value = arg.original_value()
+        source = arg.original_source()
+        value = arg.original_value()
 
-            is_symnode_vt = is_torch_sym(value) or (
-                not config.specialize_int
-                and type(value) is int
-                and not is_int_specialization_case(value, source)
-            )
+        is_symnode_vt = is_torch_sym(value) or (
+            not config.specialize_int
+            and type(value) is int
+            and not is_int_specialization_case(value, source)
+        )
 
-            if not is_symnode_vt:
-                return arg
-
-        # Realize to get the underlying variable (handles both realized and unrealized)
-        arg = arg.realize()
+        if not is_symnode_vt:
+            return arg
 
     if isinstance(arg, SymNodeVariable):
         return ConstantVariable.create(arg.evaluate_expr())
@@ -2718,6 +2714,11 @@ list_methods = {method for method in list.__dict__.values() if callable(method)}
 list_getitem = list.__getitem__
 
 str_methods = {method for method in str.__dict__.values() if callable(method)}
+
+# EnumType is the metaclass for Enum classes
+enum_type_methods = {
+    method for method in type(enum.Enum).__dict__.values() if callable(method)
+}
 
 K = TypeVar("K")
 V = TypeVar("V")
@@ -3497,12 +3498,12 @@ def get_concrete_sizes_from_symints(
     pattern = r"\(s(\d+)\)"
     assert fake_mode.shape_env is not None
     shape_env = fake_mode.shape_env
-    var_to_val = shape_env.var_to_val
+    backed_var_to_val = shape_env.backed_var_to_val
 
     def replace_sym(match: Any) -> str:
         sym_name = f"s{match.group(1)}"
         val = next(
-            (v for k, v in var_to_val.items() if k.name == sym_name),
+            (v for k, v in backed_var_to_val.items() if k.name == sym_name),
             None,
         )
         if isinstance(val, (int, Integer)):
@@ -3852,7 +3853,7 @@ def get_real_value(node: torch.fx.Node, tracer: Any) -> Any:
     return real_value
 
 
-def assert_no_fake_params_or_buffers(gm: torch.fx.GraphModule) -> None:
+def assert_no_fake_params_or_buffers(gm: torch.nn.Module) -> None:
     from torch._subclasses.fake_tensor import FakeTensorConfig, is_fake
 
     def stack_or_hint(t: Any) -> str:
@@ -4008,7 +4009,12 @@ def format_bytecode(
     return f"{prefix} {name} {filename} line {line_no} \n{dis.Bytecode(code).dis()}\n"
 
 
-forward_hook_names = ["_forward_pre_hooks", "_forward_hooks"]
+forward_hook_names = [
+    "_forward_pre_hooks",
+    "_forward_pre_hooks_with_kwargs",
+    "_forward_hooks_with_kwargs",
+    "_forward_hooks",
+]
 backward_hook_names = ["_backward_pre_hooks", "_backward_hooks"]
 state_dict_hook_names = [
     "_state_dict_pre_hooks",
@@ -4171,24 +4177,10 @@ class numpy_operator_wrapper(Generic[_P, R]):
 def defake(x: Any) -> Any:
     if not isinstance(x, FakeTensor):
         return x
-    size: torch._prims_common.ShapeType
-    stride: torch._prims_common.StrideType
-    if x._has_symbolic_sizes_strides:
-        size = []
-        for s in x.size():
-            if isinstance(s, torch.SymInt):
-                size.append(s.node.shape_env.size_hint(s.node.expr))
-            else:
-                size.append(s)
-        stride = []
-        for s in x.stride():
-            if isinstance(s, torch.SymInt):
-                stride.append(s.node.shape_env.size_hint(s.node.expr))
-            else:
-                stride.append(s)
-    else:
-        size = x.size()
-        stride = x.stride()
+    from torch._inductor.virtualized import V
+
+    size = V.graph.sizevars.optimization_hints(x.size())
+    stride = V.graph.sizevars.optimization_hints(x.stride())
     y = torch.empty_strided(
         size,
         stride,
