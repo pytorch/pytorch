@@ -35,7 +35,7 @@ from torch.testing._internal.common_fsdp import (
     _assert_module_states,
     DEVICEInitMode,
     FSDPInitMode,
-    FSDPTestContinuous,
+    FSDPTest,
     FSDPTestMultiThread,
     MLP,
     NestedWrappedModule,
@@ -75,7 +75,7 @@ class MyModel(nn.Module):
         return self.b(self.a(x + y))
 
 
-class TestFSDPMiscMultiProcess(FSDPTestContinuous):
+class TestFSDPMiscMultiProcess(FSDPTest):
     @property
     def world_size(self):
         return 2

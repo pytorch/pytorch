@@ -51,7 +51,6 @@ from torch.distributed.tensor.parallel import (
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import (
-    MultiProcContinuousTest,
     MultiProcessTestCase,
     MultiThreadedTestCase,
     run_subtests,
@@ -1188,11 +1187,31 @@ class FSDPTestMultiThread(MultiThreadedTestCase):
         torch._dynamo.reset()
 
 
-class FSDPTestMixin:
-    """
-    Mixin class containing shared test utilities for FSDP tests.
-    Provides common helper methods for both FSDPTest and FSDPTestContinuous.
-    """
+class FSDPTest(MultiProcessTestCase):
+    def setUp(self):
+        super().setUp()
+        # Set TORCH_NCCL_DESYNC_DEBUG=0 to disable the NCCL `workCleanupLoop()`,
+        # which can cause unit test flakiness:
+        # https://github.com/pytorch/pytorch/issues/90848
+        os.environ["TORCH_NCCL_DESYNC_DEBUG"] = "0"
+        self._spawn_processes()
+
+    @property
+    def world_size(self):
+        return DEVICE_COUNT
+
+    @property
+    def process_group(self):
+        return dist.distributed_c10d._get_default_group()
+
+    @property
+    def destroy_pg_upon_exit(self) -> bool:
+        # Overriding base test class: do not auto destroy PG upon exit.
+        return False
+
+    @property
+    def init_method(self):
+        return f"{FILE_SCHEMA}{self.file_name}"
 
     def _check_cpu_offload(self, fsdp_model, cpu_offload):
         self.assertEqual(cpu_offload, fsdp_model.cpu_offload)
@@ -1205,6 +1224,61 @@ class FSDPTestMixin:
 
     def run_subtests(self, *args, **kwargs):
         return run_subtests(self, *args, **kwargs)
+
+    @classmethod
+    def _run(cls, rank, test_name, file_name, pipe, **kwargs):  # type: ignore[override]
+        self = cls(test_name)
+        self.rank = rank
+        self.file_name = file_name
+        fake_pg = kwargs.get("fake_pg", False)
+
+        print(f"dist init r={self.rank}, world={self.world_size}")
+        if torch.accelerator.device_count() < self.world_size:
+            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
+
+        # Specify gloo backend to make 'init_process_group()' succeed,
+        # Actual tests will be skipped if there is no enough GPUs.
+        try:
+            if fake_pg:
+                store = torch.testing._internal.distributed.fake_pg.FakeStore()
+                dist.init_process_group(
+                    backend="fake",
+                    world_size=self.world_size,
+                    rank=rank,
+                    store=store,
+                )
+            else:
+                dist.init_process_group(
+                    init_method=self.init_method,
+                    backend=DISTRIBUTED_BACKEND,
+                    world_size=int(self.world_size),
+                    rank=self.rank,
+                )
+        except RuntimeError as e:
+            if "recompile" in e.args[0]:
+                sys.exit(TEST_SKIPS["backend_unavailable"].exit_code)
+
+            raise
+
+        device_ids = None
+        device_id = self.rank % DEVICE_COUNT
+        if TEST_CUDA or TEST_XPU:
+            torch.accelerator.set_device_index(device_id)
+        device_ids = [device_id]
+
+        # Execute barrier prior to running test to ensure that every process
+        # has finished initialization and that the following test
+        # immediately exiting due to a skip doesn't cause flakiness.
+        dist.barrier(device_ids=device_ids)
+
+        torch._dynamo.reset()
+        set_rng_seed()
+        self.run_test(test_name, pipe)
+        torch._dynamo.reset()
+
+        dist.barrier(device_ids=device_ids)
+
+        dist.destroy_process_group()
 
     def _train_for_several_steps(
         self,
@@ -1464,135 +1538,6 @@ class FSDPTestMixin:
                 exact_device=True,
                 msg="FSDP did not match DDP",
             )
-
-
-class FSDPTest(FSDPTestMixin, MultiProcessTestCase):
-    def setUp(self):
-        super().setUp()
-        # Set TORCH_NCCL_DESYNC_DEBUG=0 to disable the NCCL `workCleanupLoop()`,
-        # which can cause unit test flakiness:
-        # https://github.com/pytorch/pytorch/issues/90848
-        os.environ["TORCH_NCCL_DESYNC_DEBUG"] = "0"
-        self._spawn_processes()
-
-    @property
-    def world_size(self):
-        return DEVICE_COUNT
-
-    @property
-    def process_group(self):
-        return dist.distributed_c10d._get_default_group()
-
-    @property
-    def destroy_pg_upon_exit(self) -> bool:
-        # Overriding base test class: do not auto destroy PG upon exit.
-        return False
-
-    @property
-    def init_method(self):
-        return f"{FILE_SCHEMA}{self.file_name}"
-
-    @classmethod
-    def _run(cls, rank, test_name, file_name, pipe, **kwargs):  # type: ignore[override]
-        self = cls(test_name)
-        self.rank = rank
-        self.file_name = file_name
-        fake_pg = kwargs.get("fake_pg", False)
-
-        print(f"dist init r={self.rank}, world={self.world_size}")
-        if torch.accelerator.device_count() < self.world_size:
-            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
-
-        # Specify gloo backend to make 'init_process_group()' succeed,
-        # Actual tests will be skipped if there is no enough GPUs.
-        try:
-            if fake_pg:
-                store = torch.testing._internal.distributed.fake_pg.FakeStore()
-                dist.init_process_group(
-                    backend="fake",
-                    world_size=self.world_size,
-                    rank=rank,
-                    store=store,
-                )
-            else:
-                dist.init_process_group(
-                    init_method=self.init_method,
-                    backend=DISTRIBUTED_BACKEND,
-                    world_size=int(self.world_size),
-                    rank=self.rank,
-                )
-        except RuntimeError as e:
-            if "recompile" in e.args[0]:
-                sys.exit(TEST_SKIPS["backend_unavailable"].exit_code)
-
-            raise
-
-        device_ids = None
-        device_id = self.rank % DEVICE_COUNT
-        if TEST_CUDA or TEST_XPU:
-            torch.accelerator.set_device_index(device_id)
-        device_ids = [device_id]
-
-        # Execute barrier prior to running test to ensure that every process
-        # has finished initialization and that the following test
-        # immediately exiting due to a skip doesn't cause flakiness.
-        dist.barrier(device_ids=device_ids)
-
-        torch._dynamo.reset()
-        set_rng_seed()
-        self.run_test(test_name, pipe)
-        torch._dynamo.reset()
-
-        dist.barrier(device_ids=device_ids)
-
-        dist.destroy_process_group()
-
-
-class FSDPTestContinuous(FSDPTestMixin, MultiProcContinuousTest):
-    """
-    FSDP test base class using MultiProcContinuousTest for faster test execution.
-    This class reuses worker processes across tests, reducing process spawn overhead.
-    Use this for tests that don't require fresh process state between tests.
-    """
-
-    world_size: int = DEVICE_COUNT
-
-    @classmethod
-    def backend_str(cls) -> str:
-        return DISTRIBUTED_BACKEND
-
-    @classmethod
-    def device_type(cls) -> str:
-        return DEVICE_TYPE
-
-    @classmethod
-    def _init_pg(cls, rank, world_size, rdvz_file):
-        # Set TORCH_NCCL_DESYNC_DEBUG=0 to disable the NCCL `workCleanupLoop()`,
-        # which can cause unit test flakiness:
-        # https://github.com/pytorch/pytorch/issues/90848
-        os.environ["TORCH_NCCL_DESYNC_DEBUG"] = "0"
-
-        if torch.accelerator.device_count() < world_size:
-            sys.exit(TEST_SKIPS[f"multi-gpu-{world_size}"].exit_code)
-
-        device_id = rank % DEVICE_COUNT
-        if TEST_CUDA or TEST_XPU:
-            torch.accelerator.set_device_index(device_id)
-
-        super()._init_pg(rank, world_size, rdvz_file)
-
-    def setUp(self):
-        super().setUp()
-        torch._dynamo.reset()
-        set_rng_seed()
-
-    def tearDown(self):
-        super().tearDown()
-        torch._dynamo.reset()
-
-    @property
-    def process_group(self):
-        return self.__class__.pg
 
 
 def compiled_fsdp_test(compile_compute_on_module: Optional[type] = None):

@@ -15,7 +15,7 @@ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     DEVICEInitMode,
     FSDPInitMode,
-    FSDPTestContinuous,
+    FSDPTest,
     get_devtype,
     NestedWrappedModule,
 )
@@ -36,7 +36,7 @@ if TEST_WITH_DEV_DBG_ASAN:
     sys.exit(0)
 
 
-class TestPureFP16(FSDPTestContinuous):
+class TestPureFP16(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_pure_fp16_training(self):
         """Tests pure FP16 training, including when the parameter's dtype is

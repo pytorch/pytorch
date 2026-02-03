@@ -24,7 +24,7 @@ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     DEVICEInitMode,
     FSDPInitMode,
-    FSDPTestContinuous,
+    FSDPTest,
     get_devtype,
     NestedWrappedModule,
     TransformerWithSharedParams,
@@ -46,7 +46,7 @@ if TEST_WITH_DEV_DBG_ASAN:
     sys.exit(0)
 
 
-class TestUnshardParamsBase(FSDPTestContinuous):
+class TestUnshardParamsBase(FSDPTest):
     """
     This contains any methods common to both the sharded and non-sharded cases.
     """
