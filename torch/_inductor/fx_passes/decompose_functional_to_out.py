@@ -20,9 +20,10 @@ from typing import Any, Optional
 import torch
 import torch.fx as fx
 from torch._library.functional_to_out import (
-    get_out_variant,
-    has_out_variant,
     FunctionalToOutMapping,
+    get_out_variant,
+    has_any_registered_mappings,
+    has_out_variant,
     TensorSpec,
 )
 
@@ -42,6 +43,11 @@ def decompose_functional_to_out(graph: fx.Graph) -> bool:
     Returns:
         True if any transformations were made
     """
+    # Early exit: if no mappings registered, skip the pass entirely
+    # This ensures zero overhead for users who don't use this feature
+    if not has_any_registered_mappings():
+        return False
+
     modified = False
     nodes_to_transform = []
 
@@ -60,14 +66,10 @@ def decompose_functional_to_out(graph: fx.Graph) -> bool:
         if mapping is None:
             continue
 
-        try:
-            success = _decompose_node(graph, node, mapping)
-            modified |= success
-            if success:
-                log.debug(f"Decomposed {node.target} -> {mapping.out_op}")
-        except Exception as e:
-            log.warning(f"Failed to decompose {node.target}: {e}")
-            continue
+        success = _decompose_node(graph, node, mapping)
+        modified |= success
+        if success:
+            log.debug("Decomposed %s -> %s", node.target, mapping.out_op)
 
     if modified:
         # Clean up the graph
@@ -113,7 +115,7 @@ def _decompose_node(
     # Get output tensor specifications from fake tensors in node metadata
     output_specs = _get_output_specs_from_node(node, mapping)
     if output_specs is None:
-        log.warning(f"Could not infer output specs for {node.target}")
+        log.warning("Could not infer output specs for %s", node.target)
         return False
 
     # Insert allocation nodes before the functional op
@@ -171,7 +173,7 @@ def _get_output_specs_from_node(
             fake_kwargs = {k: _get_fake_val(v) for k, v in node.kwargs.items()}
             return mapping.get_output_specs(fake_args, fake_kwargs)
         except Exception as e:
-            log.debug(f"Could not infer specs from mapping: {e}")
+            log.debug("Could not infer specs from mapping: %s", e)
             return None
 
     # Normalize to tuple
@@ -196,7 +198,7 @@ def _get_output_specs_from_node(
             )
         else:
             # Non-tensor in output tuple
-            log.debug(f"Non-tensor output element: {type(v)}")
+            log.debug("Non-tensor output element: %s", type(v))
 
     return specs if specs else None
 
@@ -239,7 +241,6 @@ def _create_allocation_node(
 
     # Set metadata for the allocation
     # Create a fake tensor with the same spec for downstream passes
-    from torch._subclasses.fake_tensor import FakeTensorMode
     from torch._guards import detect_fake_mode
 
     # Try to get existing fake mode
@@ -315,7 +316,7 @@ def should_decompose_functional_to_out() -> bool:
     """Check if the decompose pass should run based on config."""
     from torch._inductor import config
 
-    return getattr(config, "decompose_functional_to_out", True)
+    return getattr(config, "decompose_functional_to_out", False)
 
 
 def run_decompose_pass(gm: fx.GraphModule) -> fx.GraphModule:

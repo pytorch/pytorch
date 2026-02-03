@@ -1,3 +1,4 @@
+# Owner(s): ["module: inductor"]
 """
 Tests for the functional-to-out variant decomposition pass.
 
@@ -17,11 +18,7 @@ import operator
 import unittest
 
 import torch
-import torch.fx as fx
-from torch.testing._internal.common_utils import (
-    run_tests,
-    TestCase,
-)
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 # Check CUDA availability
@@ -88,9 +85,9 @@ class TestFunctionalToOutRegistry(TestCase):
     def test_register_and_lookup(self):
         """Test basic registration and lookup."""
         from torch._library.functional_to_out import (
-            register_functional_to_out,
             get_out_variant,
             has_out_variant,
+            register_functional_to_out,
         )
 
         func_op, out_op = self._create_test_ops()
@@ -117,9 +114,9 @@ class TestFunctionalToOutRegistry(TestCase):
     def test_unregister(self):
         """Test unregistration."""
         from torch._library.functional_to_out import (
+            has_out_variant,
             register_functional_to_out,
             unregister_functional_to_out,
-            has_out_variant,
         )
 
         func_op, out_op = self._create_test_ops()
@@ -163,10 +160,10 @@ class TestFunctionalToOutRegistry(TestCase):
     def test_clear_registry(self):
         """Test clearing the registry."""
         from torch._library.functional_to_out import (
-            register_functional_to_out,
             clear_registry,
-            has_out_variant,
             get_all_registered_ops,
+            has_out_variant,
+            register_functional_to_out,
         )
 
         func_op, out_op = self._create_test_ops()
@@ -292,9 +289,8 @@ class TestOutputSpecsInference(TestCase):
     def test_infer_single_output(self):
         """Test inferring specs for single output op."""
         from torch._library.functional_to_out import (
-            register_functional_to_out,
             get_out_variant,
-            TensorSpec,
+            register_functional_to_out,
         )
 
         # Create simple ops
@@ -333,8 +329,8 @@ class TestOutputSpecsInference(TestCase):
     def test_infer_multi_output(self):
         """Test inferring specs for multiple output op."""
         from torch._library.functional_to_out import (
-            register_functional_to_out,
             get_out_variant,
+            register_functional_to_out,
         )
 
         func_op, out_op = self._create_multi_output_ops()
@@ -395,10 +391,10 @@ class TestDecomposeFunctionalToOut(TestCase):
 
     def test_decompose_single_output(self):
         """Test decomposition of single-output functional op."""
-        from torch._library.functional_to_out import register_functional_to_out
         from torch._inductor.fx_passes.decompose_functional_to_out import (
             decompose_functional_to_out,
         )
+        from torch._library.functional_to_out import register_functional_to_out
 
         func_op, out_op = self._create_simple_ops()
 
@@ -446,10 +442,10 @@ class TestDecomposeFunctionalToOut(TestCase):
 
     def test_decompose_multi_output(self):
         """Test decomposition of multi-output functional op."""
-        from torch._library.functional_to_out import register_functional_to_out
         from torch._inductor.fx_passes.decompose_functional_to_out import (
             decompose_functional_to_out,
         )
+        from torch._library.functional_to_out import register_functional_to_out
 
         # Create multi-output ops
         @torch.library.custom_op("test_f2o::dual_func", mutates_args=())
@@ -549,13 +545,10 @@ class TestDecomposeFunctionalToOutCUDA(TestCase):
     @requires_cuda()
     def test_cuda_decomposition(self):
         """Test decomposition preserves CUDA device."""
-        from torch._library.functional_to_out import (
-            register_functional_to_out,
-            TensorSpec,
-        )
         from torch._inductor.fx_passes.decompose_functional_to_out import (
             decompose_functional_to_out,
         )
+        from torch._library.functional_to_out import register_functional_to_out
 
         @torch.library.custom_op("test_f2o::cuda_func", mutates_args=())
         def cuda_func(x: torch.Tensor) -> torch.Tensor:
@@ -680,10 +673,10 @@ class TestThreeOutputDecomposition(TestCase):
 
     def test_three_outputs(self):
         """Test decomposition with three outputs."""
-        from torch._library.functional_to_out import register_functional_to_out
         from torch._inductor.fx_passes.decompose_functional_to_out import (
             decompose_functional_to_out,
         )
+        from torch._library.functional_to_out import register_functional_to_out
 
         @torch.library.custom_op("test_f2o::triple_func", mutates_args=())
         def triple_func(
@@ -771,8 +764,8 @@ class TestEdgeCases(TestCase):
     def test_different_dtypes(self):
         """Test that different output dtypes are handled correctly."""
         from torch._library.functional_to_out import (
-            register_functional_to_out,
             get_out_variant,
+            register_functional_to_out,
         )
 
         @torch.library.custom_op("test_f2o::mixed_dtype_func", mutates_args=())
@@ -830,10 +823,10 @@ class TestGraphInspection(TestCase):
 
     def test_metadata_preserved(self):
         """Test that metadata is preserved in transformed nodes."""
-        from torch._library.functional_to_out import register_functional_to_out
         from torch._inductor.fx_passes.decompose_functional_to_out import (
             decompose_functional_to_out,
         )
+        from torch._library.functional_to_out import register_functional_to_out
 
         @torch.library.custom_op("test_f2o::meta_func", mutates_args=())
         def meta_func(x: torch.Tensor) -> torch.Tensor:
@@ -901,12 +894,19 @@ class TestConfigOption(TestCase):
 
         self.assertTrue(hasattr(config, "decompose_functional_to_out"))
 
+    def test_config_default_is_false(self):
+        """Test that the config is disabled by default (opt-in)."""
+        from torch._inductor import config
+
+        # Default should be False - users must explicitly enable
+        self.assertFalse(config.decompose_functional_to_out)
+
     def test_should_decompose_check(self):
         """Test the should_decompose_functional_to_out helper."""
+        from torch._inductor import config
         from torch._inductor.fx_passes.decompose_functional_to_out import (
             should_decompose_functional_to_out,
         )
-        from torch._inductor import config
 
         original = config.decompose_functional_to_out
 
@@ -939,8 +939,8 @@ class TestBuildOutArgs(TestCase):
 
         # Create a mock mapping
         mapping = FunctionalToOutMapping(
-            functional_op=None,  # type: ignore
-            out_op=None,  # type: ignore
+            functional_op=None,  # type: ignore[arg-type]
+            out_op=None,  # type: ignore[arg-type]
             out_arg_positions=(0,),
         )
 
@@ -961,8 +961,8 @@ class TestBuildOutArgs(TestCase):
         from torch._library.functional_to_out import FunctionalToOutMapping
 
         mapping = FunctionalToOutMapping(
-            functional_op=None,  # type: ignore
-            out_op=None,  # type: ignore
+            functional_op=None,  # type: ignore[arg-type]
+            out_op=None,  # type: ignore[arg-type]
             out_arg_positions=(0, 1),
         )
 
@@ -997,8 +997,8 @@ class TestFunctionalToOutDecorator(TestCase):
         """Test decorator when applied to an OpOverload directly."""
         from torch._library.functional_to_out import (
             functional_to_out,
-            has_out_variant,
             get_out_variant,
+            has_out_variant,
         )
 
         # First create the out variant
@@ -1039,8 +1039,8 @@ class TestFunctionalToOutDecorator(TestCase):
         """Test decorator with string op name for out variant."""
         from torch._library.functional_to_out import (
             functional_to_out,
-            has_out_variant,
             get_out_variant,
+            has_out_variant,
         )
 
         # Create out variant first
@@ -1132,8 +1132,8 @@ class TestCustomOutputSpecsFn(TestCase):
     def test_custom_output_specs_fn(self):
         """Test registration with custom output_specs_fn."""
         from torch._library.functional_to_out import (
-            register_functional_to_out,
             get_out_variant,
+            register_functional_to_out,
             TensorSpec,
         )
 
@@ -1186,8 +1186,8 @@ class TestCustomOutputSpecsFn(TestCase):
     def test_custom_output_specs_fn_multi_output(self):
         """Test custom output_specs_fn with multiple outputs."""
         from torch._library.functional_to_out import (
-            register_functional_to_out,
             get_out_variant,
+            register_functional_to_out,
             TensorSpec,
         )
 
@@ -1252,8 +1252,8 @@ class TestDecomposeFunctionalCall(TestCase):
     def test_decompose_functional_call_basic(self):
         """Test basic decompose_functional_call usage."""
         from torch._library.functional_to_out import (
-            register_functional_to_out,
             decompose_functional_call,
+            register_functional_to_out,
         )
 
         @torch.library.custom_op("test_f2o::decompose_func", mutates_args=())
@@ -1292,8 +1292,8 @@ class TestDecomposeFunctionalCall(TestCase):
     def test_decompose_functional_call_multi_output(self):
         """Test decompose_functional_call with multiple outputs."""
         from torch._library.functional_to_out import (
-            register_functional_to_out,
             decompose_functional_call,
+            register_functional_to_out,
         )
 
         @torch.library.custom_op("test_f2o::decompose_multi_func", mutates_args=())
@@ -1362,8 +1362,8 @@ class TestDecomposeFunctionalCall(TestCase):
     def test_decompose_functional_call_with_kwargs(self):
         """Test decompose_functional_call with keyword arguments."""
         from torch._library.functional_to_out import (
-            register_functional_to_out,
             decompose_functional_call,
+            register_functional_to_out,
         )
 
         @torch.library.custom_op("test_f2o::kwargs_func", mutates_args=())
@@ -1414,10 +1414,10 @@ class TestErrorHandling(TestCase):
 
     def test_decompose_graceful_failure(self):
         """Test that decomposition failures are handled gracefully."""
-        from torch._library.functional_to_out import register_functional_to_out
         from torch._inductor.fx_passes.decompose_functional_to_out import (
             decompose_functional_to_out,
         )
+        from torch._library.functional_to_out import register_functional_to_out
 
         @torch.library.custom_op("test_f2o::fail_func", mutates_args=())
         def fail_func(x: torch.Tensor) -> torch.Tensor:
@@ -1459,22 +1459,22 @@ class TestErrorHandling(TestCase):
         from torch._library.functional_to_out import FunctionalToOutMapping
 
         mapping_single = FunctionalToOutMapping(
-            functional_op=None,  # type: ignore
-            out_op=None,  # type: ignore
+            functional_op=None,  # type: ignore[arg-type]
+            out_op=None,  # type: ignore[arg-type]
             out_arg_positions=(0,),
         )
         self.assertEqual(mapping_single.num_outputs, 1)
 
         mapping_double = FunctionalToOutMapping(
-            functional_op=None,  # type: ignore
-            out_op=None,  # type: ignore
+            functional_op=None,  # type: ignore[arg-type]
+            out_op=None,  # type: ignore[arg-type]
             out_arg_positions=(0, 1),
         )
         self.assertEqual(mapping_double.num_outputs, 2)
 
         mapping_triple = FunctionalToOutMapping(
-            functional_op=None,  # type: ignore
-            out_op=None,  # type: ignore
+            functional_op=None,  # type: ignore[arg-type]
+            out_op=None,  # type: ignore[arg-type]
             out_arg_positions=(0, 1, 2),
         )
         self.assertEqual(mapping_triple.num_outputs, 3)
@@ -1496,8 +1496,8 @@ class TestInferOutputSpecsFromFake(TestCase):
     def test_infer_specs_creates_fake_mode(self):
         """Test that spec inference creates fake mode when not present."""
         from torch._library.functional_to_out import (
-            register_functional_to_out,
             get_out_variant,
+            register_functional_to_out,
         )
 
         @torch.library.custom_op("test_f2o::infer_func", mutates_args=())
@@ -1535,8 +1535,8 @@ class TestInferOutputSpecsFromFake(TestCase):
     def test_infer_specs_with_existing_fake_mode(self):
         """Test spec inference when already in fake mode."""
         from torch._library.functional_to_out import (
-            register_functional_to_out,
             get_out_variant,
+            register_functional_to_out,
         )
         from torch._subclasses.fake_tensor import FakeTensorMode
 

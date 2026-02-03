@@ -1,3 +1,4 @@
+# Owner(s): ["module: inductor"]
 """
 Tests for functional → out variant decomposition.
 
@@ -8,34 +9,29 @@ This module tests:
 4. CUDAGraph compatibility (when CUDA available)
 """
 
-import operator
 import unittest
-from typing import Any
-from unittest.mock import patch
 
 import torch
 import torch.fx as fx
 from torch import Tensor
-
+from torch._inductor.fx_passes.decompose_functional_to_out import (
+    decompose_functional_to_out,
+)
 
 # Import the modules we're testing
 from torch._library.functional_to_out import (
-    register_functional_to_out,
-    unregister_functional_to_out,
+    clear_registry,
+    FunctionalToOutMapping,
     get_out_variant,
     has_out_variant,
-    clear_registry,
+    register_functional_to_out,
     TensorSpec,
-    FunctionalToOutMapping,
+    unregister_functional_to_out,
 )
-from torch._inductor.fx_passes.decompose_functional_to_out import (
-    decompose_functional_to_out,
-    _decompose_node,
-    _get_output_specs_from_node,
-)
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
-class TestRegistryAPI(unittest.TestCase):
+class TestRegistryAPI(TestCase):
     """Tests for the functional→out registration API."""
 
     def setUp(self):
@@ -50,6 +46,7 @@ class TestRegistryAPI(unittest.TestCase):
 
     def _setup_test_ops(self):
         """Define test custom ops."""
+
         # Functional variant
         @torch.library.custom_op("test_f2o::add_scale", mutates_args=())
         def add_scale_functional(x: Tensor, y: Tensor, scale: float) -> Tensor:
@@ -85,9 +82,7 @@ class TestRegistryAPI(unittest.TestCase):
         @torch.library.custom_op(
             "test_f2o::split_quant_out", mutates_args=("out_quant", "out_scale")
         )
-        def split_quant_out(
-            out_quant: Tensor, out_scale: Tensor, x: Tensor
-        ) -> None:
+        def split_quant_out(out_quant: Tensor, out_scale: Tensor, x: Tensor) -> None:
             out_quant.copy_((x * 127).to(torch.int8))
             out_scale.copy_(x.abs().max(dim=-1, keepdim=True).values)
 
@@ -98,7 +93,6 @@ class TestRegistryAPI(unittest.TestCase):
     def _cleanup_test_ops(self):
         """Clean up test ops (if needed)."""
         # torch.library ops are automatically cleaned up
-        pass
 
     def test_register_basic(self):
         """Test basic registration."""
@@ -169,7 +163,7 @@ class TestRegistryAPI(unittest.TestCase):
         self.assertFalse(has_out_variant(torch.ops.test_f2o.add_scale))
 
 
-class TestTensorSpec(unittest.TestCase):
+class TestTensorSpec(TestCase):
     """Tests for TensorSpec."""
 
     def test_allocate(self):
@@ -198,7 +192,7 @@ class TestTensorSpec(unittest.TestCase):
         self.assertTrue(tensor.requires_grad)
 
 
-class TestOutputSpecsInference(unittest.TestCase):
+class TestOutputSpecsInference(TestCase):
     """Tests for output specs inference from fake tensors."""
 
     def setUp(self):
@@ -210,6 +204,7 @@ class TestOutputSpecsInference(unittest.TestCase):
 
     def _setup_test_ops(self):
         """Set up test ops."""
+
         @torch.library.custom_op("test_f2o_infer::simple_op", mutates_args=())
         def simple_op(x: Tensor) -> Tensor:
             return x * 2
@@ -242,7 +237,7 @@ class TestOutputSpecsInference(unittest.TestCase):
         self.assertEqual(specs[0].dtype, torch.float32)
 
 
-class TestDecomposePass(unittest.TestCase):
+class TestDecomposePass(TestCase):
     """Tests for the Inductor decompose pass."""
 
     def setUp(self):
@@ -254,6 +249,7 @@ class TestDecomposePass(unittest.TestCase):
 
     def _setup_test_ops(self):
         """Set up test ops for pass testing."""
+
         @torch.library.custom_op("test_f2o_pass::mul2", mutates_args=())
         def mul2_functional(x: Tensor) -> Tensor:
             return x * 2
@@ -319,13 +315,14 @@ class TestDecomposePass(unittest.TestCase):
         nodes = list(graph.nodes)
         node_targets = [n.target for n in nodes if n.op == "call_function"]
 
-        # Should have: torch.empty, mul2_out, torch.add
+        # Should have: torch.empty, mul2_out.default, torch.add
         self.assertIn(torch.empty, node_targets)
-        self.assertIn(torch.ops.test_f2o_pass.mul2_out, node_targets)
+        # The out_op is resolved to its .default overload
+        self.assertIn(torch.ops.test_f2o_pass.mul2_out.default, node_targets)
         self.assertNotIn(torch.ops.test_f2o_pass.mul2, node_targets)
 
 
-class TestEndToEnd(unittest.TestCase):
+class TestEndToEnd(TestCase):
     """End-to-end tests with torch.compile."""
 
     def setUp(self):
@@ -337,6 +334,7 @@ class TestEndToEnd(unittest.TestCase):
 
     def _setup_test_ops(self):
         """Set up realistic test ops."""
+
         # Functional variant that mimics a quantization op
         @torch.library.custom_op("test_f2o_e2e::quant", mutates_args=())
         def quant_functional(x: Tensor, scale: Tensor) -> tuple[Tensor, Tensor]:
@@ -419,7 +417,7 @@ class TestEndToEnd(unittest.TestCase):
 
 
 @unittest.skipUnless(torch.cuda.is_available(), "CUDA not available")
-class TestCUDAGraphCompatibility(unittest.TestCase):
+class TestCUDAGraphCompatibility(TestCase):
     """Tests for CUDAGraph compatibility."""
 
     def setUp(self):
@@ -545,8 +543,4 @@ def demo_basic_usage():
 
 
 if __name__ == "__main__":
-    # Run demo
-    demo_basic_usage()
-
-    # Run tests
-    unittest.main(verbosity=2)
+    run_tests()

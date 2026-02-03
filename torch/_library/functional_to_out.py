@@ -26,10 +26,10 @@ Example usage:
     ... )
 """
 
-from dataclasses import dataclass
-from collections.abc import Callable, Sequence
-from typing import Optional, Any, Union
 import logging
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
+from typing import Any, Optional, Union
 
 import torch
 from torch._ops import OpOverload
@@ -74,12 +74,6 @@ class FunctionalToOutMapping:
     out_arg_positions: tuple[int, ...]
     output_specs_fn: Optional[Callable[..., list[TensorSpec]]] = None
 
-    def __post_init__(self):
-        # Validate that out_arg_positions length matches expected outputs
-        if self.output_specs_fn is None:
-            # Will use fake tensor mode to infer - validation happens at runtime
-            pass
-
     @property
     def num_outputs(self) -> int:
         """Number of output tensors."""
@@ -108,8 +102,8 @@ class FunctionalToOutMapping:
         self, args: tuple[Any, ...], kwargs: dict[str, Any]
     ) -> list[TensorSpec]:
         """Infer output specs using fake tensor mode."""
-        from torch._subclasses.fake_tensor import FakeTensorMode
         from torch._guards import detect_fake_mode
+        from torch._subclasses.fake_tensor import FakeTensorMode
 
         # Check if we're already in a fake mode
         existing_fake_mode = detect_fake_mode(args)
@@ -150,7 +144,7 @@ class FunctionalToOutMapping:
                 )
             else:
                 # Non-tensor output - shouldn't happen for our use case
-                log.warning(f"Non-tensor output in functional op: {type(t)}")
+                log.warning("Non-tensor output in functional op: %s", type(t))
 
         return specs
 
@@ -183,6 +177,19 @@ class FunctionalToOutMapping:
 # =============================================================================
 
 _FUNCTIONAL_TO_OUT_REGISTRY: dict[OpOverload, FunctionalToOutMapping] = {}
+
+
+def has_any_registered_mappings() -> bool:
+    """
+    Check if any functional-to-out mappings are registered.
+
+    This is used for early exit optimization in the decompose pass.
+    If no mappings are registered, the pass can skip entirely.
+
+    Returns:
+        True if at least one mapping is registered
+    """
+    return len(_FUNCTIONAL_TO_OUT_REGISTRY) > 0
 
 
 def register_functional_to_out(
@@ -237,7 +244,7 @@ def register_functional_to_out(
     )
 
     _FUNCTIONAL_TO_OUT_REGISTRY[functional_op] = mapping
-    log.debug(f"Registered functional→out mapping: {functional_op} → {out_op}")
+    log.debug("Registered functional→out mapping: %s → %s", functional_op, out_op)
 
 
 def unregister_functional_to_out(functional_op: OpOverload) -> bool:
@@ -347,7 +354,7 @@ def functional_to_out(
             return func_or_op
 
         # Resolve out_op string to OpOverload if needed
-        resolved_out_op = out_op
+        resolved_out_op: OpOverload
         if isinstance(out_op, str):
             # Parse "namespace::op_name" format
             parts = out_op.split("::")
@@ -356,6 +363,8 @@ def functional_to_out(
                 resolved_out_op = getattr(getattr(torch.ops, ns), name)
             else:
                 raise ValueError(f"Invalid op name format: {out_op}")
+        else:
+            resolved_out_op = out_op
 
         register_functional_to_out(
             functional_op=functional_op,
