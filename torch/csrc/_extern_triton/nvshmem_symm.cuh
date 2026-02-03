@@ -373,7 +373,8 @@ __device__ void nvshmem_lsa_barrier_wait_impl(
 
 // =============================================================================
 // GIN (GPU-Initiated Networking) BARRIER PRIMITIVES
-// These barrier primitives target the full team (all ranks), not just LSA domain
+// These barrier primitives target the full team (all ranks), not just LSA
+// domain
 // =============================================================================
 
 /**
@@ -1107,7 +1108,7 @@ __device__ int32_t nvshmem_symm_put_signal_async(
       dest_rank,
       signal_index,
       static_cast<uint64_t>(signal_value),
-    signal_op);
+      signal_op);
   return 0;
 }
 

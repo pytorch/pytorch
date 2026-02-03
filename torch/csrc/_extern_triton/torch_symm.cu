@@ -300,7 +300,8 @@ symm_lsa_barrier_wait(int64_t ctx_ptr, int32_t barrier_index) {
 
 // =============================================================================
 // GIN (GPU-Initiated Networking) BARRIER PRIMITIVES
-// These barrier primitives target the full team (all ranks), not just LSA domain
+// These barrier primitives target the full team (all ranks), not just LSA
+// domain
 // =============================================================================
 
 /**

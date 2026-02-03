@@ -76,14 +76,72 @@ The abstraction layer exposes the following unified primitives to kernel authors
 
 ### 2.2 Synchronization Primitives
 
+The barrier primitives use a `scope` parameter to control which peers participate in synchronization:
+
+| Scope        | Value | Description                                               |
+|--------------|-------|-----------------------------------------------------------|
+| `SCOPE_LSA`  | 0     | LSA (Local Symmetric Access) domain only (NVLink peers)   |
+| `SCOPE_WORLD`| 1     | All ranks in the team (full world via GIN)                |
+
+#### Barrier Primitives
+
+| Primitive                | Purpose                                                        |
+|--------------------------|----------------------------------------------------------------|
+| `symm_barrier`           | Barrier with configurable scope (combined arrive + wait)       |
+| `symm_barrier_arrive`    | Signal arrival at barrier with configurable scope (split-phase)|
+| `symm_barrier_wait`      | Wait for peers to arrive at barrier with configurable scope    |
+
+All barrier primitives accept a `scope` parameter to select between LSA-only and full-team synchronization.
+
+**`symm_barrier`** - Combined barrier (arrive + wait in one call):
+
+```python
+@triton.jit
+def my_kernel(ctx_ptr, data_ptr, backend_hint: tl.constexpr):
+    # Write data to local buffer
+    tl.store(data_ptr + offsets, data, mask=mask)
+
+    # LSA-only barrier (faster, NVLink peers only)
+    symm_barrier(ctx_ptr, scope=SCOPE_LSA, backend=backend_hint)
+
+    # Full team barrier (all ranks, including cross-node via GIN)
+    symm_barrier(ctx_ptr, scope=SCOPE_WORLD, backend=backend_hint)
+```
+
+**Split-phase barriers** (`symm_barrier_arrive` and `symm_barrier_wait`) allow overlapping
+computation with synchronization:
+
+```python
+@triton.jit
+def my_kernel(ctx_ptr, data_ptr, backend_hint: tl.constexpr):
+    # Write data to local buffer
+    tl.store(data_ptr + offsets, data, mask=mask)
+
+    # Signal arrival with SCOPE_LSA (NVLink-connected peers only)
+    symm_barrier_arrive(ctx_ptr, barrier_index=0, scope=SCOPE_LSA, backend=backend_hint)
+
+    # Do independent computation while waiting
+    result = compute_something_else()
+
+    # Wait for all LSA peers before reading their data
+    symm_barrier_wait(ctx_ptr, barrier_index=0, scope=SCOPE_LSA, backend=backend_hint)
+
+    # Now safe to read peer data
+    peer_data = tl.load(peer_ptr + offsets)
+```
+
+For full team synchronization (including cross-node via GIN), use `scope=SCOPE_WORLD`:
+
+```python
+    # Signal arrival with SCOPE_WORLD (all ranks in team)
+    symm_barrier_arrive(ctx_ptr, barrier_index=0, scope=SCOPE_WORLD, backend=backend_hint)
+    symm_barrier_wait(ctx_ptr, barrier_index=0, scope=SCOPE_WORLD, backend=backend_hint)
+```
+
+#### Other Synchronization Primitives
+
 | Primitive                  | Purpose                                                        |
 |----------------------------|----------------------------------------------------------------|
-| `symm_lsa_barrier`         | Barrier within the LSA (Local Symmetric Access) domain only    |
-| `symm_lsa_barrier_arrive`  | Signal arrival at LSA barrier (split-phase, non-blocking)      |
-| `symm_lsa_barrier_wait`    | Wait for all LSA peers to arrive at barrier (split-phase)      |
-| `symm_barrier`             | Barrier across all ranks in the communicator                   |
-| `symm_barrier_arrive`      | Signal arrival at GIN barrier (full team, split-phase)         |
-| `symm_barrier_wait`        | Wait for all team peers to arrive at GIN barrier (split-phase) |
 | `symm_fence`               | Memory fence with configurable scope (CTA/GPU/system)          |
 | `symm_quiet`               | Ensure all prior one-sided operations have completed           |
 

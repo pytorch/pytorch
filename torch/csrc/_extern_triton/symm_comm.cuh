@@ -584,9 +584,9 @@ struct NVSHMEMSymmContext : public SymmContext {
   uint64_t* lsa_barrier_epoch;
 
   // GIN barrier epoch tracking (symmetric address)
-  // Similar to lsa_barrier_epoch but for GIN (GPU-Initiated Networking) barriers
-  // that synchronize across all ranks (not just LSA domain).
-  // Used by symm_barrier_arrive/wait for full team synchronization.
+  // Similar to lsa_barrier_epoch but for GIN (GPU-Initiated Networking)
+  // barriers that synchronize across all ranks (not just LSA domain). Used by
+  // symm_barrier_arrive/wait for full team synchronization.
   uint64_t* gin_barrier_epoch;
 
   // Pointer to the associated SymmTeam for this context

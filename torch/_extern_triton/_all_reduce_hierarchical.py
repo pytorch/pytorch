@@ -100,6 +100,12 @@ if TRITON_AVAILABLE:
                 backend_hint: Backend hint (0=DEFAULT, 2=NVSHMEM)
             """
             # -----------------------------------------------------------------
+            # Barrier scope constants (defined locally for Triton JIT compatibility)
+            # -----------------------------------------------------------------
+            SCOPE_LSA: tl.constexpr = 0  # LSA domain only (NVLink peers)
+            SCOPE_WORLD: tl.constexpr = 1  # All ranks in team
+
+            # -----------------------------------------------------------------
             # 1. Topology & Identity
             # -----------------------------------------------------------------
             pid = tl.program_id(0)
@@ -126,7 +132,8 @@ if TRITON_AVAILABLE:
             p_scratch = ptr_scratch.to(tl.pointer_type(tl.float32))
 
             # Initial barrier to ensure all ranks have data ready
-            symm_barrier(ctx_ptr, backend_hint)
+            # Use SCOPE_WORLD to synchronize all ranks in the team
+            symm_barrier(ctx_ptr, scope=SCOPE_WORLD, backend=backend_hint)
 
             # -----------------------------------------------------------------
             # Phase 1: Intra-LSA Reduce-Scatter (Pull Model)
@@ -160,8 +167,10 @@ if TRITON_AVAILABLE:
                 # Store reduced result back to local buffer
                 tl.store(p_data + offsets, acc, mask=mask)
 
-            # Barrier after reduce-scatter
-            symm_barrier(ctx_ptr, backend_hint)
+            # Barrier after reduce-scatter - all ranks must synchronize
+            # Use SCOPE_WORLD because even though Phase 1 only pulls from LSA peers,
+            # all ranks in the team must complete Phase 1 before Phase 3 broadcast
+            symm_barrier(ctx_ptr, scope=SCOPE_WORLD, backend=backend_hint)
 
             # -----------------------------------------------------------------
             # Phase 2: Inter-Domain Ring All-Reduce
@@ -242,7 +251,8 @@ if TRITON_AVAILABLE:
                         tl.store(p_data + offsets, local_val + recv_val, mask=mask)
 
                 # Barrier after reduce-scatter across nodes
-                symm_barrier(ctx_ptr, backend_hint)
+                # Use SCOPE_WORLD since Phase 2 involves all nodes
+                symm_barrier(ctx_ptr, scope=SCOPE_WORLD, backend=backend_hint)
 
                 # Phase 2b: Ring All-Gather across nodes
                 # Each step, send the fully reduced sub_chunk to next node
@@ -307,7 +317,8 @@ if TRITON_AVAILABLE:
                         tl.store(p_data + offsets, val, mask=mask)
 
                 # Barrier after all-gather across nodes
-                symm_barrier(ctx_ptr, backend_hint)
+                # Use SCOPE_WORLD since Phase 2 involves all nodes
+                symm_barrier(ctx_ptr, scope=SCOPE_WORLD, backend=backend_hint)
 
             # -----------------------------------------------------------------
             # Phase 3: Intra-LSA Broadcast (Multicast Push with Unicast Fallback)
@@ -358,7 +369,8 @@ if TRITON_AVAILABLE:
                         tl.store(peer_ptr + offsets, val, mask=mask)
 
             # Final barrier to ensure all broadcasts complete
-            symm_barrier(ctx_ptr, backend_hint)
+            # Use SCOPE_WORLD to ensure all ranks have received their data
+            symm_barrier(ctx_ptr, scope=SCOPE_WORLD, backend=backend_hint)
 
         return all_reduce_hierarchical
 

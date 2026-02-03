@@ -103,11 +103,11 @@ if TRITON_AVAILABLE:
         DTYPE_FLOAT32,
         REDUCE_OP_SUM,
         requires_torch_symm,
+        SCOPE_LSA,
+        SCOPE_WORLD,
         symm_all_reduce,
         symm_barrier_arrive,
         symm_barrier_wait,
-        symm_lsa_barrier_arrive,
-        symm_lsa_barrier_wait,
         symm_lsa_ptr,
         symm_team_rank,
         symm_team_size,
@@ -172,26 +172,29 @@ if TRITON_AVAILABLE:
         BACKEND_NVSHMEM
     )
 
-    # Test kernel for split-phase GIN barrier (arrive/wait) - full team sync
+    # Test kernel for split-phase barrier with configurable scope
     @requires_torch_symm(backend=BACKEND_NVSHMEM)
     @triton.jit
-    def symm_barrier_arrive_wait_test_kernel(
+    def symm_barrier_test_kernel(
         ctx_ptr,
         src_ptr,
         dst_ptr,
         barrier_index: tl.constexpr,
+        scope: tl.constexpr,
+        value_offset: tl.constexpr,
         backend_hint: tl.constexpr,
     ):
         """
-        Test kernel for split-phase GIN barrier arrive/wait primitives.
+        Test kernel for split-phase barrier arrive/wait with configurable scope.
 
-        GIN (GPU-Initiated Networking) barriers synchronize ALL ranks in the team,
-        not just the LSA (NVLink-connected) peers. This is for cross-node sync.
+        Uses the unified symm_barrier_arrive/wait with the specified scope to
+        synchronize either LSA domain peers (SCOPE_LSA=0) or all ranks in the
+        team (SCOPE_WORLD=1).
 
         Pattern:
-        1. Each rank writes a unique value to its source buffer
-        2. Signal arrival (data ready) via GIN barrier
-        3. Wait for all team peers to arrive
+        1. Each rank writes a unique value (rank + value_offset) to its source buffer
+        2. Signal arrival (data ready) via symm_barrier_arrive with specified scope
+        3. Wait for peers to arrive via symm_barrier_wait with specified scope
         4. Read peer data via P2P and store in destination buffer
 
         Args:
@@ -199,74 +202,25 @@ if TRITON_AVAILABLE:
             src_ptr: Pointer to source symmetric buffer
             dst_ptr: Pointer to destination symmetric buffer
             barrier_index: Barrier index to use
+            scope: Barrier scope (0=SCOPE_LSA, 1=SCOPE_WORLD)
+            value_offset: Offset to add to rank for unique value identification
             backend_hint: Backend hint (2 for NVSHMEM)
         """
         my_pe = symm_team_rank(ctx_ptr, backend=backend_hint)
         n_pes = symm_team_size(ctx_ptr, backend=backend_hint)
 
-        # Write unique value to source buffer (my_pe + 200 to distinguish from LSA test)
+        # Write unique value to source buffer (my_pe + value_offset)
         p_src = src_ptr.to(tl.pointer_type(tl.int32))
-        tl.store(p_src, my_pe + 200)
+        tl.store(p_src, my_pe + value_offset)
 
-        # Signal arrival via GIN barrier - data is ready to be read by all team peers
-        symm_barrier_arrive(ctx_ptr, barrier_index, backend=backend_hint)
+        # Signal arrival via barrier with specified scope
+        symm_barrier_arrive(ctx_ptr, barrier_index, scope=scope, backend=backend_hint)
 
-        # Wait for all team peers to arrive
-        symm_barrier_wait(ctx_ptr, barrier_index, backend=backend_hint)
+        # Wait for peers to arrive (scope determines which peers)
+        symm_barrier_wait(ctx_ptr, barrier_index, scope=scope, backend=backend_hint)
 
         # Read peer data via P2P (next PE in ring)
         next_pe = (my_pe + 1) % n_pes
-        peer_src_ptr = symm_lsa_ptr(ctx_ptr, src_ptr, next_pe, backend=backend_hint)
-        p_peer = peer_src_ptr.to(tl.pointer_type(tl.int32))
-        peer_val = tl.load(p_peer)
-
-        # Store received value to destination
-        p_dst = dst_ptr.to(tl.pointer_type(tl.int32))
-        tl.store(p_dst, peer_val)
-
-    # Test kernel for split-phase LSA barrier (arrive/wait)
-    @requires_torch_symm(backend=BACKEND_NVSHMEM)
-    @triton.jit
-    def symm_lsa_barrier_arrive_wait_test_kernel(
-        ctx_ptr,
-        src_ptr,
-        dst_ptr,
-        barrier_index: tl.constexpr,
-        backend_hint: tl.constexpr,
-    ):
-        """
-        Test kernel for split-phase LSA barrier arrive/wait primitives.
-
-        Pattern:
-        1. Each rank writes a unique value to its source buffer
-        2. Signal arrival (data ready)
-        3. Wait for all peers to arrive
-        4. Read peer data via P2P and store in destination buffer
-
-        Args:
-            ctx_ptr: Pointer to SymmContext (team is obtained from context internally)
-            src_ptr: Pointer to source symmetric buffer
-            dst_ptr: Pointer to destination symmetric buffer
-            barrier_index: Barrier index to use
-            backend_hint: Backend hint (2 for NVSHMEM)
-        """
-        # Use symm_team primitives to get rank and world size from context
-        my_pe = symm_team_rank(ctx_ptr, backend=backend_hint)
-        n_pes = symm_team_size(ctx_ptr, backend=backend_hint)
-
-        # Write unique value to source buffer (my_pe + 100)
-        p_src = src_ptr.to(tl.pointer_type(tl.int32))
-        tl.store(p_src, my_pe + 100)
-
-        # Signal arrival - data is ready to be read by peers
-        symm_lsa_barrier_arrive(ctx_ptr, barrier_index, backend=backend_hint)
-
-        # Wait for all peers to arrive
-        symm_lsa_barrier_wait(ctx_ptr, barrier_index, backend=backend_hint)
-
-        # Read peer data via P2P (next PE in ring)
-        next_pe = (my_pe + 1) % n_pes
-        # Use symm_lsa_ptr to get a pointer to peer's symmetric buffer
         peer_src_ptr = symm_lsa_ptr(ctx_ptr, src_ptr, next_pe, backend=backend_hint)
         p_peer = peer_src_ptr.to(tl.pointer_type(tl.int32))
         peer_val = tl.load(p_peer)
@@ -494,19 +448,20 @@ class TestTorchSymmTriton(MultiProcessTestCase):
     @skip_if_lt_x_gpu(2)
     @requires_triton
     @requires_nvshmem
-    def test_nvshmem_lsa_barrier_arrive_wait(self):
+    def test_nvshmem_barrier_scope_lsa(self):
         """
-        Test split-phase LSA barrier with arrive() and wait() primitives.
+        Test split-phase barrier with SCOPE_LSA (LSA domain only).
 
-        This test verifies that:
-        1. symm_lsa_barrier_arrive() correctly signals arrival to all peers
-        2. symm_lsa_barrier_wait() correctly waits for all peers to arrive
+        This test verifies that the unified symm_barrier_arrive/wait primitives
+        work correctly with scope=SCOPE_LSA:
+        1. symm_barrier_arrive(scope=SCOPE_LSA) correctly signals arrival to LSA peers
+        2. symm_barrier_wait(scope=SCOPE_LSA) correctly waits for LSA peers to arrive
         3. After wait returns, peer data written before arrive() is visible
 
         Pattern:
         - Each rank writes (rank + 100) to its source buffer
-        - Signal arrival via symm_lsa_barrier_arrive()
-        - Wait for all peers via symm_lsa_barrier_wait()
+        - Signal arrival via symm_barrier_arrive(scope=SCOPE_LSA)
+        - Wait for all LSA peers via symm_barrier_wait(scope=SCOPE_LSA)
         - Read next peer's value via P2P load
         - Verify received value is (next_rank + 100)
         """
@@ -542,14 +497,16 @@ class TestTorchSymmTriton(MultiProcessTestCase):
 
             print(f"[Rank {self.rank}] Launching kernel with ctx_ptr={ctx_ptr}, src_ptr={src_ptr}, dst_ptr={dst_ptr}")
 
-            # Launch kernel with split-phase barrier
+            # Launch kernel with split-phase barrier using SCOPE_LSA
             # Team is obtained from context internally, no need to pass it
             # Use cooperative grid for NVSHMEM operations
-            symm_lsa_barrier_arrive_wait_test_kernel[(1,)](
+            symm_barrier_test_kernel[(1,)](
                 ctx_ptr,
                 src_ptr,
                 dst_ptr,
                 barrier_index=0,
+                scope=SCOPE_LSA,
+                value_offset=100,
                 backend_hint=BACKEND_NVSHMEM,
                 launch_cooperative_grid=True,
                 num_ctas=1,
@@ -582,22 +539,23 @@ class TestTorchSymmTriton(MultiProcessTestCase):
     @skip_if_lt_x_gpu(2)
     @requires_triton
     @requires_nvshmem
-    def test_nvshmem_barrier_arrive_wait(self):
+    def test_nvshmem_barrier_scope_world(self):
         """
-        Test split-phase GIN barrier with arrive() and wait() primitives.
+        Test split-phase barrier with SCOPE_WORLD (all ranks in team).
 
-        This test verifies that:
-        1. symm_barrier_arrive() correctly signals arrival to all team peers
-        2. symm_barrier_wait() correctly waits for all team peers to arrive
+        This test verifies that the unified symm_barrier_arrive/wait primitives
+        work correctly with scope=SCOPE_WORLD:
+        1. symm_barrier_arrive(scope=SCOPE_WORLD) correctly signals arrival to all team peers
+        2. symm_barrier_wait(scope=SCOPE_WORLD) correctly waits for all team peers to arrive
         3. After wait returns, peer data written before arrive() is visible
 
-        GIN barriers synchronize ALL ranks in the team (cross-node), unlike LSA
-        barriers which only synchronize NVLink-connected peers.
+        SCOPE_WORLD barriers synchronize ALL ranks in the team (cross-node via GIN),
+        unlike SCOPE_LSA barriers which only synchronize NVLink-connected peers.
 
         Pattern:
         - Each rank writes (rank + 200) to its source buffer
-        - Signal arrival via symm_barrier_arrive()
-        - Wait for all team peers via symm_barrier_wait()
+        - Signal arrival via symm_barrier_arrive(scope=SCOPE_WORLD)
+        - Wait for all team peers via symm_barrier_wait(scope=SCOPE_WORLD)
         - Read next peer's value via P2P load
         - Verify received value is (next_rank + 200)
         """
@@ -627,12 +585,14 @@ class TestTorchSymmTriton(MultiProcessTestCase):
 
             print(f"[Rank {self.rank}] Launching GIN barrier kernel with ctx_ptr={ctx_ptr}")
 
-            # Launch kernel with split-phase GIN barrier
-            symm_barrier_arrive_wait_test_kernel[(1,)](
+            # Launch kernel with split-phase GIN barrier using SCOPE_WORLD
+            symm_barrier_test_kernel[(1,)](
                 ctx_ptr,
                 src_ptr,
                 dst_ptr,
                 barrier_index=0,
+                scope=SCOPE_WORLD,
+                value_offset=200,
                 backend_hint=BACKEND_NVSHMEM,
                 launch_cooperative_grid=True,
                 num_ctas=1,

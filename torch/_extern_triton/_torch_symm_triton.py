@@ -152,6 +152,14 @@ SIGNAL_CMP_GE = _SIGNAL_CMP_GE
 SIGNAL_CMP_LT = _SIGNAL_CMP_LT
 SIGNAL_CMP_LE = _SIGNAL_CMP_LE
 
+# Barrier scope constants
+# These control which peers participate in barrier synchronization
+_SCOPE_LSA = 0  # LSA (Local Symmetric Access) domain only - NVLink-connected peers
+_SCOPE_WORLD = 1  # All ranks in the team (full world synchronization via GIN)
+
+SCOPE_LSA = _SCOPE_LSA
+SCOPE_WORLD = _SCOPE_WORLD
+
 
 class TorchSymmLibFinder:
     """Utility class for finding the torch symmetric memory bitcode library."""
@@ -1410,13 +1418,18 @@ if TRITON_AVAILABLE:
     @triton.jit
     def symm_barrier(
         ctx_ptr,
+        scope: tl.constexpr = 0,
         backend: tl.constexpr = 0,
     ):
         """
-        Perform team-wide barrier synchronization.
+        Perform barrier synchronization with configurable scope.
 
-        All ranks in the team block until everyone has reached this point.
-        This is a collective operation that must be called by all ranks in the team.
+        All ranks in the specified scope block until everyone has reached this point.
+        This is a collective operation that must be called by all ranks in the scope.
+
+        The scope parameter controls which peers participate:
+        - SCOPE_LSA (0): Only LSA domain peers (NVLink-connected)
+        - SCOPE_WORLD (1): All ranks in the team (via GIN)
 
         Unlike symm_quiet (which ensures local operations are complete), symm_barrier
         provides global synchronization where all ranks wait for each other.
@@ -1426,15 +1439,29 @@ if TRITON_AVAILABLE:
           2. Call symm_barrier to ensure all ranks have completed their operations
           3. Proceed with operations that depend on data from other ranks
 
+        Example usage:
+            # LSA-only barrier (faster, NVLink peers only)
+            symm_barrier(ctx_ptr, scope=SCOPE_LSA, backend=backend_hint)
+
+            # Full team barrier (all ranks, including cross-node)
+            symm_barrier(ctx_ptr, scope=SCOPE_WORLD, backend=backend_hint)
+
         This function dispatches to either the unified frontend (runtime dispatch)
         or a backend-specific implementation based on the backend hint.
 
-        Maps to:
+        Maps to (when scope=SCOPE_LSA):
+        - NVSHMEM: Signal-based LSA barrier using lsa_signal_pad
+        - NCCL: ncclLsaBarrier() with ncclTeamTagLsa (when device bitcode is available)
+
+        Maps to (when scope=SCOPE_WORLD):
         - NVSHMEM: nvshmemx_barrier_all_block()
-        - NCCL: ncclLsaBarrier() (when device bitcode is available)
+        - NCCL: ncclLsaBarrier() with ncclTeamTagWorld (when device bitcode is available)
 
         Args:
             ctx_ptr: Pointer to SymmContext (NCCLSymmContext or NVSHMEMSymmContext)
+            scope: Barrier scope (constexpr, default=0 for SCOPE_LSA)
+                   - 0 (SCOPE_LSA): LSA domain only (NVLink-connected peers)
+                   - 1 (SCOPE_WORLD): All ranks in the team
             backend: Backend hint (constexpr, default=0 for BACKEND_DEFAULT)
                       - 0 (BACKEND_DEFAULT): Runtime dispatch based on context type
                       - 1 (BACKEND_NCCL): Direct NCCL dispatch (not functional)
@@ -1446,267 +1473,58 @@ if TRITON_AVAILABLE:
 
             This function asserts on invalid context.
         """
-        # Use integer literals for comparison since Triton can't access globals
-        # 0 = BACKEND_DEFAULT, 1 = BACKEND_NCCL, 2 = BACKEND_NVSHMEM
-        if backend == 0:  # BACKEND_DEFAULT
-            # Runtime dispatch based on SymmContext type
-            _symm_barrier_frontend(ctx_ptr)
-        elif backend == 2:  # BACKEND_NVSHMEM
-            # Direct NVSHMEM dispatch
-            _nvshmem_symm_barrier(ctx_ptr)
-        else:
-            # BACKEND_NCCL (1) or unknown - not supported
-            # NCCL does not provide device bitcode library
-            tl.static_assert(
-                False,
-                "NCCL backend not supported (no device bitcode library available)",
-            )
+        # Validate scope at compile time
+        tl.static_assert(
+            scope >= 0 and scope <= 1,
+            "scope must be 0 (SCOPE_LSA) or 1 (SCOPE_WORLD)",
+        )
 
-    @triton.jit
-    def symm_lsa_barrier(
-        ctx_ptr,
-        barrier_index: tl.constexpr = 0,
-        backend: tl.constexpr = 0,
-    ):
-        """
-        Perform LSA (Local Symmetric Access) domain barrier synchronization.
-
-        All ranks in the same LSA domain block until everyone has reached this point.
-        LSA domain contains peers that can directly access each other's memory via
-        load/store operations (e.g., NVLink-connected GPUs on the same node).
-
-        This is a collective operation that must be called by all ranks in the LSA domain.
-
-        Unlike symm_barrier (which synchronizes all ranks in the team), symm_lsa_barrier
-        only synchronizes ranks within the same LSA domain. This is useful for:
-        - Synchronizing intra-node GPUs after direct P2P memory operations
-        - Avoiding the overhead of global synchronization when only local sync is needed
-        - Implementing hierarchical synchronization patterns
-
-        Multiple independent barriers can be used by specifying different barrier_index
-        values. All ranks using the same barrier_index synchronize together.
-
-        Common usage pattern:
-          1. All ranks in LSA domain perform local operations (P2P loads/stores)
-          2. Call symm_lsa_barrier to ensure all LSA-local operations are visible
-          3. Proceed with operations that depend on data from LSA peers
-
-        This function dispatches to either the unified frontend (runtime dispatch)
-        or a backend-specific implementation based on the backend hint.
-
-        Maps to:
-        - NVSHMEM: nvshmemx_team_barrier_block(lsa_team)
-        - NCCL: ncclLsaBarrierSession with ncclTeamTagLsa
-
-        Args:
-            ctx_ptr: Pointer to SymmContext (NCCLSymmContext or NVSHMEMSymmContext)
-            barrier_index: Index of the barrier to use (constexpr, default=0).
-                           Multiple independent barriers can be used by specifying
-                           different indices. All ranks must use the same index.
-            backend: Backend hint (constexpr, default=0 for BACKEND_DEFAULT)
-                      - 0 (BACKEND_DEFAULT): Runtime dispatch based on context type
-                      - 1 (BACKEND_NCCL): Direct NCCL dispatch (not functional)
-                      - 2 (BACKEND_NVSHMEM): Direct NVSHMEM dispatch
-
-        Note:
-            When using BACKEND_DEFAULT (0), use @requires_torch_symm decorator.
-            When using BACKEND_NVSHMEM (2), use @requires_torch_symm(backend=BACKEND_NVSHMEM).
-
-            This function asserts on invalid context.
-        """
-        # Use integer literals for comparison since Triton can't access globals
-        # 0 = BACKEND_DEFAULT, 1 = BACKEND_NCCL, 2 = BACKEND_NVSHMEM
-        if backend == 0:  # BACKEND_DEFAULT
-            # Runtime dispatch based on SymmContext type
-            _symm_lsa_barrier_frontend(ctx_ptr, barrier_index)
-        elif backend == 2:  # BACKEND_NVSHMEM
-            # Direct NVSHMEM dispatch
-            _nvshmem_symm_lsa_barrier(ctx_ptr, barrier_index)
-        else:
-            # BACKEND_NCCL (1) or unknown - not supported
-            # NCCL does not provide device bitcode library
-            tl.static_assert(
-                False,
-                "NCCL backend not supported (no device bitcode library available)",
-            )
-
-    @triton.jit
-    def symm_lsa_barrier_arrive(
-        ctx_ptr,
-        barrier_index: tl.constexpr = 0,
-        backend: tl.constexpr = 0,
-    ):
-        """
-        Signal arrival at an LSA (Local Symmetric Access) domain barrier.
-
-        This is the "arrive" phase of a split-phase barrier. It signals that this
-        rank has completed its local operations and is ready to synchronize, but
-        does NOT wait for other ranks to arrive.
-
-        Split-phase barriers allow overlapping computation with synchronization:
-        1. All ranks call symm_lsa_barrier_arrive() after completing local work
-        2. Ranks can perform independent computation
-        3. All ranks call symm_lsa_barrier_wait() before accessing peer data
-
-        Multiple independent barriers can be used by specifying different barrier_index
-        values. The same barrier_index must be used in the corresponding wait() call.
-
-        This is useful for:
-        - Hiding synchronization latency with computation
-        - Implementing pipelined algorithms
-        - Fine-grained control over synchronization timing
-
-        Example usage:
-            # Phase 1: Write data to local buffer
-            tl.store(local_ptr + offsets, data, mask=mask)
-
-            # Signal arrival (data is ready)
-            symm_lsa_barrier_arrive(ctx_ptr, barrier_index=0)
-
-            # Do independent computation while waiting for peers
-            result = compute_something_else()
-
-            # Wait for all peers before reading their data
-            symm_lsa_barrier_wait(ctx_ptr, barrier_index=0)
-
-            # Now safe to read peer data
-            peer_data = tl.load(peer_ptr + offsets, mask=mask)
-
-        This function dispatches to either the unified frontend (runtime dispatch)
-        or a backend-specific implementation based on the backend hint.
-
-        Maps to:
-        - NVSHMEM: Signal operations on lsa_signal_pad to notify peers
-        - NCCL: ncclLsaBarrierSession::arrive() with ncclTeamTagLsa
-
-        Args:
-            ctx_ptr: Pointer to SymmContext (NCCLSymmContext or NVSHMEMSymmContext)
-            barrier_index: Index of the barrier to use (constexpr, default=0).
-                           Multiple independent barriers can be used by specifying
-                           different indices. Must match the corresponding wait() call.
-            backend: Backend hint (constexpr, default=0 for BACKEND_DEFAULT)
-                      - 0 (BACKEND_DEFAULT): Runtime dispatch based on context type
-                      - 1 (BACKEND_NCCL): Direct NCCL dispatch (not functional)
-                      - 2 (BACKEND_NVSHMEM): Direct NVSHMEM dispatch
-
-        Note:
-            When using BACKEND_DEFAULT (0), use @requires_torch_symm decorator.
-            When using BACKEND_NVSHMEM (2), use @requires_torch_symm(backend=BACKEND_NVSHMEM).
-
-            This function asserts on invalid context.
-        """
-        # Use integer literals for comparison since Triton can't access globals
-        # 0 = BACKEND_DEFAULT, 1 = BACKEND_NCCL, 2 = BACKEND_NVSHMEM
-        if backend == 0:  # BACKEND_DEFAULT
-            # Runtime dispatch based on SymmContext type
-            _symm_lsa_barrier_arrive_frontend(ctx_ptr, barrier_index)
-        elif backend == 2:  # BACKEND_NVSHMEM
-            # Direct NVSHMEM dispatch
-            _nvshmem_symm_lsa_barrier_arrive(ctx_ptr, barrier_index)
-        else:
-            # BACKEND_NCCL (1) or unknown - not supported
-            # NCCL does not provide device bitcode library
-            tl.static_assert(
-                False,
-                "NCCL backend not supported (no device bitcode library available)",
-            )
-
-    @triton.jit
-    def symm_lsa_barrier_wait(
-        ctx_ptr,
-        barrier_index: tl.constexpr = 0,
-        backend: tl.constexpr = 0,
-    ):
-        """
-        Wait for all peers to arrive at an LSA (Local Symmetric Access) domain barrier.
-
-        This is the "wait" phase of a split-phase barrier. It blocks until all ranks
-        in the LSA domain have called symm_lsa_barrier_arrive() with the same barrier_index.
-
-        Must be called after symm_lsa_barrier_arrive() with the same barrier_index.
-        After this returns:
-        - All data written by peers before their arrive() is guaranteed to be visible
-        - The barrier state is automatically reset for the next iteration
-
-        Split-phase barriers allow overlapping computation with synchronization:
-        1. All ranks call symm_lsa_barrier_arrive() after completing local work
-        2. Ranks can perform independent computation
-        3. All ranks call symm_lsa_barrier_wait() before accessing peer data
-
-        Example usage:
-            # Phase 1: Write data to local buffer
-            tl.store(local_ptr + offsets, data, mask=mask)
-
-            # Signal arrival (data is ready)
-            symm_lsa_barrier_arrive(ctx_ptr, barrier_index=0)
-
-            # Do independent computation while waiting for peers
-            result = compute_something_else()
-
-            # Wait for all peers before reading their data
-            symm_lsa_barrier_wait(ctx_ptr, barrier_index=0)
-
-            # Now safe to read peer data
-            peer_data = tl.load(peer_ptr + offsets, mask=mask)
-
-        This function dispatches to either the unified frontend (runtime dispatch)
-        or a backend-specific implementation based on the backend hint.
-
-        Maps to:
-        - NVSHMEM: nvshmem_signal_wait_until on lsa_signal_pad, then reset
-        - NCCL: ncclLsaBarrierSession::wait() with ncclTeamTagLsa
-
-        Args:
-            ctx_ptr: Pointer to SymmContext (NCCLSymmContext or NVSHMEMSymmContext)
-            barrier_index: Index of the barrier to wait on (constexpr, default=0).
-                           Must match the barrier_index used in the corresponding
-                           arrive() call.
-            backend: Backend hint (constexpr, default=0 for BACKEND_DEFAULT)
-                      - 0 (BACKEND_DEFAULT): Runtime dispatch based on context type
-                      - 1 (BACKEND_NCCL): Direct NCCL dispatch (not functional)
-                      - 2 (BACKEND_NVSHMEM): Direct NVSHMEM dispatch
-
-        Note:
-            When using BACKEND_DEFAULT (0), use @requires_torch_symm decorator.
-            When using BACKEND_NVSHMEM (2), use @requires_torch_symm(backend=BACKEND_NVSHMEM).
-
-            This function asserts on invalid context.
-        """
-        # Use integer literals for comparison since Triton can't access globals
-        # 0 = BACKEND_DEFAULT, 1 = BACKEND_NCCL, 2 = BACKEND_NVSHMEM
-        if backend == 0:  # BACKEND_DEFAULT
-            # Runtime dispatch based on SymmContext type
-            _symm_lsa_barrier_wait_frontend(ctx_ptr, barrier_index)
-        elif backend == 2:  # BACKEND_NVSHMEM
-            # Direct NVSHMEM dispatch
-            _nvshmem_symm_lsa_barrier_wait(ctx_ptr, barrier_index)
-        else:
-            # BACKEND_NCCL (1) or unknown - not supported
-            # NCCL does not provide device bitcode library
-            tl.static_assert(
-                False,
-                "NCCL backend not supported (no device bitcode library available)",
-            )
+        # Dispatch based on scope
+        # 0 = SCOPE_LSA, 1 = SCOPE_WORLD
+        if scope == 0:  # SCOPE_LSA
+            if backend == 0:  # BACKEND_DEFAULT
+                _symm_lsa_barrier_frontend(ctx_ptr, 0)  # barrier_index=0
+            elif backend == 2:  # BACKEND_NVSHMEM
+                _nvshmem_symm_lsa_barrier(ctx_ptr, 0)  # barrier_index=0
+            else:
+                tl.static_assert(
+                    False,
+                    "NCCL backend not supported (no device bitcode library available)",
+                )
+        else:  # SCOPE_WORLD
+            if backend == 0:  # BACKEND_DEFAULT
+                _symm_barrier_frontend(ctx_ptr)
+            elif backend == 2:  # BACKEND_NVSHMEM
+                _nvshmem_symm_barrier(ctx_ptr)
+            else:
+                tl.static_assert(
+                    False,
+                    "NCCL backend not supported (no device bitcode library available)",
+                )
 
     # =========================================================================
-    # GIN BARRIER PRIMITIVES (Full Team Synchronization)
+    # UNIFIED BARRIER PRIMITIVES WITH SCOPE
+    # These provide a unified interface with scope parameter to select between
+    # LSA (local) and WORLD (all ranks) synchronization.
     # =========================================================================
 
     @triton.jit
     def symm_barrier_arrive(
         ctx_ptr,
         barrier_index: tl.constexpr = 0,
+        scope: tl.constexpr = 0,
         backend: tl.constexpr = 0,
     ):
         """
-        Signal arrival at a GIN (GPU-Initiated Networking) barrier (full team).
+        Signal arrival at a barrier with configurable scope.
 
         This is the "arrive" phase of a split-phase barrier. It signals that this
         rank has completed its local operations and is ready to synchronize, but
         does NOT wait for other ranks to arrive.
 
-        Unlike symm_lsa_barrier_arrive which only targets the LSA domain (local peers),
-        this GIN barrier targets ALL ranks in the team using GPU-initiated networking.
+        The scope parameter controls which peers participate:
+        - SCOPE_LSA (0): Only LSA domain peers (NVLink-connected)
+        - SCOPE_WORLD (1): All ranks in the team (via GIN)
 
         Split-phase barriers allow overlapping computation with synchronization:
         1. All ranks call symm_barrier_arrive() after completing local work
@@ -1716,23 +1534,18 @@ if TRITON_AVAILABLE:
         Multiple independent barriers can be used by specifying different barrier_index
         values. The same barrier_index must be used in the corresponding wait() call.
 
-        This is useful for:
-        - Synchronizing across all ranks (not just local/LSA domain)
-        - Hiding synchronization latency with computation
-        - Implementing pipelined algorithms across nodes
-
         Example usage:
             # Phase 1: Write data to local buffer
             tl.store(local_ptr + offsets, data, mask=mask)
 
-            # Signal arrival (data is ready) to ALL ranks
-            symm_barrier_arrive(ctx_ptr, barrier_index=0)
+            # Signal arrival (data is ready) - LSA scope
+            symm_barrier_arrive(ctx_ptr, barrier_index=0, scope=SCOPE_LSA)
 
             # Do independent computation while waiting for peers
             result = compute_something_else()
 
-            # Wait for all peers (across all nodes) before reading their data
-            symm_barrier_wait(ctx_ptr, barrier_index=0)
+            # Wait for all LSA peers before reading their data
+            symm_barrier_wait(ctx_ptr, barrier_index=0, scope=SCOPE_LSA)
 
             # Now safe to read peer data
             peer_data = tl.load(peer_ptr + offsets, mask=mask)
@@ -1740,7 +1553,11 @@ if TRITON_AVAILABLE:
         This function dispatches to either the unified frontend (runtime dispatch)
         or a backend-specific implementation based on the backend hint.
 
-        Maps to:
+        Maps to (when scope=SCOPE_LSA):
+        - NVSHMEM: Signal operations on lsa_signal_pad to notify peers
+        - NCCL: ncclLsaBarrierSession::arrive() with ncclTeamTagLsa
+
+        Maps to (when scope=SCOPE_WORLD):
         - NVSHMEM: Signal operations on gin_signal_pad to notify all team peers
         - NCCL: ncclLsaBarrierSession::arrive() with ncclTeamTagWorld
 
@@ -1749,6 +1566,9 @@ if TRITON_AVAILABLE:
             barrier_index: Index of the barrier to use (constexpr, default=0).
                            Multiple independent barriers can be used by specifying
                            different indices. Must match the corresponding wait() call.
+            scope: Barrier scope (constexpr, default=0 for SCOPE_LSA)
+                   - 0 (SCOPE_LSA): LSA domain only (NVLink-connected peers)
+                   - 1 (SCOPE_WORLD): All ranks in the team
             backend: Backend hint (constexpr, default=0 for BACKEND_DEFAULT)
                       - 0 (BACKEND_DEFAULT): Runtime dispatch based on context type
                       - 1 (BACKEND_NCCL): Direct NCCL dispatch (not functional)
@@ -1760,41 +1580,57 @@ if TRITON_AVAILABLE:
 
             This function asserts on invalid context.
         """
-        # Use integer literals for comparison since Triton can't access globals
-        # 0 = BACKEND_DEFAULT, 1 = BACKEND_NCCL, 2 = BACKEND_NVSHMEM
-        if backend == 0:  # BACKEND_DEFAULT
-            # Runtime dispatch based on SymmContext type
-            _symm_barrier_arrive_frontend(ctx_ptr, barrier_index)
-        elif backend == 2:  # BACKEND_NVSHMEM
-            # Direct NVSHMEM dispatch
-            _nvshmem_symm_barrier_arrive(ctx_ptr, barrier_index)
-        else:
-            # BACKEND_NCCL (1) or unknown - not supported
-            # NCCL does not provide device bitcode library
-            tl.static_assert(
-                False,
-                "NCCL backend not supported (no device bitcode library available)",
-            )
+        # Validate scope at compile time
+        tl.static_assert(
+            scope >= 0 and scope <= 1,
+            "scope must be 0 (SCOPE_LSA) or 1 (SCOPE_WORLD)",
+        )
+
+        # Dispatch based on scope
+        # 0 = SCOPE_LSA, 1 = SCOPE_WORLD
+        if scope == 0:  # SCOPE_LSA
+            if backend == 0:  # BACKEND_DEFAULT
+                _symm_lsa_barrier_arrive_frontend(ctx_ptr, barrier_index)
+            elif backend == 2:  # BACKEND_NVSHMEM
+                _nvshmem_symm_lsa_barrier_arrive(ctx_ptr, barrier_index)
+            else:
+                tl.static_assert(
+                    False,
+                    "NCCL backend not supported (no device bitcode library available)",
+                )
+        else:  # SCOPE_WORLD
+            if backend == 0:  # BACKEND_DEFAULT
+                _symm_barrier_arrive_frontend(ctx_ptr, barrier_index)
+            elif backend == 2:  # BACKEND_NVSHMEM
+                _nvshmem_symm_barrier_arrive(ctx_ptr, barrier_index)
+            else:
+                tl.static_assert(
+                    False,
+                    "NCCL backend not supported (no device bitcode library available)",
+                )
 
     @triton.jit
     def symm_barrier_wait(
         ctx_ptr,
         barrier_index: tl.constexpr = 0,
+        scope: tl.constexpr = 0,
         backend: tl.constexpr = 0,
     ):
         """
-        Wait for all peers to arrive at a GIN (GPU-Initiated Networking) barrier (full team).
+        Wait for all peers to arrive at a barrier with configurable scope.
 
         This is the "wait" phase of a split-phase barrier. It blocks until all ranks
-        in the team have called symm_barrier_arrive() with the same barrier_index.
+        in the specified scope have called symm_barrier_arrive() with the
+        same barrier_index and scope.
 
-        Unlike symm_lsa_barrier_wait which only waits for LSA domain peers, this GIN
-        barrier waits for ALL ranks in the team.
+        The scope parameter controls which peers we wait for:
+        - SCOPE_LSA (0): Only LSA domain peers (NVLink-connected)
+        - SCOPE_WORLD (1): All ranks in the team (via GIN)
 
-        Must be called after symm_barrier_arrive() with the same barrier_index.
-        After this returns:
+        Must be called after symm_barrier_arrive() with the same barrier_index
+        and scope. After this returns:
         - All data written by peers before their arrive() is guaranteed to be visible
-        - The epoch is updated for the next iteration
+        - The barrier state is automatically reset for the next iteration
 
         Split-phase barriers allow overlapping computation with synchronization:
         1. All ranks call symm_barrier_arrive() after completing local work
@@ -1805,14 +1641,14 @@ if TRITON_AVAILABLE:
             # Phase 1: Write data to local buffer
             tl.store(local_ptr + offsets, data, mask=mask)
 
-            # Signal arrival (data is ready) to ALL ranks
-            symm_barrier_arrive(ctx_ptr, barrier_index=0)
+            # Signal arrival (data is ready) - WORLD scope
+            symm_barrier_arrive(ctx_ptr, barrier_index=0, scope=SCOPE_WORLD)
 
             # Do independent computation while waiting for peers
             result = compute_something_else()
 
-            # Wait for all peers (across all nodes) before reading their data
-            symm_barrier_wait(ctx_ptr, barrier_index=0)
+            # Wait for all peers before reading their data
+            symm_barrier_wait(ctx_ptr, barrier_index=0, scope=SCOPE_WORLD)
 
             # Now safe to read peer data
             peer_data = tl.load(peer_ptr + offsets, mask=mask)
@@ -1820,7 +1656,11 @@ if TRITON_AVAILABLE:
         This function dispatches to either the unified frontend (runtime dispatch)
         or a backend-specific implementation based on the backend hint.
 
-        Maps to:
+        Maps to (when scope=SCOPE_LSA):
+        - NVSHMEM: nvshmem_signal_wait_until on lsa_signal_pad, then reset
+        - NCCL: ncclLsaBarrierSession::wait() with ncclTeamTagLsa
+
+        Maps to (when scope=SCOPE_WORLD):
         - NVSHMEM: nvshmem_signal_wait_until on gin_signal_pad, then update epoch
         - NCCL: ncclLsaBarrierSession::wait() with ncclTeamTagWorld
 
@@ -1829,6 +1669,9 @@ if TRITON_AVAILABLE:
             barrier_index: Index of the barrier to wait on (constexpr, default=0).
                            Must match the barrier_index used in the corresponding
                            arrive() call.
+            scope: Barrier scope (constexpr, default=0 for SCOPE_LSA)
+                   - 0 (SCOPE_LSA): LSA domain only (NVLink-connected peers)
+                   - 1 (SCOPE_WORLD): All ranks in the team
             backend: Backend hint (constexpr, default=0 for BACKEND_DEFAULT)
                       - 0 (BACKEND_DEFAULT): Runtime dispatch based on context type
                       - 1 (BACKEND_NCCL): Direct NCCL dispatch (not functional)
@@ -1840,21 +1683,34 @@ if TRITON_AVAILABLE:
 
             This function asserts on invalid context.
         """
-        # Use integer literals for comparison since Triton can't access globals
-        # 0 = BACKEND_DEFAULT, 1 = BACKEND_NCCL, 2 = BACKEND_NVSHMEM
-        if backend == 0:  # BACKEND_DEFAULT
-            # Runtime dispatch based on SymmContext type
-            _symm_barrier_wait_frontend(ctx_ptr, barrier_index)
-        elif backend == 2:  # BACKEND_NVSHMEM
-            # Direct NVSHMEM dispatch
-            _nvshmem_symm_barrier_wait(ctx_ptr, barrier_index)
-        else:
-            # BACKEND_NCCL (1) or unknown - not supported
-            # NCCL does not provide device bitcode library
-            tl.static_assert(
-                False,
-                "NCCL backend not supported (no device bitcode library available)",
-            )
+        # Validate scope at compile time
+        tl.static_assert(
+            scope >= 0 and scope <= 1,
+            "scope must be 0 (SCOPE_LSA) or 1 (SCOPE_WORLD)",
+        )
+
+        # Dispatch based on scope
+        # 0 = SCOPE_LSA, 1 = SCOPE_WORLD
+        if scope == 0:  # SCOPE_LSA
+            if backend == 0:  # BACKEND_DEFAULT
+                _symm_lsa_barrier_wait_frontend(ctx_ptr, barrier_index)
+            elif backend == 2:  # BACKEND_NVSHMEM
+                _nvshmem_symm_lsa_barrier_wait(ctx_ptr, barrier_index)
+            else:
+                tl.static_assert(
+                    False,
+                    "NCCL backend not supported (no device bitcode library available)",
+                )
+        else:  # SCOPE_WORLD
+            if backend == 0:  # BACKEND_DEFAULT
+                _symm_barrier_wait_frontend(ctx_ptr, barrier_index)
+            elif backend == 2:  # BACKEND_NVSHMEM
+                _nvshmem_symm_barrier_wait(ctx_ptr, barrier_index)
+            else:
+                tl.static_assert(
+                    False,
+                    "NCCL backend not supported (no device bitcode library available)",
+                )
 
     @triton.jit
     def symm_fence(
@@ -3535,8 +3391,11 @@ else:
     def symm_barrier(*args, **kwargs):  # type: ignore[misc]
         raise ImportError("Triton is required for symm_barrier")
 
-    def symm_lsa_barrier(*args, **kwargs):  # type: ignore[misc]
-        raise ImportError("Triton is required for symm_lsa_barrier")
+    def symm_barrier_arrive(*args, **kwargs):  # type: ignore[misc]
+        raise ImportError("Triton is required for symm_barrier_arrive")
+
+    def symm_barrier_wait(*args, **kwargs):  # type: ignore[misc]
+        raise ImportError("Triton is required for symm_barrier_wait")
 
     def symm_fence(*args, **kwargs):  # type: ignore[misc]
         raise ImportError("Triton is required for symm_fence")
@@ -3591,6 +3450,9 @@ __all__ = [
     "FENCE_SCOPE_CTA",
     "FENCE_SCOPE_GPU",
     "FENCE_SCOPE_SYSTEM",
+    # Barrier scope constants
+    "SCOPE_LSA",
+    "SCOPE_WORLD",
     # Signal operation constants
     "SIGNAL_OP_SET",
     "SIGNAL_OP_ADD",
@@ -3610,9 +3472,6 @@ __all__ = [
     # Ordering primitives
     "symm_quiet",
     "symm_barrier",
-    "symm_lsa_barrier",
-    "symm_lsa_barrier_arrive",
-    "symm_lsa_barrier_wait",
     "symm_barrier_arrive",
     "symm_barrier_wait",
     "symm_fence",

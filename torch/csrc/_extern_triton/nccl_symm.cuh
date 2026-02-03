@@ -352,7 +352,8 @@ __device__ void nccl_lsa_barrier_wait_impl(
 
 // =============================================================================
 // GIN (GPU-Initiated Networking) BARRIER PRIMITIVES
-// These barrier primitives target the full team (all ranks), not just LSA domain
+// These barrier primitives target the full team (all ranks), not just LSA
+// domain
 // =============================================================================
 
 /**
@@ -365,7 +366,8 @@ __device__ void nccl_lsa_barrier_wait_impl(
  * Unlike lsa_barrier_arrive which only targets the LSA domain, this GIN
  * barrier targets ALL ranks in the team using ncclTeamTagWorld.
  *
- * Uses ncclLsaBarrierSession with ncclTeamTagWorld for full team synchronization.
+ * Uses ncclLsaBarrierSession with ncclTeamTagWorld for full team
+ * synchronization.
  *
  * @param nccl_ctx NCCL context with device communicator
  * @param barrier_index Index of the barrier to use (0..nBarriers-1).
@@ -402,7 +404,8 @@ __device__ void nccl_barrier_arrive_impl(
  * Unlike lsa_barrier_wait which only waits for LSA domain peers, this GIN
  * barrier waits for ALL ranks in the team using ncclTeamTagWorld.
  *
- * Uses ncclLsaBarrierSession with ncclTeamTagWorld for full team synchronization.
+ * Uses ncclLsaBarrierSession with ncclTeamTagWorld for full team
+ * synchronization.
  *
  * @param nccl_ctx NCCL context with device communicator
  * @param barrier_index Index of the barrier to use (0..nBarriers-1).
