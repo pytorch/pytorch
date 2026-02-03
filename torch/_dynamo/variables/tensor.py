@@ -1589,8 +1589,8 @@ class TensorVariable(VariableTracker):
         def extract_python_value(vt: VariableTracker) -> Any:
             if isinstance(vt, variables.UserDefinedObjectVariable):
                 return vt.value
-            else:
-                return vt.as_python_constant()
+
+            return vt.as_python_constant()
 
         grad_placements_vt = kwargs.get(
             "grad_placements", ConstantVariable.create(None)
