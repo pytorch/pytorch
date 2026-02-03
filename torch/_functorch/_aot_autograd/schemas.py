@@ -1020,10 +1020,10 @@ class AOTConfig:
     Configuration for AOTDispatcher
     """
 
-    fw_compiler: Callable
-    bw_compiler: Callable
-    partition_fn: Callable
-    decompositions: dict[OpOverload, Callable]
+    fw_compiler: Callable[..., Any] | None
+    bw_compiler: Callable[..., Any] | None
+    partition_fn: Callable[..., Any] | None
+    decompositions: dict[OpOverload, Callable[..., Any]] | None
     num_params_buffers: int
     aot_id: int
     keep_inference_input_mutations: bool
@@ -1032,7 +1032,7 @@ class AOTConfig:
     dynamic_shapes: bool = False
     aot_autograd_arg_pos_to_source: Optional[list[Source]] = None
     static_input_indices: Optional[list[int]] = None
-    inference_compiler: Optional[Callable] = None
+    inference_compiler: Callable[..., Any] | None = None
     enable_log: bool = True
     # this is always false outside of export.
     pre_dispatch: bool = False
