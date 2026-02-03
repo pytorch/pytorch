@@ -2611,6 +2611,9 @@ def pointwise(
                 ),  # better for some kernels
                 triton_config_with_settings(size_hints, 64, 64),  # ~8% better for fp16
                 triton_config_with_settings(size_hints, 256, 16),
+                triton_config_with_settings(size_hints, 256, 64),
+                triton_config_with_settings(size_hints, 256, 128),
+                triton_config_with_settings(size_hints, 64, 128),
                 triton_config_with_settings(size_hints, 16, 256),
                 triton_config_with_settings(
                     size_hints, 128, 16
@@ -2711,7 +2714,7 @@ def _reduction_configs(
     )
 
     register_intensive = False
-    MAX_R0_BLOCK = 2048
+    MAX_R0_BLOCK = 4096 if torch.version.hip else 2048
     loads_and_red = inductor_meta.get("num_load", 0) + inductor_meta.get(
         "num_reduction", 0
     )
@@ -2728,7 +2731,7 @@ def _reduction_configs(
         #
         # The heuristic is a very simple one since registers can be reused. But
         # hopefully it can be a good enough indicator.
-        MAX_R0_BLOCK = 1024
+        MAX_R0_BLOCK = 2048 if torch.version.hip else 1024
         register_intensive = True
 
     def make_config(
