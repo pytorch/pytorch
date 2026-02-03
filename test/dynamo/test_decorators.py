@@ -2267,6 +2267,62 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
             torch.compile(model)
             torch.compile(other_model)
 
+    def test_disable_class_and_instance_method(self):
+        # Test that decorating a method at class definition time and then
+        # re-decorating the instance method works correctly. This tests the
+        # fix in innermost_fn that stops unwrapping when hitting a bound method.
+        from torch._dynamo.eval_frame import innermost_fn
+
+        class Foo:
+            def run(self, a, b, c):
+                return self.work(a, b, c)
+
+            @torch._dynamo.disable
+            def work(self, a, b, c):
+                return a + b - c
+
+        foo = Foo()
+        # Re-decorate the instance method
+        foo.work = torch._dynamo.disable(foo.work)
+
+        a = torch.randint(0, 10, (10,))
+        b = torch.randint(0, 10, (10,))
+        c = torch.randint(0, 10, (10,))
+
+        # Should work without error - self should be correctly bound
+        result = foo.run(a, b, c)
+        self.assertEqual(result, a + b - c)
+
+        # Also test nested disable on instance methods
+        foo2 = Foo()
+        foo2.work = torch._dynamo.disable(torch._dynamo.disable(foo2.work))
+        result2 = foo2.run(a, b, c)
+        self.assertEqual(result2, a + b - c)
+
+        # Test innermost_fn shortcut behavior for unbound methods
+        # disable(disable(Foo.method)) should unwrap to the original function
+        class Bar:
+            def method(self, x):
+                return x + 1
+
+        bar = Bar()
+        bound_method = bar.method
+
+        original_method = Bar.method
+        disabled_once = torch._dynamo.disable(Bar.method)
+        disabled_twice = torch._dynamo.disable(disabled_once)
+        # innermost_fn should find the original unbound method
+        self.assertIs(innermost_fn(disabled_twice), original_method)
+        self.assertIs(innermost_fn(disabled_once), original_method)
+
+        # Test innermost_fn shortcut behavior for bound methods
+        # disable(disable(obj.method)) should stop at the bound method
+        # innermost_fn should return the bound method itself, not unwrap it
+        self.assertIs(innermost_fn(bound_method), bound_method)
+        # Wrapping a bound method should also preserve the binding
+        disabled_bound = torch._dynamo.disable(bound_method)
+        self.assertIs(innermost_fn(disabled_bound), bound_method)
+
     def test_dynamo_disable_annotations(self):
         class SimpleModel(torch.nn.Module):
             def __init__(self) -> None:

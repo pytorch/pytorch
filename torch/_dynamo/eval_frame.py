@@ -625,12 +625,22 @@ def innermost_fn(
     function. TorchDynamo caches on fn.__code__ object, so its necessary to find
     the innermost function to pass on the optimize, run, disable etc.
     """
+    # Don't unwrap bound methods. When a method is decorated at class definition
+    # time, _torchdynamo_orig_callable is set on the wrapper function. Accessing
+    # this attribute on a bound method delegates to __func__, which would return
+    # the unbound original function and lose the self binding.
+    if isinstance(fn, types.MethodType):
+        return fn
+
     unaltered_fn = fn
     while hasattr(unaltered_fn, unaltered_fn_attr):
         unaltered_fn = getattr(unaltered_fn, unaltered_fn_attr)
         assert callable(unaltered_fn), (
             f"A callable function is expected, but {type(unaltered_fn)} is provided."
         )
+        # Stop unwrapping if we hit a bound method
+        if isinstance(unaltered_fn, types.MethodType):
+            break
     return unaltered_fn
 
 
