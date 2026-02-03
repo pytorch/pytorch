@@ -1,3 +1,4 @@
+# noqa: S101
 from __future__ import annotations
 
 
@@ -15,6 +16,7 @@ from ._onnx_program import _ort_session_initializer
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
+
     import onnxruntime as ort
 
 
@@ -333,7 +335,9 @@ class InputObserverInfo:
             if k not in ordered_kwargs:
                 ordered_kwargs[k] = v
 
-        candidate = InputCandidate(args, ordered_kwargs, clone=True, cst_kwargs=cst_kwargs)
+        candidate = InputCandidate(
+            args, ordered_kwargs, clone=True, cst_kwargs=cst_kwargs
+        )
         self.inputs.append(candidate)
         if self._best_candidate is None or len(self._best_candidate) < len(candidate):
             self._best_candidate = candidate
@@ -399,7 +403,9 @@ class InputObserverInfo:
         self.align_inputs_none_values()
         assert self._best_candidate is not None  # pyrefly missing case
         assert self._best_candidate.flat_list is not None  # pyrefly missing case
-        assert self._best_candidate.aligned_flat_list is not None  # pyrefly missing case
+        assert (
+            self._best_candidate.aligned_flat_list is not None
+        )  # pyrefly missing case
 
         def _set_batch_dimension(name_or_position) -> bool:
             if not set_batch_dimension_for:
@@ -610,8 +616,9 @@ class InputObserverInfo:
         if flat:
             return aligned_flat_list
         args, kwargs = torch.utils._pytree.tree_unflatten(
+            aligned_flat_list,
             # pyrefly: ignore[bad-argument-type]
-            aligned_flat_list, candidate.aligned_spec
+            candidate.aligned_spec,
         )
         if self._best_candidate.cst_kwargs:
             # pyrefly: ignore[invalid-argument]
@@ -826,7 +833,9 @@ class InputObserver:
                 self.info._captured_inputs,
                 self.info.signature_names,
             )
-        return self.info.infer_arguments(index_or_candidate=index_or_candidate, flat=flat)
+        return self.info.infer_arguments(
+            index_or_candidate=index_or_candidate, flat=flat
+        )
 
     def check_discrepancies(
         self,
@@ -906,7 +915,7 @@ class InputObserver:
             if error:
                 diff: dict[str, Any] = dict(error=error, SUCCESS=False)
             elif ort_outputs is None or len(outputs) != len(ort_outputs):
-                diff = dict(SUCCESS=False, error = "not the same number of outputs")
+                diff = dict(SUCCESS=False, error="not the same number of outputs")
             else:
                 success = True
                 err_abs = 0.0

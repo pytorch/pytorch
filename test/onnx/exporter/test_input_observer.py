@@ -131,7 +131,8 @@ class TestInputObserver(common_utils.TestCase):
 
         cst = torch.export.Dim.DYNAMIC
         self.assertEqual(
-            dict(x={0: cst, 1: cst}, y={1: cst}, add=None), observer.infer_dynamic_shapes()
+            dict(x={0: cst, 1: cst}, y={1: cst}, add=None),
+            observer.infer_dynamic_shapes(),
         )
         args = observer.infer_arguments()
         self.assertIsInstance(args, dict)
@@ -766,14 +767,18 @@ class TestInputObserver(common_utils.TestCase):
         with observer(model):
             for args, kwargs in inputs:
                 model(*args, **kwargs)
-        iargs = observer.infer_arguments(dict(w=torch.randn((1, 6)), z=torch.randn((5, 6))))
+        iargs = observer.infer_arguments(
+            dict(w=torch.randn((1, 6)), z=torch.randn((5, 6)))
+        )
         self.assertEqual(len(iargs), 4)
         self.assertEqual(iargs["x"].shape, (5, 0))
         self.assertEqual(iargs["y"].shape, (1, 0))
         self.assertEqual(iargs["w"].shape, (1, 6))
         self.assertEqual(iargs["z"].shape, (5, 6))
 
-        iargs = observer.infer_arguments((torch.randn((5, 6)), torch.randn((1, 6))))
+        iargs = observer.infer_arguments(
+            (torch.randn((5, 6)), torch.randn((1, 6)))
+        )
         self.assertEqual(len(iargs), 4)
         self.assertEqual(iargs["x"].shape, (5, 6))
         self.assertEqual(iargs["y"].shape, (1, 6))
