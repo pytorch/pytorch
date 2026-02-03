@@ -22,6 +22,7 @@ from contextlib import nullcontext
 from typing import Any, Optional, TYPE_CHECKING, Union
 
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.opaque_object import is_opaque_value
 
 
 if TYPE_CHECKING:
@@ -560,6 +561,7 @@ def collect_fw_donated_buffer_idxs(
         t = saved_tensors[i]
         if (
             t is not None
+            and isinstance(t, FakeTensor)
             and not is_sparse_any(t)
             and StorageWeakRef(t.untyped_storage()) not in storage_refs
         ):
@@ -1737,7 +1739,9 @@ def _aot_stage2a_partition(
                         }
                         if dynamic_dims:
                             fw_metadata.dynamic_saved_tensors_idxs[idx] = dynamic_dims
-                    elif isinstance(node.meta["val"], FakeScriptObject):
+                    elif isinstance(node.meta["val"], FakeScriptObject) or is_opaque_value(
+                        node.meta["val"]
+                    ):
                         opaque_outs_saved_for_bw.append(node)
 
             num_symints_saved_for_bw = len(symint_outs_saved_for_bw)

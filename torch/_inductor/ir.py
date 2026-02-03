@@ -42,7 +42,7 @@ from torch._export.serde.serialize import GraphModuleSerializer
 from torch._higher_order_ops.auto_functionalize import can_auto_functionalize
 from torch._inductor import metrics
 from torch._inductor.utils import get_free_symbols
-from torch._library.opaque_object import is_opaque_type
+from torch._library.opaque_object import is_opaque_type, is_opaque_value
 from torch._prims_common import (
     compute_required_storage_length,
     is_boolean_dtype,
@@ -248,6 +248,7 @@ def validate_ir(node_or_nodes: Optional[_NodeOrNodes]) -> None:
                     DynamicScalar,
                     AssertScalar,
                     TensorBox,
+                    TorchBindObject,
                     sympy.logic.boolalg.Boolean,
                     Expr,
                     int,
@@ -8312,6 +8313,12 @@ class FallbackKernel(ExternKernelAlloc):
                 return output
             elif isinstance(output, torch.SymInt):
                 return output.node.expr
+            elif is_opaque_value(output):
+                # Handle opaque value type outputs by creating a TorchBindObject
+                name = f"opaque_output{len(V.graph.torchbind_constants)}"
+                V.graph.torchbind_constants[name] = output  # type: ignore[arg-type]
+                V.graph.constant_reprs[name] = ""
+                return TorchBindObject(name=name, value=output)  # type: ignore[arg-type]
             else:
                 assert output is None, (
                     f"FallbackKernel output type {type(output)} is not supported"
@@ -9456,11 +9463,27 @@ class TorchBindObject(NonTensorObj):
     def get_value(self) -> Union[FakeScriptObject, torch.ScriptObject]:
         return self.value
 
+    def get_size(self) -> Sequence[Expr]:
+        # TorchBindObject is not a tensor, return empty size
+        return []
+
+    def get_numel(self) -> Expr:
+        # TorchBindObject is not a tensor, return 0
+        return sympy.Integer(0)
+
+    def get_dtype(self) -> Optional[torch.dtype]:
+        # TorchBindObject is not a tensor, has no dtype
+        return None
+
     def get_real_obj(self) -> torch.ScriptObject:
         if isinstance(self.value, torch.ScriptObject):
             return self.value
-        else:
+        elif hasattr(self.value, "real_obj"):
+            # FakeScriptObject has a real_obj attribute
             return self.value.real_obj
+        else:
+            # Opaque value types are the real object themselves
+            return self.value  # type: ignore[return-value]
 
     def get_buf_bytes(self) -> int:
         # Returns the sum of all tensors in the flattened object

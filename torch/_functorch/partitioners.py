@@ -31,6 +31,7 @@ from torch._inductor.custom_graph_pass import (
     CustomRuntimeEstimator,
 )
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.opaque_object import is_opaque_value
 from torch._library.utils import is_builtin
 from torch._logging import LazyString, trace_structured
 from torch._logging._internal import trace_log
@@ -2116,9 +2117,13 @@ def solve_min_cut(
             weight = float(sym_node_size(node))
             cannot_save_reason = None
         elif is_non_tensor_node:
-            # FakeScriptObjects (opaque objects) should have weight 0.0 so they can be
-            # properly partitioned between forward and backward, like BackwardState.
-            if isinstance(node.meta.get("val"), (BackwardState, FakeScriptObject)):
+            # FakeScriptObjects (opaque reference types), BackwardState, and
+            # opaque value types should have weight 0.0 so they can be
+            # properly partitioned between forward and backward.
+            val = node.meta.get("val")
+            if isinstance(val, (BackwardState, FakeScriptObject)) or is_opaque_value(
+                val
+            ):
                 weight = 0.0
                 cannot_save_reason = None
             else:
