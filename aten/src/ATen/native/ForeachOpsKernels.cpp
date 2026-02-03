@@ -494,8 +494,8 @@ std::vector<Tensor> foreach_tensor_norm_slow(
     // If the tensor is empty and norm == infinity, we cannot compute the norm
     // because the operation does not have an identity
     if (p == std::numeric_limits<double>::infinity()) {
-      TORCH_CHECK(
-          t.numel() > 0,
+      TORCH_SYM_CHECK(
+          t.sym_numel().sym_gt(0),
           "_foreach_norm cannot compute the infinity norm on an empty tensor because the operation does not have an identity");
     }
     result.emplace_back(at::linalg_vector_norm(t, ord, {}, false, dtype));
