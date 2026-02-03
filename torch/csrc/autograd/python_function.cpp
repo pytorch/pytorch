@@ -149,18 +149,12 @@ PyObject* to_py_size(const std::vector<c10::SymInt>& size) {
 
 namespace torch::autograd {
 
-// Overwrites py_fn->needs_input_grad (which was initially set during forward
-// based on requires_grad) with the actual values needed for this backward pass.
-// Uses task_should_compute_output to check if each edge is needed, which
-// accounts for partial backward (when inputs= is specified).
 static void set_needs_input_grad(
     THPFunction* py_fn,
     PyNode* node) {
-  const auto& is_variable_input = py_fn->is_variable_input;
-  size_t num_inputs = is_variable_input.size();
   size_t edge_idx = 0;
-  for (const auto i : c10::irange(num_inputs)) {
-    if (is_variable_input[i]) {
+  for (const auto i : c10::irange(py_fn->is_variable_input.size())) {
+    if (py_fn->is_variable_input[i]) {
       PyObject* new_value =
           node->task_should_compute_output(edge_idx++) ? Py_True : Py_False;
       PyObject* old_value = PyTuple_GET_ITEM(py_fn->needs_input_grad, i);
