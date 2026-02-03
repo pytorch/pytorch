@@ -17,14 +17,14 @@ dnnl::memory make_onednn_memory(
       dnnl::sycl_interop::memory_kind::usm,
       ptr == nullptr ? DNNL_MEMORY_ALLOCATE : ptr);
 }
-// Use this helper for all read-only inputs (src, bias, binary) passed to oneDNN.
-// Do NOT use data_ptr() for inputs here.
-// Using mutable pointers may trigger COW materialization and break COW tests.
-// Only destination tensors should use writable memory.
+
 dnnl::memory make_onednn_memory_readonly(
     dnnl::memory::desc md,
     dnnl::engine& engine,
     const void* ptr) {
+  TORCH_CHECK(ptr, "oneDNN readonly: null data_ptr");
+
+  // oneDNN requires void*, const_cast avoids COW materialization.
   return dnnl::sycl_interop::make_memory(
       md,
       engine,

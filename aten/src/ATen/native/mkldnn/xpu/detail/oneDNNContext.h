@@ -13,16 +13,18 @@
 
 namespace at::native::onednn {
 
+// For read-write outputs (use data_ptr()).
 TORCH_XPU_API dnnl::memory make_onednn_memory(
     dnnl::memory::desc md,
     dnnl::engine& engine,
     void* ptr);
 
+// For read-only inputs (use const_data_ptr()).
 TORCH_XPU_API dnnl::memory make_onednn_memory_readonly(
     dnnl::memory::desc md,
     dnnl::engine& engine,
     const void* ptr);
-
+    
 // Keep non-static and non-inline
 bool set_onednn_verbose(int level);
 
