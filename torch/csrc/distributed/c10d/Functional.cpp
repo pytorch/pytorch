@@ -322,6 +322,99 @@ at::Tensor broadcast(
   return broadcast_(output, src, std::move(group_name));
 }
 
+// NOLINTNEXTLINE(performance-unnecessary-value-param)
+at::Tensor& scatter_(
+    at::Tensor& output,
+    const std::vector<at::Tensor>& scatter_list,
+    int64_t src,
+    std::string group_name) {
+  c10d::ScatterOptions opts;
+  opts.rootRank = src;
+
+  auto group = c10d::resolve_process_group(group_name);
+  std::vector<at::Tensor> outputs{output};
+
+  // scatter_list should only be non-empty on the source rank
+  std::vector<std::vector<at::Tensor>> input_tensors;
+  if (!scatter_list.empty()) {
+    input_tensors.push_back(scatter_list);
+  }
+
+  auto work = group->scatter(outputs, input_tensors, opts);
+  c10d::register_work(output, work);
+  return output;
+}
+
+at::Tensor scatter(
+    const at::Tensor& output,
+    const std::vector<at::Tensor>& scatter_list,
+    int64_t src,
+    std::string group_name) {
+  auto output_clone = output.clone(at::MemoryFormat::Contiguous);
+  return scatter_(output_clone, scatter_list, src, std::move(group_name));
+}
+
+// In-place gather: gather tensors from all ranks to the destination rank
+// output_list is only populated on the dst rank
+std::vector<at::Tensor> gather_(
+    std::vector<at::Tensor> output_list,
+    const at::Tensor& input,
+    int64_t dst,
+    std::string group_name) {
+  c10d::GatherOptions opts;
+  opts.rootRank = dst;
+
+  auto group = c10d::resolve_process_group(group_name);
+  auto rank = group->getRank();
+
+  std::vector<at::Tensor> inputs{input.contiguous()};
+  std::vector<std::vector<at::Tensor>> outputs;
+
+  if (rank == dst) {
+    outputs.push_back(std::move(output_list));
+  }
+
+  auto work = group->gather(outputs, inputs, opts);
+
+  if (rank == dst) {
+    for (const auto& tensor : outputs[0]) {
+      c10d::register_work(tensor, work);
+    }
+    return std::move(outputs[0]);
+  }
+  return {};
+}
+
+// Out-of-place gather: uses provided output_list if non-empty, otherwise
+// allocates
+std::vector<at::Tensor> gather(
+    const at::Tensor& input,
+    const std::vector<at::Tensor>& gather_list,
+    int64_t dst,
+    std::string group_name) {
+  auto group = c10d::resolve_process_group(group_name);
+  auto rank = group->getRank();
+
+  std::vector<at::Tensor> output_list;
+  if (rank == dst) {
+    if (!gather_list.empty()) {
+      // Use provided gather_list
+      for (const auto& t : gather_list) {
+        output_list.push_back(t.clone(at::MemoryFormat::Contiguous));
+      }
+    } else {
+      // Allocate output tensors
+      auto group_size = group->getSize();
+      output_list.reserve(group_size);
+      for (int64_t i = 0; i < group_size; ++i) {
+        output_list.push_back(at::empty_like(input));
+      }
+    }
+  }
+
+  return gather_(std::move(output_list), input, dst, std::move(group_name));
+}
+
 } // namespace c10d
 
 TORCH_LIBRARY(_c10d_functional, m) {
@@ -413,6 +506,30 @@ TORCH_LIBRARY(_c10d_functional, m) {
       "broadcast_(Tensor(a!) input, int src, str group_name) -> Tensor(a!)",
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd, c10d::broadcast_),
+      {at::Tag::pt2_compliant_tag});
+
+  m.def(
+      "scatter(Tensor output, Tensor[] scatter_list, int src, str group_name) -> Tensor",
+      torch::dispatch(
+          c10::DispatchKey::CompositeExplicitAutograd, c10d::scatter),
+      {at::Tag::pt2_compliant_tag});
+
+  m.def(
+      "scatter_(Tensor(a!) output, Tensor[] scatter_list, int src, str group_name) -> Tensor(a!)",
+      torch::dispatch(
+          c10::DispatchKey::CompositeExplicitAutograd, c10d::scatter_),
+      {at::Tag::pt2_compliant_tag});
+
+  m.def(
+      "gather(Tensor input, Tensor[] gather_list, int dst, str group_name) -> Tensor[]",
+      torch::dispatch(
+          c10::DispatchKey::CompositeExplicitAutograd, c10d::gather),
+      {at::Tag::pt2_compliant_tag});
+
+  m.def(
+      "gather_(Tensor[](a!) output_list, Tensor input, int dst, str group_name) -> Tensor[](a!)",
+      torch::dispatch(
+          c10::DispatchKey::CompositeExplicitAutograd, c10d::gather_),
       {at::Tag::pt2_compliant_tag});
 
   m.def(
