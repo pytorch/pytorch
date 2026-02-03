@@ -1507,6 +1507,40 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
       TensorList _params, bool has_biases,
       int64_t num_layers, double dropout_p, bool train, bool bidirectional) {
   TORCH_CHECK(hx.size() == 2, "lstm expects two hidden states");
+
+  // Validate hidden state shapes to prevent segfaults
+  const auto& h_0 = hx[0];
+  const auto& c_0 = hx[1];
+  int64_t num_directions = bidirectional ? 2 : 1;
+  int64_t expected_first_dim = num_layers * num_directions;
+
+  TORCH_CHECK(h_0.dim() == 3, "hx[0] must be 3D tensor, got ", h_0.dim(), "D tensor");
+  TORCH_CHECK(c_0.dim() == 3, "hx[1] must be 3D tensor, got ", c_0.dim(), "D tensor");
+  TORCH_CHECK(
+      h_0.size(0) == expected_first_dim,
+      "hx[0] first dimension must be ", expected_first_dim,
+      " (num_layers * num_directions), got ", h_0.size(0));
+  TORCH_CHECK(
+      c_0.size(0) == expected_first_dim,
+      "hx[1] first dimension must be ", expected_first_dim,
+      " (num_layers * num_directions), got ", c_0.size(0));
+  TORCH_CHECK(
+      h_0.size(1) == c_0.size(1),
+      "hx[0] and hx[1] must have the same batch size (dim 1), got ",
+      h_0.size(1), " and ", c_0.size(1));
+
+  if (batch_sizes.numel() > 0) {
+    int64_t first_batch_size = batch_sizes[0].item<int64_t>();
+    TORCH_CHECK(
+        h_0.size(1) >= first_batch_size,
+        "hx[0] batch size (", h_0.size(1),
+        ") must be >= first batch_size (", first_batch_size, ")");
+    TORCH_CHECK(
+        c_0.size(1) >= first_batch_size,
+        "hx[1] batch size (", c_0.size(1),
+        ") must be >= first batch_size (", first_batch_size, ")");
+  }
+
   if (use_cudnn(data)) {
     Tensor output, hy, cy;
     lstm_packed_cudnn_stub(data.device().type(), output, hy, cy, data, batch_sizes, hx,
