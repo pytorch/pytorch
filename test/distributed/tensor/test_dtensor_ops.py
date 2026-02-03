@@ -879,7 +879,6 @@ ops_unbacked_dtensor_dde = {
     xfail("ldexp"),
     xfail("le"),
     xfail("lerp"),
-    xfail("linalg.vecdot"),
     xfail("logaddexp"),
     xfail("logaddexp2"),
     xfail("logical_and"),
