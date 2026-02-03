@@ -351,7 +351,8 @@ def _check_custom_op_aliasing(
         if config.error_on_custom_op_aliasing:
             raise
         else:
-            warnings.warn(str(e), UserWarning, stacklevel=3)
+            msg = f"{e} This is deprecated and will become an error in PyTorch 2.12."
+            warnings.warn(msg, UserWarning, stacklevel=3)
 
 
 @functools.lru_cache(None)
@@ -1199,7 +1200,8 @@ class AOTDedupeWrapper(CompilerWrapper):
 
         if (
             tracing_context := TracingContext.try_get()
-        ) and aot_config.aot_autograd_arg_pos_to_source:
+            and aot_config.aot_autograd_arg_pos_to_source
+        ):
             # TODO(voz): This structure is 1:1, we could consider an alternate structure like
             # kept_pos:[dupe_arg_pos], however, add_dupe_map is 1:1 so we would need a new structure there,
             # which feels like needless complexity for a tiny bit of efficiency at this point.
@@ -1213,9 +1215,6 @@ class AOTDedupeWrapper(CompilerWrapper):
                     kept_arg_source = aot_config.aot_autograd_arg_pos_to_source[
                         kept_pos
                     ]
-                    # Skip if either source is None (e.g., DDPOptimizer intermediate values)
-                    if dupe_arg_source is None or kept_arg_source is None:
-                        continue
                     tracing_context.guards_context.aotautograd_guards.append(  # type: ignore[attr-defined]
                         DuplicateInputs(kept_arg_source, dupe_arg_source)
                     )
