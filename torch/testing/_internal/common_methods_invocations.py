@@ -2237,7 +2237,7 @@ def sample_inputs_block_diag(op_info, device, dtype, requires_grad, **kwargs):
         yield SampleInput(make_arg(shape), args=tuple(make_arg(s) for s in other_shapes))
         # We also want to test mixed complex-non-complex inputs to block_diag
         if dtype == torch.complex32 or dtype == torch.complex64:
-            non_complex_dtype = torch.float32 if dtype == torch.complex32 else torch.float64
+            non_complex_dtype = torch.float32 if dtype == torch.complex32 or device == 'mps:0' else torch.float64
             make_arg_non_complex = partial(make_tensor, dtype=non_complex_dtype, device=device, requires_grad=requires_grad)
             yield SampleInput(make_arg_non_complex(shape), args=tuple(make_arg(s) for s in other_shapes))
 
@@ -13071,16 +13071,6 @@ op_db: list[OpInfo] = [
                # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":252,
                # please report a bug to PyTorch.
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=[torch.float32]),
-               # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-               DecorateInfo(
-                   unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
-                   device_type='mps', dtypes=(torch.complex64,)
-               ),
-               DecorateInfo(
-                   unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager',
-                   device_type='mps', dtypes=(torch.complex64,)
-               ),
            ),
            sample_inputs_func=sample_inputs_block_diag),
     UnaryUfuncInfo('bitwise_not',
@@ -16339,10 +16329,6 @@ op_db: list[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_rms_norm,
-           skips=(
-               # Exception: Failed to create function state object for: pow_scalar_dense_float2_float2_float
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.complex64,)),
-           ),
            error_inputs_func=error_inputs_rms_norm,),
     OpInfo('nn.functional.local_response_norm',
            dtypes=floating_types_and(torch.int64, torch.float16, torch.bfloat16),
@@ -19086,15 +19072,6 @@ op_db: list[OpInfo] = [
                    supports_fwgrad_bwgrad=True,
                    promotes_int_to_float=True,
                    skips=(
-                       # RuntimeError: Failed to create function state object for: pow_scalar_dense_float2_float2_float
-                       DecorateInfo(
-                           unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager',
-                           device_type='mps', dtypes=(torch.complex64,)
-                       ),
-                       DecorateInfo(
-                           unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
-                           device_type='mps', dtypes=(torch.complex64,)
-                       ),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                     dtypes=(torch.cfloat, torch.cdouble)),
                        # AssertionError: Tensor-likes are not close!
@@ -26148,10 +26125,6 @@ python_ref_db = [
         "_refs.block_diag",
         torch_opinfo_name="block_diag",
         skips=(
-            # The following dtypes did not work in forward but are listed by the OpInfo: {torch.complex64}.
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-            # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='mps', dtypes=(torch.complex64,)),
             # RuntimeError: Failed to create function state object for: cat_int32_t_float_float2
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta',
