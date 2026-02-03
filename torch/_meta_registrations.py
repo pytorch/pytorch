@@ -5782,7 +5782,7 @@ def meta_scatter_(self, dim, index, src_or_value, reduce=None):
     return self
 
 
-@register_meta([aten._scaled_dot_product_flash_attention])
+@register_meta([aten._scaled_dot_product_flash_attention.default])
 def meta__scaled_dot_product_flash_attention(
     query: Tensor,
     key: Tensor,
@@ -5843,6 +5843,33 @@ def meta__scaled_dot_product_flash_attention(
         seed,
         offset,
         debug_mask,
+    )
+
+
+@register_meta([aten._scaled_dot_product_flash_attention.quantized])
+def meta__scaled_dot_product_flash_attention_quantized(
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    q_descale: Tensor | None,
+    k_descale: Tensor | None,
+    v_descale: Tensor | None,
+    dropout_p: float = 0.0,
+    is_causal: bool = False,
+    return_debug_mask: bool = False,
+    scale: float | None = None,
+):
+    if query.dtype == torch.float8_e4m3fn:
+        query = query.to(torch.bfloat16)
+
+    return meta__scaled_dot_product_flash_attention(
+        query,
+        key,
+        value,
+        dropout_p,
+        is_causal,
+        return_debug_mask,
+        scale,
     )
 
 
@@ -6246,7 +6273,7 @@ def meta__scaled_dot_product_cudnn_backward(
 
 @register_meta(
     [
-        aten._flash_attention_forward,
+        aten._flash_attention_forward.default,
     ]
 )
 def meta__flash_attention_forward(
@@ -6321,6 +6348,49 @@ def meta__flash_attention_forward(
         seed,
         offset,
         debug_mask,
+    )
+
+
+@register_meta([aten._flash_attention_forward.quantized])
+def meta__flash_attention_forward_quantized(
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    cum_seq_q: Tensor | None,
+    cum_seq_k: Tensor | None,
+    max_q: int,
+    max_k: int,
+    dropout_p: float,
+    is_causal: bool,
+    return_debug_mask: bool,
+    q_descale: Tensor | None,
+    k_descale: Tensor | None,
+    v_descale: Tensor | None,
+    scale: float | None = None,
+    window_size_left: int | None = None,
+    window_size_right: int | None = None,
+    seqused_k: Tensor | None = None,
+    alibi_slopes: Tensor | None = None,
+):
+    if query.dtype == torch.float8_e4m3fn:
+        query = query.to(torch.bfloat16)
+
+    return meta__flash_attention_forward(
+        query,
+        key,
+        value,
+        cum_seq_q,
+        cum_seq_k,
+        max_q,
+        max_k,
+        dropout_p,
+        is_causal,
+        return_debug_mask,
+        scale,
+        window_size_left,
+        window_size_right,
+        seqused_k,
+        alibi_slopes,
     )
 
 
@@ -6789,6 +6859,16 @@ def _check_scaled_mm_sizes_v2(
                 and recipe_b[0] == ScalingType.BlockWise1x32
             )
 
+        def is_nv_single_level(
+            recipe_a: list[ScalingType], recipe_b: list[ScalingType]
+        ):
+            return (
+                len(recipe_a) == 1
+                and len(recipe_b) == 1
+                and recipe_a[0] == ScalingType.BlockWise1x16
+                and recipe_b[0] == ScalingType.BlockWise1x16
+            )
+
         def is_nv(recipe_a: list[ScalingType], recipe_b: list[ScalingType]):
             return (
                 len(recipe_a) == 2
@@ -6964,6 +7044,23 @@ def _check_scaled_mm_sizes_v2(
                     f"and scale_b must have {expected_scale_b_elems} (got: {scale_b[0].numel()}). Scales must "
                     f"have types {torch.float8_e8m0fnu} (for self: {scale_a[0].dtype}, mat_b: {scale_b[0].dtype}) "
                     f"Must have swizzle type {expected_swizzle} (got self: {swizzle_a[0]}, mat_b: {swizzle_b[0]})"
+                ),
+            )
+        elif is_nv_single_level(scale_recipe_a, scale_recipe_b):
+            expected_scale_a_elems = round_up(M, 128) * round_up(ceil_div(K, 16), 4)
+            expected_scale_b_elems = round_up(N, 128) * round_up(ceil_div(K, 16), 4)
+            expected_swizzle = SwizzleType.SWIZZLE_32_4_4
+            torch._check(
+                scale_a[0].numel() == expected_scale_a_elems
+                and scale_a[0].dtype == torch.float8_e4m3fn
+                and scale_b[0].numel() == expected_scale_b_elems
+                and scale_b[0].dtype == torch.float8_e4m3fn
+                and swizzle_a[0] == expected_swizzle
+                and swizzle_b[0] == expected_swizzle,
+                lambda: (
+                    f"for single-level NV scaling scale_a must have {expected_scale_a_elems} (got: {scale_a[0].numel()}) "
+                    f"and scale_b must have {expected_scale_b_elems} (got: {scale_b[0].numel()}). Must have "
+                    f"swizzle type {expected_swizzle} (got self: {swizzle_a[0]}, mat_b: {swizzle_b[0]})"
                 ),
             )
         elif is_nv(scale_recipe_a, scale_recipe_b):
