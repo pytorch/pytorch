@@ -23,7 +23,7 @@ from torch import device, Tensor
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import defake, dynamo_timed
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import is_opaque_type
+from torch._library.opaque_object import is_opaque_type, is_opaque_value
 from torch._library.utils import get_layout_constraint_tag
 from torch._logging import LazyString, trace_structured
 from torch._prims_common import (
@@ -1179,6 +1179,12 @@ class GraphLowering(torch.fx.Interpreter):
             return expr
         elif isinstance(example, FakeScriptObject):
             obj = TorchBindObject(name=target, value=example)
+            self.graph_inputs[target] = obj
+            self.graph_input_names.append(target)
+            return obj
+        elif is_opaque_value(example):
+            # Handle opaque value types (like FakeScriptObject but for value types)
+            obj = TorchBindObject(name=target, value=example)  # type: ignore[arg-type]
             self.graph_inputs[target] = obj
             self.graph_input_names.append(target)
             return obj
