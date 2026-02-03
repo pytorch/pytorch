@@ -304,10 +304,12 @@ class TestDTensorDebugMode(TestCase):
       redistribute_input(t: f32[8, 16], trace: S(1)[0]S(1)[1]->S(1)R->RR)
         _c10d_functional::all_gather_into_tensor(t: f32[8, 16], 2, 3)
         _c10d_functional::_wrap_tensor_autograd(t: f32[16, 16])
+        _c10d_functional::wait_tensor(t: f32[16, 16])
         aten::chunk(t: f32[16, 16], 2)
         aten::cat(['t: f32[8, 16]', 't: f32[8, 16]'], 1)
         _c10d_functional::all_gather_into_tensor(t: f32[8, 32], 4, 1)
         _c10d_functional::_wrap_tensor_autograd(t: f32[32, 32])
+        _c10d_functional::wait_tensor(t: f32[32, 32])
         aten::chunk(t: f32[32, 32], 4)
         aten::cat(['t: f32[8, 32]', 't: f32[8, 32]', 't: f32[8, 32]', 't: f32[8, 32]'], 1)
     aten::mm(t: f32[16, 8], t: f32[8, 128])
@@ -369,6 +371,7 @@ class TestDTensorDebugMode(TestCase):
       redistribute_input(t: f32[8, 2], trace: S(1)->R)
         _c10d_functional::all_gather_into_tensor(t: f32[8, 2], 8, 0)  ->  t: f32[64, 2]
         _c10d_functional::_wrap_tensor_autograd(t: f32[64, 2])  ->  t: f32[64, 2]
+        _c10d_functional::wait_tensor(t: f32[64, 2])  ->  t: f32[64, 2]
         aten::chunk(t: f32[64, 2], 8)  ->  ['t: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]']
         aten::cat(['t: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]'], 1)  ->  t: f32[8, 16]
     aten::topk(t: f32[8, 16], 4, 1)  ->  ('t: f32[8, 4]', 't: i64[8, 4]')""",  # noqa: B950
