@@ -113,6 +113,7 @@ from .resume_execution import (
     ContinueExecutionCache,
     IS_TRACING_RESUME_PROLOGUE_VARNAME,
     ReenterWith,
+    TORCH_DYNAMO_RESUME_IN_PREFIX,
 )
 from .source import (
     AttrSource,
@@ -3429,32 +3430,43 @@ class InstructionTranslatorBase(
         items = self.popn(inst.argval)
         self.push(SliceVariable(items, tx=self))  # type: ignore[arg-type]
 
-    def BUILD_LIST(self, inst: Instruction) -> None:
-        # Nested graph breaks are currently not supported for 3.12+ comprehension handling
-        if (
+    def _maybe_setup_comprehension_speculation(self, inst: Instruction) -> bool:
+        """
+        Handle comprehension start for Python 3.12+ BUILD_LIST/BUILD_MAP with argval 0.
+        Returns True if a graph break was triggered and the caller should return early.
+        """
+        if not (
             sys.version_info >= (3, 12)
             and inst.argval == 0
             and not config.nested_graph_breaks
         ):
-            is_comp_start = self._is_comprehension_start()
-            if is_comp_start:
-                can_speculate = (
-                    all(b.can_restore() for b in self.block_stack)
-                    and not self.one_graph
-                    and not self.error_on_graph_break
-                    and not self.is_tracing_resume_prologue
-                    and not self.active_generic_context_managers
-                    and self.output.current_tracer.parent is None
-                    and self.parent is None
-                )
-                # Only set up speculation at depth 0 (outermost comprehension)
-                if can_speculate and self._comprehension_depth == 0:
-                    speculation = self.speculate()
-                    if speculation.failed(self):
-                        self._handle_comprehension_graph_break(inst)
-                        return
-                    self.current_speculation = speculation
-                self._comprehension_depth += 1
+            return False
+
+        if not self._is_comprehension_start():
+            return False
+
+        can_speculate = (
+            all(b.can_restore() for b in self.block_stack)
+            and not self.one_graph
+            and not self.error_on_graph_break
+            and not self.is_tracing_resume_prologue
+            and not self.active_generic_context_managers
+            and self.output.current_tracer.parent is None
+            and self.parent is None
+        )
+        # Only set up speculation at depth 0 (outermost comprehension)
+        if can_speculate and self._comprehension_depth == 0:
+            speculation = self.speculate()
+            if speculation.failed(self):
+                self._handle_comprehension_graph_break(inst)
+                return True
+            self.current_speculation = speculation
+        self._comprehension_depth += 1
+        return False
+
+    def BUILD_LIST(self, inst: Instruction) -> None:
+        if self._maybe_setup_comprehension_speculation(inst):
+            return
 
         items = self.popn(inst.argval)
         self.push(ListVariable(items, mutation_type=ValueMutationNew()))
@@ -3493,31 +3505,8 @@ class InstructionTranslatorBase(
     BUILD_TUPLE_UNPACK_WITH_CALL = BUILD_TUPLE_UNPACK
 
     def BUILD_MAP(self, inst: Instruction) -> None:
-        # Nested graph breaks are currently not supported for 3.12+ comprehension handling
-        if (
-            sys.version_info >= (3, 12)
-            and inst.argval == 0
-            and not config.nested_graph_breaks
-        ):
-            is_comp_start = self._is_comprehension_start()
-            if is_comp_start:
-                can_speculate = (
-                    all(b.can_restore() for b in self.block_stack)
-                    and not self.one_graph
-                    and not self.error_on_graph_break
-                    and not self.is_tracing_resume_prologue
-                    and not self.active_generic_context_managers
-                    and self.output.current_tracer.parent is None
-                    and self.parent is None
-                )
-                # Only set up speculation at depth 0 (outermost comprehension)
-                if can_speculate and self._comprehension_depth == 0:
-                    speculation = self.speculate()
-                    if speculation.failed(self):
-                        self._handle_comprehension_graph_break(inst)
-                        return
-                    self.current_speculation = speculation
-                self._comprehension_depth += 1
+        if self._maybe_setup_comprehension_speculation(inst):
+            return
 
         items = self.popn(inst.argval * 2)
         d = dict(zip(items[::2], items[1::2]))
@@ -4483,7 +4472,13 @@ class InstructionTranslatorBase(
                 if nesting_depth == 0:
                     end_for_ip = search_ip
                     break
-        assert end_for_ip >= 0
+        if end_for_ip < 0:
+            unimplemented(
+                gb_type="Comprehension analysis failed",
+                context="",
+                explanation="Could not find END_FOR instruction in comprehension bytecode.",
+                hints=[],
+            )
 
         # Find first FOR_ITER to know where loop body starts
         for_iter_ip = next(
@@ -4564,7 +4559,12 @@ class InstructionTranslatorBase(
             result_var = None
             result_on_stack = True
         else:
-            raise AssertionError("Comprehension does not match any known pattern")
+            unimplemented(
+                gb_type="Comprehension analysis failed",
+                context=f"pre_store_ops={pre_store_ops}, post_store_op={post_store_op}",
+                explanation="Comprehension does not match any known bytecode pattern.",
+                hints=[],
+            )
 
         return ComprehensionAnalysis(
             end_ip=scan_ip,
@@ -4578,28 +4578,22 @@ class InstructionTranslatorBase(
     def _handle_comprehension_graph_break(self, inst: Instruction) -> None:
         """Handle graph break for a comprehension by skipping the comprehension bytecode.
 
-        Steps
-        1. Compiles the graph up to the comprehension
-        2. Adds the comprehension bytecode (runs eagerly at runtime)
-        3. Generates code to load comprehension-created locals
-        4. Creates a resume function for code after the comprehension
+        Steps:
+        1. Compile the graph up to the comprehension
+        2. Add the comprehension bytecode (runs eagerly at runtime)
+        3. Generate code to pass comprehension-created variables to the resume function
+        4. Create the resume function for code after the comprehension
         """
         assert sys.version_info >= (3, 12)
 
-        from .bytecode_transformation import (
-            create_dup_top,
-            create_instruction,
-            create_load_const,
-        )
+        from .bytecode_transformation import create_instruction
         from .codegen import PyCodegen
-        from .source import LocalSource
-        from .utils import is_safe_constant
         from .variables.misc import UnknownVariable
-        from .variables.tensor import SymNodeVariable, TensorVariable
 
         analysis = self._analyze_comprehension()
 
-        if self.f_code.co_name.startswith("torch_dynamo_resume"):
+        # Validate: can't handle captured vars in resume functions due to nested sources
+        if self.f_code.co_name.startswith(TORCH_DYNAMO_RESUME_IN_PREFIX):
             if analysis.captured_vars:
                 unimplemented(
                     gb_type="Comprehension graph break in resume function with captured variables",
@@ -4612,89 +4606,15 @@ class InstructionTranslatorBase(
 
         assert self.instruction_pointer is not None
         start_ip = self.instruction_pointer - 1  # BUILD_LIST/BUILD_MAP
-
+        stack_pops = 1 + len(analysis.iterator_vars)
         reason = GraphCompileReason("comprehension_graph_break", [self.frame_summary()])
         log.debug("comprehension triggered compile")
 
-        stack_pops = 1 + len(analysis.iterator_vars)
+        # --- Step 1: Compile the graph up to the comprehension ---
 
-        # Calculate extra stack values beyond what the comprehension expects
-        num_extra_stack = len(self.stack) - stack_pops
-
-        # Variables to pass to resume function
-        vars_to_pass = (
-            [analysis.result_var] if analysis.result_var else []
-        ) + analysis.walrus_vars
-
-        # If there are extra stack values AND we need to pass variables to the
-        # resume function, fall back to normal graph break handling. The code that
-        # adds variables to frames[0] assumes frames_list is at TOS, but with extra
-        # stack values it's at a different position.
-        if num_extra_stack > 0 and vars_to_pass:
-            unimplemented(
-                gb_type="Comprehension graph break with extra stack values",
-                context="",
-                explanation="Cannot use comprehension optimization when there are "
-                "extra values on the stack and variables need to be passed to the "
-                "resume function.",
-                hints=[],
-            )
-
-        # Ensure object identity preservation for captured mutable variables:
-        # Reconstruct them once, store to local slots, and set LocalSource so
-        # compile_subgraph loads from the same slots instead of reconstructing.
-        #
-        # For tensors/symnodes: the comprehension bytecode uses LOAD_FAST to load
-        # them from local slots. If a tensor's source doesn't match its variable
-        # name, we fall back to normal graph break handling.
-        pre_subgraph_insts: list[Instruction] = []
-        if analysis.captured_vars:
-            captured_vars_cg = PyCodegen(self)
-            captured_vars_cg.value_from_source = False
-
-            for var_name in analysis.captured_vars:
-                if var_name in self.symbolic_locals:
-                    var = self.symbolic_locals[var_name]
-                    in_correct_slot = (
-                        isinstance(var.source, LocalSource)
-                        and var.source.local_name == var_name
-                    )
-
-                    if isinstance(var, (TensorVariable, SymNodeVariable)):
-                        if not in_correct_slot:
-                            unimplemented(
-                                gb_type="Comprehension with captured tensor not in local slot",
-                                context="",
-                                explanation="Cannot use comprehension optimization when a "
-                                "captured tensor variable is not stored in its expected "
-                                "local slot.",
-                                hints=[],
-                            )
-                        continue
-
-                    if in_correct_slot:
-                        continue
-
-                    # For python constants, use create_load_const directly
-                    if var.is_python_constant():
-                        const_val = var.as_python_constant()
-                        if is_safe_constant(const_val):
-                            captured_vars_cg.append_output(create_load_const(const_val))
-                            captured_vars_cg.append_output(
-                                create_instruction("STORE_FAST", argval=var_name)
-                            )
-                            var.source = LocalSource(var_name)
-                            continue
-
-                    # For other variable types, reconstruct and store to local slot
-                    captured_vars_cg(var)
-                    captured_vars_cg.append_output(
-                        create_instruction("STORE_FAST", argval=var_name)
-                    )
-                    var.source = LocalSource(var_name)
-
-            pre_subgraph_insts = captured_vars_cg.get_instructions()
-
+        # Ensure captured variables are in their local slots before compiling.
+        # This preserves object identity for mutable variables.
+        pre_subgraph_insts = self._codegen_captured_vars_to_locals(analysis)
         if pre_subgraph_insts:
             self.output.add_output_instructions(pre_subgraph_insts)
 
@@ -4703,14 +4623,131 @@ class InstructionTranslatorBase(
             reason=reason,
             stack_pops=stack_pops,
         )
-
         self.popn(stack_pops)
+        meta = all_stack_locals_metadata[0]
 
-        # Copy comprehension bytecode to output (runs eagerly)
+        # --- Step 2: Add the comprehension bytecode ---
+
+        copied_insts = self._copy_comprehension_bytecode(start_ip, analysis.end_ip)
+        self.output.add_output_instructions(copied_insts)
+
+        if analysis.result_on_stack:
+            self.push(UnknownVariable())
+
+        # --- Step 3: Generate code to pass variables to resume function ---
+
+        # Variables the comprehension creates that need to be passed to resume:
+        # - result_var: variable the comprehension result is assigned to
+        # - walrus_vars: variables created by walrus operator (:=)
+        vars_to_pass = (
+            [analysis.result_var] if analysis.result_var else []
+        ) + analysis.walrus_vars
+
+        for var_name in vars_to_pass:
+            meta.locals_names[var_name] = len(meta.locals_names)
+            self.symbolic_locals[var_name] = UnknownVariable()
+
+        if vars_to_pass:
+            # Stack layout: [cells], [frame_list], *(extra values), (result if on stack)
+            # NULLs outside stack_pops are not on runtime stack (in stack_null_idxes).
+            frame_list_pos = len(self.stack) - len(meta.stack_null_idxes) + 1
+            resume_cg = PyCodegen(self)
+            for var_name in vars_to_pass:
+                resume_cg.extend_output(
+                    [
+                        create_instruction("COPY", arg=frame_list_pos),
+                        resume_cg.create_load_const(0),
+                        resume_cg.create_binary_subscr(),
+                        create_instruction("LOAD_FAST", argval=var_name),
+                        create_instruction("LIST_APPEND", arg=1),
+                        create_instruction("POP_TOP"),
+                    ]
+                )
+            self.output.add_output_instructions(resume_cg.get_instructions())
+
+        # --- Step 4: Create the resume function ---
+
+        resume_inst = self.instructions[analysis.end_ip]
+        self.output.add_output_instructions(
+            self.create_call_resume_at(resume_inst, all_stack_locals_metadata)
+        )
+
+        self.output.should_exit = True
+        self.instruction_pointer = None
+
+    def _codegen_captured_vars_to_locals(
+        self, analysis: ComprehensionAnalysis
+    ) -> list[Instruction]:
+        """Generate instructions to store captured variables to their local slots.
+
+        For tensors/symnodes: they must already be in the correct local slot
+        (the comprehension bytecode uses LOAD_FAST to load them).
+
+        For other variables: reconstruct and store to local slots so
+        compile_subgraph loads from the same slots, preserving object identity.
+        """
+        if not analysis.captured_vars:
+            return []
+
+        from .bytecode_transformation import create_instruction, create_load_const
+        from .codegen import PyCodegen
+        from .source import LocalSource
+        from .utils import is_safe_constant
+        from .variables.tensor import SymNodeVariable, TensorVariable
+
+        cg = PyCodegen(self)
+        cg.value_from_source = False
+
+        for var_name in analysis.captured_vars:
+            if var_name not in self.symbolic_locals:
+                continue
+
+            var = self.symbolic_locals[var_name]
+            in_correct_slot = (
+                isinstance(var.source, LocalSource)
+                and var.source.local_name == var_name
+            )
+
+            # Tensors/symnodes must already be in their correct slot
+            if isinstance(var, (TensorVariable, SymNodeVariable)):
+                if not in_correct_slot:
+                    unimplemented(
+                        gb_type="Comprehension with captured tensor not in local slot",
+                        context="",
+                        explanation="Cannot use comprehension optimization when a "
+                        "captured tensor variable is not stored in its expected "
+                        "local slot.",
+                        hints=[],
+                    )
+                continue
+
+            if in_correct_slot:
+                continue
+
+            # For constants, use create_load_const directly
+            if var.is_python_constant():
+                const_val = var.as_python_constant()
+                if is_safe_constant(const_val):
+                    cg.append_output(create_load_const(const_val))
+                    cg.append_output(create_instruction("STORE_FAST", argval=var_name))
+                    var.source = LocalSource(var_name)
+                    continue
+
+            # For other variables, reconstruct and store
+            cg(var)
+            cg.append_output(create_instruction("STORE_FAST", argval=var_name))
+            var.source = LocalSource(var_name)
+
+        return cg.get_instructions()
+
+    def _copy_comprehension_bytecode(
+        self, start_ip: int, end_ip: int
+    ) -> list[Instruction]:
+        """Copy comprehension bytecode instructions, updating jump targets."""
         inst_map: dict[Instruction, Instruction] = {}
         copied_insts: list[Instruction] = []
 
-        for ip in range(start_ip, analysis.end_ip):
+        for ip in range(start_ip, end_ip):
             original_inst = self.instructions[ip]
             copied_inst = copy.copy(original_inst)
             copied_inst.exn_tab_entry = None
@@ -4721,37 +4758,7 @@ class InstructionTranslatorBase(
             if copied_inst.target is not None and copied_inst.target in inst_map:
                 copied_inst.target = inst_map[copied_inst.target]
 
-        self.output.add_output_instructions(copied_insts)
-
-        meta = all_stack_locals_metadata[0]
-
-        # If result stays on stack, push placeholder for resume function
-        if analysis.result_on_stack:
-            self.push(UnknownVariable())
-
-        for var_name in vars_to_pass:
-            meta.locals_names[var_name] = len(meta.locals_names)
-            self.symbolic_locals[var_name] = UnknownVariable()
-
-        # Generate code to pass variables to resume function
-        resume_cg = PyCodegen(self)
-        for var_name in vars_to_pass:
-            resume_cg.append_output(create_dup_top())
-            resume_cg.append_output(resume_cg.create_load_const(0))
-            resume_cg.append_output(resume_cg.create_binary_subscr())
-            resume_cg.append_output(create_instruction("LOAD_FAST", argval=var_name))
-            resume_cg.append_output(create_instruction("LIST_APPEND", arg=1))
-            resume_cg.append_output(create_instruction("POP_TOP"))
-
-        self.output.add_output_instructions(resume_cg.get_instructions())
-
-        resume_inst = self.instructions[analysis.end_ip]
-        self.output.add_output_instructions(
-            self.create_call_resume_at(resume_inst, all_stack_locals_metadata)
-        )
-
-        self.output.should_exit = True
-        self.instruction_pointer = None
+        return copied_insts
 
     def _make_frame_loc(
         self, filename: str, lineno: Optional[int], fallback_lineno: int
