@@ -53,7 +53,7 @@ TensorBase empty_strided_xpu(
     IntArrayRef stride,
     ScalarType dtype,
     std::optional<Device> device_opt) {
-  at::globalContext().lazyInitDevice(c10::DeviceType::XPU);
+  at::globalContext().lazyInitDevice(kXPU);
   const auto device = device_or_default(device_opt);
   TORCH_INTERNAL_ASSERT(device.is_xpu());
   const c10::DeviceGuard device_guard(device);
