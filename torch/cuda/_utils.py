@@ -31,7 +31,7 @@ def _get_hip_runtime_library() -> ctypes.CDLL:
     return lib
 
 
-def _get_cuda_runtime_library() -> ctypes.CDLL:
+def _get_cuda_library() -> ctypes.CDLL:
     if sys.platform == "win32":
         return ctypes.CDLL("nvcuda.dll")
     else:  # Unix-based systems
@@ -43,7 +43,7 @@ def _get_gpu_runtime_library() -> ctypes.CDLL:
     if torch.version.hip:
         return _get_hip_runtime_library()
     else:
-        return _get_cuda_runtime_library()
+        return _get_cuda_library()
 
 
 # Helper: check CUDA errors
@@ -216,7 +216,8 @@ def _nvrtc_compile(
 
     # Enable automatic precompiled headers (CUDA 12.8+)
     if auto_pch:
-        assert str(torch.version.cuda) >= "12.8", "PCH requires CUDA 12.8+"
+        if str(torch.version.cuda) < "12.8":
+            raise AssertionError(f"PCH requires CUDA 12.8+, got {torch.version.cuda}")
         if nvcc_options is None:
             nvcc_options = []
         nvcc_options.append("--pch")
