@@ -66,32 +66,81 @@ need to maintain multiple kernel variants or manage complex build dependencies.
 
 The abstraction layer exposes the following unified primitives to kernel authors:
 
-### 2.1 Memory Access Primitives
+### 2.1 Constants
 
-| Primitive                | Purpose                                                                                 |
-|--------------------------|-----------------------------------------------------------------------------------------|
-| `symm_lsa_ptr`           | Get pointer to symmetric memory on a peer rank (P2P access)                             |
-| `symm_lsa_multicast_ptr` | Get multicast address for broadcasting to all LSA team members (team from ctx)          |
-| `symm_lsa_signal_ptr`    | Get pointer to peer's signal pad for direct load/store                                  |
+All constants are available in two forms:
+- **Python constants** (e.g., `SCOPE_LSA`) for use in non-Triton code
+- **Triton constexpr constants** (e.g., `TL_SCOPE_LSA`) for use within `@triton.jit` functions
 
-### 2.2 Synchronization Primitives
+#### Backend Hint Constants
 
-The barrier primitives use a `scope` parameter to control which peers participate in synchronization:
+| Constant           | Value | TL_* Version         | Description                                |
+|--------------------|-------|----------------------|--------------------------------------------|
+| `BACKEND_DEFAULT`  | 0     | `TL_BACKEND_DEFAULT` | Runtime dispatch based on context type     |
+| `BACKEND_NCCL`     | 1     | `TL_BACKEND_NCCL`    | Direct NCCL dispatch (not functional)      |
+| `BACKEND_NVSHMEM`  | 2     | `TL_BACKEND_NVSHMEM` | Direct NVSHMEM dispatch                    |
 
-| Scope        | Value | Description                                               |
-|--------------|-------|-----------------------------------------------------------|
-| `SCOPE_LSA`  | 0     | LSA (Local Symmetric Access) domain only (NVLink peers)   |
-| `SCOPE_WORLD`| 1     | All ranks in the team (full world via GIN)                |
+#### Scope Constants
+
+| Constant      | Value | TL_* Version     | Description                                         |
+|---------------|-------|------------------|-----------------------------------------------------|
+| `SCOPE_LSA`   | 0     | `TL_SCOPE_LSA`   | LSA (Local Symmetric Access) domain (NVLink peers)  |
+| `SCOPE_WORLD` | 1     | `TL_SCOPE_WORLD` | All ranks in the team (full world via GIN)          |
+
+#### Fence Scope Constants
+
+| Constant             | Value | TL_* Version           | Description                              |
+|----------------------|-------|------------------------|------------------------------------------|
+| `FENCE_SCOPE_CTA`    | 0     | `TL_FENCE_SCOPE_CTA`   | Intra-block sync (`__syncthreads()`)     |
+| `FENCE_SCOPE_GPU`    | 1     | `TL_FENCE_SCOPE_GPU`   | Device-wide fence (`__threadfence()`)    |
+| `FENCE_SCOPE_SYSTEM` | 2     | `TL_FENCE_SCOPE_SYSTEM`| System-wide fence (`__threadfence_system()`) |
+
+#### Signal Operation Constants
+
+| Constant        | Value | TL_* Version       | Description                        |
+|-----------------|-------|--------------------|------------------------------------|
+| `SIGNAL_OP_SET` | 0     | `TL_SIGNAL_OP_SET` | Atomic set (replace value)         |
+| `SIGNAL_OP_ADD` | 1     | `TL_SIGNAL_OP_ADD` | Atomic add (increment value)       |
+
+#### Signal Comparison Constants (for `symm_signal_wait_until`)
+
+| Constant        | Value | TL_* Version       | Description              |
+|-----------------|-------|--------------------|--------------------------|
+| `SIGNAL_CMP_EQ` | 1     | `TL_SIGNAL_CMP_EQ` | Equal                    |
+| `SIGNAL_CMP_NE` | 2     | `TL_SIGNAL_CMP_NE` | Not equal                |
+| `SIGNAL_CMP_GT` | 3     | `TL_SIGNAL_CMP_GT` | Greater than             |
+| `SIGNAL_CMP_GE` | 4     | `TL_SIGNAL_CMP_GE` | Greater than or equal    |
+| `SIGNAL_CMP_LT` | 5     | `TL_SIGNAL_CMP_LT` | Less than                |
+| `SIGNAL_CMP_LE` | 6     | `TL_SIGNAL_CMP_LE` | Less than or equal       |
+
+#### Reduction/Data Type Constants
+
+| Constant        | Value | TL_* Version       | Description              |
+|-----------------|-------|--------------------|--------------------------|
+| `REDUCE_OP_SUM` | 0     | `TL_REDUCE_OP_SUM` | Sum reduction            |
+| `DTYPE_FLOAT32` | 0     | `TL_DTYPE_FLOAT32` | Float32 data type        |
+
+### 2.2 Memory Access Primitives
+
+| Primitive              | Signature                                          | Purpose                                                 |
+|------------------------|----------------------------------------------------|---------------------------------------------------------|
+| `symm_lsa_ptr`         | `(ctx_ptr, local_ptr, peer, backend) -> int64`     | Get pointer to symmetric memory on a peer rank (P2P)    |
+| `symm_lsa_multicast_ptr` | `(ctx_ptr, local_ptr, backend) -> int64`         | Get multicast address for broadcasting to all LSA peers |
+| `symm_lsa_signal_ptr`  | `(ctx_ptr, peer, backend) -> int64`                | Get pointer to peer's signal pad for direct load/store  |
+
+### 2.3 Synchronization Primitives
 
 #### Barrier Primitives
 
-| Primitive                | Purpose                                                        |
-|--------------------------|----------------------------------------------------------------|
-| `symm_barrier`           | Barrier with configurable scope (combined arrive + wait)       |
-| `symm_barrier_arrive`    | Signal arrival at barrier with configurable scope (split-phase)|
-| `symm_barrier_wait`      | Wait for peers to arrive at barrier with configurable scope    |
+| Primitive              | Signature                                               | Purpose                                          |
+|------------------------|---------------------------------------------------------|--------------------------------------------------|
+| `symm_barrier`         | `(ctx_ptr, scope, backend) -> void`                     | Combined barrier (arrive + wait) with scope      |
+| `symm_barrier_arrive`  | `(ctx_ptr, barrier_index, scope, backend) -> void`      | Signal arrival at barrier (split-phase)          |
+| `symm_barrier_wait`    | `(ctx_ptr, barrier_index, scope, backend) -> void`      | Wait for peers to arrive at barrier              |
 
-All barrier primitives accept a `scope` parameter to select between LSA-only and full-team synchronization.
+All barrier primitives accept a `scope` parameter:
+- `SCOPE_LSA (0)`: Only LSA domain peers (NVLink-connected)
+- `SCOPE_WORLD (1)`: All ranks in the team (via GIN)
 
 **`symm_barrier`** - Combined barrier (arrive + wait in one call):
 
@@ -102,10 +151,10 @@ def my_kernel(ctx_ptr, data_ptr, backend_hint: tl.constexpr):
     tl.store(data_ptr + offsets, data, mask=mask)
 
     # LSA-only barrier (faster, NVLink peers only)
-    symm_barrier(ctx_ptr, scope=SCOPE_LSA, backend=backend_hint)
+    symm_barrier(ctx_ptr, scope=TL_SCOPE_LSA, backend=backend_hint)
 
     # Full team barrier (all ranks, including cross-node via GIN)
-    symm_barrier(ctx_ptr, scope=SCOPE_WORLD, backend=backend_hint)
+    symm_barrier(ctx_ptr, scope=TL_SCOPE_WORLD, backend=backend_hint)
 ```
 
 **Split-phase barriers** (`symm_barrier_arrive` and `symm_barrier_wait`) allow overlapping
@@ -118,66 +167,97 @@ def my_kernel(ctx_ptr, data_ptr, backend_hint: tl.constexpr):
     tl.store(data_ptr + offsets, data, mask=mask)
 
     # Signal arrival with SCOPE_LSA (NVLink-connected peers only)
-    symm_barrier_arrive(ctx_ptr, barrier_index=0, scope=SCOPE_LSA, backend=backend_hint)
+    symm_barrier_arrive(ctx_ptr, barrier_index=0, scope=TL_SCOPE_LSA, backend=backend_hint)
 
     # Do independent computation while waiting
     result = compute_something_else()
 
     # Wait for all LSA peers before reading their data
-    symm_barrier_wait(ctx_ptr, barrier_index=0, scope=SCOPE_LSA, backend=backend_hint)
+    symm_barrier_wait(ctx_ptr, barrier_index=0, scope=TL_SCOPE_LSA, backend=backend_hint)
 
     # Now safe to read peer data
     peer_data = tl.load(peer_ptr + offsets)
 ```
 
-For full team synchronization (including cross-node via GIN), use `scope=SCOPE_WORLD`:
+#### Ordering Primitives
 
-```python
-    # Signal arrival with SCOPE_WORLD (all ranks in team)
-    symm_barrier_arrive(ctx_ptr, barrier_index=0, scope=SCOPE_WORLD, backend=backend_hint)
-    symm_barrier_wait(ctx_ptr, barrier_index=0, scope=SCOPE_WORLD, backend=backend_hint)
-```
+| Primitive    | Signature                              | Purpose                                             |
+|--------------|----------------------------------------|-----------------------------------------------------|
+| `symm_fence` | `(ctx_ptr, scope, backend) -> void`    | Memory fence with configurable scope (CTA/GPU/system) |
+| `symm_quiet` | `(ctx_ptr, backend) -> void`           | Ensure all prior one-sided operations have completed  |
 
-#### Other Synchronization Primitives
+### 2.4 Signaling Primitives
 
-| Primitive                  | Purpose                                                        |
-|----------------------------|----------------------------------------------------------------|
-| `symm_fence`               | Memory fence with configurable scope (CTA/GPU/system)          |
-| `symm_quiet`               | Ensure all prior one-sided operations have completed           |
+| Primitive              | Signature                                              | Purpose                                          |
+|------------------------|--------------------------------------------------------|--------------------------------------------------|
+| `symm_signal`          | `(ctx_ptr, signal_index, dest_rank, value, op, backend) -> void` | Atomically update a signal at remote rank        |
+| `symm_signal_wait_until` | `(ctx_ptr, signal_index, cmp, cmp_value, backend) -> int64` | Block until local signal meets condition         |
+| `symm_signal_reset`    | `(ctx_ptr, signal_index, backend) -> void`             | Reset a local signal to zero for reuse           |
 
-### 2.3 Signaling Primitives
+**Signal operations (`symm_signal` op parameter):**
+- `SIGNAL_OP_SET (0)`: Atomic set (replace value)
+- `SIGNAL_OP_ADD (1)`: Atomic add (increment value)
 
-| Primitive                | Purpose                                                        |
-|--------------------------|----------------------------------------------------------------|
-| `symm_signal`            | Atomically update a signal at a remote rank's signal pad       |
-| `symm_signal_wait_until` | Block until a local signal meets a specified condition         |
-| `symm_signal_reset`      | Reset a local signal to zero for reuse                         |
+**Comparison conditions (`symm_signal_wait_until` cmp parameter):**
+- `SIGNAL_CMP_EQ (1)`: Wait until signal == cmp_value
+- `SIGNAL_CMP_NE (2)`: Wait until signal != cmp_value
+- `SIGNAL_CMP_GT (3)`: Wait until signal > cmp_value
+- `SIGNAL_CMP_GE (4)`: Wait until signal >= cmp_value
+- `SIGNAL_CMP_LT (5)`: Wait until signal < cmp_value
+- `SIGNAL_CMP_LE (6)`: Wait until signal <= cmp_value
 
-### 2.4 Data Transfer Primitives
+### 2.5 Data Transfer Primitives
 
-| Primitive                | Purpose                                                        |
-|--------------------------|----------------------------------------------------------------|
-| `symm_put_async`         | Non-blocking one-sided put (local → remote)                    |
-| `symm_put_signal_async`  | Non-blocking put with remote signal notification on arrival    |
+| Primitive              | Signature                                                                          | Purpose                                          |
+|------------------------|------------------------------------------------------------------------------------|--------------------------------------------------|
+| `symm_put_async`       | `(ctx_ptr, dest_ptr, src_ptr, count, dtype, dest_rank, backend) -> void`           | Non-blocking one-sided put (local → remote)      |
+| `symm_put_signal_async` | `(ctx_ptr, dest_ptr, src_ptr, count, dtype, dest_rank, signal_index, signal_value, signal_op, backend) -> void` | Non-blocking put with remote signal notification |
 
-### 2.5 Team (Topology) Primitives
+### 2.6 Team (Topology) Primitives
 
 All team primitives obtain the team information from the `SymmContext` internally.
 The context stores a pointer to its associated `SymmTeam`, eliminating the need to
 pass a separate `team_ptr` parameter.
 
-| Primitive            | Signature                  | Purpose                                              |
-|----------------------|----------------------------|------------------------------------------------------|
-| `symm_team_size`     | `(ctx_ptr) -> int32`       | Get number of ranks in the team                      |
-| `symm_team_rank`     | `(ctx_ptr) -> int32`       | Get this process's rank within the team              |
-| `symm_team_lsa_size` | `(ctx_ptr) -> int32`       | Get number of ranks in the LSA domain                |
-| `symm_team_lsa`      | `(ctx_ptr, peer) -> int32` | Check if peer is in same LSA domain (NVLink-connected)|
+| Primitive        | Signature                              | Purpose                                                        |
+|------------------|----------------------------------------|----------------------------------------------------------------|
+| `symm_team_size` | `(ctx_ptr, scope, backend) -> int32`   | Get number of ranks in the given scope (LSA or WORLD)          |
+| `symm_team_rank` | `(ctx_ptr, scope, backend) -> int32`   | Get this process's rank within the given scope                 |
+| `symm_team_peer` | `(ctx_ptr, peer, backend) -> int32`    | Get scope in which caller and peer are connected (0=LSA, 1=WORLD) |
 
-### 2.6 Collective Primitives (Demonstration Only)
+**Scope Parameter:**
+- `SCOPE_LSA (0)`: LSA domain only (NVLink-connected peers on the same node)
+- `SCOPE_WORLD (1)`: All ranks in the team (default)
 
-| Primitive                | Purpose                                                        |
-|--------------------------|----------------------------------------------------------------|
-| `symm_all_reduce`        | **Demo only** - Simple all-reduce (not production-ready)       |
+**Example usage:**
+
+```python
+@triton.jit
+def my_kernel(ctx_ptr, data_ptr, backend_hint: tl.constexpr):
+    # Team operations use ctx_ptr and scope parameter
+    my_rank = symm_team_rank(ctx_ptr, scope=TL_SCOPE_WORLD, backend=backend_hint)
+    team_size = symm_team_size(ctx_ptr, scope=TL_SCOPE_WORLD, backend=backend_hint)
+    lsa_size = symm_team_size(ctx_ptr, scope=TL_SCOPE_LSA, backend=backend_hint)
+    local_rank = symm_team_rank(ctx_ptr, scope=TL_SCOPE_LSA, backend=backend_hint)
+
+    # Check connectivity scope between caller and a peer
+    peer_scope = symm_team_peer(ctx_ptr, peer, backend=backend_hint)
+    if peer_scope == TL_SCOPE_LSA:
+        # Direct memory access via NVLink
+        peer_ptr = symm_lsa_ptr(ctx_ptr, data_ptr, peer, backend=backend_hint)
+    else:
+        # Use explicit put/get for cross-node communication
+        pass
+
+    # Multicast pointer also uses ctx_ptr only
+    mc_ptr = symm_lsa_multicast_ptr(ctx_ptr, data_ptr, backend=backend_hint)
+```
+
+### 2.7 Collective Primitives (Demonstration Only)
+
+| Primitive       | Signature                                                              | Purpose                                     |
+|-----------------|------------------------------------------------------------------------|---------------------------------------------|
+| `symm_all_reduce` | `(ctx_ptr, local_ptr, byte_offset, num_elements, reduce_op, dtype, backend) -> void` | **Demo only** - Simple all-reduce (not production-ready) |
 
 ---
 
@@ -293,10 +373,23 @@ __device__ int64_t symm_lsa_multicast_ptr(int64_t ctx_ptr, int64_t local_ptr) {
 ```python
 @triton.jit
 def my_kernel(ctx_ptr, data_ptr, backend_hint: tl.constexpr):
-    # Team operations use ctx_ptr directly
-    my_rank = symm_team_rank(ctx_ptr, backend=backend_hint)
-    team_size = symm_team_size(ctx_ptr, backend=backend_hint)
-    lsa_size = symm_team_lsa_size(ctx_ptr, backend=backend_hint)
+    # Use module-level TL_* constants for Triton JIT compatibility
+    # (imported from torch._extern_triton)
+
+    # Team operations use ctx_ptr and scope parameter
+    my_rank = symm_team_rank(ctx_ptr, scope=TL_SCOPE_WORLD, backend=backend_hint)
+    team_size = symm_team_size(ctx_ptr, scope=TL_SCOPE_WORLD, backend=backend_hint)
+    lsa_size = symm_team_size(ctx_ptr, scope=TL_SCOPE_LSA, backend=backend_hint)
+    local_rank = symm_team_rank(ctx_ptr, scope=TL_SCOPE_LSA, backend=backend_hint)
+
+    # Check connectivity scope between caller and a peer
+    peer_scope = symm_team_peer(ctx_ptr, peer, backend=backend_hint)
+    if peer_scope == TL_SCOPE_LSA:
+        # Direct memory access via NVLink
+        peer_ptr = symm_lsa_ptr(ctx_ptr, data_ptr, peer, backend=backend_hint)
+    else:
+        # Use explicit put/get for cross-node communication
+        pass
 
     # Multicast pointer also uses ctx_ptr only
     mc_ptr = symm_lsa_multicast_ptr(ctx_ptr, data_ptr, backend=backend_hint)

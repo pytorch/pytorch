@@ -160,6 +160,42 @@ _SCOPE_WORLD = 1  # All ranks in the team (full world synchronization via GIN)
 SCOPE_LSA = _SCOPE_LSA
 SCOPE_WORLD = _SCOPE_WORLD
 
+# Triton constexpr versions of constants for use within @triton.jit functions
+# These are only defined when Triton is available
+# IMPORTANT: Must use tl.constexpr() function, not tl.constexpr type annotation
+if TRITON_AVAILABLE:
+    # Backend constants
+    TL_BACKEND_DEFAULT = tl.constexpr(_BACKEND_DEFAULT)
+    TL_BACKEND_NCCL = tl.constexpr(_BACKEND_NCCL)
+    TL_BACKEND_NVSHMEM = tl.constexpr(_BACKEND_NVSHMEM)
+
+    # Reduction operation constants
+    TL_REDUCE_OP_SUM = tl.constexpr(_REDUCE_OP_SUM)
+
+    # Data type constants
+    TL_DTYPE_FLOAT32 = tl.constexpr(_DTYPE_FLOAT32)
+
+    # Fence scope constants
+    TL_FENCE_SCOPE_CTA = tl.constexpr(_FENCE_SCOPE_CTA)
+    TL_FENCE_SCOPE_GPU = tl.constexpr(_FENCE_SCOPE_GPU)
+    TL_FENCE_SCOPE_SYSTEM = tl.constexpr(_FENCE_SCOPE_SYSTEM)
+
+    # Signal operation constants
+    TL_SIGNAL_OP_SET = tl.constexpr(_SIGNAL_OP_SET)
+    TL_SIGNAL_OP_ADD = tl.constexpr(_SIGNAL_OP_ADD)
+
+    # Signal comparison constants
+    TL_SIGNAL_CMP_EQ = tl.constexpr(_SIGNAL_CMP_EQ)
+    TL_SIGNAL_CMP_NE = tl.constexpr(_SIGNAL_CMP_NE)
+    TL_SIGNAL_CMP_GT = tl.constexpr(_SIGNAL_CMP_GT)
+    TL_SIGNAL_CMP_GE = tl.constexpr(_SIGNAL_CMP_GE)
+    TL_SIGNAL_CMP_LT = tl.constexpr(_SIGNAL_CMP_LT)
+    TL_SIGNAL_CMP_LE = tl.constexpr(_SIGNAL_CMP_LE)
+
+    # Scope constants
+    TL_SCOPE_LSA = tl.constexpr(_SCOPE_LSA)
+    TL_SCOPE_WORLD = tl.constexpr(_SCOPE_WORLD)
+
 
 class TorchSymmLibFinder:
     """Utility class for finding the torch symmetric memory bitcode library."""
@@ -1200,23 +1236,21 @@ if TRITON_AVAILABLE:
             When using BACKEND_NVSHMEM (2), use @requires_torch_symm(backend=BACKEND_NVSHMEM).
 
             This function asserts on invalid context, unsupported reduce_op, or
-            unsupported dtype. Use device-side error checking for debugging.
+              unsupported dtype. Use device-side error checking for debugging.
         """
         # Validate reduce_op at compile time
         tl.static_assert(
-            reduce_op == 0,  # REDUCE_OP_SUM
+            reduce_op == TL_REDUCE_OP_SUM,
             "Only REDUCE_OP_SUM (0) is supported",
         )
 
         # Validate dtype at compile time
         tl.static_assert(
-            dtype == 0,  # DTYPE_FLOAT32
+            dtype == TL_DTYPE_FLOAT32,
             "Only DTYPE_FLOAT32 (0) is supported",
         )
 
-        # Use integer literals for comparison since Triton can't access globals
-        # 0 = BACKEND_DEFAULT, 1 = BACKEND_NCCL, 2 = BACKEND_NVSHMEM
-        if backend == 0:  # BACKEND_DEFAULT
+        if backend == TL_BACKEND_DEFAULT:
             # Runtime dispatch based on SymmContext type
             _symm_all_reduce_frontend(
                 ctx_ptr,
@@ -1226,7 +1260,7 @@ if TRITON_AVAILABLE:
                 reduce_op,
                 dtype,
             )
-        elif backend == 2:  # BACKEND_NVSHMEM
+        elif backend == TL_BACKEND_NVSHMEM:
             # Direct NVSHMEM dispatch
             _nvshmem_symm_all_reduce(
                 ctx_ptr,
@@ -1237,7 +1271,7 @@ if TRITON_AVAILABLE:
                 dtype,
             )
         else:
-            # BACKEND_NCCL (1) or unknown - not supported
+            # BACKEND_NCCL or unknown - not supported
             # NCCL does not provide device bitcode library
             tl.static_assert(
                 False,
@@ -1347,16 +1381,14 @@ if TRITON_AVAILABLE:
             When using BACKEND_DEFAULT (0), use @requires_torch_symm decorator.
             When using BACKEND_NVSHMEM (2), use @requires_torch_symm(backend=BACKEND_NVSHMEM).
         """
-        # Use integer literals for comparison since Triton can't access globals
-        # 0 = BACKEND_DEFAULT, 1 = BACKEND_NCCL, 2 = BACKEND_NVSHMEM
-        if backend == 0:  # BACKEND_DEFAULT
+        if backend == TL_BACKEND_DEFAULT:
             # Runtime dispatch based on SymmContext type
             return _symm_lsa_signal_ptr_frontend(ctx_ptr, peer)
-        elif backend == 2:  # BACKEND_NVSHMEM
+        elif backend == TL_BACKEND_NVSHMEM:
             # Direct NVSHMEM dispatch
             return _nvshmem_symm_lsa_signal_ptr(ctx_ptr, peer)
         else:
-            # BACKEND_NCCL (1) or unknown - not supported
+            # BACKEND_NCCL or unknown - not supported
             # NCCL does not provide device bitcode library
             tl.static_assert(
                 False,
@@ -1399,16 +1431,14 @@ if TRITON_AVAILABLE:
 
             This function asserts on invalid context.
         """
-        # Use integer literals for comparison since Triton can't access globals
-        # 0 = BACKEND_DEFAULT, 1 = BACKEND_NCCL, 2 = BACKEND_NVSHMEM
-        if backend == 0:  # BACKEND_DEFAULT
+        if backend == TL_BACKEND_DEFAULT:
             # Runtime dispatch based on SymmContext type
             _symm_quiet_frontend(ctx_ptr)
-        elif backend == 2:  # BACKEND_NVSHMEM
+        elif backend == TL_BACKEND_NVSHMEM:
             # Direct NVSHMEM dispatch
             _nvshmem_symm_quiet(ctx_ptr)
         else:
-            # BACKEND_NCCL (1) or unknown - not supported
+            # BACKEND_NCCL or unknown - not supported
             # NCCL does not provide device bitcode library
             tl.static_assert(
                 False,
@@ -1475,16 +1505,15 @@ if TRITON_AVAILABLE:
         """
         # Validate scope at compile time
         tl.static_assert(
-            scope >= 0 and scope <= 1,
+            scope >= TL_SCOPE_LSA and scope <= TL_SCOPE_WORLD,
             "scope must be 0 (SCOPE_LSA) or 1 (SCOPE_WORLD)",
         )
 
         # Dispatch based on scope
-        # 0 = SCOPE_LSA, 1 = SCOPE_WORLD
-        if scope == 0:  # SCOPE_LSA
-            if backend == 0:  # BACKEND_DEFAULT
+        if scope == TL_SCOPE_LSA:
+            if backend == TL_BACKEND_DEFAULT:
                 _symm_lsa_barrier_frontend(ctx_ptr, 0)  # barrier_index=0
-            elif backend == 2:  # BACKEND_NVSHMEM
+            elif backend == TL_BACKEND_NVSHMEM:
                 _nvshmem_symm_lsa_barrier(ctx_ptr, 0)  # barrier_index=0
             else:
                 tl.static_assert(
@@ -1492,9 +1521,9 @@ if TRITON_AVAILABLE:
                     "NCCL backend not supported (no device bitcode library available)",
                 )
         else:  # SCOPE_WORLD
-            if backend == 0:  # BACKEND_DEFAULT
+            if backend == TL_BACKEND_DEFAULT:
                 _symm_barrier_frontend(ctx_ptr)
-            elif backend == 2:  # BACKEND_NVSHMEM
+            elif backend == TL_BACKEND_NVSHMEM:
                 _nvshmem_symm_barrier(ctx_ptr)
             else:
                 tl.static_assert(
@@ -1582,16 +1611,15 @@ if TRITON_AVAILABLE:
         """
         # Validate scope at compile time
         tl.static_assert(
-            scope >= 0 and scope <= 1,
+            scope >= TL_SCOPE_LSA and scope <= TL_SCOPE_WORLD,
             "scope must be 0 (SCOPE_LSA) or 1 (SCOPE_WORLD)",
         )
 
         # Dispatch based on scope
-        # 0 = SCOPE_LSA, 1 = SCOPE_WORLD
-        if scope == 0:  # SCOPE_LSA
-            if backend == 0:  # BACKEND_DEFAULT
+        if scope == TL_SCOPE_LSA:
+            if backend == TL_BACKEND_DEFAULT:
                 _symm_lsa_barrier_arrive_frontend(ctx_ptr, barrier_index)
-            elif backend == 2:  # BACKEND_NVSHMEM
+            elif backend == TL_BACKEND_NVSHMEM:
                 _nvshmem_symm_lsa_barrier_arrive(ctx_ptr, barrier_index)
             else:
                 tl.static_assert(
@@ -1599,9 +1627,9 @@ if TRITON_AVAILABLE:
                     "NCCL backend not supported (no device bitcode library available)",
                 )
         else:  # SCOPE_WORLD
-            if backend == 0:  # BACKEND_DEFAULT
+            if backend == TL_BACKEND_DEFAULT:
                 _symm_barrier_arrive_frontend(ctx_ptr, barrier_index)
-            elif backend == 2:  # BACKEND_NVSHMEM
+            elif backend == TL_BACKEND_NVSHMEM:
                 _nvshmem_symm_barrier_arrive(ctx_ptr, barrier_index)
             else:
                 tl.static_assert(
@@ -1685,16 +1713,15 @@ if TRITON_AVAILABLE:
         """
         # Validate scope at compile time
         tl.static_assert(
-            scope >= 0 and scope <= 1,
+            scope >= TL_SCOPE_LSA and scope <= TL_SCOPE_WORLD,
             "scope must be 0 (SCOPE_LSA) or 1 (SCOPE_WORLD)",
         )
 
         # Dispatch based on scope
-        # 0 = SCOPE_LSA, 1 = SCOPE_WORLD
-        if scope == 0:  # SCOPE_LSA
-            if backend == 0:  # BACKEND_DEFAULT
+        if scope == TL_SCOPE_LSA:
+            if backend == TL_BACKEND_DEFAULT:
                 _symm_lsa_barrier_wait_frontend(ctx_ptr, barrier_index)
-            elif backend == 2:  # BACKEND_NVSHMEM
+            elif backend == TL_BACKEND_NVSHMEM:
                 _nvshmem_symm_lsa_barrier_wait(ctx_ptr, barrier_index)
             else:
                 tl.static_assert(
@@ -1702,9 +1729,9 @@ if TRITON_AVAILABLE:
                     "NCCL backend not supported (no device bitcode library available)",
                 )
         else:  # SCOPE_WORLD
-            if backend == 0:  # BACKEND_DEFAULT
+            if backend == TL_BACKEND_DEFAULT:
                 _symm_barrier_wait_frontend(ctx_ptr, barrier_index)
-            elif backend == 2:  # BACKEND_NVSHMEM
+            elif backend == TL_BACKEND_NVSHMEM:
                 _nvshmem_symm_barrier_wait(ctx_ptr, barrier_index)
             else:
                 tl.static_assert(
@@ -1762,20 +1789,18 @@ if TRITON_AVAILABLE:
         """
         # Validate scope at compile time
         tl.static_assert(
-            scope >= 0 and scope <= 2,
+            scope >= TL_FENCE_SCOPE_CTA and scope <= TL_FENCE_SCOPE_SYSTEM,
             "scope must be 0 (CTA), 1 (GPU), or 2 (SYSTEM)",
         )
 
-        # Use integer literals for comparison since Triton can't access globals
-        # 0 = BACKEND_DEFAULT, 1 = BACKEND_NCCL, 2 = BACKEND_NVSHMEM
-        if backend == 0:  # BACKEND_DEFAULT
+        if backend == TL_BACKEND_DEFAULT:
             # Runtime dispatch based on SymmContext type
             _symm_fence_frontend(ctx_ptr, scope)
-        elif backend == 2:  # BACKEND_NVSHMEM
+        elif backend == TL_BACKEND_NVSHMEM:
             # Direct NVSHMEM dispatch
             _nvshmem_symm_fence(ctx_ptr, scope)
         else:
-            # BACKEND_NCCL (1) or unknown - not supported
+            # BACKEND_NCCL or unknown - not supported
             # NCCL does not provide device bitcode library
             tl.static_assert(
                 False,
@@ -1968,16 +1993,14 @@ if TRITON_AVAILABLE:
             When using BACKEND_DEFAULT (0), use @requires_torch_symm decorator.
             When using BACKEND_NVSHMEM (2), use @requires_torch_symm(backend=BACKEND_NVSHMEM).
         """
-        # Use integer literals for comparison since Triton can't access globals
-        # 0 = BACKEND_DEFAULT, 1 = BACKEND_NCCL, 2 = BACKEND_NVSHMEM
-        if backend == 0:  # BACKEND_DEFAULT
+        if backend == TL_BACKEND_DEFAULT:
             # Runtime dispatch based on SymmContext type
             return _symm_lsa_ptr_frontend(ctx_ptr, local_ptr, peer)
-        elif backend == 2:  # BACKEND_NVSHMEM
+        elif backend == TL_BACKEND_NVSHMEM:
             # Direct NVSHMEM dispatch
             return _nvshmem_symm_lsa_ptr(ctx_ptr, local_ptr, peer)
         else:
-            # BACKEND_NCCL (1) or unknown - not supported
+            # BACKEND_NCCL or unknown - not supported
             # NCCL does not provide device bitcode library
             tl.static_assert(
                 False,
@@ -2030,16 +2053,14 @@ if TRITON_AVAILABLE:
             When using BACKEND_DEFAULT (0), use @requires_torch_symm decorator.
             When using BACKEND_NVSHMEM (2), use @requires_torch_symm(backend=BACKEND_NVSHMEM).
         """
-        # Use integer literals for comparison since Triton can't access globals
-        # 0 = BACKEND_DEFAULT, 1 = BACKEND_NCCL, 2 = BACKEND_NVSHMEM
-        if backend == 0:  # BACKEND_DEFAULT
+        if backend == TL_BACKEND_DEFAULT:
             # Runtime dispatch based on SymmContext type
             return _symm_lsa_multicast_ptr_frontend(ctx_ptr, local_ptr)
-        elif backend == 2:  # BACKEND_NVSHMEM
+        elif backend == TL_BACKEND_NVSHMEM:
             # Direct NVSHMEM dispatch
             return _nvshmem_symm_lsa_multicast_ptr(ctx_ptr, local_ptr)
         else:
-            # BACKEND_NCCL (1) or unknown - not supported
+            # BACKEND_NCCL or unknown - not supported
             # NCCL does not provide device bitcode library
             tl.static_assert(
                 False,
@@ -2241,141 +2262,142 @@ if TRITON_AVAILABLE:
     @triton.jit
     def symm_team_size(
         ctx_ptr,
+        scope: tl.constexpr = 1,
         backend: tl.constexpr = 0,
     ):
         """
-        Get the number of ranks in the team.
+        Get the number of ranks in the team for the specified scope.
 
         This returns the total number of processes/PEs that are members of the
-        team associated with the context.
-
-        Team is obtained from the context internally.
+        team for the given scope.
 
         Args:
             ctx_ptr: Pointer to SymmContext (as int64 for Triton compatibility)
+            scope: Synchronization scope (constexpr)
+                   - 0 (SCOPE_LSA): Return LSA domain size (NVLink-connected peers)
+                   - 1 (SCOPE_WORLD): Return full team size (all ranks)
             backend: Backend hint (constexpr, default=0 for BACKEND_DEFAULT)
                      - 0 (BACKEND_DEFAULT): Runtime dispatch based on context type
                      - 1 (BACKEND_NCCL): Direct NCCL dispatch (not functional)
                      - 2 (BACKEND_NVSHMEM): Direct NVSHMEM dispatch
 
         Returns:
-            int32: Number of ranks in the team, or -1 if context/team is invalid
+            int32: Number of ranks in the team/scope, or -1 if context/team is invalid
 
         Note:
             When using BACKEND_DEFAULT (0), use @requires_torch_symm decorator.
             When using BACKEND_NVSHMEM (2), use @requires_torch_symm(backend=BACKEND_NVSHMEM).
         """
-        if backend == 0:  # BACKEND_DEFAULT
-            return _symm_team_size_frontend(ctx_ptr)
-        elif backend == 2:  # BACKEND_NVSHMEM
-            return _nvshmem_symm_team_size(ctx_ptr)
-        else:
-            tl.static_assert(
-                False,
-                "NCCL backend not supported (no device bitcode library available)",
-            )
-            return -1
+        tl.static_assert(
+            scope >= TL_SCOPE_LSA and scope <= TL_SCOPE_WORLD,
+            "scope must be 0 (SCOPE_LSA) or 1 (SCOPE_WORLD)",
+        )
+        if scope == TL_SCOPE_LSA:
+            if backend == TL_BACKEND_DEFAULT:
+                return _symm_team_lsa_size_frontend(ctx_ptr)
+            elif backend == TL_BACKEND_NVSHMEM:
+                return _nvshmem_symm_team_lsa_size(ctx_ptr)
+            else:
+                tl.static_assert(
+                    False,
+                    "NCCL backend not supported (no device bitcode library available)",
+                )
+                return -1
+        else:  # SCOPE_WORLD
+            if backend == TL_BACKEND_DEFAULT:
+                return _symm_team_size_frontend(ctx_ptr)
+            elif backend == TL_BACKEND_NVSHMEM:
+                return _nvshmem_symm_team_size(ctx_ptr)
+            else:
+                tl.static_assert(
+                    False,
+                    "NCCL backend not supported (no device bitcode library available)",
+                )
+                return -1
 
     @triton.jit
     def symm_team_rank(
         ctx_ptr,
+        scope: tl.constexpr = 1,
         backend: tl.constexpr = 0,
     ):
         """
-        Get the calling process's rank index within the team.
+        Get the calling process's rank index within the team for the specified scope.
 
-        Returns the rank of this process within the team (0..team_size-1).
-        This is the team-local rank, not the global rank.
-
-        Team is obtained from the context internally.
+        Returns the rank of this process within the team.
+        For SCOPE_WORLD: returns 0..team_size-1
+        For SCOPE_LSA: returns 0..lsa_size-1 (rank within LSA domain)
 
         Args:
             ctx_ptr: Pointer to SymmContext (as int64 for Triton compatibility)
+            scope: Synchronization scope (constexpr)
+                   - 0 (SCOPE_LSA): Return rank within LSA domain (0..lsa_size-1)
+                   - 1 (SCOPE_WORLD): Return rank within full team (0..team_size-1)
             backend: Backend hint (constexpr, default=0 for BACKEND_DEFAULT)
                      - 0 (BACKEND_DEFAULT): Runtime dispatch based on context type
                      - 1 (BACKEND_NCCL): Direct NCCL dispatch (not functional)
                      - 2 (BACKEND_NVSHMEM): Direct NVSHMEM dispatch
 
         Returns:
-            int32: Rank index within the team (0..team_size-1), or -1 if context/team is invalid
+            int32: Rank index within the team/scope, or -1 if context/team is invalid
 
         Note:
             When using BACKEND_DEFAULT (0), use @requires_torch_symm decorator.
             When using BACKEND_NVSHMEM (2), use @requires_torch_symm(backend=BACKEND_NVSHMEM).
         """
-        if backend == 0:  # BACKEND_DEFAULT
-            return _symm_team_rank_frontend(ctx_ptr)
-        elif backend == 2:  # BACKEND_NVSHMEM
-            return _nvshmem_symm_team_rank(ctx_ptr)
-        else:
-            tl.static_assert(
-                False,
-                "NCCL backend not supported (no device bitcode library available)",
-            )
-            return -1
+        tl.static_assert(
+            scope >= TL_SCOPE_LSA and scope <= TL_SCOPE_WORLD,
+            "scope must be 0 (SCOPE_LSA) or 1 (SCOPE_WORLD)",
+        )
+        if scope == TL_SCOPE_LSA:
+            # Compute LSA rank as world_rank % lsa_size
+            if backend == TL_BACKEND_DEFAULT:
+                world_rank = _symm_team_rank_frontend(ctx_ptr)
+                lsa_size = _symm_team_lsa_size_frontend(ctx_ptr)
+                return world_rank % lsa_size
+            elif backend == TL_BACKEND_NVSHMEM:
+                world_rank = _nvshmem_symm_team_rank(ctx_ptr)
+                lsa_size = _nvshmem_symm_team_lsa_size(ctx_ptr)
+                return world_rank % lsa_size
+            else:
+                tl.static_assert(
+                    False,
+                    "NCCL backend not supported (no device bitcode library available)",
+                )
+                return -1
+        else:  # SCOPE_WORLD
+            if backend == TL_BACKEND_DEFAULT:
+                return _symm_team_rank_frontend(ctx_ptr)
+            elif backend == TL_BACKEND_NVSHMEM:
+                return _nvshmem_symm_team_rank(ctx_ptr)
+            else:
+                tl.static_assert(
+                    False,
+                    "NCCL backend not supported (no device bitcode library available)",
+                )
+                return -1
 
     @triton.jit
-    def symm_team_lsa_size(
-        ctx_ptr,
-        backend: tl.constexpr = 0,
-    ):
-        """
-        Get the number of ranks in the caller's LSA (Local Symmetric Access) domain.
-
-        LSA domain contains peers that can directly access each other's memory via
-        load/store operations (e.g., NVLink-connected GPUs on the same node).
-
-        This is useful for optimizing communication patterns:
-        - Peers in LSA domain: Use direct memory access (symm_lsa_ptr + tl.load/store)
-        - Peers outside LSA: Use explicit put/get operations
-
-        Team is obtained from the context internally.
-
-        Args:
-            ctx_ptr: Pointer to SymmContext (as int64 for Triton compatibility)
-            backend: Backend hint (constexpr, default=0 for BACKEND_DEFAULT)
-                     - 0 (BACKEND_DEFAULT): Runtime dispatch based on context type
-                     - 1 (BACKEND_NCCL): Direct NCCL dispatch (not functional)
-                     - 2 (BACKEND_NVSHMEM): Direct NVSHMEM dispatch
-
-        Returns:
-            int32: Number of ranks in the LSA domain, or -1 if context/team is invalid
-
-        Note:
-            When using BACKEND_DEFAULT (0), use @requires_torch_symm decorator.
-            When using BACKEND_NVSHMEM (2), use @requires_torch_symm(backend=BACKEND_NVSHMEM).
-        """
-        if backend == 0:  # BACKEND_DEFAULT
-            return _symm_team_lsa_size_frontend(ctx_ptr)
-        elif backend == 2:  # BACKEND_NVSHMEM
-            return _nvshmem_symm_team_lsa_size(ctx_ptr)
-        else:
-            tl.static_assert(
-                False,
-                "NCCL backend not supported (no device bitcode library available)",
-            )
-            return -1
-
-    @triton.jit
-    def symm_team_lsa(
+    def symm_team_peer(
         ctx_ptr,
         peer,
         backend: tl.constexpr = 0,
     ):
         """
-        Check if a peer rank is in the same LSA domain as the caller.
+        Get the scope in which the caller and a peer rank are connected.
 
-        Returns 1 (true) if the peer can be accessed via direct load/store operations
-        (e.g., via symm_lsa_ptr), 0 (false) if explicit communication is required.
+        Returns the scope (connectivity level) between the caller and the
+        specified peer rank. This can be used to select the optimal
+        communication strategy for a given peer.
 
         Usage pattern:
-          is_lsa = symm_team_lsa(ctx, peer)
-          if is_lsa == 1:
-              # Direct memory access available
+          scope = symm_team_peer(ctx, peer)
+          if scope == SCOPE_LSA:
+              # Direct memory access available (NVLink)
               peer_ptr = symm_lsa_ptr(ctx, local_ptr, peer)
               data = tl.load(peer_ptr + offset)
-          else:
-              # Use explicit get operation
+          else:  # SCOPE_WORLD
+              # Use explicit communication (GIN)
               symm_get(ctx, local_buf, remote_buf, peer, size)
 
         Team is obtained from the context internally.
@@ -2389,16 +2411,30 @@ if TRITON_AVAILABLE:
                      - 2 (BACKEND_NVSHMEM): Direct NVSHMEM dispatch
 
         Returns:
-            int32: 1 if peer is in LSA domain, 0 if not, -1 if context/team is invalid
+            int32: SCOPE_LSA (0) if peer is in LSA domain (direct memory access),
+                   SCOPE_WORLD (1) if peer requires world-scope communication,
+                   -1 if context/team is invalid
 
         Note:
             When using BACKEND_DEFAULT (0), use @requires_torch_symm decorator.
             When using BACKEND_NVSHMEM (2), use @requires_torch_symm(backend=BACKEND_NVSHMEM).
         """
-        if backend == 0:  # BACKEND_DEFAULT
-            return _symm_team_lsa_frontend(ctx_ptr, peer)
-        elif backend == 2:  # BACKEND_NVSHMEM
-            return _nvshmem_symm_team_lsa(ctx_ptr, peer)
+        if backend == TL_BACKEND_DEFAULT:
+            is_lsa = _symm_team_lsa_frontend(ctx_ptr, peer)
+            if is_lsa == 1:
+                return TL_SCOPE_LSA
+            elif is_lsa == 0:
+                return TL_SCOPE_WORLD
+            else:
+                return -1  # Error
+        elif backend == TL_BACKEND_NVSHMEM:
+            is_lsa = _nvshmem_symm_team_lsa(ctx_ptr, peer)
+            if is_lsa == 1:
+                return TL_SCOPE_LSA
+            elif is_lsa == 0:
+                return TL_SCOPE_WORLD
+            else:
+                return -1  # Error
         else:
             tl.static_assert(
                 False,
@@ -2724,13 +2760,11 @@ if TRITON_AVAILABLE:
         """
         # Validate op at compile time
         tl.static_assert(
-            op == 0 or op == 1,  # SIGNAL_OP_SET or SIGNAL_OP_ADD
-            "op must be 0 (SIGNAL_OP_SET) or 1 (SIGNAL_OP_ADD)",
+            op == TL_SIGNAL_OP_SET or op == TL_SIGNAL_OP_ADD,
+            "op must be SIGNAL_OP_SET (0) or SIGNAL_OP_ADD (1)",
         )
 
-        # Use integer literals for comparison since Triton can't access globals
-        # 0 = BACKEND_DEFAULT, 1 = BACKEND_NCCL, 2 = BACKEND_NVSHMEM
-        if backend == 0:  # BACKEND_DEFAULT
+        if backend == TL_BACKEND_DEFAULT:
             # Runtime dispatch based on SymmContext type
             _symm_signal_frontend(
                 ctx_ptr,
@@ -2739,7 +2773,7 @@ if TRITON_AVAILABLE:
                 value,
                 op,
             )
-        elif backend == 2:  # BACKEND_NVSHMEM
+        elif backend == TL_BACKEND_NVSHMEM:
             # Direct NVSHMEM dispatch
             _nvshmem_symm_signal(
                 ctx_ptr,
@@ -2749,7 +2783,7 @@ if TRITON_AVAILABLE:
                 op,
             )
         else:
-            # BACKEND_NCCL (1) or unknown - not supported
+            # BACKEND_NCCL or unknown - not supported
             # NCCL does not provide device bitcode library
             tl.static_assert(
                 False,
@@ -2825,13 +2859,11 @@ if TRITON_AVAILABLE:
         """
         # Validate cmp at compile time
         tl.static_assert(
-            cmp >= 1 and cmp <= 6,
-            "cmp must be between 1 (SIGNAL_CMP_EQ) and 6 (SIGNAL_CMP_LE)",
+            cmp >= TL_SIGNAL_CMP_EQ and cmp <= TL_SIGNAL_CMP_LE,
+            "cmp must be between SIGNAL_CMP_EQ (1) and SIGNAL_CMP_LE (6)",
         )
 
-        # Use integer literals for comparison since Triton can't access globals
-        # 0 = BACKEND_DEFAULT, 1 = BACKEND_NCCL, 2 = BACKEND_NVSHMEM
-        if backend == 0:  # BACKEND_DEFAULT
+        if backend == TL_BACKEND_DEFAULT:
             # Runtime dispatch based on SymmContext type
             return _symm_signal_wait_until_frontend(
                 ctx_ptr,
@@ -2839,7 +2871,7 @@ if TRITON_AVAILABLE:
                 cmp,
                 cmp_value,
             )
-        elif backend == 2:  # BACKEND_NVSHMEM
+        elif backend == TL_BACKEND_NVSHMEM:
             # Direct NVSHMEM dispatch
             return _nvshmem_symm_signal_wait_until(
                 ctx_ptr,
@@ -2848,7 +2880,7 @@ if TRITON_AVAILABLE:
                 cmp_value,
             )
         else:
-            # BACKEND_NCCL (1) or unknown - not supported
+            # BACKEND_NCCL or unknown - not supported
             # NCCL does not provide device bitcode library
             tl.static_assert(
                 False,
@@ -2905,22 +2937,20 @@ if TRITON_AVAILABLE:
 
             This function asserts on invalid context.
         """
-        # Use integer literals for comparison since Triton can't access globals
-        # 0 = BACKEND_DEFAULT, 1 = BACKEND_NCCL, 2 = BACKEND_NVSHMEM
-        if backend == 0:  # BACKEND_DEFAULT
+        if backend == TL_BACKEND_DEFAULT:
             # Runtime dispatch based on SymmContext type
             _symm_signal_reset_frontend(
                 ctx_ptr,
                 signal_index,
             )
-        elif backend == 2:  # BACKEND_NVSHMEM
+        elif backend == TL_BACKEND_NVSHMEM:
             # Direct NVSHMEM dispatch
             _nvshmem_symm_signal_reset(
                 ctx_ptr,
                 signal_index,
             )
         else:
-            # BACKEND_NCCL (1) or unknown - not supported
+            # BACKEND_NCCL or unknown - not supported
             # NCCL does not provide device bitcode library
             tl.static_assert(
                 False,
@@ -3082,9 +3112,7 @@ if TRITON_AVAILABLE:
         # Compute element size from dtype (primitive_bitwidth is in bits)
         element_size: tl.constexpr = dtype.primitive_bitwidth // 8
 
-        # Use integer literals for comparison since Triton can't access globals
-        # 0 = BACKEND_DEFAULT, 1 = BACKEND_NCCL, 2 = BACKEND_NVSHMEM
-        if backend == 0:  # BACKEND_DEFAULT
+        if backend == TL_BACKEND_DEFAULT:
             # Runtime dispatch based on SymmContext type
             _symm_put_async_frontend(
                 ctx_ptr,
@@ -3094,7 +3122,7 @@ if TRITON_AVAILABLE:
                 element_size,
                 dest_rank,
             )
-        elif backend == 2:  # BACKEND_NVSHMEM
+        elif backend == TL_BACKEND_NVSHMEM:
             # Direct NVSHMEM dispatch
             _nvshmem_symm_put_async(
                 ctx_ptr,
@@ -3105,7 +3133,7 @@ if TRITON_AVAILABLE:
                 dest_rank,
             )
         else:
-            # BACKEND_NCCL (1) or unknown - not supported
+            # BACKEND_NCCL or unknown - not supported
             # NCCL does not provide device bitcode library
             tl.static_assert(
                 False,
@@ -3332,16 +3360,14 @@ if TRITON_AVAILABLE:
         """
         # Validate signal_op at compile time
         tl.static_assert(
-            signal_op == 0 or signal_op == 1,  # SIGNAL_OP_SET or SIGNAL_OP_ADD
-            "signal_op must be 0 (SIGNAL_OP_SET) or 1 (SIGNAL_OP_ADD)",
+            signal_op == TL_SIGNAL_OP_SET or signal_op == TL_SIGNAL_OP_ADD,
+            "signal_op must be SIGNAL_OP_SET (0) or SIGNAL_OP_ADD (1)",
         )
 
         # Compute element size from dtype (primitive_bitwidth is in bits)
         element_size: tl.constexpr = dtype.primitive_bitwidth // 8
 
-        # Use integer literals for comparison since Triton can't access globals
-        # 0 = BACKEND_DEFAULT, 1 = BACKEND_NCCL, 2 = BACKEND_NVSHMEM
-        if backend == 0:  # BACKEND_DEFAULT
+        if backend == TL_BACKEND_DEFAULT:
             # Runtime dispatch based on SymmContext type
             _symm_put_signal_async_frontend(
                 ctx_ptr,
@@ -3354,7 +3380,7 @@ if TRITON_AVAILABLE:
                 signal_value,
                 signal_op,
             )
-        elif backend == 2:  # BACKEND_NVSHMEM
+        elif backend == TL_BACKEND_NVSHMEM:
             # Direct NVSHMEM dispatch
             _nvshmem_symm_put_signal_async(
                 ctx_ptr,
@@ -3368,7 +3394,7 @@ if TRITON_AVAILABLE:
                 signal_op,
             )
         else:
-            # BACKEND_NCCL (1) or unknown - not supported
+            # BACKEND_NCCL or unknown - not supported
             # NCCL does not provide device bitcode library
             tl.static_assert(
                 False,
@@ -3412,11 +3438,8 @@ else:
     def symm_team_rank(*args, **kwargs):  # type: ignore[misc]
         raise ImportError("Triton is required for symm_team_rank")
 
-    def symm_team_lsa_size(*args, **kwargs):  # type: ignore[misc]
-        raise ImportError("Triton is required for symm_team_lsa_size")
-
-    def symm_team_lsa(*args, **kwargs):  # type: ignore[misc]
-        raise ImportError("Triton is required for symm_team_lsa")
+    def symm_team_peer(*args, **kwargs):  # type: ignore[misc]
+        raise ImportError("Triton is required for symm_team_peer")
 
     def symm_signal(*args, **kwargs):  # type: ignore[misc]
         raise ImportError("Triton is required for symm_signal")
@@ -3482,8 +3505,7 @@ __all__ = [
     # Team primitives
     "symm_team_size",
     "symm_team_rank",
-    "symm_team_lsa_size",
-    "symm_team_lsa",
+    "symm_team_peer",
     # Signal primitives
     "symm_signal",
     "symm_signal_wait_until",
