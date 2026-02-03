@@ -19,12 +19,7 @@ from torch._utils import _dummy_type, _LazySeedTracker
 from torch.types import Device
 
 from ._utils import _get_device_index
-from .graphs import (
-    XPUGraph,
-    graph,
-    graph_pool_handle,
-    is_current_stream_capturing,
-)
+from .graphs import graph, graph_pool_handle, is_current_stream_capturing, XPUGraph
 from .streams import Event, Stream
 
 
