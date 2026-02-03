@@ -1961,6 +1961,22 @@
       "Hints": []
     }
   ],
+  "GB6276": [
+    {
+      "Gb_type": "Comprehension analysis failed: No END_FOR",
+      "Context": "",
+      "Explanation": "Could not find END_FOR instruction in comprehension bytecode.",
+      "Hints": []
+    }
+  ],
+  "GB9898": [
+    {
+      "Gb_type": "Comprehension analysis failed: No matches",
+      "Context": "pre_store_ops={pre_store_ops}, post_store_op={post_store_op}",
+      "Explanation": "Comprehension does not match any known bytecode pattern.",
+      "Hints": []
+    }
+  ],
   "GB0166": [
     {
       "Gb_type": "Unsupported torch._C._ImperativeEngine.queue_callback()",

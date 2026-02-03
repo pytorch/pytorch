@@ -4474,7 +4474,7 @@ class InstructionTranslatorBase(
                     break
         if end_for_ip < 0:
             unimplemented(
-                gb_type="Comprehension analysis failed",
+                gb_type="Comprehension analysis failed: No END_FOR",
                 context="",
                 explanation="Could not find END_FOR instruction in comprehension bytecode.",
                 hints=[],
@@ -4560,7 +4560,7 @@ class InstructionTranslatorBase(
             result_on_stack = True
         else:
             unimplemented(
-                gb_type="Comprehension analysis failed",
+                gb_type="Comprehension analysis failed: No matches",
                 context=f"pre_store_ops={pre_store_ops}, post_store_op={post_store_op}",
                 explanation="Comprehension does not match any known bytecode pattern.",
                 hints=[],
@@ -4569,6 +4569,7 @@ class InstructionTranslatorBase(
         return ComprehensionAnalysis(
             end_ip=scan_ip,
             result_var=result_var,
+            # pyrefly: ignore [unbound-name]
             result_on_stack=result_on_stack,
             iterator_vars=iterator_vars,
             walrus_vars=walrus_vars,
@@ -4580,15 +4581,18 @@ class InstructionTranslatorBase(
 
         Steps:
         1. Compile the graph up to the comprehension
-        2. Add the comprehension bytecode (runs eagerly at runtime)
-        3. Generate code to pass comprehension-created variables to the resume function
-        4. Create the resume function for code after the comprehension
+        2. Load captured variables from frame_list to local slots
+        3. Add the comprehension bytecode (runs eagerly at runtime)
+        4. Generate code to pass comprehension-created variables to the resume function
+        5. Create the resume function for code after the comprehension
         """
         assert sys.version_info >= (3, 12)
 
         from .bytecode_transformation import create_instruction
         from .codegen import PyCodegen
+        from .source import LocalSource
         from .variables.misc import UnknownVariable
+        from .variables.tensor import SymNodeVariable, TensorVariable
 
         analysis = self._analyze_comprehension()
 
@@ -4612,12 +4616,6 @@ class InstructionTranslatorBase(
 
         # --- Step 1: Compile the graph up to the comprehension ---
 
-        # Ensure captured variables are in their local slots before compiling.
-        # This preserves object identity for mutable variables.
-        pre_subgraph_insts = self._codegen_captured_vars_to_locals(analysis)
-        if pre_subgraph_insts:
-            self.output.add_output_instructions(pre_subgraph_insts)
-
         all_stack_locals_metadata = self.output.compile_subgraph(
             self,
             reason=reason,
@@ -4626,7 +4624,62 @@ class InstructionTranslatorBase(
         self.popn(stack_pops)
         meta = all_stack_locals_metadata[0]
 
-        # --- Step 2: Add the comprehension bytecode ---
+        # --- Step 2: Load captured variables from frame_list to local slots ---
+        # The comprehension bytecode uses LOAD_FAST to load captured variables.
+        # compile_subgraph put them in frame_list[0], so we load from there
+        # and STORE_FAST to ensure they're in the correct local slots.
+
+        captured_vars_to_store: list[str] = []
+        for var_name in analysis.captured_vars:
+            if var_name not in self.symbolic_locals:
+                continue
+            if var_name not in meta.locals_names:
+                continue
+
+            var = self.symbolic_locals[var_name]
+            in_correct_slot = (
+                isinstance(var.source, LocalSource)
+                and var.source.local_name == var_name
+            )
+            # Tensors/symnodes must already be in their correct slot
+            if isinstance(var, (TensorVariable, SymNodeVariable)):
+                if not in_correct_slot:
+                    unimplemented(
+                        gb_type="Comprehension with captured tensor not in local slot",
+                        context="",
+                        explanation="Cannot use comprehension optimization when a "
+                        "captured tensor variable is not stored in its expected "
+                        "local slot.",
+                        hints=[],
+                    )
+                continue
+
+            if not in_correct_slot:
+                captured_vars_to_store.append(var_name)
+
+        if captured_vars_to_store:
+            # Stack layout: [cells], [frame_list], *(all stack values including stack_pops)
+            # At this point, popn(stack_pops) reduced symbolic stack but runtime stack
+            # still has all values. We need to add stack_pops back.
+            frame_list_pos = (
+                len(self.stack) + stack_pops - len(meta.stack_null_idxes) + 1
+            )
+            cg = PyCodegen(self)
+            for var_name in captured_vars_to_store:
+                var_idx = meta.locals_names[var_name]
+                cg.extend_output(
+                    [
+                        create_instruction("COPY", arg=frame_list_pos),
+                        cg.create_load_const(0),
+                        cg.create_binary_subscr(),
+                        cg.create_load_const(var_idx),
+                        cg.create_binary_subscr(),
+                        create_instruction("STORE_FAST", argval=var_name),
+                    ]
+                )
+            self.output.add_output_instructions(cg.get_instructions())
+
+        # --- Step 3: Add the comprehension bytecode ---
 
         copied_insts = self._copy_comprehension_bytecode(start_ip, analysis.end_ip)
         self.output.add_output_instructions(copied_insts)
@@ -4634,7 +4687,7 @@ class InstructionTranslatorBase(
         if analysis.result_on_stack:
             self.push(UnknownVariable())
 
-        # --- Step 3: Generate code to pass variables to resume function ---
+        # --- Step 4: Generate code to pass variables to resume function ---
 
         # Variables the comprehension creates that need to be passed to resume:
         # - result_var: variable the comprehension result is assigned to
@@ -4649,96 +4702,37 @@ class InstructionTranslatorBase(
 
         if vars_to_pass:
             # Stack layout: [cells], [frame_list], *(extra values), (result if on stack)
-            # NULLs outside stack_pops are not on runtime stack (in stack_null_idxes).
             frame_list_pos = len(self.stack) - len(meta.stack_null_idxes) + 1
             resume_cg = PyCodegen(self)
+            resume_cg.extend_output(
+                [
+                    create_instruction("COPY", arg=frame_list_pos),
+                    resume_cg.create_load_const(0),
+                    resume_cg.create_binary_subscr(),
+                ]
+            )
             for var_name in vars_to_pass:
                 resume_cg.extend_output(
                     [
-                        create_instruction("COPY", arg=frame_list_pos),
-                        resume_cg.create_load_const(0),
-                        resume_cg.create_binary_subscr(),
                         create_instruction("LOAD_FAST", argval=var_name),
                         create_instruction("LIST_APPEND", arg=1),
-                        create_instruction("POP_TOP"),
                     ]
                 )
+            resume_cg.extend_output(
+                [
+                    create_instruction("POP_TOP"),
+                ]
+            )
             self.output.add_output_instructions(resume_cg.get_instructions())
 
-        # --- Step 4: Create the resume function ---
+        # --- Step 5: Create the resume function ---
 
         resume_inst = self.instructions[analysis.end_ip]
         self.output.add_output_instructions(
             self.create_call_resume_at(resume_inst, all_stack_locals_metadata)
         )
 
-        self.output.should_exit = True
         self.instruction_pointer = None
-
-    def _codegen_captured_vars_to_locals(
-        self, analysis: ComprehensionAnalysis
-    ) -> list[Instruction]:
-        """Generate instructions to store captured variables to their local slots.
-
-        For tensors/symnodes: they must already be in the correct local slot
-        (the comprehension bytecode uses LOAD_FAST to load them).
-
-        For other variables: reconstruct and store to local slots so
-        compile_subgraph loads from the same slots, preserving object identity.
-        """
-        if not analysis.captured_vars:
-            return []
-
-        from .bytecode_transformation import create_instruction, create_load_const
-        from .codegen import PyCodegen
-        from .source import LocalSource
-        from .utils import is_safe_constant
-        from .variables.tensor import SymNodeVariable, TensorVariable
-
-        cg = PyCodegen(self)
-        cg.value_from_source = False
-
-        for var_name in analysis.captured_vars:
-            if var_name not in self.symbolic_locals:
-                continue
-
-            var = self.symbolic_locals[var_name]
-            in_correct_slot = (
-                isinstance(var.source, LocalSource)
-                and var.source.local_name == var_name
-            )
-
-            # Tensors/symnodes must already be in their correct slot
-            if isinstance(var, (TensorVariable, SymNodeVariable)):
-                if not in_correct_slot:
-                    unimplemented(
-                        gb_type="Comprehension with captured tensor not in local slot",
-                        context="",
-                        explanation="Cannot use comprehension optimization when a "
-                        "captured tensor variable is not stored in its expected "
-                        "local slot.",
-                        hints=[],
-                    )
-                continue
-
-            if in_correct_slot:
-                continue
-
-            # For constants, use create_load_const directly
-            if var.is_python_constant():
-                const_val = var.as_python_constant()
-                if is_safe_constant(const_val):
-                    cg.append_output(create_load_const(const_val))
-                    cg.append_output(create_instruction("STORE_FAST", argval=var_name))
-                    var.source = LocalSource(var_name)
-                    continue
-
-            # For other variables, reconstruct and store
-            cg(var)
-            cg.append_output(create_instruction("STORE_FAST", argval=var_name))
-            var.source = LocalSource(var_name)
-
-        return cg.get_instructions()
 
     def _copy_comprehension_bytecode(
         self, start_ip: int, end_ip: int
