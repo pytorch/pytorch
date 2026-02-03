@@ -113,7 +113,6 @@ enrich_profiler_metadata: bool = Config(  # type: ignore[var-annotated]
 # The worst that can happen is an error somewhere else in the stack where we expect
 # to locate an unbacked binding. Or a runtime assertion not being lowered in the output
 # code.
-# [@compile_ignored: debug]
 soft_pending_unbacked_not_found_error = False
 
 
