@@ -3616,7 +3616,7 @@ class TestBinaryUfuncs(TestCase):
                 ref = ref_func(a.cpu().float().numpy(), b.cpu().float().numpy())
                 v = our_func(a, b)
                 self.assertEqual(ref, v.float(), atol=0.01, rtol=0.01)
-            elif dtype == torch.complex32:
+            elif dtype in (torch.complex32, torch.bcomplex32):
                 ref = ref_func(
                     a.cpu().to(torch.complex64).numpy(),
                     b.cpu().to(torch.complex64).numpy(),
