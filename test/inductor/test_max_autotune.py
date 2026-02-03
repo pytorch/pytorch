@@ -176,6 +176,7 @@ class TestMaxAutotune(TestCase):
     @unittest.skipIf(
         not has_triton_tma_device(), "Need device-side TMA support in Triton"
     )
+    @skipIfXpu(msg="XPU TMA requires contiguous last dimension")
     @parametrize("a_transposed", (False, True))
     @parametrize("b_transposed", (False, True))
     @parametrize("dynamic", (False, True))
@@ -327,6 +328,7 @@ class TestMaxAutotune(TestCase):
     @unittest.skipIf(
         not has_triton_tma_device(), "Need device-side TMA support in Triton"
     )
+    @skipIfXpu(msg="XPU TMA requires contiguous last dimension")
     @parametrize("a_transposed", (False, True))
     @parametrize("b_transposed", (False, True))
     @parametrize("dynamic", (False, True))
@@ -389,6 +391,7 @@ class TestMaxAutotune(TestCase):
     @unittest.skipIf(
         not has_triton_tma_device(), "Need device-side TMA support in Triton"
     )
+    @skipIfXpu(msg="Covered by XPU TMA")
     @parametrize("dynamic", (False, True))
     def test_max_autotune_regular_mm_persistent_tma_illegal_alignment(self, dynamic):
         def mm(a, b):
@@ -504,6 +507,7 @@ class TestMaxAutotune(TestCase):
     @unittest.skipIf(
         not has_triton_tma_device(), "Need device-side TMA support in Triton"
     )
+    @skipIfXpu(msg="XPU TMA requires contiguous last dimension")
     @parametrize("a_transposed", (False, True))
     @parametrize("b_transposed", (False, True))
     @parametrize("dynamic", (False, True))
@@ -584,6 +588,7 @@ class TestMaxAutotune(TestCase):
     @unittest.skipIf(
         not has_triton_tma_device(), "Need device-side TMA support in Triton"
     )
+    @skipIfXpu(msg="Covered by XPU TMA")
     @parametrize("dynamic", (False, True))
     def test_max_autotune_addmm_persistent_tma_illegal_alignment(self, dynamic):
         def addmm(x, a, b):
@@ -3905,6 +3910,7 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
             yield
 
     @unittest.skipIf(not has_triton_tma_device(), "Need TMA support in Triton")
+    @skipIfXpu(msg="Bad tma config can be covered by XPU TMA")
     @parametrize("use_async_compile", (True, False))
     def test_template_bad_epilogue_fusion(self, use_async_compile: bool):
         def f(a, b):
