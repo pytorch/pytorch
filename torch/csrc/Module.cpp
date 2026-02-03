@@ -2109,6 +2109,7 @@ PyMethodDef* THXPModule_methods();
 void THXPStream_init(PyObject* module);
 void THXPEvent_init(PyObject* module);
 void THXPMemPool_init(PyObject* module);
+void THXPGraph_init(PyObject* module);
 namespace torch::xpu {
 void initModule(PyObject* module);
 } // namespace torch::xpu
@@ -2298,7 +2299,7 @@ PyObject* initModule() {
 #ifdef USE_CUDA
   torch::cuda::initModule(module);
 #endif
-#if defined(USE_CUDA) && !defined(USE_ROCM)
+#if defined(USE_CUDA)
   ASSERT_TRUE(StaticCudaLauncher_init(module));
 #endif
 #if defined(USE_XPU) && !defined(_WIN32)
@@ -2335,6 +2336,7 @@ PyObject* initModule() {
   THXPStream_init(module);
   THXPEvent_init(module);
   THXPMemPool_init(module);
+  THXPGraph_init(module);
 #endif
 
   torch::distributed::initPlacementBindings(module);
