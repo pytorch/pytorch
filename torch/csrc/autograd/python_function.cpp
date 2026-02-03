@@ -182,10 +182,9 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
   pybind11::gil_scoped_acquire gil;
   at::OptionalDeviceGuard _device_guard;
   THPFunction* py_fn = (THPFunction*)obj;
+  const auto& is_variable_input = py_fn->is_variable_input;
 
   set_needs_input_grad(py_fn, this);
-
-  const auto& is_variable_input = py_fn->is_variable_input;
 
   // Massage a C++ variable_list into a Python arguments tuple
   THPObjectPtr pyInputs(to_py_args(inputs, &_device_guard));
