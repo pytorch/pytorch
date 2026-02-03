@@ -567,7 +567,8 @@ def no_batch_dim_reference_fn(m, p, *args, **kwargs):
     is_criterion = get_and_pop('is_criterion', False)
 
     if kwargs_to_batchify is not None:
-        assert isinstance(kwargs_to_batchify, dict)
+        if not isinstance(kwargs_to_batchify, dict):
+            raise AssertionError(f"Expected kwargs_to_batchify to be a dict, got {type(kwargs_to_batchify)}")
         for k, v in kwargs.items():
             if k in kwargs_to_batchify and v is not None:
                 bdim = kwargs_to_batchify[k]
@@ -2536,7 +2537,8 @@ def module_inputs_torch_nn_TransformerEncoderLayer(module_info, device, dtype, r
     # since the fast path requires no_grad mode, we run the fast path in .eval()
     # and no_grad() in the reference_fn and verify that against the results in train mode.
     def fast_path_reference_fn(module, parameters, *args, **kwargs):
-        assert module.training
+        if not module.training:
+            raise AssertionError("Expected module.training to be True")
         module.train(False)
         with torch.no_grad():
             output = module(*args, **kwargs)
@@ -3236,6 +3238,28 @@ rnn_gru_lstm_module_info_decorators = (
 )
 
 # Start of module error inputs functions.
+
+def module_error_inputs_torch_nn_NLLLoss(module_info, device, dtype, requires_grad, training, **kwargs):
+    """
+    Error inputs for NLLLoss that test weight dtype must match input dtype.
+    Regression test for device parity between CPU and CUDA with empty tensors.
+    """
+    input_t = torch.tensor([], device=device, dtype=dtype).reshape((0, 0))
+    weight_dtype = torch.float32 if dtype == torch.float16 else torch.float16
+    weight_t = torch.tensor([], device=device, dtype=weight_dtype)
+    target_t = torch.tensor([], device=device, dtype=torch.long)
+
+    return [
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=FunctionInput(weight=weight_t),
+                forward_input=FunctionInput(input_t, target_t),
+            ),
+            error_on=ModuleErrorEnum.FORWARD_ERROR,
+            error_type=RuntimeError,
+            error_regex=r"expected scalar type \w+ but found \w+"
+        ),
+    ]
 
 def module_error_inputs_torch_nn_RNN_GRU_Cell(module_info, device, dtype, requires_grad, training, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -3994,6 +4018,7 @@ module_db: list[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.NLLLoss,
                module_inputs_func=module_inputs_torch_nn_NLLLoss,
+               module_error_inputs_func=module_error_inputs_torch_nn_NLLLoss,
                skips=(
                    # No channels_last support for loss functions.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),

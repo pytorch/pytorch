@@ -30,7 +30,8 @@ def call_op(
     # onnxscript ops directly.
     from onnxscript.ir import convenience as ir_convenience
 
-    assert _core.current_tracer is not None
+    if _core.current_tracer is None:
+        raise AssertionError("current_tracer must be non-None")
     tracer = _core.current_tracer
 
     inputs = list(args)
