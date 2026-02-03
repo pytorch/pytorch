@@ -19,6 +19,13 @@ struct TORCH_API PythonTorchFunctionTLS {
   static const PythonTorchFunctionTLS& get_state();
   static void set_state(const PythonTorchFunctionTLS& state);
 
+  // "Skip one hop" mechanism for backward() etc.
+  // When set, the next torch function mode dispatch will skip stashing the mode
+  // and call the original function directly, but keep the mode enabled for
+  // subsequent operations.
+  static void set_skip_one_hop(bool skip);
+  static bool get_skip_one_hop();
+
  private:
   // The mode TLS is split into
   //   - disabled_state, which says which part of torch function are disabled
@@ -27,6 +34,7 @@ struct TORCH_API PythonTorchFunctionTLS {
   TorchFunctionDisabledState disabled_state_ =
       TorchFunctionDisabledState::ENABLED;
   std::vector<std::shared_ptr<c10::SafePyObject>> stack_;
+  bool skip_one_hop_ = false;
   friend TORCH_API bool torch_function_mode_enabled();
 };
 
