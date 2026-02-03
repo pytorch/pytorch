@@ -321,8 +321,8 @@ void cpu_kernel(TensorIteratorBase& iter, func_t&& op, int64_t grain_size = at::
 }
 
 template <typename func_t>
-void cpu_kernel_opaque(TensorIteratorBase& iter, func_t&& op) {
-  return cpu_kernel(iter, op, at::internal::GRAIN_SIZE, false);
+void cpu_kernel_opaque(TensorIteratorBase& iter, func_t&& op, int64_t grain_size = at::internal::GRAIN_SIZE) {
+  return cpu_kernel(iter, op, grain_size, false);
 }
 
 // This function helps write elementwise kernels that requires multiple outputs.
