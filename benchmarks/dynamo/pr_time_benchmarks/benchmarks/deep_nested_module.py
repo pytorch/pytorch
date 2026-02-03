@@ -4,7 +4,6 @@ from benchmark_base import BenchmarkBase
 
 import torch
 import torch.nn as nn
-from torch._inductor.utils import fresh_cache
 
 
 class DeepNestedModule(nn.Module):
@@ -31,50 +30,35 @@ class DeepNestedModule(nn.Module):
 
 
 class Benchmark(BenchmarkBase):
-    def __init__(
-        self,
-        ModuleClass,
-        depth=40,
-        backend="eager",
-        is_gpu=False,
-        dynamic=False,
-    ):
-        self.ModuleClass = ModuleClass
-        self.depth = depth
-        self._name = f"{ModuleClass.__name__}_depth{depth}"
-        self._is_gpu = is_gpu
-
+    def __init__(self):
         super().__init__(
-            category="basic",
-            backend=backend,
-            device="cuda" if self._is_gpu else "cpu",
-            dynamic=dynamic,
+            category="deep_nested_module",
+            backend="eager",
+            device="cpu",
         )
 
     def name(self):
-        prefix = f"{self.category()}_{self._name}_{self.backend()}"
-        return prefix
+        return f"{self.category()}_{self.device()}"
 
     def _prepare_once(self):
-        self.m = self.ModuleClass(depth=self.depth)
-        torch.set_float32_matmul_precision("high")
+        self.m = DeepNestedModule(depth=40)
         self.input = torch.ones(1, 10, device=self.device())
 
     def _prepare(self):
         torch._dynamo.reset()
 
     def _work(self):
-        with fresh_cache():
-            opt_m = torch.compile(backend=self.backend(), dynamic=self.is_dynamic())(
-                self.m.cuda() if self._is_gpu else self.m
-            )
-            opt_m(self.input)
+        @torch.compile(backend=self.backend())
+        def f(inp):
+            return self.m(inp)
+
+        f(self.input)
 
 
 def main():
     result_path = sys.argv[1]
     benchmarks = [
-        Benchmark(DeepNestedModule, depth=40),
+        Benchmark(),
     ]
     for b in benchmarks:
         b.enable_compile_time_instruction_count().collect_all().append_results(
