@@ -1067,11 +1067,7 @@ class GraphModuleSerializer(metaclass=Final):
             return frames
 
         if stack_trace := node.meta.get("stack_trace"):
-            if stack_trace[0] is dict:
-                stack_trace_list = parse_stack_trace(stack_trace)
-                ret["stack_trace"] = stack_trace_list
-            else:
-                ret["stack_trace"] = stack_trace
+            ret["stack_trace"] = parse_stack_trace(stack_trace)
 
         if nn_module_stack := node.meta.get("nn_module_stack"):
             nn_module_list = [
