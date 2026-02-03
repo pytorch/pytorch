@@ -21,6 +21,7 @@ compilation boundaries and optimize PyTorch programs effectively.
 
 import abc
 import builtins
+import contextlib
 import copy
 import dataclasses
 import functools
@@ -35,7 +36,7 @@ import sys
 import types
 import unittest
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any, cast, Optional, Union
 
@@ -3142,6 +3143,12 @@ def _allowed_callable_ids() -> dict[int, str]:
 
 
 @FunctionIdSet
+def _leaf_function_ids() -> dict[int, str]:
+    rv: dict[int, str] = {}
+    return rv
+
+
+@FunctionIdSet
 def _disallowed_callable_ids() -> dict[int, str]:
     rv: dict[int, str] = {}
     return rv
@@ -3261,6 +3268,11 @@ def is_callable_allowed(obj: Any) -> bool:
 def is_nonstrict_trace_callable(obj: Any) -> bool:
     _maybe_init_lazy_module(obj)
     return id(obj) in _nonstrict_trace_callable_ids
+
+
+def is_leaf_function(obj: Any) -> bool:
+    _maybe_init_lazy_module(obj)
+    return id(obj) in _leaf_function_ids
 
 
 def is_callable_disallowed(obj: Any) -> bool:
@@ -3789,8 +3801,37 @@ The reason to have this flag is that if the upper level function call (e.g, f2) 
 we don't want to inline the lower level function call (e.g, f3) by default.
 """
 
+_force_inline_flag = False
+
+
+@contextlib.contextmanager
+def _force_inline() -> Iterator[None]:
+    """
+    A context manager used within the dynamo codebase that forces a function
+    and nested function calls to be inlined during dynamo tracing.
+
+    When active, check_verbose() will skip all inline/skip decision logic and
+    always return SkipResult(False, ...), meaning functions will be inlined.
+
+    See _make_inlined() in higher_order_ops.py which uses this to ensure that
+    a python function is fully traced to produce the needed variable trackers.
+    """
+    global _force_inline_flag
+    old_val = _force_inline_flag
+    try:
+        _force_inline_flag = True
+        yield
+    finally:
+        _force_inline_flag = old_val
+
 
 def check_verbose(obj: Any, is_inlined_call: bool = False) -> SkipResult:
+    if _force_inline_flag:
+        return SkipResult(
+            False,
+            "don't skip because we're inside _force_inline() context",
+        )
+
     if isinstance(
         obj,
         (
