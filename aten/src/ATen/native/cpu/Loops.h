@@ -302,13 +302,15 @@ VectorizedLoop2d<op_t, vop_t> make_vectorized_loop2d(
 }
 
 template <typename func_t>
-void cpu_kernel(TensorIteratorBase& iter, func_t&& op, int64_t grain_size = at::internal::GRAIN_SIZE) {
+void cpu_kernel(TensorIteratorBase& iter, func_t&& op, int64_t grain_size = at::internal::GRAIN_SIZE, bool check_dynamic_casting = true) {
   using traits = function_traits<func_t>;
   // this could be extended to work with void return types
   TORCH_INTERNAL_ASSERT(iter.ninputs() == traits::arity);
   TORCH_INTERNAL_ASSERT(iter.noutputs() == 1);
   // dynamic casting not currently supported on CPU
-  TORCH_INTERNAL_ASSERT(!needs_dynamic_casting<func_t>::check(iter));
+  if (check_dynamic_casting) {
+    TORCH_INTERNAL_ASSERT(!needs_dynamic_casting<func_t>::check(iter));
+  }
 
   iter.for_each([&](char** data, const int64_t* strides, int64_t n) {
     // basic loop can handle 1d slices with arbitrary strides, and 1d slices is all that
@@ -316,6 +318,11 @@ void cpu_kernel(TensorIteratorBase& iter, func_t&& op, int64_t grain_size = at::
       basic_loop(data, strides, 0, n, op);
   }, grain_size);
   iter.cast_outputs();
+}
+
+template <typename func_t>
+void cpu_kernel_opaque(TensorIteratorBase& iter, func_t&& op) {
+  return cpu_kernel(iter, op, at::internal::GRAIN_SIZE, false);
 }
 
 // This function helps write elementwise kernels that requires multiple outputs.
