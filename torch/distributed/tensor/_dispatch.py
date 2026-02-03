@@ -537,10 +537,15 @@ class OpDispatcher:
             op_call, None
         )
 
-        # Auto-detect needs_pytree if any arg is a list/tuple (e.g., torch.cat)
+        # Auto-detect needs_pytree if any arg is a list/tuple containing tensors
+        def _contains_tensor(arg: object) -> bool:
+            if isinstance(arg, (list, tuple)):
+                return any(isinstance(item, torch.Tensor) for item in arg)
+            return False
+
         needs_pytree = (
             runtime_schema_info is not None and runtime_schema_info.needs_pytree
-        ) or any(isinstance(arg, (list, tuple)) for arg in args)
+        ) or any(_contains_tensor(arg) for arg in args)
 
         if needs_pytree:
             # flatten args/kwargs when op says necessary or args contain lists/tuples

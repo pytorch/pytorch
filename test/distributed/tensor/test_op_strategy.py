@@ -883,6 +883,10 @@ class TestExpandToFullMeshOpStrategy(TestCase):
             backend="fake", rank=0, world_size=self.world_size, store=self.fake_store
         )
 
+    def tearDown(self):
+        super().tearDown()
+        torch.distributed.destroy_process_group()
+
     def _create_op_strategy_with_tensor_meta(
         self, mesh: DeviceMesh, shape: tuple, dtype: torch.dtype
     ) -> OpStrategy:
