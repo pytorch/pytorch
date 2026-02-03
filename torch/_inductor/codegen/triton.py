@@ -187,47 +187,6 @@ def gen_attr_descriptor_import() -> str:
         return ""
 
 
-@lru_cache(None)
-def gen_common_triton_imports() -> str:
-    imports = IndentedBuffer()
-    imports.splice(
-        """
-        import triton
-        import triton.language as tl
-        """
-    )
-    try:
-        import triton.language.extra.tlx  # noqa: F401
-
-        imports.splice(
-            """
-           import triton.language.extra.tlx as tlx  # noqa: F401
-           """
-        )
-    except ImportError:
-        pass
-    if attr_desc := gen_attr_descriptor_import():
-        imports.writeline(attr_desc)
-
-    imports.splice(
-        """
-        from torch._inductor.runtime import triton_helpers, triton_heuristics
-        from torch._inductor.runtime.triton_helpers import libdevice, math as tl_math
-        from torch._inductor.runtime.hints import AutotuneHint, ReductionHint, TileHint, DeviceProperties
-        """
-    )
-    if config.triton.proton_profiling:
-        imports.splice(
-            """
-            import triton.profiler as proton
-            import triton.profiler.language as pl
-            pl.enable_semantic('triton')
-            """
-        )
-
-    return imports.getvalue()
-
-
 class TritonSymbols:
     """
     Stores sympy.Symbol instances and constants associated with triton codegen.
@@ -1212,7 +1171,7 @@ class TritonOverrides(OpOverrides):
         if (
             x_dtype == torch.float32
             and y_dtype == torch.float32
-            and config.emulate_divison_rounding
+            and config.eager_numerics.division_rounding
         ):
             # x / y in Triton is lowered to div.full which is approx
             # we want div_rn to adhere with eager
@@ -2262,10 +2221,13 @@ class TMACompatibilityChecker:
         if self.force:
             return True
         if not (
-            V.graph.get_current_device_or_throw().type == "cuda"
-            and torch.cuda.get_device_capability()[0] >= 9
+            (
+                V.graph.get_current_device_or_throw().type == "cuda"
+                and torch.cuda.get_device_capability()[0] >= 9
+                and config.assume_aligned_inputs
+            )
+            or V.graph.get_current_device_or_throw().type == "xpu"
             and config.triton.use_tensor_descriptor
-            and config.assume_aligned_inputs
             and has_triton_stable_tma_api()
             # For CUDA The base ptr needs to be aligned
         ):
@@ -2506,6 +2468,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     kexpr: Callable[[sympy.Expr], str] = texpr
     allow_block_ptr = True
     tma_compatibility_checker_cls = TMACompatibilityChecker
+    block_ptr_options_cls: type[BlockPtrOptions] = BlockPtrOptions
+    tensor_descriptor_options_cls: type[TensorDescriptorOptions] = (
+        TensorDescriptorOptions
+    )
     transpose_discontiguous_tensor_descriptors_override: Optional[bool] = None
 
     def __init__(
@@ -2975,9 +2941,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 self.filter_masks(mask_vars)
 
                 options_class = (
-                    BlockPtrOptions
+                    self.block_ptr_options_cls
                     if config.triton.use_block_ptr
-                    else TensorDescriptorOptions
+                    else self.tensor_descriptor_options_cls
                 )
                 nonlocal tma_compatibility_checker
                 stride_sorter_cls: type[BlockParameters.StrideSorter]
@@ -3347,7 +3313,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     GDC_WAIT = "tl.extra.cuda.gdc_wait()"
     GDC_LAUNCH = "tl.extra.cuda.gdc_launch_dependents()"
 
-    def _enable_pdl_codegen(self):
+    @staticmethod
+    def _enable_pdl_codegen():
         if not torch._inductor.config.triton.enable_pdl:
             return False
         if isinstance(V.kernel, torch._inductor.select_algorithm.TritonTemplateKernel):
@@ -5196,8 +5163,57 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             return "reduction"
         return "pointwise"
 
-    @staticmethod
-    def inductor_meta_common():
+    @classmethod
+    @lru_cache(None)
+    def gen_common_triton_imports(cls) -> str:
+        imports = IndentedBuffer()
+        imports.splice(
+            """
+            import triton
+            import triton.language as tl
+            """
+        )
+        try:
+            import triton.language.extra.tlx  # noqa: F401
+
+            imports.splice(
+                """
+               import triton.language.extra.tlx as tlx  # noqa: F401
+               """
+            )
+        except ImportError:
+            pass
+        if attr_desc := gen_attr_descriptor_import():
+            imports.writeline(attr_desc)
+
+        imports.splice(
+            """
+            from torch._inductor.runtime import triton_helpers, triton_heuristics
+            from torch._inductor.runtime.triton_helpers import libdevice, math as tl_math
+            from torch._inductor.runtime.hints import AutotuneHint, ReductionHint, TileHint, DeviceProperties
+            """
+        )
+        if config.triton.proton_profiling:
+            imports.splice(
+                """
+                import triton.profiler as proton
+                import triton.profiler.language as pl
+                pl.enable_semantic('triton')
+                """
+            )
+
+        return imports.getvalue()
+
+    @classmethod
+    def triton_meta_common(cls):
+        return {
+            "enable_fp_fusion": not config.emulate_precision_casts,
+            "launch_pdl": cls._enable_pdl_codegen(),
+            "disable_ftz": config.eager_numerics.disable_ftz,
+        }
+
+    @classmethod
+    def inductor_meta_common(cls):
         inductor_meta = {
             "backend_hash": torch.utils._triton.triton_hash_with_backend(),
             "assert_indirect_indexing": config.assert_indirect_indexing,
@@ -5275,7 +5291,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             size_hints[prefix] = size_hint
 
         if name is None:
-            code.splice(gen_common_triton_imports())
+            code.splice(self.gen_common_triton_imports())
             device_type = V.graph.get_current_device_or_throw().type
             if device_type == "cpu":
                 code.splice("triton_helpers.set_driver_to_cpu()")
@@ -5379,7 +5395,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 torch._inductor.config.triton.native_matmul
                 and ("tl.dot" in str(self.body) or "tl.dot" in str(self.compute))
             ),
+            **self.triton_meta_common(),
         }
+
+        if self.cooperative_reduction:
+            # Cooperative reductions rely on multi-block synchronization that
+            # requires cooperative-grid launches to avoid hanging.
+            triton_meta["launch_cooperative_grid"] = True
 
         # Skip memory optimization for forward of the training loop where we expect
         # every new node will increase the peak memory and our greedy approach would
@@ -5480,8 +5502,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         triton_meta["configs"] = [config_of(signature)]
 
-        triton_meta["launch_pdl"] = self._enable_pdl_codegen()
-
         # Triton compiler includes equal_to_1 args into constants even
         # when they are not constexpr. otherwise there may be a segfault
         # during launching the Inductor-compiled Triton kernel.
@@ -5489,7 +5509,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         # https://github.com/triton-lang/triton/blob/231efe9ed2d200be0f69a07c298e4342b08efe3d/python/triton/runtime/jit.py#L384
         for arg_num in equal_1_arg_indices(signature):  # type: ignore[index]
             triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index,union-attr]
-        triton_meta["enable_fp_fusion"] = not config.emulate_precision_casts
 
         self.triton_meta = triton_meta
 
@@ -5644,6 +5663,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 return triton_heuristics.Grid2DWithYZOverflow
             return triton_heuristics.Grid2D
         elif n == 3:
+            if self.is_native_matmul:
+                return triton_heuristics.BatchMatmulGrid3D
             return triton_heuristics.Grid3D
         raise ValueError(f"Unsupported number of dimensions: {n}")
 
@@ -5713,6 +5734,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     def iteration_ranges_ranges_code(self, entry: IterationRangesRoot) -> str:
         assert entry.tensor_dim is not None
         size = self.indexing_size_str(entry.tensor_dim)
+        # For batch matmul, we always set the ZBLOCK=1.
+        # In this case, we found not broadcasting tl.arange(0, ZBLOCK) is faster.
+        if (
+            self.is_native_matmul
+            and entry.tensor_dim == 0
+            and self.triton_tensor_ndim() == 4
+        ):
+            size = ""
         index_dtype = self.index_dtype
         suffix = f".to({index_dtype})" if index_dtype != "tl.int32" else ""
         if (
@@ -5741,6 +5770,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             # For each z dimension, there are tl.num_programs(1) yblocks which is passed by grad(x,y,z).
             # So, we need to add tl.program_id(z) * tl.num_programs(y) *YBLOCK to get the correct yoffset.
             key = f"({key} + tl.program_id({entry.grid_dim + 1}) * tl.num_programs({entry.grid_dim}))"
+
+        # For batched matmul, we intentionally remap program_id axes so that the
+        # batch dimension is placed on CUDA gridDim.x (the fastest-varying launch axis).
+        # - gridDim.x scales to much larger sizes than gridDim.z (limited to 65536 in CUDA)
+        if self.is_native_matmul and self.triton_tensor_ndim() == 4:
+            reversed_pid_map = {0: 2, 1: 1, 2: 0}
+            key = f"tl.program_id({reversed_pid_map[entry.grid_dim]})"
+
         pid = entry.pid_cache.get(key, key)
         if self.index_dtype != "tl.int32":
             return f"{pid}.to({self.index_dtype})"

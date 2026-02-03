@@ -6,7 +6,12 @@ from typing import Any, cast, Literal, Optional, TYPE_CHECKING, Union
 import torch
 import torch._inductor.custom_graph_pass
 from torch._environment import is_fbcode
-from torch.utils._config_module import Config, get_tristate_env, install_config_module
+from torch.utils._config_module import (
+    Config,
+    get_tristate_env,
+    inherit_fields_from,
+    install_config_module,
+)
 
 
 if TYPE_CHECKING:
@@ -533,6 +538,16 @@ graph_partition: bool = (
 # "namespace::kernel_name.overload" (e.g., aten::mm.default).
 custom_should_partition_ops: list[str] = []
 
+# register ops whose OUTPUT unbacked symints should cause partition. Any tensors or ops
+# that use these output unbacked symints (e.g. in their shapes, strides, or offsets)
+# will be excluded from cudagraph partitions. This is useful for operators that produce
+# data-dependent unbacked symints (e.g., from a custom op that returns a SymInt).
+# Note: Input symints to these ops remain cudagraph-safe; only the output symints are
+# marked as cudagraph-unsafe. Name format should be "namespace::kernel_name"
+# (e.g., mylib::get_split_point) for op overload packet, or
+# "namespace::kernel_name.overload" for specific overloads.
+cudagraph_unsafe_unbacked_ops: list[str] = []
+
 # whether template autotuning should allow flexible layouts if possible (e.g. only extern choices)
 max_autotune_allow_flexible_layouts: bool = False
 
@@ -564,6 +579,19 @@ multi_kernel_hints: list[int] = []
 max_autotune_gemm_backends = os.environ.get(
     "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON,CPP"
 ).upper()
+
+
+# Configures the maximum number of NVIDIA Universal GEMM (NVGEMM) configs to profile
+# in max_autotune. By default it's 5, to keep compile time reasonable.
+# Set to None (or env var "none"/"all") to tune all configs.
+def _nvgemm_max_profiling_configs_default() -> Optional[int]:
+    env_val = os.environ.get("TORCHINDUCTOR_NVGEMM_MAX_PROFILING_CONFIGS", "5")
+    if env_val.lower() in ("none", "all"):
+        return None
+    return int(env_val)
+
+
+nvgemm_max_profiling_configs: Optional[int] = _nvgemm_max_profiling_configs_default()
 
 
 # As above, specify candidate backends for conv autotune.
@@ -861,31 +889,16 @@ combo_kernel_allow_mixed_sizes = 1
 combo_kernel_foreach_dynamic_shapes = True
 # Maximum number of arguments (read/write buffers) allowed in a combo kernel
 combo_kernel_max_num_args = 250
+# When True, each combo sub-kernel gets its own block sizes (XBLOCK_0, YBLOCK_0, etc.)
+# allowing different sub-kernels to use different tile sizes based on their heuristics.
+# When False, all sub-kernels share block sizes (XBLOCK, YBLOCK, etc.)
+combo_kernel_per_subkernel_blocks = False
 
 # constant folding on the joint graph
 joint_graph_constant_folding = True
 
 # Enable indirect_indexing asserts for decompositions and lowerings
 debug_index_asserts = False
-
-# Mode to emulate PyTorch eager numerics when doing lower precision compute
-# (fp16, bf16).  PyTorch eager computes bf16/fp16 by upcasting inputs to fp32
-# and downcasting after.  When two low precision operators are fused together,
-# Inductor will elide the downcast-upcast pairs (effectively a precision
-# truncation) that would occur between these two operators.  Typically,
-# Inductor's behavior should be closer to fp64 ref numerics.  However, with
-# this knob you can ensure the downcast-upcast are preserved so that you can
-# emulate the eager numerics.
-emulate_precision_casts = (
-    os.environ.get("TORCHINDUCTOR_EMULATE_PRECISION_CASTS", "0") == "1"
-)
-
-# x / y in Triton is lowered to div.full which is approx
-# PyTorch eager uses the equivalent of Triton's div_rn, which can
-# come at a performance penalty
-emulate_divison_rounding = (
-    os.environ.get("TORCHINDUCTOR_EMULATE_DIVISION_ROUNDING", "0") == "1"
-)
 
 # warnings intended for PyTorch developers, disable for point releases
 is_nightly_or_source = "dev" in torch.__version__ or "git" in torch.__version__
@@ -1955,6 +1968,8 @@ class aot_inductor:
     # Generate kernel files that support multiple archs
     # For CUDA, this means generating fatbin files for kernels, and the fatbin files
     # contains PTX and SASS for the current architecture.
+    # For XPU, this means generating SPIR-V files for kernels, and the SPIR-V files
+    # will be compiled to target different XPU architectures at runtime.
     emit_multi_arch_kernel: Optional[bool] = None
 
     # If not None, the generated files with use this name in file stem.
@@ -2005,27 +2020,12 @@ class aot_inductor_mode:
     compile_standalone: bool = False
 
 
-class cuda:
-    """Settings for cuda backend, today this consists of cutlass"""
+class cutlass:
+    """
+    Config specific to cutlass backend.
+    """
 
-    # CUDA arch to use for CUDA template kernel compilation.
-    # e.g. "70", "75", "80", "90", etc.
-    # When arch is None, Inductor uses torch.cuda.get_device_capability(0).
-    arch: Optional[str] = None
-
-    # CUDA version to use for CUDA template kernel compilation.
-    # e.g. "11.4", "12.1", etc.
-    # When version is None, Inductor uses torch.version.cuda.
-    version: Optional[str] = None
-
-    # Optimization level for the host compiler.
     compile_opt_level: Literal["-O0", "-O1", "-O2", "-O3", "-OS"] = "-O1"
-
-    # Whether to enable device LTO (link-time-optimization).
-    enable_cuda_lto = False
-
-    # Whether to keep intermediate files dring compilation.
-    enable_ptxas_info = False
 
     # Whether to enable debug info, e.g. line number, cutlass debug info.
     enable_debug_info = False
@@ -2038,7 +2038,10 @@ class cuda:
     cutlass_dir = os.path.realpath(
         os.environ.get(
             "TORCHINDUCTOR_CUTLASS_DIR",
-            os.path.join(os.path.dirname(torch.__file__), "../third_party/cutlass/"),
+            os.path.join(
+                os.path.dirname(torch.__file__),
+                "../third_party/cutlass/",
+            ),
         )
     )
 
@@ -2046,10 +2049,6 @@ class cuda:
     # By default it's None, so that all CUTLASS configs are tuned.
     # This is mainly used to reduce test time in CI.
     cutlass_max_profiling_configs: Optional[int] = None
-
-    # Configures the maximum number of NVIDIA Universal GEMM (NVGEMM) configs to profile in max_autotune.
-    # By default it's 5, to keep compile time to a reasonable level.
-    nvgemm_max_profiling_configs: Optional[int] = 5
 
     # The L2 swizzle values to consider when profiling CUTLASS configs in max_autotune.
     cutlass_max_profiling_swizzle_options: list[int] = [1, 2, 4, 8]
@@ -2081,14 +2080,6 @@ class cuda:
 
     # Whether to only use TMA-compatible kernels in CUTLASS
     cutlass_tma_only = False
-
-    # Path to CUDA NVCC.
-    # NVCC search order:
-    # 1) cuda_cxx set in this config
-    # 2) CUDACXX environment variable
-    # 3) CUDA_HOME environment variable
-    # 4) default system search PATH.
-    cuda_cxx: Optional[str] = None
 
     # Minimum value of M*N*K to consider the CUTLASS backend for GEMM ops.
     cutlass_backend_min_gemm_size: int = 1
@@ -2157,6 +2148,47 @@ class cuda:
 
     # Enable caching codegen of cuda templates.
     enable_caching_codegen: bool = True
+
+
+@inherit_fields_from(cutlass)
+class cuda(cutlass):
+    # CUDA arch to use for CUDA template kernel compilation.
+    # e.g. "70", "75", "80", "90", etc.
+    # When arch is None, Inductor uses torch.cuda.get_device_capability(0).
+    arch: Optional[str] = None
+
+    # CUDA version to use for CUDA template kernel compilation.
+    # e.g. "11.4", "12.1", etc.
+    # When version is None, Inductor uses torch.version.cuda.
+    version: Optional[str] = None
+
+    # Path to CUDA NVCC.
+    # NVCC search order:
+    # 1) cuda_cxx set in this config
+    # 2) CUDACXX environment variable
+    # 3) CUDA_HOME environment variable
+    # 4) default system search PATH.
+    cuda_cxx: Optional[str] = None
+
+    # Whether to enable device LTO (link-time-optimization).
+    enable_cuda_lto = False
+
+    # Whether to keep intermediate files dring compilation.
+    enable_ptxas_info = False
+
+    # Configures the maximum number of NVIDIA Universal GEMM (NVGEMM) configs to profile in max_autotune.
+    # By default it's 5, to keep compile time to a reasonable level.
+    nvgemm_max_profiling_configs: Optional[int] = 5
+
+
+@inherit_fields_from(cutlass)
+class xpu(cutlass):
+    # Xe arch to use for SYCL kernel compilation.
+    # eg. 12, 20, which corresponding to Xe12(PVC) and Xe20 (BMG)
+    arch: Optional[str] = None
+    # oneAPI version to use for SYCL kernel compilation.
+    # e.g. "20250201".
+    version: Optional[str] = None
 
 
 class rocm:
@@ -2368,6 +2400,8 @@ _cache_config_ignore_prefix: list[str] = [
     "trace",
     # uses absolute path
     "cuda.cutlass_dir",
+    "cutlass.cutlass_dir",
+    "xpu.cutlass_dir",
     # not relevant
     "worker_start_method",
     "compile_threads",
@@ -2458,6 +2492,29 @@ class test_configs:
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
 
+
+class eager_numerics:
+    # x / y in Triton is lowered to div.full which is approx
+    # PyTorch eager uses the equivalent of Triton's div_rn, which can
+    # come at a performance penalty
+    division_rounding: bool = (
+        os.environ.get("TORCHINDUCTOR_EMULATE_DIVISION_ROUNDING", "0") == "1"
+    )
+
+    disable_ftz: bool = False
+
+
+# Mode to emulate PyTorch eager numerics when doing lower precision compute
+# (fp16, bf16).  PyTorch eager computes bf16/fp16 by upcasting inputs to fp32
+# and downcasting after.  When two low precision operators are fused together,
+# Inductor will elide the downcast-upcast pairs (effectively a precision
+# truncation) that would occur between these two operators.  Typically,
+# Inductor's behavior should be closer to fp64 ref numerics.  However, with
+# this knob you can ensure the downcast-upcast are preserved so that you can
+# emulate the eager numerics.
+emulate_precision_casts: bool = (
+    os.environ.get("TORCHINDUCTOR_EMULATE_PRECISION_CASTS", "0") == "1"
+)
 
 # adds patch, save_config, etc
 install_config_module(sys.modules[__name__])

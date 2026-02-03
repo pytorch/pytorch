@@ -177,22 +177,31 @@ class TestFP8Types(TestCase):
             return x.to(dtype=dtype)
 
         compiled_fp8_cast = torch.compile(fp8_cast, backend="inductor", dynamic=True)
-
         x_shape = (16, 16, 16)
 
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.BackendCompilerFailed,
-            "Conversions between float8_e5m2 and float8_e4m3fn is not supported!",
-        ):
-            x = torch.rand(*x_shape, device=device).to(dtype=torch.float8_e4m3fn)
-            compiled_fp8_cast(x, torch.float8_e5m2)
+        if "cuda" in device:
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.BackendCompilerFailed,
+                "Conversions between float8_e5m2 and float8_e4m3fn is not supported!",
+            ):
+                x = torch.rand(*x_shape, device=device).to(dtype=torch.float8_e4m3fn)
+                compiled_fp8_cast(x, torch.float8_e5m2)
 
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.BackendCompilerFailed,
-            "Conversions between float8_e5m2 and float8_e4m3fn is not supported!",
-        ):
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.BackendCompilerFailed,
+                "Conversions between float8_e5m2 and float8_e4m3fn is not supported!",
+            ):
+                x = torch.rand(*x_shape, device=device).to(dtype=torch.float8_e5m2)
+                compiled_fp8_cast(x, torch.float8_e4m3fn)
+
+        else:
+            x = torch.rand(*x_shape, device=device).to(dtype=torch.float8_e4m3fn)
+            out = compiled_fp8_cast(x, torch.float8_e5m2)
+            self.assertEqual(out.dtype, torch.float8_e5m2)
+
             x = torch.rand(*x_shape, device=device).to(dtype=torch.float8_e5m2)
-            compiled_fp8_cast(x, torch.float8_e4m3fn)
+            out = compiled_fp8_cast(x, torch.float8_e4m3fn)
+            self.assertEqual(out.dtype, torch.float8_e4m3fn)
 
     @parametrize("src_dtype", (torch.float16, torch.bfloat16, torch.float))
     @parametrize("dst_dtype", (torch.float8_e4m3fn, torch.float8_e5m2))
@@ -967,14 +976,20 @@ class TestFP8Lowering(TestCase):
             )
 
         # Verify that Inductor chooses the correct scaling recipes
+        check_scale_recipe_a = (
+            ScalingType.BlockWise1x128.value
+            if (am, ak) == (1, 128)
+            else ScalingType.BlockWise128x128.value
+        )
         FileCheck().check(
-            f"SCALE_RECIPE_A : tl.constexpr = {ScalingType.BlockWise1x128.value}"
+            f"SCALE_RECIPE_A : tl.constexpr = {check_scale_recipe_a}"
         ).run(code[0])
 
-        if (bn, bk) == (1, 128):
-            check_scale_recipe_b = ScalingType.BlockWise1x128.value
-        else:
-            check_scale_recipe_b = ScalingType.BlockWise128x128.value
+        check_scale_recipe_b = (
+            ScalingType.BlockWise1x128.value
+            if (bn, bk) == (1, 128)
+            else ScalingType.BlockWise128x128.value
+        )
         FileCheck().check(
             f"SCALE_RECIPE_B : tl.constexpr = {check_scale_recipe_b}"
         ).run(code[0])
