@@ -1971,6 +1971,29 @@ class OptimizeFlattenedReductionsTest(TestCase):
         self.assertEqual(len(result), 1)
         self.assertIsInstance(result[0], _TransformInfo)
 
+    def test_redistribute_with_submesh_flattened(self):
+        """Test that redistribute works correctly with a flattened submesh.
+
+        This exercises _get_flattened_mesh_by_layout through the public
+        DTensor.redistribute() API, ensuring mesh_dims are correctly
+        interpreted relative to the submesh, not the root mesh.
+        """
+        root_mesh = init_device_mesh(
+            "cpu", (2, 2, 1, 2), mesh_dim_names=("dp", "fsdp", "cp", "ep")
+        )
+
+        submesh = root_mesh["cp", "ep"]
+        submesh._flatten("cp_ep")
+
+        local_tensor = torch.randn(8)
+        dtensor = DTensor.from_local(
+            local_tensor, submesh, [Partial("sum"), Partial("sum")]
+        )
+
+        result = dtensor.redistribute(submesh, [Replicate(), Replicate()])
+
+        self.assertEqual(result.placements, (Replicate(), Replicate()))
+
     def test_reduce_scatter_with_intervening_shard_flattened(self):
         """Reduce-scatter SHOULD be flattened when intervening shard still allows even division.
 
