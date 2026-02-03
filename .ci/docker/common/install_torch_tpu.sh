@@ -23,7 +23,7 @@ cleanup() {
 install_gcloud() {
     if ! command -v gcloud &> /dev/null; then
         echo "gcloud CLI not found. Installing..."
-        
+
         # Ensure curl and apt-transport-https are present
         sudo apt-get update && sudo apt-get install -y apt-transport-https ca-certificates gnupg curl
 
@@ -31,7 +31,7 @@ install_gcloud() {
         curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg
 
         # Add the Cloud SDK distribution URI as a package source
-        echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | sudo tee /etc/apt/sources.list.d/google-cloud-sdk.list
+        echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | sudo tee /etc/apt/sources.list.d/google-cloud-sdk.list #@lint-ignore
 
         # Update and install
         sudo apt-get update && sudo apt-get install -y google-cloud-cli
@@ -42,7 +42,7 @@ install_gcloud() {
 
 fetch_secret() {
     echo "Fetching SSH key from Secret Manager..."
-    
+
     # Check if xtrace (set -x) is enabled
     local xtrace_enabled=0
     if [[ "$-" == *x* ]]; then
@@ -52,7 +52,7 @@ fetch_secret() {
 
     if ! gcloud secrets versions access latest --secret="torchtpu-readonly-key" --project="ml-velocity-actions-testing" > "temp_ssh_key"; then
         echo "Error: Failed to fetch secret. Ensure you are authenticated with gcloud."
-        
+  
         # Restore xtrace if it was enabled, before exiting
         if [ $xtrace_enabled -eq 1 ]; then
             set -x
@@ -69,7 +69,7 @@ fetch_secret() {
 clone_repo() {
     echo "Cloning repository..."
     chmod 600 "temp_ssh_key"
-    
+
     # Use GIT_SSH_COMMAND to specify the key and disable strict host key checking for automation
     export GIT_SSH_COMMAND="ssh -i temp_ssh_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=no"
     if git clone --recursive "git@github.com:google-ml-infra/torch_tpu.git"; then
@@ -103,8 +103,11 @@ fi
 # We install to /usr/local/bin so it is available to all users (root & jenkins)
 if ! command -v bazel &> /dev/null; then
     echo "Bazel not found. Installing Bazelisk..."
-    curl -L https://github.com/bazelbuild/bazelisk/releases/download/v1.27.0/bazelisk-linux-amd64 -o /usr/local/bin/bazel
-    chmod +x /usr/local/bin/bazel
+    temp_dir=$(mktemp -d)
+    curl -L https://github.com/bazelbuild/bazelisk/releases/download/v1.27.0/bazelisk-linux-amd64 -o "${temp_dir}/bazel"
+    sudo mv "${temp_dir}/bazel" /usr/local/bin/bazel
+    sudo chmod +x /usr/local/bin/bazel
+    rm -rf "${temp_dir}"
 else
     echo "Bazel is already installed."
 fi
