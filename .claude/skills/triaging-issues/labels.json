@@ -353,7 +353,7 @@
     },
     {
       "name": "module: edge cases",
-      "description": "Adversarial inputs unlikely to occur in practice"
+      "description": "Adversarial inputs unlikely to occur in practice. Add when inputs are at dtype limits (torch.finfo.max/min), extreme tensor shapes, or unusual values that stress numerical limits."
     },
     {
       "name": "module: elastic",
@@ -1033,7 +1033,7 @@
     },
     {
       "name": "needs reproduction",
-      "description": "Ensure you have actionable steps to reproduce the issue. Someone else needs to confirm the repro."
+      "description": "Ensure you have actionable steps to reproduce the issue. Someone else needs to confirm the repro. Add when issue requires downloading external files (.zip, .pt, .pth, .pkl, .safetensors) or links to external storage (Google Drive, Dropbox) to reproduce."
     },
     {
       "name": "needs research",
