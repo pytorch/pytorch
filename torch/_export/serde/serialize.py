@@ -1136,7 +1136,6 @@ class GraphModuleSerializer(metaclass=Final):
                 }
                 for k, v in nn_module_stack.items()
             ]
-            test = self.serialize_operator(nn_module_list)
             ret["nn_module_stack"] = self.serialize_operator(nn_module_list)
 
         if source_fn_st := node.meta.get("source_fn_stack"):
@@ -3397,7 +3396,6 @@ class GraphModuleDeserializer(metaclass=Final):
             ret["stack_trace"] = deserialize_meta_func(stack_trace)
 
         if nn_module_stack := metadata.get("nn_module_stack"):
-            test = deserialize_meta_func(nn_module_stack)
             ret["nn_module_stack"] = deserialize_meta_func(nn_module_stack)
 
         if source_fn_st_data := metadata.get("source_fn_stack"):
