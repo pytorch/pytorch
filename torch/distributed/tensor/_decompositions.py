@@ -13,6 +13,7 @@ from typing import Any
 import torch
 from torch._decomp import decomposition_table
 from torch._ops import OpOverload
+from torch.distributed._functional_collectives import _are_we_tracing
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor._op_schema import OpSchema, OpStrategy
@@ -25,6 +26,7 @@ from torch.distributed.tensor.placement_types import (
     Replicate,
     Shard,
 )
+from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_any, tree_flatten, tree_map, tree_map_only
 
@@ -58,7 +60,12 @@ class PlacementTrackingMode(TorchDispatchMode):
             raise NotImplementedError(f"No DTensorSpec found in args/kwargs for {func}")
 
         op_schema = OpSchema(func, args_schema, kwargs_schema)
-        output_sharding = self.sharding_prop.propagate_op_sharding(op_schema)
+        if _are_we_tracing():
+            output_sharding = self.sharding_prop.propagate_op_sharding_non_cached(
+                op_schema
+            )
+        else:
+            output_sharding = self.sharding_prop.propagate_op_sharding(op_schema)
 
         if output_sharding.needs_redistribute:  # pyrefly: ignore [missing-attribute]
             raise RuntimeError(f"Decomposition requires redistribution for {func}")
@@ -127,6 +134,8 @@ class DecompShardingStrategy:
                     op_schema, input_placements, fake_mesh, sharding_prop
                 )
             except NotImplementedError:
+                return None
+            except GuardOnDataDependentSymNode:
                 return None
             except (RuntimeError, KeyError, IndexError):
                 # TODO(pianpwk): RuntimeError is raised when redistribution is detected; switch to a custom error type
