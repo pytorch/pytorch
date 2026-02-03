@@ -162,8 +162,10 @@ struct TORCH_HIP_CPP_API ConvolutionDescriptor
     MIOPEN_CHECK(miopenSetConvolutionGroupCount(mut_desc(), groups));
     MIOPEN_CHECK(
         miopenSetConvolutionAttribute(mut_desc(), MIOPEN_CONVOLUTION_ATTRIB_DETERMINISTIC, deterministic ? 1 : 0));
+#if MIOPEN_VERSION_MAJOR * 10000 + MIOPEN_VERSION_MINOR * 100 + MIOPEN_VERSION_PATCH >= 30501
     MIOPEN_CHECK(miopenSetConvolutionAttribute(
         mut_desc(), MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE, allow_tf32 ? miopenMathDefault : miopenMathPedantic));
+#endif
     if (benchmark) {
       MIOPEN_CHECK(miopenSetConvolutionFindMode(mut_desc(), miopenConvolutionFindModeNormal));
     }
