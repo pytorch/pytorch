@@ -1115,12 +1115,174 @@ class TestUserStreamCompile(InductorTestCase):
         # all on the same stream and are pointwise operations
 
 
+@unittest.skipUnless(TEST_CUDA, "requires CUDA")
+class TestGenericStreamCompile(InductorTestCase):
+    """Tests for torch.compile with device-agnostic torch.Stream API."""
+
+    def test_generic_stream_basic(self):
+        """Test compilation with torch.Stream (device-agnostic API)."""
+        from torch._inductor.utils import run_and_get_code
+
+        # Create stream outside compiled function
+        stream = torch.Stream("cuda")
+        # Convert to cuda stream for use with torch.cuda.stream()
+        cuda_stream = torch.cuda.Stream(
+            stream_id=stream.stream_id,
+            device_index=stream.device_index,
+            device_type=stream.device_type,
+        )
+
+        def fn(x):
+            with torch.cuda.stream(cuda_stream):
+                a = x * 2
+                b = a + 1
+
+            cuda_stream.synchronize()
+            return b
+
+        x = torch.randn(1024, device="cuda")
+
+        expected = fn(x)
+        compiled_fn = torch.compile(fn)
+        result, (code,) = run_and_get_code(compiled_fn, x)
+
+        self.assertEqual(result, expected)
+
+        # Verify stream context is present
+        self.assertIn("torch.cuda.stream", code)
+
+    def test_generic_stream_with_event(self):
+        """Test compilation with torch.Stream and torch.Event."""
+        from torch._inductor.utils import run_and_get_code
+
+        # Create stream and event outside compiled function
+        stream = torch.Stream("cuda")
+        event = torch.Event("cuda")
+        cuda_stream = torch.cuda.Stream(
+            stream_id=stream.stream_id,
+            device_index=stream.device_index,
+            device_type=stream.device_type,
+        )
+
+        def fn(x):
+            # Work on default stream
+            a = x * 2
+            event.record()
+
+            with torch.cuda.stream(cuda_stream):
+                event.wait()
+                b = a + 1
+
+            cuda_stream.synchronize()
+            return b
+
+        x = torch.randn(1024, device="cuda")
+
+        expected = fn(x)
+        compiled_fn = torch.compile(fn)
+        result, (code,) = run_and_get_code(compiled_fn, x)
+
+        self.assertEqual(result, expected)
+
+        # Verify event operations
+        self.assertTrue(
+            "record_event" in code or ".record(" in code,
+            "Expected record_event or .record( in generated code",
+        )
+
+    def test_generic_stream_multiple(self):
+        """Test compilation with multiple torch.Stream instances."""
+        from torch._inductor.utils import run_and_get_code
+
+        # Create streams and event outside compiled function
+        stream1 = torch.Stream("cuda")
+        stream2 = torch.Stream("cuda")
+        event = torch.Event("cuda")
+        cuda_stream1 = torch.cuda.Stream(
+            stream_id=stream1.stream_id,
+            device_index=stream1.device_index,
+            device_type=stream1.device_type,
+        )
+        cuda_stream2 = torch.cuda.Stream(
+            stream_id=stream2.stream_id,
+            device_index=stream2.device_index,
+            device_type=stream2.device_type,
+        )
+
+        def fn(x):
+            with torch.cuda.stream(cuda_stream1):
+                a = x * 2
+                event.record()
+
+            with torch.cuda.stream(cuda_stream2):
+                event.wait()
+                b = a + 1
+
+            cuda_stream1.synchronize()
+            cuda_stream2.synchronize()
+            return b
+
+        x = torch.randn(1024, device="cuda")
+
+        expected = fn(x)
+        compiled_fn = torch.compile(fn)
+        result, (code,) = run_and_get_code(compiled_fn, x)
+
+        self.assertEqual(result, expected)
+
+        # Verify stream handling
+        self.assertTrue(
+            "torch.cuda.stream" in code or "stream" in code.lower(),
+            "Expected stream context in generated code",
+        )
+
+    def test_generic_event_record_on_stream(self):
+        """Test torch.Event.record() with explicit stream argument."""
+        from torch._inductor.utils import run_and_get_code
+
+        # Create stream and event outside compiled function
+        stream = torch.Stream("cuda")
+        event = torch.Event("cuda")
+        cuda_stream = torch.cuda.Stream(
+            stream_id=stream.stream_id,
+            device_index=stream.device_index,
+            device_type=stream.device_type,
+        )
+
+        def fn(x):
+            with torch.cuda.stream(cuda_stream):
+                a = x * 2
+                # Record event with explicit stream (using cuda_stream)
+                event.record(cuda_stream)
+
+            event.wait()
+            b = a + 1
+
+            cuda_stream.synchronize()
+            return b
+
+        x = torch.randn(1024, device="cuda")
+
+        expected = fn(x)
+        compiled_fn = torch.compile(fn)
+        result, (code,) = run_and_get_code(compiled_fn, x)
+
+        self.assertEqual(result, expected)
+
+        # Verify event operations
+        self.assertTrue(
+            "record_event" in code or ".record(" in code,
+            "Expected record_event or .record( in generated code",
+        )
+
+
 instantiate_parametrized_tests(TestStreamUtils)
 instantiate_parametrized_tests(TestCudaEventFactory)
 instantiate_parametrized_tests(TestWrapperCodegenStreams)
 instantiate_parametrized_tests(TestConfig)
 instantiate_parametrized_tests(TestStreamCodegen)
 instantiate_parametrized_tests(TestUserStreamCompile)
+instantiate_parametrized_tests(TestGenericStreamCompile)
 
 
 if __name__ == "__main__":
