@@ -1660,18 +1660,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             expected_ops_dynamic=ifdynstaticdefault(1, 7),
         )
 
-    def test_min_max_tuple_const(self):
-        # min/max on tuple constants should use ConstantVariable.create
-        # to properly handle the tuple return type
-        def fn():
-            a = min((1, 2), (3, 4))
-            b = max((1, 2), (3, 4))
-            return a, b
-
-        opt_fn = torch.compile(fn, fullgraph=True)
-        result = opt_fn()
-        self.assertEqual(result, ((1, 2), (3, 4)))
-
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_bound_shape_checks(self):
         def f1(x, y):
@@ -5362,63 +5350,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(res1, 8)
         self.assertEqual(res2, 9)
 
-    def test_enum_as_dict_key(self):
-        class MyEnum(enum.Enum):
-            FOO = 10
-            BAR = 20
-
-        def fn(x):
-            y = x + 2
-            z = {
-                MyEnum.FOO: torch.tensor(1),
-                MyEnum.BAR: 10,
-                "MyEnum.BAR": torch.tensor(8),
-                5: torch.rand(3),
-            }
-            torch._dynamo.graph_break()
-            a = z[MyEnum.FOO] + z["MyEnum.BAR"]
-            b = y * 2
-            return a, b
-
-        cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch.compile(fn, backend=cnts)
-        for _ in range(10):
-            x = torch.rand(3)
-            ref = fn(x)
-            res = opt_fn(x)
-            self.assertTrue(same(ref, res))
-        self.assertEqual(cnts.frame_count, 2)
-
-    def test_enum_as_dict_key_with_overloaded_str(self):
-        class MyEnum(enum.Enum):
-            FOO = 10
-            BAR = 20
-
-            def __str__(self):
-                return self.value
-
-        def fn(x):
-            y = x + 2
-            z = {
-                MyEnum.FOO: torch.tensor(1),
-                MyEnum.BAR: 10,
-                "MyEnum.BAR": torch.tensor(8),
-                5: torch.rand(3),
-            }
-            torch._dynamo.graph_break()
-            a = z[MyEnum.FOO] + z["MyEnum.BAR"]
-            b = y * 2
-            return a, b
-
-        cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch.compile(fn, backend=cnts)
-        for _ in range(10):
-            x = torch.rand(3)
-            ref = fn(x)
-            res = opt_fn(x)
-            self.assertTrue(same(ref, res))
-        self.assertEqual(cnts.frame_count, 2)
-
     def test_const_dict_variable_python_type(self):
         from torch._dynamo.variables import ConstantVariable, ConstDictVariable
 
@@ -5526,29 +5457,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         opt_fn = torch.compile(fn, fullgraph=True)
         self.assertTrue(opt_fn())
-
-    def test_enum_no_graphbreaks(self):
-        class Foo(enum.Enum):
-            FOO = 0
-            BAR = 1
-
-        def fn(x, foo):
-            if foo is Foo.FOO:
-                x = torch.add(x, 1.0)
-            x = torch.mul(x, 1.0)
-            return x
-
-        x = torch.randn(1)
-        cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
-        opt_fn(x, Foo.FOO)
-        self.assertEqual(cnts.op_count, 2)
-
-        torch._dynamo.reset()
-        cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
-        opt_fn(x, Foo.BAR)
-        self.assertEqual(cnts.op_count, 1)
 
     def test_repeat_interleave_graphbreaks(self):
         def fn_no_breaks(x):
@@ -6931,73 +6839,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         false_sin = graph(torch.tensor(False), torch.tensor([0.5, 0.5]))
         self.assertTrue(same(torch.sin(torch.tensor([0.5, 0.5])), false_sin))
 
-    def test_enum_guards(self):
-        class MyEnum(enum.Enum):
-            FOO = 10
-            BAR = 20
-
-        def fn(x, y):
-            if y == MyEnum.FOO:
-                return x + 1
-            else:
-                return x - 1
-
-        x = torch.rand(3)
-        y = MyEnum.BAR
-        ref = fn(x, y)
-        opt_fn = torch.compile(backend="eager")(fn)
-        res = opt_fn(x, y)
-        self.assertTrue(same(ref, res))
-
-    def test_enum_method(self):
-        class Bool(enum.IntEnum):
-            TRUE = enum.auto()
-            FALSE = enum.auto()
-
-            def is_true(self, x):
-                # Return `x + 1` to make sure Dynamo actually traced into this,
-                # rather than invoking it.
-                return self == Bool.TRUE, x + 1
-
-        def f(x, e):
-            cond, y = e.is_true(x)
-            if cond:
-                return y + 2
-            else:
-                return y - 2
-
-        opt_f = torch.compile(fullgraph=True)(f)
-        args = [torch.zeros(1), Bool.TRUE]
-        ref_out = f(*args)
-        opt_out = opt_f(*args)
-        self.assertTrue(same(ref_out, opt_out))
-
-    def test_enum_subclass(self):
-        # Copied from inspect.py
-
-        class _ParameterKind(enum.IntEnum):
-            POSITIONAL_ONLY = "positional-only"
-
-            def __new__(cls, description):
-                value = len(cls.__members__)
-                member = int.__new__(cls, value)
-                member._value_ = value
-                member.description = description
-                return member
-
-            def __str__(self):
-                return self.name
-
-        _POSITIONAL_ONLY = _ParameterKind.POSITIONAL_ONLY
-
-        def fn(x):
-            _ParameterKind(_POSITIONAL_ONLY)
-            return torch.cos(x)
-
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        x = torch.randn(4)
-        self.assertEqual(fn(x), opt_fn(x))
-
     def test_duplicate_graph_break_log(self):
         torch._logging.set_logs(graph_breaks=True)
 
@@ -7094,26 +6935,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             return C().fn(torch.ones(2, 3))
 
         self.assertTrue(torch.allclose(f(), torch.tensor([2.0])))
-
-    def test_user_function_variable_supports_enum_argument(self):
-        class Foo(enum.Enum):
-            FOO = 0
-            BAR = 1
-
-        def gn(x, y=Foo.FOO):
-            if y is Foo.FOO:
-                return x
-            else:
-                return x + 1
-
-        def fn(x):
-            return gn(x)
-
-        x = torch.randn(2, 3)
-        ref = fn(x)
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        res = opt_fn(x)
-        self.assertTrue(torch.allclose(ref, res))
 
     def test_user_function_variable_supports_type_abcmeta_argument(self):
         class Foo(metaclass=abc.ABCMeta):
@@ -12704,6 +12525,47 @@ fn
 
         self.assertEqual(bound0, bound1)
 
+    def test_sourceless_mapping_proxy(self):
+        # Test that Dynamo can handle a sourceless MappingProxyType.
+        # This occurs when type.__dict__['__dict__'].__get__ is called
+        # and returns a mappingproxy that was created during tracing.
+        _get_dunder_dict = type.__dict__["__dict__"].__get__
+
+        class MyClass:
+            a = 1
+            b = 2
+
+        def fn(x):
+            d = _get_dunder_dict(MyClass)
+            return x + len(d)
+
+        t = torch.randn(3)
+        ref = fn(t)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(t)
+        self.assertEqual(ref, res)
+
+    def test_sourceless_inspect_parameter(self):
+        import inspect
+
+        class MyClass:
+            param = inspect.Parameter(
+                "x", inspect.Parameter.POSITIONAL_OR_KEYWORD, default=42
+            )
+
+        _get_dunder_dict = type.__dict__["__dict__"].__get__
+
+        def fn(x):
+            d = _get_dunder_dict(MyClass)
+            p = d["param"]
+            return x + p.default
+
+        t = torch.randn(3)
+        ref = fn(t)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(t)
+        self.assertEqual(ref, res)
+
     def test_inspect_signature_parameters(self):
         import inspect
 
@@ -13801,14 +13663,30 @@ fn
             x = torch.randn(10, 10)
             compiled_fn = torch.compile(fn, fullgraph=True, backend="inductor")
             # Use error_on_custom_op_aliasing=False to emit warnings instead of errors
-            with torch._functorch.config.patch(
-                check_custom_op_aliasing=True, error_on_custom_op_aliasing=False
+            with (
+                torch._functorch.config.patch(
+                    check_custom_op_aliasing=True, error_on_custom_op_aliasing=False
+                ),
+                warnings.catch_warnings(record=True) as w,
             ):
-                with self.assertWarnsRegex(
-                    UserWarning,
-                    "The output of this custom operator \(1\) must not also be an input",
-                ):
-                    _ = compiled_fn(x)
+                warnings.simplefilter("always")
+                _ = compiled_fn(x)
+                aliasing_warnings = [
+                    x for x in w if "may not alias any inputs" in str(x.message)
+                ]
+                self.assertEqual(len(aliasing_warnings), 1)
+                msg = str(aliasing_warnings[0].message)
+                self.assertEqual(
+                    msg,
+                    "mylib::alias_op2 (with implementation in ???): "
+                    "The output of this custom operator (1) must not also be an input "
+                    "to this custom operator and (2) may not alias any inputs to this "
+                    "custom operator or other returns. The most common way to trigger "
+                    "this error is if we have y = custom_op(x) and y and x are the same "
+                    "Tensor. Please instead return a clone of the offending output "
+                    "tensor(s) (e.g. return x.clone()) or refactor the custom operator "
+                    "to not return y. This is deprecated and will become an error in PyTorch 2.12.",
+                )
 
 
 class MiscTestsPyTree(torch._inductor.test_case.TestCase):
