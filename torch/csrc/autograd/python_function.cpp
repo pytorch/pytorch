@@ -158,20 +158,17 @@ static void set_needs_input_grad(
     PyNode* node) {
   const auto& is_variable_input = py_fn->is_variable_input;
   size_t num_inputs = is_variable_input.size();
-  THPObjectPtr needs_input_grad(PyTuple_New(num_inputs));
   size_t edge_idx = 0;
   for (const auto i : c10::irange(num_inputs)) {
-    PyObject* value;
     if (is_variable_input[i]) {
-      value = node->task_should_compute_output(edge_idx++) ? Py_True : Py_False;
-    } else {
-      value = Py_False;
+      PyObject* new_value =
+          node->task_should_compute_output(edge_idx++) ? Py_True : Py_False;
+      PyObject* old_value = PyTuple_GET_ITEM(py_fn->needs_input_grad, i);
+      Py_INCREF(new_value);
+      Py_DECREF(old_value);
+      PyTuple_SET_ITEM(py_fn->needs_input_grad, i, new_value);
     }
-    Py_INCREF(value);
-    PyTuple_SET_ITEM(needs_input_grad.get(), i, value);
   }
-  Py_DECREF(py_fn->needs_input_grad);
-  py_fn->needs_input_grad = needs_input_grad.release();
 }
 
 // NOTE: this function is written in a way that assumes it's only called for
