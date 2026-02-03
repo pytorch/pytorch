@@ -1448,7 +1448,7 @@ def split(self: Tensor, split_size: int, dim: int = 0) -> tuple[Tensor, ...]:
             )
         return (self.detach(),)
     chunks = (dim_size + split_size - 1) // split_size
-
+    chunks = max(chunks, 1)
     # Avoid importing sympy at a module level
     from torch.fx.experimental.symbolic_shapes import guard_int
 

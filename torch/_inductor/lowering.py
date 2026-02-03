@@ -2035,31 +2035,13 @@ def select(x, dim, idx):
 @register_lowering(aten.split, type_promotion_kind=None)
 def split(x, sizes, dim=0):
     dim = _validate_dim(x, dim, 0)
-    sizes_ = sizes
-
-    # If sizes is an integer (or a SymInt), we turn it into a list of sizes
-    # by computing what the actual size of each chunk should be.
-    if not isinstance(sizes, (list, tuple)):
-        x_size = x.get_size()[dim]
-        if sizes == 0 and x_size == 0:
-            chunks = 1
-            sizes_ = [x_size]
-        else:
-            chunks = V.graph.sizevars.guard_int(
-                sympy.Max(FloorDiv(x_size + sizes - 1, sizes), 1)
-            )
-            sizes_ = [sizes] * chunks
-            # The last chunk might have a smaller size than the rest.
-            sizes_[-1] = x_size - (chunks - 1) * sizes
-
-    # From this point, we assume that the sum of the sizes of all chunks
-    # equals the size of the base tensor.
+    assert isinstance(sizes, (list, tuple)), (
+        "Expected list of sizes after decomposition"
+    )
     result = []
     start = 0
-    for size in sizes_:
+    for size in sizes:
         end = start + size
-        # No need for clamping here, since we compute the exact
-        # start and end values.
         result.append(slice_(x, dim, start, end, clamp=False))
         start = end
     return result
