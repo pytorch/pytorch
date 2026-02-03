@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """
-PreToolUse hook to block forbidden labels from being added during triage.
+PreToolUse hook to validate labels during triage.
 
 This hook intercepts mcp__github__update_issue calls and blocks any attempt
-to add labels that are reserved for CI/infrastructure use.
+to add labels that are:
+1. Reserved for CI/infrastructure use (forbidden patterns)
+2. Not in the labels.json allowlist (non-existent labels)
 
 Exit codes:
   0 - Allow the tool call
@@ -15,9 +17,12 @@ import os
 import re
 import sys
 from datetime import datetime
+from pathlib import Path
 
 
 DEBUG_LOG = os.environ.get("TRIAGE_HOOK_DEBUG_LOG", "/tmp/triage_hooks.log")
+SCRIPT_DIR = Path(__file__).parent
+LABELS_FILE = SCRIPT_DIR.parent / "labels.json"
 
 
 def debug_log(msg: str, to_stderr: bool = False):
@@ -61,6 +66,34 @@ def is_forbidden(label: str) -> bool:
     return label_lower in [f.lower() for f in FORBIDDEN_EXACT]
 
 
+def load_valid_labels() -> set[str]:
+    """Load the set of valid label names from labels.json.
+
+    Raises RuntimeError if labels.json cannot be loaded, as this indicates
+    a configuration problem that must be fixed.
+    """
+    try:
+        with open(LABELS_FILE) as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        raise RuntimeError(f"labels.json not found at {LABELS_FILE}") from None
+    except json.JSONDecodeError as e:
+        raise RuntimeError(f"labels.json contains invalid JSON: {e}") from None
+    except PermissionError:
+        raise RuntimeError("Cannot read labels.json: permission denied") from None
+
+    labels_list = data.get("labels", [])
+    try:
+        return {label["name"] for label in labels_list}
+    except (KeyError, TypeError) as e:
+        raise RuntimeError(f"labels.json has malformed entries: {e}") from None
+
+
+def find_nonexistent_labels(labels: list[str], valid_labels: set[str]) -> list[str]:
+    """Return labels that don't exist in the valid labels set."""
+    return [label for label in labels if label not in valid_labels]
+
+
 def main():
     try:
         data = json.load(sys.stdin)
@@ -74,11 +107,10 @@ def main():
             debug_log("No labels provided, allowing")
             sys.exit(0)
 
-        blocked = [label for label in labels if is_forbidden(label)]
-
-        if blocked:
-            debug_log(f"BLOCKING - forbidden labels: {blocked}")
-            print(f"BLOCKED: Cannot add forbidden labels: {blocked}", file=sys.stderr)
+        forbidden = [label for label in labels if is_forbidden(label)]
+        if forbidden:
+            debug_log(f"BLOCKING - forbidden labels: {forbidden}")
+            print(f"BLOCKED: Cannot add forbidden labels: {forbidden}", file=sys.stderr)
             print(
                 "These labels are reserved for CI/infrastructure use only.",
                 file=sys.stderr,
@@ -94,6 +126,26 @@ def main():
             )
             sys.exit(2)
 
+        valid_labels = load_valid_labels()
+        nonexistent = find_nonexistent_labels(labels, valid_labels)
+        if nonexistent:
+            debug_log(f"BLOCKING - non-existent labels: {nonexistent}")
+            print(f"BLOCKED: These labels do not exist: {nonexistent}", file=sys.stderr)
+            print(
+                "Labels must exist in labels.json before they can be applied.",
+                file=sys.stderr,
+            )
+            print(file=sys.stderr)
+            print(
+                "ACTION REQUIRED: Remove the non-existent labels and retry with only valid labels.",
+                file=sys.stderr,
+            )
+            print(
+                "See labels.json for the full list of available labels.",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+
         debug_log(f"All labels allowed: {labels}")
         sys.exit(0)
 
@@ -103,6 +155,7 @@ def main():
         print("Hook was unable to validate labels; stopping triage.", file=sys.stderr)
         sys.exit(2)
     except Exception as e:
+        debug_log(f"Unexpected error: {type(e).__name__}: {e}")
         print(f"Hook error: {e}", file=sys.stderr)
         print("Hook was unable to validate labels; stopping triage.", file=sys.stderr)
         sys.exit(2)
