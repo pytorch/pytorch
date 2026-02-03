@@ -1014,6 +1014,47 @@ def module_inputs_torch_nn_ConvNd(module_info, device, dtype, requires_grad, tra
     ]
 
 
+def module_error_inputs_torch_nn_Conv2d(module_info, device, dtype, requires_grad, training, **kwargs):
+    """
+    Error inputs for Conv2d that test error messages for invalid inputs.
+    """
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        # Wrong input dimensions: 2D input instead of 3D/4D
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=FunctionInput(3, 16, 3),  # in_channels=3, out_channels=16, kernel=3
+                forward_input=FunctionInput(make_input((3, 10))),  # 2D input
+            ),
+            error_on=ModuleErrorEnum.FORWARD_ERROR,
+            error_type=RuntimeError,
+            error_regex=r"Expected 3D \(unbatched\) or 4D \(batched\) input to conv2d.*got input of size.*3.*10"
+        ),
+        # Wrong number of input channels
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=FunctionInput(3, 16, 3),  # expects 3 input channels
+                forward_input=FunctionInput(make_input((1, 5, 10, 10))),  # 5 input channels
+            ),
+            error_on=ModuleErrorEnum.FORWARD_ERROR,
+            error_type=RuntimeError,
+            error_regex=r"Given groups=1.*expected input.*to have 3 channels.*but got 5 channels"
+        ),
+        # Groups not dividing in_channels
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=FunctionInput(3, 16, 3, groups=2),  # 3 not divisible by 2
+                forward_input=FunctionInput(),
+            ),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=ValueError,
+            error_regex=r"in_channels must be divisible by groups"
+        ),
+    ]
+
+
+
 def module_inputs_torch_nn_CosineEmbeddingLoss(module_info, device, dtype, requires_grad, training, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     make_target = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
@@ -3678,6 +3719,7 @@ module_db: list[ModuleInfo] = [
                )),
     ModuleInfo(torch.nn.Conv2d,
                module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=2, lazy=False),
+               module_error_inputs_func=module_error_inputs_torch_nn_Conv2d,
                gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
                module_memformat_affects_out=True,
                skips=(
