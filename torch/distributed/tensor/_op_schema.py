@@ -407,10 +407,11 @@ class OpSchema:
     @property
     def kwargs_strategy(self) -> tuple[OpStrategy, ...]:
         # returns OpStrategy items from kwargs_schema.
+        filtered_kwargs = {k: v for k, v in self.kwargs_schema.items() if k != "out"}
         kwargs_vals = (
-            tree_leaves(self.kwargs_schema)
+            tree_leaves(filtered_kwargs)
             if self.schema_info is not None and self.schema_info.needs_pytree
-            else self.kwargs_schema.values()
+            else filtered_kwargs.values()
         )
         return tuple(item for item in kwargs_vals if isinstance(item, OpStrategy))
 
