@@ -41,7 +41,7 @@ static void pow_tensor_scalar_kernel(TensorIteratorBase& iter, const Scalar& exp
   if (!exp_scalar.isComplex() && exp_scalar.to<float>() == .5) {
     return lib.exec_unary_kernel(iter, "sqrt");
   }
-  if (exp_scalar.isComplex()) {
+  if (exp_scalar.isComplex() || c10::isComplexType(iter.common_dtype())) {
     return lib.exec_unary_kernel(iter, "pow_scalar", exp_scalar, ScalarType::ComplexFloat);
   }
   lib.exec_unary_kernel(iter, "pow_scalar", exp_scalar, ScalarType::Float);
