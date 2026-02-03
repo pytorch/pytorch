@@ -50,8 +50,6 @@ from .common import (
 from .wrapper import (
     AllocateLine,
     BufferLike,
-    CommBufferAllocateLine,
-    CommBufferFreeLine,
     CommentLine,
     ConditionalLine,
     DynamicScalarLine,
@@ -927,11 +925,11 @@ class FxConverter:
         # Does nothing.
 
     def _generate_comm_buffer_allocate(self, line: WrapperLine) -> None:
-        assert isinstance(line, CommBufferAllocateLine)
+        assert isinstance(line, AllocateLine) and line.comm_buffer
         raise NotImplementedError("Comm buffer allocation is not yet supported")
 
     def _generate_comm_buffer_free(self, line: WrapperLine) -> None:
-        assert isinstance(line, CommBufferFreeLine)
+        assert isinstance(line, FreeIfNotReusedLine) and line.comm_buffer
         self._free(line.node)
 
     def _generate_triton_call(self, line: WrapperLine) -> None:
@@ -1110,7 +1108,11 @@ class FxConverter:
 
         # Get the result buffer.
         # Some kernels write to a pre-existing output tensor via the "out" kwarg.
-        kwargs = kernel.kwargs.copy()
+        # Materialize any IR nodes in kwargs to FX nodes (e.g., TensorBox -> Tensor).
+        kwargs = {
+            k: self._generate_buffer(v) if isinstance(v, ir.IRNode) else v
+            for k, v in kernel.kwargs.items()
+        }
 
         result_buffer: Optional[str] = None
         if isinstance(kernel, ir.ExternKernelOut):

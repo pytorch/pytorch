@@ -296,7 +296,6 @@ class StaticallyLaunchedCudaKernel(StaticallyLaunchedTritonKernel):
 class StaticallyLaunchedXpuKernel(StaticallyLaunchedTritonKernel):
     @cached_property
     def C_impl(self):
-        # pyrefly: ignore [missing-module-attribute]
         from torch._C import _StaticXpuLauncher
 
         return _StaticXpuLauncher
@@ -315,4 +314,6 @@ def statically_launched_kernel_by_device(
     elif device_type == "xpu":
         return StaticallyLaunchedXpuKernel(kernel)
     else:
-        raise NotImplementedError(f"Device type {device_type} not supported")
+        raise NotImplementedError(
+            f"Device type {device_type} is not supported for static launcher"
+        )

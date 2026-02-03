@@ -108,7 +108,7 @@ class FunctionalTensor(torch.Tensor):
     # Used by auto_functionalize to determine base of tensors during inference mode.
     _inference_mode_base: Optional[FunctionalTensor] = None
 
-    def __new__(cls, elem, mode):
+    def __new__(cls, elem: torch.Tensor, mode: FunctionalTensorMode) -> Self:
         if not torch._is_functional_tensor(elem):
             raise AssertionError("elem must be a functional tensor")
 
@@ -606,9 +606,14 @@ class FunctionalTensorMode(TorchDispatchMode):
                             for a in pytree.tree_leaves([args, kwargs]):
                                 if not isinstance(a, FunctionalTensor):
                                     continue
-                                curr_node = m.tracer.tensor_tracker[
-                                    torch._from_functional_tensor(a.elem)
-                                ].proxy.node
+                                unwrapped = torch._from_functional_tensor(a.elem)
+                                try:
+                                    tracker_entry = m.tracer.tensor_tracker[unwrapped]
+                                except KeyError:
+                                    raise RuntimeError(
+                                        f"cannot find {unwrapped} in tensor_tracker"
+                                    ) from None
+                                curr_node = tracker_entry.proxy.node
                                 with fx_traceback.set_current_replay_node(curr_node):
                                     torch._sync(a)
 
@@ -790,7 +795,7 @@ class PythonFunctionalizeAPI(BaseFunctionalizeAPI):
         # directly instead of globally setting it.
         return contextlib.nullcontext()
 
-    def replace(self, input_tensor, output_tensor) -> None:
+    def replace(self, input_tensor: torch.Tensor, output_tensor: torch.Tensor) -> None:
         if not isinstance(input_tensor, FunctionalTensor):
             raise AssertionError(
                 f"input_tensor must be a FunctionalTensor, got {type(input_tensor)}"
@@ -799,21 +804,21 @@ class PythonFunctionalizeAPI(BaseFunctionalizeAPI):
             raise AssertionError("output_tensor must not be a FunctionalTensor")
         input_tensor.replace_(output_tensor)
 
-    def commit_update(self, tensor) -> None:
+    def commit_update(self, tensor: torch.Tensor) -> None:
         if not isinstance(tensor, FunctionalTensor):
             raise AssertionError(
                 f"tensor must be a FunctionalTensor, got {type(tensor)}"
             )
         tensor.commit_update()
 
-    def sync(self, tensor) -> None:
+    def sync(self, tensor: torch.Tensor) -> None:
         if not isinstance(tensor, FunctionalTensor):
             raise AssertionError(
                 f"tensor must be a FunctionalTensor, got {type(tensor)}"
             )
         tensor.sync()
 
-    def mark_mutation_hidden_from_autograd(self, tensor) -> None:
+    def mark_mutation_hidden_from_autograd(self, tensor: torch.Tensor) -> None:
         if not isinstance(tensor, FunctionalTensor):
             raise AssertionError(
                 f"tensor must be a FunctionalTensor, got {type(tensor)}"
@@ -822,7 +827,7 @@ class PythonFunctionalizeAPI(BaseFunctionalizeAPI):
 
 
 class CppFunctionalizeAPI(BaseFunctionalizeAPI):
-    def wrap_tensors(self, args: tuple[Any]) -> tuple[Any]:
+    def wrap_tensors(self, args: tuple[Any, ...]) -> tuple[Any, ...]:
         from torch._functorch.eager_transforms import _wrap_all_tensors_to_functional
 
         return _wrap_all_tensors_to_functional(args, level=0)

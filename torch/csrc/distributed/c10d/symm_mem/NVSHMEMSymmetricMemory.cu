@@ -4,6 +4,7 @@
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nvshmem_extension.cuh>
+#include <torch/csrc/distributed/c10d/symm_mem/nvshmem_team_manager.hpp>
 
 #include <ATen/ceil_div.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -141,7 +142,10 @@ class NVSHMEMPeerAllocInfo : public c10::intrusive_ptr_target {
 
     // Initialize multicast address
     // On unsupported platforms, this API returns a nullptr.
-    mc_addr_ = nvshmemx_mc_ptr(NVSHMEM_TEAM_WORLD, base_ptr_);
+    auto device = c10::Device(c10::DeviceType::CUDA, allocation->device_idx);
+    auto& team_manager = c10d::nvshmem_extension::TeamManager::get(device);
+    auto team = team_manager.get_team(group_name, rank_to_global_rank);
+    mc_addr_ = nvshmemx_mc_ptr(team, base_ptr_);
   }
 
  private:
@@ -156,7 +160,7 @@ class NVSHMEMPeerAllocInfo : public c10::intrusive_ptr_target {
   // Whether the world is within CUDA P2P only, not network
   bool world_within_cuda_p2p_;
   // Multicast address
-  void* mc_addr_;
+  void* mc_addr_{nullptr};
 
   friend class NVSHMEMSymmetricMemory;
 };
@@ -212,7 +216,6 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
   }
 
   bool has_multicast_support() override {
-    // On unsupported platforms, this API returns a nullptr.
     return pai_->mc_addr_ != nullptr;
   }
 
