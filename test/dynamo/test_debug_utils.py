@@ -236,23 +236,52 @@ class TestBackendOverrideIntegration(TestCase):
         return x
 
     def _run_with_override(self, device, override_config, default_backend="eager"):
-        from torch._dynamo.graph_id_filter import lookup_backend_with_mode
+        from torch._dynamo.graph_id_filter import (
+            _create_backend_router,
+            get_backend_override_for_compile_id,
+        )
 
         torch._dynamo.reset()
+        # Clear the router cache to ensure fresh routers for each test
+        _create_backend_router.cache_clear()
         self._backends_called.clear()
-        original_lookup = lookup_backend_with_mode
+        original_get_override = get_backend_override_for_compile_id
 
-        def tracking_lookup(backend_str):
-            self._backends_called.append(backend_str)
-            return original_lookup(backend_str)
+        # Pre-parse the config to build a mapping of graph_id -> backend_str
+        # by using the same parsing logic but extracting the original strings
+        backend_str_map: dict[int, str] = {}
+        if override_config:
+            for rule_str in override_config.split(";"):
+                rule_str = rule_str.strip()
+                if not rule_str or ":" not in rule_str:
+                    continue
+                colon_idx = rule_str.find(":")
+                filter_str = rule_str[:colon_idx].strip()
+                backend_str = rule_str[colon_idx + 1 :].strip()
+                # Parse the filter to extract graph IDs
+                from torch._dynamo.graph_id_filter import GraphIdFilter
+
+                gf = GraphIdFilter(filter_str)
+                # Store the backend_str for any graph that matches this filter
+                for graph_id in range(100):  # Check first 100 graphs
+                    if graph_id in gf and graph_id not in backend_str_map:
+                        backend_str_map[graph_id] = backend_str
+
+        def tracking_get_override(compile_id, config_str):
+            result = original_get_override(compile_id, config_str)
+            if result is not None:
+                graph_id = compile_id.frame_id
+                if graph_id in backend_str_map:
+                    self._backends_called.append(backend_str_map[graph_id])
+            return result
 
         with (
             patch.object(
                 torch._dynamo.config, "debug_backend_override", override_config
             ),
             patch(
-                "torch._dynamo.graph_id_filter.lookup_backend_with_mode",
-                tracking_lookup,
+                "torch._dynamo.output_graph.get_backend_override_for_compile_id",
+                tracking_get_override,
             ),
         ):
             compiled_fn = torch.compile(self._fn_with_4_graphs, backend=default_backend)
@@ -336,10 +365,10 @@ class TestInductorConfigOverrideIntegration(TestCase):
 
         router = GraphConfigRouter("0:triton.cudagraph_skip_dynamic_graphs=False")
         self.assertEqual(
-            router.get_config_for_graph(0),
+            router.get_value_for_graph(0),
             {"triton.cudagraph_skip_dynamic_graphs": False},
         )
-        self.assertIsNone(router.get_config_for_graph(1))
+        self.assertIsNone(router.get_value_for_graph(1))
 
     def test_config_router_multiple_options(self, device):
         from torch._dynamo.graph_id_filter import GraphConfigRouter
@@ -348,7 +377,7 @@ class TestInductorConfigOverrideIntegration(TestCase):
             "0:triton.cudagraphs=False,triton.cudagraph_trees=False"
         )
         self.assertEqual(
-            router.get_config_for_graph(0),
+            router.get_value_for_graph(0),
             {"triton.cudagraphs": False, "triton.cudagraph_trees": False},
         )
 
@@ -356,19 +385,19 @@ class TestInductorConfigOverrideIntegration(TestCase):
         from torch._dynamo.graph_id_filter import GraphConfigRouter
 
         router = GraphConfigRouter(">1:triton.cudagraphs=True")
-        self.assertIsNone(router.get_config_for_graph(0))
-        self.assertIsNone(router.get_config_for_graph(1))
-        self.assertEqual(router.get_config_for_graph(2), {"triton.cudagraphs": True})
+        self.assertIsNone(router.get_value_for_graph(0))
+        self.assertIsNone(router.get_value_for_graph(1))
+        self.assertEqual(router.get_value_for_graph(2), {"triton.cudagraphs": True})
 
     def test_config_router_range(self, device):
         from torch._dynamo.graph_id_filter import GraphConfigRouter
 
         router = GraphConfigRouter("1-3:triton.cudagraphs=False")
-        self.assertIsNone(router.get_config_for_graph(0))
-        self.assertEqual(router.get_config_for_graph(1), {"triton.cudagraphs": False})
-        self.assertEqual(router.get_config_for_graph(2), {"triton.cudagraphs": False})
-        self.assertEqual(router.get_config_for_graph(3), {"triton.cudagraphs": False})
-        self.assertIsNone(router.get_config_for_graph(4))
+        self.assertIsNone(router.get_value_for_graph(0))
+        self.assertEqual(router.get_value_for_graph(1), {"triton.cudagraphs": False})
+        self.assertEqual(router.get_value_for_graph(2), {"triton.cudagraphs": False})
+        self.assertEqual(router.get_value_for_graph(3), {"triton.cudagraphs": False})
+        self.assertIsNone(router.get_value_for_graph(4))
 
     def test_config_router_value_types(self, device):
         from torch._dynamo.graph_id_filter import GraphConfigRouter
@@ -376,7 +405,7 @@ class TestInductorConfigOverrideIntegration(TestCase):
         router = GraphConfigRouter(
             "0:bool_opt=True,int_opt=42,float_opt=3.14,str_opt=hello,none_opt=None"
         )
-        config = router.get_config_for_graph(0)
+        config = router.get_value_for_graph(0)
         self.assertEqual(config["bool_opt"], True)
         self.assertEqual(config["int_opt"], 42)
         self.assertAlmostEqual(config["float_opt"], 3.14)
