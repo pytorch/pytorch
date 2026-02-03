@@ -572,24 +572,33 @@ class OpDispatcher:
                 args_schema.append(arg)
                 local_args.append(arg)
 
-        for k, v in kwargs.items():
+        nonlocal_compute_mesh: list[DeviceMesh | None] = [compute_mesh]
+
+        def extract_local(v: object) -> object:
             if isinstance(v, dtensor.DTensor):
-                local_kwargs[k] = v._local_tensor
-                kwargs_schema[k] = v._spec
-            elif isinstance(v, torch.Tensor):
-                compute_mesh = compute_mesh or try_find_mesh_from_args(
+                if nonlocal_compute_mesh[0] is None:
+                    nonlocal_compute_mesh[0] = v.device_mesh
+                return v._local_tensor
+            return v
+
+        def extract_schema(v: object) -> object:
+            if isinstance(v, dtensor.DTensor):
+                if nonlocal_compute_mesh[0] is None:
+                    nonlocal_compute_mesh[0] = v.device_mesh
+                return v._spec
+            if isinstance(v, torch.Tensor):
+                mesh = nonlocal_compute_mesh[0] or try_find_mesh_from_args(
                     op_call, args_list
                 )
-                kwargs_schema[k] = self._try_replicate_spec_for_scalar_tensor(
-                    op_call,
-                    v,
-                    compute_mesh,
-                )
-                local_kwargs[k] = v
-            else:
-                # non DTensor/Tensor args (i.e. int/float/bool), just add to args_schema/local_args
-                kwargs_schema[k] = v
-                local_kwargs[k] = v
+                nonlocal_compute_mesh[0] = mesh
+                return self._try_replicate_spec_for_scalar_tensor(op_call, v, mesh)
+            return v
+
+        for k, v in kwargs.items():
+            local_kwargs[k] = pytree.tree_map(extract_local, v)
+            kwargs_schema[k] = pytree.tree_map(extract_schema, v)
+
+        compute_mesh = nonlocal_compute_mesh[0]
 
         assert compute_mesh is not None, (
             f"found no DeviceMesh from dtensor args for {op_call}!"
