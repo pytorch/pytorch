@@ -62,12 +62,11 @@ from ..source import (
     AttrSource,
     CellContentsSource,
     ClosureSource,
-    CollectionsSource,
     ConstantSource,
     DefaultsSource,
     GetItemSource,
+    ImportSource,
     SkipGuardSource,
-    TorchSource,
     TypeSource,
 )
 from ..utils import (
@@ -134,7 +133,8 @@ class ClosureConversionError(NotImplementedError):
 @functools.lru_cache
 def get_pytree_SUPPORTED_NODES_source() -> AttrSource:
     return AttrSource(
-        AttrSource(AttrSource(TorchSource(), "utils"), "_pytree"), "SUPPORTED_NODES"
+        AttrSource(AttrSource(ImportSource("torch"), "utils"), "_pytree"),
+        "SUPPORTED_NODES",
     )
 
 
@@ -216,29 +216,15 @@ def bind_args_cached(
             # Maybe override pos-defaults applied above
             ba[name] = wrap_bound_arg(tx, rem_kw.pop(name))
         elif name not in ba:
-            raise_observed_exception(
-                TypeError,
-                tx,
-                args=[
-                    ConstantVariable.create(
-                        f"Missing required positional argument: {name}"
-                    )
-                ],
-            )
+            raise TypeError(f"missing required positional argument: {name}")
 
     # 2) *args
     extra = args[len(spec.all_pos_names) :]
     if spec.varargs_name:
         ba[spec.varargs_name] = wrap_bound_arg(tx, tuple(extra))
     elif extra:
-        raise_observed_exception(
-            TypeError,
-            tx,
-            args=[
-                ConstantVariable.create(
-                    f"Too many positional arguments: got {len(args)}, expected {len(spec.all_pos_names)}"
-                )
-            ],
+        raise TypeError(
+            f"Too many positional arguments: got {len(args)}, expected {len(spec.all_pos_names)}"
         )
 
     # 3) Keyword-only
@@ -251,27 +237,13 @@ def bind_args_cached(
                 kwdefault_source = DefaultsSource(fn_source, name, is_kw=True)
             ba[name] = wrap_bound_arg(tx, spec.kwdefaults[name], kwdefault_source)
         else:
-            raise_observed_exception(
-                TypeError,
-                tx,
-                args=[
-                    ConstantVariable.create(
-                        f"Missing required keyword-only argument: {name}"
-                    )
-                ],
-            )
+            raise TypeError(f"Missing required keyword-only argument: {name}")
 
     # 4) **kwargs
     if spec.varkw_name:
         ba[spec.varkw_name] = wrap_bound_arg(tx, rem_kw)
     elif rem_kw:
-        raise_observed_exception(
-            TypeError,
-            tx,
-            args=[
-                ConstantVariable.create(f"Unexpected keyword arguments: {list(rem_kw)}")
-            ],
-        )
+        raise TypeError(f"Unexpected keyword arguments: {list(rem_kw)}")
 
     return ba
 
@@ -393,6 +365,9 @@ class BaseUserFunctionVariable(VariableTracker):
         raise NotImplementedError
 
     def get_code(self) -> types.CodeType:
+        raise NotImplementedError
+
+    def has_self(self) -> bool:
         raise NotImplementedError
 
     def call_function(
@@ -657,7 +632,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                 )
 
             fn = fn_var.fn
-            return variables.TorchInGraphFunctionVariable(fn, nonstrict_traceable=True)
+            return variables.TorchInGraphFunctionVariable(
+                fn, kind=variables.torch.AllowInGraphKind.NONSTRICT_TRACE
+            )
 
         if self.is_constant:
             return invoke_and_store_as_constant(
@@ -1290,6 +1267,9 @@ class LocalGeneratorFunctionVariable(BaseUserFunctionVariable):
     def get_globals(self) -> dict[str, Any]:
         return self.vt.get_globals()
 
+    def has_self(self) -> bool:
+        return self.vt.has_self()
+
     def _build_inline_tracer(
         self,
         tx: "InstructionTranslatorBase",
@@ -1422,12 +1402,19 @@ class UserMethodVariable(UserFunctionVariable):
         #
         # We might be able to simplify this away by canonicalizing the
         # function/method wrapping code paths.
-        from ..trace_rules import is_nonstrict_trace_callable
+        from ..trace_rules import is_leaf_function, is_nonstrict_trace_callable
 
         if is_nonstrict_trace_callable(self.fn):
             call_args = [*self.self_args(), *args]
             var = variables.TorchInGraphFunctionVariable(
-                self.fn, nonstrict_traceable=True
+                self.fn, kind=variables.torch.AllowInGraphKind.NONSTRICT_TRACE
+            )
+            return var.call_function(tx, call_args, kwargs)
+
+        if is_leaf_function(self.fn):
+            call_args = [*self.self_args(), *args]
+            var = variables.TorchInGraphFunctionVariable(
+                self.fn, kind=variables.torch.AllowInGraphKind.LEAF_FUNCTION
             )
             return var.call_function(tx, call_args, kwargs)
 
@@ -3115,7 +3102,7 @@ class PyTreeGetNodeTypeFunctionVariable(UserFunctionVariable):
             type_source = TypeSource(args[0].source)
         python_type = args[0].python_type()
         if is_namedtuple_class(python_type):
-            type_source = AttrSource(CollectionsSource(), "namedtuple")
+            type_source = AttrSource(ImportSource("collections"), "namedtuple")
             return VariableTracker.build(tx, namedtuple, type_source)
         return VariableTracker.build(tx, python_type, source=type_source)
 
