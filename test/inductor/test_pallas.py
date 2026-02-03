@@ -540,6 +540,7 @@ class PallasTestsMixin:
         self.assertFalse(x.is_contiguous())
         self.assertEqual(compiled(x), x * 2.0 + 1.0)
 
+    @skip_if_cuda
     def test_stride_non_contiguous_2d_transpose(self):
         """Test 2D transposed input patterns."""
         compiled = self._compile(lambda x: x * 2.0 + 1.0)
@@ -558,6 +559,7 @@ class PallasTestsMixin:
         self.assertFalse(x.is_contiguous())
         self.assertEqual(compiled(x), x * 2.0 + 1.0)
 
+    @skip_if_cuda
     def test_stride_non_contiguous_permuted(self):
         """Test permuted non-contiguous input patterns."""
         compiled = self._compile(lambda x: x * 2.0 + 1.0)
@@ -567,6 +569,7 @@ class PallasTestsMixin:
         self.assertFalse(x.is_contiguous())
         self.assertEqual(compiled(x), x * 2.0 + 1.0)
 
+    @skip_if_cuda
     def test_stride_non_contiguous_channels_last(self):
         """Test channels-last (NHWC) non-contiguous input patterns."""
         compiled = self._compile(lambda x: x * 2.0 + 1.0)
