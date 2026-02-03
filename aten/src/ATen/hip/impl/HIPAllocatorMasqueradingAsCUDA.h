@@ -114,8 +114,8 @@ public:
     allocator_->recordStream(ptr, stream);
   }
 
-  HIPCachingAllocator::SnapshotInfo snapshot(MempoolId_t mempool_id = {0, 0}) override {
-    return allocator_->snapshot(mempool_id);
+  HIPCachingAllocator::SnapshotInfo snapshot(MempoolId_t mempool_id = {0, 0}, bool include_traces = true) override {
+    return allocator_->snapshot(mempool_id, include_traces);
   }
 
   void beginAllocateToPool(
@@ -142,8 +142,8 @@ public:
   void createOrIncrefPool(
       c10::DeviceIndex device,
       MempoolId_t mempool_id,
-      HIPAllocator* allocator = nullptr) override {
-    allocator_->createOrIncrefPool(device, mempool_id, allocator);
+      std::shared_ptr<HIPAllocator> allocator = nullptr) override {
+    allocator_->createOrIncrefPool(device, mempool_id, std::move(allocator));
   }
 
   void setUseOnOOM(c10::DeviceIndex device, MempoolId_t mempool_id, bool use_on_oom) override {

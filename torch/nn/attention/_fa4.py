@@ -218,6 +218,7 @@ def _fa4_run_backward(
     cu_seq_k: torch.Tensor | None,
     scale: float | None,
     is_causal: bool,
+    deterministic: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     if _FA4_MODULE_PATH is None:
         raise RuntimeError("FA4 not registered")
@@ -233,6 +234,7 @@ def _fa4_run_backward(
         causal=is_causal,
         cu_seqlens_q=cu_seq_q,
         cu_seqlens_k=cu_seq_k,
+        deterministic=deterministic,
     )
     return dq, dk, dv
 
@@ -321,6 +323,7 @@ def _fa4_flash_attention_backward_impl(
     )
     if error is not None:
         raise RuntimeError(f"FA4 flash_attention backward unsupported: {error}")
+    deterministic = torch.are_deterministic_algorithms_enabled()
     dq, dk, dv = _fa4_run_backward(
         grad_out,
         query,
@@ -332,6 +335,7 @@ def _fa4_flash_attention_backward_impl(
         cum_seq_k,
         scale,
         is_causal,
+        deterministic,
     )
     return dq, dk, dv
 

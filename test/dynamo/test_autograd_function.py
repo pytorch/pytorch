@@ -605,7 +605,7 @@ class GraphModule(torch.nn.Module):
 
         fwd_body_0 = self.fwd_body_0
         bwd_body_0 = self.bwd_body_0
-        autograd_function_apply = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_weird_b, l_weird_c, l_x_, l_z_, non_differentiable_idx = []);  fwd_body_0 = bwd_body_0 = l_weird_b = l_weird_c = l_x_ = l_z_ = None
+        autograd_function_apply = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_weird_b, l_weird_c, l_x_, l_z_, non_differentiable_idx = [], saved_for_backward_idx = [0, 1]);  fwd_body_0 = bwd_body_0 = l_weird_b = l_weird_c = l_x_ = l_z_ = None
         getitem: "f32[]" = autograd_function_apply[0];  autograd_function_apply = None
         return (getitem,)
 
@@ -1127,7 +1127,7 @@ class GraphModule(torch.nn.Module):
 
         fwd_body_0 = self.fwd_body_0
         bwd_body_0 = self.bwd_body_0
-        autograd_function_apply = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_weight_, l_x_, non_differentiable_idx = []);  fwd_body_0 = bwd_body_0 = l_weight_ = l_x_ = None
+        autograd_function_apply = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_weight_, l_x_, non_differentiable_idx = [], saved_for_backward_idx = [0, 1]);  fwd_body_0 = bwd_body_0 = l_weight_ = l_x_ = None
         getitem: "f32[5, 4]" = autograd_function_apply[0];  autograd_function_apply = None
         return (getitem,)
 
@@ -1342,7 +1342,7 @@ class GraphModule(torch.nn.Module):
 
         fwd_body_0 = self.fwd_body_0
         bwd_body_0 = self.bwd_body_0
-        autograd_function_apply = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_x_, l_y_, non_differentiable_idx = [1]);  fwd_body_0 = bwd_body_0 = l_x_ = l_y_ = None
+        autograd_function_apply = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_x_, l_y_, non_differentiable_idx = [1], saved_for_backward_idx = []);  fwd_body_0 = bwd_body_0 = l_x_ = l_y_ = None
         getitem: "f32[]" = autograd_function_apply[0]
         getitem_1: "f32[]" = autograd_function_apply[1];  autograd_function_apply = None
         return (getitem, getitem_1)
@@ -1664,7 +1664,7 @@ class GraphModule(torch.nn.Module):
         arg_1: "f32[s17, 8]" = torch.cos(l_y_);  l_y_ = None
         fwd_body_0 = self.fwd_body_0
         bwd_body_0 = self.bwd_body_0
-        autograd_function_apply = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, s77, arg, s17, arg_1, non_differentiable_idx = []);  fwd_body_0 = bwd_body_0 = s77 = arg = s17 = arg_1 = None
+        autograd_function_apply = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, s77, arg, s17, arg_1, non_differentiable_idx = [], saved_for_backward_idx = [1, 2, 3]);  fwd_body_0 = bwd_body_0 = s77 = arg = s17 = arg_1 = None
         getitem: "f32[s17, 8]" = autograd_function_apply[0]
         getitem_1: "f32[s17, 8]" = autograd_function_apply[1];  autograd_function_apply = None
 
@@ -1752,7 +1752,7 @@ class GraphModule(torch.nn.Module):
 
         fwd_body_0 = self.fwd_body_0
         bwd_body_0 = self.bwd_body_0
-        autograd_function_apply = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_x_, l_y_, non_differentiable_idx = []);  fwd_body_0 = bwd_body_0 = l_x_ = l_y_ = None
+        autograd_function_apply = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_x_, l_y_, non_differentiable_idx = [], saved_for_backward_idx = [0]);  fwd_body_0 = bwd_body_0 = l_x_ = l_y_ = None
         getitem: "f32[8, 8]" = autograd_function_apply[0]
         getitem_1: "f32[8, 8]" = autograd_function_apply[1]
         getitem_2: "f32[8, 8]" = autograd_function_apply[2];  autograd_function_apply = None
@@ -1826,7 +1826,7 @@ class GraphModule(torch.nn.Module):
 
         fwd_body_0 = self.fwd_body_0
         bwd_body_0 = self.bwd_body_0
-        autograd_function_apply = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_x_, non_differentiable_idx = []);  fwd_body_0 = bwd_body_0 = l_x_ = None
+        autograd_function_apply = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_x_, non_differentiable_idx = [], saved_for_backward_idx = []);  fwd_body_0 = bwd_body_0 = l_x_ = None
         y: "f32[8, 8]" = autograd_function_apply[0];  autograd_function_apply = None
 
         sin: "f32[8, 8]" = torch.sin(y);  y = None
@@ -1912,7 +1912,7 @@ class GraphModule(torch.nn.Module):
 
         fwd_body_0 = self.fwd_body_0
         bwd_body_0 = self.bwd_body_0
-        autograd_function_apply = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_module_b, l_input_data_values, l_x_, non_differentiable_idx = []);  fwd_body_0 = bwd_body_0 = l_module_b = l_input_data_values = None
+        autograd_function_apply = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_module_b, l_input_data_values, l_x_, non_differentiable_idx = [], saved_for_backward_idx = []);  fwd_body_0 = bwd_body_0 = l_module_b = l_input_data_values = None
         getitem: "f32[4, 4]" = autograd_function_apply[0]
         getitem_1: "f32[4, 4]" = autograd_function_apply[1];  autograd_function_apply = None
 
