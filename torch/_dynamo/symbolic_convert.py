@@ -3435,11 +3435,7 @@ class InstructionTranslatorBase(
         Handle comprehension start for Python 3.12+ BUILD_LIST/BUILD_MAP with argval 0.
         Returns True if a graph break was triggered and the caller should return early.
         """
-        if not (
-            sys.version_info >= (3, 12)
-            and inst.argval == 0
-            and not config.nested_graph_breaks
-        ):
+        if not (sys.version_info >= (3, 12) and inst.argval == 0):
             return False
 
         if not self._is_comprehension_start():
