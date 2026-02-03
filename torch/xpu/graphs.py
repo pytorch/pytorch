@@ -25,11 +25,7 @@ if not hasattr(torch._C, "_XpuStreamBase"):
     torch._C.__dict__["_XPUGraph"] = _dummy_type("_XPUGraph")
     torch._C.__dict__["_xpu_graph_pool_handle"] = _dummy_type("_xpu_graph_pool_handle")
 
-from torch._C import (  # noqa: F401
-    _xpu_isCurrentStreamCapturing,
-    _XPUGraph,
-    _xpu_graph_pool_handle,
-)
+from torch._C import _xpu_isCurrentStreamCapturing, _XPUGraph, _xpu_graph_pool_handle
 
 def is_current_stream_capturing() -> bool:
     r"""Return True if XPU graph capture is underway on the current XPU stream, False otherwise.
