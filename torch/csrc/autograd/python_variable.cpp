@@ -2262,6 +2262,21 @@ create_native_op_schema(
         break;
       }
       case TensorFlavor::NON_TENSOR: {
+        // Check if this is a list/tuple that might contain DTensors (e.g.,
+        // torch.cat)
+        if (arg.isList() && compute_mesh.is_none()) {
+          const auto list = arg.toList();
+          for (const auto& item : list) {
+            const auto [item_flavor, item_py_tensor] =
+                check_for_dtensor_or_tensor(item);
+            if (item_flavor == TensorFlavor::EXACTLY_DTENSOR ||
+                item_flavor == TensorFlavor::DTENSOR_SUBCLASS) {
+              compute_mesh = py::reinterpret_borrow<py::object>(
+                  item_py_tensor.attr(dtensor_interned_strings.device_mesh));
+              break;
+            }
+          }
+        }
         // non DTensor/Tensor args (i.e. int/float/bool), just add to
         // local_args
         handle_non_dtensor_arg(idx, arg);
@@ -2309,6 +2324,21 @@ create_native_op_schema(
           break;
         }
         case TensorFlavor::NON_TENSOR: {
+          // Check if this is a list/tuple that might contain DTensors (e.g.,
+          // torch.cat)
+          if (argument_it->isList() && compute_mesh.is_none()) {
+            const auto list = argument_it->toList();
+            for (const auto& item : list) {
+              const auto [item_flavor, item_py_tensor] =
+                  check_for_dtensor_or_tensor(item);
+              if (item_flavor == TensorFlavor::EXACTLY_DTENSOR ||
+                  item_flavor == TensorFlavor::DTENSOR_SUBCLASS) {
+                compute_mesh = py::reinterpret_borrow<py::object>(
+                    item_py_tensor.attr(dtensor_interned_strings.device_mesh));
+                break;
+              }
+            }
+          }
           handle_non_dtensor_arg(native_info.static_argnum, *argument_it);
           break;
         }
