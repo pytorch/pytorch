@@ -316,6 +316,9 @@ def _parse_stack_trace(
     if stack_trace is None:
         return None
 
+    # stacktrace should have innermost frame last, so we
+    # iterate backwards to find the first line that starts
+    # with 'file'
     if isinstance(stack_trace, list):
         for idx in range(len(stack_trace) - 1, -1, -1):
             frame = stack_trace[idx]
