@@ -61,23 +61,9 @@ class _BreakpointMarker:
 BREAKPOINT_MARKER = _BreakpointMarker()
 
 
-# Sentinel for NULL stack slots (C returns "<NULL>" string, we replace with this)
-class _NullStackValue:
-    """Sentinel representing a NULL value on the bytecode stack."""
-
-    __slots__ = ()
-    _instance: "_NullStackValue | None" = None
-
-    def __new__(cls) -> "_NullStackValue":
-        if cls._instance is None:
-            cls._instance = cast("_NullStackValue", object.__new__(cls))
-        return cls._instance
-
-    def __repr__(self) -> str:
-        return "<NULL>"
-
-
-NULL_STACK_VALUE = _NullStackValue()
+# Import NULL_STACK_VALUE sentinel from C module
+# This is returned by _get_frame_value_stack_at_depth for NULL stack slots
+from torch._C._dynamo.eval_frame import NULL_STACK_VALUE  # noqa: F401
 
 
 @dataclass
@@ -114,6 +100,31 @@ class _DebugContext:
         self._old_trace: Callable[..., Any] | None = None
         if _HAS_SYS_MONITORING:
             self._tool_id = sys.monitoring.DEBUGGER_ID
+
+    def get_instructions(self, code: types.CodeType | None = None) -> list[Instruction]:
+        """Get the list of instructions for a tracked code object.
+
+        Args:
+            code: The code object to get instructions for. If None, returns
+                  instructions from the most recently tracked code object.
+
+        Returns:
+            List of instructions, or empty list if the code is not tracked.
+        """
+        if not self._code_states:
+            return []
+        if code is None:
+            # Return instructions from the most recently tracked code
+            state = next(reversed(self._code_states.values()))
+        else:
+            state = self._code_states.get(code)
+            if state is None:
+                return []
+        return state.instructions
+
+    def get_tracked_codes(self) -> list[types.CodeType]:
+        """Get all code objects that have been tracked by the debugger."""
+        return list(self._code_states.keys())
 
     def _get_or_create_state(self, code: types.CodeType) -> DebuggerState:
         """Get or create debugger state for a code object."""
@@ -177,8 +188,10 @@ class _DebugContext:
 
         index = state.offset_to_index.get(offset, -1)
         marker = ">>>" if mark_current and offset == state.current_offset else "   "
-        bp_marker = "*" if offset in state.breakpoints else " "
-        arg_str = f" {inst.argval}" if inst.argval is not None else ""
+        bp_marker = (
+            "*" if state.offset_to_index.get(offset, -1) in state.breakpoints else " "
+        )
+        arg_str = f" {inst.argval}" if inst.arg is not None else ""
         return f"{marker}{bp_marker} {index:{iw}d} [{offset:{ow}d}]: {inst.opname}{arg_str}"
 
     def _format_header(self, state: DebuggerState) -> str:
@@ -213,7 +226,6 @@ class _DebugContext:
         depth = state.stack_depth_at.get(state.current_offset, 0)
         try:
             stack = _get_frame_value_stack_at_depth(state.current_frame, depth)
-            stack = [NULL_STACK_VALUE if v == "<NULL>" else v for v in stack]
         except Exception as e:
             print(f"\nStack: (error reading stack: {e})")
             return
@@ -222,7 +234,11 @@ class _DebugContext:
             print("  (empty)")
         else:
             for i, value in enumerate(stack):
-                print(f"  [{i}] {value!r}")
+                if value is NULL_STACK_VALUE:
+                    addr = "0x0"
+                else:
+                    addr = f"0x{id(value):x}"
+                print(f"  [{i}] {addr} {value!r}")
         print()
 
     def _print_locals(self, state: DebuggerState) -> None:
@@ -240,9 +256,7 @@ class _DebugContext:
                 print(f"  {name} = {value!r}")
         print()
 
-    def _print_globals(
-        self, state: DebuggerState, pattern: str | None = None
-    ) -> None:
+    def _print_globals(self, state: DebuggerState, pattern: str | None = None) -> None:
         """Print global variables."""
         if state.current_frame is None:
             print("\nGlobals: (no frame available)")
@@ -273,17 +287,19 @@ class _DebugContext:
         print("\nCommands:")
         print("  s, step     - Execute one instruction")
         print("  c, cont     - Continue until breakpoint or next Dynamo code")
-        print("  v, verbose  - Continue but print each instruction before executing")
-        print("                (useful for finding segfaults - last printed = culprit)")
+        print(
+            "  v, verbose  - Toggle verbose mode (print each instruction before executing)"
+        )
+        print("                Use with 'c' to find segfaults - last printed = culprit")
         print("  p <expr>    - Print expression")
         print("  l, list     - Show context around current instruction")
         print("  ll          - Disassemble all bytecode")
         print("  stack       - Print value stack")
         print("  locals      - Print local variables")
         print("  globals     - Print global variables")
-        print("  b <offset>  - Set breakpoint at byte offset (see [offset] column)")
+        print("  b <n>       - Set breakpoint at instruction n (see # column)")
         print("  b           - List breakpoints")
-        print("  cl <offset> - Clear breakpoint at byte offset")
+        print("  cl <n>      - Clear breakpoint at instruction n")
         print("  q, quit     - Exit debugger")
         print("  <expr>      - Evaluate Python expression (like pdb)")
         print()
@@ -298,8 +314,7 @@ class _DebugContext:
 
         depth = state.stack_depth_at.get(state.current_offset, 0)
         try:
-            stack = _get_frame_value_stack_at_depth(state.current_frame, depth)
-            return [NULL_STACK_VALUE if v == "<NULL>" else v for v in stack]
+            return _get_frame_value_stack_at_depth(state.current_frame, depth)
         except Exception:
             return []
 
@@ -339,15 +354,9 @@ class _DebugContext:
                 return
 
             elif action in ("v", "verbose"):
-                state.step_mode = False
-                state.verbose_mode = True
-                print(
-                    "Verbose mode enabled. Each instruction will be printed before executing."
-                )
-                print(
-                    "If a segfault occurs, the last printed instruction is the culprit."
-                )
-                return
+                state.verbose_mode = not state.verbose_mode
+                status = "enabled" if state.verbose_mode else "disabled"
+                print(f"Verbose mode {status}.")
 
             elif action in ("l", "list"):
                 self._print_context(state)
@@ -367,30 +376,49 @@ class _DebugContext:
             elif action == "b":
                 if arg:
                     try:
-                        offset = int(arg)
-                        state.breakpoints.add(offset)
-                        print(f"Breakpoint set at offset {offset}")
+                        index = int(arg)
+                        num_instructions = len(state.instructions)
+                        if index < 0 or index >= num_instructions:
+                            print(
+                                f"Invalid instruction number: {index} "
+                                f"(must be 0-{num_instructions - 1})"
+                            )
+                        else:
+                            state.breakpoints.add(index)
+                            print(f"Breakpoint set at instruction {index}")
                     except ValueError:
-                        print(f"Invalid offset: {arg}")
+                        print(f"Invalid instruction number: {arg}")
                 else:
                     print("\nBreakpoints:")
                     if not state.breakpoints:
                         print("  (none)")
                     else:
-                        for bp in sorted(state.breakpoints):
-                            print(
-                                f"  {self._format_instruction(state, bp, mark_current=False)}"
-                            )
+                        for bp_index in sorted(state.breakpoints):
+                            if bp_index < len(state.instructions):
+                                inst = state.instructions[bp_index]
+                                if inst.offset is not None:
+                                    print(
+                                        f"  {self._format_instruction(state, inst.offset, mark_current=False)}"
+                                    )
                     print()
 
             elif action == "cl":
                 if arg:
                     try:
-                        offset = int(arg)
-                        state.breakpoints.discard(offset)
-                        print(f"Breakpoint cleared at offset {offset}")
+                        index = int(arg)
+                        num_instructions = len(state.instructions)
+                        if index < 0 or index >= num_instructions:
+                            print(
+                                f"Invalid instruction number: {index} "
+                                f"(must be 0-{num_instructions - 1})"
+                            )
+                        elif index in state.breakpoints:
+                            state.breakpoints.discard(index)
+                            print(f"Breakpoint cleared at instruction {index}")
+                        else:
+                            print(f"No breakpoint at instruction {index}")
                     except ValueError:
-                        print(f"Invalid offset: {arg}")
+                        print(f"Invalid instruction number: {arg}")
 
             elif action == "p":
                 if arg:
@@ -429,12 +457,17 @@ class _DebugContext:
                     # If not a valid expression, try as statement (exec)
                     try:
                         keys_before = set(eval_locals.keys())
+                        ids_before = {k: id(v) for k, v in eval_locals.items()}
                         exec(cmd, frame_globals, eval_locals)
                         # Capture any new or modified variables into user_locals
                         for key in eval_locals:
-                            if key not in keys_before or key in state.user_locals:
-                                if key != "__stack__":
-                                    state.user_locals[key] = eval_locals[key]
+                            is_new = key not in keys_before
+                            is_user_var = key in state.user_locals
+                            is_modified = id(eval_locals[key]) != ids_before.get(key)
+                            if (
+                                is_new or is_user_var or is_modified
+                            ) and key != "__stack__":
+                                state.user_locals[key] = eval_locals[key]
                     except Exception as e:
                         print(f"*** {type(e).__name__}: {e}")
                 except Exception as e:
@@ -461,8 +494,8 @@ class _DebugContext:
             inst = state.offset_to_inst.get(offset)
             if inst:
                 idx = state.offset_to_index.get(offset, -1)
-                arg_str = f" {inst.argval}" if inst.argval is not None else ""
-                print(f"[{idx}] {inst.opname}{arg_str}", flush=True)
+                arg_str = f" {inst.argval}" if inst.arg is not None else ""
+                print(f"Running [{idx}] {inst.opname}{arg_str}", flush=True)
 
         # Check for BREAKPOINT_MARKER (inserted by PyCodegen)
         inst = state.offset_to_inst.get(offset)
@@ -472,10 +505,15 @@ class _DebugContext:
             and inst.argval is BREAKPOINT_MARKER
         )
 
-        should_stop = (
-            state.step_mode or offset in state.breakpoints or hit_breakpoint_marker
-        )
+        # Check if current instruction has a breakpoint (by index)
+        current_index = state.offset_to_index.get(offset, -1)
+        hit_breakpoint = current_index in state.breakpoints
+        should_stop = state.step_mode or hit_breakpoint or hit_breakpoint_marker
         if should_stop:
+            if hit_breakpoint:
+                print(f"Breakpoint hit at instruction {current_index}")
+            elif hit_breakpoint_marker:
+                print("Breakpoint hit (programmatic)")
             self._interactive_prompt(state)
 
     def _handle_return(self, code: types.CodeType, retval: object) -> None:

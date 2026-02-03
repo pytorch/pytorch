@@ -78,6 +78,11 @@ def set_bytecode_debugger_callback(
     callback: Callable[[types.CodeType], None] | None,
 ) -> None: ...
 
+# Sentinel for NULL stack values returned by _get_frame_value_stack_at_depth
+class NullStackValue: ...
+
+NULL_STACK_VALUE: NullStackValue
+
 py_opcode_caches: list[int]
 
 def code_framelocals_names(code: types.CodeType) -> tuple[str, ...]: ...

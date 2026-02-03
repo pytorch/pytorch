@@ -22,6 +22,31 @@ PyObject* guard_error_hook = NULL;
 PyObject* guard_complete_hook = NULL;
 PyObject* bytecode_debugger_callback = NULL;
 
+// Singleton sentinel for NULL stack values
+static PyObject* null_stack_value_singleton = NULL;
+
+// NullStackValue type - a simple sentinel object
+static PyObject* NullStackValue_repr(PyObject* self) {
+  return PyUnicode_FromString("<NULL>");
+}
+
+static PyTypeObject NullStackValueType = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "torch._C._dynamo.eval_frame.NullStackValue",
+    .tp_doc = "Sentinel representing a NULL value on the bytecode stack",
+    .tp_basicsize = sizeof(PyObject),
+    .tp_flags = Py_TPFLAGS_DEFAULT,
+    .tp_repr = NullStackValue_repr,
+};
+
+static PyObject* get_null_stack_value(void) {
+  if (null_stack_value_singleton == NULL) {
+    null_stack_value_singleton = PyObject_New(PyObject, &NullStackValueType);
+  }
+  Py_INCREF(null_stack_value_singleton);
+  return null_stack_value_singleton;
+}
+
 typedef struct {
   int active_dynamo_threads;
 } ModuleState;
@@ -577,8 +602,8 @@ PyObject* get_frame_value_stack_at_depth_impl(PyFrameObject* frame, int depth) {
   for (int i = 0; i < depth; i++) {
     PyObject* obj = THP_PyStackRef_AsPyObjectBorrow(&stack_base[i]);
     if (obj == NULL) {
-      // Use a string marker for NULL to distinguish from Python None
-      obj = PyUnicode_FromString("<NULL>");
+      // Use singleton sentinel for NULL stack slots
+      obj = get_null_stack_value();
       if (obj == NULL) {
         Py_DECREF(result);
         return NULL;
@@ -607,8 +632,8 @@ PyObject* get_frame_value_stack_at_depth_impl(PyFrameObject* frame, int depth) {
   for (int i = 0; i < depth; i++) {
     PyObject* obj = iframe->localsplus[stack_start + i];
     if (obj == NULL) {
-      // Use a string marker for NULL to distinguish from Python None
-      obj = PyUnicode_FromString("<NULL>");
+      // Use singleton sentinel for NULL stack slots
+      obj = get_null_stack_value();
       if (obj == NULL) {
         Py_DECREF(result);
         return NULL;
@@ -901,6 +926,19 @@ PyObject* torch_c_dynamo_eval_frame_init(void) {
           module,
           "_PyInterpreterFrame",
           (PyObject*)&THPPyInterpreterFrameType) != 0) {
+    return NULL;
+  }
+
+  // Initialize NullStackValue type and add singleton to module
+  if (PyType_Ready(&NullStackValueType) < 0) {
+    return NULL;
+  }
+  PyObject* null_value = get_null_stack_value();
+  if (null_value == NULL) {
+    return NULL;
+  }
+  if (PyModule_AddObject(module, "NULL_STACK_VALUE", null_value) != 0) {
+    Py_DECREF(null_value);
     return NULL;
   }
 
