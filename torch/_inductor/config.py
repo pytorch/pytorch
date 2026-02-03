@@ -889,6 +889,10 @@ combo_kernel_allow_mixed_sizes = 1
 combo_kernel_foreach_dynamic_shapes = True
 # Maximum number of arguments (read/write buffers) allowed in a combo kernel
 combo_kernel_max_num_args = 250
+# When True, each combo sub-kernel gets its own block sizes (XBLOCK_0, YBLOCK_0, etc.)
+# allowing different sub-kernels to use different tile sizes based on their heuristics.
+# When False, all sub-kernels share block sizes (XBLOCK, YBLOCK, etc.)
+combo_kernel_per_subkernel_blocks = False
 
 # constant folding on the joint graph
 joint_graph_constant_folding = True
@@ -1964,6 +1968,8 @@ class aot_inductor:
     # Generate kernel files that support multiple archs
     # For CUDA, this means generating fatbin files for kernels, and the fatbin files
     # contains PTX and SASS for the current architecture.
+    # For XPU, this means generating SPIR-V files for kernels, and the SPIR-V files
+    # will be compiled to target different XPU architectures at runtime.
     emit_multi_arch_kernel: Optional[bool] = None
 
     # If not None, the generated files with use this name in file stem.
