@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import contextlib
+import math
 import sys
 import warnings
 from typing import Any, cast, TYPE_CHECKING, Union
@@ -205,10 +206,15 @@ def all_gather_tensor(
     )
     res = _maybe_wrap_tensor(tensor)
     if gather_dim != 0:
-        # The wait (if needed) is handled automatically by AsyncCollectiveTensor's
-        # __torch_dispatch__ when _maybe_view_chunk_cat calls operations that need
-        # the actual tensor data (e.g., torch.cat). For view-only transformations,
-        # the AsyncCollectiveTensor wrapper is preserved, delaying the wait.
+        # Check if _maybe_view_chunk_cat can use the view optimization.
+        # If not, it will use torch.cat which needs the data anyway, so
+        # wait early to avoid AsyncCollectiveTensor dispatch overhead.
+        if isinstance(res, AsyncCollectiveTensor):
+            shape = list(res.shape)
+            numel_between = math.prod(shape[1:gather_dim]) if gather_dim > 1 else 1
+            can_use_view = shape[0] == group_size and numel_between == 1
+            if not can_use_view:
+                res = res.wait()
         res = _maybe_view_chunk_cat(res, group_size, gather_dim)
     return res
 
@@ -237,10 +243,15 @@ def all_gather_tensor_autograd(
     )
     res = _FromTorchTensor.apply(tensor)
     if gather_dim != 0:
-        # The wait (if needed) is handled automatically by AsyncCollectiveTensor's
-        # __torch_dispatch__ when _maybe_view_chunk_cat calls operations that need
-        # the actual tensor data (e.g., torch.cat). For view-only transformations,
-        # the AsyncCollectiveTensor wrapper is preserved, delaying the wait.
+        # Check if _maybe_view_chunk_cat can use the view optimization.
+        # If not, it will use torch.cat which needs the data anyway, so
+        # wait early to avoid AsyncCollectiveTensor dispatch overhead.
+        if isinstance(res, AsyncCollectiveTensor):
+            shape = list(res.shape)
+            numel_between = math.prod(shape[1:gather_dim]) if gather_dim > 1 else 1
+            can_use_view = shape[0] == group_size and numel_between == 1
+            if not can_use_view:
+                res = res.wait()
         res = _maybe_view_chunk_cat(res, group_size, gather_dim)
     return res
 
