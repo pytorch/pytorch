@@ -231,6 +231,9 @@ inductor_skips["xpu"] = {}
 inductor_expected_failures_single_sample = defaultdict(dict)
 
 inductor_expected_failures_single_sample["cpu"] = {
+    "_softmax_backward_data": {
+        f16
+    },  # half_to_float is only valid for the CUDA implementation
     "_upsample_bilinear2d_aa": {f32, f64},
     "cholesky": {f32, f64},
     "complex": {f16},
@@ -294,17 +297,6 @@ inductor_expected_failures_single_sample["xpu"] = {
     ("linalg.pinv", "singular"): {f64},
     # could not create a primitive
     "addmv": {f64},
-    # [Begin] Incorrect XPU reference due to new driver.
-    "masked.prod": {b8, i32, i64},
-    "masked.amin": {i64},
-    "masked.amax": {i64},
-    "amax": {i64},
-    "amin": {i64},
-    "std": {f64},
-    "var": {f64},
-    "std_mean": {f64},
-    "var_mean": {f64},
-    # [End]
     "fft.fft": {f16},
     "fft.fft2": {f16},
     "fft.fftn": {f16},
@@ -464,6 +456,11 @@ inductor_override_kwargs["cuda"] = {
     ("kron", f16): {"reference_in_float": True},
     "log_normal": {"reference_in_float": True},
     ("masked.softmin", f16): {"atol": 1e-4, "rtol": 0.01},
+    ("nn.functional.adaptive_avg_pool2d", f16): {
+        "reference_in_float": True,
+        "atol": 2e-5,
+        "rtol": 0.02,
+    },
     ("nn.functional.batch_norm", f16): {"reference_in_float": True},
     ("nn.functional.batch_norm.without_cudnn", f16): {"reference_in_float": True},
     ("nn.functional.cosine_similarity", f16): {"reference_in_float": True},
@@ -991,6 +988,56 @@ inductor_one_sample["xpu"] = {
     "xlogy": {f16},
 }
 
+# TODO: Fix these so strides match.
+inductor_skip_exact_stride = {
+    "complex",
+    "empty_permuted",
+    "fft.irfftn",
+    "fft.irfft2",
+    "linalg.diagonal",
+    "linalg.eigvals",  # Fails for ROCM
+    "linalg.lu",
+    "linalg.lu_factor",
+    "linalg.matrix_norm",
+    "linalg.norm",
+    "linalg.norm.subgradients_at_zero",
+    "linalg.pinv.singular",
+    "linalg.svdvals",
+    "linalg.solve",
+    "linalg.solve_ex",
+    "linalg.qr",
+    "matmul",
+    "__rmatmul__",
+    "nn.functional.adaptive_avg_pool1d",
+    "nn.functional.group_norm",
+    "nn.functional.linear",
+    "nn.functional.max_pool2d",
+    "nn.functional.unfold",
+    "ormqr",
+    "pca_lowrank",
+    "polar",
+    "prod",
+    "qr",
+    "rot90",
+    "stack",
+    "sum",
+    "tensordot",
+    "tril_indices",
+    "triu_indices",
+    "unbind",
+    "unbind_copy",
+}
+
+# On XPU, Inductor may apply additional layout optimizations that can change
+# tensor strides compared to eager mode, so exact stride checks are relaxed
+# for certain ops.
+inductor_skip_exact_stride_xpu = {
+    "nn.functional.conv2d",
+    "nn.functional.conv_transpose2d",
+    "nn.functional.max_unpool2d",
+    "nn.functional.max_unpool2d.grad",
+    "nn.functional.rms_norm",
+}
 
 # Custom replacements for assertEquals, in cases where a difference in value
 # may not indicate correctness.
@@ -1362,12 +1409,17 @@ class TestInductorOpInfo(TestCase):
                         adjusted_kwargs.update(kwarg_overrides)
 
                         # Call the appropriate check method based on device type
+                        exact_stride = op_name not in inductor_skip_exact_stride
+                        # XPU has additional layout optimizations that change strides differently from eager mode.
+                        if exact_stride and GPU_TYPE == "xpu":
+                            exact_stride = op_name not in inductor_skip_exact_stride_xpu
                         if device_type == GPU_TYPE:
                             self.check_model_gpu(
                                 fn,
                                 args,
                                 kwargs,
                                 **adjusted_kwargs,
+                                exact_stride=exact_stride,
                             )
                         else:
                             self.check_model(
@@ -1375,6 +1427,7 @@ class TestInductorOpInfo(TestCase):
                                 args,
                                 kwargs,
                                 **adjusted_kwargs,
+                                exact_stride=exact_stride,
                             )
 
         except Exception as e:
