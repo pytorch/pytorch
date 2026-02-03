@@ -2227,6 +2227,7 @@ def joint_fwd_bwd(fn: Callable[..., Any], args: Sequence[Any]) -> torch.fx.Graph
     with torch._guards.tracing(None):
         aot_function(
             fn,
+            # pyrefly: ignore[bad-argument-type]
             lambda gm, example_inputs: make_boxed_func(gm),
             partition_fn=record_joint_graph,
             decompositions=select_decomp_table(),

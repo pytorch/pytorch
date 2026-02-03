@@ -104,7 +104,6 @@ class ToyModel(torch.nn.Module):
         return x
 
 
-@unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
 class FxGraphRunnableTest(TestCase):
     def setUp(self):
         super().setUp()
@@ -398,13 +397,43 @@ class FxGraphRunnableTest(TestCase):
         torch.compile(f)(x)
         self._exec_and_verify_payload()
 
+    @torch._dynamo.config.patch(assume_static_by_default=False)
+    def test_storage_nbytes_symint_mismatch(self):
+        """
+        Test that symbols in storage nbytes are extracted when they differ from shape.
+
+        When a tensor is a view created via as_strided where the storage comes from
+        one tensor but the shape dimension comes from another tensor, the storage
+        nbytes expression uses different symbols than the tensor shape. All symbols
+        must be defined at the top of the generated repro script.
+        """
+
+        def f(view, weights):
+            return (view * weights.unsqueeze(1)).sum()
+
+        # Create storage_src with dynamic shape (s0, s1)
+        storage_src = torch.randn(32, 64)
+        torch._dynamo.mark_dynamic(storage_src, 0)
+        torch._dynamo.mark_dynamic(storage_src, 1)
+
+        # Create weights with independent dynamic shape (s2)
+        weights = torch.randn(100)
+        torch._dynamo.mark_dynamic(weights, 0)
+
+        # Create as_strided view: storage from storage_src, shape from weights
+        flat = storage_src.flatten()
+        s2 = weights.shape[0]
+        view = flat.as_strided((s2, 16), (16, 1))
+
+        torch.compile(f)(view, weights)
+        self._exec_and_verify_payload()
+
 
 @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
 class TestFxGraphRunnableMultiProcessGroup(TestCase):
     @unittest.skipIf(
         not torch.distributed.is_available(), "Torch distributed not available."
     )
-    @skip_if_lt_x_gpu(4)
     def test_multiple_process_groups(self):
         import tempfile
 
