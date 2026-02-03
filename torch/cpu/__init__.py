@@ -4,7 +4,10 @@ This package implements abstractions found in ``torch.cuda``
 to facilitate writing device-agnostic code.
 """
 
+from collections.abc import Mapping
 from contextlib import AbstractContextManager
+from functools import lru_cache
+from types import MappingProxyType
 from typing import Any
 
 import torch
@@ -25,38 +28,85 @@ __all__ = [
     "Stream",
     "StreamContext",
     "Event",
+    "get_capabilities",
 ]
+
+
+@lru_cache(None)
+def get_capabilities() -> Mapping[str, Any]:
+    """
+    Returns an immutable mapping of CPU capabilities detected at runtime.
+
+    This function queries the CPU for supported instruction sets and features
+    using cpuinfo. The result is cached after the first call for efficiency.
+
+    The returned mapping contains architecture-specific capabilities:
+
+    For x86/x86_64:
+        - SSE family: sse, sse2, sse3, ssse3, sse4_1, sse4_2, sse4a
+        - AVX family: avx, avx2, avx_vnni
+        - AVX-512 family: avx512_f, avx512_cd, avx512_dq, avx512_bw, avx512_vl,
+          avx512_ifma, avx512_vbmi, avx512_vbmi2, avx512_bitalg, avx512_vpopcntdq,
+          avx512_vnni, avx512_bf16, avx512_fp16, avx512_vp2intersect,
+          avx512_4vnniw, avx512_4fmaps
+        - AVX10 family: avx10_1, avx10_2
+        - AVX-VNNI-INT: avx_vnni_int8, avx_vnni_int16, avx_ne_convert
+        - AMX: amx_bf16, amx_tile, amx_int8, amx_fp16
+        - FMA: fma3, fma4
+        - Other: f16c, bmi, bmi2, popcnt, lzcnt, aes, sha, clflush, clflushopt, clwb
+
+    For ARM64:
+        - SIMD: neon, fp16_arith, bf16, i8mm, dot
+        - SVE: sve, sve2, sve_bf16, sve_max_length (when supported)
+        - SME: sme, sme2, sme_max_length (when supported)
+        - Other: atomics, fhm, rdm, crc32, aes, sha1, sha2, pmull
+
+    Common to all architectures:
+        - architecture: string identifying the CPU architecture
+
+    Returns:
+        MappingProxyType: An immutable mapping where keys are capability names
+        (e.g., 'avx2', 'sve') and values are booleans indicating
+        support, or integers for properties like vector lengths.
+
+    Example:
+        >>> caps = torch.cpu.get_capabilities()
+        >>> if caps.get("avx2", False):
+        ...     print("AVX2 is supported")
+        >>> print(f"Architecture: {caps['architecture']}")
+    """
+    return MappingProxyType(torch._C._cpu._get_cpu_capability())
 
 
 def _is_avx2_supported() -> bool:
     r"""Returns a bool indicating if CPU supports AVX2."""
-    return torch._C._cpu._is_avx2_supported()
+    return get_capabilities().get("avx2", False)
 
 
 def _is_avx512_supported() -> bool:
     r"""Returns a bool indicating if CPU supports AVX512."""
-    return torch._C._cpu._is_avx512_supported()
+    return get_capabilities().get("avx512_f", False)
 
 
 def _is_avx512_bf16_supported() -> bool:
     r"""Returns a bool indicating if CPU supports AVX512_BF16."""
-    return torch._C._cpu._is_avx512_bf16_supported()
+    return get_capabilities().get("avx512_bf16", False)
 
 
 def _is_vnni_supported() -> bool:
     r"""Returns a bool indicating if CPU supports VNNI."""
     # Note: Currently, it only checks avx512_vnni, will add the support of avx2_vnni later.
-    return torch._C._cpu._is_avx512_vnni_supported()
+    return get_capabilities().get("avx512_vnni", False)
 
 
 def _is_amx_tile_supported() -> bool:
     r"""Returns a bool indicating if CPU supports AMX_TILE."""
-    return torch._C._cpu._is_amx_tile_supported()
+    return get_capabilities().get("amx_tile", False)
 
 
 def _is_amx_fp16_supported() -> bool:
     r"""Returns a bool indicating if CPU supports AMX FP16."""
-    return torch._C._cpu._is_amx_fp16_supported()
+    return get_capabilities().get("amx_fp16", False)
 
 
 def _init_amx() -> bool:
