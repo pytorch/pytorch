@@ -228,6 +228,7 @@ def get_all_qint_dtypes() -> list[torch.dtype]:
 
 float_to_corresponding_complex_type_map = {
     torch.float16: torch.complex32,
+    torch.bfloat16: torch.bcomplex32,
     torch.float32: torch.complex64,
     torch.float64: torch.complex128,
 }
