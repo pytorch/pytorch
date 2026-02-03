@@ -61,5 +61,8 @@ def should_pad_params_encoder(
         mat2_exclude_padding_time=should_exclude_padding_time(match, "mat2"),
         tf32=False
         if mat1.dtype != torch.float32
-        else bool(torch.backends.cuda.matmul.fp32_precision == "tf32" or torch.backends.mkldnn.fp32_precision == "tf32"),
+        else bool(
+            torch.backends.cuda.matmul.fp32_precision == "tf32"
+            or torch.backends.mkldnn.fp32_precision == "tf32"
+        ),
     )
