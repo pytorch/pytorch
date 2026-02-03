@@ -1591,9 +1591,6 @@ class TensorVariable(VariableTracker):
                 return vt.as_python_constant()
             elif isinstance(vt, variables.UserDefinedObjectVariable):
                 return vt.value
-            elif isinstance(vt, (variables.TupleVariable, variables.ListVariable)):
-                items = [extract_python_value(item) for item in vt.items]
-                return vt.python_type()(items)
             else:
                 return vt.as_python_constant()
 
