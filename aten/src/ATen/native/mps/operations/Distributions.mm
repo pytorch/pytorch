@@ -468,6 +468,7 @@ static Tensor& distribution_kernel_mps_impl(Tensor& self,
     int64_t seed;
     int64_t base_offset;
     {
+      // See Note [Acquire lock when using random generators]
       std::lock_guard<std::mutex> lock(mps_gen->mutex_);
       seed = static_cast<int64_t>(mps_gen->current_seed());
       base_offset = static_cast<int64_t>(mps_gen->get_offset());
