@@ -436,6 +436,160 @@ class TestWithNCCL(DistributedTestBase):
         assert output.completed
 
     @skip_if_lt_x_gpu(2)
+    def test_scatter(self) -> None:
+        self._init_process_group()
+
+        src = 0
+        if self.rank == src:
+            scatter_list = [
+                torch.full((10, 10), float(i), device=self.device)
+                for i in range(self.world_size)
+            ]
+        else:
+            scatter_list = []
+
+        output = torch.zeros((10, 10), device=self.device)
+        output = torch.ops._c10d_functional.scatter(
+            output,
+            scatter_list,
+            src,
+            "default",
+        )
+        output = torch.ops._c10d_functional.wait_tensor(output)
+        assert output.eq(float(self.rank)).all()
+
+        output = torch.zeros((10, 10), device=self.device)
+        output = funcol.scatter(
+            output,
+            scatter_list,
+            src,
+            "default",
+        )
+        assert isinstance(output, AsyncCollectiveTensor)
+        assert not output.completed
+        assert output.eq(float(self.rank)).all()
+        assert output.completed
+
+    @skip_if_lt_x_gpu(2)
+    def test_scatter_(self) -> None:
+        self._init_process_group()
+
+        src = 0
+        if self.rank == src:
+            scatter_list = [
+                torch.full((10, 10), float(i), device=self.device)
+                for i in range(self.world_size)
+            ]
+        else:
+            scatter_list = []
+
+        output = torch.zeros((10, 10), device=self.device)
+        result = torch.ops._c10d_functional.scatter_(
+            output,
+            scatter_list,
+            src,
+            "default",
+        )
+        result = torch.ops._c10d_functional.wait_tensor(result)
+        assert id(result) == id(output)
+        assert output.eq(float(self.rank)).all()
+
+    @skip_if_lt_x_gpu(2)
+    def test_gather(self) -> None:
+        self._init_process_group()
+
+        input = torch.full((10, 10), float(self.rank), device=self.device)
+        dst = 0
+
+        if self.rank == dst:
+            gather_list = [
+                torch.zeros((10, 10), device=self.device)
+                for _ in range(self.world_size)
+            ]
+        else:
+            gather_list = []
+
+        outputs = torch.ops._c10d_functional.gather(
+            input,
+            gather_list,
+            dst,
+            "default",
+        )
+
+        if self.rank == dst:
+            assert len(outputs) == self.world_size
+            for i, output in enumerate(outputs):
+                output = torch.ops._c10d_functional.wait_tensor(output)
+                assert output.eq(float(i)).all()
+        else:
+            assert len(outputs) == 0
+
+        outputs = funcol.gather(
+            input,
+            [],
+            dst,
+            "default",
+        )
+
+        if self.rank == dst:
+            assert len(outputs) == self.world_size
+            for i, output in enumerate(outputs):
+                assert isinstance(output, AsyncCollectiveTensor)
+                assert output.eq(float(i)).all()
+
+        if self.rank == dst:
+            gather_list2 = [
+                torch.zeros((10, 10), device=self.device)
+                for _ in range(self.world_size)
+            ]
+        else:
+            gather_list2 = []
+
+        outputs = funcol.gather(
+            input,
+            gather_list2,
+            dst,
+            "default",
+        )
+
+        if self.rank == dst:
+            assert len(outputs) == self.world_size
+            for i, output in enumerate(outputs):
+                assert isinstance(output, AsyncCollectiveTensor)
+                assert output.eq(float(i)).all()
+
+    @skip_if_lt_x_gpu(2)
+    def test_gather_(self) -> None:
+        self._init_process_group()
+
+        input = torch.full((10, 10), float(self.rank), device=self.device)
+        dst = 0
+
+        if self.rank == dst:
+            gather_list = [
+                torch.zeros((10, 10), device=self.device)
+                for _ in range(self.world_size)
+            ]
+        else:
+            gather_list = []
+
+        outputs = torch.ops._c10d_functional.gather_(
+            gather_list,
+            input,
+            dst,
+            "default",
+        )
+
+        if self.rank == dst:
+            assert len(outputs) == self.world_size
+            for i, output in enumerate(outputs):
+                output = torch.ops._c10d_functional.wait_tensor(output)
+                assert output.eq(float(i)).all()
+                assert id(output) == id(gather_list[i])
+        else:
+            assert len(outputs) == 0
+
+    @skip_if_lt_x_gpu(2)
     def test_wait_tensor(self) -> None:
         self._init_process_group()
 
