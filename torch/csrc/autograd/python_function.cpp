@@ -149,6 +149,31 @@ PyObject* to_py_size(const std::vector<c10::SymInt>& size) {
 
 namespace torch::autograd {
 
+// Populates py_fn->needs_input_grad based on which outputs the backward graph
+// actually needs to compute. Uses task_should_compute_output to check if each
+// edge is needed. The Py_XDECREF handles the retain_graph=True case where
+// backward runs multiple times on the same graph.
+static void set_needs_input_grad(
+    THPFunction* py_fn,
+    PyNode* node) {
+  const auto& is_variable_input = py_fn->is_variable_input;
+  size_t num_inputs = is_variable_input.size();
+  THPObjectPtr needs_input_grad(PyTuple_New(num_inputs));
+  size_t edge_idx = 0;
+  for (const auto i : c10::irange(num_inputs)) {
+    PyObject* value;
+    if (is_variable_input[i]) {
+      value = node->task_should_compute_output(edge_idx++) ? Py_True : Py_False;
+    } else {
+      value = Py_False;
+    }
+    Py_INCREF(value);
+    PyTuple_SET_ITEM(needs_input_grad.get(), i, value);
+  }
+  Py_XDECREF(py_fn->needs_input_grad);
+  py_fn->needs_input_grad = needs_input_grad.release();
+}
+
 // NOTE: this function is written in a way that assumes it's only called for
 // backward; it's used by engine.cpp.  This is responsible for forwarding a call
 // from C++'s Node::apply to a Python method "apply".
@@ -158,23 +183,9 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
   at::OptionalDeviceGuard _device_guard;
   THPFunction* py_fn = (THPFunction*)obj;
 
-  // Create needs_input_grad based on which outputs the backward graph needs
+  set_needs_input_grad(py_fn, this);
+
   const auto& is_variable_input = py_fn->is_variable_input;
-  size_t num_inputs = is_variable_input.size();
-  THPObjectPtr needs_input_grad(PyTuple_New(num_inputs));
-  size_t edge_idx = 0;
-  for (const auto i : c10::irange(num_inputs)) {
-    PyObject* value;
-    if (is_variable_input[i]) {
-      value = task_should_compute_output(edge_idx++) ? Py_True : Py_False;
-    } else {
-      value = Py_False;
-    }
-    Py_INCREF(value);
-    PyTuple_SET_ITEM(needs_input_grad.get(), i, value);
-  }
-  Py_XDECREF(py_fn->needs_input_grad);
-  py_fn->needs_input_grad = needs_input_grad.release();
 
   // Massage a C++ variable_list into a Python arguments tuple
   THPObjectPtr pyInputs(to_py_args(inputs, &_device_guard));
@@ -226,27 +237,12 @@ auto PyNode::apply_with_saved_impl(
   at::OptionalDeviceGuard _device_guard;
   THPFunction* py_fn = (THPFunction*)obj;
 
-  // Create needs_input_grad based on which outputs the backward graph needs
-  const auto& is_variable_input = py_fn->is_variable_input;
-  size_t num_inputs = is_variable_input.size();
-  THPObjectPtr needs_input_grad(PyTuple_New(num_inputs));
-  size_t edge_idx = 0;
-  for (const auto i : c10::irange(num_inputs)) {
-    PyObject* value;
-    if (is_variable_input[i]) {
-      value = task_should_compute_output(edge_idx++) ? Py_True : Py_False;
-    } else {
-      value = Py_False;
-    }
-    Py_INCREF(value);
-    PyTuple_SET_ITEM(needs_input_grad.get(), i, value);
-  }
-  Py_XDECREF(py_fn->needs_input_grad);
-  py_fn->needs_input_grad = needs_input_grad.release();
+  set_needs_input_grad(py_fn, this);
 
   // Massage a C++ variable_list into a Python arguments tuple
   THPObjectPtr pyInputs(to_py_args(inputs, &_device_guard));
 
+  const auto& is_variable_input = py_fn->is_variable_input;
   const auto& input_infos = py_fn->input_info;
   // input_info only contains info from variable inputs and should be a subset
   TORCH_INTERNAL_ASSERT(is_variable_input.size() >= input_infos.size());
