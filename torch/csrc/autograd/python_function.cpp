@@ -182,7 +182,6 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
   pybind11::gil_scoped_acquire gil;
   at::OptionalDeviceGuard _device_guard;
   THPFunction* py_fn = (THPFunction*)obj;
-  const auto& is_variable_input = py_fn->is_variable_input;
 
   set_needs_input_grad(py_fn, this);
 
@@ -197,6 +196,7 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
     throw_python_error();
   ensure_tuple(r);
 
+  auto& is_variable_input = py_fn->is_variable_input;
   auto num_outputs = PyTuple_GET_SIZE(r.get());
   auto num_forward_inputs = static_cast<Py_ssize_t>(is_variable_input.size());
   // Returning too many results is ok, but only as long as they're all None.
