@@ -104,6 +104,12 @@ size_t MPSHooks::getRecommendedMaxMemory() const {
   return at::mps::getIMPSAllocator()->getRecommendedMaxMemory();
 }
 
+size_t MPSHooks::getMaxThreadsPerThreadgroupWidth() const {
+  MTLDevice_t device = at::mps::MPSDevice::getInstance()->device();
+  const auto maxThreadsPerThreadgroup = [device maxThreadsPerThreadgroup];
+  return maxThreadsPerThreadgroup.width;
+}
+
 void MPSHooks::setMemoryFraction(double ratio) const {
   at::mps::getIMPSAllocator()->setHighWatermarkRatio(ratio);
 }

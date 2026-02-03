@@ -12863,6 +12863,23 @@ class TestConsistency(TestCaseMPS):
         out_mps = torch.grid_sampler_3d(input.to(device), grid_nan.to(device), 0, 0, True)
         self.assertEqual(out_mps, out_cpu)
 
+    def test_householder_product_race(self, device):
+        # Regression testing for https://github.com/pytorch/pytorch/issues/173972
+        max_threads = torch.mps.max_threads_per_threadgroup_width()
+        m0 = int(max_threads**(0.5))
+
+        for m in range(m0, 5 * m0, m0):
+            max_errors = []
+            for _ in range(10):
+                num_batches = 2
+                A = torch.eye(m, m).repeat(num_batches, 1, 1)
+                for i in range(num_batches):
+                    A[i, random.randint(0, m - 1), random.randint(0, m - 1)] = 1
+                tau = torch.randn(num_batches, m)
+                r_cpu = torch.orgqr(A, tau)
+                r_mps = torch.orgqr(A.to('mps'), tau.to('mps'))
+                self.assertEqual(r_cpu, r_mps)
+
     def test_fmax_mixed_dtypes(self, device):
         # Regression testing for https://github.com/pytorch/pytorch/issues/149951
         # fmax and fmin are implemented as binary metal shaders and they were implemented
