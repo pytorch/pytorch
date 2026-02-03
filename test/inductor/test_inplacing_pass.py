@@ -784,6 +784,308 @@ class TestReinplacingPassCorrectness(InductorTestCase):
             if my_wait_functional._opoverload in inplaceable_ops:
                 del inplaceable_ops[my_wait_functional._opoverload]
 
+    def test_with_effects_reinplace_partial_inplace(self):
+        """Test reinplace pass with partial inplacing (some args can be inplaced, some cannot).
+
+        When some mutated args can be inplaced but others cannot (e.g., placeholders),
+        the pass should insert clones for the non-inplaceable args and still convert
+        to the inplace version.
+        """
+        from torch._higher_order_ops.effects import with_effects
+        from torch._inductor.fx_passes.reinplace import inplaceable_ops, InplaceableOp
+
+        # Define an op that returns two tensors (functional version)
+        @torch.library.custom_op("_test_effects::my_swap_partial", mutates_args=())
+        def my_swap_partial_functional(
+            x: torch.Tensor, y: torch.Tensor
+        ) -> tuple[torch.Tensor, torch.Tensor]:
+            # Swap values between x and y
+            return y.clone(), x.clone()
+
+        @my_swap_partial_functional.register_fake
+        def _(x: torch.Tensor, y: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+            return torch.empty_like(x), torch.empty_like(y)
+
+        # Define inplace version that mutates both x and y
+        @torch.library.custom_op(
+            "_test_effects::my_swap_partial_", mutates_args={"x", "y"}
+        )
+        def my_swap_partial_inplace(x: torch.Tensor, y: torch.Tensor) -> None:
+            tmp = x.clone()
+            x.copy_(y)
+            y.copy_(tmp)
+
+        @my_swap_partial_inplace.register_fake
+        def _(x: torch.Tensor, y: torch.Tensor) -> None:
+            pass
+
+        # Register the functional -> inplace mapping with multiple mutated args
+        inplaceable_ops[my_swap_partial_functional._opoverload] = InplaceableOp(
+            my_swap_partial_inplace._opoverload,
+            (0, 1),  # Both x (arg 0) and y (arg 1) are mutated
+        )
+
+        try:
+
+            def f(a, b):
+                # x can be inplaced (non-placeholder), y cannot (placeholder)
+                x = a.clone()
+                # y is just 'b' (a placeholder) - cannot be inplaced
+                token = torch.ops.aten._make_dep_token()
+                result = with_effects(
+                    token, my_swap_partial_functional._opoverload, x, b
+                )
+                out = result[1]
+                return out[0], out[1]
+
+            a = torch.randn(3, device=device)
+            b = torch.randn(3, device=device)
+
+            gm = make_fx(f, tracing_mode="fake")(a, b)
+
+            # Find the with_effects node before reinplace
+            with_effects_nodes_before = [
+                n
+                for n in gm.graph.nodes
+                if n.target is torch.ops.higher_order.with_effects
+            ]
+            self.assertEqual(len(with_effects_nodes_before), 1)
+
+            # The inner op should be the functional version
+            inner_op_before = with_effects_nodes_before[0].args[1]
+            self.assertEqual(inner_op_before, my_swap_partial_functional._opoverload)
+
+            # Count clone nodes before
+            clone_nodes_before = [
+                n for n in gm.graph.nodes if n.target is torch.ops.aten.clone.default
+            ]
+            num_clones_before = len(clone_nodes_before)
+
+            # Run reinplace pass
+            reinplace_inplaceable_ops_core(gm.graph)
+
+            # Find the with_effects node after reinplace
+            with_effects_nodes_after = [
+                n
+                for n in gm.graph.nodes
+                if n.target is torch.ops.higher_order.with_effects
+            ]
+            self.assertEqual(len(with_effects_nodes_after), 1)
+
+            # The inner op should now be the inplace version
+            inner_op_after = with_effects_nodes_after[0].args[1]
+            self.assertEqual(inner_op_after, my_swap_partial_inplace._opoverload)
+
+            # Count clone nodes after - should have one more clone for the non-inplaceable arg
+            clone_nodes_after = [
+                n for n in gm.graph.nodes if n.target is torch.ops.aten.clone.default
+            ]
+            self.assertEqual(
+                len(clone_nodes_after),
+                num_clones_before + 1,
+                "Should have inserted one clone for the non-inplaceable arg",
+            )
+
+            # Verify getitem nodes for result extraction are cleaned up
+            # (getitem[i] for i >= 1 on with_effects should be removed or replaced)
+            getitem_nodes_after = [
+                n
+                for n in gm.graph.nodes
+                if n.target is operator.getitem
+                and n.args[0] is with_effects_nodes_after[0]
+                and n.args[1] >= 1
+            ]
+            self.assertEqual(
+                len(getitem_nodes_after),
+                0,
+                "getitem nodes extracting result tuple should be cleaned up",
+            )
+
+        finally:
+            if my_swap_partial_functional._opoverload in inplaceable_ops:
+                del inplaceable_ops[my_swap_partial_functional._opoverload]
+
+    def test_with_effects_reinplace_list_partial_inplace(self):
+        """Test reinplace pass with list args where some elements can be inplaced and some cannot.
+
+        When a list of tensors is passed and some can be inplaced but others cannot,
+        the pass should insert clones for the non-inplaceable elements.
+        """
+        from torch._higher_order_ops.effects import with_effects
+        from torch._inductor.fx_passes.reinplace import inplaceable_ops, InplaceableOp
+
+        # Define an op that takes a list of tensors (functional version)
+        @torch.library.custom_op("_test_effects::my_wait_partial", mutates_args=())
+        def my_wait_partial_functional(
+            tensors: list[torch.Tensor],
+        ) -> list[torch.Tensor]:
+            return [t.clone() for t in tensors]
+
+        @my_wait_partial_functional.register_fake
+        def _(tensors: list[torch.Tensor]) -> list[torch.Tensor]:
+            return [torch.empty_like(t) for t in tensors]
+
+        # Define inplace version that mutates the list of tensors
+        @torch.library.custom_op(
+            "_test_effects::my_wait_partial_", mutates_args={"tensors"}
+        )
+        def my_wait_partial_inplace(tensors: list[torch.Tensor]) -> None:
+            pass
+
+        @my_wait_partial_inplace.register_fake
+        def _(tensors: list[torch.Tensor]) -> None:
+            pass
+
+        # Register the functional -> inplace mapping
+        inplaceable_ops[my_wait_partial_functional._opoverload] = InplaceableOp(
+            my_wait_partial_inplace._opoverload,
+            0,  # First arg (tensors list) is mutated
+        )
+
+        try:
+
+            def f(a, b, c):
+                # x can be inplaced (non-placeholder)
+                x = a.clone()
+                # y is placeholder - cannot be inplaced
+                # z can be inplaced (non-placeholder)
+                z = c.clone()
+                token = torch.ops.aten._make_dep_token()
+                result = with_effects(
+                    token, my_wait_partial_functional._opoverload, [x, b, z]
+                )
+                out = result[1]
+                return out[0], out[1], out[2]
+
+            a = torch.randn(3, device=device)
+            b = torch.randn(3, device=device)
+            c = torch.randn(3, device=device)
+
+            gm = make_fx(f, tracing_mode="fake")(a, b, c)
+
+            # Count clone nodes before
+            clone_nodes_before = [
+                n for n in gm.graph.nodes if n.target is torch.ops.aten.clone.default
+            ]
+            num_clones_before = len(clone_nodes_before)
+
+            # Run reinplace pass
+            reinplace_inplaceable_ops_core(gm.graph)
+
+            # Find the with_effects node after reinplace
+            with_effects_nodes_after = [
+                n
+                for n in gm.graph.nodes
+                if n.target is torch.ops.higher_order.with_effects
+            ]
+            self.assertEqual(len(with_effects_nodes_after), 1)
+
+            # The inner op should now be the inplace version
+            inner_op_after = with_effects_nodes_after[0].args[1]
+            self.assertEqual(inner_op_after, my_wait_partial_inplace._opoverload)
+
+            # Count clone nodes after - should have one more clone for b (the placeholder)
+            clone_nodes_after = [
+                n for n in gm.graph.nodes if n.target is torch.ops.aten.clone.default
+            ]
+            self.assertEqual(
+                len(clone_nodes_after),
+                num_clones_before + 1,
+                "Should have inserted one clone for the non-inplaceable list element",
+            )
+
+        finally:
+            if my_wait_partial_functional._opoverload in inplaceable_ops:
+                del inplaceable_ops[my_wait_partial_functional._opoverload]
+
+    def test_inplaceable_ops_partial_inplace(self):
+        """Test reinplace pass with direct inplaceable_ops (not with_effects) with partial inplacing.
+
+        When some mutated args can be inplaced but others cannot,
+        the pass should insert clones for the non-inplaceable args.
+        """
+        from torch._inductor.fx_passes.reinplace import inplaceable_ops, InplaceableOp
+
+        # Define an op that mutates two tensors (functional version)
+        @torch.library.custom_op("_test::my_swap_direct", mutates_args=())
+        def my_swap_direct_functional(
+            x: torch.Tensor, y: torch.Tensor
+        ) -> tuple[torch.Tensor, torch.Tensor]:
+            return y.clone(), x.clone()
+
+        @my_swap_direct_functional.register_fake
+        def _(x: torch.Tensor, y: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+            return torch.empty_like(x), torch.empty_like(y)
+
+        # Define inplace version
+        @torch.library.custom_op("_test::my_swap_direct_", mutates_args={"x", "y"})
+        def my_swap_direct_inplace(x: torch.Tensor, y: torch.Tensor) -> None:
+            tmp = x.clone()
+            x.copy_(y)
+            y.copy_(tmp)
+
+        @my_swap_direct_inplace.register_fake
+        def _(x: torch.Tensor, y: torch.Tensor) -> None:
+            pass
+
+        # Register the functional -> inplace mapping
+        inplaceable_ops[my_swap_direct_functional._opoverload] = InplaceableOp(
+            my_swap_direct_inplace._opoverload,
+            (0, 1),  # Both args are mutated
+        )
+
+        try:
+
+            def f(a, b):
+                # x can be inplaced (non-placeholder)
+                x = a.clone()
+                # y is placeholder - cannot be inplaced
+                return my_swap_direct_functional._opoverload(x, b)
+
+            a = torch.randn(3, device=device)
+            b = torch.randn(3, device=device)
+
+            gm = make_fx(f, tracing_mode="fake")(a, b)
+
+            # Count clone nodes before
+            clone_nodes_before = [
+                n for n in gm.graph.nodes if n.target is torch.ops.aten.clone.default
+            ]
+            num_clones_before = len(clone_nodes_before)
+
+            # Find the op node before reinplace
+            op_nodes_before = [
+                n
+                for n in gm.graph.nodes
+                if n.target is my_swap_direct_functional._opoverload
+            ]
+            self.assertEqual(len(op_nodes_before), 1)
+
+            # Run reinplace pass
+            reinplace_inplaceable_ops_core(gm.graph)
+
+            # The op should now be the inplace version
+            op_nodes_after = [
+                n
+                for n in gm.graph.nodes
+                if n.target is my_swap_direct_inplace._opoverload
+            ]
+            self.assertEqual(len(op_nodes_after), 1)
+
+            # Count clone nodes after - should have one more clone for b (the placeholder)
+            clone_nodes_after = [
+                n for n in gm.graph.nodes if n.target is torch.ops.aten.clone.default
+            ]
+            self.assertEqual(
+                len(clone_nodes_after),
+                num_clones_before + 1,
+                "Should have inserted one clone for the non-inplaceable arg",
+            )
+
+        finally:
+            if my_swap_direct_functional._opoverload in inplaceable_ops:
+                del inplaceable_ops[my_swap_direct_functional._opoverload]
+
 
 instantiate_parametrized_tests(TestReinplacingPassCorrectness)
 
