@@ -1678,6 +1678,10 @@ except RuntimeError as e:
         """Test for from_blob with custom deleter (2.11 feature)."""
         import libtorch_agn_2_11 as libtorch_agnostic
 
+        is_cuda = torch.device(device).type == "cuda"
+        if is_cuda:
+            init_mem = torch.cuda.memory_allocated(device)
+
         libtorch_agnostic.ops.reset_deleter_call_count()
         self.assertEqual(libtorch_agnostic.ops.get_deleter_call_count(), 0)
 
@@ -1703,6 +1707,14 @@ except RuntimeError as e:
         # can be used.
         self.assertEqual(libtorch_agnostic.ops.get_deleter_call_count(), 1)
         original += 1
+
+        del original
+        gc.collect()
+
+        if is_cuda:
+            torch.cuda.synchronize(device)
+            curr_mem = torch.cuda.memory_allocated(device)
+            self.assertEqual(curr_mem, init_mem)
 
     @onlyCUDA
     @skipIfTorchVersionLessThan(2, 11)
