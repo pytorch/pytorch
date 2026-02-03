@@ -263,6 +263,13 @@ void initDynamoBindings(PyObject* torch) {
   m.attr("py_opcode_caches") = _PyOpcode_Caches_vec;
   m.def("code_framelocals_names", &code_framelocals_names);
   _register_functions(dynamo);
+
+  py::enum_<EvalFrameOverride>(m, "_EvalFrameOverride")
+      .value("NONE", EvalFrameOverride::NONE)
+      .value("SKIP", EvalFrameOverride::SKIP)
+      .value("ERROR", EvalFrameOverride::ERROR);
+
+  m.def("set_eval_frame_override", &set_eval_frame_override);
 }
 
 } // namespace torch::dynamo
