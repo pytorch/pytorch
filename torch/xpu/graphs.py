@@ -128,6 +128,7 @@ class XPUGraph(_XPUGraph):
         """  # noqa: B950
         return super().raw_xpu_graph_exec()
 
+
 class graph:
     r"""Context-manager that captures XPU work into a :class:`torch.xpu.XPUGraph` object for later replay.
 
