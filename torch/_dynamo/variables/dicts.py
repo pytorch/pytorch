@@ -1020,7 +1020,11 @@ class DefaultDictVariable(ConstDictVariable):
         else:
             return super().call_method(tx, name, args, kwargs)
 
-    def var_getattr(self, tx, name) -> VariableTracker:
+    def var_getattr(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+    ) -> VariableTracker:
         if name == "default_factory":
             return self.default_factory
         return super().var_getattr(tx, name)
