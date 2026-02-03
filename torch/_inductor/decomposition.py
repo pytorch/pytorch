@@ -7,6 +7,7 @@ import sys
 import typing
 from collections.abc import Callable
 from typing import Any, Optional, TypeAlias, TypeVar, Union
+
 from typing_extensions import ParamSpec
 
 import torch
@@ -20,10 +21,14 @@ from torch._decomp import (
 )
 from torch._decomp.decompositions import (
     _grid_sampler_2d as decomp_grid_sampler_2d,
+)
+from torch._decomp.decompositions import (
     _index_add,
-    embedding_dense_backward as decomp_embedding_dense_backward,
     pw_cast_for_opmath,
     pw_cast_for_opmath_non_tensor_args,
+)
+from torch._decomp.decompositions import (
+    embedding_dense_backward as decomp_embedding_dense_backward,
 )
 from torch._decomp.decompositions_for_rng import extra_random_decomps
 from torch._dynamo.utils import counters
@@ -31,8 +36,8 @@ from torch._environment import is_fbcode
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._inductor.utils import pad_listlike
 from torch._prims_common import (
-    elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
+    elementwise_dtypes,
     type_to_dtype,
 )
 from torch._refs import native_layer_norm as decomp_native_layer_norm
@@ -44,7 +49,6 @@ from .utils import (
     needs_fallback_due_to_atomic_add_limitations,
     use_scatter_fallback,
 )
-
 
 _T = TypeVar("_T")
 _P = ParamSpec("_P")
@@ -494,39 +498,39 @@ def add(
         return NotImplemented
 
     def _requires_fallback(tensor: torch.Tensor) -> bool:
-        if tensor.ndim == 0 and tensor.is_complex():
-            return True
+        if tensor.ndim == 0:
+            return tensor.is_complex()
+        if not tensor.is_complex():
+            return False
         # Viewing complex tensors as their real dtype requires the last stride to be 1.
         return tensor.stride()[-1] != 1
 
     z = y
     if alpha is not None:
-        z = alpha * y
+        z = alpha * z
+
+    output_size_zero = False
+    if x.ndim == 0 and z.ndim == 0:
+        output_size_zero = True
+    if x.ndim == 0:
+        x = x.reshape(1)
+    if z.ndim == 0:
+        z = z.reshape(1)
+
     complex_type = torch.promote_types(x.dtype, y.dtype)
 
     if _requires_fallback(x) or _requires_fallback(z):
         return NotImplemented
 
-    # For complex typed `x`, `x.view(x.real.dtype)` doubles the last dimension and can cause problem
-    # when broadcasting the add.
     def reshape_tensor_complex(tensor: torch.Tensor) -> torch.Tensor:
-        """Reshape tensor from [*initial_dims, last_dim] to *initial_dims, last_dim/2, 2]"""
-        # Get the current shape of the tensor
         *initial_dims, last_dim = tensor.shape
-
-        # Check if the last dimension is even. We should never reach here since `x.view(x.real.dtype)`
-        # doubles the last dimension for complex numbers.
         if last_dim % 2 != 0:
             raise AssertionError(
                 "The size of the last dimension must be even to reshape it to [..., last_dim/2, 2]"
             )
+        return tensor.view(*initial_dims, last_dim // 2, 2)
 
-        # Reshape the tensor
-        new_shape = (*initial_dims, last_dim // 2, 2)
-        reshaped_tensor = tensor.view(new_shape)
-        return reshaped_tensor
-
-    # Manually resolve complex tensors, as .is_conj() is unreliable after cloning during compilation.
+    # Manually resolve complex tensors
     x = x + 0
     z = z + 0
 
@@ -534,6 +538,8 @@ def add(
     z_reshaped = reshape_tensor_complex(z.view(y.real.dtype))
     result = torch.flatten(x_reshaped + z_reshaped, start_dim=-2).view(complex_type)
 
+    if output_size_zero:
+        return result[0]
     return result
 
 
