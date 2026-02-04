@@ -356,29 +356,15 @@ def higher_order_invoke_subgraph(
     Returns:
         Sequence of output values from the function call
     """
-    # Create a node that calls the subgraph function directly with the operands
-    assert _core.current_tracer is not None
-    tracer = _core.current_tracer
-
     # This key can be used by downstream to avoid inlining
     subgraph.metadata_props["pkg.torch.ops.higher_order.invoke_subgraph.identifier"] = (
         str(identifier)
     )
 
     # Create the function call node
-    node = ir.Node(
-        subgraph.domain,
+    return call_op(
         subgraph.name,
-        list(operands),
-        num_outputs=len(subgraph.outputs),
+        *operands,
+        _num_outputs=len(subgraph.outputs),
+        _domain=subgraph.domain,
     )
-
-    # ONNX Runtime complains about duplicate output names if we don't rename them.
-    # But this doesn't seem to be an actual violation of SSA form without renaming.
-    for func_out, out in zip(subgraph.outputs, node.outputs):
-        out.name = f"{func_out.name}_{subgraph.name}"
-
-    # Add the node to the current tracer
-    tracer.nodes.append(node)
-
-    return node.outputs
