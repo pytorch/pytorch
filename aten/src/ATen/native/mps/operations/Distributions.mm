@@ -469,7 +469,6 @@ static Tensor& distribution_kernel_mps_impl(Tensor& self,
   return self;
 }
 
-// Exponential distribution
 Tensor& exponential_mps_(Tensor& self, double lambda, std::optional<Generator> gen) {
   TORCH_CHECK(lambda > 0.0, "exponential_ expects lambda > 0.0, but found lambda=", lambda);
   return distribution_kernel_mps_impl(self, lambda, 0.0, "exponential", 1, gen);
