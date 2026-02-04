@@ -26,20 +26,20 @@ if TYPE_CHECKING:
     from torch.distributed.device_mesh import DeviceMesh
 
 
-__all__ = ["ChunkedStorage", "fully_shard_flat", "get_chunked_storage"]
+__all__ = ["DStorage", "fully_shard_flat", "get_dstorage"]
 
 
-# Module attribute name for storing ChunkedStorage
-_CHUNKED_STORAGE_ATTR = "_chunked_storage"
+# Module attribute name for storing DStorage
+_DSTORAGE_ATTR = "_dstorage"
 
 
-def get_chunked_storage(module: nn.Module) -> "ChunkedStorage | None":
-    """Get the ChunkedStorage associated with a module, if any."""
-    return getattr(module, _CHUNKED_STORAGE_ATTR, None)
+def get_dstorage(module: nn.Module) -> "DStorage | None":
+    """Get the DStorage associated with a module, if any."""
+    return getattr(module, _DSTORAGE_ATTR, None)
 
 
 class ShardedState(Enum):
-    """State of the parameters in ChunkedStorage."""
+    """State of the parameters in DStorage."""
 
     SHARDED = auto()  # Parameters are sharded DTensors
     UNSHARDED = auto()  # Parameters are unsharded for forward/backward
@@ -73,7 +73,7 @@ def _align_offset(offset: int, alignment: int) -> int:
     return (offset + alignment - 1) // alignment * alignment
 
 
-class ChunkedStorage:
+class DStorage:
     """
     Manages a unified byte buffer that backs multiple DTensor parameters.
 
@@ -762,19 +762,19 @@ def _get_managed_named_params(
     module: nn.Module,
 ) -> list[tuple[str, nn.Parameter]]:
     """
-    Collect parameters that should be managed by this module's ChunkedStorage.
+    Collect parameters that should be managed by this module's DStorage.
 
     This excludes parameters from child modules that already have their own
-    ChunkedStorage (i.e., already wrapped with fully_shard_flat).
+    DStorage (i.e., already wrapped with fully_shard_flat).
 
     Similar to FSDP2's _get_managed_modules/_get_managed_states pattern.
     """
     managed_params: list[tuple[str, nn.Parameter]] = []
 
-    # Find child modules that already have ChunkedStorage
+    # Find child modules that already have DStorage
     wrapped_prefixes: set[str] = set()
     for name, child in module.named_modules():
-        if name and get_chunked_storage(child) is not None:
+        if name and get_dstorage(child) is not None:
             # This child is already wrapped; skip its parameters
             wrapped_prefixes.add(name + ".")
 
@@ -793,7 +793,7 @@ def fully_shard_flat(
     placements: tuple[Placement, ...] | None = None,
     reshard_after_forward: bool = True,
     register_hooks: bool = True,
-) -> ChunkedStorage:
+) -> DStorage:
     """
     Apply flat-storage FSDP sharding to a module.
 
@@ -803,7 +803,7 @@ def fully_shard_flat(
     3. Replaces each parameter with a DTensor whose _local_tensor is a typed view
        into the byte buffer at the appropriate offset
     4. Optionally registers forward/backward hooks for automatic unshard/reshard
-    5. Returns ChunkedStorage for managing the unified buffer
+    5. Returns DStorage for managing the unified buffer
 
     The unified byte buffer enables a single all-gather operation for all parameters.
 
@@ -823,7 +823,7 @@ def fully_shard_flat(
             unshard()/reshard().
 
     Returns:
-        ChunkedStorage instance containing the unified byte buffer and parameter metadata.
+        DStorage instance containing the unified byte buffer and parameter metadata.
 
     Example::
 
@@ -841,16 +841,16 @@ def fully_shard_flat(
         - Parameters of different dtypes are supported in a single unified buffer
         - Proper alignment is maintained for each dtype
         - Parameters on meta device will have uninitialized storage
-        - The returned ChunkedStorage is also stored on module._chunked_storage
+        - The returned DStorage is also stored on module._chunked_storage
         - Forward/backward hooks are automatically registered for unshard/reshard
     """
     if placements is None:
         placements = (Shard(0),)
 
     # Check if module is already wrapped
-    if get_chunked_storage(module) is not None:
+    if get_dstorage(module) is not None:
         raise ValueError(
-            f"Module {type(module).__name__} already has ChunkedStorage. "
+            f"Module {type(module).__name__} already has DStorage. "
             "Cannot apply fully_shard_flat twice to the same module."
         )
 
@@ -880,7 +880,7 @@ def fully_shard_flat(
     # Copy original data into byte storage (handles sharding)
     _copy_original_data_to_flat_storage(byte_storage, named_params, param_infos, mesh)
 
-    # Replace each parameter with DTensor view (before creating ChunkedStorage)
+    # Replace each parameter with DTensor view (before creating DStorage)
     for fqn, info in param_infos.items():
         local_view = byte_storage[info.byte_offset : info.byte_offset + info.local_numel * info.dtype.itemsize]
         typed_view = local_view.view(info.dtype).view(info.local_shape)
@@ -888,15 +888,15 @@ def fully_shard_flat(
         new_param = nn.Parameter(dtensor, requires_grad=info.requires_grad)
         _set_param_on_module(module, fqn, new_param)
 
-    # Create ChunkedStorage (after DTensor params are registered)
+    # Create DStorage (after DTensor params are registered)
     # This also registers forward/backward hooks if requested
-    storage = ChunkedStorage(
+    storage = DStorage(
         byte_storage, param_infos, mesh, total_bytes, total_unsharded_bytes, module,
         reshard_after_forward=reshard_after_forward,
         register_hooks=register_hooks,
     )
 
-    # Store ChunkedStorage on module for nested wrapping detection
-    setattr(module, _CHUNKED_STORAGE_ATTR, storage)
+    # Store DStorage on module for nested wrapping detection
+    setattr(module, _DSTORAGE_ATTR, storage)
 
     return storage

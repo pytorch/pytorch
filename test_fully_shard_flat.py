@@ -21,7 +21,7 @@ import torch
 import torch.distributed as dist
 from datetime import timedelta
 from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.fsdp._fully_shard import fully_shard_flat, get_chunked_storage
+from torch.distributed.fsdp._fully_shard import fully_shard_flat, get_dstorage
 from torch.distributed.tensor import DTensor
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -102,11 +102,11 @@ def run():
     for i, layer in enumerate(model.layers):
         storage = fully_shard_flat(layer, mesh)
         print_rank0(f"  Layer {i}: {len(storage.param_infos)} params, {storage.total_bytes} bytes")
-        assert get_chunked_storage(layer) is storage
+        assert get_dstorage(layer) is storage
 
     root_storage = fully_shard_flat(model, mesh)
     print_rank0(f"  Root: {len(root_storage.param_infos)} params, {root_storage.total_bytes} bytes")
-    assert get_chunked_storage(model) is root_storage
+    assert get_dstorage(model) is root_storage
 
     # Verify root storage excludes layer params
     root_storage_fqns = set(root_storage.param_infos.keys())
@@ -132,7 +132,7 @@ def run():
 
     # Verify weights match after sharding (before any training)
     root_storage.unshard()
-    for layer_storage in [get_chunked_storage(layer) for layer in model.layers]:
+    for layer_storage in [get_dstorage(layer) for layer in model.layers]:
         if layer_storage:
             layer_storage.unshard()
 
@@ -149,7 +149,7 @@ def run():
 
     # Reshard for training loop
     root_storage.reshard()
-    for layer_storage in [get_chunked_storage(layer) for layer in model.layers]:
+    for layer_storage in [get_dstorage(layer) for layer in model.layers]:
         if layer_storage:
             layer_storage.reshard()
 
