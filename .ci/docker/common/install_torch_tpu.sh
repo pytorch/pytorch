@@ -82,6 +82,14 @@ clone_repo() {
 
 pull_torch_tpu() {
     trap cleanup EXIT
+    
+    echo "Attempting to clone repository publicly..."
+    if GIT_TERMINAL_PROMPT=0 git clone "${TORCH_TPU_REPO}" torch_tpu; then
+         echo "Public clone successful."
+         return 0
+    fi
+     
+    echo "Public clone failed. Falling back to authenticated clone..."
     echo "Starting setup_repo.sh..."
     install_gcloud
     fetch_secret
@@ -116,13 +124,13 @@ fi
 bazel --version
 
 # 5. Preparation
-mkdir -p /var/lib/jenkins/torch_tpu
-chown -R jenkins /var/lib/jenkins/torch_tpu
+mkdir -p /var/lib/jenkins/
 pushd /var/lib/jenkins/
 
 # 6. Clone
 pull_torch_tpu
-# as_jenkins git clone --recursive "${TORCH_TPU_REPO}" torch_tpu
+chown -R jenkins /var/lib/jenkins/torch_tpu
+# git clone --recursive "${TORCH_TPU_REPO}" torch_tpu
 cd torch_tpu
 
 # 7. Checkout
