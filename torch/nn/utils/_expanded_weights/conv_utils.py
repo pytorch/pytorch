@@ -1,5 +1,7 @@
 # mypy: allow-untyped-defs
 
+import math
+
 import torch
 import torch.nn.functional as F
 
@@ -213,8 +215,6 @@ def conv_unfold_weight_grad_sample(
     groups,
     func,
 ):
-    import numpy as np
-
     n = input.shape[0]
     in_channels = input.shape[1]
 
@@ -246,7 +246,7 @@ def conv_unfold_weight_grad_sample(
         -1,
         groups,
         int(in_channels / groups),
-        np.prod(kernel_size),
+        math.prod(kernel_size),
     )
     weight_grad_sample = torch.einsum(
         "ngrg...->ngr...", weight_grad_sample
@@ -312,7 +312,7 @@ def unfold3d(
         stride: the stride of the sliding blocks in the input spatial dimensions
         dilation: the spacing between the kernel points.
     Returns:
-        A tensor of shape ``(B, C * np.prod(kernel_size), L)``, where L - output spatial dimensions.
+        A tensor of shape ``(B, C * math.prod(kernel_size), L)``, where L - output spatial dimensions.
         See :class:`torch.nn.Unfold` for more details
     Example:
         >>> # xdoctest: +SKIP
@@ -321,8 +321,6 @@ def unfold3d(
         >>> unfold3d(tensor, kernel_size=2, padding=0, stride=1).shape
         torch.Size([3, 32, 120])
     """
-
-    import numpy as np
 
     if len(tensor.shape) != 5:
         raise ValueError(
@@ -349,9 +347,9 @@ def unfold3d(
     tensor = tensor.permute(0, 2, 3, 4, 1, 5, 6, 7)
     # Output shape: (B, D_out, H_out, W_out, C, kernel_size[0], kernel_size[1], kernel_size[2])
 
-    tensor = tensor.reshape(batch_size, -1, channels * np.prod(kernel_size)).transpose(
-        1, 2
-    )
+    tensor = tensor.reshape(
+        batch_size, -1, channels * math.prod(kernel_size)
+    ).transpose(1, 2)
     # Output shape: (B, D_out * H_out * W_out, C * kernel_size[0] * kernel_size[1] * kernel_size[2]
 
     return tensor
