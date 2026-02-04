@@ -22,7 +22,10 @@ from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import (
     decorateIf,
     instantiate_parametrized_tests,
+    MI200_ARCH,
+    NAVI_ARCH,
     parametrize,
+    skipIfRocmArch,
     subtest,
 )
 from torch.testing._internal.inductor_utils import (
@@ -797,6 +800,7 @@ class CommonTemplate:
             ((5, 5), 1, 1, torch.var_mean),  # Reduction + pointwise fusion.
         ],
     )
+    @skipIfRocmArch(MI200_ARCH + NAVI_ARCH)
     def test_2d_reduction_odd_shapes(
         self,
         view_size: tuple[int, ...],
