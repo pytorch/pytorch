@@ -59,7 +59,7 @@ jobs:
           - cuda_version: "12.6.3"
             arch: "aarch64"
             cuda_short: "126"
-            torch_cuda_arch_list: "8.0;8.6;9.0"
+            torch_cuda_arch_list: "9.0"
             docker_image: "quay.io/pypa/manylinux_2_34_aarch64"
             runner: "linux.arm64.r7g.12xlarge.memory"
             max_jobs: "4"
@@ -116,7 +116,7 @@ jobs:
           )
           PYTHON_EXECUTABLE=/opt/python/cp310-cp310/bin/python
           docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}" -m pip install \
-            torch==2.9.0 --extra-index-url "https://download.pytorch.org/whl/cu${CUDA_SHORT}"
+            torch==2.10.0 --extra-index-url "https://download.pytorch.org/whl/cu${CUDA_SHORT}"
           docker exec -t \
             -e CUDA_VERSION="${CUDA_VERSION}" \
             -e CUDA_SHORT="${CUDA_SHORT}" \

@@ -83,19 +83,21 @@ git submodule update --init ../csrc/cutlass
 
 if [[ "${CUDA_VERSION}" == 13.* ]]; then
     CCCL_INCLUDE="/usr/local/cuda/include/cccl"
-    if [[ -d "${CCCL_INCLUDE}" ]]; then
-        echo "Adding CCCL include path: ${CCCL_INCLUDE}"
-        export CPLUS_INCLUDE_PATH="${CCCL_INCLUDE}${CPLUS_INCLUDE_PATH:+:$CPLUS_INCLUDE_PATH}"
-        export C_INCLUDE_PATH="${CCCL_INCLUDE}${C_INCLUDE_PATH:+:$C_INCLUDE_PATH}"
-    else
-        fatal "CCCL include directory not found at ${CCCL_INCLUDE}"
-    fi
+    [[ ! -d "${CCCL_INCLUDE}" ]] && fatal "CCCL include directory not found at ${CCCL_INCLUDE}"
+    echo "Adding CCCL include path: ${CCCL_INCLUDE}"
+    export CPLUS_INCLUDE_PATH="${CCCL_INCLUDE}${CPLUS_INCLUDE_PATH:+:$CPLUS_INCLUDE_PATH}"
+    export C_INCLUDE_PATH="${CCCL_INCLUDE}${C_INCLUDE_PATH:+:$C_INCLUDE_PATH}"
 fi
 
 if [[ "${FA_TEST_BUILD}" == "true" ]]; then
     BUILD_DATE=$(date +%Y%m%d)
     export FLASH_ATTN_LOCAL_VERSION="${BUILD_DATE}.cu${CUDA_SHORT}"
 fi
+
+# stable ABI wheel requires torch>=2.9.0
+# since Python 3.9 support was dropped in torch 2.9.0, we need to use Python 3.10+
+sed -i 's/python_requires=">=3.8"/python_requires=">=3.10"/' setup.py
+sed -i 's/"torch",/"torch>=2.9.0",/' setup.py
 
 "$PYTHON" setup.py bdist_wheel \
     -d "$FA_FINAL_PACKAGE_DIR" \
