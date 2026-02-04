@@ -1233,7 +1233,7 @@ class FSDPTest(MultiProcessTestCase):
         fake_pg = kwargs.get("fake_pg", False)
 
         print(f"dist init r={self.rank}, world={self.world_size}")
-        if torch.accelerator.device_count() < self.world_size:
+        if DEVICE_TYPE != "cpu" and torch.accelerator.device_count() < self.world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
 
         # Specify gloo backend to make 'init_process_group()' succeed,
@@ -1424,6 +1424,8 @@ class FSDPTest(MultiProcessTestCase):
                 ref_model = DDP(
                     model, device_ids=[DEVICE_TYPE], output_device=DEVICE_TYPE
                 )
+            elif DEVICE_TYPE == "cpu":
+                ref_model = DDP(model)
             else:
                 ref_model = DDP(model, device_ids=[rank], output_device=rank)
         else:
