@@ -14,6 +14,7 @@ from torch.distributed.tensor import (
     Replicate,
     Shard,
 )
+from torch.distributed.tensor._dtensor_spec import TensorMeta
 from torch.distributed.tensor._sharding_prop import ShardingPropagator
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -810,6 +811,51 @@ class DistTensorOpsTest(DTensorTestBase):
         # by now we should have cache hit
         self.assertEqual(hits, 1)
         self.assertEqual(misses, 2)
+
+    @with_comms
+    def test_single_dim_strategy_dtype_cache_key(self):
+        from torch.distributed.tensor._op_schema import RuntimeSchemaInfo
+        from torch.distributed.tensor._ops.single_dim_strategy import (
+            _ShardingPlaceholder,
+            register_single_dim_strategy,
+        )
+        from torch.distributed.tensor.debug import _clear_sharding_prop_cache
+
+        @register_single_dim_strategy(
+            torch.ops.aten._to_copy.default,
+            schema_info=RuntimeSchemaInfo(static_kwargkey=["dtype"]),
+        )
+        def to_copy_single_dim_strategy(op, args_schema, kwargs_schema):
+            self_meta = args_schema[0]
+            assert isinstance(self_meta, TensorMeta)
+            single_dim_strategies = []
+            for dim in range(len(self_meta.shape)):
+                single_dim_strategies.append(
+                    [_ShardingPlaceholder(dim), _ShardingPlaceholder(dim)]
+                )
+            if kwargs_schema.get("dtype", torch.float32).is_floating_point:
+                single_dim_strategies.append([Partial("sum"), Partial("sum")])
+            return single_dim_strategies
+
+        _clear_sharding_prop_cache()
+        mesh = self.build_device_mesh()
+        shard_spec = [Shard(0)]
+        local_tensor = torch.randn(2, 8, dtype=torch.float32)
+        sharded_dtensor = DTensor.from_local(local_tensor, mesh, shard_spec)
+
+        strategy_cache = DTensor._op_dispatcher.sharding_propagator
+        strategy_cache.op_strategy_funcs.pop(torch.ops.aten._to_copy.default, None)
+        strategy_cache.op_to_schema_info.pop(torch.ops.aten._to_copy.default, None)
+        strategy_cache.op_to_schema_info_for_single_dim_strategy.pop(
+            torch.ops.aten._to_copy.default,
+            None,
+        )
+
+        out_int = sharded_dtensor.to(torch.int32)
+        out_float = sharded_dtensor.to(torch.float64)
+
+        self.assertEqual(str(out_int.placements[0]), "R")
+        self.assertEqual(str(out_float.placements[0]), "P(sum)")
 
     @with_comms
     def test_slice(self):

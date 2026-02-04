@@ -963,6 +963,7 @@ static bool arg_type_tensor_or_tensor_list_like(py::handle arg) {
   _(needs_redistribute)                                       \
   _(op)                                                       \
   _(op_to_schema_info)                                        \
+  _(op_to_schema_info_for_single_dim_strategy)                \
   _(output_sharding)                                          \
   _(output_spec)                                              \
   _(schema_info)                                              \
@@ -1917,9 +1918,9 @@ static PyObject* DTensor_compute_global_tensor_info_impl(
       const auto placement_type_name =
           py::str(py::handle(PyType_GetName(Py_TYPE(placement.ptr()))));
 #else
-      const auto placement_type_name =
-          py::str(py::handle((PyObject*)Py_TYPE(placement.ptr()))
-                      .attr(dtensor_interned_strings.__name__));
+      const auto placement_type_name = py::str(
+          py::handle((PyObject*)Py_TYPE(placement.ptr()))
+              .attr(dtensor_interned_strings.__name__));
 #endif
       return PyErr_Format(
           PyExc_RuntimeError,
@@ -2132,11 +2133,21 @@ static py::object get_runtime_schema_info_for_op(py::handle py_op) {
       op_dispatcher.attr(dtensor_interned_strings.sharding_propagator);
   const py::dict op_to_schema_info = py::reinterpret_borrow<py::dict>(
       sharding_propagator.attr(dtensor_interned_strings.op_to_schema_info));
+  const py::dict op_to_schema_info_for_single_dim_strategy =
+      py::reinterpret_borrow<py::dict>(sharding_propagator.attr(
+          dtensor_interned_strings.op_to_schema_info_for_single_dim_strategy));
 
   PyObject* runtime_schema_info =
       PyDict_GetItemWithError(op_to_schema_info.ptr(), py_op.ptr());
   if (!runtime_schema_info && PyErr_Occurred()) {
     throw py::error_already_set();
+  }
+  if (!runtime_schema_info) {
+    runtime_schema_info = PyDict_GetItemWithError(
+        op_to_schema_info_for_single_dim_strategy.ptr(), py_op.ptr());
+    if (!runtime_schema_info && PyErr_Occurred()) {
+      throw py::error_already_set();
+    }
   }
   return py::reinterpret_borrow<py::object>(runtime_schema_info);
 }
@@ -2177,9 +2188,10 @@ create_native_op_schema(
 
   py::object runtime_schema_info = get_runtime_schema_info_for_op(py_op);
   if (runtime_schema_info &&
-      checked_istrue(py::handle(runtime_schema_info)
-                         .attr(dtensor_interned_strings.needs_pytree)
-                         .ptr())) {
+      checked_istrue(
+          py::handle(runtime_schema_info)
+              .attr(dtensor_interned_strings.needs_pytree)
+              .ptr())) {
     // Punting on pytree flattening in the fast path on IValues for
     // now since only a minority of ops need it.
     return std::nullopt;
@@ -2194,33 +2206,34 @@ create_native_op_schema(
 
   py::object compute_mesh = py::none();
 
-  const auto handle_non_dtensor_arg =
-      [&comparison_key, &comparison_key_hash, &native_info](
-          size_t idx, c10::IValue arg) {
-        if (idx >= native_info.static_argnum) {
-          if (arg.isList()) {
-            const auto& list = arg.toList();
-            if (list.empty()) {
-              arg = c10::ivalue::Tuple::create({});
-            } else {
-              // WARNING: here we rely on c10::List being represented
-              // by a contiguous array of IValue for efficiency!
-              arg = c10::ivalue::Tuple::create(c10::ArrayRef<c10::IValue>(
-                  &(*list.begin()).get(), list.size()));
-            }
-          } else if (arg.isTensor() && !arg.toTensor().defined()) {
-            // Coerce undefined Tensor to None, just as we do when
-            // converting IValues to PyObject. Otherwise comparison
-            // doesn't work. (undefined Tensors can get here because
-            // check_for_dtensor_or_tensor calls them non-Tensors, but
-            // doesn't have a way to do the coercion for us.)
-            arg = c10::IValue();
-          }
-          comparison_key_hash =
-              c10::hash_combine(comparison_key_hash, c10::IValue::hash(arg));
-          comparison_key.emplace_back(std::move(arg));
+  const auto handle_non_dtensor_arg = [&comparison_key,
+                                       &comparison_key_hash,
+                                       &native_info](
+                                          size_t idx, c10::IValue arg) {
+    if (idx >= native_info.static_argnum) {
+      if (arg.isList()) {
+        const auto& list = arg.toList();
+        if (list.empty()) {
+          arg = c10::ivalue::Tuple::create({});
+        } else {
+          // WARNING: here we rely on c10::List being represented
+          // by a contiguous array of IValue for efficiency!
+          arg = c10::ivalue::Tuple::create(
+              c10::ArrayRef<c10::IValue>(&(*list.begin()).get(), list.size()));
         }
-      };
+      } else if (arg.isTensor() && !arg.toTensor().defined()) {
+        // Coerce undefined Tensor to None, just as we do when
+        // converting IValues to PyObject. Otherwise comparison
+        // doesn't work. (undefined Tensors can get here because
+        // check_for_dtensor_or_tensor calls them non-Tensors, but
+        // doesn't have a way to do the coercion for us.)
+        arg = c10::IValue();
+      }
+      comparison_key_hash =
+          c10::hash_combine(comparison_key_hash, c10::IValue::hash(arg));
+      comparison_key.emplace_back(std::move(arg));
+    }
+  };
   const auto handle_dtensor_arg = [&comparison_key,
                                    &comparison_key_hash](py::object arg) {
     comparison_key_hash = c10::hash_combine(
