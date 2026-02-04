@@ -114,7 +114,8 @@ class TestMean(TestCase):
             raise AssertionError("Expected mean of empty array to be nan")
 
         m = np.asarray(A)
-        assert np.mean(A) == m.mean()
+        if np.mean(A) != m.mean():
+            raise AssertionError(f"Expected {m.mean()}, got {np.mean(A)}")
 
     def test_mean_values(self):
         # rmat = np.random.random((4, 5))
@@ -206,7 +207,8 @@ class TestSum(TestCase):
 
         res_float = a.sum(dtype=np.float64)
         assert_allclose(res_float, 4.0, atol=1e-15)
-        assert res_float.dtype == "float64"
+        if res_float.dtype != "float64":
+            raise AssertionError(f"Expected dtype float64, got {res_float.dtype}")
 
     @skipIf(numpy.__version__ < "1.24", reason="NP_VER: fails on NumPy 1.23.x")
     @xpassIfTorchDynamo_np  # (reason="sum: does not warn on overflow")
@@ -432,8 +434,10 @@ class TestGenericReductions(TestCase):
         out = np.empty_like(result, dtype=dtype)
         result_with_out = self.func(a, axis=axis, keepdims=keepdims, out=out)
 
-        assert result_with_out is out
-        assert result_with_out.dtype == dtype
+        if result_with_out is not out:
+            raise AssertionError("Expected result_with_out to be out")
+        if result_with_out.dtype != dtype:
+            raise AssertionError(f"Expected dtype {dtype}, got {result_with_out.dtype}")
         assert_array_equal(result, result_with_out)
 
         # TODO: what if result.dtype != out.dtype; does out typecast the result?
