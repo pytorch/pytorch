@@ -5,6 +5,9 @@ try:
 except ImportError:  # pragma: no cover
     optree = None
 
+from collections import namedtuple
+from typing import NamedTuple
+
 import torch
 import torch._dynamo
 from torch.testing._internal.common_utils import (
@@ -937,8 +940,6 @@ class TreeMapCompileTests(TestCase):
     @parametrize("tree_map_name,tree_map_impl", TREE_MAP_IMPLEMENTATIONS)
     def test_namedtuple_tree_map(self, tree_map_name: str, tree_map_impl) -> None:
         """Test tree_map with namedtuple uses fast path."""
-        from collections import namedtuple
-
         Point = namedtuple("Point", ["x", "y"])
 
         tree = {
@@ -971,8 +972,6 @@ class TreeMapCompileTests(TestCase):
         self, tree_map_name: str, tree_map_impl
     ) -> None:
         """Test tree_map with multiple namedtuple trees."""
-        from collections import namedtuple
-
         Point = namedtuple("Point", ["x", "y"])
 
         tree1 = {"point": Point(torch.ones(2), torch.zeros(2))}
@@ -998,9 +997,10 @@ class TreeMapCompileTests(TestCase):
     @parametrize("tree_map_name,tree_map_impl", TREE_MAP_IMPLEMENTATIONS)
     def test_namedtuple_with_is_leaf(self, tree_map_name: str, tree_map_impl) -> None:
         """Test tree_map with namedtuple and is_leaf predicate."""
-        from collections import namedtuple
 
-        Point = namedtuple("Point", ["x", "y"])
+        class Point(NamedTuple):
+            x: int
+            y: int
 
         tree = {"point": Point(torch.ones(2), torch.zeros(2)), "val": torch.ones(3)}
 
