@@ -13,7 +13,7 @@
 
 #ifdef __ARM_NEON__
 #include <arm_neon.h>
-#elif defined(__riscv_v_intrinsic) && __riscv_v_intrinsic>=12000
+#elif defined(__riscv_v) && __riscv_v_intrinsic>=12000
 #include <riscv_vector.h>
 #endif
 
@@ -246,7 +246,7 @@ void convolution_depthwise3x3_winograd_impl(
   }
 }
 
-#elif defined(__riscv_v_intrinsic) && __riscv_v_intrinsic>=12000
+#elif defined(__riscv_v) && __riscv_v_intrinsic>=12000
 
 inline void winograd_f2k3_input_transform_inplace__rvv(
     vfloat32m1x4_t* input_tile_val) {
