@@ -208,11 +208,6 @@ def _is_registered_backend(compiler_fn: CompilerFn) -> bool:
     """
     Check if the given compiler function is a registered backend.
     Custom backends (user-provided callables not in the registry) return False.
-
-    This function unwraps the compiler function to find the innermost function,
-    since torch.compile wraps backends in multiple layers. It also handles
-    special wrapper classes like _TorchCompileInductorWrapper and
-    _TorchCompileWrapper.
     """
     from .backends.registry import _BACKENDS, _COMPILER_FNS, _lazy_import
     from .eval_frame import innermost_fn
@@ -1912,11 +1907,12 @@ def _compile(
                     gc.collect(1)
 
             # Clear WeakIdRef entries that can block swap_tensors after compile.
-            # Only do this for registered backends; custom backends may need these
-            # weakrefs to persist (e.g., for standalone_compile).
-            if config.invalidate_compile_context_weakrefs and _is_registered_backend(
-                compiler_fn
-            ):
+            # Determine whether to clear based on config and backend type.
+            should_clear = config.invalidate_compile_context_weakrefs
+            if should_clear is None:
+                # Default: clear for registered backends, don't clear for custom
+                should_clear = _is_registered_backend(compiler_fn)
+            if should_clear:
                 if tracer_output and tracer_output.output_graph:
                     tc = tracer_output.output_graph.tracing_context
                     tc.tensor_to_context.clear()
