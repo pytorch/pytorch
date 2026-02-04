@@ -840,23 +840,13 @@ class FSDPParam:
         mesh = self.mesh_info.mesh
         if mesh.ndim == 1:
             return mesh
-        elif mesh.ndim == 2:
-            if mesh.mesh_dim_names is None:
-                raise AssertionError("Expected mesh_dim_names to not be None")
-            return mesh[mesh.mesh_dim_names[-1]]
-        raise ValueError(f"Invalid mesh: {mesh}")
+        if mesh.mesh_dim_names is None:
+            raise AssertionError("Expected mesh_dim_names to not be None")
+        return mesh[mesh.mesh_dim_names[-1]]
 
     @property
     def shard_mesh_from_root(self):
-        mesh = self.mesh_info.mesh
-
-        if mesh.ndim == 1:
-            return mesh
-        else:
-            if mesh.mesh_dim_names is None:
-                raise AssertionError("Expected mesh_dim_names to not be None")
-            shard_dim_name = mesh.mesh_dim_names[-1]
-            return mesh[shard_dim_name]
+        return self.shard_mesh
 
     def _assert_in_states(self, *states: ShardedState) -> None:
         if self.sharded_state not in states:
