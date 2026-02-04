@@ -274,9 +274,12 @@ class TestFlag(TestCase):
         class MyArr:
             __array_struct__ = a.__array_struct__
 
-        assert memoryview(a).readonly is not writeable
-        assert a.__array_interface__["data"][1] is not writeable
-        assert np.asarray(MyArr()).flags.writeable is writeable
+        if memoryview(a).readonly is writeable:
+            raise AssertionError("memoryview readonly mismatch")
+        if a.__array_interface__["data"][1] is writeable:
+            raise AssertionError("array_interface data readonly mismatch")
+        if np.asarray(MyArr()).flags.writeable is not writeable:
+            raise AssertionError("asarray writeable flag mismatch")
 
     @xfail
     def test_otherflags(self):
@@ -528,7 +531,10 @@ class TestArrayConstruction(TestCase):
         assert_raises(TypeError, np.array)
 
     def test_0d_array_shape(self):
-        assert np.ones(np.array(3)).shape == (3,)
+        if np.ones(np.array(3)).shape != (3,):
+            raise AssertionError(
+                f"shape mismatch: {np.ones(np.array(3)).shape} != (3,)"
+            )
 
     def test_array_copy_false(self):
         d = np.array([1, 2, 3])
@@ -977,10 +983,12 @@ class TestCreation(TestCase):
 
     def test_void(self):
         arr = np.array([], dtype="V")
-        assert arr.dtype == "V8"  # current default
+        if arr.dtype != "V8":  # current default
+            raise AssertionError(f"dtype mismatch: {arr.dtype} != V8")
         # Same length scalars (those that go to the same void) work:
         arr = np.array([b"1234", b"1234"], dtype="V")
-        assert arr.dtype == "V4"
+        if arr.dtype != "V4":
+            raise AssertionError(f"dtype mismatch: {arr.dtype} != V4")
 
         # Promoting different lengths will fail (pre 1.20 this worked)
         # by going via S5 and casting to V5.
@@ -991,7 +999,8 @@ class TestCreation(TestCase):
 
         # Check the same for the casting path:
         arr = np.array([b"1234", b"1234"], dtype="O").astype("V")
-        assert arr.dtype == "V4"
+        if arr.dtype != "V4":
+            raise AssertionError(f"dtype mismatch: {arr.dtype} != V4")
         with pytest.raises(TypeError):
             np.array([b"1234", b"12345"], dtype="O").astype("V")
 
@@ -1272,24 +1281,31 @@ class TestCreation(TestCase):
         assert_equal(a.dtype, object)
 
         a = self._ragged_creation([[1], [2], [3, 3]])
-        assert a.shape == (3,)
-        assert a.dtype == object
+        if a.shape != (3,):
+            raise AssertionError(f"shape mismatch: {a.shape} != (3,)")
+        if a.dtype != object:
+            raise AssertionError(f"dtype mismatch: {a.dtype} != object")
 
     def test_array_of_ragged_array(self):
         outer = np.array([None, None])
         outer[0] = outer[1] = np.array([1, 2, 3])
-        assert np.array(outer).shape == (2,)
-        assert np.array([outer]).shape == (1, 2)
+        if np.array(outer).shape != (2,):
+            raise AssertionError(f"shape mismatch: {np.array(outer).shape} != (2,)")
+        if np.array([outer]).shape != (1, 2):
+            raise AssertionError(f"shape mismatch: {np.array([outer]).shape} != (1, 2)")
 
         outer_ragged = np.array([None, None])
         outer_ragged[0] = np.array([1, 2, 3])
         outer_ragged[1] = np.array([1, 2, 3, 4])
         # should both of these emit deprecation warnings?
-        assert np.array(outer_ragged).shape == (2,)
-        assert np.array([outer_ragged]).shape == (
-            1,
-            2,
-        )
+        if np.array(outer_ragged).shape != (2,):
+            raise AssertionError(
+                f"shape mismatch: {np.array(outer_ragged).shape} != (2,)"
+            )
+        if np.array([outer_ragged]).shape != (1, 2):
+            raise AssertionError(
+                f"shape mismatch: {np.array([outer_ragged]).shape} != (1, 2)"
+            )
 
     def test_deep_nonragged_object(self):
         # None of these should raise, even though they are missing dtype=object
@@ -1314,7 +1330,8 @@ class TestCreation(TestCase):
         # We expect a fill value of None, which is not NULL:
         expected = np.array(None).tobytes()
         expected = expected * (arr.nbytes // len(expected))
-        assert arr.tobytes() == expected
+        if arr.tobytes() != expected:
+            raise AssertionError("tobytes mismatch")
 
 
 class TestBool(TestCase):
@@ -1494,7 +1511,8 @@ class TestMethods(TestCase):
 
         out = np.array(0)
         ret = np.choose(np.array(1), [10, 20, 30], out=out)
-        assert out is ret
+        if out is not ret:
+            raise AssertionError("out should be ret")
         assert_equal(out[()], 20)
 
     @xpassIfTorchDynamo_np  # (reason="choose(..., mode=...) not implemented")
@@ -1571,7 +1589,8 @@ class TestMethods(TestCase):
             out = np.zeros_like(arr)
             res = arr.round(*round_args, out=out)
             assert_equal(out, expected)
-            assert out is res
+            if out is not res:
+                raise AssertionError("out should be res")
 
         check_round(np.array([1.2, 1.5]), [1, 2])
         check_round(np.array(1.5), 2)
@@ -2737,7 +2756,8 @@ class TestMethods(TestCase):
 
         out = np.array(1)
         ret = a.trace(out=out)
-        assert ret is out
+        if ret is not out:
+            raise AssertionError("ret should be out")
 
     def test_put(self):
         icodes = np.typecodes["AllInteger"]
@@ -2934,7 +2954,8 @@ class TestMethods(TestCase):
         a = np.array([1 - 1j, 1 + 1j, 23 + 23.0j])
         out = np.empty_like(a)
         res = a.conjugate(out)
-        assert res is out
+        if res is not out:
+            raise AssertionError("res should be out")
         assert_array_equal(out, a.conjugate())
 
     def test__complex__(self):
@@ -3225,7 +3246,8 @@ class TestArgmaxArgminCommon(TestCase):
         arg_method = getattr(a, method)
         out = np.empty((256,) * ndim, dtype=np.intp)
         ret = arg_method(axis=0, out=out)
-        assert ret is out
+        if ret is not out:
+            raise AssertionError("ret should be out")
 
     @parametrize(
         "arr_method, np_method", [("argmax", np.argmax), ("argmin", np.argmin)]
@@ -3731,7 +3753,8 @@ class TestTake(TestCase):
         inds = np.zeros(shape, dtype=np.intp)
         out = np.zeros(shape, dtype=x.dtype)
         ret = np.take(x, inds, out=out)
-        assert ret is out
+        if ret is not out:
+            raise AssertionError("ret should be out")
 
 
 @xpassIfTorchDynamo_np  # (reason="TODO")
@@ -3849,7 +3872,8 @@ class TestIO(TestCase):
 
     def test_fromstring_count0(self):
         d = np.fromstring("1,2", sep=",", dtype=np.int64, count=0)
-        assert d.shape == (0,)
+        if d.shape != (0,):
+            raise AssertionError(f"shape mismatch: {d.shape} != (0,)")
 
     def test_empty_files_text(self, tmp_filename):
         with open(tmp_filename, "w"):
@@ -4319,7 +4343,8 @@ class TestFromBuffer(TestCase):
             # @parametrize breaks with bytes objects
             obj = bytes(obj, encoding="latin-1")
         new = np.frombuffer(obj)
-        assert new.base is obj
+        if new.base is not obj:
+            raise AssertionError("new.base should be obj")
 
     def test_empty(self):
         assert_array_equal(np.frombuffer(b""), np.array([]))
@@ -4415,7 +4440,8 @@ class TestFlat(TestCase):
             pass
         # Check the value of `.index` is updated correctly (see also gh-19153)
         # If the type was incorrect, this would show up on big-endian machines
-        assert it.index == it.base.size
+        if it.index != it.base.size:
+            raise AssertionError(f"index mismatch: {it.index} != {it.base.size}")
 
 
 class TestResize(TestCase):
@@ -5208,7 +5234,8 @@ class TestDot(TestCase):
         # Test that the chunking does the right thing, see also gh-22262
         data = np.ones(2**30 + 100, dtype=dtype)
         res = np.dot(data, data)
-        assert res == 2**30 + 100
+        if res != 2**30 + 100:
+            raise AssertionError(f"result mismatch: {res} != {2**30 + 100}")
 
 
 class MatmulCommon:
@@ -5478,7 +5505,10 @@ class TestMatmul(MatmulCommon, TestCase):
         # size zero when the outer dimensions (iterator size) has size zero.
         arr = np.ones((0, 1, 1))
         out = np.ones((1, 1, 1))
-        assert self.matmul(arr, arr).shape == (0, 1, 1)
+        if self.matmul(arr, arr).shape != (0, 1, 1):
+            raise AssertionError(
+                f"shape mismatch: {self.matmul(arr, arr).shape} != (0, 1, 1)"
+            )
 
         with pytest.raises((RuntimeError, ValueError)):
             self.matmul(arr, arr, out=out)
@@ -5517,7 +5547,8 @@ class TestMatmul(MatmulCommon, TestCase):
         # test out non-contiguous
         out = np.ones((5, 2, 2), dtype=float)
         c = self.matmul(a, b, out=out[..., 0])
-        assert c.tensor._base is out.tensor
+        if c.tensor._base is not out.tensor:
+            raise AssertionError("c.tensor._base should be out.tensor")
 
     m1 = np.arange(15.0).reshape(5, 3)
     m2 = np.arange(21.0).reshape(3, 7)
@@ -5605,10 +5636,12 @@ class TestMatmul(MatmulCommon, TestCase):
     def test_matmul_bool(self):
         # gh-14439
         a = np.array([[1, 0], [1, 1]], dtype=bool)
-        assert np.max(a.view(np.uint8)) == 1
+        if np.max(a.view(np.uint8)) != 1:
+            raise AssertionError(f"max mismatch: {np.max(a.view(np.uint8))} != 1")
         b = np.matmul(a, a)
         # matmul with boolean output should always be 0, 1
-        assert np.max(b.view(np.uint8)) == 1
+        if np.max(b.view(np.uint8)) != 1:
+            raise AssertionError(f"max mismatch: {np.max(b.view(np.uint8))} != 1")
 
         # rg = np.random.default_rng(np.random.PCG64(43))
         # d = rg.integers(2, size=4*5, dtype=np.int8)
@@ -5621,7 +5654,8 @@ class TestMatmul(MatmulCommon, TestCase):
         assert_equal(out1, out2)
 
         c = np.matmul(np.zeros((2, 0), dtype=bool), np.zeros(0, dtype=bool))
-        assert not np.any(c)
+        if np.any(c):
+            raise AssertionError("c should be all False")
 
 
 class TestMatmulOperator(MatmulCommon, TestCase):
@@ -5672,13 +5706,16 @@ class TestMatmulOperator(MatmulCommon, TestCase):
     def test_matmul_axes(self):
         a = np.arange(3 * 4 * 5).reshape(3, 4, 5)
         c = np.matmul(a, a, axes=[(-2, -1), (-1, -2), (1, 2)])
-        assert c.shape == (3, 4, 4)
+        if c.shape != (3, 4, 4):
+            raise AssertionError(f"shape mismatch: {c.shape} != (3, 4, 4)")
         d = np.matmul(a, a, axes=[(-2, -1), (-1, -2), (0, 1)])
-        assert d.shape == (4, 4, 3)
+        if d.shape != (4, 4, 3):
+            raise AssertionError(f"shape mismatch: {d.shape} != (4, 4, 3)")
         e = np.swapaxes(d, 0, 2)
         assert_array_equal(e, c)
         f = np.matmul(a, np.arange(3), axes=[(1, 0), (0), (0)])
-        assert f.shape == (4, 5)
+        if f.shape != (4, 5):
+            raise AssertionError(f"shape mismatch: {f.shape} != (4, 5)")
 
 
 class TestInner(TestCase):
@@ -5783,7 +5820,10 @@ class TestChoose(TestCase):
     )
     def test_output_dtype(self, ops):
         expected_dt = np.result_type(*ops)
-        assert np.choose([0], ops).dtype == expected_dt
+        if np.choose([0], ops).dtype != expected_dt:
+            raise AssertionError(
+                f"dtype mismatch: {np.choose([0], ops).dtype} != {expected_dt}"
+            )
 
     def test_docstring_1(self):
         # examples from the docstring,
@@ -5873,15 +5913,18 @@ class TestMinScalarType(TestCase):
     # three tests below are added based on what numpy does
     def test_complex(self):
         dt = np.min_scalar_type(0 + 0j)
-        assert dt == np.dtype("complex64")
+        if dt != np.dtype("complex64"):
+            raise AssertionError(f"dtype mismatch: {dt} != complex64")
 
     def test_float(self):
         dt = np.min_scalar_type(0.1)
-        assert dt == np.dtype("float16")
+        if dt != np.dtype("float16"):
+            raise AssertionError(f"dtype mismatch: {dt} != float16")
 
     def test_nonscalar(self):
         dt = np.min_scalar_type([0, 1, 2])
-        assert dt == np.dtype("int64")
+        if dt != np.dtype("int64"):
+            raise AssertionError(f"dtype mismatch: {dt} != int64")
 
 
 from numpy.core._internal import _dtype_from_pep3118
@@ -6051,23 +6094,31 @@ class TestArrayCreationCopyArgument(TestCase):
 
                 for copy in self.true_vals:
                     res = np.array(arr, copy=copy, dtype=int2)
-                    assert res is not arr and res.flags.owndata
+                    if not (res is not arr and res.flags.owndata):
+                        raise AssertionError("res should be a new array with owndata")
                     assert_array_equal(res, arr)
 
                 if int1 == int2:
                     # Casting is not necessary, base check is sufficient here
                     for copy in self.false_vals:
                         res = np.array(arr, copy=copy, dtype=int2)
-                        assert res is arr or res.base is arr
+                        if not (res is arr or res.base is arr):
+                            raise AssertionError(
+                                "res should be arr or share base with arr"
+                            )
 
                     res = np.array(arr, copy=np._CopyMode.NEVER, dtype=int2)
-                    assert res is arr or res.base is arr
+                    if not (res is arr or res.base is arr):
+                        raise AssertionError("res should be arr or share base with arr")
 
                 else:
                     # Casting is necessary, assert copy works:
                     for copy in self.false_vals:
                         res = np.array(arr, copy=copy, dtype=int2)
-                        assert res is not arr and res.flags.owndata
+                        if not (res is not arr and res.flags.owndata):
+                            raise AssertionError(
+                                "res should be a new array with owndata"
+                            )
                         assert_array_equal(res, arr)
 
                     assert_raises(
@@ -6084,12 +6135,15 @@ class TestArrayCreationCopyArgument(TestCase):
         # memoryview, so use may_share_memory.
         for copy in self.true_vals:
             res = np.array(view, copy=copy)
-            assert not np.may_share_memory(arr, res)
+            if np.may_share_memory(arr, res):
+                raise AssertionError("res should not share memory with arr")
         for copy in self.false_vals:
             res = np.array(view, copy=copy)
-            assert np.may_share_memory(arr, res)
+            if not np.may_share_memory(arr, res):
+                raise AssertionError("res should share memory with arr")
         res = np.array(view, copy=np._CopyMode.NEVER)
-        assert np.may_share_memory(arr, res)
+        if not np.may_share_memory(arr, res):
+            raise AssertionError("res should share memory with arr")
 
     def test_array_interfaces(self):
         # Array interface gives direct memory access (much like a memoryview)
@@ -6108,7 +6162,8 @@ class TestArrayCreationCopyArgument(TestCase):
             (np._CopyMode.NEVER, arr),
         ]:
             res = np.array(arr, copy=copy)
-            assert res.base is val
+            if res.base is not val:
+                raise AssertionError(f"res.base should be {val}")
 
     def test___array__(self):
         base_arr = np.arange(10)
@@ -6127,12 +6182,14 @@ class TestArrayCreationCopyArgument(TestCase):
             # An additional copy is currently forced by numpy in this case,
             # you could argue, numpy does not trust the ArrayLike. This
             # may be open for change:
-            assert res is not base_arr
+            if res is base_arr:
+                raise AssertionError("res should not be base_arr")
 
         for copy in self.false_vals:
             res = np.array(arr, copy=copy)
             assert_array_equal(res, base_arr)
-            assert res is base_arr  # numpy trusts the ArrayLike
+            if res is not base_arr:  # numpy trusts the ArrayLike
+                raise AssertionError("res should be base_arr")
 
         with pytest.raises(ValueError):
             np.array(arr, copy=np._CopyMode.NEVER)
@@ -6146,13 +6203,16 @@ class TestArrayCreationCopyArgument(TestCase):
         # Prepare C-order, F-order and non-contiguous arrays:
         arr = arr.copy(order1)
         if order1 == "C":
-            assert arr.flags.c_contiguous
+            if not arr.flags.c_contiguous:
+                raise AssertionError("arr should be C contiguous")
         elif order1 == "F":
-            assert arr.flags.f_contiguous
+            if not arr.flags.f_contiguous:
+                raise AssertionError("arr should be F contiguous")
         elif arr.ndim != 0:
             # Make array non-contiguous
             arr = arr[::2, ::2]
-            assert not arr.flags.forc
+            if arr.flags.forc:
+                raise AssertionError("arr should not be forc")
 
         # Whether a copy is necessary depends on the order of arr:
         if order2 == "C":
@@ -6170,7 +6230,8 @@ class TestArrayCreationCopyArgument(TestCase):
         for view in [arr, memoryview(arr)]:
             for copy in self.true_vals:
                 res = np.array(view, copy=copy, order=order2)
-                assert res is not arr and res.flags.owndata
+                if not (res is not arr and res.flags.owndata):
+                    raise AssertionError("res should be a new array with owndata")
                 assert_array_equal(arr, res)
 
             if no_copy_necessary:
@@ -6178,11 +6239,15 @@ class TestArrayCreationCopyArgument(TestCase):
                     res = np.array(view, copy=copy, order=order2)
                     # res.base.obj refers to the memoryview
                     if not IS_PYPY:
-                        assert res is arr or res.base.obj is arr
+                        if not (res is arr or res.base.obj is arr):
+                            raise AssertionError(
+                                "res should be arr or share base with arr"
+                            )
 
                 res = np.array(view, copy=np._CopyMode.NEVER, order=order2)
                 if not IS_PYPY:
-                    assert res is arr or res.base.obj is arr
+                    if not (res is arr or res.base.obj is arr):
+                        raise AssertionError("res should be arr or share base with arr")
             else:
                 for copy in self.false_vals:
                     res = np.array(arr, copy=copy, order=order2)
@@ -6311,7 +6376,8 @@ class TestArrayInterface(TestCase):
         else:
             result = np.array(val)
             assert_equal(np.array(val), expected)
-            assert result.dtype == "f8"
+            if result.dtype != "f8":
+                raise AssertionError(f"dtype mismatch: {result.dtype} != f8")
             del result
         if HAS_REFCOUNT:
             post_cnt = sys.getrefcount(np.dtype("f8"))
@@ -6743,7 +6809,8 @@ class TestWritebackIfCopy(TestCase):
 
     def test_put_noncontiguous(self):
         a = np.arange(6).reshape(2, 3).T  # force non-c-contiguous
-        assert not a.flags["C_CONTIGUOUS"]  # sanity check
+        if a.flags["C_CONTIGUOUS"]:  # sanity check
+            raise AssertionError("array should not be C_CONTIGUOUS")
         np.put(a, [0, 2], [44, 55])
         assert_equal(a, np.array([[44, 3], [55, 4], [2, 5]]))
 
@@ -6823,9 +6890,12 @@ class TestArange(TestCase):
         keyword_zerotostop = np.arange(start=0, stop=3)
         keyword_start_stop = np.arange(start=3, stop=9)
 
-        assert len(keyword_stop) == 3
-        assert len(keyword_zerotostop) == 3
-        assert len(keyword_start_stop) == 6
+        if len(keyword_stop) != 3:
+            raise AssertionError(f"len mismatch: {len(keyword_stop)} != 3")
+        if len(keyword_zerotostop) != 3:
+            raise AssertionError(f"len mismatch: {len(keyword_zerotostop)} != 3")
+        if len(keyword_start_stop) != 6:
+            raise AssertionError(f"len mismatch: {len(keyword_start_stop)} != 6")
         assert_array_equal(keyword_stop, keyword_zerotostop)
 
     @skip(reason="arange for booleans: numpy maybe deprecates?")
@@ -6853,16 +6923,21 @@ class TestArange(TestCase):
     def test_error_paths_and_promotion(self, which):
         args = [0, 1, 2]  # start, stop, and step
         args[which] = np.float64(2.0)  # should ensure float64 output
-        assert np.arange(*args).dtype == np.float64
+        if np.arange(*args).dtype != np.float64:
+            raise AssertionError(f"dtype mismatch: {np.arange(*args).dtype} != float64")
 
         # repeat with non-empty ranges
         args = [0, 8, 2]
         args[which] = np.float64(2.0)
-        assert np.arange(*args).dtype == np.float64
+        if np.arange(*args).dtype != np.float64:
+            raise AssertionError(f"dtype mismatch: {np.arange(*args).dtype} != float64")
 
     @parametrize("dt", [np.float32, np.uint8, complex])
     def test_explicit_dtype(self, dt):
-        assert np.arange(5.0, dtype=dt).dtype == dt
+        if np.arange(5.0, dtype=dt).dtype != dt:
+            raise AssertionError(
+                f"dtype mismatch: {np.arange(5.0, dtype=dt).dtype} != {dt}"
+            )
 
 
 class TestRichcompareScalar(TestCase):
@@ -6870,10 +6945,14 @@ class TestRichcompareScalar(TestCase):
     def test_richcompare_scalar_boolean_singleton_return(self):
         # These are currently guaranteed to be the boolean singletons, but maybe
         # returning NumPy booleans would also be OK:
-        assert (np.array(0) == "a") is False
-        assert (np.array(0) != "a") is True
-        assert (np.int16(0) == "a") is False
-        assert (np.int16(0) != "a") is True
+        if (np.array(0) == "a") is not False:
+            raise AssertionError("comparison should be False")
+        if (np.array(0) != "a") is not True:
+            raise AssertionError("comparison should be True")
+        if (np.int16(0) == "a") is not False:
+            raise AssertionError("comparison should be False")
+        if (np.int16(0) != "a") is not True:
+            raise AssertionError("comparison should be True")
 
 
 @skip  # (reason="implement views/dtypes")

@@ -566,7 +566,8 @@ def run_meta_crossref(
             meta_args = (meta_args[0], args[1]) + meta_args[2:]
         elif func is torch.Tensor.__getitem__:
             # Ensure boolean tensors use original
-            assert len(args) == 2
+            if len(args) != 2:
+                raise AssertionError(f"expected len(args) == 2, got {len(args)}")
             flat_args = pytree.tree_leaves(args[1])
             flat_meta_args, spec = tree_flatten(meta_args[1])
             flat_new_args = []
@@ -1192,7 +1193,8 @@ class TestMeta(TestCase):
                     ref = func(*args, **kwargs)
 
                 # *_like functions take a Tensor as first argument
-                assert isinstance(args[0], torch.Tensor)
+                if not isinstance(args[0], torch.Tensor):
+                    raise AssertionError(f"expected args[0] to be Tensor, got {type(args[0])}")
                 with torch.random.fork_rng():
                     torch.manual_seed(123)
                     args[0] = args[0].to(device="meta")

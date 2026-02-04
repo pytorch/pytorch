@@ -42,34 +42,51 @@ class TestTorchrun(TestCase):
         from torch.backends.xeon.run_cpu import _CPUinfo
 
         cpuinfo = _CPUinfo(lscpu_info)
-        assert cpuinfo._physical_core_nums() == 8
-        assert cpuinfo._logical_core_nums() == 16
-        assert cpuinfo.get_node_physical_cores(0) == [0, 1, 2, 3]
-        assert cpuinfo.get_node_physical_cores(1) == [4, 5, 6, 7]
-        assert cpuinfo.get_node_logical_cores(0) == [0, 1, 2, 3, 8, 9, 10, 11]
-        assert cpuinfo.get_node_logical_cores(1) == [4, 5, 6, 7, 12, 13, 14, 15]
-        assert cpuinfo.get_all_physical_cores() == [0, 1, 2, 3, 4, 5, 6, 7]
-        assert cpuinfo.get_all_logical_cores() == [
-            0,
-            1,
-            2,
-            3,
-            8,
-            9,
-            10,
-            11,
-            4,
-            5,
-            6,
-            7,
-            12,
-            13,
-            14,
-            15,
-        ]
-        assert cpuinfo.numa_aware_check([0, 1, 2, 3]) == [0]
-        assert cpuinfo.numa_aware_check([4, 5, 6, 7]) == [1]
-        assert cpuinfo.numa_aware_check([2, 3, 4, 5]) == [0, 1]
+        if cpuinfo._physical_core_nums() != 8:
+            raise AssertionError(
+                f"Expected 8 physical cores, got {cpuinfo._physical_core_nums()}"
+            )
+        if cpuinfo._logical_core_nums() != 16:
+            raise AssertionError(
+                f"Expected 16 logical cores, got {cpuinfo._logical_core_nums()}"
+            )
+        if cpuinfo.get_node_physical_cores(0) != [0, 1, 2, 3]:
+            raise AssertionError(
+                f"Expected [0, 1, 2, 3], got {cpuinfo.get_node_physical_cores(0)}"
+            )
+        if cpuinfo.get_node_physical_cores(1) != [4, 5, 6, 7]:
+            raise AssertionError(
+                f"Expected [4, 5, 6, 7], got {cpuinfo.get_node_physical_cores(1)}"
+            )
+        if cpuinfo.get_node_logical_cores(0) != [0, 1, 2, 3, 8, 9, 10, 11]:
+            raise AssertionError(
+                f"Expected [0, 1, 2, 3, 8, 9, 10, 11], got {cpuinfo.get_node_logical_cores(0)}"
+            )
+        if cpuinfo.get_node_logical_cores(1) != [4, 5, 6, 7, 12, 13, 14, 15]:
+            raise AssertionError(
+                f"Expected [4, 5, 6, 7, 12, 13, 14, 15], got {cpuinfo.get_node_logical_cores(1)}"
+            )
+        if cpuinfo.get_all_physical_cores() != [0, 1, 2, 3, 4, 5, 6, 7]:
+            raise AssertionError(
+                f"Expected [0, 1, 2, 3, 4, 5, 6, 7], got {cpuinfo.get_all_physical_cores()}"
+            )
+        expected_logical = [0, 1, 2, 3, 8, 9, 10, 11, 4, 5, 6, 7, 12, 13, 14, 15]
+        if cpuinfo.get_all_logical_cores() != expected_logical:
+            raise AssertionError(
+                f"Expected {expected_logical}, got {cpuinfo.get_all_logical_cores()}"
+            )
+        if cpuinfo.numa_aware_check([0, 1, 2, 3]) != [0]:
+            raise AssertionError(
+                f"Expected [0], got {cpuinfo.numa_aware_check([0, 1, 2, 3])}"
+            )
+        if cpuinfo.numa_aware_check([4, 5, 6, 7]) != [1]:
+            raise AssertionError(
+                f"Expected [1], got {cpuinfo.numa_aware_check([4, 5, 6, 7])}"
+            )
+        if cpuinfo.numa_aware_check([2, 3, 4, 5]) != [0, 1]:
+            raise AssertionError(
+                f"Expected [0, 1], got {cpuinfo.numa_aware_check([2, 3, 4, 5])}"
+            )
 
     def test_multi_threads(self):
         num = 0
@@ -84,7 +101,10 @@ class TestTorchrun(TestCase):
                 segs = str(line, "utf-8").strip().split("-")
                 if segs[-1].strip() == "pwd":
                     num += 1
-        assert num == 4, "Failed to launch multiple instances for inference"
+        if num != 4:
+            raise AssertionError(
+                f"Failed to launch multiple instances for inference, got {num}"
+            )
 
 
 if __name__ == "__main__":

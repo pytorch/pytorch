@@ -85,9 +85,10 @@ class CompositeMHA(torch.nn.Module):
 
         self.head_dim = embed_dim // num_heads
         self.embed_dim = embed_dim
-        assert self.head_dim * num_heads == self.embed_dim, (
-            "embed_dim must be divisible by num_heads"
-        )
+        if self.head_dim * num_heads != self.embed_dim:
+            raise AssertionError(
+                f"embed_dim ({self.embed_dim}) must be divisible by num_heads ({num_heads})"
+            )
 
         self.q_proj_weight = Parameter(
             torch.empty((embed_dim, embed_dim), **factory_kwargs)
