@@ -138,13 +138,13 @@ sycl::event convolution(
   dnnl::memory src_m, weight_m, dst_m, bia_m;
   at::Tensor src_blocked, weight_blocked, dst_blocked = dst;
 
-  src_m = make_onednn_memory_readonly(src_md, engine, src.const_data_ptr());
-  weight_m = make_onednn_memory_readonly(weight_md, engine, weight.const_data_ptr());
-  dst_m = make_onednn_memory(dst_md, engine, dst.data_ptr());
+  src_m = make_onednn_memory(src_md, engine, usm_ro(src));
+  weight_m = make_onednn_memory(weight_md, engine, usm_ro(weight));
+  dst_m = make_onednn_memory(dst_md, engine, usm_rw(dst));
 
   std::unordered_map<int, dnnl::memory> args;
   if (bia.defined()) {
-    bia_m = make_onednn_memory_readonly(bia_md, engine, bia.const_data_ptr());
+    bia_m = make_onednn_memory(bia_md, engine, usm_ro(bia));
     args.insert({DNNL_ARG_BIAS, bia_m});
   }
   auto expected_dst_md = conv_fwd_pd.dst_desc();
@@ -161,7 +161,7 @@ sycl::event convolution(
       src.options().dtype(at::kByte),
       std::nullopt);
   auto scratchpad_m = make_onednn_memory(
-      conv_fwd_pd.scratchpad_desc(), engine, scratchpad_tensor.data_ptr());
+      conv_fwd_pd.scratchpad_desc(), engine, usm_rw(scratchpad_tensor));
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad_m});
 
   auto conv_forward = dnnl::convolution_forward(conv_fwd_pd);
@@ -247,9 +247,9 @@ sycl::event convolution_backward_weights(
   at::Tensor expected_src, expected_diff_dst, expected_diff_weight;
   dnnl::memory src_m, diff_dst_m, diff_weight_m;
 
-  src_m = make_onednn_memory_readonly(src_md, engine, src.const_data_ptr());
-  diff_dst_m = make_onednn_memory_readonly(dst_md, engine, diff_dst.const_data_ptr());
-  diff_weight_m = make_onednn_memory(weight_md, engine, diff_weight.data_ptr());
+  src_m = make_onednn_memory(src_md, engine, usm_ro(src));
+  diff_dst_m = make_onednn_memory(dst_md, engine, usm_ro(diff_dst));
+  diff_weight_m = make_onednn_memory(weight_md, engine, usm_rw(diff_weight));
 
   // insert args
   std::unordered_map<int, dnnl::memory> args;
@@ -258,7 +258,7 @@ sycl::event convolution_backward_weights(
   args.insert({DNNL_ARG_DIFF_WEIGHTS, diff_weight_m});
   if (diff_bia.defined()) {
     dnnl::memory diff_bia_m =
-        make_onednn_memory(bia_md, engine, diff_bia.data_ptr());
+        make_onednn_memory(bia_md, engine, usm_rw(diff_bia));
     args.insert({DNNL_ARG_DIFF_BIAS, diff_bia_m});
   }
 
@@ -268,7 +268,7 @@ sycl::event convolution_backward_weights(
       src.options().dtype(at::kByte),
       std::nullopt);
   auto scratchpad_m = make_onednn_memory(
-      conv_bwd_w_pd.scratchpad_desc(), engine, scratchpad_tensor.data_ptr());
+      conv_bwd_w_pd.scratchpad_desc(), engine, usm_rw(scratchpad_tensor));
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad_m});
 
   // execute primitive
@@ -354,9 +354,9 @@ sycl::event convolution_backward_data(
   at::Tensor expected_src, expected_wei, expected_dst;
   dnnl::memory diff_dst_m, wei_m, diff_src_m;
 
-  diff_src_m = make_onednn_memory(src_md, engine, diff_src.data_ptr());
-  wei_m = make_onednn_memory_readonly(weight_md, engine, weight.const_data_ptr());
-  diff_dst_m = make_onednn_memory_readonly(dst_md, engine, diff_dst.const_data_ptr());
+  diff_src_m = make_onednn_memory(src_md, engine, usm_rw(diff_src));
+  wei_m = make_onednn_memory(weight_md, engine, usm_ro(weight));
+  diff_dst_m = make_onednn_memory(dst_md, engine, usm_ro(diff_dst));
 
   // insert args
   std::unordered_map<int, dnnl::memory> args;
@@ -368,7 +368,7 @@ sycl::event convolution_backward_data(
   auto scratchpad_memory = make_onednn_memory(
       conv_backward_data_pd.scratchpad_desc(),
       engine,
-      scratchpad_tensor.data_ptr());
+      usm_rw(scratchpad_tensor));
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad_memory});
   args.insert({DNNL_ARG_DIFF_DST, diff_dst_m});
   args.insert({DNNL_ARG_WEIGHTS, wei_m});

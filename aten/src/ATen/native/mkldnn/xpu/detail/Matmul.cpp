@@ -223,9 +223,9 @@
       dst_usr_md = dnnl::memory::desc(dst_dims, dst_usr_dt, dst_strides);
 
       // STEP4: create memory
-      auto m1_usr_m = make_onednn_memory_readonly(m1_usr_md, engine, m1.const_data_ptr());
-      auto m2_usr_m = make_onednn_memory_readonly(m2_usr_md, engine, m2.const_data_ptr());
-      auto dst_usr_m = make_onednn_memory(dst_usr_md, engine, dst.data_ptr());
+      auto m1_usr_m = make_onednn_memory(m1_usr_md, engine, usm_ro(m1));
+      auto m2_usr_m = make_onednn_memory(m2_usr_md, engine, usm_ro(m2));
+      auto dst_usr_m = make_onednn_memory(dst_usr_md, engine, usm_rw(dst));
 
       auto expected_m1_md = matmul_pd.src_desc();
       auto expected_m2_md = matmul_pd.weights_desc();
@@ -243,14 +243,14 @@
           m1.options().dtype(at::kByte),
           std::nullopt);
       auto scratchpad_memory = make_onednn_memory(
-          matmul_pd.scratchpad_desc(), engine, scratchpad_tensor.data_ptr());
+          matmul_pd.scratchpad_desc(), engine, usm_rw(scratchpad_tensor));
       args.insert({DNNL_ARG_SCRATCHPAD, scratchpad_memory});
 
       args.insert({DNNL_ARG_SRC, m1_m});
       args.insert({DNNL_ARG_WEIGHTS, m2_m});
       args.insert({DNNL_ARG_DST, dst_m});
       if (with_bias) {
-        auto bias_m = make_onednn_memory_readonly(bias_md, engine, b.const_data_ptr());
+        auto bias_m = make_onednn_memory(bias_md, engine, usm_ro(b));
         args.insert({DNNL_ARG_BIAS, bias_m});
       }
 

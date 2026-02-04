@@ -180,11 +180,11 @@ at::Tensor quantized_convolution(
 
   dnnl::memory src_m, weight_m, output_m, bias_m;
 
-  src_m = make_onednn_memory_readonly(src_md, engine, act.const_data_ptr());
-  output_m = make_onednn_memory(output_md, engine, output.data_ptr());
-  weight_m = make_onednn_memory_readonly(weight_md, engine, weight.const_data_ptr());
+  src_m = make_onednn_memory(src_md, engine, usm_ro(act));
+  output_m = make_onednn_memory(output_md, engine, usm_rw(output));
+  weight_m = make_onednn_memory(weight_md, engine, usm_ro(weight));
   if (bias.has_value()) {
-    bias_m = make_onednn_memory_readonly(bias_md, engine, bias.value().const_data_ptr());
+    bias_m = make_onednn_memory(bias_md, engine, usm_ro(bias.value()));
   }
 
   std::unordered_map<int, dnnl::memory> args;
@@ -225,7 +225,7 @@ at::Tensor quantized_convolution(
       act.options().dtype(at::kByte),
       std::nullopt);
   auto scratchpad_m = make_onednn_memory(
-      conv_fwd_pd.scratchpad_desc(), engine, scratchpad_tensor.data_ptr());
+      conv_fwd_pd.scratchpad_desc(), engine, usm_rw(scratchpad_tensor));
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad_m});
 
   // Weight scale is now tensor in nature, directly create dnnl::memory from it
@@ -235,7 +235,7 @@ at::Tensor quantized_convolution(
       dnnl::memory::data_type::f32,
       dnnl::memory::format_tag::x);
   dnnl::memory weight_sc_m =
-      make_onednn_memory(weight_sc_md, engine, weight_scales.data_ptr());
+      make_onednn_memory(weight_sc_md, engine, usm_rw(weight_scales));
   args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS, weight_sc_m});
 
   auto qconv_event = dnnl::sycl_interop::execute(conv_forward, stream, args);

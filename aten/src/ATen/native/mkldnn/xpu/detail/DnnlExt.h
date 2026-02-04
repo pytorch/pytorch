@@ -259,10 +259,10 @@ class primitive_ext : public primitive {
     }
   }
 
-  template <typename M>
-  void set_attribute(int slot, int arg_class, void* handle, M constructor) {
+  template <typename USM, typename M>
+  void set_attribute(int slot, int arg_class, USM handle, M constructor) {
     if (mem_arg_cache[slot])
-      mem_arg_cache[slot].set_data_handle(handle);
+      mem_arg_cache[slot].set_data_handle(handle.raw());
     else {
       mem_arg_cache[slot] = constructor();
       c_args[slot].arg = arg_class;

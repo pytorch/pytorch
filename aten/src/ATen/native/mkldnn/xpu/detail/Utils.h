@@ -121,7 +121,7 @@ dnnl::memory dnnl_memory_from_host_scalar(
                      .device(kXPU);
   holder = at::empty({1}, options).fill_(host_value);
   dnnl::memory::desc md = get_onednn_md(holder);
-  dnnl::memory mem = make_onednn_memory(md, engine, holder.data_ptr());
+  dnnl::memory mem = make_onednn_memory(md, engine, usm_rw(holder));
   return mem;
 }
 

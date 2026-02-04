@@ -10,26 +10,35 @@ namespace at::native::onednn {
 dnnl::memory make_onednn_memory(
     dnnl::memory::desc md,
     dnnl::engine& engine,
-    void* ptr) {
+    ReadWriteUSM mem) {
   return dnnl::sycl_interop::make_memory(
       md,
       engine,
       dnnl::sycl_interop::memory_kind::usm,
-      ptr == nullptr ? DNNL_MEMORY_ALLOCATE : ptr);
+      mem.ptr ? mem.ptr : DNNL_MEMORY_ALLOCATE);
 }
 
-dnnl::memory make_onednn_memory_readonly(
+dnnl::memory make_onednn_memory(
     dnnl::memory::desc md,
     dnnl::engine& engine,
-    const void* ptr) {
-  TORCH_CHECK(ptr, "oneDNN readonly: null data_ptr");
-
-  // oneDNN requires void*, const_cast avoids COW materialization.
+    ReadOnlyUSM mem) {
   return dnnl::sycl_interop::make_memory(
       md,
       engine,
       dnnl::sycl_interop::memory_kind::usm,
-      const_cast<void*>(ptr));
+      const_cast<void*>(mem.ptr));
+}
+
+dnnl::memory make_onednn_memory(
+    dnnl::memory::desc md,
+    dnnl::engine& engine,
+    AllocUSM) {
+
+  return dnnl::sycl_interop::make_memory(
+      md,
+      engine,
+      dnnl::sycl_interop::memory_kind::usm,
+      DNNL_MEMORY_ALLOCATE);
 }
 
 dnnl::memory::format_tag get_dnnl_default_format(
