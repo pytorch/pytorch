@@ -523,6 +523,14 @@
       ]
     }
   ],
+  "GB5696": [
+    {
+      "Gb_type": "Comprehension graph break with extra stack values",
+      "Context": "",
+      "Explanation": "Cannot use comprehension optimization when there are extra values on the stack and variables need to be passed to the resume function.",
+      "Hints": []
+    }
+  ],
   "GB0048": [
     {
       "Gb_type": "Error getting associated real value",
@@ -1969,6 +1977,22 @@
       "Hints": []
     }
   ],
+  "GB6276": [
+    {
+      "Gb_type": "Comprehension analysis failed: No END_FOR",
+      "Context": "",
+      "Explanation": "Could not find END_FOR instruction in comprehension bytecode.",
+      "Hints": []
+    }
+  ],
+  "GB9898": [
+    {
+      "Gb_type": "Comprehension analysis failed: No matches",
+      "Context": "pre_store_ops={pre_store_ops}, post_store_op={post_store_op}",
+      "Explanation": "Comprehension does not match any known bytecode pattern.",
+      "Hints": []
+    }
+  ],
   "GB0166": [
     {
       "Gb_type": "Unsupported torch._C._ImperativeEngine.queue_callback()",
@@ -2618,6 +2642,14 @@
         "Use a dictionary where the keys are tensors.",
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
+    }
+  ],
+  "GB2669": [
+    {
+      "Gb_type": "Comprehension graph break in resume function with captured variables",
+      "Context": "str(analysis.captured_vars)",
+      "Explanation": "Cannot use comprehension optimization inside a resume function when there are captured variables. This can cause issues with deeply nested source chains.",
+      "Hints": []
     }
   ],
   "GB0223": [
@@ -4179,6 +4211,14 @@
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
+    }
+  ],
+  "GB7425": [
+    {
+      "Gb_type": "Comprehension with captured tensor not in local slot",
+      "Context": "",
+      "Explanation": "Cannot use comprehension optimization when a captured tensor variable is not stored in its expected local slot.",
+      "Hints": []
     }
   ],
   "GB0357": [

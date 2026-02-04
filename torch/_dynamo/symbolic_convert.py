@@ -116,6 +116,7 @@ from .resume_execution import (
     ContinueExecutionCache,
     IS_TRACING_RESUME_PROLOGUE_VARNAME,
     ReenterWith,
+    TORCH_DYNAMO_RESUME_IN_PREFIX,
 )
 from .source import (
     AttrSource,
@@ -505,6 +506,110 @@ def get_assert_bytecode_sequence(with_msg: bool) -> list[str]:
     end_idx = insts.index("RAISE_VARARGS")
 
     return insts[begin_idx + 1 : end_idx + 1]
+
+
+@functools.cache
+def _get_comprehension_bytecode_prefix() -> list[str]:
+    """Get the bytecode instructions that precede BUILD_LIST in a list comprehension."""
+
+    assert sys.version_info >= (3, 12)
+
+    def fn() -> list[int]:
+        return [i for i in range(1)]  # noqa: C416
+
+    insts = [inst.opname for inst in dis.get_instructions(fn)]
+
+    start_idx = len(insts) - 1 - insts[::-1].index("LOAD_FAST_AND_CLEAR")
+    end_idx = insts.index("BUILD_LIST")
+
+    return insts[start_idx:end_idx]
+
+
+@functools.cache
+def _get_comprehension_result_patterns() -> dict[str, dict[str, Any]]:
+    """Discover bytecode patterns for comprehension result handling.
+
+    Analyzes sample functions to extract the opcode sequences that appear
+    after END_FOR for each result disposition (stored, discarded, returned, consumed).
+
+    Returns patterns with:
+        - pre_store_ops: opcodes between END_FOR and first STORE_FAST
+        - post_store_op: first opcode after all STORE_FASTs (for disambiguation)
+    """
+    assert sys.version_info >= (3, 12)
+
+    def fn_stored() -> list[int]:
+        result = [i for i in range(1)]  # noqa: C416
+        return result
+
+    def fn_discarded() -> int:
+        [i for i in range(1)]  # noqa: C416
+        return 1
+
+    def fn_returned() -> list[int]:
+        return [i for i in range(1)]  # noqa: C416
+
+    def fn_consumed() -> int:
+        return sum([i for i in range(1)])  # noqa: C416
+
+    def extract_pattern(fn: Callable[..., Any]) -> tuple[list[str], Optional[str]]:
+        """Extract (pre_store_ops, post_store_op) from comprehension bytecode."""
+        target_line = list(dis.findlinestarts(fn.__code__))[1][1]
+        insts: list[str] = []
+        started = False
+        for instr in dis.get_instructions(fn):
+            if started and instr.starts_line:
+                break
+            pos = instr.positions
+            if pos and pos.lineno == target_line:
+                started = started or bool(instr.starts_line)
+                insts.append(instr.opname)
+
+        ops = insts[insts.index("END_FOR") + 1 :]
+        idx = 0
+
+        pre_store_ops = []
+        while idx < len(ops) and ops[idx] != "STORE_FAST":
+            pre_store_ops.append(ops[idx])
+            idx += 1
+
+        while idx < len(ops) and ops[idx] == "STORE_FAST":
+            idx += 1
+
+        return pre_store_ops, ops[idx] if idx < len(ops) else None
+
+    stored = extract_pattern(fn_stored)
+    discarded = extract_pattern(fn_discarded)
+    returned = extract_pattern(fn_returned)
+    consumed = extract_pattern(fn_consumed)
+
+    return {
+        "stored": {"pre_store_ops": stored[0], "post_store_op": stored[1]},
+        "discarded": {"pre_store_ops": discarded[0], "post_store_op": discarded[1]},
+        "returned": {"pre_store_ops": returned[0], "post_store_op": returned[1]},
+        "consumed": {"pre_store_ops": consumed[0], "post_store_op": []},
+    }
+
+
+@dataclasses.dataclass
+class ComprehensionAnalysis:
+    """Metadata about a comprehension's bytecode structure.
+
+    Attributes:
+        end_ip: Instruction pointer after all comprehension bytecode
+        result_var: Name of result variable, or None if result stays on stack
+        result_on_stack: True if result stays on stack (discarded, returned, or in expression)
+        iterator_vars: Variables from LOAD_FAST_AND_CLEAR (need restoration)
+        walrus_vars: Variables assigned via walrus operator (:=) inside comprehension
+        captured_vars: Variables read from outer scope via LOAD_FAST inside comprehension
+    """
+
+    end_ip: int
+    result_var: Optional[str]
+    result_on_stack: bool
+    iterator_vars: list[str]
+    walrus_vars: list[str]
+    captured_vars: list[str]
 
 
 def _detect_and_normalize_assert_statement(
@@ -3328,7 +3433,40 @@ class InstructionTranslatorBase(
         items = self.popn(inst.argval)
         self.push(SliceVariable(items, tx=self))  # type: ignore[arg-type]
 
+    def _maybe_setup_comprehension_speculation(self, inst: Instruction) -> bool:
+        """
+        Handle comprehension start for Python 3.12+ BUILD_LIST/BUILD_MAP with argval 0.
+        Returns True if a graph break was triggered and the caller should return early.
+        """
+        if not (sys.version_info >= (3, 12) and inst.argval == 0):
+            return False
+
+        if not self._is_comprehension_start():
+            return False
+
+        can_speculate = (
+            all(b.can_restore() for b in self.block_stack)
+            and not self.one_graph
+            and not self.error_on_graph_break
+            and not self.is_tracing_resume_prologue
+            and not self.active_generic_context_managers
+            and self.output.current_tracer.parent is None
+            and self.parent is None
+        )
+        # Only set up speculation at depth 0 (outermost comprehension)
+        if can_speculate and self._comprehension_depth == 0:
+            speculation = self.speculate()
+            if speculation.failed(self):
+                self._handle_comprehension_graph_break(inst)
+                return True
+            self.current_speculation = speculation
+        self._comprehension_depth += 1
+        return False
+
     def BUILD_LIST(self, inst: Instruction) -> None:
+        if self._maybe_setup_comprehension_speculation(inst):
+            return
+
         items = self.popn(inst.argval)
         self.push(ListVariable(items, mutation_type=ValueMutationNew()))
 
@@ -3366,6 +3504,9 @@ class InstructionTranslatorBase(
     BUILD_TUPLE_UNPACK_WITH_CALL = BUILD_TUPLE_UNPACK
 
     def BUILD_MAP(self, inst: Instruction) -> None:
+        if self._maybe_setup_comprehension_speculation(inst):
+            return
+
         items = self.popn(inst.argval * 2)
         d = dict(zip(items[::2], items[1::2]))
         self.push(ConstDictVariable(d, mutation_type=ValueMutationNew()))
@@ -4292,6 +4433,342 @@ class InstructionTranslatorBase(
             self.instructions[self.instruction_pointer - 1],
         )
 
+    def _is_comprehension_start(self) -> bool:
+        """Detect if we're at the start of a list/dict comprehension in 3.12+.
+
+        In Python 3.12+, comprehensions are inlined with a bytecode pattern that
+        precedes BUILD_LIST/BUILD_MAP.
+        """
+        assert sys.version_info >= (3, 12)
+
+        assert self.instruction_pointer is not None
+        ip = self.instruction_pointer - 1
+
+        pattern = _get_comprehension_bytecode_prefix()
+        prefix = [inst.opname for inst in self.instructions[ip - len(pattern) : ip]]
+
+        return prefix == pattern
+
+    def _analyze_comprehension(self) -> ComprehensionAnalysis:
+        """Analyze comprehension bytecode to determine result handling pattern."""
+        assert sys.version_info >= (3, 12)
+        assert self.instruction_pointer is not None
+
+        patterns = _get_comprehension_result_patterns()
+        start_ip = self.instruction_pointer - 1  # BUILD_LIST/BUILD_MAP
+
+        iterator_vars: list[str] = []
+        walrus_vars: list[str] = []
+        captured_vars: list[str] = []
+        defined_inside: set[str] = set()
+
+        # Collect iterator variables from LOAD_FAST_AND_CLEAR before BUILD_LIST/BUILD_MAP
+        iter_scan_ip = start_ip - 1
+        while iter_scan_ip >= 0:
+            inst = self.instructions[iter_scan_ip]
+            if inst.opname == "LOAD_FAST_AND_CLEAR":
+                iterator_vars.insert(0, inst.argval)
+                iter_scan_ip -= 1
+            elif inst.opname in ("SWAP", "GET_ITER"):
+                iter_scan_ip -= 1
+            else:
+                break
+        defined_inside.update(iterator_vars)
+
+        # Find the outermost END_FOR by tracking nesting depth
+        end_for_ip = -1
+        nesting_depth = 0
+        for search_ip in range(self.instruction_pointer, len(self.instructions)):
+            inst = self.instructions[search_ip]
+            if inst.opname == "FOR_ITER":
+                nesting_depth += 1
+            elif inst.opname == "END_FOR":
+                nesting_depth -= 1
+                if nesting_depth == 0:
+                    end_for_ip = search_ip
+                    break
+        if end_for_ip < 0:
+            unimplemented(
+                gb_type="Comprehension analysis failed: No END_FOR",
+                context="",
+                explanation="Could not find END_FOR instruction in comprehension bytecode.",
+                hints=[],
+            )
+
+        # Find first FOR_ITER to know where loop body starts
+        for_iter_ip = next(
+            i
+            for i in range(start_ip, end_for_ip)
+            if self.instructions[i].opname == "FOR_ITER"
+        )
+
+        # Single pass through loop body to detect walrus vars and captured vars
+        for body_ip in range(for_iter_ip + 1, end_for_ip):
+            inst = self.instructions[body_ip]
+
+            # Detect walrus pattern: COPY 1 followed by STORE_FAST
+            if inst.opname == "COPY" and inst.arg == 1 and body_ip + 1 < end_for_ip:
+                next_inst = self.instructions[body_ip + 1]
+                if next_inst.opname == "STORE_FAST":
+                    var_name = next_inst.argval
+                    if var_name not in iterator_vars and var_name not in walrus_vars:
+                        walrus_vars.append(var_name)
+                        defined_inside.add(var_name)
+
+            # Track variables defined inside the loop
+            if inst.opname == "STORE_FAST":
+                defined_inside.add(inst.argval)
+
+            # Detect LOAD_FAST referencing outer variables
+            elif inst.opname.startswith("LOAD_FAST"):
+                var_names = (
+                    inst.argval if isinstance(inst.argval, tuple) else (inst.argval,)
+                )
+                for var_name in var_names:
+                    if var_name not in defined_inside and var_name not in captured_vars:
+                        captured_vars.append(var_name)
+
+        # Extract pre_store_ops: all opcodes from END_FOR+1 until first STORE_FAST
+        pre_store_ops: list[str] = []
+        scan_ip = end_for_ip + 1
+        while (
+            scan_ip < len(self.instructions)
+            and self.instructions[scan_ip].opname != "STORE_FAST"
+        ):
+            pre_store_ops.append(self.instructions[scan_ip].opname)
+            scan_ip += 1
+
+        store_fast_ip = scan_ip
+
+        # Skip all STORE_FASTs to find post_store_op
+        while (
+            scan_ip < len(self.instructions)
+            and self.instructions[scan_ip].opname == "STORE_FAST"
+        ):
+            scan_ip += 1
+
+        post_store_op = (
+            self.instructions[scan_ip].opname
+            if scan_ip < len(self.instructions)
+            else None
+        )
+
+        def matches(name: str) -> bool:
+            pat = patterns[name]
+            return pre_store_ops == pat["pre_store_ops"] and (
+                post_store_op == pat["post_store_op"] or not pat["post_store_op"]
+            )
+
+        result_var: Optional[str] = None
+        if matches("stored"):
+            result_var = self.instructions[store_fast_ip].argval
+            result_on_stack = False
+        elif matches("discarded"):
+            result_var = None
+            result_on_stack = False
+            scan_ip = scan_ip + 1 if patterns["discarded"]["post_store_op"] else scan_ip
+        elif (
+            matches("returned")
+            or pre_store_ops == patterns["consumed"]["pre_store_ops"]
+        ):
+            result_var = None
+            result_on_stack = True
+        else:
+            unimplemented(
+                gb_type="Comprehension analysis failed: No matches",
+                context=f"pre_store_ops={pre_store_ops}, post_store_op={post_store_op}",
+                explanation="Comprehension does not match any known bytecode pattern.",
+                hints=[],
+            )
+
+        return ComprehensionAnalysis(
+            end_ip=scan_ip,
+            result_var=result_var,
+            # pyrefly: ignore [unbound-name]
+            result_on_stack=result_on_stack,
+            iterator_vars=iterator_vars,
+            walrus_vars=walrus_vars,
+            captured_vars=captured_vars,
+        )
+
+    def _handle_comprehension_graph_break(self, inst: Instruction) -> None:
+        """Handle graph break for a comprehension by skipping the comprehension bytecode.
+
+        Steps:
+        1. Compile the graph up to the comprehension
+        2. Load captured variables from frame_list to local slots
+        3. Add the comprehension bytecode (runs eagerly at runtime)
+        4. Generate code to pass comprehension-created variables to the resume function
+        5. Create the resume function for code after the comprehension
+        """
+        assert sys.version_info >= (3, 12)
+
+        from .bytecode_transformation import create_instruction
+        from .codegen import PyCodegen
+        from .source import LocalSource
+        from .variables.misc import UnknownVariable
+        from .variables.tensor import SymNodeVariable, TensorVariable
+
+        analysis = self._analyze_comprehension()
+
+        # Validate: can't handle captured vars in resume functions due to nested sources
+        if self.f_code.co_name.startswith(TORCH_DYNAMO_RESUME_IN_PREFIX):
+            if analysis.captured_vars:
+                unimplemented(
+                    gb_type="Comprehension graph break in resume function with captured variables",
+                    context=str(analysis.captured_vars),
+                    explanation="Cannot use comprehension optimization inside a resume "
+                    "function when there are captured variables. This can cause issues "
+                    "with deeply nested source chains.",
+                    hints=[],
+                )
+
+        assert self.instruction_pointer is not None
+        start_ip = self.instruction_pointer - 1  # BUILD_LIST/BUILD_MAP
+        stack_pops = 1 + len(analysis.iterator_vars)
+        reason = GraphCompileReason("comprehension_graph_break", [self.frame_summary()])
+        log.debug("comprehension triggered compile")
+
+        # --- Step 1: Compile the graph up to the comprehension ---
+
+        all_stack_locals_metadata = self.output.compile_subgraph(
+            self,
+            reason=reason,
+            stack_pops=stack_pops,
+        )
+        self.popn(stack_pops)
+        meta = all_stack_locals_metadata[0]
+
+        # --- Step 2: Load captured variables from frame_list to local slots ---
+        # The comprehension bytecode uses LOAD_FAST to load captured variables.
+        # compile_subgraph put them in frame_list[0], so we load from there
+        # and STORE_FAST to ensure they're in the correct local slots.
+
+        captured_vars_to_store: list[str] = []
+        for var_name in analysis.captured_vars:
+            if var_name not in self.symbolic_locals:
+                continue
+            if var_name not in meta.locals_names:
+                continue
+
+            var = self.symbolic_locals[var_name]
+            in_correct_slot = (
+                isinstance(var.source, LocalSource)
+                and var.source.local_name == var_name
+            )
+            # Tensors/symnodes must already be in their correct slot
+            if isinstance(var, (TensorVariable, SymNodeVariable)):
+                if not in_correct_slot:
+                    unimplemented(
+                        gb_type="Comprehension with captured tensor not in local slot",
+                        context="",
+                        explanation="Cannot use comprehension optimization when a "
+                        "captured tensor variable is not stored in its expected "
+                        "local slot.",
+                        hints=[],
+                    )
+                continue
+
+            if not in_correct_slot:
+                captured_vars_to_store.append(var_name)
+
+        if captured_vars_to_store:
+            # Stack layout: [cells], [frame_list], *(all stack values including stack_pops)
+            # At this point, popn(stack_pops) reduced symbolic stack but runtime stack
+            # still has all values. We need to add stack_pops back.
+            frame_list_pos = (
+                len(self.stack) + stack_pops - len(meta.stack_null_idxes) + 1
+            )
+            cg = PyCodegen(self)
+            for var_name in captured_vars_to_store:
+                var_idx = meta.locals_names[var_name]
+                cg.extend_output(
+                    [
+                        create_instruction("COPY", arg=frame_list_pos),
+                        cg.create_load_const(0),
+                        cg.create_binary_subscr(),
+                        cg.create_load_const(var_idx),
+                        cg.create_binary_subscr(),
+                        create_instruction("STORE_FAST", argval=var_name),
+                    ]
+                )
+            self.output.add_output_instructions(cg.get_instructions())
+
+        # --- Step 3: Add the comprehension bytecode ---
+
+        copied_insts = self._copy_comprehension_bytecode(start_ip, analysis.end_ip)
+        self.output.add_output_instructions(copied_insts)
+
+        if analysis.result_on_stack:
+            self.push(UnknownVariable())
+
+        # --- Step 4: Generate code to pass variables to resume function ---
+
+        # Variables the comprehension creates that need to be passed to resume:
+        # - result_var: variable the comprehension result is assigned to
+        # - walrus_vars: variables created by walrus operator (:=)
+        vars_to_pass = (
+            [analysis.result_var] if analysis.result_var else []
+        ) + analysis.walrus_vars
+
+        for var_name in vars_to_pass:
+            meta.locals_names[var_name] = len(meta.locals_names)
+            self.symbolic_locals[var_name] = UnknownVariable()
+
+        if vars_to_pass:
+            # Stack layout: [cells], [frame_list], *(extra values), (result if on stack)
+            frame_list_pos = len(self.stack) - len(meta.stack_null_idxes) + 1
+            resume_cg = PyCodegen(self)
+            resume_cg.extend_output(
+                [
+                    create_instruction("COPY", arg=frame_list_pos),
+                    resume_cg.create_load_const(0),
+                    resume_cg.create_binary_subscr(),
+                ]
+            )
+            for var_name in vars_to_pass:
+                resume_cg.extend_output(
+                    [
+                        create_instruction("LOAD_FAST", argval=var_name),
+                        create_instruction("LIST_APPEND", arg=1),
+                    ]
+                )
+            resume_cg.extend_output(
+                [
+                    create_instruction("POP_TOP"),
+                ]
+            )
+            self.output.add_output_instructions(resume_cg.get_instructions())
+
+        # --- Step 5: Create the resume function ---
+
+        resume_inst = self.instructions[analysis.end_ip]
+        self.output.add_output_instructions(
+            self.create_call_resume_at(resume_inst, all_stack_locals_metadata)
+        )
+
+        self.instruction_pointer = None
+
+    def _copy_comprehension_bytecode(
+        self, start_ip: int, end_ip: int
+    ) -> list[Instruction]:
+        """Copy comprehension bytecode instructions, updating jump targets."""
+        inst_map: dict[Instruction, Instruction] = {}
+        copied_insts: list[Instruction] = []
+
+        for ip in range(start_ip, end_ip):
+            original_inst = self.instructions[ip]
+            copied_inst = copy.copy(original_inst)
+            copied_inst.exn_tab_entry = None
+            inst_map[original_inst] = copied_inst
+            copied_insts.append(copied_inst)
+
+        for copied_inst in copied_insts:
+            if copied_inst.target is not None and copied_inst.target in inst_map:
+                copied_inst.target = inst_map[copied_inst.target]
+
+        return copied_insts
+
     def _make_frame_loc(
         self, filename: str, lineno: Optional[int], fallback_lineno: int
     ) -> tuple[str, int]:
@@ -4492,6 +4969,7 @@ class InstructionTranslatorBase(
         self.prefix_insts = []
         self.exn_vt_stack = exn_vt_stack
         self.latest_bytecode_queue = deque(maxlen=20)
+        self._comprehension_depth = 0
 
         # Properties of the input/output code
         self.instructions: list[Instruction] = instructions
