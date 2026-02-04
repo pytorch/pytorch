@@ -1685,7 +1685,8 @@ torch.cuda.synchronize()
         stride = list(grad.stride())
         stride[0] = stride[0] * 2
         grad.set_(grad.storage(), 0, grad.size(), stride)
-        assert grad.is_contiguous()
+        if not grad.is_contiguous():
+            raise AssertionError("Expected grad to be contiguous")
 
         y.backward(grad)
 
