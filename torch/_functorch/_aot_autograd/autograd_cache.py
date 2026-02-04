@@ -540,7 +540,34 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
                 if is_traceable_wrapper_subclass(inner_tensor):
                     inner_metadata[name] = self._reduce_tensor_subclass(inner_tensor)
 
-        return (_ident, (metadata, repr(subclass_metadata), inner_metadata))
+        subclass_key = self._subclass_cache_key(subclass_metadata)
+        return (_ident, (metadata, subclass_key, inner_metadata))
+
+    def _subclass_cache_key(self, subclass_metadata: Any) -> Any:
+        """
+        Get a stable cache key for subclass metadata.
+        For DTensorSpec, use repr() which is stable across processes.
+        For other types, fall back to hash().
+        """
+        from torch.distributed.tensor._dtensor_spec import DTensorSpec
+
+        # TODO: For cross-process cache stability, we ideally want stable hashing
+        # for all tensor subclasses. However, making DTensorSpec/DeviceMesh use
+        # stable hashing (e.g., blake2b) has performance implications for eager
+        # runtime where these hashes are used frequently in sharding propagation.
+        # Since DTensorSpec and its components (DeviceMesh, Placement types) have
+        # stable repr() implementations, we use repr() here for DTensor specifically.
+        # Other subclasses fall back to hash() which may not be cross-process stable.
+        #
+        # DTensor's __tensor_flatten__ returns (DTensorSpec, requires_grad)
+        if (
+            isinstance(subclass_metadata, tuple)
+            and len(subclass_metadata) >= 1
+            and isinstance(subclass_metadata[0], DTensorSpec)
+        ):
+            return repr(subclass_metadata)
+
+        return hash(subclass_metadata)
 
     def _reduce_aot_config(self, aot_config: AOTConfig):
         """
