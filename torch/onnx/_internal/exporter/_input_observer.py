@@ -1,4 +1,3 @@
-# noqa: S101
 from __future__ import annotations
 
 
@@ -401,11 +400,11 @@ class InputObserverInfo:
                 nested structured.
         """
         self.align_inputs_none_values()
-        assert self._best_candidate is not None  # pyrefly missing case
-        assert self._best_candidate.flat_list is not None  # pyrefly missing case
+        assert self._best_candidate is not None  # noqa: S101
+        assert self._best_candidate.flat_list is not None  # noqa: S101
         assert (
             self._best_candidate.aligned_flat_list is not None
-        )  # pyrefly missing case
+        )  # noqa: S101
 
         def _set_batch_dimension(name_or_position) -> bool:
             if not set_batch_dimension_for:
@@ -537,7 +536,7 @@ class InputObserverInfo:
         # This is already checked by _build_inputs_completed_with_none_values
         # but this is not always well captured by tools checking types.
         self.align_inputs_none_values()
-        assert self._best_candidate is not None  # pyrefly missing case
+        assert self._best_candidate is not None  # noqa: S101
         candidate = None
         if index_or_candidate is None:
             for cand in self.inputs:
@@ -559,7 +558,7 @@ class InputObserverInfo:
         else:
             candidate = index_or_candidate
 
-        assert candidate is not None  # pyrefly missing case
+        assert candidate is not None  # noqa: S101
         if candidate.aligned_flat_list is None:
             raise RuntimeError(
                 f"Candidate {candidate} has no aligned flat list of tensors, "
@@ -568,10 +567,10 @@ class InputObserverInfo:
             )
 
         aligned_flat_list = candidate.aligned_flat_list
-        assert aligned_flat_list is not None  # pyrefly missing case
+        assert aligned_flat_list is not None  # noqa: S101
         if any(t is None for t in aligned_flat_list):
             dynamic_shapes = self.infer_dynamic_shapes(return_flat=True)
-            assert isinstance(dynamic_shapes, list)  # pyrefly missing case
+            assert isinstance(dynamic_shapes, tuple)  # noqa: S101
             aligned_flat_list = aligned_flat_list.copy()
             for index in range(len(aligned_flat_list)):
                 if aligned_flat_list[index] is not None:
@@ -796,7 +795,7 @@ class InputObserver:
             Inferred arguments, every optional tensor is replaced by a empty tensor.
         """
         self._check_captured()
-        assert self.info is not None  # pyrefly missing case
+        assert self.info is not None  # noqa: S101
         index_or_candidate: int | InputCandidate | None = None
         if index_or_args_or_kwargs is None or isinstance(index_or_args_or_kwargs, int):
             index_or_candidate = index_or_args_or_kwargs
@@ -873,7 +872,7 @@ class InputObserver:
         # For big models, we should consider taking a filename to avoid the users
         # creating the model proto twice.
         self._check_captured()
-        assert self.info is not None  # pyrefly missing case
+        assert self.info is not None  # noqa: S101
 
         onnx_program.initialize_inference_session(initializer)
 
@@ -889,7 +888,7 @@ class InputObserver:
             loop = io_sets
         data: list[dict[str, Any]] = []
         for inputs, outputs, latency in loop:
-            assert inputs.aligned_flat_list is not None  # pyrefly missing case
+            assert inputs.aligned_flat_list is not None  # noqa: S101
             if len(input_names) != len(inputs.aligned_flat_list):
                 raise RuntimeError(
                     f"There are ({len(inputs.aligned_flat_list)}) "

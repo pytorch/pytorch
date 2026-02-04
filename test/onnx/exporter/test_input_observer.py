@@ -809,7 +809,8 @@ class TestInputObserver(common_utils.TestCase):
         for cand in observer.info.inputs:
             cand.str_obs()
             self.assertEqual(
-                len(cand.flat_list), len([t for t in cand.aligned_flat_list if t is not None])
+                len(cand.flat_list),
+                len([t for t in cand.aligned_flat_list if t is not None]),
             )
 
         cst = torch.export.Dim.DYNAMIC
