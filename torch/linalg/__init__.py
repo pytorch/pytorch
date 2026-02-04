@@ -2241,12 +2241,12 @@ Supports inputs of float, double, cfloat and cdouble dtypes.
 Also supports batches of matrices, and if the inputs are batches of matrices then
 the output has the same batch dimensions.
 
-Letting `*` be zero or more batch dimensions:
+Letting `*` be zero or more batch dimensions,
 
-- If :attr:`A` has shape `(*, n, n)` and :attr:`B` has shape `(n,)` or `(*, n)` (a batch of vectors),  
+- If :attr:`A` has shape `(*, n, n)` and :attr:`B` has shape `(n,)` or `(*, n)` (a batch of vectors),
   this function returns `X` of shape `(*, n)`. The batch dimensions `*` of :attr:`A` and :attr:`B` must match exactly.
 
-- Otherwise, if :attr:`A` has shape `(*, n, n)` and :attr:`B` has shape `(n, k)` or `(*, n, k)` (a batch of matrices or “multiple right-hand sides”),  
+- Otherwise, if :attr:`A` has shape `(*, n, n)` and :attr:`B` has shape `(n, k)` or `(*, n, k)` (a batch of matrices or "multiple right-hand sides"),
   this function returns `X` of shape `(*, n, k)`. The batch dimensions `*` of :attr:`A` and :attr:`B` need only be broadcastable.
 
 .. note::
