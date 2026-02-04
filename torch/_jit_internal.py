@@ -677,6 +677,9 @@ def export(fn: Callable[_P, _R]) -> Callable[_P, _R]:
     This decorator indicates that a method on an ``nn.Module`` is used as an entry point into a
     :class:`ScriptModule` and should be compiled.
 
+    .. deprecated:: 2.5
+        Please use :func:`torch.compile` instead.
+
     ``forward`` implicitly is assumed to be an entry point, so it does not need this decorator.
     Functions and methods called from ``forward`` are compiled as they are seen
     by the compiler, so they do not need this decorator either.
@@ -791,6 +794,9 @@ def ignore(drop=False, **kwargs):
     your model that is not yet TorchScript compatible. If called from TorchScript,
     ignored functions will dispatch the call to the Python interpreter. Models with ignored
     functions cannot be exported; use :func:`@torch.jit.unused <torch.jit.unused>` instead.
+
+    .. deprecated:: 2.5
+        Please use :func:`torch.compile` instead.
 
     Example (using ``@torch.jit.ignore`` on a method)::
 

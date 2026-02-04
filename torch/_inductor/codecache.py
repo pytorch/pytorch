@@ -34,7 +34,7 @@ from pathlib import Path
 from tempfile import _TemporaryFileWrapper
 from time import time, time_ns
 from types import ModuleType
-from typing import Any, cast, Generic, NoReturn, TYPE_CHECKING, TypeVar, Union
+from typing import Any, cast, Generic, NoReturn, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import override, Self
 
 import torch
@@ -94,7 +94,6 @@ from torch._inductor.utils import (
     is_windows,
     XPU_KERNEL_FORMAT,
 )
-from torch._library.opaque_object import is_opaque_reference_type
 from torch._logging import trace_structured
 from torch._subclasses.fake_tensor import (
     extract_tensor_metadata,
@@ -626,10 +625,17 @@ class FxGraphCachePickler(pickle.Pickler):
         try:
             self.dump(obj)
             return self._stream.getvalue()
-        except (TypeError, AttributeError, pickle.PicklingError) as e:
+        except (TypeError, AttributeError, pickle.PicklingError, ValueError) as e:
             # Some configs options may not pickle.
             log.warning("Failed to pickle cache key", exc_info=True)
             raise BypassFxGraphCache("Failed to pickle cache key") from e
+        except RuntimeError as e:
+            # pybind11 raises RuntimeError with message like:
+            # "<pybind11_builtins... object at 0x...> is not pickleable."
+            if "pybind11" in str(e) and "is not pickleable" in str(e):
+                log.warning("Failed to pickle cache key", exc_info=True)
+                raise BypassFxGraphCache("Failed to pickle cache key") from e
+            raise
         finally:
             # Reset our stream for the next dump.
             self._stream.seek(0)
@@ -772,11 +778,6 @@ class BypassFxGraphCache(Exception):
     """
 
 
-@dataclasses.dataclass
-class HashableOpaqueValue:
-    ordinal: int
-
-
 class FxGraphHashDetails:
     """
     Object to capture all the details for a compiled FX graph relevant to computing
@@ -796,20 +797,6 @@ class FxGraphHashDetails:
         self.gm = gm
         self.example_inputs = example_inputs
         self.cache_key_tag = cconfig.cache_key_tag
-
-        # Process the example_inputs. If there's an opaque reference in the example_inputs
-        # then we need to replace it with a hashable value. What's important is that if the
-        # same reference appears twice then it's the same hash value for each.
-        processed_inputs = []
-        seen_opaques = {}
-        for input in example_inputs:
-            if is_opaque_reference_type(type(input)):
-                if id(input) not in seen_opaques:
-                    seen_opaques[id(input)] = HashableOpaqueValue(len(seen_opaques))
-                processed_inputs.append(seen_opaques[id(input)])
-            else:
-                processed_inputs.append(input)
-        self.example_inputs = processed_inputs
 
         # Order kwargs so hashing is stable to changes in kwarg order. Although
         # it's technically a _CompileFxKwargs we don't actually need it typed as
@@ -1064,6 +1051,8 @@ class GuardedCache(Generic[T]):
             subdir = cls._get_tmp_dir_for_key(key)
             if os.path.exists(subdir):
                 for path in sorted(os.listdir(subdir)):
+                    if path.startswith("."):
+                        continue  # Skip temp files from concurrent write_atomic() calls
                     try:
                         with open(os.path.join(subdir, path), "rb") as f:
                             content = f.read()
@@ -1753,7 +1742,7 @@ class CudaKernelParamCache:
         if config.aot_inductor.emit_multi_arch_kernel:
             bin_type_to_ext = {
                 "cubin": ".fatbin",
-                "spv": f".{XPU_KERNEL_FORMAT}",
+                XPU_KERNEL_FORMAT: ".spv",
                 "hsaco": ".hsaco",
             }
             assert bin_type in bin_type_to_ext, (
@@ -2500,15 +2489,18 @@ end
                                 compile_multiarch_bundle_from_llvm_ir,
                             )
 
+                            # pyrefly: ignore [unbound-name]
                             if not os.path.exists(asm_file):
                                 raise RuntimeError(
                                     f"Multi-arch ROCm compilation requires LLVM IR file, "
+                                    # pyrefly: ignore [unbound-name]
                                     f"but {asm_file} not found. "
                                     f"Ensure asm_type='ll' is captured in triton_heuristics.py"
                                 )
 
                             # Compile for multiple archs and bundle them
                             success = compile_multiarch_bundle_from_llvm_ir(
+                                # pyrefly: ignore [unbound-name]
                                 llvm_ir_path=asm_file,
                                 output_bundle_path=cubin_file,
                                 target_archs=None,
@@ -2623,10 +2615,10 @@ end
                         # Don't use resource.getpagesize() on Windows, as it is a Unix specific package
                         # as seen in https://docs.python.org/2/library/resource.html
                         if _IS_WINDOWS:
-                            from ctypes import (  # type: ignore[attr-defined]
+                            from ctypes import (
                                 byref,
                                 Structure,
-                                windll,
+                                windll,  # pyrefly: ignore [missing-module-attribute]
                             )
                             from ctypes.wintypes import DWORD, LPVOID, WORD
 
@@ -3823,7 +3815,7 @@ def _load_triton_kernel_from_source(
     return getattr(PyCodeCache.load(source_code), kernel_name)
 
 
-def _cuda_compiler() -> str | None:
+def _cuda_compiler() -> Optional[str]:
     if cuda_env.nvcc_exist(config.cuda.cuda_cxx):
         return config.cuda.cuda_cxx
     if config.is_fbcode():
@@ -3841,7 +3833,7 @@ def _cutlass_path() -> str:
 
         return parutil.get_dir_path("cutlass-4-headers")
     else:
-        return config.cuda.cutlass_dir
+        return config.cutlass.cutlass_dir
 
 
 def _cutlass_paths() -> list[str]:
@@ -3889,7 +3881,7 @@ def cutlass_key() -> bytes:
             return resource_file.read().encode()
 
     combined_hash = hashlib.sha256()
-    build_code_hash([config.cuda.cutlass_dir], "", combined_hash)
+    build_code_hash([config.cutlass.cutlass_dir], "", combined_hash)
     return combined_hash.digest()
 
 
@@ -3961,14 +3953,14 @@ def _nvcc_compiler_options() -> list[str]:
         "-DCUTE_SM90_EXTENDED_MMA_SHAPES_ENABLED",
         "-w",
         f"-gencode=arch=compute_{arch},code=[{','.join(code)}]",
-        config.cuda.compile_opt_level,
+        config.cutlass.compile_opt_level,
         "-std=c++17",
         "--expt-relaxed-constexpr",
         "-DNDEBUG",
     ]
     if config.is_fbcode():
         options.extend(["-ccbin", os.path.dirname(build_paths.gcc)])
-    if config.cuda.enable_debug_info:
+    if config.cutlass.enable_debug_info:
         options.extend(["-lineinfo", "-g", "-DCUTLASS_DEBUG_TRACE_LEVEL=1"])
     if config.cuda.enable_ptxas_info:
         options.extend(
@@ -3980,7 +3972,7 @@ def _nvcc_compiler_options() -> list[str]:
                 "--source-in-ptx",
             ]
         )  # Annotate the ptx file with source information
-    if config.cuda.use_fast_math:
+    if config.cutlass.use_fast_math:
         options.extend(
             [
                 "--use_fast_math",
@@ -4184,7 +4176,7 @@ class CUDACodeCache:
         Returns the hash key of source code, and the path to the file.
         """
 
-        if config.cuda.cutlass_hash_with_compile_cmd:
+        if config.cutlass.cutlass_hash_with_compile_cmd:
             cuda_command = repr(
                 cuda_compile_command(["dummy_input"], "dummy_output", dst_file_ext)
             )
@@ -4235,7 +4227,7 @@ class CUDACodeCache:
                 output_path = input_path[: -len(cls._SOURCE_CODE_SUFFIX)] + dst_file_ext
                 error_path = binary_error_path(output_path)
                 binary_remote_cache = cls.get_kernel_binary_remote_cache(
-                    caching_enabled=config.cuda.use_binary_remote_cache
+                    caching_enabled=config.cutlass.use_binary_remote_cache
                     and not config.force_disable_caches,
                     caching_available=config.is_fbcode(),
                 )
@@ -4250,13 +4242,13 @@ class CUDACodeCache:
                     cmd_parts, error_output = json.loads(error_json)
                     if (
                         binary_remote_cache is not None
-                        and config.cuda.upload_to_binary_remote_cache
+                        and config.cutlass.upload_to_binary_remote_cache
                     ):
                         # This ensures that a local error is uploaded to the remote cache,
                         # as we make no assumptions about the remote cache having the same
                         # information as the local cache
                         binary_remote_cache.put(
-                            error_path, config.cuda.binary_remote_cache_force_write
+                            error_path, config.cutlass.binary_remote_cache_force_write
                         )
                     cls.cache[key_with_ext] = CUDACodeCache.CacheEntry(
                         input_path, output_path, error_json
@@ -4320,11 +4312,11 @@ class CUDACodeCache:
                 # Upload to remote cache if enabled
                 if (
                     binary_remote_cache is not None
-                    and config.cuda.upload_to_binary_remote_cache
+                    and config.cutlass.upload_to_binary_remote_cache
                 ):
                     # will log on errors, but not fail out
                     binary_remote_cache.put(
-                        output_path, config.cuda.binary_remote_cache_force_write
+                        output_path, config.cutlass.binary_remote_cache_force_write
                     )
                 cls.cache[key_with_ext] = CUDACodeCache.CacheEntry(
                     input_path, output_path, None
@@ -4377,10 +4369,10 @@ class CUDACodeCache:
         # Upload to remote cache directly from memory if enabled
         if (
             binary_remote_cache is not None
-            and config.cuda.upload_to_binary_remote_cache
+            and config.cutlass.upload_to_binary_remote_cache
         ):
             binary_remote_cache.put(
-                error_path, config.cuda.binary_remote_cache_force_write
+                error_path, config.cutlass.binary_remote_cache_force_write
             )
 
 
