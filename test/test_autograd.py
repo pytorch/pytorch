@@ -4114,12 +4114,12 @@ class TestAutograd(TestCase):
         def fn(x):
             return x.sin().cos()
 
-        torch.set_default_device("cuda")
-        a = torch.tensor(1.0, requires_grad=True)
-        out = torch.utils.checkpoint.checkpoint(
-            fn, a, context_fn=context_fn, use_reentrant=False
-        )
-        out.backward()
+        with apply_device("cuda"):
+            a = torch.tensor(1.0, requires_grad=True)
+            out = torch.utils.checkpoint.checkpoint(
+                fn, a, context_fn=context_fn, use_reentrant=False
+            )
+            out.backward()
 
     def test_detach(self):
         x = torch.randn(10, 10, requires_grad=True)
