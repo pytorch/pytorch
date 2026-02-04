@@ -571,7 +571,7 @@ class InputObserverInfo:
         if any(t is None for t in aligned_flat_list):
             dynamic_shapes = self.infer_dynamic_shapes(return_flat=True)
             assert isinstance(dynamic_shapes, tuple)  # noqa: S101
-            aligned_flat_list = aligned_flat_list.copy()
+            aligned_flat_list = list(aligned_flat_list)
             for index in range(len(aligned_flat_list)):
                 if aligned_flat_list[index] is not None:
                     continue
