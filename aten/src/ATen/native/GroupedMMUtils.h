@@ -12,6 +12,7 @@
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_strided.h>
 #include <ATen/ops/mm.h>
+#include <ATen/ops/zeros.h>
 #endif
 
 namespace at::native {
@@ -74,6 +75,12 @@ c10::ScalarType out_dtype
   }
   return at::empty_strided(out_size, out_stride, mat_a.options().dtype(out_dtype));
   #else
+  // For ROCm 2D-2D case (output is 3D), zero-initialize to handle K=0 or small K
+  // groups correctly. When K=0, the mathematically correct result is zeros,
+  // but CK kernel may not write to the output region.
+  if (a_is_2d && b_is_2d) {
+    return at::zeros(out_size, mat_a.options().dtype(out_dtype));
+  }
   return at::empty(out_size, mat_a.options().dtype(out_dtype));
   #endif
 }
