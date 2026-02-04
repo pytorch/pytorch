@@ -85,6 +85,7 @@ from __future__ import annotations
 import os
 from typing import Any, Optional, TYPE_CHECKING
 
+
 if TYPE_CHECKING:
     from triton.runtime.jit import JITFunction
 
@@ -2531,6 +2532,93 @@ if TRITON_AVAILABLE:
         )
 
     # =========================================================================
+    # SYMM_LSA_SIGNAL - LSA DOMAIN POINT-TO-POINT SIGNALING
+    # =========================================================================
+
+    @core.extern
+    def _symm_lsa_signal_frontend(
+        ctx_ptr,
+        signal_index,
+        dest_rank,
+        value,
+        op,
+        _semantic=None,
+    ):
+        """
+        Frontend LSA signal operation that dispatches based on SymmContext type.
+
+        Signal a remote rank's flag without data transfer within the LSA domain.
+        Atomically operates (set/add) on the symmetric signal at signal_index
+        on dest_rank. Uses the lsa_signal_pad stored in the context.
+        Used for point-to-point notification within NVLink-connected peers.
+
+        This calls the unified frontend function that dynamically dispatches to
+        either NCCL or NVSHMEM backend based on the SymmContext type field.
+
+        Asserts on invalid context or invalid signal operation.
+        """
+        return core.extern_elementwise(
+            "",  # libname - not used when extern_libs is provided
+            "",  # libpath - not used when extern_libs is provided
+            [ctx_ptr, signal_index, dest_rank, value, op],
+            {
+                # C function signature:
+                # (int64 ctx_ptr, int32 signal_index, int32 dest_rank,
+                #  int64 value, int32 op) -> int32
+                (
+                    core.dtype("int64"),  # ctx_ptr
+                    core.dtype("int32"),  # signal_index
+                    core.dtype("int32"),  # dest_rank
+                    core.dtype("int64"),  # value
+                    core.dtype("int32"),  # op
+                ): ("symm_lsa_signal", core.dtype("int32")),
+            },
+            is_pure=False,  # Remote atomic operation has side effects
+            _semantic=_semantic,
+        )
+
+    @core.extern
+    def _nvshmem_symm_lsa_signal(
+        ctx_ptr,
+        signal_index,
+        dest_rank,
+        value,
+        op,
+        _semantic=None,
+    ):
+        """
+        NVSHMEM-specific LSA signal operation.
+
+        Signal a remote rank's flag without data transfer within the LSA domain.
+        Uses the lsa_signal_pad stored in the context for direct P2P signaling.
+        Maps to direct memory operations on peer's lsa_signal_pad.
+
+        This calls the NVSHMEM backend directly, bypassing runtime dispatch.
+        Use this when you know the context is NVSHMEM type.
+
+        Asserts on invalid context or invalid signal operation.
+        """
+        return core.extern_elementwise(
+            "",  # libname - not used when extern_libs is provided
+            "",  # libpath - not used when extern_libs is provided
+            [ctx_ptr, signal_index, dest_rank, value, op],
+            {
+                # C function signature:
+                # (int64 ctx_ptr, int32 signal_index, int32 dest_rank,
+                #  int64 value, int32 op) -> int32
+                (
+                    core.dtype("int64"),  # ctx_ptr
+                    core.dtype("int32"),  # signal_index
+                    core.dtype("int32"),  # dest_rank
+                    core.dtype("int64"),  # value
+                    core.dtype("int32"),  # op
+                ): ("nvshmem_symm_lsa_signal", core.dtype("int32")),
+            },
+            is_pure=False,  # Remote atomic operation has side effects
+            _semantic=_semantic,
+        )
+
+    # =========================================================================
     # SYMM_SIGNAL_WAIT_UNTIL - WAIT FOR SIGNAL CONDITION
     # =========================================================================
 
@@ -2632,6 +2720,107 @@ if TRITON_AVAILABLE:
         )
 
     # =========================================================================
+    # SYMM_LSA_SIGNAL_WAIT_UNTIL - LSA DOMAIN WAIT FOR SIGNAL CONDITION
+    # =========================================================================
+
+    @core.extern
+    def _symm_lsa_signal_wait_until_frontend(
+        ctx_ptr,
+        signal_index,
+        cmp,
+        cmp_value,
+        _semantic=None,
+    ):
+        """
+        Frontend LSA signal_wait_until operation that dispatches based on SymmContext type.
+
+        Blocks the calling thread/CTA until a local LSA signal at signal_index meets
+        the specified condition relative to the comparison value.
+
+        Uses the lsa_signal_pad from the context (same pad that symm_lsa_signal writes
+        to). This enables point-to-point synchronization patterns within LSA domain.
+
+        Supported conditions:
+        - SIGNAL_CMP_EQ (1): Wait until signal == cmp_value
+        - SIGNAL_CMP_NE (2): Wait until signal != cmp_value
+        - SIGNAL_CMP_GT (3): Wait until signal > cmp_value
+        - SIGNAL_CMP_GE (4): Wait until signal >= cmp_value
+        - SIGNAL_CMP_LT (5): Wait until signal < cmp_value
+        - SIGNAL_CMP_LE (6): Wait until signal <= cmp_value
+
+        This calls the unified frontend function that dynamically dispatches to
+        either NCCL or NVSHMEM backend based on the SymmContext type field.
+
+        Asserts on invalid context or invalid comparison operation.
+        """
+        return core.extern_elementwise(
+            "",  # libname - not used when extern_libs is provided
+            "",  # libpath - not used when extern_libs is provided
+            [ctx_ptr, signal_index, cmp, cmp_value],
+            {
+                # C function signature:
+                # (int64 ctx_ptr, int32 signal_index, int32 cmp,
+                #  int64 cmp_value) -> int64
+                (
+                    core.dtype("int64"),  # ctx_ptr
+                    core.dtype("int32"),  # signal_index
+                    core.dtype("int32"),  # cmp
+                    core.dtype("int64"),  # cmp_value
+                ): ("symm_lsa_signal_wait_until", core.dtype("int64")),
+            },
+            is_pure=False,  # Blocking wait operation has side effects
+            _semantic=_semantic,
+        )
+
+    @core.extern
+    def _nvshmem_symm_lsa_signal_wait_until(
+        ctx_ptr,
+        signal_index,
+        cmp,
+        cmp_value,
+        _semantic=None,
+    ):
+        """
+        NVSHMEM-specific LSA signal_wait_until operation.
+
+        Blocks the calling thread/CTA until a local LSA signal at signal_index meets
+        the specified condition relative to the comparison value.
+
+        Uses the lsa_signal_pad from the context for P2P signaling within LSA domain.
+
+        Supported conditions:
+        - SIGNAL_CMP_EQ (1): Wait until signal == cmp_value
+        - SIGNAL_CMP_NE (2): Wait until signal != cmp_value
+        - SIGNAL_CMP_GT (3): Wait until signal > cmp_value
+        - SIGNAL_CMP_GE (4): Wait until signal >= cmp_value
+        - SIGNAL_CMP_LT (5): Wait until signal < cmp_value
+        - SIGNAL_CMP_LE (6): Wait until signal <= cmp_value
+
+        This calls the NVSHMEM backend directly, bypassing runtime dispatch.
+        Use this when you know the context is NVSHMEM type.
+
+        Asserts on invalid context or invalid comparison operation.
+        """
+        return core.extern_elementwise(
+            "",  # libname - not used when extern_libs is provided
+            "",  # libpath - not used when extern_libs is provided
+            [ctx_ptr, signal_index, cmp, cmp_value],
+            {
+                # C function signature:
+                # (int64 ctx_ptr, int32 signal_index, int32 cmp,
+                #  int64 cmp_value) -> int64
+                (
+                    core.dtype("int64"),  # ctx_ptr
+                    core.dtype("int32"),  # signal_index
+                    core.dtype("int32"),  # cmp
+                    core.dtype("int64"),  # cmp_value
+                ): ("nvshmem_symm_lsa_signal_wait_until", core.dtype("int64")),
+            },
+            is_pure=False,  # Blocking wait operation has side effects
+            _semantic=_semantic,
+        )
+
+    # =========================================================================
     # SYMM_SIGNAL_RESET - RESET SIGNAL TO ZERO
     # =========================================================================
 
@@ -2702,6 +2891,78 @@ if TRITON_AVAILABLE:
             _semantic=_semantic,
         )
 
+    # =========================================================================
+    # SYMM_LSA_SIGNAL_RESET - LSA DOMAIN RESET SIGNAL TO ZERO
+    # =========================================================================
+
+    @core.extern
+    def _symm_lsa_signal_reset_frontend(
+        ctx_ptr,
+        signal_index,
+        _semantic=None,
+    ):
+        """
+        Frontend LSA signal_reset operation that dispatches based on SymmContext type.
+
+        Resets a local LSA signal at signal_index to zero. This is used to prepare
+        a signal for the next round of signaling/waiting in iterative algorithms
+        within the LSA domain.
+
+        This calls the unified frontend function that dynamically dispatches to
+        either NCCL or NVSHMEM backend based on the SymmContext type field.
+
+        Asserts on invalid context.
+        """
+        return core.extern_elementwise(
+            "",  # libname - not used when extern_libs is provided
+            "",  # libpath - not used when extern_libs is provided
+            [ctx_ptr, signal_index],
+            {
+                # C function signature: (int64 ctx_ptr, int32 signal_index) -> int32
+                (
+                    core.dtype("int64"),  # ctx_ptr
+                    core.dtype("int32"),  # signal_index
+                ): ("symm_lsa_signal_reset", core.dtype("int32")),
+            },
+            is_pure=False,  # Has side effects (modifies signal)
+            _semantic=_semantic,
+        )
+
+    @core.extern
+    def _nvshmem_symm_lsa_signal_reset(
+        ctx_ptr,
+        signal_index,
+        _semantic=None,
+    ):
+        """
+        NVSHMEM-specific LSA signal_reset operation.
+
+        Resets a local LSA signal at signal_index to zero. This is used to prepare
+        a signal for the next round of signaling/waiting in iterative algorithms
+        within the LSA domain.
+
+        Uses the lsa_signal_pad from the context for P2P signaling.
+
+        This calls the NVSHMEM backend directly, bypassing runtime dispatch.
+        Use this when you know the context is NVSHMEM type.
+
+        Asserts on invalid context.
+        """
+        return core.extern_elementwise(
+            "",  # libname - not used when extern_libs is provided
+            "",  # libpath - not used when extern_libs is provided
+            [ctx_ptr, signal_index],
+            {
+                # C function signature: (int64 ctx_ptr, int32 signal_index) -> int32
+                (
+                    core.dtype("int64"),  # ctx_ptr
+                    core.dtype("int32"),  # signal_index
+                ): ("nvshmem_symm_lsa_signal_reset", core.dtype("int32")),
+            },
+            is_pure=False,  # Has side effects (modifies signal)
+            _semantic=_semantic,
+        )
+
     @triton.jit
     def symm_signal(
         ctx_ptr,
@@ -2709,35 +2970,47 @@ if TRITON_AVAILABLE:
         dest_rank,
         value: tl.constexpr = 1,
         op: tl.constexpr = 0,
+        scope: tl.constexpr = 1,
         backend: tl.constexpr = 0,
     ):
         """
-        Signal a remote rank's flag without data transfer.
+        Signal a remote rank's flag without data transfer with configurable scope.
 
         Atomically operates (set/add) on the symmetric signal at signal_index
         on dest_rank. Uses the signal pad stored in the context.
         Used for point-to-point notification.
 
+        The scope parameter controls which signal pad is used:
+        - SCOPE_LSA (0): Uses lsa_signal_pad for NVLink-connected peers
+        - SCOPE_WORLD (1): Uses gin_signal_pad for all ranks (default)
+
         This is a non-blocking operation. To ensure the signal has been delivered,
         use symm_quiet() after the signal.
 
         Common usage patterns:
-          # Simple notification (signal value = 1)
-          symm_signal(ctx, idx, dest_rank)
+          # Simple notification (signal value = 1) - WORLD scope
+          symm_signal(ctx, idx, dest_rank, scope=SCOPE_WORLD)
           symm_quiet(ctx)  # Ensure signal is delivered
 
+          # LSA-only signal (faster, NVLink peers only)
+          symm_signal(ctx, idx, dest_rank, scope=SCOPE_LSA)
+
           # Signal with specific value
-          symm_signal(ctx, idx, dest_rank, value=42, op=SIGNAL_OP_SET)
+          symm_signal(ctx, idx, dest_rank, value=42, op=SIGNAL_OP_SET, scope=SCOPE_WORLD)
 
           # Increment a counter
-          symm_signal(ctx, idx, dest_rank, value=1, op=SIGNAL_OP_ADD)
+          symm_signal(ctx, idx, dest_rank, value=1, op=SIGNAL_OP_ADD, scope=SCOPE_WORLD)
 
         This function dispatches to either the unified frontend (runtime dispatch)
         or a backend-specific implementation based on the backend hint.
 
-        Maps to:
-        - NVSHMEM: nvshmemx_signal_op(signal_pad + idx, value, sig_op, dest_rank)
-        - NCCL: atomicExch/atomicAdd on signal_pad_ptrs[dest_rank] + idx
+        Maps to (when scope=SCOPE_LSA):
+        - NVSHMEM: Direct P2P store to lsa_signal_pad on peer
+        - NCCL: Direct P2P store to lsa_signal_pad on peer
+
+        Maps to (when scope=SCOPE_WORLD):
+        - NVSHMEM: nvshmemx_signal_op(gin_signal_pad + idx, value, sig_op, dest_rank)
+        - NCCL: atomicExch/atomicAdd on gin_signal_pad_ptrs[dest_rank] + idx
 
         Args:
             ctx_ptr: Pointer to SymmContext (NCCLSymmContext or NVSHMEMSymmContext)
@@ -2747,6 +3020,9 @@ if TRITON_AVAILABLE:
             op: Signal operation (constexpr, default=SIGNAL_OP_SET)
                 - 0 (SIGNAL_OP_SET): Atomic set (replace value)
                 - 1 (SIGNAL_OP_ADD): Atomic add (increment value)
+            scope: Signal scope (constexpr, default=1 for SCOPE_WORLD)
+                   - 0 (SCOPE_LSA): LSA domain only (NVLink-connected peers)
+                   - 1 (SCOPE_WORLD): All ranks in the team
             backend: Backend hint (constexpr, default=0 for BACKEND_DEFAULT)
                      - 0 (BACKEND_DEFAULT): Runtime dispatch based on context type
                      - 1 (BACKEND_NCCL): Direct NCCL dispatch (not functional)
@@ -2764,31 +3040,57 @@ if TRITON_AVAILABLE:
             "op must be SIGNAL_OP_SET (0) or SIGNAL_OP_ADD (1)",
         )
 
-        if backend == TL_BACKEND_DEFAULT:
-            # Runtime dispatch based on SymmContext type
-            _symm_signal_frontend(
-                ctx_ptr,
-                signal_index,
-                dest_rank,
-                value,
-                op,
-            )
-        elif backend == TL_BACKEND_NVSHMEM:
-            # Direct NVSHMEM dispatch
-            _nvshmem_symm_signal(
-                ctx_ptr,
-                signal_index,
-                dest_rank,
-                value,
-                op,
-            )
-        else:
-            # BACKEND_NCCL or unknown - not supported
-            # NCCL does not provide device bitcode library
-            tl.static_assert(
-                False,
-                "NCCL backend not supported (no device bitcode library available)",
-            )
+        # Validate scope at compile time
+        tl.static_assert(
+            scope >= TL_SCOPE_LSA and scope <= TL_SCOPE_WORLD,
+            "scope must be 0 (SCOPE_LSA) or 1 (SCOPE_WORLD)",
+        )
+
+        # Dispatch based on scope
+        if scope == TL_SCOPE_LSA:
+            if backend == TL_BACKEND_DEFAULT:
+                _symm_lsa_signal_frontend(
+                    ctx_ptr,
+                    signal_index,
+                    dest_rank,
+                    value,
+                    op,
+                )
+            elif backend == TL_BACKEND_NVSHMEM:
+                _nvshmem_symm_lsa_signal(
+                    ctx_ptr,
+                    signal_index,
+                    dest_rank,
+                    value,
+                    op,
+                )
+            else:
+                tl.static_assert(
+                    False,
+                    "NCCL backend not supported (no device bitcode library available)",
+                )
+        else:  # SCOPE_WORLD
+            if backend == TL_BACKEND_DEFAULT:
+                _symm_signal_frontend(
+                    ctx_ptr,
+                    signal_index,
+                    dest_rank,
+                    value,
+                    op,
+                )
+            elif backend == TL_BACKEND_NVSHMEM:
+                _nvshmem_symm_signal(
+                    ctx_ptr,
+                    signal_index,
+                    dest_rank,
+                    value,
+                    op,
+                )
+            else:
+                tl.static_assert(
+                    False,
+                    "NCCL backend not supported (no device bitcode library available)",
+                )
 
     @triton.jit
     def symm_signal_wait_until(
@@ -2796,24 +3098,31 @@ if TRITON_AVAILABLE:
         signal_index,
         cmp: tl.constexpr,
         cmp_value,
+        scope: tl.constexpr = 1,
         backend: tl.constexpr = 0,
     ):
         """
-        Wait until a local signal meets a specified condition.
+        Wait until a local signal meets a specified condition with configurable scope.
 
         Blocks the calling thread/CTA until the signal at signal_index meets
-        the specified condition relative to cmp_value. Uses the gin_signal_pad
-        from the context (same pad that symm_signal writes to).
+        the specified condition relative to cmp_value.
+
+        The scope parameter controls which signal pad is used:
+        - SCOPE_LSA (0): Uses lsa_signal_pad for NVLink-connected peers
+        - SCOPE_WORLD (1): Uses gin_signal_pad for all ranks (default)
 
         This enables point-to-point synchronization patterns where one rank
         signals with symm_signal and another waits with symm_signal_wait_until.
 
         Common usage patterns:
-          # Wait for signal to be set (equal to 1)
-          symm_signal_wait_until(ctx, idx, SIGNAL_CMP_EQ, 1)
+          # Wait for signal to be set (equal to 1) - WORLD scope
+          symm_signal_wait_until(ctx, idx, SIGNAL_CMP_EQ, 1, scope=SCOPE_WORLD)
+
+          # Wait for LSA signal (faster, NVLink peers only)
+          symm_signal_wait_until(ctx, idx, SIGNAL_CMP_GE, 1, scope=SCOPE_LSA)
 
           # Wait for counter to reach threshold
-          symm_signal_wait_until(ctx, idx, SIGNAL_CMP_GE, expected_count)
+          symm_signal_wait_until(ctx, idx, SIGNAL_CMP_GE, expected_count, scope=SCOPE_WORLD)
 
         Supported conditions:
         - SIGNAL_CMP_EQ (1): Wait until signal == cmp_value
@@ -2828,8 +3137,12 @@ if TRITON_AVAILABLE:
         This function dispatches to either the unified frontend (runtime dispatch)
         or a backend-specific implementation based on the backend hint.
 
-        Maps to:
-        - NVSHMEM: nvshmem_signal_wait_until(signal_pad + idx, cmp, cmp_value)
+        Maps to (when scope=SCOPE_LSA):
+        - NVSHMEM: Direct P2P load from lsa_signal_pad with polling
+        - NCCL: Direct P2P load from lsa_signal_pad with polling
+
+        Maps to (when scope=SCOPE_WORLD):
+        - NVSHMEM: nvshmem_signal_wait_until(gin_signal_pad + idx, cmp, cmp_value)
         - NCCL: ncclGin::waitSignal with ncclGin_WaitSignalGe
 
         Args:
@@ -2843,6 +3156,9 @@ if TRITON_AVAILABLE:
                  - 5 (SIGNAL_CMP_LT): Less than
                  - 6 (SIGNAL_CMP_LE): Less than or equal
             cmp_value: Value to compare against (int64)
+            scope: Signal scope (constexpr, default=1 for SCOPE_WORLD)
+                   - 0 (SCOPE_LSA): LSA domain only (NVLink-connected peers)
+                   - 1 (SCOPE_WORLD): All ranks in the team
             backend: Backend hint (constexpr, default=0 for BACKEND_DEFAULT)
                      - 0 (BACKEND_DEFAULT): Runtime dispatch based on context type
                      - 1 (BACKEND_NCCL): Direct NCCL dispatch (not functional)
@@ -2863,69 +3179,110 @@ if TRITON_AVAILABLE:
             "cmp must be between SIGNAL_CMP_EQ (1) and SIGNAL_CMP_LE (6)",
         )
 
-        if backend == TL_BACKEND_DEFAULT:
-            # Runtime dispatch based on SymmContext type
-            return _symm_signal_wait_until_frontend(
-                ctx_ptr,
-                signal_index,
-                cmp,
-                cmp_value,
-            )
-        elif backend == TL_BACKEND_NVSHMEM:
-            # Direct NVSHMEM dispatch
-            return _nvshmem_symm_signal_wait_until(
-                ctx_ptr,
-                signal_index,
-                cmp,
-                cmp_value,
-            )
-        else:
-            # BACKEND_NCCL or unknown - not supported
-            # NCCL does not provide device bitcode library
-            tl.static_assert(
-                False,
-                "NCCL backend not supported (no device bitcode library available)",
-            )
-            return tl.zeros((1,), dtype=tl.int64)[0]  # Unreachable
+        # Validate scope at compile time
+        tl.static_assert(
+            scope >= TL_SCOPE_LSA and scope <= TL_SCOPE_WORLD,
+            "scope must be 0 (SCOPE_LSA) or 1 (SCOPE_WORLD)",
+        )
+
+        # Dispatch based on scope
+        if scope == TL_SCOPE_LSA:
+            if backend == TL_BACKEND_DEFAULT:
+                return _symm_lsa_signal_wait_until_frontend(
+                    ctx_ptr,
+                    signal_index,
+                    cmp,
+                    cmp_value,
+                )
+            elif backend == TL_BACKEND_NVSHMEM:
+                return _nvshmem_symm_lsa_signal_wait_until(
+                    ctx_ptr,
+                    signal_index,
+                    cmp,
+                    cmp_value,
+                )
+            else:
+                tl.static_assert(
+                    False,
+                    "NCCL backend not supported (no device bitcode library available)",
+                )
+                return tl.zeros((1,), dtype=tl.int64)[0]  # Unreachable
+        else:  # SCOPE_WORLD
+            if backend == TL_BACKEND_DEFAULT:
+                return _symm_signal_wait_until_frontend(
+                    ctx_ptr,
+                    signal_index,
+                    cmp,
+                    cmp_value,
+                )
+            elif backend == TL_BACKEND_NVSHMEM:
+                return _nvshmem_symm_signal_wait_until(
+                    ctx_ptr,
+                    signal_index,
+                    cmp,
+                    cmp_value,
+                )
+            else:
+                tl.static_assert(
+                    False,
+                    "NCCL backend not supported (no device bitcode library available)",
+                )
+                return tl.zeros((1,), dtype=tl.int64)[0]  # Unreachable
 
     @triton.jit
     def symm_signal_reset(
         ctx_ptr,
         signal_index,
+        scope: tl.constexpr = 1,
         backend: tl.constexpr = 0,
     ):
         """
-        Reset a local signal to zero.
+        Reset a local signal to zero with configurable scope.
 
         Resets the signal at signal_index to zero. This is used to prepare
         a signal for the next round of signaling/waiting in iterative algorithms.
+
+        The scope parameter controls which signal pad is used:
+        - SCOPE_LSA (0): Uses lsa_signal_pad for NVLink-connected peers
+        - SCOPE_WORLD (1): Uses gin_signal_pad for all ranks (default)
 
         For NVSHMEM, this uses nvshmem_signal_wait_until to ensure the signal
         has arrived before resetting it to zero, providing proper synchronization.
         For NCCL, this uses ncclGin::resetSignal to atomically reset the signal.
 
         Common usage patterns:
-          # After waiting for a signal, reset it for next iteration
-          symm_signal_wait_until(ctx, idx, SIGNAL_CMP_GE, 1)
-          symm_signal_reset(ctx, idx)
+          # After waiting for a signal, reset it for next iteration - WORLD scope
+          symm_signal_wait_until(ctx, idx, SIGNAL_CMP_GE, 1, scope=SCOPE_WORLD)
+          symm_signal_reset(ctx, idx, scope=SCOPE_WORLD)
+
+          # LSA-only reset (faster, NVLink peers only)
+          symm_signal_wait_until(ctx, idx, SIGNAL_CMP_GE, 1, scope=SCOPE_LSA)
+          symm_signal_reset(ctx, idx, scope=SCOPE_LSA)
 
           # In a loop
           for i in range(iterations):
               # ... do work ...
-              symm_signal(ctx, idx, peer_rank, 1, SIGNAL_OP_SET)
-              symm_signal_wait_until(ctx, idx, SIGNAL_CMP_GE, 1)
-              symm_signal_reset(ctx, idx)  # Reset for next iteration
+              symm_signal(ctx, idx, peer_rank, 1, SIGNAL_OP_SET, scope=SCOPE_LSA)
+              symm_signal_wait_until(ctx, idx, SIGNAL_CMP_GE, 1, scope=SCOPE_LSA)
+              symm_signal_reset(ctx, idx, scope=SCOPE_LSA)  # Reset for next iteration
 
         This function dispatches to either the unified frontend (runtime dispatch)
         or a backend-specific implementation based on the backend hint.
 
-        Maps to:
-        - NVSHMEM: nvshmem_signal_wait_until + direct memory write
+        Maps to (when scope=SCOPE_LSA):
+        - NVSHMEM: Direct P2P store to reset lsa_signal_pad
+        - NCCL: Direct P2P store to reset lsa_signal_pad
+
+        Maps to (when scope=SCOPE_WORLD):
+        - NVSHMEM: nvshmem_signal_wait_until + direct memory write to gin_signal_pad
         - NCCL: ncclGin::resetSignal
 
         Args:
             ctx_ptr: Pointer to SymmContext (NCCLSymmContext or NVSHMEMSymmContext)
             signal_index: Index into the signal buffer (int32)
+            scope: Signal scope (constexpr, default=1 for SCOPE_WORLD)
+                   - 0 (SCOPE_LSA): LSA domain only (NVLink-connected peers)
+                   - 1 (SCOPE_WORLD): All ranks in the team
             backend: Backend hint (constexpr, default=0 for BACKEND_DEFAULT)
                       - 0 (BACKEND_DEFAULT): Runtime dispatch based on context type
                       - 1 (BACKEND_NCCL): Direct NCCL dispatch (not functional)
@@ -2937,25 +3294,45 @@ if TRITON_AVAILABLE:
 
             This function asserts on invalid context.
         """
-        if backend == TL_BACKEND_DEFAULT:
-            # Runtime dispatch based on SymmContext type
-            _symm_signal_reset_frontend(
-                ctx_ptr,
-                signal_index,
-            )
-        elif backend == TL_BACKEND_NVSHMEM:
-            # Direct NVSHMEM dispatch
-            _nvshmem_symm_signal_reset(
-                ctx_ptr,
-                signal_index,
-            )
-        else:
-            # BACKEND_NCCL or unknown - not supported
-            # NCCL does not provide device bitcode library
-            tl.static_assert(
-                False,
-                "NCCL backend not supported (no device bitcode library available)",
-            )
+        # Validate scope at compile time
+        tl.static_assert(
+            scope >= TL_SCOPE_LSA and scope <= TL_SCOPE_WORLD,
+            "scope must be 0 (SCOPE_LSA) or 1 (SCOPE_WORLD)",
+        )
+
+        # Dispatch based on scope
+        if scope == TL_SCOPE_LSA:
+            if backend == TL_BACKEND_DEFAULT:
+                _symm_lsa_signal_reset_frontend(
+                    ctx_ptr,
+                    signal_index,
+                )
+            elif backend == TL_BACKEND_NVSHMEM:
+                _nvshmem_symm_lsa_signal_reset(
+                    ctx_ptr,
+                    signal_index,
+                )
+            else:
+                tl.static_assert(
+                    False,
+                    "NCCL backend not supported (no device bitcode library available)",
+                )
+        else:  # SCOPE_WORLD
+            if backend == TL_BACKEND_DEFAULT:
+                _symm_signal_reset_frontend(
+                    ctx_ptr,
+                    signal_index,
+                )
+            elif backend == TL_BACKEND_NVSHMEM:
+                _nvshmem_symm_signal_reset(
+                    ctx_ptr,
+                    signal_index,
+                )
+            else:
+                tl.static_assert(
+                    False,
+                    "NCCL backend not supported (no device bitcode library available)",
+                )
 
     # =========================================================================
     # SYMM_PUT_ASYNC - NON-BLOCKING ONE-SIDED PUT
@@ -3310,7 +3687,7 @@ if TRITON_AVAILABLE:
           # Put data and signal completion (default: ADD 1)
           symm_put_signal_async(ctx, remote_buf, local_data, count, tl.float32, peer, sig_idx)
           # On the receiver side:
-          symm_signal_wait_until(ctx, sig_idx, SIGNAL_CMP_GE, 1)
+          symm_signal_wait_until(ctx, sig_idx, SIGNAL_CMP_GE, 1, scope=SCOPE_WORLD)
 
           # Put with explicit signal value and operation
           symm_put_signal_async(ctx, dest, src, count, tl.float32, peer, sig_idx,
@@ -3322,7 +3699,7 @@ if TRITON_AVAILABLE:
                                     chunk_count, tl.float32, peer, sig_idx,
                                     signal_value=1, signal_op=SIGNAL_OP_ADD)
           # Receiver waits for all chunks:
-          symm_signal_wait_until(ctx, sig_idx, SIGNAL_CMP_GE, num_chunks)
+          symm_signal_wait_until(ctx, sig_idx, SIGNAL_CMP_GE, num_chunks, scope=SCOPE_WORLD)
 
         This function dispatches to either the unified frontend (runtime dispatch)
         or a backend-specific implementation based on the backend hint.

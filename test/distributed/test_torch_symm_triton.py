@@ -17,7 +17,7 @@ is functional since it provides libnvshmem_device.bc.
 import os
 import sys
 import unittest
-from typing import Callable
+from collections.abc import Callable
 
 import torch
 import torch.distributed as dist
@@ -100,8 +100,6 @@ if TRITON_AVAILABLE:
     from torch._extern_triton._torch_symm_triton import (
         BACKEND_DEFAULT,
         BACKEND_NVSHMEM,
-        DTYPE_FLOAT32,
-        REDUCE_OP_SUM,
         requires_torch_symm,
         SCOPE_LSA,
         SCOPE_WORLD,
@@ -111,7 +109,6 @@ if TRITON_AVAILABLE:
         symm_remote_ptr,
         symm_team_rank,
         symm_team_size,
-        TorchSymmLibFinder,
     )
 
     def make_symm_all_reduce_test_kernel(backend: int):
@@ -495,7 +492,9 @@ class TestTorchSymmTriton(MultiProcessTestCase):
             torch.cuda.synchronize(device)
             dist.barrier()
 
-            print(f"[Rank {self.rank}] Launching kernel with ctx_ptr={ctx_ptr}, src_ptr={src_ptr}, dst_ptr={dst_ptr}")
+            print(
+                f"[Rank {self.rank}] Launching kernel with ctx_ptr={ctx_ptr}, src_ptr={src_ptr}, dst_ptr={dst_ptr}"
+            )
 
             # Launch kernel with split-phase barrier using SCOPE_LSA
             # Team is obtained from context internally, no need to pass it
@@ -521,7 +520,6 @@ class TestTorchSymmTriton(MultiProcessTestCase):
             # Create a tensor view of the dst area in the buffer
             result_tensor = torch.empty(1, dtype=dtype, device=device)
             # Copy from dst_ptr to result_tensor
-            import ctypes
             # Direct memory read using a CUDA tensor
             result = torch.tensor([0], dtype=dtype, device=device)
             # Use cudaMemcpy via torch
@@ -583,7 +581,9 @@ class TestTorchSymmTriton(MultiProcessTestCase):
             torch.cuda.synchronize(device)
             dist.barrier()
 
-            print(f"[Rank {self.rank}] Launching GIN barrier kernel with ctx_ptr={ctx_ptr}")
+            print(
+                f"[Rank {self.rank}] Launching GIN barrier kernel with ctx_ptr={ctx_ptr}"
+            )
 
             # Launch kernel with split-phase GIN barrier using SCOPE_WORLD
             symm_barrier_test_kernel[(1,)](
@@ -677,9 +677,7 @@ class TestTorchSymmAvailability(TestCase):
     @requires_triton
     def test_decorators_exist(self):
         """Test that decorators are available and can be used with backend argument."""
-        from torch._extern_triton._torch_symm_triton import (
-            requires_torch_symm,
-        )
+        from torch._extern_triton._torch_symm_triton import requires_torch_symm
 
         self.assertTrue(callable(requires_torch_symm))
 

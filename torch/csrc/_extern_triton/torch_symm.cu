@@ -27,11 +27,11 @@
 #include <stdint.h>
 
 // Include the unified context definitions
-#include "symm_comm.cuh"
+#include <symm_comm.cuh>
 
 // Include backend implementations (always compiled for error checking)
-#include "nccl_symm.cuh"
-#include "nvshmem_symm.cuh"
+#include <nccl_symm.cuh>
+#include <nvshmem_symm.cuh>
 
 // =============================================================================
 // NCCL_HAS_DEVICE_BITCODE CONFIGURATION
@@ -603,6 +603,130 @@ __device__ int32_t symm_signal_reset(int64_t ctx_ptr, int32_t signal_index) {
     case SymmContext::Type::NVSHMEM: {
       NVSHMEMSymmContext* nvshmem_ctx = static_cast<NVSHMEMSymmContext*>(ctx);
       nvshmem_signal_reset_impl(nvshmem_ctx, signal_index);
+      return 0;
+    }
+    default:
+      TORCH_SYMM_CHECK(false, "Unknown SymmContext type");
+      return -1;
+  }
+}
+
+/**
+ * Unified lsa_signal operation.
+ *
+ * Atomically updates a signal value at a remote rank's LSA signal location.
+ * This is a point-to-point notification mechanism without data transfer,
+ * operating within the LSA domain using direct P2P memory access.
+ *
+ * @param ctx_ptr Pointer to SymmContext (as int64)
+ * @param signal_index Index of the signal to update
+ * @param dest_rank Destination rank to signal (must be in LSA domain)
+ * @param value Value to use in the operation
+ * @param op Signal operation: SIGNAL_OP_SET (0) or SIGNAL_OP_ADD (1)
+ * @return 0 on success
+ */
+__device__ int32_t symm_lsa_signal(
+    int64_t ctx_ptr,
+    int32_t signal_index,
+    int32_t dest_rank,
+    int64_t value,
+    int32_t op) {
+  SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
+  TORCH_SYMM_CHECK(ctx != nullptr, "SymmContext is null");
+
+  switch (ctx->type) {
+#if NCCL_HAS_DEVICE_BITCODE
+    case SymmContext::Type::NCCL: {
+      NCCLSymmContext* nccl_ctx = static_cast<NCCLSymmContext*>(ctx);
+      nccl_lsa_signal_impl(
+          nccl_ctx, signal_index, dest_rank, static_cast<uint64_t>(value), op);
+      return 0;
+    }
+#endif
+    case SymmContext::Type::NVSHMEM: {
+      NVSHMEMSymmContext* nvshmem_ctx = static_cast<NVSHMEMSymmContext*>(ctx);
+      nvshmem_lsa_signal_impl(
+          nvshmem_ctx,
+          signal_index,
+          dest_rank,
+          static_cast<uint64_t>(value),
+          op);
+      return 0;
+    }
+    default:
+      TORCH_SYMM_CHECK(false, "Unknown SymmContext type");
+      return -1;
+  }
+}
+
+/**
+ * Unified lsa_signal_wait_until operation.
+ *
+ * Blocks the calling thread/CTA until a local LSA signal at signal_index meets
+ * the specified condition relative to the comparison value.
+ *
+ * Uses the lsa_signal_pad from the context for P2P signaling within LSA domain.
+ *
+ * @param ctx_ptr Pointer to SymmContext (as int64)
+ * @param signal_index Index of the signal to wait on
+ * @param cmp Comparison operation
+ * @param cmp_value Value to compare against
+ * @return The signal value that satisfied the condition
+ */
+__device__ int64_t symm_lsa_signal_wait_until(
+    int64_t ctx_ptr,
+    int32_t signal_index,
+    int32_t cmp,
+    int64_t cmp_value) {
+  SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
+  TORCH_SYMM_CHECK(ctx != nullptr, "SymmContext is null");
+
+  switch (ctx->type) {
+#if NCCL_HAS_DEVICE_BITCODE
+    case SymmContext::Type::NCCL: {
+      NCCLSymmContext* nccl_ctx = static_cast<NCCLSymmContext*>(ctx);
+      return static_cast<int64_t>(nccl_lsa_signal_wait_until_impl(
+          nccl_ctx, signal_index, cmp, static_cast<uint64_t>(cmp_value)));
+    }
+#endif
+    case SymmContext::Type::NVSHMEM: {
+      NVSHMEMSymmContext* nvshmem_ctx = static_cast<NVSHMEMSymmContext*>(ctx);
+      return static_cast<int64_t>(nvshmem_lsa_signal_wait_until_impl(
+          nvshmem_ctx, signal_index, cmp, static_cast<uint64_t>(cmp_value)));
+    }
+    default:
+      TORCH_SYMM_CHECK(false, "Unknown SymmContext type");
+      return 0;
+  }
+}
+
+/**
+ * Unified lsa_signal_reset operation.
+ *
+ * Resets a local LSA signal at signal_index to zero. This is used to prepare
+ * a signal for the next round of signaling/waiting in iterative algorithms
+ * within the LSA domain.
+ *
+ * @param ctx_ptr Pointer to SymmContext (as int64)
+ * @param signal_index Index of the signal to reset
+ * @return 0 on success
+ */
+__device__ int32_t
+symm_lsa_signal_reset(int64_t ctx_ptr, int32_t signal_index) {
+  SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
+  TORCH_SYMM_CHECK(ctx != nullptr, "SymmContext is null");
+
+  switch (ctx->type) {
+#if NCCL_HAS_DEVICE_BITCODE
+    case SymmContext::Type::NCCL: {
+      NCCLSymmContext* nccl_ctx = static_cast<NCCLSymmContext*>(ctx);
+      nccl_lsa_signal_reset_impl(nccl_ctx, signal_index);
+      return 0;
+    }
+#endif
+    case SymmContext::Type::NVSHMEM: {
+      NVSHMEMSymmContext* nvshmem_ctx = static_cast<NVSHMEMSymmContext*>(ctx);
+      nvshmem_lsa_signal_reset_impl(nvshmem_ctx, signal_index);
       return 0;
     }
     default:

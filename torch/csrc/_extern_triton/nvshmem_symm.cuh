@@ -12,7 +12,7 @@
 #include <cuda_runtime.h>
 #include <stdint.h>
 
-#include "symm_comm.cuh"
+#include <symm_comm.cuh>
 
 // =============================================================================
 // REDUCTION OPERATION AND DATA TYPE CONSTANTS
@@ -575,6 +575,141 @@ __device__ void nvshmem_signal_impl(
 }
 
 /**
+ * NVSHMEM backend implementation of lsa_signal.
+ *
+ * Atomically updates a signal value at a remote rank's LSA signal location.
+ * This is a point-to-point notification mechanism without data transfer,
+ * operating within the LSA (Local Symmetric Access) domain using direct
+ * P2P memory access.
+ *
+ * Uses the lsa_signal_pad from the context for direct P2P signaling
+ * between NVLink-connected peers.
+ *
+ * @param nvshmem_ctx NVSHMEM context with lsa_signal_pad
+ * @param signal_index Index of the signal to update
+ * @param dest_rank Destination PE to signal (must be in LSA domain)
+ * @param value Value to use in the operation (default 1)
+ * @param op Signal operation: SIGNAL_OP_SET (0) or SIGNAL_OP_ADD (1)
+ */
+__device__ void nvshmem_lsa_signal_impl(
+    NVSHMEMSymmContext* nvshmem_ctx,
+    int32_t signal_index,
+    int32_t dest_rank,
+    uint64_t value,
+    int32_t op) {
+  // Get the LSA signal pad from the context (used for P2P load/store)
+  TORCH_SYMM_CHECK(
+      nvshmem_ctx->lsa_signal_pad != nullptr, "lsa_signal_pad is null");
+
+  // Get the remote peer's signal pad address via P2P
+  uint64_t* peer_signal_pad = static_cast<uint64_t*>(
+      nvshmem_ptr(nvshmem_ctx->lsa_signal_pad, dest_rank));
+  TORCH_SYMM_CHECK(peer_signal_pad != nullptr, "Peer not P2P accessible");
+
+  // Calculate the address of the specific signal
+  uint64_t* target_signal = peer_signal_pad + signal_index;
+
+  // Perform the atomic operation
+  switch (op) {
+    case SIGNAL_OP_SET:
+      atomicExch(reinterpret_cast<unsigned long long*>(target_signal), value);
+      break;
+    case SIGNAL_OP_ADD:
+      atomicAdd(reinterpret_cast<unsigned long long*>(target_signal), value);
+      break;
+    default:
+      TORCH_SYMM_CHECK(false, "Invalid signal operation");
+  }
+}
+
+/**
+ * NVSHMEM backend implementation of lsa_signal_wait_until.
+ *
+ * Blocks the calling thread/CTA until a local LSA signal at signal_index
+ * meets the specified condition relative to the comparison value.
+ *
+ * Uses the lsa_signal_pad from the context for P2P signaling within LSA domain.
+ *
+ * @param nvshmem_ctx NVSHMEM context with lsa_signal_pad
+ * @param signal_index Index of the signal to wait on
+ * @param cmp Comparison operation (SIGNAL_CMP_EQ, SIGNAL_CMP_GE, etc.)
+ * @param cmp_value Value to compare against
+ * @return The signal value that satisfied the condition
+ */
+__device__ uint64_t nvshmem_lsa_signal_wait_until_impl(
+    NVSHMEMSymmContext* nvshmem_ctx,
+    int32_t signal_index,
+    int32_t cmp,
+    uint64_t cmp_value) {
+  // Get the LSA signal pad from the context
+  TORCH_SYMM_CHECK(
+      nvshmem_ctx->lsa_signal_pad != nullptr, "lsa_signal_pad is null");
+  uint64_t* signal_pad = nvshmem_ctx->lsa_signal_pad;
+
+  // Calculate the address of the specific signal
+  volatile uint64_t* target_signal = signal_pad + signal_index;
+
+  // Poll until the condition is met
+  uint64_t current_value;
+  bool condition_met = false;
+  do {
+    current_value = *target_signal;
+    switch (cmp) {
+      case SIGNAL_CMP_EQ:
+        condition_met = (current_value == cmp_value);
+        break;
+      case SIGNAL_CMP_NE:
+        condition_met = (current_value != cmp_value);
+        break;
+      case SIGNAL_CMP_GT:
+        condition_met = (current_value > cmp_value);
+        break;
+      case SIGNAL_CMP_GE:
+        condition_met = (current_value >= cmp_value);
+        break;
+      case SIGNAL_CMP_LT:
+        condition_met = (current_value < cmp_value);
+        break;
+      case SIGNAL_CMP_LE:
+        condition_met = (current_value <= cmp_value);
+        break;
+      default:
+        TORCH_SYMM_CHECK(false, "Invalid comparison operation");
+        return 0;
+    }
+  } while (!condition_met);
+
+  return current_value;
+}
+
+/**
+ * NVSHMEM backend implementation of lsa_signal_reset.
+ *
+ * Resets a local LSA signal at signal_index to zero. This is used to prepare
+ * a signal for the next round of signaling/waiting in iterative algorithms
+ * within the LSA domain.
+ *
+ * Uses the lsa_signal_pad from the context for P2P signaling.
+ *
+ * @param nvshmem_ctx NVSHMEM context with lsa_signal_pad
+ * @param signal_index Index of the signal to reset
+ */
+__device__ void nvshmem_lsa_signal_reset_impl(
+    NVSHMEMSymmContext* nvshmem_ctx,
+    int32_t signal_index) {
+  // Get the LSA signal pad from the context
+  TORCH_SYMM_CHECK(
+      nvshmem_ctx->lsa_signal_pad != nullptr, "lsa_signal_pad is null");
+  uint64_t* signal_pad = nvshmem_ctx->lsa_signal_pad;
+
+  // Calculate the address of the specific signal
+  uint64_t* target_signal = signal_pad + signal_index;
+
+  // Reset the signal to zero
+  *target_signal = 0;
+}
+
+/**
  * NVSHMEM backend implementation of lsa_signal_ptr.
  *
  * Returns a device pointer to a peer's LSA signal pad, if accessible via P2P.
@@ -1024,6 +1159,77 @@ nvshmem_symm_signal_reset(int64_t ctx_ptr, int32_t signal_index) {
   SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
   NVSHMEMSymmContext* nvshmem_ctx = cast_to_nvshmem_context(ctx);
   nvshmem_signal_reset_impl(nvshmem_ctx, signal_index);
+  return 0;
+}
+
+/**
+ * NVSHMEM-specific wrapper for lsa_signal operation.
+ *
+ * Atomically updates a signal value at a remote rank's LSA signal location.
+ * This is a point-to-point notification mechanism without data transfer,
+ * operating within the LSA domain using direct P2P memory access.
+ *
+ * @param ctx_ptr Pointer to SymmContext (as int64)
+ * @param signal_index Index of the signal to update
+ * @param dest_rank Destination PE to signal (must be in LSA domain)
+ * @param value Value to use in the operation
+ * @param op Signal operation: SIGNAL_OP_SET (0) or SIGNAL_OP_ADD (1)
+ * @return 0 on success
+ */
+__device__ int32_t nvshmem_symm_lsa_signal(
+    int64_t ctx_ptr,
+    int32_t signal_index,
+    int32_t dest_rank,
+    int64_t value,
+    int32_t op) {
+  SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
+  NVSHMEMSymmContext* nvshmem_ctx = cast_to_nvshmem_context(ctx);
+  nvshmem_lsa_signal_impl(
+      nvshmem_ctx, signal_index, dest_rank, static_cast<uint64_t>(value), op);
+  return 0;
+}
+
+/**
+ * NVSHMEM-specific wrapper for lsa_signal_wait_until operation.
+ *
+ * Blocks the calling thread/CTA until a local LSA signal at signal_index
+ * meets the specified condition relative to the comparison value.
+ *
+ * Uses the lsa_signal_pad from the context for P2P signaling within LSA domain.
+ *
+ * @param ctx_ptr Pointer to SymmContext (as int64)
+ * @param signal_index Index of the signal to wait on
+ * @param cmp Comparison operation (SIGNAL_CMP_EQ, SIGNAL_CMP_GE, etc.)
+ * @param cmp_value Value to compare against
+ * @return The signal value that satisfied the condition
+ */
+__device__ int64_t nvshmem_symm_lsa_signal_wait_until(
+    int64_t ctx_ptr,
+    int32_t signal_index,
+    int32_t cmp,
+    int64_t cmp_value) {
+  SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
+  NVSHMEMSymmContext* nvshmem_ctx = cast_to_nvshmem_context(ctx);
+  return static_cast<int64_t>(nvshmem_lsa_signal_wait_until_impl(
+      nvshmem_ctx, signal_index, cmp, static_cast<uint64_t>(cmp_value)));
+}
+
+/**
+ * NVSHMEM-specific wrapper for lsa_signal_reset operation.
+ *
+ * Resets a local LSA signal at signal_index to zero. This is used to prepare
+ * a signal for the next round of signaling/waiting in iterative algorithms
+ * within the LSA domain.
+ *
+ * @param ctx_ptr Pointer to SymmContext (as int64)
+ * @param signal_index Index of the signal to reset
+ * @return 0 on success
+ */
+__device__ int32_t
+nvshmem_symm_lsa_signal_reset(int64_t ctx_ptr, int32_t signal_index) {
+  SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
+  NVSHMEMSymmContext* nvshmem_ctx = cast_to_nvshmem_context(ctx);
+  nvshmem_lsa_signal_reset_impl(nvshmem_ctx, signal_index);
   return 0;
 }
 

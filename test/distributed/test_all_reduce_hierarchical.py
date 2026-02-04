@@ -82,14 +82,11 @@ def requires_nvshmem(func: Callable) -> Callable:
 
 # Import Triton kernels if available
 if TRITON_AVAILABLE:
-    from torch._extern_triton._torch_symm_triton import (
-        BACKEND_DEFAULT,
-        BACKEND_NVSHMEM,
-    )
     from torch._extern_triton._all_reduce_hierarchical import (
         all_reduce_hierarchical_dynamic,
         all_reduce_hierarchical_nvshmem,
     )
+    from torch._extern_triton._torch_symm_triton import BACKEND_DEFAULT, BACKEND_NVSHMEM
 
 
 class TestAllReduceHierarchical(MultiProcessTestCase):

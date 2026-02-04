@@ -26,6 +26,7 @@ from the SymmContext using symm_team_size and symm_team_rank primitives.
 
 from __future__ import annotations
 
+
 try:
     import triton
     from triton import language as tl
@@ -44,8 +45,8 @@ if TRITON_AVAILABLE:
         requires_torch_symm,
         symm_barrier,
         symm_multicast_ptr,
-        symm_remote_ptr,
         symm_put_signal_async,
+        symm_remote_ptr,
         symm_signal_wait_until,
         symm_team_rank,
         symm_team_size,
@@ -109,12 +110,18 @@ if TRITON_AVAILABLE:
             num_programs = tl.num_programs(0)
 
             # Get topology from context using team primitives
-            my_rank = symm_team_rank(ctx_ptr, scope=TL_SCOPE_WORLD, backend=backend_hint)
-            team_size = symm_team_size(ctx_ptr, scope=TL_SCOPE_WORLD, backend=backend_hint)
+            my_rank = symm_team_rank(
+                ctx_ptr, scope=TL_SCOPE_WORLD, backend=backend_hint
+            )
+            team_size = symm_team_size(
+                ctx_ptr, scope=TL_SCOPE_WORLD, backend=backend_hint
+            )
             lsa_size = symm_team_size(ctx_ptr, scope=TL_SCOPE_LSA, backend=backend_hint)
 
             # Derived topology values
-            local_rank = symm_team_rank(ctx_ptr, scope=TL_SCOPE_LSA, backend=backend_hint)
+            local_rank = symm_team_rank(
+                ctx_ptr, scope=TL_SCOPE_LSA, backend=backend_hint
+            )
             node_id = my_rank // lsa_size
             num_nodes = team_size // lsa_size
 
@@ -235,7 +242,8 @@ if TRITON_AVAILABLE:
                         local_rank,  # signal_index
                         TL_SIGNAL_CMP_GE,
                         sig_val,  # wait for step + 1
-                        backend_hint,
+                        scope=TL_SCOPE_WORLD,
+                        backend=backend_hint,
                     )
 
                     # Accumulate received data from scratch into our recv chunk
@@ -252,7 +260,7 @@ if TRITON_AVAILABLE:
                         )
                         tl.store(p_data + offsets, local_val + recv_val, mask=mask)
 
-                # Barrier after reduce-scatter across nodes
+                    # Barrier after reduce-scatter across nodes
                     # Use TL_SCOPE_WORLD since Phase 2 involves all nodes
                     symm_barrier(ctx_ptr, scope=TL_SCOPE_WORLD, backend=backend_hint)
 
@@ -304,7 +312,8 @@ if TRITON_AVAILABLE:
                         local_rank,
                         TL_SIGNAL_CMP_GE,
                         sig_val,
-                        backend_hint,
+                        scope=TL_SCOPE_WORLD,
+                        backend=backend_hint,
                     )
 
                     # Copy received data to the recv chunk (no accumulation, just copy)
@@ -318,7 +327,7 @@ if TRITON_AVAILABLE:
                         val = tl.load(p_scratch + scratch_offsets, mask=mask, other=0.0)
                         tl.store(p_data + offsets, val, mask=mask)
 
-                # Barrier after all-gather across nodes
+                    # Barrier after all-gather across nodes
                     # Use TL_SCOPE_WORLD since Phase 2 involves all nodes
                     symm_barrier(ctx_ptr, scope=TL_SCOPE_WORLD, backend=backend_hint)
 
@@ -332,9 +341,7 @@ if TRITON_AVAILABLE:
 
             # Try to get multicast pointer (returns 0 if not supported)
             # Team is obtained from the context internally
-            mc_ptr_raw = symm_multicast_ptr(
-                ctx_ptr, ptr_data, backend_hint
-            )
+            mc_ptr_raw = symm_multicast_ptr(ctx_ptr, ptr_data, backend_hint)
 
             if mc_ptr_raw != 0:
                 # Hardware multicast is available - single write broadcasts to all peers

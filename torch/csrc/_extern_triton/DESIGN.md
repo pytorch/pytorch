@@ -181,18 +181,24 @@ def my_kernel(ctx_ptr, data_ptr, backend_hint: tl.constexpr):
 
 #### Ordering Primitives
 
-| Primitive    | Signature                              | Purpose                                             |
-|--------------|----------------------------------------|-----------------------------------------------------|
-| `symm_fence` | `(ctx_ptr, scope, backend) -> void`    | Memory fence with configurable scope (CTA/GPU/system) |
-| `symm_quiet` | `(ctx_ptr, backend) -> void`           | Ensure all prior one-sided operations have completed  |
+| Primitive    | Signature                                   | Purpose                                             |
+|--------------|---------------------------------------------|-----------------------------------------------------|
+| `symm_fence` | `(ctx_ptr, fence_scope, backend) -> void`   | Memory fence with configurable scope (CTA/GPU/system) |
+| `symm_quiet` | `(ctx_ptr, backend) -> void`                | Ensure all prior one-sided operations have completed  |
+
+**Note:** The `fence_scope` parameter for `symm_fence` uses `FENCE_SCOPE_*` constants (CTA=0, GPU=1, SYSTEM=2), which are different from the team `SCOPE_*` constants (LSA=0, WORLD=1) used by barriers and signals.
 
 ### 2.4 Signaling Primitives
 
 | Primitive              | Signature                                              | Purpose                                          |
 |------------------------|--------------------------------------------------------|--------------------------------------------------|
-| `symm_signal`          | `(ctx_ptr, signal_index, dest_rank, value, op, backend) -> void` | Atomically update a signal at remote rank        |
-| `symm_signal_wait_until` | `(ctx_ptr, signal_index, cmp, cmp_value, backend) -> int64` | Block until local signal meets condition         |
-| `symm_signal_reset`    | `(ctx_ptr, signal_index, backend) -> void`             | Reset a local signal to zero for reuse           |
+| `symm_signal`          | `(ctx_ptr, signal_index, dest_rank, value, op, scope, backend) -> void` | Atomically update a signal at remote rank        |
+| `symm_signal_wait_until` | `(ctx_ptr, signal_index, cmp, cmp_value, scope, backend) -> int64` | Block until local signal meets condition         |
+| `symm_signal_reset`    | `(ctx_ptr, signal_index, scope, backend) -> void`      | Reset a local signal to zero for reuse           |
+
+**Scope parameter (controls which signal pad is used):**
+- `SCOPE_LSA (0)`: Uses `lsa_signal_pad` for NVLink-connected peers (faster, P2P direct access)
+- `SCOPE_WORLD (1)`: Uses `gin_signal_pad` for all ranks via GIN (default, works across nodes)
 
 **Signal operations (`symm_signal` op parameter):**
 - `SIGNAL_OP_SET (0)`: Atomic set (replace value)
@@ -205,6 +211,45 @@ def my_kernel(ctx_ptr, data_ptr, backend_hint: tl.constexpr):
 - `SIGNAL_CMP_GE (4)`: Wait until signal >= cmp_value
 - `SIGNAL_CMP_LT (5)`: Wait until signal < cmp_value
 - `SIGNAL_CMP_LE (6)`: Wait until signal <= cmp_value
+
+**Example usage:**
+
+```python
+@triton.jit
+def producer_consumer_kernel(ctx_ptr, data_ptr, peer_rank, backend_hint: tl.constexpr):
+    my_rank = symm_team_rank(ctx_ptr, scope=TL_SCOPE_WORLD, backend=backend_hint)
+
+    # Producer: write data and signal consumer (WORLD scope for cross-node)
+    if my_rank == 0:
+        tl.store(data_ptr + offsets, data, mask=mask)
+        symm_signal(ctx_ptr, signal_index=0, dest_rank=peer_rank, value=1,
+                    op=TL_SIGNAL_OP_SET, scope=TL_SCOPE_WORLD, backend=backend_hint)
+
+    # Consumer: wait for producer's signal then read data
+    if my_rank == peer_rank:
+        symm_signal_wait_until(ctx_ptr, signal_index=0, cmp=TL_SIGNAL_CMP_GE,
+                               cmp_value=1, scope=TL_SCOPE_WORLD, backend=backend_hint)
+        data = tl.load(peer_data_ptr + offsets, mask=mask)
+        symm_signal_reset(ctx_ptr, signal_index=0, scope=TL_SCOPE_WORLD, backend=backend_hint)
+
+
+@triton.jit
+def lsa_signal_kernel(ctx_ptr, data_ptr, backend_hint: tl.constexpr):
+    # For NVLink-connected peers, use SCOPE_LSA for faster signaling
+    local_rank = symm_team_rank(ctx_ptr, scope=TL_SCOPE_LSA, backend=backend_hint)
+    lsa_size = symm_team_size(ctx_ptr, scope=TL_SCOPE_LSA, backend=backend_hint)
+    next_peer = (local_rank + 1) % lsa_size
+
+    # Signal LSA peer directly (faster than WORLD scope)
+    symm_signal(ctx_ptr, signal_index=local_rank, dest_rank=next_peer, value=1,
+                op=TL_SIGNAL_OP_ADD, scope=TL_SCOPE_LSA, backend=backend_hint)
+
+    # Wait for signal from previous LSA peer
+    prev_peer = (local_rank - 1 + lsa_size) % lsa_size
+    symm_signal_wait_until(ctx_ptr, signal_index=local_rank, cmp=TL_SIGNAL_CMP_GE,
+                           cmp_value=1, scope=TL_SCOPE_LSA, backend=backend_hint)
+    symm_signal_reset(ctx_ptr, signal_index=local_rank, scope=TL_SCOPE_LSA, backend=backend_hint)
+```
 
 ### 2.5 Data Transfer Primitives
 
@@ -855,7 +900,7 @@ If NCCLx later introduces distinct device APIs, create a separate backend:
 // ncclx_symm.cuh - Only if NCCLx introduces new device APIs
 
 #pragma once
-#include "symm_comm.cuh"
+#include <symm_comm.cuh>
 
 // Forward declarations for hypothetical NCCLx-specific device APIs
 // (Currently these do NOT exist - NCCLx uses standard NCCL APIs)
@@ -1320,7 +1365,7 @@ Add C++ functions to create SymmContext from an existing `ncclComm_t`:
 // torch/csrc/_extern_triton/torchcomms_integration.cpp
 
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_manager.hpp>
-#include "symm_comm.cuh"
+#include <symm_comm.cuh>
 
 namespace torch_symm {
 
