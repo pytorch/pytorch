@@ -764,7 +764,8 @@ class TestHash(TestCase):
     def test_integer_hashes(self, type_code):
         scalar = np.dtype(type_code).type
         for i in range(128):
-            assert hash(i) == hash(scalar(i))
+            if hash(i) != hash(scalar(i)):
+                raise AssertionError(f"Expected hash({i}) == hash(scalar({i}))")
 
     @parametrize("type_code", np.typecodes["AllFloat"])
     def test_float_and_complex_hashes(self, type_code):
@@ -776,12 +777,21 @@ class TestHash(TestCase):
                 val = complex(numpy_val)
             else:
                 val = float(numpy_val)
-            assert val == numpy_val
-            assert hash(val) == hash(numpy_val)
+            if val != numpy_val:
+                raise AssertionError(
+                    f"Expected val == numpy_val, got {val} vs {numpy_val}"
+                )
+            if hash(val) != hash(numpy_val):
+                raise AssertionError(
+                    f"Expected hash(val) == hash(numpy_val), got {hash(val)} vs {hash(numpy_val)}"
+                )
 
         if hash(float(np.nan)) != hash(float(np.nan)):
             # If Python distinguishes different NaNs we do so too (gh-18833)
-            assert hash(scalar(np.nan)) != hash(scalar(np.nan))
+            if hash(scalar(np.nan)) == hash(scalar(np.nan)):
+                raise AssertionError(
+                    "Expected hash(scalar(np.nan)) != hash(scalar(np.nan))"
+                )
 
     @parametrize("type_code", np.typecodes["Complex"])
     def test_complex_hashes(self, type_code):
@@ -789,7 +799,10 @@ class TestHash(TestCase):
         scalar = np.dtype(type_code).type
         for val in [np.pi + 1j, np.inf - 3j, 3j, 6.0 + 1j]:
             numpy_val = scalar(val)
-            assert hash(complex(numpy_val)) == hash(numpy_val)
+            if hash(complex(numpy_val)) != hash(numpy_val):
+                raise AssertionError(
+                    f"Expected hash(complex(numpy_val)) == hash(numpy_val), got {hash(complex(numpy_val))} vs {hash(numpy_val)}"
+                )
 
 
 @contextlib.contextmanager
@@ -925,13 +938,19 @@ class TestScalarSubclassingMisc(TestCase):
 
         # inheritance has to override, or this is correctly lost:
         res = op(myf_simple1(1), myf_simple2(2))
-        assert type(res) is sctype or type(res) is np.bool_
-        assert op(myf_simple1(1), myf_simple2(2)) == op(1, 2)  # inherited
+        if type(res) is not sctype and type(res) is not np.bool_:
+            raise AssertionError(
+                f"Expected type(res) is sctype or np.bool_, got {type(res)}"
+            )
+        if op(myf_simple1(1), myf_simple2(2)) != op(1, 2):
+            raise AssertionError("Expected inherited op to match")  # inherited
 
         # Two independent subclasses do not really define an order.  This could
         # be attempted, but we do not since Python's `int` does neither:
-        assert op(myf_op(1), myf_simple1(2)) == __op__
-        assert op(myf_simple1(1), myf_op(2)) == op(1, 2)  # inherited
+        if op(myf_op(1), myf_simple1(2)) != __op__:
+            raise AssertionError(f"Expected op result == {__op__}")
+        if op(myf_simple1(1), myf_op(2)) != op(1, 2):
+            raise AssertionError("Expected inherited op to match")  # inherited
 
     @skip(reason="We do not support subclassing scalars.")
     @parametrize("__op__, __rop__, op, cmp", ops_with_names)
@@ -952,8 +971,10 @@ class TestScalarSubclassingMisc(TestCase):
         )
 
         # Just like normally, we should never presume we can modify the float.
-        assert op(myt(1), np.float64(2)) == __op__
-        assert op(np.float64(1), myt(2)) == __rop__
+        if op(myt(1), np.float64(2)) != __op__:
+            raise AssertionError(f"Expected op result == {__op__}")
+        if op(np.float64(1), myt(2)) != __rop__:
+            raise AssertionError(f"Expected rop result == {__rop__}")
 
         if op in {operator.mod, operator.floordiv} and subtype is complex:
             return  # module is not support for complex.  Do not test.
@@ -967,12 +988,20 @@ class TestScalarSubclassingMisc(TestCase):
         # Check for float32, as a float subclass float64 may behave differently
         res = op(myt(1), np.float16(2))
         expected = op(subtype(1), np.float16(2))
-        assert res == expected
-        assert type(res) is type(expected)
+        if res != expected:
+            raise AssertionError(f"Expected res == {expected}, got {res}")
+        if type(res) is not type(expected):
+            raise AssertionError(
+                f"Expected type(res) is {type(expected)}, got {type(res)}"
+            )
         res = op(np.float32(2), myt(1))
         expected = op(np.float32(2), subtype(1))
-        assert res == expected
-        assert type(res) is type(expected)
+        if res != expected:
+            raise AssertionError(f"Expected res == {expected}, got {res}")
+        if type(res) is not type(expected):
+            raise AssertionError(
+                f"Expected type(res) is {type(expected)}, got {type(res)}"
+            )
 
 
 if __name__ == "__main__":
