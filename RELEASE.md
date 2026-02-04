@@ -51,7 +51,7 @@ Following is the Release Compatibility Matrix for PyTorch releases:
 
 | PyTorch version | Python | C++ | Stable CUDA | Experimental CUDA | Stable ROCm |
 | --- | --- | --- | --- | --- | --- |
-| 2.10 | >=3.10, <=(3.14, 3.14t experimental) | C++17 | CUDA 12.6 (CUDNN 9.10.2.21), CUDA 12.8 (CUDNN 9.10.2.21) | CUDA 13.0 (CUDNN 9.13.0.50) | ROCm 7.1 |
+| 2.10 | >=3.10, <=(3.14, 3.14t experimental) | C++17 | CUDA 12.6 (CUDNN 9.10.2.21), CUDA 12.8 (CUDNN 9.10.2.21) | CUDA 13.0 (CUDNN 9.15.1.9) | ROCm 7.1 |
 | 2.9 | >=3.10, <=(3.14, 3.14t experimental) | C++17 | CUDA 12.6 (CUDNN 9.10.2.21), CUDA 12.8 (CUDNN 9.10.2.21) | CUDA 13.0 (CUDNN 9.13.0.50) | ROCm 6.4 |
 | 2.8 | >=3.9, <=3.13, (3.13t experimental) | C++17 | CUDA 12.6 (CUDNN 9.10.2.21), CUDA 12.8 (CUDNN 9.10.2.21) | CUDA 12.9 (CUDNN 9.10.2.21) | ROCm 6.4 |
 | 2.7 | >=3.9, <=3.13, (3.13t experimental) | C++17 | CUDA 11.8 (CUDNN 9.1.0.70), CUDA 12.6 (CUDNN 9.5.1.17) | CUDA 12.8 (CUDNN 9.7.1.26) | ROCm 6.3 |
@@ -102,7 +102,7 @@ Following is the release cadence. All future dates below are tentative. For late
 | 2.13 | 8 Jun 2026 | 8 Jul 2026 | (Aug 2026) | (Sept 2026) |
 | 2.14 | 3 Aug 2026 | 2 Sept 2026 | (Oct 2026) | (Nov 2026) |
 | 2.15 | 28 Sept 2026 | 28 Oct 2026 | (Nov 2026) | (Dec 2026) |
-| 2.16 | 2 Nov 2026 | 22 Dec 2026 | (Jan 2027) | (Feb 2027) |
+| 2.16 | 23 Nov 2026 | 22 Dec 2026 | (Jan 2027) | (Feb 2027) |
 
 ## General Overview
 

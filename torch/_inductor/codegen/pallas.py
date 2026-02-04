@@ -2552,7 +2552,7 @@ class PallasKernel(SIMDKernel):
                 # 4. Reshape output with 1s in reduced dims for proper broadcasting
                 reduction_op = reduction_ops[reduction_type]
                 # Use a helper to find reduction axes by product matching
-                reduction_expr = f"_pallas_partial_reduce({reduction_op}, {value}, {pointwise_numel}, {reduction_numel})"
+                reduction_expr = f"pallas_partial_reduce({reduction_op}, {value}, {pointwise_numel}, {reduction_numel})"
             elif is_symbolic_partial:
                 # Symbolic sizes: use axis-based reduction (axis=0 for outer reduction)
                 reduction_expr = f"{reduction_ops[reduction_type]}({value}, axis=0)"
@@ -2619,8 +2619,10 @@ class PallasKernel(SIMDKernel):
         }
 
         kernel_name = name or "<KERNEL_NAME>"
-        interpret_is_cpu = V.graph.get_current_device_or_throw().type == "cpu"
         is_tpu = torch._inductor.config._debug_cpu_to_tpu_pallas
+        interpret_is_cpu = (
+            V.graph.get_current_device_or_throw().type == "cpu" and not is_tpu
+        )
         if is_tpu:
             if not torch._inductor.config.pallas_take_first_jax_device_only:
                 raise RuntimeError(
@@ -2642,31 +2644,7 @@ import torch
 import jax
 import jax.numpy as jnp
 from jax.experimental import pallas as pl
-from torch._inductor.runtime.runtime_utils import torch_dtype_to_jax_runtime
-def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
-    # Helper for partial reductions: reorders axes and reduces
-    # Returns result with keepdims-style shape for proper in-kernel broadcasting
-    shape = tuple(v.shape)
-    # Find contiguous axes whose product = red_numel (search from right)
-    red_axes = None
-    for i in range(len(shape) - 1, -1, -1):
-        prod = 1
-        for j in range(i, -1, -1):
-            prod *= shape[j]
-            if prod == red_numel:
-                red_axes = list(range(j, i + 1))
-                break
-        if red_axes is not None:
-            break
-    if red_axes is None:
-        red_axes = [len(shape) - 1]
-    # Build output shape with 1s for reduced dimensions (keepdims style)
-    out_shape = tuple(1 if i in red_axes else s for i, s in enumerate(shape))
-    # Move pointwise axes to front, reduction axes to back
-    pw_axes = [i for i in range(len(shape)) if i not in red_axes]
-    reordered = jnp.moveaxis(v, pw_axes, list(range(len(pw_axes))))
-    result = reduce_fn(reordered.reshape(pw_numel, red_numel), axis=-1)
-    return result.reshape(out_shape)
+from torch._inductor.runtime.runtime_utils import pallas_partial_reduce, torch_dtype_to_jax_runtime
 """ + (
             "\nfrom jax.experimental.pallas import mosaic_gpu as plgpu"
             if not interpret_is_cpu
@@ -2676,18 +2654,7 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
 
         aliasable_flags: dict[str, bool] = {}
         for param in pure_out_params:
-            buffer_name = output_buffer_lookup.get(param)
-            is_contiguous = buffer_name is not None and self._buffer_is_contiguous(
-                buffer_name
-            )
-            # Enable aliasing if:
-            # 1. Not on CPU and buffer is contiguous (normal case), OR
-            # 2. Output needs to be readable (for scatter operations)
-            # outputs_need_read contains output parameter names (e.g., out_ptr0)
-            needs_read = param in self.outputs_need_read
-            aliasable_flags[param] = (
-                (not interpret_is_cpu) and is_contiguous
-            ) or needs_read
+            aliasable_flags[param] = True
         alias_params = [
             f"{param}_alias" for param in pure_out_params if aliasable_flags[param]
         ]
@@ -2703,7 +2670,7 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
         # because pallas_call returns a new array (doesn't mutate in-place)
         # For outputs that need read access (scatter), we enable aliasing to read
         # current values, but still need to copy back the result
-        if interpret_is_cpu:
+        if interpret_is_cpu or is_tpu:
             # Copy back all outputs on CPU
             copy_output_indices = list(range(len(output_params)))
         else:
@@ -2912,6 +2879,7 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
                 if out_ptr in full_kernel_params:
                     code.writeline(store_line)
 
+        code.writeline("")
         jit_wrapper_name = f"{kernel_name}_jit_wrapper"
         donate_indices = []
         # Offset by 2 for (out_shapes, out_dtypes), plus size_var_params count
@@ -2937,9 +2905,18 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
         )
         code.writeline(f"def {jit_wrapper_name}({', '.join(wrapper_params)}):")
         with code.indent():
-            code.writeline("out_specs = tuple(")
+            code.writeline("out_shapes_pallas = tuple(")
             code.writeline("    jax.ShapeDtypeStruct(shape, dtype)")
             code.writeline("    for shape, dtype in zip(out_shapes, out_dtypes)")
+            code.writeline(")")
+            code.writeline("indexer = lambda n: lambda i: [i] * n")
+            code.writeline("out_specs_pallas = tuple(")
+            code.writeline("    pl.BlockSpec(shape, indexer(len(shape)))")
+            code.writeline("    for shape, dtype in zip(out_shapes, out_dtypes)")
+            code.writeline(")")
+            code.writeline("in_specs_pallas = tuple(")
+            code.writeline("    pl.BlockSpec(i.shape, indexer(len(i.shape)))")
+            code.writeline("    for i in [" + ", ".join(kernel_input_params) + "]")
             code.writeline(")")
 
             alias_pairs: list[tuple[int, int]] = []
@@ -3341,7 +3318,9 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
             else:
                 code.writeline("return pl.pallas_call(")
                 code.writeline("    " + kernel_arg)
-                code.writeline("    out_shape=out_specs,")
+                code.writeline("    out_shape=out_shapes_pallas,")
+                code.writeline("    out_specs=out_specs_pallas,")
+                code.writeline("    in_specs=in_specs_pallas,")
                 code.writeline(f"    interpret={interpret_literal},")
                 code.writeline("    grid=(1,),")
                 code.writeline(
@@ -3354,6 +3333,7 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
                     code.writeline(f"    {', '.join(kernel_input_params)},")
                 code.writeline(")")
 
+        code.writeline("")
         main_name = f"{kernel_name}_main"
         code.writeline(
             f"def {main_name}({', '.join(full_kernel_params)}, stream=None):"

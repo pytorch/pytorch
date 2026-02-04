@@ -21,6 +21,7 @@ import os
 import subprocess
 import sys
 import urllib
+from concurrent.futures import as_completed, ThreadPoolExecutor
 from io import BytesIO
 from itertools import product
 from pathlib import Path
@@ -163,50 +164,69 @@ def normalize_suite_filename(suite_name):
     return subsuite
 
 
+def download_single_artifact(suite, shard, url_candidates):
+    """Download a single artifact, trying each URL candidate until one succeeds.
+
+    Returns a tuple of (suite, shard, result_dict) where result_dict maps
+    (suite, phase) -> DataFrame, or None if download failed.
+    """
+    subsuite = normalize_suite_filename(suite)
+    for url in url_candidates:
+        try:
+            resp = urlopen(url)
+            artifact = ZipFile(BytesIO(resp.read()))
+            result = {}
+            for phase in ("training", "inference"):
+                # Try both paths - CUDA uses test/test-reports/, ROCm uses test-reports/
+                possible_names = [
+                    f"test/test-reports/{phase}_{subsuite}.csv",
+                    f"test-reports/{phase}_{subsuite}.csv",
+                ]
+                found = False
+                for name in possible_names:
+                    try:
+                        df = pd.read_csv(artifact.open(name))
+                        df["graph_breaks"] = df["graph_breaks"].fillna(0).astype(int)
+                        result[(suite, phase)] = df
+                        found = True
+                        break
+                    except KeyError:
+                        continue
+                if not found and phase == "inference":
+                    # No warning for training, since it's expected to be missing for some tests
+                    print(
+                        f"Warning: Unable to find {phase}_{subsuite}.csv in artifacts file from {url}, continuing"
+                    )
+            return (suite, shard, result)
+        except urllib.error.HTTPError:
+            continue  # Try next candidate URL
+    return (suite, shard, None)
+
+
 def download_artifacts_and_extract_csvs(urls):
     dataframes = {}
-    for (suite, shard), url_candidates in urls.items():
-        # Try each URL candidate (oldest first) until one succeeds
-        downloaded = False
-        for url in url_candidates:
-            try:
-                resp = urlopen(url)
-                subsuite = normalize_suite_filename(suite)
-                artifact = ZipFile(BytesIO(resp.read()))
-                for phase in ("training", "inference"):
-                    # Try both paths - CUDA uses test/test-reports/, ROCm uses test-reports/
-                    possible_names = [
-                        f"test/test-reports/{phase}_{subsuite}.csv",
-                        f"test-reports/{phase}_{subsuite}.csv",
-                    ]
-                    found = False
-                    for name in possible_names:
-                        try:
-                            df = pd.read_csv(artifact.open(name))
-                            df["graph_breaks"] = (
-                                df["graph_breaks"].fillna(0).astype(int)
-                            )
-                            prev_df = dataframes.get((suite, phase), None)
-                            dataframes[(suite, phase)] = (
-                                pd.concat([prev_df, df]) if prev_df is not None else df
-                            )
-                            found = True
-                            break
-                        except KeyError:
-                            continue
-                    if not found and phase == "inference":
-                        # No warning for training, since it's expected to be missing for some tests
-                        print(
-                            f"Warning: Unable to find {phase}_{subsuite}.csv in artifacts file from {url}, continuing"
-                        )
-                downloaded = True
-                break  # Successfully downloaded, no need to try other candidates
-            except urllib.error.HTTPError:
-                continue  # Try next candidate URL
-        if not downloaded:
-            print(
-                f"Unable to download any artifact for {suite} shard {shard}, tried {len(url_candidates)} URLs"
+    with ThreadPoolExecutor(max_workers=16) as executor:
+        futures = {
+            executor.submit(download_single_artifact, suite, shard, url_candidates): (
+                suite,
+                shard,
+                url_candidates,
             )
+            for (suite, shard), url_candidates in urls.items()
+        }
+        for future in as_completed(futures):
+            suite, shard, url_candidates = futures[future]
+            suite_result, shard_result, result = future.result()
+            if result is None:
+                print(
+                    f"Unable to download any artifact for {suite} shard {shard}, tried {len(url_candidates)} URLs"
+                )
+            else:
+                for (s, phase), df in result.items():
+                    prev_df = dataframes.get((s, phase), None)
+                    dataframes[(s, phase)] = (
+                        pd.concat([prev_df, df]) if prev_df is not None else df
+                    )
 
     return dataframes
 
@@ -281,14 +301,22 @@ if __name__ == "__main__":
 
     results = query_job_sha(repo, args.sha)
 
-    print("Processing CUDA jobs...")
+    # Get URLs for both CUDA and ROCm
     cuda_urls = get_artifacts_urls(results, suites, is_rocm=False)
-    cuda_dataframes = download_artifacts_and_extract_csvs(cuda_urls)
+    rocm_urls = get_artifacts_urls(results, suites, is_rocm=True)
+
+    # Download CUDA and ROCm artifacts in parallel
+    print("Downloading CUDA and ROCm artifacts in parallel...")
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        cuda_future = executor.submit(download_artifacts_and_extract_csvs, cuda_urls)
+        rocm_future = executor.submit(download_artifacts_and_extract_csvs, rocm_urls)
+        cuda_dataframes = cuda_future.result()
+        rocm_dataframes = rocm_future.result()
+
+    print("Writing CUDA CSVs...")
     write_filtered_csvs(root_path, cuda_dataframes)
 
-    print("Processing ROCm jobs...")
-    rocm_urls = get_artifacts_urls(results, suites, is_rocm=True)
-    rocm_dataframes = download_artifacts_and_extract_csvs(rocm_urls)
+    print("Writing ROCm CSVs...")
     write_filtered_csvs(rocm_path, rocm_dataframes)
 
     print("Success. Now, confirm the changes to .csvs and `git add` them if satisfied.")

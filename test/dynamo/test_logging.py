@@ -412,7 +412,14 @@ torch._inductor.exc.InductorError: LoweringException: AssertionError:
   target: aten.round.default
   args[0]: TensorBox(StorageBox(
     InputBuffer(name='primals_1', layout=FixedLayout('cpu', torch.float32, size=[1000, 1000], stride=[1000, 1]))
-  ))""",
+  ))AssertionError:
+  target: aten.round.default
+  args[0]: TensorBox(StorageBox(
+    InputBuffer(name='primals_1', layout=FixedLayout('cpu', torch.float32, size=[1000, 1000], stride=[1000, 1]))
+  ))
+Found from :
+   File "test_logging.py", line N, in inductor_error_fn
+    output = torch.round(a)""",
         )
 
         exitstack.close()
@@ -1490,6 +1497,7 @@ exclusions = {
     "annotation",
     "node_runtime_estimation",
     "caching",
+    "overlap_scheduling",
 }
 for name in torch._logging._internal.log_registry.artifact_names:
     if name not in exclusions:
