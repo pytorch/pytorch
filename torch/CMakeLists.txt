@@ -155,6 +155,9 @@ if(USE_CUDA)
         list(APPEND TORCH_PYTHON_LINK_LIBRARIES torch::nvtoolsext)
       endif()
     endif()
+
+    # Build extern_triton bitcode for Triton kernel integration
+    add_subdirectory(${TORCH_SRC_DIR}/csrc/_extern_triton)
 endif()
 
 if(USE_ROCM)
