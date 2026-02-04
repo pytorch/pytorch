@@ -587,22 +587,19 @@ sycl::event scaled_matmul(
 
   // Prepare scale memory for oneDNN.
   // The normalize() function handles conversion to contiguous format.
-  auto make_scale_mem_from_spec = [&](const ScaleSpec& spec,
-                                      int64_t expected_numel,
-                                      const at::Tensor& scale_tensor)
-      -> std::pair<dnnl::memory, at::Tensor> {
-    at::Tensor prepared = spec.normalize(scale_tensor);
-
+  auto make_scale_mem_from_spec =
+      [&](const ScaleSpec& spec,
+          int64_t expected_numel,
+          const at::Tensor& scale_tensor) -> dnnl::memory {
     TORCH_CHECK(
-        prepared.numel() == expected_numel,
+        scale_tensor.numel() == expected_numel,
         "Scale buffer length mismatch. Expected ",
         expected_numel,
         ", got ",
-        prepared.numel());
+        scale_tensor.numel());
     dnnl::memory::desc scale_md(
-        {prepared.numel()}, spec.dtype, dnnl::memory::format_tag::x);
-    return {
-        make_onednn_memory(scale_md, engine, prepared.data_ptr()), prepared};
+        {scale_tensor.numel()}, spec.dtype, dnnl::memory::format_tag::x);
+    return make_onednn_memory(scale_md, engine, scale_tensor.data_ptr());
   };
 
   auto scratchpad =
@@ -618,24 +615,25 @@ sycl::event scaled_matmul(
     args.insert({DNNL_ARG_BIAS, b_usr_m});
   }
 
-  // Attach runtime scales using specs
-  // Note: We need to keep the prepared tensors alive until execute() completes
-  auto [src_sc_mem, src_scale_prepared] = make_scale_mem_from_spec(
-      src_spec, src_spec.expected_numel(M, K, "src"), scale_a);
-  auto [wei_sc_mem, wei_scale_prepared] = make_scale_mem_from_spec(
-      wei_spec, wei_spec.expected_numel(N, K, "wei"), scale_b);
-  // Keep tensors alive during execute - suppress unused warnings
-  (void)src_scale_prepared;
-  (void)wei_scale_prepared;
+  at::Tensor src_sc_tensor = src_spec.normalize(scale_a);
+  auto src_sc_mem = make_scale_mem_from_spec(
+      src_spec, src_spec.expected_numel(M, K, "src"), src_sc_tensor);
+
+  at::Tensor wei_sc_tensor = wei_spec.normalize(scale_b);
+  auto wei_sc_mem = make_scale_mem_from_spec(
+      wei_spec, wei_spec.expected_numel(N, K, "wei"), wei_sc_tensor);
+
   args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC, src_sc_mem});
   args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS, wei_sc_mem});
+
+  at::Tensor dst_scale_tensor;
   if (with_dst_scale) {
     // Bind single f32 scalar as DST scale
-    at::Tensor dst_scale_f32 = scale_result->to(at::kFloat).contiguous();
+    dst_scale_tensor = scale_result->to(at::kFloat).contiguous();
     dnnl::memory::desc dst_sc_md(
         {1}, dnnl::memory::data_type::f32, dnnl::memory::format_tag::x);
     auto dst_sc_mem =
-        make_onednn_memory(dst_sc_md, engine, dst_scale_f32.data_ptr());
+        make_onednn_memory(dst_sc_md, engine, dst_scale_tensor.data_ptr());
     args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_DST, dst_sc_mem});
   }
 
