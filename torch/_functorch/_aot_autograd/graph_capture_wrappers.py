@@ -102,7 +102,7 @@ from .utils import (
 # if keep_data_input_mutations is set, then we assume that data-only mutations
 # will be left in the graph, and we only return metadata-mutated inputs as outputs.
 def fn_input_mutations_to_outputs(
-    fn: Callable,
+    fn: Callable[..., Any],
     args_descs: list[AOTInput],
     meta: ViewAndMutationMeta,
     keep_data_input_mutations: bool,
@@ -354,8 +354,8 @@ def create_joint(
                 inputs_needs_grads.append(False)
 
         # Get the outputs that need gradients
-        needed_outs = []
-        needed_tangents = []
+        needed_outs: list[Tensor] = []
+        needed_tangents: list[Tensor] = []
         for out, tangent in zip(outs_to_grad, tangents):
             if isinstance(out, Tensor) and out.requires_grad:
                 # A bit sketchy, but fixes e.g. test_aot_autograd_exhaustive_matmul_cpu_float32
@@ -379,7 +379,9 @@ def create_joint(
                 )
                 needed_tangents.append(tangent)
 
-        setup_stacktrace_preservation_hooks([out.grad_fn for out in needed_outs])
+        setup_stacktrace_preservation_hooks(
+            [out.grad_fn for out in needed_outs if out.grad_fn is not None]
+        )
 
         if config.functionalize_rng_ops:
             PhiloxStateTracker.mark_beginning_of_backward()
@@ -401,7 +403,7 @@ def create_joint(
                 functional_tensor_mode._tokens_forward_output = (
                     functional_tensor_mode._tokens
                 )
-                functional_tensor_mode._tokens = {}
+                functional_tensor_mode._tokens = {}  # pyrefly: ignore[implicit-any]
 
             with (
                 set_partitioner_tag_is_backward(),
@@ -1285,7 +1287,7 @@ def aot_dispatch_subclass(
     *,
     is_joint_structure: bool,
     meta: ViewAndMutationMeta,
-    fw_only: Callable,
+    fw_only: Callable[..., Any],
 ) -> SubclassTracingInfo:
     # Skip logic if we don't need to trace through any subclasses
     req_subclass_dispatch = requires_subclass_dispatch(args, meta)  # type: ignore[arg-type]
