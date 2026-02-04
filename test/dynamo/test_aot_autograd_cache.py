@@ -2483,17 +2483,11 @@ class AOTAutogradCacheTests(InductorTestCase):
                 self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 2)
                 self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 0)
 
-    @requires_cuda_and_triton
     @inductor_config.patch("fx_graph_cache", True)
     @inductor_config.patch("fx_graph_remote_cache", False)
     @functorch_config.patch({"enable_autograd_cache": True})
     @functorch_config.patch({"strict_autograd_cache": True})
     def test_output_views_input_dynamic(self):
-        """
-        Test cache with a model where one output is a view of an input,
-        combined with dynamic shapes.
-        """
-
         class OutputViewsInput(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -2506,8 +2500,8 @@ class AOTAutogradCacheTests(InductorTestCase):
                 x_view = x.view(batch * seq, hidden)
                 return y, x_view
 
-        model = OutputViewsInput().cuda()
-        x = torch.randn(2, 16, 64, device="cuda")
+        model = OutputViewsInput()
+        x = torch.randn(2, 16, 64)
 
         torch._dynamo.mark_dynamic(x, 0)
         torch._dynamo.mark_dynamic(x, 1)
@@ -2524,7 +2518,7 @@ class AOTAutogradCacheTests(InductorTestCase):
         self._clear_dynamo_and_codecache()
 
         # Use different dynamic shape
-        x2 = torch.randn(4, 8, 64, device="cuda")
+        x2 = torch.randn(4, 8, 64)
         torch._dynamo.mark_dynamic(x2, 0)
         torch._dynamo.mark_dynamic(x2, 1)
 
@@ -2535,8 +2529,7 @@ class AOTAutogradCacheTests(InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
 
         # Verify correctness
-        eager_model = OutputViewsInput().cuda()
-        eager_model.load_state_dict(model.state_dict())
+        eager_model = copy.deepcopy(model)
         expected_y, expected_view = eager_model(x2)
         self.assertEqual(y2, expected_y)
         self.assertEqual(x_view2, expected_view)
