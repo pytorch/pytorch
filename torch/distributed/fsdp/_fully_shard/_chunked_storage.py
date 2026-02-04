@@ -295,8 +295,7 @@ class ChunkedStorage:
     def _compute_local_shape_for_rank(
         self, global_shape: torch.Size, placements: tuple[Placement, ...], rank: int
     ) -> torch.Size:
-        """Compute local shape for a specific rank."""
-        # This is a simplified version - for proper implementation we'd use DTensor utils
+        """Compute local shape for a specific rank using DTensor's sharding logic."""
         shard_dim = 0
         for placement in placements:
             if isinstance(placement, Shard):
@@ -306,14 +305,18 @@ class ChunkedStorage:
         world_size = self.world_size
         dim_size = global_shape[shard_dim]
 
-        # Compute chunk size for this rank (handles uneven sharding)
-        base_size = dim_size // world_size
-        remainder = dim_size % world_size
-
-        if rank < remainder:
-            local_dim_size = base_size + 1
+        # Match DTensor's Shard.local_shard_size_and_offset logic
+        if dim_size % world_size == 0:
+            # Even sharding
+            local_dim_size = dim_size // world_size
         else:
-            local_dim_size = base_size
+            # Uneven sharding: ceil-based chunk size
+            full_chunk_size = (dim_size + world_size - 1) // world_size
+            shard_starting_idx = full_chunk_size * rank
+            if dim_size < shard_starting_idx:
+                local_dim_size = 0
+            else:
+                local_dim_size = min(dim_size, shard_starting_idx + full_chunk_size) - shard_starting_idx
 
         local_shape = list(global_shape)
         local_shape[shard_dim] = local_dim_size
