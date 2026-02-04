@@ -7067,9 +7067,9 @@ class AOTInductorTestsTemplate:
                 # CUDA/XPU: Keep existing hardcoded values
                 # The tuned best config on XPU is different with CUDA.
                 if GPU_TYPE == "xpu":
-                    grid_0 = 32736
+                    grid_0 = 32768
                 else:
-                    grid_0 = 1023
+                    grid_0 = 1024
                 self.code_check_count(
                     Model(), (x, y, m), f"uint32_t grid_0 = {grid_0}L;", 1
                 )
@@ -7137,9 +7137,9 @@ class AOTInductorTestsTemplate:
                 # CUDA/XPU: Keep existing hardcoded values
                 # The tuned best config on XPU is different with CUDA.
                 if GPU_TYPE == "xpu":
-                    grid_0 = 32736
+                    grid_0 = 32768
                 else:
-                    grid_0 = 1023
+                    grid_0 = 1024
                 self.code_check_count(
                     Model(), (x, y, m), f"uint32_t grid_0 = {grid_0}L;", 1
                 )
