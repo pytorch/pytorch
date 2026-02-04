@@ -1145,7 +1145,7 @@ class TritonOverrides(OpOverrides):
         # the literal matches what a tensor load would produce,
         # see https://github.com/pytorch/pytorch/issues/173987.
         if triton_type != dtype:
-            value = torch.tensor(value, dtype=dtype).item()
+            value = torch.tensor(value, dtype=dtype, device="cpu")
         triton_val = constant_repr(type_(value))
 
         # NOTE: We use tl.full here to get the expected type.
