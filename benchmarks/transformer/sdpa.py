@@ -172,7 +172,13 @@ def run_single_experiment(config: ExperimentConfig) -> ExperimentResults:
         "FA3",
         "FA4",
     ):
-        activate_flash_attention_impl(config.flash_impl)
+        try:
+            activate_flash_attention_impl(config.flash_impl)
+        except ImportError as e:
+            raise RuntimeError(
+                f"Failed to activate {config.flash_impl}: {e}\n"
+                f"Please install the required flash attention library or run with default configuration (without --flash_test)."
+            ) from e
 
     try:
         with context:
@@ -218,15 +224,11 @@ def print_results(experiments: list[Experiment]):
     table_data = defaultdict(list)
     for experiment in experiments:
         for key, value in experiment.asdict().items():
-            # Display None flash_impl as "FA2" for readability
-            if key == "flash_impl" and value is None:
-                value = "FA2"
             table_data[key].append(value)
     del table_data["device"]
     if table_data["backend"][0] is None:
         del table_data["backend"]
-    # Hide flash_impl column if all values are "FA2" (default)
-    if all(v == "FA2" for v in table_data.get("flash_impl", [])):
+    if table_data["flash_impl"][0] is None:
         del table_data["flash_impl"]
     print(tabulate(table_data, headers="keys", tablefmt="pretty", floatfmt=".3f"))
 
@@ -265,9 +267,6 @@ def write_results_to_csv(
             row = experiment.asdict()
             if "device" in row:
                 del row["device"]  # Remove device field
-            # Convert None flash_impl to "FA2" for readability
-            if row.get("flash_impl") is None:
-                row["flash_impl"] = "FA2"
             writer.writerow(row)
 
     print(f"Results written to: {filename}")
@@ -278,16 +277,53 @@ def generate_experiment_configs() -> list[ExperimentConfig]:
     num_heads = [16]
     q_kv_seq_lens = [(128, 128), (256, 256), (512, 512), (1024, 1024), (8192, 8192)]
     embed_dims = [2048]
-    backends = [
-        None,
-        SDPBackend.FLASH_ATTENTION,
-    ]  # If set to None, all backends are enabled
+    backends = [None]  # If set to None, all backends are enabled
     dtypes = [
         torch.bfloat16,
     ]
     is_causal = [True, False]
-    # None means FA2 (default), "FA3", "FA4" for the alternative implementations
-    flash_impls = [None, "FA3"]
+    all_configs = []
+    for (
+        bsz,
+        heads,
+        (q_seq_len, kv_seq_len),
+        embed_dim,
+        causal,
+        dtype,
+        backend,
+    ) in itertools.product(
+        batch_sizes, num_heads, q_kv_seq_lens, embed_dims, is_causal, dtypes, backends
+    ):
+        all_configs.append(
+            ExperimentConfig(
+                batch_size=bsz,
+                num_heads=heads,
+                q_seq_len=q_seq_len,
+                kv_seq_len=kv_seq_len,
+                embed_dim=embed_dim,
+                is_causal=causal,
+                dtype=dtype,
+                backend=backend,
+            )
+        )
+
+    return all_configs
+
+
+def generate_experiment_configs_with_flash() -> list[ExperimentConfig]:
+    batch_sizes = [1, 8, 16]
+    num_heads = [16]
+    q_kv_seq_lens = [(128, 128), (256, 256), (512, 512), (1024, 1024), (8192, 8192)]
+    embed_dims = [2048]
+    backends = [
+        SDPBackend.FLASH_ATTENTION,
+    ]
+    dtypes = [
+        torch.bfloat16,
+    ]
+    is_causal = [True, False]
+    # FA2 (default), "FA3", "FA4" for the alternative implementations
+    flash_impls = ["FA2", "FA3"]
     all_configs = []
     for (
         bsz,
@@ -308,12 +344,6 @@ def generate_experiment_configs() -> list[ExperimentConfig]:
         backends,
         flash_impls,
     ):
-        # Alternative flash implementations are ignored if the backend is not Flash Attention
-        # Continue to avoid duplicate experiments
-        if backend is None and flash_impl is not None:
-            continue
-        if backend is not None and flash_impl is None:
-            continue
         all_configs.append(
             ExperimentConfig(
                 batch_size=bsz,
@@ -332,10 +362,24 @@ def generate_experiment_configs() -> list[ExperimentConfig]:
 
 
 def main():
+    import argparse
+
+    parser = argparse.ArgumentParser(description="SDPA benchmark runner")
+    parser.add_argument(
+        "--flash_test",
+        action="store_true",
+        help="Use flash attention configs (generate_experiment_configs_with_flash)",
+    )
+    args = parser.parse_args()
+
     seed = 123
     torch.manual_seed(seed)
     results = []
-    for config in tqdm(generate_experiment_configs()):
+    if args.flash_test:
+        configs = generate_experiment_configs_with_flash()
+    else:
+        configs = generate_experiment_configs()
+    for config in tqdm(configs):
         results.append(Experiment(config, run_single_experiment(config)))
 
     print_results(results)
