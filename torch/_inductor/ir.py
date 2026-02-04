@@ -8,7 +8,7 @@ import logging
 import operator
 import textwrap
 import traceback
-from collections.abc import Callable, Container, Generator, Iterable, Iterator, Sequence
+from collections.abc import Callable, Generator, Iterable, Iterator, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from enum import Enum
 from functools import partial
@@ -118,7 +118,7 @@ if TYPE_CHECKING:
     from torch.fx.experimental.symbolic_shapes import SympyBoolean
     from torch.fx.node import Argument
 
-    from .codegen.cuda.cuda_template import CUDATemplate
+    from .codegen.cutlass.cuda_template import CUDATemplate
     from .codegen.wrapper import PythonWrapperCodegen
     from .graph import GraphLowering
     from .utils import IndentedBuffer
@@ -2956,8 +2956,18 @@ class ExpandView(BaseView):
                 # NB: new_size[i] == old_size[i] is expected to already be
                 # guarded because the meta formula was expected to have taught
                 # us this equality.
-                # pyrefly: ignore [unsupported-operation]
-                assert sizevars.size_hint(new_size[i] - old_size[i], fallback=0) == 0, (
+                v1 = new_size[i]
+                v2 = old_size[i]
+                assert v1 is not None
+                assert v2 is not None
+                diff = v1 - v2
+                assert (
+                    sizevars.optimization_hint(
+                        diff,
+                        fallback=0,
+                    )
+                    == 0
+                ), (
                     f"Broadcast failed in ExpandView({x.get_size()}, {new_size}) on dimension {i}"
                 )
         return new_size
@@ -3790,7 +3800,7 @@ class Layout(OutputSpec):
         non_1_indices = [
             i
             for i, dim in enumerate(self.size)
-            if V.graph.sizevars.size_hint(dim, fallback=2) != 1
+            if V.graph.sizevars.optimization_hint(dim, fallback=2) != 1
         ]
 
         stride = [self.stride[i] for i in non_1_indices]
@@ -5280,6 +5290,7 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         )
         self._choice_timings_fn = choice_timings_fn
         self._choice_timings: dict[Optional[int], dict[ChoiceCaller, float]] = {}
+        self._choices: list[ChoiceCaller] = unfiltered_choices
         self.original_inputs = inputs
         self._output_plannable = all(
             isinstance(choice, TritonTemplateCallerBase)
@@ -5297,6 +5308,10 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         Are all possible choices TritonTemplates or Extern Kernels with out variants
         """
         return self._output_plannable
+
+    @property
+    def choices(self) -> list[ChoiceCaller]:
+        return self._choices
 
     def choice_timings(
         self, hint_override: Optional[int] = None
@@ -5441,7 +5456,12 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         inputs: Sequence[IRNode],
         kernel: Any,
         accumulator_type: Any,
+        variant: Any,  # GemmVariant, use Any to avoid circular import
         workspace_size: int = 0,
+        scale_type_a: Optional[Any] = None,
+        scale_type_b: Optional[Any] = None,
+        swizzle_type_a: Optional[Any] = None,
+        swizzle_type_b: Optional[Any] = None,
     ) -> None:
         # We pass None initially, then override with our method below
         super().__init__(layout, inputs, make_kernel_render=None)
@@ -5449,6 +5469,11 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         self.accumulator_type = accumulator_type
         self.outputs: list[Buffer] = [self]
         self.workspace_size = workspace_size
+        self.variant = variant
+        self.scale_type_a = scale_type_a
+        self.scale_type_b = scale_type_b
+        self.swizzle_type_a = swizzle_type_a
+        self.swizzle_type_b = swizzle_type_b
         # Store kernel metadata for code generation since kernels aren't serializeable yet
         self.kernel_metadata = {
             "kernel_name": kernel.metadata.kernel_name,
@@ -5497,6 +5522,11 @@ class NVUniversalGemmBuffer(TemplateBuffer):
             kernel_metadata=self.kernel_metadata,
             accumulator_type=self.accumulator_type,
             workspace_size=self.workspace_size,
+            variant=self.variant,
+            scale_type_a=self.scale_type_a,
+            scale_type_b=self.scale_type_b,
+            swizzle_type_a=self.swizzle_type_a,
+            swizzle_type_b=self.swizzle_type_b,
         )
 
         def render():
@@ -6015,86 +6045,24 @@ class ExternKernel(InputsKernel):
         Callable[[Any, Any], Any],
         Optional[dict[sympy.Symbol, pytree.KeyPath]],
     ]:
-        r"""Process kernel arguments for external kernel execution.
-
-        Separates tensor and non-tensor arguments, realizes tensor inputs, freezes
-        their layouts, and runs fake tensor propagation to determine output
-        properties. This is necessary because Inductor may have changed the strides
-        of inputs and we need to accurately determine the output stride.
-
-        The processing steps are:
-
-        1. Flatten the argument tree using pytree
-        2. Separate :class:`IRNode` (tensor) arguments from non-tensor arguments,
-           handling special types like :class:`~sympy.core.expr.Expr`,
-           :class:`GeneratorState`, and :class:`OpaqueObjectState`
-        3. Realize tensor inputs via :meth:`realize_input`
-        4. Freeze tensor layouts to prevent stride changes
-        5. Convert IR nodes to example tensors (preserving constants from
-           :attr:`V.graph.constants`)
-        6. Run the kernel to propagate shapes and strides
-        7. Compute unbacked symbolic bindings for dynamic shapes
-
-        Args:
-            kernel (_OpOverloads): The kernel operation to execute
-            *args: Positional arguments to pass to the kernel
-            **kwargs: Keyword arguments to pass to the kernel
-
-        Returns:
-            tuple: A 5-tuple containing:
-
-                - **example_output**: Result from running fake tensor propagation
-                - **tensor_args** (list): Realized tensor arguments (IRNodes)
-                - **non_tensor_args** (list): Non-tensor arguments
-                - **unflatten_args** (Callable): Function that takes
-                  ``(new_tensor_args, new_non_tensor_args)`` and reconstructs the
-                  original ``(args, kwargs)`` structure
-                - **unbacked_bindings** (Optional[dict]): Mapping from unbacked
-                  :class:`~sympy.core.symbol.Symbol` to :class:`~torch.utils._pytree.KeyPath`,
-                  or ``None`` if no shape environment is available
-        """
         binded_args = {"args": args, "kwargs": kwargs}
 
         args_flat, args_spec = pytree.tree_flatten(binded_args)
 
-        args_flat_is_tensor: list[bool] = []
+        is_arg_tensor = []
         # tensor_args can be either tensor or torchbind objects
-        tensor_args: list[IRNode] = []
-        non_tensor_args: list[object] = []
-        real_non_tensor_args: list[
-            FakeScriptObject | torch._C.Generator | torch._C.ScriptObject | torch.Tensor
-        ] = []
+        tensor_args = []
+        non_tensor_args: list[Any] = []
         for arg in args_flat:
-            match arg:
-                case Expr():
-                    node = V.graph.sizevars.shape_env.create_symintnode(arg, hint=None)
-                    args_flat_is_tensor.append(False)
-                    non_tensor_args.append(node)
-                    real_non_tensor_args.append(node)
-
-                case GeneratorState():
-                    args_flat_is_tensor.append(False)
-                    non_tensor_args.append(arg)
-                    device_index = arg.device.index
-                    assert arg.device.type == "cuda" and device_index is not None
-                    real_non_tensor_args.append(
-                        torch.cuda.default_generators[device_index].clone_state()
-                    )
-
-                case OpaqueObjectState():
-                    args_flat_is_tensor.append(False)
-                    non_tensor_args.append(arg)
-                    # Use the original opaque object value
-                    real_non_tensor_args.append(arg.value)
-
-                case IRNode():
-                    args_flat_is_tensor.append(True)
-                    tensor_args.append(arg)
-
-                case _:
-                    args_flat_is_tensor.append(False)
-                    non_tensor_args.append(arg)
-                    real_non_tensor_args.append(arg)
+            is_arg_tensor.append(
+                isinstance(arg, IRNode) and not isinstance(arg, GeneratorState)
+            )
+            if is_arg_tensor[-1]:
+                tensor_args.append(arg)
+            else:
+                if isinstance(arg, Expr):
+                    arg = V.graph.sizevars.shape_env.create_symintnode(arg, hint=None)
+                non_tensor_args.append(arg)
 
         def unflatten_args(
             new_tensor_args: Sequence[_T], new_non_tensor_args: Sequence[_T]
@@ -6102,7 +6070,7 @@ class ExternKernel(InputsKernel):
             result = []
             it_tensors = iter(new_tensor_args)
             it_non_tensors = iter(new_non_tensor_args)
-            for is_tensor in args_flat_is_tensor:
+            for is_tensor in is_arg_tensor:
                 if is_tensor:
                     result.append(next(it_tensors))
                 else:
@@ -6122,7 +6090,9 @@ class ExternKernel(InputsKernel):
         # strides of inputs and we need to determine accurately what the
         # output stride will be.
         example_args: list[
-            torch.Tensor | torch._C.ScriptObject | FakeScriptObject | torch.Generator
+            Union[
+                torch.Tensor, torch._C.ScriptObject, FakeScriptObject, torch.Generator
+            ]
         ] = []
 
         # We need to retain the constant values of fake tensors that we originally
@@ -6140,22 +6110,16 @@ class ExternKernel(InputsKernel):
                 example_args.append(V.graph.torchbind_constants[x.get_name()])
             elif isinstance(x, TorchBindObject):
                 example_args.append(x.get_value())
-            elif isinstance(x, GeneratorState):
-                # TODO: Is this even reachable? The original tensor_args never
-                # has them so they'd have to come from realize_input().
+            elif isinstance(x, torch._inductor.ir.GeneratorState):
                 device_index = x.device.index
                 assert x.device.type == "cuda" and device_index is not None
                 example_args.append(
                     torch.cuda.default_generators[device_index].clone_state()
                 )
-            elif isinstance(x, OpaqueObjectState):
-                # TODO: Same Q as GeneratorState
-                # Use the original opaque object value
-                example_args.append(x.value)
             else:
                 example_args.append(ir_node_to_tensor(x, guard_shape=True))
 
-        new_args, new_kwargs = unflatten_args(example_args, real_non_tensor_args)
+        new_args, new_kwargs = unflatten_args(example_args, non_tensor_args)
         example_output = kernel(*new_args, **new_kwargs)
 
         unbacked_bindings: Optional[dict[sympy.Symbol, pytree.KeyPath]] = None
@@ -6483,7 +6447,11 @@ class ExternKernel(InputsKernel):
         cls, x: IRNode, exact_strides: Sequence[_IntLike], allow_padding: bool = False
     ) -> IRNode:
         return cls.require_strides(
-            x, exact_strides=exact_strides, allow_padding=allow_padding
+            x,
+            exact_strides=[
+                s.node.expr if isinstance(s, torch.SymInt) else s for s in exact_strides
+            ],
+            allow_padding=allow_padding,
         )
 
     @classmethod
@@ -7892,9 +7860,21 @@ class FallbackKernel(ExternKernelAlloc):
             self.mutation_names.append(tensor_args[0].get_name())
             return
 
-        if schema.is_mutable and not can_auto_functionalize(kernel):
+        def has_functionalize_impl(op: torch._ops.OpOverload) -> bool:
+            return torch._C._dispatch_has_kernel_for_dispatch_key(
+                op.name(), torch._C.DispatchKey.Functionalize
+            ) or (
+                hasattr(op, "py_kernels")
+                and torch._C.DispatchKey.Functionalize in op.py_kernels
+            )
+
+        if (
+            schema.is_mutable
+            and not can_auto_functionalize(self.op_overload)
+            and not has_functionalize_impl(self.op_overload)
+        ):
             raise NotImplementedError(
-                f"NYI: Can't generate FallbackKernel for {kernel}"
+                f"NYI: Can't generate FallbackKernel for {self.op_overload}"
             )
 
         args, kwargs = self.unflatten_args(self.inputs, self.constant_args)
@@ -7950,13 +7930,13 @@ class FallbackKernel(ExternKernelAlloc):
             self.get_name(), self.outputs, getattr(self, "unbacked_bindings", None)
         )
 
-    def get_unbacked_symbol_defs(self) -> Container[sympy.Symbol]:  # type: ignore[override]
+    def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
         if unbacked_bindings := getattr(self, "unbacked_bindings", None):
             resolved = resolve_unbacked_bindings(
                 V.graph.sizevars.shape_env, unbacked_bindings
             )
             assert resolved is not None
-            return resolved.keys()
+            return OrderedSet(resolved.keys())
         else:
             return OrderedSet()
 
@@ -8144,7 +8124,7 @@ class FallbackKernel(ExternKernelAlloc):
             return_type = returns[0].real_type
             output_arguments = [handle_single_output(return_type, outputs)]
         else:
-            # For tuple returns, e.g "-> (Tensor, Tensor)" or "-> (Tesnor, Tensor[])"
+            # For tuple returns, e.g "-> (Tensor, Tensor)" or "-> (Tensor, Tensor[])"
             # Not generating output args for self.mutation_outputs
             output_arguments = [
                 handle_single_output(
@@ -8837,9 +8817,7 @@ class InvokeSubgraph(ExternKernel):
         new_operands: list[IRNode] = []
 
         for idx, operand in enumerate(operands):
-            if isinstance(
-                operand, (ShapeAsConstantBuffer, GeneratorState, OpaqueObjectState)
-            ):
+            if isinstance(operand, (ShapeAsConstantBuffer, GeneratorState)):
                 new_operands.append(operand)
             else:
                 new_operands.append(
@@ -8988,13 +8966,9 @@ class Conditional(ExternKernel):
                 if isinstance(output, ShapeAsConstantBuffer):
                     ret.append(output)
                 else:
-                    fake_strides = [
-                        s.node.expr if isinstance(s, torch.SymInt) else s
-                        for s in fake.stride()
-                    ]
                     ret.append(
                         ExternKernel.require_exact_strides(
-                            TensorBox(output), fake_strides, allow_padding=False
+                            TensorBox(output), fake.stride(), allow_padding=False
                         )
                     )
             return ret
@@ -9535,24 +9509,6 @@ class GeneratorState(NonTensorObj):
         return self.name
 
 
-@ir_dataclass
-class OpaqueObjectState(NonTensorObj):
-    """
-    Represents an opaque object (e.g., ProcessGroup) that is passed through
-    as a graph input. Similar to GeneratorState, this wraps the object with
-    its placeholder name so codegen can reference it properly.
-    """
-
-    name: str
-    value: Any  # The actual opaque object (for reference, not used in codegen)
-
-    def get_name(self) -> str:
-        return self.name
-
-    def codegen_reference(self, writer: Optional[IndentedBuffer] = None) -> str:
-        return self.name
-
-
 class _CollectiveKernel(FallbackKernel):
     def should_allocate(self) -> bool:
         return False
@@ -9666,7 +9622,8 @@ class _CollectiveKernel(FallbackKernel):
             ) = cls.process_kernel(kernel, inputs, *args, **kwargs)
         assert not unbacked_bindings, f"{kernel}, {unbacked_bindings}"
         for tensor_arg in tensor_args:
-            tensor_arg.realize()
+            if not isinstance(tensor_arg, TorchBindObject):
+                tensor_arg.realize()
 
         if isinstance(example_output, list):
             device = cls.find_device(tensor_args, example_output)

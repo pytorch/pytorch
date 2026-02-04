@@ -13,7 +13,6 @@ import torch._dynamo.testing
 import torch.distributed as dist
 import torch.nn as nn
 from torch._C import FileCheck
-from torch._functorch.aot_autograd import aot_function
 from torch._inductor.utils import run_and_get_triton_code
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     checkpoint_wrapper,
@@ -1378,6 +1377,109 @@ class outer_fn(torch.nn.Module):
             return (wait_tensor,)""",  # noqa: B950
         )
 
+    @torch._dynamo.config.patch(force_compile_during_fx_trace=True)
+    def test_aot_autograd_over_dynamo_dtensor_requires_grad(self):
+        """Test AOTAutograd over Dynamo with DTensor inputs/outputs and requires_grad.
+
+        This tests the scenario where:
+        1. An outer aot_function traces a function with DTensor requires_grad inputs
+        2. Inside that function, a torch.compile'd function with invoke_subgraph backend is called
+        3. Both inner and outer operate on DTensors
+        4. The inner Dynamo region should only be compiled once
+        """
+        from torch._dynamo.testing import CompileCounterWithBackend
+        from torch._functorch.aot_autograd import aot_function
+        from torch._functorch.compilers import nop
+
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        torch._dynamo.reset()
+
+        # Use a compile counter to track how many times Dynamo compiles
+        compile_counter = CompileCounterWithBackend("invoke_subgraph")
+
+        def inner_fn(dt):
+            # Simple operation on DTensor
+            return dt * 2 + 1
+
+        compiled_fn = torch.compile(inner_fn, backend=compile_counter)
+
+        def outer_fn(dt):
+            # Outer function also operates on DTensor
+            dt2 = dt + 1
+            dt3 = compiled_fn(dt2)
+            return dt3.sum()
+
+        # Create DTensor with requires_grad
+        local_tensor = torch.randn(4, 4, requires_grad=True)
+        dt_input = DTensor.from_local(local_tensor, mesh, [Shard(0)], run_check=False)
+
+        # Track forward graph to verify invoke_subgraph appears
+        fw_graph = None
+
+        def fw_compiler(gm, example_inputs):
+            nonlocal fw_graph
+            fw_graph = gm
+            return gm
+
+        aot_fn = aot_function(
+            outer_fn,
+            fw_compiler=fw_compiler,
+            bw_compiler=nop,
+            _disable_torch_fn_metadata_mode=True,
+        )
+
+        # Run forward and backward
+        result = aot_fn(dt_input)
+        result.backward()
+
+        # Check that we got a forward graph
+        self.assertIsNotNone(fw_graph, "Expected a forward graph")
+
+        # Check compile count - should be exactly 1 compilation
+        self.assertEqual(
+            compile_counter.frame_count,
+            1,
+            f"Expected 1 compilation, got {compile_counter.frame_count}",
+        )
+
+    def test_compile_redistribute_flattened_mesh(self):
+        """
+        Test that redistribute works with pre-flattened meshes during compile.
+
+        When redistributing from [Shard, Shard, Replicate] to [Replicate, Replicate, Replicate]
+        on a 3D mesh, DTensor can optimize by using a single all-gather on the flattened
+        mesh instead of 2 sequential all-gathers. This requires the flattened mesh to be
+        pre-created before compile to avoid tracing issues.
+        """
+        dist.destroy_process_group()
+        dist.init_process_group("fake", store=FakeStore(), rank=0, world_size=8)
+
+        mesh = init_device_mesh(
+            self.device_type, (2, 2, 2), mesh_dim_names=("fsdp", "cp", "tp")
+        )
+        # Pre-create flattened mesh for fsdp+cp before compile
+        mesh["fsdp", "cp"]._flatten()
+
+        def redistribute_fn(x):
+            return x.redistribute(placements=[Replicate(), Replicate(), Replicate()])
+
+        input_dt = DTensor.from_local(
+            torch.randn(4, 8, device=self.device_type, requires_grad=True),
+            device_mesh=mesh,
+            placements=[Shard(0), Shard(0), Replicate()],
+            run_check=False,
+        )
+
+        compiled_fn = torch.compile(
+            redistribute_fn, fullgraph=True, backend="aot_eager"
+        )
+        result = compiled_fn(input_dt)
+        self.assertEqual(result.placements, (Replicate(), Replicate(), Replicate()))
+
+        # Test backward pass
+        result.sum().backward()
+
 
 @instantiate_parametrized_tests
 class TestDTensorCompileE2E(DTensorTestBase):
@@ -1644,263 +1746,6 @@ class TestDTensorCompileE2E(DTensorTestBase):
             self.assertEqual(len(result), len(expected))
             for dt_chunk, tensor_chunk in zip(result, expected):
                 self.assertEqual(dt_chunk.full_tensor(), tensor_chunk)
-
-    @with_comms
-    @parametrize("compile_on_one_rank", [False])
-    def test_dtensor_processgroup_extraction(self, compile_on_one_rank):
-        """Test ProcessGroup handling with compile_on_one_rank config.
-
-        When compile_on_one_rank=True: ProcessGroups are extracted as explicit
-        graph inputs (placeholders).
-
-        When compile_on_one_rank=False: Target name strings are used instead of
-        ProcessGroups.
-
-        In both cases, there should be NO _opaque_obj in the graph.
-        """
-        with patch("torch.distributed.config.compile_on_one_rank", compile_on_one_rank):
-            mesh = self.build_device_mesh()
-
-            def fn(dt):
-                # This will decompose into shard_dim_alltoall which uses ProcessGroup
-                return dt.redistribute(mesh, [Replicate()])
-
-            # Create a sharded DTensor input
-            local_tensor = torch.randn(4, 8, device=self.device_type)
-            dt_input = DTensor.from_local(
-                local_tensor, mesh, [Shard(0)], run_check=False
-            )
-
-            # Capture the forward graph
-            fw_graph_cell = [None]
-
-            def extract_graph(fx_g, _):
-                fw_graph_cell[0] = fx_g
-                return fx_g
-
-            # Compile with aot_function
-            compiled_fn = aot_function(
-                fn,
-                fw_compiler=extract_graph,
-                bw_compiler=lambda fx_g, _: fx_g,
-            )
-
-            # Run compilation
-            compiled_fn(dt_input)
-
-            # Verify the graph was captured
-            fw_graph = fw_graph_cell[0]
-            self.assertIsNotNone(fw_graph)
-
-            graph_code = fw_graph.code
-
-            # In both cases, there should be NO opaque objects in the graph
-            self.assertNotIn(
-                "_opaque_obj",
-                graph_code,
-                f"Graph should not contain opaque objects. Graph:\n{graph_code}",
-            )
-
-            if compile_on_one_rank:
-                # ProcessGroups should be placeholders
-                placeholders = [
-                    n for n in fw_graph.graph.nodes if n.op == "placeholder"
-                ]
-                # We expect: inner tensor(s) + symints + ProcessGroup(s)
-                self.assertGreater(
-                    len(placeholders),
-                    1,
-                    f"Expected ProcessGroup placeholders but only got {len(placeholders)} placeholder(s)",
-                )
-
-    @with_comms
-    @parametrize("compile_on_one_rank", [False])
-    def test_dtensor_processgroup_deduplication(self, compile_on_one_rank):
-        """Test that multiple DTensors sharing the same ProcessGroup only pass it once."""
-        with patch("torch.distributed.config.compile_on_one_rank", compile_on_one_rank):
-            mesh = self.build_device_mesh()
-
-            def fn(dt1, dt2):
-                # Both DTensors share the same mesh/ProcessGroup
-                out1 = dt1.redistribute(mesh, [Replicate()])
-                out2 = dt2.redistribute(mesh, [Replicate()])
-                return out1 + out2
-
-            # Create two sharded DTensors with the same mesh
-            local1 = torch.randn(4, 8, device=self.device_type)
-            local2 = torch.randn(4, 8, device=self.device_type)
-            dt1 = DTensor.from_local(local1, mesh, [Shard(0)], run_check=False)
-            dt2 = DTensor.from_local(local2, mesh, [Shard(0)], run_check=False)
-
-            # Capture the forward graph
-            fw_graph_cell = [None]
-
-            def extract_graph(fx_g, _):
-                fw_graph_cell[0] = fx_g
-                return fx_g
-
-            compiled_fn = aot_function(
-                fn,
-                fw_compiler=extract_graph,
-                bw_compiler=lambda fx_g, _: fx_g,
-            )
-
-            # Run compilation
-            compiled_fn(dt1, dt2)
-
-            # Verify the graph
-            fw_graph = fw_graph_cell[0]
-            self.assertIsNotNone(fw_graph)
-
-            graph_code = fw_graph.code
-
-            # In both cases, there should be NO opaque objects in the graph.
-            # When compile_on_one_rank=True: ProcessGroups are placeholders.
-            # When compile_on_one_rank=False: Target name strings are used.
-            self.assertNotIn(
-                "_opaque_obj",
-                graph_code,
-                f"Graph should not contain opaque objects. Graph:\n{graph_code}",
-            )
-
-            if compile_on_one_rank:
-                # ProcessGroups should be placeholders
-                placeholders = [
-                    n for n in fw_graph.graph.nodes if n.op == "placeholder"
-                ]
-                # We expect: 2 inner tensors + symints + ProcessGroup(s)
-                self.assertGreater(
-                    len(placeholders),
-                    2,
-                    f"Expected ProcessGroup placeholders but only got {len(placeholders)} placeholder(s)",
-                )
-
-    @with_comms
-    @parametrize("compile_on_one_rank", [False])
-    def test_dtensor_processgroup_backward(self, compile_on_one_rank):
-        """Test that ProcessGroups are correctly handled in backward graph."""
-        with patch("torch.distributed.config.compile_on_one_rank", compile_on_one_rank):
-            mesh = self.build_device_mesh()
-
-            def fn(dt):
-                out = dt.redistribute(mesh, [Replicate()])
-                return out.sum()
-
-            # Create a sharded DTensor that requires grad
-            local_tensor = torch.randn(
-                4, 8, device=self.device_type, requires_grad=True
-            )
-            dt_input = DTensor.from_local(
-                local_tensor, mesh, [Shard(0)], run_check=False
-            )
-
-            # Capture both forward and backward graphs
-            fw_graph_cell = [None]
-            bw_graph_cell = [None]
-
-            def extract_fw_graph(fx_g, _):
-                fw_graph_cell[0] = fx_g
-                return fx_g
-
-            def extract_bw_graph(fx_g, _):
-                bw_graph_cell[0] = fx_g
-                return fx_g
-
-            compiled_fn = aot_function(
-                fn,
-                fw_compiler=extract_fw_graph,
-                bw_compiler=extract_bw_graph,
-            )
-
-            # Run forward and backward
-            output = compiled_fn(dt_input)
-            output.backward()
-
-            # Verify forward graph
-            # In both cases, there should be NO opaque objects in the graph.
-            # When compile_on_one_rank=True: ProcessGroups are placeholders.
-            # When compile_on_one_rank=False: Target name strings are used.
-            fw_graph = fw_graph_cell[0]
-            if fw_graph is not None:
-                fw_code = fw_graph.code
-                self.assertNotIn(
-                    "_opaque_obj",
-                    fw_code,
-                    f"Forward graph should not contain opaque objects. Graph:\n{fw_code}",
-                )
-
-            # Verify backward graph (if it was captured)
-            bw_graph = bw_graph_cell[0]
-            if bw_graph is not None:
-                bw_code = bw_graph.code
-                self.assertNotIn(
-                    "_opaque_obj",
-                    bw_code,
-                    f"Backward graph should not contain opaque objects. Graph:\n{bw_code}",
-                )
-
-    @with_comms
-    @parametrize("compile_on_one_rank", [False])
-    def test_dtensor_process_groups_2d_mesh(self, compile_on_one_rank):
-        """Test ProcessGroups are correctly extracted for 2D mesh (multiple groups)."""
-        with patch("torch.distributed.config.compile_on_one_rank", compile_on_one_rank):
-            mesh = DeviceMesh(self.device_type, [[0, 1], [2, 3]])  # 2x2 mesh
-
-            def fn(x):
-                # Create DTensor inside fn - this pattern is tested to work
-                dt = DTensor.from_local(x, mesh, [Shard(0), Shard(1)], run_check=False)
-                return dt.redistribute(mesh, [Replicate(), Replicate()]).to_local()
-
-            local_tensor = torch.randn(4, 8, device=self.device_type)
-
-            fw_graph_cell = [None]
-
-            def extract_graph(fx_g, _):
-                fw_graph_cell[0] = fx_g
-                return fx_g
-
-            compiled_fn = aot_function(
-                fn, fw_compiler=extract_graph, bw_compiler=lambda fx_g, _: fx_g
-            )
-            compiled_fn(local_tensor)
-
-            fw_graph = fw_graph_cell[0]
-            self.assertIsNotNone(fw_graph)
-
-            graph_code = fw_graph.code
-            placeholders = [n for n in fw_graph.graph.nodes if n.op == "placeholder"]
-
-            # In both cases, there should be NO opaque objects in the graph.
-            # When compile_on_one_rank=True: ProcessGroups are placeholders.
-            # When compile_on_one_rank=False: Target name strings are used.
-            self.assertNotIn(
-                "_opaque_obj",
-                graph_code,
-                f"Graph should not contain opaque objects. Graph:\n{graph_code}",
-            )
-
-            if compile_on_one_rank:
-                # Should have tensor + 2 ProcessGroups (one per mesh dim)
-                self.assertGreaterEqual(len(placeholders), 3)
-
-    @with_comms
-    def test_dtensor_torch_compile_with_processgroups(self):
-        """Test ProcessGroups work correctly through torch.compile() path."""
-        mesh = self.build_device_mesh()
-
-        def fn(x):
-            # Create DTensor inside fn and redistribute - this pattern works in existing tests
-            dt = DTensor.from_local(x, mesh, [Shard(0)], run_check=False)
-            return dt.redistribute(mesh, [Replicate()]).to_local() + 2
-
-        local_tensor = torch.randn(4, 8, device=self.device_type)
-
-        ref = fn(local_tensor)
-        compiled_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
-        result = compiled_fn(local_tensor)
-
-        # Verify the result is correct
-        self.assertEqual(result, ref)
 
 
 if __name__ == "__main__":
