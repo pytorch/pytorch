@@ -89,9 +89,10 @@ class PipeTests(TestCase):
             mb_args=(x, y),
         )
 
-        assert pipe.num_stages == EXPECTED_N_STAGES[ModelClass], (
-            f"nstages = {pipe.num_stages}, expect {EXPECTED_N_STAGES[ModelClass]}"
-        )
+        if pipe.num_stages != EXPECTED_N_STAGES[ModelClass]:
+            raise AssertionError(
+                f"nstages = {pipe.num_stages}, expect {EXPECTED_N_STAGES[ModelClass]}"
+            )
 
         ref_out = mod(x, y)
         out = pipe(x, y)[0]
@@ -105,14 +106,18 @@ class PipeTests(TestCase):
         for idx in range(pipe.num_stages):
             stage_mod = pipe.get_stage_module(idx)
             stage_fqns = set(stage_mod.state_dict().keys())
-            assert stage_fqns.issubset(old_names)
+            if not stage_fqns.issubset(old_names):
+                raise AssertionError(
+                    f"stage_fqns {stage_fqns} is not a subset of old_names {old_names}"
+                )
             new_names.update(stage_fqns)
 
         if CHECK_FQN_SET_EQUALITY:
-            assert old_names == new_names, f"""
+            if old_names != new_names:
+                raise AssertionError(f"""
             old names {old_names}
             new names {new_names}
-            """
+            """)
         print("Qualname check passed")
 
 

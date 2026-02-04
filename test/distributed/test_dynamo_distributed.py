@@ -1492,7 +1492,8 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
     @patch.object(config, "optimize_ddp", True)
     def test_graph_split(self):
-        assert config.optimize_ddp
+        if not config.optimize_ddp:
+            raise AssertionError("Expected config.optimize_ddp to be True")
         """
         Just ensures that the appropriate number of splits happen (based on
         bucket size and model parameters) - verifies the number of times
@@ -1687,7 +1688,8 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
     @patch.object(config, "optimize_ddp", True)
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_graph_split_inductor(self):
-        assert config.optimize_ddp
+        if not config.optimize_ddp:
+            raise AssertionError("Expected config.optimize_ddp to be True")
         """
         Same as above, but using inductor backend.
         We observed issues with inductor/fx interface in the past.
@@ -1707,7 +1709,8 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
     )
     @patch.object(config, "optimize_ddp", True)
     def _test_graph_split_inductor_layout_optimizations_impl(self, context):
-        assert config.optimize_ddp
+        if not config.optimize_ddp:
+            raise AssertionError("Expected config.optimize_ddp to be True")
         channel_dim = 512
         # channel dim must be > 64 for inductor to do layout optimization and use NHWC
 
@@ -1767,7 +1770,8 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
     @patch.object(config, "optimize_ddp", True)
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_graph_split_inductor_transpose(self):
-        assert config.optimize_ddp
+        if not config.optimize_ddp:
+            raise AssertionError("Expected config.optimize_ddp to be True")
 
         B = 100
         N = 30

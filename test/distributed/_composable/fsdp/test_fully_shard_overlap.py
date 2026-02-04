@@ -64,7 +64,8 @@ class TestFullyShardOverlap(FSDPTest):
         )
         ref_model = copy.deepcopy(model).to(device_type)
         for lin in model:
-            assert len(list(lin.parameters())) == 1, "Expects only one weight"
+            if len(list(lin.parameters())) != 1:
+                raise AssertionError("Expects only one weight")
             fully_shard(lin, reshard_after_forward=True)
         fully_shard(model, reshard_after_forward=True)
 

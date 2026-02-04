@@ -402,7 +402,8 @@ class DTensorExportTest(TestCase):
         res = []
         for node in joint_gm.graph.nodes:
             if node.op == "placeholder":
-                assert "val" in node.meta
+                if "val" not in node.meta:
+                    raise AssertionError(f"Expected 'val' in node.meta for {node}")
                 fake_val = node.meta["val"]
                 if isinstance(fake_val, torch._subclasses.fake_tensor.FakeTensor):
                     res.append(list(fake_val.shape))
