@@ -1772,7 +1772,10 @@ def gen_pyi(
                 ),
                 defs(
                     "set_",
-                    ["self", "source: Storage | TypedStorage | UntypedStorage | Tensor"],
+                    [
+                        "self",
+                        "source: Storage | TypedStorage | UntypedStorage | Tensor",
+                    ],
                     "Tensor",
                 ),
                 defs(
