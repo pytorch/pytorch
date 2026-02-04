@@ -128,7 +128,6 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
                                                         options:options
                                                     deallocator:nil];
 
-#if defined(MPS_SUPPORT_TENSORS_UNIFIED_MEMORY) && MPS_SUPPORT_TENSORS_UNIFIED_MEMORY
     // Both src and dst tensors have MTLBuffer backing in shared storage
     // we can memcpy directly between their contents pointers and avoid encoding
     // a Metal blit.
@@ -176,36 +175,7 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
       }
       dst.copy_(tmp, non_blocking);
     }
-#else
-    id<MTLBuffer> maybeCastedSourceBuffer = sourceBuffer;
-    Tensor maybeCastedSource;
-    bool needsBlit = true;
-    if (src_.dtype() != dst.dtype()) {
-      if (destOffset == 0 && storage_byte_offset == 0) {
-        // Return the casted tensor directly if there's no destination offset
-        needsBlit = false;
-        maybeCastedSourceBuffer = destBuffer;
-      } else if (src.element_size() < dst.element_size()) {
-        maybeCastedSource = at::empty(dst.sizes(), dst.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
-        maybeCastedSourceBuffer = getMTLBufferStorage(maybeCastedSource);
-      }
-
-      // In case of dtype change, first convert src inplace
-      copy_cast_mps(dst, src, maybeCastedSourceBuffer, sourceBuffer, non_blocking);
-    }
-
-    if (needsBlit) {
-      const size_t size_to_copy = (src.nbytes() / src.element_size()) * dst.element_size();
-
-      // If there's anything wrong with source, we shouldn't return dst_ silently and must error out.
-      TORCH_INTERNAL_ASSERT(sourceBuffer && dst_tensor_nbytes > 0);
-      uint64_t profile_id =
-          getMPSProfiler().beginProfileCopy(sourceBuffer, destBuffer, src, dst, size_to_copy, non_blocking);
-
-      stream->copy_and_sync(
-          maybeCastedSourceBuffer, destBuffer, size_to_copy, storage_byte_offset, destOffset, non_blocking, profile_id);
-    }
-#endif
+    
     [destBuffer release];
   }
 
@@ -243,7 +213,6 @@ static void copy_to_mps_stride_contig(at::Tensor& dst, const at::Tensor& src, bo
                                                           options:options
                                                       deallocator:nil];
 
-#if defined(MPS_SUPPORT_TENSORS_UNIFIED_MEMORY) && MPS_SUPPORT_TENSORS_UNIFIED_MEMORY
     // Both src and dst tensors have MTLBuffer backing in shared storage
     // we can memcpy directly between their contents pointers and avoid encoding
     // a Metal blit.
@@ -291,13 +260,7 @@ static void copy_to_mps_stride_contig(at::Tensor& dst, const at::Tensor& src, bo
 
     // Ensure the device sees the updated shared memory before any GPU work
     stream->synchronize(SyncType::COMMIT_AND_WAIT);
-#else
-    uint64_t profile_id =
-        getMPSProfiler().beginProfileCopy(sourceBuffer, destBuffer, src, dst, size_to_copy, non_blocking);
 
-    stream->copy_and_sync(
-        sourceBuffer, destBuffer, size_to_copy, sourceOffset, dst_byte_offset, non_blocking, profile_id);
-#endif
     [sourceBuffer release];
   }
 }
