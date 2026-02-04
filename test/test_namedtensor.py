@@ -718,7 +718,8 @@ class TestNamedTensor(TestCase):
             unnamed3 = torch.randn(1, 1, 1)
 
             def compute_expected_names(tensor, other):
-                assert tensor.has_names() ^ other.has_names()
+                if not (tensor.has_names() ^ other.has_names()):
+                    raise AssertionError("exactly one of tensor/other should have names")
                 named = tensor if tensor.has_names() else other
                 unnamed = other if tensor.has_names() else tensor
                 unnamed_dim = unnamed.dim()

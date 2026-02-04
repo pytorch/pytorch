@@ -119,7 +119,8 @@ class TestJit(JitCommonTestCase):
                     )
                     raise Exception(variant_error_info) from e  # noqa: TRY002
 
-        assert tested, "JIT Test does not execute any logic"
+        if not tested:
+            raise AssertionError("JIT Test does not execute any logic")
 
     def indiv_variant_test_jit(
         self, device, dtype, op, sample, func_type, variant, has_fake_function

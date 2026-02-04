@@ -367,19 +367,31 @@ class TestAverage(TestCase):
         self, x, axis, expected_avg, weights, expected_wavg, expected_wsum
     ):
         avg = np.average(x, axis=axis, keepdims=True)
-        assert avg.shape == np.shape(expected_avg)
+        if avg.shape != np.shape(expected_avg):
+            raise AssertionError(
+                f"Expected avg.shape == {np.shape(expected_avg)}, got {avg.shape}"
+            )
         assert_array_equal(avg, expected_avg)
 
         wavg = np.average(x, axis=axis, weights=weights, keepdims=True)
-        assert wavg.shape == np.shape(expected_wavg)
+        if wavg.shape != np.shape(expected_wavg):
+            raise AssertionError(
+                f"Expected wavg.shape == {np.shape(expected_wavg)}, got {wavg.shape}"
+            )
         assert_array_equal(wavg, expected_wavg)
 
         wavg, wsum = np.average(
             x, axis=axis, weights=weights, returned=True, keepdims=True
         )
-        assert wavg.shape == np.shape(expected_wavg)
+        if wavg.shape != np.shape(expected_wavg):
+            raise AssertionError(
+                f"Expected wavg.shape == {np.shape(expected_wavg)}, got {wavg.shape}"
+            )
         assert_array_equal(wavg, expected_wavg)
-        assert wsum.shape == np.shape(expected_wsum)
+        if wsum.shape != np.shape(expected_wsum):
+            raise AssertionError(
+                f"Expected wsum.shape == {np.shape(expected_wsum)}, got {wsum.shape}"
+            )
         assert_array_equal(wsum, expected_wsum)
 
     @skip(reason="NP_VER: fails on CI")
@@ -1245,10 +1257,12 @@ class TestTrimZeros(TestCase):
             arr = np.zeros_like(_arr, dtype=_arr.dtype)
 
             res1 = trim_zeros(arr, trim="B")
-            assert len(res1) == 0
+            if len(res1) != 0:
+                raise AssertionError(f"Expected len(res1) == 0, got {len(res1)}")
 
             res2 = trim_zeros(arr, trim="f")
-            assert len(res2) == 0
+            if len(res2) != 0:
+                raise AssertionError(f"Expected len(res2) == 0, got {len(res2)}")
 
     def test_size_zero(self):
         arr = np.zeros(0)
@@ -1275,7 +1289,8 @@ class TestTrimZeros(TestCase):
 
     def test_list_to_list(self):
         res = trim_zeros(self.a.tolist())
-        assert isinstance(res, list)
+        if not isinstance(res, list):
+            raise AssertionError(f"Expected res to be list, got {type(res)}")
 
 
 @xpassIfTorchDynamo_np  # (reason="TODO: implement")
@@ -1779,7 +1794,10 @@ class TestUnwrap(TestCase):
         assert_array_equal(no_discont, [0, 75, 150, 225, 300, 180])
         sm_discont = unwrap(wrap_uneven, period=250, discont=140)
         assert_array_equal(sm_discont, [0, 75, 150, 225, 300, 430])
-        assert sm_discont.dtype == wrap_uneven.dtype
+        if sm_discont.dtype != wrap_uneven.dtype:
+            raise AssertionError(
+                f"dtype mismatch: {sm_discont.dtype} != {wrap_uneven.dtype}"
+            )
 
 
 @instantiate_parametrized_tests
@@ -1793,7 +1811,8 @@ class TestFilterwindows(TestCase):
 
         w = hanning(scalar)
         ref_dtype = np.result_type(dtype, np.float64)
-        assert w.dtype == ref_dtype
+        if w.dtype != ref_dtype:
+            raise AssertionError(f"dtype mismatch: {w.dtype} != {ref_dtype}")
 
         # check symmetry
         assert_allclose(w, flipud(w), atol=1e-15)
@@ -1815,7 +1834,8 @@ class TestFilterwindows(TestCase):
 
         w = hamming(scalar)
         ref_dtype = np.result_type(dtype, np.float64)
-        assert w.dtype == ref_dtype
+        if w.dtype != ref_dtype:
+            raise AssertionError(f"dtype mismatch: {w.dtype} != {ref_dtype}")
 
         # check symmetry
         assert_allclose(w, flipud(w), atol=1e-15)
@@ -1837,7 +1857,8 @@ class TestFilterwindows(TestCase):
 
         w = bartlett(scalar)
         ref_dtype = np.result_type(dtype, np.float64)
-        assert w.dtype == ref_dtype
+        if w.dtype != ref_dtype:
+            raise AssertionError(f"dtype mismatch: {w.dtype} != {ref_dtype}")
 
         # check symmetry
         assert_allclose(w, flipud(w), atol=1e-15)
@@ -1859,7 +1880,8 @@ class TestFilterwindows(TestCase):
 
         w = blackman(scalar)
         ref_dtype = np.result_type(dtype, np.float64)
-        assert w.dtype == ref_dtype
+        if w.dtype != ref_dtype:
+            raise AssertionError(f"dtype mismatch: {w.dtype} != {ref_dtype}")
 
         # check symmetry
         assert_allclose(w, flipud(w), atol=1e-15)
@@ -1881,7 +1903,8 @@ class TestFilterwindows(TestCase):
 
         w = kaiser(scalar, 0)
         ref_dtype = np.result_type(dtype, np.float64)
-        assert w.dtype == ref_dtype
+        if w.dtype != ref_dtype:
+            raise AssertionError(f"dtype mismatch: {w.dtype} != {ref_dtype}")
 
         # check symmetry
         assert_equal(w, flipud(w))
@@ -2093,7 +2116,8 @@ class TestCorrCoef(TestCase):
     def test_corrcoef_dtype(self, test_type):
         cast_A = self.A.astype(test_type)
         res = corrcoef(cast_A, dtype=test_type)
-        assert test_type == res.dtype
+        if test_type != res.dtype:
+            raise AssertionError(f"dtype mismatch: {test_type} != {res.dtype}")
 
 
 @instantiate_parametrized_tests
@@ -2208,7 +2232,8 @@ class TestCov(TestCase):
     def test_cov_dtype(self, test_type):
         cast_x1 = self.x1.astype(test_type)
         res = cov(cast_x1, dtype=test_type)
-        assert test_type == res.dtype
+        if test_type != res.dtype:
+            raise AssertionError(f"dtype mismatch: {test_type} != {res.dtype}")
 
 
 class Test_I0(TestCase):
@@ -3310,7 +3335,8 @@ class TestPercentile(TestCase):
 
         out = np.empty(shape_out)
         result = np.percentile(d, q, axis=axis, keepdims=True, out=out)
-        assert result is out
+        if result is not out:
+            raise AssertionError("result is not out")
         assert_equal(result.shape, shape_out)
 
     @skip(reason="NP_VER: fails on CI; no method=")
@@ -3502,7 +3528,8 @@ class TestQuantile(TestCase):
     @parametrize("dtype", "Bbhil")  # np.typecodes["AllInteger"])
     def test_quantile_preserve_int_type(self, dtype):
         res = np.quantile(np.array([1, 2], dtype=dtype), [0.5], method="nearest")
-        assert res.dtype == dtype
+        if res.dtype != dtype:
+            raise AssertionError(f"dtype mismatch: {res.dtype} != {dtype}")
 
     @skipif(numpy.__version__ < "1.22", reason="NP_VER: fails with NumPy 1.21.2 on CI")
     @parametrize(
@@ -3872,7 +3899,8 @@ class TestMedian(TestCase):
             )
         out = np.empty(shape_out)
         result = np.median(d, axis=axis, keepdims=True, out=out)
-        assert result is out
+        if result is not out:
+            raise AssertionError("result is not out")
         assert_equal(result.shape, shape_out)
 
 

@@ -823,14 +823,18 @@ class ScheduleTest(MultiProcContinuousTest):
         def forward_callback(action: _Action, ctx: _PipelineContext):
             """Custom callback for FORWARD computation that mimics the original implementation."""
             schedule = ctx.schedule_ref
-            assert isinstance(schedule, _PipelineScheduleRuntime)
+            if not isinstance(schedule, _PipelineScheduleRuntime):
+                raise AssertionError(
+                    f"Expected _PipelineScheduleRuntime, got {type(schedule)}"
+                )
             stage_index_to_stage: dict[int, _PipelineStageBase] = {
                 stage.stage_index: stage for stage in schedule._stages
             }
             stage = stage_index_to_stage[action.stage_index]
             stage_index = stage.stage_index
             mb_index = action.microbatch_index
-            assert mb_index is not None
+            if mb_index is None:
+                raise AssertionError("Expected mb_index to not be None")
             fwd_recv_ops = schedule.fwd_recv_ops
             arg_mbs = ctx.arg_mbs
             kwarg_mbs = ctx.kwarg_mbs
@@ -846,10 +850,8 @@ class ScheduleTest(MultiProcContinuousTest):
                 # no recv op expected for V-schedule special case (see [Note: V-schedule special case])
                 and not is_prev_stage_on_this_rank
             ):
-                assert (
-                    stage_index,
-                    mb_index,
-                ) in fwd_recv_ops, f"Computing {action=} before receiving input"
+                if (stage_index, mb_index) not in fwd_recv_ops:
+                    raise AssertionError(f"Computing {action=} before receiving input")
                 from torch.distributed.pipelining.schedules import _wait_batch_p2p
 
                 _wait_batch_p2p(fwd_recv_ops.pop((stage_index, mb_index)))
@@ -871,11 +873,15 @@ class ScheduleTest(MultiProcContinuousTest):
         def overlap_callback(action: _Action, ctx: _PipelineContext):
             """Custom callback for OVERLAP_F_B computation that mimics the original implementation."""
             schedule = ctx.schedule_ref
-            assert isinstance(schedule, _PipelineScheduleRuntime)
+            if not isinstance(schedule, _PipelineScheduleRuntime):
+                raise AssertionError(
+                    f"Expected _PipelineScheduleRuntime, got {type(schedule)}"
+                )
             stage_index_to_stage: dict[int, _PipelineStageBase] = {
                 stage.stage_index: stage for stage in schedule._stages
             }
-            assert action.sub_actions is not None
+            if action.sub_actions is None:
+                raise AssertionError("Expected action.sub_actions to not be None")
             fwd_action = action.sub_actions[0]
             bwd_action = action.sub_actions[1]
 
@@ -894,7 +900,8 @@ class ScheduleTest(MultiProcContinuousTest):
             backward_stage_index = bwd_action.stage_index
             backward_stage = stage_index_to_stage[backward_stage_index]
             backward_mb_index = bwd_action.microbatch_index
-            assert backward_mb_index is not None
+            if backward_mb_index is None:
+                raise AssertionError("Expected backward_mb_index to not be None")
             bwd_recv_ops = schedule.bwd_recv_ops
             is_next_stage_on_this_rank = (
                 backward_stage.stage_index + 1 in stage_index_to_stage
@@ -907,12 +914,10 @@ class ScheduleTest(MultiProcContinuousTest):
                 # no recv op expected for V-schedule special case (see [Note: V-schedule special case])
                 and not is_next_stage_on_this_rank
             ):
-                assert (
-                    backward_stage_index,
-                    backward_mb_index,
-                ) in bwd_recv_ops, (
-                    f"Attempted to run compute {action=} before receiving input"
-                )
+                if (backward_stage_index, backward_mb_index) not in bwd_recv_ops:
+                    raise AssertionError(
+                        f"Attempted to run compute {action=} before receiving input"
+                    )
                 _wait_batch_p2p(
                     bwd_recv_ops.pop((backward_stage_index, backward_mb_index))
                 )
@@ -1161,7 +1166,10 @@ class CustomSchedulesTest(MultiProcContinuousTest):
         schedule = ScheduleClass(
             stages, num_microbatches, loss_fn=loss_fn, scale_grads=False
         )
-        assert isinstance(schedule, _PipelineScheduleRuntime)
+        if not isinstance(schedule, _PipelineScheduleRuntime):
+            raise AssertionError(
+                f"Expected _PipelineScheduleRuntime, got {type(schedule)}"
+            )
 
         # Run pipeline with tensor leak checking
         with check_leaked_tensors() as garbage_tensors:
