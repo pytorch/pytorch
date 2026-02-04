@@ -1,5 +1,7 @@
 # mypy: allow-untyped-defs
 # pylint: disable=useless-parent-delegation
+from __future__ import annotations
+
 import ctypes
 
 import torch
@@ -43,11 +45,11 @@ class Stream(torch._C._CudaStreamBase):
             with torch.cuda.device(device):
                 return super().__new__(cls, priority=priority, **kwargs)
 
-    def wait_event(self, event) -> None:
+    def wait_event(self, event: Event | torch.Event) -> None:
         r"""Make all future work submitted to the stream wait for an event.
 
         Args:
-            event (torch.cuda.Event): an event to wait for.
+            event (Event, torch.Event): an event to wait for.
 
         .. note:: This is a wrapper around ``cudaStreamWaitEvent()``: see
            `CUDA Stream documentation`_ for more info.
@@ -60,25 +62,25 @@ class Stream(torch._C._CudaStreamBase):
         """
         event.wait(self)
 
-    def wait_stream(self, stream) -> None:
+    def wait_stream(self, stream: Stream | torch.Stream) -> None:
         r"""Synchronize with another stream.
 
         All future work submitted to this stream will wait until all kernels
         submitted to a given stream at the time of call complete.
 
         Args:
-            stream (Stream): a stream to synchronize.
+            stream (Stream, torch.Stream): a stream to synchronize.
 
         .. note:: This function returns without waiting for currently enqueued
            kernels in :attr:`stream`: only future operations are affected.
         """
         self.wait_event(stream.record_event())
 
-    def record_event(self, event=None):
+    def record_event(self, event: Event | torch.Event | None = None):
         r"""Record an event.
 
         Args:
-            event (torch.cuda.Event, optional): event to record. If not given, a new one
+            event (Event, torch.Event, optional): event to record. If not given, a new one
                 will be allocated.
 
         Returns:
@@ -194,20 +196,22 @@ class Event(torch._C._CudaEventBase):
         r"""Reconstruct an event from an IPC handle on the given device."""
         return super().from_ipc_handle(device, handle)
 
-    def record(self, stream=None):
+    def record(self, stream: Stream | torch.Stream | None = None):
         r"""Record the event in a given stream.
 
-        Uses ``torch.cuda.current_stream()`` if no stream is specified. The
-        stream's device must match the event's device.
+        Args:
+            stream (Stream, torch.Stream, optional): Uses ``torch.cuda.current_stream()`` if no stream is specified.
+                The stream's device must match the event's device.
         """
         if stream is None:
             stream = torch.cuda.current_stream()
         super().record(stream)
 
-    def wait(self, stream=None) -> None:
+    def wait(self, stream: Stream | torch.Stream | None = None) -> None:
         r"""Make all future work submitted to the given stream wait for this event.
 
-        Use ``torch.cuda.current_stream()`` if no stream is specified.
+        Args:
+            stream (Stream, torch.Stream, optional): Uses ``torch.cuda.current_stream()`` if no stream is specified.
 
         .. note:: This is a wrapper around ``cudaStreamWaitEvent()``: see
             `CUDA Event documentation`_ for more info.
@@ -225,11 +229,14 @@ class Event(torch._C._CudaEventBase):
         """
         return super().query()
 
-    def elapsed_time(self, end_event):
+    def elapsed_time(self, end_event: Event):
         r"""Return the time elapsed.
 
         Time reported in milliseconds after the event was recorded and
         before the end_event was recorded.
+
+        Args:
+            end_event (Event): the end event.
         """
         return super().elapsed_time(end_event)
 
