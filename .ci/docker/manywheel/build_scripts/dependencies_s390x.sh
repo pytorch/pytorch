@@ -10,6 +10,16 @@ retry () {
     $*  || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
 }
 
+# protobuf with fix from https://github.com/protocolbuffers/protobuf/pull/25363
+retry wget https://files.pythonhosted.org/packages/ba/25/7c72c307aafc96fa87062aa6291d9f7c94836e43214d43722e86037aac02/protobuf-6.33.5.tar.gz
+tar xzvf protobuf-6.33.5.tar.gz
+cd protobuf-6.33.5
+retry wget https://github.com/protocolbuffers/protobuf/pull/25363.patch
+patch -p1 < 25363.patch
+python3 setup.py bdist_wheel
+pip3 install dist/protobuf-*.whl
+cd ..
+/bin/rm -rf ./protobuf-6.33.5 ./protobuf-6.33.5.tar.gz
 
 # build onnxruntime 1.21.0 from sources.
 # it is not possible to build it from sources using pip,
