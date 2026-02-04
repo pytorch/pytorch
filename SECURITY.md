@@ -47,6 +47,8 @@ Important Note: The trustworthiness of a model is not binary. You must always de
 
 TorchScript models should be treated the same way as locally executable code from an unknown source. Only run TorchScript models if you trust the provider. Please note, that tools for introspecting TorchScript models (such as `torch.utils.model_dump`) may also execute partial or full code stored in those models, therefore they should be used only if you trust the provider of the binary you are about to load.
 
+PyTorch mobile models (`.ptl` files) are TorchScript models optimized for mobile deployment and should be treated with the same level of caution. Only load PyTorch mobile models from trusted sources.
+
 ### Untrusted inputs during training and prediction
 
 If you plan to open your model to untrusted inputs, be aware that inputs can also be used as vectors by malicious agents. To minimize risks, make sure to give your model only the permissions strictly required, and keep your libraries updated with the latest security patches.
