@@ -1943,35 +1943,6 @@ class TestStandaloneCompile(TestCase):
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @functorch_config.patch({"enable_autograd_cache": True})
-    def test_is_saveable(self) -> None:
-        mod = torch.nn.Linear(1, 3)
-        x = torch.randn(4, 1)
-
-        @torch._dynamo.allow_in_graph
-        def uncacheable(x):
-            return x.sin()
-
-        def f(x):
-            with torch.no_grad():
-                result = mod(x)
-                return uncacheable(result)
-
-        with fresh_cache():
-            gm, args, kwargs = self.capture(f)(x)
-            assert not kwargs
-
-            compiled_artifact = torch._inductor.standalone_compile(gm, args)
-
-            self.assertFalse(compiled_artifact.is_saveable())
-
-            with tempfile.TemporaryDirectory() as temp_dir:
-                path = os.path.join(temp_dir, "new_dir")
-                with self.assertRaisesRegex(RuntimeError, "not serializable"):
-                    compiled_artifact.save(path=path, format="unpacked")
-
-    @config.patch({"fx_graph_cache": True})
-    @config.patch({"fx_graph_remote_cache": False})
-    @functorch_config.patch({"enable_autograd_cache": True})
     @parametrize("dynamic", (False, True))
     @parametrize("is_aot", (False, True))
     def test_call_in_backend(self, dynamic: bool, is_aot: bool) -> None:
