@@ -129,7 +129,6 @@ supported_ctx_manager_classes = dict.fromkeys(
         torch._C.DisableTorchFunction,
         torch._functorch.vmap.vmap_increment_nesting,
         torch._functorch.eager_transforms.grad_increment_nesting,
-        torch._functorch.eager_transforms.jvp_increment_nesting,
         torch._functorch.eager_transforms.enable_inplace_requires_grad,
         torch.amp.autocast_mode.autocast,
         torch.autograd.grad_mode.enable_grad,
@@ -344,15 +343,15 @@ def get_overridable_functions() -> set[Callable[..., Any]]:
     from itertools import chain
 
     from torch.overrides import get_overridable_functions as get_overridable_functions_
+    from torch.utils._device import _device_constructors
 
     funcs = set(chain.from_iterable(get_overridable_functions_().values()))
+    funcs.update(_device_constructors())
     more: set[Callable[..., Any]] = {
-        torch.ones,
         torch.ones_like,
-        torch.zeros,
         torch.zeros_like,
-        torch.empty,
-        torch.full,
+        torch.empty_like,
+        torch.full_like,
     }
     funcs.update(more)
     return funcs
@@ -471,7 +470,6 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             GradInplaceRequiresGradCtxManagerVariable,
             GradModeVariable,
             InferenceModeVariable,
-            JvpIncrementNestingCtxManagerVariable,
             SDPAKernelVariable,
             SetFwdGradEnabledContextManager,
             StreamVariable,
@@ -556,9 +554,6 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                 tx,
                 args,
             )
-        elif self.value is torch._functorch.eager_transforms.jvp_increment_nesting:
-            assert len(args) == 0
-            return JvpIncrementNestingCtxManagerVariable.create(tx)
         elif self.value is torch.autograd.forward_ad._set_fwd_grad_enabled:
             assert len(args) == 1
             return SetFwdGradEnabledContextManager.create(
@@ -1282,6 +1277,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 *args: VariableTracker,
                 **kwargs: VariableTracker,
             ) -> VariableTracker:
+                from .builder import SourcelessBuilder
+
                 # rewrite non-primitive args/kwargs to be included in the on-the-fly prim function
                 # and rewrite args to have only proxyable args, then insert call_function
                 placements_vt = kwargs.get("placements")
@@ -1292,7 +1289,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 if placements_vt is None:
                     placements_vt = ConstantVariable.create(None)
                 elif isinstance(placements_vt, variables.UserDefinedObjectVariable):
-                    placements_vt = variables.BuiltinVariable(tuple).call_function(
+                    placements_vt = SourcelessBuilder.create(tx, tuple).call_function(
                         tx, [placements_vt], {}
                     )
 
@@ -2443,7 +2440,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         from torch.utils._pytree import tree_flatten
 
         from .base import AsPythonConstantNotImplementedError
-        from .builder import wrap_fx_proxy
+        from .builder import SourcelessBuilder, wrap_fx_proxy
 
         # 1. Convert `args, kwargs` into pytree-flattened proxy forms.
         #
@@ -2454,7 +2451,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         packed_input_vt = TupleVariable.build(
             tx, (TupleVariable.build(tx, args), ConstDictVariable.build(tx, kwargs))
         )
-        out_vt = variables.UserFunctionVariable(tree_flatten).call_function(  # type: ignore[arg-type]
+        out_vt = SourcelessBuilder.create(tx, tree_flatten).call_function(  # type: ignore[arg-type]
             tx, [packed_input_vt], {}
         )
         assert isinstance(out_vt, TupleVariable) and len(out_vt.items) == 2
@@ -2631,7 +2628,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 
         # Reuse the same pattern used above for tree_flatten: call the python
         # function through Dynamo so it symbolically interprets it.
-        out_vt = variables.UserFunctionVariable(_pytree.tree_unflatten).call_function(
+        out_vt = SourcelessBuilder.create(tx, _pytree.tree_unflatten).call_function(
             tx, [proxy_list_vt, out_spec_vt], {}
         )
 
@@ -3141,3 +3138,49 @@ class FuncTorchInterpreterVariable(BaseTorchVariable):
                 tx, None
             )
         return super().call_method(tx, name, args, kwargs)
+
+
+class JvpIncrementNestingVariable(BaseTorchVariable):
+    """
+    Represents torch._C._functorch._jvp_increment_nesting. Typically called
+    inside jvp_increment_nesting context manager.
+    """
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        assert not args and not kwargs
+        tx.output.create_node(
+            "call_function",
+            torch._C._functorch._jvp_increment_nesting,
+            (),
+            {},
+        )
+        level = torch._C._functorch._jvp_increment_nesting()
+        return variables.ConstantVariable.create(level)
+
+
+class JvpDecrementNestingVariable(BaseTorchVariable):
+    """
+    Represents torch._C._functorch._jvp_decrement_nesting. Typically called
+    inside jvp_increment_nesting context manager.
+    """
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        assert not args and not kwargs
+        tx.output.create_node(
+            "call_function",
+            torch._C._functorch._jvp_decrement_nesting,
+            (),
+            {},
+        )
+        torch._C._functorch._jvp_decrement_nesting()
+        return variables.ConstantVariable.create(None)
