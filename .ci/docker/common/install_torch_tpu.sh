@@ -130,7 +130,6 @@ pushd /var/lib/jenkins/
 # 6. Clone
 pull_torch_tpu
 chown -R jenkins /var/lib/jenkins/torch_tpu
-# git clone --recursive "${TORCH_TPU_REPO}" torch_tpu
 cd torch_tpu
 
 # 7. Checkout
