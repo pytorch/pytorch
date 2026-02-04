@@ -6,7 +6,7 @@ set MODULE_NAME=pytorch
 
 IF NOT EXIST "setup.py" IF NOT EXIST "%MODULE_NAME%" (
     call internal\clone.bat
-    cd %~dp0
+    cd %~dp0\..
 ) ELSE (
     call internal\clean.bat
 )
