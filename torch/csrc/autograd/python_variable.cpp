@@ -1918,9 +1918,9 @@ static PyObject* DTensor_compute_global_tensor_info_impl(
       const auto placement_type_name =
           py::str(py::handle(PyType_GetName(Py_TYPE(placement.ptr()))));
 #else
-      const auto placement_type_name = py::str(
-          py::handle((PyObject*)Py_TYPE(placement.ptr()))
-              .attr(dtensor_interned_strings.__name__));
+      const auto placement_type_name =
+          py::str(py::handle((PyObject*)Py_TYPE(placement.ptr()))
+                      .attr(dtensor_interned_strings.__name__));
 #endif
       return PyErr_Format(
           PyExc_RuntimeError,
