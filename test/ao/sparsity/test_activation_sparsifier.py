@@ -51,11 +51,19 @@ class TestActivationSparsifier(TestCase):
         combined_defaults = {**defaults, "sparse_config": sparse_config}
 
         # more keys are populated in activation sparsifier (even though they may be None)
-        assert len(combined_defaults) <= len(activation_sparsifier.defaults)
+        if len(combined_defaults) > len(activation_sparsifier.defaults):
+            raise AssertionError(
+                f"Expected combined_defaults length <= sparsifier.defaults length, "
+                f"got {len(combined_defaults)} > {len(activation_sparsifier.defaults)}"
+            )
 
         for key, config in sparsifier_defaults.items():
             # all the keys in combined_defaults should be present in sparsifier defaults
-            assert config == combined_defaults.get(key)
+            if config != combined_defaults.get(key):
+                raise AssertionError(
+                    f"Expected sparsifier_defaults['{key}'] == combined_defaults.get('{key}'), "
+                    f"got {config} != {combined_defaults.get(key)}"
+                )
 
     def _check_register_layer(
         self, activation_sparsifier, defaults, sparse_config, layer_args_list
@@ -79,7 +87,10 @@ class TestActivationSparsifier(TestCase):
         """
         # check args
         data_groups = activation_sparsifier.data_groups
-        assert len(data_groups) == len(layer_args_list)
+        if len(data_groups) != len(layer_args_list):
+            raise AssertionError(
+                f"Expected {len(layer_args_list)} data_groups, got {len(data_groups)}"
+            )
         for layer_args in layer_args_list:
             layer_arg, sparse_config_layer = layer_args
 
@@ -89,7 +100,11 @@ class TestActivationSparsifier(TestCase):
 
             name = module_to_fqn(activation_sparsifier.model, layer_arg["layer"])
 
-            assert data_groups[name]["sparse_config"] == sparse_config_actual
+            if data_groups[name]["sparse_config"] != sparse_config_actual:
+                raise AssertionError(
+                    f"Expected sparse_config {sparse_config_actual}, "
+                    f"got {data_groups[name]['sparse_config']}"
+                )
 
             # assert the rest
             other_config_actual = copy.deepcopy(defaults)
@@ -97,7 +112,10 @@ class TestActivationSparsifier(TestCase):
             other_config_actual.pop("layer")
 
             for key, value in other_config_actual.items():
-                assert key in data_groups[name]
+                if key not in data_groups[name]:
+                    raise AssertionError(
+                        f"Expected key '{key}' in data_groups['{name}']"
+                    )
                 assert value == data_groups[name][key]
 
             # get_mask should raise error
