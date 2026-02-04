@@ -1584,6 +1584,14 @@ class TensorVariable(VariableTracker):
         # rewrite non-primitive args/kwargs to be included in the on-the-fly prim function
         # and rewrite args to have only proxyable args, then insert call_function
 
+        # custom grad_placements do not work with  as_python_constant,
+        # to support them we need to handle UserDefinedObject
+        def extract_python_value(vt: VariableTracker) -> Any:
+            if isinstance(vt, variables.UserDefinedObjectVariable):
+                return vt.value
+
+            return vt.as_python_constant()
+
         grad_placements_vt = kwargs.get(
             "grad_placements", ConstantVariable.create(None)
         )
@@ -1596,8 +1604,8 @@ class TensorVariable(VariableTracker):
         if kwargs.get("grad_placements") is not None:
             kwargs["grad_placements"] = grad_placements_vt
 
-        args_as_value = [x.as_python_constant() for x in args]
-        kwargs_as_value = {k: v.as_python_constant() for k, v in kwargs.items()}
+        args_as_value = [extract_python_value(x) for x in args]
+        kwargs_as_value = {k: extract_python_value(v) for k, v in kwargs.items()}
 
         def to_local_fn_with_prim_types(x: Any) -> Any:
             return x.to_local(*args_as_value, **kwargs_as_value)
