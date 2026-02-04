@@ -5235,8 +5235,15 @@ Here are the ways to call ``to``:
 
     According to `C++ type conversion rules <https://en.cppreference.com/w/cpp/language/implicit_conversion.html>`_,
     converting floating point value to integer type will truncate the fractional part.
-    If the truncated value cannot fit into the target type (e.g., casting ``torch.inf`` to ``torch.long``),
-    the behavior is undefined and the result may vary across platforms.
+
+    For non-finite values (infinity and NaN), PyTorch defines the following behavior
+    to ensure consistency across platforms:
+
+    - Positive infinity (``+inf``) maps to the maximum representable value of the target integer type
+    - Negative infinity (``-inf``) maps to the minimum representable value of the target integer type
+    - NaN maps to 0
+
+    This behavior is consistent across CPU and CUDA devices.
 
 .. method:: to(device=None, dtype=None, non_blocking=False, copy=False, memory_format=torch.preserve_format) -> Tensor
    :noindex:
