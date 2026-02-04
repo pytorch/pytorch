@@ -1,4 +1,4 @@
-name: win-test
+name: windows-rtx-test
 
 on:
   workflow_call:
