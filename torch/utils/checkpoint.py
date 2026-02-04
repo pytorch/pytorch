@@ -798,42 +798,6 @@ class _Holder:
         self.handles: Dict[int, Optional[_Handle]] = {}
 
 
-class _NoopSaveInputs(torch.autograd.Function):
-    @staticmethod
-    # pyrefly: ignore [bad-override]
-    def forward(ctx, *args):
-        # Only tensors can be saved with ctx.save_for_backward, everything else
-        # is captured by get_args, which is saved directly on ctx
-        tensor_indices, tensors = zip(
-            *[(i, o) for i, o in enumerate(args) if isinstance(o, torch.Tensor)], strict=False
-        )
-        idx2saved_idx = {b: a for a, b in enumerate(tensor_indices)}
-        # args but with tensors replaced with None as placeholders
-        args = [None if isinstance(o, torch.Tensor) else o for o in args]
-
-        def get_args(saved_tensors):
-            # restore the placeholders with the original tensors grabbed from
-            # ctx.saved_tensors (which may be saved on a parent checkpoint if
-            # this checkpoint is nested, and that would trigger a recursive
-            # unpack!)
-            ret = [
-                saved_tensors[idx2saved_idx[i]] if i in tensor_indices else o
-                for i, o in enumerate(args)
-            ]
-            # grab the tail since we also saved the dummy to avoid having to explicitly
-            # handle the case where there are no tensor inputs
-            return ret[1:]
-        
-        ctx.get_args = get_args
-        ctx.save_for_backward(*tensors)
-
-        return torch.empty((0,))
-
-    @staticmethod
-    def backward(ctx, *grad_outputs) -> NoReturn:
-        raise AssertionError("Did not expect to backward on this graph")
-
-
 class _CheckpointFrame:
     def __init__(self, recompute_fn, early_stop, unpack_error_cb, metadata_fn) -> None:
         self.recompute_fn = recompute_fn
