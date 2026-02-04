@@ -87,6 +87,21 @@ TEST(TestStream, StreamPriorityTest) {
   EXPECT_EQ(stream.priority(), 0);
 }
 
+TEST(TestStream, GenericStream) {
+  if (!at::cuda::is_available()) return;
+
+  c10::cuda::CUDAStream cuda_stream = c10::cuda::getStreamFromPool();
+  c10::Stream generic_stream = cuda_stream.unwrap();
+  c10::cuda::CUDAStream wrapped_stream = c10::cuda::CUDAStream(generic_stream);
+  EXPECT_EQ(cuda_stream, wrapped_stream);
+  EXPECT_EQ(
+      (cudaStream_t)cuda_stream,
+      reinterpret_cast<cudaStream_t>(generic_stream.native_handle()));
+  EXPECT_EQ(
+      cuda_stream.stream(),
+      reinterpret_cast<cudaStream_t>(generic_stream.native_handle()));
+}
+
 // Verifies streams are set properly
 TEST(TestStream, GetAndSetTest) {
   if (!at::cuda::is_available()) return;
