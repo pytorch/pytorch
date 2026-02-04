@@ -827,6 +827,23 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
   return std::make_tuple(attention, logsumexp, Tensor(), Tensor(), max_seqlen_batch_q, max_seqlen_batch_k, philox_seed, philox_offset, debug_attn_mask);
 }
 
+std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Tensor, Tensor> _scaled_dot_product_flash_attention_cuda_quantized(
+  const Tensor& query,
+  const Tensor& key,
+  const Tensor& value,
+  const std::optional<Tensor>& q_descale,
+  const std::optional<Tensor>& k_descale,
+  const std::optional<Tensor>& v_descale,
+  double dropout_p,
+  bool is_causal,
+  bool return_debug_mask,
+  std::optional<double> scale) {
+  TORCH_CHECK(false,
+    "Low-precision flash attention SDPA requires FA3. "
+    "Call torch.nn.attention.activate_flash_attention_impl('FA3') first.");
+  return std::make_tuple(Tensor(), Tensor(), Tensor(), Tensor(), c10::SymInt(0), c10::SymInt(0), Tensor(), Tensor(), Tensor());
+}
+
 std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Tensor, Tensor> _cudnn_attention_forward(
     const Tensor& query,
     const Tensor& key,
@@ -1169,10 +1186,20 @@ _flash_attention_forward(
   std::optional<Tensor> alibi_slopes = _alibi_slopes;
   const float softcap = 0.0;
 
-#ifndef USE_ROCM  // ROCM backend accepts std::optional for window_size_left/right directly.
-  const int non_null_window_left = window_size_left.value_or(-1);
-  const int non_null_window_right = window_size_right.value_or(-1);
+#ifdef USE_ROCM  // ROCM backend accepts std::optional for window_size_left/right directly.
+#ifdef DISABLE_AOTRITON  // CK backend, Passing window_size as it is
+  const auto window_left = window_size_left;
+  const auto window_right = window_size_right;
+#else  // AOTriton implements "generalized" SWA and negative size means negative shifting.
+  // aotriton_adapter::parse_window_size tries to match the behavior of CUTLASS backend
+  using sdp::aotriton_adapter::parse_window_size;
+  const auto [window_left, window_right] = parse_window_size(window_size_left,
+                                                             window_size_right);
 #endif
+#else  // USE_ROCM
+  const int window_left = window_size_left.value_or(-1);
+  const int window_right = window_size_right.value_or(-1);
+#endif  // USE_ROCM
 
   // We are going to have two paths:
   // 1. The standard MHA path for dense tensors
@@ -1209,13 +1236,8 @@ _flash_attention_forward(
             softmax_scale,
             false /*zero_tensors*/,
             is_causal,
-#ifdef USE_ROCM
-            window_size_left,
-            window_size_right,
-#else
-            non_null_window_left,
-            non_null_window_right,
-#endif
+            window_left,
+            window_right,
             softcap,
             return_debug_mask,
             std::nullopt /*gen_*/);
@@ -1238,13 +1260,8 @@ _flash_attention_forward(
             dropout_p,
             softmax_scale,
             is_causal,
-#ifdef USE_ROCM
-            window_size_left,
-            window_size_right,
-#else
-            non_null_window_left,
-            non_null_window_right,
-#endif
+            window_left,
+            window_right,
             softcap,
             return_debug_mask, /*return_softmax (this is used for testing)*/
             std::nullopt);
@@ -1267,6 +1284,32 @@ _flash_attention_forward(
       Tensor(),
       Tensor());
 }
+
+std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor>
+_flash_attention_forward_quantized(
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    const std::optional<Tensor>& cumulative_sequence_length_q,
+    const std::optional<Tensor>& cumulative_sequence_length_k,
+    int64_t max_seqlen_batch_q,
+    int64_t max_seqlen_batch_k,
+    double dropout_p,
+    bool is_causal,
+    bool return_debug_mask,
+    const std::optional<Tensor>& q_descale,
+    const std::optional<Tensor>& k_descale,
+    const std::optional<Tensor>& v_descale,
+    std::optional<double> scale,
+    std::optional<int64_t> window_size_left,
+    std::optional<int64_t> window_size_right,
+    const std::optional<Tensor>& _seqused_k,
+    const std::optional<Tensor>& _alibi_slopes
+  ) {
+    TORCH_CHECK(false, "Low-precision flash attention SDPA requires FA3. "
+    "Call torch.nn.attention.activate_flash_attention_impl('FA3') first.");
+    return std::make_tuple(Tensor(), Tensor(), Tensor(), Tensor(), Tensor());
+  }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_attention_forward(
     const at::Tensor& query, // [b, seqlen, num_heads, K]

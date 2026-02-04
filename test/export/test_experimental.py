@@ -222,6 +222,41 @@ def forward(self, p_linear_weight, p_linear_bias, c_lifted_tensor_0, x):
 
         self._test_export_blockmask_with_mask_fn(make_mask_fn)
 
+    def test_export_with_default_kwargs(self):
+        class FunctionalWrapper(torch.nn.Module):
+            """Wrapper with keyword-only argument in __call__."""
+
+            def __init__(self, module):
+                super().__init__()
+                self._module = module
+
+            def __call__(self, *args, _ctx=None, **kwargs):
+                # _ctx is keyword-only with default None
+                out = self._module(*args, **kwargs)
+                return out, _ctx
+
+        inner = torch.nn.Linear(4, 4)
+        wrapper = FunctionalWrapper(inner)
+        x = torch.randn(2, 4, requires_grad=True)
+
+        gm = dynamo_graph_capture_for_export(wrapper)(x)
+        compile_out, compile_ctx = gm(x)
+        eager_out, eager_ctx = wrapper(x)
+        self.assertEqual(compile_ctx, eager_ctx)
+        self.assertEqual(compile_out, eager_out)
+        self.assertExpectedInline(
+            str(gm.code).strip(),
+            """\
+def forward(self, args_0):
+    _fn_args = (args_0, )
+    L_self_modules_module_parameters_weight_ , L_self_modules_module_parameters_bias_ , L_args_0_ , = self._dynamo_bytecode_flatten(*_fn_args)
+    l_self_modules_module_parameters_weight_ = L_self_modules_module_parameters_weight_
+    l_self_modules_module_parameters_bias_ = L_self_modules_module_parameters_bias_
+    l_args_0_ = L_args_0_
+    out = torch._C._nn.linear(l_args_0_, l_self_modules_module_parameters_weight_, l_self_modules_module_parameters_bias_);  l_args_0_ = l_self_modules_module_parameters_weight_ = l_self_modules_module_parameters_bias_ = None
+    return self._dynamo_bytecode_unflatten((out,), _fn_args)""",
+        )
+
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_export_blockmask_mutated_closure(self):
         def make_mask_fn():
@@ -782,21 +817,15 @@ def forward(self, x):
             gm = dynamo_graph_capture_for_export(foo)(*trace_inputs)
             test_inputs = make_inputs()
             self.assertExpectedInline(
-                gm._in_shuffle_graph.code.strip("\r\n "),
-                """\
-def forward(self, arg0_1, arg1_1, arg2_1):
-    return (arg1_1, arg2_1)""",
-            )
-            self.assertExpectedInline(
                 gm.code.strip("\r\n "),
                 """\
 def forward(self, args_0):
-    _tree_leaf_0, _tree_leaf_1, _tree_leaf_2, = pytree.tree_leaves((self, args_0,))
-    L_bar_x , L_bar_y , = self._in_shuffle_graph(_tree_leaf_0, _tree_leaf_1, _tree_leaf_2)
+    _fn_args = (args_0, )
+    L_bar_x , L_bar_y , = self._dynamo_bytecode_flatten(*_fn_args)
     l_bar_x = L_bar_x
     l_bar_y = L_bar_y
     add = l_bar_x + l_bar_y;  l_bar_x = l_bar_y = None
-    return pytree.tree_unflatten(self._out_shuffle_graph(_tree_leaf_0, _tree_leaf_1, _tree_leaf_2, add), self._out_spec)""",
+    return self._dynamo_bytecode_unflatten((add,), _fn_args)""",
             )
             self.assertEqual(gm(*test_inputs), foo(*test_inputs))
         finally:
@@ -819,25 +848,18 @@ def forward(self, args_0):
         inps = (torch.randn(10, 32),)
         ep = dynamo_graph_capture_for_export(MyModel())(*inps)
         self.assertExpectedInline(
-            ep._in_shuffle_graph.code.strip("\r\n "),
-            """\
-def forward(self, arg0_1, arg1_1):
-    _tensor_constant0 = self._tensor_constant0
-    return (arg1_1, _tensor_constant0)""",
-        )
-        self.assertExpectedInline(
             ep.code.strip("\r\n "),
             """\
 def forward(self, args_0):
-    _tree_leaf_0, _tree_leaf_1, = pytree.tree_leaves((self, args_0,))
-    L_x_ , L_outer_ , = self._in_shuffle_graph(_tree_leaf_0, _tree_leaf_1)
+    _fn_args = (args_0, )
+    L_x_ , L_outer_ , = self._dynamo_bytecode_flatten(*_fn_args)
     l_x_ = L_x_
     l_outer_ = L_outer_
     z = l_x_ + l_outer_;  l_x_ = l_outer_ = None
     y = z[(slice(None, -1, None), slice(None, None, None))];  z = None
     stacked = torch.stack([y, y, y], dim = 0);  y = None
     reshaped = stacked.reshape(-1, 3, 32);  stacked = None
-    return pytree.tree_unflatten(self._out_shuffle_graph(_tree_leaf_0, _tree_leaf_1, reshaped), self._out_spec)""",
+    return self._dynamo_bytecode_unflatten((reshaped,), _fn_args)""",
         )
         self.assertEqual(ep(*inps), MyModel()(*inps))
 
@@ -916,12 +938,12 @@ def forward(self, args_0):
             gm.code.strip("\r\n "),
             """\
 def forward(self, args_0):
-    _tree_leaf_0, _tree_leaf_1, = pytree.tree_leaves((self, args_0,))
-    L_args_0_ , = self._in_shuffle_graph(_tree_leaf_0, _tree_leaf_1)
+    _fn_args = (args_0, )
+    L_args_0_ , = self._dynamo_bytecode_flatten(*_fn_args)
     l_args_0_ = L_args_0_
-    add = l_args_0_ + 1
+    add = l_args_0_ + 1;  add = None
     mul = l_args_0_ * 2;  l_args_0_ = None
-    return pytree.tree_unflatten(self._out_shuffle_graph(_tree_leaf_0, _tree_leaf_1, mul, add), self._out_spec)""",
+    return self._dynamo_bytecode_unflatten((mul,), _fn_args)""",
         )
         self.assertEqual(gm(*test_inputs), foo(*test_inputs))
 
