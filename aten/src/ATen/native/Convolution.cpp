@@ -354,7 +354,7 @@ struct ConvParams {
   }
 
   bool use_cpu_depthwise3x3_winograd(const at::Tensor& input, const at::Tensor& weight, const std::optional<at::Tensor>& bias) const {
-#if defined(__ARM_NEON__) || (defined(__riscv_v_intrinsic) && __riscv_v_intrinsic>=12000)
+#if defined(__ARM_NEON__) || (defined(__riscv_v) && __riscv_v_intrinsic>=12000)
     // Currently only 3x3 depthwise convolutions on tensors of float are supported.
     return (input.ndimension() == 4) &&
            (at::symint::size<T>(input, 1) == groups) &&
