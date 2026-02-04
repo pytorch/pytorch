@@ -51,11 +51,20 @@ class TestConvertDType(TestCase):
     def test_convert_np_dtypes(self, name, np_dtype):
         tnp_dtype = tnp.dtype(np_dtype)
         if name == "bool_":
-            assert tnp_dtype == tnp.bool_
+            if tnp_dtype != tnp.bool_:
+                raise AssertionError(
+                    f"Expected tnp_dtype == tnp.bool_, got {tnp_dtype}"
+                )
         elif tnp_dtype.name == "bool_":
-            assert name.startswith("bool")
+            if not name.startswith("bool"):
+                raise AssertionError(
+                    f"Expected name to start with 'bool', got '{name}'"
+                )
         else:
-            assert tnp_dtype.name == name
+            if tnp_dtype.name != name:
+                raise AssertionError(
+                    f"Expected tnp_dtype.name == '{name}', got '{tnp_dtype.name}'"
+                )
 
 
 if __name__ == "__main__":

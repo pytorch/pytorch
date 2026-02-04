@@ -467,7 +467,10 @@ class DTensorTest(DTensorTestBase):
         # test the case under no-grad we directly return the local tensor
         with torch.no_grad():
             local_no_grad = sharded_tensor.to_local()
-            assert local_no_grad is sharded_tensor._local_tensor
+            if local_no_grad is not sharded_tensor._local_tensor:
+                raise AssertionError(
+                    "Expected local_no_grad to be sharded_tensor._local_tensor"
+                )
 
     @with_comms
     def test_to_local_grad_hint(self):

@@ -136,10 +136,14 @@ class TestEye(TestCase):
         mat_c = eye(4, 3, k=-1)
         mat_f = eye(4, 3, k=-1, order="F")
         assert_equal(mat_c, mat_f)
-        assert mat_c.flags.c_contiguous
-        assert not mat_c.flags.f_contiguous
-        assert not mat_f.flags.c_contiguous
-        assert mat_f.flags.f_contiguous
+        if not mat_c.flags.c_contiguous:
+            raise AssertionError("Expected mat_c.flags.c_contiguous to be True")
+        if mat_c.flags.f_contiguous:
+            raise AssertionError("Expected mat_c.flags.f_contiguous to be False")
+        if mat_f.flags.c_contiguous:
+            raise AssertionError("Expected mat_f.flags.c_contiguous to be False")
+        if not mat_f.flags.f_contiguous:
+            raise AssertionError("Expected mat_f.flags.f_contiguous to be True")
 
 
 class TestDiag(TestCase):
