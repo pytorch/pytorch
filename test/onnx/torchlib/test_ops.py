@@ -151,7 +151,9 @@ def run_test_output_match(
     onnx_function = torchlib_op_info.op
     input_wrangler = torchlib_op_info.input_wrangler
     if (
-        not ops_test_common.dtype_op_schema_compatible(dtype, onnx_function.op_signature)
+        not ops_test_common.dtype_op_schema_compatible(
+            dtype, onnx_function.op_signature
+        )
         and dtype not in COMPLEX_TYPES
     ):
         test_suite.skipTest(
