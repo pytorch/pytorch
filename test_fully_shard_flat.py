@@ -281,6 +281,113 @@ def run_param_boundary():
     return True
 
 
+def run_mixed_placement():
+    """Test mixed Shard/Owned placements using shard_placement_fn."""
+    rank, world_size = dist.get_rank(), dist.get_world_size()
+    device = torch.device("cuda", torch.cuda.current_device())
+    mesh = init_device_mesh("cuda", (world_size,))
+
+    print_rank0(f"\n{'='*70}")
+    print_rank0(f"Testing MIXED Shard/Owned placements with world_size={world_size}")
+    print_rank0(f"{'='*70}")
+
+    # Simple MLP model
+    torch.manual_seed(42)
+
+    class SimpleMLP(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.fc1 = nn.Linear(16, 32)  # Will use Owned (on rank 0)
+            self.fc2 = nn.Linear(32, 64)  # Will use Shard
+            self.fc3 = nn.Linear(64, 8)   # Will use Owned (on rank 1 if ws >= 2)
+
+        def forward(self, x):
+            x = torch.relu(self.fc1(x))
+            x = torch.relu(self.fc2(x))
+            return self.fc3(x)
+
+    model = SimpleMLP().to(device)
+
+    # Create reference model (DDP)
+    ref_model = copy.deepcopy(model)
+    ref_model = DDP(ref_model, device_ids=[rank])
+    ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
+
+    from torch.distributed.fsdp._fully_shard import Owned
+    from torch.distributed.tensor import Shard
+
+    # Mixed placement function: fc1 -> Owned(0), fc2 -> Shard, fc3 -> Owned(1 or 0)
+    def placement_fn(fqn: str, param: nn.Parameter):
+        if fqn.startswith("fc1"):
+            return Owned(0)  # fc1 owned by rank 0
+        elif fqn.startswith("fc3"):
+            return Owned(min(1, world_size - 1))  # fc3 owned by rank 1 (or 0 if ws=1)
+        else:
+            return Shard(0)  # fc2 sharded across all ranks
+
+    storage = fully_shard_flat(model, mesh, shard_placement_fn=placement_fn)
+
+    print_rank0(f"\n=== Mixed Placement Configuration ===")
+    for fqn, info in storage.param_infos.items():
+        placement = info.placements[0]
+        if isinstance(placement, Owned):
+            placement_str = f"Owned({placement.owner_rank})"
+        else:
+            placement_str = f"Shard({placement.dim})"
+        if rank == 0:
+            print(f"  {fqn:<20} | {placement_str:<12} | local_numel={info.local_numel}")
+
+    # Verify mixed placements
+    for fqn, info in storage.param_infos.items():
+        placement = info.placements[0]
+        if fqn.startswith("fc1"):
+            assert isinstance(placement, Owned), f"{fqn} should be Owned"
+            assert placement.owner_rank == 0, f"{fqn} should be owned by rank 0"
+        elif fqn.startswith("fc3"):
+            assert isinstance(placement, Owned), f"{fqn} should be Owned"
+        else:
+            assert isinstance(placement, Shard), f"{fqn} should be Shard"
+
+    print_rank0(f"  ✓ Mixed placements verified")
+
+    # Create optimizer for FSDP model
+    optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+
+    # Training loop
+    print_rank0(f"\n=== Training loop (comparing with DDP reference) ===")
+    batch_size = 4
+    num_iters = 5
+
+    torch.manual_seed(42 + rank)
+    for iteration in range(num_iters):
+        inp = torch.randn(batch_size, 16, device=device)
+
+        # Reference model (DDP)
+        ref_optim.zero_grad()
+        ref_loss = ref_model(inp).sum()
+        ref_loss.backward()
+        ref_optim.step()
+
+        # FSDP model with mixed placements
+        optim.zero_grad()
+        fsdp_loss = model(inp).sum()
+        fsdp_loss.backward()
+        torch.cuda.synchronize()
+        optim.step()
+
+        # Compare losses
+        torch.testing.assert_close(ref_loss, fsdp_loss)
+        print_rank0(f"  Iter {iteration}: ref_loss={ref_loss.item():.6f}, "
+                    f"fsdp_loss={fsdp_loss.item():.6f} ✓")
+
+    print_rank0(f"\n{'='*70}")
+    print_rank0("PASSED: Mixed Shard/Owned placements match DDP reference")
+    print_rank0(f"{'='*70}")
+
+    torch.cuda.synchronize()
+    return True
+
+
 def main():
     """Run tests."""
     rank, world_size = setup_distributed()
@@ -290,6 +397,7 @@ def main():
     try:
         run()
         run_param_boundary()
+        run_mixed_placement()
         success = True
     except Exception as e:
         print_rank0(f"FAILED: {e}")

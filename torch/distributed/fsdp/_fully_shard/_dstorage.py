@@ -9,7 +9,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import auto, Enum
-from typing import Any, Literal, TYPE_CHECKING
+from typing import Any, Callable, Literal, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
@@ -132,7 +132,7 @@ class DStorage:
         module: nn.Module,
         reshard_after_forward: bool = True,
         register_hooks: bool = True,
-        shard_strategy: Literal["per_param", "param_boundary"] = "per_param",
+        region_info: dict[str, int] | None = None,
     ) -> None:
         if byte_storage.dtype != torch.uint8:
             raise ValueError(f"Expected uint8 storage, got {byte_storage.dtype}")
@@ -144,7 +144,14 @@ class DStorage:
         self._module = module
         self._state = ShardedState.SHARDED
         self._reshard_after_forward = reshard_after_forward
-        self._shard_strategy = shard_strategy
+
+        # Region info for batched collectives (Shard params first, then Owned)
+        self._region_info = region_info or {
+            "shard_region_start": 0,
+            "shard_region_end": total_bytes,
+            "owned_region_start": total_bytes,
+            "owned_region_end": total_bytes,
+        }
 
         # Unsharded buffer (allocated on demand)
         self._unsharded_byte_storage: torch.Tensor | None = None
@@ -233,6 +240,9 @@ class DStorage:
         """
         All-gather the sharded byte buffer to get the full unsharded buffer.
 
+        Uses per-param all-gather with variable sizes to handle uneven sharding.
+        For Owned params, uses batched all-gather when possible.
+
         Returns:
             Unsharded byte buffer containing all parameter data.
         """
@@ -244,112 +254,151 @@ class DStorage:
                 device=self._byte_storage.device,
             )
 
-        # Get the process group from mesh
         pg = self._mesh.get_group()
         world_size = self.world_size
         my_rank = self._mesh.get_local_rank()
 
-        if self._shard_strategy == "param_boundary":
-            self._all_gather_param_boundary(pg, my_rank)
-        else:
-            self._all_gather_per_param(pg, world_size, my_rank)
+        # Collect Shard and Owned params
+        shard_infos = []
+        owned_infos = []
+        for fqn, info in self._param_infos.items():
+            if isinstance(info.placements[0], Owned):
+                owned_infos.append((fqn, info))
+            else:
+                shard_infos.append((fqn, info))
+
+        # All-gather Shard params (per-param with variable sizes for uneven sharding)
+        for fqn, info in shard_infos:
+            self._all_gather_shard_param(info, pg, world_size)
+
+        # Batched all-gather for Owned params (variable sizes per rank)
+        if owned_infos:
+            self._all_gather_owned_batched(owned_infos, pg, world_size, my_rank)
 
         return self._unsharded_byte_storage
 
-    def _all_gather_param_boundary(self, pg, my_rank: int) -> None:
-        """All-gather for param-boundary strategy: broadcast from owner."""
-        for fqn, info in self._param_infos.items():
+    def _all_gather_shard_param(
+        self,
+        info: ParamInfo,
+        pg,
+        world_size: int,
+    ) -> None:
+        """All-gather a single Shard param using variable-size all-gather."""
+        shard_dim = 0
+        for placement in info.placements:
+            if isinstance(placement, Shard):
+                shard_dim = placement.dim
+                break
+
+        # Get local shard from byte storage
+        num_bytes = info.local_numel * info.dtype.itemsize
+        if info.local_numel > 0:
+            byte_view = self._byte_storage[info.byte_offset : info.byte_offset + num_bytes]
+            local_shard = byte_view.view(info.dtype).view(info.local_shape)
+        else:
+            local_shard = torch.empty(info.local_shape, dtype=info.dtype, device=self._byte_storage.device)
+
+        # Compute local shapes for all ranks
+        local_shapes = []
+        local_numels = []
+        for rank in range(world_size):
+            shape = self._compute_local_shape_for_rank(info.global_shape, info.placements, rank)
+            local_shapes.append(shape)
+            numel = 1
+            for d in shape:
+                numel *= d
+            local_numels.append(numel)
+
+        # All-gather with variable sizes
+        output_tensors = [
+            torch.empty(local_shapes[rank], dtype=info.dtype, device=self._byte_storage.device)
+            for rank in range(world_size)
+        ]
+        dist.all_gather(output_tensors, local_shard.contiguous(), group=pg)
+
+        # Concatenate along shard dimension
+        chunks = [t for t in output_tensors if t.numel() > 0]
+        if chunks:
+            unsharded = torch.cat(chunks, dim=shard_dim)
+        else:
+            unsharded = torch.empty(info.global_shape, dtype=info.dtype, device=self._byte_storage.device)
+
+        # Copy to unsharded buffer
+        unsharded_bytes = info.global_numel * info.dtype.itemsize
+        dest = self._unsharded_byte_storage[info.unsharded_byte_offset : info.unsharded_byte_offset + unsharded_bytes]
+        dest.copy_(unsharded.view(-1).view(torch.uint8))
+
+    def _all_gather_owned_batched(
+        self,
+        owned_infos: list[tuple[str, ParamInfo]],
+        pg,
+        world_size: int,
+        my_rank: int,
+    ) -> None:
+        """Batched all-gather for all Owned params using variable-size all-gather."""
+        # Get the owned region from byte_storage (only owner has data)
+        owned_start = self._region_info["owned_region_start"]
+        owned_end = self._region_info["owned_region_end"]
+        my_owned_region = self._byte_storage[owned_start:owned_end]
+
+        # Gather sizes from all ranks
+        my_size = torch.tensor([my_owned_region.numel()], dtype=torch.long, device=self._byte_storage.device)
+        all_sizes = [torch.zeros(1, dtype=torch.long, device=self._byte_storage.device) for _ in range(world_size)]
+        dist.all_gather(all_sizes, my_size, group=pg)
+        all_sizes = [s.item() for s in all_sizes]
+
+        # Skip if no owned params
+        if sum(all_sizes) == 0:
+            return
+
+        # All-gather with variable sizes
+        output_tensors = [
+            torch.empty(size, dtype=torch.uint8, device=self._byte_storage.device)
+            for size in all_sizes
+        ]
+        input_tensor = my_owned_region.contiguous() if my_owned_region.numel() > 0 else torch.empty(0, dtype=torch.uint8, device=self._byte_storage.device)
+        dist.all_gather(output_tensors, input_tensor, group=pg)
+
+        # Build mapping from param to owner's contribution offset
+        # For each owned param, find its data in the owner's output tensor
+        for fqn, info in owned_infos:
             owner_rank = info.owner_rank
-            assert owner_rank is not None, f"owner_rank not set for {fqn}"
+            assert owner_rank is not None
 
-            # Get destination in unsharded buffer
-            num_bytes = info.global_numel * info.dtype.itemsize
-            dest = self._unsharded_byte_storage[
-                info.unsharded_byte_offset : info.unsharded_byte_offset + num_bytes
-            ]
-            dest_typed = dest.view(info.dtype)
+            # Find offset of this param in owner's owned region
+            # Need to compute this based on param layout in owner's buffer
+            owner_output = output_tensors[owner_rank]
+            if owner_output.numel() == 0:
+                continue
 
+            # For the owner, info.byte_offset is within their byte_storage
+            # The owned region starts at owned_start in owner's buffer
+            # So param's offset within owner's owned region is: info.byte_offset - owned_start
+            # But we need to handle that non-owners have byte_offset=0 for owned params
+            # We need to compute the correct offset for the owner
+
+            # Recompute offset for owner (this is a simplification - in practice we'd store this)
             if my_rank == owner_rank:
-                # Owner: copy from local storage to unsharded buffer, then broadcast
-                local_view = self.get_local_view(fqn)
-                dest_typed.copy_(local_view.view(-1))
-
-            # Broadcast from owner to all ranks
-            dist.broadcast(dest_typed, src=owner_rank, group=pg)
-
-    def _all_gather_per_param(self, pg, world_size: int, my_rank: int) -> None:
-        """All-gather for per-param strategy: gather shards and concatenate."""
-        # For each parameter, all-gather its chunks and reassemble
-        for fqn, info in self._param_infos.items():
-            # Get shard dimension
-            shard_dim = 0
-            for placement in info.placements:
-                if isinstance(placement, Shard):
-                    shard_dim = placement.dim
-                    break
-
-            # Get local chunk for this rank
-            local_view = self.get_local_view(fqn)
-
-            # Compute max local numel across all ranks for padding
-            max_local_numel = 0
-            local_numels = []
-            for rank in range(world_size):
-                local_shape_for_rank = self._compute_local_shape_for_rank(
-                    info.global_shape, info.placements, rank
-                )
-                numel = 1
-                for d in local_shape_for_rank:
-                    numel *= d
-                local_numels.append(numel)
-                max_local_numel = max(max_local_numel, numel)
-
-            # Pad local tensor to max size
-            if local_view.numel() < max_local_numel:
-                padded = torch.zeros(
-                    max_local_numel, dtype=info.dtype, device=self._byte_storage.device
-                )
-                if local_view.numel() > 0:
-                    padded[: local_view.numel()] = local_view.view(-1)
+                param_offset_in_owned = info.byte_offset - owned_start
             else:
-                padded = local_view.view(-1)
+                # Need to figure out where this param is in owner's output
+                # For now, iterate through owned_infos to find cumulative offset
+                param_offset_in_owned = 0
+                for other_fqn, other_info in owned_infos:
+                    if other_info.owner_rank == owner_rank:
+                        if other_fqn == fqn:
+                            break
+                        # Add this param's size
+                        alignment = _get_dtype_alignment(other_info.dtype)
+                        param_offset_in_owned = _align_offset(param_offset_in_owned, alignment)
+                        param_offset_in_owned += other_info.global_numel * other_info.dtype.itemsize
 
-            # All-gather the padded tensors
-            all_gather_output = torch.empty(
-                world_size * max_local_numel,
-                dtype=info.dtype,
-                device=self._byte_storage.device,
-            )
-            dist.all_gather_into_tensor(all_gather_output, padded.contiguous(), group=pg)
-
-            # Extract and concatenate non-padded chunks
-            chunks = []
-            for rank in range(world_size):
-                rank_numel = local_numels[rank]
-                if rank_numel > 0:
-                    start = rank * max_local_numel
-                    chunk = all_gather_output[start : start + rank_numel]
-                    local_shape_for_rank = self._compute_local_shape_for_rank(
-                        info.global_shape, info.placements, rank
-                    )
-                    chunks.append(chunk.view(local_shape_for_rank))
-
-            # Concatenate along shard dimension
-            if chunks:
-                unsharded_param = torch.cat(chunks, dim=shard_dim)
-            else:
-                unsharded_param = torch.empty(
-                    info.global_shape,
-                    dtype=info.dtype,
-                    device=self._byte_storage.device,
-                )
-
-            # Copy into unsharded buffer
             num_bytes = info.global_numel * info.dtype.itemsize
-            dest = self._unsharded_byte_storage[
-                info.unsharded_byte_offset : info.unsharded_byte_offset + num_bytes
-            ]
-            dest.copy_(unsharded_param.view(-1).view(torch.uint8))
+            param_data = owner_output[param_offset_in_owned : param_offset_in_owned + num_bytes]
+
+            # Copy to unsharded buffer
+            dest = self._unsharded_byte_storage[info.unsharded_byte_offset : info.unsharded_byte_offset + num_bytes]
+            dest.copy_(param_data)
 
     def _compute_local_shape_for_rank(
         self, global_shape: torch.Size, placements: tuple[Placement, ...], rank: int
@@ -430,70 +479,61 @@ class DStorage:
         """
         Reduce-scatter gradients to sharded DTensor params.
 
-        For per_param strategy: Uses reduce-scatter to distribute gradient shards.
-        For param_boundary strategy: Uses reduce to send gradients to owner rank.
+        Handles mixed Shard/Owned placements per-parameter:
+        - Shard: Uses reduce-scatter to distribute gradient shards
+        - Owned: Uses reduce to send gradients to owner rank
         """
-        if self._shard_strategy == "param_boundary":
-            self._reduce_grads_param_boundary()
-        else:
-            self._reduce_scatter_grads_per_param()
-
-    def _reduce_grads_param_boundary(self) -> None:
-        """Reduce gradients to owner rank for param-boundary strategy."""
-        pg = self._mesh.get_group()
-        my_rank = self._mesh.get_local_rank()
-
-        for fqn, info in self._param_infos.items():
-            unsharded_param = _get_param_from_module(self._module, fqn)
-            if unsharded_param.grad is None:
-                continue
-
-            owner_rank = info.owner_rank
-            assert owner_rank is not None
-
-            grad = unsharded_param.grad.contiguous()
-
-            # Reduce gradient to owner rank (average across all ranks)
-            dist.reduce(grad, dst=owner_rank, op=dist.ReduceOp.AVG, group=pg)
-
-            # Only owner keeps the gradient
-            if my_rank == owner_rank:
-                # Create DTensor gradient for the sharded param
-                grad_dtensor = _create_dtensor_from_view(grad, info, self._mesh)
-                self._sharded_params[fqn].grad = grad_dtensor
-
-    def _reduce_scatter_grads_per_param(self) -> None:
-        """Reduce-scatter gradients for per-param strategy."""
         pg = self._mesh.get_group()
         world_size = self.world_size
+        my_rank = self._mesh.get_local_rank()
 
-        # Collect all gradients and compute padded sizes
-        grads: list[torch.Tensor] = []
-        grad_infos: list[ParamInfo] = []
-        padded_unsharded_sizes: list[torch.Size] = []
+        # Separate params by placement type
+        shard_grads: list[torch.Tensor] = []
+        shard_infos: list[ParamInfo] = []
+        shard_padded_sizes: list[torch.Size] = []
 
         for fqn, info in self._param_infos.items():
             unsharded_param = _get_param_from_module(self._module, fqn)
             if unsharded_param.grad is None:
                 continue
 
+            placement = info.placements[0]
             grad = unsharded_param.grad.contiguous()
-            grads.append(grad)
-            grad_infos.append(info)
 
-            # Compute padded size (dim0 must be divisible by world_size)
-            padded_dim0 = ((grad.size(0) + world_size - 1) // world_size) * world_size
-            padded_size = torch.Size([padded_dim0] + list(grad.shape[1:]))
-            padded_unsharded_sizes.append(padded_size)
+            if isinstance(placement, Owned):
+                # Handle Owned params with reduce to owner
+                owner_rank = info.owner_rank
+                assert owner_rank is not None
+                dist.reduce(grad, dst=owner_rank, op=dist.ReduceOp.AVG, group=pg)
+                if my_rank == owner_rank:
+                    grad_dtensor = _create_dtensor_from_view(grad, info, self._mesh)
+                    self._sharded_params[fqn].grad = grad_dtensor
+            else:
+                # Collect Shard params for batched reduce-scatter
+                shard_grads.append(grad)
+                shard_infos.append(info)
+                padded_dim0 = ((grad.size(0) + world_size - 1) // world_size) * world_size
+                padded_size = torch.Size([padded_dim0] + list(grad.shape[1:]))
+                shard_padded_sizes.append(padded_size)
 
-        if not grads:
-            return
+        # Batch reduce-scatter for Shard params
+        if shard_grads:
+            self._reduce_scatter_shard_grads(pg, world_size, shard_grads, shard_infos, shard_padded_sizes)
 
-        # Compute total numel for reduce-scatter buffers
-        reduce_scatter_input_numel = sum(s.numel() for s in padded_unsharded_sizes)
+        torch.cuda.synchronize()
+
+    def _reduce_scatter_shard_grads(
+        self,
+        pg,
+        world_size: int,
+        grads: list[torch.Tensor],
+        grad_infos: list[ParamInfo],
+        padded_sizes: list[torch.Size],
+    ) -> None:
+        """Reduce-scatter gradients for Shard params."""
+        reduce_scatter_input_numel = sum(s.numel() for s in padded_sizes)
         reduce_scatter_output_numel = reduce_scatter_input_numel // world_size
 
-        # Determine dtype (all grads should have same dtype for reduce-scatter)
         grad_dtype = grads[0].dtype
         device = grads[0].device
 
@@ -502,9 +542,7 @@ class DStorage:
             reduce_scatter_input_numel, dtype=grad_dtype, device=device
         )
 
-        # Copy-in with chunk_cat: reorders data for reduce-scatter
-        # chunk_cat chunks each tensor into world_size pieces along dim 0,
-        # then concatenates chunk[i] from all tensors into row i of output
+        # Copy-in with chunk_cat
         reduce_scatter_input_2d = reduce_scatter_input.view(world_size, -1)
         torch._chunk_cat(grads, dim=0, num_chunks=world_size, out=reduce_scatter_input_2d)
 
@@ -523,17 +561,11 @@ class DStorage:
 
         # Extract sharded gradients from the output
         flat_grad_offset = 0
-        for info, padded_size in zip(grad_infos, padded_unsharded_sizes):
-            # Compute the sharded size (actual local shape, not padded)
+        for info, padded_size in zip(grad_infos, padded_sizes):
             sharded_size = info.local_shape
-
-            # Extract gradient shard using as_strided for efficiency
-            # The padded chunk size in the output
             padded_sharded_numel = padded_size.numel() // world_size
 
             if info.local_numel > 0:
-                # Create sharded gradient by extracting from flat output
-                # The actual shard may be smaller than padded chunk
                 sharded_stride = make_contiguous_strides_for(sharded_size)
                 sharded_grad = torch.as_strided(
                     reduce_scatter_output,
@@ -542,13 +574,10 @@ class DStorage:
                     storage_offset=flat_grad_offset,
                 ).contiguous()
 
-                # Create DTensor gradient and assign to sharded param
                 grad_dtensor = _create_dtensor_from_view(sharded_grad, info, self._mesh)
                 self._sharded_params[info.fqn].grad = grad_dtensor
 
             flat_grad_offset += padded_sharded_numel
-
-        torch.cuda.synchronize()
 
     @contextmanager
     def unsharded(self):
@@ -832,7 +861,7 @@ def _create_param_infos_param_boundary(
     named_params: list[tuple[str, nn.Parameter]],
     mesh: DeviceMesh,
     assignments: dict[str, int],
-) -> tuple[dict[str, ParamInfo], int, int]:
+) -> tuple[dict[str, ParamInfo], int, int, dict[str, int]]:
     """
     Create ParamInfo for parameter-boundary sharding.
 
@@ -843,6 +872,7 @@ def _create_param_infos_param_boundary(
         param_infos: dict mapping FQN to ParamInfo
         total_bytes: total bytes needed for the sharded buffer (this rank's owned params)
         total_unsharded_bytes: total bytes needed for the unsharded buffer (all params)
+        region_info: dict with shard/owned region boundaries
     """
     my_rank = mesh.get_local_rank()
     param_infos: dict[str, ParamInfo] = {}
@@ -901,7 +931,208 @@ def _create_param_infos_param_boundary(
         )
         param_infos[fqn] = info
 
-    return param_infos, current_byte_offset, current_unsharded_byte_offset
+    # For param_boundary: no shard region (all params are Owned)
+    region_info = {
+        "shard_region_start": 0,
+        "shard_region_end": 0,
+        "owned_region_start": 0,
+        "owned_region_end": current_byte_offset,
+    }
+
+    return param_infos, current_byte_offset, current_unsharded_byte_offset, region_info
+
+
+def _create_param_infos_with_placement_fn(
+    named_params: list[tuple[str, nn.Parameter]],
+    mesh: DeviceMesh,
+    shard_placement_fn: Callable[[str, nn.Parameter], Shard | Owned | None],
+    default_placement: Shard | Owned = Shard(0),
+) -> tuple[dict[str, ParamInfo], int, int]:
+    """
+    Create ParamInfo for each parameter using a per-parameter placement function.
+
+    Supports mixed Shard and Owned placements in the same storage.
+
+    Args:
+        named_params: List of (fqn, param) tuples
+        mesh: Device mesh for sharding
+        shard_placement_fn: Function mapping (fqn, param) -> Shard | Owned | None
+            Returns None for default placement
+        default_placement: Default placement when function returns None
+
+    Returns:
+        param_infos: dict mapping FQN to ParamInfo
+        total_bytes: total bytes needed for the sharded buffer
+        total_unsharded_bytes: total bytes needed for the unsharded buffer
+    """
+    my_rank = mesh.get_local_rank()
+    world_size = mesh.size()
+
+    # First pass: categorize params by placement type
+    shard_params: list[tuple[str, nn.Parameter, Shard]] = []
+    owned_params: list[tuple[str, nn.Parameter, Owned]] = []
+
+    for fqn, param in named_params:
+        placement = shard_placement_fn(fqn, param)
+        if placement is None:
+            placement = default_placement
+
+        # Normalize negative dims for Shard
+        if isinstance(placement, Shard) and placement.dim < 0:
+            placement = Shard(placement.dim + param.ndim)
+
+        if isinstance(placement, Owned):
+            owned_params.append((fqn, param, placement))
+        else:
+            assert isinstance(placement, Shard)
+            shard_params.append((fqn, param, placement))
+
+    # Second pass: layout buffer with Shard params first, then Owned params
+    param_infos: dict[str, ParamInfo] = {}
+    current_byte_offset = 0
+    current_unsharded_byte_offset = 0
+
+    # Layout Shard params first (contiguous region for batched all-gather)
+    shard_region_start = 0
+    for fqn, param, placement in shard_params:
+        global_shape = param.shape
+        global_stride = make_contiguous_strides_for(global_shape)
+        dtype = param.dtype
+        global_numel = param.numel()
+
+        placements_tuple = (placement,)
+        local_shape, local_numel = _compute_local_info(global_shape, mesh, placements_tuple)
+
+        alignment = _get_dtype_alignment(dtype)
+        aligned_offset = _align_offset(current_byte_offset, alignment)
+        byte_offset = aligned_offset
+        param_bytes = local_numel * dtype.itemsize
+        current_byte_offset = aligned_offset + param_bytes
+
+        # Unsharded buffer offset
+        aligned_unsharded_offset = _align_offset(current_unsharded_byte_offset, alignment)
+        unsharded_param_bytes = global_numel * dtype.itemsize
+        current_unsharded_byte_offset = aligned_unsharded_offset + unsharded_param_bytes
+
+        info = ParamInfo(
+            fqn=fqn,
+            global_shape=global_shape,
+            global_stride=tuple(global_stride),
+            dtype=dtype,
+            requires_grad=param.requires_grad,
+            placements=placements_tuple,
+            local_shape=local_shape,
+            local_numel=local_numel,
+            byte_offset=byte_offset,
+            global_numel=global_numel,
+            unsharded_byte_offset=aligned_unsharded_offset,
+            owner_rank=None,
+        )
+        param_infos[fqn] = info
+
+    shard_region_end = current_byte_offset
+
+    # Layout Owned params (only owner stores data)
+    owned_region_start = current_byte_offset
+    for fqn, param, placement in owned_params:
+        global_shape = param.shape
+        global_stride = make_contiguous_strides_for(global_shape)
+        dtype = param.dtype
+        global_numel = param.numel()
+        owner_rank = placement.owner_rank
+
+        if my_rank == owner_rank:
+            local_shape = global_shape
+            local_numel = global_numel
+            alignment = _get_dtype_alignment(dtype)
+            aligned_offset = _align_offset(current_byte_offset, alignment)
+            byte_offset = aligned_offset
+            param_bytes = local_numel * dtype.itemsize
+            current_byte_offset = aligned_offset + param_bytes
+        else:
+            local_shape = torch.Size([0] + list(global_shape[1:]))
+            local_numel = 0
+            byte_offset = 0  # Not stored locally
+
+        placements_tuple = (placement,)
+
+        # Unsharded buffer offset
+        alignment = _get_dtype_alignment(dtype)
+        aligned_unsharded_offset = _align_offset(current_unsharded_byte_offset, alignment)
+        unsharded_param_bytes = global_numel * dtype.itemsize
+        current_unsharded_byte_offset = aligned_unsharded_offset + unsharded_param_bytes
+
+        info = ParamInfo(
+            fqn=fqn,
+            global_shape=global_shape,
+            global_stride=tuple(global_stride),
+            dtype=dtype,
+            requires_grad=param.requires_grad,
+            placements=placements_tuple,
+            local_shape=local_shape,
+            local_numel=local_numel,
+            byte_offset=byte_offset,
+            global_numel=global_numel,
+            unsharded_byte_offset=aligned_unsharded_offset,
+            owner_rank=owner_rank,
+        )
+        param_infos[fqn] = info
+
+    owned_region_end = current_byte_offset
+
+    # Return param_infos, total bytes, total unsharded bytes, and region info
+    region_info = {
+        "shard_region_start": shard_region_start,
+        "shard_region_end": shard_region_end,
+        "owned_region_start": owned_region_start,
+        "owned_region_end": owned_region_end,
+    }
+    return param_infos, current_byte_offset, current_unsharded_byte_offset, region_info
+
+
+def _copy_original_data_with_placement_fn(
+    byte_storage: torch.Tensor,
+    named_params: list[tuple[str, nn.Parameter]],
+    param_infos: dict[str, ParamInfo],
+    mesh: DeviceMesh,
+) -> None:
+    """
+    Copy original parameter data into byte storage, handling mixed Shard/Owned placements.
+    """
+    my_rank = mesh.get_local_rank()
+    world_size = mesh.size()
+
+    for fqn, param in named_params:
+        info = param_infos[fqn]
+
+        if param.device.type == "meta":
+            continue
+
+        placement = info.placements[0]
+
+        if isinstance(placement, Owned):
+            # Only owner copies data
+            if my_rank != info.owner_rank:
+                continue
+            # Copy full parameter into byte storage
+            num_bytes = info.local_numel * info.dtype.itemsize
+            byte_view = byte_storage[info.byte_offset : info.byte_offset + num_bytes]
+            typed_dest = byte_view.view(info.dtype)
+            typed_dest.copy_(param.data.view(-1))
+        else:
+            # Shard: chunk and copy local shard
+            assert isinstance(placement, Shard)
+            shard_dim = placement.dim
+            chunks = list(torch.chunk(param.data, world_size, dim=shard_dim))
+            while len(chunks) < world_size:
+                chunks.append(chunks[0].new_empty(0))
+            local_shard = chunks[my_rank]
+
+            if local_shard.numel() > 0:
+                num_bytes = info.local_numel * info.dtype.itemsize
+                byte_view = byte_storage[info.byte_offset : info.byte_offset + num_bytes]
+                typed_dest = byte_view.view(info.dtype)
+                typed_dest.copy_(local_shard.view(-1))
 
 
 def _copy_original_data_to_flat_storage_param_boundary(
@@ -1017,6 +1248,7 @@ def fully_shard_flat(
     reshard_after_forward: bool = True,
     register_hooks: bool = True,
     shard_strategy: Literal["per_param", "param_boundary"] = "per_param",
+    shard_placement_fn: Callable[[str, nn.Parameter], Shard | Owned | None] | None = None,
 ) -> DStorage:
     """
     Apply flat-storage FSDP sharding to a module.
@@ -1038,20 +1270,27 @@ def fully_shard_flat(
     Args:
         module: The module to shard. Can have real or meta device parameters.
         mesh: The device mesh for sharding. Currently only 1D mesh is supported.
-        placements: The sharding placements. Defaults to (Shard(0),).
-            Ignored when shard_strategy="param_boundary" (uses Owned placement).
+        placements: The default sharding placements. Defaults to (Shard(0),).
+            Used when shard_placement_fn is None or returns None for a param.
+            Ignored when shard_strategy="param_boundary".
         reshard_after_forward: If True (default), reshard parameters after forward
             to save memory. Parameters will be re-unsharded in backward.
             If False, keep parameters unsharded between forward and backward.
         register_hooks: If True (default), register forward/backward hooks for
             automatic unshard/reshard. If False, caller must manually call
             unshard()/reshard().
-        shard_strategy: The sharding strategy to use:
+        shard_strategy: The default sharding strategy (ignored if shard_placement_fn is provided):
             - "per_param" (default): Each parameter is sharded across all ranks
               along the specified dimension. Uses Shard placement.
             - "param_boundary": Each parameter is assigned to one rank (owner).
               The owner has full parameter data, others have empty tensors.
               Uses Owned placement and greedy bin-packing for balanced memory.
+        shard_placement_fn: Optional callable for per-parameter placement control.
+            Takes (fqn, param) and returns Shard | Owned | None.
+            - Shard(dim): Shard this parameter along dimension dim
+            - Owned(rank): Assign this parameter to the specified rank
+            - None: Use default placement from `placements` parameter
+            This enables mixed Shard/Owned placements in a single DStorage.
 
     Returns:
         DStorage instance containing the unified byte buffer and parameter metadata.
@@ -1068,11 +1307,19 @@ def fully_shard_flat(
         >>> output = model(input)
         >>> output.sum().backward()
 
+    Example with per-parameter placement::
+
+        >>> def placement_fn(fqn, param):
+        ...     if "embed" in fqn:
+        ...         return Owned(0)  # Embeddings owned by rank 0
+        ...     return Shard(0)  # Other params sharded
+        >>> storage = fully_shard_flat(model, mesh, shard_placement_fn=placement_fn)
+
     Note:
         - Parameters of different dtypes are supported in a single unified buffer
         - Proper alignment is maintained for each dtype
         - Parameters on meta device will have uninitialized storage
-        - The returned DStorage is also stored on module._chunked_storage
+        - The returned DStorage is also stored on module._dstorage
         - Forward/backward hooks are automatically registered for unshard/reshard
     """
     if placements is None:
@@ -1101,10 +1348,17 @@ def fully_shard_flat(
         device = torch.device(device)
 
     # Create parameter infos with local shapes and byte offsets
-    if shard_strategy == "param_boundary":
+    region_info = None
+    if shard_placement_fn is not None:
+        # Per-parameter placement function provided
+        default_placement = placements[0] if placements else Shard(0)
+        param_infos, total_bytes, total_unsharded_bytes, region_info = _create_param_infos_with_placement_fn(
+            named_params, mesh, shard_placement_fn, default_placement
+        )
+    elif shard_strategy == "param_boundary":
         # Assign params to ranks using bin-packing
         assignments = _assign_params_to_ranks(named_params, mesh.size())
-        param_infos, total_bytes, total_unsharded_bytes = _create_param_infos_param_boundary(
+        param_infos, total_bytes, total_unsharded_bytes, region_info = _create_param_infos_param_boundary(
             named_params, mesh, assignments
         )
     else:
@@ -1116,7 +1370,9 @@ def fully_shard_flat(
     byte_storage = torch.empty(total_bytes, dtype=torch.uint8, device=device)
 
     # Copy original data into byte storage (handles sharding)
-    if shard_strategy == "param_boundary":
+    if shard_placement_fn is not None:
+        _copy_original_data_with_placement_fn(byte_storage, named_params, param_infos, mesh)
+    elif shard_strategy == "param_boundary":
         _copy_original_data_to_flat_storage_param_boundary(
             byte_storage, named_params, param_infos, mesh
         )
@@ -1137,7 +1393,7 @@ def fully_shard_flat(
         byte_storage, param_infos, mesh, total_bytes, total_unsharded_bytes, module,
         reshard_after_forward=reshard_after_forward,
         register_hooks=register_hooks,
-        shard_strategy=shard_strategy,
+        region_info=region_info,
     )
 
     # Store DStorage on module for nested wrapping detection
