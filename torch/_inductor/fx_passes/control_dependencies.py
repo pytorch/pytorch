@@ -12,6 +12,7 @@ from typing import Any
 
 import torch.fx as fx
 import torch.utils._pytree as pytree
+from torch._C import DispatchKey
 from torch._higher_order_ops.utils import register_fake
 from torch._ops import HigherOrderOperator
 from torch.utils._ordered_set import OrderedSet
@@ -61,6 +62,20 @@ control_deps = ControlDeps()
 @register_fake(control_deps)
 def _(additional_deps, subgraph, *args, **kwargs):
     """Fake tensor implementation - execute the subgraph."""
+    return subgraph(*args, **kwargs)
+
+
+# Register eager execution implementation
+@control_deps.py_impl(DispatchKey.CompositeExplicitAutograd)
+def control_deps_eager(additional_deps, subgraph, *args, **kwargs):
+    """Eager implementation - just execute the subgraph."""
+    return subgraph(*args, **kwargs)
+
+
+# Register autograd implementation
+@control_deps.py_impl(DispatchKey.Autograd)
+def control_deps_autograd(additional_deps, subgraph, *args, **kwargs):
+    """Autograd implementation - just execute the subgraph (no custom backward)."""
     return subgraph(*args, **kwargs)
 
 

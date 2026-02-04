@@ -496,3 +496,29 @@ def wrap_sync_control_deps(gm: torch.fx.GraphModule, sync_node: Node) -> None:
     # Remove original sync node
     sync_node.replace_all_uses_with(control_deps_node)
     graph.erase_node(sync_node)
+
+
+def wrap_all_sync_nodes_with_control_deps(gm: torch.fx.GraphModule) -> None:
+    """
+    Wrap all record_event/wait_event nodes in the graph with control_deps.
+
+    This prevents sync operations from being reordered relative to other
+    operations on the same stream.
+    """
+    supported_sync_ops = (
+        torch.ops.streams.record_event.default,
+        torch.ops.streams.wait_event.default,
+    )
+
+    # Collect all sync nodes first (avoid modifying graph while iterating)
+    sync_nodes = [
+        node
+        for node in gm.graph.nodes
+        if node.op == "call_function" and node.target in supported_sync_ops
+    ]
+
+    for sync_node in sync_nodes:
+        wrap_sync_control_deps(gm, sync_node)
+
+    if sync_nodes:
+        gm.recompile()
