@@ -112,9 +112,9 @@ jobs:
             -w /pytorch \
             "${DOCKER_IMAGE}"
           )
-          PYTHON_EXECUTABLE=/opt/python/cp312-cp312/bin/python
+          PYTHON_EXECUTABLE=/opt/python/cp310-cp310/bin/python
           docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}" -m pip install \
-            torch --extra-index-url "https://download.pytorch.org/whl/cu${CUDA_SHORT}"
+            torch==2.9.0 --extra-index-url "https://download.pytorch.org/whl/cu${CUDA_SHORT}"
           docker exec -t \
             -e CUDA_VERSION="${CUDA_VERSION}" \
             -e CUDA_SHORT="${CUDA_SHORT}" \
