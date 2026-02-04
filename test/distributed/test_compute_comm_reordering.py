@@ -61,12 +61,18 @@ def create_grouped_node_for_allreduce_and_its_deps(snodes):
         if isinstance(snode.node, ir._CollectiveKernel)
         and snode.node.op_overload == torch.ops._c10d_functional.all_reduce_.default
     ]
-    assert len(all_reduce_snodes) == 1
+    if len(all_reduce_snodes) != 1:
+        raise AssertionError(
+            f"Expected exactly 1 all_reduce_snode, got {len(all_reduce_snodes)}"
+        )
     all_reduce_snode = all_reduce_snodes[0]
     all_reduce_dep_snodes = [
         name_to_snode[node.name] for node in all_reduce_snode.node.inputs
     ]
-    assert len(all_reduce_dep_snodes) == 1
+    if len(all_reduce_dep_snodes) != 1:
+        raise AssertionError(
+            f"Expected exactly 1 all_reduce_dep_snode, got {len(all_reduce_dep_snodes)}"
+        )
     all_reduce_dep_snode = all_reduce_dep_snodes[0]
 
     grouped_snode = scheduler.GroupedSchedulerNode.create(
@@ -480,14 +486,32 @@ graph():
             fn(g1, g2, g3)
 
     def test_nccl_heuristics(self):
-        assert len(baseLat) == len(NCCL_ALGO)
-        assert all(len(x) == len(NCCL_PROTO) for x in baseLat)
+        if len(baseLat) != len(NCCL_ALGO):
+            raise AssertionError(
+                f"Expected len(baseLat) == len(NCCL_ALGO), got {len(baseLat)} vs {len(NCCL_ALGO)}"
+            )
+        if not all(len(x) == len(NCCL_PROTO) for x in baseLat):
+            raise AssertionError(
+                "Expected all elements in baseLat to have len(NCCL_PROTO)"
+            )
 
-        assert len(hwLat) == len(NCCL_HW)
-        assert all(len(x) == len(NCCL_ALGO) for x in hwLat)
-        assert all(len(y) == len(NCCL_PROTO) for x in hwLat for y in x)
+        if len(hwLat) != len(NCCL_HW):
+            raise AssertionError(
+                f"Expected len(hwLat) == len(NCCL_HW), got {len(hwLat)} vs {len(NCCL_HW)}"
+            )
+        if not all(len(x) == len(NCCL_ALGO) for x in hwLat):
+            raise AssertionError(
+                "Expected all elements in hwLat to have len(NCCL_ALGO)"
+            )
+        if not all(len(y) == len(NCCL_PROTO) for x in hwLat for y in x):
+            raise AssertionError(
+                "Expected all nested elements in hwLat to have len(NCCL_PROTO)"
+            )
 
-        assert len(llMaxBws) == len(NVIDIA_GPU_TYPE)
+        if len(llMaxBws) != len(NVIDIA_GPU_TYPE):
+            raise AssertionError(
+                f"Expected len(llMaxBws) == len(NVIDIA_GPU_TYPE), got {len(llMaxBws)} vs {len(NVIDIA_GPU_TYPE)}"
+            )
 
 
 if __name__ == "__main__":
