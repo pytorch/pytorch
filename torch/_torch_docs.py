@@ -221,7 +221,7 @@ add_docstr(
     r"""
 pi -> float
 
-Returns `pi(3.1415...) <https://en.wikipedia.org/wiki/Pi>` also known as :math:`\large \pi`.
+Returns `pi(3.1415...) <https://en.wikipedia.org/wiki/Pi>` also known as :math:`\huge \pi`.
 
 Example::
 
