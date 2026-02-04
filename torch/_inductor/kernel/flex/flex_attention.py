@@ -16,7 +16,7 @@ from torch._inductor.virtualized import V
 from torch.nn.attention.flex_attention import _Backend
 
 from ...ir import ComputedBuffer, ExternKernel, FixedLayout, TensorBox
-from ...lowering import empty, empty_strided, lowerings, register_lowering
+from ...lowering import empty, empty_strided, lowerings, register_lowering, to_dtype
 from ...select_algorithm import (
     autotune_select_algorithm,
     SymbolicGridFn,
@@ -737,6 +737,22 @@ def flex_attention_backward(*args, **kwargs):
     joint_outputs = process_joint_outputs(
         all_joint_outputs, len(joint_placeholder_inps)
     )
+    if joint_outputs.captured_grads:
+        casted_captured_grads: list[Optional[TensorBox]] = []
+        for grad, buf in zip(joint_outputs.captured_grads, score_mod_other_buffers):
+            if grad is None:
+                casted_captured_grads.append(None)
+                continue
+            buf_dtype = buf.get_dtype()
+            casted_captured_grads.append(
+                to_dtype(grad, buf_dtype) if grad.get_dtype() != buf_dtype else grad
+            )
+        joint_outputs = JointOutputResult(
+            grad_input=joint_outputs.grad_input,
+            captured_grads_compute=joint_outputs.captured_grads_compute,
+            captured_grads=casted_captured_grads,
+            mutated_grads=joint_outputs.mutated_grads,
+        )
 
     mask_graph_placeholder_inps = [
         create_placeholder(name, dtype, query.get_device())
