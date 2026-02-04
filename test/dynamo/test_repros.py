@@ -1545,11 +1545,11 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         cnt = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize_assert(cnt)(fn)
         self.assertTrue(same(opt_fn(*args), correct))
+        self.assertEqual(cnt.frame_count, 1)
+        # Op count may vary between 8-10 in static mode.
         if torch._dynamo.config.assume_static_by_default:
-            self.assertExpectedInline(cnt.frame_count, """1""")
-            self.assertExpectedInline(cnt.op_count, """8""")
+            self.assertIn(cnt.op_count, range(8, 11))
         else:
-            self.assertExpectedInline(cnt.frame_count, """1""")
             self.assertExpectedInline(cnt.op_count, """11""")
 
     def test_rng_state(self):
@@ -2542,7 +2542,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
                 return x * 2 * tensor_for_import_testing
 
-        x = torch.randn(10)
+        x = torch.randn(10, device="cpu")
         fn(x)
         cnt = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
@@ -2565,7 +2565,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
                 return x * 2 * utils.tensor_for_import_testing
 
-        x = torch.randn(10)
+        x = torch.randn(10, device="cpu")
         fn(x)
         cnt = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
@@ -3516,7 +3516,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         def f(x):
             return torch.ops.test_sample.foo(x + 1) + 1
 
-        f(torch.randn(3))
+        f(torch.randn(3, device="cpu"))
 
         self.assertEqual(counter.op_count, 2)
         self.assertEqual(counter.frame_count, 2)
