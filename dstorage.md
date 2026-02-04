@@ -1,4 +1,7 @@
-# DStorage for DTensor(placement=Shard|Owned)
+# MST Implementation: Introducing DStorage 
+
+Implementation: https://github.com/pytorch/pytorch/pull/174267
+
 
 DStorage does 3 things:
 1. Consolidating all parameters into a unified byte buffer with proper dtype alignment (bf16, fp32)
