@@ -1,17 +1,7 @@
 #pragma once
 
 #include <ATen/hip/HIPConfig.h>
-
-// The includes of HIPGuard.h
-#include <c10/hip/impl/HIPGuardImpl.h>
-#include <c10/hip/HIPMacros.h>
-#include <c10/core/DeviceType.h>
-#include <c10/core/impl/InlineDeviceGuard.h>
-#include <c10/core/impl/InlineStreamGuard.h>
-#include <c10/util/Exception.h>
-
-#include <c10/hip/impl/HIPGuardImpl.h>
-
+#include <c10/hip/HIPGuard.h>
 #include <ATen/hip/impl/HIPCachingAllocatorMasqueradingAsCUDA.h>
 #include <ATen/hip/impl/HIPStreamMasqueradingAsCUDA.h>
 
@@ -21,6 +11,10 @@ namespace c10 { namespace hip {
 
 // Note [Masquerading as CUDA]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+//
+// How it was before caffe2 was removed from public repos. hipify v1.
+// ==================================================================
+//
 // c10_hip is very easy to understand: it is HIPified from c10_cuda,
 // and anywhere you said CUDA, the source code now says HIP.  HIPified
 // PyTorch is much harder to understand: it is HIPified from regular
@@ -47,337 +41,45 @@ namespace c10 { namespace hip {
 // When you add a new MasqueradingAsCUDA class/function, you need to
 // also update the rewrite rules in torch/utils/hipify/cuda_to_hip_mappings.py
 //
-//
-//
 // By the way, note that the cpp file associated with this also
 // *overwrites* the entry in the DeviceGuardImpl registry for CUDA with
 // this HIP implementation.
+//
+// How it is now. caffe2 is removed from public repos. hipify v2.
+// ==============================================================
+//
+// c10_hip is very easy to understand: it is HIPified from c10_cuda,
+// and anywhere you used a CUDA API, the source now calls a HIP API.
+// Classes and namespaces are not renamed from CUDA to HIP et al.
+// Filenames do get renamed from CUDA to HIP. This is the same as how PyTorch
+// sources are hipified. It is simpler, better.
+//
+// However, this leads to a challenge that many downstream projects explicitly
+// use these v1 Masquerading headers, classes, and symbols. For the purpose of
+// backwards-compatible transitions, we maintain these Masquerading
+// implementations but they no longer coerce a HIP device to a CUDA device. New
+// code should not use Masquerading implementations but instead use the regular
+// CUDA classes, for example the CUDAStream class inside c10/hip/HIPStream.h.
+//
 
-struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplInterface {
-  static constexpr c10::DeviceType static_type = c10::DeviceType::CUDA;
-  HIPGuardImplMasqueradingAsCUDA() {}
-  HIPGuardImplMasqueradingAsCUDA(c10::DeviceType t) {
-    TORCH_INTERNAL_ASSERT(t == c10::DeviceType::CUDA);
-  }
-  c10::DeviceType type() const override {
-    return c10::DeviceType::CUDA;
-  }
-  Device exchangeDevice(Device d) const override {
-    TORCH_INTERNAL_ASSERT(d.is_cuda());
-    Device old_device = getDevice();
-    if (old_device.index() != d.index()) {
-      C10_HIP_CHECK(hipSetDevice(d.index()));
-    }
-    return old_device;
-  }
-  Device getDevice() const override {
-    int device;
-    C10_HIP_CHECK(hipGetDevice(&device));
-    return Device(c10::DeviceType::CUDA, device);
-  }
-  void setDevice(Device d) const override {
-    TORCH_INTERNAL_ASSERT(d.is_cuda());
-    C10_HIP_CHECK(hipSetDevice(d.index()));
-  }
-  void uncheckedSetDevice(Device d) const noexcept override {
-    C10_HIP_CHECK_WARN(hipSetDevice(d.index()));
-  }
-  Stream getStream(Device d) const override {
-    return getCurrentHIPStreamMasqueradingAsCUDA(d.index()).unwrap();
-  }
-  Stream getDefaultStream(Device d) const override {
-    return getDefaultHIPStreamMasqueradingAsCUDA(d.index());
-  }
-  Stream getNewStream(Device d, int priority = 0) const override {
-    return getStreamFromPoolMasqueradingAsCUDA(priority, d.index());
-  }
-  Stream getStreamFromGlobalPool(Device d, bool isHighPriority = false) const override {
-    return getStreamFromPoolMasqueradingAsCUDA(isHighPriority, d.index());
-  }
-  Stream exchangeStream(Stream s) const override {
-    HIPStreamMasqueradingAsCUDA cs(s);
-    auto old_stream = getCurrentHIPStreamMasqueradingAsCUDA(s.device().index());
-    setCurrentHIPStreamMasqueradingAsCUDA(cs);
-    return old_stream.unwrap();
-  }
-  DeviceIndex deviceCount() const noexcept override {
-    int deviceCnt;
-    hipError_t _err;
-    _err = hipGetDeviceCount(&deviceCnt);
-    if(_err != hipErrorNoDevice && _err != hipSuccess)
-        C10_HIP_CHECK(_err);
-    return deviceCnt;
-  }
-
-  // Event-related functions
-  // Note: hipEventCreateWithFlags should be called on the same device as
-  //  the recording stream's device.
-  void createEvent(
-    hipEvent_t* hip_event,
-    const EventFlag flag) const {
-    // Maps PyTorch's Event::Flag to HIP flag
-    auto hip_flag = hipEventDefault;
-    switch (flag) {
-      case EventFlag::PYTORCH_DEFAULT:
-        hip_flag = hipEventDisableTiming;
-        break;
-      case EventFlag::BACKEND_DEFAULT:
-        hip_flag = hipEventDefault;
-        break;
-      default:
-        TORCH_CHECK(false, "HIP event received unknown flag");
-    }
-
-    C10_HIP_CHECK(hipEventCreateWithFlags(hip_event, hip_flag));
-  }
-
-  void destroyEvent(
-    void* event,
-    const DeviceIndex device_index) const noexcept override {
-    if (!event) return;
-    auto hip_event = static_cast<hipEvent_t>(event);
-    int orig_device;
-    C10_HIP_CHECK_WARN(hipGetDevice(&orig_device));
-    C10_HIP_CHECK_WARN(hipSetDevice(device_index));
-    C10_HIP_CHECK_WARN(hipEventDestroy(hip_event));
-    C10_HIP_CHECK_WARN(hipSetDevice(orig_device));
-  }
-
-  void record(void** event,
-    const Stream& stream,
-    const DeviceIndex device_index,
-    const EventFlag flag) const override {
-    TORCH_CHECK(device_index == -1 || device_index == stream.device_index(),
-      "Event device index ",
-      device_index,
-      " does not match recording stream's device index ",
-      stream.device_index(),
-      ".");
-
-    hipEvent_t hip_event = static_cast<hipEvent_t>(*event);
-    HIPStreamMasqueradingAsCUDA hip_stream{stream};
-
-    // Moves to stream's device to record
-    const auto orig_device = getDevice();
-    setDevice(stream.device());
-
-    // Creates the event (lazily)
-    if (!hip_event) createEvent(&hip_event, flag);
-    C10_HIP_CHECK(hipEventRecord(hip_event, hip_stream));
-    // Makes the void* point to the (possibly just allocated) HIP event
-    *event = hip_event;
-
-    // Resets device
-    setDevice(orig_device);
-  }
-
-  void block(
-    void* event,
-    const Stream& stream) const override {
-    if (!event) return;
-    hipEvent_t hip_event = static_cast<hipEvent_t>(event);
-    HIPStreamMasqueradingAsCUDA hip_stream{stream};
-    const auto orig_device = getDevice();
-    setDevice(stream.device());
-    C10_HIP_CHECK(hipStreamWaitEvent(
-      hip_stream,
-      hip_event,
-      /*flags (must be zero)=*/ 0));
-    setDevice(orig_device);
-  }
-
-  bool queryEvent(void* event) const override {
-    if (!event) return true;
-    hipEvent_t hip_event = static_cast<hipEvent_t>(event);
-    const hipError_t err = hipEventQuery(hip_event);
-    if (err != hipErrorNotReady) C10_HIP_CHECK(err);
-    else {
-      // ignore and clear the error if not ready
-      (void)hipGetLastError();
-    }
-    return (err == hipSuccess);
-  }
-
-  // Stream-related functions
-  bool queryStream(const Stream& stream) const override {
-    HIPStreamMasqueradingAsCUDA hip_stream{stream};
-    return hip_stream.query();
-  }
-
-  void synchronizeStream(const Stream& stream) const override {
-    HIPStreamMasqueradingAsCUDA hip_stream{stream};
-    hip_stream.synchronize();
-  }
-
-  void synchronizeEvent(void* event) const override {
-    if (!event)
-      return;
-    hipEvent_t hip_event = static_cast<hipEvent_t>(event);
-    C10_HIP_CHECK(hipEventSynchronize(hip_event));
-  }
-
-  // Note: synchronizeDevice can be safely called from any device
-  void synchronizeDevice(const c10::DeviceIndex device_index) const override {
-    int orig_device{-1};
-    C10_HIP_CHECK(hipGetDevice(&orig_device));
-    C10_HIP_CHECK(hipSetDevice(device_index));
-    C10_HIP_CHECK(hipDeviceSynchronize());
-    C10_HIP_CHECK(hipSetDevice(orig_device));
-  }
-
-  void recordDataPtrOnStream(
-    const c10::DataPtr& data_ptr,
-    const Stream& stream) const override {
-    HIPStreamMasqueradingAsCUDA hip_stream{stream};
-    HIPCachingAllocatorMasqueradingAsCUDA::recordStreamMasqueradingAsCUDA(data_ptr, hip_stream);
-  }
-
-  double elapsedTime(void* event1, void* event2, const DeviceIndex device_index)
-      const override {
-    TORCH_CHECK(
-        event1 && event2,
-        "Both events must be recorded before calculating elapsed time.");
-    int orig_device;
-    C10_HIP_CHECK(hipGetDevice(&orig_device));
-    C10_HIP_CHECK(hipSetDevice(device_index));
-    hipEvent_t hip_event1 = static_cast<hipEvent_t>(event1);
-    hipEvent_t hip_event2 = static_cast<hipEvent_t>(event2);
-    float time_ms = 0;
-    // raise hipErrorNotReady if either event is recorded but not yet completed
-    C10_HIP_CHECK(hipEventElapsedTime(&time_ms, hip_event1, hip_event2));
-    C10_HIP_CHECK(hipSetDevice(orig_device));
-    return static_cast<double>(time_ms);
-  }
+struct HIPGuardMasqueradingAsCUDA final : public c10::cuda::CUDAGuard {
+  using c10::cuda::CUDAGuard::CUDAGuard;
 };
 
-// All of the guards which have HIPGuardImpl burned in need to also have
-// variants using HIPGuardImplMasqueradingAsCUDA.
-
-/// This code is all a direct copy from c10/cuda/HIPGuardMasqueradingAsCUDA.h, but with
-/// the correct InlineDeviceGuard burned in.  Sorry about the
-/// copy-pasting.
-
-struct HIPGuardMasqueradingAsCUDA {
-  explicit HIPGuardMasqueradingAsCUDA() = delete;
-  explicit HIPGuardMasqueradingAsCUDA(DeviceIndex device_index) : guard_(device_index) {}
-  explicit HIPGuardMasqueradingAsCUDA(Device device) : guard_(device) {}
-
-  HIPGuardMasqueradingAsCUDA(const HIPGuardMasqueradingAsCUDA&) = delete;
-  HIPGuardMasqueradingAsCUDA& operator=(const HIPGuardMasqueradingAsCUDA&) = delete;
-  HIPGuardMasqueradingAsCUDA(HIPGuardMasqueradingAsCUDA&& other) = delete;
-  HIPGuardMasqueradingAsCUDA& operator=(HIPGuardMasqueradingAsCUDA&& other) = delete;
-
-  void set_device(Device device) { guard_.set_device(device); }
-  void reset_device(Device device) { guard_.reset_device(device); }
-  void set_index(DeviceIndex device_index) { guard_.set_index(device_index); }
-  Device original_device() const { return guard_.original_device(); }
-  Device current_device() const { return guard_.current_device(); }
-
- private:
-  c10::impl::InlineDeviceGuard<HIPGuardImplMasqueradingAsCUDA> guard_;
+struct OptionalHIPGuardMasqueradingAsCUDA final : public c10::cuda::OptionalCUDAGuard {
+  using c10::cuda::OptionalCUDAGuard::OptionalCUDAGuard;
 };
 
-struct OptionalHIPGuardMasqueradingAsCUDA {
-  explicit OptionalHIPGuardMasqueradingAsCUDA() : guard_() {}
-  explicit OptionalHIPGuardMasqueradingAsCUDA(std::optional<Device> device_opt) : guard_(device_opt) {}
-  explicit OptionalHIPGuardMasqueradingAsCUDA(std::optional<DeviceIndex> device_index_opt) : guard_(device_index_opt) {}
-
-  OptionalHIPGuardMasqueradingAsCUDA(const OptionalHIPGuardMasqueradingAsCUDA&) = delete;
-  OptionalHIPGuardMasqueradingAsCUDA& operator=(const OptionalHIPGuardMasqueradingAsCUDA&) = delete;
-  OptionalHIPGuardMasqueradingAsCUDA(OptionalHIPGuardMasqueradingAsCUDA&& other) = delete;
-  OptionalHIPGuardMasqueradingAsCUDA& operator=(OptionalHIPGuardMasqueradingAsCUDA&& other) = delete;
-
-  void set_device(Device device) { guard_.set_device(device); }
-  void reset_device(Device device) { guard_.reset_device(device); }
-  void set_index(DeviceIndex device_index) { guard_.set_index(device_index); }
-  std::optional<Device> original_device() const { return guard_.original_device(); }
-  std::optional<Device> current_device() const { return guard_.current_device(); }
-  void reset() { guard_.reset(); }
-
-private:
-  c10::impl::InlineOptionalDeviceGuard<HIPGuardImplMasqueradingAsCUDA> guard_;
+struct HIPStreamGuardMasqueradingAsCUDA final : public c10::cuda::CUDAStreamGuard {
+  using c10::cuda::CUDAStreamGuard::CUDAStreamGuard;
 };
 
-struct HIPStreamGuardMasqueradingAsCUDA {
-  explicit HIPStreamGuardMasqueradingAsCUDA() = delete;
-  explicit HIPStreamGuardMasqueradingAsCUDA(Stream stream) : guard_(stream) {}
-  HIPStreamGuardMasqueradingAsCUDA(const HIPStreamGuardMasqueradingAsCUDA&) = delete;
-  HIPStreamGuardMasqueradingAsCUDA& operator=(const HIPStreamGuardMasqueradingAsCUDA&) = delete;
-  HIPStreamGuardMasqueradingAsCUDA(HIPStreamGuardMasqueradingAsCUDA&& other) = delete;
-  HIPStreamGuardMasqueradingAsCUDA& operator=(HIPStreamGuardMasqueradingAsCUDA&& other) = delete;
-
-  void reset_stream(Stream stream) { guard_.reset_stream(stream); }
-
-  HIPStreamMasqueradingAsCUDA original_stream() const {
-    return HIPStreamMasqueradingAsCUDA(HIPStreamMasqueradingAsCUDA::UNCHECKED, guard_.original_stream());
-  }
-  HIPStreamMasqueradingAsCUDA current_stream() const {
-    return HIPStreamMasqueradingAsCUDA(HIPStreamMasqueradingAsCUDA::UNCHECKED, guard_.current_stream());
-  }
-
-  Device current_device() const { return guard_.current_device(); }
-  Device original_device() const { return guard_.original_device(); }
-
-private:
-  c10::impl::InlineStreamGuard<HIPGuardImplMasqueradingAsCUDA> guard_;
+struct OptionalHIPStreamGuardMasqueradingAsCUDA final : public c10::cuda::OptionalCUDAStreamGuard {
+  using c10::cuda::OptionalCUDAStreamGuard::OptionalCUDAStreamGuard;
 };
 
-struct OptionalHIPStreamGuardMasqueradingAsCUDA {
-  explicit OptionalHIPStreamGuardMasqueradingAsCUDA() : guard_() {}
-  explicit OptionalHIPStreamGuardMasqueradingAsCUDA(Stream stream) : guard_(stream) {}
-  explicit OptionalHIPStreamGuardMasqueradingAsCUDA(std::optional<Stream> stream_opt) : guard_(stream_opt) {}
-
-  OptionalHIPStreamGuardMasqueradingAsCUDA(const OptionalHIPStreamGuardMasqueradingAsCUDA&) = delete;
-  OptionalHIPStreamGuardMasqueradingAsCUDA& operator=(const OptionalHIPStreamGuardMasqueradingAsCUDA&) = delete;
-  OptionalHIPStreamGuardMasqueradingAsCUDA(OptionalHIPStreamGuardMasqueradingAsCUDA&& other) = delete;
-  OptionalHIPStreamGuardMasqueradingAsCUDA& operator=(OptionalHIPStreamGuardMasqueradingAsCUDA&& other) = delete;
-
-  void reset_stream(Stream stream) { guard_.reset_stream(stream); }
-
-  std::optional<HIPStreamMasqueradingAsCUDA> original_stream() const {
-    auto r = guard_.original_stream();
-    if (r.has_value()) {
-      return HIPStreamMasqueradingAsCUDA(HIPStreamMasqueradingAsCUDA::UNCHECKED, r.value());
-    } else {
-      return std::nullopt;
-    }
-  }
-
-  std::optional<HIPStreamMasqueradingAsCUDA> current_stream() const {
-    auto r = guard_.current_stream();
-    if (r.has_value()) {
-      return HIPStreamMasqueradingAsCUDA(HIPStreamMasqueradingAsCUDA::UNCHECKED, r.value());
-    } else {
-      return std::nullopt;
-    }
-  }
-
-  void reset() { guard_.reset(); }
-
-private:
-  c10::impl::InlineOptionalStreamGuard<HIPGuardImplMasqueradingAsCUDA> guard_;
-};
-
-struct HIPMultiStreamGuardMasqueradingAsCUDA {
-  explicit HIPMultiStreamGuardMasqueradingAsCUDA(ArrayRef<HIPStreamMasqueradingAsCUDA> streams)
-    : guard_(unwrapStreams(streams)) {}
-
-  HIPMultiStreamGuardMasqueradingAsCUDA(const HIPMultiStreamGuardMasqueradingAsCUDA&) = delete;
-  HIPMultiStreamGuardMasqueradingAsCUDA& operator=(const HIPMultiStreamGuardMasqueradingAsCUDA&) = delete;
-  HIPMultiStreamGuardMasqueradingAsCUDA(HIPMultiStreamGuardMasqueradingAsCUDA&& other) = delete;
-  HIPMultiStreamGuardMasqueradingAsCUDA& operator=(HIPMultiStreamGuardMasqueradingAsCUDA&& other) = delete;
-
-private:
-  c10::impl::InlineMultiStreamGuard<HIPGuardImplMasqueradingAsCUDA> guard_;
-
-  static std::vector<Stream> unwrapStreams(ArrayRef<HIPStreamMasqueradingAsCUDA> hipStreams) {
-    std::vector<Stream> streams;
-    streams.reserve(hipStreams.size());
-    for (const HIPStreamMasqueradingAsCUDA& hipStream : hipStreams) {
-      streams.push_back(hipStream);
-    }
-    return streams;
-  }
+struct HIPMultiStreamGuardMasqueradingAsCUDA final : public c10::cuda::CUDAMultiStreamGuard {
+  using c10::cuda::CUDAMultiStreamGuard::CUDAMultiStreamGuard;
 };
 
 }} // namespace c10::hip
