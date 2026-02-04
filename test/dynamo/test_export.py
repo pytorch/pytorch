@@ -2873,7 +2873,7 @@ def forward(self, x):
 
     def test_list_contains(self):
         def func(x):
-            assert x.size(-1) in [4, 5, 6], "bad"
+            assert x.size(-1) in [4, 5, 6], "bad"  # noqa: S101
             return x + x
 
         inps = (torch.randn(1, 5),)
@@ -2891,8 +2891,8 @@ def forward(self, x):
 
     def test_list_not_contains(self):
         def func(x):
-            assert x.size(0) not in [4, 5, 6], "bad1"
-            assert "monkey" not in ["cow", "pig"], "bad2"
+            assert x.size(0) not in [4, 5, 6], "bad1"  # noqa: S101
+            assert "monkey" not in ["cow", "pig"], "bad2"  # noqa: S101
             return x + x
 
         inps = (torch.randn(1, 5),)
@@ -3027,7 +3027,7 @@ def forward(self, x):
     @config.patch(assume_static_by_default=False)
     def test_export_persist_assert(self):
         def f(x):
-            assert x[0].sum() > 4, "Shape must be more than 4"
+            assert x[0].sum() > 4, "Shape must be more than 4"  # noqa: S101
             return x.cos() + x.sin()
 
         gm, _ = torch._dynamo.export(f, aten_graph=True, tracing_mode="symbolic")(

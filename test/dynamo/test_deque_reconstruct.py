@@ -13,7 +13,8 @@ class TestDequeReconstruct(torch._inductor.test_case.TestCase):
     @contextlib.contextmanager
     def set_deque_in_globals(self, value):
         prev = globals().pop("deque", self.UNSET)
-        assert "deque" not in globals()
+        if "deque" in globals():
+            raise AssertionError("Expected deque to not be in globals")
 
         try:
             if value is not self.UNSET:
@@ -22,7 +23,8 @@ class TestDequeReconstruct(torch._inductor.test_case.TestCase):
         finally:
             if prev is self.UNSET:
                 globals().pop("deque", None)
-                assert "deque" not in globals()
+                if "deque" in globals():
+                    raise AssertionError("Expected deque to not be in globals")
             else:
                 globals()["deque"] = prev
 
