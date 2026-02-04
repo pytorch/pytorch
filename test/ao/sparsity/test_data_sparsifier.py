@@ -138,7 +138,9 @@ class _BaseDataSparsiferTestCase(TestCase):
             self.assertEqual(original_data, data)
             self.assertEqualBroadcasting(mask[0], 0)
             if "step_count" not in sparsifier.state[name]:
-                raise AssertionError(f"Expected 'step_count' in sparsifier.state['{name}']")
+                raise AssertionError(
+                    f"Expected 'step_count' in sparsifier.state['{name}']"
+                )
             if sparsifier.state[name]["step_count"] != 3:
                 raise AssertionError(
                     f"Expected step_count 3, got {sparsifier.state[name]['step_count']}"
@@ -197,7 +199,9 @@ class _BaseDataSparsiferTestCase(TestCase):
                 raise AssertionError("data1 should not be modified")
 
             if sparsifier.data_groups[name1] != config:
-                raise AssertionError("old_config should match new config after replacement")
+                raise AssertionError(
+                    "old_config should match new config after replacement"
+                )
 
     def check_state_dict(self, data_list, data_with_config, defaults, **kwargs):
         sparsifier1 = self._make_sparsifier(
@@ -236,7 +240,9 @@ class _BaseDataSparsiferTestCase(TestCase):
                 raise AssertionError(f"Expected 'mask' in sparsifier1.state['{name}']")
             mask1, mask2 = state1[name]["mask"], sparsifier2.state[name]["mask"]
             if not (mask1.is_sparse and not mask2.is_sparse):
-                raise AssertionError("Expected mask1 to be sparse and mask2 to be dense")
+                raise AssertionError(
+                    "Expected mask1 to be sparse and mask2 to be dense"
+                )
             if not torch.all(mask1.to_dense() == mask2):
                 raise AssertionError("Masks do not match after loading state dict")
 
@@ -280,7 +286,10 @@ class _BaseDataSparsiferTestCase(TestCase):
             weight = sparsifier._extract_weight(data)
             weight.data = weight + torch.randn(*weight.shape)
             contained_data = sparsifier.get_data(name=name)
-            if weight.data.storage().data_ptr() != contained_data.data.storage().data_ptr():
+            if (
+                weight.data.storage().data_ptr()
+                != contained_data.data.storage().data_ptr()
+            ):
                 raise AssertionError("Memory reference is not preserved")
             if not torch.all(contained_data == weight):
                 raise AssertionError("Contained data does not match weight")
@@ -377,9 +386,7 @@ class _NormDataSparsifierTestCase(_BaseDataSparsiferTestCase):
                     f"Actual sparsity {actual_sparsity} not in bounds [{lb}, {ub}]"
                 )
             if actual_sparsity <= 0.0:
-                raise AssertionError(
-                    "Actual sparsity should be > 0.0"
-                )
+                raise AssertionError("Actual sparsity should be > 0.0")
 
         iters_before_collapse = 100
 
@@ -423,9 +430,13 @@ class _NormDataSparsifierTestCase(_BaseDataSparsiferTestCase):
                     block = row[idx : idx + 4]
                     block, _ = block.sort()
                     if not (block[:2] == 0).all():
-                        raise AssertionError("Expected first 2 elements of block to be 0")
+                        raise AssertionError(
+                            "Expected first 2 elements of block to be 0"
+                        )
                     if not (block[2:] != 0).all():
-                        raise AssertionError("Expected last 2 elements of block to be non-zero")
+                        raise AssertionError(
+                            "Expected last 2 elements of block to be non-zero"
+                        )
 
     def check_sparsity_level(
         self, data_list, data_with_config, defaults, norm_type="L1"
@@ -444,7 +455,9 @@ class _NormDataSparsifierTestCase(_BaseDataSparsiferTestCase):
             and "name" in data_with_config[0]
             and "data" in data_with_config[0]
         ):
-            raise AssertionError("data_with_config must have at least one entry with 'name' and 'data'")
+            raise AssertionError(
+                "data_with_config must have at least one entry with 'name' and 'data'"
+            )
         # get some data
         name, data = data_with_config[0]["name"], data_with_config[0]["data"]
         for idx, (sl, sbs, zpb) in enumerate(testcases[0]):
@@ -750,14 +763,26 @@ class TestQuantizationUtils(TestCase):
             **sparse_config,
         )
 
-        if type(model.emb1) is not torch.ao.nn.quantized.modules.embedding_ops.Embedding:
-            raise AssertionError(f"Expected quantized Embedding, got {type(model.emb1)}")
-        if type(model.embbag1) is not torch.ao.nn.quantized.modules.embedding_ops.EmbeddingBag:
-            raise AssertionError(f"Expected quantized EmbeddingBag, got {type(model.embbag1)}")
+        if (
+            type(model.emb1)
+            is not torch.ao.nn.quantized.modules.embedding_ops.Embedding
+        ):
+            raise AssertionError(
+                f"Expected quantized Embedding, got {type(model.emb1)}"
+            )
+        if (
+            type(model.embbag1)
+            is not torch.ao.nn.quantized.modules.embedding_ops.EmbeddingBag
+        ):
+            raise AssertionError(
+                f"Expected quantized EmbeddingBag, got {type(model.embbag1)}"
+            )
         if type(model.emb_seq[0]) is not nn.Embedding:
             raise AssertionError(f"Expected nn.Embedding, got {type(model.emb_seq[0])}")
         if type(model.emb_seq[1]) is not nn.EmbeddingBag:
-            raise AssertionError(f"Expected nn.EmbeddingBag, got {type(model.emb_seq[1])}")
+            raise AssertionError(
+                f"Expected nn.EmbeddingBag, got {type(model.emb_seq[1])}"
+            )
         if type(model.linear1) is not nn.Linear:
             raise AssertionError(f"Expected nn.Linear, got {type(model.linear1)}")
         if type(model.linear2) is not nn.Linear:
@@ -794,18 +819,42 @@ class TestQuantizationUtils(TestCase):
             model, DataNormSparsifier, sparsify_first=False, **sparse_config
         )
 
-        if type(model.emb1) is not torch.ao.nn.quantized.modules.embedding_ops.Embedding:
-            raise AssertionError(f"Expected quantized Embedding, got {type(model.emb1)}")
-        if type(model.embbag1) is not torch.ao.nn.quantized.modules.embedding_ops.EmbeddingBag:
-            raise AssertionError(f"Expected quantized EmbeddingBag, got {type(model.embbag1)}")
-        if type(model.emb_seq[0]) is not torch.ao.nn.quantized.modules.embedding_ops.Embedding:
-            raise AssertionError(f"Expected quantized Embedding, got {type(model.emb_seq[0])}")
-        if type(model.emb_seq[1]) is not torch.ao.nn.quantized.modules.embedding_ops.EmbeddingBag:
-            raise AssertionError(f"Expected quantized EmbeddingBag, got {type(model.emb_seq[1])}")
+        if (
+            type(model.emb1)
+            is not torch.ao.nn.quantized.modules.embedding_ops.Embedding
+        ):
+            raise AssertionError(
+                f"Expected quantized Embedding, got {type(model.emb1)}"
+            )
+        if (
+            type(model.embbag1)
+            is not torch.ao.nn.quantized.modules.embedding_ops.EmbeddingBag
+        ):
+            raise AssertionError(
+                f"Expected quantized EmbeddingBag, got {type(model.embbag1)}"
+            )
+        if (
+            type(model.emb_seq[0])
+            is not torch.ao.nn.quantized.modules.embedding_ops.Embedding
+        ):
+            raise AssertionError(
+                f"Expected quantized Embedding, got {type(model.emb_seq[0])}"
+            )
+        if (
+            type(model.emb_seq[1])
+            is not torch.ao.nn.quantized.modules.embedding_ops.EmbeddingBag
+        ):
+            raise AssertionError(
+                f"Expected quantized EmbeddingBag, got {type(model.emb_seq[1])}"
+            )
         if type(model.linear1) is not nn.Linear:
-            raise AssertionError(f"Expected nn.Linear (not quantized), got {type(model.linear1)}")
+            raise AssertionError(
+                f"Expected nn.Linear (not quantized), got {type(model.linear1)}"
+            )
         if type(model.linear2) is not nn.Linear:
-            raise AssertionError(f"Expected nn.Linear (not quantized), got {type(model.linear2)}")
+            raise AssertionError(
+                f"Expected nn.Linear (not quantized), got {type(model.linear2)}"
+            )
 
         dequant_emb1 = torch.dequantize(model.emb1.weight())
         dequant_embbag1 = torch.dequantize(model.embbag1.weight())
