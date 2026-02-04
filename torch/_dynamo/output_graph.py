@@ -29,6 +29,7 @@ import logging
 import operator
 import re
 import sys
+import time
 import traceback
 import warnings
 import weakref
@@ -168,6 +169,7 @@ from .variables.user_defined import UserDefinedDictVariable
 
 
 if TYPE_CHECKING:
+    from torch._dynamo.dynamo_profiler import DynamoProfilerState
     from torch._dynamo.package import CompilePackage
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
     from torch.multiprocessing.reductions import StorageWeakRef
@@ -700,6 +702,9 @@ class OutputGraph(OutputGraphCommon):
         self.compiler_fn: Optional[CompilerFn] = compiler_fn
         self.root_tx = root_tx
 
+        # Profiler state for tracking function trace timings
+        self.profiler_state: Optional[DynamoProfilerState] = None
+
         self.package = package
         # Given a source, what are the user stacks of all locations that
         # accessed it?
@@ -795,6 +800,30 @@ class OutputGraph(OutputGraphCommon):
         # dynamo_flat_name_to_original_fqn mapping.
         self.used_inlined_inbuilt_modules_names: OrderedSet[str] = OrderedSet()
 
+        self.attr_source_cache: dict[tuple[Source, str], AttrSource] = {}
+
+    def get_chained_attr_source(self, base: Source, path: str) -> AttrSource:
+        parts = path.split(".")
+        key = (base, parts[0])
+        if key not in self.attr_source_cache:
+            self.attr_source_cache[key] = AttrSource(base, parts[0])
+        result = self.attr_source_cache[key]
+        for part in parts[1:]:
+            key = (result, part)
+            if key not in self.attr_source_cache:
+                self.attr_source_cache[key] = AttrSource(result, part)
+            result = self.attr_source_cache[key]
+        return result
+
+    def get_chained_param_buffer_source(
+        self, base: Source, path: str
+    ) -> "ParamBufferSource":
+        parts = path.rsplit(".", 1)
+        if len(parts) == 1:
+            return ParamBufferSource(base, path)
+        intermediate_base = self.get_chained_attr_source(base, parts[0])
+        return ParamBufferSource(intermediate_base, parts[1])
+
     def mark_bytecode_tracing_start(self) -> None:
         self.compiler_trace_stack.enter_context(
             dynamo_timed(
@@ -802,9 +831,52 @@ class OutputGraph(OutputGraphCommon):
                 log_pt2_compile_event=True,
             )
         )
+        # Start profiler timing for the root function
+        if config.dynamo_profiler:
+            from torch._dynamo.dynamo_profiler import DynamoProfilerState
+
+            if self.profiler_state is None:
+                self.profiler_state = DynamoProfilerState()
+            code = self.root_tx.f_code
+            self.profiler_state.push(
+                code.co_name,
+                code.co_filename,
+                code.co_firstlineno,
+                time.time_ns(),
+            )
 
     def mark_bytecode_tracing_stop(self) -> None:
         self.compiler_trace_stack.close()
+        # Record profiler timing for the root function and dump stats
+        if config.dynamo_profiler and self.profiler_state is not None:
+            from torch._dynamo.dynamo_profiler import FunctionTraceTiming
+
+            stack_entry = self.profiler_state.pop()
+            trace_end_ns = time.time_ns()
+            if stack_entry is not None:
+                cumtime_ns = trace_end_ns - stack_entry.start_time_ns
+                tottime_ns = cumtime_ns - stack_entry.child_time_ns
+                timing = FunctionTraceTiming(
+                    func_name=stack_entry.func_name,
+                    filename=stack_entry.filename,
+                    firstlineno=stack_entry.firstlineno,
+                    cumtime_ns=cumtime_ns,
+                    tottime_ns=tottime_ns,
+                    bytecode_count=len(self.root_tx.f_code.co_code),
+                    inline_depth=0,
+                    caller_func_name=None,
+                    caller_filename=None,
+                    caller_firstlineno=None,
+                    is_primitive_call=stack_entry.is_primitive_call,
+                    call_stack=(),
+                )
+                self.profiler_state.record_timing(timing)
+
+            # Dump profiler stats
+            output_file = None
+            if isinstance(config.dynamo_profiler, str):
+                output_file = config.dynamo_profiler
+            self.profiler_state.dump_stats(output_file)
 
     def install_builtins_dict_in_fglobals(self) -> str:
         f_builtins = get_builtins_dict(self.global_scope)
@@ -1288,7 +1360,7 @@ class OutputGraph(OutputGraphCommon):
 
             def register_leaf_name(leaf_name: str) -> None:
                 assert self.param_name_to_source is not None
-                new_source = ParamBufferSource(source, leaf_name)
+                new_source = self.get_chained_param_buffer_source(source, leaf_name)
                 new_name = f"{name}.{leaf_name}"
                 self.param_name_to_source[new_name] = new_source
                 if isinstance(source, LocalSource):
@@ -2247,22 +2319,23 @@ class OutputGraph(OutputGraphCommon):
                 # while creating the graph module because self.graph and root
                 # are out of sync. This only happens for `get_attr` nodes, so
                 # here we clean up the get_attr nodes that are unused.
-                for attr in dir(root):
-                    subgraph = getattr(root, attr)
-                    if isinstance(subgraph, fx.GraphModule):
-                        insert_deferred_runtime_asserts(
-                            subgraph,
-                            self.shape_env,
-                            name,
-                            export=self.export,
-                        )
-                self.remove_unused_get_attr_nodes()
-                insert_deferred_runtime_asserts(
-                    fx.GraphModule(root, self.graph),
-                    self.shape_env,
-                    name,
-                    export=self.export,
-                )
+                with dynamo_timed("insert_deferred_runtime_asserts"):
+                    for attr in dir(root):
+                        subgraph = getattr(root, attr)
+                        if isinstance(subgraph, fx.GraphModule):
+                            insert_deferred_runtime_asserts(
+                                subgraph,
+                                self.shape_env,
+                                name,
+                                export=self.export,
+                            )
+                    self.remove_unused_get_attr_nodes()
+                    insert_deferred_runtime_asserts(
+                        fx.GraphModule(root, self.graph),
+                        self.shape_env,
+                        name,
+                        export=self.export,
+                    )
             # NB: deferred runtime asserts can keep graphargs live, so make sure
             # those are inserted before pruning
             self.remove_unused_graphargs()
@@ -2895,7 +2968,7 @@ class OutputGraph(OutputGraphCommon):
 
         def register_leaf_name(leaf_name: str) -> None:
             assert self.param_name_to_source is not None
-            new_source = ParamBufferSource(source, leaf_name)
+            new_source = self.get_chained_param_buffer_source(source, leaf_name)
             new_name = f"{name}.{leaf_name}"
             self.param_name_to_source[new_name] = new_source
             if isinstance(source, LocalSource):
