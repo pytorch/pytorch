@@ -3773,6 +3773,48 @@ class Scheduler:
         with dynamo_timed("benchmark_codegened_module"):
             return backend.benchmark_codegened_module(module)
 
+    def _has_layout_conflict_for_template(
+        self, multi_node: ir.MultiTemplateBuffer, choice: TritonTemplateCallerBase
+    ) -> bool:
+        """
+        Check if selecting a Triton template would cause layout conflicts.
+
+        A conflict exists when:
+        1. An input has FlexibleLayout (not yet frozen)
+        2. The template expects certain strides from that input
+        3. The input's layout has already been frozen to different strides
+           by another consumer, OR another consumer would freeze it differently
+
+        Returns True if there's a conflict and we should fall back to ATen.
+        """
+        # Get the speculative constraints from the choice
+        constraints = getattr(choice, 'layout_constraints', None)
+        if not constraints:
+            return False
+
+        log.error(f"Node {multi_node} has constraints {constraints}")
+        for inp in multi_node.inputs:
+            inp_name = inp.get_name()
+            if inp_name not in constraints:
+                continue
+
+            expected_layout = constraints[inp_name]
+            layout = inp.layout
+            # If layout is already frozen (FixedLayout), check if it matches expected
+            assert isinstance(layout, ir.FixedLayout)
+            if expected_layout != layout:
+                log.error(
+                    "Layout conflict detected for %s: template expects %s but layout is frozen to %s",
+                    inp_name,
+                    expected_layout,
+                    layout,
+                )
+                return True
+
+
+        return False
+
+
     def finalize_multi_template_buffers(self) -> None:
         """
         Finalize a backing choice for MultiTemplateBuffers which did not already have a
@@ -3801,6 +3843,25 @@ class Scheduler:
                             )
                         ),
                     )
+
+                if isinstance(
+                    min_node_unfused,
+                    torch._inductor.ir.TritonTemplateCallerBase,
+                ):
+                    # Check for layout conflicts before committing to Triton template
+                    if self._has_layout_conflict_for_template(multi_node, min_node_unfused):
+                        log.error(
+                            "Falling back to ATen due to layout conflict for %s",
+                            multi_node.get_name() if hasattr(multi_node, 'get_name') else multi_node,
+                        )
+                        # Fall back to first ExternKernelCaller (ATen)
+                        for choice in multi_node.choice_timings():
+                            if isinstance(
+                                choice,
+                                torch._inductor.select_algorithm.ExternKernelCaller,
+                            ):
+                                min_node_unfused = choice
+                                break
 
                 if isinstance(
                     min_node_unfused,
