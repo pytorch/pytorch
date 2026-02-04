@@ -174,7 +174,7 @@ def run_single_experiment(config: ExperimentConfig) -> ExperimentResults:
     ):
         try:
             activate_flash_attention_impl(config.flash_impl)
-        except (ImportError, ModuleNotFoundError) as e:
+        except ImportError as e:
             raise RuntimeError(
                 f"Failed to activate {config.flash_impl}: {e}\n"
                 f"Please install the required flash attention library or run with default configuration (without --flash_test)."
