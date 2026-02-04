@@ -1523,7 +1523,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             )
 
     @unittest.skipIf(
-        not torch._C._cpu._is_amx_tile_supported(), "AMX ISA support is required"
+        not torch.cpu._is_amx_tile_supported(), "AMX ISA support is required"
     )
     @inductor_config.patch({"freezing": True})
     @patches
