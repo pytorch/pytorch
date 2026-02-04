@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
-import logging
 from typing import TYPE_CHECKING
 
 import torch
@@ -12,9 +11,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from torch.onnx._internal.exporter import _registration
-
-
-logger = logging.getLogger(__name__)
 
 
 def _arg_has_complex_dtype(arg) -> bool:
