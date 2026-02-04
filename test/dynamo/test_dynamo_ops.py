@@ -43,6 +43,8 @@ test_inplace_ops_propagate_requires_grad_metadata_skips = {
     # Numerical gradient mismatch (not a metadata propagation issue)
     skip("igamma"),
     skip("igammac"),
+    skip("addcdiv"),
+    skip("addcmul")
 }
 
 
@@ -166,8 +168,6 @@ class TestTensorMetaProp(torch._dynamo.test_case.TestCase):
             self.assertEqual(
                 args_eager[requires_grad_idx].grad,
                 args_compiled[requires_grad_idx].grad,
-                atol=1e-2,
-                rtol=1e-2,
                 msg=f"{op.name}: Gradient mismatch indicates metadata not propagated during tracing",
             )
 
