@@ -2,7 +2,7 @@ name: Windows RTX Nightly
 
 on:
   schedule:
-    # Run every day at 1:15 AM UTC
+    # Run every day at 00:30 AM UTC
     - cron: '30 0 * * *'
 
 concurrency:
