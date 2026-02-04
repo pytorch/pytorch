@@ -706,7 +706,8 @@ class TestIter(TestCase):
         if len(lst) != 1:
             raise AssertionError(f"Expected length 1, got {len(lst)}")
         # FIXME: "is" cannot be used here because dynamo fails
-        assert type(lst[0]) == np.ndarray  # noqa: E721
+        if type(lst[0]) != np.ndarray:  # noqa: E721
+            raise AssertionError(f"Expected np.ndarray, got {type(lst[0])}")
         assert_equal(lst[0], np.arange(5))
 
 
