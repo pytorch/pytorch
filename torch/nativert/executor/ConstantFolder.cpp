@@ -5,7 +5,6 @@
 
 #include <c10/util/Enumerate.h>
 
-#include <torch/nativert/executor/DelegateExecutor.h>
 #include <torch/nativert/executor/Weights.h>
 
 namespace torch::nativert {

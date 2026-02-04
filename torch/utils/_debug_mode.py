@@ -43,6 +43,7 @@ from collections.abc import Callable
 from typing import Any, TYPE_CHECKING
 
 import torch
+from torch._logging import warning_once
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx.graph import _parse_stack_trace
 from torch.utils._dtype_abbrs import dtype_abbrs
@@ -51,7 +52,13 @@ from torch.utils._python_dispatch import (
     _get_current_dispatch_mode_stack,
     TorchDispatchMode,
 )
-from torch.utils._pytree import keystr, tree_all, tree_map, tree_map_with_path
+from torch.utils._pytree import (
+    keystr,
+    tree_all,
+    tree_map,
+    tree_map_only,
+    tree_map_with_path,
+)
 from torch.utils._traceback import CapturedTraceback
 from torch.utils.weak import WeakIdRef
 
@@ -70,6 +77,7 @@ REDISTRIBUTE_FUNC = "redistribute_input"
 # registered dispatch call hooks
 _DISPATCH_RECORD_HOOKS: list[Callable] = []
 _DISPATCH_LOG_HOOKS: list[Callable] = []
+_DISPATCH_PRE_LOG_HOOKS: list[Callable] = []
 # Tracks if we're in inductor benchmarking, and temporarily disables logging
 # (for ignoring autotuning kernel launches which don't affect the user-facing result)
 _IN_INDUCTOR_BENCHMARK = False
@@ -80,6 +88,8 @@ _RECORD_TRITON_OUTPUTS = False
 _TRITON_OUTPUT_HASH_FN = None
 # Annotates kernel input hashes, and stores them in call.pre_hashes
 _TRITON_INPUT_HASH_FN = None
+# Counter for active DebugMode instances (fast path for get_active_debug_mode)
+_ACTIVE_DEBUG_MODE_COUNT = 0
 
 
 def _stringify_shape(shape) -> str:
@@ -271,7 +281,6 @@ def _ensure_annotate_decorated():
 
         # Register no-op lowering for inductor backend
         from torch._inductor.lowering import register_lowering
-        from torch._logging import warning_once
 
         @register_lowering(torch.ops.debug_mode_ops.annotate)
         def _annotate_lowering(tag: str) -> None:
@@ -405,8 +414,6 @@ class _OpCall(_DebugCall):
 
 
 class _RedistributeCall(_DebugCall):
-    """Redistribute call from DTensor dispatch"""
-
     def __init__(
         self,
         arg,
@@ -415,12 +422,15 @@ class _RedistributeCall(_DebugCall):
         transform_info_str,
         call_depth,
         stack=False,
+        is_explicit=False,
     ) -> None:
         super().__init__(call_depth, stack=stack)
         self.arg = arg
         self.src_placement = src_placement
         self.dst_placement = dst_placement
         self.transform_info_str = transform_info_str
+        self.is_explicit = is_explicit
+        self.is_outer_call = isinstance(arg, int)
 
         self.arg_str: str | None = None
 
@@ -443,7 +453,17 @@ class _RedistributeCall(_DebugCall):
             dst_placement_str = _arg_to_str(self.dst_placement, attributes)
             placement_str = f"{src_placement_str} -> {dst_placement_str}"
 
-        base_str = f"{REDISTRIBUTE_FUNC}({arg_str}, {placement_str})"
+        # DebugMode will add redistribute_input logs at 2 levels,
+        # once per redistribute decision, and once per redistributed input.
+        # We only annotate [implicit/explicit] logs on the former (outer-level call).
+        if self.is_outer_call:
+            annotation = " [implicit] "
+        elif self.is_explicit:
+            annotation = " [explicit] "
+        else:
+            annotation = ""
+
+        base_str = f"{REDISTRIBUTE_FUNC}{annotation}({arg_str}, {placement_str})"
         if self.output_str:
             base_str += self.output_str
         return base_str
@@ -464,28 +484,20 @@ class _RedistributeCall(_DebugCall):
         yield self.call_depth
 
 
-class _NNModuleCall(_DebugCall):
-    """Designates entering an nn.Module's forward method"""
+class _OutputPlacementCall(_DebugCall):
+    """Records output placement for a DTensor op."""
 
-    def __init__(self, module_name: str, call_depth: int, stack: bool = False) -> None:
-        super().__init__(call_depth, stack=stack)
-        self.module_name = module_name
+    def __init__(self, placements_str: str, call_depth: int) -> None:
+        super().__init__(call_depth)
+        self.placements_str = placements_str
 
     def stringify_args(
         self, attributes: list[str], tensor_memo: TensorIdTracker | None = None
     ) -> None:
-        pass  # nothing to stringify
+        pass  # Already stringified
 
     def render(self, attributes: list[str]) -> str:
-        return f"[nn.Mod] {self.module_name}"
-
-    def __iter__(self):
-        yield from [
-            f"[nn.Mod] {self.module_name}",
-            (),
-            {},
-            self.call_depth,
-        ]
+        return f"-> output: {self.placements_str}"
 
 
 class _TritonKernelCall(_DebugCall):
@@ -577,16 +589,19 @@ class _TritonKernelCall(_DebugCall):
 class _AnnotateCall(_DebugCall):
     """Custom annotation call"""
 
-    def __init__(self, tag: Any, call_depth: int, stack: bool = False) -> None:
+    def __init__(
+        self, tag: Any, header: str, call_depth: int, stack: bool = False
+    ) -> None:
         super().__init__(call_depth, stack=stack)
         self.tag = tag
+        self.header = header
 
     def render(self, attributes: list[str]) -> str:
-        return f"[annotate] {self.tag}"
+        return f"[{self.header}] {self.tag}"
 
     def __iter__(self):
         yield from [
-            f"[nn.Mod] {self.tag}",
+            f"[{self.header}] {self.tag}",
             (),
             {},
             self.call_depth,
@@ -595,8 +610,21 @@ class _AnnotateCall(_DebugCall):
 
 def _run_hook(hook, *args):
     out = hook(*args)
-    assert out is None or isinstance(out, dict)
+    if out is not None and not isinstance(out, dict):
+        raise AssertionError(f"hook must return None or dict, got {type(out).__name__}")
     return out
+
+
+def _run_dispatch_pre_log_hooks(call: _DebugCall, func, types, args, kwargs) -> None:
+    global _DISPATCH_PRE_LOG_HOOKS
+    if _DISPATCH_PRE_LOG_HOOKS:
+        for hook in _DISPATCH_PRE_LOG_HOOKS:
+            hook_out = _run_hook(hook, func, types, args, kwargs, call)
+            if hook_out is not None:
+                # Store pre-hook results in call.log
+                if call.log is None:
+                    call.log = {}
+                call.log.update(hook_out)
 
 
 def _run_dispatch_hooks(call: _DebugCall, func, types, args, kwargs, result) -> None:
@@ -611,13 +639,13 @@ def _run_dispatch_hooks(call: _DebugCall, func, types, args, kwargs, result) -> 
             call.record = record
 
     if _DISPATCH_LOG_HOOKS:
-        log = {}
+        # Preserve existing log from pre-hooks (e.g., input_hash)
+        if call.log is None:
+            call.log = {}
         for hook in _DISPATCH_LOG_HOOKS:
             hook_out = _run_hook(hook, func, types, args, kwargs, result)
             if hook_out is not None:
-                log.update(hook_out)
-        if log:
-            call.log = log
+                call.log.update(hook_out)
 
 
 def _get_call_name(call: _DebugCall) -> str:
@@ -626,8 +654,8 @@ def _get_call_name(call: _DebugCall) -> str:
         return _get_op_name(call.op)
     elif isinstance(call, _TritonKernelCall):
         return call.kernel_name
-    elif isinstance(call, _NNModuleCall):
-        return call.module_name
+    elif isinstance(call, _AnnotateCall):
+        return f"[{call.header}] {call.tag}"
     elif isinstance(call, _RedistributeCall):
         return REDISTRIBUTE_FUNC
     else:
@@ -645,6 +673,78 @@ def _annotate_fake(tag: str) -> None:
     return None
 
 
+class DebugInterpreter(torch.fx.Interpreter):
+    """
+    Interpreter class for running aot_eager compiled regions when DebugMode is active,
+    instead of using the compiled code. This gives us access to fx.Node metadata to decorate
+    and contextualize DebugMode logs (e.g. nn_module_stack, stack_trace, compiled region boundaries).
+
+    Note: this is currently only enabled with DebugMode(run_compile_with_interpreter=True).
+    """
+
+    def __init__(self, module, backend):
+        super().__init__(module)
+        self.mode = get_active_debug_mode()
+        if self.mode is None:
+            raise RuntimeError("No DebugMode is currently active")
+
+        # for tracking initial nn_module_stack
+        self.base_nn_module_stack = list(self.mode.current_nn_module_stack)
+
+        # annotate start of region
+        self.backend = backend
+        self.mode.operators.append(
+            _AnnotateCall(
+                "enter", f"{self.backend} region (compile)", self.mode.call_depth
+            )
+        )
+
+    def run_node(self, n: torch.fx.Node) -> Any:
+        if self.mode is None:
+            raise RuntimeError("No DebugMode is currently active")
+
+        # handling of nn.Module stack
+        if self.mode.record_nn_module and n.op not in ["placeholder", "output"]:
+            self.mode._handle_fx_nn_module_stack(
+                self.base_nn_module_stack,
+                n.meta.get("nn_module_stack", {}),
+                n.meta.get("fwd_nn_module_stack", {}),
+            )
+
+        # override stack trace with n.meta
+        if (
+            self.mode.record_stack_trace
+            and n.op not in ["placeholder", "output"]
+            and (stack_trace := n.meta.get("stack_trace", None)) is not None
+        ):
+            with self.mode.set_fx_stack_trace(stack_trace):
+                return super().run_node(n)
+        else:
+            return super().run_node(n)
+
+    def run(self, *args, **kwargs):
+        if self.mode is None:
+            raise RuntimeError("No DebugMode is currently active")
+        result = super().run(*args)
+
+        # reset nn.Module stack to pre-compiled region value
+        if len(self.mode.current_nn_module_stack) < len(self.base_nn_module_stack):
+            warning_once(
+                log, "unexpected handling of nn_module_stack in DebugInterpreter"
+            )
+        while len(self.mode.current_nn_module_stack) > len(self.base_nn_module_stack):
+            self.mode._exit_nn_module_call()
+
+        # annotate end of region
+        self.mode.operators.append(
+            _AnnotateCall(
+                "exit", f"{self.backend} region (compile)", self.mode.call_depth
+            )
+        )
+
+        return result
+
+
 class DebugMode(TorchDispatchMode):
     def __init__(
         self,
@@ -658,6 +758,9 @@ class DebugMode(TorchDispatchMode):
         record_stack_trace=False,
         record_output=True,
         record_ids=False,
+        record_profiler_context=True,
+        record_localtensor=True,
+        run_compile_with_interpreter=False,
     ) -> None:
         super().__init__()
         import torch.distributed.tensor  # noqa: F401
@@ -675,10 +778,13 @@ class DebugMode(TorchDispatchMode):
         # Records __torch_dispatch__ calls on real tensors.
         self.record_realtensor = record_realtensor
 
+        # Records __torch_dispatch__ calls on LocalTensor.
+        self.record_localtensor = record_localtensor
+
         # Optional list[str] of tensor attributes, to be annotated in the string dump.
         self.record_tensor_attributes = record_tensor_attributes or []
 
-        # Uses ModTracker to record nn.Module entrances, as _NNModuleCall entries.
+        # Uses ModTracker to record nn.Module entrances.
         # This flag currently has no effect on torch.compiled-regions.
         self.record_nn_module = record_nn_module
 
@@ -702,6 +808,14 @@ class DebugMode(TorchDispatchMode):
         # Annotates string dumps with graph-style tensor ids, e.g. op($1, $2) -> $3.
         self.record_ids: bool = record_ids
 
+        # Annotates string dumps with profiler.record_function contexts from runtime code.
+        # Currently does not preserve contexts inside torch.compile-d regions.
+        self.record_profiler_context: bool = record_profiler_context
+
+        # For aot_eager compiled regions, wraps the compiled fx.GraphModule with a DebugInterpreter,
+        # and uses it at runtime for node metadata visibility.
+        self.run_compile_with_interpreter: bool = run_compile_with_interpreter
+
         self.reset()
 
     def reset(self) -> None:
@@ -709,10 +823,12 @@ class DebugMode(TorchDispatchMode):
         self.call_depth = 0
         self._tensor_memo = TensorIdTracker()
         self._output_info: dict[int, object] = {}
+        self.ignored_record_functions = 0
+        self.current_nn_module_stack = []
+        self.fx_stack_trace = None
 
     def _track_op_output(self, op_index, result) -> None:
         """Assign IDs to output tensors and store in output_info"""
-        # self._track_tensor_ids(result)
         self._output_info[op_index] = result
 
     # Without this override, running torch.compile under DebugMode
@@ -735,6 +851,8 @@ class DebugMode(TorchDispatchMode):
                 self.record_tensor_attributes,
                 self._tensor_memo if self.record_ids else None,
             )
+        if self.fx_stack_trace:
+            call.stack_trace = call.fwd_stack_trace = self.fx_stack_trace
         self.operators.append(call)
 
     def _record_call_output(self, call, output) -> None:
@@ -763,14 +881,58 @@ class DebugMode(TorchDispatchMode):
         finally:
             self.call_depth -= 1
 
+    def _maybe_record_function(self, tag):
+        # filter out tags that appear noisy, or aren't runtime-related
+        if any(
+            tag.startswith(prefix)
+            for prefix in [
+                # assuming these are from benchmarking, not the actual runtime call
+                "CachingAutotuner.",
+                "InductorBenchmarker.",
+                # inductor compilation
+                "compile_fx.<locals>.",
+            ]
+        ):
+            self.ignored_record_functions += 1
+            return
+
+        call = _AnnotateCall(
+            tag, "record function", self.call_depth, stack=self.record_stack_trace
+        )
+        self.operators.append(call)
+        self.call_depth += 1
+
+    def _maybe_exit_record_function(self):
+        if self.ignored_record_functions < 0:
+            raise AssertionError(
+                f"ignored_record_functions is negative: {self.ignored_record_functions}"
+            )
+        if self.ignored_record_functions > 0:
+            self.ignored_record_functions -= 1
+        else:
+            self.call_depth -= 1
+
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
 
+        # Handle record_function entries
+        if self.record_profiler_context:
+            if func == torch.ops.profiler._record_function_enter_new.default:
+                if len(args) != 1:
+                    raise AssertionError(f"expected 1 arg, got {len(args)}")
+                self._maybe_record_function(args[0])
+            elif func == torch.ops.profiler._record_function_exit._RecordFunction:
+                self._maybe_exit_record_function()
+
+        # Handle DebugMode._annotate()
         if func is torch.ops.debug_mode_ops.annotate.default:
-            assert len(args) == 1
+            if len(args) != 1:
+                raise AssertionError(f"expected 1 arg, got {len(args)}")
             self._handle_annotate(args[0])
             return
+
+        from torch.distributed._local_tensor import LocalTensor
 
         # Record the operation with its call depth
         call = None
@@ -793,6 +955,17 @@ class DebugMode(TorchDispatchMode):
                         stack=self.record_stack_trace,
                     )
                     self._record_call(call)
+        # TODO: check the context manager
+        elif LocalTensor in types:
+            if self.record_localtensor:
+                call = _OpCall(
+                    func,
+                    args,
+                    kwargs,
+                    self.call_depth + 1,
+                    stack=self.record_stack_trace,
+                )
+                self._record_call(call)
         elif len(types) == 0:
             if self.record_realtensor:
                 call = _OpCall(
@@ -804,6 +977,12 @@ class DebugMode(TorchDispatchMode):
                 )
                 self._record_call(call)
 
+        # Run pre-hooks before executing the operation to hash inputs
+        # We have to run becore the func() call in case there's any
+        # in-place mutation
+        if call:
+            _run_dispatch_pre_log_hooks(call, func, types, args, kwargs)
+
         result = func(*args, **kwargs)
         if call:
             self._record_call_output(call, result)
@@ -812,8 +991,8 @@ class DebugMode(TorchDispatchMode):
         return result
 
     def __enter__(self):
-        self.reset()
-
+        global _ACTIVE_DEBUG_MODE_COUNT
+        _ACTIVE_DEBUG_MODE_COUNT += 1
         if self.record_torchfunction:
             torch._C._push_on_torch_function_stack(self)
 
@@ -830,6 +1009,8 @@ class DebugMode(TorchDispatchMode):
 
     # pyrefly: ignore [bad-override]
     def __exit__(self, *args):
+        global _ACTIVE_DEBUG_MODE_COUNT
+        _ACTIVE_DEBUG_MODE_COUNT -= 1
         super().__exit__(*args)
         if self.record_nn_module:
             self.module_tracker.__exit__()  # type: ignore[attribute, union-attr]
@@ -837,6 +1018,26 @@ class DebugMode(TorchDispatchMode):
             torch._C._pop_torch_function_stack()
         if self.record_stack_trace:
             self.anomaly_for_traces.__exit__(*args)
+
+    @contextlib.contextmanager
+    def set_fx_stack_trace(self, stack_trace):
+        self.fx_stack_trace = stack_trace
+        try:
+            yield
+        finally:
+            self.fx_stack_trace = None
+
+    def _enter_nn_module_call(self, fqn, header):
+        call = _AnnotateCall(
+            fqn, header, self.call_depth + 1, stack=self.record_stack_trace
+        )
+        self.operators.append(call)
+        self.current_nn_module_stack.append(fqn)
+        self.call_depth += 1
+
+    def _exit_nn_module_call(self):
+        self.call_depth -= 1
+        self.current_nn_module_stack.pop()
 
     def module_tracker_setup(self) -> None:
         from torch.distributed._tools.mod_tracker import ModTracker
@@ -846,14 +1047,58 @@ class DebugMode(TorchDispatchMode):
         # module pre-fw hook: record module call
         def pre_fw_hook(module, input) -> None:
             fqn = self.module_tracker._get_mod_name(module)  # type: ignore[attribute, union-attr]
-            self.operators.append(_NNModuleCall(fqn, self.call_depth))
-            self.call_depth += 1
+            self._enter_nn_module_call(fqn, "nn.Mod")
 
         # module post-fw hook: decrement call depth
         def post_fw_hook(module, input, output) -> None:
-            self.call_depth -= 1
+            self._exit_nn_module_call()
 
         self.module_tracker.register_user_hooks(pre_fw_hook, post_fw_hook)
+
+    def _handle_fx_nn_module_stack(
+        self,
+        base_stack: list[str],
+        nn_module_stack: dict[str, tuple[str, Any]] | None,
+        fwd_nn_module_stack: dict[str, tuple[str, Any]] | None,
+    ) -> None:
+        """
+        Called when DebugInterpreter observes nn_module_stack or fwd_nn_module_stack metadata
+        from executing the compiled GraphModule.
+
+        If the current module stack is mismatched with what's currently tracked in DebugMode
+        (current_nn_module_stack), we adjust call depth and add new [nn.Module] log entries accordingly.
+        """
+
+        nn_module_stack = nn_module_stack or {}
+        fwd_nn_module_stack = fwd_nn_module_stack or {}
+        if nn_module_stack and fwd_nn_module_stack:
+            raise AssertionError(
+                "Expecting at most one of nn_module_stack and fwd_nn_module_stack."
+            )
+
+        is_fwd = nn_module_stack
+        stack = nn_module_stack if is_fwd else fwd_nn_module_stack
+
+        # forward stack
+        current_stack = self.current_nn_module_stack
+        new_stack = base_stack + [v[0] for v in stack.values()]
+
+        entered = set(new_stack) - set(current_stack)
+        exited = set(current_stack) - set(new_stack)
+
+        # Decrement depth for exited modules
+        for _ in exited:
+            self._exit_nn_module_call()
+        if self.call_depth < 0:
+            raise AssertionError("Unexpectedly, DebugMode call_depth is negative")
+
+        # Add [nn.Module] entries for newly entered modules
+        for fqn in sorted(entered):
+            self._enter_nn_module_call(
+                fqn, "nn.Mod (compile)" if is_fwd else "nn.Mod (compile bwd)"
+            )
+
+        self.current_nn_module_stack = new_stack
 
     @contextlib.contextmanager
     def record_redistribute_calls(
@@ -862,6 +1107,7 @@ class DebugMode(TorchDispatchMode):
         src_placement,
         dst_placement,
         transform_info_str: str | None = None,
+        is_explicit: bool = False,
     ):
         try:
             self._record_call(
@@ -872,12 +1118,25 @@ class DebugMode(TorchDispatchMode):
                     transform_info_str=transform_info_str,
                     call_depth=self.call_depth + 1,
                     stack=self.record_stack_trace,
+                    is_explicit=is_explicit,
                 )
             )
             self.call_depth += 1
             yield
         finally:
             self.call_depth -= 1
+
+    def record_output_placements(self, output_spec) -> None:
+        """Record output placements for a DTensor op as a separate line."""
+        if not self.record_output:
+            return
+        from torch.distributed.tensor._dtensor_spec import DTensorSpec
+
+        placements_str = str(
+            tree_map_only(DTensorSpec, _stringify_dtensor_spec, output_spec)
+        )
+        call = _OutputPlacementCall(placements_str, self.call_depth + 1)
+        self._record_call(call)
 
     def record_triton_kernel(
         self, kernel_name: str, kwargs: dict[str, Any]
@@ -947,6 +1206,7 @@ class DebugMode(TorchDispatchMode):
     def dispatch_hooks(
         record_hook: Callable | None = None,
         log_hook: Callable | None = None,
+        pre_log_hook: Callable | None = None,
     ):
         """
         Allows installing post-hooks on arguments to intercepted __torch_dispatch__ calls;
@@ -956,13 +1216,18 @@ class DebugMode(TorchDispatchMode):
         Logging hook outputs are stored in call.log and annotate calls in debug_string(),
         while recording hook outputs are just stored in call.record.
         For now hooks are expected to return dictionaries.
+
+        pre_log_hook signature is (func, types, args, kwargs, call) and is executed before
+        the operation. It allows capturing state before in-place mutations.
         """
-        global _DISPATCH_RECORD_HOOKS, _DISPATCH_LOG_HOOKS
+        global _DISPATCH_RECORD_HOOKS, _DISPATCH_LOG_HOOKS, _DISPATCH_PRE_LOG_HOOKS
 
         if record_hook:
             _DISPATCH_RECORD_HOOKS.append(record_hook)
         if log_hook:
             _DISPATCH_LOG_HOOKS.append(log_hook)
+        if pre_log_hook:
+            _DISPATCH_PRE_LOG_HOOKS.append(pre_log_hook)
         try:
             yield
         finally:
@@ -970,6 +1235,8 @@ class DebugMode(TorchDispatchMode):
                 _DISPATCH_RECORD_HOOKS.pop()
             if log_hook:
                 _DISPATCH_LOG_HOOKS.pop()
+            if pre_log_hook:
+                _DISPATCH_PRE_LOG_HOOKS.pop()
 
     @staticmethod
     @contextlib.contextmanager
@@ -1008,11 +1275,18 @@ class DebugMode(TorchDispatchMode):
                 - "hash_tensor": uses torch.hash_tensor (XOR sum reduction)
             - List of strings: returns tuple of hashes from above options
         hash_inputs: if True, also hashes tensors in (args, kwargs), storing them in "input_hash".
-        NOTE: this is currently a post-hook, so e.g. inplace ops will log the "output" hashes.
+        Input hashes are captured before the operation executes, so they reflect the state before
+        any in-place mutations.
         """
 
         def hash_fn_option(hash_type):
-            assert isinstance(hash_type, str) and hash_type in ["norm", "hash_tensor"]
+            if not isinstance(hash_type, str) or hash_type not in [
+                "norm",
+                "hash_tensor",
+            ]:
+                raise AssertionError(
+                    f"hash_type must be 'norm' or 'hash_tensor', got {hash_type!r}"
+                )
             return functools.partial(
                 norm_hash_fn if hash_type == "norm" else hash_tensor_fn, use_scalar=True
             )
@@ -1034,14 +1308,25 @@ class DebugMode(TorchDispatchMode):
                 lambda x: fn(x) if isinstance(x, torch.Tensor) else None, obj
             )
 
-        def _dispatch_hash_hook(func, types, args, kwargs, result):
+        def _dispatch_pre_log_hook(func, types, args, kwargs, call):
+            """Pre-hook to capture input hashes before operation executes"""
+            if "empty" in str(func) or "profiler" in str(func):
+                return None
+
+            if hash_inputs:
+                # Capture input hashes before the operation
+                input_hash = _tree_hash((args, kwargs))
+                if not tree_all(lambda x: x is None, input_hash):
+                    return {"input_hash": input_hash}
+            return None
+
+        def _dispatch_post_hook(func, types, args, kwargs, result):
+            """Post-hook to capture output hashes after operation executes"""
             if "empty" in str(func) or "profiler" in str(func):
                 return None
 
             out = {}
             out["hash"] = _tree_hash(result)
-            if hash_inputs:
-                out["input_hash"] = _tree_hash((args, kwargs))
 
             if tree_all(lambda x: x is None, out.values()):
                 return None
@@ -1054,7 +1339,10 @@ class DebugMode(TorchDispatchMode):
                 _TRITON_INPUT_HASH_FN = fn
             _old_output_hfn = _TRITON_OUTPUT_HASH_FN
             _TRITON_OUTPUT_HASH_FN = fn
-            with DebugMode.dispatch_hooks(log_hook=_dispatch_hash_hook):
+            with DebugMode.dispatch_hooks(
+                log_hook=_dispatch_post_hook,
+                pre_log_hook=_dispatch_pre_log_hook if hash_inputs else None,
+            ):
                 yield
         finally:
             if hash_inputs:
@@ -1081,7 +1369,7 @@ class DebugMode(TorchDispatchMode):
 
     def _handle_annotate(self, tag):
         """Handles DebugMode._annotate()"""
-        call = _AnnotateCall(tag, self.call_depth, self.record_stack_trace)
+        call = _AnnotateCall(tag, "annotate", self.call_depth, self.record_stack_trace)
         self.operators.append(call)
 
     @staticmethod
@@ -1185,7 +1473,10 @@ class DebugMode(TorchDispatchMode):
                     )
 
                 def compare_triton_hashes(hashes1, hashes2, is_input):
-                    assert set(hashes1.keys()) == set(hashes2.keys())  # type: ignore[union-attr]
+                    if set(hashes1.keys()) != set(hashes2.keys()):  # type: ignore[union-attr]
+                        raise AssertionError(
+                            f"hash key mismatch: {set(hashes1.keys())} vs {set(hashes2.keys())}"
+                        )
                     for key in hashes1:
                         if hashes1[key] != hashes2[key]:
                             difference_info.append(
@@ -1294,6 +1585,9 @@ class DebugMode(TorchDispatchMode):
 
 
 def get_active_debug_mode() -> DebugMode | None:
+    # Fast path: if no DebugMode is active, skip the stack walk
+    if _ACTIVE_DEBUG_MODE_COUNT == 0:
+        return None
     debug_mode = None
     for mode in _get_current_dispatch_mode_stack():
         if isinstance(mode, DebugMode):

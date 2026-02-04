@@ -1,14 +1,46 @@
 import os
 from collections.abc import Callable
 from functools import cache, partial
+from typing import TypeVar
 
 import torch
 from torch._environment import is_fbcode
 
 
+T = TypeVar("T")
+
+
+def _is_force_disable_caches() -> bool:
+    """Check if caching is force disabled via inductor config.
+
+    This defers importing torch._inductor.config to avoid circular imports.
+
+    Returns:
+        True if force_disable_caches is set in inductor config, False otherwise.
+    """
+    from torch._inductor import config as inductor_config
+
+    return inductor_config.force_disable_caches
+
+
+@cache
+def _env_var_val(env_var: str, default: T) -> str | T:
+    """Get the value of an environment variable or return the default.
+
+    Args:
+        env_var: Environment variable name to check
+        default: Default value to return if environment variable is not set
+
+    Returns:
+        The value from the environment variable as a string, or the default if not set
+    """
+    return os.environ.get(env_var, default)
+
+
 @cache
 def _env_var_config(env_var: str, default: bool) -> bool:
-    if (env_val := os.environ.get(env_var)) is not None:
+    env_val = _env_var_val(env_var, None)
+    if env_val is not None:
         return env_val == "1"
     return default
 
@@ -63,65 +95,73 @@ _CACHING_MODULE_VERSION: int = 0
 _CACHING_MODULE_VERSION_JK: str = "pytorch/inductor:caching_module_version"
 _CACHING_MODULE_OSS_DEFAULT: bool = False
 _CACHING_MODULE_ENV_VAR_OVERRIDE: str = "TORCHINDUCTOR_ENABLE_CACHING_MODULE"
-IS_CACHING_MODULE_ENABLED: Callable[[], bool] = partial(
-    _versioned_config,
-    _CACHING_MODULE_VERSION_JK,
-    _CACHING_MODULE_VERSION,
-    _CACHING_MODULE_OSS_DEFAULT,
-    _CACHING_MODULE_ENV_VAR_OVERRIDE,
+
+
+def _is_caching_module_enabled_base() -> bool:
+    """Base check for caching module enablement via versioned config."""
+    return _versioned_config(
+        _CACHING_MODULE_VERSION_JK,
+        _CACHING_MODULE_VERSION,
+        _CACHING_MODULE_OSS_DEFAULT,
+        _CACHING_MODULE_ENV_VAR_OVERRIDE,
+    )
+
+
+def IS_CACHING_MODULE_ENABLED() -> bool:
+    """Check if the caching module is enabled.
+
+    Returns False if:
+    - The versioned config disables it
+    - force_disable_caches is set in inductor config
+
+    Returns:
+        True if caching module is enabled, False otherwise.
+    """
+    if not _is_caching_module_enabled_base():
+        return False
+    if _is_force_disable_caches():
+        return False
+    return True
+
+
+# Controls whether the Memoizer dumps its cache to a JSON file on destruction.
+# When enabled, the Memoizer will write its in-memory cache to a JSON file
+# (memoizer_cache.json in the cache directory) on destruction. This dump file
+# can later be used to pre-populate Memoizers via CACHE_DUMP_FILE_PATH.
+#
+# This is useful for:
+# - Debugging and inspection of cached values
+# - Creating cache snapshots that can be reused across runs
+# - Pre-warming caches for subsequent executions
+#
+# Set via environment variable: TORCHINDUCTOR_DUMP_MEMOIZER_CACHE=1
+_DUMP_MEMOIZER_CACHE_ENV_VAR: str = "TORCHINDUCTOR_DUMP_MEMOIZER_CACHE"
+_DUMP_MEMOIZER_CACHE_DEFAULT: bool = False
+IS_DUMP_MEMOIZER_CACHE_ENABLED: Callable[[], bool] = partial(
+    _env_var_config,
+    _DUMP_MEMOIZER_CACHE_ENV_VAR,
+    _DUMP_MEMOIZER_CACHE_DEFAULT,
 )
 
 
-# toggles the deterministic caching interface. silently disabling deterministic
-# caching (i.e. by mimicking the functionality of IS_CACHING_MODULE_ENABLED) can
-# be problematic if the user is directly calling the deterministic caching interface
-# (for example, if they were to interface with dcache instead of icache). instead, if
-# the user tries to use the deterministic caching interface while it is disabled we
-# will simply throw DeterministicCachingDisabledError
-_DETERMINISTIC_CACHING_VERSION: int = 0
-_DETERMINISTIC_CACHING_VERSION_JK: str = (
-    "pytorch/inductor:deterministic_caching_version"
-)
-_DETERMINISTIC_CACHING_OSS_DEFAULT: bool = False
-_DETERMINISTIC_CACHING_ENV_VAR_OVERRIDE: str = (
-    "TORCHINDUCTOR_ENABLE_DETERMINISTIC_CACHING"
-)
-IS_DETERMINISTIC_CACHING_ENABLED: Callable[[], bool] = partial(
-    _versioned_config,
-    _DETERMINISTIC_CACHING_VERSION_JK,
-    _DETERMINISTIC_CACHING_VERSION,
-    _DETERMINISTIC_CACHING_OSS_DEFAULT,
-    _DETERMINISTIC_CACHING_ENV_VAR_OVERRIDE,
-)
-
-# enabling strictly pre-populated determinism forces the deterministic caching
-# interface to pull from and only from a pre-populated in-memory cache. this
-# in-memory cache gets pre-populated from a file path that is specified by
-# environment variable "TORCHINDUCTOR_PRE_POPULATE_DETERMINISTIC_CACHE".
-# coincidentally, the deterministic caching interface will dump its in-memory
-# cache to disk on program exit (check the logs for the exact file path) which
-# can be used as a drop-in solution for pre-population on subsequent runs. if
-# strictly pre-populated determinism is enabled and a key is encountered which
-# is not covered by the pre-populated in-memory cache an exception,
-# StrictDeterministicCachingKeyNotFoundError, will be raised
-STRICTLY_PRE_POPULATED_DETERMINISM: bool = _env_var_config(
-    "TORCHINDUCTOR_STRICTLY_PRE_POPULATED_DETERMINISM",
-    default=False,
-)
-# similar to strictly pre-populated determinism, except that any key can either
-# be in the pre-populated in-memory cache or the on-disk/remote cache (depending
-# on whether or not local/global determinism is enabled).
-STRICTLY_CACHED_DETERMINISM: bool = _env_var_config(
-    "TORCHINDUCTOR_STRICTLY_CACHED_DETERMINISM",
-    default=False,
-)
-# local determinism ensures that caching is deterministic on a single machine,
-# hence an on-disk cache is used for synchronization of results
-LOCAL_DETERMINISM: bool = _env_var_config(
-    "TORCHINDUCTOR_LOCAL_DETERMINISM", default=(not is_fbcode())
-)
-# global determinism ensures that caching is deterministic across any/all machines,
-# hence a remote cache (with strong consistency!) is used for synchronization of results
-GLOBAL_DETERMINISM: bool = _env_var_config(
-    "TORCHINDUCTOR_GLOBAL_DETERMINISM", default=is_fbcode()
+# Path to a cache dump file to pre-populate Memoizers on initialization.
+# This should point to a JSON file produced by IS_DUMP_MEMOIZER_CACHE_ENABLED.
+#
+# When set, Memoizers will load cached entries from this file on initialization,
+# allowing cache values to be reused across separate runs without recomputation.
+# This is particularly useful for:
+# - Pre-warming caches with known-good values
+# - Reproducing behavior from a previous run
+# - Sharing cached computations across different environments
+#
+# The dump file format is produced by the Memoizer's _dump_to_disk method when
+# IS_DUMP_MEMOIZER_CACHE_ENABLED is set to true.
+#
+# Set via environment variable: TORCHINDUCTOR_CACHE_DUMP_FILE_PATH=/path/to/dump.json
+_CACHE_DUMP_FILE_PATH_ENV_VAR: str = "TORCHINDUCTOR_CACHE_DUMP_FILE_PATH"
+_CACHE_DUMP_FILE_PATH_DEFAULT: str | None = None
+CACHE_DUMP_FILE_PATH: Callable[[], str | None] = partial(
+    _env_var_val,
+    _CACHE_DUMP_FILE_PATH_ENV_VAR,
+    _CACHE_DUMP_FILE_PATH_DEFAULT,
 )

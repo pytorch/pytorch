@@ -55,10 +55,18 @@ from torch._logging.scribe import open_source_signpost
 
 
 try:
-    from torch._dynamo.utils import clone_inputs, graph_break_reasons
+    from torch._dynamo.utils import (
+        clone_inputs,
+        copy_dynamo_tensor_attributes,
+        graph_break_reasons,
+    )
     from torch._inductor.utils import fresh_cache
 except ImportError:
-    from _dynamo.utils import clone_inputs, graph_break_reasons
+    from _dynamo.utils import (
+        clone_inputs,
+        copy_dynamo_tensor_attributes,
+        graph_break_reasons,
+    )
     from _inductor.utils import fresh_cache
 
 import torch._functorch.config
@@ -789,7 +797,7 @@ class Stats:
         return [cls.totals["aot_autograd"]["total"], cls.totals["aot_autograd"]["ok"]]
 
 
-def coverage_experiment(args, model_iter_fn, model, example_inputs):
+def coverage_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
     """
     Test operator/model coverage of TorchDynamo and record statistics
     taken from a profiler.  This target is mainly intended to check
@@ -1665,12 +1673,15 @@ def cast_to(dtype, model, inputs):
     else:
         model = model.to(dtype)
 
-    inputs = tree_map(
-        lambda x: x.to(dtype)
-        if isinstance(x, torch.Tensor) and x.is_floating_point()
-        else x,
-        inputs,
-    )
+    def cast_and_preserve_markings(x):
+        if not isinstance(x, torch.Tensor) or not x.is_floating_point():
+            return x
+        y = x.to(dtype)
+        # Preserve dynamic/unbacked markings
+        copy_dynamo_tensor_attributes(x, y)
+        return y
+
+    inputs = tree_map(cast_and_preserve_markings, inputs)
     return model, inputs
 
 
@@ -1945,6 +1956,15 @@ class BenchmarkRunner:
     def use_larger_multiplier_for_smaller_tensor(self, name):
         return False
 
+    def use_iou_for_bool_accuracy(self, name):
+        return False
+
+    def get_iou_threshold(self, name):
+        return 0.99
+
+    def get_accuracy_check_runs(self, name):
+        return 1
+
     def iter_models(self, args):
         for model_name in self.iter_model_names(args):
             for device in args.devices:
@@ -2216,6 +2236,7 @@ class BenchmarkRunner:
                 log.warning(
                     "fp64 golden ref were not generated for %s. Setting accuracy check to cosine",
                     name,
+                    exc_info=True,
                 )
                 self.args.cosine = True
                 fp64_outputs = None
@@ -2305,120 +2326,161 @@ class BenchmarkRunner:
 
             correct_rerun_result = None
 
-            # Run with Dynamo
-            reset_rng_state()
-            torch._dynamo.reset()
-            torch._dynamo.utils.counters.clear()
-            model_copy = None
-            try:
-                model_copy = self.deepcopy_and_maybe_parallelize(model)
-                self.init_optimizer(name, current_device, model_copy.parameters())
-                if (
-                    self.args.export
-                    or self.args.export_aot_inductor
-                    or self.args.export_nativert
-                    or self.args.torchscript_jit_trace
-                    or self.args.aot_precompile
-                ):
-                    # apply export on module directly
-                    # no need for n iterations
-                    # the logic should be the same to self.model_iter_fn (forward_pass)
-                    with self.autocast(**self.autocast_arg):
-                        optimized_model_iter_fn = optimize_ctx(
-                            model_copy, example_inputs
-                        )
-                        new_result = optimized_model_iter_fn(model_copy, example_inputs)
-                else:
-                    optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
-                    new_result = self.run_n_iterations(
-                        model_copy, example_inputs, optimized_model_iter_fn
-                    )
-            except Exception as e:
-                log.exception("")
-                print(
-                    "TorchDynamo optimized model failed to run because of following error"
-                )
-                accuracy_status = (
-                    "OOM"
-                    if isinstance(e, torch.cuda.OutOfMemoryError)
-                    else "fail_to_run"
-                )
-                return record_status(accuracy_status, dynamo_start_stats=start_stats)
-            finally:
-                del model_copy
+            # Support multiple accuracy check runs for flaky models
+            accuracy_check_runs = self.get_accuracy_check_runs(name)
+            pass_count = 0
 
-            if name in self.skip_accuracy_check_as_eager_non_deterministic:
-                return record_status("pass_due_to_skip", dynamo_start_stats=start_stats)
+            for run_idx in range(accuracy_check_runs):
+                # Run with Dynamo
+                reset_rng_state()
+                torch._dynamo.reset()
+                torch._dynamo.utils.counters.clear()
+                model_copy = None
+                run_passed = True
 
-            force_max_multiplier = False
-            if (
-                self.args.freezing
-                and self.args.bfloat16
-                and torch._dynamo.utils.counters["inductor"]["binary_folding_conv"] > 0
-            ):
-                force_max_multiplier = True
-
-            try:
-                if self.args.training and self.args.amp:
-                    if process_fn := self.get_output_amp_train_process_func.get(
-                        name, None
+                try:
+                    model_copy = self.deepcopy_and_maybe_parallelize(model)
+                    self.init_optimizer(name, current_device, model_copy.parameters())
+                    if (
+                        self.args.export
+                        or self.args.export_aot_inductor
+                        or self.args.export_nativert
+                        or self.args.torchscript_jit_trace
+                        or self.args.aot_precompile
                     ):
-                        correct_result = process_fn(correct_result)
-                        new_result = process_fn(new_result)
-                        fp64_outputs = process_fn(fp64_outputs)
+                        # apply export on module directly
+                        # no need for n iterations
+                        # the logic should be the same to self.model_iter_fn (forward_pass)
+                        with self.autocast(**self.autocast_arg):
+                            optimized_model_iter_fn = optimize_ctx(
+                                model_copy, example_inputs
+                            )
+                            new_result = optimized_model_iter_fn(
+                                model_copy, example_inputs
+                            )
+                    else:
+                        optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
+                        new_result = self.run_n_iterations(
+                            model_copy, example_inputs, optimized_model_iter_fn
+                        )
+                except Exception as e:
+                    log.exception("")
+                    print(
+                        "TorchDynamo optimized model failed to run because of following error"
+                    )
+                    accuracy_status = (
+                        "OOM"
+                        if isinstance(e, torch.cuda.OutOfMemoryError)
+                        else "fail_to_run"
+                    )
+                    return record_status(
+                        accuracy_status, dynamo_start_stats=start_stats
+                    )
+                finally:
+                    del model_copy
 
+                if name in self.skip_accuracy_check_as_eager_non_deterministic:
+                    return record_status(
+                        "pass_due_to_skip", dynamo_start_stats=start_stats
+                    )
+
+                force_max_multiplier = False
                 if (
-                    self.args.save_model_outputs_to
-                    and self.args.compare_model_outputs_with
-                    and self.args.save_model_outputs_to
-                    == self.args.compare_model_outputs_with
+                    self.args.freezing
+                    and self.args.bfloat16
+                    and torch._dynamo.utils.counters["inductor"]["binary_folding_conv"]
+                    > 0
                 ):
-                    log.warning(
-                        "args.save_model_outputs_to and args.compare_model_outputs_with points to the same path."
-                        "Result will be undefined."
-                    )
+                    force_max_multiplier = True
 
-                if self.args.save_model_outputs_to:
-                    print(f"Save model outputs to: {self.args.save_model_outputs_to}")
-                    torch.save(new_result, self.args.save_model_outputs_to)
+                try:
+                    if self.args.training and self.args.amp:
+                        if process_fn := self.get_output_amp_train_process_func.get(
+                            name, None
+                        ):
+                            correct_result = process_fn(correct_result)
+                            new_result = process_fn(new_result)
+                            fp64_outputs = process_fn(fp64_outputs)
 
-                if self.args.compare_model_outputs_with:
-                    print(
-                        f"Load model outputs from {self.args.compare_model_outputs_with} to compare"
-                    )
-                    saved_result = torch.load(
-                        self.args.compare_model_outputs_with, weights_only=False
-                    )
-                    is_bitwise_same = bitwise_same(saved_result, new_result)
-                    if not is_bitwise_same:
+                    if (
+                        self.args.save_model_outputs_to
+                        and self.args.compare_model_outputs_with
+                        and self.args.save_model_outputs_to
+                        == self.args.compare_model_outputs_with
+                    ):
+                        log.warning(
+                            "args.save_model_outputs_to and args.compare_model_outputs_with points to the same path."
+                            "Result will be undefined."
+                        )
+
+                    if self.args.save_model_outputs_to:
                         print(
-                            "The result is not bitwise equivalent to the previously saved result"
+                            f"Save model outputs to: {self.args.save_model_outputs_to}"
                         )
-                        return record_status(
-                            "not_bitwise_equivalent", dynamo_start_stats=start_stats
-                        )
+                        torch.save(new_result, self.args.save_model_outputs_to)
 
-                    print(
-                        "The result is bitwise equivalent to the previously saved result"
+                    if self.args.compare_model_outputs_with:
+                        print(
+                            f"Load model outputs from {self.args.compare_model_outputs_with} to compare"
+                        )
+                        saved_result = torch.load(
+                            self.args.compare_model_outputs_with, weights_only=False
+                        )
+                        is_bitwise_same = bitwise_same(saved_result, new_result)
+                        if not is_bitwise_same:
+                            print(
+                                "The result is not bitwise equivalent to the previously saved result"
+                            )
+                            return record_status(
+                                "not_bitwise_equivalent",
+                                dynamo_start_stats=start_stats,
+                            )
+
+                        print(
+                            "The result is bitwise equivalent to the previously saved result"
+                        )
+                        del saved_result
+
+                    if not same(
+                        correct_result,
+                        new_result,
+                        fp64_outputs,
+                        equal_nan=self.equal_nan,
+                        use_larger_multiplier_for_smaller_tensor=self.use_larger_multiplier_for_smaller_tensor(
+                            name
+                        ),
+                        cos_similarity=cos_similarity,
+                        tol=tolerance,
+                        force_max_multiplier=force_max_multiplier,
+                        use_iou_for_bool=self.use_iou_for_bool_accuracy(name),
+                        iou_threshold=self.get_iou_threshold(name),
+                    ):
+                        run_passed = False
+                except Exception:
+                    # Sometimes torch.allclose may throw RuntimeError
+                    run_passed = False
+
+                if run_passed:
+                    pass_count += 1
+
+                if accuracy_check_runs > 1:
+                    log.info(
+                        "Accuracy check run %d/%d: %s",
+                        run_idx + 1,
+                        accuracy_check_runs,
+                        "passed" if run_passed else "failed",
                     )
-                    del saved_result
 
-                if not same(
-                    correct_result,
-                    new_result,
-                    fp64_outputs,
-                    equal_nan=self.equal_nan,
-                    use_larger_multiplier_for_smaller_tensor=self.use_larger_multiplier_for_smaller_tensor(
-                        name
-                    ),
-                    cos_similarity=cos_similarity,
-                    tol=tolerance,
-                    force_max_multiplier=force_max_multiplier,
-                ):
-                    is_same = False
-            except Exception:
-                # Sometimes torch.allclose may throw RuntimeError
-                is_same = False
+            # Pass if majority of runs pass (more than half)
+            is_same = pass_count > accuracy_check_runs // 2
+
+            if accuracy_check_runs > 1:
+                log.info(
+                    "Accuracy check summary: %d/%d runs passed, %s",
+                    pass_count,
+                    accuracy_check_runs,
+                    "PASS" if is_same else "FAIL",
+                )
 
             if not is_same:
                 if self.args.skip_accuracy_check:
@@ -3216,6 +3278,11 @@ def parse_args(args=None):
         help="Only assume batch dimension is dynamic.  Implies --dynamic-shapes",
     )
     parser.add_argument(
+        "--unbacked-batch-only",
+        action="store_true",
+        help="Mark batch dimension as unbacked using mark_unbacked. Implies --dynamic-shapes",
+    )
+    parser.add_argument(
         "--specialize-int", action="store_true", help="Run with specialize_int=True."
     )
     parser.add_argument(
@@ -3777,7 +3844,8 @@ def setup_determinism_for_accuracy_test(args):
     }:
         # some of the models do not support use_deterministic_algorithms
         torch.use_deterministic_algorithms(True)
-    if args.devices == ["xpu"]:
+
+    if args.devices == ["rocm"]:
         torch.use_deterministic_algorithms(True, warn_only=True)
 
     torch.backends.cudnn.deterministic = True
@@ -3806,8 +3874,11 @@ def run(runner, args, original_dir=None):
     if args.dynamic_batch_only:
         args.dynamic_shapes = True
         torch._dynamo.config.assume_static_by_default = True
+    if args.unbacked_batch_only:
+        args.dynamic_shapes = True
+        torch._dynamo.config.assume_static_by_default = True
     if args.dynamic_shapes:
-        if not args.dynamic_batch_only:
+        if not args.dynamic_batch_only and not args.unbacked_batch_only:
             torch._dynamo.config.assume_static_by_default = False
     if args.compiled_autograd:
         torch._dynamo.config.compiled_autograd = True
@@ -4168,14 +4239,19 @@ def run(runner, args, original_dir=None):
             write_outputs(output_filename, [], [args.only, batch_size])
         return
 
+    should_profile_details = args.profile_details
     args.profile_details = {}
     if args.export_profiler_trace:
-        if args.profile_details:
+        if should_profile_details:
             args.profile_details = {
                 "record_shapes": True,
                 "profile_memory": True,
                 "with_stack": True,
                 "with_modules": True,
+                "activities": [
+                    torch.profiler.ProfilerActivity.CPU,
+                    torch.profiler.ProfilerActivity.CUDA,
+                ],
             }
 
         if args.profiler_trace_name is None:
@@ -4342,20 +4418,30 @@ def run(runner, args, original_dir=None):
             # NB: Assumes only the first batch-y like dimension is the batch
             marked = False
 
-            def detect_and_mark_batch(t):
+            def detect_and_mark_batch(t, use_unbacked=False):
                 nonlocal marked
                 for i, s in enumerate(t.size()):
                     if s == batch_size:
-                        torch._dynamo.maybe_mark_dynamic(t, i)
+                        if use_unbacked:
+                            # Use duck_shape_id="batch" so all batch dimensions
+                            # share the same unbacked symbol
+                            torch._dynamo.decorators.mark_unbacked(
+                                t, i, shape_id="batch", hint_override=batch_size
+                            )
+                        else:
+                            torch._dynamo.maybe_mark_dynamic(t, i)
                         marked = True
                         break
 
             if (
-                args.dynamic_batch_only
+                (args.dynamic_batch_only or args.unbacked_batch_only)
                 and batch_size > 1
                 and model_name not in CI_SKIP_DYNAMIC_BATCH_ONLY
             ):
-                tree_map_only(torch.Tensor, detect_and_mark_batch, example_inputs)
+                mark_fn = functools.partial(
+                    detect_and_mark_batch, use_unbacked=args.unbacked_batch_only
+                )
+                tree_map_only(torch.Tensor, mark_fn, example_inputs)
                 assert marked, f"nothing in example_inputs had a dim with {batch_size}"
 
             if args.log_operator_inputs:

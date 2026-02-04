@@ -334,7 +334,8 @@ Example::
         doc_sections = ["signature", "descr", "args", "example"]
         example_input = example_input.to(dtype=torch.float32)
     else:
-        assert 0  # add function name to operation names dictionaries
+        # add function name to operation names dictionaries
+        raise AssertionError(f"unknown function {func.__name__}")
     example_output = func(example_input, *example_args, mask=example_mask)
 
     template_data = {
@@ -374,7 +375,8 @@ Example::
     elif func.__name__ in normalization_names:
         template_data.update(definition=definitions[func.__name__])
     else:
-        assert 0  # add function name to operation names dictionaries
+        # add function name to operation names dictionaries
+        raise AssertionError(f"unknown function {func.__name__}")
     template_data.update(
         args_declarations=("\n    ".join(arg_declarations)).format_map(template_data)
     )
@@ -451,7 +453,8 @@ def _reduction_identity(op_name: str, input: Tensor, *args):
     elif op_name == "norm":
         ord = args[0] if args else 2
         if ord == float("-inf"):
-            assert torch.is_floating_point(input), input.dtype
+            if not torch.is_floating_point(input):
+                raise AssertionError(f"input must be floating point, got {input.dtype}")
             return torch.tensor(torch.inf, dtype=dtype, device=device)
         return torch.tensor(0, dtype=dtype, device=device)
     elif op_name == "median":
@@ -532,10 +535,20 @@ def _sparse_coo_where(mask: Tensor, input: Tensor, fill_value: Tensor) -> Tensor
     - all unspecified elements correspond to masked-out elements.
     """
 
-    assert input.layout == torch.sparse_coo
-    assert mask.layout == input.layout
-    assert mask.shape == input.shape
-    assert mask.dense_dim() == input.dense_dim()  # TODO: eliminate this restriction
+    if input.layout != torch.sparse_coo:
+        raise AssertionError(f"input.layout must be sparse_coo, got {input.layout}")
+    if mask.layout != input.layout:
+        raise AssertionError(f"mask.layout must match input.layout, got {mask.layout}")
+    if mask.shape != input.shape:
+        raise AssertionError(
+            f"mask.shape must match input.shape: {mask.shape} vs {input.shape}"
+        )
+    if mask.dense_dim() != input.dense_dim():
+        # TODO: eliminate this restriction
+        raise AssertionError(
+            f"mask.dense_dim() must match input.dense_dim(): "
+            f"{mask.dense_dim()} vs {input.dense_dim()}"
+        )
 
     input = input.coalesce()
 
@@ -748,9 +761,10 @@ def _sparse_csr_segment_reduction_helper(
 ) -> Tensor:
     # Currently, while sparse CSR is always 2D with no dense dimensions keepdim must be True
     # FIXME: when dense dimensions are implemented for CSR tensors
-    assert keepdim, (
-        "reduction operations on CSR tensors with keepdim=False is unsupported"
-    )
+    if not keepdim:
+        raise AssertionError(
+            "reduction operations on CSR tensors with keepdim=False is unsupported"
+        )
     reduce = op.__name__
     valid_reductions = ["sum", "prod", "mean", "amax", "amin"]
     if reduce not in valid_reductions:
@@ -784,9 +798,10 @@ def _sparse_csr_segment_reduction_helper(
             )
             new_shape = [1, mask_input.size(1)]
         else:
-            assert dims[0] == 1, (
-                "Sparse CSR tensors are 2D and only support reduction along dim 0 or 1."
-            )
+            if dims[0] != 1:
+                raise AssertionError(
+                    "Sparse CSR tensors are 2D and only support reduction along dim 0 or 1."
+                )
             # all intervals new_crow_indices[i] - new_crow_indices[i-1] are 1
             # except for where crow_indices[i] == crow_indices[i-1] where the interval remains as 0
             new_crow_indices = torch.cat(
@@ -801,7 +816,8 @@ def _sparse_csr_segment_reduction_helper(
             new_values = torch._segment_reduce(values, reduce, offsets=crow_indices)  # type: ignore[attr-defined]
             new_shape = [mask_input.size(0), 1]
     else:
-        assert len(dims) == 2
+        if len(dims) != 2:
+            raise AssertionError(f"expected len(dims) == 2, got {len(dims)}")
         nnz = min(1, values.numel())
         if nnz == 1:
             op_kwargs = {"keepdim": True, "dtype": output_dtype}
@@ -924,7 +940,8 @@ def _input_mask(input: Tensor | MaskedTensor, *args, **kwargs) -> Tensor:
         elif mask.layout == torch.sparse_coo:
             mask = torch._sparse_broadcast_to(mask, input.shape)
         else:
-            assert mask.layout == torch.sparse_csr
+            if mask.layout != torch.sparse_csr:
+                raise AssertionError(f"expected sparse_csr layout, got {mask.layout}")
             # Broadcasting of CSR tensors is not implemented. Working
             # around by using COO layout.
             mask = torch._sparse_broadcast_to(
@@ -941,7 +958,8 @@ def _input_mask(input: Tensor | MaskedTensor, *args, **kwargs) -> Tensor:
             else:
                 mask = mask.to_sparse()
         else:
-            assert input.layout == torch.sparse_csr
+            if input.layout != torch.sparse_csr:
+                raise AssertionError(f"expected sparse_csr layout, got {input.layout}")
             mask = mask.to_sparse_csr()
 
     # sparse mask must be coalesced
@@ -1604,9 +1622,8 @@ def _std_var(
     mask: Tensor | None,
     take_sqrt: bool | None,
 ) -> Tensor:
-    assert unbiased is None or correction_opt is None, (
-        "Only one of unbiased and correction may be given"
-    )
+    if unbiased is not None and correction_opt is not None:
+        raise AssertionError("Only one of unbiased and correction may be given")
     correction = 1.0
     if unbiased is not None:
         correction = 1.0 if unbiased else 0.0
@@ -1645,6 +1662,7 @@ def _std_var(
             # pyrefly: ignore [no-matching-overload]
             total = sum(x * x.conj(), dim, keepdim=keepdim, dtype=compute_dtype)
         else:
+            # pyrefly: ignore [no-matching-overload]
             total = sum(
                 x * x.conj(),
                 dim,

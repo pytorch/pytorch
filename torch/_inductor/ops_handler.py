@@ -398,6 +398,9 @@ class OpsHandler(Generic[T]):
     def log2(self, x0: T) -> T:
         raise NotImplementedError
 
+    def ldexp(self, x0: T, n: T) -> T:
+        raise NotImplementedError
+
     def nextafter(self, x0: T, x1: T) -> T:
         raise NotImplementedError
 
@@ -561,6 +564,10 @@ class OpsHandler(Generic[T]):
         raise NotImplementedError
 
     def fma(self, x: T, y: T, z: T) -> T:
+        raise NotImplementedError
+
+    def mul_rn(self, x: T, y: T) -> T:
+        """Multiplication with round-to-nearest, preventing fusion with subsequent ops."""
         raise NotImplementedError
 
     def igamma(self, x: T, y: T) -> T:

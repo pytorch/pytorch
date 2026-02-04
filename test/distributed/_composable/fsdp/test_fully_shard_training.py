@@ -52,6 +52,7 @@ from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
     MI200_ARCH,
     run_tests,
+    TEST_CUDA_GRAPH,
     TEST_HPU,
     TEST_XPU,
     wrapSwapTensorsTest,
@@ -799,6 +800,66 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
                     self, ref_model, model, prefixes_to_ignore=prefixes_to_ignore
                 )
 
+    @skip_if_lt_x_gpu(2)
+    def test_double_forward_with_nested_fsdp_and_checkpoint(self):
+        """
+        Tests that calling model.forward() twice before backward() works correctly
+        when using nested FSDP with activation checkpointing.
+        This pattern is common in DPO training.
+        """
+        self.run_subtests(
+            {
+                "reshard_after_forward": [True, False],
+                "checkpoint_impl": ["composable", "utils"],
+            },
+            self._test_double_forward_with_nested_fsdp_and_checkpoint,
+        )
+
+    def _test_double_forward_with_nested_fsdp_and_checkpoint(
+        self,
+        reshard_after_forward: bool,
+        checkpoint_impl: str,
+    ):
+        torch.manual_seed(42)
+        vocab_size = 1024
+        with torch.device(device_type):
+            model_args = ModelArgs(
+                n_layers=3,
+                n_heads=4,
+                vocab_size=vocab_size,
+                max_seq_len=64,
+                dropout_p=0,
+                checkpoint_activations=(checkpoint_impl == "utils"),
+            )
+            model = Transformer(model_args)
+
+        if checkpoint_impl == "composable":
+            for module in model.modules():
+                if isinstance(module, TransformerBlock):
+                    checkpoint(module)
+
+        for layer in model.layers:
+            fully_shard(layer.attention, reshard_after_forward=reshard_after_forward)
+            fully_shard(layer.feed_forward, reshard_after_forward=reshard_after_forward)
+            fully_shard(layer, reshard_after_forward=reshard_after_forward)
+        fully_shard(model, reshard_after_forward=reshard_after_forward)
+
+        torch.manual_seed(42 + self.rank)
+        inp1 = torch.randint(0, vocab_size, (2, 32), device=device_type.type)
+        inp2 = torch.randint(0, vocab_size, (2, 32), device=device_type.type)
+
+        # DPO pattern
+        out1 = model(inp1)
+        out2 = model(inp2)
+
+        # DPO-style loss that combines both outputs
+        loss = (out1.sum() - out2.sum()).pow(2)
+        loss.backward()
+
+        for param in model.parameters():
+            if param.requires_grad:
+                self.assertIsNotNone(param.grad)
+
 
 class TestFullyShardShardPlacementFnMultiProcess(FSDPTest):
     @property
@@ -853,7 +914,6 @@ class TestFullyShardShardPlacementFnMultiThread(FSDPTestMultiThread):
     def world_size(self) -> int:
         return 4
 
-    @skip_if_lt_x_gpu(1)
     def test_shard_placement_fn_contiguous_params_grads(self):
         dim = 4
         model = MLP(dim=dim)
@@ -1665,6 +1725,68 @@ class TestFullyShardWorldSize1(FSDPTest):
             optim.step()
 
             self.assertEqual(losses[0], losses[1])
+
+
+class TestFullyShardCudaGraph(FSDPTest):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    def test_two_layer_fully_shard_cudagraph(self):
+        if device_type.type == "cuda":
+            torch.cuda.set_device(self.rank)
+        device = torch.device(device_type.type, self.rank)
+        torch.manual_seed(42)
+        model = nn.Sequential(
+            nn.Linear(8, 8, bias=False),
+            nn.Linear(8, 8, bias=False),
+        ).to(device)
+        for param in model.parameters():
+            dist.broadcast(param, src=0)
+        fully_shard(model[0])
+        fully_shard(model[1])
+        fully_shard(model)
+
+        stream = torch.cuda.Stream()
+
+        # warmup
+        with torch.cuda.stream(stream):
+            input_tensor = torch.randn(4, 8, device=device)
+            output = model(input_tensor)
+            output.sum().backward()
+            model.zero_grad(set_to_none=True)
+            del output
+
+        # stream capture to graph
+        static_input = input_tensor.clone()
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph, stream=stream):
+            static_output = model(static_input)
+            static_output.sum().backward()
+            static_output_grads = [
+                param.grad.detach().clone() for param in model.parameters()
+            ]
+
+        # equivalence check
+        with torch.cuda.stream(stream):
+            for _ in range(2):
+                replay_input = torch.randn(4, 8, device=device)
+                ref_output = model(replay_input)
+                ref_output.sum().backward()
+                ref_grads = [
+                    param.grad.detach().clone() for param in model.parameters()
+                ]
+
+                static_input.copy_(replay_input)
+                graph.replay()
+                self.assertTrue(torch.equal(static_output, ref_output))
+                for graph_grad, ref_grad in zip(static_output_grads, ref_grads):
+                    self.assertTrue(torch.equal(graph_grad, ref_grad))
+                model.zero_grad(set_to_none=True)
 
 
 if __name__ == "__main__":

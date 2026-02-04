@@ -381,7 +381,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
       try {
         auto script_dict = py::cast<ScriptDict>(obj);
         return script_dict.dict_;
-      } catch (py::cast_error& e) {
+      } catch (py::cast_error&) {
       }
 
       // If not (i.e. it is a regular Python dictionary), make a new
