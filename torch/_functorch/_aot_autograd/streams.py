@@ -26,7 +26,8 @@ Graph: TypeAlias = torch.fx.Graph
 
 
 def get_roofline_estimate(node: Node) -> float:
-    assert node.op == "call_function", "non-func node in roofline estimate"
+    if node.op != "call_function":
+        raise AssertionError(f"non-func node in roofline estimate: {node.op}")
 
     def map_value(x: Any) -> Any:
         return x.meta.get("value", x) if isinstance(x, Node) else x
@@ -148,17 +149,20 @@ def handle_synced_deallocation(
     node: Node,
     last_usage: Node,
 ) -> None:
-    assert is_bwd_node(node), (
-        "synced allocations should only be handled on backward nodes"
-    )
-    assert is_bwd_node(last_usage), (
-        "synced allocations should only be handled on backward nodes"
-    )
+    if not is_bwd_node(node):
+        raise AssertionError(
+            "synced allocations should only be handled on backward nodes"
+        )
+    if not is_bwd_node(last_usage):
+        raise AssertionError(
+            "synced allocations should only be handled on backward nodes"
+        )
     allocating_stream = get_stream(node)
     side_stream = get_stream(last_usage)
-    assert allocating_stream != side_stream, (
-        "allocating and side stream should be different for synced deallocations"
-    )
+    if allocating_stream == side_stream:
+        raise AssertionError(
+            "allocating and side stream should be different for synced deallocations"
+        )
     if not torch.cuda.is_available():
         # fallback to record_stream in this case
         with graph.inserting_after(node):
@@ -287,7 +291,7 @@ def sync_deallocations(gm: torch.fx.GraphModule) -> None:
                 )
 
 
-def assign_epilogue_copy_streams(gm: torch.fx.GraphModule):
+def assign_epilogue_copy_streams(gm: torch.fx.GraphModule) -> None:
     for epi_copy in gm.graph.find_nodes(op="call_function", target=aten.copy_.default):
         arg_stream = get_stream(epi_copy.args[1])
         copy_stream = get_stream(epi_copy)
@@ -297,7 +301,7 @@ def assign_epilogue_copy_streams(gm: torch.fx.GraphModule):
 
 def populate_fw_metadata_with_stream_indices(
     gm: torch.fx.GraphModule, fw_metadata: "ViewAndMutationMeta"
-):
+) -> None:
     """
     Populates fw_metadata.mutated_inp_stream_indices with stream indices from the compiled graph.
 
@@ -318,9 +322,10 @@ def populate_fw_metadata_with_stream_indices(
         output_node = node
         break
 
-    assert output_node is not None, (
-        "No output node found in the graph when extracting stream indices"
-    )
+    if output_node is None:
+        raise AssertionError(
+            "No output node found in the graph when extracting stream indices"
+        )
 
     # The output node's args[0] is a tuple/list of all outputs
     output_args = output_node.args[0]

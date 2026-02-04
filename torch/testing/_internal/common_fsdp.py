@@ -1583,10 +1583,18 @@ class FSDPTestContinuous(FSDPTestMixin, MultiProcContinuousTest):
 
     def setUp(self):
         super().setUp()
+        # Barrier to synchronize workers before test, similar to FSDPTest._run().
+        # This ensures all workers start the test together and prevents NCCL
+        # collective mismatches when the process group is reused across tests.
+        if self.rank != self.MAIN_PROCESS_RANK:
+            dist.barrier()
         torch._dynamo.reset()
         set_rng_seed()
 
     def tearDown(self):
+        # Barrier to synchronize workers after test, similar to FSDPTest._run().
+        if self.rank != self.MAIN_PROCESS_RANK:
+            dist.barrier()
         super().tearDown()
         torch._dynamo.reset()
 
