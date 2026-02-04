@@ -735,7 +735,7 @@ void _apply_sparse_csr_linear_solve(
     TORCH_CHECK(x.stride(1) >= x.size(0), "x must be a column major tensor");
   }
   if (b.dim() == 2) {
-    TORCH_CHECK(b.size(1) == x.size(1), "linear system size mismatch.");
+    TORCH_CHECK(b.size(1) == x.size(1), "x columns count must be the same as b");
   }
   TORCH_CHECK(A.dtype() == b.dtype() && A.dtype() == x.dtype(), "A, x, and b must have the same dtype");
   TORCH_CHECK(left == true, "only left == true is supported by the Sparse CSR backend");
