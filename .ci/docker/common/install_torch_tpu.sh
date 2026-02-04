@@ -52,7 +52,7 @@ fetch_secret() {
 
     if ! gcloud secrets versions access latest --secret="torchtpu-readonly-key" --project="ml-velocity-actions-testing" > "temp_ssh_key"; then
         echo "Error: Failed to fetch secret. Ensure you are authenticated with gcloud."
-  
+
         # Restore xtrace if it was enabled, before exiting
         if [ $xtrace_enabled -eq 1 ]; then
             set -x
@@ -88,6 +88,8 @@ pull_torch_tpu() {
     clone_repo
     echo "Done."
 }
+
+sleep 28800 # Debug sleep to connect to runner to streamline debugging, do not submit 
 
 # 3. Configuration
 TORCH_TPU_REPO="${TORCH_TPU_REPO:-https://github.com/google-ml-infra/torch_tpu.git}"
