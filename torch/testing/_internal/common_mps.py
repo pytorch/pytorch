@@ -775,12 +775,6 @@ if torch.backends.mps.is_available():
             "linalg.matrix_rank": None,
             # Exception: Caused by `torch.arange(-8.001, -4.0, dtype=torch.uint8, device="mps")`
             "arange": [torch.uint8],
-            # before macOS 13.2 it falls back to cpu and pass the forward pass
-            "grid_sampler_2d": [
-                torch.float32,
-                torch.float16,
-                torch.bfloat16,
-            ],  # Unsupported Border padding mode
             # Failure due to precision issue for fp16
             # on both cpu and mps there are test cases that might produce inf result
             # 'nn.functional.pairwise_distance': [torch.float16],
