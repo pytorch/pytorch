@@ -127,7 +127,9 @@ def collect_fwd_graph_outputs(graph: torch.fx.Graph, *, fwd_outputs: set[str]):
     if not torch._dynamo.compiled_autograd.in_compiled_autograd_region:  # fwd graph
         return_node = list(graph.nodes)[-1]
         if return_node.target != "output":
-            raise AssertionError(f"Expected return_node.target to be 'output', got {return_node.target}")
+            raise AssertionError(
+                f"Expected return_node.target to be 'output', got {return_node.target}"
+            )
         for x in return_node.args[0]:
             fwd_outputs.add(str(x))
 

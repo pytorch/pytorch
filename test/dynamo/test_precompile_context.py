@@ -61,7 +61,9 @@ class PrecompileContextTests(InductorTestCase):
         for key in PrecompileContext._backend_artifacts_by_key:
             result = PrecompileContext.serialize_artifact_by_key(key)
             if not isinstance(result, BackendCacheArtifact):
-                raise AssertionError(f"Expected BackendCacheArtifact, got {type(result)}")
+                raise AssertionError(
+                    f"Expected BackendCacheArtifact, got {type(result)}"
+                )
             self.assertEqual(result.key, key)
 
         # This should still work
@@ -97,7 +99,9 @@ class PrecompileContextTests(InductorTestCase):
 
         result = PrecompileContext.serialize_artifact_by_key(key)
         if not isinstance(result, BundledAOTAutogradCacheArtifact):
-            raise AssertionError(f"Expected BundledAOTAutogradCacheArtifact, got {type(result)}")
+            raise AssertionError(
+                f"Expected BundledAOTAutogradCacheArtifact, got {type(result)}"
+            )
         self.assertEqual(result.key, key)
 
         result, _ = PrecompileContext.create_cache_entries()
@@ -105,7 +109,9 @@ class PrecompileContextTests(InductorTestCase):
             raise AssertionError(f"Expected len(result) == 1, got {len(result)}")
         aot_autograd_artifacts = next(iter(result.values())).backends
         if len(aot_autograd_artifacts) != 1:
-            raise AssertionError(f"Expected len(aot_autograd_artifacts) == 1, got {len(aot_autograd_artifacts)}")
+            raise AssertionError(
+                f"Expected len(aot_autograd_artifacts) == 1, got {len(aot_autograd_artifacts)}"
+            )
         entry = next(iter(aot_autograd_artifacts.values())).content
         self.assertEqual(entry._my_private_field, 42)
 

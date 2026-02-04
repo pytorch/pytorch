@@ -251,7 +251,9 @@ class Boxes:
             # the inputs (and consequently confuses jit)
             tensor = tensor.reshape((-1, 4)).to(dtype=torch.float32, device=device)
         if not (tensor.dim() == 2 and tensor.size(-1) == 4):
-            raise AssertionError(f"Expected 2D tensor with last dim 4, got {tensor.size()}")
+            raise AssertionError(
+                f"Expected 2D tensor with last dim 4, got {tensor.size()}"
+            )
         self.tensor = tensor
 
     def __len__(self) -> int:

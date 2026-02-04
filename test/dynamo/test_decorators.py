@@ -1068,7 +1068,9 @@ class DecoratorTests(PytreeRegisteringTestCase):
         def codegen_return_with_pops(self, *args) -> list[Instruction]:
             insts = old_codegen_return(*args)
             if not insts[-1].opname.startswith("RETURN"):
-                raise AssertionError(f"Expected RETURN instruction, got {insts[-1].opname}")
+                raise AssertionError(
+                    f"Expected RETURN instruction, got {insts[-1].opname}"
+                )
             # to prevent infinite recursion
             if self.f_code.co_name != "inner":
                 insts[-1:-1] = [

@@ -4318,7 +4318,9 @@ def forward(self, tangents_1):
                 y = self.buffer.add_(3)
                 y.resize_([20])
                 if y.shape != self.buffer.shape:
-                    raise AssertionError(f"Expected y.shape {y.shape} == buffer.shape {self.buffer.shape}")
+                    raise AssertionError(
+                        f"Expected y.shape {y.shape} == buffer.shape {self.buffer.shape}"
+                    )
                 return x.sum() + self.buffer.sum()
 
         m = M().eval()
@@ -5850,7 +5852,9 @@ class TestPartitioning(AOTTestCase):
             for node in fx_g.graph.nodes:
                 if node.op != "output":
                     if "tensor_meta" not in node.meta:
-                        raise AssertionError(f"Expected 'tensor_meta' in node.meta for {node}")
+                        raise AssertionError(
+                            f"Expected 'tensor_meta' in node.meta for {node}"
+                        )
             return fx_g
 
         inp0 = torch.randn(16, 128, 768, requires_grad=True)
@@ -7278,9 +7282,13 @@ class TestAOTModuleSimplified(AOTTestCase):
         if not torch.allclose(ref[0], res[0]):
             raise AssertionError("ref[0] and res[0] not allclose")
         if not torch.allclose(inputs[0].grad, cloned_inputs[0].grad):
-            raise AssertionError("inputs[0].grad and cloned_inputs[0].grad not allclose")
+            raise AssertionError(
+                "inputs[0].grad and cloned_inputs[0].grad not allclose"
+            )
         if not torch.allclose(inputs[1].grad, cloned_inputs[1].grad):
-            raise AssertionError("inputs[1].grad and cloned_inputs[1].grad not allclose")
+            raise AssertionError(
+                "inputs[1].grad and cloned_inputs[1].grad not allclose"
+            )
 
     def test_aot_module_simplified_dynamic(self):
         class MockModule(torch.nn.Module):
@@ -7320,9 +7328,13 @@ class TestAOTModuleSimplified(AOTTestCase):
         if not torch.allclose(ref[0], res[0]):
             raise AssertionError("ref[0] and res[0] not allclose")
         if not torch.allclose(inputs[0].grad, cloned_inputs[0].grad):
-            raise AssertionError("inputs[0].grad and cloned_inputs[0].grad not allclose")
+            raise AssertionError(
+                "inputs[0].grad and cloned_inputs[0].grad not allclose"
+            )
         if not torch.allclose(inputs[1].grad, cloned_inputs[1].grad):
-            raise AssertionError("inputs[1].grad and cloned_inputs[1].grad not allclose")
+            raise AssertionError(
+                "inputs[1].grad and cloned_inputs[1].grad not allclose"
+            )
 
     # https://github.com/pytorch/pytorch/issues/105327
     def test_lift_fresh_copy_in_graph(self):
@@ -7389,7 +7401,9 @@ class TestAOTModuleSimplified(AOTTestCase):
                 continue
             self.assertTrue(node.stack_trace is not None)
             if "test_aotdispatch.py" not in node.stack_trace:
-                raise AssertionError(f"Expected 'test_aotdispatch.py' in stack trace, got: {node.stack_trace}")
+                raise AssertionError(
+                    f"Expected 'test_aotdispatch.py' in stack trace, got: {node.stack_trace}"
+                )
 
         def assert_compiler(gm: torch.fx.GraphModule, _):
             for node in gm.graph.nodes:
@@ -7397,7 +7411,9 @@ class TestAOTModuleSimplified(AOTTestCase):
                     continue
                 self.assertTrue(node.stack_trace is not None)
                 if "test_aotdispatch.py" not in node.stack_trace:
-                    raise AssertionError(f"Expected 'test_aotdispatch.py' in stack trace, got: {node.stack_trace}")
+                    raise AssertionError(
+                        f"Expected 'test_aotdispatch.py' in stack trace, got: {node.stack_trace}"
+                    )
             return gm.forward  # return a python callable
 
         x = torch.randn(128, 20, requires_grad=True)
@@ -7430,7 +7446,7 @@ class TestAOTModuleSimplified(AOTTestCase):
                 continue
             self.assertTrue(node.stack_trace is not None)
             if "test_aotdispatch.py" not in node.stack_trace:
-                raise AssertionError(f"Expected 'test_aotdispatch.py' in stack trace")
+                raise AssertionError("Expected 'test_aotdispatch.py' in stack trace")
 
         def assert_compiler(gm: torch.fx.GraphModule, _):
             if torch.ops.aten.copy_.default not in [x.target for x in gm.graph.nodes]:

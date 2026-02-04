@@ -5501,7 +5501,9 @@ def forward(self, L_it_ : torch.Tensor, L_pytree_input_0_0_ : torch.Tensor, L_py
             fn = torch.func.functionalize(fn)
         else:
             if func_type != "no":
-                raise AssertionError(f"Expected func_type to be 'no', got {func_type!r}")
+                raise AssertionError(
+                    f"Expected func_type to be 'no', got {func_type!r}"
+                )
         return fn, mode
 
     @parametrize("func_type", ["no", "cpp", "python", "functorch"])
