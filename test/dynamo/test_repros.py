@@ -7882,7 +7882,7 @@ SavedForBackwardsAOTOutput(idx=5)""",
 
                 raise NotImplementedError(f"{func=}")
 
-        # Compile on cpu
+        # Compile on CPU
         linear = torch.nn.Linear(2, 2)
         linear.weight = torch.nn.Parameter(Subclass(linear.weight.detach()))
         linear.compile()
@@ -7892,15 +7892,12 @@ SavedForBackwardsAOTOutput(idx=5)""",
         t1 = linear.weight
         self.assertEqual(len(weakref.getweakrefs(t1)), 0)
 
-        # Move to cpu. Should work with no weakrefs
+        # Already on CPU, so should just clear weakrefs
         linear.cpu()
 
-        # Move back to cuda and check that there is no recompile
-        linear.to("cpu")
-        prev_frame_count = torch._dynamo.utils.counters.get("frames", {}).get("ok", 0)
-        linear(torch.randn(1, 2, device="cpu"))
-        new_frame_count = torch._dynamo.utils.counters.get("frames", {}).get("ok", 0)
-        assert new_frame_count == prev_frame_count, "linear() call caused a recompile"
+        # Check that there is no recompile
+        with torch._dynamo.config.patch(error_on_recompile=True):
+            linear(torch.randn(1, 2, device="cpu"))
 
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
