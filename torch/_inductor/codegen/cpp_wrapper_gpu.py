@@ -23,13 +23,7 @@ from ..ir import (
     TMADescriptorExperimental,
     TMADescriptorStable,
 )
-from ..utils import (
-    cache_on_self,
-    get_gpu_type,
-    GPU_ALIGN_BYTES,
-    IndentedBuffer,
-    XPU_KERNEL_FORMAT,
-)
+from ..utils import cache_on_self, get_gpu_type, GPU_ALIGN_BYTES, IndentedBuffer
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import get_device_op_overrides, TritonScratchWorkspace
@@ -186,25 +180,20 @@ class DeferredTritonCallWrapper:
                     f"__{params['inductor_meta']['kernel_name']}_end"
                 )
 
-            if V.graph.aot_mode and config.aot_inductor.embed_kernel_binary:
-                load_kernel_args = [
+            load_kernel_args = (
+                [
                     *embed_kernel_args,
                     cpp_string_literal(params["mangled_name"]),
                     str(params["shared_mem"]),
                 ]
-                if torch.xpu.is_available():
-                    is_spv = "true" if XPU_KERNEL_FORMAT == "spv" else "false"
-                    if config.aot_inductor.emit_multi_arch_kernel:
-                        is_spv = "true"
-                    load_kernel_args.append(is_spv)
-            else:
-                load_kernel_args = [
+                if V.graph.aot_mode and config.aot_inductor.embed_kernel_binary
+                else [
                     cpp_string_literal(params[get_cpp_wrapper_cubin_path_name()]),
                     cpp_string_literal(params["mangled_name"]),
                     str(params["shared_mem"]),
                     "cubin_dir_",
                 ]
-
+            )
             prefix.writeline(
                 f"{kernel_var_name} = loadKernel({', '.join(load_kernel_args)}); "
             )
