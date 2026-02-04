@@ -585,13 +585,7 @@ class WeakKeyDictionaryScriptObjectTestCase(TestCase):
         super().setUp()
         if IS_MACOS:
             raise unittest.SkipTest("non-portable load_library call used in test")
-
-    def __init__(self, *args, **kw):
-        unittest.TestCase.__init__(self, *args, **kw)
-        try:
-            load_torchbind_test_lib()
-        except unittest.SkipTest:
-            return  # Skip in setup
+        load_torchbind_test_lib()
 
         self.reference = self._reference().copy()
 
