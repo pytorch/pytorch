@@ -124,3 +124,26 @@ C10_CUDA_API bool hasPrimaryContext(DeviceIndex device_index);
 C10_CUDA_API std::optional<DeviceIndex> getDeviceIndexWithPrimaryContext();
 
 } // namespace c10::cuda
+
+#ifdef USE_ROCM
+// for backward-compat between hipify v1 and v2 for external projects
+namespace c10::hip {
+using c10::cuda::current_device;
+using c10::cuda::device_count;
+using c10::cuda::device_count_ensure_non_zero;
+using c10::cuda::device_synchronize;
+using c10::cuda::ExchangeDevice;
+using c10::cuda::GetDevice;
+using c10::cuda::GetDeviceCount;
+using c10::cuda::getDeviceIndexWithPrimaryContext;
+using c10::cuda::hasPrimaryContext;
+using c10::cuda::MaybeExchangeDevice;
+using c10::cuda::MaybeSetDevice;
+using c10::cuda::memcpy_and_sync;
+using c10::cuda::set_device;
+using c10::cuda::SetDevice;
+using c10::cuda::SetTargetDevice;
+using c10::cuda::stream_synchronize;
+using c10::cuda::warn_or_error_on_sync;
+} // namespace c10::hip
+#endif
