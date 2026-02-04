@@ -18,12 +18,7 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
 )
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import (
-    _maybe_wrap_fsdp,
-    FSDPTest,
-    FSDPTestContinuous,
-    get_devtype,
-)
+from torch.testing._internal.common_fsdp import _maybe_wrap_fsdp, FSDPTest, get_devtype
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -126,8 +121,6 @@ class TestFSDPCheckpoint(FSDPTest):
             for ref_g, g in zip(ref_grads, grads):
                 self.assertEqual(ref_g, g)
 
-    # TODO: migrate this to use FSDPTestContinuous, currently relies on testing
-    # global state which will cause the test to fail when we dont tear down the process
     @skip_if_lt_x_gpu(2)
     @parametrize(
         "cpu_offload",
@@ -309,7 +302,7 @@ class TestModel(nn.Module):
         return self.l2(self.relu(self.checkpoint2(self.checkpoint1(self.l1(x)))))
 
 
-class TestFSDPCheckpointSubmodule(FSDPTestContinuous):
+class TestFSDPCheckpointSubmodule(FSDPTest):
     # TODO: grad value checks occasionally fails when use_reentrant = True
     @skip_if_lt_x_gpu(2)
     @parametrize("use_reentrant", [False])
