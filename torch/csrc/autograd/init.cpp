@@ -593,9 +593,6 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
             return s.unpack();
           })
       .def(
-          "reset_data",
-          [](torch::autograd::SavedVariable& s) { s.reset_data(); })
-      .def(
           "register_hooks",
           [](torch::autograd::SavedVariable& s,
              py::function& pack_hook,
