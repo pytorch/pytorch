@@ -9,6 +9,14 @@ Review PyTorch pull requests focusing on what CI cannot check: code quality, tes
 
 ## Usage Modes
 
+### No Argument
+
+If the user invokes `/pr-review` with no arguments, **do not perform a review**. Instead, ask the user what they would like to review:
+
+> What would you like me to review?
+> - A PR number or URL (e.g., `/pr-review 12345`)
+> - The current branch (e.g., `/pr-review branch`)
+
 ### Local CLI Mode
 
 The user provides a PR number or URL:
@@ -37,6 +45,39 @@ gh pr diff <PR_NUMBER>
 # Get PR comments
 gh pr view <PR_NUMBER> --json comments,reviews
 ```
+
+### Local Branch Mode
+
+Review changes in the current branch that are not in `main`:
+
+```
+/pr-review branch
+/pr-review branch detailed
+```
+
+Use git commands to get branch changes:
+
+```bash
+# Get current branch name
+git branch --show-current
+
+# Get list of changed files compared to main
+git diff --name-only main...HEAD
+
+# Get full diff compared to main
+git diff main...HEAD
+
+# Get commit log for the branch
+git log main..HEAD --oneline
+
+# Get diff stats (files changed, insertions, deletions)
+git diff --stat main...HEAD
+```
+
+For local branch reviews:
+- The "Summary" should describe what the branch changes accomplish based on commit messages and diff
+- Use the current branch name in the review header instead of a PR number
+- All other review criteria apply the same as PR reviews
 
 ### GitHub Actions Mode
 
@@ -94,9 +135,11 @@ Structure your review as follows:
 
 ```markdown
 ## PR Review: #<number>
+<!-- Or for local branch reviews: -->
+## Branch Review: <branch-name> (vs main)
 
 ### Summary
-Brief overall assessment of the PR (1-2 sentences).
+Brief overall assessment of the changes (1-2 sentences).
 
 ### Code Quality
 [Issues and suggestions, or "No concerns" if none]
@@ -126,6 +169,8 @@ Brief overall assessment of the PR (1-2 sentences).
 
 **Only include this section if the user requests a "detailed" or "in depth" review.**
 
+**Do not repeat observations already made in other sections.** This section is for additional file-specific feedback that doesn't fit into the categorized sections above.
+
 When requested, add file-specific feedback with line references:
 
 ```markdown
@@ -137,11 +182,12 @@ When requested, add file-specific feedback with line references:
 
 ## Key Principles
 
-1. **Focus on what CI cannot check** - Don't comment on formatting, linting, or type errors
-2. **Be specific** - Reference file paths and line numbers
-3. **Be actionable** - Provide concrete suggestions, not vague concerns
-4. **Be proportionate** - Minor issues shouldn't block, but note them
-5. **Assume competence** - The author knows PyTorch; explain only non-obvious context
+1. **No repetition** - Each observation appears in exactly one section. Never repeat the same issue, concern, or suggestion across multiple sections. If an issue spans categories (e.g., a security issue that also affects performance), place it in the most relevant section only.
+2. **Focus on what CI cannot check** - Don't comment on formatting, linting, or type errors
+3. **Be specific** - Reference file paths and line numbers
+4. **Be actionable** - Provide concrete suggestions, not vague concerns
+5. **Be proportionate** - Minor issues shouldn't block, but note them
+6. **Assume competence** - The author knows PyTorch; explain only non-obvious context
 
 ## Files to Reference
 
