@@ -526,8 +526,7 @@ Tensor& _scaled_block1x128_block1x128(
     const c10::ScalarType out_dtype,
     const bool use_fast_accum,
     Tensor& out) {
-  // Restrictions:
-  // A, B are FP8, scales are fp32, shape K//128
+  // A: [M, K], B: [K, N] are FP8, scales are fp32
 
   // check types
   TORCH_CHECK_VALUE(
@@ -598,7 +597,6 @@ Tensor& _scaled_block128x128_block1x128(
     const c10::ScalarType out_dtype,
     const bool use_fast_accum,
     Tensor& out) {
-  // Restrictions:
   // A: [M, K], B: [K, N] are FP8, scales are fp32
 
   // [Note:] Unlike cuBLAS, XPU does not use L4 padding nor swizzling
