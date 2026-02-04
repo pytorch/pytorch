@@ -2046,9 +2046,6 @@ static void lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor
   auto b = batchCount(B);
   auto n = LU.size(-2);
   auto k = B.size(-1);
-  // magma implementation of LU solve cannot handle a b tensor with last dim > 1024
-  // See https://bitbucket.org/icl/magma/issues/19/dgesv_batched-dgetrs_batched-fails-for
-  bool over_batched_magma_dim_limit = k > 1024;
   // heuristics determined from tests discussed in https://github.com/pytorch/pytorch/pull/72935
 
   // Computes X = U^{-1}L^{-1}P^T B via triangular solves
@@ -2093,6 +2090,8 @@ static void lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor
     }
   };
 
+  _warn_once_magma_deprecation("linalg.lu_solve");
+
 #ifdef USE_LINALG_SOLVER
   auto lu_solve_batched_cublas_fn = [](const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType trans) {
     auto LU_ = maybe_expand_lu(B, LU);
@@ -2103,6 +2102,7 @@ static void lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor
   // Preferred Backend
   auto preferred_backend = at::globalContext().linalgPreferredBackend();
   if (preferred_backend == at::LinalgBackend::Cusolver) {
+    // TODO: Re-eval this condition
     if (b <= 2 && n >= 64) {
       lu_solve_looped_cusolver(LU, pivots, B, trans);
     } else {
@@ -2111,14 +2111,14 @@ static void lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor
     return;
   }
 
+  // TODO: Re-eval this heuristic
   // Heuristic
   //if (n == k) {
   // if (k <= 16) batched_cublas
   // else solve_triag
   //} else {
   //if (n <= 8) {
-  // if (k >= 256 && NoTranspose) batched_magma
-  // else batched_cusolver
+  // batched_cublas
   //} else if (n <= 32) {
   //  b <= 2 looped_cusolver
   //  k <= 8 batched_cusolver

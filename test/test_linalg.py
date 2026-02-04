@@ -7062,8 +7062,7 @@ class TestLinalg(TestCase):
         backends = ["default"]
 
         if torch.device(device).type == 'cuda':
-            if has_cusolver():
-                backends.append("cusolver")
+            backends.append("cusolver")
 
         def gen_matrices():
             rhs = 3
