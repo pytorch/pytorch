@@ -3410,6 +3410,9 @@ from torch._inductor.runtime.runtime_utils import pallas_partial_reduce, torch_d
             # Add tensor args (with _jax suffix)
             wrapper_call_args.extend(arg_name_map[name] for name in kernel_input_params)
             code.writeline(f"res = {jit_wrapper_name}({', '.join(wrapper_call_args)})")
+            # Synchronize JAX computation to ensure results are visible to PyTorch
+            # This is needed because JAX and PyTorch use different CUDA streams
+            code.writeline("jax.block_until_ready(res)")
             if copy_output_indices:
                 code.writeline(
                     "result_values = res if isinstance(res, tuple) else (res,)"
