@@ -851,16 +851,7 @@ class CommonTemplate:
                 f"Too many block descriptors emitted: {block_pointer_count}",
             )
 
-        # Check the code for multiple Rn_BLOCK's
-        # HIP: Backend scheduling differences may result in 1D reductions instead of 2D
-        # We check for this by seeing if the number of block descriptors is equal to the minimum number of block descriptors.
-        # If it is, then we expect a 1D reduction.
-        expected_reduction_dims = 2
-        if torch.version.hip and (
-            code.count(self.block_descriptor_constructor_str) == min_num_block_pointers
-        ):
-            expected_reduction_dims = 1
-        self._assert_reduction_ndims(code, expected_reduction_dims)
+        self._assert_reduction_ndims(code, 2)
 
     @parametrize(
         "size,expected_num_block_pointers,expected_num_triton_kernels,expect_fallback",
