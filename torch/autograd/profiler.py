@@ -635,7 +635,7 @@ class profile:
             if kineto_event.device_type() == DeviceType.CPU:
                 # find the corresponding memory allocation events
                 for mem_record in mem_records_acc.in_interval(
-                    kineto_event.start_ns() / 1000, abs_end_ns / 1000
+                    kineto_event.start_ns(), abs_end_ns
                 ):
                     cpu_memory_usage += _cpu_memory_usage(mem_record[0])
                     device_memory_usage += _device_memory_usage(mem_record[0])
