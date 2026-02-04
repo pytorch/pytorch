@@ -195,9 +195,7 @@ struct HeapBlock {
     if (buf) {
       updateAvailableSize();
       n_buffers++;
-#if defined(MPS_SUPPORT_TENSORS_UNIFIED_MEMORY) && MPS_SUPPORT_TENSORS_UNIFIED_MEMORY
       TORCH_INTERNAL_ASSERT([buf storageMode] == MTLStorageModeShared);
-#endif
     }
     return buf;
   }
