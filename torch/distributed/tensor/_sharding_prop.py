@@ -525,6 +525,7 @@ class ShardingPropagator:
 
         single_dim_strategy = self.op_single_dim_strategy_funcs.get(op_schema.op)
         op_strategy_func = self.op_strategy_funcs.get(op_schema.op)
+        decomp_exception = None
         if single_dim_strategy is not None or op_strategy_func is not None:
             # Validate that tensor_meta count matches expected outputs from op schema.
             # This catches bugs in fake tensor propagation early.
@@ -558,6 +559,20 @@ class ShardingPropagator:
                 assert op_strategy_func is not None
                 op_strategy = op_strategy_func(strategy_schema)
 
+        else:
+            # try operator decomposition path
+            from torch.distributed.tensor._decompositions import DecompShardingStrategy
+
+            op_strategy = None
+            if DecompShardingStrategy.has_decomp(op_schema.op):
+                try:
+                    op_strategy = DecompShardingStrategy.propagate_strategy(
+                        op_schema, self
+                    )
+                except Exception as e:
+                    decomp_exception = e
+
+        if op_strategy is not None:
             if isinstance(op_strategy, OpStrategy):
                 # single Op strategy
                 output_strategy = _select_min_cost_strategy(op_strategy, op_schema)
@@ -769,7 +784,7 @@ class ShardingPropagator:
         else:
             raise NotImplementedError(
                 f"Operator {op_schema.op} does not have a sharding strategy registered."
-            )
+            ) from decomp_exception
 
     def _adjust_shape_and_stride_args(
         self,
