@@ -348,6 +348,12 @@ keep-runtime-typing = true
 # Exceptions - files already migrated:
 "test/ao/sparsity/test_sparsifier.py" = []
 "test/ao/sparsity/test_activation_sparsifier.py" = []
+"test/ao/sparsity/test_structured_sparsifier.py" = []
+"test/ao/sparsity/test_data_sparsifier.py" = []
+"test/ao/sparsity/test_parametrization.py" = []
+"test/ao/sparsity/test_data_scheduler.py" = []
+"test/ao/sparsity/test_scheduler.py" = []
+"test/ao/sparsity/test_kernels.py" = []
 "torch/_dynamo/**" = ["S101"]
 "torch/_inductor/**" = ["S101"]
 "torch/distributed/**" = ["S101"]
