@@ -150,7 +150,9 @@ class TestSaliencyPruner(TestCase):
         expected = torch.Tensor([2, 2, -2, -2])
         for pruned in [model.lstm.bias_ih_l0, model.lstm.bias_hh_l0]:
             if expected.shape != pruned.shape:
-                raise AssertionError(f"Expected shape {expected.shape}, got {pruned.shape}")
+                raise AssertionError(
+                    f"Expected shape {expected.shape}, got {pruned.shape}"
+                )
             if not torch.isclose(expected, pruned, rtol=1e-05, atol=1e-07).all():
                 raise AssertionError("Expected and pruned tensors are not close")
 
@@ -165,12 +167,14 @@ class TestBaseStructuredSparsifier(TestCase):
                 )
             # Check mask exists
             if config["tensor_fqn"] not in pruner.state:
-                raise AssertionError(f"Expected tensor_fqn in pruner.state")
+                raise AssertionError("Expected tensor_fqn in pruner.state")
             # Check parametrization exists and is correct
             if not parametrize.is_parametrized(module):
                 raise AssertionError("Expected module to be parametrized")
             if not hasattr(module, "parametrizations"):
-                raise AssertionError("Expected module to have parametrizations attribute")
+                raise AssertionError(
+                    "Expected module to have parametrizations attribute"
+                )
             # Assume that this is the 1st/only parametrization
             if type(module.parametrizations.weight[0]) is not FakeStructuredSparsity:
                 raise AssertionError(
@@ -248,7 +252,9 @@ class TestBaseStructuredSparsifier(TestCase):
         if "test" not in pruner.groups[0]:
             raise AssertionError("Expected 'test' key in pruner.groups[0]")
         if pruner.groups[0]["test"] != 3:
-            raise AssertionError(f"Expected test value 3, got {pruner.groups[0]['test']}")
+            raise AssertionError(
+                f"Expected test value 3, got {pruner.groups[0]['test']}"
+            )
 
     def test_constructor(self):
         model = SimpleLinear()
@@ -281,7 +287,9 @@ class TestBaseStructuredSparsifier(TestCase):
         pruner.prepare(model, config)
         self._check_pruner_prepared(model, pruner, device)
         if model(x).shape != expected_shape:
-            raise AssertionError(f"Expected shape {expected_shape}, got {model(x).shape}")
+            raise AssertionError(
+                f"Expected shape {expected_shape}, got {model(x).shape}"
+            )
 
     def test_prepare_conv2d(self):
         models = [
@@ -336,7 +344,9 @@ class TestBaseStructuredSparsifier(TestCase):
         pruner.step()
         self._check_pruner_valid_after_step(model, pruner, 1, device)
         if model(x).shape != expected_shape:
-            raise AssertionError(f"Expected shape {expected_shape}, got {model(x).shape}")
+            raise AssertionError(
+                f"Expected shape {expected_shape}, got {model(x).shape}"
+            )
 
     @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     def test_step_conv2d(self):
@@ -365,7 +375,9 @@ class TestBaseStructuredSparsifier(TestCase):
         for config in pruner.groups:
             module = config["module"]
             if hasattr(module, "parametrizations"):
-                raise AssertionError("Module should not have parametrizations after pruning")
+                raise AssertionError(
+                    "Module should not have parametrizations after pruning"
+                )
             if hasattr(module, "mask"):
                 raise AssertionError("Module should not have mask after pruning")
 
@@ -394,7 +406,9 @@ class TestBaseStructuredSparsifier(TestCase):
         num_pruned_params = sum(p.numel() for p in pruned.parameters())
 
         if y_pruned.shape != expected_shape:
-            raise AssertionError(f"Expected shape {expected_shape}, got {y_pruned.shape}")
+            raise AssertionError(
+                f"Expected shape {expected_shape}, got {y_pruned.shape}"
+            )
         self._check_pruner_pruned(model, pruner, device)
         if y_pruned.shape == y_expected.shape:
             if not torch.isclose(y_expected, y_pruned, rtol=1e-05, atol=1e-07).all():
@@ -527,7 +541,9 @@ class TestBaseStructuredSparsifier(TestCase):
 
         y_expected = model(x)
         if y_expected.shape != expected_shape:
-            raise AssertionError(f"Expected shape {expected_shape}, got {y_expected.shape}")
+            raise AssertionError(
+                f"Expected shape {expected_shape}, got {y_expected.shape}"
+            )
 
         self._check_pruner_prepared(model, pruner, device)
 
@@ -537,7 +553,9 @@ class TestBaseStructuredSparsifier(TestCase):
         num_pruned_params = sum(p.numel() for p in pruned.parameters())
 
         if y_pruned.shape != expected_shape:
-            raise AssertionError(f"Expected shape {expected_shape}, got {y_pruned.shape}")
+            raise AssertionError(
+                f"Expected shape {expected_shape}, got {y_pruned.shape}"
+            )
         self._check_pruner_pruned(model, pruner, device)
         if y_pruned.shape == y_expected.shape:
             # TODO This rtol is a little high, need to double check if something specific is causing this to fail
@@ -922,7 +940,9 @@ class TestBaseStructuredSparsifier(TestCase):
 
         # assert we haven't deleted any keys
         if len(expected_params) != 0:
-            raise AssertionError(f"Expected all params deleted, but {len(expected_params)} remain")
+            raise AssertionError(
+                f"Expected all params deleted, but {len(expected_params)} remain"
+            )
 
     def test_prune_lstm_layernorm_linear_single_layer(self):
         """
@@ -1065,7 +1085,9 @@ class TestFPGMPruner(TestCase):
             flattened_filters, flattened_filters, p=2
         )
         expected_dist_conv1 = torch.sum(torch.abs(expected_dist_matrix_conv1), 1)
-        if not torch.isclose(dist_conv1, expected_dist_conv1, rtol=1e-05, atol=1e-07).all():
+        if not torch.isclose(
+            dist_conv1, expected_dist_conv1, rtol=1e-05, atol=1e-07
+        ).all():
             raise AssertionError("Distance computation does not match expected")
 
     def _test_update_mask_on_single_layer(self, expected_conv1, device):
@@ -1078,7 +1100,10 @@ class TestFPGMPruner(TestCase):
         pruner.prepare(model, config)
         pruner.enable_mask_update = True
         pruner.step()
-        if pruner.groups[0]["module"].parametrizations.weight[0].mask[-1].item() is False:
+        if (
+            pruner.groups[0]["module"].parametrizations.weight[0].mask[-1].item()
+            is False
+        ):
             raise AssertionError("do not prune the least-norm filter")
 
         # fusion step
