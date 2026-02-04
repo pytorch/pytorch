@@ -20,7 +20,7 @@ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     DEVICEInitMode,
     FSDPInitMode,
-    FSDPTestContinuous,
+    FSDPTest,
     get_devtype,
     NestedWrappedModule,
     TransformerWithSharedParams,
@@ -41,7 +41,7 @@ if TEST_WITH_DEV_DBG_ASAN:
     sys.exit(0)
 
 
-class TestClipGradNorm(FSDPTestContinuous):
+class TestClipGradNorm(FSDPTest):
     """Tests :meth:`FullyShardedDataParallel.clip_grad_norm_`."""
 
     @skip_if_lt_x_gpu(2)
