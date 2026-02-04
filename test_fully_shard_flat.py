@@ -176,16 +176,10 @@ def run():
             if param._local_tensor.numel() > 0:
                 assert param.grad is not None, f"Iter {iteration}: {name} missing gradient"
 
-        # Compare losses
-        loss_match = torch.allclose(ref_loss, fsdp_loss, rtol=1e-4, atol=1e-4)
-        status = "✓" if loss_match else "✗"
+        # Compare losses (use torch.testing.assert_close like FSDP2's assertEqual)
+        torch.testing.assert_close(ref_loss, fsdp_loss)
         print_rank0(f"  Iter {iteration}: ref_loss={ref_loss.item():.6f}, "
-                    f"fsdp_loss={fsdp_loss.item():.6f} {status}")
-
-        if not loss_match:
-            raise AssertionError(
-                f"Loss mismatch at iter {iteration}: ref={ref_loss.item()}, fsdp={fsdp_loss.item()}"
-            )
+                    f"fsdp_loss={fsdp_loss.item():.6f} ✓")
 
     print_rank0(f"\n{'='*70}")
     print_rank0("PASSED: Numerics match DDP reference")
