@@ -625,22 +625,22 @@ def innermost_fn(
     function. TorchDynamo caches on fn.__code__ object, so its necessary to find
     the innermost function to pass on the optimize, run, disable etc.
     """
-    # Don't unwrap bound methods. When a method is decorated at class definition
-    # time, _torchdynamo_orig_callable is set on the wrapper function. Accessing
-    # this attribute on a bound method delegates to __func__, which would return
-    # the unbound original function and lose the self binding.
-    if isinstance(fn, types.MethodType):
-        return fn
-
     unaltered_fn = fn
-    while hasattr(unaltered_fn, unaltered_fn_attr):
+    while (
+        hasattr(unaltered_fn, unaltered_fn_attr)
+        # Only follow the chain if _torchdynamo_wrapper_id matches id(fn).
+        # This prevents following chains in two cases:
+        # 1. Bound methods: id(bound_method) != id(wrapper_function), so we
+        #    won't unwrap through __func__ and lose the self binding.
+        # 2. functools.wraps copies: When functools.wraps copies
+        #    _torchdynamo_orig_callable from a wrapped function, the copied
+        #    _torchdynamo_wrapper_id won't match the outer wrapper's id.
+        and getattr(unaltered_fn, "_torchdynamo_wrapper_id", None) == id(unaltered_fn)
+    ):
         unaltered_fn = getattr(unaltered_fn, unaltered_fn_attr)
         assert callable(unaltered_fn), (
             f"A callable function is expected, but {type(unaltered_fn)} is provided."
         )
-        # Stop unwrapping if we hit a bound method
-        if isinstance(unaltered_fn, types.MethodType):
-            break
     return unaltered_fn
 
 
@@ -884,6 +884,7 @@ class _TorchDynamoContext:
             # Save the function pointer to find the original callable while nesting
             # of decorators.
             new_mod._torchdynamo_orig_callable = mod.forward
+            new_mod._torchdynamo_wrapper_id = id(new_mod)
 
             # when compiling torch.nn.Module,
             # provide public api OptimizedModule.get_compiler_config()
@@ -1057,6 +1058,7 @@ class _TorchDynamoContext:
         # Save the function pointer to find the original callable while nesting
         # of decorators.
         compile_wrapper._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
+        compile_wrapper._torchdynamo_wrapper_id = id(compile_wrapper)  # type: ignore[attr-defined]
 
         # when compiling user function instead of nn.Module
         # provide public api _fn.get_compiler_config()
@@ -1205,6 +1207,7 @@ class DisableContext(_TorchDynamoContext):
             mod = fn
             new_mod = OptimizedModule(mod, self)
             new_mod._torchdynamo_orig_callable = mod.forward
+            new_mod._torchdynamo_wrapper_id = id(new_mod)
             return new_mod
 
         if isinstance(fn, type):
@@ -1269,6 +1272,7 @@ class DisableContext(_TorchDynamoContext):
         # Save the function pointer to find the original callable while nesting
         # of decorators.
         _fn._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
+        _fn._torchdynamo_wrapper_id = id(_fn)  # type: ignore[attr-defined]
 
         _fn._torchdynamo_disable_recursive = True  # type: ignore[attr-defined]
 
