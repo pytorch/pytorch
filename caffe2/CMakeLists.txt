@@ -1796,8 +1796,8 @@ if(USE_ROCM)
     endif()
   endif()
   # Since PyTorch files contain HIP headers, this is also needed to capture the includes.
-  # ROCM_INCLUDE_DIRS is defined in LoadHIP.cmake
-  target_include_directories(torch_hip PRIVATE ${Caffe2_HIP_INCLUDE} ${ROCM_INCLUDE_DIRS})
+  # ROCM_INCLUDE_DIRS is defined in LoadHIP.cmake and added as SYSTEM includes in cmake/Dependencies.cmake
+  target_include_directories(torch_hip PRIVATE ${Caffe2_HIP_INCLUDE})
   target_include_directories(torch_hip INTERFACE $<INSTALL_INTERFACE:include>)
 endif()
 
@@ -1991,9 +1991,11 @@ if(BUILD_TEST)
         hip_add_executable(${test_name} "${test_src}")
         list(JOIN PYTORCH_ROCM_ARCH " " ROCM_PROPERTY_ARCH_LIST)
         set_target_properties(${test_name} PROPERTIES HIP_ARCHITECTURES ${ROCM_PROPERTY_ARCH_LIST})
-        set_target_properties(${test_name} PROPERTIES LINKER_LANGUAGE CXX)
       else()
         add_executable(${test_name} "${test_src}")
+      endif()
+      if(test_src MATCHES "^.*\.hip$")
+        set_target_properties(${test_name} PROPERTIES LINKER_LANGUAGE CXX)
       endif()
       target_link_libraries(${test_name} torch_library gtest_main)
       target_include_directories(${test_name} PRIVATE $<INSTALL_INTERFACE:include>)

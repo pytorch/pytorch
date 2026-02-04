@@ -740,9 +740,13 @@ def _handle_output_node(
         node_name_to_values: A mapping of FX node names to their produced ONNX ``Value``.
         graph_like: The ONNX graph at construction.
     """
-    # node.args[0] can be a tuple with more than one elements. This happens when,
-    # for example, a subgraph has multiple outputs. We flatten them all as ONNX graph outputs
-    for output in node.args[0]:  # type: ignore[index,union-attr]
+    if not isinstance(node.args[0], Sequence):
+        output_nodes = (node.args[0],)
+    else:
+        # node.args[0] can be a tuple with more than one elements. This happens when,
+        # for example, a subgraph has multiple outputs. We flatten them all as ONNX graph outputs
+        output_nodes = node.args[0]
+    for output in output_nodes:
         if output is None:
             logger.warning(
                 "Output node %s has None output. The output is ignored in the exported graph. Please ensure the graph output order is expected",
