@@ -491,7 +491,8 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
 
   m.def(
       "multimem_one_shot_all_reduce_out(Tensor input, str reduce_op, str group_name, Tensor(a!) out) -> Tensor(a!)");
-  m.register_symm_mem_args("multimem_one_shot_all_reduce_out", {"input", "out"});
+  m.register_symm_mem_args(
+      "multimem_one_shot_all_reduce_out", {"input", "out"});
 
   m.def(
       "multimem_one_shot_reduce_out(Tensor input, str reduce_op, int root, str group_name, Tensor(a!) out) -> Tensor(a!)");
@@ -511,11 +512,13 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
 
   m.def(
       "one_shot_all_reduce_copy(Tensor symm_buffer, Tensor local_input, str reduce_op, str group_name) -> Tensor");
-  m.register_symm_mem_args("one_shot_all_reduce_copy", {"symm_buffer", "local_input"});
+  m.register_symm_mem_args(
+      "one_shot_all_reduce_copy", {"symm_buffer", "local_input"});
 
   m.def(
       "one_shot_all_reduce_copy_out(Tensor symm_buffer, Tensor local_input, str reduce_op, str group_name, Tensor(a!) out) -> Tensor(a!)");
-  m.register_symm_mem_args("one_shot_all_reduce_copy_out", {"symm_buffer", "local_input", "out"});
+  m.register_symm_mem_args(
+      "one_shot_all_reduce_copy_out", {"symm_buffer", "local_input", "out"});
 
   m.def(
       "two_shot_all_reduce_(Tensor(a!) input, str reduce_op, str group_name) -> Tensor(a!)");

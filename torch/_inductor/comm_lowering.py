@@ -440,6 +440,34 @@ def register_symm_mem_lowerings():
                 "ensure the input is allocated as a symmetric memory buffer."
             )
 
+    def _get_mutated_return_arg(schema):
+        """
+        For mutable ops that return an aliased tensor, find which argument is returned.
+
+        Returns:
+            Tuple of (arg_name, arg_index) for the argument that is returned, or None
+            if the op doesn't return an aliased tensor.
+        """
+        if not schema.is_mutable:
+            return None
+
+        if len(schema.returns) == 0:
+            return None
+
+        if len(schema.returns) == 1:
+            ret = schema.returns[0]
+            if ret.alias_info is None:
+                return None
+
+            ret_alias_set = ret.alias_info.after_set
+            for i, arg in enumerate(schema.arguments):
+                if arg.alias_info is not None and arg.alias_info.is_write:
+                    arg_alias_set = arg.alias_info.after_set
+                    if ret_alias_set == arg_alias_set:
+                        return (arg.name, i)
+
+        return None
+
     def _create_symm_mem_lowering(op, symm_mem_args_set, group_arg_name="group_name"):
         """
         Create a lowering function for an operator with symm_mem args.
@@ -452,19 +480,12 @@ def register_symm_mem_lowerings():
         Returns:
             Lowering function that realizes symm_mem args and calls the operator
         """
+        schema = op._schema
+        is_mutable = schema.is_mutable
+        mutated_return = _get_mutated_return_arg(schema) if is_mutable else None
 
         def lowering_fn(*args, **kwargs):
-            try:
-                schema = op._schema
-                arg_names = [arg.name for arg in schema.arguments]
-            except AttributeError:
-                # If schema is not available, assume args are in order
-                # This shouldn't happen for properly registered ops
-                log.warning(
-                    "Could not get schema for %s, realizing symm_mem args by position",
-                    op,
-                )
-                arg_names = [f"arg{i}" for i in range(len(args))]
+            arg_names = [arg.name for arg in schema.arguments]
 
             all_args = {}
             for i, arg_value in enumerate(args):
@@ -484,9 +505,19 @@ def register_symm_mem_lowerings():
                         if isinstance(item, ir.TensorBox) and group_name is not None:
                             _maybe_realize_symm_mem(item, group_name)
 
-            result = ir.FallbackKernel.create(op, *args, **kwargs)
+            if mutated_return is not None:
+                # Inplace op: use _CollectiveKernel.create_inplace and return mutated arg
+                arg_name, arg_idx = mutated_return
+                mutated_arg = all_args.get(arg_name)
+                if mutated_arg is None and arg_idx < len(args):
+                    mutated_arg = args[arg_idx]
 
-            return pytree.tree_map(ir.TensorBox.create, result)
+                ir._CollectiveKernel.create_inplace(op, *args, **kwargs)
+                return mutated_arg
+            else:
+                # Non-mutating op: use FallbackKernel
+                result = ir.FallbackKernel.create(op, *args, **kwargs)
+                return pytree.tree_map(ir.TensorBox.create, result)
 
         return lowering_fn
 

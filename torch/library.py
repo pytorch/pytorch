@@ -409,22 +409,8 @@ class Library:
 
         if op_overload is None:
             try:
-                if "::" in qualname:
-                    ns, op_part = qualname.rsplit("::", 1)
-                    if "." in op_part:
-                        op_base, overload = op_part.rsplit(".", 1)
-                    else:
-                        op_base = op_part
-                        overload = "default"
-
-                    if hasattr(torch.ops, ns):
-                        ns_obj = getattr(torch.ops, ns)
-                        if hasattr(ns_obj, op_base):
-                            packet = getattr(ns_obj, op_base)
-                            if hasattr(packet, overload):
-                                op_overload = getattr(packet, overload)
-            except Exception:
-                # If we can't get the operator, continue without validation
+                op_overload = torch._library.utils.lookup_op(qualname)
+            except (ValueError, AttributeError):
                 pass
 
         entry = torch._library.simple_registry.singleton.find(qualname)
