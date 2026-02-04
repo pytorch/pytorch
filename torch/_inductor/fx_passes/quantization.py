@@ -1,15 +1,12 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import copy
-import functools
 import itertools
 import math
 import operator
-from typing import Any
 
 import torch
 from torch._dynamo.utils import counters
-from torch.fx.experimental.symbolic_shapes import has_free_symbols
 from torch.fx.node import map_arg
 
 from .. import config
