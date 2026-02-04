@@ -127,6 +127,9 @@ static PyObject* THCPEvent_get_device(THCPEvent* self, void* unused) {
 static PyObject* THCPEvent_record(PyObject* _self, PyObject* _stream) {
   HANDLE_TH_ERRORS {
     auto self = (THCPEvent*)_self;
+    TORCH_CHECK(
+        THPStream_Check(_stream),
+        "expected stream to be a torch.Stream or torch.cuda.Stream object");
     auto stream = (THPStream*)_stream;
     c10::cuda::CUDAStream cuda_stream =
         c10::cuda::CUDAStream(c10::Stream::unpack3(
@@ -143,6 +146,9 @@ static PyObject* THCPEvent_record(PyObject* _self, PyObject* _stream) {
 static PyObject* THCPEvent_wait(PyObject* _self, PyObject* _stream) {
   HANDLE_TH_ERRORS {
     auto self = (THCPEvent*)_self;
+    TORCH_CHECK(
+        THPStream_Check(_stream),
+        "expected stream to be a torch.Stream or torch.cuda.Stream object");
     auto stream = (THPStream*)_stream;
     c10::cuda::CUDAStream cuda_stream =
         c10::cuda::CUDAStream(c10::Stream::unpack3(

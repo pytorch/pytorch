@@ -374,6 +374,16 @@ if __name__ == "__main__":
             RuntimeError, "expected event to be a torch.Event object"
         ):
             s3.record_event(e1)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "expected stream to be a torch.Stream or torch.xpu.Stream object",
+        ):
+            e2.record(e2)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "expected stream to be a torch.Stream or torch.xpu.Stream object",
+        ):
+            e2.wait(e2)
 
     def test_device_context_manager(self):
         prev_device = torch.xpu.current_device()

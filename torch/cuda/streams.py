@@ -69,7 +69,7 @@ class Stream(torch._C._CudaStreamBase):
         submitted to a given stream at the time of call complete.
 
         Args:
-            stream (Stream): a stream to synchronize.
+            stream (Stream, torch.Stream): a stream to synchronize.
 
         .. note:: This function returns without waiting for currently enqueued
            kernels in :attr:`stream`: only future operations are affected.
@@ -200,7 +200,7 @@ class Event(torch._C._CudaEventBase):
         r"""Record the event in a given stream.
 
         Args:
-            stream (Stream, torch, optional): Uses ``torch.cuda.current_stream()`` if no stream is specified.
+            stream (Stream, torch.Stream, optional): Uses ``torch.cuda.current_stream()`` if no stream is specified.
                 The stream's device must match the event's device.
         """
         if stream is None:
@@ -211,7 +211,7 @@ class Event(torch._C._CudaEventBase):
         r"""Make all future work submitted to the given stream wait for this event.
 
         Args:
-            stream (Stream, torch, optional): Uses ``torch.cuda.current_stream()`` if no stream is specified.
+            stream (Stream, torch.Stream, optional): Uses ``torch.cuda.current_stream()`` if no stream is specified.
 
         .. note:: This is a wrapper around ``cudaStreamWaitEvent()``: see
             `CUDA Event documentation`_ for more info.

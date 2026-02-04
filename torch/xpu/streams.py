@@ -125,7 +125,7 @@ class Event(torch._C._XpuEventBase):
         r"""Record the event in a given stream.
 
         Args:
-            stream (Stream, torch, optional): Uses ``torch.xpu.current_stream()`` if no stream is specified.
+            stream (Stream, torch.Stream, optional): Uses ``torch.xpu.current_stream()`` if no stream is specified.
                 The stream's device must match the event's device.
         """
         if stream is None:
@@ -136,7 +136,7 @@ class Event(torch._C._XpuEventBase):
         r"""Make all future work submitted to the given stream wait for this event.
 
         Args:
-            stream (Stream, torch, optional): Uses ``torch.xpu.current_stream()`` if no stream is specified.
+            stream (Stream, torch.Stream, optional): Uses ``torch.xpu.current_stream()`` if no stream is specified.
         """
         if stream is None:
             stream = torch.xpu.current_stream()

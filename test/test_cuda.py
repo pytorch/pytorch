@@ -1150,6 +1150,16 @@ print(t.is_pinned())
             RuntimeError, "expected event to be a torch.Event object"
         ):
             s3.record_event(e1)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "expected stream to be a torch.Stream or torch.cuda.Stream object",
+        ):
+            e2.record(e2)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "expected stream to be a torch.Stream or torch.cuda.Stream object",
+        ):
+            e2.wait(e2)
 
     def test_record_stream(self):
         cycles_per_ms = get_cycles_per_ms()

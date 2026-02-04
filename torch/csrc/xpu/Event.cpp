@@ -71,6 +71,9 @@ static PyObject* THXPEvent_get_device(THXPEvent* self, void* unused) {
 static PyObject* THXPEvent_record(PyObject* _self, PyObject* _stream) {
   HANDLE_TH_ERRORS
   auto* self = (THXPEvent*)_self;
+  TORCH_CHECK(
+      THPStream_Check(_stream),
+      "expected stream to be a torch.Stream or torch.xpu.Stream object");
   auto* stream = (THPStream*)_stream;
   c10::xpu::XPUStream xpu_stream = c10::xpu::XPUStream(c10::Stream::unpack3(
       stream->stream_id,
@@ -84,6 +87,9 @@ static PyObject* THXPEvent_record(PyObject* _self, PyObject* _stream) {
 static PyObject* THXPEvent_wait(PyObject* _self, PyObject* _stream) {
   HANDLE_TH_ERRORS
   auto* self = (THXPEvent*)_self;
+  TORCH_CHECK(
+      THPStream_Check(_stream),
+      "expected stream to be a torch.Stream or torch.xpu.Stream object");
   auto* stream = (THPStream*)_stream;
   c10::xpu::XPUStream xpu_stream = c10::xpu::XPUStream(c10::Stream::unpack3(
       stream->stream_id,
