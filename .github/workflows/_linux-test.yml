@@ -389,6 +389,10 @@ jobs:
             export HF_DATASETS_OFFLINE=0
           fi
 
+          # TESTING
+          export TRANSFORMERS_OFFLINE=0
+          export HF_DATASETS_OFFLINE=0
+
           # detached container should get cleaned up by teardown_ec2_linux
           # TODO: Stop building test binaries as part of the build phase
           # Used for GPU_FLAG, SHM_OPTS, JENKINS_USER and DOCKER_SHELL_CMD since that doesn't play nice
