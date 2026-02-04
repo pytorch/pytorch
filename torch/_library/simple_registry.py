@@ -46,7 +46,9 @@ class SimpleLibraryRegistry:
         try:
             import torch._C
 
-            cpp_registry = torch._C._get_cpp_symm_mem_args_registry()
+            cpp_registry = (
+                torch._C._get_cpp_symm_mem_args_registry()  # pyrefly: ignore [missing-attribute]
+            )
             for qualname, arg_names in cpp_registry.items():
                 entry = self.find(qualname)
                 # register without validation since C++ already registered
