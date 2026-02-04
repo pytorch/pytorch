@@ -154,6 +154,28 @@ torch_set_requires_grad(AtenTensorHandle tensor, bool requires_grad);
 
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_11_0
+
+// Creates a tensor from an existing data blob with an optional deleter.
+// The deleter is called with the data pointer when the tensor's storage
+// is deallocated.
+AOTI_TORCH_EXPORT AOTITorchError torch_from_blob(
+    void* data,
+    int64_t ndim,
+    const int64_t* sizes_ptr,
+    const int64_t* strides_ptr,
+    int64_t storage_offset,
+    int32_t dtype,
+    int32_t device_type,
+    int32_t device_index,
+    AtenTensorHandle* ret, // returns new reference
+    int32_t layout,
+    const uint8_t* opaque_metadata,
+    int64_t opaque_metadata_size,
+    void (*deleter)(void*));
+
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_11_0
+
 #ifdef __cplusplus
 } // extern "C"
 #endif

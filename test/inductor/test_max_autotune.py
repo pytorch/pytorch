@@ -64,10 +64,9 @@ from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_WINDOWS,
-    NAVI_ARCH,
     parametrize,
     random_matrix_with_scaled_reduction_dim,
-    skipIfRocmArch,
+    skipIfRocm,
     TEST_WITH_ROCM,
     TEST_XPU,
 )
@@ -176,6 +175,7 @@ class TestMaxAutotune(TestCase):
     @unittest.skipIf(
         not has_triton_tma_device(), "Need device-side TMA support in Triton"
     )
+    @skipIfXpu(msg="XPU TMA requires contiguous last dimension")
     @parametrize("a_transposed", (False, True))
     @parametrize("b_transposed", (False, True))
     @parametrize("dynamic", (False, True))
@@ -327,6 +327,7 @@ class TestMaxAutotune(TestCase):
     @unittest.skipIf(
         not has_triton_tma_device(), "Need device-side TMA support in Triton"
     )
+    @skipIfXpu(msg="XPU TMA requires contiguous last dimension")
     @parametrize("a_transposed", (False, True))
     @parametrize("b_transposed", (False, True))
     @parametrize("dynamic", (False, True))
@@ -389,6 +390,7 @@ class TestMaxAutotune(TestCase):
     @unittest.skipIf(
         not has_triton_tma_device(), "Need device-side TMA support in Triton"
     )
+    @skipIfXpu(msg="Covered by XPU TMA")
     @parametrize("dynamic", (False, True))
     def test_max_autotune_regular_mm_persistent_tma_illegal_alignment(self, dynamic):
         def mm(a, b):
@@ -504,6 +506,7 @@ class TestMaxAutotune(TestCase):
     @unittest.skipIf(
         not has_triton_tma_device(), "Need device-side TMA support in Triton"
     )
+    @skipIfXpu(msg="XPU TMA requires contiguous last dimension")
     @parametrize("a_transposed", (False, True))
     @parametrize("b_transposed", (False, True))
     @parametrize("dynamic", (False, True))
@@ -584,6 +587,7 @@ class TestMaxAutotune(TestCase):
     @unittest.skipIf(
         not has_triton_tma_device(), "Need device-side TMA support in Triton"
     )
+    @skipIfXpu(msg="Covered by XPU TMA")
     @parametrize("dynamic", (False, True))
     def test_max_autotune_addmm_persistent_tma_illegal_alignment(self, dynamic):
         def addmm(x, a, b):
@@ -1140,7 +1144,6 @@ class TestMaxAutotune(TestCase):
 
         self.assertIn("NoValidChoicesError", str(context.exception))
 
-    @skipIfRocmArch(NAVI_ARCH)
     def test_non_contiguous_input_mm(self):
         """
         Make sure the triton template can work with non-contiguous inputs without crash.
@@ -1159,7 +1162,6 @@ class TestMaxAutotune(TestCase):
         act = f(x, y)
         torch.testing.assert_close(act, ref, atol=2e-2, rtol=1e-2)
 
-    @skipIfRocmArch(NAVI_ARCH)
     def test_non_contiguous_input_addmm(self):
         b = torch.randn((768), dtype=torch.bfloat16, device=GPU_TYPE)
         x = rand_strided(
@@ -1175,7 +1177,6 @@ class TestMaxAutotune(TestCase):
         act = f(x, y)
         torch.testing.assert_close(act, ref, atol=2e-2, rtol=1e-2)
 
-    @skipIfRocmArch(NAVI_ARCH)
     def test_non_contiguous_input_bmm(self):
         x = rand_strided(
             (1, 50257, 2048), (0, 1, 50304), dtype=torch.bfloat16, device=GPU_TYPE
@@ -1305,6 +1306,8 @@ class TestMaxAutotune(TestCase):
         shape_padding=False,
     )
     def test_max_autotune_decompose_k(self, sizes, dtype, dynamic):
+        # UT specific change to force testing decompose K feature on ROCm until
+        # enabled by default, same strategy as #169948
         with config.patch(_DECOMPOSE_K_PATCH_ROCM):
             fp16_red_setting = (
                 torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction
@@ -1421,42 +1424,46 @@ class TestMaxAutotune(TestCase):
         max_autotune_gemm_backends="TRITON",
     )
     def test_max_autotune_decompose_k_dynamic_input(self):
-        def f(a, b):
-            a_in = torch.stack((a, a), dim=0)
-            return (a_in @ b).relu()
+        # UT specific change to force testing decompose K feature on ROCm until
+        # enabled by default, same strategy as #169948
+        with config.patch(_DECOMPOSE_K_PATCH_ROCM):
 
-        a, b = self._make_matrices(
-            M=32,
-            K=32768,
-            N=64,
-            dtype=torch.bfloat16,
-            device=GPU_TYPE,
-            requires_grad=True,
-        )
+            def f(a, b):
+                a_in = torch.stack((a, a), dim=0)
+                return (a_in @ b).relu()
 
-        torch._dynamo.reset()
-        torch._dynamo.maybe_mark_dynamic(a, 0)
-        compiled_func = torch.compile(f)
-
-        with mock.patch(
-            "torch._inductor.kernel.mm.use_decompose_k_choice"
-        ) as decomp_mock:
-            decomp_mock.side_effect = (
-                lambda *args, **kwargs: kwargs.get("threshold_multiple", 1) == 1
+            a, b = self._make_matrices(
+                M=32,
+                K=32768,
+                N=64,
+                dtype=torch.bfloat16,
+                device=GPU_TYPE,
+                requires_grad=True,
             )
 
-            out, code = run_and_get_code(compiled_func, a, b)
-            FileCheck().check("extern_kernels.bmm_dtype").check_regex(
-                "triton_.*_fused_.*.run"
-            ).check("decompose_k").check_regex(r"s[0-9]+ = s[0-9]+").check_regex(
-                r"2\*s[0-9]+"
-            ).check_regex("s[0-9]+ = 32").run(code[0])
-            torch.testing.assert_close(
-                out,
-                f(a, b),
-                atol=1e-4,
-                rtol=1e-4,
-            )
+            torch._dynamo.reset()
+            torch._dynamo.maybe_mark_dynamic(a, 0)
+            compiled_func = torch.compile(f)
+
+            with mock.patch(
+                "torch._inductor.kernel.mm.use_decompose_k_choice"
+            ) as decomp_mock:
+                decomp_mock.side_effect = (
+                    lambda *args, **kwargs: kwargs.get("threshold_multiple", 1) == 1
+                )
+
+                out, code = run_and_get_code(compiled_func, a, b)
+                FileCheck().check("extern_kernels.bmm_dtype").check_regex(
+                    "triton_.*_fused_.*.run"
+                ).check("decompose_k").check_regex(r"s[0-9]+ = s[0-9]+").check_regex(
+                    r"2\*s[0-9]+"
+                ).check_regex("s[0-9]+ = 32").run(code[0])
+                torch.testing.assert_close(
+                    out,
+                    f(a, b),
+                    atol=1e-4,
+                    rtol=1e-4,
+                )
 
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
@@ -1470,6 +1477,8 @@ class TestMaxAutotune(TestCase):
         max_autotune_gemm_backends="TRITON",
     )
     def test_max_autotune_decompose_k_dynamic_input_bwd(self):
+        # UT specific change to force testing decompose K feature on ROCm until
+        # enabled by default, same strategy as #169948
         with config.patch(_DECOMPOSE_K_PATCH_ROCM):
 
             def f(a, b):
@@ -1523,6 +1532,8 @@ class TestMaxAutotune(TestCase):
         max_autotune_gemm_backends="TRITON",
     )
     def test_max_autotune_decompose_k_output_stride(self):
+        # UT specific change to force testing decompose K feature on ROCm until
+        # enabled by default, same strategy as #169948
         with config.patch(_DECOMPOSE_K_PATCH_ROCM):
 
             def f(a, b):
@@ -1831,7 +1842,6 @@ class TestMaxAutotune(TestCase):
                 self.assertEqual(configs[0], expected_config)
 
     @unittest.skipIf(config.cpp_wrapper, "out_dtype override not supported for AOTI")
-    @unittest.skipIf(TEST_WITH_ROCM, "out_dtype override only available on NVIDIA")
     def test_bmm_out_dtype(self):
         def f(a, b):
             return torch.bmm(a, b, out_dtype=torch.float32)
@@ -3905,6 +3915,7 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
             yield
 
     @unittest.skipIf(not has_triton_tma_device(), "Need TMA support in Triton")
+    @skipIfXpu(msg="Bad tma config can be covered by XPU TMA")
     @parametrize("use_async_compile", (True, False))
     def test_template_bad_epilogue_fusion(self, use_async_compile: bool):
         def f(a, b):
@@ -4098,6 +4109,7 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
     @unittest.skipIf(
         not HAS_CUDA_AND_TRITON, "Scheduler static analysis only tested on cuda"
     )
+    @skipIfRocm(msg="Scheduler static analysis needs investigation on ROCm")
     @parametrize("fuse_epilogue", (True, False))
     @parametrize("use_async_compile", (True, False))
     def test_template_epilogue_fusion_extra_reads(
@@ -4188,6 +4200,17 @@ class TestMaxAutotuneAsyncPipelined(TestMaxAutotune, TestEpilogueFusionStaticAna
         "test_non_contiguous_input_mm_plus_mm": "Flaky on trunk",
         "test_autotune_device_guard": "Flaky on trunk",
         "test_template_bad_epilogue_fusion": "Benchmarking path is different",
+        # Contiguous transform tests - SubgraphChoiceCaller not supported with async pipelining
+        "test_max_autotune_contiguous_transform_mm": "Subgraphs not supported with async pipelining",
+        "test_max_autotune_contiguous_transform_addmm": "Subgraphs not supported with async pipelining",
+        "test_max_autotune_contiguous_transform_non_contiguous_second_matrix": "Subgraphs not supported with async pipelining",
+        "test_max_autotune_contiguous_transform_with_epilogue": "Subgraphs not supported with async pipelining",
+        # XPU specific skips due to lack of multiprocess tensor reduction support (issue #170636)
+        "test_max_autotune_addmm_persistent_tma": "No XPU implementation for multiprocess tensor reduction",
+        "test_max_autotune_regular_mm_persistent_tma": "No XPU implementation for multiprocess tensor reduction",
+        "test_max_autotune_regular_mm_persistent_tma_strided": "No XPU implementation for multiprocess tensor reduction",
+        "test_max_autotune_addmm_tma_dynamic_outer_dim": "No XPU implementation for multiprocess tensor reduction",
+        "test_max_autotune_regular_mm_tma_dynamic_outer_dim": "No XPU implementation for multiprocess tensor reduction",
     }
 
     @classmethod

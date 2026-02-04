@@ -415,11 +415,15 @@ def raise_observed_exception(
     kwargs: Optional[dict[str, Any]] = None,
 ) -> NoReturn:
     from .symbolic_convert import ExceptionVals
-    from .variables import BuiltinVariable
+    from .variables.builder import SourcelessBuilder
 
     # CPython here raises an exception. Since there is no python code, we have to manually setup the exception
     # stack and raise the exception.
-    exception_vt = BuiltinVariable(exc_type).call_function(tx, args or [], kwargs or {})  # type: ignore[arg-type]
+    exception_vt = SourcelessBuilder.create(tx, exc_type).call_function(
+        tx,  # pyrefly: ignore[bad-argument-type]
+        [SourcelessBuilder.create(tx, a) for a in args] if args else [],
+        kwargs or {},
+    )
     assert isinstance(exception_vt, ExceptionVals)
     tx._attach_traceback_to_exception(exception_vt)
     tx.exn_vt_stack.set_current_exception(exception_vt)  # type: ignore[arg-type]
