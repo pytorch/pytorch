@@ -71,7 +71,7 @@ class _PyInterpreterFrame:
     closure: tuple[types.CellType]
 
 def _debug_get_cache_entry_list(code: types.CodeType) -> list[_CacheEntry]: ...
-def _get_frame_value_stack_at_depth(
+def _get_frame_value_stack_with_depth(
     frame: types.FrameType, depth: int
 ) -> list[object]: ...
 def set_bytecode_debugger_callback(
@@ -93,3 +93,10 @@ def _load_precompile_entry(
 ) -> None: ...
 def _reset_precompile_entries(code: types.CodeType) -> None: ...
 def _debug_get_precompile_entries(code: types.CodeType) -> list[_PrecompileEntry]: ...
+
+class _EvalFrameOverride(enum.IntEnum):
+    NONE = 0
+    SKIP = 1
+    ERROR = 2
+
+def set_eval_frame_override(override: _EvalFrameOverride) -> _EvalFrameOverride: ...

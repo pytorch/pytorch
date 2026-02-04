@@ -61,8 +61,8 @@ class _BreakpointMarker:
 BREAKPOINT_MARKER = _BreakpointMarker()
 
 
-# Import NULL_STACK_VALUE sentinel from C module
-# This is returned by _get_frame_value_stack_at_depth for NULL stack slots
+# Import NULL_STACK_VALUE sentinel from C++ module
+# This is returned by _get_frame_value_stack_with_depth for NULL stack slots
 from torch._C._dynamo.eval_frame import NULL_STACK_VALUE  # noqa: F401
 
 
@@ -74,7 +74,6 @@ class DebuggerState:
     instructions: list[Instruction]
     offset_to_inst: dict[int, Instruction]
     offset_to_index: dict[int, int]
-    stack_depth_at: dict[int, int]
     index_width: int
     offset_width: int
     breakpoints: set[int] = field(default_factory=set)
@@ -83,7 +82,8 @@ class DebuggerState:
         False  # Print each instruction before executing (for segfault debugging)
     )
     current_frame: types.FrameType | None = None
-    current_offset: int = 0
+    current_offset: int = -1  # -1 indicates first instruction not yet seen
+    current_stack_depth: int = 0  # Tracked dynamically
     first_instruction_seen: bool = False
     user_locals: dict[str, Any] = field(
         default_factory=dict
@@ -138,19 +138,6 @@ class _DebugContext:
                     offset_to_inst[inst.offset] = inst
                     offset_to_index[inst.offset] = i
 
-            # Compute stack depth at each instruction
-            stack_depth_at: dict[int, int] = {}
-            depth = 0
-            for inst in instructions:
-                if inst.offset is not None:
-                    stack_depth_at[inst.offset] = depth
-                    try:
-                        # For opcodes without arguments, pass None (not 0)
-                        effect = dis.stack_effect(inst.opcode, inst.arg)
-                        depth += effect
-                    except (ValueError, TypeError):
-                        pass
-
             max_index = len(instructions) - 1 if instructions else 0
             max_offset = max(
                 (inst.offset for inst in instructions if inst.offset is not None),
@@ -162,7 +149,6 @@ class _DebugContext:
                 instructions=instructions,
                 offset_to_inst=offset_to_inst,
                 offset_to_index=offset_to_index,
-                stack_depth_at=stack_depth_at,
                 index_width=max(1, len(str(max_index))),
                 offset_width=max(1, len(str(max_offset))),
             )
@@ -221,11 +207,11 @@ class _DebugContext:
             print("\nStack: (no frame available)")
             return
 
-        from torch._C._dynamo.eval_frame import _get_frame_value_stack_at_depth
+        from torch._C._dynamo.eval_frame import _get_frame_value_stack_with_depth
 
-        depth = state.stack_depth_at.get(state.current_offset, 0)
+        depth = state.current_stack_depth
         try:
-            stack = _get_frame_value_stack_at_depth(state.current_frame, depth)
+            stack = _get_frame_value_stack_with_depth(state.current_frame, depth)
         except Exception as e:
             print(f"\nStack: (error reading stack: {e})")
             return
@@ -310,11 +296,11 @@ class _DebugContext:
         """Get the current stack for use in expression evaluation."""
         if state.current_frame is None:
             return []
-        from torch._C._dynamo.eval_frame import _get_frame_value_stack_at_depth
+        from torch._C._dynamo.eval_frame import _get_frame_value_stack_with_depth
 
-        depth = state.stack_depth_at.get(state.current_offset, 0)
+        depth = state.current_stack_depth
         try:
-            return _get_frame_value_stack_at_depth(state.current_frame, depth)
+            return _get_frame_value_stack_with_depth(state.current_frame, depth)
         except Exception:
             return []
 
@@ -478,6 +464,33 @@ class _DebugContext:
     ) -> None:
         """Common instruction handling logic for both tracing backends."""
         state = self._get_or_create_state(code)
+
+        # Update stack depth based on the previous instruction's effect.
+        # The callback is called BEFORE instruction at 'offset' executes,
+        # so we need to apply the effect of the previous instruction first.
+        previous_offset = state.current_offset
+        if previous_offset >= 0:
+            prev_inst = state.offset_to_inst.get(previous_offset)
+            if prev_inst is not None:
+                # Detect if a jump was taken: current offset != sequential next
+                prev_index = state.offset_to_index.get(previous_offset, -1)
+                expected_next_index = prev_index + 1
+                current_index = state.offset_to_index.get(offset, -1)
+                did_jump = current_index != expected_next_index
+
+                try:
+                    effect = dis.stack_effect(
+                        prev_inst.opcode, prev_inst.arg, jump=did_jump
+                    )
+                    state.current_stack_depth += effect
+                    if state.current_stack_depth < 0:
+                        raise RuntimeError(
+                            f"Stack depth went negative after {prev_inst.opname} "
+                            f"at offset {previous_offset}: depth={state.current_stack_depth}"
+                        )
+                except (ValueError, TypeError):
+                    pass
+
         state.current_offset = offset
         state.current_frame = (
             frame if frame is not None else self._find_frame_for_code(code)

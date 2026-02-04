@@ -29,6 +29,15 @@ int32_t dynamo_get_c_recursion_limit();
 
 } // extern "C"
 
+// Used to override the Dynamo callback for fullgraph=True'd compiled objects
+enum class EvalFrameOverride {
+  NONE, // Run regular set callback
+  SKIP, // skip frames recursively
+  ERROR, // error if Dynamo attempts to trace code
+};
+
+EvalFrameOverride set_eval_frame_override(EvalFrameOverride override);
+
 // Bytecode debugger callback functions
 void set_bytecode_debugger_callback(py::object callback);
 py::object get_bytecode_debugger_callback();
@@ -40,7 +49,7 @@ class NullStackValue {
 };
 
 py::object get_null_stack_value();
-py::list _get_frame_value_stack_at_depth(
+py::list _get_frame_value_stack_with_depth(
     const py::handle& frame_obj,
     int depth);
 

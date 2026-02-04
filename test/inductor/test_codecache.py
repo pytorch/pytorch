@@ -489,7 +489,12 @@ class TestFxGraphCache(TestCase):
 
         if device == GPU_TYPE and not HAS_GPU:
             raise unittest.SkipTest(f"requires {GPU_TYPE}")
-        if device == "cuda" and dtype == torch.bfloat16 and not SM80OrLater:
+        if (
+            device == "cuda"
+            and torch.version.hip is None
+            and dtype == torch.bfloat16
+            and not SM80OrLater
+        ):
             raise unittest.SkipTest("requires SM80 or later")
         if use_static_triton_launcher and not (
             device in STATIC_LAUNCHER_DEVICES and bundle_triton
@@ -497,8 +502,6 @@ class TestFxGraphCache(TestCase):
             raise unittest.SkipTest(
                 "Static cuda launcher requires cuda and triton bundling"
             )
-        if use_static_triton_launcher and TEST_WITH_ROCM:
-            raise unittest.SkipTest("Static cuda launcher doesn't work with ROCM")
 
         def fn(x, y):
             return (x * 2, y @ y)
@@ -1939,6 +1942,35 @@ class TestStandaloneCompile(TestCase):
 
             if not is_aot:
                 self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_is_saveable(self) -> None:
+        mod = torch.nn.Linear(1, 3)
+        x = torch.randn(4, 1)
+
+        @torch._dynamo.allow_in_graph
+        def uncacheable(x):
+            return x.sin()
+
+        def f(x):
+            with torch.no_grad():
+                result = mod(x)
+                return uncacheable(result)
+
+        with fresh_cache():
+            gm, args, kwargs = self.capture(f)(x)
+            assert not kwargs
+
+            compiled_artifact = torch._inductor.standalone_compile(gm, args)
+
+            self.assertFalse(compiled_artifact.is_saveable())
+
+            with tempfile.TemporaryDirectory() as temp_dir:
+                path = os.path.join(temp_dir, "new_dir")
+                with self.assertRaisesRegex(RuntimeError, "not serializable"):
+                    compiled_artifact.save(path=path, format="unpacked")
 
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
