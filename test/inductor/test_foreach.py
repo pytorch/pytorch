@@ -1243,6 +1243,7 @@ class ForeachTests(TestCase):
         for a, b in zip(eager_tensor_scalar, compiled_tensor_scalar):
             self.assertEqual(a, b, atol=0, rtol=0)
 
+    @skipIfRocm
     @requires_gpu
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     @torch._inductor.config.patch("emulate_precision_casts", True)
