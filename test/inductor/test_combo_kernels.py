@@ -949,8 +949,25 @@ class ComboKernelPDLTests(TestCase):
 
         # Check that launch_pdl is True and PDL API calls are generated
         FileCheck().check("'launch_pdl': True").run(code)
-        FileCheck().check("tl.extra.cuda.gdc_wait()").run(code)
-        FileCheck().check("tl.extra.cuda.gdc_launch_dependents()").run(code)
+
+        # Each sub-kernel should have exactly one gdc_wait followed by one
+        # gdc_launch_dependents, with no redundant waits in between.
+        # Uses round-robin dispatch (pid % 2) since both tensors are same size.
+        (
+            FileCheck()
+            .check("if pid % 2 == 0:")
+            .check("tl.extra.cuda.gdc_wait()")
+            .check("tl.load(")
+            .check_not("tl.extra.cuda.gdc_wait()")
+            .check("tl.extra.cuda.gdc_launch_dependents()")
+            .check_not("tl.extra.cuda.gdc_wait()")
+            .check("elif pid % 2 == 1:")
+            .check("tl.extra.cuda.gdc_wait()")
+            .check("tl.load(")
+            .check_not("tl.extra.cuda.gdc_wait()")
+            .check("tl.extra.cuda.gdc_launch_dependents()")
+            .run(code)
+        )
 
     @requires_gpu_and_triton
     @unittest.skipIf(not SM90OrLater, "PDL requires SM90 or later (Hopper+)")
@@ -974,10 +991,25 @@ class ComboKernelPDLTests(TestCase):
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-        # Verify combo kernel structure with PDL
-        FileCheck().check("'launch_pdl': True").check("tl.extra.cuda.gdc_wait()").check(
-            "tl.extra.cuda.gdc_launch_dependents()"
-        ).run(code)
+        # Verify combo kernel structure with PDL - each sub-kernel should have
+        # exactly one gdc_wait and one gdc_launch_dependents, no redundant waits.
+        (
+            FileCheck()
+            .check("'launch_pdl': True")
+            .check("if pid < num_xblocks_0:")
+            .check("tl.extra.cuda.gdc_wait()")
+            .check_not("tl.extra.cuda.gdc_wait()")
+            .check("tl.extra.cuda.gdc_launch_dependents()")
+            .check("elif pid < num_xblocks_1:")
+            .check("tl.extra.cuda.gdc_wait()")
+            .check_not("tl.extra.cuda.gdc_wait()")
+            .check("tl.extra.cuda.gdc_launch_dependents()")
+            .check("elif pid < num_xblocks_2:")
+            .check("tl.extra.cuda.gdc_wait()")
+            .check_not("tl.extra.cuda.gdc_wait()")
+            .check("tl.extra.cuda.gdc_launch_dependents()")
+            .run(code)
+        )
 
     @requires_gpu_and_triton
     @unittest.skipIf(not SM90OrLater, "PDL requires SM90 or later (Hopper+)")

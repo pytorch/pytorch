@@ -856,6 +856,7 @@ class ComboKernel(Kernel):
                         code, sub_kernel, num
                     )
                     sub_kernel.codegen_body()
+                    sub_kernel._filter_pdl(sub_kernel.body)
                     uniquified_body = self.uniquify_block_sizes(
                         sub_kernel.body, num, uniquify
                     )
