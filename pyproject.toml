@@ -342,27 +342,12 @@ keep-runtime-typing = true
 "tools/linter/**" = [
     "LOG015" # please fix
 ]
-# Remaining benchmarks files that still need S101 migration
-"benchmarks/distributed/rpc/**" = ["S101"]
-"benchmarks/dynamo/cachebench.py" = ["S101"]
-"benchmarks/dynamo/combine_csv.py" = ["S101"]
-"benchmarks/dynamo/microbenchmarks/bench_mm_fusion.py" = ["S101"]
-"benchmarks/dynamo/microbenchmarks/microbench.py" = ["S101"]
-"benchmarks/dynamo/parse_logs.py" = ["S101"]
-"benchmarks/dynamo/pr_time_benchmarks/**" = ["S101"]
-"benchmarks/dynamo/summarize_perf.py" = ["S101"]
-"benchmarks/dynamo/torchbench.py" = ["S101"]
-"benchmarks/dynamo/training_loss.py" = ["S101"]
-"benchmarks/operator_benchmark/pt/matmul_test.py" = ["S101"]
-"benchmarks/operator_benchmark/pt/mm_test.py" = ["S101"]
-"benchmarks/operator_benchmark/pt/qcat_test.py" = ["S101"]
-"benchmarks/record_function_benchmark/**" = ["S101"]
-"benchmarks/tensorexpr/**" = ["S101"]
-"benchmarks/transformer/attention_bias_benchmarks.py" = ["S101"]
-"benchmarks/upload_scribe.py" = ["S101"]
-"test/**" = [
-    "S101"
-]
+# Remaining files that still need S101 migration
+# Test files with S101 still need migration - doing incrementally
+"test/**" = ["S101"]
+# Exceptions - files already migrated:
+"test/ao/sparsity/test_sparsifier.py" = []
+"test/ao/sparsity/test_activation_sparsifier.py" = []
 "torch/_dynamo/**" = ["S101"]
 "torch/_inductor/**" = ["S101"]
 "torch/distributed/**" = ["S101"]
