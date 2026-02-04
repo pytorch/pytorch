@@ -1,7 +1,7 @@
 import contextlib
 import logging
 from collections.abc import Callable
-from typing import Any, Optional, TypeVar, cast
+from typing import Any, cast, Optional, TypeVar
 from unittest.mock import patch
 
 import torch
@@ -25,9 +25,8 @@ from .cpp_gemm_template import (
 from .cpp_micro_gemm import CppMicroGemmAMX, create_micro_gemm
 from .cpp_template_kernel import CppTemplateKernel
 from .cpp_utils import (
-    DTYPE_TO_CPP,
-    GemmBlocking,
     create_epilogue_with_attr,
+    GemmBlocking,
     get_gemm_template_output_and_compute_dtype,
 )
 
@@ -499,7 +498,6 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
             kernel=kernel,
             export_declaration=get_export_declaration(),
             acc_buf_dtype=torch.float,
-            DTYPE_TO_CPP=DTYPE_TO_CPP,
             L1_cache_size=L1_cache_size,
             L2_cache_size=L2_cache_size,
             config=config,
