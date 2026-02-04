@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 import torch
 import torch.fx
 
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
