@@ -8,6 +8,8 @@ on:
         required: false
         default: true
         type: boolean
+  schedule:
+    - cron: '0 0 1,15 * *'  # periodic builds (no uploads) every 2 weeks to test the script
   pull_request:
     paths:
       - .github/workflows/_binary-build-flash-attention-wheel-linux.yml
