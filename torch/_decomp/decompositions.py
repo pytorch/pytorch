@@ -3017,6 +3017,7 @@ def uniform(
 ):
     return prims._uniform_helper(
         x.shape,
+        stride=x.stride(),
         low=sym_float(low),
         high=sym_float(high),
         dtype=x.dtype,
