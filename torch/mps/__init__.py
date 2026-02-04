@@ -137,11 +137,6 @@ def recommended_max_memory() -> int:
     return torch._C._mps_recommendedMaxMemory()
 
 
-def max_threads_per_threadgroup_width() -> int:
-    r"""Returns the maximum number of threads that can be dispatched along the width of a threadgroup"""
-    return torch._C._mps_maxThreadsPerThreadgroupWidth()
-
-
 def compile_shader(source: str):
     r"""Compiles compute shader from source and allows one to invoke kernels
     defined there from the comfort of Python runtime
@@ -191,6 +186,5 @@ __all__ = [
     "Event",
     "profiler",
     "recommended_max_memory",
-    "max_total_threads_per_threadgroup",
     "is_available",
 ]

@@ -2241,8 +2241,9 @@ class CUDAGraphTreeManager:
                     if log.isEnabledFor(logging.DEBUG):
                         unexpected_rerecord_reason = status_logger()
                         log.debug(
-                            "function %d re-recording due to %s",
-                            function_id.id,
+                            "[%s] Re-recording function=%s, reason=%s",
+                            self.compile_id,
+                            self.get_func_name(function_id),
                             unexpected_rerecord_reason,
                         )
                     else:
@@ -2331,8 +2332,8 @@ class CUDAGraphTreeManager:
         ):
             graph_id = self.new_graph_id()
             log.debug(
-                "Recording function %d (%s) of graph recording id %d, inputs: %s",
-                function_id.id,
+                "[%s] Recording function=%s, cuda_graph_id=%d, inputs: %s",
+                self.compile_id,
                 self.get_func_name(function_id),
                 graph_id.id,
                 format_inputs_log(new_inputs),
@@ -2376,11 +2377,15 @@ class CUDAGraphTreeManager:
         already_warm = function_id in self.warmed_up_functions
         func_name = self.get_func_name(function_id)
         if not already_warm:
-            log.debug("Running warmup of function %d (%s)", function_id.id, func_name)
+            log.debug(
+                "[%s] Running warmup function=%s",
+                self.compile_id,
+                func_name,
+            )
         else:
             log.debug(
-                "Running eager of function %d (%s) because ancestor needed to warm up",
-                function_id.id,
+                "[%s] Running eager function=%s",
+                self.compile_id,
                 func_name,
             )
         self.warmed_up_functions.add(function_id)

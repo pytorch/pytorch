@@ -116,15 +116,6 @@ static PyObject* MPSModule_recommendedMaxMemory(
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* MPSModule_maxThreadsPerThreadgroupWidth(
-    PyObject* _unused,
-    PyObject* noargs) {
-  HANDLE_TH_ERRORS
-  return THPUtils_packUInt64(
-      at::detail::getMPSHooks().getMaxThreadsPerThreadgroupWidth());
-  END_HANDLE_TH_ERRORS
-}
-
 static PyObject* MPSModule_profilerStartTrace(
     PyObject* _unused,
     PyObject* args) {
@@ -248,10 +239,6 @@ static struct PyMethodDef _MPSModule_methods[] = {
      nullptr},
     {"_mps_recommendedMaxMemory",
      MPSModule_recommendedMaxMemory,
-     METH_NOARGS,
-     nullptr},
-    {"_mps_maxThreadsPerThreadgroupWidth",
-     MPSModule_maxThreadsPerThreadgroupWidth,
      METH_NOARGS,
      nullptr},
     {"_mps_profilerStartTrace",

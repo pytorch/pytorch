@@ -1,5 +1,6 @@
 # Owner(s): ["module: cpp"]
 
+import gc
 import math
 import sysconfig
 import unittest
@@ -80,10 +81,11 @@ class TestLibtorchAgnostic(TestCase):
     """
     Tests for versioned libtorch_agnostic extensions.
 
-    This test class supports testing both:
+    This test class supports testing:
 
     - libtorch_agn_2_9: Extension built with TORCH_TARGET_VERSION=2.9.0
     - libtorch_agn_2_10: Extension built with TORCH_TARGET_VERSION=2.10.0
+    - libtorch_agn_2_11: Extension built with TORCH_TARGET_VERSION=2.11.0
 
     Tests should be decorated with @skipIfTorchVersionLessThan to indicate the
     version that they target.
@@ -91,7 +93,7 @@ class TestLibtorchAgnostic(TestCase):
 
     @classmethod
     def setUpClass(cls):
-        # Build both 2.9 and 2.10 extensions
+        # Build versioned extensions
         base_dir = Path(__file__).parent
 
         try:
@@ -101,7 +103,7 @@ class TestLibtorchAgnostic(TestCase):
                 extension_root=base_dir / "libtorch_agn_2_9_extension"
             )
 
-        # Only build 2.10 extension if running on PyTorch 2.10+
+        # Only build 2.X extension if running on PyTorch 2.X+
         import re
 
         version_parts = torch.__version__.split(".")
@@ -118,6 +120,16 @@ class TestLibtorchAgnostic(TestCase):
                 )
         else:
             print(f"Skipping 2.10 extension (running on PyTorch {torch.__version__})")
+
+        if (current_major > 2) or (current_major == 2 and current_minor >= 11):
+            try:
+                import libtorch_agn_2_11  # noqa: F401
+            except Exception:
+                install_cpp_extension(
+                    extension_root=base_dir / "libtorch_agn_2_11_extension"
+                )
+        else:
+            print(f"Skipping 2.11 extension (running on PyTorch {torch.__version__})")
 
     @onlyCPU
     def test_slow_sgd(self, device):
@@ -1659,6 +1671,75 @@ except RuntimeError as e:
         result_broadcast = libtorch_agnostic.ops.my_subtract(a, c)
         expected_broadcast = torch.subtract(a, c)
         self.assertEqual(result_broadcast, expected_broadcast)
+
+    @skipIfTorchVersionLessThan(2, 11)
+    @skipIfTorchDynamo("no data pointer defined for FakeTensor, FunctionalTensor")
+    def test_my_from_blob_with_deleter(self, device):
+        """Test for from_blob with custom deleter (2.11 feature)."""
+        import libtorch_agn_2_11 as libtorch_agnostic
+
+        is_cuda = torch.device(device).type == "cuda"
+        if is_cuda:
+            init_mem = torch.cuda.memory_allocated(device)
+
+        def inner():
+            libtorch_agnostic.ops.reset_deleter_call_count()
+            self.assertEqual(libtorch_agnostic.ops.get_deleter_call_count(), 0)
+
+            # We need an original tensor to create the tensor with from_blob.
+            original = torch.rand(2, 3, device=device, dtype=torch.float32)
+            blob_tensor = libtorch_agnostic.ops.my_from_blob_with_deleter(
+                original.data_ptr(),
+                original.size(),
+                original.stride(),
+                device,
+                torch.float32,
+            )
+
+            self.assertEqual(blob_tensor, original)
+            self.assertEqual(blob_tensor.data_ptr(), original.data_ptr())
+
+            self.assertEqual(libtorch_agnostic.ops.get_deleter_call_count(), 0)
+
+            del blob_tensor
+            gc.collect()
+
+            # Ensure the deleter was called. The original tensor still exists
+            # and can be used.
+            self.assertEqual(libtorch_agnostic.ops.get_deleter_call_count(), 1)
+            original += 1
+            # original goes out of scope here and its cuda memory should be
+            # freed.
+
+        inner()
+
+        if is_cuda:
+            # original tensor is out of scope, all the memory should be freed
+            torch.cuda.synchronize(device)
+            curr_mem = torch.cuda.memory_allocated(device)
+            self.assertEqual(curr_mem, init_mem)
+
+    @onlyCUDA
+    @skipIfTorchVersionLessThan(2, 11)
+    def test_my_from_blob_with_cuda_deleter_no_leak(self, device):
+        """Test that from_blob deleter properly frees cudaMalloc'd memory."""
+        import libtorch_agn_2_11 as libtorch_agnostic
+
+        torch.cuda.synchronize(device)
+        init_mem = torch.cuda.memory_allocated(device)
+        numel = 1024 * 1024  # 4 MB per tensor
+
+        for _ in range(10):
+            tensor = libtorch_agnostic.ops.my_from_blob_with_cuda_deleter(numel, device)
+            # Verify tensor was created correctly
+            self.assertEqual(tensor.numel(), numel)
+            self.assertEqual(tensor.device, torch.device(device))
+            del tensor
+            gc.collect()
+            torch.cuda.synchronize(device)
+
+            curr_mem = torch.cuda.memory_allocated(device)
+            self.assertEqual(curr_mem, init_mem)
 
 
 instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
