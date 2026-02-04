@@ -45,6 +45,7 @@ import time
 import traceback
 import types
 import typing
+import unittest.mock as mock
 import weakref
 from dataclasses import dataclass
 from pathlib import Path
@@ -682,6 +683,10 @@ class ConvertFrameAssert:
             return ConvertFrameReturn(apply_to_code=False)
 
         global initial_global_state
+        # Save the previous initial_global_state to handle nested compilations
+        # (e.g., compiled autograd running during graph execution can trigger
+        # nested compilations that would otherwise overwrite the outer state)
+        prev_initial_global_state = initial_global_state
         initial_global_state = GlobalStateGuard()
 
         compile_id = get_compile_id(frame_state)
@@ -706,27 +711,31 @@ class ConvertFrameAssert:
             info = f"{code.co_name} {code.co_filename}:{code.co_firstlineno}"
             dynamo_tls.traced_frame_infos.append(info)
 
-        with compile_context(CompileContext(compile_id)):
-            result = _compile(
-                frame.f_code,
-                frame.f_globals,
-                frame.f_locals,
-                frame.f_builtins,
-                frame.closure,
-                self._torchdynamo_orig_backend,
-                self._one_graph,
-                self._export,
-                self._export_constraints,
-                hooks,
-                cache_entry,
-                cache_size,
-                frame,
-                frame_state=frame_state,
-                compile_id=compile_id,
-                skip=skip + 1,
-                package=self._package,
-                convert_frame_box=self._box,
-            )
+        try:
+            with compile_context(CompileContext(compile_id)):
+                result = _compile(
+                    frame.f_code,
+                    frame.f_globals,
+                    frame.f_locals,
+                    frame.f_builtins,
+                    frame.closure,
+                    self._torchdynamo_orig_backend,
+                    self._one_graph,
+                    self._export,
+                    self._export_constraints,
+                    hooks,
+                    cache_entry,
+                    cache_size,
+                    frame,
+                    frame_state=frame_state,
+                    compile_id=compile_id,
+                    skip=skip + 1,
+                    package=self._package,
+                    convert_frame_box=self._box,
+                )
+        finally:
+            # Restore the previous initial_global_state for nested compilation handling
+            initial_global_state = prev_initial_global_state
 
         if config.caching_precompile and self._package is not None:
             from .package import DynamoCache
@@ -890,7 +899,9 @@ class DynamoOutput:
         )
 
     def graph_capture_output(
-        self, argdefs: Optional[tuple[Any, ...]] = None
+        self,
+        argdefs: Optional[tuple[Any, ...]] = None,
+        kwdefaults: Optional[dict[str, Any]] = None,
     ) -> GraphCaptureOutput:
         output_graph = self.tracer_output.output_graph
         assert output_graph is not None
@@ -907,6 +918,7 @@ class DynamoOutput:
             self.bytecode,
             self.tracer_output.closure,
             argdefs,
+            kwdefaults,
             self.tracer_output.f_globals,
         )
 
@@ -936,6 +948,7 @@ class GraphRuntimeEnv:
     used_globals: dict[str, Any]
     closure: Optional[tuple[Any, ...]]
     argdefs: Optional[tuple[Any, ...]]
+    kwdefaults: Optional[dict[str, Any]] = None
     external_refs: set[str] = dataclasses.field(default_factory=set)
 
     def forward_callable(
@@ -959,12 +972,15 @@ class GraphRuntimeEnv:
         # check that all external references are available
         self._check_external_refs(f_globals)
 
-        return types.FunctionType(
+        fn = types.FunctionType(
             self.bytecode,
             f_globals,
             closure=self.closure,
             argdefs=self.argdefs,
         )
+        if self.kwdefaults:
+            fn.__kwdefaults__ = self.kwdefaults
+        return fn
 
     def _check_external_refs(self, f_globals: dict[str, Any]) -> None:
         missing_refs = []
@@ -991,6 +1007,7 @@ class GraphCaptureOutput:
     bytecode: CodeType
     closure: Optional[tuple[Any, ...]]
     argdefs: Optional[tuple[Any, ...]]
+    kwdefaults: Optional[dict[str, Any]]
     f_globals: dict[str, Any]
 
     def build_guards(
@@ -1033,6 +1050,7 @@ class GraphCaptureOutput:
             used_globals=used_globals,
             closure=self.closure,
             argdefs=self.argdefs,
+            kwdefaults=self.kwdefaults,
             external_refs=external_refs,
         )
 
@@ -1103,6 +1121,11 @@ def get_traced_fn(mod: Any) -> tuple[FunctionType, Optional[object]]:
             # pyrefly: ignore [missing-attribute]
             resolved_forward = resolved_forward.__func__
 
+        resolved_call = mod.__call__
+        if hasattr(resolved_call, "__self__"):
+            # pyrefly: ignore [missing-attribute]
+            resolved_call = resolved_call.__func__
+
         # Mirrored from NNModuleVariable.call_function:
         # https://github.com/pytorch/pytorch/blob/main/torch/_dynamo/variables/nn_module.py#L1035
         if (
@@ -1114,7 +1137,8 @@ def get_traced_fn(mod: Any) -> tuple[FunctionType, Optional[object]]:
             and len(mod._backward_hooks) == 0
             and len(torch.nn.modules.module._global_backward_pre_hooks) == 0
             and len(torch.nn.modules.module._global_backward_hooks) == 0
-            and resolved_forward != torch.nn.Module.forward
+            and resolved_forward != torch.nn.Module.forward  # has forward impl
+            and resolved_call == torch.nn.Module.__call__  # no custom __call__ impl
         ):
             # We cannot trace __call__ by default because it will break
             # the legacy dynamo export. If we want to revisit this,
@@ -1174,6 +1198,7 @@ def _get_frame(
         builtins.__dict__,
         closure=fn.__closure__ or (),  # type: ignore[arg-type]
         argdefs=fn.__defaults__,
+        kwdefaults=fn.__kwdefaults__,
     )
 
 
@@ -1224,6 +1249,7 @@ class FrameInfo:
     builtins: dict[str, object]
     closure: tuple[CellType]
     argdefs: Optional[tuple[Any, ...]]
+    kwdefaults: Optional[dict[str, Any]]
 
 
 def _fullgraph_capture_frame(
@@ -1278,9 +1304,31 @@ def _fullgraph_capture_frame(
         raise e.with_traceback(None) from e.__cause__  # User compiler error
 
     return CaptureOutput(
-        dynamo_output.graph_capture_output(frame.argdefs),
+        dynamo_output.graph_capture_output(frame.argdefs, frame.kwdefaults),
         backend_input,
     )
+
+
+# Called by eval_frame_cpp.cpp in order to raise an error if Dynamo attempts to compile_frame
+def get_fail_callback(callback: ConvertFrameProtocol) -> ConvertFrameProtocol:
+    fail_callback = getattr(callback, "_dynamo_fail_callback", None)
+    if fail_callback is not None:
+        return fail_callback
+
+    def compile_frame_error(*args: Any, **kwargs: Any) -> NoReturn:
+        raise RuntimeError(
+            "Dynamo: expected not to compile nested code - this happens because "
+            "a Dynamo callback was triggered and succeeded in compiling "
+            "when running fullgraph=True compiled code."
+        )
+
+    def fail_callback(*args: Any, **kwargs: Any) -> ConvertFrameReturn:
+        with mock.patch(__name__ + ".compile_frame", compile_frame_error):
+            return callback(*args, **kwargs)
+
+    # pyrefly: ignore [missing-attribute]
+    callback._dynamo_fail_callback = fail_callback
+    return fail_callback
 
 
 def compile_frame(  # type: ignore[return]

@@ -254,6 +254,11 @@ class OpDispatcher:
         assert output_sharding is not None, "output sharding should not be None"
         assert op_info is not None, "op_info should never be None"
 
+        # Record output placements for debugging
+        debug_mode = get_active_debug_mode()
+        if debug_mode is not None and output_sharding.output_spec is not None:
+            debug_mode.record_output_placements(output_sharding.output_spec)
+
         mesh = op_info.compute_mesh
         participating = mesh._is_current_rank_part_of_mesh()
         local_results = None
@@ -374,6 +379,11 @@ class OpDispatcher:
         """
         Tail of main dispatching logic, called from C++ fast path.
         """
+
+        # Record output placements for debugging
+        debug_mode = get_active_debug_mode()
+        if debug_mode is not None and output_sharding.output_spec is not None:
+            debug_mode.record_output_placements(output_sharding.output_spec)
 
         if output_sharding.output_spec is None:
             if op_call == aten.equal.default:
@@ -527,8 +537,18 @@ class OpDispatcher:
             op_call, None
         )
 
-        if runtime_schema_info is not None and runtime_schema_info.needs_pytree:
-            # flatten args/kwargs when op says necessary
+        # Auto-detect needs_pytree if any arg is a list/tuple containing tensors
+        def _contains_tensor(arg: object) -> bool:
+            if isinstance(arg, (list, tuple)):
+                return any(isinstance(item, torch.Tensor) for item in arg)
+            return False
+
+        needs_pytree = (
+            runtime_schema_info is not None and runtime_schema_info.needs_pytree
+        ) or any(_contains_tensor(arg) for arg in args)
+
+        if needs_pytree:
+            # flatten args/kwargs when op says necessary or args contain lists/tuples
             tree_args, args_spec = pytree.tree_flatten(args)
             args_list: Sequence[object] = tree_args
         else:
@@ -566,6 +586,8 @@ class OpDispatcher:
             if isinstance(v, dtensor.DTensor):
                 local_kwargs[k] = v._local_tensor
                 kwargs_schema[k] = v._spec
+                if compute_mesh is None:
+                    compute_mesh = v.device_mesh
             elif isinstance(v, torch.Tensor):
                 compute_mesh = compute_mesh or try_find_mesh_from_args(
                     op_call, args_list

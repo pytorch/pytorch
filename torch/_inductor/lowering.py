@@ -2299,12 +2299,14 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
 
 
 def make_fallback(op, layout_constraint=None, warn=True, override_decomp=False):
-    # When emulate_precision_casts is enabled, we skip decomposing addcdiv
-    # to use the native CUDA kernel which preserves FMA semantics.
-    # Note: _foreach_addcmul.Scalar is unconditionally not decomposed.
-    skip_decomp_for_precision = (
-        config.emulate_precision_casts and op == aten._foreach_addcdiv.Scalar
-    )
+    # When emulate_precision_casts is enabled, we skip decomposing addcmul ops
+    # to use the inductor lowering which preserves FMA semantics.
+    # For _foreach_addcdiv, we use the native CUDA kernel.
+    skip_decomp_for_precision = config.emulate_precision_casts and op in {
+        aten.addcmul,
+        aten._foreach_addcmul.Scalar,
+        aten._foreach_addcdiv.Scalar,
+    }
     assert op not in decompositions or override_decomp or skip_decomp_for_precision, (
         f"both a fallback and a decomp for same op: {op}"
     )
@@ -2692,7 +2694,7 @@ def searchsorted(
 
 
 @register_lowering(
-    aten.bucketize, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH
+    aten.bucketize.Tensor, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH
 )
 def bucketize(
     input: TensorBox,
@@ -2788,10 +2790,7 @@ def constrain_to_fake_tensor(arg, fake_arg):
     if isinstance(fake_arg, FakeScriptObject):
         return arg
     if isinstance(arg, ir.IRNode):
-        meta_stride_expr = [
-            s.node.expr if isinstance(s, torch.SymInt) else s for s in fake_arg.stride()
-        ]
-        return ir.ExternKernel.require_exact_strides(arg, meta_stride_expr)
+        return ir.ExternKernel.require_exact_strides(arg, fake_arg.stride())
     if isinstance(arg, dict):
         return {key: constrain_to_fake_tensor(arg[key], fake_arg[key]) for key in arg}
     elif isinstance(arg, (tuple, list)):
@@ -3138,6 +3137,10 @@ make_fallback(
     warn=False,
 )
 make_fallback(
+    aten._scaled_dot_product_flash_attention.quantized,
+    warn=False,
+)
+make_fallback(
     aten._scaled_dot_product_flash_attention_backward.default,
     sdpa_constraint,
     warn=False,
@@ -3173,6 +3176,7 @@ make_fallback(
     warn=False,
 )
 make_fallback(aten._flash_attention_forward.default, sdpa_constraint)
+make_fallback(aten._flash_attention_forward.quantized)
 make_fallback(aten._flash_attention_backward.default, sdpa_constraint)
 make_fallback(aten._efficient_attention_forward.default, sdpa_constraint)
 make_fallback(aten._efficient_attention_backward.default, sdpa_constraint)
@@ -6955,14 +6959,20 @@ def addcmul(self, tensor1, tensor2, *, value=1):
     Matches eager CUDA kernel order: self + value * (tensor1 * tensor2)
     This is computed as: fma(value, tensor1 * tensor2, self)
 
-    Note: FMA is only used for floating-point types. For integer types,
+    Note: FMA is only used for floating-point types on non-AMD GPUs. For integer types,
     we fall back to regular arithmetic since FMA doesn't support integers.
 
     For floating-point types, we use mul_rn (round-to-nearest multiplication)
     to force rounding of the product before the FMA. This prevents Triton's
     compiler from fusing the multiplication with the FMA, matching eager's
     rounding behavior.
+
+    When emulate_precision_casts is False, we return NotImplemented to use the
+    decomposition instead.
     """
+    if not config.emulate_precision_casts:
+        return NotImplemented
+
     dtype = get_promoted_dtype(
         self,
         tensor1,
@@ -6974,13 +6984,16 @@ def addcmul(self, tensor1, tensor2, *, value=1):
     t1_loader = tensor1.make_loader()
     t2_loader = tensor2.make_loader()
 
-    # FMA is only available for floating-point types
-    use_fma = dtype.is_floating_point
+    # FMA is only available for floating-point types on non-AMD GPUs
+    use_fma = dtype.is_floating_point and not torch.version.hip
 
     def inner_fn(idx):
         self_val = self_loader(idx)
         t1_val = t1_loader(idx)
         t2_val = t2_loader(idx)
+
+        if value == 1 and use_fma:
+            return ops.fma(t1_val, t2_val, self_val)
 
         # Match eager order: self + value * (tensor1 * tensor2)
         # Compute tensor1 * tensor2 first
@@ -7016,7 +7029,13 @@ def _foreach_addcmul_scalar(self, tensor1, tensor2, value=1):
     """
     Foreach version of addcmul with scalar value parameter.
     Uses foreach_group_loop for consistent grouping behavior.
+
+    When emulate_precision_casts is False, we return NotImplemented to use the
+    decomposition instead.
     """
+    if not config.emulate_precision_casts:
+        return NotImplemented
+
     realize_outputs = (
         len(V.graph.current_node.users) == 0
         or V.graph.current_node.target in inplace_foreach_ops
@@ -7756,10 +7775,11 @@ def with_effects(token, op, *args, **kwargs):
         return (token, *result)
 
 
-from .comm_lowering import register_comm_lowerings
+from .comm_lowering import register_comm_lowerings, register_symm_mem_lowerings
 
 
 register_comm_lowerings()
+register_symm_mem_lowerings()
 
 
 @register_lowering(inductor_prims.prepare_softmax_online, type_promotion_kind=None)
@@ -7813,6 +7833,49 @@ def prepare_softmax_online(x, dim):
         exp = lowerings[aten.exp](sub(x, amax))
         xsum = sum_(exp, dim, keepdims=True)
         return amax, xsum
+
+
+def _is_sm100_or_later():
+    """Check if we're on SM100+ hardware (Blackwell)."""
+    return torch.cuda.is_available() and torch.cuda.get_device_capability() >= (10, 0)
+
+
+@register_lowering(inductor_prims.cvt_e8m0_rceil, type_promotion_kind=None)
+def cvt_e8m0_rceil_lowering(inp):
+    """
+    Lowering for cvt_e8m0_rceil. Uses PTX cvt.rp.satfinite.ue8m0x2.f32 on SM100+.
+
+    The PTX instruction takes 2 float32 and outputs 2 e8m0 packed in uint16.
+    Currently we pass 0.0 as the second input and only use the low byte result.
+    """
+    # TODO: Optimize to process pairs (pack=2) by creating a custom Pointwise
+    # that loads adjacent elements, applies PTX to both, and uses a follow-up
+    # kernel to extract the packed uint16 results as uint8.
+    if not _is_sm100_or_later():
+        raise NotImplementedError(
+            "cvt_e8m0_rceil requires SM100+ (Blackwell) for PTX instruction support"
+        )
+
+    dtype = inp.get_dtype()
+    if dtype not in (torch.float32, torch.float16, torch.bfloat16):
+        raise ValueError(
+            f"cvt_e8m0_rceil requires float32, float16, or bfloat16 input, got {dtype}"
+        )
+
+    # Upcast bf16/fp16 to float32 for PTX instruction
+    if dtype != torch.float32:
+        inp = to_dtype(inp, torch.float32)
+
+    fn = functools.partial(
+        ops.inline_asm_elementwise,
+        asm="cvt.rp.satfinite.ue8m0x2.f32 $0, 0.0, $1;",
+        constraints="=h,r",
+        dtype=torch.uint16,
+        is_pure=True,
+        pack=1,
+    )
+    result = make_pointwise(fn)(inp)
+    return to_dtype(result, torch.uint8)
 
 
 # populate lowerings defined in kernel/*
