@@ -1259,16 +1259,17 @@ def set_sync_debug_mode(debug_mode: int | str) -> None:
     """
     _lazy_init()
     if isinstance(debug_mode, str):
-        if debug_mode == "default":
-            debug_mode = 0
-        elif debug_mode == "warn":
-            debug_mode = 1
-        elif debug_mode == "error":
-            debug_mode = 2
-        else:
-            raise RuntimeError(
-                "invalid value of debug_mode, expected one of `default`, `warn`, `error`"
-            )
+        match debug_mode:
+            case "default":
+                debug_mode = 0
+            case "warn":
+                debug_mode = 1
+            case "error":
+                debug_mode = 2
+            case _:
+                raise RuntimeError(
+                    "invalid value of debug_mode, expected one of `default`, `warn`, `error`"
+                )
 
     torch._C._cuda_set_sync_debug_mode(debug_mode)
 
