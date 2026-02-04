@@ -1238,6 +1238,10 @@ class LocalTensorMode(TorchDispatchMode):
         self._per_rank_rng_states: dict[
             int, tuple[torch.Tensor, dict[int, torch.Tensor]]
         ] = {}
+        # Cache for get_coordinate results, keyed by mesh id
+        # Protected by _coordinate_cache_lock for thread safety in MPMD contexts
+        self._coordinate_cache: dict[int, list[SymInt]] = {}
+        self._coordinate_cache_lock = threading.Lock()
 
     def __enter__(self) -> "LocalTensorMode":
         get_local_tensor_mode_list().append(self)
@@ -1553,7 +1557,7 @@ class _LocalDeviceMesh:
     """
 
     @staticmethod
-    def get_coordinate(self: DeviceMesh) -> list[int] | None:
+    def get_coordinate(self: DeviceMesh) -> list[SymInt] | None:
         # NB: In order to support submeshes the code below recreates for each
         # rank submesh with the same mesh dimensions as current mesh. We are
         # doing this because when submesh is created it is created for a particular
@@ -1562,22 +1566,35 @@ class _LocalDeviceMesh:
         lm = enabled_local_tensor_mode()
         assert lm is not None, "Unexpectedly not in LocalTensorMode"
 
-        coords: list[dict[int, int]] = [{} for _ in range(self.ndim)]
-        # Clone rank_map to avoid "Cannot set version_counter for inference tensor"
-        # error when running under torch.inference_mode()
-        rank_map = self._rank_map.clone()
-        for r in lm.ranks:
-            rank_tensor = self._layout.remap_to_tensor(rank_map)
-            rank_coords = (rank_tensor == r).nonzero().tolist()
-            assert len(rank_coords) == 1
-            for d, c in enumerate(rank_coords[0][1:]):
-                coords[d][r] = c
+        # Check cache first (fast path without lock)
+        mesh_id = id(self)
+        if mesh_id in lm._coordinate_cache:
+            return lm._coordinate_cache[mesh_id]
 
-        out = [torch.SymInt(LocalIntNode(c)) for c in coords]
-        # The output contains coordinates for each of the ranks with respect to
-        # their meshes formed from root mesh and selecting the same dimensions
-        # as the current mesh.
-        return out  # type: ignore[return-value]
+        # Acquire lock for thread safety in MPMD contexts
+        with lm._coordinate_cache_lock:
+            # Double-check after acquiring lock
+            if mesh_id in lm._coordinate_cache:
+                return lm._coordinate_cache[mesh_id]
+
+            coords: list[dict[int, int]] = [{} for _ in range(self.ndim)]
+            # Clone rank_map to avoid "Cannot set version_counter for inference tensor"
+            # error when running under torch.inference_mode()
+            rank_map = self._rank_map.clone()
+            for r in lm.ranks:
+                rank_tensor = self._layout.remap_to_tensor(rank_map)
+                rank_coords = (rank_tensor == r).nonzero().tolist()
+                assert len(rank_coords) == 1
+                for d, c in enumerate(rank_coords[0][1:]):
+                    coords[d][r] = c
+
+            out = [torch.SymInt(LocalIntNode(c)) for c in coords]
+            # Cache the result
+            lm._coordinate_cache[mesh_id] = out
+            # The output contains coordinates for each of the ranks with respect to
+            # their meshes formed from root mesh and selecting the same dimensions
+            # as the current mesh.
+            return out  # type: ignore[return-value]
 
     @staticmethod
     def _is_current_rank_part_of_mesh(self: DeviceMesh) -> bool:
