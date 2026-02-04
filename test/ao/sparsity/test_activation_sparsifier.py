@@ -189,7 +189,9 @@ class TestActivationSparsifier(TestCase):
 
         for config in activation_sparsifier.data_groups.values():
             if "data" in config:
-                raise AssertionError("Expected 'data' to be removed from config after step")
+                raise AssertionError(
+                    "Expected 'data' to be removed from config after step"
+                )
 
     def _check_squash_mask(self, activation_sparsifier, data):
         """Makes sure that squash_mask() works as usual. Specifically, checks
@@ -259,9 +261,13 @@ class TestActivationSparsifier(TestCase):
         sparsifier2 = ActivationSparsifier(new_model)
 
         if sparsifier2.defaults == sparsifier1.defaults:
-            raise AssertionError("Expected sparsifier defaults to be different before load")
+            raise AssertionError(
+                "Expected sparsifier defaults to be different before load"
+            )
         if len(sparsifier2.data_groups) == len(sparsifier1.data_groups):
-            raise AssertionError("Expected data_groups lengths to be different before load")
+            raise AssertionError(
+                "Expected data_groups lengths to be different before load"
+            )
 
         sparsifier2.load_state_dict(state_dict)
 
