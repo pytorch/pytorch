@@ -1519,6 +1519,126 @@ def linalg_householder_product_strategy(
 
 
 # =============================================================================
+# Two-input solve operators (A, B -> X or A, B -> (X, ...))
+#
+# For solve(A, B) = X where AX = B:
+# - Batch dimensions can be sharded (all tensors shard on same batch dim)
+#
+# Note: Column sharding for B (A replicated, B sharded on column dim) is only
+# valid when left=True. Since this depends on kwargs, we don't include it in
+# the single-dim strategy to avoid incorrect rules when left=False.
+# =============================================================================
+
+_TWO_INPUT_SOLVE_OP_TO_NUM_OUTPUTS: dict[OpOverload, int] = {
+    aten._linalg_solve_ex.default: 4,  # X, LU, pivots, info
+    aten.linalg_solve_triangular.default: 1,  # X
+}
+
+
+@register_single_dim_strategy(
+    list(_TWO_INPUT_SOLVE_OP_TO_NUM_OUTPUTS.keys()),
+    schema_info=RuntimeSchemaInfo(1),
+)
+def two_input_solve_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    """
+    Strategy for solve operators with two matrix inputs (A, B).
+
+    Supports batch dimension sharding where all tensors shard on the same batch dim.
+    Handles both matrix B (*batch, m, k) and vector B (*batch, m) cases.
+    """
+    A_meta = cast(TensorMeta, args_schema[0])
+    B_meta = cast(TensorMeta, args_schema[1])
+    A_ndim = len(A_meta.shape)
+    B_ndim = len(B_meta.shape)
+    num_outputs = _TWO_INPUT_SOLVE_OP_TO_NUM_OUTPUTS[op]
+
+    # A is always a matrix (*batch, n, n), so A has 2 trailing dims
+    A_batch_dims = max(0, A_ndim - 2)
+
+    # B can be a matrix (*batch, m, k) with 2 trailing dims,
+    # or a vector (*batch, m) with 1 trailing dim.
+    # Heuristic: if B has fewer dims than A, it's likely a vector
+    if B_ndim < A_ndim:
+        B_batch_dims = max(0, B_ndim - 1)  # vector case
+    else:
+        B_batch_dims = max(0, B_ndim - 2)  # matrix case
+
+    # Batch dimension sharding (all tensors shard on same batch dim)
+    num_batch_dims = min(A_batch_dims, B_batch_dims)
+    return batch_dim_rules(
+        num_batch_dims=num_batch_dims,
+        num_outputs=num_outputs,
+        num_inputs=2,
+    )
+
+
+# =============================================================================
+# Three-input solve operators (LU/LD, pivots, B -> X)
+#
+# For lu_solve(LU, pivots, B) = X:
+# - Batch dimensions can be sharded (all tensors shard on same batch dim)
+#
+# Note: Column sharding for B is only valid when left=True. Since this depends
+# on kwargs, we don't include it to avoid incorrect rules when left=False.
+# =============================================================================
+
+_THREE_INPUT_SOLVE_OP_TO_NUM_OUTPUTS: dict[OpOverload, int] = {
+    aten.linalg_lu_solve.default: 1,  # LU, pivots, B -> X
+    # Note: linalg_ldl_solve is not included because batch sharding produces
+    # incorrect results for unknown reasons. It falls back to replicate-only.
+}
+
+
+@register_single_dim_strategy(
+    list(_THREE_INPUT_SOLVE_OP_TO_NUM_OUTPUTS.keys()),
+    schema_info=RuntimeSchemaInfo(1),
+)
+def three_input_solve_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    """
+    Strategy for solve operators using pre-computed factorizations.
+
+    Supports batch dimension sharding where all tensors shard on the same batch dim.
+    Handles both matrix B (*batch, m, k) and vector B (*batch, m) cases.
+    """
+    factor_meta = cast(TensorMeta, args_schema[0])  # LU or LD matrix
+    pivots_meta = cast(TensorMeta, args_schema[1])  # pivots tensor
+    B_meta = cast(TensorMeta, args_schema[2])  # B matrix
+    factor_ndim = len(factor_meta.shape)
+    pivots_ndim = len(pivots_meta.shape)
+    B_ndim = len(B_meta.shape)
+
+    # factor is a matrix (*batch, n, n), pivots is (*batch, k)
+    factor_batch_dims = max(0, factor_ndim - 2)
+    pivots_batch_dims = max(0, pivots_ndim - 1)
+
+    # B can be matrix (*batch, m, k) or vector (*batch, m)
+    if B_ndim < factor_ndim:
+        B_batch_dims = max(0, B_ndim - 1)  # vector case
+    else:
+        B_batch_dims = max(0, B_ndim - 2)  # matrix case
+
+    rules: list[list[Placement | _ShardingPlaceholder]] = []
+
+    # Batch dimension sharding
+    num_batch_dims = min(factor_batch_dims, pivots_batch_dims, B_batch_dims)
+    for batch_dim in range(num_batch_dims):
+        # [X, factor, pivots, B] all shard on same batch dim
+        batch_rule: list[Placement | _ShardingPlaceholder] = [
+            _ShardingPlaceholder(batch_dim),  # X
+            _ShardingPlaceholder(batch_dim),  # factor
+            _ShardingPlaceholder(batch_dim),  # pivots
+            _ShardingPlaceholder(batch_dim),  # B
+        ]
+        rules.append(batch_rule)
+
+    return rules
+
+
+# =============================================================================
 # Linalg error checking operator (no tensor output)
 # =============================================================================
 
