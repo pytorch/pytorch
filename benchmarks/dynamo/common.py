@@ -55,10 +55,18 @@ from torch._logging.scribe import open_source_signpost
 
 
 try:
-    from torch._dynamo.utils import clone_inputs, graph_break_reasons
+    from torch._dynamo.utils import (
+        clone_inputs,
+        copy_dynamo_tensor_attributes,
+        graph_break_reasons,
+    )
     from torch._inductor.utils import fresh_cache
 except ImportError:
-    from _dynamo.utils import clone_inputs, graph_break_reasons
+    from _dynamo.utils import (
+        clone_inputs,
+        copy_dynamo_tensor_attributes,
+        graph_break_reasons,
+    )
     from _inductor.utils import fresh_cache
 
 import torch._functorch.config
@@ -1665,12 +1673,15 @@ def cast_to(dtype, model, inputs):
     else:
         model = model.to(dtype)
 
-    inputs = tree_map(
-        lambda x: x.to(dtype)
-        if isinstance(x, torch.Tensor) and x.is_floating_point()
-        else x,
-        inputs,
-    )
+    def cast_and_preserve_markings(x):
+        if not isinstance(x, torch.Tensor) or not x.is_floating_point():
+            return x
+        y = x.to(dtype)
+        # Preserve dynamic/unbacked markings
+        copy_dynamo_tensor_attributes(x, y)
+        return y
+
+    inputs = tree_map(cast_and_preserve_markings, inputs)
     return model, inputs
 
 
@@ -3267,6 +3278,11 @@ def parse_args(args=None):
         help="Only assume batch dimension is dynamic.  Implies --dynamic-shapes",
     )
     parser.add_argument(
+        "--unbacked-batch-only",
+        action="store_true",
+        help="Mark batch dimension as unbacked using mark_unbacked. Implies --dynamic-shapes",
+    )
+    parser.add_argument(
         "--specialize-int", action="store_true", help="Run with specialize_int=True."
     )
     parser.add_argument(
@@ -3858,8 +3874,11 @@ def run(runner, args, original_dir=None):
     if args.dynamic_batch_only:
         args.dynamic_shapes = True
         torch._dynamo.config.assume_static_by_default = True
+    if args.unbacked_batch_only:
+        args.dynamic_shapes = True
+        torch._dynamo.config.assume_static_by_default = True
     if args.dynamic_shapes:
-        if not args.dynamic_batch_only:
+        if not args.dynamic_batch_only and not args.unbacked_batch_only:
             torch._dynamo.config.assume_static_by_default = False
     if args.compiled_autograd:
         torch._dynamo.config.compiled_autograd = True
@@ -4399,20 +4418,30 @@ def run(runner, args, original_dir=None):
             # NB: Assumes only the first batch-y like dimension is the batch
             marked = False
 
-            def detect_and_mark_batch(t):
+            def detect_and_mark_batch(t, use_unbacked=False):
                 nonlocal marked
                 for i, s in enumerate(t.size()):
                     if s == batch_size:
-                        torch._dynamo.maybe_mark_dynamic(t, i)
+                        if use_unbacked:
+                            # Use duck_shape_id="batch" so all batch dimensions
+                            # share the same unbacked symbol
+                            torch._dynamo.decorators.mark_unbacked(
+                                t, i, shape_id="batch", hint_override=batch_size
+                            )
+                        else:
+                            torch._dynamo.maybe_mark_dynamic(t, i)
                         marked = True
                         break
 
             if (
-                args.dynamic_batch_only
+                (args.dynamic_batch_only or args.unbacked_batch_only)
                 and batch_size > 1
                 and model_name not in CI_SKIP_DYNAMIC_BATCH_ONLY
             ):
-                tree_map_only(torch.Tensor, detect_and_mark_batch, example_inputs)
+                mark_fn = functools.partial(
+                    detect_and_mark_batch, use_unbacked=args.unbacked_batch_only
+                )
+                tree_map_only(torch.Tensor, mark_fn, example_inputs)
                 assert marked, f"nothing in example_inputs had a dim with {batch_size}"
 
             if args.log_operator_inputs:
