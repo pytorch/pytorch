@@ -3464,10 +3464,11 @@ class TestSparseCSR(TestCase):
             if sample.input.ndim != 2:
                 continue
 
+            out = torch.zeros(sample.args[0].size(), dtype=dtype, device=device)
             if not sample.args[0].numel():
                 with self.assertRaisesRegex(RuntimeError,
                                             "Expected non-empty other tensor, but found empty tensor"):
-                    out = torch.linalg.solve(sample.input.to_sparse_csr(), *sample.args, **sample.kwargs)
+                    torch.linalg.solve(sample.input.to_sparse_csr(), *sample.args, **sample.kwargs, out=out)
                 continue
 
             expect = torch.linalg.solve(sample.input, *sample.args, **sample.kwargs)
