@@ -1604,6 +1604,8 @@ class DictViewVariable(VariableTracker):
             return ListIteratorVariable(
                 self.view_items_vt, mutation_type=ValueMutationNew()
             )
+        elif name == "__repr__":
+            return ConstantVariable.create(self.debug_repr())
         return super().call_method(tx, name, args, kwargs)
 
 
@@ -1621,6 +1623,16 @@ class DictKeysVariable(DictViewVariable):
 
     def python_type(self) -> type:
         return dict_keys
+
+    def debug_repr(self) -> str:
+        if not self.view_items:
+            return "dict_keys([])"
+        else:
+            return (
+                "dict_keys(["
+                + ",".join(f"{k.vt.debug_repr()}" for k in self.view_items)
+                + "])"
+            )
 
     def call_method(
         self,
@@ -1665,6 +1677,16 @@ class DictValuesVariable(DictViewVariable):
     def python_type(self) -> type:
         return dict_values
 
+    def debug_repr(self) -> str:
+        if not self.view_items:
+            return "dict_values([])"
+        else:
+            return (
+                "dict_values(["
+                + ",".join(f"{v.debug_repr()}" for v in self.view_items)
+                + "])"
+            )
+
 
 class DictItemsVariable(DictViewVariable):
     kv = "items"
@@ -1676,6 +1698,19 @@ class DictItemsVariable(DictViewVariable):
 
     def python_type(self) -> type:
         return dict_items
+
+    def debug_repr(self) -> str:
+        if not self.view_items:
+            return "dict_items([])"
+        else:
+            return (
+                "dict_items(["
+                + ",".join(
+                    f"({k.vt.debug_repr()}, {v.debug_repr()})"
+                    for k, v in self.view_items
+                )
+                + "])"
+            )
 
     def call_method(
         self,
