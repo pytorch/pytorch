@@ -587,9 +587,9 @@ static void _rrelu_with_noise_train(
   opmath_t lower = lower_.to<opmath_t>();
   opmath_t upper = upper_.to<opmath_t>();
   Tensor tmp_tensor = output.contiguous();
-  scalar_t* output_data = tmp_tensor.data_ptr<scalar_t>();
+  scalar_t* output_data = tmp_tensor.mutable_data_ptr<scalar_t>();
   const scalar_t* input_data = input.const_data_ptr<scalar_t>();
-  scalar_t* noise_data = noise.data_ptr<scalar_t>();
+  scalar_t* noise_data = noise.mutable_data_ptr<scalar_t>();
   auto gen  = at::get_generator_or_default<CPUGeneratorImpl>(generator, detail::getDefaultCPUGenerator());
   std::lock_guard<std::mutex> lock(gen->mutex_);
   for (const auto i : c10::irange(input.numel())) {
@@ -674,13 +674,13 @@ Tensor rrelu_with_noise_backward(
 Tensor rrelu(const Tensor & self, const Scalar& lower, const Scalar& upper, bool training, std::optional<Generator> generator) {
   TORCH_CHECK(std::isfinite(lower.to<double>()), "rrelu: lower bound must be finite, got ", lower.to<double>());
   TORCH_CHECK(std::isfinite(upper.to<double>()), "rrelu: upper bound must be finite, got ", upper.to<double>());
-  TORCH_CHECK(lower.to<double>() <= upper.to<double>(), "Lower bound should be less than or equal to the upper bound")
+  TORCH_CHECK(lower.to<double>() <= upper.to<double>(), "Lower bound should be less than or equal to the upper bound");
   auto noise = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   return at::rrelu_with_noise(self, noise, lower, upper, training, std::move(generator));
 }
 
 Tensor & rrelu_(Tensor & self, const Scalar& lower, const Scalar& upper, bool training, std::optional<Generator> generator) {
-  TORCH_CHECK(lower.to<double>() <= upper.to<double>(), "Lower bound should be less than or equal to the upper bound")
+  TORCH_CHECK(lower.to<double>() <= upper.to<double>(), "Lower bound should be less than or equal to the upper bound");
   auto noise = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   return at::rrelu_with_noise_(self, noise, lower, upper, training, std::move(generator));
 }

@@ -585,7 +585,14 @@ def createResolutionCallbackForClassMethods(cls: type) -> Callable[[str], Any]:
     # Skip built-ins, as they do not have global scope nor type hints
     # Needed to support `enum.Enum` derived classes in Python-3.11
     # That adds `_new_member_` property which is an alias to `__new__`
-    fns = [fn for fn in fns if not inspect.isbuiltin(fn) and hasattr(fn, "__globals__")]
+    # Skip __annotate__ added by PEP 649 for deferred annotation evaluation
+    fns = [
+        fn
+        for fn in fns
+        if not inspect.isbuiltin(fn)
+        and hasattr(fn, "__globals__")
+        and fn.__name__ != "__annotate__"
+    ]
     captures = {}
 
     for fn in fns:
@@ -676,6 +683,9 @@ def export(fn: Callable[_P, _R]) -> Callable[_P, _R]:
     """
     This decorator indicates that a method on an ``nn.Module`` is used as an entry point into a
     :class:`ScriptModule` and should be compiled.
+
+    .. deprecated:: 2.5
+        Please use :func:`torch.compile` instead.
 
     ``forward`` implicitly is assumed to be an entry point, so it does not need this decorator.
     Functions and methods called from ``forward`` are compiled as they are seen
@@ -791,6 +801,9 @@ def ignore(drop=False, **kwargs):
     your model that is not yet TorchScript compatible. If called from TorchScript,
     ignored functions will dispatch the call to the Python interpreter. Models with ignored
     functions cannot be exported; use :func:`@torch.jit.unused <torch.jit.unused>` instead.
+
+    .. deprecated:: 2.5
+        Please use :func:`torch.compile` instead.
 
     Example (using ``@torch.jit.ignore`` on a method)::
 

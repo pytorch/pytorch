@@ -132,7 +132,14 @@ class SkipFrame(TorchDynamoException):
 
 
 class TorchRuntimeError(TorchDynamoException):
-    pass
+    def __init__(self, msg: str, real_stack: StackSummary | None = None) -> None:
+        super().__init__(msg)
+        self.msg = msg
+        self.real_stack = (
+            real_stack
+            if real_stack is not None
+            else torch._guards.TracingContext.extract_stack()
+        )
 
 
 class InvalidBackend(TorchDynamoException):
@@ -415,21 +422,13 @@ def raise_observed_exception(
     kwargs: Optional[dict[str, Any]] = None,
 ) -> NoReturn:
     from .symbolic_convert import ExceptionVals
-    from .variables import BuiltinVariable, ConstantVariable, VariableTracker
-
-    # Wrap any non-VariableTracker args in ConstantVariable
-    def wrap_arg(arg: Any) -> VariableTracker:
-        if isinstance(arg, VariableTracker):
-            return arg
-        return ConstantVariable.create(arg)
-
-    wrapped_args = [wrap_arg(a) for a in args] if args else []
+    from .variables.builder import SourcelessBuilder
 
     # CPython here raises an exception. Since there is no python code, we have to manually setup the exception
     # stack and raise the exception.
-    exception_vt = BuiltinVariable(exc_type).call_function(
+    exception_vt = SourcelessBuilder.create(tx, exc_type).call_function(
         tx,  # pyrefly: ignore[bad-argument-type]
-        wrapped_args,
+        [SourcelessBuilder.create(tx, a) for a in args] if args else [],
         kwargs or {},
     )
     assert isinstance(exception_vt, ExceptionVals)
