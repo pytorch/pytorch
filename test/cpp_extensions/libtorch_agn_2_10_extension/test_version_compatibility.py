@@ -283,7 +283,8 @@ if not IS_WINDOWS:
 
     # Test discovery: generate a test for each .cpp and .cu file
     _csrc_dir = Path(__file__).parent / "csrc"
-    assert _csrc_dir.exists()
+    if not _csrc_dir.exists():
+        raise AssertionError(f"Expected csrc directory to exist at {_csrc_dir}")
     # Collect both .cpp and .cu files, excluding those used for negative test
     # already defined above
     _source_files = sorted(
