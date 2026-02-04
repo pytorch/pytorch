@@ -381,8 +381,8 @@ struct ScaleSpec {
     // For blockwise 128x128: groups = {128, 128}
     // scale shape: [ceil_div(inner_dim, 128), ceil_div(outer_dim, 128)]
     // Note: XPU/oneDNN does not use L4 padding unlike CUDA cuBLAS.
-    // So it won't have something like `round_up<int64_t>(ceil_div<int64_t>(K,
-    // 128), 4)`
+    // So it won't have something like
+    // `round_up<int64_t>(ceil_div<int64_t>(K, 128), 4)`
     if (group_m > 1 && group_k > 1) {
       return at::ceil_div(outer_dim, group_m) *
           at::ceil_div(inner_dim, group_k);
