@@ -22,6 +22,7 @@ from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     requires_accelerator_dist_backend,
     requires_gloo,
+    requires_nccl,
     skip_if_lt_x_gpu,
     with_dist_debug_levels,
 )
@@ -376,6 +377,47 @@ if not TEST_WITH_DEV_DBG_ASAN:
                 AssertionError, "ProcessGroupWrapper unsupported without GLOO backend"
             ):
                 self._create_wrapper_pg()
+
+        @requires_nccl()
+        @skip_if_lt_x_gpu(2)
+        @with_dist_debug_levels(levels=["DETAIL"])
+        def test_wrapper_forwards_nccl_methods(self):
+            """
+            Tests that ProcessGroupWrapper correctly forwards NCCL-specific
+            utility methods to the wrapped backend. See issue #173538.
+            """
+            torch.cuda.set_device(self.rank)
+            device = torch.device(f"cuda:{self.rank}")
+            wrapper = self._create_wrapper_pg(with_new_group=False)
+
+            # Verify we're testing the wrapper
+            self.assertIsInstance(wrapper, _ProcessGroupWrapper)
+            unwrapped = wrapper.wrapped_pg
+
+            # Verify wrapper forwards property/method calls to wrapped backend
+            self.assertEqual(wrapper.supports_splitting, unwrapped.supports_splitting)
+            self.assertEqual(wrapper.supports_coalescing, unwrapped.supports_coalescing)
+            self.assertEqual(
+                wrapper.supports_time_estimate, unwrapped.supports_time_estimate
+            )
+            self.assertEqual(
+                wrapper.supports_tensor_alloc(device),
+                unwrapped.supports_tensor_alloc(device),
+            )
+            self.assertEqual(wrapper.get_error(), unwrapped.get_error())
+            self.assertIs(wrapper.options, unwrapped.options)
+
+            # Test eager_connect_single_device forwarding (should not raise)
+            wrapper.eager_connect_single_device(device)
+
+            # mem_allocator and allocate_tensor require NCCL >= 2.19 and GPU
+            # multicast support (e.g., not available on T4)
+            if wrapper.supports_tensor_alloc(device):
+                self.assertIs(wrapper.mem_allocator, unwrapped.mem_allocator)
+                tensor = wrapper.allocate_tensor(
+                    1024, dtype=torch.float32, device=device
+                )
+                self.assertEqual(tensor.shape, torch.Size([1024]))
 
         @requires_accelerator_dist_backend(["nccl", "xccl"])
         @skip_if_lt_x_gpu(2)

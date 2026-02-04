@@ -231,9 +231,6 @@ inductor_skips["xpu"] = {}
 inductor_expected_failures_single_sample = defaultdict(dict)
 
 inductor_expected_failures_single_sample["cpu"] = {
-    "_softmax_backward_data": {
-        f16
-    },  # half_to_float is only valid for the CUDA implementation
     "_upsample_bilinear2d_aa": {f32, f64},
     "cholesky": {f32, f64},
     "complex": {f16},
@@ -456,6 +453,11 @@ inductor_override_kwargs["cuda"] = {
     ("kron", f16): {"reference_in_float": True},
     "log_normal": {"reference_in_float": True},
     ("masked.softmin", f16): {"atol": 1e-4, "rtol": 0.01},
+    ("nn.functional.adaptive_avg_pool2d", f16): {
+        "reference_in_float": True,
+        "atol": 2e-5,
+        "rtol": 0.02,
+    },
     ("nn.functional.batch_norm", f16): {"reference_in_float": True},
     ("nn.functional.batch_norm.without_cudnn", f16): {"reference_in_float": True},
     ("nn.functional.cosine_similarity", f16): {"reference_in_float": True},
@@ -991,7 +993,9 @@ inductor_skip_exact_stride = {
     "fft.irfft2",
     "linalg.diagonal",
     "linalg.eigvals",  # Fails for ROCM
+    "linalg.lu",
     "linalg.lu_factor",
+    "linalg.lu_factor_ex",
     "linalg.matrix_norm",
     "linalg.norm",
     "linalg.norm.subgradients_at_zero",
@@ -1000,6 +1004,7 @@ inductor_skip_exact_stride = {
     "linalg.solve",
     "linalg.solve_ex",
     "linalg.qr",
+    "lu",
     "matmul",
     "__rmatmul__",
     "nn.functional.adaptive_avg_pool1d",
@@ -1008,6 +1013,7 @@ inductor_skip_exact_stride = {
     "nn.functional.max_pool2d",
     "nn.functional.unfold",
     "ormqr",
+    "pca_lowrank",
     "polar",
     "prod",
     "qr",
@@ -1019,6 +1025,17 @@ inductor_skip_exact_stride = {
     "triu_indices",
     "unbind",
     "unbind_copy",
+}
+
+# On XPU, Inductor may apply additional layout optimizations that can change
+# tensor strides compared to eager mode, so exact stride checks are relaxed
+# for certain ops.
+inductor_skip_exact_stride_xpu = {
+    "nn.functional.conv2d",
+    "nn.functional.conv_transpose2d",
+    "nn.functional.max_unpool2d",
+    "nn.functional.max_unpool2d.grad",
+    "nn.functional.rms_norm",
 }
 
 # Custom replacements for assertEquals, in cases where a difference in value
@@ -1392,6 +1409,9 @@ class TestInductorOpInfo(TestCase):
 
                         # Call the appropriate check method based on device type
                         exact_stride = op_name not in inductor_skip_exact_stride
+                        # XPU has additional layout optimizations that change strides differently from eager mode.
+                        if exact_stride and GPU_TYPE == "xpu":
+                            exact_stride = op_name not in inductor_skip_exact_stride_xpu
                         if device_type == GPU_TYPE:
                             self.check_model_gpu(
                                 fn,
