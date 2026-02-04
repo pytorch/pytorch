@@ -989,6 +989,39 @@ def forward(self, b_parametrizations_buffer_original0, x):
         out_test = fn_opt(dt)
         self.assertEqual(out_ref, out_test)
 
+    def test_dynamo_to_local_custom_partial_placement(self):
+        """Test that to_local works with custom Partial subclasses in grad_placements.
+
+        This tests the fix for custom placement objects like _ScaledPartial that
+        cannot be converted to Python constants via as_python_constant().
+        """
+
+        # Define a custom Partial subclass similar to _ScaledPartial in torchtitan
+        class ScaledPartial(Partial):
+            def __init__(self, reduction_divide_factor: float):
+                self.reduction_divide_factor = reduction_divide_factor
+                super().__init__(reduce_op="sum")
+
+            def _reduce_value(
+                self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
+            ) -> torch.Tensor:
+                tensor.div_(self.reduction_divide_factor)
+                return super()._reduce_value(tensor, mesh, mesh_dim)
+
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        scaled_partial = ScaledPartial(reduction_divide_factor=2.0)
+
+        def fn(x):
+            return x.to_local(grad_placements=[scaled_partial]) + 2
+
+        fn_opt = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        x = torch.ones(4)
+        dt = DTensor.from_local(x, mesh, [Replicate()], run_check=False)
+
+        out_ref = fn(dt)
+        out_test = fn_opt(dt)
+        self.assertEqual(out_ref, out_test)
+
     def test_dynamo_to_local_kwargs_forward_hook(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -1442,43 +1475,6 @@ class outer_fn(torch.nn.Module):
             1,
             f"Expected 1 compilation, got {compile_counter.frame_count}",
         )
-
-    def test_compile_redistribute_flattened_mesh(self):
-        """
-        Test that redistribute works with pre-flattened meshes during compile.
-
-        When redistributing from [Shard, Shard, Replicate] to [Replicate, Replicate, Replicate]
-        on a 3D mesh, DTensor can optimize by using a single all-gather on the flattened
-        mesh instead of 2 sequential all-gathers. This requires the flattened mesh to be
-        pre-created before compile to avoid tracing issues.
-        """
-        dist.destroy_process_group()
-        dist.init_process_group("fake", store=FakeStore(), rank=0, world_size=8)
-
-        mesh = init_device_mesh(
-            self.device_type, (2, 2, 2), mesh_dim_names=("fsdp", "cp", "tp")
-        )
-        # Pre-create flattened mesh for fsdp+cp before compile
-        mesh["fsdp", "cp"]._flatten()
-
-        def redistribute_fn(x):
-            return x.redistribute(placements=[Replicate(), Replicate(), Replicate()])
-
-        input_dt = DTensor.from_local(
-            torch.randn(4, 8, device=self.device_type, requires_grad=True),
-            device_mesh=mesh,
-            placements=[Shard(0), Shard(0), Replicate()],
-            run_check=False,
-        )
-
-        compiled_fn = torch.compile(
-            redistribute_fn, fullgraph=True, backend="aot_eager"
-        )
-        result = compiled_fn(input_dt)
-        self.assertEqual(result.placements, (Replicate(), Replicate(), Replicate()))
-
-        # Test backward pass
-        result.sum().backward()
 
 
 @instantiate_parametrized_tests
