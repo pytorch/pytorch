@@ -83,6 +83,7 @@ from torch.utils._python_dispatch import (
 from torch.utils._traceback import CapturedTraceback, format_traceback_short
 
 from . import config, decorators, exc, graph_break_hints, trace_rules
+from .backends.registry import _is_registered_backend
 from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
 from .bytecode_transformation import (
     check_inst_exn_tab_entries_valid,
@@ -202,38 +203,6 @@ _P = ParamSpec("_P")
 
 class TODO_UNKNOWN:
     pass
-
-
-def _is_registered_backend(compiler_fn: CompilerFn) -> bool:
-    """
-    Check if the given compiler function is a registered backend.
-    Custom backends (user-provided callables not in the registry) return False.
-    """
-    from .backends.registry import _BACKENDS, _COMPILER_FNS, _lazy_import
-    from .eval_frame import innermost_fn
-
-    # Unwrap to get the actual backend function
-    unwrapped = innermost_fn(compiler_fn, unaltered_fn_attr="_torchdynamo_orig_backend")
-
-    # Ensure backends are loaded
-    _lazy_import()
-
-    # Check if it's directly a registered backend function
-    if unwrapped in _COMPILER_FNS.values():
-        return True
-
-    # Check for _TorchCompileInductorWrapper or _TorchCompileWrapper
-    # These have a compiler_name attribute that identifies the backend
-    if hasattr(unwrapped, "compiler_name"):
-        compiler_name = unwrapped.compiler_name
-        if compiler_name in _BACKENDS or compiler_name in _COMPILER_FNS:
-            return True
-
-    # Check if the wrapper has a compiler_fn attribute (e.g., _TorchCompileWrapper)
-    if hasattr(unwrapped, "compiler_fn"):
-        return unwrapped.compiler_fn in _COMPILER_FNS.values()
-
-    return False
 
 
 def _clear_fake_mode_weakrefs(
@@ -1906,24 +1875,6 @@ def _compile(
                     log.info("run_gc_after_compile: running gc")
                     gc.collect(1)
 
-            # Clear WeakIdRef entries that can block swap_tensors after compile.
-            # Determine whether to clear based on config and backend type.
-            should_clear = config.invalidate_compile_context_weakrefs
-            if should_clear is None:
-                # Default: clear for registered backends, don't clear for custom
-                should_clear = _is_registered_backend(compiler_fn)
-            if should_clear:
-                if tracer_output and tracer_output.output_graph:
-                    tc = tracer_output.output_graph.tracing_context
-                    tc.tensor_to_context.clear()
-                    # Clear both the current fake_mode and the old_fake_mode
-                    # (the original is stored before backend_fake_mode replaces it)
-                    _clear_fake_mode_weakrefs(tc.fake_mode)
-                    if hasattr(tracer_output.output_graph, "_old_fake_mode"):
-                        _clear_fake_mode_weakrefs(
-                            tracer_output.output_graph._old_fake_mode
-                        )
-
             output = None
             if tracer_output:
                 output = tracer_output.output_graph
@@ -2016,6 +1967,24 @@ def _compile(
                 and not tracer_output.output_graph.export
             ):
                 tracer_output.output_graph.tracing_context.guards_context.dynamo_guards.inner = OrderedSet()
+
+            # Clear WeakIdRef entries that can block swap_tensors after compile.
+            # Determine whether to clear based on config and backend type.
+            should_clear = config.invalidate_compile_context_weakrefs
+            if should_clear is None:
+                # Default: clear for registered backends, don't clear for custom
+                should_clear = _is_registered_backend(compiler_fn)
+            if should_clear:
+                if tracer_output and tracer_output.output_graph:
+                    tc = tracer_output.output_graph.tracing_context
+                    tc.tensor_to_context.clear()
+                    # Clear both the current fake_mode and the old_fake_mode
+                    # (the original is stored before backend_fake_mode replaces it)
+                    _clear_fake_mode_weakrefs(tc.fake_mode)
+                    if hasattr(tracer_output.output_graph, "_old_fake_mode"):
+                        _clear_fake_mode_weakrefs(
+                            tracer_output.output_graph._old_fake_mode
+                        )
 
 
 class ConvertFrame:

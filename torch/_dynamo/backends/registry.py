@@ -178,3 +178,34 @@ def _discover_entrypoint_backends() -> None:
     eps_dict = {name: eps[name] for name in eps.names}
     for backend_name in eps_dict:
         _BACKENDS[backend_name] = eps_dict[backend_name]
+
+
+def _is_registered_backend(compiler_fn: CompilerFn) -> bool:
+    """
+    Check if the given compiler function is a registered backend.
+    Custom backends (user-provided callables not in the registry) return False.
+    """
+    from ..eval_frame import innermost_fn
+
+    # Unwrap to get the actual backend function
+    unwrapped = innermost_fn(compiler_fn, unaltered_fn_attr="_torchdynamo_orig_backend")
+
+    # Ensure backends are loaded
+    _lazy_import()
+
+    # Check if it's directly a registered backend function
+    if unwrapped in _COMPILER_FNS.values():
+        return True
+
+    # Check for _TorchCompileInductorWrapper or _TorchCompileWrapper
+    # These have a compiler_name attribute that identifies the backend
+    if hasattr(unwrapped, "compiler_name"):
+        compiler_name = unwrapped.compiler_name
+        if compiler_name in _BACKENDS or compiler_name in _COMPILER_FNS:
+            return True
+
+    # Check if the wrapper has a compiler_fn attribute (e.g., _TorchCompileWrapper)
+    if hasattr(unwrapped, "compiler_fn"):
+        return unwrapped.compiler_fn in _COMPILER_FNS.values()
+
+    return False
