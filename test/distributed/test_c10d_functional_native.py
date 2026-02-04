@@ -647,6 +647,60 @@ class ProcessGroupDummy(dist.ProcessGroup):
         )
 
 
+class CrossThreadWaitTest(TestCase):
+    """
+    Test that wait_tensor can find work registered on a different thread.
+    This validates the cross-thread work registry lookup in wait_tensor
+    that handles the case where wait() is called from a different thread
+    than where the collective was initiated.
+    """
+
+    def test_wait_tensor_cross_thread(self) -> None:
+        """
+        Test that wait_tensor works when called from a different thread
+        than where the collective was registered.
+        """
+        wait_called = False
+        exception_in_thread: Optional[BaseException] = None
+
+        class MyWork(dist.Work):
+            def wait(self, _=None):
+                nonlocal wait_called
+                wait_called = True
+                return True
+
+        # Create tensor and register work in main thread
+        tensor = torch.rand(2, 2)
+        work = MyWork()
+        torch._C._distributed_c10d._register_work(tensor, work)
+
+        # Verify work is registered
+        self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 1)
+
+        # Wait for the tensor in a different thread
+        def wait_in_different_thread():
+            nonlocal exception_in_thread
+            try:
+                # This should find the work registered in the main thread
+                torch.ops._c10d_functional.wait_tensor(tensor)
+            except Exception as e:
+                exception_in_thread = e
+
+        thread = threading.Thread(target=wait_in_different_thread)
+        thread.start()
+        thread.join()
+
+        # Check no exception occurred
+        if exception_in_thread is not None:
+            raise exception_in_thread
+
+        # Verify wait was called
+        self.assertTrue(wait_called)
+
+        # Verify work was removed from registry
+        self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
+
+
 class PyWorkTest(TestCase):
     """
     Native functional collectives have some interesting interactions with
@@ -1039,6 +1093,25 @@ class CompileTest(TestCase):
         # Test aoti
         out = AOTIRunnerUtil.run(func, (args,))  # noqa: F841
         torch.accelerator.synchronize()
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @fresh_cache()
+    def test_inductor_all_reduce_output_stride_matches_eager(self):
+        def func(x):
+            x = x.t()
+            y = torch.ops._c10d_functional.all_reduce.default(x, "sum", "0")
+            z = torch.ops._c10d_functional.wait_tensor.default(y)
+            return y, z
+
+        arg = torch.rand(16, 8, device=self.device)
+
+        eager_y, eager_z = func(arg)
+
+        compiled_f = torch.compile(func)
+        compiled_y, compiled_z = compiled_f(arg)
+
+        self.assertEqual(compiled_y.stride(), eager_y.stride())
+        self.assertEqual(compiled_z.stride(), eager_z.stride())
 
     @unittest.skipIf(not HAS_GPU, "This is a GPU test!")
     @fresh_cache()

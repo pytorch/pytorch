@@ -84,12 +84,6 @@ THPObjectPtr _unicode_dispatch(PyObject* str) {
     return THPObjectPtr();
   }
 
-  // Remove this when we're 3.10+
-  if (PyUnicode_READY(str) != 0) {
-    // Returns -1 with an exception set on failure
-    return THPObjectPtr();
-  }
-
   auto length = PyUnicode_GET_LENGTH(str);
 
   switch (PyUnicode_KIND(str)) {
@@ -269,6 +263,13 @@ void initDynamoBindings(PyObject* torch) {
   m.attr("py_opcode_caches") = _PyOpcode_Caches_vec;
   m.def("code_framelocals_names", &code_framelocals_names);
   _register_functions(dynamo);
+
+  py::enum_<EvalFrameOverride>(m, "_EvalFrameOverride")
+      .value("NONE", EvalFrameOverride::NONE)
+      .value("SKIP", EvalFrameOverride::SKIP)
+      .value("ERROR", EvalFrameOverride::ERROR);
+
+  m.def("set_eval_frame_override", &set_eval_frame_override);
 }
 
 } // namespace torch::dynamo

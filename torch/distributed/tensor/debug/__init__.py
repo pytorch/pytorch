@@ -49,6 +49,15 @@ def _clear_fast_path_sharding_prop_cache():
     torch._C._clear_DTensor_sharding_propagator_cache()
 
 
+def _clear_sharding_prop_cache():
+    """
+    Clears both the Python and fast path sharding propagation caches, used for debugging purpose only.
+    This is the recommended way to clear all sharding propagation caches.
+    """
+    _clear_python_sharding_prop_cache()
+    _clear_fast_path_sharding_prop_cache()
+
+
 # Set namespace for exposed private names
 CommDebugMode.__module__ = "torch.distributed.tensor.debug"
 visualize_sharding.__module__ = "torch.distributed.tensor.debug"

@@ -243,7 +243,7 @@ class Backend(str):  # noqa: SLOT000
     """
     An enum-like class for backends.
 
-    Available backends: GLOO, NCCL, UCC, MPI, XCCL, and other registered backends.
+    Available backends: GLOO, NCCL, UCC, MPI, XCCL, FAKE, and other registered backends.
 
     The values of this class are lowercase strings, e.g., ``"gloo"``. They can
     be accessed as attributes, e.g., ``Backend.NCCL``.
@@ -264,12 +264,13 @@ class Backend(str):  # noqa: SLOT000
     UCC = "ucc"
     MPI = "mpi"
     XCCL = "xccl"
+    FAKE = "fake"
 
     _BackendPlugin = namedtuple("_BackendPlugin", ["creator_fn", "extended_api"])
 
     _plugins: dict[str, _BackendPlugin] = {}
 
-    backend_list = [UNDEFINED, GLOO, NCCL, XCCL, UCC, MPI]
+    backend_list = [UNDEFINED, GLOO, NCCL, XCCL, UCC, MPI, FAKE]
 
     # 3rd-party devices can register the default backend support here
     default_device_backend_map: dict[str, str] = {
@@ -285,6 +286,7 @@ class Backend(str):  # noqa: SLOT000
         XCCL: ["xpu"],
         UCC: ["cpu", "cuda"],
         MPI: ["cpu", "cuda"],
+        FAKE: ["cpu", "cuda", "hpu", "xpu"],
     }
 
     backend_type_map: dict[str, ProcessGroup.BackendType] = {
@@ -294,6 +296,7 @@ class Backend(str):  # noqa: SLOT000
         XCCL: ProcessGroup.BackendType.XCCL,
         UCC: ProcessGroup.BackendType.UCC,
         MPI: ProcessGroup.BackendType.MPI,
+        FAKE: ProcessGroup.BackendType.CUSTOM,
     }
 
     def __new__(cls, name: str):
@@ -849,7 +852,7 @@ def _get_object_coll_device(group: ProcessGroup | None = None) -> str:
 def _get_pg_default_device(group: ProcessGroup | None = None) -> torch.device:
     """
     .. note:: This method will be deprecated, it only stays for
-        backward-compatiblity reason. Alternatives:
+        backward-compatibility reason. Alternatives:
 
         - If you need to find a device for object collectives, please use
         `_get_object_coll_device(group)`.
@@ -874,7 +877,7 @@ def _get_pg_default_device(group: ProcessGroup | None = None) -> torch.device:
 
     warnings.warn(
         "`_get_pg_default_device` will be deprecated, it only stays for "
-        "backward-compatiblity reason. If you need to find a device for object "
+        "backward-compatibility reason. If you need to find a device for object "
         "collectives, please use `_get_object_coll_device`. If you need to query "
         "the device types supported by group, please use "
         "`_device_capability(group)`. ",
@@ -1197,7 +1200,7 @@ def _as_iterable(obj) -> collections.abc.Iterable:
 
 def _ensure_all_tensors_same_dtype(*tensors) -> None:
     last_dtype = None
-    # pyrefly: ignore [bad-assignment]
+
     for tensor in itertools.chain.from_iterable(map(_as_iterable, tensors)):
         tensor_dtype = tensor.dtype
         # Mixing complex and its element type is allowed
@@ -1795,7 +1798,7 @@ def init_process_group(
     else:
         # backward compatible API
         if store is None:
-            if backend == "fake":
+            if backend == Backend.FAKE:
                 from torch.testing._internal.distributed.fake_pg import FakeStore
 
                 store = FakeStore()
@@ -1879,7 +1882,6 @@ def _get_split_source(pg: ProcessGroup):
         split_from = pg._get_backend(pg.bound_device_id)
     elif pg is _world.default_pg:
         try:
-            # pyrefly: ignore [missing-attribute]
             split_from = pg._get_backend(torch.device("cuda"))
         except RuntimeError:
             # no cuda device associated with this backend
@@ -2155,7 +2157,7 @@ def _new_process_group_helper(
 
         # Process group wrapper initialization for supported PGs when TORCH_DISTRIBUTED_DEBUG is set
         if (
-            backend_str in [Backend.GLOO, Backend.NCCL, Backend.UCC]
+            backend_str in [Backend.GLOO, Backend.NCCL, Backend.XCCL, Backend.UCC]
             or backend_str.upper() in Backend._plugins
         ):
             # In debug mode and if GLOO is available, wrap in a wrapper PG that
@@ -3392,7 +3394,7 @@ def gather_object(
 
     if object_gather_list is None:
         raise AssertionError("Must provide object_gather_list on dst rank")
-    # pyrefly: ignore  # unbound-name
+    # pyrefly: ignore [unbound-name]
     for i, tensor in enumerate(output_tensors):
         tensor = tensor.type(torch.uint8)
         tensor_size = object_size_list[i]
