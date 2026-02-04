@@ -8424,6 +8424,21 @@ def softmax(x: Tensor, dim: int, half_to_float: bool) -> Tensor:
     return res
 
 
+@register_meta(aten._foreach_norm.Scalar)
+def meta_foreach_norm(tensors, ord=2, dtype=None):
+    if float(ord) == float('inf'):
+        for t in tensors:
+            torch._check(t.numel() > 0,
+                lambda: "_foreach_norm cannot compute infinity norm on empty tensor")
+    results = []
+    for t in tensors:
+        out_dtype = dtype if dtype is not None else t.dtype
+        if out_dtype.is_complex:
+            out_dtype = corresponding_real_dtype(out_dtype)
+        results.append(t.new_empty((), dtype=out_dtype))
+    return results
+
+
 @register_meta(aten.constant_pad_nd)
 @out_wrapper()
 def _constant_pad_nd_meta(input, pad, value=0):
