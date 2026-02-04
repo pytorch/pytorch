@@ -295,8 +295,10 @@ class TracerBase:
 
         args_ = self.create_arg(args)
         kwargs_ = self.create_arg(kwargs)
-        assert isinstance(args_, tuple)
-        assert isinstance(kwargs_, dict)
+        if not isinstance(args_, tuple):
+            raise AssertionError(f"Expected args_ to be tuple, got {type(args_)}")
+        if not isinstance(kwargs_, dict):
+            raise AssertionError(f"Expected kwargs_ to be dict, got {type(kwargs_)}")
 
         node = self.create_node(kind, target, args_, kwargs_, name, type_expr)
 
@@ -484,7 +486,7 @@ def _get_seq_nr(node_name: str = ""):
         annotation_log.debug("%s: seq_nr from current_meta grad_fn_seq_nr", node_name)
         new_seq_nr = current_meta["grad_fn_seq_nr"][-1]
 
-    elif torch.fx.traceback.is_preserving_node_seq_nr():
+    elif torch.fx.traceback._is_preserving_node_seq_nr():
         # Special case where we preserve seq_nr from currently tracing node
         # Used to preserve seq_nr when re-tracing subgraphs in HOP
         annotation_log.debug("%s: seq_nr from current_meta seq_nr", node_name)
@@ -495,7 +497,7 @@ def _get_seq_nr(node_name: str = ""):
         # This branch is used to get seq_nr for forward nodes
         new_seq_nr = torch.autograd._get_sequence_nr() - 1
 
-    if not torch.fx.traceback.is_preserving_node_seq_nr():
+    if not torch.fx.traceback._is_preserving_node_seq_nr():
         # See Note [Functionalization View Replay Annotation]
         # Overriding some node meta with the original node meta of the
         # regenerated node.
@@ -521,7 +523,8 @@ class GraphAppendingTracer(TracerBase):
 
 @compatibility(is_backward_compatible=False)
 def assert_fn(x):
-    assert x
+    if not x:
+        raise AssertionError("Assertion failed")
 
 
 @compatibility(is_backward_compatible=True)
@@ -597,8 +600,10 @@ class Proxy:
                 )
                 new_obj = copy.copy(v)
             new_dict[k] = new_obj
-        assert "node" in new_dict
-        assert "tracer" in new_dict
+        if "node" not in new_dict:
+            raise AssertionError("'node' not in new_dict during proxy unpickling")
+        if "tracer" not in new_dict:
+            raise AssertionError("'tracer' not in new_dict during proxy unpickling")
         new_proxy = Proxy(new_dict["node"], new_dict["tracer"])
         for k, v in new_dict.items():
             new_proxy.__dict__[k] = v
@@ -615,9 +620,11 @@ class Proxy:
 
     def __iter__(self) -> Iterator["Proxy"]:
         frame = inspect.currentframe()
-        assert frame is not None
+        if frame is None:
+            raise AssertionError("inspect.currentframe() returned None")
         calling_frame = frame.f_back
-        assert calling_frame is not None
+        if calling_frame is None:
+            raise AssertionError("frame.f_back is None")
         inst_list = list(dis.get_instructions(calling_frame.f_code))
         if sys.version_info >= (3, 11):
             from bisect import bisect_left
@@ -641,9 +648,11 @@ class Proxy:
             # check if this boolean is used in an assertion, bytecode pattern for assertions
             # is pretty stable for Python 3.7--3.9
             frame = inspect.currentframe()
-            assert frame is not None
+            if frame is None:
+                raise AssertionError("inspect.currentframe() returned None")
             calling_frame = frame.f_back
-            assert calling_frame is not None
+            if calling_frame is None:
+                raise AssertionError("frame.f_back is None")
             insts = list(dis.get_instructions(calling_frame.f_code))
             if sys.version_info >= (3, 11):
                 from bisect import bisect_left
@@ -655,7 +664,8 @@ class Proxy:
 
             if inst.opname == "POP_JUMP_IF_TRUE":
                 first = insts[cur + 1]
-                assert inst.arg is not None
+                if inst.arg is None:
+                    raise AssertionError("inst.arg is None for POP_JUMP_IF_TRUE")
                 last = insts[inst.arg // 2 - 1]
                 starts_with_assert = (
                     first.opname == "LOAD_GLOBAL"
@@ -746,9 +756,10 @@ class MetaProxy(Proxy):
                 meta_proxy = arg
                 break
 
-        assert meta_proxy is not None, (
-            "No MetaProxy found in arguments, but one is expected."
-        )
+        if meta_proxy is None:
+            raise AssertionError(
+                "No MetaProxy found in arguments, but one is expected."
+            )
 
         proxy = super().__torch_function__(orig_method, types, args, kwargs)
         with meta_proxy.fake_mode:
@@ -794,7 +805,8 @@ class ParameterProxy(Proxy):
 
     def __init__(self, tracer: TracerBase, node: Node, name, param):
         super().__init__(node, tracer)
-        assert isinstance(param, torch.nn.Parameter)
+        if not isinstance(param, torch.nn.Parameter):
+            raise AssertionError(f"Expected Parameter, got {type(param)}")
         self.param = param
         self.name = name
 

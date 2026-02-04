@@ -1742,7 +1742,7 @@ class CudaKernelParamCache:
         if config.aot_inductor.emit_multi_arch_kernel:
             bin_type_to_ext = {
                 "cubin": ".fatbin",
-                "spv": f".{XPU_KERNEL_FORMAT}",
+                XPU_KERNEL_FORMAT: ".spv",
                 "hsaco": ".hsaco",
             }
             assert bin_type in bin_type_to_ext, (
@@ -3938,6 +3938,8 @@ def _nvcc_arch_as_compile_option() -> str:
         return "100f"
     if arch == "100":
         return "100a"
+    if arch == "120":
+        return "120a"
     return arch
 
 

@@ -572,6 +572,10 @@ class OpsHandler(Generic[T]):
     def fma(self, x: T, y: T, z: T) -> T:
         raise NotImplementedError
 
+    def mul_rn(self, x: T, y: T) -> T:
+        """Multiplication with round-to-nearest, preventing fusion with subsequent ops."""
+        raise NotImplementedError
+
     def igamma(self, x: T, y: T) -> T:
         raise NotImplementedError
 
