@@ -85,10 +85,9 @@ from .ctx_manager import (
     TorchFunctionDisableVariable,
 )
 from .dicts import ConstDictVariable
-from .distributed import DistributedVariable
+from .distributed import DistributedVariable, ProcessGroupVariable
 from .functions import bind_args_cached, NestedUserFunctionVariable
 from .lists import ListVariable, NamedTupleVariable, TupleVariable
-from .script_object import TorchScriptObjectVariable
 from .torch_function import (
     can_dispatch_torch_function,
     dispatch_torch_function,
@@ -345,15 +344,15 @@ def get_overridable_functions() -> set[Callable[..., Any]]:
     from itertools import chain
 
     from torch.overrides import get_overridable_functions as get_overridable_functions_
+    from torch.utils._device import _device_constructors
 
     funcs = set(chain.from_iterable(get_overridable_functions_().values()))
+    funcs.update(_device_constructors())
     more: set[Callable[..., Any]] = {
-        torch.ones,
         torch.ones_like,
-        torch.zeros,
         torch.zeros_like,
-        torch.empty,
-        torch.full,
+        torch.empty_like,
+        torch.full_like,
     }
     funcs.update(more)
     return funcs
@@ -1233,8 +1232,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 _rank_not_in_group,
                 _resolve_group_name_by_ranks_and_tag,
                 get_process_group_ranks,
-                get_rank,
-                get_world_size,
             )
             from torch.distributed.tensor import DTensor
 
@@ -1244,25 +1241,20 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 _rank_not_in_group,
                 get_process_group_ranks,
                 _resolve_group_name_by_ranks_and_tag,
-                get_rank,
-                get_world_size,
             )
             def handle_constant_processgroup_functions(
                 self, tx: "InstructionTranslator", *args: VariableTracker
             ) -> VariableTracker:
+                # because the input is a "ProcessGroupVariable", we'll be guarding on its
+                # ID_MATCH based on how it was constructed.
+
                 # We desugar it at trace-time into ranks by directly calling util
                 # bake the result into the trace
-                if len(args) == 0:
-                    # get_rank() or get_world_size() with no args (uses default group)
-                    pass
-                elif len(args) == 1:
+                if len(args) == 1:
                     # group or group name
-                    assert args[0].is_python_constant() or (
-                        isinstance(args[0], TorchScriptObjectVariable)
-                        and args[  # pyrefly: ignore[missing-attribute]
-                            0
-                        ].value.script_class_name  # pyrefly: ignore[missing-attribute]
-                        == "torch.distributed.distributed_c10d.ProcessGroup"
+                    assert (
+                        isinstance(args[0], ProcessGroupVariable)
+                        or args[0].is_python_constant()
                     )
                 elif len(args) == 2:
                     # ranks + tag
@@ -1275,15 +1267,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         f"Invalid group value ({args}) for constant pg "
                         f"function {self.value}"
                     )
-
-                def get_arg_value(arg: VariableTracker) -> Any:
-                    # TorchScriptObjectVariable for ProcessGroup doesn't support
-                    # as_python_constant(), so extract real_obj directly
-                    if isinstance(arg, TorchScriptObjectVariable):
-                        return arg.value.real_obj  # pyrefly: ignore[missing-attribute]
-                    return arg.as_python_constant()
-
-                args_as_value = [get_arg_value(arg) for arg in args]
+                args_as_value = [arg.as_python_constant() for arg in args]
                 invocation_result = self.value(*args_as_value)
 
                 # Note - while we *could* cook up sources around invocations, like a FunctionSource
@@ -1298,6 +1282,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 *args: VariableTracker,
                 **kwargs: VariableTracker,
             ) -> VariableTracker:
+                from .builder import SourcelessBuilder
+
                 # rewrite non-primitive args/kwargs to be included in the on-the-fly prim function
                 # and rewrite args to have only proxyable args, then insert call_function
                 placements_vt = kwargs.get("placements")
@@ -1308,7 +1294,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 if placements_vt is None:
                     placements_vt = ConstantVariable.create(None)
                 elif isinstance(placements_vt, variables.UserDefinedObjectVariable):
-                    placements_vt = variables.BuiltinVariable(tuple).call_function(
+                    placements_vt = SourcelessBuilder.create(tx, tuple).call_function(
                         tx, [placements_vt], {}
                     )
 
@@ -2459,7 +2445,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         from torch.utils._pytree import tree_flatten
 
         from .base import AsPythonConstantNotImplementedError
-        from .builder import wrap_fx_proxy
+        from .builder import SourcelessBuilder, wrap_fx_proxy
 
         # 1. Convert `args, kwargs` into pytree-flattened proxy forms.
         #
@@ -2470,7 +2456,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         packed_input_vt = TupleVariable.build(
             tx, (TupleVariable.build(tx, args), ConstDictVariable.build(tx, kwargs))
         )
-        out_vt = variables.UserFunctionVariable(tree_flatten).call_function(  # type: ignore[arg-type]
+        out_vt = SourcelessBuilder.create(tx, tree_flatten).call_function(  # type: ignore[arg-type]
             tx, [packed_input_vt], {}
         )
         assert isinstance(out_vt, TupleVariable) and len(out_vt.items) == 2
@@ -2647,7 +2633,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 
         # Reuse the same pattern used above for tree_flatten: call the python
         # function through Dynamo so it symbolically interprets it.
-        out_vt = variables.UserFunctionVariable(_pytree.tree_unflatten).call_function(
+        out_vt = SourcelessBuilder.create(tx, _pytree.tree_unflatten).call_function(
             tx, [proxy_list_vt, out_spec_vt], {}
         )
 
