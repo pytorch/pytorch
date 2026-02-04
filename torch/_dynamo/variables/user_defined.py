@@ -535,6 +535,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
         elif self.value is collections.defaultdict:
             if len(args) == 0:
                 default_factory = variables.ConstantVariable.create(None)
+            elif len(args) == 1:
+                # In the case the argument is a builtin, then we can take the callable as the factory method.
+                # Otherwise, it must be a ConstantVariable holding None.
+                if not DefaultDictVariable.is_supported_arg(args[0]):
+                    raise_observed_exception(TypeError, tx, args=[args[0]])
+                default_factory = args[0]
+                args = []
             else:
                 default_factory, *args = args
             dict_vt = variables.BuiltinVariable.call_custom_dict(
