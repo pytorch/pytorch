@@ -49,6 +49,20 @@ kernel void geometric(
   output[tid] = static_cast<T>(result);
 }
 
+template <typename T>
+kernel void exponential(
+    device T* output [[buffer(0)]],
+    constant float2& params [[buffer(1)]],
+    constant long2& seed_base_offset [[buffer(2)]],
+    uint tid [[thread_position_in_grid]]) {
+  float u = c10::metal::rand(seed_base_offset.x, seed_base_offset.y + tid);
+  // Clamp to avoid log(0)
+  u = clamp(u, eps, 1.0f - eps);
+  // Exponential inverse CDF: -log(1-u) / lambda
+  float result = -::metal::precise::log(1.0f - u) / params.x;
+  output[tid] = static_cast<T>(result);
+}
+
 #define REGISTER_OP(NAME, DTYPE)                                    \
   template [[host_name(#NAME "_" #DTYPE)]] kernel void NAME<DTYPE>( \
       device DTYPE*, constant float2&, constant long2&, uint)
@@ -69,3 +83,7 @@ REGISTER_OP(geometric, long);
 REGISTER_OP(geometric, short);
 REGISTER_OP(geometric, char);
 REGISTER_OP(geometric, uchar);
+
+REGISTER_OP(exponential, float);
+REGISTER_OP(exponential, half);
+REGISTER_OP(exponential, bfloat);
