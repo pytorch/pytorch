@@ -3827,6 +3827,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             )
 
         do_upcast = pytree.tree_any(lambda v: should_upcast(v.dtype), value)
+        original_dtype = dtype
         if do_upcast:
             # Only promote FB16/BF16; do not promote other integer/boolean dtypes
             pytree.tree_map_(maybe_upcast, value)
@@ -4271,9 +4272,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         # expected dtype.
         if do_upcast:
             for result in result_tuple:
-                if result.dtype != dtype:
+                if result.dtype != original_dtype:
                     self.post_loop_combine.writeline(
-                        f"{result} = {result}.to({triton_compute_type(dtype)})"
+                        f"{result} = {result}.to({triton_compute_type(original_dtype)})"
                     )
 
         return result_var
