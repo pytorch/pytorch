@@ -294,7 +294,6 @@ keep-runtime-typing = true
 "test/torch_np/numpy_tests/**" = [
     "F821",
     "NPY201",
-    "S101",
 ]
 "test/dynamo/test_bytecode_utils.py" = [
     "F821",
@@ -349,8 +348,6 @@ keep-runtime-typing = true
 # S101 migration: Remaining test folders/files still needing migration (ignore S101 for now)
 # Note: test/export/**, test/jit/**, test/torch_np/numpy_tests/** have S101 added to existing entries above
 "test/_test_bazel.py" = ["S101"]
-"test/ao/sparsity/test_kernels.py" = ["S101"]
-"test/cpp_extensions/**" = ["S101"]
 "test/distributed/**" = ["S101"]
 "test/dynamo/**" = ["S101"]
 "test/functorch/**" = ["S101"]
@@ -429,8 +426,6 @@ keep-runtime-typing = true
 "test/test_unary_ufuncs.py" = ["S101"]
 "test/test_varlen_attention.py" = ["S101"]
 "test/test_view_ops.py" = ["S101"]
-"test/torch_np/test_dtype.py" = ["S101"]
-"test/torch_np/test_nep50_examples.py" = ["S101"]
 # torch/ folders still needing S101 migration
 "torch/_dynamo/**" = ["S101"]
 "torch/_inductor/**" = ["S101"]
