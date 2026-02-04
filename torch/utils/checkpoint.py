@@ -14,6 +14,7 @@ import torch.fx.traceback as fx_traceback
 from torch.utils._pytree import tree_map
 from torch.testing._internal.logging_tensor import capture_logs, LoggingTensorMode
 from torch.utils._python_dispatch import TorchDispatchMode
+from torch._C._autograd import SavedTensor
 from typing import NoReturn
 
 __all__ = [
@@ -791,48 +792,13 @@ class _Holder:
         self.handles: Dict[int, Optional[_Handle]] = {}
 
 
-class _NoopSaveInputs(torch.autograd.Function):
-    @staticmethod
-    # pyrefly: ignore [bad-override]
-    def forward(*args):
-        return torch.empty((0,))
-
-    @staticmethod
-    def setup_context(ctx: Any, inputs: Tuple[Any, ...], output: Any) -> None:
-        # Only tensors can be saved with ctx.save_for_backward, everything else
-        # is captured by get_args, which is saved directly on ctx
-        tensor_indices, tensors = zip(
-            *[(i, o) for i, o in enumerate(inputs) if isinstance(o, torch.Tensor)], strict=False
-        )
-        idx2saved_idx = {b: a for a, b in enumerate(tensor_indices)}
-        # args but with tensors replaced with None as placeholders
-        args = [None if isinstance(o, torch.Tensor) else o for o in inputs]
-
-        def get_args(saved_tensors):
-            # restore the placeholders with the original tensors grabbed from
-            # ctx.saved_tensors (which may be saved on a parent checkpoint if
-            # this checkpoint is nested, and that would trigger a recursive
-            # unpack!)
-            ret = [
-                saved_tensors[idx2saved_idx[i]] if i in tensor_indices else o
-                for i, o in enumerate(args)
-            ]
-            # grab the tail since we also saved the dummy to avoid having to explicitly
-            # handle the case where there are no tensor inputs
-            return ret[1:]
-
-        ctx.get_args = get_args
-        ctx.save_for_backward(*tensors)
-
-    @staticmethod
-    def backward(ctx, *grad_outputs) -> NoReturn:
-        raise AssertionError("Did not expect to backward on this graph")
-
-
 class _CheckpointFrame:
     def __init__(self, recompute_fn, early_stop, unpack_error_cb, metadata_fn) -> None:
         self.recompute_fn = recompute_fn
-        self.input_saver = None
+        # Store saved inputs directly using SavedTensor
+        self.saved_tensors: List[SavedTensor] = []
+        self.tensor_indices: List[int] = []
+        self.non_tensor_args: List[Any] = []
         self.weak_holders: List[ReferenceType] = []
         # We store this as a weakkeydictionary so that in the case of a partial
         # backward, the entries in the dict are cleared alongside the Holder
@@ -854,6 +820,29 @@ class _CheckpointFrame:
         self.x_metadatas = []
         self.forward_completed = False
         self.ignore_saved_mismatch = False
+
+    def save_inputs(self, kwargs, *args):
+        """Save inputs using SavedTensor, separating tensors from non-tensors."""
+        self.saved_tensors = []
+        self.tensor_indices = []
+        self.non_tensor_args = []
+
+        for i, arg in enumerate(args):
+            if isinstance(arg, torch.Tensor):
+                self.saved_tensors.append(SavedTensor(arg, is_output=False))
+                self.tensor_indices.append(i)
+                self.non_tensor_args.append(None)
+            else:
+                self.non_tensor_args.append(arg)
+
+        self.saved_kwargs = kwargs
+
+    def get_inputs(self):
+        """Reconstruct inputs by unpacking SavedTensors."""
+        args = list(self.non_tensor_args)
+        for saved_idx, arg_idx in enumerate(self.tensor_indices):
+            args[arg_idx] = self.saved_tensors[saved_idx].unpack()
+        return self.saved_kwargs, args
 
     def check_recomputed_tensors_match(self, gid) -> None:
         if self.ignore_saved_mismatch:
@@ -1162,15 +1151,14 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
                     gid = int(uuid.uuid4())
 
             if not frame.is_recomputed[gid]:
-                ctx = frame.input_saver.grad_fn
-                args = ctx.get_args(ctx.saved_tensors)
+                kwargs, args = frame.get_inputs()
 
                 try:
                     with _recomputation_hook(
                         weakref.ref(frame), gid
                     ), torch.autograd.enable_grad():
                         # See Note: [compiled autograd and checkpoint unpack hook]
-                        _run_fn_with_dynamo_disabled(frame.recompute_fn, *args)
+                        _run_fn_with_dynamo_disabled(frame.recompute_fn, kwargs, *args)
                 except _StopRecomputationError:
                     pass
                 frame.is_recomputed[gid] = True
@@ -1612,13 +1600,14 @@ def _checkpoint_without_reentrant_generator(
         unpack_error_cb,
         metadata_fn
     )
-    dummy = torch.empty((0,), requires_grad=True)
-    new_frame.input_saver = _NoopSaveInputs.apply(dummy, kwargs, *args)
 
-    # When ambient grad_mode is False
-    if new_frame.input_saver.grad_fn is None:
+    # When ambient grad_mode is False, checkpoint is a no-op
+    if not torch.is_grad_enabled():
         yield
         return
+
+    # Save inputs using SavedTensor (goes through saved_tensors_hooks)
+    new_frame.save_inputs(kwargs, *args)
 
     with _checkpoint_hook(new_frame), forward_context:
         yield
