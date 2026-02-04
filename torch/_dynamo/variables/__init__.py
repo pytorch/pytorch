@@ -34,7 +34,6 @@ from .ctx_manager import (
     GradInplaceRequiresGradCtxManagerVariable,
     GradModeVariable,
     InferenceModeVariable,
-    JvpIncrementNestingCtxManagerVariable,
     SDPAKernelVariable,
     SetFwdGradEnabledContextManager,
     TemporarilyPopInterpreterStackCtxManagerVariable,
@@ -145,7 +144,12 @@ from .tensor import (
     UnspecializedPythonVariable,
     UntypedStorageVariable,
 )
-from .torch import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
+from .torch import (
+    JvpDecrementNestingVariable,
+    JvpIncrementNestingVariable,
+    TorchCtxManagerClassVariable,
+    TorchInGraphFunctionVariable,
+)
 from .user_defined import (
     FrozenDataClassVariable,
     MutableMappingVariable,
@@ -186,6 +190,8 @@ __all__ = [
     "GradModeVariable",
     "IteratorVariable",
     "ItertoolsVariable",
+    "JvpDecrementNestingVariable",
+    "JvpIncrementNestingVariable",
     "LambdaVariable",
     "LazyConstantVariable",
     "LazyVariableTracker",
