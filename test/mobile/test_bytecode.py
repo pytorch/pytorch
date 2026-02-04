@@ -387,11 +387,7 @@ class testVariousModelVersions(TestCase):
 
         buffer = io.BytesIO(script_module._save_to_buffer_for_lite_interpreter())
         buffer.seek(0)
-        type_list = _get_mobile_model_contained_types(buffer)
-        if len(type_list) < 0:
-            raise AssertionError(
-                f"Expected non-negative type list length, got {len(type_list)}"
-            )
+        _get_mobile_model_contained_types(buffer)
 
 
 if __name__ == "__main__":
