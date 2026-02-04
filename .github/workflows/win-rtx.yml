@@ -1,0 +1,106 @@
+name: Windows RTX Nightly
+
+on:
+  schedule:
+    # Run every day at 1:15 AM UTC
+    - cron: '30 0 * * *'
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+
+  llm-td:
+    if: github.repository_owner == 'pytorch'
+    name: before-test
+    uses: ./.github/workflows/llm_td_retrieval.yml
+    permissions:
+      id-token: write
+      contents: read
+
+  target-determination:
+    name: before-test
+    uses: ./.github/workflows/target_determination.yml
+    needs: llm-td
+    permissions:
+      id-token: write
+      contents: read
+
+  # Windows CUDA Build & Test - sm_89 (RTX 40xx)
+  win_vs2022_cuda12_8_py3_build_sm89:
+    name: win-vs2022-cuda12.8-py3-sm89
+    uses: ./.github/workflows/_win-build.yml
+    with:
+      build-environment: win-vs2022-cuda12.8-py3-sm89
+      cuda-version: "12.8"
+      runner: "rtx-40x0-build"
+      cuda-arch-list: "8.9"
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 1, runner: "rtx-40x0-test" },
+        ]}
+    secrets: inherit
+
+  win_vs2022_cuda12_8_py3_test_sm89:
+    name: win-vs2022-cuda12.8-py3-sm89
+    needs:
+      - win_vs2022_cuda12_8_py3_build_sm89
+    uses: ./.github/workflows/_win-test.yml
+    with:
+      build-environment: win-vs2022-cuda12.8-py3-sm89
+      build-secure-hash: ${{ needs.win_vs2022_cuda12_8_py3_build_sm89.outputs.build-secure-hash }}
+      build-artifact-name: ${{ needs.win_vs2022_cuda12_8_py3_build_sm89.outputs.build-artifact-name }}
+      cuda-version: 12.8
+      test-matrix: |
+        { include: [
+          { config: "default",          shard: 1, num_shards: 5, runner: "rtx-40x0-test" },
+          { config: "default",          shard: 2, num_shards: 5, runner: "rtx-40x0-test" },
+          { config: "default",          shard: 3, num_shards: 5, runner: "rtx-40x0-test" },
+          { config: "default",          shard: 4, num_shards: 5, runner: "rtx-40x0-test" },
+          { config: "default",          shard: 5, num_shards: 5, runner: "rtx-40x0-test" }
+        ]}
+      disable-monitor: true
+      timeout-minutes: 360
+    secrets: inherit
+
+  # Windows CUDA Build & Test - sm_120 (Blackwell - RTX 5070)
+  win_vs2022_cuda12_8_py3_build_sm120:
+    name: win-vs2022-cuda12.8-py3-sm120
+    uses: ./.github/workflows/_win-build.yml
+    with:
+      build-environment: win-vs2022-cuda12.8-py3-sm120
+      cuda-version: "12.8"
+      runner: "rtx-50x0-build"
+      cuda-arch-list: "12.0"
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 1, runner: "rtx-50x0-test" },
+        ]}
+    secrets: inherit
+
+  win_vs2022_cuda12_8_py3_test_sm120:
+    name: win-vs2022-cuda12.8-py3-sm120
+    needs:
+      - win_vs2022_cuda12_8_py3_build_sm120
+    uses: ./.github/workflows/_win-test.yml
+    with:
+      build-environment: win-vs2022-cuda12.8-py3-sm120
+      build-secure-hash: ${{ needs.win_vs2022_cuda12_8_py3_build_sm120.outputs.build-secure-hash }}
+      build-artifact-name : ${{ needs.win_vs2022_cuda12_8_py3_build_sm120.outputs.build-artifact-name }}
+      cuda-version: 12.8
+      test-matrix: |
+        { include: [
+          { config: "default",          shard: 1, num_shards: 5, runner: "rtx-50x0-test" },
+          { config: "default",          shard: 2, num_shards: 5, runner: "rtx-50x0-test" },
+          { config: "default",          shard: 3, num_shards: 5, runner: "rtx-50x0-test" },
+          { config: "default",          shard: 4, num_shards: 5, runner: "rtx-50x0-test" },
+          { config: "default",          shard: 5, num_shards: 5, runner: "rtx-50x0-test" },
+        ]}
+      disable-monitor: true
+      timeout-minutes: 360
+    secrets: inherit
