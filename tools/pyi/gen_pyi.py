@@ -1771,7 +1771,7 @@ def gen_pyi(
                     "set_",
                     [
                         "self",
-                        "source: Storage | TypedStorage | UntypedStorage",
+                        "source: Storage | TypedStorage | UntypedStorage | Tensor",
                         "storage_offset: IntLikeType",
                         "size: _symsize",
                         "stride: _symsize",
@@ -1780,7 +1780,12 @@ def gen_pyi(
                 ),
                 defs(
                     "set_",
-                    ["self", "source: Storage | TypedStorage | UntypedStorage"],
+                    ["self", "source: Storage | TypedStorage | UntypedStorage | Tensor"],
+                    "Tensor",
+                ),
+                defs(
+                    "set_",
+                    ["self"],
                     "Tensor",
                 ),
             ],
