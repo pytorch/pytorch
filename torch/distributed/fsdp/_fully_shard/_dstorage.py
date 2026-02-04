@@ -9,7 +9,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import auto, Enum
-from typing import Any, TYPE_CHECKING
+from typing import Any, Literal, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from torch.distributed.device_mesh import DeviceMesh
 
 
-__all__ = ["DStorage", "fully_shard_flat", "get_dstorage"]
+__all__ = ["DStorage", "fully_shard_flat", "get_dstorage", "Owned"]
 
 
 # Module attribute name for storing DStorage
@@ -36,6 +36,34 @@ _DSTORAGE_ATTR = "_dstorage"
 def get_dstorage(module: nn.Module) -> "DStorage | None":
     """Get the DStorage associated with a module, if any."""
     return getattr(module, _DSTORAGE_ATTR, None)
+
+
+class Owned(Placement):
+    """
+    Placement indicating a parameter is fully owned by one rank.
+
+    In parameter-boundary sharding, each parameter is assigned to exactly one
+    rank (the owner). The owner has the full parameter data, while other ranks
+    have an empty tensor.
+
+    This enables sharding at parameter boundaries rather than within parameters,
+    which can be useful for models where parameter sizes don't divide evenly.
+    """
+
+    def __init__(self, owner_rank: int):
+        self.owner_rank = owner_rank
+        super().__init__()
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Owned):
+            return False
+        return self.owner_rank == other.owner_rank
+
+    def __hash__(self) -> int:
+        return hash((type(self), self.owner_rank))
+
+    def __repr__(self) -> str:
+        return f"Owned({self.owner_rank})"
 
 
 class ShardedState(Enum):
@@ -60,6 +88,7 @@ class ParamInfo:
     byte_offset: int = 0  # byte offset into the sharded storage
     global_numel: int = 0  # total elements in unsharded param
     unsharded_byte_offset: int = 0  # byte offset into the unsharded storage
+    owner_rank: int | None = None  # for param-boundary sharding: which rank owns this param
 
 
 def _get_dtype_alignment(dtype: torch.dtype) -> int:
@@ -103,6 +132,7 @@ class DStorage:
         module: nn.Module,
         reshard_after_forward: bool = True,
         register_hooks: bool = True,
+        shard_strategy: Literal["per_param", "param_boundary"] = "per_param",
     ) -> None:
         if byte_storage.dtype != torch.uint8:
             raise ValueError(f"Expected uint8 storage, got {byte_storage.dtype}")
@@ -114,6 +144,7 @@ class DStorage:
         self._module = module
         self._state = ShardedState.SHARDED
         self._reshard_after_forward = reshard_after_forward
+        self._shard_strategy = shard_strategy
 
         # Unsharded buffer (allocated on demand)
         self._unsharded_byte_storage: torch.Tensor | None = None
@@ -218,6 +249,36 @@ class DStorage:
         world_size = self.world_size
         my_rank = self._mesh.get_local_rank()
 
+        if self._shard_strategy == "param_boundary":
+            self._all_gather_param_boundary(pg, my_rank)
+        else:
+            self._all_gather_per_param(pg, world_size, my_rank)
+
+        return self._unsharded_byte_storage
+
+    def _all_gather_param_boundary(self, pg, my_rank: int) -> None:
+        """All-gather for param-boundary strategy: broadcast from owner."""
+        for fqn, info in self._param_infos.items():
+            owner_rank = info.owner_rank
+            assert owner_rank is not None, f"owner_rank not set for {fqn}"
+
+            # Get destination in unsharded buffer
+            num_bytes = info.global_numel * info.dtype.itemsize
+            dest = self._unsharded_byte_storage[
+                info.unsharded_byte_offset : info.unsharded_byte_offset + num_bytes
+            ]
+            dest_typed = dest.view(info.dtype)
+
+            if my_rank == owner_rank:
+                # Owner: copy from local storage to unsharded buffer, then broadcast
+                local_view = self.get_local_view(fqn)
+                dest_typed.copy_(local_view.view(-1))
+
+            # Broadcast from owner to all ranks
+            dist.broadcast(dest_typed, src=owner_rank, group=pg)
+
+    def _all_gather_per_param(self, pg, world_size: int, my_rank: int) -> None:
+        """All-gather for per-param strategy: gather shards and concatenate."""
         # For each parameter, all-gather its chunks and reassemble
         for fqn, info in self._param_infos.items():
             # Get shard dimension
@@ -289,8 +350,6 @@ class DStorage:
                 info.unsharded_byte_offset : info.unsharded_byte_offset + num_bytes
             ]
             dest.copy_(unsharded_param.view(-1).view(torch.uint8))
-
-        return self._unsharded_byte_storage
 
     def _compute_local_shape_for_rank(
         self, global_shape: torch.Size, placements: tuple[Placement, ...], rank: int
@@ -371,13 +430,40 @@ class DStorage:
         """
         Reduce-scatter gradients to sharded DTensor params.
 
-        Uses the same approach as FSDP2's foreach_reduce:
-        1. Pad each gradient's dim0 to be divisible by world_size
-        2. Use chunk_cat to reorder: chunk each grad into world_size pieces,
-           concatenate chunk[i] from all grads into row i
-        3. Reduce-scatter the reordered buffer
-        4. Extract sharded gradients from the output
+        For per_param strategy: Uses reduce-scatter to distribute gradient shards.
+        For param_boundary strategy: Uses reduce to send gradients to owner rank.
         """
+        if self._shard_strategy == "param_boundary":
+            self._reduce_grads_param_boundary()
+        else:
+            self._reduce_scatter_grads_per_param()
+
+    def _reduce_grads_param_boundary(self) -> None:
+        """Reduce gradients to owner rank for param-boundary strategy."""
+        pg = self._mesh.get_group()
+        my_rank = self._mesh.get_local_rank()
+
+        for fqn, info in self._param_infos.items():
+            unsharded_param = _get_param_from_module(self._module, fqn)
+            if unsharded_param.grad is None:
+                continue
+
+            owner_rank = info.owner_rank
+            assert owner_rank is not None
+
+            grad = unsharded_param.grad.contiguous()
+
+            # Reduce gradient to owner rank (average across all ranks)
+            dist.reduce(grad, dst=owner_rank, op=dist.ReduceOp.AVG, group=pg)
+
+            # Only owner keeps the gradient
+            if my_rank == owner_rank:
+                # Create DTensor gradient for the sharded param
+                grad_dtensor = _create_dtensor_from_view(grad, info, self._mesh)
+                self._sharded_params[fqn].grad = grad_dtensor
+
+    def _reduce_scatter_grads_per_param(self) -> None:
+        """Reduce-scatter gradients for per-param strategy."""
         pg = self._mesh.get_group()
         world_size = self.world_size
 
@@ -711,6 +797,143 @@ def _get_param_from_module(
     return getattr(module, parts[-1])
 
 
+def _assign_params_to_ranks(
+    named_params: list[tuple[str, nn.Parameter]],
+    world_size: int,
+) -> dict[str, int]:
+    """
+    Assign parameters to ranks using greedy bin-packing for balanced memory.
+
+    Assigns larger parameters first to help balance the load.
+
+    Returns:
+        Dict mapping FQN to owner rank.
+    """
+    # Sort by size (descending) for better bin packing
+    sorted_params = sorted(
+        named_params,
+        key=lambda x: x[1].numel() * x[1].element_size(),
+        reverse=True,
+    )
+
+    rank_bytes: list[int] = [0] * world_size
+    assignments: dict[str, int] = {}
+
+    for fqn, param in sorted_params:
+        # Assign to rank with least bytes
+        target_rank = rank_bytes.index(min(rank_bytes))
+        assignments[fqn] = target_rank
+        rank_bytes[target_rank] += param.numel() * param.element_size()
+
+    return assignments
+
+
+def _create_param_infos_param_boundary(
+    named_params: list[tuple[str, nn.Parameter]],
+    mesh: DeviceMesh,
+    assignments: dict[str, int],
+) -> tuple[dict[str, ParamInfo], int, int]:
+    """
+    Create ParamInfo for parameter-boundary sharding.
+
+    Each parameter is assigned to one rank. The owner has full data,
+    non-owners have empty storage for this param.
+
+    Returns:
+        param_infos: dict mapping FQN to ParamInfo
+        total_bytes: total bytes needed for the sharded buffer (this rank's owned params)
+        total_unsharded_bytes: total bytes needed for the unsharded buffer (all params)
+    """
+    my_rank = mesh.get_local_rank()
+    param_infos: dict[str, ParamInfo] = {}
+    current_byte_offset = 0
+    current_unsharded_byte_offset = 0
+
+    for fqn, param in named_params:
+        global_shape = param.shape
+        global_stride = make_contiguous_strides_for(global_shape)
+        dtype = param.dtype
+        owner_rank = assignments[fqn]
+
+        global_numel = param.numel()
+
+        # For param-boundary: owner has full shape, others have empty
+        if my_rank == owner_rank:
+            local_shape = global_shape
+            local_numel = global_numel
+        else:
+            # Empty tensor: shape with 0 in first dim
+            local_shape = torch.Size([0] + list(global_shape[1:]))
+            local_numel = 0
+
+        placement = (Owned(owner_rank),)
+
+        # Align offset for this dtype (sharded buffer - only for owned params)
+        alignment = _get_dtype_alignment(dtype)
+
+        # Only allocate space in sharded buffer if this rank owns the param
+        if my_rank == owner_rank:
+            aligned_offset = _align_offset(current_byte_offset, alignment)
+            byte_offset = aligned_offset
+            param_bytes = local_numel * dtype.itemsize
+            current_byte_offset = aligned_offset + param_bytes
+        else:
+            byte_offset = 0  # Not stored locally
+
+        # Unsharded buffer offset (all ranks need space for all params)
+        aligned_unsharded_offset = _align_offset(current_unsharded_byte_offset, alignment)
+        unsharded_param_bytes = global_numel * dtype.itemsize
+        current_unsharded_byte_offset = aligned_unsharded_offset + unsharded_param_bytes
+
+        info = ParamInfo(
+            fqn=fqn,
+            global_shape=global_shape,
+            global_stride=tuple(global_stride),
+            dtype=dtype,
+            requires_grad=param.requires_grad,
+            placements=placement,
+            local_shape=local_shape,
+            local_numel=local_numel,
+            byte_offset=byte_offset,
+            global_numel=global_numel,
+            unsharded_byte_offset=aligned_unsharded_offset,
+            owner_rank=owner_rank,
+        )
+        param_infos[fqn] = info
+
+    return param_infos, current_byte_offset, current_unsharded_byte_offset
+
+
+def _copy_original_data_to_flat_storage_param_boundary(
+    byte_storage: torch.Tensor,
+    named_params: list[tuple[str, nn.Parameter]],
+    param_infos: dict[str, ParamInfo],
+    mesh: DeviceMesh,
+) -> None:
+    """
+    Copy original parameter data into byte storage for parameter-boundary sharding.
+
+    Only the owner rank copies the full parameter data.
+    """
+    my_rank = mesh.get_local_rank()
+
+    for fqn, param in named_params:
+        info = param_infos[fqn]
+
+        if param.device.type == "meta":
+            continue
+
+        # Only owner copies data
+        if my_rank != info.owner_rank:
+            continue
+
+        # Copy full parameter into byte storage
+        num_bytes = info.local_numel * info.dtype.itemsize
+        byte_view = byte_storage[info.byte_offset : info.byte_offset + num_bytes]
+        typed_dest = byte_view.view(info.dtype)
+        typed_dest.copy_(param.data.view(-1))
+
+
 def _copy_original_data_to_flat_storage(
     byte_storage: torch.Tensor,
     named_params: list[tuple[str, nn.Parameter]],
@@ -793,6 +1016,7 @@ def fully_shard_flat(
     placements: tuple[Placement, ...] | None = None,
     reshard_after_forward: bool = True,
     register_hooks: bool = True,
+    shard_strategy: Literal["per_param", "param_boundary"] = "per_param",
 ) -> DStorage:
     """
     Apply flat-storage FSDP sharding to a module.
@@ -815,12 +1039,19 @@ def fully_shard_flat(
         module: The module to shard. Can have real or meta device parameters.
         mesh: The device mesh for sharding. Currently only 1D mesh is supported.
         placements: The sharding placements. Defaults to (Shard(0),).
+            Ignored when shard_strategy="param_boundary" (uses Owned placement).
         reshard_after_forward: If True (default), reshard parameters after forward
             to save memory. Parameters will be re-unsharded in backward.
             If False, keep parameters unsharded between forward and backward.
         register_hooks: If True (default), register forward/backward hooks for
             automatic unshard/reshard. If False, caller must manually call
             unshard()/reshard().
+        shard_strategy: The sharding strategy to use:
+            - "per_param" (default): Each parameter is sharded across all ranks
+              along the specified dimension. Uses Shard placement.
+            - "param_boundary": Each parameter is assigned to one rank (owner).
+              The owner has full parameter data, others have empty tensors.
+              Uses Owned placement and greedy bin-packing for balanced memory.
 
     Returns:
         DStorage instance containing the unified byte buffer and parameter metadata.
@@ -870,15 +1101,27 @@ def fully_shard_flat(
         device = torch.device(device)
 
     # Create parameter infos with local shapes and byte offsets
-    param_infos, total_bytes, total_unsharded_bytes = _create_param_infos(
-        named_params, mesh, placements
-    )
+    if shard_strategy == "param_boundary":
+        # Assign params to ranks using bin-packing
+        assignments = _assign_params_to_ranks(named_params, mesh.size())
+        param_infos, total_bytes, total_unsharded_bytes = _create_param_infos_param_boundary(
+            named_params, mesh, assignments
+        )
+    else:
+        param_infos, total_bytes, total_unsharded_bytes = _create_param_infos(
+            named_params, mesh, placements
+        )
 
     # Allocate unified byte storage
     byte_storage = torch.empty(total_bytes, dtype=torch.uint8, device=device)
 
     # Copy original data into byte storage (handles sharding)
-    _copy_original_data_to_flat_storage(byte_storage, named_params, param_infos, mesh)
+    if shard_strategy == "param_boundary":
+        _copy_original_data_to_flat_storage_param_boundary(
+            byte_storage, named_params, param_infos, mesh
+        )
+    else:
+        _copy_original_data_to_flat_storage(byte_storage, named_params, param_infos, mesh)
 
     # Replace each parameter with DTensor view (before creating DStorage)
     for fqn, info in param_infos.items():
@@ -894,6 +1137,7 @@ def fully_shard_flat(
         byte_storage, param_infos, mesh, total_bytes, total_unsharded_bytes, module,
         reshard_after_forward=reshard_after_forward,
         register_hooks=register_hooks,
+        shard_strategy=shard_strategy,
     )
 
     # Store DStorage on module for nested wrapping detection

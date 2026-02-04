@@ -295,6 +295,8 @@ def map_placements_after_broadcast(
     partial_to_replicate: bool = False,
 ) -> tuple[Placement, ...]:
     """Map each placement based on the output shape after broadcast."""
+    from torch.distributed.fsdp._fully_shard import Owned
+
     new_placements: list[Placement] = []
     for placement in placements:
         if isinstance(placement, Partial):
@@ -304,6 +306,10 @@ def map_placements_after_broadcast(
             else:
                 new_placements.append(placement)
         elif isinstance(placement, Replicate):
+            new_placements.append(placement)
+        elif isinstance(placement, Owned):
+            # Owned placement: owner has full data, non-owners have empty
+            # For pointwise ops, preserve the Owned placement
             new_placements.append(placement)
         else:
             assert isinstance(placement, Shard | _StridedShard)

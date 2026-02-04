@@ -19,6 +19,7 @@ import copy
 
 import torch
 import torch.distributed as dist
+import torch.nn as nn
 from datetime import timedelta
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp._fully_shard import fully_shard_flat, get_dstorage
@@ -189,6 +190,97 @@ def run():
     return True
 
 
+def run_param_boundary():
+    """Test param_boundary sharding strategy."""
+    rank, world_size = dist.get_rank(), dist.get_world_size()
+    device = torch.device("cuda", torch.cuda.current_device())
+    mesh = init_device_mesh("cuda", (world_size,))
+
+    print_rank0(f"\n{'='*70}")
+    print_rank0(f"Testing param_boundary sharding with world_size={world_size}")
+    print_rank0(f"{'='*70}")
+
+    # Simple MLP model
+    torch.manual_seed(42)
+
+    class SimpleMLP(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.fc1 = nn.Linear(16, 32)
+            self.fc2 = nn.Linear(32, 64)
+            self.fc3 = nn.Linear(64, 8)
+
+        def forward(self, x):
+            x = torch.relu(self.fc1(x))
+            x = torch.relu(self.fc2(x))
+            return self.fc3(x)
+
+    model = SimpleMLP().to(device)
+
+    # Create reference model (DDP)
+    ref_model = copy.deepcopy(model)
+    ref_model = DDP(ref_model, device_ids=[rank])
+    ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
+
+    # Apply param_boundary sharding
+    from torch.distributed.fsdp._fully_shard import Owned
+
+    storage = fully_shard_flat(model, mesh, shard_strategy="param_boundary")
+
+    print_rank0(f"\n=== Parameter Ownership (param_boundary) ===")
+    for fqn, info in storage.param_infos.items():
+        owner = info.owner_rank
+        has_data = info.local_numel > 0
+        status = "OWNS" if rank == owner else "----"
+        if rank == 0:
+            print(f"  {fqn:<20} | owner=rank{owner} | local_numel={info.local_numel}")
+
+    # Verify placements are Owned
+    for fqn, info in storage.param_infos.items():
+        assert len(info.placements) == 1
+        assert isinstance(info.placements[0], Owned), f"{fqn} should have Owned placement"
+        assert info.placements[0].owner_rank == info.owner_rank
+
+    print_rank0(f"  ✓ All parameters have Owned placement")
+
+    # Create optimizer for FSDP model
+    optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+
+    # Training loop
+    print_rank0(f"\n=== Training loop (comparing with DDP reference) ===")
+    batch_size = 4
+    num_iters = 5
+
+    torch.manual_seed(42 + rank)
+    for iteration in range(num_iters):
+        inp = torch.randn(batch_size, 16, device=device)
+
+        # Reference model (DDP)
+        ref_optim.zero_grad()
+        ref_loss = ref_model(inp).sum()
+        ref_loss.backward()
+        ref_optim.step()
+
+        # FSDP model with param_boundary
+        optim.zero_grad()
+        fsdp_loss = model(inp).sum()
+        fsdp_loss.backward()
+        torch.cuda.synchronize()
+        optim.step()
+
+        # Compare losses
+        torch.testing.assert_close(ref_loss, fsdp_loss)
+        print_rank0(f"  Iter {iteration}: ref_loss={ref_loss.item():.6f}, "
+                    f"fsdp_loss={fsdp_loss.item():.6f} ✓")
+
+    print_rank0(f"\n{'='*70}")
+    print_rank0("PASSED: param_boundary sharding matches DDP reference")
+    print_rank0(f"{'='*70}")
+
+    torch.cuda.synchronize()
+    return True
+
+
 def main():
     """Run tests."""
     rank, world_size = setup_distributed()
@@ -197,6 +289,7 @@ def main():
 
     try:
         run()
+        run_param_boundary()
         success = True
     except Exception as e:
         print_rank0(f"FAILED: {e}")
