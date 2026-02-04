@@ -765,8 +765,8 @@ py::object toPyObject(IValue ivalue) {
     // PyObject
     return py::reinterpret_borrow<py::object>(ivalue.toPyObject());
   } else if (ivalue.isCapsule()) {
-#ifdef USE_DISTRIBUTED
     auto capsule = ivalue.toCapsule();
+#ifdef USE_DISTRIBUTED
     {
       auto pg = c10::static_intrusive_pointer_cast<c10d::ProcessGroup>(capsule);
       if (pg != nullptr) {
