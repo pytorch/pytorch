@@ -26,11 +26,11 @@ covered in the {ref}`export IR spec <export.ir_spec>`.
 In *non-strict mode*, we trace through the program using the normal Python
 interpreter. Your code executes exactly as it would in eager mode; the only
 difference is that all Tensors are replaced by
-[fake Tensors](https://pytorch.org/docs/main/torch.compiler_fake_tensor.html),
+[fake Tensors](https://docs.pytorch.org/docs/main/user_guide/torch_compiler/torch.compiler_fake_tensor.html),
 **which have shapes and other forms of metadata but no data**, wrapped in
 [Proxy objects](https://pytorch.org/docs/main/fx.html) that record all
 operations on them into a graph. We also capture
-[conditions on Tensor shapes](https://pytorch.org/docs/main/torch.compiler_dynamic_shapes.html#the-guard-model)
+[conditions on Tensor shapes](https://docs.pytorch.org/docs/main/user_guide/torch_compiler/torch.compiler_dynamic_shapes.html#the-guard-model)
 **that guard the correctness of the generated code**.
 
 In *strict mode*, we first trace through the program using
@@ -247,7 +247,7 @@ model are different in these cases.
 #### Dynamic Shape-Dependent Control Flow
 
 When the value involved in a control flow is a
-[dynamic shape](https://pytorch.org/docs/main/torch.compiler_dynamic_shapes.html),
+[dynamic shape](https://docs.pytorch.org/docs/main/user_guide/torch_compiler/torch.compiler_dynamic_shapes.html),
 in most cases **we will also know the concrete value of the dynamic shape
 during tracing**: see the following section for more details on how the
 compiler tracks this information.
@@ -297,7 +297,7 @@ class M_new(torch.nn.Module):
 ```
 
 A special case of data-dependent control flow is where it involves a
-[data-dependent dynamic shape](https://pytorch.org/docs/main/torch.compiler_dynamic_shapes.html#unbacked-symints):
+[data-dependent dynamic shape](https://docs.pytorch.org/docs/main/user_guide/torch_compiler/torch.compiler_dynamic_shapes.html#unbacked-symints):
 typically, the shape of some intermediate Tensor that depends on input data
 rather than on input shapes (thus not shape-dependent). Instead of using a
 control flow operator, in this case you can provide an assertion that decides
@@ -351,7 +351,7 @@ Moreover, as we encounter control flow in the program, we create boolean
 expressions, typically involving relational operators, describing conditions
 along the traced path. These **expressions are evaluated to decide which path
 to trace through the program**, and recorded in a
-[shape environment](https://pytorch.org/docs/main/torch.compiler_dynamic_shapes.html#overall-architecture)
+[shape environment](https://docs.pytorch.org/docs/main/user_guide/torch_compiler/torch.compiler_dynamic_shapes.html#overall-architecture)
 to guard the correctness of the traced path and to evaluate subsequently
 created expressions.
 
@@ -360,7 +360,7 @@ We briefly introduce these subsystems next.
 ### Fake Implementations of PyTorch Operators
 
 Recall that during tracing, we are executing the program with
-[fake Tensors](https://pytorch.org/docs/main/torch.compiler_fake_tensor.html),
+[fake Tensors](https://docs.pytorch.org/docs/main/user_guide/torch_compiler/torch.compiler_fake_tensor.html),
 which have no data. In general we cannot call the actual implementations of
 PyTorch operators with fake Tensors. Thus each operator needs to have an
 additional fake (a.k.a. "meta") implementation, which inputs and outputs fake

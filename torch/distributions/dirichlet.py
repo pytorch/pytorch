@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional
 
 import torch
 from torch import Tensor
@@ -62,7 +61,7 @@ class Dirichlet(ExponentialFamily):
     def __init__(
         self,
         concentration: Tensor,
-        validate_args: Optional[bool] = None,
+        validate_args: bool | None = None,
     ) -> None:
         if concentration.dim() < 1:
             raise ValueError(
