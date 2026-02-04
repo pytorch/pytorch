@@ -24,7 +24,16 @@ if TYPE_CHECKING:
     from torch.distributed.device_mesh import DeviceMesh
 
 
-__all__ = ["ChunkedStorage", "fully_shard_flat"]
+__all__ = ["ChunkedStorage", "fully_shard_flat", "get_chunked_storage"]
+
+
+# Module attribute name for storing ChunkedStorage
+_CHUNKED_STORAGE_ATTR = "_chunked_storage"
+
+
+def get_chunked_storage(module: nn.Module) -> "ChunkedStorage | None":
+    """Get the ChunkedStorage associated with a module, if any."""
+    return getattr(module, _CHUNKED_STORAGE_ATTR, None)
 
 
 class ShardedState(Enum):
@@ -338,70 +347,100 @@ class ChunkedStorage:
 
     def _reduce_scatter_grads(self) -> None:
         """
-        Reduce-scatter gradients from unsharded params to sharded DTensor params.
+        Reduce-scatter gradients to sharded DTensor params.
 
-        For each parameter:
-        1. Get gradient from current (unsharded) param on module
-        2. Reduce-scatter: sum gradients across ranks, then each rank keeps its shard
-        3. Store sharded gradient as DTensor on the cached DTensor param
+        Uses the same approach as FSDP2's foreach_reduce:
+        1. Pad each gradient's dim0 to be divisible by world_size
+        2. Use chunk_cat to reorder: chunk each grad into world_size pieces,
+           concatenate chunk[i] from all grads into row i
+        3. Reduce-scatter the reordered buffer
+        4. Extract sharded gradients from the output
         """
         pg = self._mesh.get_group()
         world_size = self.world_size
-        my_rank = self._mesh.get_local_rank()
+
+        # Collect all gradients and compute padded sizes
+        grads: list[torch.Tensor] = []
+        grad_infos: list[ParamInfo] = []
+        padded_unsharded_sizes: list[torch.Size] = []
 
         for fqn, info in self._param_infos.items():
-            # Get current unsharded param from module
             unsharded_param = _get_param_from_module(self._module, fqn)
-
             if unsharded_param.grad is None:
                 continue
 
-            grad = unsharded_param.grad
+            grad = unsharded_param.grad.contiguous()
+            grads.append(grad)
+            grad_infos.append(info)
 
-            # Get shard dimension
-            shard_dim = 0
-            for placement in info.placements:
-                if isinstance(placement, Shard):
-                    shard_dim = placement.dim
-                    break
+            # Compute padded size (dim0 must be divisible by world_size)
+            padded_dim0 = ((grad.size(0) + world_size - 1) // world_size) * world_size
+            padded_size = torch.Size([padded_dim0] + list(grad.shape[1:]))
+            padded_unsharded_sizes.append(padded_size)
 
-            # Compute local sizes for each rank (for uneven sharding)
-            local_numels = []
-            for rank in range(world_size):
-                local_shape = self._compute_local_shape_for_rank(
-                    info.global_shape, info.placements, rank
-                )
-                numel = 1
-                for d in local_shape:
-                    numel *= d
-                local_numels.append(numel)
+        if not grads:
+            return
 
-            max_local_numel = max(local_numels)
-            my_local_numel = local_numels[my_rank]
+        # Compute total numel for reduce-scatter buffers
+        reduce_scatter_input_numel = sum(s.numel() for s in padded_unsharded_sizes)
+        reduce_scatter_output_numel = reduce_scatter_input_numel // world_size
 
-            # Pad gradient to be evenly divisible for reduce_scatter
-            # We need to split into world_size equal chunks
-            padded_size = max_local_numel * world_size
-            if grad.numel() < padded_size:
-                padded_grad = torch.zeros(
-                    padded_size, dtype=info.dtype, device=self._byte_storage.device
-                )
-                padded_grad[: grad.numel()] = grad.view(-1)
-            else:
-                padded_grad = grad.view(-1)[:padded_size].contiguous()
+        # Determine dtype (all grads should have same dtype for reduce-scatter)
+        grad_dtype = grads[0].dtype
+        device = grads[0].device
 
-            # Reduce-scatter: each rank gets chunk[rank] after reduction
-            output = torch.empty(
-                max_local_numel, dtype=info.dtype, device=self._byte_storage.device
-            )
-            dist.reduce_scatter_tensor(output, padded_grad, group=pg)
+        # Allocate reduce-scatter input buffer
+        reduce_scatter_input = torch.empty(
+            reduce_scatter_input_numel, dtype=grad_dtype, device=device
+        )
 
-            # Extract only the valid (non-padded) portion for this rank
-            if my_local_numel > 0:
-                sharded_grad = output[:my_local_numel].view(info.local_shape)
+        # Copy-in with chunk_cat: reorders data for reduce-scatter
+        # chunk_cat chunks each tensor into world_size pieces along dim 0,
+        # then concatenates chunk[i] from all tensors into row i of output
+        reduce_scatter_input_2d = reduce_scatter_input.view(world_size, -1)
+        torch._chunk_cat(grads, dim=0, num_chunks=world_size, out=reduce_scatter_input_2d)
+
+        # Allocate reduce-scatter output buffer
+        reduce_scatter_output = torch.empty(
+            reduce_scatter_output_numel, dtype=grad_dtype, device=device
+        )
+
+        # Perform reduce-scatter
+        dist.reduce_scatter_tensor(
+            output=reduce_scatter_output,
+            input=reduce_scatter_input,
+            op=dist.ReduceOp.AVG,
+            group=pg,
+        )
+
+        # Extract sharded gradients from the output
+        flat_grad_offset = 0
+        for info, padded_size in zip(grad_infos, padded_unsharded_sizes):
+            # Compute the sharded size (actual local shape, not padded)
+            sharded_size = info.local_shape
+
+            # Extract gradient shard using as_strided for efficiency
+            # The padded chunk size in the output
+            padded_sharded_numel = padded_size.numel() // world_size
+
+            if info.local_numel > 0:
+                # Create sharded gradient by extracting from flat output
+                # The actual shard may be smaller than padded chunk
+                sharded_stride = make_contiguous_strides_for(sharded_size)
+                sharded_grad = torch.as_strided(
+                    reduce_scatter_output,
+                    size=sharded_size,
+                    stride=sharded_stride,
+                    storage_offset=flat_grad_offset,
+                ).contiguous()
+
                 # Create DTensor gradient and assign to sharded param
                 grad_dtensor = _create_dtensor_from_view(sharded_grad, info, self._mesh)
-                self._sharded_params[fqn].grad = grad_dtensor
+                self._sharded_params[info.fqn].grad = grad_dtensor
+
+            flat_grad_offset += padded_sharded_numel
+
+        torch.cuda.synchronize()
 
     @contextmanager
     def unsharded(self):
@@ -590,6 +629,35 @@ def _copy_original_data_to_flat_storage(
             typed_dest.copy_(local_shard.view(-1))
 
 
+def _get_managed_named_params(
+    module: nn.Module,
+) -> list[tuple[str, nn.Parameter]]:
+    """
+    Collect parameters that should be managed by this module's ChunkedStorage.
+
+    This excludes parameters from child modules that already have their own
+    ChunkedStorage (i.e., already wrapped with fully_shard_flat).
+
+    Similar to FSDP2's _get_managed_modules/_get_managed_states pattern.
+    """
+    managed_params: list[tuple[str, nn.Parameter]] = []
+
+    # Find child modules that already have ChunkedStorage
+    wrapped_prefixes: set[str] = set()
+    for name, child in module.named_modules():
+        if name and get_chunked_storage(child) is not None:
+            # This child is already wrapped; skip its parameters
+            wrapped_prefixes.add(name + ".")
+
+    # Collect parameters not in wrapped submodules
+    for fqn, param in module.named_parameters():
+        is_wrapped = any(fqn.startswith(prefix) for prefix in wrapped_prefixes)
+        if not is_wrapped:
+            managed_params.append((fqn, param))
+
+    return managed_params
+
+
 def fully_shard_flat(
     module: nn.Module,
     mesh: DeviceMesh,
@@ -599,13 +667,17 @@ def fully_shard_flat(
     Apply flat-storage FSDP sharding to a module.
 
     This function:
-    1. Collects all parameters from the module
+    1. Collects parameters from the module (excluding already-wrapped submodules)
     2. Creates a single unified byte buffer for all parameters (regardless of dtype)
     3. Replaces each parameter with a DTensor whose _local_tensor is a typed view
        into the byte buffer at the appropriate offset
     4. Returns ChunkedStorage for managing the unified buffer
 
     The unified byte buffer enables a single all-gather operation for all parameters.
+
+    Nested wrapping is supported: apply fully_shard_flat to inner modules first,
+    then to outer modules. The outer module's storage will exclude parameters
+    from already-wrapped inner modules.
 
     Args:
         module: The module to shard. Can have real or meta device parameters.
@@ -618,23 +690,35 @@ def fully_shard_flat(
     Example::
 
         >>> mesh = init_device_mesh("cuda", (world_size,))
-        >>> model = nn.Linear(1024, 1024)
-        >>> storage = fully_shard_flat(model, mesh)
-        >>> # model.weight and model.bias are now DTensors backed by storage.byte_storage
+        >>> model = Transformer(args)
+        >>> # Nested wrapping: wrap layers first, then root
+        >>> for layer in model.layers:
+        ...     fully_shard_flat(layer, mesh)
+        >>> storage = fully_shard_flat(model, mesh)  # Only wraps non-layer params
 
     Note:
         - Parameters of different dtypes are supported in a single unified buffer
         - Proper alignment is maintained for each dtype
         - Parameters on meta device will have uninitialized storage
-        - The returned ChunkedStorage holds the byte buffer; keep it alive
+        - The returned ChunkedStorage is also stored on module._chunked_storage
     """
     if placements is None:
         placements = (Shard(0),)
 
-    # Collect all parameters
-    named_params = list(module.named_parameters())
+    # Check if module is already wrapped
+    if get_chunked_storage(module) is not None:
+        raise ValueError(
+            f"Module {type(module).__name__} already has ChunkedStorage. "
+            "Cannot apply fully_shard_flat twice to the same module."
+        )
+
+    # Collect parameters (excluding those from already-wrapped submodules)
+    named_params = _get_managed_named_params(module)
     if not named_params:
-        raise ValueError("Module has no parameters to shard")
+        raise ValueError(
+            f"Module {type(module).__name__} has no parameters to shard. "
+            "All parameters may belong to already-wrapped submodules."
+        )
 
     # Determine device
     device = mesh.device_type
@@ -666,5 +750,8 @@ def fully_shard_flat(
     storage = ChunkedStorage(
         byte_storage, param_infos, mesh, total_bytes, total_unsharded_bytes, module
     )
+
+    # Store ChunkedStorage on module for nested wrapping detection
+    setattr(module, _CHUNKED_STORAGE_ATTR, storage)
 
     return storage

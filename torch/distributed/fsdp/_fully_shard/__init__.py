@@ -1,4 +1,4 @@
-from ._chunked_storage import ChunkedStorage, fully_shard_flat
+from ._chunked_storage import ChunkedStorage, fully_shard_flat, get_chunked_storage
 from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
 from ._fully_shard import (
     FSDPModule,
@@ -15,6 +15,7 @@ __all__ = [
     "FSDPModule",
     "fully_shard",
     "fully_shard_flat",
+    "get_chunked_storage",
     "MixedPrecisionPolicy",
     "OffloadPolicy",
     "register_fsdp_forward_method",

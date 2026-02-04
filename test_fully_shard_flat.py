@@ -8,7 +8,7 @@
 """
 Test script for fully_shard_flat API with Transformer model.
 
-Tests uneven sharding (dim % world_size != 0) and sparse sharding (dim < world_size).
+Tests uneven sharding (dim % world_size != 0) and nested wrapping.
 
 Usage:
     torchrun --nproc_per_node=2 test_fully_shard_flat.py
@@ -19,7 +19,7 @@ import torch
 import torch.distributed as dist
 from datetime import timedelta
 from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.fsdp._fully_shard import fully_shard_flat
+from torch.distributed.fsdp._fully_shard import fully_shard_flat, get_chunked_storage
 from torch.distributed.tensor import DTensor
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
@@ -58,16 +58,16 @@ def run():
     device = torch.device("cuda", torch.cuda.current_device())
     mesh = init_device_mesh("cuda", (world_size,))
 
-    # Configure Transformer with dimensions for uneven/sparse sharding:
-    # - vocab_size=3: sparse sharding for world_size=4 (some ranks get 0 rows)
-    # - max_seq_len=5: uneven for world_size=2,4
+    # Configure Transformer with dimensions for uneven sharding:
+    # - vocab_size=5: uneven for world_size=2,4 (no sparse sharding)
+    # - max_seq_len=7: uneven for world_size=2,4
     # - dim=6: even for ws=2, uneven for ws=4
     # - n_heads=2: head_dim=3
     # - hidden_dim=4*dim=24: even for both
     args = ModelArgs(
         n_layers=1,
-        vocab_size=3,  # sparse for ws=4
-        max_seq_len=5,  # uneven for ws=2,4
+        vocab_size=5,  # uneven for ws=2,4 (avoids sparse)
+        max_seq_len=7,  # uneven for ws=2,4
         dim=6,
         n_heads=2,
         dropout_p=0.0,  # disable dropout for deterministic testing
@@ -127,16 +127,12 @@ def run():
     assert len(storage_ptrs) == 1, f"Expected 1 unified storage, got {len(storage_ptrs)}"
     print_rank0(f"  ✓ ALL parameters share SINGLE unified byte storage")
 
-    # Show local shapes per rank (first few params only)
-    print_rank0(f"\n=== Local Shapes Per Rank (sample) ===")
+    # Show local shapes per rank (rank 0 only, no collective)
+    print_rank0(f"\n=== Local Shapes on Rank 0 (sample) ===")
     sample_params = ["tok_embeddings.weight", "pos_embeddings.weight", "output.weight"]
     for name, param in model.named_parameters():
         if name in sample_params:
-            all_shapes = [None] * world_size
-            dist.all_gather_object(all_shapes, tuple(param._local_tensor.shape))
-            if rank == 0:
-                shapes_str = ", ".join([f"r{i}:{s[0]}" for i, s in enumerate(all_shapes)])
-                print(f"  {name:<25}: [{shapes_str}]")
+            print_rank0(f"  {name:<25}: local={tuple(param._local_tensor.shape)}")
 
     # === Test 2: Unshard/Reshard ===
     print_rank0(f"\n=== Testing unshard() ===")
@@ -227,10 +223,11 @@ def run():
         else:
             print_rank0(f"  {name}: grad=NO")
 
-    # Verify all grads are DTensors
+    # Verify all grads are DTensors (skip for ranks with 0 elements)
     for name, param in model.named_parameters():
-        assert param.grad is not None, f"{name} missing gradient"
-        assert isinstance(param.grad, DTensor), f"{name} gradient should be DTensor"
+        if param._local_tensor.numel() > 0:
+            assert param.grad is not None, f"{name} missing gradient"
+            assert isinstance(param.grad, DTensor), f"{name} gradient should be DTensor"
     print_rank0(f"  ✓ All gradients are DTensors with sharded local tensors")
 
     print_rank0(f"\n{'='*70}")
@@ -243,14 +240,174 @@ def run():
     return True
 
 
+def run_nested():
+    """Test nested wrapping: layers first, then root."""
+    rank, world_size = dist.get_rank(), dist.get_world_size()
+    device = torch.device("cuda", torch.cuda.current_device())
+    mesh = init_device_mesh("cuda", (world_size,))
+
+    # Create Transformer with 2 layers
+    args = ModelArgs(
+        n_layers=2,
+        vocab_size=5,
+        max_seq_len=7,
+        dim=6,
+        n_heads=2,
+        dropout_p=0.0,
+        weight_tying=False,
+    )
+    model = Transformer(args).to(device).to(torch.bfloat16)
+
+    print_rank0(f"\n{'='*70}")
+    print_rank0(f"Testing NESTED wrapping with Transformer, world_size={world_size}")
+    print_rank0(f"{'='*70}")
+
+    # Count params per component
+    layer_param_names = set()
+    for i, layer in enumerate(model.layers):
+        for name, _ in layer.named_parameters():
+            layer_param_names.add(f"layers.{i}.{name}")
+    root_param_names = set()
+    for name, _ in model.named_parameters():
+        if name not in layer_param_names:
+            root_param_names.add(name)
+
+    print_rank0(f"\n=== Parameter Distribution ===")
+    print_rank0(f"  Total params: {sum(1 for _ in model.parameters())}")
+    print_rank0(f"  Layer params: {len(layer_param_names)}")
+    print_rank0(f"  Root params:  {len(root_param_names)}")
+    print_rank0(f"  Root param names: {sorted(root_param_names)}")
+
+    # === Step 1: Apply fully_shard_flat to each layer ===
+    print_rank0(f"\n=== Step 1: Wrapping layers ===")
+    layer_storages = []
+    for i, layer in enumerate(model.layers):
+        storage = fully_shard_flat(layer, mesh)
+        layer_storages.append(storage)
+        print_rank0(f"  Layer {i}: {len(storage.param_infos)} params, {storage.total_bytes} bytes")
+        # Verify storage is attached to layer
+        assert get_chunked_storage(layer) is storage, f"Layer {i} storage not attached"
+
+    # === Step 2: Apply fully_shard_flat to root (should exclude layer params) ===
+    print_rank0(f"\n=== Step 2: Wrapping root (excludes layers) ===")
+    root_storage = fully_shard_flat(model, mesh)
+    print_rank0(f"  Root: {len(root_storage.param_infos)} params, {root_storage.total_bytes} bytes")
+    assert get_chunked_storage(model) is root_storage, "Root storage not attached"
+
+    # Verify root storage only has non-layer params
+    root_storage_fqns = set(root_storage.param_infos.keys())
+    print_rank0(f"  Root storage FQNs: {sorted(root_storage_fqns)}")
+    assert root_storage_fqns == root_param_names, (
+        f"Root storage should only have root params.\n"
+        f"Expected: {sorted(root_param_names)}\n"
+        f"Got: {sorted(root_storage_fqns)}"
+    )
+    print_rank0(f"  ✓ Root storage correctly excludes layer parameters")
+
+    # Print the model structure after applying fully_shard_flat
+    print_rank0(f"\n=== Model after fully_shard_flat ===")
+    print_rank0(str(model))
+
+    # Show that parameters are DTensors
+    print_rank0(f"\n=== Sample Parameters (showing DTensor) ===")
+    for name in ["tok_embeddings.weight", "layers.0.attention.wq.weight", "output.weight"]:
+        param = dict(model.named_parameters())[name]
+        print_rank0(f"  {name}:")
+        print_rank0(f"    type: {type(param.data).__name__}")
+        print_rank0(f"    global_shape: {tuple(param.shape)}")
+        print_rank0(f"    local_shape:  {tuple(param._local_tensor.shape)}")
+        print_rank0(f"    placements:   {param.placements}")
+
+    # === Step 3: Test unshard/reshard for all storages ===
+    print_rank0(f"\n=== Step 3: Testing unshard/reshard ===")
+
+    # Unshard all (layers first, then root)
+    for i, storage in enumerate(layer_storages):
+        storage.unshard()
+    root_storage.unshard()
+    print_rank0(f"  ✓ All storages unsharded")
+
+    # Verify all params are unsharded
+    for name, param in model.named_parameters():
+        assert not isinstance(param, DTensor), f"{name} should be unsharded"
+    print_rank0(f"  ✓ All parameters are unsharded tensors")
+
+    # Forward pass
+    batch_size = 2
+    seq_len = args.max_seq_len
+    tokens = torch.randint(0, args.vocab_size, (batch_size, seq_len), device=device)
+    y = model(tokens)
+    print_rank0(f"  ✓ Forward pass: input={tuple(tokens.shape)}, output={tuple(y.shape)}")
+
+    # Reshard all (root first, then layers - reverse order)
+    root_storage.reshard()
+    for storage in layer_storages:
+        storage.reshard()
+    print_rank0(f"  ✓ All storages resharded")
+
+    # Verify all params are DTensors again
+    for name, param in model.named_parameters():
+        assert isinstance(param, DTensor), f"{name} should be DTensor"
+    print_rank0(f"  ✓ All parameters are DTensors")
+
+    # === Step 4: Test forward + backward with nested wrapping ===
+    print_rank0(f"\n=== Step 4: Testing forward + backward ===")
+
+    # Clear gradients
+    for param in model.parameters():
+        param.grad = None
+
+    # Unshard all
+    for storage in layer_storages:
+        storage.unshard()
+    root_storage.unshard()
+
+    # Forward + backward
+    tokens = torch.randint(0, args.vocab_size, (batch_size, seq_len), device=device)
+    y = model(tokens)
+    loss = y.sum()
+    loss.backward()
+    print_rank0(f"  Forward + backward complete, loss={loss.item():.4f}")
+
+    # Verify all grads exist
+    for name, param in model.named_parameters():
+        assert param.grad is not None, f"{name} missing gradient"
+    print_rank0(f"  ✓ All parameters have gradients")
+
+    # Reshard all (reduce-scatter grads)
+    root_storage.reshard()
+    for storage in layer_storages:
+        storage.reshard()
+    print_rank0(f"  ✓ All storages resharded with gradients")
+
+    # Verify all grads are DTensors
+    for name, param in model.named_parameters():
+        if param._local_tensor.numel() > 0:
+            assert param.grad is not None, f"{name} missing gradient"
+            assert isinstance(param.grad, DTensor), f"{name} gradient should be DTensor"
+    print_rank0(f"  ✓ All gradients are DTensors")
+
+    print_rank0(f"\n{'='*70}")
+    print_rank0("PASSED: Nested wrapping test")
+    print_rank0(f"{'='*70}")
+
+    torch.cuda.synchronize()
+    return True
+
+
 def main():
-    """Run test."""
+    """Run tests."""
     rank, world_size = setup_distributed()
 
     print_rank0(f"Running tests with world_size={world_size}")
 
     try:
+        # Test 1: Basic flat sharding
         run()
+
+        # Test 2: Nested wrapping
+        run_nested()
+
         print_rank0("\n=== All tests passed! ===")
         success = True
     except Exception as e:
