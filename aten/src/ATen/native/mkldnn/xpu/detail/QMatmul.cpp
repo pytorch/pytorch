@@ -423,11 +423,11 @@ struct ScaleSpec {
 // The mask and groups parameters work together:
 // - mask=0: per-tensor (single scale for whole tensor)
 // - mask=(1<<0)|(1<<1): scale varies along both dimensions
-// - groups: block sizes for grouping, e.g., {128, 1} means 128 elements grouped
-// on dim0
+// - groups: block sizes for grouping, 
+// e.g., {128, 1} means 128 elements grouped on dim0
 //
-// The returned value will be used in `set_scales(arg, mask, groups,
-// data_type)`.
+// The returned value will be used in 
+// `set_scales(arg, mask, groups, data_type)`.
 inline ScaleSpec make_scale_spec(
     at::blas::ScalingType scaling_type,
     int64_t M,
@@ -451,9 +451,7 @@ inline ScaleSpec make_scale_spec(
 
     case at::blas::ScalingType::RowWise: {
       // Scale RowWise using block-wise style groups to achieve
-      // per-row/per-column scaling. oneDNN FP8 matmul doesn't support simple
-      // per-dimension scaling (mask=1/2 with empty groups), so we use mask=3
-      // with groups to emulate:
+      // per-column scaling.
       //   SRC: groups={1, K} -> one scale per row (M scales)
       //   WEI: groups={K, 1} -> one scale per column (N scales)
       return {
@@ -465,7 +463,7 @@ inline ScaleSpec make_scale_spec(
     case at::blas::ScalingType::BlockWise1x128: {
       // Blockwise 1x128 scaling (DeepSeek style)
       // For SRC (A): scale shape [M, ceil_div(K, 128)], groups = {1, 128}
-      // For WEI (B): scale shape [N, ceil_div(K, 128)], groups = {128, 1}
+      // For WEI (B): scale shape [ceil_div(K, 128), N], groups = {128, 1}
       // mask={(1 << 0) | (1 << 1)}: Scale on both dim0 and dim1
       return {
           (1 << 0) | (1 << 1),
@@ -475,10 +473,8 @@ inline ScaleSpec make_scale_spec(
 
     case at::blas::ScalingType::BlockWise128x128: {
       // Blockwise 128x128 scaling (2D block scaling)
-      // For SRC (A): scale shape [ceil_div(M, 128), ceil_div(K, 128)],
-      //              groups = {128, 128}
-      // For WEI (B): scale shape [ceil_div(K, 128), ceil_div(N, 128)],
-      //              groups = {128, 128}
+      // For SRC (A): scale shape [M // 128, K // 128], groups = {128, 128}
+      // For WEI (B): scale shape [K // 128, N // 128], groups = {128, 128}
       // mask={(1 << 0) | (1 << 1)}: Scale on both dim0 and dim1
       return {
           (1 << 0) | (1 << 1),

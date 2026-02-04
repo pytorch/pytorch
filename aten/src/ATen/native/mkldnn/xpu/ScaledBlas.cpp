@@ -630,7 +630,7 @@ Tensor& _scaled_block128x128_block1x128(
       "scale_a must be K-contiguous (stride(1) == 1); got: ",
       scale_a.strides());
 
-  // scale_b shape: [K//128, N] - natural shape matching B [K, N]
+  // scale_b shape: [K//128, N].
   TORCH_CHECK_VALUE(
       scale_b.size(0) == ceil_div<int64_t>(K, 128) && scale_b.size(1) == N &&
           scale_b.scalar_type() == kFloat,
@@ -640,7 +640,8 @@ Tensor& _scaled_block128x128_block1x128(
       N,
       " Float elements, got ",
       scale_b.sizes());
-  // scale_b stride: K-contiguous (stride(1) == 1)
+  // scale_b stride:
+  // Note that this is different with CUDA. CUDA has col-major scales.
   TORCH_CHECK_VALUE(
       scale_b.stride(1) == 1,
       "scale_b must be K-contiguous (stride(1) == 1); got: ",
