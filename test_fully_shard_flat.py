@@ -88,8 +88,8 @@ def run():
         dtype_str = "bf16" if param.dtype == torch.bfloat16 else "fp32"
         print_rank0(f"  {name}: {tuple(param.shape)}, {dtype_str}")
 
-    # Apply fully_shard_flat
-    storage = fully_shard_flat(model, mesh)
+    # Apply fully_shard_flat (without hooks for manual control)
+    storage = fully_shard_flat(model, mesh, register_hooks=False)
 
     # === Test 1: Sharding ===
     print_rank0(f"\n=== After fully_shard_flat ===")
@@ -278,11 +278,11 @@ def run_nested():
     print_rank0(f"  Root params:  {len(root_param_names)}")
     print_rank0(f"  Root param names: {sorted(root_param_names)}")
 
-    # === Step 1: Apply fully_shard_flat to each layer ===
+    # === Step 1: Apply fully_shard_flat to each layer (without hooks for manual control) ===
     print_rank0(f"\n=== Step 1: Wrapping layers ===")
     layer_storages = []
     for i, layer in enumerate(model.layers):
-        storage = fully_shard_flat(layer, mesh)
+        storage = fully_shard_flat(layer, mesh, register_hooks=False)
         layer_storages.append(storage)
         print_rank0(f"  Layer {i}: {len(storage.param_infos)} params, {storage.total_bytes} bytes")
         # Verify storage is attached to layer
@@ -290,7 +290,7 @@ def run_nested():
 
     # === Step 2: Apply fully_shard_flat to root (should exclude layer params) ===
     print_rank0(f"\n=== Step 2: Wrapping root (excludes layers) ===")
-    root_storage = fully_shard_flat(model, mesh)
+    root_storage = fully_shard_flat(model, mesh, register_hooks=False)
     print_rank0(f"  Root: {len(root_storage.param_infos)} params, {root_storage.total_bytes} bytes")
     assert get_chunked_storage(model) is root_storage, "Root storage not attached"
 
@@ -395,6 +395,138 @@ def run_nested():
     return True
 
 
+def run_auto_hooks():
+    """Test automatic hook-based unshard/reshard scheduling."""
+    rank, world_size = dist.get_rank(), dist.get_world_size()
+    device = torch.device("cuda", torch.cuda.current_device())
+    mesh = init_device_mesh("cuda", (world_size,))
+
+    # Create Transformer with 2 layers
+    args = ModelArgs(
+        n_layers=2,
+        vocab_size=5,
+        max_seq_len=7,
+        dim=6,
+        n_heads=2,
+        dropout_p=0.0,
+        weight_tying=False,
+    )
+    model = Transformer(args).to(device).to(torch.bfloat16)
+
+    print_rank0(f"\n{'='*70}")
+    print_rank0(f"Testing AUTOMATIC HOOKS with Transformer, world_size={world_size}")
+    print_rank0(f"{'='*70}")
+
+    # Apply nested wrapping (hooks are registered automatically)
+    print_rank0(f"\n=== Applying fully_shard_flat with automatic hooks ===")
+    layer_storages = []
+    for i, layer in enumerate(model.layers):
+        storage = fully_shard_flat(layer, mesh)
+        layer_storages.append(storage)
+        print_rank0(f"  Layer {i}: {len(storage.param_infos)} params, hooks registered")
+
+    root_storage = fully_shard_flat(model, mesh)
+    print_rank0(f"  Root: {len(root_storage.param_infos)} params, hooks registered")
+
+    # Verify all params are sharded DTensors initially
+    for name, param in model.named_parameters():
+        assert isinstance(param, DTensor), f"{name} should be DTensor initially"
+    print_rank0(f"  ✓ All parameters are sharded DTensors")
+
+    # === Test 1: Forward with automatic hooks ===
+    print_rank0(f"\n=== Test 1: Forward with automatic hooks ===")
+    batch_size = 2
+    seq_len = args.max_seq_len
+    tokens = torch.randint(0, args.vocab_size, (batch_size, seq_len), device=device)
+
+    # Just call forward - hooks should handle unshard automatically
+    output = model(tokens)
+    print_rank0(f"  Forward: input={tuple(tokens.shape)}, output={tuple(output.shape)}")
+
+    # After forward, params are UNSHARDED (we keep them unsharded for backward)
+    for name, param in model.named_parameters():
+        assert not isinstance(param, DTensor), f"{name} should be unsharded after forward"
+    print_rank0(f"  ✓ All parameters are unsharded after forward (ready for backward)")
+
+    # === Test 2: Forward + Backward with automatic hooks ===
+    print_rank0(f"\n=== Test 2: Forward + Backward with automatic hooks ===")
+
+    # Clear gradients
+    for param in model.parameters():
+        param.grad = None
+
+    # Forward + backward - hooks handle everything
+    tokens = torch.randint(0, args.vocab_size, (batch_size, seq_len), device=device)
+    output = model(tokens)
+    loss = output.sum()
+    loss.backward()
+    print_rank0(f"  Forward + backward complete, loss={loss.item():.4f}")
+
+    # Wait for post_backward callback to complete
+    torch.cuda.synchronize()
+
+    # Debug: Check storage states after sync
+    print_rank0(f"  Root storage state: {root_storage.state}")
+    for i, s in enumerate(layer_storages):
+        print_rank0(f"  Layer {i} storage state: {s.state}")
+
+    # Verify params are DTensors with DTensor gradients
+    for name, param in model.named_parameters():
+        assert isinstance(param, DTensor), f"{name} should be DTensor after backward"
+        if param._local_tensor.numel() > 0:
+            assert param.grad is not None, f"{name} should have gradient"
+            assert isinstance(param.grad, DTensor), f"{name} gradient should be DTensor"
+    print_rank0(f"  ✓ All parameters are DTensors with DTensor gradients")
+
+    # === Test 3: Multiple forward/backward iterations ===
+    print_rank0(f"\n=== Test 3: Multiple iterations ===")
+    for iteration in range(3):
+        # Clear gradients
+        for param in model.parameters():
+            param.grad = None
+
+        tokens = torch.randint(0, args.vocab_size, (batch_size, seq_len), device=device)
+        output = model(tokens)
+        loss = output.sum()
+        loss.backward()
+        torch.cuda.synchronize()
+
+        # Verify state after each iteration
+        for name, param in model.named_parameters():
+            assert isinstance(param, DTensor), f"Iter {iteration}: {name} should be DTensor"
+
+    print_rank0(f"  ✓ 3 iterations completed successfully")
+
+    # === Test 4: Verify multiple consecutive forward+backward cycles ===
+    print_rank0(f"\n=== Test 4: Consecutive forward+backward cycles ===")
+
+    for cycle in range(2):
+        # Clear gradients
+        for param in model.parameters():
+            param.grad = None
+
+        tokens = torch.randint(0, args.vocab_size, (batch_size, seq_len), device=device)
+        output = model(tokens)
+        loss = output.sum()
+        loss.backward()
+        torch.cuda.synchronize()
+
+        # Verify state after each cycle
+        for name, param in model.named_parameters():
+            assert isinstance(param, DTensor), f"Cycle {cycle}: {name} should be DTensor"
+            if param._local_tensor.numel() > 0:
+                assert param.grad is not None, f"Cycle {cycle}: {name} should have gradient"
+
+    print_rank0(f"  ✓ 2 consecutive cycles completed successfully")
+
+    print_rank0(f"\n{'='*70}")
+    print_rank0("PASSED: Automatic hooks test")
+    print_rank0(f"{'='*70}")
+
+    torch.cuda.synchronize()
+    return True
+
+
 def main():
     """Run tests."""
     rank, world_size = setup_distributed()
@@ -402,11 +534,14 @@ def main():
     print_rank0(f"Running tests with world_size={world_size}")
 
     try:
-        # Test 1: Basic flat sharding
+        # Test 1: Basic flat sharding (manual unshard/reshard)
         run()
 
-        # Test 2: Nested wrapping
+        # Test 2: Nested wrapping (manual unshard/reshard)
         run_nested()
+
+        # Test 3: Automatic hook-based scheduling
+        run_auto_hooks()
 
         print_rank0("\n=== All tests passed! ===")
         success = True

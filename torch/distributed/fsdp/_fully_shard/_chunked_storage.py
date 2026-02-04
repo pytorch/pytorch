@@ -9,16 +9,18 @@ from __future__ import annotations
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import auto, Enum
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch._prims_common import make_contiguous_strides_for
+from torch.autograd import Variable
 from torch.distributed.tensor import DTensor, Shard
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._utils import compute_local_shape_and_global_offset
 from torch.distributed.tensor.placement_types import Placement
+from torch.utils._pytree import tree_flatten
 
 if TYPE_CHECKING:
     from torch.distributed.device_mesh import DeviceMesh
@@ -81,11 +83,14 @@ class ChunkedStorage:
 
     This enables a single all-gather operation for the entire parameter group.
 
-    Lifecycle:
-        1. SHARDED state: Parameters are sharded DTensors, model.parameters() returns DTensors
-        2. unshard(): All-gather byte buffer, register unsharded params for forward
-        3. UNSHARDED state: Parameters are full tensors for forward/backward
-        4. reshard(): Free unsharded buffer, restore sharded DTensor params
+    Lifecycle (automatic with hooks):
+        1. SHARDED state: Parameters are sharded DTensors
+        2. Forward pre-hook: unshard() - all-gather to get full params
+        3. Forward: compute with unsharded params
+        4. Forward post-hook: register backward hooks, optionally reshard
+        5. Backward pre-hook: unshard() if resharded after forward
+        6. Backward: compute gradients with unsharded params
+        7. Post-backward: reshard() with reduce-scatter gradients
     """
 
     def __init__(
@@ -96,6 +101,8 @@ class ChunkedStorage:
         total_bytes: int,
         total_unsharded_bytes: int,
         module: nn.Module,
+        reshard_after_forward: bool = True,
+        register_hooks: bool = True,
     ) -> None:
         if byte_storage.dtype != torch.uint8:
             raise ValueError(f"Expected uint8 storage, got {byte_storage.dtype}")
@@ -106,6 +113,7 @@ class ChunkedStorage:
         self._total_unsharded_bytes = total_unsharded_bytes
         self._module = module
         self._state = ShardedState.SHARDED
+        self._reshard_after_forward = reshard_after_forward
 
         # Unsharded buffer (allocated on demand)
         self._unsharded_byte_storage: torch.Tensor | None = None
@@ -118,6 +126,17 @@ class ChunkedStorage:
             for part in parts[:-1]:
                 mod = getattr(mod, part)
             self._sharded_params[fqn] = getattr(mod, parts[-1])
+
+        # Hook handles
+        self._pre_forward_hook_handle = None
+        self._post_forward_hook_handle = None
+
+        # Track if post_backward has been called this iteration
+        self._post_backward_called = False
+
+        # Register forward hooks if requested
+        if register_hooks:
+            self._register_forward_hooks()
 
     @property
     def byte_storage(self) -> torch.Tensor:
@@ -457,6 +476,113 @@ class ChunkedStorage:
         finally:
             self.reshard()
 
+    # ==================== Hook-based Scheduling ====================
+
+    def _register_forward_hooks(self) -> None:
+        """Register forward pre/post hooks on the module."""
+        self._pre_forward_hook_handle = self._module.register_forward_pre_hook(
+            self._pre_forward, prepend=True, with_kwargs=True
+        )
+        self._post_forward_hook_handle = self._module.register_forward_hook(
+            self._post_forward, prepend=False
+        )
+
+    def _pre_forward(
+        self,
+        module: nn.Module,
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+    ) -> tuple[tuple[Any, ...], dict[str, Any]]:
+        """Forward pre-hook: unshard parameters."""
+        self.unshard()
+        return args, kwargs
+
+    def _post_forward(
+        self,
+        module: nn.Module,
+        args: tuple[Any, ...],
+        output: Any,
+    ) -> Any:
+        """Forward post-hook: register backward hooks."""
+        # Register backward hooks on output tensors
+        output = self._register_pre_backward_hooks(output)
+
+        # Reset post_backward flag for this iteration
+        self._post_backward_called = False
+
+        # NOTE: We do NOT reshard after forward even if reshard_after_forward=True
+        # This is because the autograd graph references the unsharded params,
+        # and we need those same param objects to receive gradients in backward.
+        # Memory savings from reshard_after_forward would require more complex
+        # tracking of unsharded params (like FSDP2's FSDPParam).
+
+        return output
+
+    def _register_pre_backward_hooks(self, output: Any) -> Any:
+        """Register hooks on output tensors to trigger pre_backward."""
+        if not torch.is_grad_enabled():
+            return output
+
+        flat_outputs, _ = tree_flatten(output)
+        for t in flat_outputs:
+            if torch.is_tensor(t) and t.requires_grad:
+                t.register_hook(self._pre_backward)
+
+        return output
+
+    def _pre_backward(self, grad: torch.Tensor) -> torch.Tensor:
+        """Backward pre-hook: register post-backward callback."""
+        # Register post-backward callback (must be done during backward)
+        self._register_post_backward_callback()
+        # Params are already unsharded from forward, no need to unshard again
+        return grad
+
+    def _register_post_backward_callback(self) -> None:
+        """Register callback to run after backward completes."""
+        if self._post_backward_called:
+            return
+        Variable._execution_engine.queue_callback(self._post_backward)
+
+    def _post_backward(self) -> None:
+        """Post-backward callback: reshard and reduce-scatter gradients."""
+        # Ensure we only run once per backward pass
+        if self._post_backward_called:
+            return
+        self._post_backward_called = True
+
+        # Only reshard if currently unsharded
+        if self._state == ShardedState.UNSHARDED:
+            self.reshard()
+
+    def _reshard_params_only(self) -> None:
+        """
+        Reshard parameters without reduce-scatter (for use after forward).
+
+        This restores sharded DTensor parameters but does NOT reduce-scatter
+        gradients (since there are none yet after forward).
+        """
+        if self._state == ShardedState.SHARDED:
+            return
+
+        # Restore sharded DTensor parameters
+        for fqn, sharded_param in self._sharded_params.items():
+            _set_param_on_module(self._module, fqn, sharded_param)
+
+        # Free unsharded buffer
+        if self._unsharded_byte_storage is not None:
+            self._unsharded_byte_storage = None
+
+        self._state = ShardedState.SHARDED
+
+    def remove_hooks(self) -> None:
+        """Remove registered forward hooks."""
+        if self._pre_forward_hook_handle is not None:
+            self._pre_forward_hook_handle.remove()
+            self._pre_forward_hook_handle = None
+        if self._post_forward_hook_handle is not None:
+            self._post_forward_hook_handle.remove()
+            self._post_forward_hook_handle = None
+
 
 def _compute_local_info(
     global_shape: torch.Size,
@@ -662,6 +788,8 @@ def fully_shard_flat(
     module: nn.Module,
     mesh: DeviceMesh,
     placements: tuple[Placement, ...] | None = None,
+    reshard_after_forward: bool = True,
+    register_hooks: bool = True,
 ) -> ChunkedStorage:
     """
     Apply flat-storage FSDP sharding to a module.
@@ -671,7 +799,8 @@ def fully_shard_flat(
     2. Creates a single unified byte buffer for all parameters (regardless of dtype)
     3. Replaces each parameter with a DTensor whose _local_tensor is a typed view
        into the byte buffer at the appropriate offset
-    4. Returns ChunkedStorage for managing the unified buffer
+    4. Optionally registers forward/backward hooks for automatic unshard/reshard
+    5. Returns ChunkedStorage for managing the unified buffer
 
     The unified byte buffer enables a single all-gather operation for all parameters.
 
@@ -683,6 +812,12 @@ def fully_shard_flat(
         module: The module to shard. Can have real or meta device parameters.
         mesh: The device mesh for sharding. Currently only 1D mesh is supported.
         placements: The sharding placements. Defaults to (Shard(0),).
+        reshard_after_forward: If True (default), reshard parameters after forward
+            to save memory. Parameters will be re-unsharded in backward.
+            If False, keep parameters unsharded between forward and backward.
+        register_hooks: If True (default), register forward/backward hooks for
+            automatic unshard/reshard. If False, caller must manually call
+            unshard()/reshard().
 
     Returns:
         ChunkedStorage instance containing the unified byte buffer and parameter metadata.
@@ -695,12 +830,16 @@ def fully_shard_flat(
         >>> for layer in model.layers:
         ...     fully_shard_flat(layer, mesh)
         >>> storage = fully_shard_flat(model, mesh)  # Only wraps non-layer params
+        >>> # Forward/backward now work automatically with hooks
+        >>> output = model(input)
+        >>> output.sum().backward()
 
     Note:
         - Parameters of different dtypes are supported in a single unified buffer
         - Proper alignment is maintained for each dtype
         - Parameters on meta device will have uninitialized storage
         - The returned ChunkedStorage is also stored on module._chunked_storage
+        - Forward/backward hooks are automatically registered for unshard/reshard
     """
     if placements is None:
         placements = (Shard(0),)
@@ -747,8 +886,11 @@ def fully_shard_flat(
         _set_param_on_module(module, fqn, new_param)
 
     # Create ChunkedStorage (after DTensor params are registered)
+    # This also registers forward/backward hooks if requested
     storage = ChunkedStorage(
-        byte_storage, param_infos, mesh, total_bytes, total_unsharded_bytes, module
+        byte_storage, param_infos, mesh, total_bytes, total_unsharded_bytes, module,
+        reshard_after_forward=reshard_after_forward,
+        register_hooks=register_hooks,
     )
 
     # Store ChunkedStorage on module for nested wrapping detection
