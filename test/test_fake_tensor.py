@@ -30,6 +30,7 @@ from torch._guards import tracing, TracingContext
 from torch._higher_order_ops.scan import scan
 from torch._subclasses.fake_tensor import (
     _CacheKeyState,
+    _check_for_subclass_arg,
     DynamicOutputShapeException,
     extract_tensor_metadata,
     FakeTensor,
@@ -2821,6 +2822,35 @@ class FakeTensorPreferDeviceType(TestCase):
                 result = x + y
                 self.assertEqual(result.device.type, "cpu")
                 self.assertTrue(isinstance(result, FakeTensor))
+
+    def test_check_for_subclass_arg_parameter_subclass(self):
+        """
+        Test that _check_for_subclass_arg correctly handles nn.Parameter subclasses.
+
+        Parameter subclasses (like vLLM's ModelWeightParameter) should NOT be
+        flagged as unrecognized tensor subclasses. They should be treated the
+        same as nn.Parameter itself.
+        """
+
+        class ParameterSubclass(torch.nn.Parameter):
+            """A simple Parameter subclass for testing."""
+
+        # Regular tensor should not be flagged
+        tensor = torch.randn(10)
+        self.assertFalse(_check_for_subclass_arg(tensor))
+
+        # nn.Parameter should not be flagged
+        param = torch.nn.Parameter(torch.randn(10))
+        self.assertFalse(_check_for_subclass_arg(param))
+
+        # Parameter subclass should also NOT be flagged (this was the bug)
+        param_subclass = ParameterSubclass(torch.randn(10))
+        self.assertFalse(_check_for_subclass_arg(param_subclass))
+
+        # FakeTensor should not be flagged
+        with FakeTensorMode() as mode:
+            fake = mode.from_tensor(torch.randn(10))
+            self.assertFalse(_check_for_subclass_arg(fake))
 
 
 if __name__ == "__main__":
