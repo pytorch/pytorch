@@ -60,7 +60,9 @@ struct maybe_bool<true, src_t> {
 // Note: deliberately ignores undefined behavior, consistent with NumPy.
 // PyTorch's type conversions can cause a variety of undefined behavior,
 // including float to integral overflow and signed to unsigned integer overflow.
-// Some of this undefined behavior is addressed below.
+// Some of this undefined behavior is addressed below. In particular, conversions
+// from floating-point infinity and NaN to integer types are now well-defined:
+// +inf -> max value, -inf -> min value, NaN -> 0.
 template <typename dest_t, typename src_t>
 struct static_cast_with_inter_type {
   C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline dest_t apply(
