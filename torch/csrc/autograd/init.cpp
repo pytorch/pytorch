@@ -577,11 +577,21 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   py_context_manager_DEPRECATED<DisableFuncTorch>(_C_m, "_DisableFuncTorch");
   py_context_manager<DisableAutocast>(_C_m, "_DisableAutocast");
   py::class_<torch::autograd::SavedVariable>(std::move(m), "SavedTensor")
-      .def(py::init([]() -> torch::autograd::SavedVariable {
-        TORCH_CHECK(
-            false,
-            "Trying to create a SavedTensor object from Python is forbidden.");
-      }))
+      .def(py::init(
+          [](const at::Tensor& tensor,
+             bool is_output,
+             bool is_inplace_on_view) -> torch::autograd::SavedVariable {
+            return torch::autograd::SavedVariable(
+                tensor, is_output, is_inplace_on_view);
+          }),
+          py::arg("tensor"),
+          py::arg("is_output"),
+          py::arg("is_inplace_on_view") = false)
+      .def(
+          "unpack",
+          [](const torch::autograd::SavedVariable& s) -> at::Tensor {
+            return s.unpack();
+          })
       .def(
           "register_hooks",
           [](torch::autograd::SavedVariable& s,
