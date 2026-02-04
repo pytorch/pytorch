@@ -2,6 +2,8 @@ name: Build Flash Attention 3 wheels (Windows)
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: '0 0 1,15 * *'
   pull_request:
     paths:
       - .github/workflows/_binary-build-flash-attention-wheel-windows.yml
@@ -40,7 +42,12 @@ jobs:
     env:
       CUDA_VERSION: ${{ matrix.cuda_short }}
       TORCH_CUDA_ARCH_LIST: ${{ matrix.torch_cuda_arch_list }}
+      # we are building with python 3.10 because 3.9 is not supported by torch >= 2.9 and FA3 is ABI stable after 2.9
       PYTHON_VERSION: "3.10"
+      PYTORCH_VERSION: "2.10.0"
+      EINOPS_VERSION: "0.8.2"
+      NINJA_VERSION: "1.13.0"
+      NUMPY_VERSION: "2.2.6"
       VC_YEAR: "2022"
       DISTUTILS_USE_SDK: 1
     steps:
@@ -75,6 +82,8 @@ jobs:
           CUDA_VER_SHORT="${CUDA_VER%.*}"
           CUDA_PATH="/c/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v${CUDA_VER_SHORT}"
           echo "Using CUDA ${CUDA_VER_SHORT} at ${CUDA_PATH}"
+          echo "CUDA_HOME=${CUDA_PATH}" >> "${GITHUB_ENV}"
+          echo "${CUDA_PATH}/bin" >> "${GITHUB_PATH}"
       - name: Setup MSVC
         uses: ilammy/msvc-dev-cmd@v1
 
@@ -90,8 +99,11 @@ jobs:
       - name: Apply Flash Attention patches for Windows
         run: |
           cd flash-attention/hopper
-          sed -i 's/bare_metal_version != Version("12.8"):/& and not is_offline_build():/' setup.py
+          sed -i 's/bare_metal_version != Version("12.8")/& and not is_offline_build()/' setup.py
           sed -i '/flags.append(f'"'"'ldflags = /i\    ldflags.remove("/LTCG")' setup.py
+
+          sed -i "s/python_requires=\">=3.8\"/python_requires=\">=${PYTHON_VERSION}\"/" setup.py
+          sed -i "s/\"torch\",/\"torch>=${PYTORCH_VERSION}\",/" setup.py
 
           BUILD_DATE=$(date +%Y%m%d)
           sed -i "s/version=\"3.0.0.b1\"/version=\"3.0.0b1+cu${CUDA_VERSION}.${BUILD_DATE}\"/" setup.py
@@ -109,8 +121,8 @@ jobs:
           set -x
           mkdir -p "${FA_FINAL_PACKAGE_DIR}"
           nvcc --version
-          python -m pip install torch==2.10.0 --index-url "https://download.pytorch.org/whl/cu${CUDA_VERSION}"
-          python -m pip install einops==0.8.2 ninja==1.13.0 numpy==2.4.1
+          python -m pip install torch==${PYTORCH_VERSION} --index-url "https://download.pytorch.org/whl/cu${CUDA_VERSION}"
+          python -m pip install einops==${EINOPS_VERSION} ninja==${NINJA_VERSION} numpy==${NUMPY_VERSION}
           cd flash-attention/hopper
           python setup.py bdist_wheel -d "${FA_FINAL_PACKAGE_DIR}" -k --plat-name win_amd64
           echo "Wheel built:"
