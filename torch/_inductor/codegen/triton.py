@@ -752,7 +752,7 @@ def triton_reshape(
 # number of operators which Triton "implements", but in a way that is
 # inconsistent with Python semantics (and consistent with C semantics).  We
 # must override all of these, or it is potential silent correctness problem
-class TritonPrinter(PythonPrinter):
+class TritonPrinter(PythonPrinter):  # noqa: docstring_linter
     def _print_TruncToInt(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1
         return (

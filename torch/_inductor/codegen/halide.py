@@ -77,7 +77,7 @@ class Unsupported(RuntimeError):
         super().__init__(f"halide backend does not support: {thing}")
 
 
-class HalidePrinter(PythonPrinter):
+class HalidePrinter(PythonPrinter):  # noqa: docstring_linter
     @staticmethod
     def cast_index(expr):
         return f"hl.cast({V.kernel.index_dtype}, {expr})"
