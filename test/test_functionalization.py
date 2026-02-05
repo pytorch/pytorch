@@ -2319,6 +2319,28 @@ def forward(self, arg0_1):
                     tensor.untyped_storage()._cdata, copied.untyped_storage()._cdata
                 )
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA required")
+    def test_view_copy_preserves_pin_memory(self):
+        # Test that view_copy preserves pin_memory when using functionalize
+        # with remove='mutations_and_views' mode
+        # See https://github.com/pytorch/pytorch/issues/171894
+        from torch.func import functionalize
+
+        def demo_function(x):
+            y = x.view(-1)
+            return y
+
+        for pin_memory in [True, False]:
+            with self.subTest(pin_memory=pin_memory):
+                x = torch.randn(4, pin_memory=pin_memory)
+                self.assertEqual(x.is_pinned(), pin_memory)
+
+                # Functionalize with mutations_and_views replaces view with view_copy
+                result = functionalize(demo_function, remove="mutations_and_views")(x)
+
+                self.assertEqual(result.is_pinned(), pin_memory)
+                self.assertEqual(x.view(-1), result)
+
 
 @xfail_inherited_tests(
     [
