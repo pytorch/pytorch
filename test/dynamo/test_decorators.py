@@ -3423,6 +3423,144 @@ class GraphModule(torch.nn.Module):
             def bad_fn2(x):
                 return (x,)
 
+    def test_leaf_function_output_structure_mismatch(self):
+        @leaf_function
+        def mismatched_fn(x):
+            return {"a": x, "b": x * 2}
+
+        @mismatched_fn.register_fake
+        def mismatched_fn_fake(x):
+            return (x, x * 2)
+
+        def fn(x):
+            return mismatched_fn(x)
+
+        x = torch.randn(3, 3)
+        with self.assertRaisesRegex(AssertionError, "output structure mismatch"):
+            torch.compile(fn, backend="eager")(x)
+
+    def test_leaf_function_nested_output(self):
+        @leaf_function
+        def nested_output_fn(linear1, linear2, linear3, x):
+            if x.sum() > 0:
+                return {
+                    "out": (linear1(x), linear2(x)),
+                    "extra": linear3(x),
+                    "count": 42,
+                }
+            else:
+                return {
+                    "out": (linear1(x) + 1, linear2(x) + 1),
+                    "extra": linear3(x) + 1,
+                    "count": 42,
+                }
+
+        @nested_output_fn.register_fake
+        def nested_output_fn_fake(linear1, linear2, linear3, x):
+            return {
+                "out": (linear1(x), linear2(x)),
+                "extra": linear3(x),
+                "count": 42,
+            }
+
+        class NestedOutputModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = torch.nn.Linear(3, 3)
+                self.linear2 = torch.nn.Linear(3, 3)
+                self.linear3 = torch.nn.Linear(3, 3)
+
+            def forward(self, x):
+                result = nested_output_fn(self.linear1, self.linear2, self.linear3, x)
+                return (
+                    result["out"][0] * result["count"]
+                    + result["out"][1]
+                    + result["extra"]
+                )
+
+        def args_fn():
+            return (torch.randn(3, 3, requires_grad=True),)
+
+        def loss_fn(out):
+            return out.sum()
+
+        self._test_leaf_function_helper(NestedOutputModule, args_fn, loss_fn)
+
+    def test_leaf_function_custom_pytree_output(self):
+        class Point:
+            x: torch.Tensor
+            y: torch.Tensor
+
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+
+        self.register_pytree_node(
+            Point,
+            lambda p: ((p.x, p.y), ()),
+            lambda xy, _: Point(xy[0], xy[1]),
+            serialized_type_name=f"{Point.__module__}.{Point.__qualname__}",
+        )
+
+        @leaf_function
+        def point_fn(linear1, linear2, x):
+            return (Point(linear1(x), linear2(x)), 0.5)
+
+        @point_fn.register_fake
+        def point_fn_fake(linear1, linear2, x):
+            return (Point(linear1(x), linear2(x)), 0.5)
+
+        class PointModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = torch.nn.Linear(3, 3)
+                self.linear2 = torch.nn.Linear(3, 3)
+
+            def forward(self, x):
+                p, scale = point_fn(self.linear1, self.linear2, x)
+                return (p.x * scale, p.y * scale)
+
+        def args_fn():
+            return (torch.randn(3, 3, requires_grad=True),)
+
+        def loss_fn(out):
+            return out[0].sum() + out[1].sum()
+
+        self._test_leaf_function_helper(PointModule, args_fn, loss_fn)
+
+    def test_leaf_function_fake_requires_grad_ignored(self):
+        @leaf_function
+        def my_fn(x):
+            return (x * 2,)
+
+        @my_fn.register_fake
+        def my_fn_fake(x):
+            return (torch.empty_like(x).requires_grad_(False),)
+
+        from torch._dynamo.testing import EagerAndRecordGraphs
+
+        backend = EagerAndRecordGraphs()
+
+        @torch.compile(backend=backend, fullgraph=True)
+        def fn(x):
+            return my_fn(x)
+
+        x = torch.randn(3, 3, requires_grad=True)
+        out = fn(x)
+
+        self.assertTrue(out[0].requires_grad)
+        out[0].sum().backward()
+        self.assertIsNotNone(x.grad)
+
+        graph = backend.graphs[0]
+        for node in graph.graph.nodes:
+            if node.op == "call_function" and "invoke_leaf_function" in str(
+                node.target
+            ):
+                example_value = node.meta.get("example_value")
+                self.assertIsNotNone(example_value)
+                self.assertTrue(example_value[0].requires_grad)
+
 
 instantiate_parametrized_tests(DecoratorTests)
 
