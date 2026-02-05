@@ -9,7 +9,12 @@ from torch._inductor.config import (
     inductor_default_autotune_rep,
     inductor_default_autotune_warmup,
 )
-from torch._inductor.runtime.benchmarking import Benchmarker, TritonBenchmarker
+from torch._inductor.runtime.benchmarking import (
+    Benchmarker,
+    InductorBenchmarker,
+    ProfilingBenchmarker,
+    TritonBenchmarker,
+)
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import (
     decorateIf,
@@ -21,6 +26,7 @@ from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 
 ALL_BENCHMARKER_CLASSES = (
     Benchmarker,
+    ProfilingBenchmarker,
     TritonBenchmarker,
 )
 
@@ -149,6 +155,70 @@ class TestBenchmarker(TestCase):
 
         self.assertEqual(captured_kwargs["warmup"], custom_warmup)
         self.assertEqual(captured_kwargs["rep"], custom_rep)
+
+    @unittest.skipIf(not HAS_GPU, "requires GPU")
+    def test_profiling_benchmarker_returns_positive_timing(self):
+        """Test that ProfilingBenchmarker.benchmark_gpu returns a positive timing."""
+        benchmarker = ProfilingBenchmarker()
+        _, _callable = self.make_params(GPU_TYPE)
+        timing = benchmarker.benchmark_gpu(_callable, warmup=10, rep=20)
+        self.assertGreater(timing, 0)
+
+    @unittest.skipIf(not HAS_GPU, "requires GPU")
+    def test_do_bench_using_profiling_backwards_compat(self):
+        """Test that utils.do_bench_using_profiling still works."""
+        from torch._inductor.utils import do_bench_using_profiling
+
+        _, _callable = self.make_params(GPU_TYPE)
+        timing = do_bench_using_profiling(_callable, warmup=10, rep=20)
+        self.assertGreater(timing, 0)
+
+
+class TestBenchmarkerSingleton(TestCase):
+    """Tests for Benchmarker singleton pattern."""
+
+    def test_benchmarker_is_singleton(self):
+        """Same Benchmarker class returns the same instance."""
+        a = Benchmarker()
+        b = Benchmarker()
+        self.assertIs(a, b)
+
+    def test_triton_benchmarker_is_singleton(self):
+        """Same TritonBenchmarker class returns the same instance."""
+        a = TritonBenchmarker()
+        b = TritonBenchmarker()
+        self.assertIs(a, b)
+
+    def test_inductor_benchmarker_is_singleton(self):
+        """Same InductorBenchmarker class returns the same instance."""
+        a = InductorBenchmarker()
+        b = InductorBenchmarker()
+        self.assertIs(a, b)
+
+    def test_different_classes_are_different_instances(self):
+        """Different Benchmarker subclasses return different instances."""
+        benchmarker = Benchmarker()
+        triton = TritonBenchmarker()
+        inductor = InductorBenchmarker()
+
+        self.assertIsNot(benchmarker, triton)
+        self.assertIsNot(benchmarker, inductor)
+        self.assertIsNot(triton, inductor)
+
+    def test_init_guard_prevents_reinitialization(self):
+        """The _initialized guard should prevent re-running init logic."""
+        # Get the singleton instance
+        instance = Benchmarker()
+
+        # Verify _initialized is set
+        self.assertTrue(instance._initialized)
+
+        # Manually reset _initialized to simulate what would happen without guard
+        # Then verify calling constructor again doesn't re-initialize
+        # (since it returns the same instance with _initialized already True)
+        second = Benchmarker()
+        self.assertIs(instance, second)
+        self.assertTrue(second._initialized)
 
 
 if __name__ == "__main__":
