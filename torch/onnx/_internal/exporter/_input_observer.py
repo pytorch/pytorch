@@ -431,8 +431,8 @@ class InputObserverInfo:
         ):
             raise NotImplementedError(
                 "infer_dynamic_shapes is not implemented "
-                "when the best candidate is not 'aligned'."
-                "This happens when there is not stored set inputs where "
+                "when the best candidate is not 'aligned'. "
+                "This happens when there is no stored set of inputs where "
                 "all optional inputs showing in other sets are defined."
             )
 
@@ -648,12 +648,13 @@ class InputObserver:
     >>> )
 
     With LLM:
+
     >>> input_observer = InputObserver()
     >>> with input_observer(model):
     >>>     model.generate(input_ids)
     >>> ep = torch.export.export(  # or torch.onnx.export
     >>>     model,
-    >>>     ()
+    >>>     (),
     >>>     kwargs=input_observer.infer_arguments(),
     >>>     dynamic_shapes.input_observer.infer_dynamic_shapes(),
     >>> )
@@ -780,9 +781,9 @@ class InputObserver:
 
         Args:
             index_or_args_or_kwargs: If missing, the method selects one set of inputs
-                among the available ones, usually this inputs containing
-                the set of stored inputs with the highest number of tensors.
-                The then replaces None values and missing tensors by empty tensors.
+                among the available ones, usually the set of inputs containing
+                with the highest number of tensors.
+                It then replaces None values and missing tensors with empty tensors.
                 If not missing, it can be an integer to fetch one of the stored set
                 or some inputs.
             flat: If True, it returns a flattened list of tensors,
@@ -790,7 +791,7 @@ class InputObserver:
                 the nested structures.
 
         Returns:
-            Inferred arguments, every optional tensor is replaced by a empty tensor.
+            Inferred arguments, every optional tensor is replaced by an empty tensor.
         """
         self._check_captured()
         assert self.info is not None  # noqa: S101
@@ -839,7 +840,6 @@ class InputObserver:
         onnx_program: torch.onnx.ONNXProgram,
         atol: float = 1e-4,
         rtol: float = 0.1,
-        hist=(0.1, 0.01),
         progress_bar: bool = False,
         initializer: Callable[
             [str | bytes], ort.InferenceSession
@@ -855,9 +855,6 @@ class InputObserver:
                 Absolute tolerance, recommended values, 1e-4 for float, 1e-2 for float16.
             rtol:
                 Relative tolerance.
-            hist:
-                Thresholds, the function determines the number of discrepancies
-                above these thresholds.
             progress_bar:
                 Shows a progress bar (requires :epkg:`tqdm`).
             initializer: The function to initialize the ONNX Runtime inference
@@ -931,6 +928,7 @@ class InputObserver:
                         error = "not the same shape"
                         break
                     if torch_tensor.dtype != ort_tensor.dtype:
+                        success = False
                         error = "not the same type"
                         break
                     err = (torch_tensor - ort_tensor).abs().max().item()
@@ -951,7 +949,7 @@ class InputObserver:
                 diff = dict(SUCCESS=success, abs=err_abs, rel=err_rel)
             diff.update(
                 dict(
-                    index=len(diff),
+                    index=len(data),
                     duration_torch=latency,
                     ort_duration=duration,
                     n_inputs=len(input_names),
