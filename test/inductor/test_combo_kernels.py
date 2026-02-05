@@ -10,10 +10,12 @@ import torch
 import torch._inductor
 from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
+from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     skipIfRocm,
+    skipIfXpu,
     TestCase,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU_AND_TRITON
@@ -407,6 +409,7 @@ class ComboKernelTests(TestCase):
         # 3D poi (x, y, z) are separated from combo kernels
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
+    @skipIfXpu(msg="Profiler JSON traceEvents is not supported on XPU")
     @requires_gpu_and_triton
     def test_combo_kernel_per_config_subkernel_block_size(self):
         from torch.profiler import ProfilerActivity
@@ -439,23 +442,24 @@ class ComboKernelTests(TestCase):
             return o0, o1, o2, o3, o4, o5, o6, o7
 
         inps = [
-            torch.randn(4, 3, 224, 224, device="cuda"),
-            torch.randn(64, 3, 3, 3, device="cuda"),
-            torch.randn(64, 64, 3, 3, device="cuda"),
-            torch.randn(128, 64, 3, 3, device="cuda"),
-            torch.randn(128, 128, 3, 3, device="cuda"),
-            torch.randn(256, 128, 3, 3, device="cuda"),
-            torch.randn(256, 256, 3, 3, device="cuda"),
-            torch.randn(256, 256, 3, 3, device="cuda"),
+            torch.randn(4, 3, 224, 224, device=GPU_TYPE),
+            torch.randn(64, 3, 3, 3, device=GPU_TYPE),
+            torch.randn(64, 64, 3, 3, device=GPU_TYPE),
+            torch.randn(128, 64, 3, 3, device=GPU_TYPE),
+            torch.randn(128, 128, 3, 3, device=GPU_TYPE),
+            torch.randn(256, 128, 3, 3, device=GPU_TYPE),
+            torch.randn(256, 256, 3, 3, device=GPU_TYPE),
+            torch.randn(256, 256, 3, 3, device=GPU_TYPE),
         ]
         out_eager = fn(*inps)
         fn_c = torch.compile(fn)
 
         with tempfile.NamedTemporaryFile(suffix=".json") as trace_file:
             trace_path = trace_file.name
+            activity = getattr(ProfilerActivity, GPU_TYPE.upper())
 
             with torch.profiler.profile(
-                activities=[ProfilerActivity.CUDA],
+                activities=[activity],
                 record_shapes=True,
             ) as prof:
                 out_compiled, code = run_and_get_code(fn_c, *inps)
@@ -904,6 +908,132 @@ class ComboKernelBenchmarkTestsPerSubkernelBlocks(ComboKernelBenchmarkTests):
 
 class ComboKernelDynamicShapesTestsPerSubkernelBlocks(ComboKernelDynamicShapesTests):
     combo_kernel_per_subkernel_blocks = True
+
+
+@instantiate_parametrized_tests
+class ComboKernelPDLTests(TestCase):
+    """Tests for PDL (Programmatic Dependent Launch) support in combo kernels."""
+
+    def setUp(self):
+        super().setUp()
+        torch._inductor.metrics.reset()
+        self._test_stack = contextlib.ExitStack()
+        self._test_stack.enter_context(
+            torch._inductor.config.patch(
+                {
+                    "combo_kernels": True,
+                    "benchmark_combo_kernel": False,
+                    "triton.enable_pdl": True,
+                }
+            )
+        )
+
+    def tearDown(self):
+        self._test_stack.close()
+        torch._inductor.metrics.reset()
+        super().tearDown()
+
+    @requires_gpu_and_triton
+    @skipIfRocm
+    @unittest.skipIf(not SM90OrLater, "PDL requires SM90 or later (Hopper+)")
+    def test_pdl_codegen_in_combo_kernel(self):
+        """Test that PDL flag and gdc calls are generated in combo kernels."""
+
+        def fn(a, b):
+            return torch.relu(a), torch.sigmoid(b)
+
+        inps = [
+            torch.rand(1024, device=GPU_TYPE),
+            torch.rand(1024, device=GPU_TYPE),
+        ]
+
+        fn_c = torch.compile(fn)
+        _, code = run_and_get_code(fn_c, *inps)
+        code = " ".join(code)
+
+        # Check that launch_pdl is True and PDL API calls are generated
+        FileCheck().check("'launch_pdl': True").run(code)
+
+        # Each sub-kernel should have exactly one gdc_wait followed by one
+        # gdc_launch_dependents, with no redundant waits in between.
+        # Uses round-robin dispatch (pid % 2) since both tensors are same size.
+        (
+            FileCheck()
+            .check("if pid % 2 == 0:")
+            .check("tl.extra.cuda.gdc_wait()")
+            .check("tl.load(")
+            .check_not("tl.extra.cuda.gdc_wait()")
+            .check("tl.extra.cuda.gdc_launch_dependents()")
+            .check_not("tl.extra.cuda.gdc_wait()")
+            .check("elif pid % 2 == 1:")
+            .check("tl.extra.cuda.gdc_wait()")
+            .check("tl.load(")
+            .check_not("tl.extra.cuda.gdc_wait()")
+            .check("tl.extra.cuda.gdc_launch_dependents()")
+            .run(code)
+        )
+
+    @requires_gpu_and_triton
+    @skipIfRocm
+    @unittest.skipIf(not SM90OrLater, "PDL requires SM90 or later (Hopper+)")
+    def test_pdl_combo_kernel_pointwise(self):
+        """Test that pointwise combo kernels produce correct results with PDL."""
+
+        def fn(a, b, c):
+            return torch.relu(a), torch.sigmoid(b), torch.tanh(c)
+
+        inps = [
+            torch.rand(10, 10, device=GPU_TYPE),
+            torch.rand(20, 20, device=GPU_TYPE),
+            torch.rand(10, 10, device=GPU_TYPE),
+        ]
+
+        out_eager = fn(*inps)
+        fn_c = torch.compile(fn)
+        out_compiled, code = run_and_get_code(fn_c, *inps)
+        code = " ".join(code)
+
+        self.assertEqual(out_eager, out_compiled)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+        # Verify combo kernel structure with PDL - each sub-kernel should have
+        # exactly one gdc_wait and one gdc_launch_dependents, no redundant waits.
+        (
+            FileCheck()
+            .check("'launch_pdl': True")
+            .check("if pid < num_xblocks_0:")
+            .check("tl.extra.cuda.gdc_wait()")
+            .check_not("tl.extra.cuda.gdc_wait()")
+            .check("tl.extra.cuda.gdc_launch_dependents()")
+            .check("elif pid < num_xblocks_1:")
+            .check("tl.extra.cuda.gdc_wait()")
+            .check_not("tl.extra.cuda.gdc_wait()")
+            .check("tl.extra.cuda.gdc_launch_dependents()")
+            .check("elif pid < num_xblocks_2:")
+            .check("tl.extra.cuda.gdc_wait()")
+            .check_not("tl.extra.cuda.gdc_wait()")
+            .check("tl.extra.cuda.gdc_launch_dependents()")
+            .run(code)
+        )
+
+    @requires_gpu_and_triton
+    @skipIfRocm
+    @unittest.skipIf(not SM90OrLater, "PDL requires SM90 or later (Hopper+)")
+    def test_pdl_combo_kernel_reduction(self):
+        """Test that reduction combo kernels produce correct results with PDL."""
+
+        def fn(x, y):
+            return x.sum(dim=-1), y.mean(dim=-1)
+
+        inps = [
+            torch.rand(32, 1024, device=GPU_TYPE),
+            torch.rand(32, 1024, device=GPU_TYPE),
+        ]
+
+        out_eager = fn(*inps)
+        out_compiled = torch.compile(fn)(*inps)
+
+        self.assertEqual(out_eager, out_compiled)
 
 
 if __name__ == "__main__":
