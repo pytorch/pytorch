@@ -88,7 +88,16 @@ class _ProfilerResult:
     def experimental_event_tree(self) -> list[_ProfilerEvent]: ...
     def trace_start_ns(self) -> int: ...
 
-class SavedTensor: ...
+class SavedTensor:
+    def __init__(
+        self,
+        tensor: torch.Tensor,
+        *,
+        is_output: bool,
+        is_inplace_on_view: bool = False,
+        _INTERNAL_USE_ONLY: bool = False,
+    ) -> None: ...
+    def unpack(self) -> torch.Tensor: ...
 
 def _enable_profiler(
     config: ProfilerConfig,
