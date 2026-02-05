@@ -3333,7 +3333,7 @@ class TestSDPACudaOnly(NNTestCase):
         prefer_cudnn = "TORCH_CUDNN_SDPA_PREFERRED" not in os.environ or bool(os.environ["TORCH_CUDNN_SDPA_PREFERRED"])
         # cuDNN prioritization requires cuDNN >= 9.9.0 (90900) per sdp_utils.cpp:83
         cudnn_version = torch.backends.cudnn.version() if torch.backends.cudnn.is_available() else 0
-        is_hopper_or_newer = device_capability and (device_capability == (9, 0) or device_capability == (10, 0))
+        is_hopper_or_newer = device_capability and (device_capability[0] == 9 or device_capability[0] == 10)
         prefer_cudnn = prefer_cudnn and is_hopper_or_newer and cudnn_version >= 90900
 
         # cuDNN is enabled by default on SM 9.0/10.0 with cuDNN >= 9.9.0 (per #162073)
