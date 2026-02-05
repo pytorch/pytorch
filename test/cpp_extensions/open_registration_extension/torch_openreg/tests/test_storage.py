@@ -7,7 +7,6 @@ import tempfile
 import unittest
 
 import numpy
-
 import torch
 from torch.serialization import safe_globals
 from torch.testing._internal.common_utils import (
@@ -21,6 +20,7 @@ from torch.testing._internal.common_utils import (
 class TestStorage(TestCase):
     @skipIfTorchDynamo("unsupported aten.is_pinned.default")
     def test_rewrapped_storage(self):
+        """Test rewrapping pinned storage"""
         pinned_a = torch.randn(10).pin_memory()
         rewrapped_a = torch.tensor((), dtype=torch.float32).set_(
             pinned_a.untyped_storage()[2:],
@@ -34,6 +34,7 @@ class TestStorage(TestCase):
 
 class TestSerialization(TestCase):
     def test_serialization(self):
+        """Test basic serialization and deserialization"""
         storage = torch.UntypedStorage(4, device=torch.device("openreg"))
         self.assertEqual(torch.serialization.location_tag(storage), "openreg:0")
 
@@ -168,6 +169,65 @@ class TestSerialization(TestCase):
                 ):
                     with torch.serialization.skip_data():
                         torch.save(sd, f)
+
+    def test_serialization_metadata_preservation(self):
+        """Test that metadata is preserved during serialization"""
+        tensor = torch.empty(3, 3, device="openreg")
+        metadata = {"version_number": True, "format_number": True}
+        torch._utils.set_tensor_metadata(tensor, metadata)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "data.pt")
+            torch.save(tensor, path)
+
+            loaded_tensor = torch.load(path)
+            self.assertEqual(torch._utils.get_tensor_metadata(loaded_tensor), metadata)
+
+    def test_serialization_map_location_cpu(self):
+        """Test serialization with map_location to CPU"""
+        tensor = torch.randn(3, 3, device="openreg")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "data.pt")
+            torch.save(tensor, path)
+
+            loaded_cpu = torch.load(path, map_location="cpu")
+            self.assertTrue(loaded_cpu.is_cpu)
+            self.assertEqual(loaded_cpu, tensor.cpu())
+
+    def test_serialization_map_location_device(self):
+        """Test serialization with map_location to specific device"""
+        tensor = torch.randn(3, 3, device="openreg:0")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "data.pt")
+            torch.save(tensor, path)
+
+            loaded_device = torch.load(path, map_location="openreg:1")
+            self.assertEqual(loaded_device.device.index, 1)
+            self.assertEqual(loaded_device.cpu(), tensor.cpu())
+
+    def test_serialization_storage_location_tag(self):
+        """Test storage location tag"""
+        storage = torch.UntypedStorage(4, device=torch.device("openreg:1"))
+        self.assertEqual(torch.serialization.location_tag(storage), "openreg:1")
+
+        storage = torch.UntypedStorage(4, device=torch.device("openreg"))
+        self.assertEqual(torch.serialization.location_tag(storage), "openreg:0")
+
+    def test_serialization_default_restore_location(self):
+        """Test default restore location"""
+        storage_cpu = torch.empty(4, 4).storage()
+
+        storage_openreg0 = torch.serialization.default_restore_location(
+            storage_cpu, "openreg:0"
+        )
+        self.assertTrue(storage_openreg0.is_openreg)
+
+        storage_openreg1 = torch.serialization.default_restore_location(
+            storage_cpu, "openreg:1"
+        )
+        self.assertTrue(storage_openreg1.is_openreg)
 
 
 if __name__ == "__main__":

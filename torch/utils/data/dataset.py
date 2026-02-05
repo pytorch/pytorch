@@ -198,7 +198,7 @@ class TensorDataset(Dataset[tuple[Tensor, ...]]):
     tensors: tuple[Tensor, ...]
 
     def __init__(self, *tensors: Tensor) -> None:
-        if all(tensors[0].size(0) != tensor.size(0) for tensor in tensors):
+        if any(tensors[0].size(0) != tensor.size(0) for tensor in tensors):
             raise AssertionError("Size mismatch between tensors")
         self.tensors = tensors
 
@@ -387,6 +387,22 @@ class Subset(Dataset[_T_co]):
     r"""
     Subset of a dataset at specified indices.
 
+    .. note::
+        When subclassing `Subset` and overriding `__getitem__`, you **must** also
+        override `__getitems__` to ensure `DataLoader` works correctly with your
+        custom logic. If you override only `__getitem__`, a `NotImplementedError`
+        will be raised when using `DataLoader`.
+
+        A simple implementation of `__getitems__` can delegate to `__getitem__`:
+
+        .. code-block:: python
+
+            def __getitems__(self, indices):
+                return [self.__getitem__(idx) for idx in indices]
+
+        For better performance, consider implementing batch-aware logic in
+        `__getitems__` instead of calling `__getitem__` multiple times.
+
     Args:
         dataset (Dataset): The whole Dataset
         indices (sequence): Indices in the whole set selected for subset
@@ -398,6 +414,20 @@ class Subset(Dataset[_T_co]):
     def __init__(self, dataset: Dataset[_T_co], indices: Sequence[int]) -> None:
         self.dataset = dataset
         self.indices = indices
+
+        # Check if __getitem__ is overridden but __getitems__ is not
+        if (
+            type(self).__getitem__ is not Subset.__getitem__
+            and type(self).__getitems__ is Subset.__getitems__
+        ):
+            raise NotImplementedError(
+                f"{type(self).__name__} overrides __getitem__ but not __getitems__. "
+                "When subclassing Subset and overriding __getitem__, you must also override "
+                "__getitems__ to ensure DataLoader works correctly with your custom logic. "
+                "A simple implementation:\n\n"
+                "def __getitems__(self, indices):\n"
+                "    return [self.__getitem__(idx) for idx in indices]"
+            )
 
     def __getitem__(self, idx):
         if isinstance(idx, list):

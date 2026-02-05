@@ -92,7 +92,7 @@ all_modules = {
     # "dynamic_quant_ops": DynamicQuantModule(),
     "static_quant_ops": StaticQuantModule(),
     "fused_quant_ops": FusedQuantModule(),
-    # TorchScript buildin ops
+    # TorchScript builtin ops
     "torchscript_builtin_ops": TSBuiltinOpsModule(),
     "torchscript_collection_ops": TSCollectionOpsModule(),
     # vision

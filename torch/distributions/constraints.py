@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 
 from collections.abc import Callable
-from typing import Any, Optional
+from typing import Any
 
 
 r"""
@@ -207,10 +207,10 @@ class _DependentProperty(property, _Dependent):
 
     def __init__(
         self,
-        fn: Optional[Callable[..., Any]] = None,
+        fn: Callable[..., Any] | None = None,
         *,
-        is_discrete: Optional[bool] = NotImplemented,
-        event_dim: Optional[int] = NotImplemented,
+        is_discrete: bool | None = NotImplemented,
+        event_dim: int | None = NotImplemented,
     ) -> None:
         super().__init__(fn)
         self._is_discrete = is_discrete
@@ -236,9 +236,18 @@ class _IndependentConstraint(Constraint):
     """
 
     def __init__(self, base_constraint, reinterpreted_batch_ndims):
-        assert isinstance(base_constraint, Constraint)
-        assert isinstance(reinterpreted_batch_ndims, int)
-        assert reinterpreted_batch_ndims >= 0
+        if not isinstance(base_constraint, Constraint):
+            raise AssertionError(
+                f"base_constraint must be a Constraint, got {type(base_constraint).__name__}"
+            )
+        if not isinstance(reinterpreted_batch_ndims, int):
+            raise AssertionError(
+                f"reinterpreted_batch_ndims must be an int, got {type(reinterpreted_batch_ndims).__name__}"
+            )
+        if reinterpreted_batch_ndims < 0:
+            raise AssertionError(
+                f"reinterpreted_batch_ndims must be >= 0, got {reinterpreted_batch_ndims}"
+            )
         self.base_constraint = base_constraint
         self.reinterpreted_batch_ndims = reinterpreted_batch_ndims
         super().__init__()
@@ -282,7 +291,10 @@ class MixtureSameFamilyConstraint(Constraint):
     """
 
     def __init__(self, base_constraint):
-        assert isinstance(base_constraint, Constraint)
+        if not isinstance(base_constraint, Constraint):
+            raise AssertionError(
+                f"base_constraint must be a Constraint, got {type(base_constraint).__name__}"
+            )
         self.base_constraint = base_constraint
         super().__init__()
 
@@ -646,12 +658,16 @@ class _Cat(Constraint):
     """
 
     def __init__(self, cseq, dim=0, lengths=None):
-        assert all(isinstance(c, Constraint) for c in cseq)
+        if not all(isinstance(c, Constraint) for c in cseq):
+            raise AssertionError("All elements of cseq must be Constraint instances")
         self.cseq = list(cseq)
         if lengths is None:
             lengths = [1] * len(self.cseq)
         self.lengths = list(lengths)
-        assert len(self.lengths) == len(self.cseq)
+        if len(self.lengths) != len(self.cseq):
+            raise AssertionError(
+                f"lengths ({len(self.lengths)}) must match cseq ({len(self.cseq)})"
+            )
         self.dim = dim
         super().__init__()
 
@@ -664,7 +680,10 @@ class _Cat(Constraint):
         return max(c.event_dim for c in self.cseq)
 
     def check(self, value):
-        assert -value.dim() <= self.dim < value.dim()
+        if not (-value.dim() <= self.dim < value.dim()):
+            raise AssertionError(
+                f"dim {self.dim} out of range for value with {value.dim()} dimensions"
+            )
         checks = []
         start = 0
         for constr, length in zip(self.cseq, self.lengths):
@@ -682,7 +701,8 @@ class _Stack(Constraint):
     """
 
     def __init__(self, cseq, dim=0):
-        assert all(isinstance(c, Constraint) for c in cseq)
+        if not all(isinstance(c, Constraint) for c in cseq):
+            raise AssertionError("All elements of cseq must be Constraint instances")
         self.cseq = list(cseq)
         self.dim = dim
         super().__init__()
@@ -699,7 +719,10 @@ class _Stack(Constraint):
         return dim
 
     def check(self, value):
-        assert -value.dim() <= self.dim < value.dim()
+        if not (-value.dim() <= self.dim < value.dim()):
+            raise AssertionError(
+                f"dim {self.dim} out of range for value with {value.dim()} dimensions"
+            )
         vs = [value.select(self.dim, i) for i in range(value.size(self.dim))]
         return torch.stack(
             [constr.check(v) for v, constr in zip(vs, self.cseq)], self.dim
