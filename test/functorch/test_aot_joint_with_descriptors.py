@@ -17,6 +17,7 @@ from torch._dynamo.functional_export import dynamo_graph_capture_for_export
 from torch._dynamo.testing import normalize_gm
 from torch._functorch._aot_autograd.descriptors import (
     BufferAOTInput,
+    GradAOTOutput,
     ParamAOTInput,
     PlainAOTInput,
     PlainAOTOutput,
@@ -1255,6 +1256,353 @@ class inner_f(torch.nn.Module):
 [('placeholder', 'arg0_1', {'mod_name': 'my_mod'}), ('placeholder', 'arg1_1', {'mod_name': 'my_mod'}), ('call_function', 'sin', {'mod_name': 'bar'}), ('call_function', 'mul', {'mod_name': 'bar'}), ('call_function', 'mul_1', {'mod_name': 'bar'}), ('call_function', 'cos', {'mod_name': 'bar'}), ('call_function', 'mul_2', {'mod_name': 'bar'}), ('output', 'output', {'mod_name': 'my_mod'})]
 ('call_function', 'invoke_subgraph_1', {'mod_name': 'my_mod'})
 ('call_function', 'getitem_1', {'mod_name': 'my_mod'})""",  # noqa: B950
+        )
+
+
+class TestDescriptorBasedMeta(TestCase):
+    """Tests for DescriptorBasedMeta and graph_transform utilities."""
+
+    def test_descriptor_based_meta_creation(self):
+        """Test creating DescriptorBasedMeta from descriptors."""
+        from torch._functorch._aot_autograd.schemas import (
+            DescriptorBasedMeta,
+            InputMutationInfo,
+            OutputAliasInfoDesc,
+            OutputType,
+        )
+
+        input_descs = [PlainAOTInput(idx=0), PlainAOTInput(idx=1)]
+        output_descs = [PlainAOTOutput(idx=0)]
+
+        meta = DescriptorBasedMeta(
+            input_descs=input_descs,
+            output_descs=output_descs,
+        )
+
+        self.assertEqual(len(meta.input_descs), 2)
+        self.assertEqual(len(meta.output_descs), 1)
+        self.assertEqual(meta.num_outputs, 1)
+
+    def test_descriptor_based_meta_classify_inputs(self):
+        """Test classifying inputs by descriptor type."""
+        from torch._functorch._aot_autograd.schemas import DescriptorBasedMeta
+
+        input_descs = [
+            PlainAOTInput(idx=0),
+            ParamAOTInput(target="weight"),
+            BufferAOTInput(target="running_mean"),
+            PlainAOTInput(idx=1),
+        ]
+        output_descs = [PlainAOTOutput(idx=0)]
+
+        meta = DescriptorBasedMeta(
+            input_descs=input_descs,
+            output_descs=output_descs,
+        )
+
+        classified = meta.classify_inputs()
+        self.assertEqual(len(classified["plain"]), 2)
+        self.assertEqual(len(classified["params"]), 1)
+        self.assertEqual(len(classified["buffers"]), 1)
+
+    def test_descriptor_based_meta_mutation_info(self):
+        """Test mutated input tracking."""
+        from torch._functorch._aot_autograd.schemas import (
+            DescriptorBasedMeta,
+            InputMutationInfo,
+            MutationType,
+        )
+
+        input_descs = [PlainAOTInput(idx=0), PlainAOTInput(idx=1)]
+        output_descs = [PlainAOTOutput(idx=0)]
+
+        mutation_info_0 = InputMutationInfo(
+            mutates_data=True,
+            mutates_metadata=False,
+            mutations_hidden_from_autograd=False,
+            mutations_under_no_grad_or_inference_mode=False,
+            mutation_inductor_storage_resize=False,
+            mutates_storage_metadata=False,
+            requires_grad=True,
+            keep_input_mutations=False,
+            is_leaf=True,
+        )
+        mutation_info_1 = InputMutationInfo(
+            mutates_data=False,
+            mutates_metadata=False,
+            mutations_hidden_from_autograd=False,
+            mutations_under_no_grad_or_inference_mode=False,
+            mutation_inductor_storage_resize=False,
+            mutates_storage_metadata=False,
+            requires_grad=True,
+            keep_input_mutations=False,
+            is_leaf=True,
+        )
+
+        meta = DescriptorBasedMeta(
+            input_descs=input_descs,
+            output_descs=output_descs,
+            input_mutation_info={
+                input_descs[0]: mutation_info_0,
+                input_descs[1]: mutation_info_1,
+            },
+        )
+
+        # First input is mutated outside graph
+        self.assertEqual(meta.mutated_inp_runtime_indices, [0])
+        self.assertEqual(meta.num_mutated_inp_runtime_indices, 1)
+
+    def test_descriptor_based_meta_alias_info(self):
+        """Test aliased output tracking."""
+        from torch._functorch._aot_autograd.schemas import (
+            DescriptorBasedMeta,
+            OutputAliasInfoDesc,
+            OutputType,
+        )
+
+        input_descs = [PlainAOTInput(idx=0)]
+        output_descs = [PlainAOTOutput(idx=0), PlainAOTOutput(idx=1)]
+
+        alias_info_0 = OutputAliasInfoDesc(
+            output_type=OutputType.non_alias,
+            raw_type=torch.Tensor,
+            base_desc=None,
+            dynamic_dims=None,
+            requires_grad=True,
+        )
+        alias_info_1 = OutputAliasInfoDesc(
+            output_type=OutputType.alias_of_input,
+            raw_type=torch.Tensor,
+            base_desc=input_descs[0],
+            dynamic_dims=None,
+            requires_grad=True,
+        )
+
+        meta = DescriptorBasedMeta(
+            input_descs=input_descs,
+            output_descs=output_descs,
+            output_alias_info={
+                output_descs[0]: alias_info_0,
+                output_descs[1]: alias_info_1,
+            },
+        )
+
+        self.assertEqual(meta.aliased_out_indices, [1])
+        self.assertEqual(meta.num_outputs_aliased, 1)
+
+    def test_graph_transform_get_meta(self):
+        """Test get_meta extracts descriptors from graph."""
+        from torch._functorch._aot_autograd.graph_transform import get_meta
+
+        class SimpleModule(nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        gm = torch.fx.symbolic_trace(SimpleModule())
+
+        # Add descriptors to nodes
+        for i, node in enumerate(gm.graph.nodes):
+            if node.op == "placeholder":
+                node.meta["desc"] = PlainAOTInput(idx=i)
+            elif node.op == "output":
+                node.meta["desc"] = [PlainAOTOutput(idx=0)]
+
+        meta = get_meta(gm)
+        self.assertEqual(len(meta.input_descs), 2)
+        self.assertEqual(len(meta.output_descs), 1)
+
+    def test_graph_transform_partition_by_output(self):
+        """Test partitioning graph by output descriptor type."""
+        from torch._functorch._aot_autograd.descriptors import GradAOTOutput
+        from torch._functorch._aot_autograd.graph_transform import (
+            get_output_descs,
+            partition_by_output,
+        )
+
+        class SimpleModule(nn.Module):
+            def forward(self, x, y):
+                return x + y, x * y
+
+        gm = torch.fx.symbolic_trace(SimpleModule())
+
+        # Add descriptors
+        for i, node in enumerate(gm.graph.nodes):
+            if node.op == "placeholder":
+                node.meta["desc"] = PlainAOTInput(idx=i)
+            elif node.op == "output":
+                node.meta["desc"] = [
+                    PlainAOTOutput(idx=0),
+                    GradAOTOutput(grad_of=PlainAOTInput(idx=0)),
+                ]
+
+        # Partition to keep only PlainAOTOutput
+        partitioned = partition_by_output(
+            gm, lambda d: isinstance(d, PlainAOTOutput)
+        )
+
+        output_descs = get_output_descs(partitioned)
+        self.assertEqual(len(output_descs), 1)
+        self.assertIsInstance(output_descs[0], PlainAOTOutput)
+
+    def test_attach_mutation_info_to_graph(self):
+        """Test attaching mutation info to graph nodes."""
+        from torch._functorch._aot_autograd.graph_transform import (
+            attach_mutation_info_to_graph,
+            detach_mutation_info_from_graph,
+            get_meta,
+        )
+        from torch._functorch._aot_autograd.schemas import (
+            InputAliasInfo,
+            OutputAliasInfo,
+            OutputType,
+            ViewAndMutationMeta,
+        )
+
+        class SimpleModule(nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        gm = torch.fx.symbolic_trace(SimpleModule())
+
+        # Add descriptors
+        for i, node in enumerate(gm.graph.nodes):
+            if node.op == "placeholder":
+                node.meta["desc"] = PlainAOTInput(idx=i)
+            elif node.op == "output":
+                node.meta["desc"] = [PlainAOTOutput(idx=0)]
+
+        # Create ViewAndMutationMeta
+        input_info = [
+            InputAliasInfo(
+                is_leaf=True,
+                mutates_data=True,
+                mutates_metadata=False,
+                mutations_hidden_from_autograd=False,
+                mutations_under_no_grad_or_inference_mode=False,
+                mutation_inductor_storage_resize=False,
+                mutates_storage_metadata=False,
+                requires_grad=True,
+                keep_input_mutations=False,
+            ),
+            InputAliasInfo(
+                is_leaf=True,
+                mutates_data=False,
+                mutates_metadata=False,
+                mutations_hidden_from_autograd=False,
+                mutations_under_no_grad_or_inference_mode=False,
+                mutation_inductor_storage_resize=False,
+                mutates_storage_metadata=False,
+                requires_grad=True,
+                keep_input_mutations=False,
+            ),
+        ]
+        output_info = [
+            OutputAliasInfo(
+                output_type=OutputType.non_alias,
+                raw_type=torch.Tensor,
+                base_idx=None,
+                dynamic_dims=None,
+                requires_grad=True,
+            ),
+        ]
+        vm_meta = ViewAndMutationMeta(
+            input_info=input_info,
+            output_info=output_info,
+            num_intermediate_bases=0,
+            keep_input_mutations=False,
+            traced_tangents=[],
+            traced_tangents_descs=[],
+            subclass_inp_meta=[],
+            subclass_fw_graph_out_meta=[],
+            subclass_tangent_meta=[],
+        )
+
+        # Before attaching
+        meta_before = get_meta(gm)
+        self.assertEqual(len(meta_before.input_mutation_info), 0)
+
+        # Attach
+        attach_mutation_info_to_graph(gm, vm_meta)
+
+        # After attaching
+        meta_after = get_meta(gm)
+        self.assertEqual(len(meta_after.input_mutation_info), 2)
+        self.assertEqual(meta_after.mutated_inp_runtime_indices, [0])
+
+        # Detach
+        detach_mutation_info_from_graph(gm)
+        meta_detached = get_meta(gm)
+        self.assertEqual(len(meta_detached.input_mutation_info), 0)
+
+    def test_validate_equivalence(self):
+        """Test validation of descriptor-based vs index-based metadata."""
+        from torch._functorch._aot_autograd.graph_transform import (
+            create_validated_descriptor_meta,
+        )
+        from torch._functorch._aot_autograd.schemas import (
+            InputAliasInfo,
+            OutputAliasInfo,
+            OutputType,
+            ViewAndMutationMeta,
+        )
+
+        input_descs = [PlainAOTInput(idx=0), PlainAOTInput(idx=1)]
+        output_descs = [PlainAOTOutput(idx=0)]
+
+        input_info = [
+            InputAliasInfo(
+                is_leaf=True,
+                mutates_data=True,
+                mutates_metadata=False,
+                mutations_hidden_from_autograd=False,
+                mutations_under_no_grad_or_inference_mode=False,
+                mutation_inductor_storage_resize=False,
+                mutates_storage_metadata=False,
+                requires_grad=True,
+                keep_input_mutations=False,
+            ),
+            InputAliasInfo(
+                is_leaf=True,
+                mutates_data=False,
+                mutates_metadata=False,
+                mutations_hidden_from_autograd=False,
+                mutations_under_no_grad_or_inference_mode=False,
+                mutation_inductor_storage_resize=False,
+                mutates_storage_metadata=False,
+                requires_grad=True,
+                keep_input_mutations=False,
+            ),
+        ]
+        output_info = [
+            OutputAliasInfo(
+                output_type=OutputType.non_alias,
+                raw_type=torch.Tensor,
+                base_idx=None,
+                dynamic_dims=None,
+                requires_grad=True,
+            ),
+        ]
+        vm_meta = ViewAndMutationMeta(
+            input_info=input_info,
+            output_info=output_info,
+            num_intermediate_bases=0,
+            keep_input_mutations=False,
+            traced_tangents=[],
+            traced_tangents_descs=[],
+            subclass_inp_meta=[],
+            subclass_fw_graph_out_meta=[],
+            subclass_tangent_meta=[],
+        )
+
+        # Should not raise
+        descriptor_meta = create_validated_descriptor_meta(
+            vm_meta, input_descs, output_descs
+        )
+
+        self.assertEqual(descriptor_meta.mutated_inp_runtime_indices, [0])
+        self.assertEqual(
+            descriptor_meta.mutated_inp_runtime_indices,
+            vm_meta.mutated_inp_runtime_indices,
         )
 
 

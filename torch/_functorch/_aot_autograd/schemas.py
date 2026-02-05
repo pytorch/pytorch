@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     import contextlib
     from collections.abc import Callable, Iterable, Sequence
 
+    import torch.fx
     from torch._guards import Source
     from torch._inductor.output_code import OutputCode
     from torch._inductor.utils import InputType
@@ -168,6 +169,137 @@ class InputAliasInfo:
             return MutationType.MUTATED_IN_GRAPH
 
         return MutationType.MUTATED_OUT_GRAPH
+
+
+@dataclass(frozen=True)
+class InputMutationInfo:
+    """
+    Mutation info for a specific input, attached to its descriptor.
+
+    Unlike InputAliasInfo which uses positional indices, this class is designed
+    to be attached to AOTInput descriptors, making the metadata transformation-invariant.
+    """
+
+    mutates_data: bool
+    mutates_metadata: bool
+    mutations_hidden_from_autograd: bool
+    mutations_under_no_grad_or_inference_mode: bool
+    mutation_inductor_storage_resize: bool
+    mutates_storage_metadata: bool
+    requires_grad: bool
+    keep_input_mutations: bool
+    is_leaf: bool
+
+    def __post_init__(self) -> None:
+        if self.mutates_storage_metadata:
+            if not self.mutates_metadata:
+                raise AssertionError(
+                    "mutates_storage_metadata requires mutates_metadata to be True"
+                )
+
+    @functools.cached_property
+    def mutation_type(self) -> MutationType:
+        if (
+            (not self.mutates_data)
+            and (not self.mutates_metadata)
+            and not (self.mutation_inductor_storage_resize)
+        ):
+            return MutationType.NOT_MUTATED
+
+        if _check_if_mutation_can_be_in_graph(
+            self.keep_input_mutations,
+            self.mutates_data,
+            self.mutates_metadata,
+            self.mutations_hidden_from_autograd,
+            self.mutations_under_no_grad_or_inference_mode,
+            self.mutates_storage_metadata,
+            self.mutation_inductor_storage_resize,
+            self.requires_grad,
+        ):
+            return MutationType.MUTATED_IN_GRAPH
+
+        return MutationType.MUTATED_OUT_GRAPH
+
+    @classmethod
+    def from_input_alias_info(cls, info: InputAliasInfo) -> "InputMutationInfo":
+        """Convert from the legacy InputAliasInfo to InputMutationInfo."""
+        return cls(
+            mutates_data=info.mutates_data,
+            mutates_metadata=info.mutates_metadata,
+            mutations_hidden_from_autograd=info.mutations_hidden_from_autograd,
+            mutations_under_no_grad_or_inference_mode=info.mutations_under_no_grad_or_inference_mode,
+            mutation_inductor_storage_resize=info.mutation_inductor_storage_resize,
+            mutates_storage_metadata=info.mutates_storage_metadata,
+            requires_grad=info.requires_grad,
+            keep_input_mutations=info.keep_input_mutations,
+            is_leaf=info.is_leaf,
+        )
+
+
+@dataclass(frozen=True)
+class OutputAliasInfoDesc:
+    """
+    Alias info for a specific output, attached to its descriptor.
+
+    Unlike OutputAliasInfo which uses positional indices (base_idx: int),
+    this class uses descriptor references (base_desc), making the metadata
+    transformation-invariant.
+    """
+
+    output_type: OutputType
+    raw_type: type
+    # Instead of base_idx: int, we use a descriptor reference
+    # This can be None for non_alias outputs, an AOTInput for alias_of_input,
+    # or an AOTOutput for alias_of_intermediate types
+    base_desc: Optional[Union["AOTInput", "AOTOutput"]]
+    dynamic_dims: Optional[set[int]]
+    requires_grad: bool
+    view_meta_sequence: Optional["ViewMetaSequence"] = None
+
+    @classmethod
+    def from_output_alias_info(
+        cls,
+        info: OutputAliasInfo,
+        input_descs: list["AOTInput"],
+        output_descs: list["AOTOutput"],
+        num_user_outputs: int,
+    ) -> "OutputAliasInfoDesc":
+        """
+        Convert from the legacy OutputAliasInfo to OutputAliasInfoDesc.
+
+        Args:
+            info: The legacy OutputAliasInfo with positional base_idx
+            input_descs: List of input descriptors for resolving alias_of_input
+            output_descs: List of output descriptors for resolving alias_of_intermediate
+            num_user_outputs: Number of user outputs (for computing intermediate base index)
+        """
+        base_desc: Optional[Union[AOTInput, AOTOutput]] = None
+
+        if info.base_idx is not None:
+            if info.output_type in (OutputType.alias_of_input, OutputType.is_input):
+                # base_idx refers to an input
+                base_desc = input_descs[info.base_idx]
+            elif info.output_type in (
+                OutputType.alias_of_intermediate,
+                OutputType.alias_of_intermediate_save_as_output,
+            ):
+                # base_idx refers to an intermediate base (output after user outputs)
+                intermediate_idx = info.base_idx + num_user_outputs
+                if intermediate_idx < len(output_descs):
+                    base_desc = output_descs[intermediate_idx]
+            elif info.output_type == OutputType.alias_of_intermediate_base_is_user_output:
+                # base_idx refers to a user output
+                if info.base_idx < len(output_descs):
+                    base_desc = output_descs[info.base_idx]
+
+        return cls(
+            output_type=info.output_type,
+            raw_type=info.raw_type,
+            base_desc=base_desc,
+            dynamic_dims=info.dynamic_dims,
+            requires_grad=info.requires_grad,
+            view_meta_sequence=info.view_meta_sequence,
+        )
 
 
 @dataclass
@@ -795,6 +927,334 @@ class ViewAndMutationMeta:
             )
             and self.num_backward_tokens == other.num_backward_tokens
         )
+
+
+@dataclass
+class DescriptorBasedMeta:
+    """
+    Runtime metadata derived directly from FX graph descriptors.
+
+    Unlike ViewAndMutationMeta which uses positional indices, this class
+    stores descriptors and derives indices dynamically, making it
+    transformation-invariant. When nodes move in the graph, their descriptors
+    move with them, and this class can recompute correct indices.
+
+    This is intended to eventually replace ViewAndMutationMeta for runtime
+    wrapper construction.
+    """
+
+    # Ordered list of input descriptors (matches placeholder order in graph)
+    input_descs: list["AOTInput"]
+    # Ordered list of output descriptors (matches output node order in graph)
+    output_descs: list["AOTOutput"]
+
+    # Mutation info keyed by input descriptor
+    input_mutation_info: dict["AOTInput", InputMutationInfo] = field(
+        default_factory=dict
+    )
+    # Alias info keyed by output descriptor
+    output_alias_info: dict["AOTOutput", OutputAliasInfoDesc] = field(
+        default_factory=dict
+    )
+
+    # Optional: whether to keep input mutations in graph
+    keep_input_mutations: bool = False
+
+    # Number of intermediate bases (outputs beyond user outputs)
+    # output_descs[:num_user_outputs] are user outputs
+    # output_descs[num_user_outputs:] are intermediate bases
+    num_intermediate_bases: int = 0
+
+    @property
+    def num_user_outputs(self) -> int:
+        """Number of user outputs (excludes intermediate bases)."""
+        return len(self.output_descs) - self.num_intermediate_bases
+
+    @classmethod
+    def from_graph(cls, graph: "torch.fx.Graph") -> "DescriptorBasedMeta":
+        """
+        Build metadata by scanning node.meta['desc'] on graph.
+
+        This extracts descriptors from placeholder nodes (inputs) and the
+        output node (outputs), creating a DescriptorBasedMeta instance.
+        Also collects mutation_info and alias_info if attached to nodes.
+        """
+        input_descs: list[AOTInput] = []
+        output_descs: list[AOTOutput] = []
+        input_mutation_info: dict[AOTInput, InputMutationInfo] = {}
+        output_alias_info: dict[AOTOutput, OutputAliasInfoDesc] = {}
+
+        for node in graph.nodes:
+            if node.op == "placeholder":
+                desc = node.meta.get("desc")
+                if desc is not None:
+                    input_descs.append(desc)
+                    # Collect mutation_info if attached
+                    mutation_info = node.meta.get("mutation_info")
+                    if mutation_info is not None:
+                        input_mutation_info[desc] = mutation_info
+            elif node.op == "output":
+                descs = node.meta.get("desc")
+                alias_infos = node.meta.get("alias_info")
+                if descs is not None:
+                    if isinstance(descs, (list, tuple)):
+                        output_descs.extend(descs)
+                        # Collect alias_info if attached (should be parallel list)
+                        if alias_infos is not None and isinstance(alias_infos, (list, tuple)):
+                            for d, info in zip(descs, alias_infos):
+                                if info is not None:
+                                    output_alias_info[d] = info
+                    else:
+                        output_descs.append(descs)
+                        if alias_infos is not None and not isinstance(alias_infos, (list, tuple)):
+                            output_alias_info[descs] = alias_infos
+
+        return cls(
+            input_descs=input_descs,
+            output_descs=output_descs,
+            input_mutation_info=input_mutation_info,
+            output_alias_info=output_alias_info,
+        )
+
+    @classmethod
+    def from_view_and_mutation_meta(
+        cls,
+        meta: ViewAndMutationMeta,
+        input_descs: list["AOTInput"],
+        output_descs: list["AOTOutput"],
+    ) -> "DescriptorBasedMeta":
+        """
+        Convert from ViewAndMutationMeta to DescriptorBasedMeta.
+
+        This creates a DescriptorBasedMeta that derives the same runtime
+        behavior as the provided ViewAndMutationMeta, useful for validation.
+        """
+        input_mutation_info: dict[AOTInput, InputMutationInfo] = {}
+        output_alias_info: dict[AOTOutput, OutputAliasInfoDesc] = {}
+
+        # Convert input_info to descriptor-keyed mutation info
+        for i, info in enumerate(meta.input_info):
+            if i < len(input_descs):
+                input_mutation_info[input_descs[i]] = InputMutationInfo.from_input_alias_info(info)
+
+        # Convert output_info to descriptor-keyed alias info
+        num_user_outputs = len(meta.output_info)
+        for i, info in enumerate(meta.output_info):
+            if i < len(output_descs):
+                output_alias_info[output_descs[i]] = OutputAliasInfoDesc.from_output_alias_info(
+                    info, input_descs, output_descs, num_user_outputs
+                )
+
+        return cls(
+            input_descs=input_descs,
+            output_descs=output_descs,
+            input_mutation_info=input_mutation_info,
+            output_alias_info=output_alias_info,
+            keep_input_mutations=meta.keep_input_mutations,
+            num_intermediate_bases=meta.num_intermediate_bases,
+        )
+
+    # -------------------------------------------------------------------------
+    # Derived properties (replace precomputed index lists from ViewAndMutationMeta)
+    # -------------------------------------------------------------------------
+
+    @property
+    def mutated_input_descs(self) -> list[tuple[int, "AOTInput", InputMutationInfo]]:
+        """
+        Inputs that are mutated outside the graph, with their position and mutation info.
+
+        Returns list of (position, descriptor, mutation_info) tuples.
+        """
+        return [
+            (i, d, self.input_mutation_info[d])
+            for i, d in enumerate(self.input_descs)
+            if d in self.input_mutation_info
+            and self.input_mutation_info[d].mutation_type == MutationType.MUTATED_OUT_GRAPH
+        ]
+
+    @property
+    def mutated_inp_runtime_indices(self) -> list[int]:
+        """Indices of inputs that are mutated outside the graph (for compatibility)."""
+        return [i for i, _, _ in self.mutated_input_descs]
+
+    @property
+    def num_mutated_inp_runtime_indices(self) -> int:
+        """Number of inputs mutated outside the graph."""
+        return len(self.mutated_input_descs)
+
+    @property
+    def mutated_graph_handled_descs(
+        self,
+    ) -> list[tuple[int, "AOTInput", InputMutationInfo]]:
+        """Inputs that are mutated inside the graph."""
+        return [
+            (i, d, self.input_mutation_info[d])
+            for i, d in enumerate(self.input_descs)
+            if d in self.input_mutation_info
+            and self.input_mutation_info[d].mutation_type == MutationType.MUTATED_IN_GRAPH
+        ]
+
+    @property
+    def mutated_graph_handled_indices(self) -> list[int]:
+        """Indices of inputs mutated inside the graph."""
+        return [i for i, _, _ in self.mutated_graph_handled_descs]
+
+    @property
+    def aliased_output_descs(
+        self,
+    ) -> list[tuple[int, "AOTOutput", OutputAliasInfoDesc]]:
+        """
+        Outputs that alias inputs or intermediates, with position and info.
+        """
+        return [
+            (i, d, self.output_alias_info[d])
+            for i, d in enumerate(self.output_descs)
+            if d in self.output_alias_info
+            and self.output_alias_info[d].output_type
+            not in (
+                OutputType.non_alias,
+                OutputType.unsafe_view_alias,
+                OutputType.custom_function_view,
+            )
+        ]
+
+    @property
+    def aliased_out_indices(self) -> list[int]:
+        """Indices of outputs that are aliased (for compatibility)."""
+        return [i for i, _, _ in self.aliased_output_descs]
+
+    @property
+    def num_outputs_aliased(self) -> int:
+        """Number of aliased outputs."""
+        return len(self.aliased_output_descs)
+
+    @property
+    def num_outputs(self) -> int:
+        """Total number of outputs."""
+        return len(self.output_descs)
+
+    # -------------------------------------------------------------------------
+    # Classification helpers
+    # -------------------------------------------------------------------------
+
+    def classify_inputs(self) -> dict[str, list[tuple[int, "AOTInput"]]]:
+        """
+        Group inputs by type: params, buffers, plain, tangents, tokens, etc.
+
+        Returns a dict mapping category names to lists of (position, descriptor).
+        """
+        from .descriptors import (
+            BackwardTokenAOTInput,
+            BufferAOTInput,
+            ForwardTokenAOTInput,
+            ParamAOTInput,
+            PlainAOTInput,
+            TangentAOTInput,
+        )
+
+        result: dict[str, list[tuple[int, AOTInput]]] = collections.defaultdict(list)
+        for i, d in enumerate(self.input_descs):
+            if isinstance(d, ParamAOTInput):
+                result["params"].append((i, d))
+            elif isinstance(d, BufferAOTInput):
+                result["buffers"].append((i, d))
+            elif isinstance(d, PlainAOTInput):
+                result["plain"].append((i, d))
+            elif isinstance(d, TangentAOTInput):
+                result["tangents"].append((i, d))
+            elif isinstance(d, ForwardTokenAOTInput):
+                result["forward_tokens"].append((i, d))
+            elif isinstance(d, BackwardTokenAOTInput):
+                result["backward_tokens"].append((i, d))
+            else:
+                result["other"].append((i, d))
+        return dict(result)
+
+    def classify_outputs(self) -> dict[str, list[tuple[int, "AOTOutput"]]]:
+        """
+        Group outputs by type: plain, grads, mutations, intermediate_bases, etc.
+
+        Returns a dict mapping category names to lists of (position, descriptor).
+        """
+        from .descriptors import (
+            BackwardTokenAOTOutput,
+            ForwardTokenAOTOutput,
+            GradAOTOutput,
+            InputMutationAOTOutput,
+            IntermediateBaseAOTOutput,
+            PlainAOTOutput,
+        )
+
+        result: dict[str, list[tuple[int, AOTOutput]]] = collections.defaultdict(list)
+        for i, d in enumerate(self.output_descs):
+            if isinstance(d, PlainAOTOutput):
+                result["plain"].append((i, d))
+            elif isinstance(d, GradAOTOutput):
+                result["grads"].append((i, d))
+            elif isinstance(d, InputMutationAOTOutput):
+                result["mutations"].append((i, d))
+            elif isinstance(d, IntermediateBaseAOTOutput):
+                result["intermediate_bases"].append((i, d))
+            elif isinstance(d, ForwardTokenAOTOutput):
+                result["forward_tokens"].append((i, d))
+            elif isinstance(d, BackwardTokenAOTOutput):
+                result["backward_tokens"].append((i, d))
+            else:
+                result["other"].append((i, d))
+        return dict(result)
+
+    def get_input_info(self, idx: int) -> Optional[InputMutationInfo]:
+        """Get mutation info for input at given index."""
+        if idx < len(self.input_descs):
+            return self.input_mutation_info.get(self.input_descs[idx])
+        return None
+
+    def get_output_info(self, idx: int) -> Optional[OutputAliasInfoDesc]:
+        """Get alias info for output at given index."""
+        if idx < len(self.output_descs):
+            return self.output_alias_info.get(self.output_descs[idx])
+        return None
+
+    def validate_equivalence(self, meta: ViewAndMutationMeta) -> None:
+        """
+        Validate that this DescriptorBasedMeta derives the same runtime behavior
+        as the provided ViewAndMutationMeta.
+
+        Raises AssertionError if any derived indices don't match.
+        """
+        # Validate mutated input runtime indices
+        derived_mutated = self.mutated_inp_runtime_indices
+        expected_mutated = meta.mutated_inp_runtime_indices
+        if derived_mutated != expected_mutated:
+            raise AssertionError(
+                f"Mutated input indices mismatch: derived={derived_mutated}, "
+                f"expected={expected_mutated}"
+            )
+
+        # Validate mutated graph handled indices
+        derived_graph_handled = self.mutated_graph_handled_indices
+        expected_graph_handled = meta.mutated_graph_handled_indices
+        if derived_graph_handled != expected_graph_handled:
+            raise AssertionError(
+                f"Mutated graph handled indices mismatch: derived={derived_graph_handled}, "
+                f"expected={expected_graph_handled}"
+            )
+
+        # Validate aliased output indices
+        derived_aliased = self.aliased_out_indices
+        expected_aliased = meta.aliased_out_indices
+        if derived_aliased != expected_aliased:
+            raise AssertionError(
+                f"Aliased output indices mismatch: derived={derived_aliased}, "
+                f"expected={expected_aliased}"
+            )
+
+        # Validate num_outputs_aliased
+        if self.num_outputs_aliased != meta.num_outputs_aliased:
+            raise AssertionError(
+                f"num_outputs_aliased mismatch: derived={self.num_outputs_aliased}, "
+                f"expected={meta.num_outputs_aliased}"
+            )
 
 
 @dataclass(eq=False)

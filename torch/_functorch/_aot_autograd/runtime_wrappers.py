@@ -20,7 +20,7 @@ from collections.abc import Callable, Generator, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
 from functools import wraps
-from typing import Any, Optional, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch.fx as fx
@@ -87,6 +87,9 @@ from .schemas import (
     TraceFn,
     ViewAndMutationMeta,
 )
+
+if TYPE_CHECKING:
+    from .schemas import DescriptorBasedMeta, OutputAliasInfoDesc
 from .subclass_utils import (
     requires_subclass_dispatch,
     runtime_unwrap_tensor_subclasses,
@@ -161,6 +164,33 @@ def _log_args_maybe_list(arg: object, label: str) -> None:
 # This is because there are some minor differences in how we treat these cases at runtime:
 # - resize_() is currently handled in the inference case, but not fully handled in the autograd case.
 # - the autograd cases inserts TensorAlias wrapper objects for outputs that alias inputs
+def _synthesize_descriptors_from_meta(
+    meta: ViewAndMutationMeta,
+) -> tuple[list[AOTInput], list[AOTOutput]]:
+    """
+    Synthesize AOTInput/AOTOutput descriptors from ViewAndMutationMeta.
+
+    This is used when we want to use descriptor-based runtime wrappers but
+    don't have actual descriptors attached to the graph. We create synthetic
+    descriptors based on the metadata structure.
+    """
+    from .descriptors import PlainAOTInput, PlainAOTOutput
+
+    # Create synthetic input descriptors
+    input_descs: list[AOTInput] = [
+        PlainAOTInput(idx=i) for i in range(len(meta.input_info))
+    ]
+
+    # Create synthetic output descriptors for user outputs AND intermediate bases
+    # Intermediate bases are additional outputs appended after user outputs
+    total_outputs = len(meta.output_info) + meta.num_intermediate_bases
+    output_descs: list[AOTOutput] = [
+        PlainAOTOutput(idx=i) for i in range(total_outputs)
+    ]
+
+    return input_descs, output_descs
+
+
 @dataclass
 class RuntimeWrapper(CompilerWrapper):
     indices_of_inps_to_detach: list[int]
@@ -174,24 +204,24 @@ class RuntimeWrapper(CompilerWrapper):
         *,
         runtime_metadata: ViewAndMutationMeta,
     ) -> Callable[..., Any]:
+        from .schemas import DescriptorBasedMeta
+
+        # Synthesize descriptors and create DescriptorBasedMeta
+        input_descs, output_descs = _synthesize_descriptors_from_meta(
+            runtime_metadata
+        )
+        descriptor_meta = DescriptorBasedMeta.from_view_and_mutation_meta(
+            runtime_metadata, input_descs, output_descs
+        )
+
         return _create_runtime_wrapper(
             compiled_fn,
-            runtime_metadata=runtime_metadata,
+            runtime_metadata=descriptor_meta,
             indices_of_inps_to_detach=self.indices_of_inps_to_detach,
             trace_joint=self.trace_joint,
             keep_input_mutations=aot_config.keep_inference_input_mutations,
             disable_amp=self.disable_amp,
         )
-
-
-class NoopAliasHandler:
-    def __init__(
-        self, info: Any, runtime_metadata: ViewAndMutationMeta, trace_joint: bool
-    ) -> None:
-        pass
-
-    def __call__(self, orig_inputs: list[Any], fw_outs: list[Any], out: Any) -> Any:
-        return out
 
 
 def _unwrap_tensoralias(x: TensorAlias) -> torch.Tensor:
@@ -202,96 +232,6 @@ def _unwrap_tensoralias(x: TensorAlias) -> torch.Tensor:
 
 def _identity(x: Any) -> Any:
     return x
-
-
-class AliasOfInputHandler:
-    def __init__(
-        self, info: Any, runtime_metadata: ViewAndMutationMeta, trace_joint: bool
-    ) -> None:
-        self.base_idx = info.base_idx
-        self.unwrap_out = _unwrap_tensoralias if trace_joint else _identity
-        self.requires_grad = info.requires_grad
-        self.view_meta_sequence = info.view_meta_sequence
-        self.replay_views = config.view_replay_for_aliased_outputs
-
-    def __call__(
-        self, orig_inputs: list[Any], fw_outs: list[Any], out: Any
-    ) -> torch.Tensor:
-        aliased_base_tensor = orig_inputs[self.base_idx]
-        return gen_alias_from_base(
-            aliased_base_tensor,
-            self.unwrap_out(out),
-            self.requires_grad,
-            self.view_meta_sequence,
-            replay_views=self.replay_views,
-        )
-
-
-class IsInputHandler:
-    def __init__(
-        self, info: Any, runtime_metadata: ViewAndMutationMeta, trace_joint: bool
-    ) -> None:
-        self.base_idx = info.base_idx
-        self.unwrap_out = _unwrap_tensoralias if trace_joint else _identity
-
-    def __call__(
-        self, orig_inputs: list[Any], fw_outs: list[Any], out: Any
-    ) -> torch.Tensor:
-        aliased_base_tensor = orig_inputs[self.base_idx]
-        return aliased_base_tensor
-
-
-class AliasOfIntermediateHandler:
-    def __init__(
-        self, info: Any, runtime_metadata: ViewAndMutationMeta, trace_joint: bool
-    ) -> None:
-        self._unwrap_aliased_base_tensor = _identity
-        if info.output_type in (
-            OutputType.alias_of_intermediate,
-            OutputType.alias_of_intermediate_save_as_output,
-        ):
-            num_user_outputs = len(runtime_metadata.output_info)
-            self.base_idx = info.base_idx + num_user_outputs
-        else:
-            self.base_idx = info.base_idx
-            if self.base_idx in runtime_metadata.aliased_out_indices:
-                self._unwrap_aliased_base_tensor = _unwrap_tensoralias
-
-        self.unwrap_out = _unwrap_tensoralias if trace_joint else _identity
-        self.requires_grad = info.requires_grad
-        self.view_meta_sequence = info.view_meta_sequence
-        self.replay_views = config.view_replay_for_aliased_outputs
-
-    def __call__(
-        self, orig_inputs: list[Any], fw_outs: list[Any], out: Any
-    ) -> torch.Tensor:
-        aliased_base_tensor = fw_outs[self.base_idx]
-        return gen_alias_from_base(
-            self._unwrap_aliased_base_tensor(aliased_base_tensor),
-            self.unwrap_out(out),
-            self.requires_grad,
-            self.view_meta_sequence,
-            replay_views=self.replay_views,
-        )
-
-
-_HANDLER_MAP = {
-    OutputType.non_alias: NoopAliasHandler,
-    OutputType.unsafe_view_alias: NoopAliasHandler,
-    OutputType.custom_function_view: NoopAliasHandler,
-    OutputType.alias_of_input: AliasOfInputHandler,
-    OutputType.is_input: IsInputHandler,
-    OutputType.alias_of_intermediate: AliasOfIntermediateHandler,
-    OutputType.alias_of_intermediate_save_as_output: AliasOfIntermediateHandler,
-    OutputType.alias_of_intermediate_base_is_user_output: AliasOfIntermediateHandler,
-}
-
-
-def make_output_handler(
-    info: Any, runtime_metadata: ViewAndMutationMeta, trace_joint: bool
-) -> Any:
-    handler_type = _HANDLER_MAP[info.output_type]
-    return handler_type(info, runtime_metadata, trace_joint)
 
 
 # not sure why AOTDispatcher needs to manually set this
@@ -455,123 +395,231 @@ class _FirstInvocationContext:
         return nullcontext()
 
 
+class NoopAliasHandler:
+    """Handler for outputs that don't need alias regeneration."""
+
+    def __init__(
+        self,
+        info: "OutputAliasInfoDesc",
+        meta: "DescriptorBasedMeta",
+        trace_joint: bool,
+    ) -> None:
+        pass
+
+    def __call__(self, orig_inputs: list[Any], fw_outs: list[Any], out: Any) -> Any:
+        return out
+
+
+class AliasOfInputHandler:
+    """Handler for outputs that alias inputs, using descriptor-based lookup."""
+
+    def __init__(
+        self,
+        info: "OutputAliasInfoDesc",
+        meta: "DescriptorBasedMeta",
+        trace_joint: bool,
+    ) -> None:
+        # Resolve base_desc to index
+        if info.base_desc is None:
+            raise AssertionError("base_desc must not be None for alias_of_input")
+        self.base_idx = meta.input_descs.index(info.base_desc)
+        self.unwrap_out = _unwrap_tensoralias if trace_joint else _identity
+        self.requires_grad = info.requires_grad
+        self.view_meta_sequence = info.view_meta_sequence
+        self.replay_views = config.view_replay_for_aliased_outputs
+
+    def __call__(
+        self, orig_inputs: list[Any], fw_outs: list[Any], out: Any
+    ) -> torch.Tensor:
+        aliased_base_tensor = orig_inputs[self.base_idx]
+        return gen_alias_from_base(
+            aliased_base_tensor,
+            self.unwrap_out(out),
+            self.requires_grad,
+            self.view_meta_sequence,
+            replay_views=self.replay_views,
+        )
+
+
+class IsInputHandler:
+    """Handler for outputs that ARE inputs, using descriptor-based lookup."""
+
+    def __init__(
+        self,
+        info: "OutputAliasInfoDesc",
+        meta: "DescriptorBasedMeta",
+        trace_joint: bool,
+    ) -> None:
+        if info.base_desc is None:
+            raise AssertionError("base_desc must not be None for is_input")
+        self.base_idx = meta.input_descs.index(info.base_desc)
+        self.unwrap_out = _unwrap_tensoralias if trace_joint else _identity
+
+    def __call__(
+        self, orig_inputs: list[Any], fw_outs: list[Any], out: Any
+    ) -> torch.Tensor:
+        return orig_inputs[self.base_idx]
+
+
+class AliasOfIntermediateHandler:
+    """Handler for outputs that alias intermediates, using descriptor-based lookup."""
+
+    def __init__(
+        self,
+        info: "OutputAliasInfoDesc",
+        meta: "DescriptorBasedMeta",
+        trace_joint: bool,
+    ) -> None:
+        self._unwrap_aliased_base_tensor = _identity
+
+        if info.base_desc is None:
+            raise AssertionError("base_desc must not be None for alias_of_intermediate")
+
+        # For alias_of_intermediate types, base_desc is an AOTOutput
+        # We need to find its index in the output list
+        if info.output_type in (
+            OutputType.alias_of_intermediate,
+            OutputType.alias_of_intermediate_save_as_output,
+        ):
+            # base_desc points to an intermediate base output
+            self.base_idx = meta.output_descs.index(info.base_desc)
+        else:
+            # alias_of_intermediate_base_is_user_output
+            self.base_idx = meta.output_descs.index(info.base_desc)
+            if self.base_idx in meta.aliased_out_indices:
+                self._unwrap_aliased_base_tensor = _unwrap_tensoralias
+
+        self.unwrap_out = _unwrap_tensoralias if trace_joint else _identity
+        self.requires_grad = info.requires_grad
+        self.view_meta_sequence = info.view_meta_sequence
+        self.replay_views = config.view_replay_for_aliased_outputs
+
+    def __call__(
+        self, orig_inputs: list[Any], fw_outs: list[Any], out: Any
+    ) -> torch.Tensor:
+        aliased_base_tensor = fw_outs[self.base_idx]
+        return gen_alias_from_base(
+            self._unwrap_aliased_base_tensor(aliased_base_tensor),
+            self.unwrap_out(out),
+            self.requires_grad,
+            self.view_meta_sequence,
+            replay_views=self.replay_views,
+        )
+
+
+_HANDLER_MAP = {
+    OutputType.non_alias: NoopAliasHandler,
+    OutputType.unsafe_view_alias: NoopAliasHandler,
+    OutputType.custom_function_view: NoopAliasHandler,
+    OutputType.alias_of_input: AliasOfInputHandler,
+    OutputType.is_input: IsInputHandler,
+    OutputType.alias_of_intermediate: AliasOfIntermediateHandler,
+    OutputType.alias_of_intermediate_save_as_output: AliasOfIntermediateHandler,
+    OutputType.alias_of_intermediate_base_is_user_output: AliasOfIntermediateHandler,
+}
+
+
+def make_output_handler(
+    info: "OutputAliasInfoDesc",
+    meta: "DescriptorBasedMeta",
+    trace_joint: bool,
+) -> Any:
+    """Create an output handler from descriptor-based alias info."""
+    handler_type = _HANDLER_MAP[info.output_type]
+    return handler_type(info, meta, trace_joint)
+
+
 def _create_runtime_wrapper(
     compiled_fn: Callable[..., Any],
     *,
-    runtime_metadata: ViewAndMutationMeta,
+    runtime_metadata: "DescriptorBasedMeta",
     indices_of_inps_to_detach: list[int],
     trace_joint: bool,
     keep_input_mutations: bool,
     disable_amp: bool,
 ) -> Callable[..., Any]:
+    """
+    Create a runtime wrapper using descriptor-based metadata.
+
+    This is the descriptor-based equivalent of _create_runtime_wrapper.
+    Instead of using positional indices from ViewAndMutationMeta, it uses
+    DescriptorBasedMeta which derives indices from descriptors.
+    """
+    from .schemas import DescriptorBasedMeta, OutputAliasInfoDesc
+
     if not getattr(compiled_fn, "_boxed_call", False):
         compiled_fn = make_boxed_func(compiled_fn)
 
-    # We only want to run debugmode on custom ops at the first invocation of
-    # runtime wrapper. For all subsequent uses, we should no-op for performance
-    # See: https://github.com/pytorch/pytorch/issues/165349
     first_invocation_ctx = _FirstInvocationContext()
 
-    # Note [Inputs needed in runtime epilogue after list clearing]
-    # In Python functions, you can't free the input arguments of a function within the scope of that function. A workaround is to
-    # wrap the input arguments in a list, and clear the list from within the function.
-    # Here, this is implemented as `call_func_at_runtime_with_args(..., steal_args=True)`.
-    #
-    # This is needed for Compiled Autograd since some of the inputs (activations) should be freed early.
-    # However, we cannot blindly clear the entire list, because AOTAutograd may need access to some of the graph inputs
-    # **after** the compiled function has finished running. There are two main cases:
-    #   (1) Input mutations: If there are an input mutations that we must run outside of the graph, we need access to the input.
-    #   (2) Output aliasing: Outputs that aliases graph inputs generally must be regenerated outside of the `autograd.Function`,
-    #       and doing so requires us accessing the corresponding input after the compiled artifact has run.
-    epilogue_args_idx = []
+    # Build epilogue args from descriptors
+    epilogue_args_idx: list[int] = []
     epilogue_args_idx.extend(runtime_metadata.mutated_inp_runtime_indices)
-    for info in runtime_metadata.output_info:
-        if (
-            info.output_type == OutputType.alias_of_input
-            or info.output_type == OutputType.is_input
+    for i, desc in enumerate(runtime_metadata.output_descs):
+        info = runtime_metadata.output_alias_info.get(desc)
+        if info is not None and info.output_type in (
+            OutputType.alias_of_input,
+            OutputType.is_input,
         ):
-            if not isinstance(info.base_idx, int):
-                raise AssertionError(
-                    f"expected info.base_idx to be int, got {type(info.base_idx)}"
-                )
-            epilogue_args_idx.append(info.base_idx)
+            if info.base_desc is not None:
+                base_idx = runtime_metadata.input_descs.index(info.base_desc)
+                epilogue_args_idx.append(base_idx)
 
-    if config.unlift_effect_tokens:
-        if len(runtime_metadata.tokens) != 0:
-            raise AssertionError(
-                f"expected no tokens when unlift_effect_tokens is True, got {len(runtime_metadata.tokens)}"
-            )
-
+    # Pre-compute output handlers if there are aliased outputs
+    # Only create handlers for user outputs, not intermediate bases
+    num_user_outputs = runtime_metadata.num_user_outputs
+    output_handlers = None
     if runtime_metadata.num_outputs_aliased > 0:
         output_handlers = tuple(
-            make_output_handler(info, runtime_metadata, trace_joint)
-            for info in runtime_metadata.output_info
-        )
-
-    def record_runtime_wrapper_prologue_enter() -> AbstractContextManager[None] | None:
-        if (
-            torch.autograd.profiler._is_profiler_enabled
-            and dynamo_config.record_runtime_overhead
-        ):
-            cm = torch._C._profiler._RecordFunctionFast(
-                "AOTDispatcher Runtime Wrapper Prologue"
+            make_output_handler(
+                runtime_metadata.output_alias_info.get(desc)
+                or OutputAliasInfoDesc(
+                    output_type=OutputType.non_alias,
+                    raw_type=torch.Tensor,
+                    base_desc=None,
+                    dynamic_dims=None,
+                    requires_grad=False,
+                ),
+                runtime_metadata,
+                trace_joint,
             )
-            cm.__enter__()
-            return cm
-        return None
-
-    def record_runtime_wrapper_prologue_exit(
-        cm: AbstractContextManager[None] | None,
-    ) -> None:
-        if cm is not None:
-            cm.__exit__(None, None, None)
+            for desc in runtime_metadata.output_descs[:num_user_outputs]
+        )
 
     @simple_wraps(compiled_fn)
     def runtime_wrapper(args: list[Any]) -> Any:
-        # Create context manager for profiler
-        cm = record_runtime_wrapper_prologue_enter()
-
-        # stash a ref to each input tensor we plan to use after the compiled function
+        # Stash refs to inputs needed for epilogue
         orig_inputs = {i: args[i] for i in epilogue_args_idx}
 
         if keep_input_mutations:
-            mutated_args = (
-                args[i]
-                for i in runtime_metadata.mutated_graph_handled_indices_seen_by_autograd
-            )
-            torch.autograd.graph.increment_version(mutated_args)
+            mutated_indices = [
+                i
+                for i, _, info in runtime_metadata.mutated_graph_handled_descs
+                if not info.mutations_hidden_from_autograd
+            ]
+            if mutated_indices:
+                mutated_args = (args[i] for i in mutated_indices)
+                torch.autograd.graph.increment_version(mutated_args)
 
-        # Enable _AnalyzeCustomOpInputOutputMode on first invocation to check aliasing constraints for custom ops
         with first_invocation_ctx():
             if trace_joint:
                 args_ = list(args)
-                # See Note [Detaching inputs that never need gradients]
                 for idx in indices_of_inps_to_detach:
                     if isinstance(args_[idx], torch.Tensor):
                         args_[idx] = args_[idx].detach()
 
-                # It's possible to have trace_joint inside user specified with no_grad() region,
-                # if there is a nested with enable_grad(), that forces some outputs to require gradients.
-                # Therefore, we unconditionally turn on enable_grad() for compiled_fn execution.
                 with (
                     torch.autograd._force_original_view_tracking(True),
                     torch.enable_grad(),
                 ):
-                    record_runtime_wrapper_prologue_exit(cm)
                     all_outs = call_func_at_runtime_with_args(
                         compiled_fn, args_, disable_amp=disable_amp, steal_args=True
                     )
             else:
-                # When we have an inference graph, we run with grad disabled.
-                # It's possible to get an inference graph with inputs that require grad,
-                # in which case we want to make sure autograd is disabled
-                # (since e.g., inductor will generate aten.addmm.out calls which autograd will complain on)
-                # NOTE: We use _set_grad_enabled directly to reduce runtime overhead
                 grad_enabled = torch.is_grad_enabled()
                 try:
                     if grad_enabled:
                         torch._C._set_grad_enabled(False)
-                    record_runtime_wrapper_prologue_exit(cm)
                     all_outs = call_func_at_runtime_with_args(
                         compiled_fn, args, disable_amp=disable_amp, steal_args=True
                     )
@@ -582,143 +630,117 @@ def _create_runtime_wrapper(
         del args
 
         num_mutated_runtime_inps = runtime_metadata.num_mutated_inp_runtime_indices
-        num_intermediate_bases = runtime_metadata.num_intermediate_bases
 
-        expected_outs = (
-            num_mutated_runtime_inps
-            + runtime_metadata.num_outputs
-            + num_intermediate_bases
-        )
-        if len(all_outs) != expected_outs:
-            raise AssertionError(
-                f"expected {expected_outs} outputs, got {len(all_outs)}"
-            )
-
-        # Step 3: After running the compiled fw, apply updates to mutated inputs
+        # Apply mutations to inputs
         if num_mutated_runtime_inps > 0:
             updated_inputs = all_outs[:num_mutated_runtime_inps]
             fw_outs = all_outs[num_mutated_runtime_inps:]
 
-            for i, inpt_idx in enumerate(runtime_metadata.mutated_inp_runtime_indices):
-                meta = runtime_metadata.input_info[inpt_idx]
-                if not meta.mutates_data and not meta.mutates_metadata:
+            for i, (inpt_idx, desc, meta_info) in enumerate(
+                runtime_metadata.mutated_input_descs
+            ):
+                if not meta_info.mutates_data and not meta_info.mutates_metadata:
                     continue
                 original_inpt = orig_inputs[inpt_idx]
                 updated_inpt = updated_inputs[i]
-                if meta.mutates_storage_metadata:
-                    # See Note [set_() Input Mutations in AOTAutograd]
-                    # mutates_storage_metadata means our input saw a x.set_(y) call.
-                    # What if x **also** saw a data and/or a metadata mutation?
-                    # (1) If the [meta]data mutation occurred after the set_(),
-                    #     then there is no need to copy_() the data.
-                    #     When we perform x.set_(x_updated), we are guaranteed that
-                    #     x_updated already has the final version of the data/metadata
-                    # (2) If a data mutation occurred before the set_().
-                    #     This case seems very difficult to support.
-                    #     TODO: discuss on the PR and decide if we want to tr to
-                    #     either support it, or detect and ban it.
+
+                if meta_info.mutates_storage_metadata:
                     if trace_joint:
                         if not isinstance(updated_inpt, TensorAlias):
                             raise AssertionError(
-                                f"expected TensorAlias for updated_inpt, got {type(updated_inpt)}"
+                                f"expected TensorAlias, got {type(updated_inpt)}"
                             )
                         updated_inpt = updated_inpt.alias
                     with torch.no_grad():
                         original_inpt.set_(updated_inpt)
                     continue
-                if meta.mutates_metadata and not meta.mutates_data:
+
+                if meta_info.mutates_metadata and not meta_info.mutates_data:
                     if trace_joint:
                         if not isinstance(updated_inpt, TensorAlias):
                             raise AssertionError(
-                                f"expected TensorAlias for updated_inpt, got {type(updated_inpt)}"
+                                f"expected TensorAlias, got {type(updated_inpt)}"
                             )
                         updated_inpt = updated_inpt.alias
-                    # We need to grab the size/stride/storage_offset from the compiled forward,
-                    # and use that to mutate the metadata of the input
                     original_inpt.as_strided_(
                         updated_inpt.size(),
                         updated_inpt.stride(),
                         updated_inpt.storage_offset(),
                     )
                 else:
-                    if meta.mutates_data and meta.mutates_metadata:
+                    if meta_info.mutates_data and meta_info.mutates_metadata:
                         original_inpt.as_strided_(
                             updated_inpt.size(),
                             updated_inpt.stride(),
                             updated_inpt.storage_offset(),
                         )
-                    else:
-                        if not meta.mutates_data:
-                            raise AssertionError(
-                                "expected meta.mutates_data to be True"
-                            )
-                    if meta.is_leaf and original_inpt.requires_grad:
-                        # We can hit this situation in this case:
-                        #   def f(x):
-                        #       x.detach().mul_(2)
-                        #       return x + 1
-                        # AOTAutograd will see a mutation in the above case, and try to
-                        # apply a copy_() here, in the epilogue.
-                        # But if x required gradients, and is a leaf, then autograd
-                        # will yell at us for trying to mutate it.
-                        # However, it's only possible to end up in this scenario (like the above)
-                        # if all of the mutations to the leaf input were non-autograd-tracking mutations
-                        # (aka mutations under no_grad(), or on detached views).
-                        # In that case, we fully want to hide the mutation from autograd, so detaching is ok.
+                    if meta_info.is_leaf and original_inpt.requires_grad:
                         original_inpt.detach().copy_(updated_inpt)
                     else:
-                        # Check if we have stream index information for this mutated input
-                        if (
-                            runtime_metadata.mutated_inp_stream_indices is not None
-                            and i < len(runtime_metadata.mutated_inp_stream_indices)
-                            and runtime_metadata.mutated_inp_stream_indices[i]
-                            is not None
-                        ):
-                            raise RuntimeError(
-                                "Mutations on inputs with user-specified streams are not yet supported. "
-                                "See: https://github.com/pytorch/pytorch/issues/172522"
-                            )
                         original_inpt.copy_(updated_inpt)
         else:
             fw_outs = all_outs
 
-        # Step 4: Manually regenerate any outputs that are aliased to inputs, instead of
-        # compiling them.
-        if runtime_metadata.num_outputs_aliased > 0:
-            # The compiled forward also returned intermediate bases. We don't want to return them to the user.
-            expect_num_outputs = (
-                len(output_handlers) + runtime_metadata.num_intermediate_bases
-            )
-            if len(fw_outs) != expect_num_outputs:
-                raise AssertionError(
-                    f"expected {expect_num_outputs} fw_outs, got {len(fw_outs)}"
-                )
+        # Regenerate aliased outputs
+        # Only return user outputs, not intermediate bases
+        if output_handlers is not None:
             ret_outs = [
                 handler(orig_inputs, fw_outs, out)
                 for out, handler in builtins.zip(fw_outs, output_handlers)
             ]
         else:
-            ret_outs = fw_outs
+            # No aliased outputs, but still need to slice off intermediate bases
+            ret_outs = list(fw_outs[:num_user_outputs])
 
-        if runtime_metadata.dynamic_outputs:
-            for t, o in zip(ret_outs, runtime_metadata.output_info):
-                if o.dynamic_dims is None:
-                    continue
-                maybe_mark_dynamic_helper(t, o.dynamic_dims)
-        if runtime_metadata.grad_enabled_mutation is not None:
-            torch._C._set_grad_enabled(runtime_metadata.grad_enabled_mutation)
+        # Mark dynamic outputs (only for user outputs)
+        for i, desc in enumerate(runtime_metadata.output_descs[:num_user_outputs]):
+            info = runtime_metadata.output_alias_info.get(desc)
+            if info is not None and info.dynamic_dims:
+                maybe_mark_dynamic_helper(ret_outs[i], info.dynamic_dims)
+
         return ret_outs
 
-    if not (trace_joint and _should_disable_saved_tensors_hooks()):
-        return runtime_wrapper
+    return runtime_wrapper
 
-    # Disabling saved tensors hooks
-    @simple_wraps(runtime_wrapper)
-    def _runtime_wrapper(*args: Any, **kwargs: Any) -> Any:
-        with _disable_saved_tensors_hooks():
-            return runtime_wrapper(*args, **kwargs)
 
-    return _runtime_wrapper
+@dataclass
+class DescriptorRuntimeWrapper(CompilerWrapper):
+    """
+    A CompilerWrapper that uses descriptor-based metadata for runtime wrapping.
+
+    This is the descriptor-based equivalent of RuntimeWrapper. It uses
+    DescriptorBasedMeta instead of ViewAndMutationMeta for handling mutations
+    and aliasing at runtime.
+    """
+
+    indices_of_inps_to_detach: list[int]
+    trace_joint: bool
+    disable_amp: bool
+    descriptor_meta: Optional["DescriptorBasedMeta"] = None
+
+    def post_compile(
+        self,
+        compiled_fn: Callable[..., Any],
+        aot_config: AOTConfig,
+        *,
+        runtime_metadata: ViewAndMutationMeta,
+    ) -> Callable[..., Any]:
+        from .schemas import DescriptorBasedMeta
+
+        # If descriptor_meta was provided, use it; otherwise we can't use this wrapper
+        if self.descriptor_meta is None:
+            raise AssertionError(
+                "DescriptorRuntimeWrapper requires descriptor_meta to be set"
+            )
+
+        return _create_runtime_wrapper(
+            compiled_fn,
+            runtime_metadata=self.descriptor_meta,
+            indices_of_inps_to_detach=self.indices_of_inps_to_detach,
+            trace_joint=self.trace_joint,
+            keep_input_mutations=aot_config.keep_inference_input_mutations,
+            disable_amp=self.disable_amp,
+        )
 
 
 # WARNING: this does NOT operate on TraceFn
