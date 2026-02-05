@@ -132,7 +132,7 @@ static bool isGloballyDisabledAddmmCudaLt(const at::Device& device) {
   }
 
   // If environment variable is explicitly set, respect it
-  if (!is_addmm_cuda_lt_disabled.empty()) {
+  if (is_addmm_cuda_lt_disabled.has_value()) {
     return is_addmm_cuda_lt_disabled == "1";
   }
 
