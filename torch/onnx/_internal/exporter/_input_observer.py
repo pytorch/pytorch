@@ -730,7 +730,7 @@ class InputObserver:
             *args, _captured_method=_cm, _store_n_calls=_snc, **kwargs
         )
 
-        # It may happen than the signature of the forward is used to trigger a preprocessing.
+        # It may happen that the signature of the forward is used to trigger a preprocessing.
         # This is used in GenerationMixin (transformers):
         #   position_ids_key = "decoder_position_ids" if ... else "position_ids"
         #   if position_ids_key in set(inspect.signature(self.forward).parameters.keys()):
