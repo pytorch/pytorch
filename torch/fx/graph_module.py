@@ -112,6 +112,19 @@ def _forward_from_src(src: str, globals: dict[str, Any], co_fields=None):
     )
 
 
+def _forward_from_disk(cache_path: str, globals: dict[str, Any]):
+    """Load forward function from disk-cached module."""
+    from torch.fx.codecache import FXCodeCache
+
+    key = os.path.basename(cache_path).replace(".py", "")
+    mod = FXCodeCache.load_by_key_path(key, cache_path, attrs=globals)
+
+    def forward_wrapper(self, *args, **kwargs):
+        return mod.call(*args, **kwargs)
+
+    return forward_wrapper
+
+
 def _method_from_src(
     method_name: str, src: str, globals: dict[str, Any], co_fields=None
 ) -> Callable:
@@ -927,7 +940,41 @@ class {module_name}(torch.nn.Module):
                 f"torch._C._profiler._RecordFunctionFast('## {filename} ##')",
             )
 
-        cls.forward = _forward_from_src(self._code, python_code.globals, co_fields)
+        # Disk-based compilation (when enabled)
+        if fx_experimental_config.save_fx_code_to_disk:
+            # Generate wrapper code with module-level call() function
+            wrapper_code = self._generate_wrapper_code(python_code, co_fields)
+
+            # Build linemap for stack trace support
+            linemap = self._build_linemap(python_code)
+
+            # Write to disk and load via FXCodeCache
+            from torch.fx.codecache import FXCodeCache
+
+            key, path = FXCodeCache.write(wrapper_code)
+
+            print(f"[FX] Saved generated code to: {path}")
+
+            # Load module with linemap
+            code_cache = FXCodeCache.load_by_key_path(
+                key=key,
+                path=path,
+                linemap=linemap,
+                attrs=python_code.globals,
+            )
+
+            # Store disk compilation attributes
+            self.cache_key = key
+            self.cache_path = path
+            self.cache_linemap = linemap
+            self.current_callable = code_cache.call
+            self._source_code = wrapper_code
+
+            # Set forward to use disk-loaded callable
+            cls.forward = _forward_from_disk(path, python_code.globals)
+        else:
+            # Standard in-memory compilation
+            cls.forward = _forward_from_src(self._code, python_code.globals, co_fields)
 
         # Determine whether this class explicitly defines a __call__ implementation
         # to wrap. If it does, save it in order to have wrapped_call invoke it.
@@ -948,6 +995,42 @@ class {module_name}(torch.nn.Module):
         cls.__call__ = call_wrapped  # type: ignore[method-assign]
 
         return python_code
+
+    def _generate_wrapper_code(
+        self, python_code: PythonCode, co_fields: dict[str, Any]
+    ) -> str:
+        """Generate wrapper code with module-level call() following inductor pattern."""
+        header_lines = ["# FX Graph Module - Generated Code"]
+        if co_fields:
+            if "co_filename" in co_fields:
+                header_lines.append(f"# Source: {co_fields['co_filename']}")
+            if "co_firstlineno" in co_fields:
+                header_lines.append(f"# Line: {co_fields['co_firstlineno']}")
+            if "co_name" in co_fields:
+                header_lines.append(f"# Function: {co_fields['co_name']}")
+
+        forward_src = self._code.replace("def forward(self, ", "def forward_impl(")
+        forward_src = forward_src.replace("def forward(self):", "def forward_impl():")
+
+        footer = """
+# Module-level call function (following inductor pattern)
+def call(*args, **kwargs):
+    '''Entry point for FX graph execution.'''
+    return forward_impl(*args, **kwargs)
+"""
+        return "\n".join(header_lines) + "\n\n" + forward_src + footer
+
+    def _build_linemap(self, python_code: PythonCode) -> list[tuple[int, str]]:
+        """Map generated code lines to FX node stack traces."""
+        linemap: list[tuple[int, str]] = []
+        header_lines = 4
+
+        for i, node in enumerate(self._graph.nodes):
+            if node.stack_trace:
+                line_no = header_lines + i + 2
+                linemap.append((line_no, node.stack_trace))
+
+        return linemap
 
     def _recompile_submodules(self) -> list[tuple[str, PythonCode]]:
         """
