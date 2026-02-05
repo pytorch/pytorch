@@ -99,7 +99,7 @@ def remove_dupe_metadata(
         traced_tangents_descs=traced_tangents_descs,
         # We are guaranteed not to get here, since dupes are not supported today with subclass inputs.
         subclass_inp_meta=[],
-        subclass_fw_graph_out_meta=[],
+        _subclass_meta_components=([], []),
         subclass_tangent_meta=subclass_tangent_meta,
         is_train=m.is_train,
     )
@@ -290,7 +290,7 @@ def create_synthetic_base_metadata(
             traced_tangents_descs=traced_tangents_descs,
             # We are guaranteed not to get here, since synthetic_base codepaths are not supported today with subclass inputs.
             subclass_inp_meta=[],
-            subclass_fw_graph_out_meta=[],
+            _subclass_meta_components=([], []),
             subclass_tangent_meta=subclass_tangent_meta,
             is_train=m.is_train,
         ),
