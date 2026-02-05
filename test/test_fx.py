@@ -58,6 +58,7 @@ from fx.test_gradual_type import (  # noqa: F401  # noqa: F401
     TypeCheckerTest,
 )
 from fx.test_matcher_utils import TestMatcher  # noqa: F401
+from fx.test_opaque_infrastructure import TestOpaqueInfrastructure  # noqa: F401
 from fx.test_pass_infra import TestPassManager  # noqa: F401
 from fx.test_source_matcher_utils import TestSourceMatcher  # noqa: F401
 from fx.test_subgraph_rewriter import TestSubgraphRewriter  # noqa: F401
@@ -72,7 +73,6 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     run_tests,
     skipIfTorchDynamo,
-    skipIfRocm,
 )
 from torch.testing._internal.jit_utils import JitTestCase
 
@@ -1352,6 +1352,52 @@ class TestFX(JitTestCase):
         gm.graph.lint()
         text = gm.print_readable(False)
         assert 2 == text.count("_torch__ops_aten_aten_relu_")
+
+    def test_print_readable_no_trailing_whitespace_with_inner_graph(self):
+        # When a GraphModule has a child GraphModule (e.g., from invoke_subgraph),
+        # print_readable() should not produce lines with trailing whitespace.
+
+        # Create an inner GraphModule
+        class InnerModule(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        inner_gm = torch.fx.symbolic_trace(InnerModule())
+
+        # Create an outer module that has the inner GraphModule as a submodule
+        class OuterModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.subgraph_0 = inner_gm
+
+            def forward(self, x):
+                return x * 2
+
+        outer = OuterModule()
+
+        # Create a graph that references the submodule
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        subgraph_result = graph.call_module("subgraph_0", (x,))
+        mul_result = graph.call_function(torch.mul, (subgraph_result, 2))
+        graph.output(mul_result)
+
+        # Create the outer GraphModule with this graph
+        outer_gm = torch.fx.GraphModule(outer, graph)
+
+        # Verify that subgraph_0 is a GraphModule with a graph attribute
+        self.assertTrue(hasattr(outer_gm.subgraph_0, "graph"))
+
+        # Get the print_readable output
+        output = outer_gm.print_readable(print_output=False)
+
+        # Check for trailing whitespace on any line
+        for i, line in enumerate(output.split("\n")):
+            self.assertEqual(
+                line,
+                line.rstrip(),
+                f"Line {i + 1} has trailing whitespace: {repr(line)}",
+            )
 
     def test_script_tensor_constant(self):
         # TorchScript seems to ignore attributes that start with `__`.
@@ -4275,7 +4321,6 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
         torch.fx.proxy.TracerBase.check_mutable_operations = orig_tracer_mutable_flag
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
-    @skipIfRocm
     @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)
     def test_profiler_stack_trace_augmentation(self):
         """
@@ -4314,21 +4359,34 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
 
         actual_traces = _enrich_profiler_traces(prof)
 
-        self.assertExpectedInline(actual_traces, """\
+        # Handle platform-specific event names
+        if torch.version.hip:
+            actual_traces = '\n'.join(
+                line for line in actual_traces.split('\n')
+                if 'hipGetDeviceProperties' not in line
+            )
+            kernel_event = "hipExtModuleLaunchKernel"
+            kernel_event_relu = "hipLaunchKernel"
+        else:
+            kernel_event = "cudaLaunchKernel"
+            kernel_event_relu = "cudaLaunchKernel"
+
+        expected = f"""\
 event=aten::t node=t stack_trace=x = self.linear1(x)
 event=aten::transpose node=t stack_trace=x = self.linear1(x)
 event=aten::as_strided node=t stack_trace=x = self.linear1(x)
 event=aten::addmm node=addmm stack_trace=x = self.linear1(x)
-event=cudaLaunchKernel node=addmm stack_trace=x = self.linear1(x)
+event={kernel_event} node=addmm stack_trace=x = self.linear1(x)
 event=aten::relu node=relu stack_trace=x = self.relu(x)
 event=aten::clamp_min node=relu stack_trace=x = self.relu(x)
-event=cudaLaunchKernel node=relu stack_trace=x = self.relu(x)
+event={kernel_event_relu} node=relu stack_trace=x = self.relu(x)
 event=aten::t node=t_1 stack_trace=x = self.linear2(x)
 event=aten::transpose node=t_1 stack_trace=x = self.linear2(x)
 event=aten::as_strided node=t_1 stack_trace=x = self.linear2(x)
 event=aten::addmm node=addmm_1 stack_trace=x = self.linear2(x)
-event=cudaLaunchKernel node=addmm_1 stack_trace=x = self.linear2(x)"""
-            )
+event={kernel_event} node=addmm_1 stack_trace=x = self.linear2(x)"""
+
+        self.assertExpectedInline(actual_traces, expected)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)

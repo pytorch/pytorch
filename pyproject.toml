@@ -115,6 +115,10 @@ multi_line_output = 3
 include_trailing_comma = true
 combine_as_imports = true
 
+[tool.usort]
+preserve_inline_comments = true
+collapse_blank_lines_in_category = false
+
 [tool.usort.known]
 first_party = ["caffe2", "torch", "torchgen", "functorch", "test"]
 standard_library = ["typing_extensions"]
@@ -338,43 +342,28 @@ keep-runtime-typing = true
 "tools/linter/**" = [
     "LOG015" # please fix
 ]
-"benchmarks/**" = [
-    "S101"
-]
-"test/**" = [
-    "S101"
-]
-"torchgen/**" = [
-    "S101"
-]
+# Remaining files that still need S101 migration
+# Test files with S101 still need migration - doing incrementally
+"test/**" = ["S101"]
+# Exceptions - files already migrated:
+"test/ao/sparsity/test_sparsifier.py" = []
+"test/ao/sparsity/test_activation_sparsifier.py" = []
+"test/ao/sparsity/test_structured_sparsifier.py" = []
+"test/ao/sparsity/test_data_sparsifier.py" = []
+"test/ao/sparsity/test_parametrization.py" = []
+"test/ao/sparsity/test_data_scheduler.py" = []
+"test/ao/sparsity/test_scheduler.py" = []
+"test/ao/sparsity/test_kernels.py" = []
+"test/jit/test_hooks_modules.py" = []
+"test/distributions/test_transforms.py" = []
+"test/profiler/test_profiler.py" = []
+"test/test_public_bindings.py" = []
+"test/profiler/test_execution_trace.py" = []
+"test/test_dataloader.py" = []
+"test/torch_np/test_basic.py" = []
 "torch/_dynamo/**" = ["S101"]
-"torch/_export/**" = ["S101"]
-"torch/_functorch/**" = ["S101"]
-"torch/_higher_order_ops/**" = ["S101"]
 "torch/_inductor/**" = ["S101"]
-"torch/_library/**" = ["S101"]
-"torch/_numpy/testing/**" = ["S101"]
-"torch/_prims/**" = ["S101"]
-"torch/_refs/special/**" = ["S101"]
-"torch/_subclasses/**" = ["S101"]
-"torch/ao/nn/**" = ["S101"]
-"torch/ao/pruning/_experimental/data_sparsifier/lightning/tests/test_callbacks.py" = ["S101"]
-"torch/backends/_nnapi/**" = ["S101"]
-"torch/cuda/**" = ["S101"]
 "torch/distributed/**" = ["S101"]
-"torch/export/**" = ["S101"]
-"torch/fx/**" = ["S101"]
-"torch/jit/**" = ["S101"]
-"torch/onnx/_internal/**" = ["S101"]
-"torch/testing/**" = ["S101"]
-"tools/**" = [
-    "S101"
-]
-"functorch/**" = [
-    "S101"
-]
-"android/pytorch_android/generate_test_torchscripts.py" = ["S101"]
-".github/scripts/test_trymerge.py" = ["S101"]
 
 [tool.codespell]
 ignore-words = "tools/linter/dictionary.txt"

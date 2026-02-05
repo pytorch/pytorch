@@ -89,9 +89,12 @@ class _DimHint:
     def __call__(self, min=None, max=None) -> "_DimHint":
         if not self._factory:
             raise TypeError(f"'{type(self)}' object is not callable")
-        assert min is None or min >= 0, "min must be non-negative"
-        assert max is None or max >= 0, "max must be non-negative"
-        assert min is None or max is None or min <= max, "min must be <= max"
+        if min is not None and min < 0:
+            raise AssertionError(f"min must be non-negative, got {min}")
+        if max is not None and max < 0:
+            raise AssertionError(f"max must be non-negative, got {max}")
+        if min is not None and max is not None and min > max:
+            raise AssertionError(f"min must be <= max, got min={min}, max={max}")
         return _DimHint(self.type, min=min, max=max, _factory=False)
 
     def __repr__(self):
@@ -176,8 +179,12 @@ class Dim:
 
         _min = 0 if min is None else min
         _max = int_oo if max is None else max
-        assert _max > _min, f"Cannot create Dim with inconsistent min={min}, max={max}"
-        assert name.isidentifier(), f"Dim name must be a valid identifier, got {name}"
+        if not (_max > _min):
+            raise AssertionError(
+                f"Cannot create Dim with inconsistent min={min}, max={max}"
+            )
+        if not name.isidentifier():
+            raise AssertionError(f"Dim name must be a valid identifier, got {name}")
         self.__name__ = name
         self.min = _min
         self.max = _max
@@ -307,11 +314,12 @@ class _DerivedDim(Dim):
 
         _min_symint = self.fn(Integer(self.root.min))  # type: ignore[attr-defined]
         root = self.root  # type: ignore[attr-defined]
-        assert _min_symint >= 0, (
-            f"Expected derived min value of {self.__name__} to be >= 0. "
-            f"Please specify an appropriate min value for {root.__name__} "
-            f"(currently {root.min})."
-        )
+        if _min_symint < 0:
+            raise AssertionError(
+                f"Expected derived min value of {self.__name__} to be >= 0. "
+                f"Please specify an appropriate min value for {root.__name__} "
+                f"(currently {root.min})."
+            )
         return int(_min_symint)
 
     @property
@@ -327,11 +335,12 @@ class _DerivedDim(Dim):
 
         _max_symint = self.fn(Integer(self.root.max))  # type: ignore[attr-defined]
         root = self.root  # type: ignore[attr-defined]
-        assert _max_symint <= sys.maxsize - 1, (
-            f"Expected derived max value of {self.__name__} to be <= {sys.maxsize - 1}. "
-            f"Please specify an appropriate max value for {root.__name__} "
-            f"(currently {root.max})."
-        )
+        if _max_symint > sys.maxsize - 1:
+            raise AssertionError(
+                f"Expected derived max value of {self.__name__} to be <= {sys.maxsize - 1}. "
+                f"Please specify an appropriate max value for {root.__name__} "
+                f"(currently {root.max})."
+            )
         return int(_max_symint)
 
     def _derive(self, fn):
@@ -632,15 +641,24 @@ def _tree_map_with_path(
         if "mismatch" in e.args[0]:
             # When PyTree finds a structural mismatch between tree and dynamic_shapes,
             # the error message is unfortunately quite horrible. Let's fix that.
-            assert dynamic_shapes, "Cannot be a mismatch if there is no dynamic_shapes"
-            assert tree_name, "Must provide a tree_name when there might be a mismatch"
+            if not dynamic_shapes:
+                raise AssertionError(
+                    "Cannot be a mismatch if there is no dynamic_shapes"
+                ) from None
+            if not tree_name:
+                raise AssertionError(
+                    "Must provide a tree_name when there might be a mismatch"
+                ) from None
 
             def _key(type_, context, i):
                 # derive a PyTree key given the type, context, and child # of a TreeSpec
                 if type_ is dict:
                     return MappingKey(context[i])
                 if type_ in (list, tuple):
-                    assert context is None
+                    if context is not None:
+                        raise AssertionError(
+                            f"expected context to be None for type {type_}, got {context}"
+                        )
                     return SequenceKey(i)
                 raise AssertionError(f"Did not expect type {type_}")
 
@@ -765,18 +783,20 @@ class ShapesCollection:
         self._shapes = {}
 
     def __setitem__(self, t, shape):
-        assert isinstance(t, (torch.Tensor, _IntWrapper)), (
-            f"Cannot assign shape to non-tensor or non-_IntWrapper type {type(t)}"
-        )
+        if not isinstance(t, (torch.Tensor, _IntWrapper)):
+            raise AssertionError(
+                f"Cannot assign shape to non-tensor or non-_IntWrapper type {type(t)}"
+            )
 
         # TODO(avik): check that shape is indeed a Shape
 
         t_id = id(t)
         if t_id in self._shapes:
             _shape = self._shapes[t_id]
-            assert shape == _shape, (
-                f"Shapes assigned to input do not match: expected {_shape}, got {shape}"
-            )
+            if shape != _shape:
+                raise AssertionError(
+                    f"Shapes assigned to input do not match: expected {_shape}, got {shape}"
+                )
         else:
             self._shapes[id(t)] = shape
 
@@ -850,10 +870,12 @@ class AdditionalInputs:
         Additional input :func:`args` and :func:`kwargs`.
         """
 
-        assert type(args) is tuple, f"Representative args {args} must be a tuple"
-        assert kwargs is None or type(kwargs) is dict, (
-            f"Representative kwargs {kwargs} must be None or a dict"
-        )
+        if type(args) is not tuple:
+            raise AssertionError(f"Representative args {args} must be a tuple")
+        if kwargs is not None and type(kwargs) is not dict:
+            raise AssertionError(
+                f"Representative kwargs {kwargs} must be None or a dict"
+            )
         self._examples.append((args, kwargs))
 
     def dynamic_shapes(self, m, args, kwargs=None):
@@ -998,7 +1020,10 @@ def _check_dynamic_shapes(
                 case_name="dynamic_shapes_validation",
             )
 
-    assert isinstance(dynamic_shapes, (dict, tuple, list))
+    if not isinstance(dynamic_shapes, (dict, tuple, list)):
+        raise AssertionError(
+            f"expected dynamic_shapes to be dict, tuple, or list, got {type(dynamic_shapes)}"
+        )
     if isinstance(dynamic_shapes, dict):
         got_keys = list(dynamic_shapes.keys())
         expected_arg_names = list(combined_args.keys())
@@ -1035,7 +1060,12 @@ def _check_dynamic_shapes(
                     "Unable to specify input integers as dynamic through named "
                     "Dims. Please use Dim.AUTO/DYNAMIC instead."
                 )
-            assert dynamic_shape is None or isinstance(dynamic_shape, (int, _DimHint))
+            if dynamic_shape is not None and not isinstance(
+                dynamic_shape, (int, _DimHint)
+            ):
+                raise AssertionError(
+                    f"expected dynamic_shape to be None, int, or _DimHint for _IntWrapper, got {type(dynamic_shape)}"
+                )
         else:
             if dynamic_shape is not None:
                 rendered_path = keystr(path)
@@ -1145,7 +1175,8 @@ def _process_dynamic_shapes(
                 ),
             )
         else:
-            assert isinstance(dim, Dim)
+            if not isinstance(dim, Dim):
+                raise AssertionError(f"expected dim to be Dim, got {type(dim)}")
             constraint = _Constraint(  # type: ignore[assignment]
                 id(tensor),
                 i,
@@ -1242,7 +1273,8 @@ def _get_dim_name_mapping(
             if isinstance(dim, _DerivedDim):
                 name_to_dim[dim.root.__name__] = dim.root  # type: ignore[attr-defined]
         else:
-            assert isinstance(dim, _DimHint)
+            if not isinstance(dim, _DimHint):
+                raise AssertionError(f"expected dim to be _DimHint, got {type(dim)}")
     return name_to_dim
 
 
@@ -1320,9 +1352,13 @@ def refine_dynamic_shapes_from_suggested_fixes(
     # track derived dim roots
     roots: set[str] = set()
     for k, c in shape_fixes.items():
-        assert isinstance(c, (int, Dim, _DerivedDim, sympy.Expr))
+        if not isinstance(c, (int, Dim, _DerivedDim, sympy.Expr)):
+            raise AssertionError(
+                f"expected shape_fixes[{k!r}] to be int, Dim, _DerivedDim, or sympy.Expr, got {type(c)}"
+            )
         if isinstance(c, sympy.Expr):  # check dim/derived dim expression
-            assert _is_supported_equivalence(c)
+            if not _is_supported_equivalence(c):
+                raise AssertionError(f"sympy.Expr {c} is not a supported equivalence")
             shape_fixes[k] = c
             roots.add(str(next(iter(c.free_symbols))))
         if isinstance(c, _DerivedDim):
@@ -1330,7 +1366,10 @@ def refine_dynamic_shapes_from_suggested_fixes(
 
     # check keys are existing dims or new roots
     for k in shape_fixes:
-        assert k in name_to_dim or k in roots
+        if k not in name_to_dim and k not in roots:
+            raise AssertionError(
+                f"shape_fixes key {k!r} not found in name_to_dim or roots"
+            )
 
     # cache so we don't produce multiple derived dim objects
     derived_dim_cache: dict[str, _DerivedDim] = {}
@@ -1349,7 +1388,10 @@ def refine_dynamic_shapes_from_suggested_fixes(
                     if symbol.name in shape_fixes:
                         root = shape_fixes[symbol.name]
                     else:
-                        assert symbol.name in name_to_dim
+                        if symbol.name not in name_to_dim:
+                            raise AssertionError(
+                                f"symbol.name {symbol.name!r} not found in name_to_dim"
+                            )
                         root = name_to_dim[symbol.name]
                     # figure out value of fix
                     modulus, remainder = sympy.polys.polytools.div(fix, symbol)
