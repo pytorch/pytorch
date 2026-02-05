@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, cast, Optional, Union
+from typing import Any, cast
 
 import torch
 from torch import Tensor
@@ -29,11 +29,11 @@ class Adadelta(Optimizer):
     def __init__(
         self,
         params: ParamsT,
-        lr: Union[float, Tensor] = 1.0,
+        lr: float | Tensor = 1.0,
         rho: float = 0.9,
         eps: float = 1e-6,
         weight_decay: float = 0,
-        foreach: Optional[bool] = None,
+        foreach: bool | None = None,
         *,
         capturable: bool = False,
         maximize: bool = False,
@@ -418,7 +418,7 @@ def adadelta(
     # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
     # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
     capturable: bool = False,
-    foreach: Optional[bool] = None,
+    foreach: bool | None = None,
     differentiable: bool = False,
     has_complex: bool = False,
     *,

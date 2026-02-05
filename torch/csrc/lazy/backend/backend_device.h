@@ -21,7 +21,7 @@ struct TORCH_API BackendDeviceType {
   // Note: previous default value was '0', which actually maps to at::kCPU, at
   // least now it is explicit, we may want to make default/undefined semantics
   // more clear though
-  BackendDeviceType() : type((int8_t)at::kCPU) {}
+  BackendDeviceType() = default;
   BackendDeviceType(int8_t type) : type(type) {}
 
   virtual ~BackendDeviceType() = default;

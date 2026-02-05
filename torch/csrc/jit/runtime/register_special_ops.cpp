@@ -2,7 +2,6 @@
 #include <torch/library.h>
 
 #include <ATen/ExpandUtils.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/core/jit_type.h>
 #include <c10/core/DefaultDtype.h>
 #include <c10/util/irange.h>
@@ -10,11 +9,9 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/operator.h>
-#include <torch/csrc/jit/runtime/vararg_functions.h>
 
 #include <ATen/InitialTensorOptions.h>
 #include <c10/core/ScalarType.h>
-#include <torch/csrc/jit/frontend/error_report.h>
 
 #include <sstream>
 

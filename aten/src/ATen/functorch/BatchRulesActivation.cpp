@@ -5,8 +5,6 @@
 // LICENSE file in the root directory of this source tree.
 
 #include <ATen/functorch/BatchRulesHelper.h>
-#include <ATen/functorch/PlumbingHelper.h>
-#include <ATen/Operators.h>
 
 // NB: most activation functions fit pointwise unary or binary rules.
 // These are only the ones that have special batch rules to help with organization

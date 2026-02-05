@@ -52,23 +52,21 @@ permute_default_1 = CallFunction(aten.permute.default, view_default_4, Ignored()
 bmm_default_2 = CallFunction(aten.bmm.default, view_default_6, permute_default_1)
 mul_Tensor = CallFunction(aten.mul.Tensor, bmm_default_2, div_Tensor, _users=2)
 sum_dim_IntList_1 = CallFunction(aten.sum.dim_IntList, mul_Tensor, Ignored(), True)
-fma_default = CallFunction(prims.fma.default, neg_default, sum_dim_IntList_1, mul_Tensor)
-view_default_7 = CallFunction(aten.view.default, fma_default, Ignored())
-view_default_8 = CallFunction(aten.view.default, view_default_7, Ignored(), _users=2)
+fma_default = CallFunction(prims.fma.default, neg_default, sum_dim_IntList_1, mul_Tensor, _users=2)
 permute_default_2 = CallFunction(aten.permute.default, permute_default, Ignored())
-bmm_default_3 = CallFunction(aten.bmm.default, view_default_8, permute_default_2)
-view_default_9 = CallFunction(aten.view.default, bmm_default_3, Ignored())
+bmm_default_3 = CallFunction(aten.bmm.default, fma_default, permute_default_2)
+view_default_7 = CallFunction(aten.view.default, bmm_default_3, Ignored())
 permute_default_3 = CallFunction(aten.permute.default, view_default, Ignored())
-bmm_default_4 = CallFunction(aten.bmm.default, permute_default_3, view_default_8)
+bmm_default_4 = CallFunction(aten.bmm.default, permute_default_3, fma_default)
 permute_default_4 = CallFunction(aten.permute.default, bmm_default_4, Ignored())
-view_default_10 = CallFunction(aten.view.default, permute_default_4, Ignored())
+view_default_8 = CallFunction(aten.view.default, permute_default_4, Ignored())
 permute_default_5 = CallFunction(aten.permute.default, div_Tensor, Ignored())
 bmm_default_5 = CallFunction(aten.bmm.default, permute_default_5, view_default_6)
-view_default_11 = CallFunction(aten.view.default, bmm_default_5, Ignored())
+view_default_9 = CallFunction(aten.view.default, bmm_default_5, Ignored())
 _sfdp_pattern_24_training = MultiOutputPattern([view_default_5,
+  view_default_7,
+  view_default_8,
   view_default_9,
-  view_default_10,
-  view_default_11,
   None
 ])
 

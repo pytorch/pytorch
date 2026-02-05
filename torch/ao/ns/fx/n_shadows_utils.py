@@ -819,7 +819,6 @@ def create_add_loggers_graph(
                 model,
                 cur_subgraph_idx,
                 match_name,
-                # pyrefly: ignore [bad-argument-type]
                 maybe_subgraph,
                 [qconfig_mapping],
                 [node_name_to_qconfig],
