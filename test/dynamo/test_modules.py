@@ -1730,6 +1730,26 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch.allclose(expect_res, actual_res))
         self.assertEqual(cnt.frame_count, 1)
 
+    def test_lazy_conv_transpose1d_dynamic(self):
+        """Test LazyConvTranspose1d with dynamic=True"""
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.deconv = torch.nn.LazyConvTranspose1d(16, 3, stride=2, padding=1)
+
+            def forward(self, x):
+                return self.deconv(x)
+
+        model = Model()
+        model_compiled = torch.compile(model, dynamic=True)
+        x = torch.randn(2, 32, 8)
+        out = model_compiled(x)
+
+        self.assertEqual(out.shape, torch.Size([2, 16, 15]))
+        self.assertIsInstance(model.deconv, torch.nn.ConvTranspose1d)
+        self.assertEqual(model.deconv.in_channels, 32)
+
     def test_call_fn_with_non_const_inputs_safe(self):
         class ModuleSpecialFwd(torch.nn.Module):
             def __init__(self) -> None:
