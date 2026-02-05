@@ -148,7 +148,7 @@ class InputCandidate:
         )
 
     def __len__(self) -> int:
-        """Returns the number of flattended tensors, None tensors are included."""
+        """Returns the number of flattened tensors, None tensors are included."""
         return len(self.flat_list)
 
     def str_obs(self) -> str:
@@ -845,7 +845,7 @@ class InputObserver:
         progress_bar: bool = False,
         initializer: Callable[
             [str | bytes], ort.InferenceSession
-        ] = _ort_session_initializer,
+        ] = _onnx_program._ort_session_initializer,
     ) -> list[dict[str, str | int | float]]:
         """Computes the discrepancies between the saved inputs and outputs
         with the saved onnx model.
