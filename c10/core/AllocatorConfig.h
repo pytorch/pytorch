@@ -66,6 +66,11 @@ class ConfigTokenizer {
     return config_[i] == token;
   }
 
+  int toInt(size_t i) const {
+    checkIndex(i);
+    return std::stoi(config_[i]);
+  }
+
   size_t toSizeT(size_t i) const {
     checkIndex(i);
     return std::stoull(config_[i]);
@@ -225,6 +230,16 @@ class C10_API AcceleratorAllocatorConfig {
 
   /* Settings for both device and host allocator */
 
+  // Returns the byte value used to memset all allocations before returned.
+  // This is a debugging feature; poison allocations with 0xFF or clear with 0.
+  static int memset_value() {
+    return instance().memset_value_;
+  }
+
+  static bool has_memset_value() {
+    return memset_value() != std::numeric_limits<int>::max();
+  }
+
   // Returns the current allocator settings as a string. This string is useful
   // to expand device-specific allocator configurations
   static std::string last_allocator_settings() {
@@ -242,7 +257,8 @@ class C10_API AcceleratorAllocatorConfig {
         "garbage_collection_threshold",
         "roundup_power2_divisions",
         "expandable_segments",
-        "pinned_use_background_threads"};
+        "pinned_use_background_threads",
+        "memset_value"};
     return keys;
   }
 
@@ -323,6 +339,8 @@ class C10_API AcceleratorAllocatorConfig {
       size_t i);
   // Parse `expandable_segments` from environment variable.
   size_t parseExpandableSegments(const ConfigTokenizer& tokenizer, size_t i);
+  // Parse `memset_value` from environment variable.
+  size_t parseMemsetValue(const ConfigTokenizer& tokenizer, size_t i);
 
   /* Internal functions for host allocator */
 
@@ -355,6 +373,7 @@ class C10_API AcceleratorAllocatorConfig {
   std::atomic<bool> pinned_use_background_threads_{false};
 
   /* The following members are used for both device and host allocator. */
+  std::atomic<int> memset_value_{std::numeric_limits<int>::max()};
 
   // Record the last allocator config environment setting.
   std::mutex last_allocator_settings_mutex_;
