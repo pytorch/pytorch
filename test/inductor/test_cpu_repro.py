@@ -34,8 +34,10 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
     IS_MACOS,
+    MI200_ARCH,
     parametrize,
     skipIfRocm,
+    skipIfRocmArch,
     slowTest,
     TEST_MKL,
     xfailIfS390X,
@@ -5834,6 +5836,7 @@ class CPUReproTests(TestCase):
 
         torch.compile(fn)(torch.randn(2, 2))
 
+    @skipIfRocmArch(MI200_ARCH)
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
     @requires_vectorization
     @config.patch(freezing=True)
