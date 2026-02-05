@@ -11,6 +11,9 @@ fi
 
 source "$(dirname "${BASH_SOURCE[0]}")/common_utils.sh"
 
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+START_PATH=$(pwd)
+
 # 2. Add functions to pull TorchTPU prior to being fully OSS
 # Cleanup function to ensure SSH key is removed
 cleanup() {
@@ -25,7 +28,7 @@ install_gcloud() {
         echo "gcloud CLI not found. Installing..."
 
         # Ensure curl and apt-transport-https are present
-        sudo apt-get update && sudo apt-get install -y apt-transport-https ca-certificates gnupg curl
+        sudo apt-get update && sudo apt-get install -y apt-transport-https ca-certificates gnupg curl ssh
 
         # Import Google Cloud public key
         curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg
@@ -37,6 +40,13 @@ install_gcloud() {
         sudo apt-get update && sudo apt-get install -y google-cloud-cli
     else
         echo "gcloud CLI is already installed."
+    fi
+    if ! command -v ssh &> /dev/null; then
+        echo "ssh is needed for private pulling of repo, installing"
+        sudo apt-get update
+        sudo apt-get install -y ssh
+    else
+        echo "ssh is installed"
     fi
 }
 
@@ -82,13 +92,13 @@ clone_repo() {
 
 pull_torch_tpu() {
     trap cleanup EXIT
-    
+
     echo "Attempting to clone repository publicly..."
     if GIT_TERMINAL_PROMPT=0 git clone "${TORCH_TPU_REPO}" torch_tpu; then
          echo "Public clone successful."
          return 0
     fi
-     
+
     echo "Public clone failed. Falling back to authenticated clone..."
     echo "Starting setup_repo.sh..."
     install_gcloud
@@ -97,7 +107,7 @@ pull_torch_tpu() {
     echo "Done."
 }
 
-sleep 28800 # Debug sleep to connect to runner to streamline debugging, do not submit 
+# sleep 28800 # Debug sleep to connect to runner to streamline debugging, do not submit 
 
 # 3. Configuration
 TORCH_TPU_REPO="${TORCH_TPU_REPO:-https://github.com/google-ml-infra/torch_tpu.git}"
@@ -130,7 +140,7 @@ pushd /var/lib/jenkins/
 # 6. Clone
 pull_torch_tpu
 chown -R jenkins /var/lib/jenkins/torch_tpu
-cd torch_tpu
+pushd torch_tpu
 
 # 7. Checkout
 if [ -n "${TORCH_TPU_PINNED_COMMIT}" ]; then
@@ -144,7 +154,6 @@ fi
 as_jenkins git submodule update --init --recursive
 
 # 8. JAX/LibTPU Dependencies (Runtime)
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 if [ -f "${SCRIPT_DIR}/requirements_tpu.txt" ]; then
     pip_install -r "${SCRIPT_DIR}/requirements_tpu.txt"
 else
@@ -175,8 +184,7 @@ as_jenkins env TORCH_SOURCE="${TORCH_SOURCE}" bazel build //ci/wheel:torch_tpu_w
 pip_install bazel-bin/ci/wheel/*.whl
 
 # 12. Cleanup
-popd # Back to /var/lib/jenkins
-
+popd # Back to /var/lib/jenkins/workspace
 echo "Cleaning up build artifacts..."
 rm -rf torch_tpu
 
