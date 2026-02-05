@@ -397,7 +397,7 @@ CUDAStream getNonCapturingStreamFromPool(
         idx);
 #endif
     cudaStream_t raw_stream = streams[pri_idx][device_index][idx];
-    if (!c10::cuda::isStreamCapturing(raw_stream)) {
+    if (!c10::cuda::isStreamCapturingMayInitCtx(raw_stream)) {
       return CUDAStreamForId(device_index, makeStreamId(id_type, idx));
     }
   }

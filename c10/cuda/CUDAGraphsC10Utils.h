@@ -67,38 +67,29 @@ inline std::ostream& operator<<(std::ostream& os, CaptureStatus status) {
   return os;
 }
 
-// Use this version where you're sure a CUDA context exists already.
-inline CaptureStatus currentStreamCaptureStatusMayInitCtx() {
-  cudaStreamCaptureStatus is_capturing{cudaStreamCaptureStatusNone};
-  C10_CUDA_CHECK(
-      cudaStreamIsCapturing(c10::cuda::getCurrentCUDAStream(), &is_capturing));
-  return CaptureStatus(is_capturing);
-}
-
-inline CaptureStatus getStreamCaptureStatus(
+// Returns the capture status of the given stream (or current stream if not
+// specified). May initialize a CUDA context if called with the default stream
+// argument and no context exists yet.
+inline CaptureStatus currentStreamCaptureStatusMayInitCtx(
     std::optional<cudaStream_t> stream = std::nullopt) {
   cudaStream_t s = stream.value_or(
       static_cast<cudaStream_t>(c10::cuda::getCurrentCUDAStream()));
   cudaStreamCaptureStatus status{cudaStreamCaptureStatusNone};
-  // Use relaxed capture mode to allow querying during capture
-  CUDAStreamCaptureModeGuard guard{cudaStreamCaptureModeRelaxed};
   C10_CUDA_CHECK(cudaStreamIsCapturing(s, &status));
   return CaptureStatus(status);
 }
 
-inline bool isStreamCapturing(
+inline bool isStreamCapturingMayInitCtx(
     std::optional<cudaStream_t> stream = std::nullopt) {
-  return getStreamCaptureStatus(stream) == CaptureStatus::Active;
+  return currentStreamCaptureStatusMayInitCtx(stream) == CaptureStatus::Active;
 }
 
-inline std::optional<CaptureId_t> getStreamCaptureId(
+inline std::optional<CaptureId_t> currentStreamCaptureIdMayInitCtx(
     std::optional<cudaStream_t> stream = std::nullopt) {
   cudaStream_t s = stream.value_or(
       static_cast<cudaStream_t>(c10::cuda::getCurrentCUDAStream()));
   cudaStreamCaptureStatus status{};
   CaptureId_t capture_id = 0;
-  // Use relaxed capture mode to allow querying during capture
-  CUDAStreamCaptureModeGuard guard{cudaStreamCaptureModeRelaxed};
   C10_CUDA_CHECK(cudaStreamGetCaptureInfo(s, &status, &capture_id));
   if (status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive) {
     return capture_id;
