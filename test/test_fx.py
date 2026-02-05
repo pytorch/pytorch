@@ -74,6 +74,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfTorchDynamo,
     skipIfRocm,
+    TEST_WITH_ROCM,
 )
 from torch.testing._internal.jit_utils import JitTestCase
 
@@ -4876,7 +4877,8 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
 
 
 # This is failing on Python 3.12 : https://github.com/pytorch/pytorch/issues/119454
-@unittest.skipIf(sys.version_info >= (3, 12), "Failing on python 3.12+")
+# Skip for non-ROCm platforms; ROCm MI300/MI355 now run on Python 3.12
+@unittest.skipIf(sys.version_info >= (3, 12) and not TEST_WITH_ROCM, "Failing on python 3.12+")
 class TestFunctionalTracing(JitTestCase):
     def setUp(self):
         super().setUp()
