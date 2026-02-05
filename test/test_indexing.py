@@ -914,6 +914,11 @@ class TestIndexing(TestCase):
         with self.assertRaisesRegex(IndexError, "too many indices"):
             windowed_data = t[indices[:31]]
 
+    def test_index_tensor_empty_indices(self, device):
+        t = torch.tensor([1.0], device=device)
+        with self.assertRaisesRegex(IndexError, "at least one index must be provided"):
+            torch.ops.aten.index.Tensor(t, [])
+
     def test_bool_indices_accumulate(self, device):
         mask = torch.zeros(size=(10,), dtype=torch.bool, device=device)
         y = torch.ones(size=(10, 10), device=device)
