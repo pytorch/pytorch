@@ -319,6 +319,13 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
         to trace through and potentially optimize the code.
 
     Usage:
+        **Applicable to**:
+        1. Standalone functions: they can take nn.Module as input.
+        2. nn.Module methods: apply to custom methods like ``compute()``.
+        3. nn.Module forward: the forward method itself becomes opaque. Note that module
+           hooks are still compiled by Dynamo and AOT Autograd; if you want hooks to also
+           be opaque, decorate them with @leaf_function too.
+
         **Inputs and Outputs**:
         - Both inputs and outputs must use pytree-compatible types.
         Tensors, Python primitives (int, float, bool, str), and built-in containers
@@ -508,6 +515,40 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
             >>> x = torch.randn(32, 10, requires_grad=True)
             >>> out = compiled(x)[0]
             >>> out.sum().backward()  # Gradients flow to model.linear.weight/bias and x
+
+        Wrapping a forward_pre_hook with runtime logging. Note that both the hook
+        and the forward method should be decorated with ``@leaf_function``::
+
+            >>> import torch
+            >>> from torch._dynamo.decorators import leaf_function
+            >>>
+            >>> @leaf_function
+            ... def logging_pre_hook(module, args):
+            ...     x = args[0]
+            ...     print(f"Pre-hook: input shape={x.shape}, mean={x.mean().item():.4f}")
+            ...     return args
+            ...
+            >>> @logging_pre_hook.register_fake
+            ... def logging_pre_hook_fake(module, args):
+            ...     return args
+            ...
+            >>> class ModuleWithHook(torch.nn.Module):
+            ...     def __init__(self):
+            ...         super().__init__()
+            ...         self.linear = torch.nn.Linear(10, 10)
+            ...         self.register_forward_pre_hook(logging_pre_hook)
+            ...     @leaf_function
+            ...     def forward(self, x):
+            ...         return (self.linear(x),)
+            ...     @forward.register_fake
+            ...     def forward_fake
+            ...     def forward_fake(self, x):
+            ...         return (self.linear(x),)
+            ...
+            >>> model = ModuleWithHook()
+            >>> compiled = torch.compile(model, backend="aot_eager", fullgraph=True)
+            >>> x = torch.randn(32, 10)
+            >>> out = compiled(x)
 
     Args:
         fn: The function being decorated.
