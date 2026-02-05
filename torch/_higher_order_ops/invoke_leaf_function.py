@@ -309,20 +309,23 @@ def _make_forward(
                     for inp in inputs
                 )
 
-                state["outputs"] = tuple(
-                    GradientInfo(
-                        edge=get_gradient_edge(out),
-                        size=out.size(),
-                        stride=out.stride(),
-                        dtype=out.dtype,
-                        device=out.device,
+                if outputs is None:
+                    state["outputs"] = ()
+                else:
+                    state["outputs"] = tuple(
+                        GradientInfo(
+                            edge=get_gradient_edge(out),
+                            size=out.size(),
+                            stride=out.stride(),
+                            dtype=out.dtype,
+                            device=out.device,
+                        )
+                        if isinstance(out, torch.Tensor)
+                        and out.requires_grad
+                        and out.grad_fn is not None
+                        else None
+                        for out in outputs
                     )
-                    if isinstance(out, torch.Tensor)
-                    and out.requires_grad
-                    and out.grad_fn is not None
-                    else None
-                    for out in outputs
-                )
 
         return pytree.tree_map_only(
             torch.Tensor,
@@ -362,6 +365,10 @@ class InvokeLeafFunction(HigherOrderOperator):
             for out in fake_outputs:
                 gen.add_output(out)
         else:
+            if fake_outputs is not None:
+                raise AssertionError(
+                    f"Expected fake_outputs to be a tuple or None, got {type(fake_outputs)}"
+                )
             gen.add_output(fake_outputs)
 
         return gen.gen_schema()

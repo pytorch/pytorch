@@ -2783,15 +2783,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     args_with_modules,
                     kwargs_with_modules,
                 ):
-                    result = impl(*args_with_modules, **kwargs_with_modules)
-                # Empty containers like () are not supported because:
-                # Empty containers would be indistinguishable from None in schema
-                if isinstance(result, (tuple, list)) and not result:
-                    raise ValueError(
-                        "leaf functions cannot return empty containers. "
-                        "Hint: return None if there is no output."
-                    )
-                return result
+                    return impl(*args_with_modules, **kwargs_with_modules)
 
             return wrapped_impl
 

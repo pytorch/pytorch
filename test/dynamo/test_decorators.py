@@ -3423,28 +3423,82 @@ class GraphModule(torch.nn.Module):
             def bad_fn2(x):
                 return (x,)
 
-    def test_leaf_function_empty_tuple_output_not_supported(self):
-        """Verify that leaf functions cannot return empty tuples."""
-        from torch._dynamo.decorators import leaf_function
-        from torch._dynamo.exc import TorchRuntimeError
-
+    def test_leaf_function_no_return_value(self):
         @leaf_function
-        def fn_returns_empty(x):
-            return ()
+        def fn_no_return(x):
+            print("processing")
 
-        @fn_returns_empty.register_fake
-        def fn_returns_empty_fake(x):
-            return ()
+        @fn_no_return.register_fake
+        def fn_no_return_fake(x):
+            pass
 
-        @torch.compile(backend="aot_eager")
-        def f(x):
-            return fn_returns_empty(x)
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
 
-        with self.assertRaisesRegex(
-            TorchRuntimeError,
-            r"leaf functions cannot return empty containers",
-        ):
-            f(torch.randn(3))
+            def forward(self, x):
+                fn_no_return(x)
+                return (self.linear(x),)
+
+        def args_fn():
+            return (torch.randn(3, 3, requires_grad=True),)
+
+        def loss_fn(out):
+            return out[0].sum()
+
+        eager_graph, fw_graph, bw_graph = self._test_leaf_function_helper(
+            Mod, args_fn, loss_fn
+        )
+        self.assertExpectedInline(
+            eager_graph,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[3, 3]", L_self_modules_linear_parameters_weight_: "f32[3, 3]", L_self_modules_linear_parameters_bias_: "f32[3]"):
+        l_x_ = L_x_
+        l_self_modules_linear_parameters_weight_ = L_self_modules_linear_parameters_weight_
+        l_self_modules_linear_parameters_bias_ = L_self_modules_linear_parameters_bias_
+
+        real_fn : torch.utils._pytree.TreeSpec = self.real_fn
+        fake_fn : torch.utils._pytree.TreeSpec = self.fake_fn
+        invoke_leaf_function = torch.ops.higher_order.invoke_leaf_function(real_fn, fake_fn, l_x_);  real_fn = fake_fn = invoke_leaf_function = None
+
+        linear: "f32[3, 3]" = torch._C._nn.linear(l_x_, l_self_modules_linear_parameters_weight_, l_self_modules_linear_parameters_bias_);  l_x_ = l_self_modules_linear_parameters_weight_ = l_self_modules_linear_parameters_bias_ = None
+        return (linear,)
+""",  # noqa: B950
+        )
+        self.assertExpectedInline(
+            fw_graph,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_1: "f32[0]", primals_2: "f32[3, 3]", primals_3: "f32[3, 3]", primals_4: "f32[3]"):
+        _tree_spec_constant0 = self._tree_spec_constant0
+        _tree_spec_constant1 = self._tree_spec_constant1
+        with_effects = torch.ops.higher_order.with_effects(primals_1, torch.ops.higher_order.invoke_leaf_function, _tree_spec_constant0, _tree_spec_constant1, primals_2);  primals_1 = _tree_spec_constant0 = _tree_spec_constant1 = None
+        getitem: "f32[0]" = with_effects[0];  with_effects = None
+
+        t: "f32[3, 3]" = torch.ops.aten.t.default(primals_3)
+        addmm: "f32[3, 3]" = torch.ops.aten.addmm.default(primals_4, primals_2, t);  primals_4 = t = None
+        return (getitem, addmm, primals_2, primals_3)
+""",  # noqa: B950
+        )
+        self.assertExpectedInline(
+            bw_graph,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_2: "f32[3, 3]", primals_3: "f32[3, 3]", tangents_1: "f32[3, 3]"):
+        t: "f32[3, 3]" = torch.ops.aten.t.default(primals_3);  primals_3 = None
+        t_1: "f32[3, 3]" = torch.ops.aten.t.default(t);  t = None
+        mm: "f32[3, 3]" = torch.ops.aten.mm.default(tangents_1, t_1);  t_1 = None
+        t_2: "f32[3, 3]" = torch.ops.aten.t.default(tangents_1)
+        mm_1: "f32[3, 3]" = torch.ops.aten.mm.default(t_2, primals_2);  t_2 = primals_2 = None
+        t_3: "f32[3, 3]" = torch.ops.aten.t.default(mm_1);  mm_1 = None
+        sum_1: "f32[1, 3]" = torch.ops.aten.sum.dim_IntList(tangents_1, [0], True);  tangents_1 = None
+        view: "f32[3]" = torch.ops.aten.view.default(sum_1, [3]);  sum_1 = None
+        t_4: "f32[3, 3]" = torch.ops.aten.t.default(t_3);  t_3 = None
+        return (mm, t_4, view)
+""",  # noqa: B950
+        )
 
 
 instantiate_parametrized_tests(DecoratorTests)

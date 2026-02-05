@@ -6,6 +6,7 @@ import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._higher_order_ops.invoke_leaf_function import invoke_leaf_function
 from torch._higher_order_ops.print import print as hop_print
+from torch._higher_order_ops.schema import HopSchema
 from torch._higher_order_ops.torchbind import call_torchbind
 from torch._library.custom_ops import CustomOpDef
 from torch._library.effects import EffectType
@@ -299,11 +300,10 @@ def handle_effects(
         )
 
     schema = _get_schema(op, unwrapped_args, unwrapped_kwargs)
-    from torch._higher_order_ops.schema import HopSchema
 
     if isinstance(schema, HopSchema):
         if len(schema.returns) == 0:
-            unwrapped_outs = None  # type: ignore[assignment]
+            unwrapped_outs = ()
         else:
             if len(unwrapped_outs) != len(schema.returns):
                 raise AssertionError(
@@ -314,15 +314,15 @@ def handle_effects(
         if unwrapped_outs[0] is not None:
             raise AssertionError(f"expected no outputs but got {unwrapped_outs[0]}")
         unwrapped_outs = None  # type: ignore[assignment]
+    elif len(schema.returns) == 1:
+        if len(unwrapped_outs) != 1:
+            raise AssertionError(f"expected 1 output but got {len(unwrapped_outs)}")
+        unwrapped_outs = unwrapped_outs[0]
     else:
         if len(unwrapped_outs) != len(schema.returns):
             raise AssertionError(
                 f"expected {len(schema.returns)} outputs but got {len(unwrapped_outs)}"
             )
-        if len(schema.returns) > 1:
-            unwrapped_outs = tuple(unwrapped_outs)
-        else:
-            unwrapped_outs = unwrapped_outs[0]
 
     # Add the newly created token into the tokens map for a following call to
     # use this token.
