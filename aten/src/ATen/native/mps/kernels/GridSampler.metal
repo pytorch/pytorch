@@ -115,10 +115,7 @@ static T clip_coordinates(T in, int32_t clip_limit) {
 
 // Reflect coordinates for reflection padding
 template <typename T>
-static T reflect_coordinates(
-    T in,
-    int32_t twice_low,
-    int32_t twice_high) {
+static T reflect_coordinates(T in, int32_t twice_low, int32_t twice_high) {
   if (twice_low == twice_high) {
     return 0;
   }
