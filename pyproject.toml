@@ -342,29 +342,28 @@ keep-runtime-typing = true
 "tools/linter/**" = [
     "LOG015" # please fix
 ]
-"benchmarks/**" = [
-    "S101"
-]
-"test/**" = [
-    "S101"
-]
+# Remaining files that still need S101 migration
+# Test files with S101 still need migration - doing incrementally
+"test/**" = ["S101"]
+# Exceptions - files already migrated:
+"test/ao/sparsity/test_sparsifier.py" = []
+"test/ao/sparsity/test_activation_sparsifier.py" = []
+"test/ao/sparsity/test_structured_sparsifier.py" = []
+"test/ao/sparsity/test_data_sparsifier.py" = []
+"test/ao/sparsity/test_parametrization.py" = []
+"test/ao/sparsity/test_data_scheduler.py" = []
+"test/ao/sparsity/test_scheduler.py" = []
+"test/ao/sparsity/test_kernels.py" = []
+"test/jit/test_hooks_modules.py" = []
+"test/distributions/test_transforms.py" = []
+"test/profiler/test_profiler.py" = []
+"test/test_public_bindings.py" = []
+"test/profiler/test_execution_trace.py" = []
+"test/test_dataloader.py" = []
+"test/torch_np/test_basic.py" = []
 "torch/_dynamo/**" = ["S101"]
-"torch/_functorch/**" = ["S101"]
 "torch/_inductor/**" = ["S101"]
 "torch/distributed/**" = ["S101"]
-"torch/fx/experimental/graph_gradual_typechecker.py" = ["S101"]
-"torch/fx/experimental/migrate_gradual_types/constraint.py" = ["S101"]
-"torch/fx/experimental/migrate_gradual_types/constraint_generator.py" = ["S101"]
-"torch/fx/experimental/migrate_gradual_types/constraint_transformation.py" = ["S101"]
-"torch/fx/experimental/migrate_gradual_types/transform_to_z3.py" = ["S101"]
-"torch/fx/experimental/proxy_tensor.py" = ["S101"]
-"torch/fx/experimental/symbolic_shapes.py" = ["S101"]
-"torch/fx/experimental/unification/multipledispatch/conflict.py" = ["S101"]
-"torch/fx/experimental/unification/multipledispatch/dispatcher.py" = ["S101"]
-"torch/fx/experimental/unification/multipledispatch/utils.py" = ["S101"]
-"torch/fx/experimental/unification/utils.py" = ["S101"]
-"torch/_export/db/examples/dynamic_shape_assert.py" = ["S101"]
-"torch/_export/db/examples/list_contains.py" = ["S101"]
 
 [tool.codespell]
 ignore-words = "tools/linter/dictionary.txt"
