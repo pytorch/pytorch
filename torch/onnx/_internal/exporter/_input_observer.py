@@ -10,7 +10,7 @@ from typing import Any, TYPE_CHECKING
 
 import torch
 
-from ._onnx_program import _ort_session_initializer
+from torch.onnx._internal.exporter import _onnx_program
 
 
 if TYPE_CHECKING:
