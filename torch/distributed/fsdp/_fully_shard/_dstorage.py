@@ -9,7 +9,13 @@ from __future__ import annotations
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import auto, Enum
-from typing import Any, Callable, Literal, TYPE_CHECKING
+from typing import Any, Literal, TYPE_CHECKING
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from torch.utils.hooks import RemovableHandle
 
 import torch
 import torch.distributed as dist
@@ -22,6 +28,7 @@ from torch.distributed.tensor._utils import compute_local_shape_and_global_offse
 from torch.distributed.tensor.placement_types import Placement
 from torch.utils._pytree import tree_flatten
 
+
 if TYPE_CHECKING:
     from torch.distributed.device_mesh import DeviceMesh
 
@@ -33,7 +40,7 @@ __all__ = ["DStorage", "fully_shard_flat", "get_dstorage", "Owned"]
 _DSTORAGE_ATTR = "_dstorage"
 
 
-def get_dstorage(module: nn.Module) -> "DStorage | None":
+def get_dstorage(module: nn.Module) -> DStorage | None:
     """Get the DStorage associated with a module, if any."""
     return getattr(module, _DSTORAGE_ATTR, None)
 
@@ -88,7 +95,12 @@ class ParamInfo:
     byte_offset: int = 0  # byte offset into the sharded storage
     global_numel: int = 0  # total elements in unsharded param
     unsharded_byte_offset: int = 0  # byte offset into the unsharded storage
-    owner_rank: int | None = None  # for param-boundary sharding: which rank owns this param
+    owner_rank: int | None = (
+        None  # for param-boundary sharding: which rank owns this param
+    )
+    padded_local_numel: int = (
+        0  # padded size for uniform buffer layout (max across ranks)
+    )
 
 
 def _get_dtype_alignment(dtype: torch.dtype) -> int:
@@ -166,8 +178,8 @@ class DStorage:
             self._sharded_params[fqn] = getattr(mod, parts[-1])
 
         # Hook handles
-        self._pre_forward_hook_handle = None
-        self._post_forward_hook_handle = None
+        self._pre_forward_hook_handle: RemovableHandle | None = None
+        self._post_forward_hook_handle: RemovableHandle | None = None
 
         # Track if post_backward has been called this iteration
         self._post_backward_called = False
@@ -240,8 +252,8 @@ class DStorage:
         """
         All-gather the sharded byte buffer to get the full unsharded buffer.
 
-        Uses per-param all-gather with variable sizes to handle uneven sharding.
-        For Owned params, uses batched all-gather when possible.
+        Uses batched all-gather with padding for uniform buffer layout.
+        For Owned params, uses batched all-gather with variable sizes.
 
         Returns:
             Unsharded byte buffer containing all parameter data.
@@ -267,9 +279,9 @@ class DStorage:
             else:
                 shard_infos.append((fqn, info))
 
-        # All-gather Shard params (per-param with variable sizes for uneven sharding)
-        for fqn, info in shard_infos:
-            self._all_gather_shard_param(info, pg, world_size)
+        # Batched all-gather for Shard params (padded uniform layout)
+        if shard_infos:
+            self._all_gather_shard_batched(shard_infos, pg, world_size, my_rank)
 
         # Batched all-gather for Owned params (variable sizes per rank)
         if owned_infos:
@@ -277,56 +289,84 @@ class DStorage:
 
         return self._unsharded_byte_storage
 
-    def _all_gather_shard_param(
+    def _all_gather_shard_batched(
         self,
-        info: ParamInfo,
+        shard_infos: list[tuple[str, ParamInfo]],
         pg,
         world_size: int,
+        my_rank: int,
     ) -> None:
-        """All-gather a single Shard param using variable-size all-gather."""
-        shard_dim = 0
-        for placement in info.placements:
-            if isinstance(placement, Shard):
-                shard_dim = placement.dim
-                break
+        """Batched all-gather for all Shard params using padded uniform layout."""
+        # Get the shard region from byte_storage (uniform across ranks due to padding)
+        shard_start = self._region_info["shard_region_start"]
+        shard_end = self._region_info["shard_region_end"]
+        shard_region = self._byte_storage[shard_start:shard_end]
 
-        # Get local shard from byte storage
-        num_bytes = info.local_numel * info.dtype.itemsize
-        if info.local_numel > 0:
-            byte_view = self._byte_storage[info.byte_offset : info.byte_offset + num_bytes]
-            local_shard = byte_view.view(info.dtype).view(info.local_shape)
-        else:
-            local_shard = torch.empty(info.local_shape, dtype=info.dtype, device=self._byte_storage.device)
+        if shard_region.numel() == 0:
+            return
 
-        # Compute local shapes for all ranks
-        local_shapes = []
-        local_numels = []
-        for rank in range(world_size):
-            shape = self._compute_local_shape_for_rank(info.global_shape, info.placements, rank)
-            local_shapes.append(shape)
-            numel = 1
-            for d in shape:
-                numel *= d
-            local_numels.append(numel)
+        # All-gather the entire shard region (uniform size across ranks)
+        gathered = torch.empty(
+            world_size * shard_region.numel(),
+            dtype=torch.uint8,
+            device=self._byte_storage.device,
+        )
+        dist.all_gather_into_tensor(gathered, shard_region.contiguous(), group=pg)
 
-        # All-gather with variable sizes
-        output_tensors = [
-            torch.empty(local_shapes[rank], dtype=info.dtype, device=self._byte_storage.device)
-            for rank in range(world_size)
-        ]
-        dist.all_gather(output_tensors, local_shard.contiguous(), group=pg)
+        # Extract and unpad data for each param
+        for fqn, info in shard_infos:
+            shard_dim = 0
+            for placement in info.placements:
+                if isinstance(placement, Shard):
+                    shard_dim = placement.dim
+                    break
 
-        # Concatenate along shard dimension
-        chunks = [t for t in output_tensors if t.numel() > 0]
-        if chunks:
-            unsharded = torch.cat(chunks, dim=shard_dim)
-        else:
-            unsharded = torch.empty(info.global_shape, dtype=info.dtype, device=self._byte_storage.device)
+            # Compute local shapes for all ranks (actual, not padded)
+            local_shapes = []
+            local_numels = []
+            for rank in range(world_size):
+                shape = self._compute_local_shape_for_rank(
+                    info.global_shape, info.placements, rank
+                )
+                local_shapes.append(shape)
+                numel = 1
+                for d in shape:
+                    numel *= d
+                local_numels.append(numel)
 
-        # Copy to unsharded buffer
-        unsharded_bytes = info.global_numel * info.dtype.itemsize
-        dest = self._unsharded_byte_storage[info.unsharded_byte_offset : info.unsharded_byte_offset + unsharded_bytes]
-        dest.copy_(unsharded.view(-1).view(torch.uint8))
+            # Extract chunks from gathered buffer (accounting for padding)
+            chunks = []
+            param_offset_in_region = info.byte_offset - shard_start
+
+            for rank in range(world_size):
+                # Each rank's region starts at rank * shard_region.numel()
+                rank_region_start = rank * shard_region.numel()
+                # Param is at the same offset within each rank's region
+                chunk_start = rank_region_start + param_offset_in_region
+                # Only read actual data (not padding)
+                actual_bytes = local_numels[rank] * info.dtype.itemsize
+
+                if local_numels[rank] > 0:
+                    chunk_bytes = gathered[chunk_start : chunk_start + actual_bytes]
+                    chunk = chunk_bytes.view(info.dtype).view(local_shapes[rank])
+                    chunks.append(chunk)
+
+            # Concatenate along shard dimension
+            if chunks:
+                unsharded = torch.cat(chunks, dim=shard_dim)
+            else:
+                unsharded = torch.empty(
+                    info.global_shape,
+                    dtype=info.dtype,
+                    device=self._byte_storage.device,
+                )
+
+            # Copy to unsharded buffer
+            num_bytes = info.global_numel * info.dtype.itemsize
+            dest = self._unsharded_byte_storage[
+                info.unsharded_byte_offset : info.unsharded_byte_offset + num_bytes
+            ]
+            dest.copy_(unsharded.view(-1).view(torch.uint8))
 
     def _all_gather_owned_batched(
         self,
@@ -342,8 +382,15 @@ class DStorage:
         my_owned_region = self._byte_storage[owned_start:owned_end]
 
         # Gather sizes from all ranks
-        my_size = torch.tensor([my_owned_region.numel()], dtype=torch.long, device=self._byte_storage.device)
-        all_sizes = [torch.zeros(1, dtype=torch.long, device=self._byte_storage.device) for _ in range(world_size)]
+        my_size = torch.tensor(
+            [my_owned_region.numel()],
+            dtype=torch.long,
+            device=self._byte_storage.device,
+        )
+        all_sizes = [
+            torch.zeros(1, dtype=torch.long, device=self._byte_storage.device)
+            for _ in range(world_size)
+        ]
         dist.all_gather(all_sizes, my_size, group=pg)
         all_sizes = [s.item() for s in all_sizes]
 
@@ -356,7 +403,11 @@ class DStorage:
             torch.empty(size, dtype=torch.uint8, device=self._byte_storage.device)
             for size in all_sizes
         ]
-        input_tensor = my_owned_region.contiguous() if my_owned_region.numel() > 0 else torch.empty(0, dtype=torch.uint8, device=self._byte_storage.device)
+        input_tensor = (
+            my_owned_region.contiguous()
+            if my_owned_region.numel() > 0
+            else torch.empty(0, dtype=torch.uint8, device=self._byte_storage.device)
+        )
         dist.all_gather(output_tensors, input_tensor, group=pg)
 
         # Build mapping from param to owner's contribution offset
@@ -390,14 +441,22 @@ class DStorage:
                             break
                         # Add this param's size
                         alignment = _get_dtype_alignment(other_info.dtype)
-                        param_offset_in_owned = _align_offset(param_offset_in_owned, alignment)
-                        param_offset_in_owned += other_info.global_numel * other_info.dtype.itemsize
+                        param_offset_in_owned = _align_offset(
+                            param_offset_in_owned, alignment
+                        )
+                        param_offset_in_owned += (
+                            other_info.global_numel * other_info.dtype.itemsize
+                        )
 
             num_bytes = info.global_numel * info.dtype.itemsize
-            param_data = owner_output[param_offset_in_owned : param_offset_in_owned + num_bytes]
+            param_data = owner_output[
+                param_offset_in_owned : param_offset_in_owned + num_bytes
+            ]
 
             # Copy to unsharded buffer
-            dest = self._unsharded_byte_storage[info.unsharded_byte_offset : info.unsharded_byte_offset + num_bytes]
+            dest = self._unsharded_byte_storage[
+                info.unsharded_byte_offset : info.unsharded_byte_offset + num_bytes
+            ]
             dest.copy_(param_data)
 
     def _compute_local_shape_for_rank(
@@ -424,7 +483,10 @@ class DStorage:
             if dim_size < shard_starting_idx:
                 local_dim_size = 0
             else:
-                local_dim_size = min(dim_size, shard_starting_idx + full_chunk_size) - shard_starting_idx
+                local_dim_size = (
+                    min(dim_size, shard_starting_idx + full_chunk_size)
+                    - shard_starting_idx
+                )
 
         local_shape = list(global_shape)
         local_shape[shard_dim] = local_dim_size
@@ -445,7 +507,9 @@ class DStorage:
         # Register unsharded parameters on the module
         for fqn, info in self._param_infos.items():
             unsharded_view = self.get_unsharded_view(fqn)
-            unsharded_param = nn.Parameter(unsharded_view, requires_grad=info.requires_grad)
+            unsharded_param = nn.Parameter(
+                unsharded_view, requires_grad=info.requires_grad
+            )
             _set_param_on_module(self._module, fqn, unsharded_param)
 
         self._state = ShardedState.UNSHARDED
@@ -512,13 +576,17 @@ class DStorage:
                 # Collect Shard params for batched reduce-scatter
                 shard_grads.append(grad)
                 shard_infos.append(info)
-                padded_dim0 = ((grad.size(0) + world_size - 1) // world_size) * world_size
+                padded_dim0 = (
+                    (grad.size(0) + world_size - 1) // world_size
+                ) * world_size
                 padded_size = torch.Size([padded_dim0] + list(grad.shape[1:]))
                 shard_padded_sizes.append(padded_size)
 
         # Batch reduce-scatter for Shard params
         if shard_grads:
-            self._reduce_scatter_shard_grads(pg, world_size, shard_grads, shard_infos, shard_padded_sizes)
+            self._reduce_scatter_shard_grads(
+                pg, world_size, shard_grads, shard_infos, shard_padded_sizes
+            )
 
         torch.cuda.synchronize()
 
@@ -544,7 +612,9 @@ class DStorage:
 
         # Copy-in with chunk_cat
         reduce_scatter_input_2d = reduce_scatter_input.view(world_size, -1)
-        torch._chunk_cat(grads, dim=0, num_chunks=world_size, out=reduce_scatter_input_2d)
+        torch._chunk_cat(
+            grads, dim=0, num_chunks=world_size, out=reduce_scatter_input_2d
+        )
 
         # Allocate reduce-scatter output buffer
         reduce_scatter_output = torch.empty(
@@ -717,21 +787,58 @@ def _compute_local_info(
     return torch.Size(local_shape), local_numel
 
 
+def _compute_max_local_numel(
+    global_shape: torch.Size,
+    placements: tuple[Placement, ...],
+    world_size: int,
+) -> int:
+    """
+    Compute the max local numel across all ranks for a Shard placement.
+
+    This is used to pad local shards to uniform size for batched all-gather.
+    """
+    shard_dim = 0
+    for placement in placements:
+        if isinstance(placement, Shard):
+            shard_dim = placement.dim
+            break
+
+    dim_size = global_shape[shard_dim]
+
+    # Compute max local dim size using DTensor's ceil-based sharding
+    if dim_size % world_size == 0:
+        max_local_dim = dim_size // world_size
+    else:
+        # Ceil-based: max is the full chunk size (first rank gets this)
+        max_local_dim = (dim_size + world_size - 1) // world_size
+
+    # Compute max numel
+    max_numel = max_local_dim
+    for i, d in enumerate(global_shape):
+        if i != shard_dim:
+            max_numel *= d
+
+    return max_numel
+
+
 def _create_param_infos(
     named_params: list[tuple[str, nn.Parameter]],
     mesh: DeviceMesh,
     placements: tuple[Placement, ...],
-) -> tuple[dict[str, ParamInfo], int, int]:
+) -> tuple[dict[str, ParamInfo], int, int, dict[str, int]]:
     """
     Create ParamInfo for each parameter, computing local shapes and byte offsets.
 
     Parameters are laid out sequentially in the byte buffer with proper alignment.
+    Uses padded sizes for uniform buffer layout across ranks (enables batched all-gather).
 
     Returns:
         param_infos: dict mapping FQN to ParamInfo
         total_bytes: total bytes needed for the sharded buffer
         total_unsharded_bytes: total bytes needed for the unsharded buffer
+        region_info: dict with shard/owned region boundaries
     """
+    world_size = mesh.size()
     param_infos: dict[str, ParamInfo] = {}
     current_byte_offset = 0
     current_unsharded_byte_offset = 0
@@ -747,12 +854,19 @@ def _create_param_infos(
         for dim in global_shape:
             global_numel *= dim
 
+        # Compute padded local numel (max across all ranks for uniform layout)
+        padded_local_numel = _compute_max_local_numel(
+            global_shape, placements, world_size
+        )
+
         # Align offset for this dtype (sharded buffer)
         alignment = _get_dtype_alignment(dtype)
         aligned_offset = _align_offset(current_byte_offset, alignment)
 
         # Align offset for unsharded buffer
-        aligned_unsharded_offset = _align_offset(current_unsharded_byte_offset, alignment)
+        aligned_unsharded_offset = _align_offset(
+            current_unsharded_byte_offset, alignment
+        )
 
         info = ParamInfo(
             fqn=fqn,
@@ -766,17 +880,26 @@ def _create_param_infos(
             byte_offset=aligned_offset,
             global_numel=global_numel,
             unsharded_byte_offset=aligned_unsharded_offset,
+            padded_local_numel=padded_local_numel,
         )
         param_infos[fqn] = info
 
-        # Move offsets past this parameter's bytes
-        param_bytes = local_numel * dtype.itemsize
+        # Move offsets past this parameter's PADDED bytes (for uniform layout)
+        param_bytes = padded_local_numel * dtype.itemsize
         current_byte_offset = aligned_offset + param_bytes
 
         unsharded_param_bytes = global_numel * dtype.itemsize
         current_unsharded_byte_offset = aligned_unsharded_offset + unsharded_param_bytes
 
-    return param_infos, current_byte_offset, current_unsharded_byte_offset
+    # For Shard-only: entire buffer is shard region
+    region_info = {
+        "shard_region_start": 0,
+        "shard_region_end": current_byte_offset,
+        "owned_region_start": current_byte_offset,
+        "owned_region_end": current_byte_offset,
+    }
+
+    return param_infos, current_byte_offset, current_unsharded_byte_offset, region_info
 
 
 def _create_dtensor_from_view(
@@ -911,7 +1034,9 @@ def _create_param_infos_param_boundary(
             byte_offset = 0  # Not stored locally
 
         # Unsharded buffer offset (all ranks need space for all params)
-        aligned_unsharded_offset = _align_offset(current_unsharded_byte_offset, alignment)
+        aligned_unsharded_offset = _align_offset(
+            current_unsharded_byte_offset, alignment
+        )
         unsharded_param_bytes = global_numel * dtype.itemsize
         current_unsharded_byte_offset = aligned_unsharded_offset + unsharded_param_bytes
 
@@ -947,11 +1072,12 @@ def _create_param_infos_with_placement_fn(
     mesh: DeviceMesh,
     shard_placement_fn: Callable[[str, nn.Parameter], Shard | Owned | None],
     default_placement: Shard | Owned = Shard(0),
-) -> tuple[dict[str, ParamInfo], int, int]:
+) -> tuple[dict[str, ParamInfo], int, int, dict[str, int]]:
     """
     Create ParamInfo for each parameter using a per-parameter placement function.
 
     Supports mixed Shard and Owned placements in the same storage.
+    Uses padded sizes for Shard params to enable batched all-gather.
 
     Args:
         named_params: List of (fqn, param) tuples
@@ -964,6 +1090,7 @@ def _create_param_infos_with_placement_fn(
         param_infos: dict mapping FQN to ParamInfo
         total_bytes: total bytes needed for the sharded buffer
         total_unsharded_bytes: total bytes needed for the unsharded buffer
+        region_info: dict with shard/owned region boundaries
     """
     my_rank = mesh.get_local_rank()
     world_size = mesh.size()
@@ -1001,16 +1128,26 @@ def _create_param_infos_with_placement_fn(
         global_numel = param.numel()
 
         placements_tuple = (placement,)
-        local_shape, local_numel = _compute_local_info(global_shape, mesh, placements_tuple)
+        local_shape, local_numel = _compute_local_info(
+            global_shape, mesh, placements_tuple
+        )
+
+        # Compute padded local numel for uniform buffer layout
+        padded_local_numel = _compute_max_local_numel(
+            global_shape, placements_tuple, world_size
+        )
 
         alignment = _get_dtype_alignment(dtype)
         aligned_offset = _align_offset(current_byte_offset, alignment)
         byte_offset = aligned_offset
-        param_bytes = local_numel * dtype.itemsize
+        # Use PADDED size for buffer allocation
+        param_bytes = padded_local_numel * dtype.itemsize
         current_byte_offset = aligned_offset + param_bytes
 
         # Unsharded buffer offset
-        aligned_unsharded_offset = _align_offset(current_unsharded_byte_offset, alignment)
+        aligned_unsharded_offset = _align_offset(
+            current_unsharded_byte_offset, alignment
+        )
         unsharded_param_bytes = global_numel * dtype.itemsize
         current_unsharded_byte_offset = aligned_unsharded_offset + unsharded_param_bytes
 
@@ -1027,6 +1164,7 @@ def _create_param_infos_with_placement_fn(
             global_numel=global_numel,
             unsharded_byte_offset=aligned_unsharded_offset,
             owner_rank=None,
+            padded_local_numel=padded_local_numel,
         )
         param_infos[fqn] = info
 
@@ -1058,7 +1196,9 @@ def _create_param_infos_with_placement_fn(
 
         # Unsharded buffer offset
         alignment = _get_dtype_alignment(dtype)
-        aligned_unsharded_offset = _align_offset(current_unsharded_byte_offset, alignment)
+        aligned_unsharded_offset = _align_offset(
+            current_unsharded_byte_offset, alignment
+        )
         unsharded_param_bytes = global_numel * dtype.itemsize
         current_unsharded_byte_offset = aligned_unsharded_offset + unsharded_param_bytes
 
@@ -1130,7 +1270,9 @@ def _copy_original_data_with_placement_fn(
 
             if local_shard.numel() > 0:
                 num_bytes = info.local_numel * info.dtype.itemsize
-                byte_view = byte_storage[info.byte_offset : info.byte_offset + num_bytes]
+                byte_view = byte_storage[
+                    info.byte_offset : info.byte_offset + num_bytes
+                ]
                 typed_dest = byte_view.view(info.dtype)
                 typed_dest.copy_(local_shard.view(-1))
 
@@ -1248,7 +1390,8 @@ def fully_shard_flat(
     reshard_after_forward: bool = True,
     register_hooks: bool = True,
     shard_strategy: Literal["per_param", "param_boundary"] = "per_param",
-    shard_placement_fn: Callable[[str, nn.Parameter], Shard | Owned | None] | None = None,
+    shard_placement_fn: Callable[[str, nn.Parameter], Shard | Owned | None]
+    | None = None,
 ) -> DStorage:
     """
     Apply flat-storage FSDP sharding to a module.
@@ -1352,18 +1495,20 @@ def fully_shard_flat(
     if shard_placement_fn is not None:
         # Per-parameter placement function provided
         default_placement = placements[0] if placements else Shard(0)
-        param_infos, total_bytes, total_unsharded_bytes, region_info = _create_param_infos_with_placement_fn(
-            named_params, mesh, shard_placement_fn, default_placement
+        param_infos, total_bytes, total_unsharded_bytes, region_info = (
+            _create_param_infos_with_placement_fn(
+                named_params, mesh, shard_placement_fn, default_placement
+            )
         )
     elif shard_strategy == "param_boundary":
         # Assign params to ranks using bin-packing
         assignments = _assign_params_to_ranks(named_params, mesh.size())
-        param_infos, total_bytes, total_unsharded_bytes, region_info = _create_param_infos_param_boundary(
-            named_params, mesh, assignments
+        param_infos, total_bytes, total_unsharded_bytes, region_info = (
+            _create_param_infos_param_boundary(named_params, mesh, assignments)
         )
     else:
-        param_infos, total_bytes, total_unsharded_bytes = _create_param_infos(
-            named_params, mesh, placements
+        param_infos, total_bytes, total_unsharded_bytes, region_info = (
+            _create_param_infos(named_params, mesh, placements)
         )
 
     # Allocate unified byte storage
@@ -1371,17 +1516,23 @@ def fully_shard_flat(
 
     # Copy original data into byte storage (handles sharding)
     if shard_placement_fn is not None:
-        _copy_original_data_with_placement_fn(byte_storage, named_params, param_infos, mesh)
+        _copy_original_data_with_placement_fn(
+            byte_storage, named_params, param_infos, mesh
+        )
     elif shard_strategy == "param_boundary":
         _copy_original_data_to_flat_storage_param_boundary(
             byte_storage, named_params, param_infos, mesh
         )
     else:
-        _copy_original_data_to_flat_storage(byte_storage, named_params, param_infos, mesh)
+        _copy_original_data_to_flat_storage(
+            byte_storage, named_params, param_infos, mesh
+        )
 
     # Replace each parameter with DTensor view (before creating DStorage)
     for fqn, info in param_infos.items():
-        local_view = byte_storage[info.byte_offset : info.byte_offset + info.local_numel * info.dtype.itemsize]
+        local_view = byte_storage[
+            info.byte_offset : info.byte_offset + info.local_numel * info.dtype.itemsize
+        ]
         typed_view = local_view.view(info.dtype).view(info.local_shape)
         dtensor = _create_dtensor_from_view(typed_view, info, mesh)
         new_param = nn.Parameter(dtensor, requires_grad=info.requires_grad)
@@ -1390,7 +1541,12 @@ def fully_shard_flat(
     # Create DStorage (after DTensor params are registered)
     # This also registers forward/backward hooks if requested
     storage = DStorage(
-        byte_storage, param_infos, mesh, total_bytes, total_unsharded_bytes, module,
+        byte_storage,
+        param_infos,
+        mesh,
+        total_bytes,
+        total_unsharded_bytes,
+        module,
         reshard_after_forward=reshard_after_forward,
         register_hooks=register_hooks,
         region_info=region_info,
