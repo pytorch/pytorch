@@ -5889,6 +5889,54 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         self.generator_exhausted = False
         self.is_generator_from_ctx_manager = False
 
+    def inline_call_with_profiling(self) -> VariableTracker:
+        """Wrapper for inline_call_() that adds profiler timing for generator next() calls."""
+        if not config.dynamo_profiler:
+            return self.inline_call_()
+
+        output = self.output
+        if output.profiler_state is None:
+            output.profiler_state = DynamoProfilerState()
+
+        code = self.f_code
+
+        caller_info = output.profiler_state.get_current_caller()
+        call_stack = output.profiler_state.get_call_stack()
+
+        output.profiler_state.push(
+            code.co_name, code.co_filename, code.co_firstlineno, time.time_ns()
+        )
+
+        trace_success = False
+        try:
+            result = self.inline_call_()
+            trace_success = True
+            return result
+        finally:
+            stack_entry = output.profiler_state.pop()
+            trace_end_ns = time.time_ns()
+
+            if trace_success and stack_entry is not None:
+                cumtime_ns = trace_end_ns - stack_entry.start_time_ns
+                tottime_ns = cumtime_ns - stack_entry.child_time_ns
+
+                timing = FunctionTraceTiming(
+                    func_name=stack_entry.func_name,
+                    filename=stack_entry.filename,
+                    firstlineno=stack_entry.firstlineno,
+                    cumtime_ns=cumtime_ns,
+                    tottime_ns=tottime_ns,
+                    bytecode_count=len(code.co_code),
+                    inline_depth=self.inline_depth,
+                    caller_func_name=caller_info[0] if caller_info else None,
+                    caller_filename=caller_info[1] if caller_info else None,
+                    caller_firstlineno=caller_info[2] if caller_info else None,
+                    is_primitive_call=stack_entry.is_primitive_call,
+                    call_stack=call_stack,
+                )
+                output.profiler_state.record_timing(timing)
+                output.profiler_state.add_child_time(cumtime_ns)
+
     def should_compile_partial_graph(self) -> bool:
         # resuming on graph break on inlined generator not supported
         return False
