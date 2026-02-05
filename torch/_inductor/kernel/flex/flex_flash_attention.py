@@ -15,6 +15,7 @@ from torch.fx import GraphModule
 
 from ...ir import FixedLayout, ShapeAsConstantBuffer, Subgraph, TensorBox
 from ...lowering import empty_strided
+from ...virtualized import V
 from .common import infer_dense_strides, load_flex_template, SubgraphResults
 
 
@@ -344,6 +345,9 @@ def create_flex_flash_attention_kernel(
         stride=[sympy.sympify(s) for s in output.get_stride()],
     )
 
+    sparse_q_block_size = V.graph.sizevars.guard_int(sparse_q_block_size)
+    sparse_kv_block_size = V.graph.sizevars.guard_int(sparse_kv_block_size)
+
     mask_graph_is_trivial = is_trivial_mask_graph(mask_graph.graph_module)
     score_graph_is_trivial = subgraph is None or is_trivial_score_graph(
         subgraph.graph_module
@@ -537,6 +541,9 @@ def create_flex_flash_attention_backward_kernel(
         size=[batch_size, num_heads, seq_len_q, head_dim],
         stride=[sympy.sympify(s) for s in grad_query.get_stride()],
     )
+
+    sparse_q_block_size = V.graph.sizevars.guard_int(sparse_q_block_size)
+    sparse_kv_block_size = V.graph.sizevars.guard_int(sparse_kv_block_size)
 
     choices: list[Any] = []
 
