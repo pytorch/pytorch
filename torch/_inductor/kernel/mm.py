@@ -979,6 +979,9 @@ def tuned_scaled_mm(
         if (
             use_triton_blackwell_tma_template(mat_a, mat_b, output_layout=layout)
             and not bias
+            and use_triton_scaling_template(
+                scale_option_a, scale_option_b, epilogue_scaling_types
+            )
         ):
             templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)
             kwarg_overrides[blackwell_ws_persistent_device_tma_mm_template.uid] = (
