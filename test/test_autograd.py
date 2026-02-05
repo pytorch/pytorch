@@ -4060,6 +4060,67 @@ class TestAutograd(TestCase):
             for ref in refs:
                 self.assertIsNone(ref())
 
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA")
+    def test_checkpoint_compile_no_recompile(self):
+        # Check for ambient TorchFunctionMode, e.g. when PYTORCH_TEST_WITH_CROSSREF=1
+        expect_fail = len(torch.overrides._get_current_function_mode_stack()) > 0
+
+        @torch.compile(backend="aot_eager")
+        def fn(x):
+            return x.sin().cos()
+
+        x = torch.rand(10, 10, requires_grad=True)
+
+        def run():
+            out = torch.utils.checkpoint.checkpoint(fn, x, use_reentrant=False)
+            out.sum().backward()
+
+            torch._dynamo.reset()
+
+            prev = torch.get_default_device()
+            try:
+                # Using torch.device("cuda") directly doesn't work here because
+                # it has some issues. In particular, unlike set_default_device or
+                # invoking the TorchFunctionMode directly, it doesn't update the
+                # global state dynamo references for guards:
+                # torch.utils._device.CURRENT_DEVICE
+                torch.set_default_device("cuda")
+                out = torch.utils.checkpoint.checkpoint(fn, x, use_reentrant=False)
+                out.sum().backward()
+            finally:
+                torch.set_default_device(prev)
+
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            if expect_fail:
+                with self.assertRaises(RuntimeError):
+                    run()
+            else:
+                run()
+
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA")
+    def test_checkpoint_device_context_fn(self):
+        @contextlib.contextmanager
+        def apply_device(device):
+            try:
+                prev = torch.get_default_device()
+                torch.set_default_device(device)
+                yield
+            finally:
+                torch.set_default_device(prev)
+
+        def context_fn():
+            return contextlib.nullcontext(), apply_device("cuda")
+
+        def fn(x):
+            return x.sin().cos()
+
+        with apply_device("cuda"):
+            a = torch.tensor(1.0, requires_grad=True)
+            out = torch.utils.checkpoint.checkpoint(
+                fn, a, context_fn=context_fn, use_reentrant=False
+            )
+            out.backward()
+
     def test_detach(self):
         x = torch.randn(10, 10, requires_grad=True)
         y = x + 2
@@ -8247,6 +8308,50 @@ for shape in [(1,), ()]:
         y = getFn(False).apply(a)
         self.assertEqual(y.grad_fn.saved_tensors, ())
         self.assertEqual(y.grad_fn._raw_saved_tensors, ())
+
+    @skipIfTorchDynamo("dynamo accesses saved_tensors multiple times")
+    def test_clear_saved_tensors_on_access(self):
+        class MyFn(Function):
+            clear_saved_tensors_on_access = True
+
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                (x,) = ctx.saved_tensors
+                ref = weakref.ref(x)
+                del x
+                # Local variable should be the only remaining reference
+                self.assertIsNone(ref())
+                return grad_output
+
+        x = torch.randn(3, requires_grad=True)
+        y = MyFn.apply(x.clone())
+        y.sum().backward()
+
+    @skipIfTorchDynamo("test tests an error that dynamo does not reproduce")
+    def test_clear_saved_tensors_on_access_double_access_error(self):
+        class MyFn(Function):
+            clear_saved_tensors_on_access = True
+
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                _ = ctx.saved_tensors  # first access
+                _ = ctx.saved_tensors  # second access - should raise
+                return grad_output
+
+        x = torch.randn(3, requires_grad=True)
+        y = MyFn.apply(x)
+        with self.assertRaisesRegex(RuntimeError, "can only be accessed once"):
+            y.sum().backward()
 
     def test_autograd_node_isinstance(self):
         # Node is a "virtual" base class of codegen'd nodes. This means that

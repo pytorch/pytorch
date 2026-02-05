@@ -55,11 +55,16 @@ def transpose_strategy(op_schema: OpSchema) -> OpStrategy:
     transpose_strategies = []
     for input_strategy in self_strategy.strategies:
         input_spec = input_strategy.output_spec
-        # follow the input spec but transpose the Shard placements
-        output_placements = [
-            Shard(1 - p.dim) if isinstance(p, Shard) else p
-            for p in input_spec.placements
-        ]
+        ndim = input_spec.ndim
+        # t() on 1D tensor is a no-op, preserve placements
+        # t() on 2D tensor swaps dims 0 and 1
+        if ndim <= 1:
+            output_placements = list(input_spec.placements)
+        else:
+            output_placements = [
+                Shard(1 - p.dim) if isinstance(p, Shard) else p
+                for p in input_spec.placements
+            ]
         transpose_strategy = OpSpec(
             output_specs=DTensorSpec(
                 mesh=input_strategy.mesh,

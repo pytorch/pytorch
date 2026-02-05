@@ -103,8 +103,11 @@ struct FlightRecorder {
     return instance;
   }
   FlightRecorder() {
-    max_entries_ =
-        getCvarInt({"TORCH_FR_BUFFER_SIZE", "TORCH_NCCL_TRACE_BUFFER_SIZE"}, 0);
+    // NOTE: This default value (2000) is duplicated in ProcessGroupNCCL.cpp
+    // and ProcessGroupNCCL.hpp because they cannot directly query max_entries_
+    // (no public accessor). Keep these values in sync.
+    max_entries_ = getCvarInt(
+        {"TORCH_FR_BUFFER_SIZE", "TORCH_NCCL_TRACE_BUFFER_SIZE"}, 2000);
     capture_cpp_stack_ = getCvarBool(
         {"TORCH_FR_CPP_STACK", "TORCH_NCCL_TRACE_CPP_STACK"}, false);
     enabled_ = max_entries_ > 0;
