@@ -6240,6 +6240,38 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             ref = mod(x)  # noqa: F841
             res = opt_mod(x)  # noqa: F841
 
+    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=False)
+    def test_nnmodule_variable_children_wrap_value(self):
+        """
+        tests wrap_values() in nn_module.py by calling children() on a submodule,
+        which triggers NNModuleVariable.call_method only when
+        inline_inbuilt_nn_modules=False.  This path was previously untested
+        causing #173924
+        """
+
+        class Parent(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.container = torch.nn.Sequential(
+                    torch.nn.Linear(10, 10),
+                    torch.nn.ReLU(),
+                    torch.nn.Linear(10, 5),
+                )
+
+            def forward(self, x):
+                for child in self.container.children():
+                    x = child(x)
+                return x
+
+        model = Parent()
+        x = torch.randn(2, 10)
+
+        eager_result = model(x)
+        compiled_model = torch.compile(model, backend="eager", fullgraph=True)
+        compiled_result = compiled_model(x)
+
+        self.assertEqual(eager_result, compiled_result)
+
     def test_optimized_module_training(self):
         mod = torch.nn.Linear(3, 3)
         mod.eval()
