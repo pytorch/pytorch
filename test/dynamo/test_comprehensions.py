@@ -954,13 +954,13 @@ class NestedGraphBreakTests(torch._inductor.test_case.TestCase):
         """Nested version of test_list_comprehension_graph_break."""
 
         def inner(x):
-            y = x + 1
+            y = x + 2
             result = [torch._dynamo.graph_break() or i for i in range(3)]
-            z = x + 2
+            z = x + 3
             return y, result, z
 
         def outer(x):
-            x = x + 3
+            x = x + 1
             result = inner(x)
             x = x + 4
             return result
@@ -979,13 +979,13 @@ class NestedGraphBreakTests(torch._inductor.test_case.TestCase):
         """Nested version of test_dict_comprehension_graph_break."""
 
         def inner(x):
-            y = x + 1
+            y = x + 2
             result = {i: torch._dynamo.graph_break() or i**2 for i in range(3)}
-            z = x + 2
+            z = x + 3
             return y, result, z
 
         def outer(x):
-            x = x + 3
+            x = x + 1
             result = inner(x)
             x = x + 4
             return result
@@ -1011,11 +1011,11 @@ class NestedGraphBreakTests(torch._inductor.test_case.TestCase):
         def inner(x):
             y = x * 2
             lst = [graph_break_fn(i) for i in range(5)]
-            z = x + sum(lst)
+            z = x + 3
             return z, y
 
         def outer(x):
-            x = x + 3
+            x = x + 1
             result = inner(x)
             x = x + 4
             return result
@@ -1035,15 +1035,15 @@ class NestedGraphBreakTests(torch._inductor.test_case.TestCase):
         """Nested version of test_multiple_comprehensions_one_break."""
 
         def inner(x):
-            a = x + 1
+            a = x + 2
             list1 = [i for i in range(2)]  # noqa: C416
             list2 = [torch._dynamo.graph_break() or i for i in range(2)]
-            b = x + 2
+            b = x + 3
             list3 = [i * 2 for i in range(2)]
             return a, list1, list2, b, list3
 
         def outer(x):
-            x = x + 3
+            x = x + 1
             result = inner(x)
             x = x + 4
             return result
@@ -1062,16 +1062,16 @@ class NestedGraphBreakTests(torch._inductor.test_case.TestCase):
         """Nested version of test_nested_comprehension_inner_break."""
 
         def inner(x):
-            a = x + 1
+            a = x + 2
             result = [
                 [torch._dynamo.graph_break() or i * j for j in range(2)]
                 for i in range(2)
             ]
-            b = x + 2
+            b = x + 3
             return a, result, b
 
         def outer(x):
-            x = x + 3
+            x = x + 1
             result = inner(x)
             x = x + 4
             return result
@@ -1090,17 +1090,17 @@ class NestedGraphBreakTests(torch._inductor.test_case.TestCase):
         """Nested version of test_multi_iterator_comprehension_break."""
 
         def inner(x):
-            a = x + 1
+            a = x + 2
             result = [
                 (torch._dynamo.graph_break() or i, j)
                 for i in range(2)
                 for j in range(2)
             ]
-            b = x + 2
+            b = x + 3
             return a, result, b
 
         def outer(x):
-            x = x + 3
+            x = x + 1
             result = inner(x)
             x = x + 4
             return result
@@ -1119,13 +1119,13 @@ class NestedGraphBreakTests(torch._inductor.test_case.TestCase):
         """Nested version of test_discarded_comprehension_graph_break."""
 
         def inner(x):
-            a = x + 1
+            a = x + 2
             [torch._dynamo.graph_break() or i for i in range(3)]
-            b = x + 2
+            b = x + 3
             return a, b
 
         def outer(x):
-            x = x + 3
+            x = x + 1
             result = inner(x)
             x = x + 4
             return result
@@ -1144,13 +1144,13 @@ class NestedGraphBreakTests(torch._inductor.test_case.TestCase):
         """Nested version of test_comprehension_in_expression_graph_break."""
 
         def inner(x):
-            a = x + 1
+            a = x + 2
             total = sum([torch._dynamo.graph_break() or i for i in range(3)])
-            b = x + 2
+            b = x + 3
             return a, total, b
 
         def outer(x):
-            x = x + 3
+            x = x + 1
             result = inner(x)
             x = x + 4
             return result
@@ -1169,11 +1169,11 @@ class NestedGraphBreakTests(torch._inductor.test_case.TestCase):
         """Nested version of test_comprehension_return_directly."""
 
         def inner(x):
-            a = x + 1  # noqa: F841
+            a = x + 2  # noqa: F841
             return [torch._dynamo.graph_break() or i for i in range(3)]
 
         def outer(x):
-            x = x + 2
+            x = x + 1
             result = inner(x)
             x = x + 3
             return result
@@ -1191,13 +1191,13 @@ class NestedGraphBreakTests(torch._inductor.test_case.TestCase):
         """Nested version of test_walrus_operator_in_comprehension."""
 
         def inner(x):
-            a = x + 1
+            a = x + 2
             result = [(y := (torch._dynamo.graph_break() or i * 2)) for i in range(3)]
-            b = x + 2
+            b = x + 3
             return a, result, y, b
 
         def outer(x):
-            x = x + 3
+            x = x + 1
             result = inner(x)
             x = x + 4
             return result
@@ -1216,15 +1216,15 @@ class NestedGraphBreakTests(torch._inductor.test_case.TestCase):
         """Nested version of test_walrus_operator_in_if_in_comprehension."""
 
         def inner(x):
-            a = x + 1
+            a = x + 2
             result = [
                 (torch._dynamo.graph_break() or y) for i in range(5) if (y := i * 2) > 2
             ]
-            b = x + 2
+            b = x + 3
             return a, result, y, b
 
         def outer(x):
-            x = x + 3
+            x = x + 1
             result = inner(x)
             x = x + 4
             return result
@@ -1243,17 +1243,17 @@ class NestedGraphBreakTests(torch._inductor.test_case.TestCase):
         """Nested version of test_walrus_operator_in_comprehension_with_tensor."""
 
         def inner(x):
-            a = x + 1
+            a = x + 2
             result = [
                 (torch._dynamo.graph_break() or y + x.numel())
                 for i in range(5)
                 if (y := i * 2) > 2
             ]
-            b = x + 2
+            b = x + 3
             return a, result, y, b
 
         def outer(x):
-            x = x + 3
+            x = x + 1
             result = inner(x)
             x = x + 4
             return result
@@ -1272,16 +1272,16 @@ class NestedGraphBreakTests(torch._inductor.test_case.TestCase):
         """Nested version of test_multiple_walrus_operators_in_comprehension."""
 
         def inner(x):
-            a = x + 1
+            a = x + 2
             result = [
                 ((y := (torch._dynamo.graph_break() or i * 2)), (z := i * 3))
                 for i in range(3)
             ]
-            b = x + 2
+            b = x + 3
             return a, result, y, z, b
 
         def outer(x):
-            x = x + 3
+            x = x + 1
             result = inner(x)
             x = x + 4
             return result
@@ -1300,7 +1300,7 @@ class NestedGraphBreakTests(torch._inductor.test_case.TestCase):
         """Nested version of test_nested_comprehension_with_walrus_operators."""
 
         def inner(x):
-            a = x + 1
+            a = x + 2
             result = [
                 (
                     outer_val := i * 10,
@@ -1311,11 +1311,11 @@ class NestedGraphBreakTests(torch._inductor.test_case.TestCase):
                 )
                 for i in range(3)
             ]
-            b = x + 2
+            b = x + 3
             return a, result, outer_val, inner_val, b
 
         def outer(x):
-            x = x + 3
+            x = x + 1
             result = inner(x)
             x = x + 4
             return result
@@ -1335,16 +1335,16 @@ class NestedGraphBreakTests(torch._inductor.test_case.TestCase):
 
         def inner(x):
             outer_val = 100
-            a = x + 1
+            a = x + 2
             result = [
                 [outer_val + j for j in range(2) if torch._dynamo.graph_break() or True]
                 for i in range(2)
             ]
-            b = x + 2
+            b = x + 3
             return a, result, b
 
         def outer(x):
-            x = x + 3
+            x = x + 1
             result = inner(x)
             x = x + 4
             return result
@@ -1363,7 +1363,7 @@ class NestedGraphBreakTests(torch._inductor.test_case.TestCase):
         """Nested version of test_triple_nested_comprehension_with_walrus."""
 
         def inner(x):
-            a = x + 1
+            a = x + 2
             result = [
                 [
                     [
@@ -1375,11 +1375,11 @@ class NestedGraphBreakTests(torch._inductor.test_case.TestCase):
                 ]
                 for i in range(2)
             ]
-            b = x + 2
+            b = x + 3
             return a, result, w, b
 
         def outer(x):
-            x = x + 3
+            x = x + 1
             result = inner(x)
             x = x + 4
             return result
@@ -1399,7 +1399,7 @@ class NestedGraphBreakTests(torch._inductor.test_case.TestCase):
 
         def inner(x):
             multiplier = 10
-            a = x + 1
+            a = x + 2
             result = {
                 i: {
                     j: (inner_val := j * multiplier)
@@ -1408,11 +1408,11 @@ class NestedGraphBreakTests(torch._inductor.test_case.TestCase):
                 }
                 for i in range(3)
             }
-            b = x + 2
+            b = x + 3
             return a, result, inner_val, b
 
         def outer(x):
-            x = x + 3
+            x = x + 1
             result = inner(x)
             x = x + 4
             return result
@@ -1432,15 +1432,15 @@ class NestedGraphBreakTests(torch._inductor.test_case.TestCase):
 
         def inner(x):
             outer_val = 10
-            a = x + 1
+            a = x + 2
             result = [
                 i + outer_val for i in range(3) if torch._dynamo.graph_break() or True
             ]
-            b = x + 2
+            b = x + 3
             return a, result, b
 
         def outer(x):
-            x = x + 3
+            x = x + 1
             result = inner(x)
             x = x + 4
             return result
@@ -1460,17 +1460,17 @@ class NestedGraphBreakTests(torch._inductor.test_case.TestCase):
 
         def inner(x):
             outer_list = []
-            a = x + 1
+            a = x + 2
             result = [
                 outer_list.append(i) or i * 2
                 for i in range(3)
                 if torch._dynamo.graph_break() or True
             ]
-            b = x + 2
+            b = x + 3
             return a, result, outer_list, b
 
         def outer(x):
-            x = x + 3
+            x = x + 1
             result = inner(x)
             x = x + 4
             return result
@@ -1490,17 +1490,17 @@ class NestedGraphBreakTests(torch._inductor.test_case.TestCase):
 
         def inner(x):
             outer_dict = {}
-            a = x + 1
+            a = x + 2
             result = [
                 outer_dict.update({i: i * 10}) or i * 2
                 for i in range(3)
                 if torch._dynamo.graph_break() or True
             ]
-            b = x + 2
+            b = x + 3
             return a, result, outer_dict, b
 
         def outer(x):
-            x = x + 3
+            x = x + 1
             result = inner(x)
             x = x + 4
             return result
@@ -1520,17 +1520,17 @@ class NestedGraphBreakTests(torch._inductor.test_case.TestCase):
 
         def inner(x):
             outer_list = [100]
-            a = x + 1
+            a = x + 2
             result = [
                 outer_list.extend([i, i * 10]) or i
                 for i in range(3)
                 if torch._dynamo.graph_break() or True
             ]
-            b = x + 2
+            b = x + 3
             return a, result, outer_list, b
 
         def outer(x):
-            x = x + 3
+            x = x + 1
             result = inner(x)
             x = x + 4
             return result
@@ -1551,17 +1551,17 @@ class NestedGraphBreakTests(torch._inductor.test_case.TestCase):
         def inner(x):
             outer_list = [10, 20, 30, 40, 50]
             popped_values = []
-            a = x + 1
+            a = x + 2
             result = [
                 popped_values.append(outer_list.pop()) or i
                 for i in range(3)
                 if torch._dynamo.graph_break() or True
             ]
-            b = x + 2
+            b = x + 3
             return a, result, outer_list, popped_values, b
 
         def outer(x):
-            x = x + 3
+            x = x + 1
             result = inner(x)
             x = x + 4
             return result
@@ -1582,17 +1582,17 @@ class NestedGraphBreakTests(torch._inductor.test_case.TestCase):
         _GLOBAL_VALUE_FOR_COMPREHENSION_TEST = 100
 
         def inner(x):
-            a = x + 1
+            a = x + 2
             result = [
                 i + _GLOBAL_VALUE_FOR_COMPREHENSION_TEST
                 for i in range(3)
                 if torch._dynamo.graph_break() or True
             ]
-            b = x + 2
+            b = x + 3
             return a, result, b
 
         def outer(x):
-            x = x + 3
+            x = x + 1
             result = inner(x)
             x = x + 4
             return result
@@ -1614,17 +1614,17 @@ class NestedGraphBreakTests(torch._inductor.test_case.TestCase):
             closure_val = 50
 
             def inner(x):
-                a = x + 1
+                a = x + 2
                 result = [
                     i + closure_val
                     for i in range(3)
                     if torch._dynamo.graph_break() or True
                 ]
-                b = x + 2
+                b = x + 3
                 return a, result, b
 
             def outer(x):
-                x = x + 3
+                x = x + 1
                 result = inner(x)
                 x = x + 4
                 return result
@@ -1649,17 +1649,17 @@ class NestedGraphBreakTests(torch._inductor.test_case.TestCase):
             closure_list = []
 
             def inner(x):
-                a = x + 1
+                a = x + 2
                 result = [
                     closure_list.append(i) or i * 2
                     for i in range(3)
                     if torch._dynamo.graph_break() or True
                 ]
-                b = x + 2
+                b = x + 3
                 return a, result, closure_list.copy(), b
 
             def outer(x):
-                x = x + 3
+                x = x + 1
                 result = inner(x)
                 x = x + 4
                 return result
@@ -1683,17 +1683,17 @@ class NestedGraphBreakTests(torch._inductor.test_case.TestCase):
         """Nested version of test_nested_multi_for_comprehension_graph_break."""
 
         def inner(x):
-            a = x + 1
+            a = x + 2
             result = [
                 [(torch._dynamo.graph_break() or i + j + k) for k in range(2)]
                 for i in range(2)
                 for j in range(2)
             ]
-            b = x + 2
+            b = x + 3
             return a, result, b
 
         def outer(x):
-            x = x + 3
+            x = x + 1
             result = inner(x)
             x = x + 4
             return result
@@ -1712,15 +1712,15 @@ class NestedGraphBreakTests(torch._inductor.test_case.TestCase):
         """Nested version of test_multiple_comprehension_graph_breaks."""
 
         def inner(x):
-            a = x + 1
+            a = x + 2
             list1 = [torch._dynamo.graph_break() or i for i in range(2)]
-            b = x + 2
+            b = x + 3
             list2 = [torch._dynamo.graph_break() or i * 2 for i in range(2)]
-            c = x + 3
+            c = x + 4
             return a, list1, b, list2, c
 
         def outer(x):
-            x = x + 4
+            x = x + 1
             result = inner(x)
             x = x + 5
             return result
@@ -1744,17 +1744,17 @@ class NestedGraphBreakTests(torch._inductor.test_case.TestCase):
 
         def inner(x):
             global _GLOBAL_VALUE_FOR_COMPREHENSION_TEST
-            a = x + 1
+            a = x + 2
             _GLOBAL_VALUE_FOR_COMPREHENSION_TEST += 1
             result = [
                 torch._dynamo.graph_break() or _GLOBAL_VALUE_FOR_COMPREHENSION_TEST + i
                 for i in range(3)
             ]
-            b = x + 2
+            b = x + 3
             return a, result, b
 
         def outer(x):
-            x = x + 3
+            x = x + 1
             result = inner(x)
             x = x + 4
             return result
@@ -1782,16 +1782,16 @@ class NestedGraphBreakTests(torch._inductor.test_case.TestCase):
             closure_val = [0]
 
             def inner(x):
-                a = x + 1
+                a = x + 2
                 closure_val[0] += 1
                 result = [
                     torch._dynamo.graph_break() or closure_val[0] + i for i in range(3)
                 ]
-                b = x + 2
+                b = x + 3
                 return a, result, closure_val[0], b
 
             def outer(x):
-                x = x + 3
+                x = x + 1
                 result = inner(x)
                 x = x + 4
                 return result
@@ -1815,15 +1815,15 @@ class NestedGraphBreakTests(torch._inductor.test_case.TestCase):
         """Nested version of test_list_and_dict_comprehension_graph_breaks."""
 
         def inner(x):
-            a = x + 1
+            a = x + 2
             list1 = [torch._dynamo.graph_break() or i for i in range(2)]
-            b = x + 2
+            b = x + 3
             dict1 = {i: torch._dynamo.graph_break() or i * 10 for i in range(2)}
-            c = x + 3
+            c = x + 4
             return a, list1, b, dict1, c
 
         def outer(x):
-            x = x + 4
+            x = x + 1
             result = inner(x)
             x = x + 5
             return result
@@ -1843,16 +1843,16 @@ class NestedGraphBreakTests(torch._inductor.test_case.TestCase):
         """Nested version of test_nested_dict_in_list_comprehension_graph_break."""
 
         def inner(x):
-            a = x + 1
+            a = x + 2
             result = [
                 {j: torch._dynamo.graph_break() or i * j for j in range(2)}
                 for i in range(2)
             ]
-            b = x + 2
+            b = x + 3
             return a, result, b
 
         def outer(x):
-            x = x + 3
+            x = x + 1
             result = inner(x)
             x = x + 4
             return result
