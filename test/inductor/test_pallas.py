@@ -1422,7 +1422,8 @@ class PallasTestsMixin:
 
         # Causal mask
         mask = torch.triu(
-            torch.full((seq_len, seq_len), float("-inf"), device=self.DEVICE), diagonal=1
+            torch.full((seq_len, seq_len), float("-inf"), device=self.DEVICE),
+            diagonal=1,
         )
 
         x = torch.randn(seq_len, n_embd, device=self.DEVICE)
