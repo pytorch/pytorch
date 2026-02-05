@@ -38,9 +38,12 @@ TORCH_PRECOMPUTE_META_FUNC(avg_pool2d)
   const int64_t dH_val = stride.empty() ? kH_val : stride[0];
   const int64_t dW_val = stride.empty() ? kW_val : (stride.size() == 1 ? dH_val : stride[1]);
   if (!stride.empty()) {
-    TORCH_CHECK(dH_val > 0 && dH_val <= std::numeric_limits<int>::max() &&
-                dW_val > 0 && dW_val <= std::numeric_limits<int>::max(),
-      "integer out of range");
+    // Check for negative values (invalid) and overflow (values > INT_MAX)
+    // Zero stride is validated later in pooling_output_shape with proper error message
+    if (dH_val < 0 || dH_val > std::numeric_limits<int>::max() ||
+        dW_val < 0 || dW_val > std::numeric_limits<int>::max()) {
+      TORCH_CHECK(false, "integer out of range");
+    }
   }
   const int dH = static_cast<int>(dH_val);
   const int dW = static_cast<int>(dW_val);
@@ -137,9 +140,12 @@ TORCH_META_FUNC(avg_pool2d_backward) (
   const int64_t dH_val = stride.empty() ? kH_val : stride[0];
   const int64_t dW_val = stride.empty() ? kW_val : (stride.size() == 1 ? dH_val : stride[1]);
   if (!stride.empty()) {
-    TORCH_CHECK(dH_val > 0 && dH_val <= std::numeric_limits<int>::max() &&
-                dW_val > 0 && dW_val <= std::numeric_limits<int>::max(),
-      "integer out of range");
+    // Check for negative values (invalid) and overflow (values > INT_MAX)
+    // Zero stride is validated later in pooling_output_shape with proper error message
+    if (dH_val < 0 || dH_val > std::numeric_limits<int>::max() ||
+        dW_val < 0 || dW_val > std::numeric_limits<int>::max()) {
+      TORCH_CHECK(false, "integer out of range");
+    }
   }
   const int dH = static_cast<int>(dH_val);
   const int dW = static_cast<int>(dW_val);

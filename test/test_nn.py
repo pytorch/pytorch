@@ -8789,6 +8789,15 @@ class TestNNDeviceType(NNTestCase):
                 padding=0
             )
 
+        # Zero stride (invalid)
+        with self.assertRaisesRegex(RuntimeError, r"stride should not be zero"):
+            torch.nn.functional.avg_pool2d(
+                x,
+                kernel_size=2,
+                stride=0,  # Zero stride
+                padding=0
+            )
+
         # Extremely large stride (would overflow int)
         with self.assertRaisesRegex(RuntimeError, r"integer out of range"):
             torch.nn.functional.avg_pool2d(
