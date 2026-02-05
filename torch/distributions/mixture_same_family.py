@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional
 
 import torch
 from torch import Tensor
@@ -61,7 +60,7 @@ class MixtureSameFamily(Distribution):
         self,
         mixture_distribution: Categorical,
         component_distribution: Distribution,
-        validate_args: Optional[bool] = None,
+        validate_args: bool | None = None,
     ) -> None:
         self._mixture_distribution = mixture_distribution
         self._component_distribution = component_distribution
@@ -103,7 +102,10 @@ class MixtureSameFamily(Distribution):
         event_shape = self._component_distribution.event_shape
         self._event_ndims = len(event_shape)
         super().__init__(
-            batch_shape=cdbs, event_shape=event_shape, validate_args=validate_args
+            # pyrefly: ignore [bad-argument-type]
+            batch_shape=cdbs,
+            event_shape=event_shape,
+            validate_args=validate_args,
         )
 
     def expand(self, batch_shape, _instance=None):

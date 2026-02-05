@@ -14,3 +14,9 @@ struct OrgqrParams {
   ::c10::metal::array<uint32_t, N> H_strides;
   ::c10::metal::array<uint32_t, N> H_sizes;
 };
+
+struct UnpackPivotsParams {
+  uint32_t perm_batch_stride;
+  uint32_t pivots_batch_stride;
+  uint32_t dim_size;
+};
