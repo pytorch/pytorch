@@ -19,7 +19,7 @@ from torch.distributed.tensor import DTensor, Replicate, Shard
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_fsdp import get_devtype
 from torch.testing._internal.common_utils import parametrize, run_tests
-from torch.testing._internal.distributed._tensor.common_dtensor import (
+from torch.testing._internal.distributed._tensor.common_dtensor import (  # update to use continuous test?
     DTensorTestBase,
     skip_if_lt_x_gpu,
     with_comms,
