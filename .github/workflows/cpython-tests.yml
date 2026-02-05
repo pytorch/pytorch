@@ -1,6 +1,6 @@
 # Workflow: Dynamo Unit Test
 # runs unit tests for dynamo.
-name: dynamo-unittest
+name: cpython-unittest
 
 on:
   push:
