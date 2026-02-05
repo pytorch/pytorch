@@ -659,6 +659,8 @@ print(t.is_pinned())
         custom_envs_cublaslt = [
             {"TORCH_BLAS_PREFER_CUBLASLT": "1"},
             {"TORCH_BLAS_PREFER_HIPBLASLT": "1"},
+            {"TORCH_BLAS_PREFER_CUBLAS": "1"},
+            {"TORCH_BLAS_PREFER_ROCBLAS": "1"},
         ]
         test_script = "import torch;print(torch.backends.cuda.preferred_blas_library())"
         for env_config in custom_envs_cublaslt:
