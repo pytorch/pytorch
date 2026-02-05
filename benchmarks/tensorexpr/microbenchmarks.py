@@ -287,7 +287,7 @@ def run_benchmarks(benchmarks, sizes):
                     def check_correctness(a, b):
                         if not np.allclose(a, b):
                             print(name)
-                            assert np.allclose(a, b)
+                            raise AssertionError(f"Arrays not close for {name}")
 
                     check_correctness(tX, tR)
     return df

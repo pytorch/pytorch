@@ -506,6 +506,7 @@ static void check_indices_on_cpu_or_selfdevice(
 
 TORCH_PRECOMPUTE_META_FUNC2(index, Tensor)
 (const Tensor& self, at::IOptTensorListRef indices) {
+  TORCH_CHECK_INDEX(!indices.empty(), "at least one index must be provided");
   auto materialized = indices.materialize();
 
   TORCH_CHECK_INDEX(
