@@ -577,17 +577,18 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   py_context_manager_DEPRECATED<DisableFuncTorch>(_C_m, "_DisableFuncTorch");
   py_context_manager<DisableAutocast>(_C_m, "_DisableAutocast");
   py::class_<torch::autograd::SavedVariable>(std::move(m), "SavedTensor")
-      .def(py::init(
-          [](const at::Tensor& tensor,
-             bool is_output,
-             bool is_inplace_on_view,
-             bool _INTERNAL_USE_ONLY) -> torch::autograd::SavedVariable {
-            TORCH_CHECK(
-                _INTERNAL_USE_ONLY,
-                "SavedTensor constructor is exposed for internal use only and is subject to change.");
-            return torch::autograd::SavedVariable(
-                tensor, is_output, is_inplace_on_view);
-          }),
+      .def(
+          py::init(
+              [](const at::Tensor& tensor,
+                 bool is_output,
+                 bool is_inplace_on_view,
+                 bool _INTERNAL_USE_ONLY) -> torch::autograd::SavedVariable {
+                TORCH_CHECK(
+                    _INTERNAL_USE_ONLY,
+                    "SavedTensor constructor is exposed for internal use only and is subject to change.");
+                return torch::autograd::SavedVariable(
+                    tensor, is_output, is_inplace_on_view);
+              }),
           py::arg("tensor"),
           py::kw_only(),
           py::arg("is_output"),
