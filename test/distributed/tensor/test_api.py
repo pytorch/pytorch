@@ -307,6 +307,17 @@ class DTensorAPITest(DTensorTestBase):
         self.assertFalse(distributed_model.frozen.requires_grad)
         self.assertTrue(distributed_model.trainable.requires_grad)
 
+        x = DTensor.from_local(
+            torch.randn(10, 10, device=self.device_type),
+            device_mesh,
+            [Replicate()],
+        )
+        output = distributed_model(x)
+        output.sum().backward()
+
+        self.assertIsNone(distributed_model.frozen.grad)
+        self.assertIsNotNone(distributed_model.trainable.grad)
+
     @with_comms
     def test_distribute_module_input_fn_output_fn_warning(self):
         device_mesh = self.build_device_mesh()
