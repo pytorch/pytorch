@@ -96,7 +96,6 @@ def _make_saved_tensor(
     is_output: bool,
     is_inplace_on_view: bool = False,
 ) -> SavedTensor: ...
-
 def _enable_profiler(
     config: ProfilerConfig,
     activities: set[ProfilerActivity],
