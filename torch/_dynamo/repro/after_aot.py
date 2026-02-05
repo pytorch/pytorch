@@ -20,6 +20,7 @@ the Dynamo AOT compilation pipeline, particularly for the Inductor backend.
 from __future__ import annotations
 
 import argparse
+import ast
 import copy
 import functools
 import io
@@ -103,6 +104,126 @@ log = logging.getLogger(__name__)
 
 
 inductor_config = import_module("torch._inductor.config")
+
+
+def _extract_distributed_info(
+    gm: torch.fx.GraphModule,
+) -> dict[str, dict[str, int]]:
+    """
+    Extract process group information from distributed ops in the graph.
+
+    Returns a dict mapping group names to dicts with 'size' and 'rank' keys.
+    Example: {'tp': {'size': 4, 'rank': 0}, 'dp': {'size': 2, 'rank': 0}}
+    """
+    from torch.fx.operator_schemas import normalize_function
+
+    group_info: dict[str, dict[str, int]] = {}
+
+    for node in gm.graph.nodes:
+        if node.op != "call_function":
+            continue
+        if not isinstance(node.target, OpOverload):
+            continue
+        if node.target.namespace not in {"_c10d_functional", "c10d_functional"}:
+            continue
+
+        opt_args_kwargs = normalize_function(
+            node.target,
+            args=node.args,
+            kwargs=node.kwargs,
+            normalize_to_only_use_kwargs=True,
+        )
+        if opt_args_kwargs is None:
+            continue
+        _, kwargs = opt_args_kwargs
+
+        group_name = kwargs.get("group_name")
+        if group_name is None:
+            continue
+
+        if group_name in group_info:
+            continue
+
+        from torch.distributed.distributed_c10d import (
+            _get_group_size_by_name,
+            _resolve_process_group,
+        )
+
+        group_size = _get_group_size_by_name(group_name)
+        pg = _resolve_process_group(group_name)
+        rank = pg.rank()
+        group_info[group_name] = {"size": group_size, "rank": rank}
+
+    return group_info
+
+
+def setup_fake_process_groups(
+    group_info: dict[str, dict[str, int]],
+) -> None:
+    """
+    Set up fake process groups for repro execution.
+
+    Args:
+        group_info: dict mapping group_name -> {'size': group_size, 'rank': rank}
+    """
+    import torch.distributed as dist
+    from torch.testing._internal.distributed.fake_pg import FakeStore
+
+    if not group_info:
+        return
+
+    world_size = max(info["size"] for info in group_info.values())
+
+    global_rank = 0
+    for info in group_info.values():
+        if info["size"] == world_size:
+            global_rank = info["rank"]
+            break
+
+    store = FakeStore()
+    dist.init_process_group(
+        backend="fake",
+        rank=global_rank,
+        world_size=world_size,
+        store=store,
+    )
+
+    default_pg = dist.distributed_c10d._get_default_group()
+    torch._C._distributed_c10d._unregister_all_process_groups()
+
+    for group_name, info in group_info.items():
+        group_size = info["size"]
+        if group_size == world_size:
+            # pyrefly: ignore[bad-argument-type]
+            torch._C._distributed_c10d._register_process_group(group_name, default_pg)
+        else:
+            ranks = list(range(group_size))
+            new_pg = dist.new_group(ranks)
+            # pyrefly: ignore[bad-argument-type]
+            torch._C._distributed_c10d._register_process_group(group_name, new_pg)
+
+
+def generate_standalone_repro(
+    gm: torch.fx.GraphModule,
+    args: Sequence[Any],
+    *,
+    save_path: Optional[str] = None,
+) -> str:
+    """
+    Generate a self-contained repro script from an FX graph.
+    """
+    buf = io.StringIO()
+    save_graph_repro(buf, gm, args, "inductor", save_dir=None)
+    repro = buf.getvalue()
+
+    if save_path is not None:
+        with open(save_path, "w") as f:
+            f.write(repro)
+        log.info("Saved standalone repro to %s", save_path)
+
+    return repro
+
+
 use_buck = is_fbcode()
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
@@ -380,11 +501,62 @@ if "__compile_source__" in globals():
     kernel_side_table_prefix = (
         "torch._higher_order_ops.triton_kernel_wrap.kernel_side_table"
     )
+
+    def get_nested_jit_functions(
+        kernel: Any,
+    ) -> list[JITFunction]:
+        jit_fn = kernel if isinstance(kernel, JITFunction) else kernel.fn
+        if not getattr(jit_fn, "fn", None) or not getattr(jit_fn, "src", None):
+            return []
+
+        fn_globals = getattr(jit_fn.fn, "__globals__", {})
+        src = jit_fn.src  # pyrefly: ignore [missing-attribute]
+        full_src = src if src.strip().startswith("def ") else "def " + src
+
+        # Find all function names called in the source
+        called_names: set[str] = set()
+
+        for node in ast.walk(ast.parse(full_src)):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                called_names.add(node.func.id)
+
+        return [
+            val
+            for name in called_names
+            if (val := fn_globals.get(name))
+            and isinstance(val, JITFunction)
+            and val is not jit_fn
+        ]
+
+    def write_jit_function(
+        jit_fn: JITFunction,
+        written_fns: set[str],
+    ) -> str:
+        result = ""
+        fn_name = jit_fn._fn_name.split(".")[-1]  # pyrefly: ignore [missing-attribute]
+        if fn_name in written_fns:
+            return ""
+        # Write nested dependencies first (recursively)
+        for nested_fn in get_nested_jit_functions(jit_fn):
+            result += write_jit_function(nested_fn, written_fns)
+        # Now write this function
+        if fn_name not in written_fns:
+            result += "\n@triton.jit\n"
+            result += jit_fn.src  # pyrefly: ignore [missing-attribute]
+            result += "\n"
+            written_fns.add(fn_name)
+        return result
+
+    written_kernel_names: set[str] = set()
     # Track which grid entry corresponds to the best config
     for id in kernel_side_table.id_to_kernel:
         kernel = kernel_side_table.get_kernel(id)
 
         try:
+            # First, write out any nested kernel dependencies
+            for nested_fn in get_nested_jit_functions(kernel):
+                model_str += write_jit_function(nested_fn, written_kernel_names)
+
             if isinstance(kernel, Autotuner):
                 # pyrefly: ignore [missing-attribute]
                 if isinstance(kernel.fn, Heuristics):
@@ -412,7 +584,6 @@ if "__compile_source__" in globals():
                 )
                 """).strip()
 
-            model_str += "\n@triton.jit\n"
             # pyrefly: ignore [missing-attribute]
             src_code = kernel.src if isinstance(kernel, JITFunction) else kernel.fn.src
             fn_name = (
@@ -423,8 +594,12 @@ if "__compile_source__" in globals():
             )
             fn_name = fn_name.split(".")[-1]
 
-            model_str += src_code
-            model_str += "\n"
+            # Only write the kernel if not already written (could have been a nested dep)
+            if fn_name not in written_kernel_names:
+                model_str += "\n@triton.jit\n"
+                model_str += src_code
+                model_str += "\n"
+                written_kernel_names.add(fn_name)
             model_str += f"{kernel_side_table_prefix}.add_kernel({fn_name})\n"
         except AttributeError as e:
             model_str += "ERROR: Repro will not work as intended, "
@@ -539,13 +714,9 @@ def save_graph_repro(
     if save_dir is not None:
         save_dir = normalize_path_separator(save_dir)
 
-    # Check if the graph contains distributed operations
-    has_distributed_ops = any(
-        node.op == "call_function"
-        and isinstance(node.target, OpOverload)
-        and node.target.namespace in {"_c10d_functional", "c10d_functional"}
-        for node in gm.graph.nodes
-    )
+    # Extract distributed info from the graph
+    distributed_info = _extract_distributed_info(gm)
+    has_distributed_ops = len(distributed_info) > 0
 
     fd.write(
         generate_compiler_repro_string(
@@ -571,15 +742,9 @@ def save_graph_repro(
     # Add distributed initialization before run_repro if needed
     if has_distributed_ops:
         fd.write(
-            "    # Initialize FakeProcessGroup for distributed operations\n"
-            "    store = FakeStore()\n"
-            "    dist.init_process_group(\n"
-            '        backend="fake",\n'
-            "        rank=0,\n"
-            "        world_size=2,\n"
-            "        store=store\n"
-            "    )\n"
+            "    from torch._dynamo.repro.after_aot import setup_fake_process_groups\n"
         )
+        fd.write(f"    setup_fake_process_groups({distributed_info!r})\n")
 
     fd.write(
         f"    with torch.no_grad():\n"

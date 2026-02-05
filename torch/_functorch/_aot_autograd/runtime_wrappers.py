@@ -195,7 +195,8 @@ class NoopAliasHandler:
 
 
 def _unwrap_tensoralias(x: TensorAlias) -> torch.Tensor:
-    assert isinstance(x, TensorAlias)
+    if not isinstance(x, TensorAlias):
+        raise AssertionError(f"expected TensorAlias, got {type(x)}")
     return x.alias
 
 
@@ -351,7 +352,8 @@ def _check_custom_op_aliasing(
         if config.error_on_custom_op_aliasing:
             raise
         else:
-            warnings.warn(str(e), UserWarning, stacklevel=3)
+            msg = f"{e} This is deprecated and will become an error in PyTorch 2.12."
+            warnings.warn(msg, UserWarning, stacklevel=3)
 
 
 @functools.lru_cache(None)
@@ -488,11 +490,17 @@ def _create_runtime_wrapper(
             info.output_type == OutputType.alias_of_input
             or info.output_type == OutputType.is_input
         ):
-            assert isinstance(info.base_idx, int)
+            if not isinstance(info.base_idx, int):
+                raise AssertionError(
+                    f"expected info.base_idx to be int, got {type(info.base_idx)}"
+                )
             epilogue_args_idx.append(info.base_idx)
 
     if config.unlift_effect_tokens:
-        assert len(runtime_metadata.tokens) == 0
+        if len(runtime_metadata.tokens) != 0:
+            raise AssertionError(
+                f"expected no tokens when unlift_effect_tokens is True, got {len(runtime_metadata.tokens)}"
+            )
 
     if runtime_metadata.num_outputs_aliased > 0:
         output_handlers = tuple(
@@ -576,12 +584,15 @@ def _create_runtime_wrapper(
         num_mutated_runtime_inps = runtime_metadata.num_mutated_inp_runtime_indices
         num_intermediate_bases = runtime_metadata.num_intermediate_bases
 
-        assert (
-            len(all_outs)
-            == num_mutated_runtime_inps
+        expected_outs = (
+            num_mutated_runtime_inps
             + runtime_metadata.num_outputs
             + num_intermediate_bases
         )
+        if len(all_outs) != expected_outs:
+            raise AssertionError(
+                f"expected {expected_outs} outputs, got {len(all_outs)}"
+            )
 
         # Step 3: After running the compiled fw, apply updates to mutated inputs
         if num_mutated_runtime_inps > 0:
@@ -607,14 +618,20 @@ def _create_runtime_wrapper(
                     #     TODO: discuss on the PR and decide if we want to tr to
                     #     either support it, or detect and ban it.
                     if trace_joint:
-                        assert isinstance(updated_inpt, TensorAlias)
+                        if not isinstance(updated_inpt, TensorAlias):
+                            raise AssertionError(
+                                f"expected TensorAlias for updated_inpt, got {type(updated_inpt)}"
+                            )
                         updated_inpt = updated_inpt.alias
                     with torch.no_grad():
                         original_inpt.set_(updated_inpt)
                     continue
                 if meta.mutates_metadata and not meta.mutates_data:
                     if trace_joint:
-                        assert isinstance(updated_inpt, TensorAlias)
+                        if not isinstance(updated_inpt, TensorAlias):
+                            raise AssertionError(
+                                f"expected TensorAlias for updated_inpt, got {type(updated_inpt)}"
+                            )
                         updated_inpt = updated_inpt.alias
                     # We need to grab the size/stride/storage_offset from the compiled forward,
                     # and use that to mutate the metadata of the input
@@ -631,7 +648,10 @@ def _create_runtime_wrapper(
                             updated_inpt.storage_offset(),
                         )
                     else:
-                        assert meta.mutates_data
+                        if not meta.mutates_data:
+                            raise AssertionError(
+                                "expected meta.mutates_data to be True"
+                            )
                     if meta.is_leaf and original_inpt.requires_grad:
                         # We can hit this situation in this case:
                         #   def f(x):
@@ -669,7 +689,10 @@ def _create_runtime_wrapper(
             expect_num_outputs = (
                 len(output_handlers) + runtime_metadata.num_intermediate_bases
             )
-            assert len(fw_outs) == expect_num_outputs
+            if len(fw_outs) != expect_num_outputs:
+                raise AssertionError(
+                    f"expected {expect_num_outputs} fw_outs, got {len(fw_outs)}"
+                )
             ret_outs = [
                 handler(orig_inputs, fw_outs, out)
                 for out, handler in builtins.zip(fw_outs, output_handlers)
@@ -721,7 +744,10 @@ class FunctionalizedRngRuntimeWrapper(InductorWrapper):
         if config.functionalize_rng_ops:
             # Update example inputs for the fw_compiler
             fake_mode = detect_fake_mode()
-            assert fake_mode is not None
+            if fake_mode is None:
+                raise AssertionError(
+                    "fake_mode must not be None when functionalize_rng_ops is True"
+                )
             seed, offset = CUDARngStateHelper.get_torch_state_as_tuple(fake_mode)
             flat_args.extend([seed, offset])
             # We are not clearing flat_args here because
@@ -762,7 +788,10 @@ class FunctionalizedRngRuntimeWrapper(InductorWrapper):
         offset_index: int,
     ) -> Any:
         if metadata.is_rng_op_functionalized:
-            assert metadata.num_outputs_rng_offset == 1
+            if metadata.num_outputs_rng_offset != 1:
+                raise AssertionError(
+                    f"expected num_outputs_rng_offset == 1, got {metadata.num_outputs_rng_offset}"
+                )
             new_rng_offset = outs[offset_index]
             CUDARngStateHelper.set_new_offset(new_rng_offset)
             if self.return_new_outs:
@@ -844,7 +873,10 @@ class FakifiedOutWrapper(InductorWrapper):
         runtime_metadata: ViewAndMutationMeta,
     ) -> Callable[..., Any]:
         if self.needs_post_compile:
-            assert self.fwd_output_strides is not None
+            if self.fwd_output_strides is None:
+                raise AssertionError(
+                    "fwd_output_strides must not be None when needs_post_compile is True"
+                )
             fakified_out = self._compute_output_meta_with_inductor_strides()
 
             @wraps(compiled_fn)
@@ -1179,9 +1211,10 @@ class AOTDedupeWrapper(CompilerWrapper):
             keep_arg_mask.append(True)
             add_dupe_map.append(j)
             j += 1
-        assert len(add_dupe_map) == duped_arg_len, (
-            f"Expects add_dupe_map to have length {duped_arg_len} but got {len(add_dupe_map)}"
-        )
+        if len(add_dupe_map) != duped_arg_len:
+            raise AssertionError(
+                f"Expects add_dupe_map to have length {duped_arg_len} but got {len(add_dupe_map)}"
+            )
 
         self.keep_arg_mask = keep_arg_mask
         self.add_dupe_map = add_dupe_map
@@ -1236,9 +1269,10 @@ class AOTDedupeWrapper(CompilerWrapper):
                 keep_input_mutations=fw_metadata.keep_input_mutations,
                 is_train=fw_metadata.is_train,
             )(*deduped_flat_args)
-            assert ref_fw_metadata == updated_fw_metadata, (
-                f"ref_metadata={str(ref_fw_metadata)}, actual_metadata={str(updated_fw_metadata)}"
-            )
+            if ref_fw_metadata != updated_fw_metadata:
+                raise AssertionError(
+                    f"ref_metadata={str(ref_fw_metadata)}, actual_metadata={str(updated_fw_metadata)}"
+                )
 
         return (
             wrapped_flat_fn,
@@ -1277,11 +1311,14 @@ class AOTDedupeWrapper(CompilerWrapper):
             seen: dict[Any, None] = {}
             for i, (x, y) in enumerate(zip(new_args, args)):
                 seen[y] = None
-                assert x is y, format_guard_bug_msg(
-                    aot_config,
-                    f"{describe_input(i, aot_config)} would be a duplicate of "
-                    f"{describe_input(self.add_dupe_map[i], aot_config)}",
-                )
+                if x is not y:
+                    raise AssertionError(
+                        format_guard_bug_msg(
+                            aot_config,
+                            f"{describe_input(i, aot_config)} would be a duplicate of "
+                            f"{describe_input(self.add_dupe_map[i], aot_config)}",
+                        )
+                    )
             # This is only an error if there is metadata mutation on both of
             # the duped arguments; in this case, we need to know what order
             # the metadata mutation applies in.  You'll get the correct result
@@ -1366,7 +1403,11 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
                 """
             )
 
-        assert len(fw_metadata.input_info) == len(synthetic_base_info)
+        if len(fw_metadata.input_info) != len(synthetic_base_info):
+            raise AssertionError(
+                f"expected len(fw_metadata.input_info) == len(synthetic_base_info), "
+                f"got {len(fw_metadata.input_info)} != {len(synthetic_base_info)}"
+            )
 
         # Update our forward metadata to take synthetic bases into account
         (
@@ -1451,10 +1492,11 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
                 keep_input_mutations=fw_metadata.keep_input_mutations,
                 is_train=fw_metadata.is_train,
             )(*flat_args_with_synthetic_bases)
-            assert ref_fw_metadata == fw_metadata_updated, (
-                f"ref_metadata={pprint.pformat(partial_flatten_asdict(ref_fw_metadata))}, "
-                f"\nactual_metadata={pprint.pformat(partial_flatten_asdict(fw_metadata_updated))}"
-            )
+            if ref_fw_metadata != fw_metadata_updated:
+                raise AssertionError(
+                    f"ref_metadata={pprint.pformat(partial_flatten_asdict(ref_fw_metadata))}, "
+                    f"\nactual_metadata={pprint.pformat(partial_flatten_asdict(fw_metadata_updated))}"
+                )
         return (
             wrapped_flat_fn,
             flat_args_with_synthetic_bases,
@@ -1481,7 +1523,8 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
             args_with_synthetic_bases, _, synthetic_base_info = merge_view_inputs(
                 aot_config, args, None, self.old_input_info, is_inference=is_inference
             )
-            assert synthetic_base_info is not None
+            if synthetic_base_info is None:
+                raise AssertionError("synthetic_base_info must not be None")
             aliased_args_w_metadata_mutations = [
                 args[i] for i in self.aliased_arg_idx_with_metadata_mutations
             ]
@@ -1613,7 +1656,11 @@ def merge_view_inputs(
             return False
         return True
 
-    assert len(fwd_inputs) == len(mutated_input_info)
+    if len(fwd_inputs) != len(mutated_input_info):
+        raise AssertionError(
+            f"expected len(fwd_inputs) == len(mutated_input_info), "
+            f"got {len(fwd_inputs)} != {len(mutated_input_info)}"
+        )
     if not [info for info in mutated_input_info if info.mutates_data]:
         # Return early when there are no mutations.
         return fwd_inputs, fwd_inputs_descs, None
@@ -1683,14 +1730,16 @@ def merge_view_inputs(
             # The "inputs that are aliased but have different differentiable bases" case
             # is more complicated and hopefully pretty rare. Not currently handled.
             if not is_inference:
-                assert _are_differentiable_views(view1, view2), (
-                    "aot_autograd() does not yet handle non-differentiable view input mutations."
-                )
+                if not _are_differentiable_views(view1, view2):
+                    raise AssertionError(
+                        "aot_autograd() does not yet handle non-differentiable view input mutations."
+                    )
             # Regenerating views when reinterpreting complex / real tensors seems non-trivial,
             # not handling for now
-            assert _same_dtype_views(view1, view2), (
-                "aot_autograd() does not yet handle input mutations on views with different dtypes."
-            )
+            if not _same_dtype_views(view1, view2):
+                raise AssertionError(
+                    "aot_autograd() does not yet handle input mutations on views with different dtypes."
+                )
         non_none_bases = [
             (i, fwd_inputs[i]._base)
             for i in aliased_input_indices
@@ -1740,13 +1789,15 @@ def merge_view_inputs(
             i, synthetic_base = non_none_bases[0]
             synthetic_base_desc = ViewBaseAOTInput(fwd_inputs_descs[i])
             for _, other_base in non_none_bases[1:]:
-                assert other_base is synthetic_base, (
-                    "aot_autograd() does not yet handle non-differentiable view input mutations."
-                )
+                if other_base is not synthetic_base:
+                    raise AssertionError(
+                        "aot_autograd() does not yet handle non-differentiable view input mutations."
+                    )
             for alias in aliases_with_none_bases:
-                assert alias is synthetic_base, (
-                    "aot_autograd() does not yet handle non-differentiable view input mutations."
-                )
+                if alias is not synthetic_base:
+                    raise AssertionError(
+                        "aot_autograd() does not yet handle non-differentiable view input mutations."
+                    )
         base_args.append(synthetic_base)
         base_args_descs.append(synthetic_base_desc)
         for curr_view_idx in aliased_input_indices:
@@ -1756,7 +1807,11 @@ def merge_view_inputs(
             # Regeneration: curr_view._view_func(args[base_idx])
             inner_calling_convention_meta[curr_view_idx] = (base_idx, curr_view)
     if len(base_args) == 0:
-        assert len(other_args) == len(fwd_inputs)
+        if len(other_args) != len(fwd_inputs):
+            raise AssertionError(
+                f"expected len(other_args) == len(fwd_inputs), "
+                f"got {len(other_args)} != {len(fwd_inputs)}"
+            )
         # If no synthetic bases are necessary, just return the original inputs.
         return fwd_inputs, fwd_inputs_descs, None
     else:
@@ -1800,7 +1855,10 @@ def merge_view_inputs(
             post_processed_calling_convention_meta[k] = v
         # Quick assert: every argument in the inner calling convention should be accounted for.
         for x in post_processed_calling_convention_meta:
-            assert x != -1
+            if x == -1:
+                raise AssertionError(
+                    "every argument in the inner calling convention should be accounted for"
+                )
         return (
             args_to_functionalization,
             args_to_functionalization_descs,
@@ -1882,7 +1940,10 @@ def _backward_prologue_functional(
             ),
         )
 
-    assert len(flat_args) == expected_grad_outs
+    if len(flat_args) != expected_grad_outs:
+        raise AssertionError(
+            f"expected {expected_grad_outs} grad_outs, got {len(flat_args)}"
+        )
     out_info = metadata.output_info
 
     inp_tangents, out_tangents, intermediate_base_tangents = (
@@ -1985,9 +2046,13 @@ def _backward_prologue_functional(
     tangents_start_idx = (
         len(all_args) - num_flat_bw_args_with_grads - len(rng_args) - len(bw_tokens)
     )
-    assert tangents_start_idx == len(ctx_symints) + num_ctx_saved_tensors + len(
-        ctx_opaque_objects
+    expected_tangents_start = (
+        len(ctx_symints) + num_ctx_saved_tensors + len(ctx_opaque_objects)
     )
+    if tangents_start_idx != expected_tangents_start:
+        raise AssertionError(
+            f"expected tangents_start_idx == {expected_tangents_start}, got {tangents_start_idx}"
+        )
     tangents_end_idx = len(all_args) - len(rng_args) - len(bw_tokens)
 
     # TODO: figure out how to refactor the backward properly
@@ -2117,7 +2182,8 @@ def _backward_epilogue_functional(
 
     # TODO: figure out how to refactor the backward properly so I can use aot_dispatch_subclass_wrapper() here.
     if maybe_subclass_metadata is not None:
-        assert maybe_subclass_metadata.grad_input_metas is not None
+        if maybe_subclass_metadata.grad_input_metas is None:
+            raise AssertionError("grad_input_metas must not be None")
         outs_wrapped = wrap_tensor_subclasses(
             out,
             subclass_metas=maybe_subclass_metadata.grad_input_metas,
@@ -2139,9 +2205,11 @@ def coerce_to_expected_memory_format(
         return x
 
     expected_size = memory_format.size
-    assert expected_size is not None
+    if expected_size is None:
+        raise AssertionError("memory_format.size must not be None")
     expected_stride = memory_format.stride
-    assert expected_stride is not None
+    if expected_stride is None:
+        raise AssertionError("memory_format.stride must not be None")
     # Expected size and stride are static ints
     # ok to use == to compare runtime tensor strides and shapes
 
@@ -2233,7 +2301,10 @@ class AOTDispatchAutograd:
             return x, [x]
 
         if isinstance(x, FakeTensor):
-            assert meta.memory_format
+            if not meta.memory_format:
+                raise AssertionError(
+                    "meta.memory_format must not be None for FakeTensor"
+                )
             x = coerce_to_expected_memory_format(x, meta.memory_format)
             return x, [x]
 
@@ -2291,17 +2362,23 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
             )
 
         # Coerce to expected memory format
-        assert meta.memory_format
+        if not meta.memory_format:
+            raise AssertionError("meta.memory_format must not be None")
         x = coerce_to_expected_memory_format(x, meta.memory_format)
 
         if not is_traceable_wrapper_subclass(x):
             return x, [x]
 
-        assert isinstance(meta, SubclassCreationMeta)
+        if not isinstance(meta, SubclassCreationMeta):
+            raise AssertionError(f"expected SubclassCreationMeta, got {type(meta)}")
         if orig_x is not x:
             runtime_subclass_keys = x.__tensor_flatten__()[0]
 
-        assert len(meta.attrs) == len(runtime_subclass_keys)
+        if len(meta.attrs) != len(runtime_subclass_keys):
+            raise AssertionError(
+                f"expected len(meta.attrs) == len(runtime_subclass_keys), "
+                f"got {len(meta.attrs)} != {len(runtime_subclass_keys)}"
+            )
         leaves = []
         for attr, attr_meta in meta.attrs.items():
             elem = getattr(x, attr)
@@ -2379,12 +2456,18 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 args = deduped_flat_tensor_args
                 if backward_state_indices:
                     bw_state = args[backward_state_indices[0]]
-                    assert isinstance(bw_state, BackwardState)
+                    if not isinstance(bw_state, BackwardState):
+                        raise AssertionError(
+                            f"expected BackwardState, got {type(bw_state)}"
+                        )
                     ctx._compiled_autograd_backward_state = bw_state
 
                 if num_rng:
                     if len(fwd_rng_states) == 0:
-                        assert graphsafe_idx is not None
+                        if graphsafe_idx is None:
+                            raise AssertionError(
+                                "graphsafe_idx must not be None when num_rng > 0"
+                            )
                         initialize_rng_states(
                             num_rng, graphsafe_idx, fwd_rng_states, bwd_rng_states
                         )
@@ -2434,12 +2517,20 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 tensors_saved_no_vc_check = fw_outs[
                     CompiledFunction.metadata.tensors_saved_for_backwards_no_vc_check_slice
                 ]
-                assert all(
+                if not all(
                     isinstance(x, torch.Tensor) for x in tensors_saved_with_vc_check
-                )
-                assert all(
+                ):
+                    raise AssertionError(
+                        f"expected all tensors_saved_with_vc_check to be Tensors, "
+                        f"got types: {[type(x) for x in tensors_saved_with_vc_check]}"
+                    )
+                if not all(
                     isinstance(x, torch.Tensor) for x in tensors_saved_no_vc_check
-                )
+                ):
+                    raise AssertionError(
+                        f"expected all tensors_saved_no_vc_check to be Tensors, "
+                        f"got types: {[type(x) for x in tensors_saved_no_vc_check]}"
+                    )
 
                 # See Note [Detaching saved tensors in AOTAutograd]
                 num_vc_check = len(tensors_saved_with_vc_check)
@@ -2471,16 +2562,24 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 symint_outs = fw_outs[
                     CompiledFunction.metadata.symints_saved_for_backwards_slice
                 ]
-                assert all(
+                if not all(
                     isinstance(x, (int, float, torch.SymInt, torch.SymFloat))
                     for x in symint_outs
-                ), str([type(x) for x in symint_outs])
+                ):
+                    raise AssertionError(
+                        f"expected all symint_outs to be int/float/SymInt/SymFloat, "
+                        f"got types: {[type(x) for x in symint_outs]}"
+                    )
                 ctx.symints = symint_outs
 
                 opaque_object_outs = fw_outs[
                     CompiledFunction.metadata.opaque_objects_saved_for_backwards_slice
                 ]
-                assert all(is_opaque_type(type(obj)) for obj in opaque_object_outs)
+                if not all(is_opaque_type(type(obj)) for obj in opaque_object_outs):
+                    raise AssertionError(
+                        f"expected all opaque_object_outs to be opaque types, "
+                        f"got types: {[type(obj) for obj in opaque_object_outs]}"
+                    )
                 ctx.opaque_objects = opaque_object_outs
 
                 raw_returns = fw_outs[0:num_forward_returns]
@@ -2509,7 +2608,11 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                             for x in CompiledFunction.metadata.input_info
                             if x.mutates_data or x.mutates_metadata
                         ]
-                        assert len(user_mutated_inputs_raw) == len(mut_inp_infos)
+                        if len(user_mutated_inputs_raw) != len(mut_inp_infos):
+                            raise AssertionError(
+                                f"expected len(user_mutated_inputs_raw) == len(mut_inp_infos), "
+                                f"got {len(user_mutated_inputs_raw)} != {len(mut_inp_infos)}"
+                            )
 
                 if CompiledFunction.metadata.num_unsafe_view_outputs > 0:
                     for idx in CompiledFunction.metadata.unsafe_view_out_indices:
@@ -2530,9 +2633,10 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         intermediates_raw = raw_returns[
                             num_mutated_runtime_inps + num_outputs :
                         ]
-                        assert not any(
-                            isinstance(x, TensorAlias) for x in intermediates_raw
-                        )
+                        if any(isinstance(x, TensorAlias) for x in intermediates_raw):
+                            raise AssertionError(
+                                "expected no TensorAlias in intermediates_raw"
+                            )
 
                 # invariant: intermediate bases always require gradients, so we don't have to
                 # consider marking them as non-differentiable.
@@ -2607,7 +2711,11 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         if not retain_graph:
                             del saved_backward_tensor_states[curr_backward_iter]
                     else:
-                        assert backward_state_position == curr_backward_iter
+                        if backward_state_position != curr_backward_iter:
+                            raise AssertionError(
+                                f"expected backward_state_position == curr_backward_iter, "
+                                f"got {backward_state_position} != {curr_backward_iter}"
+                            )
 
                     backward_state_position = curr_backward_iter + 1
                     if not retain_graph:
@@ -2662,9 +2770,8 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
             @staticmethod
             def _backward_impl(ctx: Any, all_args: list[Any]) -> Any:
                 # compiled autograd reimplements this function at proxy_call_aot_backward
-                assert not backward_state_indices, (
-                    "BackwardState requires CompiledAutograd"
-                )
+                if backward_state_indices:
+                    raise AssertionError("BackwardState requires CompiledAutograd")
                 ctx.maybe_clear_saved_tensors()
 
                 saved_tensors_use_once = (
@@ -2672,23 +2779,31 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 )
 
                 if CompiledFunction.compiled_bw is None:
-                    assert lazy_backward_info is not None
-                    assert isinstance(
+                    if lazy_backward_info is None:
+                        raise AssertionError("lazy_backward_info must not be None")
+                    if not isinstance(
                         lazy_backward_info, AutogradLazyBackwardCompileInfo
-                    )
+                    ):
+                        raise AssertionError(
+                            f"expected AutogradLazyBackwardCompileInfo, got {type(lazy_backward_info)}"
+                        )
 
                     if (
                         hasattr(lazy_backward_info, "saved_context")
                         and lazy_backward_info.saved_context is not None
                     ):
-                        assert isinstance(
+                        if not isinstance(
                             lazy_backward_info.saved_context, TracingContext
-                        )
+                        ):
+                            raise AssertionError(
+                                f"expected TracingContext, got {type(lazy_backward_info.saved_context)}"
+                            )
                         ddp_ctx = lazy_backward_info.saved_context.ddp_optimizer_ctx
                         if ddp_ctx is not None:
-                            assert ddp_ctx.curr_bucket >= 0, (
-                                f"expected same # of fw and bw compiles, but found bucket {ddp_ctx.curr_bucket}"
-                            )
+                            if ddp_ctx.curr_bucket < 0:
+                                raise AssertionError(
+                                    f"expected same # of fw and bw compiles, but found bucket {ddp_ctx.curr_bucket}"
+                                )
                             curr_fw_meta = ddp_ctx.metadata_per_bucket[
                                 ddp_ctx.curr_bucket
                             ]
@@ -2758,7 +2873,10 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     ):
                         CompileEventLogger.compilation_metric(is_forward=False)
                         # See Note: [Backward graph lazy lowering]
-                        assert aot_config.bw_compiler is not None
+                        if aot_config.bw_compiler is None:
+                            raise AssertionError(
+                                "aot_config.bw_compiler must not be None"
+                            )
                         CompiledFunction.compiled_bw = aot_config.bw_compiler(
                             copy.deepcopy(bw_module), placeholder_list
                         )
@@ -2834,12 +2952,18 @@ class DebugAssertWrapper(CompilerWrapper):
             for i, a in enumerate(args):
                 can_require_grad = self.flat_requires_grad[i]
                 if can_require_grad is None:
-                    assert not isinstance(a, Tensor)
+                    if isinstance(a, Tensor):
+                        raise AssertionError(
+                            f"expected non-Tensor for arg {i}, got Tensor"
+                        )
                 elif not can_require_grad:
-                    assert not a.requires_grad, format_guard_bug_msg(
-                        aot_config,
-                        f"{describe_input(i, aot_config)} would not require grad",
-                    )
+                    if a.requires_grad:
+                        raise AssertionError(
+                            format_guard_bug_msg(
+                                aot_config,
+                                f"{describe_input(i, aot_config)} would not require grad",
+                            )
+                        )
 
             return compiled_fn(args)
 
