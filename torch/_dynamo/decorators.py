@@ -16,6 +16,7 @@ from torch.compiler import is_compiling
 from torch.utils._contextlib import _DecoratorContextManager
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
+from .._utils_internal import justknobs_check
 from . import trace_rules, variables
 from .comptime import comptime
 from .eval_frame import (
@@ -33,6 +34,8 @@ from .external_utils import (
 )
 from .utils import _get_error_on_graph_break, _set_error_on_graph_break, is_function
 
+
+justknobs_check._dynamo_marked_constant = True  # type: ignore[attr-defined]
 
 if TYPE_CHECKING:
     from types import FunctionType
