@@ -1652,7 +1652,9 @@ class DistributedDataParallel(Module, Joinable):
         # TODO: DDPSink is currently enabled for unused parameter detection and
         # static graph training for first iteration.
         if (self.find_unused_parameters and not self.static_graph) or (
-            self.static_graph and not self._static_graph_delay_allreduce_enqueued
+            self.static_graph
+            and not self._static_graph_delay_allreduce_enqueued
+            and self.require_backward_grad_sync
         ):
             (
                 output_tensor_list,

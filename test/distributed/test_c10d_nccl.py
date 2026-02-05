@@ -3538,6 +3538,55 @@ class DistributedDataParallelTest(
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+    def test_ddp_static_graph_multiple_backward_in_no_sync(self):
+        process_group = self._get_process_group()
+        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = torch.nn.Linear(3 * 224 * 224, 10)
+
+            def forward(self, im, seq):
+                out = self.lin(im.flatten(1))
+                loss = out.mean()
+                return loss, loss
+
+        model = Model().to(device_id)
+        ddp_model = DistributedDataParallel(
+            model,
+            device_ids=[device_id],
+            process_group=process_group,
+            static_graph=True,
+        )
+
+        im = torch.empty(1, 3, 224, 224, device=device_id)
+        seq = torch.randint(0, 1000, (1, 128), device=device_id).long()
+
+        with ddp_model.no_sync():
+            loss, speculative_loss = ddp_model(im, seq)
+            loss.backward(retain_graph=True)
+            speculative_loss.backward()
+
+        for param in ddp_model.parameters():
+            self.assertIsNotNone(param.grad)
+
+        ddp_model.zero_grad()
+        with ddp_model.no_sync():
+            loss, speculative_loss = ddp_model(im, seq)
+            loss.backward(retain_graph=True)
+            speculative_loss.backward()
+
+        ddp_model.zero_grad()
+        loss, speculative_loss = ddp_model(im, seq)
+        loss.backward(retain_graph=True)
+        speculative_loss.backward()
+
+        for param in ddp_model.parameters():
+            self.assertIsNotNone(param.grad)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
     def test_bucket_cap_mb_list_initialization(self):
         """Test that bucket_cap_mb_list is properly converted to bucket_bytes_cap_list"""
         process_group = self._get_process_group()
