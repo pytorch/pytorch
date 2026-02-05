@@ -12029,8 +12029,8 @@ class TestNNDeviceType(NNTestCase):
                 self._test_batchnorm_simple_average(device, dtype, torch.float)
 
     @onlyNativeDeviceTypes
-    @expectedFailureMPS  # Unsupported Border padding mode
     @dtypes(torch.float, torch.double)
+    @dtypesIfMPS(torch.float, torch.half, torch.bfloat16)
     def test_grid_sample_nan_inf(self, device, dtype):
         input = torch.zeros([1, 1, 3, 3], device=device, dtype=dtype)
         grid = torch.tensor([[[[nan, 0], [0, inf]]]], device=device, dtype=dtype)
