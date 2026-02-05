@@ -12882,6 +12882,23 @@ class TestConsistency(TestCaseMPS):
             # Broadcast
             self.assertEqual(op(x, y[0]), op(x.to("mps"), y.to("mps")[0]).cpu())
 
+    def test_abs_complex_stability(self, device):
+        a_cpu = torch.tensor(
+            [
+                1e-30 + 1e-30j,
+                1e30 + 1e30j,
+                1e-30 + 1e30j,
+                1e30 + 1e-30j,
+            ],
+            device='cpu',
+            dtype=torch.cfloat,
+        )
+        a_mps = a_cpu.to('mps')
+        a_cpu_abs = a_cpu.abs()
+        a_mps_abs = a_mps.abs()
+        self.assertEqual(a_mps_abs, a_cpu_abs)
+
+
 
 class TestErrorInputs(TestCase):
     _ignore_not_implemented_error = True
