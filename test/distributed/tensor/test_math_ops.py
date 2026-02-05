@@ -611,6 +611,69 @@ class DistMathOpsTest(DTensorTestBase):
         )
 
     @with_comms
+    def test_layer_norm_handler_decomposition(self):
+        """Test that layer_norm on input sharded on normalized dims uses decomposition."""
+        device_mesh = self.build_device_mesh()
+        torch.manual_seed(42)
+
+        batch, seq_len, hidden = 8, 16, 32
+        x = torch.randn(batch, seq_len, hidden, device=self.device_type)
+        normalized_shape = [hidden]
+
+        x_sharded = distribute_tensor(x, device_mesh, [Shard(2)])
+
+        weight = torch.ones(hidden, device=self.device_type)
+        bias = torch.zeros(hidden, device=self.device_type)
+        weight_dt = distribute_tensor(weight, device_mesh, [Shard(0)])
+        bias_dt = distribute_tensor(bias, device_mesh, [Shard(0)])
+
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            out, mean, rstd = torch.native_layer_norm(
+                x_sharded, normalized_shape, weight_dt, bias_dt, 1e-5
+            )
+
+        expected_out, expected_mean, expected_rstd = torch.native_layer_norm(
+            x, normalized_shape, weight, bias, 1e-5
+        )
+        self.assertEqual(out.full_tensor(), expected_out)
+        self.assertEqual(mean.full_tensor(), expected_mean)
+        self.assertEqual(rstd.full_tensor(), expected_rstd)
+
+        self.assertTrue(out.placements[0].is_shard())
+
+    @with_comms
+    def test_layer_norm_no_decomposition_on_outer_dims(self):
+        """Test that layer_norm sharded on outer dims uses normal dispatch."""
+        device_mesh = self.build_device_mesh()
+        torch.manual_seed(42)
+
+        batch, seq_len, hidden = 8, 16, 32
+        x = torch.randn(batch, seq_len, hidden, device=self.device_type)
+        normalized_shape = [hidden]
+
+        x_sharded = distribute_tensor(x, device_mesh, [Shard(0)])
+
+        weight = torch.ones(hidden, device=self.device_type)
+        bias = torch.zeros(hidden, device=self.device_type)
+        weight_dt = distribute_tensor(weight, device_mesh, [Replicate()])
+        bias_dt = distribute_tensor(bias, device_mesh, [Replicate()])
+
+        out, mean, rstd = torch.native_layer_norm(
+            x_sharded, normalized_shape, weight_dt, bias_dt, 1e-5
+        )
+
+        expected_out, expected_mean, expected_rstd = torch.native_layer_norm(
+            x, normalized_shape, weight, bias, 1e-5
+        )
+        self.assertEqual(out.full_tensor(), expected_out)
+        self.assertEqual(mean.full_tensor(), expected_mean)
+        self.assertEqual(rstd.full_tensor(), expected_rstd)
+
+        self.assertTrue(out.placements[0].is_shard())
+        self.assertEqual(out.placements[0].dim, 0)
+
+    @with_comms
     def test_topk(self):
         device_mesh = self.build_device_mesh()
         placement_combs = [Shard(0), Shard(1), Shard(2), Replicate()]
