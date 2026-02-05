@@ -109,25 +109,23 @@ static opmath_t<T> grid_sampler_unnormalize(
 
 // Clip coordinates for border padding
 template <typename T>
-static opmath_t<T> clip_coordinates(opmath_t<T> in, int32_t clip_limit) {
-  return min(
-      static_cast<opmath_t<T>>(clip_limit - 1),
-      max(in, static_cast<opmath_t<T>>(0)));
+static T clip_coordinates(T in, int32_t clip_limit) {
+  return ::metal::clamp(in, static_cast<T>(0), static_cast<T>(clip_limit - 1));
 }
 
 // Reflect coordinates for reflection padding
 template <typename T>
-static opmath_t<T> reflect_coordinates(
-    opmath_t<T> in,
+static T reflect_coordinates(
+    T in,
     int32_t twice_low,
     int32_t twice_high) {
   if (twice_low == twice_high) {
-    return static_cast<opmath_t<T>>(0);
+    return 0;
   }
-  opmath_t<T> min_val = static_cast<opmath_t<T>>(twice_low) / 2;
-  opmath_t<T> span = static_cast<opmath_t<T>>(twice_high - twice_low) / 2;
+  auto min_val = static_cast<T>(twice_low) / 2;
+  auto span = static_cast<T>(twice_high - twice_low) / 2;
   in = fabs(in - min_val);
-  opmath_t<T> extra = fmod(in, span);
+  auto extra = fmod(in, span);
   int32_t flips = static_cast<int32_t>(floor(in / span));
   return (flips % 2 == 0) ? (extra + min_val) : (span - extra + min_val);
 }
@@ -141,14 +139,14 @@ static opmath_t<T> compute_source_index(
     bool align_corners) {
   coord = grid_sampler_unnormalize<T>(coord, size, align_corners);
   if (padding_mode == GridSamplerPadding::Border) {
-    coord = clip_coordinates<T>(coord, size);
+    coord = clip_coordinates(coord, size);
   } else if (padding_mode == GridSamplerPadding::Reflection) {
     if (align_corners) {
-      coord = reflect_coordinates<T>(coord, 0, 2 * (size - 1));
+      coord = reflect_coordinates(coord, 0, 2 * (size - 1));
     } else {
-      coord = reflect_coordinates<T>(coord, -1, 2 * size - 1);
+      coord = reflect_coordinates(coord, -1, 2 * size - 1);
     }
-    coord = clip_coordinates<T>(coord, size);
+    coord = clip_coordinates(coord, size);
   }
   return coord;
 }
