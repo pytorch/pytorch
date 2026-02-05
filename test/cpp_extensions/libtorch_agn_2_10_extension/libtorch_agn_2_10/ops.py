@@ -696,7 +696,11 @@ def __getattr__(name):
 
 def __dir__():
     """List all available ops (native + inherited)."""
-    native = [name for name in globals() if not name.startswith("_") and callable(globals().get(name))]
+    native = [
+        name
+        for name in globals()
+        if not name.startswith("_") and callable(globals().get(name))
+    ]
     ops_namespace = getattr(torch.ops, _NAMESPACE)
     inherited = [n for n in dir(ops_namespace) if not n.startswith("_")]
     return sorted(set(native + inherited))
