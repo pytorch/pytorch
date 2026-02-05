@@ -1264,6 +1264,7 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
 
 #define LARGE_INDEX(TENSOR_TYPE, INDICES_TYPE, TYPE,                        \
                     SELF_DIM, SOURCE_DIM, IDX_DIM, IDX_IS_MAJOR)            \
+  if (IS_CACHE) {                                                           \
   indexFuncLargeIndex_Cache<TENSOR_TYPE, INDICES_TYPE, TYPE,                \
                       SELF_DIM, SOURCE_DIM, IDX_DIM, IDX_IS_MAJOR>          \
     <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(                       \
@@ -1271,7 +1272,17 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
       selfAddDim, sourceAddDim, sourceTotalSize,                            \
       (IDX_IS_MAJOR) ? sliceSize : numIndex,                                \
       selfAddDimSize, selfNumel, reduce_add, alpha_value);                  \
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  C10_CUDA_KERNEL_LAUNCH_CHECK();                                           \
+  } else {                                                                  \
+  indexFuncLargeIndex<TENSOR_TYPE, INDICES_TYPE, TYPE,                      \
+                      SELF_DIM, SOURCE_DIM, IDX_DIM, IDX_IS_MAJOR>          \
+    <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(                       \
+      selfInfo, sourceInfo, indexInfo,                                      \
+      selfAddDim, sourceAddDim, sourceTotalSize,                            \
+      (IDX_IS_MAJOR) ? sliceSize : numIndex,                                \
+      selfAddDimSize, selfNumel, reduce_add, alpha_value);                  \
+  C10_CUDA_KERNEL_LAUNCH_CHECK();                                           \
+  }
 
   uint64_t defaultMaxBlockThreads = getDefaultMaxThreadsPerBlock();
   const dim3 smallIndexGrid(std::min(ceil_div(sliceSize, (uint64_t)128), (uint64_t)(mpc * 8)));
@@ -1314,6 +1325,12 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
           }
         } else {
           const bool indexIsMajor = indexShouldBeMajor(selfInfo, selfAddDim);
+
+#ifdef USE_ROCM
+  bool IS_CACHE = true;
+#else
+  bool IS_CACHE = false;
+#endif
 
           if (selfInfo.dims == 1 && sourceInfo.dims == 1 && indContig) {
             LARGE_INDEX(scalar_t, index_t, unsigned int, 1, 1, -2, true);
