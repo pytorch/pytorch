@@ -266,11 +266,11 @@ def _make_forward(
     state: dict[str, Any] = {"inputs": None, "outputs": None}
 
     @functools.wraps(fn)
-    def forward(*flat_args):
+    def forward(input_spec, *flat_args):
         # Detach all tensor inputs to isolate from external autograd context
-        flat_args = [
+        flat_args = tuple(
             arg.detach() if isinstance(arg, torch.Tensor) else arg for arg in flat_args
-        ]
+        )
 
         # Restore requires_grad state that was captured at tracing time.
         # We need this because at runtime with aot_eager, the forward graph
@@ -278,12 +278,12 @@ def _make_forward(
         # This means intermediate tensors can lose their requires_grad status
         # by the time they reach invoke_leaf_function, even though they had it
         # during tracing.
-        inputs = [
+        inputs = tuple(
             arg.requires_grad_(True)
             if isinstance(arg, torch.Tensor) and idx in requires_grad_indices
             else arg
             for idx, arg in enumerate(flat_args)
-        ]
+        )
 
         # NB: we capture dispatch keys at creation time (during tracing), where PythonDispatcher
         # is active, but at runtime it's not so we remove it from the effective keys.
@@ -292,7 +292,7 @@ def _make_forward(
             effective_keys = include_keys.remove(DispatchKey.PythonDispatcher)
         with torch._C._ForceDispatchKeyGuard(effective_keys, exclude_keys):
             with torch.enable_grad():
-                outputs = fn(*inputs)
+                outputs = fn(input_spec, *inputs)
 
                 check_escaped_gradients(outputs, inputs, requires_grad_indices)
 
@@ -337,12 +337,13 @@ class InvokeLeafFunction(HigherOrderOperator):
     def __init__(self):
         super().__init__("invoke_leaf_function")
 
-    def __call__(self, real_fn_spec, fake_fn_spec, *flat_args):
+    def __call__(self, real_fn_spec, fake_fn_spec, input_spec, *flat_args):
         """
         real_fn_spec: pytree.TreeSpec for the real function that's wrapped in dynamo
         fake_fn_spec: pytree.TreeSpec for the fake function that's wrapped in dynamo
+        input_spec: pytree.TreeSpec for unflattening flat_args back to (args, kwargs)
         """
-        return super().__call__(real_fn_spec, fake_fn_spec, *flat_args)  # type: ignore[attr-defined]
+        return super().__call__(real_fn_spec, fake_fn_spec, input_spec, *flat_args)  # type: ignore[attr-defined]
 
 
 invoke_leaf_function = InvokeLeafFunction()
@@ -378,7 +379,7 @@ invoke_leaf_function = InvokeLeafFunction()
 class InvokeLeafFunctionAutogradOp(torch.autograd.Function):
     @staticmethod
     # pyrefly: ignore [bad-override]
-    def forward(ctx, real_fn_spec, fake_fn_spec, *flat_args):
+    def forward(ctx, real_fn_spec, fake_fn_spec, input_spec, *flat_args):
         real_fn = unwrap_fn_spec(real_fn_spec)
 
         include_keys = torch._C._dispatch_tls_local_include_set()
@@ -394,7 +395,7 @@ class InvokeLeafFunctionAutogradOp(torch.autograd.Function):
             real_fn, requires_grad_indices, include_keys, exclude_keys
         )
 
-        def real_backward(*grads):
+        def real_backward(_input_spec, *grads):
             if real_state["inputs"] is None or real_state["outputs"] is None:
                 raise RuntimeError(
                     "invoke_leaf_function backward expects inputs/outputs to be set in forward."
@@ -419,7 +420,7 @@ class InvokeLeafFunctionAutogradOp(torch.autograd.Function):
             for arg in flat_args
         )
 
-        def fake_backward(*grads):
+        def fake_backward(_input_spec, *grads):
             return tuple(
                 torch.empty_strided(
                     info.size, info.stride, dtype=info.dtype, device=info.device
@@ -433,7 +434,7 @@ class InvokeLeafFunctionAutogradOp(torch.autograd.Function):
 
         with torch._C._AutoDispatchBelowAutograd():
             fw_outputs = invoke_leaf_function(
-                new_real_fn_spec, fake_fn_spec, *flat_args
+                new_real_fn_spec, fake_fn_spec, input_spec, *flat_args
             )
 
         ctx.real_backward = real_backward
@@ -446,13 +447,15 @@ class InvokeLeafFunctionAutogradOp(torch.autograd.Function):
     def backward(ctx, *grads):
         _, real_bw_spec = func_to_graphable(ctx.real_backward)
         _, fake_bw_spec = func_to_graphable(ctx.fake_backward)
-        fw_grads = invoke_leaf_function(real_bw_spec, fake_bw_spec, *grads)
-        return None, None, *fw_grads
+        fw_grads = invoke_leaf_function(real_bw_spec, fake_bw_spec, None, *grads)
+        return None, None, None, *fw_grads
 
 
 @invoke_leaf_function.py_autograd_impl
-def invoke_leaf_function_autograd(real_fn_spec, fake_fn_spec, *flat_args):
-    return InvokeLeafFunctionAutogradOp.apply(real_fn_spec, fake_fn_spec, *flat_args)
+def invoke_leaf_function_autograd(real_fn_spec, fake_fn_spec, input_spec, *flat_args):
+    return InvokeLeafFunctionAutogradOp.apply(
+        real_fn_spec, fake_fn_spec, input_spec, *flat_args
+    )
 
 
 # TODO: allow user annotated mutation and aliasing info
@@ -547,13 +550,13 @@ def _check_no_input_mutation(
 
 
 @register_fake(invoke_leaf_function)
-def invoke_leaf_function_fake(real_fn_spec, fake_fn_spec, *flat_args):
+def invoke_leaf_function_fake(real_fn_spec, fake_fn_spec, input_spec, *flat_args):
     fake_fn = unwrap_fn_spec(fake_fn_spec)
-    return fake_fn(*flat_args)
+    return fake_fn(input_spec, *flat_args)
 
 
 @invoke_leaf_function.py_impl(DispatchKey.CompositeExplicitAutograd)
-def invoke_leaf_function_dense(real_fn_spec, fake_fn_spec, *flat_args):
+def invoke_leaf_function_dense(real_fn_spec, fake_fn_spec, input_spec, *flat_args):
     from torch._dynamo import config as dynamo_config
 
     version_before = [
@@ -561,13 +564,13 @@ def invoke_leaf_function_dense(real_fn_spec, fake_fn_spec, *flat_args):
     ]
 
     real_fn = unwrap_fn_spec(real_fn_spec)
-    real_output = real_fn(*flat_args)
+    real_output = real_fn(input_spec, *flat_args)
 
     _check_no_input_mutation(flat_args, version_before)
 
     if dynamo_config.leaf_function_validate_outputs:
         fake_fn = unwrap_fn_spec(fake_fn_spec)
-        fake_output = fake_fn(*flat_args)
+        fake_output = fake_fn(input_spec, *flat_args)
         _validate_outputs_match(fake_output, real_output)
 
     return real_output
