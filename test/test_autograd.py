@@ -8266,9 +8266,7 @@ for shape in [(1,), ()]:
 
         a = torch.randn(5, requires_grad=True)
         with torch.autograd.graph.saved_tensors_hooks(pack_hook, unpack_hook):
-            saved = torch.autograd.SavedTensor(
-                a, is_output=False, _INTERNAL_USE_ONLY=True
-            )
+            saved = torch._C._autograd._make_saved_tensor(a, is_output=False)
             self.assertEqual(pack_count[0], 1)
             self.assertEqual(unpack_count[0], 0)
 
@@ -8289,9 +8287,9 @@ for shape in [(1,), ()]:
         a = torch.randn(5, requires_grad=True)
         with self.assertRaisesRegex(
             RuntimeError,
-            "SavedTensor constructor is exposed for internal use only and is subject to change",
+            "Trying to create a SavedTensor object from Python is forbidden",
         ):
-            torch.autograd.SavedTensor(a, is_output=False)
+            torch.autograd.SavedTensor()
 
     def test_custom_function_saved_tensors(self):
         def getFn(save=True):
