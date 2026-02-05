@@ -325,7 +325,7 @@ class InputObserverInfo:
             if v is not None and not isinstance(v, (int, float, bool))
         }
 
-        # kwargs may come in a different ordeer teach.
+        # kwargs may come in a different order each time.
         # dictionaries are ordered and torch.export.export expects
         # dynamic shapes an kwargs to follow the same order.
 
