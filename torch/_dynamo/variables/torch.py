@@ -2553,9 +2553,9 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             return res
 
         captured_out_spec_holder: list[TreeSpec | None] = [None]
+        # pyrefly: ignore[unbound-name]
         flat_apply_capture = make_function_wrapper(
             patched_fn,
-            input_spec,  # pyrefly: ignore[unbound-name]
             captured_out_spec_holder,
         )
 
@@ -2569,8 +2569,15 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         )
         f_spec_proxy.node.type = type(f_spec)
 
-        # flat_apply_capture already takes flat inputs so pass None as in_spec to flat_apply
-        all_args = (f_spec_proxy, None, *proxified_flat_args)
+        # pyrefly: ignore[unbound-name]
+        input_spec_proxy = tx.output.register_static_attr_and_return_proxy(
+            fn.__name__ + "_input_spec",
+            input_spec,
+        )
+        input_spec_proxy.node.type = type(input_spec)
+
+        # flat_apply_capture takes (input_spec, *flat_args), pass None as in_spec to flat_apply
+        all_args = (f_spec_proxy, None, input_spec_proxy, *proxified_flat_args)
 
         # What's going on here? The output of the nonstrict-traced function must
         # be something we can put into the graph. This means it has to be Tuple,
@@ -2734,12 +2741,8 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         input_spec = input_spec_var.as_python_constant()
 
         captured_out_spec_holder: list[pytree.TreeSpec | None] = [None]
-        wrapped_real_impl = make_function_wrapper(
-            real_impl, input_spec, captured_out_spec_holder
-        )
-        wrapped_fake_impl = make_function_wrapper(
-            fake_impl, input_spec, captured_out_spec_holder
-        )
+        wrapped_real_impl = make_function_wrapper(real_impl, captured_out_spec_holder)
+        wrapped_fake_impl = make_function_wrapper(fake_impl, captured_out_spec_holder)
 
         _, real_impl_spec = func_to_graphable(wrapped_real_impl)
         _, fake_impl_spec = func_to_graphable(wrapped_fake_impl)
@@ -2751,10 +2754,12 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 
         real_impl_proxy = make_spec_proxy("real_fn", real_impl_spec)
         fake_impl_proxy = make_spec_proxy("fake_fn", fake_impl_spec)
+        input_spec_proxy = make_spec_proxy("input_spec", input_spec)
 
         invoke_args = (
             real_impl_proxy,
             fake_impl_proxy,
+            input_spec_proxy,
             *flat_arg_proxies,
         )
         result_proxy = tx.output.create_proxy(
