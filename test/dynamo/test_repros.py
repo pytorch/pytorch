@@ -6097,6 +6097,68 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertEqual(result, result_test)
         self.assertEqual(x, x_test)
 
+    # https://github.com/pytorch/pytorch/issues/167009
+    @requires_cuda
+    @unittest.skipIf(not dist.is_available(), "requires distributed")
+    def test_fsdp2_child_modules_compiled(self):
+        # Test that when FSDP2 is applied to child nn.Linear modules,
+        # the linear operations are still captured in the compiled graph.
+        from torch.distributed._composable.fsdp import fully_shard
+        from torch.distributed.device_mesh import init_device_mesh
+
+        class SimpleModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = nn.Linear(10, 20)
+                self.fc2 = nn.Linear(20, 5)
+                self.relu = nn.ReLU()
+
+            def forward(self, x):
+                x = self.relu(self.fc1(x))
+                return self.fc2(x)
+
+        try:
+            dist.init_process_group(backend="fake", rank=0, world_size=1)
+            device_mesh = init_device_mesh("cuda", (1,))
+
+            model = SimpleModel().cuda()
+
+            # Apply FSDP to each child module (this is the bug trigger)
+            for name, module in model.named_children():
+                if isinstance(module, nn.Linear):
+                    fully_shard(module, mesh=device_mesh)
+
+            # Apply FSDP to root
+            fully_shard(model, mesh=device_mesh)
+
+            # Track captured graphs
+            captured_graphs = []
+
+            def capture_backend(gm, example_inputs):
+                captured_graphs.append(gm)
+                return gm.forward
+
+            torch._dynamo.reset()
+            compiled_model = torch.compile(model, backend=capture_backend)
+
+            x = torch.randn(4, 10, device="cuda")
+            output = compiled_model(x)
+
+            self.assertEqual(output.shape, torch.Size([4, 5]))
+
+            # Check that linear operations are captured in the graphs
+            linear_found = any(
+                "linear" in gm.print_readable(print_output=False).lower()
+                for gm in captured_graphs
+            )
+            self.assertTrue(
+                linear_found,
+                "Linear operations should be captured in compiled graphs",
+            )
+        finally:
+            if dist.is_initialized():
+                dist.destroy_process_group()
+
     def test_aot_autograd_runtime_wrapper_prologue_profiled(self):
         # Names for prologue profiling event
         prologue_name = "AOTDispatcher Runtime Wrapper Prologue"

@@ -1788,6 +1788,18 @@ class Module:
                 or _global_forward_hooks or _global_forward_pre_hooks):
             return forward_call(*args, **kwargs)
 
+        # When Dynamo is active but we're in eager fallback (after a frame skip),
+        # wrap forward_call so that the forward can still be traced.
+        # The wrapper is not in skipfiles, so Dynamo will trace it.
+        # We only check get_eval_frame_callback() when NOT actively compiling,
+        # to avoid graph breaks from the callback check during tracing.
+        if not torch.compiler.is_compiling():
+            from torch._C._dynamo.eval_frame import get_eval_frame_callback
+            callback = get_eval_frame_callback()
+            if callback is not False and callback is not None:
+                from torch._dynamo.external_utils import wrap_inline
+                forward_call = wrap_inline(forward_call)
+
         result = None
         called_always_called_hooks = set()
 
