@@ -327,7 +327,7 @@ class InputObserverInfo:
 
         # kwargs may come in a different order each time.
         # dictionaries are ordered and torch.export.export expects
-        # dynamic shapes an kwargs to follow the same order.
+        # dynamic shapes and kwargs to follow the same order.
 
         ordered_kwargs = {k: kwargs[k] for k in self.signature_names if k in kwargs}
         for k, v in kwargs.items():
