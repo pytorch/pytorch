@@ -326,6 +326,51 @@ class TemporarilyPopInterpreterStackCtxManagerVariable(ContextWrappingVariable):
         return variables.ConstantVariable.create(None)
 
 
+class JvpIncrementNestingCtxManagerVariable(ContextWrappingVariable):
+    """represents torch.func.jvp increment/decrement nesting"""
+
+    # A guard is needed as the grad level is baked into the torch FX graph
+    # This is fine if jvp is only called from within the function
+    # being compiled. But the FX graph may be invalid in the case of a jvp
+    # call from eager that calls the compiled function, as the jvp levels
+    # may be different.
+    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.FUNCTORCH_STACK_MATCH)  # type: ignore[arg-type]
+
+    @staticmethod
+    def create(
+        tx: "InstructionTranslator", **kwargs: Any
+    ) -> "JvpIncrementNestingCtxManagerVariable":
+        var = JvpIncrementNestingCtxManagerVariable(
+            target_values=None,
+            initial_values=None,
+            **kwargs,
+        )
+        return var
+
+    def enter(self, tx: "InstructionTranslator") -> VariableTracker:
+        install_guard(self._guards_singleton)
+        jvp_level = torch._functorch.eager_transforms.enter_jvp_nesting()
+        self.set_cleanup_hook(
+            tx, lambda: torch._functorch.eager_transforms.exit_jvp_nesting()
+        )
+        self.proxy = tx.output.create_node(
+            "call_function",
+            torch._C._functorch._jvp_increment_nesting,
+            (),
+            {},
+        )
+        return variables.ConstantVariable.create(jvp_level)
+
+    def exit(
+        self, tx: "InstructionTranslator", *args: VariableTracker
+    ) -> VariableTracker:
+        self.cleanup()
+        tx.output.create_node(
+            "call_function", torch._C._functorch._jvp_decrement_nesting, (), {}
+        )
+        return variables.ConstantVariable.create(None)
+
+
 class SetFwdGradEnabledContextManager(ContextWrappingVariable):
     """represents torch.autograd.forward_ad._set_fwd_grad_enabled() to enable/disable fwd grad"""
 

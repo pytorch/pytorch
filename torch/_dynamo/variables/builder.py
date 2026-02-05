@@ -532,7 +532,13 @@ class VariableBuilder:
         ):
             vt = self.tx.output.side_effects.track_object_existing(value, vt)
 
-        self.tx.output.variable_tracker_cache[self.source] = vt
+        # Skip caching for JVP_NESTING source because
+        # JvpIncrementNestingCtxManagerVariable hides global JVP mutation from
+        # Dynamo, resulting in stale value. We attempted a fix in
+        # https://github.com/pytorch/pytorch/pull/174329 but it exposed other
+        # issues.  This only affects cache hit rate, NOT correctness.
+        if "JVP_NESTING" not in self.source.name:
+            self.tx.output.variable_tracker_cache[self.source] = vt
         return vt
 
     def _can_lift_attrs_to_inputs(self, vt: VariableTracker) -> bool:

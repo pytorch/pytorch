@@ -129,6 +129,7 @@ supported_ctx_manager_classes = dict.fromkeys(
         torch._C.DisableTorchFunction,
         torch._functorch.vmap.vmap_increment_nesting,
         torch._functorch.eager_transforms.grad_increment_nesting,
+        torch._functorch.eager_transforms.jvp_increment_nesting,
         torch._functorch.eager_transforms.enable_inplace_requires_grad,
         torch.amp.autocast_mode.autocast,
         torch.autograd.grad_mode.enable_grad,
@@ -470,6 +471,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             GradInplaceRequiresGradCtxManagerVariable,
             GradModeVariable,
             InferenceModeVariable,
+            JvpIncrementNestingCtxManagerVariable,
             SDPAKernelVariable,
             SetFwdGradEnabledContextManager,
             StreamVariable,
@@ -554,6 +556,9 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                 tx,
                 args,
             )
+        elif self.value is torch._functorch.eager_transforms.jvp_increment_nesting:
+            assert len(args) == 0
+            return JvpIncrementNestingCtxManagerVariable.create(tx)
         elif self.value is torch.autograd.forward_ad._set_fwd_grad_enabled:
             assert len(args) == 1
             return SetFwdGradEnabledContextManager.create(
@@ -3138,49 +3143,3 @@ class FuncTorchInterpreterVariable(BaseTorchVariable):
                 tx, None
             )
         return super().call_method(tx, name, args, kwargs)
-
-
-class JvpIncrementNestingVariable(BaseTorchVariable):
-    """
-    Represents torch._C._functorch._jvp_increment_nesting. Typically called
-    inside jvp_increment_nesting context manager.
-    """
-
-    def call_function(
-        self,
-        tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        assert not args and not kwargs
-        tx.output.create_node(
-            "call_function",
-            torch._C._functorch._jvp_increment_nesting,
-            (),
-            {},
-        )
-        level = torch._C._functorch._jvp_increment_nesting()
-        return variables.ConstantVariable.create(level)
-
-
-class JvpDecrementNestingVariable(BaseTorchVariable):
-    """
-    Represents torch._C._functorch._jvp_decrement_nesting. Typically called
-    inside jvp_increment_nesting context manager.
-    """
-
-    def call_function(
-        self,
-        tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        assert not args and not kwargs
-        tx.output.create_node(
-            "call_function",
-            torch._C._functorch._jvp_decrement_nesting,
-            (),
-            {},
-        )
-        torch._C._functorch._jvp_decrement_nesting()
-        return variables.ConstantVariable.create(None)
