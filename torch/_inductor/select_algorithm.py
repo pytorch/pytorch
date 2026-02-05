@@ -4091,8 +4091,8 @@ class AlgorithmSelectorCache(PersistentCache):
         if len(candidates) < 10:
             return []
 
-        # Include ATen choices in prescreening as fallback (#171094).
-        # This ensures valid fallback timings exist before potentially buggy CUTLASS kernels run.
+        # Include ATen choices in prescreening as fallback (#171094), ensuring
+        # valid fallback timings exist before potentially unstable CUTLASS kernels.
         extern_choices = [c for c in choices if isinstance(c, ExternKernelCaller)]
         candidates = extern_choices + candidates
 
