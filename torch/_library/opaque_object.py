@@ -38,7 +38,7 @@ through `register_opaque_type(MyClass, typ="value")`.
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Literal, NewType, Optional
+from typing import Any, Literal, NewType, Optional, TypeAlias, Union
 from typing_extensions import TypeIs
 from weakref import WeakKeyDictionary
 
@@ -58,6 +58,23 @@ class MemberType(Enum):
     USE_REAL = "use_real"
     # Inlines/traces the member
     INLINED = "inlined"
+
+
+class DynamoCallMethod:
+    """
+    Wrapper for a custom dynamo call_method handler.
+
+    Use this for methods that require specialized tracing logic.
+    """
+
+    def __init__(self, handler: Callable[..., Any]):
+        self._handler = handler
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        return self._handler(*args, **kwargs)
+
+
+MemberSpec: TypeAlias = Union[MemberType, DynamoCallMethod]
 
 
 @register_fake_class("aten::OpaqueObject")
@@ -85,7 +102,7 @@ class _OpaqueTypeInfo:
     guard_fn: Callable[
         [Any], list[Any]
     ]  # Callable that takes the object and returns list of values to guard on
-    members: dict[str, MemberType]  # Maps member name to how it should be handled
+    members: dict[str, MemberSpec]  # Maps member name to how it should be handled
 
 
 # Mapping of type -> (string name, reference/value type)
@@ -120,7 +137,7 @@ def register_opaque_type(
     *,
     typ: str,
     guard_fn: Any = None,
-    members: dict[str, MemberType] | None = None,
+    members: dict[str, MemberSpec] | None = None,
 ) -> None:
     """
     Registers the given type as an opaque type which allows this to be consumed
@@ -138,12 +155,13 @@ def register_opaque_type(
             for equality on each function call, triggering recompilation if they change.
             Only applicable for reference types.
             Example: lambda obj: [obj.x, obj.y]
-        members (dict[str, MemberType] | None): Dictionary mapping member names
-            (attributes, properties, or methods) to their MemberType, which controls
-            how they are handled during torch.compile tracing:
+        members (dict[str, MemberSpec] | None): Dictionary mapping member names
+            (attributes, properties, or methods) to their handling specification:
             - MemberType.USE_REAL: Evaluates with the real object at compile time and
               bakes the result as a constant
             - MemberType.INLINED: Inlines the method call into the trace
+            - DynamoCallMethod: Uses a custom handler for dynamo tracing.
+              The handler signature is: (tx, self_var, method_name, args, kwargs) -> VariableTracker
     """
     import torch.utils._pytree as pytree
 
@@ -208,6 +226,20 @@ def register_opaque_type(
                 f"value-type opaque class {cls} as it will be guarded based "
                 "on `__eq__`."
             )
+
+    if members:
+        for member_name, member_spec in members.items():
+            if isinstance(member_spec, DynamoCallMethod):
+                if not callable(member_spec._handler):
+                    raise TypeError(
+                        f"DynamoCallMethod for '{member_name}' must wrap a callable, "
+                        f"got {type(member_spec._handler)}"
+                    )
+            elif not isinstance(member_spec, MemberType):
+                raise TypeError(
+                    f"Member '{member_name}' must be a MemberType or DynamoCallMethod, "
+                    f"got {type(member_spec)}"
+                )
 
     # Generate a fully qualified name by combining module and qualname
     name = f"{cls.__module__}.{cls.__qualname__}"
@@ -322,9 +354,35 @@ def get_member_type(cls: Any, member_name: str) -> Optional[MemberType]:
         member_name: The name of the member to query
 
     Returns:
-        MemberType if the member is registered, None otherwise
+        MemberType if the member is a simple MemberType, None if it's a
+        CustomMemberSpec or not registered.
     """
     info = get_opaque_obj_info(cls)
     if info is None:
         return None
-    return info.members.get(member_name)
+    member_spec = info.members.get(member_name)
+    if member_spec is None:
+        return None
+    if isinstance(member_spec, MemberType):
+        return member_spec
+    return None
+
+
+def get_dynamo_call_method(cls: Any, member_name: str) -> Optional[DynamoCallMethod]:
+    """
+    Get the DynamoCallMethod for a member of an opaque object class.
+
+    Args:
+        cls: The opaque object class (or its string name)
+        member_name: The name of the member to query
+
+    Returns:
+        DynamoCallMethod if the member is registered as such, None otherwise
+    """
+    info = get_opaque_obj_info(cls)
+    if info is None:
+        return None
+    member_spec = info.members.get(member_name)
+    if isinstance(member_spec, DynamoCallMethod):
+        return member_spec
+    return None
