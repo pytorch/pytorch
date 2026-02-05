@@ -166,7 +166,7 @@ template <int vec_size, typename func_t, typename array_t>
 C10_LAUNCH_BOUNDS_1(num_threads())
 __global__ void vectorized_elementwise_kernel(int N, func_t f, array_t data) {
   if constexpr (vec_size == 8) {
-#if __CUDA_ARCH__ == 900 || __CUDA_ARCH__ == 1000
+#if __CUDA_ARCH__ == 900 || __CUDA_ARCH__ == 1000 || __CUDA_ARCH__ == 1030
     using traits = function_traits<func_t>;
     constexpr auto io_size = calc_io_size<func_t>();
     int remaining = N - io_block_work_size<io_size>() * blockIdx.x;
@@ -309,7 +309,7 @@ static inline void launch_vectorized_kernel(
   // TODO: Revisit this after CUDA 12.8 update.
   cudaDeviceProp* p = at::cuda::getDeviceProperties(stream.device().index());
   const int computeCapability = p->major * 10 + p->minor;
-  if (computeCapability != 90 && computeCapability != 100) {
+  if (computeCapability != 90 && computeCapability != 100 && computeCapability != 103) {
     vec_size = std::min<uint16_t>(vec_size, 4);
   }
   if constexpr (sizeof(cpp_type) < 2) {
