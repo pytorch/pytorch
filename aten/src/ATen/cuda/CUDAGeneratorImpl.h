@@ -7,6 +7,14 @@
 #include <atomic>
 #include <memory>
 #include <unordered_set>
+
+// Maximum tensor dimensions for sharding spec (matches OffsetCalculator.cuh)
+#if defined(USE_ROCM)
+constexpr int SHARDING_MAX_DIMS = 16;
+#else
+constexpr int SHARDING_MAX_DIMS = 25;
+#endif
+
 namespace at {
 
 namespace cuda {
@@ -102,6 +110,13 @@ struct CUDAGeneratorState : public c10::intrusive_ptr_target {
   at::TensorBase seed_extragraph_;
   at::TensorBase offset_extragraph_;
 
+  // Sharding spec for single-device RNG semantics (veScale-style)
+  uint64_t tensor_dim_{0};
+  uint64_t local_shape_[SHARDING_MAX_DIMS]{};
+  uint64_t global_offset_[SHARDING_MAX_DIMS]{};
+  uint64_t global_shape_[SHARDING_MAX_DIMS]{};
+  uint64_t global_strides_[SHARDING_MAX_DIMS]{};
+
   CUDAGeneratorState(
       uint64_t seed = default_rng_seed_val,
       uint64_t philox_offset_per_thread = 0,
@@ -120,6 +135,22 @@ struct CUDAGeneratorState : public c10::intrusive_ptr_target {
   uint64_t capture_epilogue();
   void replay_prologue(uint64_t wholegraph_increment);
   c10::intrusive_ptr<CUDAGeneratorState> clone();
+
+  // Sharding spec methods for single-device RNG semantics
+  uint64_t get_sharding_spec(
+      uint64_t local_shape[SHARDING_MAX_DIMS],
+      uint64_t global_offset[SHARDING_MAX_DIMS],
+      uint64_t global_shape[SHARDING_MAX_DIMS],
+      uint64_t global_strides[SHARDING_MAX_DIMS]) const;
+
+  void set_sharding_spec(
+      uint64_t tensor_dim,
+      const uint64_t local_shape[SHARDING_MAX_DIMS],
+      const uint64_t global_offset[SHARDING_MAX_DIMS],
+      const uint64_t global_shape[SHARDING_MAX_DIMS],
+      const uint64_t global_strides[SHARDING_MAX_DIMS]);
+
+  void clear_sharding_spec();
 };
 
 struct TORCH_CUDA_CPP_API CUDAGeneratorImpl : public c10::GeneratorImpl {
@@ -148,6 +179,22 @@ struct TORCH_CUDA_CPP_API CUDAGeneratorImpl : public c10::GeneratorImpl {
 
   void register_graph(cuda::CUDAGraph* graph);
   void unregister_graph(cuda::CUDAGraph* graph);
+
+  // Sharding spec for single-device RNG semantics (veScale-style)
+  uint64_t get_sharding_spec(
+      uint64_t local_shape[SHARDING_MAX_DIMS],
+      uint64_t global_offset[SHARDING_MAX_DIMS],
+      uint64_t global_shape[SHARDING_MAX_DIMS],
+      uint64_t global_strides[SHARDING_MAX_DIMS]) const;
+
+  void set_sharding_spec(
+      uint64_t tensor_dim,
+      const uint64_t local_shape[SHARDING_MAX_DIMS],
+      const uint64_t global_offset[SHARDING_MAX_DIMS],
+      const uint64_t global_shape[SHARDING_MAX_DIMS],
+      const uint64_t global_strides[SHARDING_MAX_DIMS]);
+
+  void clear_sharding_spec();
 
   // Generates a PhiloxCudaState with a specified increment, and increment
   // current state
