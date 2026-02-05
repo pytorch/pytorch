@@ -402,9 +402,7 @@ class InputObserverInfo:
         self.align_inputs_none_values()
         assert self._best_candidate is not None  # noqa: S101
         assert self._best_candidate.flat_list is not None  # noqa: S101
-        assert (
-            self._best_candidate.aligned_flat_list is not None
-        )  # noqa: S101
+        assert self._best_candidate.aligned_flat_list is not None  # noqa: S101
 
         def _set_batch_dimension(name_or_position) -> bool:
             if not set_batch_dimension_for:
