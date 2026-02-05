@@ -1,7 +1,7 @@
 SHELL=/usr/bin/env bash
 
 DOCKER_CMD ?= docker
-DESIRED_ROCM ?= 7.1
+DESIRED_ROCM ?= 7.2
 DESIRED_ROCM_SHORT = $(subst .,,$(DESIRED_ROCM))
 PACKAGE_NAME = magma-rocm
 # inherit this from underlying docker image, do not pass this env var to docker
@@ -16,14 +16,19 @@ DOCKER_RUN = set -eou pipefail; ${DOCKER_CMD} run --rm -i \
 	magma-rocm/build_magma.sh
 
 .PHONY: all
+all: magma-rocm72
 all: magma-rocm71
 all: magma-rocm70
-all: magma-rocm64
 
 .PHONY:
 clean:
 	$(RM) -r magma-*
 	$(RM) -r output
+
+.PHONY: magma-rocm72
+magma-rocm72: DESIRED_ROCM := 7.2
+magma-rocm72:
+	$(DOCKER_RUN)
 
 .PHONY: magma-rocm71
 magma-rocm71: DESIRED_ROCM := 7.1
@@ -33,9 +38,4 @@ magma-rocm71:
 .PHONY: magma-rocm70
 magma-rocm70: DESIRED_ROCM := 7.0
 magma-rocm70:
-	$(DOCKER_RUN)
-
-.PHONY: magma-rocm64
-magma-rocm64: DESIRED_ROCM := 6.4
-magma-rocm64:
 	$(DOCKER_RUN)
