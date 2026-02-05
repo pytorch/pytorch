@@ -1604,6 +1604,12 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             if waves_per_eu != 0:
                 waves_per_eu = int(8 // conf.num_warps)
 
+            # Skip configs that cause ROCm compiler hangs due to extreme register pressure.
+            # The combination of num_warps=1, high waves_per_eu, and large BLOCK_K creates
+            # conflicting requirements that can cause the compiler to hang indefinitely.
+            if conf.num_warps == 1 and waves_per_eu >= 4 and conf.block_k >= 256:
+                continue
+
             if key not in used and (
                 max_mm_configs is None or len(used) < max_mm_configs
             ):
