@@ -89,15 +89,13 @@ class _ProfilerResult:
     def trace_start_ns(self) -> int: ...
 
 class SavedTensor:
-    def __init__(
-        self,
-        tensor: torch.Tensor,
-        *,
-        is_output: bool,
-        is_inplace_on_view: bool = False,
-        _INTERNAL_USE_ONLY: bool = False,
-    ) -> None: ...
     def unpack(self) -> torch.Tensor: ...
+
+def _make_saved_tensor(
+    tensor: torch.Tensor,
+    is_output: bool,
+    is_inplace_on_view: bool = False,
+) -> SavedTensor: ...
 
 def _enable_profiler(
     config: ProfilerConfig,
