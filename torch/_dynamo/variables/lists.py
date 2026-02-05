@@ -398,7 +398,11 @@ class RangeVariable(BaseListVariable):
         super().__init__([start, stop, step], **kwargs)
 
     def debug_repr(self) -> str:
-        return self.debug_repr_helper("range(", ")")
+        repr = f"range({self.start()}, {self.stop()}"
+        if self.step() != 1:
+            repr += f", {self.step()}"
+        repr += ")"
+        return repr
 
     def python_type(self) -> type:
         return range
