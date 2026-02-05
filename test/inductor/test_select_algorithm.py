@@ -69,7 +69,7 @@ def patches(fn):
     def wrapped(*args, **kwargs):
         counters.clear()
         torch.manual_seed(12345)
-        assert not torch.backends.cuda.matmul.allow_tf32, (
+        assert torch.backends.cuda.matmul.fp32_precision != "tf32", (
             "correctness testing is allergic to tf32"
         )
         return fn(*args, **kwargs)
