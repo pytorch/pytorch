@@ -7825,7 +7825,9 @@ class AOTInductorTestsTemplate:
         with config.patch("triton.autotune_with_sample_inputs", True):
             AOTIRunnerUtil.run(Model(), example_inputs)
 
-    @unittest.skipIf(IS_FBCODE, "Subprocess spawning doesn't work in fbcode Buck environment")
+    @unittest.skipIf(
+        IS_FBCODE, "Subprocess spawning doesn't work in fbcode Buck environment"
+    )
     def test_aoti_load_package_in_fresh_subprocess(self):
         """
         Test that loading an AOTI package in a fresh subprocess works correctly.
