@@ -321,7 +321,7 @@ class InputObserverInfo:
         kwargs = {
             k: v
             for k, v in kwargs.items()
-            if v is not None and not isinstance(v, (int, float, bool))
+            if v is not None and not isinstance(v, (int, float, bool, str))
         }
 
         # kwargs may come in a different order each time.
