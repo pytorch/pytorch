@@ -3378,7 +3378,7 @@ from torch._inductor.runtime.runtime_utils import pallas_partial_reduce, torch_d
                         )
                     else:
                         code.writeline(
-                            f"{alias_name}_jax = jax.dlpack.from_dlpack({alias_name}.detach())"
+                            f"{alias_name}_jax = jax.dlpack.from_dlpack({alias_name}.detach().contiguous())"
                         )
             code.writeline("# Convert Torch -> JAX for in-place tensors")
             for ptr in pointer_tail:
@@ -3389,7 +3389,7 @@ from torch._inductor.runtime.runtime_utils import pallas_partial_reduce, torch_d
                         )
                     else:
                         code.writeline(
-                            f"{ptr}_jax = jax.dlpack.from_dlpack({ptr}.detach())"
+                            f"{ptr}_jax = jax.dlpack.from_dlpack({ptr}.detach().contiguous())"
                         )
             code.writeline("# Convert Torch -> JAX for inputs")
             for ptr in pointer_tail:
