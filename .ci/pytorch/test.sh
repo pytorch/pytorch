@@ -1820,12 +1820,7 @@ test_operator_microbenchmark() {
   cd "${TEST_DIR}"/benchmarks/operator_benchmark
 
   # Extract test name from TEST_CONFIG (e.g., "operator_microbenchmark_test_matmul" -> "matmul")
-  # For local runs without TEST_CONFIG, run all tests
-  if [[ "${TEST_CONFIG:-}" == operator_microbenchmark_test_* ]]; then
-    TESTS_TO_RUN="${TEST_CONFIG#operator_microbenchmark_test_}"
-  else
-    TESTS_TO_RUN="matmul mm addmm bmm conv optimizer activation norm scaled_mm scaled_grouped_mm"
-  fi
+  TESTS_TO_RUN="${TEST_CONFIG#operator_microbenchmark_test_}"
 
   for test_module in ${TESTS_TO_RUN}; do
     $TASKSET python -m pt.${test_module}_test --tag-filter long \
