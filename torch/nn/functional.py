@@ -6748,7 +6748,6 @@ def scaled_mm(
     scale_recipe_a: ScalingType | list[ScalingType],
     scale_b: Tensor | list[Tensor],
     scale_recipe_b: ScalingType | list[ScalingType],
-    *,
     swizzle_a: SwizzleType | list[SwizzleType] | None = None,
     swizzle_b: SwizzleType | list[SwizzleType] | None = None,
     bias: Optional[Tensor] = None,
