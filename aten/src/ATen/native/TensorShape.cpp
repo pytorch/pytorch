@@ -4943,17 +4943,6 @@ at::Tensor lift_fresh(const at::Tensor& self) {
   return self;
 }
 
-at::Tensor lift_fresh_copy(const at::Tensor& self) {
-  // Preserve pinned memory status when cloning
-  // This is important for CUDA graphs with non_blocking copies
-  if (self.is_pinned()) {
-    auto result = at::empty_like(self, self.options().pinned_memory(true));
-    result.copy_(self);
-    return result;
-  }
-  return self.clone();
-}
-
 // Autogen kernels for tensor list ops dont work on XLA. TODO(jakeszwe)
 void split_copy_Tensor_out(
     const at::Tensor& self,
