@@ -688,7 +688,7 @@ class InputObserver:
         return res
 
     def num_obs(self) -> int:
-        """Returns the number of stored set if inputs."""
+        """Returns the number of stored set of inputs."""
         return 0 if not self.info else len(self.info)
 
     @contextlib.contextmanager
