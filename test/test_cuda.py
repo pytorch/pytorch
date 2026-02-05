@@ -5780,6 +5780,11 @@ class TestMemPool(TestCase):
         torch.cuda.empty_cache()
         self.assertEqual(called_dummy_free.value, 321)
 
+        # reset dummy allocator indicator variables because they are global
+        called_dummy_free.value = 0
+        called_dummy_alloc.value = 0
+
+    @serialTest()
     def test_mempool_with_allocator(self):
         pool = torch.cuda.MemPool()
 
@@ -5851,6 +5856,11 @@ class TestMemPool(TestCase):
         # out tensor
         self.assertEqual(called_dummy_free.value, 321)
 
+        # reset dummy allocator indicator variables because they are global
+        called_dummy_free.value = 0
+        called_dummy_alloc.value = 0
+
+    @serialTest()
     def test_tensor_delete_after_allocator_delete(self):
         allocator, dummy_allocator = self.get_dummy_allocator(check_vars=True)
         pool = torch.cuda.MemPool(allocator.allocator())
@@ -5881,6 +5891,10 @@ class TestMemPool(TestCase):
         torch.cuda.empty_cache()
 
         self.assertEqual(called_dummy_free.value, 321)
+
+        # reset dummy allocator indicator variables because they are global
+        called_dummy_free.value = 0
+        called_dummy_alloc.value = 0
 
     @serialTest()
     def test_mempool_limited_memory_with_allocator(self):
