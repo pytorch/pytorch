@@ -1424,7 +1424,7 @@ def _canonicalize_profiler_events(events):
 
         events_with_traces.append(
             {
-                "event_name": event_name[:20],
+                "event_name": event_name[:30],
                 "node_name": node_name,
                 "stack_trace": stack_trace,
                 "start_time": event.get("ts", 0),

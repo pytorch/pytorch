@@ -73,7 +73,6 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     run_tests,
     skipIfTorchDynamo,
-    skipIfRocm,
 )
 from torch.testing._internal.jit_utils import JitTestCase
 
@@ -4322,7 +4321,6 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
         torch.fx.proxy.TracerBase.check_mutable_operations = orig_tracer_mutable_flag
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
-    @skipIfRocm
     @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)
     def test_profiler_stack_trace_augmentation(self):
         """
@@ -4361,21 +4359,34 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
 
         actual_traces = _enrich_profiler_traces(prof)
 
-        self.assertExpectedInline(actual_traces, """\
+        # Handle platform-specific event names
+        if torch.version.hip:
+            actual_traces = '\n'.join(
+                line for line in actual_traces.split('\n')
+                if 'hipGetDeviceProperties' not in line
+            )
+            kernel_event = "hipExtModuleLaunchKernel"
+            kernel_event_relu = "hipLaunchKernel"
+        else:
+            kernel_event = "cudaLaunchKernel"
+            kernel_event_relu = "cudaLaunchKernel"
+
+        expected = f"""\
 event=aten::t node=t stack_trace=x = self.linear1(x)
 event=aten::transpose node=t stack_trace=x = self.linear1(x)
 event=aten::as_strided node=t stack_trace=x = self.linear1(x)
 event=aten::addmm node=addmm stack_trace=x = self.linear1(x)
-event=cudaLaunchKernel node=addmm stack_trace=x = self.linear1(x)
+event={kernel_event} node=addmm stack_trace=x = self.linear1(x)
 event=aten::relu node=relu stack_trace=x = self.relu(x)
 event=aten::clamp_min node=relu stack_trace=x = self.relu(x)
-event=cudaLaunchKernel node=relu stack_trace=x = self.relu(x)
+event={kernel_event_relu} node=relu stack_trace=x = self.relu(x)
 event=aten::t node=t_1 stack_trace=x = self.linear2(x)
 event=aten::transpose node=t_1 stack_trace=x = self.linear2(x)
 event=aten::as_strided node=t_1 stack_trace=x = self.linear2(x)
 event=aten::addmm node=addmm_1 stack_trace=x = self.linear2(x)
-event=cudaLaunchKernel node=addmm_1 stack_trace=x = self.linear2(x)"""
-            )
+event={kernel_event} node=addmm_1 stack_trace=x = self.linear2(x)"""
+
+        self.assertExpectedInline(actual_traces, expected)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)
