@@ -153,7 +153,7 @@ def main():
         "bert-base-cased", num_labels=5
     )
     optimizer_cls = getattr(sys.modules["torch.optim"], args.optimizer)
-    if "capturable" in inspect.signature(optimizer_cls).parameters.keys():
+    if "capturable" in inspect.signature(optimizer_cls).parameters:
         optimizer = optimizer_cls(model.parameters(), lr=args.lr, capturable=True)
     else:
         optimizer = optimizer_cls(model.parameters(), lr=args.lr)

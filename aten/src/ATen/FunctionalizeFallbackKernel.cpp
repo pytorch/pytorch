@@ -16,14 +16,11 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_to_copy.h>
-#include <ATen/ops/to_native.h>
 #include <ATen/ops/lift.h>
 #include <ATen/ops/lift_fresh.h>
 #include <ATen/ops/lift_fresh_copy.h>
 #include <ATen/ops/resize.h>
-#include <ATen/ops/as_strided.h>
 #include <ATen/ops/as_strided_copy.h>
-#include <ATen/ops/empty_strided_native.h>
 #include <ATen/ops/_unsafe_view.h>
 
 #include <utility>

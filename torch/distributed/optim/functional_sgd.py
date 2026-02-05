@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional
 
 import torch
 import torch.optim._functional as F
@@ -56,7 +55,7 @@ class _FunctionalSGD:
         # param group as it's not a common use case.
         self.param_group = {"params": params}
 
-    def step_param(self, param: Tensor, grad: Optional[Tensor]):
+    def step_param(self, param: Tensor, grad: Tensor | None):
         """Similar to self.step, but operates on a single parameter and
         its gradient.
         """
@@ -67,7 +66,7 @@ class _FunctionalSGD:
         dampening = self.defaults["dampening"]
         lr = self.defaults["lr"]
         params = [param]
-        momentum_buffer_list: list[Optional[Tensor]] = []
+        momentum_buffer_list: list[Tensor | None] = []
         grads = []
 
         has_sparse_grad = False
@@ -106,11 +105,11 @@ class _FunctionalSGD:
         if momentum_buffer is not None:
             state["momentum_buffer"] = momentum_buffer
 
-    def step(self, gradients: list[Optional[Tensor]]):
+    def step(self, gradients: list[Tensor | None]):
         params = self.param_group["params"]
         params_with_grad = []
         grads = []
-        momentum_buffer_list: list[Optional[Tensor]] = []
+        momentum_buffer_list: list[Tensor | None] = []
         lr = self.defaults["lr"]
         weight_decay = self.defaults["weight_decay"]
         momentum = self.defaults["momentum"]

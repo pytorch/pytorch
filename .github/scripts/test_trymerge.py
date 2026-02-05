@@ -420,7 +420,8 @@ class TestTryMerge(TestCase):
         pr = GitHubPR("pytorch", "pytorch", 76123)
         approved_by = pr.get_approved_by()
         self.assertGreater(len(approved_by), 0)
-        assert pr._reviews is not None  # to pacify mypy
+        if pr._reviews is None:  # to pacify mypy
+            raise AssertionError("pr._reviews is None")
         self.assertGreater(len(pr._reviews), 100)
 
     def get_co_authors(self, *args: Any) -> None:
@@ -435,15 +436,13 @@ class TestTryMerge(TestCase):
         pr = GitHubPR("pytorch", "pytorch", 105260)
         conclusions = pr.get_checkrun_conclusions()
         self.assertEqual(len(conclusions), 221)
-        self.assertTrue(
-            "pull / linux-docs / build-docs-cpp-false" in conclusions.keys()
-        )
+        self.assertTrue("pull / linux-docs / build-docs-cpp-false" in conclusions)
 
     def test_cancelled_gets_ignored(self, *args: Any) -> None:
         """Tests that cancelled workflow does not override existing successful status"""
         pr = GitHubPR("pytorch", "pytorch", 110367)
         conclusions = pr.get_checkrun_conclusions()
-        lint_checks = [name for name in conclusions.keys() if "Lint" in name]
+        lint_checks = [name for name in conclusions if "Lint" in name]
         self.assertTrue(len(lint_checks) > 0)
         self.assertTrue(
             all(conclusions[name].status == "SUCCESS" for name in lint_checks)

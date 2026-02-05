@@ -1,6 +1,5 @@
 #include <torch/csrc/jit/passes/lower_tuples.h>
 
-#include <ATen/core/functional.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/constants.h>
@@ -28,7 +27,6 @@ std::unordered_set<Symbol> supported_ops = {
     prim::Return,
     prim::PythonOp,
     aten::format,
-    prim::Uninitialized,
     aten::__getitem__};
 
 // Flatten block inputs and insert a tuple construct in the block

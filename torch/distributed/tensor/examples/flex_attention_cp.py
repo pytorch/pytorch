@@ -5,7 +5,6 @@ torchrun --standalone --nnodes=1 --nproc-per-node=4 flex_attention_cp.py
 
 import os
 from functools import lru_cache
-from typing import Optional
 
 import torch
 import torch.distributed as dist
@@ -27,8 +26,8 @@ def get_device_type() -> str:
 @lru_cache
 def create_block_mask_cached(
     score_mod: _mask_mod_signature,
-    B: Optional[int],
-    H: Optional[int],
+    B: int | None,
+    H: int | None,
     M: int,
     N: int,
     device: str = "cuda",
