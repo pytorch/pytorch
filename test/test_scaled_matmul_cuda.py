@@ -26,6 +26,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_FP8_GROUPED_GEMM,
     PLATFORM_SUPPORTS_MX_GEMM,
+    PLATFORM_SUPPORTS_MXFP4_GEMM,
     PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM,
     SM100OrLater,
     SM120OrLater,
@@ -218,6 +219,7 @@ def scaled_mm_wrap(
     use_fast_accum=False,
     bias=None,
     wrap_v2=wrap,
+    out=None,
 ):
     if not wrap_v2:
         return torch._scaled_mm(
@@ -249,6 +251,7 @@ def scaled_mm_wrap(
             bias=bias,
             output_dtype=out_dtype,
             use_fast_accum=use_fast_accum,
+            out=out,
         )
         return out
 
@@ -700,6 +703,23 @@ class TestFP8Matmul(TestCase):
         out_fp8_s = scaled_mm_wrap(x, y, scale_a=scale_a, scale_b=scale_b)
         self.assertEqual(out_fp8, out_fp8_s)
 
+    def test_float8_out_argument(self, device) -> None:
+        if not _device_supports_scaled_mm_fp8(device):
+            raise unittest.SkipTest(f8_msg)
+        size = (16, 16)
+        x = torch.full(size, .5, device=device, dtype=e4m3_type)
+        # hipblaslt does not yet support mixed e4m3_type input
+        y_type = e4m3_type if torch.version.hip else e5m2_type
+        y = torch.full(size, .5, device=device, dtype=y_type).t()
+
+        out = torch.empty(size, device=device, dtype=torch.bfloat16)
+
+        scale_one = torch.tensor(1.0, device=device)
+        out_fp8 = scaled_mm_wrap(x, y, scale_a=scale_one, scale_b=scale_one, out=out)
+
+        if out_fp8.data_ptr() != out.data_ptr():
+            raise AssertionError("out_fp8 and out must have the same data pointers")
+
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
     @parametrize("G", [1, 4, 16])
@@ -710,8 +730,11 @@ class TestFP8Matmul(TestCase):
     def test_mxfp8_nvfp4_scaled_grouped_mm_2d_2d(self, G, M, N, K, format):
         torch.manual_seed(42)
 
-        if format == "mxfp4" and SM120OrLater:
+        if format == "mxfp4" and SM120OrLater and not PLATFORM_SUPPORTS_MXFP4_GEMM:
             raise unittest.SkipTest("MXFP4 on CUDA only supported on B200/B300")
+
+        if format == "mxfp4" and not PLATFORM_SUPPORTS_MXFP4_GEMM:
+            raise unittest.SkipTest("MXFP4 not supported on this platform - build with MSLK support")
 
         total_K = K  # Alias for clarity, communicating this consists of several groups along this dim
         input_group_end_offsets = generate_jagged_offs(
@@ -779,6 +802,8 @@ class TestFP8Matmul(TestCase):
 
         if format == "mxfp4" and SM120OrLater:
             raise unittest.SkipTest("MXFP4 on CUDA only supported on B200/B300")
+        if format == "mxfp4" and not PLATFORM_SUPPORTS_MXFP4_GEMM:
+            raise unittest.SkipTest("MXFP4 not supported on this platform - build with MSLK support")
 
         # Simulate 2d-3d grouped gemm `out = input @ weight.t()`
         # 2D inputs with groups along M, 3D weights.
@@ -1874,7 +1899,7 @@ class TestFP8Matmul(TestCase):
             raise unittest.SkipTest("nvfp4 not supported on ROCm, skipping")
         if (recipe == "nvfp4" or recipe == "mxfp4") and fast_accum:
             raise unittest.SkipTest("fast_accum not supported in nvfp4/mxfp4 cublas gemm, skipping")
-        if recipe == "mxfp4" and SM120OrLater:
+        if (recipe == "mxfp4" and SM120OrLater) or not PLATFORM_SUPPORTS_MXFP4_GEMM:
             raise unittest.SkipTest("MXFP4 on CUDA only supported on B200/B300")
 
         device = "cuda"

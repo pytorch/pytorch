@@ -174,7 +174,16 @@ def evaluate_platform_supports_mxfp8_grouped_gemm():
         return built_with_mslk and IS_SM100
     return False
 
+def evaluate_platform_supports_mxfp4_gemm():
+    if torch.cuda.is_available():
+        built_with_mslk = "USE_MSLK" in torch.__config__.show()
+        return torch.version.hip or built_with_mslk
+
+    return False
+
+
 PLATFORM_SUPPORTS_MX_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_mx_gemm())
+PLATFORM_SUPPORTS_MXFP4_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_mxfp4_gemm())
 PLATFORM_SUPPORTS_FP8: bool = LazyVal(lambda: evaluate_platform_supports_fp8())
 PLATFORM_SUPPORTS_FP8_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_fp8_grouped_gemm())
 PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_mxfp8_grouped_gemm())
