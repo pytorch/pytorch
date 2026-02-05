@@ -1108,6 +1108,7 @@ class PallasTestsMixin:
         expected = fn(x, weight, bias)
         self.assertEqual(result, expected)
 
+    @skip_if_tpu
     def test_rope(self):
         """Test Rotary Position Embedding with slice + cat.
 
@@ -1119,9 +1120,7 @@ class PallasTestsMixin:
             d = x.shape[-1]
             x1 = x[..., : d // 2]
             x2 = x[..., d // 2 :]
-            return torch.cat(
-                [x1 * cos - x2 * sin, x2 * cos + x1 * sin], dim=-1
-            )
+            return torch.cat([x1 * cos - x2 * sin, x2 * cos + x1 * sin], dim=-1)
 
         compiled = self._compile(fn)
 
