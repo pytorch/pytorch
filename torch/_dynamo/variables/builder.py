@@ -306,7 +306,7 @@ except ModuleNotFoundError:
     np: ModuleType = None  # type: ignore[assignment]
 
 try:
-    import google
+    import google.protobuf
 except ModuleNotFoundError:
     google = None
 
