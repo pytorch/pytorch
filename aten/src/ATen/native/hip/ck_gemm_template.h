@@ -14,7 +14,7 @@
 #include <ATen/hip/impl/HIPStreamMasqueradingAsCUDA.h>
 #include <ATen/native/hip/ck_gemm.h>
 #include <ATen/native/hip/ck_types.h>
-
+#include <c10/util/Exception.h>
 #include <ck/ck.hpp>
 #include <ck/tensor_operation/gpu/device/gemm_specialization.hpp>
 #include <ck/tensor_operation/gpu/device/tensor_layout.hpp>
@@ -225,12 +225,7 @@ void gemm_impl(CUDABLAS_GEMM_ARGTYPES(Dtype)) {
      c_element_op);
 
 
- if(!gemm.IsSupportedArgument(argument))
- {
-        throw std::runtime_error(
-            "wrong! device_gemm with the specified compilation parameters does "
-            "not support this GEMM problem");
- }
+ TORCH_CHECK(gemm.IsSupportedArgument(argument), "wrong! device_gemm with the specified compilation parameters does not support this GEMM problem");
 
 
  auto stream = at::cuda::getCurrentHIPStream().stream();
@@ -384,10 +379,7 @@ void gemm_impl_wmma(CUDABLAS_GEMM_ARGTYPES(Dtype)) {
  {
         printf("error shape = %ld %ld %ld TRANSA=%d TRANSB=%d \n",
                         n, m, k,TRANSA, TRANSB);
-
-        throw std::runtime_error(
-            "wrong! device_gemm with the specified compilation parameters does "
-            "not support this GEMM problem");
+        TORCH_CHECK(false, "wrong! device_gemm with the specified compilation parameters does not support this GEMM problem");
  }
 
 

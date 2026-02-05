@@ -36,7 +36,6 @@ def _list_with_default(out_size: list[int], defaults: list[int]) -> list[int]:
     import torch
 
     if isinstance(out_size, (int, torch.SymInt)):
-        # pyrefly: ignore [bad-return]
         return out_size
     if len(defaults) <= len(out_size):
         raise ValueError(f"Input dimension should be at least {len(out_size) + 1}")

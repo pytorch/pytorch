@@ -3,6 +3,8 @@
 #include <c10/core/Allocator.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 
+#include <memory>
+
 namespace at::cuda {
 
 // Keep BC only
@@ -17,9 +19,11 @@ using c10::MempoolId_t;
 // system allocator such as ncclMemAlloc.
 struct TORCH_CUDA_CPP_API MemPool {
   MemPool(
-      c10::cuda::CUDACachingAllocator::CUDAAllocator* allocator = nullptr,
+      std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator> allocator =
+          nullptr,
       bool is_user_created = true,
-      bool use_on_oom = false);
+      bool use_on_oom = false,
+      bool no_split = false);
   MemPool(const MemPool&) = delete;
   MemPool(MemPool&&) = default;
   MemPool& operator=(const MemPool&) = delete;
@@ -27,7 +31,6 @@ struct TORCH_CUDA_CPP_API MemPool {
   ~MemPool();
 
   MempoolId_t id();
-  c10::cuda::CUDACachingAllocator::CUDAAllocator* allocator();
   int use_count();
   c10::DeviceIndex device();
   static MempoolId_t graph_pool_handle(bool is_user_created = true);
@@ -35,7 +38,6 @@ struct TORCH_CUDA_CPP_API MemPool {
  private:
   static std::atomic<CaptureId_t> uid_;
   static std::atomic<CaptureId_t> uuid_;
-  c10::cuda::CUDACachingAllocator::CUDAAllocator* allocator_;
   bool is_user_created_;
   MempoolId_t id_;
   c10::DeviceIndex device_;

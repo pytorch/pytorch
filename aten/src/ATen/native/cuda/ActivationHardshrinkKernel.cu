@@ -5,6 +5,8 @@
 
 #include <cmath>
 
+#include <thrust/tuple.h>
+
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/core/TensorBase.h>

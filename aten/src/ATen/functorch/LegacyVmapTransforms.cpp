@@ -7,7 +7,6 @@
 #include <ATen/functorch/LegacyVmapTransforms.h>
 #include <ATen/functorch/DynamicLayer.h>
 
-#include <ATen/ATen.h>
 #include <c10/util/irange.h>
 
 namespace at::functorch {

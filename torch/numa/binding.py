@@ -1,3 +1,23 @@
+"""
+In NUMA (Non-Uniform Memory Access) systems, accessing memory on remote NUMA
+nodes incurs additional latency. PyTorch provides NUMA binding utilities to
+promote memory locality by binding worker processes to CPUs near their assigned GPUs.
+
+In practice, NUMA binding typically results in 1-10% overall performance improvements,
+but some workloads may obtain much greater benefits or none at all.
+
+To enable NUMA binding, use the ``--numa-binding`` flag with :ref:`torchrun <launcher-api>`, e.g.:
+
+.. code-block:: bash
+
+    torchrun --numa-binding=node --nproc_per_node=8 train.py
+
+Alternatively, pass :class:`NumaOptions` to ``LaunchConfig``
+when using ``elastic_launch``.
+
+See :class:`AffinityMode` for available binding modes.
+"""
+
 import os
 import shutil
 import traceback
@@ -15,8 +35,6 @@ from torch._utils_internal import signpost_event
 
 __all__ = [
     "AffinityMode",
-    "maybe_wrap_command_args_with_numa_binding",
-    "maybe_wrap_with_numa_binding",
     "NumaOptions",
 ]
 
@@ -24,32 +42,66 @@ logger = getLogger(__name__)
 
 
 class AffinityMode(str, Enum):
+    NODE = "node"
     """
-    See behavior description for each affinity mode
-    in torch.distributed.run.
+    Each worker process and its threads will be bound to all the CPUs
+    on the NUMA node containing the GPU whose local index equals the worker's local rank.
+    If in doubt, use this option rather than the others.
+
+    **Ex.:** If GPU 3 (i.e. ``torch.device("cuda:3")``) lives on NUMA node 1, then the worker
+    whose local rank is 3 will only be able to run on the CPUs of NUMA node 1.
     """
 
-    NODE = "node"
     SOCKET = "socket"
+    """
+    Each worker process and its threads will be bound to all the CPUs on all the NUMA nodes of the
+    socket containing the GPU whose local index equals the worker's local rank.
+
+    **Ex.:** If socket 0 contains GPU 3 and NUMA nodes 0-1, then the worker whose
+    local rank is 3 will be bound to the CPUs of NUMA nodes 0-1.
+
+    For cases where there is only one NUMA node per socket anyway, this is equivalent to NODE.
+    """
+
     EXCLUSIVE = "exclusive"
+    """
+    Each worker process and its threads will be bound to an exclusive subset of CPUs
+    on the NUMA node containing the GPU whose local index equals the worker's local rank.
+    The CPUs on the NUMA node are divided evenly among all GPUs on that node, so no two
+    workers share the same CPU cores.
+
+    **Ex.:** If NUMA node 1 has 16 physical cores and GPUs 2 and 3, then the worker whose
+    local rank is 2 will be bound to cores 0-7, and the worker whose local rank is 3 will
+    be bound to cores 8-15.
+    """
+
     CORE_COMPLEX = "core-complex"
+    """
+    Each worker process and its threads will be bound to a single core complex (a group of cores
+    sharing the same L3 cache) on the NUMA node containing the GPU whose local index equals
+    the worker's local rank. Each worker is bound to a different core complex when possible.
+
+    **Ex.:** If NUMA node 1 has two core complexes (cores 0-7 sharing one L3 cache, cores 8-15
+    sharing another) and GPUs 2 and 3, then the worker whose local rank is 2 will be bound to
+    cores 0-7, and the worker whose local rank is 3 will be bound to cores 8-15.
+    """
 
 
 @dataclass(frozen=True)
 class NumaOptions:
     affinity_mode: AffinityMode
 
-    """
-    If true, we will fall back to using the original command/entrypoint if we fail to compute
-    NUMA bindings.
-
-    You should avoid using this option! It is only intended as a safety mechanism for facilitating
-    mass rollouts of numa binding.
-    """
     should_fall_back_if_binding_fails: bool = False
+    """
+    If ``True``, we will silence any exceptions that occur during NUMA binding itself
+    rather than raising them.
+
+    There are no expected exceptions, so avoid using this option. Its purpose is simply
+    to mitigate crash risk while conducting mass rollouts of NUMA binding.
+    """
 
 
-def maybe_wrap_command_args_with_numa_binding(
+def _maybe_wrap_command_args_with_numa_binding(
     command_args: tuple[str, ...],
     *,
     gpu_index: int,
@@ -111,7 +163,7 @@ _TParams = ParamSpec("_TParams")
 _TReturn = TypeVar("_TReturn")
 
 
-def maybe_wrap_with_numa_binding(
+def _maybe_wrap_with_numa_binding(
     func: Callable[_TParams, _TReturn],
     *,
     gpu_index: int,

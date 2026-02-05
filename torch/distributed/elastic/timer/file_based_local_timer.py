@@ -14,7 +14,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable
-from typing import Optional, TypeVar
+from typing import TypeVar
 from typing_extensions import ParamSpec
 
 from torch.distributed.elastic.timer.api import TimerClient, TimerRequest
@@ -68,24 +68,26 @@ class FileTimerRequest(TimerRequest):
     process.
     """
 
-    __slots__ = ["version", "worker_pid", "scope_id", "expiration_time", "signal"]
+    __slots__ = ["version", "signal"]
 
     def __init__(
         self, worker_pid: int, scope_id: str, expiration_time: float, signal: int = 0
     ) -> None:
+        super().__init__(
+            worker_id=worker_pid, scope_id=scope_id, expiration_time=expiration_time
+        )
         self.version = 1
-        self.worker_pid = worker_pid
-        self.scope_id = scope_id
-        self.expiration_time = expiration_time
         self.signal = signal
+
+    @property
+    def worker_pid(self) -> int:
+        return self.worker_id
 
     def __eq__(self, other) -> bool:
         if isinstance(other, FileTimerRequest):
             return (
-                self.version == other.version
-                and self.worker_pid == other.worker_pid
-                and self.scope_id == other.scope_id
-                and self.expiration_time == other.expiration_time
+                super().__eq__(other)
+                and self.version == other.version
                 and self.signal == other.signal
             )
         return False
@@ -131,7 +133,7 @@ class FileTimerClient(TimerClient):
         self.signal = signal
 
     @_retry(max_retries=10, sleep_time=0.1)
-    def _open_non_blocking(self) -> Optional[io.TextIOWrapper]:
+    def _open_non_blocking(self) -> io.TextIOWrapper | None:
         # The server may have crashed or may haven't started yet.
         # In such case, calling open() in blocking model blocks the client.
         # To avoid such issue, open it in non-blocking mode, and an OSError will
@@ -200,7 +202,7 @@ class FileTimerServer:
         run_id: str,
         max_interval: float = 10,
         daemon: bool = True,
-        log_event: Optional[Callable[[str, Optional[FileTimerRequest]], None]] = None,
+        log_event: Callable[[str, FileTimerRequest | None], None] | None = None,
     ) -> None:
         self._file_path = file_path
         self._run_id = run_id
@@ -208,7 +210,7 @@ class FileTimerServer:
         self._daemon = daemon
         self._timers: dict[tuple[int, str], FileTimerRequest] = {}
         self._stop_signaled = False
-        self._watchdog_thread: Optional[threading.Thread] = None
+        self._watchdog_thread: threading.Thread | None = None
 
         self._is_client_started = False
         if os.path.exists(self._file_path):

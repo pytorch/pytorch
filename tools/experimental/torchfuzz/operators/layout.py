@@ -1,7 +1,6 @@
 """Tensor layout operator implementations."""
 
 import random
-from typing import Optional
 
 from torchfuzz.operators.base import Operator
 from torchfuzz.tensor_fuzzer import fuzz_tensor_size, Spec, TensorSpec
@@ -23,7 +22,7 @@ class ViewOperator(LayoutOperatorBase):
         super().__init__("view")
 
     @property
-    def torch_op_name(self) -> Optional[str]:
+    def torch_op_name(self) -> str | None:
         """Return the torch operation name."""
         return "torch.Tensor.view"
 
@@ -104,7 +103,7 @@ class ReshapeOperator(LayoutOperatorBase):
         super().__init__("reshape")
 
     @property
-    def torch_op_name(self) -> Optional[str]:
+    def torch_op_name(self) -> str | None:
         """Return the torch operation name."""
         return "torch.reshape"
 
@@ -179,7 +178,7 @@ class FlattenOperator(LayoutOperatorBase):
         super().__init__("flatten")
 
     @property
-    def torch_op_name(self) -> Optional[str]:
+    def torch_op_name(self) -> str | None:
         """Return the torch operation name."""
         return "torch.flatten"
 
@@ -271,7 +270,7 @@ class SqueezeOperator(LayoutOperatorBase):
         super().__init__("squeeze")
 
     @property
-    def torch_op_name(self) -> Optional[str]:
+    def torch_op_name(self) -> str | None:
         """Return the torch operation name."""
         return "torch.squeeze"
 
@@ -323,7 +322,7 @@ class UnsqueezeOperator(LayoutOperatorBase):
         super().__init__("unsqueeze")
 
     @property
-    def torch_op_name(self) -> Optional[str]:
+    def torch_op_name(self) -> str | None:
         """Return the torch operation name."""
         return "torch.unsqueeze"
 
@@ -410,7 +409,7 @@ class SplitOperator(LayoutOperatorBase):
         super().__init__("split")
 
     @property
-    def torch_op_name(self) -> Optional[str]:
+    def torch_op_name(self) -> str | None:
         """Return the torch operation name."""
         return "torch.split"
 
@@ -490,7 +489,7 @@ class ExpandOperator(LayoutOperatorBase):
         super().__init__("expand")
 
     @property
-    def torch_op_name(self) -> Optional[str]:
+    def torch_op_name(self) -> str | None:
         """Return the torch operation name."""
         return "torch.expand"
 
@@ -559,7 +558,7 @@ class CatOperator(LayoutOperatorBase):
         super().__init__("cat")
 
     @property
-    def torch_op_name(self) -> Optional[str]:
+    def torch_op_name(self) -> str | None:
         """Return the torch operation name."""
         return "torch.cat"
 
@@ -664,7 +663,7 @@ class StackOperator(LayoutOperatorBase):
         super().__init__("stack")
 
     @property
-    def torch_op_name(self) -> Optional[str]:
+    def torch_op_name(self) -> str | None:
         """Return the torch operation name."""
         return "torch.stack"
 
@@ -754,7 +753,7 @@ class ChunkOperator(LayoutOperatorBase):
         super().__init__("chunk")
 
     @property
-    def torch_op_name(self) -> Optional[str]:
+    def torch_op_name(self) -> str | None:
         """Return the torch operation name."""
         return "torch.chunk"
 
