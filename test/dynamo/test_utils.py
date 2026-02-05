@@ -55,7 +55,7 @@ class TestUtils(TestCase):
 
     def test_larger_multiplier_for_even_smaller_tensor(self):
         """
-        Tesnor numel <=10
+        Tensor numel <=10
         """
         fp64_ref = torch.DoubleTensor([0.0])
         a = torch.Tensor([1.0])
@@ -227,6 +227,11 @@ class TestDynamoTimed(TestCase):
     Test utilities surrounding dynamo_timed.
     """
 
+    def setUp(self):
+        super().setUp()
+        if hasattr(torch._dynamo, "reset_recompile_user_contexts"):
+            torch._dynamo.reset_recompile_user_contexts()
+
     def run_forward_backward(self):
         model = torch.compile(TestModel())
         x = torch.rand([3], requires_grad=True)
@@ -361,6 +366,7 @@ class TestDynamoTimed(TestCase):
         {
             "bundle_triton_into_fx_graph_cache": False,
             "bundled_autotune_remote_cache": False,
+            "force_disable_caches": True,
         }
     )
     # We can't easily test that timing is actually accurate. Mock time to always
@@ -385,12 +391,20 @@ class TestDynamoTimed(TestCase):
             self.run_forward_backward()
             compilation_events = [arg[0][0] for arg in log_event.call_args_list]
 
+        def filter_expected(s: str) -> str:
+            d = eval(s)
+            if not dynamo_config.run_gc_after_compile:
+                d.pop("gc", None)
+                if "gc_time_us" in d:
+                    d["gc_time_us"] = None
+            return pprint.pformat(d)
+
         # Validate utils.compile_times(). Unfortunately, we can't test the output
         # reliably because it depends on whether 'tabulate' is installed. So we'll
         # directly inspect the dict it prints instead:
         self.assertExpectedInline(
             pprint.pformat(utils.compilation_time_metrics),
-            (
+            filter_expected(
                 """\
 {'GraphLowering.codegen': [0.0, 0.0],
  'GraphLowering.compile_to_fn': [0.0, 0.0],
@@ -409,6 +423,7 @@ class TestDynamoTimed(TestCase):
  'additional_fake_tensor_prop': [0.0, 0.0],
  'aot_collect_metadata': [0.0],
  'aot_trace_joint_graph': [0.0],
+ 'async_compile.wait': [0.0, 0.0],
  'backward._backward_impl': [0.0],
  'build_guards': [0.0],
  'bytecode_tracing': [0.0],
@@ -420,7 +435,29 @@ class TestDynamoTimed(TestCase):
  'create_aot_dispatcher_function': [0.0],
  'fx_codegen_and_compile': [0.0, 0.0],
  'gc': [0.0],
- 'min_cut_rematerialization_partition': [0.0]}"""
+ 'insert_deferred_runtime_asserts': [0.0],
+ 'min_cut_rematerialization_partition': [0.0],
+ 'pass.joint_graph_passes.constant_fold_uniform_value': [0.0],
+ 'pass.joint_graph_passes.pass_pattern_0': [0.0],
+ 'pass.joint_graph_passes.pass_pattern_1': [0.0],
+ 'pass.joint_graph_passes.remove_noop_ops': [0.0],
+ 'pass.post_grad_passes.decompose_auto_functionalized': [0.0, 0.0],
+ 'pass.post_grad_passes.decompose_map_to_while_loop': [0.0, 0.0],
+ 'pass.post_grad_passes.decompose_scan_to_while_loop': [0.0, 0.0],
+ 'pass.post_grad_passes.decompose_triton_kernel_wrapper_functional': [0.0, 0.0],
+ 'pass.post_grad_passes.move_constructors_to_cuda': [0.0, 0.0],
+ 'pass.post_grad_passes.pass_pattern_0': [0.0, 0.0],
+ 'pass.post_grad_passes.pass_pattern_1': [0.0, 0.0],
+ 'pass.post_grad_passes.pass_pattern_2': [0.0, 0.0],
+ 'pass.post_grad_passes.post_grad_custom_pre_pass': [0.0, 0.0],
+ 'pass.post_grad_passes.reinplace_inplaceable_ops': [0.0, 0.0],
+ 'pass.post_grad_passes.remove_assert_ops': [0.0, 0.0],
+ 'pass.post_grad_passes.remove_noop_ops': [0.0, 0.0],
+ 'pass.post_grad_passes.remove_profiler_ops': [0.0, 0.0],
+ 'pass.post_grad_passes.stable_sort': [0.0, 0.0],
+ 'pass.pre_grad_passes.apply_gumbel_max_trick_pass': [0.0],
+ 'pass.pre_grad_passes.efficient_conv_bn_eval_pass': [0.0],
+ 'pass.pre_grad_passes.group_batch_fusion_passes': [0.0]}"""
                 if _IS_WINDOWS
                 else """\
 {'GraphLowering.codegen': [0.0, 0.0],
@@ -452,7 +489,29 @@ class TestDynamoTimed(TestCase):
  'create_aot_dispatcher_function': [0.0],
  'fx_codegen_and_compile': [0.0, 0.0],
  'gc': [0.0],
- 'min_cut_rematerialization_partition': [0.0]}"""
+ 'insert_deferred_runtime_asserts': [0.0],
+ 'min_cut_rematerialization_partition': [0.0],
+ 'pass.joint_graph_passes.constant_fold_uniform_value': [0.0],
+ 'pass.joint_graph_passes.pass_pattern_0': [0.0],
+ 'pass.joint_graph_passes.pass_pattern_1': [0.0],
+ 'pass.joint_graph_passes.remove_noop_ops': [0.0],
+ 'pass.post_grad_passes.decompose_auto_functionalized': [0.0, 0.0],
+ 'pass.post_grad_passes.decompose_map_to_while_loop': [0.0, 0.0],
+ 'pass.post_grad_passes.decompose_scan_to_while_loop': [0.0, 0.0],
+ 'pass.post_grad_passes.decompose_triton_kernel_wrapper_functional': [0.0, 0.0],
+ 'pass.post_grad_passes.move_constructors_to_cuda': [0.0, 0.0],
+ 'pass.post_grad_passes.pass_pattern_0': [0.0, 0.0],
+ 'pass.post_grad_passes.pass_pattern_1': [0.0, 0.0],
+ 'pass.post_grad_passes.pass_pattern_2': [0.0, 0.0],
+ 'pass.post_grad_passes.post_grad_custom_pre_pass': [0.0, 0.0],
+ 'pass.post_grad_passes.reinplace_inplaceable_ops': [0.0, 0.0],
+ 'pass.post_grad_passes.remove_assert_ops': [0.0, 0.0],
+ 'pass.post_grad_passes.remove_noop_ops': [0.0, 0.0],
+ 'pass.post_grad_passes.remove_profiler_ops': [0.0, 0.0],
+ 'pass.post_grad_passes.stable_sort': [0.0, 0.0],
+ 'pass.pre_grad_passes.apply_gumbel_max_trick_pass': [0.0],
+ 'pass.pre_grad_passes.efficient_conv_bn_eval_pass': [0.0],
+ 'pass.pre_grad_passes.group_batch_fusion_passes': [0.0]}"""
             ),  # noqa: B950
         )
 
@@ -461,7 +520,7 @@ class TestDynamoTimed(TestCase):
         time_spent = utils.calculate_time_spent()
         self.assertExpectedInline(
             pprint.pformat(time_spent),
-            (
+            filter_expected(
                 """\
 {'_recursive_joint_graph_passes': 0.0,
  '_recursive_post_grad_passes': 0.0,
@@ -524,10 +583,14 @@ class TestDynamoTimed(TestCase):
         del raw["guard_latency_us"]
         self.assertExpectedInline(
             pprint.pformat(raw),
-            (
+            filter_expected(
                 """\
 {'accumulated_cache_size': 0,
  'aot_autograd_cumulative_compile_time_us': 0,
+ 'aotautograd_local_cache_hit_count': 0,
+ 'aotautograd_local_cache_miss_count': 0,
+ 'aotautograd_remote_cache_hit_count': 0,
+ 'aotautograd_remote_cache_miss_count': 0,
  'backend_compile_time_s': 0.0,
  'backward_cumulative_compile_time_us': None,
  'cache_size': 0,
@@ -568,10 +631,12 @@ class TestDynamoTimed(TestCase):
  'inductor_compile_time_s': 0.0,
  'inductor_config': None,
  'inductor_cumulative_compile_time_us': 0,
+ 'inductor_fx_local_cache_hit_count': 0,
+ 'inductor_fx_local_cache_miss_count': 0,
  'inductor_fx_remote_cache_backend_type': None,
- 'inductor_fx_remote_cache_hit_count': None,
+ 'inductor_fx_remote_cache_hit_count': 0,
  'inductor_fx_remote_cache_hit_keys': None,
- 'inductor_fx_remote_cache_miss_count': None,
+ 'inductor_fx_remote_cache_miss_count': 0,
  'inductor_fx_remote_cache_miss_keys': None,
  'inline_inbuilt_nn_modules_candidate': False,
  'is_forward': True,
@@ -615,6 +680,10 @@ class TestDynamoTimed(TestCase):
                 else """\
 {'accumulated_cache_size': 0,
  'aot_autograd_cumulative_compile_time_us': 0,
+ 'aotautograd_local_cache_hit_count': 0,
+ 'aotautograd_local_cache_miss_count': 0,
+ 'aotautograd_remote_cache_hit_count': 0,
+ 'aotautograd_remote_cache_miss_count': 0,
  'backend_compile_time_s': 0.0,
  'backward_cumulative_compile_time_us': None,
  'cache_size': 0,
@@ -655,10 +724,12 @@ class TestDynamoTimed(TestCase):
  'inductor_compile_time_s': 0.0,
  'inductor_config': None,
  'inductor_cumulative_compile_time_us': 0,
+ 'inductor_fx_local_cache_hit_count': 0,
+ 'inductor_fx_local_cache_miss_count': 0,
  'inductor_fx_remote_cache_backend_type': None,
- 'inductor_fx_remote_cache_hit_count': None,
+ 'inductor_fx_remote_cache_hit_count': 0,
  'inductor_fx_remote_cache_hit_keys': None,
- 'inductor_fx_remote_cache_miss_count': None,
+ 'inductor_fx_remote_cache_miss_count': 0,
  'inductor_fx_remote_cache_miss_keys': None,
  'inline_inbuilt_nn_modules_candidate': False,
  'is_forward': True,
@@ -716,6 +787,10 @@ class TestDynamoTimed(TestCase):
                 """\
 {'accumulated_cache_size': None,
  'aot_autograd_cumulative_compile_time_us': None,
+ 'aotautograd_local_cache_hit_count': 0,
+ 'aotautograd_local_cache_miss_count': 0,
+ 'aotautograd_remote_cache_hit_count': 0,
+ 'aotautograd_remote_cache_miss_count': 0,
  'backend_compile_time_s': None,
  'backward_cumulative_compile_time_us': 0,
  'cache_size': None,
@@ -756,10 +831,12 @@ class TestDynamoTimed(TestCase):
  'inductor_compile_time_s': 0.0,
  'inductor_config': None,
  'inductor_cumulative_compile_time_us': 0,
+ 'inductor_fx_local_cache_hit_count': 0,
+ 'inductor_fx_local_cache_miss_count': 0,
  'inductor_fx_remote_cache_backend_type': None,
- 'inductor_fx_remote_cache_hit_count': None,
+ 'inductor_fx_remote_cache_hit_count': 0,
  'inductor_fx_remote_cache_hit_keys': None,
- 'inductor_fx_remote_cache_miss_count': None,
+ 'inductor_fx_remote_cache_miss_count': 0,
  'inductor_fx_remote_cache_miss_keys': None,
  'inline_inbuilt_nn_modules_candidate': False,
  'is_forward': False,
@@ -803,6 +880,10 @@ class TestDynamoTimed(TestCase):
                 else """\
 {'accumulated_cache_size': None,
  'aot_autograd_cumulative_compile_time_us': None,
+ 'aotautograd_local_cache_hit_count': 0,
+ 'aotautograd_local_cache_miss_count': 0,
+ 'aotautograd_remote_cache_hit_count': 0,
+ 'aotautograd_remote_cache_miss_count': 0,
  'backend_compile_time_s': None,
  'backward_cumulative_compile_time_us': 0,
  'cache_size': None,
@@ -843,10 +924,12 @@ class TestDynamoTimed(TestCase):
  'inductor_compile_time_s': 0.0,
  'inductor_config': None,
  'inductor_cumulative_compile_time_us': 0,
+ 'inductor_fx_local_cache_hit_count': 0,
+ 'inductor_fx_local_cache_miss_count': 0,
  'inductor_fx_remote_cache_backend_type': None,
- 'inductor_fx_remote_cache_hit_count': None,
+ 'inductor_fx_remote_cache_hit_count': 0,
  'inductor_fx_remote_cache_hit_keys': None,
- 'inductor_fx_remote_cache_miss_count': None,
+ 'inductor_fx_remote_cache_miss_count': 0,
  'inductor_fx_remote_cache_miss_keys': None,
  'inline_inbuilt_nn_modules_candidate': False,
  'is_forward': False,

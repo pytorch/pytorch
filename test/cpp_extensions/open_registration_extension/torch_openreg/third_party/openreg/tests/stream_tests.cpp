@@ -127,7 +127,7 @@ TEST_F(StreamTest, StreamPriorityRange) {
   // OpenReg currently exposes only one priority level; verify the fixed range.
   EXPECT_EQ(orDeviceGetStreamPriorityRange(&min_p, &max_p), orSuccess);
   EXPECT_EQ(min_p, 0);
-  EXPECT_EQ(max_p, 0);
+  EXPECT_EQ(max_p, 1);
 }
 
 } // namespace

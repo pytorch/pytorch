@@ -30,7 +30,6 @@ python fr_trace.py <dump dir containing trace files> [-o <output file>]
 
 import pickle
 from collections.abc import Sequence
-from typing import Optional
 
 from torch.distributed.flight_recorder.components.builder import build_db, transform_ft
 from torch.distributed.flight_recorder.components.config_manager import JobConfig
@@ -41,7 +40,7 @@ from torch.distributed.flight_recorder.components.types import types
 __all__ = ["main"]
 
 
-def main(args: Optional[Sequence[str]] = None) -> None:
+def main(args: Sequence[str] | None = None) -> None:
     config = JobConfig()
     # pyrefly: ignore [bad-assignment]
     args = config.parse_args(args)

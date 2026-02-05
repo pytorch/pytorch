@@ -5,7 +5,7 @@ from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import cast, Optional, TypeVar, Union
+from typing import cast, TypeVar
 
 import torch
 from torch.distributed import ProcessGroup, Work
@@ -94,9 +94,7 @@ class _StateDictMeta:
 
     treespec: TreeSpec
     paths: list[KeyPath]
-    non_tensor_leaves: list[
-        Union[object, _TensorMeta, _DTensorMeta, _ShardedTensorMeta]
-    ]
+    non_tensor_leaves: list[object | _TensorMeta | _DTensorMeta | _ShardedTensorMeta]
 
 
 @contextmanager
@@ -129,7 +127,7 @@ def _prepare_state_dict(
 
     paths: list[KeyPath] = []
     non_tensor_leaves: list[
-        Union[object, _TensorMeta, _DTensorMeta, _ShardedTensorMeta]
+        object | _TensorMeta | _DTensorMeta | _ShardedTensorMeta
     ] = []
     tensors: list[torch.Tensor] = []
     for key_path, v in leaves:
@@ -222,7 +220,7 @@ class PGTransport:
         pg: ProcessGroup,
         timeout: timedelta,
         device: torch.device,
-        state_dict: Optional[Callable[[], object]] = None,
+        state_dict: Callable[[], object] | None = None,
     ) -> None:
         self._work: list[Work] = []
         self._pg = pg

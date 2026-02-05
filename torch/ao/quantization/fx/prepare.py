@@ -1,15 +1,11 @@
 # mypy: allow-untyped-defs
 import copy
 import warnings
-from dataclasses import asdict
 from typing import Any
 
 import torch
 from torch._subclasses import FakeTensor
 from torch.ao.quantization import (
-    _DerivedObserverOrFakeQuantize,
-    FixedQParamsFakeQuantize,
-    FixedQParamsObserver,
     ObserverBase,
     ObserverOrFakeQuantize,
     PlaceholderObserver,
@@ -24,18 +20,10 @@ from torch.ao.quantization.backend_config.utils import (
     get_module_to_qat_module,
     get_pattern_to_dtype_configs,
 )
-from torch.ao.quantization.observer import _is_activation_post_process, _PartialWrapper
+from torch.ao.quantization.observer import _is_activation_post_process
 from torch.ao.quantization.qconfig import _is_reuse_input_qconfig, QConfigAny
 from torch.ao.quantization.qconfig_mapping import QConfigMapping
 from torch.ao.quantization.quantize import convert, propagate_qconfig_
-from torch.ao.quantization.quantizer import (
-    DerivedQuantizationSpec,
-    EdgeOrNode,
-    FixedQParamsQuantizationSpec,
-    QuantizationSpec,
-    QuantizationSpecBase,
-    SharedQuantizationSpec,
-)
 from torch.ao.quantization.utils import (
     _parent_name,
     get_qconfig_dtypes,
@@ -116,83 +104,6 @@ _DEFAULT_QUINT8_QCONFIG_FOR_TARGET_DTYPE_INFO = {
 }
 
 
-def _get_observer_kwargs(
-    quant_spec: QuantizationSpec | FixedQParamsQuantizationSpec,
-):
-    kwargs_dict = asdict(quant_spec)
-    return copy.deepcopy(kwargs_dict)
-
-
-def _get_qspec_for_arg(
-    arg: Node,
-    input_qspec_map: dict[Node, QuantizationSpecBase],
-    named_modules: dict[str, torch.nn.Module],
-) -> QuantizationSpecBase | None:
-    while _is_activation_post_process_node(arg, named_modules):
-        arg = arg.args[0]  # type: ignore[assignment]
-    return input_qspec_map.get(arg)
-
-
-def _create_obs_or_fq_from_qspec(
-    quantization_spec: QuantizationSpecBase | None,
-    obs_or_fq_map: dict[EdgeOrNode, ObserverOrFakeQuantize],
-    is_qat: bool,
-):
-    """Create observer or fake quantize objects based on quantization spec
-
-    Args:
-       quantization_spec: used to store parameters to create the observer or fake quantizer
-       obs_or_fq_map: this is a map from edge/output to the corresponding observer/fake_quant
-       instance, it may be reused for different edge/output depending on configuration
-    """
-    if quantization_spec is None:
-        return None
-    if isinstance(quantization_spec, SharedQuantizationSpec):
-        edge_or_node = quantization_spec.edge_or_node
-        if edge_or_node not in obs_or_fq_map:
-            raise AssertionError(
-                "please make sure only refer to edge or node that has "
-                f"observer/fake_quant inserted: '{edge_or_node}' not in\n{obs_or_fq_map.keys()}"
-            )
-        return obs_or_fq_map[edge_or_node]
-    elif isinstance(quantization_spec, DerivedQuantizationSpec):
-        # can't use asdict, so not calling get_observer_kwargs here
-        kwargs = {
-            "dtype": quantization_spec.dtype,
-            "derive_qparams_fn": quantization_spec.derive_qparams_fn,
-            "quant_min": quantization_spec.quant_min,
-            "quant_max": quantization_spec.quant_max,
-            "qscheme": quantization_spec.qscheme,
-            "ch_axis": quantization_spec.ch_axis,
-        }
-        edge_or_nodes = quantization_spec.derived_from
-        obs_or_fqs = [obs_or_fq_map[k] for k in edge_or_nodes]
-        # pyrefly: ignore [unsupported-operation]
-        kwargs["obs_or_fqs"] = obs_or_fqs
-        return _DerivedObserverOrFakeQuantize.with_args(**kwargs)()
-    elif isinstance(quantization_spec, FixedQParamsQuantizationSpec):
-        kwargs = _get_observer_kwargs(quantization_spec)
-        observer_ctr = FixedQParamsObserver.with_args(**kwargs)
-        if is_qat:
-            return FixedQParamsFakeQuantize.with_args(observer=observer_ctr)()
-        else:
-            return observer_ctr()
-
-    if not isinstance(quantization_spec, QuantizationSpec):
-        raise AssertionError("quantization_spec must be a QuantizationSpec")
-    observer_or_fake_quant_ctr = quantization_spec.observer_or_fake_quant_ctr
-    kwargs = _get_observer_kwargs(quantization_spec)
-    kwargs.pop("observer_or_fake_quant_ctr")
-    # we will remove is_dynamic from QuantizationSpec because
-    # it seems that dynamic range quantization
-    obs_or_fq_class = observer_or_fake_quant_ctr
-    if isinstance(observer_or_fake_quant_ctr, _PartialWrapper):
-        obs_or_fq_class = observer_or_fake_quant_ctr.p.func  # type: ignore[union-attr, assignment]
-    if "PerChannel" not in obs_or_fq_class.__name__:  # type: ignore[operator, union-attr]
-        kwargs.pop("ch_axis")
-    return observer_or_fake_quant_ctr.with_args(**kwargs)()
-
-
 def _needs_obs_or_fq(
     prev_output_dtype: Any,
     prev_output_is_dynamic: bool,
@@ -271,10 +182,15 @@ def _is_input_arg_dtype_supported_by_backend(
     """Check if the configured qconfig for the argument
     is supported by the backend or not
     """
-    if isinstance(arg, (list, tuple)):
+    if isinstance(arg, (list, tuple)):  # noqa: UP038
         return all(
             _is_input_arg_dtype_supported_by_backend(
-                a, node, qconfig, dtype_config, backend_config
+                # pyrefly: ignore [bad-argument-type]
+                a,
+                node,
+                qconfig,
+                dtype_config,
+                backend_config,
             )
             for a in arg
         )
@@ -367,6 +283,14 @@ def _is_output_dtype_supported_by_backend(
     return backend_config_output_dtype is None or (
         dtype_matches and qconfig_satisfies_constraints
     )
+
+
+from typing import Annotated
+
+from torch.fx import Node
+
+
+EdgeOrNode = Annotated[tuple[Node, Node] | Node, None]
 
 
 def _is_observer_in_same_graph(
@@ -473,7 +397,7 @@ def _qat_swap_modules(
 def _add_matched_node_name_to_set(matched_node_pattern: NodePattern, s: set[str]):
     if isinstance(matched_node_pattern, Node):
         s.add(matched_node_pattern.name)
-    elif isinstance(matched_node_pattern, (list, tuple)):
+    elif isinstance(matched_node_pattern, (list, tuple)):  # noqa: UP038
         for maybe_node in matched_node_pattern:
             _add_matched_node_name_to_set(maybe_node, s)
 
@@ -523,7 +447,7 @@ def _set_target_dtype_info_for_matched_node_pattern(
     """Sets the target_dtype_info for each node in matched_node_pattern
     Note: processed_nodes is used to ensure we only process each node once
     """
-    if isinstance(matched_node_pattern, (list, tuple)):
+    if isinstance(matched_node_pattern, (list, tuple)):  # noqa: UP038
         for node_pattern in matched_node_pattern:
             _set_target_dtype_info_for_matched_node_pattern(
                 node_pattern,
@@ -682,9 +606,10 @@ def _get_output_act_obs_or_fq(
     """
     if not isinstance(arg, Node):
         raise AssertionError("arg must be a Node")
+
     if "quantization_annotation" in arg.meta:
-        return _create_obs_or_fq_from_qspec(
-            arg.meta["quantization_annotation"].output_qspec, obs_or_fq_map, is_qat
+        raise NotImplementedError(
+            "Please use torchao (https://github.com/pytorch/ao) for pt2e quantization flow"
         )
 
     # Custom module LSTM output is a tuple that we broke down into the internal nodes in order
@@ -707,23 +632,20 @@ def _get_output_act_obs_or_fq(
         observed_arg = arg.args[0]
         if not isinstance(observed_arg, Node):
             raise AssertionError("Currently we only support observing Node")
+
         if "quantization_annotation" in observed_arg.meta:
-            output_act_obs_or_fq = _create_obs_or_fq_from_qspec(
-                observed_arg.meta["quantization_annotation"].output_qspec,
-                obs_or_fq_map,
-                is_qat,
+            raise NotImplementedError(
+                "Please use torchao (https://github.com/pytorch/ao) for pt2e quantization flow"
             )
-        else:
-            if "target_dtype_info" not in observed_arg.meta:
-                raise AssertionError(
-                    "expected 'target_dtype_info' in observed_arg.meta"
-                )
-            output_act_obs_or_fq_ctr = observed_arg.meta["target_dtype_info"][
-                "output_act_obs_or_fq_ctr"
-            ]
-            output_act_obs_or_fq = (
-                output_act_obs_or_fq_ctr() if output_act_obs_or_fq_ctr else None
-            )
+
+        if "target_dtype_info" not in observed_arg.meta:
+            raise AssertionError("expected 'target_dtype_info' in observed_arg.meta")
+        output_act_obs_or_fq_ctr = observed_arg.meta["target_dtype_info"][
+            "output_act_obs_or_fq_ctr"
+        ]
+        output_act_obs_or_fq = (
+            output_act_obs_or_fq_ctr() if output_act_obs_or_fq_ctr else None
+        )
     else:
         if "target_dtype_info" in arg.meta:
             output_act_obs_or_fq_ctr = arg.meta["target_dtype_info"].get(
@@ -765,24 +687,11 @@ def _get_arg_as_input_act_obs_or_fq(
     """
     if not isinstance(arg, Node):
         raise AssertionError("arg must be a Node")
-    # "input_qspec_map" is the more general design we'll use for pt2e path
-    # it is a map from input argument node to observer or fake quant constructor, for example
-    # for the following graph:
-    # x -> conv -> output
-    #
-    # we may annotate conv node like the following:
-    # conv.meta[...] = QuantizationAnnotation("input_qspec_map": {x: MinMaxObserver.with_args(dtype=torch.qint8)}, ...)
-    #
+
     if "quantization_annotation" in node.meta:
-        input_qspec_map = node.meta["quantization_annotation"].input_qspec_map
-        input_arg_qspec = _get_qspec_for_arg(arg, input_qspec_map, named_modules)
-        if input_arg_qspec is None:
-            input_arg_obs_or_fq = _DEFAULT_FP32_OBS_OR_FQ_CTR()
-        else:
-            input_arg_obs_or_fq = _create_obs_or_fq_from_qspec(
-                input_arg_qspec, obs_or_fq_map, is_qat
-            )
-        return input_arg_obs_or_fq
+        raise NotImplementedError(
+            "Please use torchao (https://github.com/pytorch/ao) for pt2e quantization flow"
+        )
 
     # we can remove the following path in the future if fx graph mode quantization is
     # no longer used
@@ -826,11 +735,12 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
     """
     # for ops such as torch.cat([x0, x1]),
     # traverse through the list
-    if isinstance(arg, (list, tuple)):
+    if isinstance(arg, (list, tuple)):  # noqa: UP038
         new_arg_to_return = []
         for inner_arg in arg:
             new_inner_arg = _maybe_insert_input_observer_for_arg_or_kwarg(
                 node,
+                # pyrefly: ignore [bad-argument-type]
                 inner_arg,
                 qconfig,
                 model,
@@ -861,20 +771,18 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
         # regular flow for most nodes, except standalone modules
 
         if "quantization_annotation" in node.meta:
-            reuse_input_obs_or_fq = node.meta[
-                "quantization_annotation"
-            ]._reuse_input_obs_or_fq
-        else:
-            if "target_dtype_info" not in node.meta:
-                raise AssertionError("expected 'target_dtype_info' in node.meta")
-            # TODO: we are assuming "target_dtype_info" exists here, maybe
-            # a default value also need to be provided here
-            target_dtype_info = node.meta["target_dtype_info"]
-            # for nodes that doesn't have `reuse_input_obs_or_fq` configured,
-            # we'll default to False, this makes configuring this field optional for users
-            reuse_input_obs_or_fq = target_dtype_info.get(
-                "reuse_input_obs_or_fq", False
+            raise NotImplementedError(
+                "Please use torchao (https://github.com/pytorch/ao) for pt2e quantization flow"
             )
+
+        if "target_dtype_info" not in node.meta:
+            raise AssertionError("expected 'target_dtype_info' in node.meta")
+        # TODO: we are assuming "target_dtype_info" exists here, maybe
+        # a default value also need to be provided here
+        target_dtype_info = node.meta["target_dtype_info"]
+        # for nodes that doesn't have `reuse_input_obs_or_fq` configured,
+        # we'll default to False, this makes configuring this field optional for users
+        reuse_input_obs_or_fq = target_dtype_info.get("reuse_input_obs_or_fq", False)
         arg_as_input_act_obs_or_fq = _get_arg_as_input_act_obs_or_fq(
             arg, node, named_modules, obs_or_fq_map, is_qat
         )
@@ -1121,21 +1029,21 @@ def _maybe_insert_output_observer_for_node(
 
     is_standalone_module = False
     if "quantization_annotation" in node.meta:
-        output_act_obs_or_fq = _create_obs_or_fq_from_qspec(
-            node.meta["quantization_annotation"].output_qspec, obs_or_fq_map, is_qat
+        raise NotImplementedError(
+            "Please use torchao (https://github.com/pytorch/ao) for pt2e quantization flow"
         )
-    else:
-        if "target_dtype_info" not in node.meta:
-            raise AssertionError("expected 'target_dtype_info' in node.meta")
-        is_standalone_module = node.meta["target_dtype_info"].get(
-            "_is_standalone_module", False
-        )
-        output_act_obs_or_fq_ctr = node.meta["target_dtype_info"].get(
-            "output_act_obs_or_fq_ctr"
-        )
-        output_act_obs_or_fq = (
-            output_act_obs_or_fq_ctr() if output_act_obs_or_fq_ctr else None
-        )
+
+    if "target_dtype_info" not in node.meta:
+        raise AssertionError("expected 'target_dtype_info' in node.meta")
+    is_standalone_module = node.meta["target_dtype_info"].get(
+        "_is_standalone_module", False
+    )
+    output_act_obs_or_fq_ctr = node.meta["target_dtype_info"].get(
+        "output_act_obs_or_fq_ctr"
+    )
+    output_act_obs_or_fq = (
+        output_act_obs_or_fq_ctr() if output_act_obs_or_fq_ctr else None
+    )
     target_dtype, target_is_dynamic = _get_dtype_and_is_dynamic(output_act_obs_or_fq)
     # uncomment after we support reuse_input_obs_or_fq properly by having separate
     # implementations for this key instead of reusing the input_output_share_observers
@@ -1249,10 +1157,14 @@ def _maybe_insert_observers_before_graph_output(
                 return observer_node
             else:
                 return maybe_node
-        elif isinstance(maybe_node, (list, tuple)):
+        elif isinstance(maybe_node, (list, tuple)):  # noqa: UP038
             results = [
                 _recursive_maybe_replace_node_with_obs(
-                    inner_node, model, named_modules, graph
+                    # pyrefly: ignore [bad-argument-type]
+                    inner_node,
+                    model,
+                    named_modules,
+                    graph,
                 )
                 for inner_node in maybe_node
             ]
@@ -1338,7 +1250,7 @@ def propagate_dtypes_for_known_nodes(
 
                 # when an argument is a tuple, it does not show up as another node so we need to go through
                 # all elements of the tuple manually
-                if isinstance(arg, (tuple, list)):
+                if isinstance(arg, (tuple, list)):  # noqa: UP038
                     arg_list = list(arg)
                 else:
                     arg_list = [arg]
@@ -1373,7 +1285,7 @@ def _maybe_make_input_output_share_observers(
     first_arg = None
     # find the first non-Tensor arg
     for i in range(len(node.args)):
-        if isinstance(node.args[i], (Node, list, tuple)):
+        if isinstance(node.args[i], (Node, list, tuple)):  # noqa: UP038
             first_arg = node.args[i]
             break
 
@@ -1381,7 +1293,7 @@ def _maybe_make_input_output_share_observers(
     if first_arg is None:
         return False
 
-    if isinstance(first_arg, (list, tuple)):
+    if isinstance(first_arg, (list, tuple)):  # noqa: UP038
         first_arg_arg = first_arg[0]
     elif isinstance(first_arg, Node):
         first_arg_arg = first_arg
@@ -1392,6 +1304,7 @@ def _maybe_make_input_output_share_observers(
     #   observed_node -> non_observed_node -> cat
     # we need to navigate up to the first observer
     iteration_guard = 0
+    # pyrefly: ignore [bad-argument-type]
     while not _is_activation_post_process_node(first_arg_arg, named_modules):
         if not isinstance(first_arg_arg, Node):
             return False
@@ -1419,7 +1332,7 @@ def _maybe_make_input_output_share_observers(
         raise AssertionError("target_to_use must be a string")
     obs_mod_to_use = named_modules[target_to_use]
 
-    if isinstance(first_arg, (list, tuple)):
+    if isinstance(first_arg, (list, tuple)):  # noqa: UP038
         # set all other input observer nodes to use that module
         for input_idx, input_arg in enumerate(first_arg):
             if input_idx == 0:
@@ -1728,7 +1641,7 @@ def insert_observers_for_model(
             ) = node_name_to_match_result_with_qconfig.get(  # type: ignore[assignment]
                 node.name, (None, None, None, None, None)
             )
-            equalization_qconfig = equalization_config_map.get(node.name, None)
+            equalization_qconfig = equalization_config_map.get(node.name)
 
             this_node_dtype_info = node.meta["target_dtype_info"]
             if "val" in node.meta:
@@ -1781,7 +1694,7 @@ def insert_observers_for_model(
                         for user in node.args[0].users:
                             # Checks if there exists another user being quantized
                             is_user_quantized = node_name_to_qconfig.get(
-                                user.name, None
+                                user.name
                             ) is not None or (
                                 user.op == "call_module"
                                 and isinstance(
@@ -1835,7 +1748,11 @@ def insert_observers_for_model(
 
                     if is_last_node_of_pattern:
                         if _is_custom_module_lstm(
-                            node, named_modules, qconfig, qhandler
+                            # pyrefly: ignore [bad-argument-type]
+                            node,
+                            named_modules,
+                            qconfig,
+                            qhandler,
                         ):
                             # Currently custom module outputs are assumed to be already quantized,
                             # so we need to insert a DeQuantStub after the output. For custom module
@@ -1849,17 +1766,28 @@ def insert_observers_for_model(
                             # should resolve this inconsistency by inserting DeQuantStubs for all custom
                             # modules, not just for LSTM.
                             _insert_dequant_stubs_for_custom_module_lstm_output(
-                                node, model, named_modules, model.graph
+                                # pyrefly: ignore [bad-argument-type]
+                                node,
+                                model,
+                                named_modules,
+                                model.graph,
                             )
+                            # pyrefly: ignore [missing-attribute]
                             if node.target not in custom_module_names_already_swapped:
+                                # pyrefly: ignore [bad-argument-type]
                                 custom_module_names_already_swapped.add(node.target)
                                 _swap_custom_module_to_observed(
-                                    node, qconfig, named_modules, prepare_custom_config
+                                    # pyrefly: ignore [bad-argument-type]
+                                    node,
+                                    qconfig,
+                                    named_modules,
+                                    prepare_custom_config,
                                 )
                         else:
                             # this returns the new observer node if it was needed
                             maybe_output_obs_node = (
                                 _maybe_insert_output_observer_for_node(
+                                    # pyrefly: ignore [bad-argument-type]
                                     node,
                                     model,
                                     named_modules,
@@ -1885,6 +1813,7 @@ def insert_observers_for_model(
                                 #
                                 # We need to save orig users before updating uses because
                                 # the list of users will change as we update uses
+                                # pyrefly: ignore [missing-attribute]
                                 orig_users = list(node.users.keys())
                                 for user_node in orig_users:
                                     if user_node is maybe_output_obs_node:
@@ -1895,7 +1824,11 @@ def insert_observers_for_model(
 
                                 _is_observer_in_same_graph_ = (
                                     _is_observer_in_same_graph(
-                                        node, named_modules, obs_or_fq_map, is_qat
+                                        # pyrefly: ignore [bad-argument-type]
+                                        node,
+                                        named_modules,
+                                        obs_or_fq_map,
+                                        is_qat,
                                     )
                                 )
 
@@ -1907,21 +1840,30 @@ def insert_observers_for_model(
                                     and _is_observer_in_same_graph_
                                 ) or reuse_input_obs_or_fq:
                                     if not _maybe_make_input_output_share_observers(
-                                        node, model, named_modules
+                                        # pyrefly: ignore [bad-argument-type]
+                                        node,
+                                        model,
+                                        named_modules,
                                     ):
                                         _remove_output_observer(
-                                            node, model, named_modules
+                                            # pyrefly: ignore [bad-argument-type]
+                                            node,
+                                            model,
+                                            named_modules,
                                         )
 
                                 if qhandler is not None and qhandler.is_custom_module():
                                     if (
+                                        # pyrefly: ignore [missing-attribute]
                                         node.target
                                         not in custom_module_names_already_swapped
                                     ):
                                         custom_module_names_already_swapped.add(
+                                            # pyrefly: ignore [bad-argument-type]
                                             node.target
                                         )
                                         _swap_custom_module_to_observed(
+                                            # pyrefly: ignore [bad-argument-type]
                                             node,
                                             qconfig,
                                             named_modules,
