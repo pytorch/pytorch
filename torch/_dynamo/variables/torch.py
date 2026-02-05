@@ -2575,8 +2575,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         )
         input_spec_proxy.node.type = type(input_spec)  # pyrefly: ignore[unbound-name]
 
-        # flat_apply_capture takes (input_spec, *flat_args), pass None as in_spec to flat_apply
-        all_args = (f_spec_proxy, None, input_spec_proxy, *proxified_flat_args)
+        all_args = (f_spec_proxy, input_spec_proxy, *proxified_flat_args)
 
         # What's going on here? The output of the nonstrict-traced function must
         # be something we can put into the graph. This means it has to be Tuple,
