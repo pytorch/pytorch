@@ -27,7 +27,7 @@ jobs:
       curr_ref_type: ${{ github.ref_type }}
       opt_out_experiments: lf
 
-  dynamo-build:
+  dynamo-cpython-build:
     name: dynamo-cpython-build
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
@@ -44,7 +44,7 @@ jobs:
         ]}
     secrets: inherit
 
-  dynamo-test:
+  dynamo-cpython-test:
     name: dynamo-cpython-test
     uses: ./.github/workflows/_linux-test.yml
     needs: [get-label-type, dynamo-cpython-build]
