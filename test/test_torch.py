@@ -178,6 +178,7 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(scalar.storage().untyped().tolist(), bytes_list)
 
     # For testing in64 support in upsample_nearest3d
+    @skipIfRocmArch(MI200_ARCH)
     @onlyCUDA
     @largeTensorTest('56GB', device='cuda')
     @dtypes(torch.bfloat16)
