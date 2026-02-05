@@ -96,7 +96,10 @@ static int32_t pad_input_index(
 
 // Unnormalize grid coordinate from [-1, 1] to pixel space
 template <typename T>
-static opmath_t<T> grid_sampler_unnormalize(opmath_t<T> coord, int32_t size, bool align_corners) {
+static opmath_t<T> grid_sampler_unnormalize(
+    opmath_t<T> coord,
+    int32_t size,
+    bool align_corners) {
   if (align_corners) {
     return ((coord + 1) / 2) * (size - 1);
   } else {
@@ -107,12 +110,17 @@ static opmath_t<T> grid_sampler_unnormalize(opmath_t<T> coord, int32_t size, boo
 // Clip coordinates for border padding
 template <typename T>
 static opmath_t<T> clip_coordinates(opmath_t<T> in, int32_t clip_limit) {
-  return min(static_cast<opmath_t<T>>(clip_limit - 1), max(in, static_cast<opmath_t<T>>(0)));
+  return min(
+      static_cast<opmath_t<T>>(clip_limit - 1),
+      max(in, static_cast<opmath_t<T>>(0)));
 }
 
 // Reflect coordinates for reflection padding
 template <typename T>
-static opmath_t<T> reflect_coordinates(opmath_t<T> in, int32_t twice_low, int32_t twice_high) {
+static opmath_t<T> reflect_coordinates(
+    opmath_t<T> in,
+    int32_t twice_low,
+    int32_t twice_high) {
   if (twice_low == twice_high) {
     return static_cast<opmath_t<T>>(0);
   }
@@ -204,10 +212,14 @@ static T interpolate_bilinear_2d(
   int32_t ix_se = ix_nw + 1;
   int32_t iy_se = iy_nw + 1;
 
-  opmath_t<T> nw = (static_cast<opmath_t<T>>(ix_se) - ix) * (static_cast<opmath_t<T>>(iy_se) - iy);
-  opmath_t<T> ne = (ix - static_cast<opmath_t<T>>(ix_sw)) * (static_cast<opmath_t<T>>(iy_sw) - iy);
-  opmath_t<T> sw = (static_cast<opmath_t<T>>(ix_ne) - ix) * (iy - static_cast<opmath_t<T>>(iy_ne));
-  opmath_t<T> se = (ix - static_cast<opmath_t<T>>(ix_nw)) * (iy - static_cast<opmath_t<T>>(iy_nw));
+  opmath_t<T> nw = (static_cast<opmath_t<T>>(ix_se) - ix) *
+      (static_cast<opmath_t<T>>(iy_se) - iy);
+  opmath_t<T> ne = (ix - static_cast<opmath_t<T>>(ix_sw)) *
+      (static_cast<opmath_t<T>>(iy_sw) - iy);
+  opmath_t<T> sw = (static_cast<opmath_t<T>>(ix_ne) - ix) *
+      (iy - static_cast<opmath_t<T>>(iy_ne));
+  opmath_t<T> se = (ix - static_cast<opmath_t<T>>(ix_nw)) *
+      (iy - static_cast<opmath_t<T>>(iy_nw));
 
   int32_t iy_nw_p = pad_input_index(iy_nw, inp_H, padding_mode, align_corners);
   int32_t ix_nw_p = pad_input_index(ix_nw, inp_W, padding_mode, align_corners);
@@ -220,16 +232,24 @@ static T interpolate_bilinear_2d(
 
   opmath_t<T> out_acc = static_cast<opmath_t<T>>(0);
   if (iy_nw_p != IDX_ZERO && ix_nw_p != IDX_ZERO) {
-    out_acc += static_cast<opmath_t<T>>(input[iy_nw_p * inp_sH + ix_nw_p * inp_sW]) * nw;
+    out_acc +=
+        static_cast<opmath_t<T>>(input[iy_nw_p * inp_sH + ix_nw_p * inp_sW]) *
+        nw;
   }
   if (iy_ne_p != IDX_ZERO && ix_ne_p != IDX_ZERO) {
-    out_acc += static_cast<opmath_t<T>>(input[iy_ne_p * inp_sH + ix_ne_p * inp_sW]) * ne;
+    out_acc +=
+        static_cast<opmath_t<T>>(input[iy_ne_p * inp_sH + ix_ne_p * inp_sW]) *
+        ne;
   }
   if (iy_sw_p != IDX_ZERO && ix_sw_p != IDX_ZERO) {
-    out_acc += static_cast<opmath_t<T>>(input[iy_sw_p * inp_sH + ix_sw_p * inp_sW]) * sw;
+    out_acc +=
+        static_cast<opmath_t<T>>(input[iy_sw_p * inp_sH + ix_sw_p * inp_sW]) *
+        sw;
   }
   if (iy_se_p != IDX_ZERO && ix_se_p != IDX_ZERO) {
-    out_acc += static_cast<opmath_t<T>>(input[iy_se_p * inp_sH + ix_se_p * inp_sW]) * se;
+    out_acc +=
+        static_cast<opmath_t<T>>(input[iy_se_p * inp_sH + ix_se_p * inp_sW]) *
+        se;
   }
 
   return static_cast<T>(out_acc);
@@ -253,8 +273,10 @@ static T interpolate_nearest_2d(
   int32_t ix_nearest = static_cast<int32_t>(rint(ix));
   int32_t iy_nearest = static_cast<int32_t>(rint(iy));
 
-  int32_t ix_p = pad_input_index(ix_nearest, inp_W, padding_mode, align_corners);
-  int32_t iy_p = pad_input_index(iy_nearest, inp_H, padding_mode, align_corners);
+  int32_t ix_p =
+      pad_input_index(ix_nearest, inp_W, padding_mode, align_corners);
+  int32_t iy_p =
+      pad_input_index(iy_nearest, inp_H, padding_mode, align_corners);
 
   if (ix_p == IDX_ZERO || iy_p == IDX_ZERO) {
     return static_cast<T>(0);
@@ -308,14 +330,51 @@ static T interpolate_bicubic_2d(
 
   for (int32_t i = 0; i < 4; ++i) {
     coefficients[i] = cubic_interp1d<T>(
-        get_bicubic_value<T>(input, iy_nw_i - 1 + i, ix_nw_i - 1, inp_H, inp_W, inp_sH, inp_sW, padding_mode, align_corners),
-        get_bicubic_value<T>(input, iy_nw_i - 1 + i, ix_nw_i + 0, inp_H, inp_W, inp_sH, inp_sW, padding_mode, align_corners),
-        get_bicubic_value<T>(input, iy_nw_i - 1 + i, ix_nw_i + 1, inp_H, inp_W, inp_sH, inp_sW, padding_mode, align_corners),
-        get_bicubic_value<T>(input, iy_nw_i - 1 + i, ix_nw_i + 2, inp_H, inp_W, inp_sH, inp_sW, padding_mode, align_corners),
+        get_bicubic_value<T>(
+            input,
+            iy_nw_i - 1 + i,
+            ix_nw_i - 1,
+            inp_H,
+            inp_W,
+            inp_sH,
+            inp_sW,
+            padding_mode,
+            align_corners),
+        get_bicubic_value<T>(
+            input,
+            iy_nw_i - 1 + i,
+            ix_nw_i + 0,
+            inp_H,
+            inp_W,
+            inp_sH,
+            inp_sW,
+            padding_mode,
+            align_corners),
+        get_bicubic_value<T>(
+            input,
+            iy_nw_i - 1 + i,
+            ix_nw_i + 1,
+            inp_H,
+            inp_W,
+            inp_sH,
+            inp_sW,
+            padding_mode,
+            align_corners),
+        get_bicubic_value<T>(
+            input,
+            iy_nw_i - 1 + i,
+            ix_nw_i + 2,
+            inp_H,
+            inp_W,
+            inp_sH,
+            inp_sW,
+            padding_mode,
+            align_corners),
         tx);
   }
 
-  return static_cast<T>(cubic_interp1d<T>(coefficients[0], coefficients[1], coefficients[2], coefficients[3], ty));
+  return static_cast<T>(cubic_interp1d<T>(
+      coefficients[0], coefficients[1], coefficients[2], coefficients[3], ty));
 }
 
 // 2D grid sampler kernel
@@ -369,11 +428,38 @@ kernel void grid_sampler_2d(
   for (int32_t c = 0; c < C; ++c) {
     T result;
     if (interpolation_mode == GridSamplerInterpolation::Bilinear) {
-      result = interpolate_bilinear_2d<T>(inp_ptr_N, ix, iy, inp_H, inp_W, inp_sH, inp_sW, padding_mode, align_corners);
+      result = interpolate_bilinear_2d<T>(
+          inp_ptr_N,
+          ix,
+          iy,
+          inp_H,
+          inp_W,
+          inp_sH,
+          inp_sW,
+          padding_mode,
+          align_corners);
     } else if (interpolation_mode == GridSamplerInterpolation::Nearest) {
-      result = interpolate_nearest_2d<T>(inp_ptr_N, ix, iy, inp_H, inp_W, inp_sH, inp_sW, padding_mode, align_corners);
+      result = interpolate_nearest_2d<T>(
+          inp_ptr_N,
+          ix,
+          iy,
+          inp_H,
+          inp_W,
+          inp_sH,
+          inp_sW,
+          padding_mode,
+          align_corners);
     } else {
-      result = interpolate_bicubic_2d<T>(inp_ptr_N, ix, iy, inp_H, inp_W, inp_sH, inp_sW, padding_mode, align_corners);
+      result = interpolate_bicubic_2d<T>(
+          inp_ptr_N,
+          ix,
+          iy,
+          inp_H,
+          inp_W,
+          inp_sH,
+          inp_sW,
+          padding_mode,
+          align_corners);
     }
     out_ptr_NCHW[c * out_sC] = result;
     inp_ptr_N += inp_sC;

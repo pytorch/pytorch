@@ -104,13 +104,13 @@ static void grid_sampler_2d_mps_impl(Tensor& output,
 }
 
 static void grid_sampler_3d_mps_impl(Tensor& output,
-                                  const Tensor& input,
-                                  const Tensor& grid,
-                                  int64_t _interpolation_mode,
-                                  int64_t _padding_mode,
-                                  bool align_corners,
-                                  int32_t sampler_dims,
-                                  const std::string& op_name) {
+                                     const Tensor& input,
+                                     const Tensor& grid,
+                                     int64_t _interpolation_mode,
+                                     int64_t _padding_mode,
+                                     bool align_corners,
+                                     int32_t sampler_dims,
+                                     const std::string& op_name) {
   check_grid_sampler_common(input, grid);
   switch (sampler_dims) {
     case 2:
@@ -214,13 +214,13 @@ Tensor grid_sampler_3d_mps(const Tensor& input,
                            bool align_corners) {
   auto output = at::empty({0}, input.options(), MemoryFormat::Contiguous);
   mps::grid_sampler_3d_mps_impl(output,
-                             input,
-                             grid,
-                             interpolation_mode,
-                             padding_mode,
-                             align_corners,
-                             /*sampler_dims=*/3,
-                             /*op_name=*/"grid_sampler_3d");
+                                input,
+                                grid,
+                                interpolation_mode,
+                                padding_mode,
+                                align_corners,
+                                /*sampler_dims=*/3,
+                                /*op_name=*/"grid_sampler_3d");
   return output;
 }
 
