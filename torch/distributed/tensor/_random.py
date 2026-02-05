@@ -19,6 +19,7 @@ __all__ = [
     "is_rng_supported_mesh",
     "manual_seed",
     "OffsetBasedRNGTracker",
+    "ThreadBasedRNGTracker",
 ]
 
 _rng_tracker: Optional["_RNGStateTracker"] = None
@@ -477,3 +478,182 @@ def _resolve_device(device_mesh: DeviceMesh) -> torch.device:
         return torch.device(f"{device_type}:{device_idx:d}")
 
     return get_device(device_idx)
+
+
+class ThreadBasedRNGTracker(_RNGStateTracker):
+    """
+    RNG tracker that provides single-device semantics for sharded tensors.
+
+    Unlike OffsetBasedRNGTracker which gives each rank different random values
+    based on offset, this tracker makes each rank generate the same values it
+    would produce if running on a single device with the same seed.
+
+    This is achieved by passing the sharding spec (local_shape, global_offset,
+    global_shape, global_strides) to the CUDA generator, which then computes
+    the correct virtual thread index for each local element.
+
+    This feature requires PyTorch to be built with the sharding-aware RNG support
+    (set_sharding_spec/get_sharding_spec methods on CUDAGeneratorImpl).
+
+    Example:
+        On a single GPU, torch.rand(4) with seed=42 produces [a, b, c, d].
+        With OffsetBasedRNGTracker on 2 GPUs, each rank produces different values.
+        With ThreadBasedRNGTracker on 2 GPUs:
+            - GPU 0 produces [a, b] (first half)
+            - GPU 1 produces [c, d] (second half)
+        When gathered, the result is identical to single-GPU execution.
+
+    .. warning::
+        This tracker has performance overhead due to per-element curand_init calls.
+        Use OffsetBasedRNGTracker for better performance when single-device semantics
+        is not required.
+    """
+
+    def __init__(
+        self,
+        device_mesh: DeviceMesh,
+        run_state_sync: bool = True,
+    ):
+        super().__init__(_resolve_device(device_mesh=device_mesh))
+        assert self._device_handle is not None
+        if self._device.type == "cpu":
+            raise RuntimeError(
+                f"{self.__class__.__name__} requires CUDA/CUDA-like device. "
+                f"Got {self._device.type} instead."
+            )
+
+        # CUDA kernel parameters for offset calculation
+        # source: aten/src/ATen/native/cuda/DistributionTemplates.h
+        self._block_size = 256
+        self._unroll = 4
+        props = torch.cuda.get_device_properties(self._device.index)
+        max_threads_per_sm = props.max_threads_per_multi_processor
+        blocks_per_sm = max_threads_per_sm // self._block_size
+        self._max_grid = props.multi_processor_count * blocks_per_sm
+
+        rng_state = self._get_device_state()
+        if run_state_sync:
+            torch.distributed.broadcast(rng_state, 0)
+            self._set_device_state(rng_state)
+
+    def _get_device_state(self) -> torch.Tensor:
+        assert self._device_handle is not None
+        return self._device_handle.get_rng_state().to(self._device)
+
+    def _set_device_state(self, state: torch.Tensor):
+        assert self._device_handle is not None
+        self._device_handle.set_rng_state(state.to("cpu"))
+
+    def _get_generator(self) -> torch.Generator:
+        """Get the default CUDA generator for the current device."""
+        return torch.cuda.default_generators[self._device.index]
+
+    @contextlib.contextmanager
+    def _distribute_region(
+        self, spec: DTensorSpec, generator: torch.Generator | None = None
+    ):
+        from torch.distributed._local_tensor import maybe_enable_local_tracker
+        from torch.distributed.tensor._utils import compute_local_shape_and_global_offset
+
+        if local_tracker_context := maybe_enable_local_tracker(
+            self._device.type, self.distribute_region_enabled, spec, generator
+        ):
+            with local_tracker_context:
+                yield
+            return
+
+        if not self.distribute_region_enabled:
+            yield
+            return
+
+        if generator is not None:
+            state = _PhiloxState(generator.get_state())
+        else:
+            state = _PhiloxState(self._get_device_state())
+
+        # Compute sharding spec for this DTensor
+        mesh = spec.mesh
+        global_shape = spec.shape
+        placements = spec.placements
+
+        local_shape, global_offset = compute_local_shape_and_global_offset(
+            global_shape, mesh, placements
+        )
+
+        # Compute global strides (row-major)
+        global_strides = []
+        stride = 1
+        for dim in reversed(range(len(global_shape))):
+            global_strides.insert(0, stride)
+            stride *= global_shape[dim]
+
+        old_offset = state.offset
+
+        # Check if the C++ sharding spec API is available
+        try:
+            import torch._C
+            if not hasattr(torch._C, '_cuda_set_rng_sharding_spec'):
+                warnings.warn(
+                    "ThreadBasedRNGTracker requires PyTorch built with sharding-aware RNG. "
+                    "Falling back to OffsetBasedRNGTracker behavior.",
+                    stacklevel=2,
+                )
+                yield
+                return
+        except Exception:
+            yield
+            return
+
+        try:
+            # Set the sharding spec via C++ API
+            device_idx = self._device.index
+            torch._C._cuda_set_rng_sharding_spec(
+                device_idx,
+                len(global_shape),
+                list(local_shape),
+                list(global_offset),
+                list(global_shape),
+                global_strides,
+            )
+
+            with torch.random.fork_rng(
+                devices=[self._device], device_type=self._device.type
+            ):
+                assert self._device_handle is not None
+                self._device_handle.set_rng_state(state.state)
+                try:
+                    yield
+                finally:
+                    # Clear sharding spec and update offset
+                    torch._C._cuda_clear_rng_sharding_spec(device_idx)
+                    self._set_post_op_offset(state, spec, old_offset)
+        finally:
+            # Ensure sharding spec is cleared even on exception
+            try:
+                torch._C._cuda_clear_rng_sharding_spec(device_idx)
+            except Exception:
+                pass
+
+        if generator is not None:
+            generator.set_state(state.state)
+        else:
+            self._set_device_state(state.state)
+
+    def _set_post_op_offset(
+        self, state: _PhiloxState, spec: DTensorSpec, old_offset: int
+    ) -> None:
+        """Sets the RNG offset to sync among ranks after the operation.
+
+        The offset increment matches how the CUDA kernel actually consumes random
+        numbers, ensuring the RNG state stays in sync with single-device execution.
+        """
+        from torch.distributed.tensor._ops.utils import prod
+
+        dtensor_shape = spec.shape
+        numel = prod(dtensor_shape)
+
+        # Calculate offset increment matching the CUDA kernel behavior
+        # See aten/src/ATen/native/cuda/DistributionTemplates.h
+        grid_x = min(self._max_grid, (numel + self._block_size - 1) // self._block_size)
+        offset_incr = ((numel - 1) // (self._block_size * grid_x * self._unroll) + 1) * self._unroll
+        state.offset = old_offset + offset_incr

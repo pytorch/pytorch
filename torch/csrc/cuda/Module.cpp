@@ -2226,6 +2226,67 @@ static struct PyMethodDef _THCPModule_methods[] = {
      THCPModule_cuda_tunableop_set_numerical_check_tolerances,
      METH_VARARGS,
      nullptr},
+    {"_cuda_set_rng_sharding_spec",
+     [](PyObject* self, PyObject* args) -> PyObject* {
+       HANDLE_TH_ERRORS
+       int device_idx;
+       int tensor_dim;
+       PyObject* local_shape_obj;
+       PyObject* global_offset_obj;
+       PyObject* global_shape_obj;
+       PyObject* global_strides_obj;
+
+       if (!PyArg_ParseTuple(args, "iiOOOO",
+           &device_idx, &tensor_dim,
+           &local_shape_obj, &global_offset_obj,
+           &global_shape_obj, &global_strides_obj)) {
+         return nullptr;
+       }
+
+       // Get the generator for this device
+       auto& gen = at::cuda::detail::getDefaultCUDAGenerator(device_idx);
+       auto cuda_gen = at::check_generator<at::CUDAGeneratorImpl>(gen);
+
+       // Extract arrays from Python lists
+       uint64_t local_shape[SHARDING_MAX_DIMS] = {0};
+       uint64_t global_offset[SHARDING_MAX_DIMS] = {0};
+       uint64_t global_shape[SHARDING_MAX_DIMS] = {0};
+       uint64_t global_strides[SHARDING_MAX_DIMS] = {0};
+
+       for (int i = 0; i < tensor_dim && i < SHARDING_MAX_DIMS; i++) {
+         local_shape[i] = PyLong_AsUnsignedLongLong(PyList_GetItem(local_shape_obj, i));
+         global_offset[i] = PyLong_AsUnsignedLongLong(PyList_GetItem(global_offset_obj, i));
+         global_shape[i] = PyLong_AsUnsignedLongLong(PyList_GetItem(global_shape_obj, i));
+         global_strides[i] = PyLong_AsUnsignedLongLong(PyList_GetItem(global_strides_obj, i));
+       }
+
+       std::lock_guard<std::mutex> lock(cuda_gen->mutex_);
+       cuda_gen->set_sharding_spec(tensor_dim, local_shape, global_offset, global_shape, global_strides);
+
+       Py_RETURN_NONE;
+       END_HANDLE_TH_ERRORS
+     },
+     METH_VARARGS,
+     nullptr},
+    {"_cuda_clear_rng_sharding_spec",
+     [](PyObject* self, PyObject* args) -> PyObject* {
+       HANDLE_TH_ERRORS
+       int device_idx;
+       if (!PyArg_ParseTuple(args, "i", &device_idx)) {
+         return nullptr;
+       }
+
+       auto& gen = at::cuda::detail::getDefaultCUDAGenerator(device_idx);
+       auto cuda_gen = at::check_generator<at::CUDAGeneratorImpl>(gen);
+
+       std::lock_guard<std::mutex> lock(cuda_gen->mutex_);
+       cuda_gen->clear_sharding_spec();
+
+       Py_RETURN_NONE;
+       END_HANDLE_TH_ERRORS
+     },
+     METH_VARARGS,
+     nullptr},
     {nullptr}};
 
 PyMethodDef* THCPModule_methods() {

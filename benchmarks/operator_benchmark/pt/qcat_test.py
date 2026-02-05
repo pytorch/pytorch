@@ -41,7 +41,10 @@ class QCatBenchmark(op_bench.TorchBenchmarkBase):
         self.qf.scale = scale
         self.qf.zero_point = zero_point
 
-        assert contig in ("none", "one", "all")
+        if contig not in ("none", "one", "all"):
+            raise AssertionError(
+                f"contig must be 'none', 'one', or 'all', but got '{contig}'"
+            )
         q_input = torch.quantize_per_tensor(f_input, scale, zero_point, dtype)
         permute_dims = tuple(range(q_input.ndim - 1, -1, -1))
         q_input_non_contig = q_input.permute(permute_dims).contiguous()
