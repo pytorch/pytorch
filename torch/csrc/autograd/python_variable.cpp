@@ -1189,34 +1189,37 @@ struct hash<NativeOpSchema> {
 } // namespace std
 
 // Helper to check if dtensor debug logging is enabled and log cache hits.
-// We cache the logger to avoid repeated Python calls.
+// We cache the logger and debug-enabled check to avoid repeated Python calls.
+// Pattern follows torch/csrc/jit/passes/onnx/onnx_log.cpp
 namespace {
 thread_local py::object dtensor_dispatch_logger;
+thread_local py::object logging_DEBUG;
 thread_local bool dtensor_dispatch_logger_initialized = false;
+thread_local bool dtensor_debug_logging_enabled = false;
 
-py::object get_dtensor_dispatch_logger() {
+void init_dtensor_dispatch_logger() {
   if (!dtensor_dispatch_logger_initialized) {
     dtensor_dispatch_logger_initialized = true;
     try {
       auto logging = py::module_::import("logging");
+      logging_DEBUG = logging.attr("DEBUG");
       dtensor_dispatch_logger =
           logging.attr("getLogger")("torch.distributed.tensor._dispatch");
+      dtensor_debug_logging_enabled =
+          dtensor_dispatch_logger.attr("isEnabledFor")(logging_DEBUG)
+              .cast<bool>();
     } catch (...) {
       dtensor_dispatch_logger = py::none();
+      dtensor_debug_logging_enabled = false;
     }
   }
-  return dtensor_dispatch_logger;
 }
 
 void log_sharding_prop_cache_hit(
     const NativeOpSchema& schema,
     const py::object& cached_sharding) {
-  auto logger = get_dtensor_dispatch_logger();
-  if (logger.is_none()) {
-    return;
-  }
-  auto logging = py::module_::import("logging");
-  if (!logger.attr("isEnabledFor")(logging.attr("DEBUG")).cast<bool>()) {
+  init_dtensor_dispatch_logger();
+  if (!dtensor_debug_logging_enabled) {
     return;
   }
   std::ostringstream ss;
@@ -1226,7 +1229,7 @@ void log_sharding_prop_cache_hit(
   if (!output_spec.is_none()) {
     ss << " -> " << py::str(output_spec).cast<std::string>();
   }
-  logger.attr("debug")(ss.str());
+  dtensor_dispatch_logger.attr("debug")(ss.str());
 }
 } // namespace
 
@@ -2339,6 +2342,21 @@ create_native_op_schema(
         break;
       }
       case TensorFlavor::NON_TENSOR: {
+        // Check if this is a list/tuple that might contain DTensors (e.g.,
+        // torch.cat)
+        if (arg.isList() && compute_mesh.is_none()) {
+          const auto list = arg.toList();
+          for (const auto& item : list) {
+            const auto [item_flavor, item_py_tensor] =
+                check_for_dtensor_or_tensor(item);
+            if (item_flavor == TensorFlavor::EXACTLY_DTENSOR ||
+                item_flavor == TensorFlavor::DTENSOR_SUBCLASS) {
+              compute_mesh = py::reinterpret_borrow<py::object>(
+                  item_py_tensor.attr(dtensor_interned_strings.device_mesh));
+              break;
+            }
+          }
+        }
         // non DTensor/Tensor args (i.e. int/float/bool), just add to
         // local_args
         handle_non_dtensor_arg(idx, arg);
@@ -2386,6 +2404,21 @@ create_native_op_schema(
           break;
         }
         case TensorFlavor::NON_TENSOR: {
+          // Check if this is a list/tuple that might contain DTensors (e.g.,
+          // torch.cat)
+          if (argument_it->isList() && compute_mesh.is_none()) {
+            const auto list = argument_it->toList();
+            for (const auto& item : list) {
+              const auto [item_flavor, item_py_tensor] =
+                  check_for_dtensor_or_tensor(item);
+              if (item_flavor == TensorFlavor::EXACTLY_DTENSOR ||
+                  item_flavor == TensorFlavor::DTENSOR_SUBCLASS) {
+                compute_mesh = py::reinterpret_borrow<py::object>(
+                    item_py_tensor.attr(dtensor_interned_strings.device_mesh));
+                break;
+              }
+            }
+          }
           handle_non_dtensor_arg(native_info.static_argnum, *argument_it);
           break;
         }
