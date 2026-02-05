@@ -12,13 +12,14 @@ import traceback
 from collections import OrderedDict
 from collections.abc import Callable, Iterator
 from dataclasses import fields, is_dataclass
-from typing import Any, Optional
+from typing import Any, Optional, TypeVar
 
 import torch
 import torch.fx.traceback as fx_traceback
-from torch._C import _fx_map_aggregate as map_aggregate, _fx_map_arg as map_arg
+from torch._C import _fx_map_arg as map_arg
 from torch._library.opaque_object import is_opaque_value_type
 from torch._logging import getArtifactLogger
+from torch.utils._pytree import tree_map_
 from torch.utils._traceback import CapturedTraceback
 
 from ._compatibility import compatibility
@@ -45,7 +46,7 @@ log = logging.getLogger(__name__)
 annotation_log = getArtifactLogger(__name__, "annotation")
 
 
-def _is_arbitrary_callable(obj: Any) -> bool:
+def _is_arbitrary_callable(obj: object) -> bool:
     """
     Returns True if obj is an arbitrary callable (function, lambda, method, etc.)
     that requires special tracing to handle. These cannot be symbolically traced
@@ -66,14 +67,18 @@ def _is_arbitrary_callable(obj: Any) -> bool:
     )
 
 
-def _find_arbitrary_callable(args: tuple, kwargs: dict) -> Any:
+def _find_arbitrary_callable(
+    args: tuple[object, ...], kwargs: dict[str, object]
+) -> object:
     """
     Recursively searches args and kwargs for any arbitrary callable.
     Returns the first arbitrary callable found, or None if none exist.
     """
     found = None
 
-    def check(obj: Any) -> Any:
+    _T = TypeVar("_T")
+
+    def check(obj: _T) -> _T:
         nonlocal found
         if found is not None:
             return obj
@@ -81,8 +86,8 @@ def _find_arbitrary_callable(args: tuple, kwargs: dict) -> Any:
             found = obj
         return obj
 
-    map_aggregate(args, check)
-    map_aggregate(kwargs, check)
+    tree_map_(check, args)
+    tree_map_(check, kwargs)
     return found
 
 
@@ -690,8 +695,8 @@ class Proxy:
             if isinstance(a, cls):
                 tracers[a.tracer] = None
 
-        map_aggregate(args, find_tracer)
-        map_aggregate(kwargs, find_tracer)
+        tree_map_(find_tracer, args)
+        tree_map_(find_tracer, kwargs)
 
         if len(tracers) > 1:
             raise RuntimeError(
