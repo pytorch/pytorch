@@ -2806,7 +2806,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 Note that dN does not appear in the expression, but we solve for it
                 using range tree numels and the other dims.
                 """
-
                 index_var = range_tree.symbol()
 
                 # Bound the possible number of dims. We use the following heuristics:
@@ -2817,6 +2816,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     "denom modulo",
                     cls=functools.partial(sympy.Wild, exclude=[index_var]),
                 )
+
                 num_dims = max(
                     2,
                     # range_tree.nodes only includes the entries for the range tree
@@ -2828,8 +2828,20 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     ),
                 )
 
+                # [Note: Precomputed replacements with BlockPatternMatch]
+                # If there are precomputed replacements in an expression e.g.
+                # ModularIndexing(d0 * d1, d0, d1), replaced with
+                # ModularIndexing(p0, d0, d1), it is not possible to match p0
+                # with d0 * d1 since sympy is unaware of this fact. Precomputed
+                # replacements are therefore removed prior to matching a
+                # BlockPattern, and are reintroduced after any analysis that
+                # works best on an expression with precomputed replacements removed
+                sizevars = V.graph.sizevars
+                index = sizevars.remove_precomputed_replacements(index)
+                numel = sizevars.remove_precomputed_replacements(range_tree.numel)
+
                 match_result = BlockPatternMatcher.match_mod_div_block_expr(
-                    index, index_var, range_tree.numel, num_dims
+                    index, index_var, numel, num_dims
                 )
                 if match_result is None:
                     return None
@@ -2864,11 +2876,21 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 # Non-leading dimensions are clamped to the size of the iteration range,
                 # while the leading dimension can exceed this to accommodate a larger
                 # block size.
+                # See [Note: Precomputed replacements with BlockPatternMatch] for
+                # the call to lookup_precomputed_size
                 linear_block_size = TritonSymbols.get_block_size(range_tree)
                 block_shape: list[sympy.Expr] = [
-                    CeilDiv(linear_block_size, slice_numels[0])
+                    CeilDiv(
+                        linear_block_size,
+                        sizevars.lookup_precomputed_size(slice_numels[0]),
+                    )
                 ] + [
-                    sympy.Min(CeilDiv(linear_block_size, numel), dim)
+                    sympy.Min(
+                        CeilDiv(
+                            linear_block_size, sizevars.lookup_precomputed_size(numel)
+                        ),
+                        sizevars.lookup_precomputed_size(dim),
+                    )
                     for numel, dim in zip(slice_numels[1:], dims[1:])
                 ]
 
@@ -2881,14 +2903,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 ]
 
                 return BlockParameters(
-                    shape=dims,
+                    shape=[sizevars.lookup_precomputed_size(d) for d in dims],
                     block_shape=block_shape,
                     strides=strides,
                     offsets=block_offsets,
                 )
 
             def match_block_subexpr(
-                expr: sympy.Expr, range_tree: IterationRangesRoot
+                expr: sympy.Expr,
+                range_tree: IterationRangesRoot,
             ) -> Optional[BlockParameters]:
                 """
                 Match a block indexing subexpression involving a single range tree.
@@ -2897,7 +2920,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     match_affine_block,
                     match_mod_div_block,
                 ):
-                    match = match_func(expr, range_tree)
+                    factored_index_expr = BlockPatternMatcher.factor_index_expr(
+                        expr, range_tree.symbol()
+                    )
+                    match = match_func(factored_index_expr, range_tree)
                     if match is not None:
                         return match
 

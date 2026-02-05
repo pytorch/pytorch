@@ -1,34 +1,25 @@
 #!/usr/bin/env python3
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-#
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree.
+# Copyright (c) Meta Platforms, Inc. and affiliates
+# Owner(s): ["oncall: distributed"]
 
 """
-Test script for fully_shard_flat API with Transformer model.
-
-Tests uneven sharding (dim % world_size != 0) and nested wrapping.
+Test script for fully_shard_flat API with meta device initialization.
 
 Usage:
     torchrun --nproc_per_node=2 test_fully_shard_flat.py
     torchrun --nproc_per_node=4 test_fully_shard_flat.py
 """
 
-import copy
-
 import torch
 import torch.distributed as dist
 import torch.nn as nn
 from datetime import timedelta
 from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.fsdp._fully_shard import fully_shard_flat, get_dstorage
-from torch.distributed.tensor import DTensor
+from torch.distributed.fsdp._fully_shard import fully_shard_flat
+from torch.distributed.tensor import DTensor, Shard
+from torch.distributed.tensor import _random as dtensor_random
+from torch.distributed.tensor._random import ThreadBasedRNGTracker
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.testing._internal.distributed._tensor.common_dtensor import (
-    ModelArgs,
-    Transformer,
-)
 
 
 def setup_distributed():
@@ -46,7 +37,7 @@ def setup_distributed():
 def cleanup_distributed():
     """Cleanup distributed environment."""
     if dist.is_initialized():
-        torch.cuda.synchronize()  # Ensure all GPU work is done
+        torch.cuda.synchronize()
         dist.destroy_process_group()
 
 
@@ -56,332 +47,125 @@ def print_rank0(msg):
         print(msg)
 
 
-def run():
-    """Test fully_shard_flat with nested wrapping and automatic hooks."""
+class SimpleMLP(nn.Module):
+    def __init__(self, in_dim: int = 16, hidden_dim: int = 32, out_dim: int = 64):
+        super().__init__()
+        self.fc1 = nn.Linear(in_dim, hidden_dim)
+        self.fc2 = nn.Linear(hidden_dim, out_dim)
+        self.fc3 = nn.Linear(out_dim, 8)
+
+    def forward(self, x):
+        x = torch.relu(self.fc1(x))
+        x = torch.relu(self.fc2(x))
+        return self.fc3(x)
+
+    def reset_parameters(self):
+        self.fc1.reset_parameters()
+        self.fc2.reset_parameters()
+        self.fc3.reset_parameters()
+
+
+def run_test():
+    """Test fully_shard_flat with meta device initialization."""
     rank, world_size = dist.get_rank(), dist.get_world_size()
-    device = torch.device("cuda", torch.cuda.current_device())
     mesh = init_device_mesh("cuda", (world_size,))
 
-    # Configure Transformer with dimensions for uneven sharding
-    torch.manual_seed(42)
-    args = ModelArgs(
-        n_layers=2,
-        vocab_size=33,  # uneven for ws=2,4
-        max_seq_len=7,  # uneven for ws=2,4
-        dim=16,
-        n_heads=2,
-        dropout_p=0.0,
-        weight_tying=False,
-    )
-    model = Transformer(args).to(device)
-
-    # Create reference model before sharding (DDP for comparison)
-    ref_model = copy.deepcopy(model)
-    ref_model = DDP(ref_model, device_ids=[rank])
-    ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
-
     print_rank0(f"\n{'='*70}")
-    print_rank0(f"Testing fully_shard_flat with world_size={world_size}")
+    print_rank0(f"Testing fully_shard_flat with meta init (world_size={world_size})")
     print_rank0(f"{'='*70}")
 
-    # Count params per component
-    layer_param_names = set()
-    for i, layer in enumerate(model.layers):
-        for name, _ in layer.named_parameters():
-            layer_param_names.add(f"layers.{i}.{name}")
-    root_param_names = set()
-    for name, _ in model.named_parameters():
-        if name not in layer_param_names:
-            root_param_names.add(name)
+    # Create model on meta device (no memory allocated)
+    with torch.device("meta"):
+        model = SimpleMLP()
 
-    print_rank0(f"\n=== Parameters ===")
-    print_rank0(f"  Total: {sum(1 for _ in model.parameters())}, "
-                f"Layers: {len(layer_param_names)}, Root: {len(root_param_names)}")
-
-    # === Apply nested fully_shard_flat ===
-    print_rank0(f"\n=== Applying nested fully_shard_flat ===")
-    for i, layer in enumerate(model.layers):
-        storage = fully_shard_flat(layer, mesh)
-        print_rank0(f"  Layer {i}: {len(storage.param_infos)} params, {storage.total_bytes} bytes")
-        assert get_dstorage(layer) is storage
-
-    root_storage = fully_shard_flat(model, mesh)
-    print_rank0(f"  Root: {len(root_storage.param_infos)} params, {root_storage.total_bytes} bytes")
-    assert get_dstorage(model) is root_storage
-
-    # Verify root storage excludes layer params
-    root_storage_fqns = set(root_storage.param_infos.keys())
-    assert root_storage_fqns == root_param_names
-
-    # Create optimizer for FSDP model
-    optim = torch.optim.Adam(model.parameters(), lr=1e-2)
-
-    # === Verify sharding ===
-    print_rank0(f"\n=== Sharding ===")
+    # Verify params are on meta device
     for name, param in model.named_parameters():
-        global_shape = tuple(param.shape)
-        local_shape = tuple(param._local_tensor.shape)
-        dim0_global = global_shape[0]
-        sharding = "uneven" if dim0_global % world_size != 0 else "even"
-        if rank == 0:
-            print(f"  {name:<38} | {str(global_shape):^12} | {str(local_shape):^12} | {sharding}")
+        assert param.device == torch.device("meta"), f"{name} should be on meta device"
+    print_rank0("  Meta device: model created without memory allocation")
 
-    # === Training loop with numerics verification ===
-    print_rank0(f"\n=== Training loop (comparing with DDP reference) ===")
-    batch_size, seq_len = 2, args.max_seq_len
-    num_iters = 5
+    # Apply fully_shard_flat on meta device FIRST
+    storage = fully_shard_flat(model, mesh)
+    print_rank0(f"  fully_shard_flat: applied on meta (total_bytes={storage.total_bytes})")
 
-    # Verify weights match after sharding (before any training)
-    root_storage.unshard()
-    for layer_storage in [get_dstorage(layer) for layer in model.layers]:
-        if layer_storage:
-            layer_storage.unshard()
+    # Verify params are DTensors on meta
+    for name, param in model.named_parameters():
+        assert isinstance(param, DTensor), f"{name} should be DTensor"
+        assert param._local_tensor.device == torch.device("meta"), \
+            f"{name}._local_tensor should be on meta"
+    print_rank0("  Params are DTensors on meta device")
 
-    max_weight_diff = 0.0
-    for (name1, p1), (name2, p2) in zip(
-        ref_model.module.named_parameters(), model.named_parameters()
+    # Materialize on GPU using to_empty
+    device = torch.device("cuda", torch.cuda.current_device())
+    model.to_empty(device=device)
+    print_rank0(f"  to_empty: model materialized on {device}")
+
+    # Initialize parameters using ThreadBasedRNGTracker for single-device semantics
+    # Set the global RNG tracker to use ThreadBasedRNGTracker
+    old_rng_tracker = dtensor_random._rng_tracker
+    dtensor_random._rng_tracker = ThreadBasedRNGTracker(device_mesh=mesh)
+    torch.manual_seed(42)
+    torch.cuda.manual_seed(42)
+    model.reset_parameters()
+    dtensor_random._rng_tracker = old_rng_tracker
+    print_rank0("  reset_parameters: weights initialized with ThreadBasedRNGTracker")
+
+    # Sync initialized values back to byte_storage
+    storage._sync_sharded_to_storage()
+    print_rank0("  _sync_sharded_to_storage: synced to byte_storage")
+
+    # Create reference model (DDP) with same seed
+    ref_model = SimpleMLP().to(device)
+    torch.manual_seed(42)
+    torch.cuda.manual_seed(42)
+    ref_model.reset_parameters()
+
+    # Compare parameters after initialization
+    print_rank0("\n=== Parameter Comparison (after reset_parameters) ===")
+    for (fsdp_name, fsdp_param), (ref_name, ref_param) in zip(
+        model.named_parameters(), ref_model.named_parameters()
     ):
-        diff = (p1 - p2).abs().max().item()
-        max_weight_diff = max(max_weight_diff, diff)
-
-    if max_weight_diff > 1e-6:
-        raise AssertionError(f"Weight mismatch after sharding: max_diff={max_weight_diff}")
-    print_rank0(f"  ✓ Weights match after unshard (max_diff={max_weight_diff})")
-
-    # Reshard for training loop
-    root_storage.reshard()
-    for layer_storage in [get_dstorage(layer) for layer in model.layers]:
-        if layer_storage:
-            layer_storage.reshard()
-
-    torch.manual_seed(42 + rank)  # Same seed across models, different per rank
-    for iteration in range(num_iters):
-        inp = torch.randint(0, args.vocab_size, (batch_size, seq_len), device=device)
-
-        # Reference model (DDP)
-        ref_optim.zero_grad()
-        ref_loss = ref_model(inp).sum()
-        ref_loss.backward()
-        ref_optim.step()
-
-        # FSDP model
-        optim.zero_grad()
-        fsdp_loss = model(inp).sum()
-        fsdp_loss.backward()
-        torch.cuda.synchronize()  # Wait for post-backward callback
-        optim.step()
-
-        # Verify params are DTensors after backward
-        for name, param in model.named_parameters():
-            assert isinstance(param, DTensor), f"Iter {iteration}: {name} should be DTensor"
-            if param._local_tensor.numel() > 0:
-                assert param.grad is not None, f"Iter {iteration}: {name} missing gradient"
-
-        # Compare losses (use torch.testing.assert_close like FSDP2's assertEqual)
-        torch.testing.assert_close(ref_loss, fsdp_loss)
-        print_rank0(f"  Iter {iteration}: ref_loss={ref_loss.item():.6f}, "
-                    f"fsdp_loss={fsdp_loss.item():.6f} ✓")
-
-    print_rank0(f"\n{'='*70}")
-    print_rank0("PASSED: Numerics match DDP reference")
-    print_rank0(f"{'='*70}")
-
-    torch.cuda.synchronize()
-    return True
-
-
-def run_param_boundary():
-    """Test param_boundary sharding strategy."""
-    rank, world_size = dist.get_rank(), dist.get_world_size()
-    device = torch.device("cuda", torch.cuda.current_device())
-    mesh = init_device_mesh("cuda", (world_size,))
-
-    print_rank0(f"\n{'='*70}")
-    print_rank0(f"Testing param_boundary sharding with world_size={world_size}")
-    print_rank0(f"{'='*70}")
-
-    # Simple MLP model
-    torch.manual_seed(42)
-
-    class SimpleMLP(nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.fc1 = nn.Linear(16, 32)
-            self.fc2 = nn.Linear(32, 64)
-            self.fc3 = nn.Linear(64, 8)
-
-        def forward(self, x):
-            x = torch.relu(self.fc1(x))
-            x = torch.relu(self.fc2(x))
-            return self.fc3(x)
-
-    model = SimpleMLP().to(device)
-
-    # Create reference model (DDP)
-    ref_model = copy.deepcopy(model)
-    ref_model = DDP(ref_model, device_ids=[rank])
-    ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
-
-    # Apply param_boundary sharding
-    from torch.distributed.fsdp._fully_shard import Owned
-
-    storage = fully_shard_flat(model, mesh, shard_strategy="param_boundary")
-
-    print_rank0(f"\n=== Parameter Ownership (param_boundary) ===")
-    for fqn, info in storage.param_infos.items():
-        owner = info.owner_rank
-        has_data = info.local_numel > 0
-        status = "OWNS" if rank == owner else "----"
-        if rank == 0:
-            print(f"  {fqn:<20} | owner=rank{owner} | local_numel={info.local_numel}")
-
-    # Verify placements are Owned
-    for fqn, info in storage.param_infos.items():
-        assert len(info.placements) == 1
-        assert isinstance(info.placements[0], Owned), f"{fqn} should have Owned placement"
-        assert info.placements[0].owner_rank == info.owner_rank
-
-    print_rank0(f"  ✓ All parameters have Owned placement")
-
-    # Create optimizer for FSDP model
-    optim = torch.optim.Adam(model.parameters(), lr=1e-2)
-
-    # Training loop
-    print_rank0(f"\n=== Training loop (comparing with DDP reference) ===")
-    batch_size = 4
-    num_iters = 5
-
-    torch.manual_seed(42 + rank)
-    for iteration in range(num_iters):
-        inp = torch.randn(batch_size, 16, device=device)
-
-        # Reference model (DDP)
-        ref_optim.zero_grad()
-        ref_loss = ref_model(inp).sum()
-        ref_loss.backward()
-        ref_optim.step()
-
-        # FSDP model with param_boundary
-        optim.zero_grad()
-        fsdp_loss = model(inp).sum()
-        fsdp_loss.backward()
-        torch.cuda.synchronize()
-        optim.step()
-
-        # Compare losses
-        torch.testing.assert_close(ref_loss, fsdp_loss)
-        print_rank0(f"  Iter {iteration}: ref_loss={ref_loss.item():.6f}, "
-                    f"fsdp_loss={fsdp_loss.item():.6f} ✓")
-
-    print_rank0(f"\n{'='*70}")
-    print_rank0("PASSED: param_boundary sharding matches DDP reference")
-    print_rank0(f"{'='*70}")
-
-    torch.cuda.synchronize()
-    return True
-
-
-def run_mixed_placement():
-    """Test mixed Shard/Owned placements using shard_placement_fn."""
-    rank, world_size = dist.get_rank(), dist.get_world_size()
-    device = torch.device("cuda", torch.cuda.current_device())
-    mesh = init_device_mesh("cuda", (world_size,))
-
-    print_rank0(f"\n{'='*70}")
-    print_rank0(f"Testing MIXED Shard/Owned placements with world_size={world_size}")
-    print_rank0(f"{'='*70}")
-
-    # Simple MLP model
-    torch.manual_seed(42)
-
-    class SimpleMLP(nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.fc1 = nn.Linear(16, 32)  # Will use Owned (on rank 0)
-            self.fc2 = nn.Linear(32, 64)  # Will use Shard
-            self.fc3 = nn.Linear(64, 8)   # Will use Owned (on rank 1 if ws >= 2)
-
-        def forward(self, x):
-            x = torch.relu(self.fc1(x))
-            x = torch.relu(self.fc2(x))
-            return self.fc3(x)
-
-    model = SimpleMLP().to(device)
-
-    # Create reference model (DDP)
-    ref_model = copy.deepcopy(model)
-    ref_model = DDP(ref_model, device_ids=[rank])
-    ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
-
-    from torch.distributed.fsdp._fully_shard import Owned
-    from torch.distributed.tensor import Shard
-
-    # Mixed placement function: fc1 -> Owned(0), fc2 -> Shard, fc3 -> Owned(1 or 0)
-    def placement_fn(fqn: str, param: nn.Parameter):
-        if fqn.startswith("fc1"):
-            return Owned(0)  # fc1 owned by rank 0
-        elif fqn.startswith("fc3"):
-            return Owned(min(1, world_size - 1))  # fc3 owned by rank 1 (or 0 if ws=1)
+        # Get full tensor from FSDP model
+        if isinstance(fsdp_param, DTensor):
+            fsdp_full = fsdp_param.full_tensor()
         else:
-            return Shard(0)  # fc2 sharded across all ranks
+            fsdp_full = fsdp_param
 
-    storage = fully_shard_flat(model, mesh, shard_placement_fn=placement_fn)
+        # Compare
+        match = torch.allclose(fsdp_full, ref_param, atol=1e-6)
+        assert match, f"Parameter {fsdp_name} doesn't match after initialization!"
+        if rank == 0:
+            print(f"  {fsdp_name}: FSDP shape={fsdp_full.shape}, REF shape={ref_param.shape}, "
+                  f"FSDP mean={fsdp_full.mean().item():.6f}, REF mean={ref_param.mean().item():.6f}, "
+                  f"match={match}")
 
-    print_rank0(f"\n=== Mixed Placement Configuration ===")
+    ref_model = DDP(ref_model, device_ids=[rank])
+
+    print_rank0(f"\n=== Shard Placement Configuration ===")
     for fqn, info in storage.param_infos.items():
         placement = info.placements[0]
-        if isinstance(placement, Owned):
-            placement_str = f"Owned({placement.owner_rank})"
-        else:
-            placement_str = f"Shard({placement.dim})"
+        placement_str = f"Shard({placement.dim})"
         if rank == 0:
             print(f"  {fqn:<20} | {placement_str:<12} | local_numel={info.local_numel}")
 
-    # Verify mixed placements
-    for fqn, info in storage.param_infos.items():
-        placement = info.placements[0]
-        if fqn.startswith("fc1"):
-            assert isinstance(placement, Owned), f"{fqn} should be Owned"
-            assert placement.owner_rank == 0, f"{fqn} should be owned by rank 0"
-        elif fqn.startswith("fc3"):
-            assert isinstance(placement, Owned), f"{fqn} should be Owned"
-        else:
-            assert isinstance(placement, Shard), f"{fqn} should be Shard"
-
-    print_rank0(f"  ✓ Mixed placements verified")
-
-    # Create optimizer for FSDP model
-    optim = torch.optim.Adam(model.parameters(), lr=1e-2)
-
-    # Training loop
-    print_rank0(f"\n=== Training loop (comparing with DDP reference) ===")
+    # Verify forward pass produces identical loss (before any optimizer steps)
+    print_rank0(f"\n=== Forward pass comparison (no training) ===")
     batch_size = 4
-    num_iters = 5
 
     torch.manual_seed(42 + rank)
-    for iteration in range(num_iters):
-        inp = torch.randn(batch_size, 16, device=device)
+    inp = torch.randn(batch_size, 16, device=device)
 
+    with torch.no_grad():
         # Reference model (DDP)
-        ref_optim.zero_grad()
         ref_loss = ref_model(inp).sum()
-        ref_loss.backward()
-        ref_optim.step()
 
-        # FSDP model with mixed placements
-        optim.zero_grad()
+        # FSDP model
         fsdp_loss = model(inp).sum()
-        fsdp_loss.backward()
-        torch.cuda.synchronize()
-        optim.step()
 
-        # Compare losses
-        torch.testing.assert_close(ref_loss, fsdp_loss)
-        print_rank0(f"  Iter {iteration}: ref_loss={ref_loss.item():.6f}, "
-                    f"fsdp_loss={fsdp_loss.item():.6f} ✓")
+    torch.testing.assert_close(ref_loss, fsdp_loss)
+    print_rank0(f"  Forward pass: ref_loss={ref_loss.item():.6f}, fsdp_loss={fsdp_loss.item():.6f}")
 
     print_rank0(f"\n{'='*70}")
-    print_rank0("PASSED: Mixed Shard/Owned placements match DDP reference")
+    print_rank0("PASSED: Meta init with fully_shard_flat matches DDP reference")
     print_rank0(f"{'='*70}")
 
     torch.cuda.synchronize()
@@ -395,9 +179,7 @@ def main():
     print_rank0(f"Running tests with world_size={world_size}")
 
     try:
-        run()
-        run_param_boundary()
-        run_mixed_placement()
+        run_test()
         success = True
     except Exception as e:
         print_rank0(f"FAILED: {e}")

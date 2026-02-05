@@ -514,6 +514,118 @@ class DStorage:
 
         self._state = ShardedState.UNSHARDED
 
+    def _sync_dtensor_to_storage(self) -> None:
+        """
+        Copy data from unsharded buffer back to sharded byte_storage.
+
+        This is useful after calling reset_parameters() on unsharded params,
+        to ensure the initialized values are persisted in the sharded storage.
+        Must be called while in UNSHARDED state, before reshard().
+        """
+        if self._state != ShardedState.UNSHARDED:
+            raise RuntimeError("Must be in UNSHARDED state to sync to storage")
+        if self._unsharded_byte_storage is None:
+            raise RuntimeError("Unsharded storage not allocated")
+
+        my_rank = self._mesh.get_local_rank()
+        world_size = self.world_size
+
+        for fqn, info in self._param_infos.items():
+            placement = info.placements[0]
+            # Get the full param data from unsharded storage
+            unsharded_view = self.get_unsharded_view(fqn)
+
+            if isinstance(placement, Owned):
+                # Only the owner rank has data in byte_storage
+                owner_rank = info.owner_rank
+                if my_rank == owner_rank:
+                    local_view = self.get_local_view(fqn)
+                    local_view.copy_(unsharded_view)
+            else:
+                # Shard: extract this rank's shard from unsharded data
+                if info.local_numel > 0:
+                    # Compute shard bounds
+                    dim0_size = info.global_shape[0]
+                    shard_size = (dim0_size + world_size - 1) // world_size
+                    start = my_rank * shard_size
+                    end = min(start + shard_size, dim0_size)
+                    actual_shard_size = end - start
+
+                    if actual_shard_size > 0:
+                        # Extract shard from unsharded data
+                        shard_data = unsharded_view[start:end]
+                        local_view = self.get_local_view(fqn)
+                        # Handle potential size mismatch due to padding
+                        if shard_data.numel() == local_view.numel():
+                            local_view.copy_(shard_data.view(local_view.shape))
+                        else:
+                            # Copy what we can
+                            flat_shard = shard_data.view(-1)
+                            flat_local = local_view.view(-1)
+                            copy_size = min(flat_shard.numel(), flat_local.numel())
+                            flat_local[:copy_size].copy_(flat_shard[:copy_size])
+
+    def _sync_sharded_to_storage(self, device: torch.device | None = None) -> None:
+        """
+        Copy data from sharded DTensor local tensors to byte_storage.
+
+        This is useful after calling to_empty() and reset_parameters() on a model
+        that was sharded on meta device. The DTensor local tensors have been
+        materialized and initialized, but byte_storage may still be on meta or
+        have stale data.
+
+        Args:
+            device: Target device for byte_storage. If None, uses the device of
+                    the first DTensor's local tensor.
+
+        Must be called while in SHARDED state.
+        """
+        if self._state != ShardedState.SHARDED:
+            raise RuntimeError("Must be in SHARDED state to sync to storage")
+
+        # Get target device from first param if not specified
+        if device is None:
+            for fqn, sharded_param in self._sharded_params.items():
+                if isinstance(sharded_param, DTensor):
+                    device = sharded_param._local_tensor.device
+                    break
+                else:
+                    device = sharded_param.device
+                    break
+
+        if device is None:
+            raise RuntimeError("No parameters found to determine target device")
+
+        # Materialize byte_storage if on meta device
+        if self._byte_storage.device == torch.device("meta"):
+            self._byte_storage = torch.empty(
+                self._byte_storage.shape,
+                dtype=self._byte_storage.dtype,
+                device=device,
+            )
+
+        # Copy from each DTensor's local tensor to byte_storage
+        for fqn, info in self._param_infos.items():
+            sharded_param = self._sharded_params[fqn]
+
+            # Get the local tensor data
+            if isinstance(sharded_param, DTensor):
+                local_data = sharded_param._local_tensor
+            else:
+                local_data = sharded_param.data
+
+            if info.local_numel == 0:
+                continue  # No data for this rank
+
+            # Get the view into byte_storage for this param
+            byte_offset = info.byte_offset
+            num_bytes = info.local_numel * info.dtype.itemsize
+            storage_slice = self._byte_storage[byte_offset : byte_offset + num_bytes]
+
+            # View as the param's dtype and copy
+            storage_view = storage_slice.view(info.dtype)
+            storage_view.copy_(local_data.view(-1))
+
     def reshard(self) -> None:
         """
         Reduce-scatter gradients, free unsharded buffer, and restore sharded DTensor parameters.
@@ -1483,12 +1595,16 @@ def fully_shard_flat(
             "All parameters may belong to already-wrapped submodules."
         )
 
-    # Determine device
-    device = mesh.device_type
-    if device == "cuda":
-        device = torch.device("cuda", torch.cuda.current_device())
+    # Determine device - use param device if meta, otherwise use mesh device
+    first_param = named_params[0][1]
+    if first_param.device.type == "meta":
+        device = torch.device("meta")
     else:
-        device = torch.device(device)
+        device = mesh.device_type
+        if device == "cuda":
+            device = torch.device("cuda", torch.cuda.current_device())
+        else:
+            device = torch.device(device)
 
     # Create parameter infos with local shapes and byte offsets
     region_info = None

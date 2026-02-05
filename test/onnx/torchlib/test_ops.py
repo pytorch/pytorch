@@ -151,12 +151,14 @@ def run_test_output_match(
     onnx_function = torchlib_op_info.op
     input_wrangler = torchlib_op_info.input_wrangler
     if (
-        not ops_test_common.dtype_op_schema_compatible(dtype, onnx_function.op_schema)
+        not ops_test_common.dtype_op_schema_compatible(
+            dtype, onnx_function.op_signature
+        )
         and dtype not in COMPLEX_TYPES
     ):
         test_suite.skipTest(
             f"dtype '{dtype}' is not supported by the op '{op.name}'. "
-            f"Type constraints: {onnx_function.op_schema.type_constraints}"
+            f"Type constraints: {onnx_function.op_signature.params}"
         )
 
     # Obtain the tolerance for the op
