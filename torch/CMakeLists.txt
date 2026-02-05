@@ -432,6 +432,18 @@ if(USE_XPU)
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/xpu/Module.cpp PROPERTIES COMPILE_FLAGS "-DXPU_ARCH_FLAGS=\"${_ARCH_FLAGS_readable}\"")
 endif()
 
+if(USE_TENSORPIPE AND USE_XPU)
+  if(NOT APPLE)
+    target_link_options(torch_python PRIVATE -Wl,--whole-archive)
+    target_link_libraries(torch_python PRIVATE tensorpipe_xpu)
+    target_link_options(torch_python PRIVATE -Wl,--no-whole-archive)
+  else()
+    # macOS: use -force_load to ensure objects in the .a are loaded.
+    target_link_libraries(torch_python PRIVATE
+      "-Wl,-force_load,$<TARGET_FILE:tensorpipe_xpu>")
+  endif()
+endif()
+
 target_compile_definitions(torch_python PRIVATE "-DTHP_BUILD_MAIN_LIB")
 
 target_link_libraries(torch_python PRIVATE ${TORCH_LIB} ${TORCH_PYTHON_LINK_LIBRARIES})
