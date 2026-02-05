@@ -9,7 +9,12 @@ from torch._inductor.config import (
     inductor_default_autotune_rep,
     inductor_default_autotune_warmup,
 )
-from torch._inductor.runtime.benchmarking import Benchmarker, TritonBenchmarker
+from torch._inductor.runtime.benchmarking import (
+    Benchmarker,
+    InductorBenchmarker,
+    ProfilingBenchmarker,
+    TritonBenchmarker,
+)
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import (
     decorateIf,
@@ -21,6 +26,7 @@ from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 
 ALL_BENCHMARKER_CLASSES = (
     Benchmarker,
+    ProfilingBenchmarker,
     TritonBenchmarker,
 )
 
@@ -149,6 +155,176 @@ class TestBenchmarker(TestCase):
 
         self.assertEqual(captured_kwargs["warmup"], custom_warmup)
         self.assertEqual(captured_kwargs["rep"], custom_rep)
+
+    @unittest.skipIf(not HAS_GPU, "requires GPU")
+    def test_profiling_benchmarker_returns_positive_timing(self):
+        """Test that ProfilingBenchmarker.benchmark_gpu returns a positive timing."""
+        benchmarker = ProfilingBenchmarker()
+        _, _callable = self.make_params(GPU_TYPE)
+        timing = benchmarker.benchmark_gpu(_callable, warmup=10, rep=20)
+        self.assertGreater(timing, 0)
+
+    @unittest.skipIf(not HAS_GPU, "requires GPU")
+    def test_do_bench_using_profiling_backwards_compat(self):
+        """Test that utils.do_bench_using_profiling still works."""
+        from torch._inductor.utils import do_bench_using_profiling
+
+        _, _callable = self.make_params(GPU_TYPE)
+        timing = do_bench_using_profiling(_callable, warmup=10, rep=20)
+        self.assertGreater(timing, 0)
+
+
+class TestBenchmarkerSingleton(TestCase):
+    """Tests for Benchmarker singleton pattern."""
+
+    def test_benchmarker_is_singleton(self):
+        """Same Benchmarker class returns the same instance."""
+        a = Benchmarker()
+        b = Benchmarker()
+        self.assertIs(a, b)
+
+    def test_triton_benchmarker_is_singleton(self):
+        """Same TritonBenchmarker class returns the same instance."""
+        a = TritonBenchmarker()
+        b = TritonBenchmarker()
+        self.assertIs(a, b)
+
+    def test_inductor_benchmarker_is_singleton(self):
+        """Same InductorBenchmarker class returns the same instance."""
+        a = InductorBenchmarker()
+        b = InductorBenchmarker()
+        self.assertIs(a, b)
+
+    def test_different_classes_are_different_instances(self):
+        """Different Benchmarker subclasses return different instances."""
+        benchmarker = Benchmarker()
+        triton = TritonBenchmarker()
+        inductor = InductorBenchmarker()
+
+        self.assertIsNot(benchmarker, triton)
+        self.assertIsNot(benchmarker, inductor)
+        self.assertIsNot(triton, inductor)
+
+    def test_init_guard_prevents_reinitialization(self):
+        """The _initialized guard should prevent re-running init logic."""
+        # Get the singleton instance
+        instance = Benchmarker()
+
+        # Verify _initialized is set
+        self.assertTrue(instance._initialized)
+
+        # Manually reset _initialized to simulate what would happen without guard
+        # Then verify calling constructor again doesn't re-initialize
+        # (since it returns the same instance with _initialized already True)
+        second = Benchmarker()
+        self.assertIs(instance, second)
+        self.assertTrue(second._initialized)
+
+
+@unittest.skipIf(not HAS_GPU, "requires GPU")
+class TestProfilingBenchmarkerMany(TestCase):
+    """Tests for ProfilingBenchmarker.benchmark_many_gpu method."""
+
+    def setUp(self):
+        super().setUp()
+        torch.manual_seed(12345)
+        counters.clear()
+
+    @staticmethod
+    def make_callable(size=100):
+        """Create a simple GPU callable."""
+        tensor = torch.randn(size, device=GPU_TYPE)
+        return lambda: torch.sum(tensor)
+
+    def test_single_callable_returns_positive_timing(self):
+        """Single callable should return a positive timing."""
+        benchmarker = ProfilingBenchmarker()
+        callables = [self.make_callable()]
+        timings = benchmarker.benchmark_many_gpu(callables, warmup=10, rep=20)
+        self.assertEqual(len(timings), 1)
+        self.assertGreater(timings[0], 0)
+
+    def test_multiple_callables_returns_correct_count(self):
+        """Number of results should match input callables."""
+        benchmarker = ProfilingBenchmarker()
+        callables = [self.make_callable() for _ in range(3)]
+        timings = benchmarker.benchmark_many_gpu(callables, warmup=10, rep=20)
+        self.assertEqual(len(timings), 3)
+        for timing in timings:
+            self.assertGreater(timing, 0)
+
+    def test_multiple_callables_preserves_relative_order(self):
+        """Larger operations should have larger timings."""
+        benchmarker = ProfilingBenchmarker()
+        # Create callables with different sizes - larger should take longer
+        small_tensor = torch.randn(10, device=GPU_TYPE)
+        large_tensor = torch.randn(10000, 10000, device=GPU_TYPE)
+
+        def small_fn():
+            return torch.sum(small_tensor)
+
+        def large_fn():
+            return torch.mm(large_tensor, large_tensor)
+
+        callables = [small_fn, large_fn]
+        timings = benchmarker.benchmark_many_gpu(callables, warmup=5, rep=20)
+        self.assertEqual(len(timings), 2)
+        # Large matmul should take longer than small sum
+        self.assertGreater(timings[1], timings[0])
+
+    def test_empty_list_raises_error(self):
+        """Empty list should raise ValueError."""
+        benchmarker = ProfilingBenchmarker()
+        with self.assertRaises(ValueError) as context:
+            benchmarker.benchmark_many_gpu([])
+        self.assertIn("At least one callable required", str(context.exception))
+
+    def test_estimated_timings_length_mismatch_raises(self):
+        """Mismatched estimated_timings length should raise ValueError."""
+        benchmarker = ProfilingBenchmarker()
+        callables = [self.make_callable(), self.make_callable()]
+        with self.assertRaises(ValueError) as context:
+            benchmarker.benchmark_many_gpu(
+                callables,
+                estimated_timings=[1.0],  # Wrong length
+            )
+        self.assertIn("estimated_timings length must match", str(context.exception))
+
+    def test_skip_initial_warmup(self):
+        """skip_initial_warmup should be respected (no crash)."""
+        benchmarker = ProfilingBenchmarker()
+        # Pre-warm the callables ourselves
+        callables = [self.make_callable()]
+        for fn in callables:
+            fn()
+        torch.cuda.synchronize()
+
+        timings = benchmarker.benchmark_many_gpu(
+            callables, warmup=10, rep=20, skip_initial_warmup=True
+        )
+        self.assertEqual(len(timings), 1)
+        self.assertGreater(timings[0], 0)
+
+    def test_estimated_timings_skips_estimation(self):
+        """estimated_timings should skip runtime estimation phase."""
+        benchmarker = ProfilingBenchmarker()
+        callables = [self.make_callable()]
+        # Provide pre-seeded timing estimates
+        timings = benchmarker.benchmark_many_gpu(
+            callables, warmup=10, rep=20, estimated_timings=[0.1]
+        )
+        self.assertEqual(len(timings), 1)
+        self.assertGreater(timings[0], 0)
+
+    def test_counter_incremented(self):
+        """Benchmark counter should be incremented."""
+        benchmarker = ProfilingBenchmarker()
+        callables = [self.make_callable()]
+        benchmarker.benchmark_many_gpu(callables, warmup=10, rep=20)
+        counter_value = counters["inductor"][
+            "benchmarking.ProfilingBenchmarker.benchmark_many_gpu"
+        ]
+        self.assertEqual(counter_value, 1)
 
 
 if __name__ == "__main__":

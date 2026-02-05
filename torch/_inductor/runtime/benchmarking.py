@@ -1,11 +1,13 @@
 import functools
 import inspect
+import queue
+import threading
 import time
 from collections.abc import Callable
 from functools import cached_property, wraps
 from itertools import chain
 from statistics import median
-from typing import Any, Concatenate, Optional, Union
+from typing import Any, ClassVar, Concatenate, Optional, TYPE_CHECKING, Union
 from typing_extensions import ParamSpec, Self, TypeVar
 
 import torch
@@ -100,8 +102,20 @@ class Benchmarker:
     inductor generated callables.
     """
 
+    _instances: ClassVar[dict[type, "Benchmarker"]] = {}
+    _instances_lock: ClassVar[threading.Lock] = threading.Lock()
+    _initialized: bool
+
+    def __new__(cls) -> Self:
+        with cls._instances_lock:
+            if cls not in cls._instances:
+                cls._instances[cls] = super().__new__(cls)
+            return cls._instances[cls]  # pyrefly: ignore[bad-return-type]
+
     def __init__(self: Self) -> None:
-        pass
+        if getattr(self, "_initialized", False):
+            return
+        self._initialized = True
 
     def infer_device(self, *fn_args: Any, **fn_kwargs: Any) -> torch.device:
         inferred_device: Optional[torch.device] = None
@@ -438,6 +452,450 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
             raise ValueError(
                 f"Unsupported return_mode: {return_mode}. Use 'min' or 'all'."
             )
+
+
+class DynamicSchedule:
+    """A profiler schedule that can be toggled between NONE and RECORD states.
+
+    This allows a single profiler session to be reused across multiple
+    benchmark calls by dynamically controlling when recording happens.
+    """
+
+    def __init__(self) -> None:
+        self._phase = torch.profiler.ProfilerAction.NONE
+        self._steps_in_record = 0
+
+    def start_recording(self) -> None:
+        """Transition to RECORD state on next step() call."""
+        self._phase = torch.profiler.ProfilerAction.RECORD
+        self._steps_in_record = 1
+
+    def __call__(self, step: int) -> torch.profiler.ProfilerAction:
+        """Return the action for the current step."""
+        if self._phase == torch.profiler.ProfilerAction.RECORD:
+            self._steps_in_record -= 1
+            if self._steps_in_record <= 0:
+                self._phase = torch.profiler.ProfilerAction.NONE
+                return torch.profiler.ProfilerAction.RECORD_AND_SAVE
+            return torch.profiler.ProfilerAction.RECORD
+        return torch.profiler.ProfilerAction.NONE
+
+
+class ProfilerSession:
+    """Manages a long-running profiler session with automatic cleanup.
+
+    This session can be reused across multiple benchmark calls, avoiding the
+    overhead and CUPTI issues from creating/destroying profiler contexts.
+    The profiler is lazily started on first record() call and automatically
+    cleaned up after a fixed duration to prevent CUPTI memory buildup.
+    """
+
+    _PROFILER_MAX_LIFETIME_SECONDS: float = 30.0
+
+    def __init__(self, device_type: str) -> None:
+        from torch.autograd.profiler_util import FunctionEvent
+
+        self._device_type = device_type
+        self._schedule = DynamicSchedule()
+        self._events_queue: queue.Queue[list[FunctionEvent]] = queue.Queue()
+        self._profiler: torch.profiler.profile | None = None
+        self._lock = threading.Lock()
+        self._generation = 0
+
+    def _on_trace_ready(self, prof: torch.profiler.profile) -> None:
+        """Callback invoked on RECORD_AND_SAVE - captures events."""
+        events = list(prof.events())
+        self._events_queue.put(events)
+
+    def _start_profiler(self) -> None:
+        """Start the profiler and schedule delayed cleanup."""
+        self._generation += 1
+        current_generation = self._generation
+
+        self._profiler = torch.profiler.profile(
+            activities=[
+                getattr(torch.profiler.ProfilerActivity, self._device_type.upper()),
+            ],
+            schedule=self._schedule,
+            on_trace_ready=self._on_trace_ready,
+        )
+        self._profiler.__enter__()
+        self._profiler.step()  # Initial step in NONE state
+
+        # Schedule cleanup after max lifetime
+        cleanup_thread = threading.Thread(
+            target=self._delayed_cleanup,
+            args=(current_generation,),
+            daemon=True,
+        )
+        cleanup_thread.start()
+
+    def _delayed_cleanup(self, generation: int) -> None:
+        """Background thread that stops profiler after max lifetime."""
+        time.sleep(self._PROFILER_MAX_LIFETIME_SECONDS)
+        self._stop_profiler(generation)
+
+    def _stop_profiler(self, generation: int | None = None) -> None:
+        """Stop the profiler if running and generation matches."""
+        with self._lock:
+            if self._profiler is not None:
+                # Only stop if generation matches (or no generation specified)
+                if generation is None or generation == self._generation:
+                    self._profiler.__exit__(None, None, None)
+                    self._profiler = None
+
+    def record(self, work_fn: Callable[[], None]) -> list["FunctionEvent"]:
+        """Execute work_fn while recording, return captured events."""
+        from torch.autograd.profiler_util import FunctionEvent
+
+        with self._lock:
+            # Lazily start profiler if not running
+            if self._profiler is None:
+                self._start_profiler()
+
+            profiler = self._profiler
+            assert profiler is not None
+
+            try:
+                self._schedule.start_recording()
+                profiler.step()  # Transition to RECORD
+                work_fn()  # Do the actual benchmarking work
+                profiler.step()  # Transition to RECORD_AND_SAVE -> NONE
+                events: list[FunctionEvent] = self._events_queue.get(timeout=30.0)
+                return events
+            except Exception:
+                # Increment generation to invalidate any pending cleanup threads
+                self._generation += 1
+                profiler.__exit__(None, None, None)
+                self._profiler = None
+                raise
+
+
+class ProfilingBenchmarker(Benchmarker):
+    """
+    Benchmarker using torch.profiler to capture device-side events.
+
+    Potentially more accurate than other benchmarking methods, as the
+    profiler timings entirely exclude host-side overhead that other
+    methods may include in adverse situations.
+    """
+
+    def __init__(self: Self) -> None:
+        if getattr(self, "_initialized", False):
+            return
+        super().__init__()
+        self._sessions: dict[str, ProfilerSession] = {}
+        self._sessions_lock: threading.Lock = threading.Lock()
+        self._cache_zero_cost: dict[str, float] = {}
+        self._cache_zero_cost_lock: threading.Lock = threading.Lock()
+
+    def _get_session(self: Self, device_type: str) -> ProfilerSession:
+        """Get or create a profiler session for the given device type."""
+        with self._sessions_lock:
+            if device_type not in self._sessions:
+                self._sessions[device_type] = ProfilerSession(device_type)
+            return self._sessions[device_type]
+
+    def _get_cache_zero_cost(
+        self: Self,
+        device_type: str,
+        device_interface: "type[DeviceInterface]",
+        cache: torch.Tensor,
+    ) -> float:
+        """Get or compute the cached cache.zero_() cost for a device type."""
+        with self._cache_zero_cost_lock:
+            if device_type not in self._cache_zero_cost:
+                # Measure cache.zero_() cost
+                start_event = device_interface.Event(enable_timing=True)
+                end_event = device_interface.Event(enable_timing=True)
+                start_event.record()
+                for _ in range(100):
+                    cache.zero_()
+                end_event.record()
+                device_interface.synchronize()
+                self._cache_zero_cost[device_type] = (
+                    start_event.elapsed_time(end_event) / 100
+                )
+            return self._cache_zero_cost[device_type]
+
+    @may_distort_benchmarking_result
+    @time_and_count
+    # pyrefly: ignore [bad-override]
+    def benchmark_gpu(
+        self: Self,
+        _callable: Callable[[], object],
+        warmup: int = 25,
+        rep: int = 100,
+        is_vetted_benchmarking: bool = False,
+        **kwargs: object,
+    ) -> float:
+        """Benchmark a GPU callable using torch.profiler to capture device events.
+
+        Arguments:
+        - _callable: The GPU callable to benchmark.
+
+        Keyword Arguments:
+        - warmup: The duration, in milliseconds, to run `_callable` before
+          benchmarking starts.
+        - rep: The duration, in milliseconds, to run `_callable` during
+          benchmarking.
+        - is_vetted_benchmarking: In deterministic mode, we only allow
+          benchmarking in vetted cases.
+        - **kwargs: Additional kwargs (ignored for compatibility).
+
+        Returns:
+        - The runtime of `_callable`, in milliseconds.
+        """
+        # Lazy imports to avoid CUDA initialization at module load.
+        # Importing this module causes CUDA initialization (due to torch.cuda.is_available
+        # at module level), which can cause failures in vllm when creating child processes.
+        from torch._dynamo.device_interface import get_interface_for_device
+        from torch._inductor.utils import get_gpu_type
+        from torch.autograd import DeviceType
+        from torch.autograd.profiler_util import EventList
+
+        if not is_vetted_benchmarking:
+            may_ban_benchmarking()
+
+        device_type = get_gpu_type()
+        device_interface = get_interface_for_device(device_type)
+
+        _callable()
+        device_interface.synchronize()
+        cache = torch.empty(int(256e6 // 4), dtype=torch.int, device=device_type)
+
+        # Estimate the runtime of the function
+        start_event = device_interface.Event(enable_timing=True)
+        end_event = device_interface.Event(enable_timing=True)
+        start_event.record()
+        for _ in range(5):
+            cache.zero_()
+            _callable()
+        end_event.record()
+        device_interface.synchronize()
+        estimate_ms = start_event.elapsed_time(end_event) / 5
+
+        # Compute number of warmup and repeat
+        n_warmup = max(1, int(warmup / estimate_ms))
+        n_repeat = max(1, int(rep / estimate_ms))
+
+        # Warm-up
+        for _ in range(n_warmup):
+            _callable()
+
+        device_interface.synchronize()
+
+        def work_fn() -> None:
+            for _ in range(n_repeat):
+                cache.zero_()
+                _callable()
+            device_interface.synchronize()
+
+        session = self._get_session(device_type)
+        events = session.record(work_fn)
+
+        filtered_events = EventList(
+            [
+                event
+                for event in events
+                if event.device_type == DeviceType.CUDA
+                and event.name != "Context Sync"
+            ]
+        )
+        if len(filtered_events) % n_repeat != 0:
+            raise RuntimeError(
+                f"Failed to divide all profiling events into #repeat groups. "
+                f"#{device_type} events: {len(filtered_events)}, #repeats: {n_repeat}"
+            )
+        num_event_per_group = len(filtered_events) // n_repeat
+        actual_events = EventList(
+            [
+                event
+                for idx, event in enumerate(filtered_events)
+                if idx % num_event_per_group != 0
+            ]
+        )
+        actual_events._build_tree()
+        actual_events = actual_events.key_averages()
+
+        logger.debug("profiling time breakdown")
+        logger.debug(actual_events.table(row_limit=-1))
+
+        result = (
+            sum(event.device_time_total for event in actual_events) / 1000.0 / n_repeat
+        )
+        logger.debug("profiling results: %s ms", result)
+        return result
+
+    @may_distort_benchmarking_result
+    @time_and_count
+    def benchmark_many_gpu(
+        self: Self,
+        callables: list[Callable[[], object]],
+        warmup: int = 25,
+        rep: int = 100,
+        is_vetted_benchmarking: bool = False,
+        skip_initial_warmup: bool = False,
+        estimated_timings: list[float] | None = None,
+        **kwargs: object,
+    ) -> list[float]:
+        """Benchmark multiple GPU callables in a single profiler session.
+
+        This is more efficient than calling benchmark_gpu for each callable
+        individually, as profiler overhead is paid only once.
+
+        Uses cache.zero_() as a sentinel event to delimit callable boundaries,
+        avoiding the need for per-callable dry runs.
+
+        Arguments:
+        - callables: List of GPU callables to benchmark.
+
+        Keyword Arguments:
+        - warmup: The duration, in milliseconds, to run cache.zero_() for
+          GPU memory warmup.
+        - rep: Target repeat time in milliseconds.
+        - is_vetted_benchmarking: In deterministic mode, we only allow
+          benchmarking in vetted cases.
+        - skip_initial_warmup: Skip initial single-call warmup phase.
+        - estimated_timings: Pre-seeded timing estimates in milliseconds
+          (without cache overhead). If provided, skips runtime estimation.
+        - **kwargs: Additional kwargs (ignored for compatibility).
+
+        Returns:
+        - List of benchmark times in milliseconds, same order as input.
+        """
+        from torch._dynamo.device_interface import get_interface_for_device
+        from torch._inductor.utils import get_gpu_type
+        from torch.autograd import DeviceType
+        from torch.autograd.profiler_util import EventList
+
+        if not callables:
+            raise ValueError("At least one callable required")
+
+        if estimated_timings is not None and len(estimated_timings) != len(callables):
+            raise ValueError("estimated_timings length must match callables length")
+
+        if not is_vetted_benchmarking:
+            may_ban_benchmarking()
+
+        device_type = get_gpu_type()
+        device_interface = get_interface_for_device(device_type)
+
+        # Initial warmup: run each callable once
+        if not skip_initial_warmup:
+            for fn in callables:
+                fn()
+            device_interface.synchronize()
+
+        cache = torch.empty(int(256e6 // 4), dtype=torch.int, device=device_type)
+
+        # Estimate runtime or use pre-seeded estimates
+        if estimated_timings is not None:
+            # Use pre-seeded estimates, adding cache.zero_() overhead
+            cache_zero_cost_ms = self._get_cache_zero_cost(
+                device_type, device_interface, cache
+            )
+            estimate_ms = sum(estimated_timings) + cache_zero_cost_ms * len(callables)
+        else:
+            # Estimate by running all callables in sequence with L2 clears
+            start_event = device_interface.Event(enable_timing=True)
+            end_event = device_interface.Event(enable_timing=True)
+            start_event.record()
+            for _ in range(5):
+                for fn in callables:
+                    cache.zero_()
+                    fn()
+            end_event.record()
+            device_interface.synchronize()
+            estimate_ms = start_event.elapsed_time(end_event) / 5
+
+        # Compute n_repeat based on target repeat time
+        # rep is per-callable, so total target time is rep * len(callables)
+        total_rep_ms = rep * len(callables)
+        n_repeat = max(1, int(total_rep_ms / estimate_ms)) if estimate_ms > 0 else 1
+
+        # Memory warmup - compute n_warmup using cached cache zero cost
+        cache_zero_cost_ms = self._get_cache_zero_cost(
+            device_type, device_interface, cache
+        )
+        n_warmup = max(1, int(warmup / cache_zero_cost_ms))
+        for _ in range(n_warmup):
+            cache.zero_()
+
+        device_interface.synchronize()
+
+        # Profile all callables with cache.zero_() as sentinel
+        def work_fn() -> None:
+            for _ in range(n_repeat):
+                for fn in callables:
+                    cache.zero_()
+                    fn()
+            device_interface.synchronize()
+
+        session = self._get_session(device_type)
+        events = session.record(work_fn)
+
+        # Filter to device events only
+        filtered_events = EventList(
+            [
+                event
+                for event in events
+                if event.device_type == DeviceType.CUDA
+                and event.name != "Context Sync"
+            ]
+        )
+
+        if not filtered_events:
+            raise RuntimeError("No profiling events captured")
+
+        # First event is cache.zero_() - use its name as sentinel
+        sentinel_name = filtered_events[0].name
+
+        # Find all sentinel indices
+        sentinel_indices = [
+            idx
+            for idx, event in enumerate(filtered_events)
+            if event.name == sentinel_name
+        ]
+
+        expected_sentinels = len(callables) * n_repeat
+        if len(sentinel_indices) != expected_sentinels:
+            raise RuntimeError(
+                f"Expected {expected_sentinels} sentinel events, found {len(sentinel_indices)}"
+            )
+
+        # Extract events between consecutive sentinels (those are the callable events)
+        # Group by callable index and repeat index
+        # Pattern: [sentinel, fn_events...] repeated for each callable in each repeat
+        callable_timings: list[list[float]] = [[] for _ in callables]
+
+        for repeat_idx in range(n_repeat):
+            for fn_idx in range(len(callables)):
+                # Index of this callable's sentinel in this repeat
+                sentinel_flat_idx = repeat_idx * len(callables) + fn_idx
+                start_idx = sentinel_indices[sentinel_flat_idx] + 1
+
+                # End index is either next sentinel or end of list
+                if sentinel_flat_idx + 1 < len(sentinel_indices):
+                    end_idx = sentinel_indices[sentinel_flat_idx + 1]
+                else:
+                    end_idx = len(filtered_events)
+
+                # Sum device time for events in this callable's execution
+                time_us = sum(
+                    event.device_time_total
+                    for event in filtered_events[start_idx:end_idx]
+                )
+                callable_timings[fn_idx].append(time_us / 1000.0)  # Convert to ms
+
+        # Use minimum timing across repeats for each callable
+        timings = [
+            min(repeat_timings) if repeat_timings else 0.0
+            for repeat_timings in callable_timings
+        ]
+
+        logger.debug("benchmark_many_gpu results: %s ms", timings)
+        return timings
 
 
 benchmarker = (
