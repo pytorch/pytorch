@@ -2569,12 +2569,11 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         )
         f_spec_proxy.node.type = type(f_spec)
 
-        # pyrefly: ignore[unbound-name]
         input_spec_proxy = tx.output.register_static_attr_and_return_proxy(
             fn.__name__ + "_input_spec",
-            input_spec,
+            input_spec,  # pyrefly: ignore[unbound-name]
         )
-        input_spec_proxy.node.type = type(input_spec)
+        input_spec_proxy.node.type = type(input_spec)  # pyrefly: ignore[unbound-name]
 
         # flat_apply_capture takes (input_spec, *flat_args), pass None as in_spec to flat_apply
         all_args = (f_spec_proxy, None, input_spec_proxy, *proxified_flat_args)
