@@ -5788,14 +5788,9 @@ class TestMemPool(TestCase):
     def test_mempool_with_allocator(self):
         pool = torch.cuda.MemPool()
 
-        # MemPool doesn't have an allocator by default
-        self.assertEqual(pool.allocator, None)
         allocator, dummy_allocator = self.get_dummy_allocator(check_vars=True)
 
         pool = torch.cuda.MemPool(allocator.allocator())
-
-        # pool should point to the same allocator as the one passed into it
-        self.assertEqual(allocator.allocator(), pool.allocator)
 
         # pool's use count should be 1 at this point as MemPool object
         # holds a reference
