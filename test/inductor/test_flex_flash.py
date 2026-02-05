@@ -942,7 +942,11 @@ class TestFlexFlash(InductorTestCase):
                 block_mask=block_mask,
                 kernel_options={"BACKEND": "FLASH"},
             )
-            out.sum().backward()
+            with self.assertWarnsRegex(
+                UserWarning,
+                "Deterministic backward for flex_attention with block_mask",
+            ):
+                out.sum().backward()
 
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("case", GQA_MQA_BLOCK_MASK_CASES, name_fn=mask_case_name)
