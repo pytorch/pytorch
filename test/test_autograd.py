@@ -8275,7 +8275,15 @@ for shape in [(1,), ()]:
             unpacked = saved.unpack()
             self.assertEqual(pack_count[0], 1)
             self.assertEqual(unpack_count[0], 1)
-            self.assertEqual(unpacked, a)
+
+            unpacked2 = saved.unpack()
+            self.assertEqual(pack_count[0], 1)
+            self.assertEqual(unpack_count[0], 2)
+
+        # Check tensor equality outside the hooks context to avoid
+        # triggering additional pack hooks from assertEqual internals
+        self.assertEqual(unpacked, a)
+        self.assertEqual(unpacked2, a)
 
     def test_saved_tensor_constructor_forbidden_without_flag(self):
         a = torch.randn(5, requires_grad=True)
