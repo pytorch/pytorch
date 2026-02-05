@@ -149,6 +149,22 @@ PyObject* to_py_size(const std::vector<c10::SymInt>& size) {
 
 namespace torch::autograd {
 
+static void set_needs_input_grad(
+    THPFunction* py_fn,
+    PyNode* node) {
+  size_t edge_idx = 0;
+  for (const auto i : c10::irange(py_fn->is_variable_input.size())) {
+    if (py_fn->is_variable_input[i]) {
+      PyObject* new_value =
+          node->task_should_compute_output(edge_idx++) ? Py_True : Py_False;
+      PyObject* old_value = PyTuple_GET_ITEM(py_fn->needs_input_grad, i);
+      Py_INCREF(new_value);
+      Py_DECREF(old_value);
+      PyTuple_SET_ITEM(py_fn->needs_input_grad, i, new_value);
+    }
+  }
+}
+
 // NOTE: this function is written in a way that assumes it's only called for
 // backward; it's used by engine.cpp.  This is responsible for forwarding a call
 // from C++'s Node::apply to a Python method "apply".
@@ -157,6 +173,8 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
   pybind11::gil_scoped_acquire gil;
   at::OptionalDeviceGuard _device_guard;
   THPFunction* py_fn = (THPFunction*)obj;
+
+  set_needs_input_grad(py_fn, this);
 
   // Massage a C++ variable_list into a Python arguments tuple
   THPObjectPtr pyInputs(to_py_args(inputs, &_device_guard));
@@ -208,6 +226,8 @@ auto PyNode::apply_with_saved_impl(
   pybind11::gil_scoped_acquire gil;
   at::OptionalDeviceGuard _device_guard;
   THPFunction* py_fn = (THPFunction*)obj;
+
+  set_needs_input_grad(py_fn, this);
 
   // Massage a C++ variable_list into a Python arguments tuple
   THPObjectPtr pyInputs(to_py_args(inputs, &_device_guard));
