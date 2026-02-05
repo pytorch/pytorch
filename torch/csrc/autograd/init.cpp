@@ -581,10 +581,10 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
           [](const at::Tensor& tensor,
              bool is_output,
              bool is_inplace_on_view,
-             bool _UNSAFE_INTERNAL_USE) -> torch::autograd::SavedVariable {
+             bool _INTERNAL_USE_ONLY) -> torch::autograd::SavedVariable {
             TORCH_CHECK(
-                _UNSAFE_INTERNAL_USE,
-                "Constructing SavedTensor from Python is internal API and subject to change.");
+                _INTERNAL_USE_ONLY,
+                "SavedTensor constructor is exposed for internal use only and is subject to change.");
             return torch::autograd::SavedVariable(
                 tensor, is_output, is_inplace_on_view);
           }),
@@ -592,7 +592,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
           py::kw_only(),
           py::arg("is_output"),
           py::arg("is_inplace_on_view") = false,
-          py::arg("_UNSAFE_INTERNAL_USE") = false)
+          py::arg("_INTERNAL_USE_ONLY") = false)
       .def(
           "unpack",
           [](const torch::autograd::SavedVariable& s) -> at::Tensor {
