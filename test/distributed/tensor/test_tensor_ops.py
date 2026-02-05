@@ -814,6 +814,12 @@ class DistTensorOpsTest(DTensorTestBase):
 
     @with_comms
     def test_single_dim_strategy_dtype_cache_key(self):
+        """Test that schema_info from single-dim strategy affects cache key.
+
+        When @register_single_dim_strategy specifies static_kwargkey=["dtype"],
+        the C++ dispatch path should include dtype in the cache key. This ensures
+        calls with different dtypes don't return the same cached result.
+        """
         from torch.distributed.tensor._op_schema import RuntimeSchemaInfo
         from torch.distributed.tensor._ops.single_dim_strategy import (
             _ShardingPlaceholder,
@@ -821,11 +827,14 @@ class DistTensorOpsTest(DTensorTestBase):
         )
         from torch.distributed.tensor.debug import _clear_sharding_prop_cache
 
+        call_count = [0]
+
         @register_single_dim_strategy(
             torch.ops.aten._to_copy.default,
             schema_info=RuntimeSchemaInfo(static_kwargkey=["dtype"]),
         )
         def to_copy_single_dim_strategy(op, args_schema, kwargs_schema):
+            call_count[0] += 1
             self_meta = args_schema[0]
             assert isinstance(self_meta, TensorMeta)
             single_dim_strategies = []
@@ -833,8 +842,6 @@ class DistTensorOpsTest(DTensorTestBase):
                 single_dim_strategies.append(
                     [_ShardingPlaceholder(dim), _ShardingPlaceholder(dim)]
                 )
-            if kwargs_schema.get("dtype", torch.float32).is_floating_point:
-                single_dim_strategies.append([Partial("sum"), Partial("sum")])
             return single_dim_strategies
 
         _clear_sharding_prop_cache()
@@ -851,11 +858,12 @@ class DistTensorOpsTest(DTensorTestBase):
             None,
         )
 
-        out_int = sharded_dtensor.to(torch.int32)
-        out_float = sharded_dtensor.to(torch.float64)
+        call_count[0] = 0
+        sharded_dtensor.to(torch.int32)
+        sharded_dtensor.to(torch.float64)
 
-        self.assertEqual(str(out_int.placements[0]), "R")
-        self.assertEqual(str(out_float.placements[0]), "P(sum)")
+        # With dtype in cache key, strategy should be called twice (different dtypes)
+        self.assertEqual(call_count[0], 2)
 
     @with_comms
     def test_slice(self):
