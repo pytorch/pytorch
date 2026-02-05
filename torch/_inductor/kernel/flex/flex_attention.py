@@ -289,6 +289,8 @@ def flex_attention(
             kv_indices,
             full_kv_num_blocks,
             full_kv_indices,
+            SPARSE_Q_BLOCK_SIZE,
+            SPARSE_KV_BLOCK_SIZE,
             mask_graph=mask_graph,
             subgraph=subgraph,
         )
@@ -781,6 +783,8 @@ def flex_attention_backward(*args, **kwargs):
             grad_out,
             scale,
             kernel_options,
+            SPARSE_Q_BLOCK_SIZE,
+            SPARSE_KV_BLOCK_SIZE,
             fw_subgraph_buffer=None if score_is_trivial else fw_subgraph_buffer,
             joint_subgraph_buffer=None
             if score_is_trivial

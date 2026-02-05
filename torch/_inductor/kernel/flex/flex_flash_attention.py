@@ -295,6 +295,8 @@ def create_flex_flash_attention_kernel(
     kv_indices: TensorBox | None,
     full_kv_num_blocks: TensorBox | None,
     full_kv_indices: TensorBox | None,
+    sparse_q_block_size: int,
+    sparse_kv_block_size: int,
     mask_graph: Subgraph,
     subgraph: Subgraph | None = None,
 ) -> tuple[TensorBox, TensorBox]:
@@ -380,6 +382,8 @@ def create_flex_flash_attention_kernel(
             SM_SCALE=scale,
             HAS_SCORE_MOD=has_score_mod,
             NEEDS_BLOCK_MASK=needs_block_mask,
+            SPARSE_Q_BLOCK_SIZE=sparse_q_block_size,
+            SPARSE_KV_BLOCK_SIZE=sparse_kv_block_size,
         )
 
     for choice in choices:
@@ -475,6 +479,8 @@ def create_flex_flash_attention_backward_kernel(
     grad_out: TensorBox,
     scale: float,
     kernel_options: dict[str, Any],
+    sparse_q_block_size: int,
+    sparse_kv_block_size: int,
     fw_subgraph_buffer: Optional[SubgraphResults] = None,
     joint_subgraph_buffer: Optional[Any] = None,
     score_mod_other_buffers: Optional[list[TensorBox]] = None,
@@ -577,6 +583,8 @@ def create_flex_flash_attention_backward_kernel(
             SM_SCALE=scale,
             HAS_SCORE_MOD=has_score_mod,
             HAS_BLOCK_MASK=has_block_mask,
+            SPARSE_Q_BLOCK_SIZE=sparse_q_block_size,
+            SPARSE_KV_BLOCK_SIZE=sparse_kv_block_size,
         )
 
     for choice in choices:
