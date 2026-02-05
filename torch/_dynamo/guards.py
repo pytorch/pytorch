@@ -2708,6 +2708,7 @@ class GuardBuilder(GuardBuilderBase):
                 names: dict[str, tuple[int, int]] = {}
                 source_pairs: list[tuple[Source, Source]] = []
                 derived_equalities: list[  # type: ignore[type-arg]
+                    # pyrefly: ignore [implicit-any]
                     tuple[Source, Union[Source, Symbol], Callable]
                 ] = []
                 phantom_symbols: dict[str, Symbol] = {}
@@ -4202,6 +4203,7 @@ class CheckFunctionManager:
 
         guards_log.debug("GUARDS:")
 
+        # pyrefly: ignore [implicit-any]
         code_parts = []
         verbose_code_parts = []
         structured_guard_fns: list[Callable[[], dict[str, Any]]] = []
@@ -4568,6 +4570,7 @@ def get_guard_fail_reason_helper(
     guard_manager: GuardManagerWrapper,
     f_locals: dict[str, object],
     compile_id: Optional[CompileId],
+    # pyrefly: ignore [implicit-any]
     backend: Optional[Callable],
 ) -> str:
     """
@@ -4675,6 +4678,7 @@ def get_guard_fail_reason(
     code: types.CodeType,
     f_locals: dict[str, object],
     compile_id: CompileId,
+    # pyrefly: ignore [implicit-any]
     backend: Callable,
     skip_logging: bool = False,
 ) -> str:
@@ -4703,6 +4707,7 @@ def get_guard_fail_reason(
 def get_and_maybe_log_recompilation_reasons(
     cache_entry: Optional[CacheEntry],
     frame: DynamoFrameType,
+    # pyrefly: ignore [implicit-any]
     backend: Callable,
     skip_logging: bool = False,
 ) -> list[str]:
@@ -4711,6 +4716,7 @@ def get_and_maybe_log_recompilation_reasons(
     Logs the recompilation reason if `recompiles` logging is enabled.
     Raises a RecompileError if `config.error_on_recompile` is enabled.
     """
+    # pyrefly: ignore [implicit-any]
     reasons = []
     while cache_entry is not None:
         reason = get_guard_fail_reason(

@@ -20,6 +20,7 @@ def create_joint_graph_node_information(
             joint_graph_node.name in recomputable_node_info
         )
         tensor_meta = joint_graph_node.meta.get("tensor_meta")
+        # pyrefly: ignore [implicit-any]
         shape = getattr(tensor_meta, "shape", []) if tensor_meta else []
 
         node_info: dict[str, Any] = {

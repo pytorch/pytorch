@@ -85,6 +85,7 @@ def bucket_has_external_output(bucket: Bucket) -> bool:
 def pretty_print_buckets(buckets: list[Bucket], bucket_bytes_cap: int) -> None:
     headers = ("Index", "Size (b)", "Param Names")
     rows: list[tuple[Optional[int], Optional[int], str]] = []
+    # pyrefly: ignore [implicit-any]
     extended_buckets = []
     for idx, bucket in enumerate(reversed(buckets)):
         if len(bucket.params) > 0:

@@ -445,6 +445,7 @@ class BenchmarkRequest:
                 )
             self.output_tensor_meta = output_tensor_meta[0]
         else:
+            # pyrefly: ignore [bad-assignment]
             self.output_tensor_meta: TensorMeta = output_tensor_meta
 
         self.extra_args = extra_args

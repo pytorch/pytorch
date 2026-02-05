@@ -221,6 +221,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
             if isinstance(arg, VariableTracker) and arg.is_python_constant():
                 return arg.as_python_constant()
             elif isinstance(arg, ListVariable) and not arg.items:
+                # pyrefly: ignore [implicit-any]
                 return []
             elif (
                 isinstance(arg, ConstDictVariable)

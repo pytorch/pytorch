@@ -3234,6 +3234,7 @@ def run_fallback_kernel(
     if torch.Tag.inplace_view in func.tags:
         raise orig_not_implemented_exception
 
+    # pyrefly: ignore [implicit-any]
     inp_impls = {}
 
     # Don't use in_kernel_invocation_manager(fake_mode) as we want to do

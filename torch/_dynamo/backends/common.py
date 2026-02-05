@@ -150,7 +150,7 @@ def mem_efficient_fusion_kwargs(use_decomps: bool) -> dict[str, Any]:
     }
 
     if use_decomps:
-        # pyrefly: ignore[unsupported-operation]
+        # pyrefly: ignore [bad-typed-dict-key, unsupported-operation]
         kwargs["decompositions"] = default_decompositions
 
     return kwargs

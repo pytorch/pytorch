@@ -200,6 +200,7 @@ def allow_in_graph(fn):  # type: ignore[no-untyped-def]
     return fn
 
 
+# pyrefly: ignore [implicit-any]
 def _check_mutually_exclusive_decorators(fn: Callable, decorator_name: str) -> None:
     mutually_exclusive = {
         "leaf_function": trace_rules.is_leaf_function,
@@ -907,12 +908,14 @@ def mark_unbacked(
             return
 
         if not hasattr(t, "_specialized_on"):
+            # pyrefly: ignore [implicit-any]
             t._specialize_on = {}
 
         if not hasattr(t, "_dynamo_unbacked_indices"):
             t._dynamo_unbacked_indices = set()
 
         if not hasattr(t, "_dynamo_hint_overrides"):
+            # pyrefly: ignore [implicit-any]
             t._dynamo_hint_overrides = {}
 
         if hint_override:
@@ -920,6 +923,7 @@ def mark_unbacked(
 
         if shape_id is not None:
             if not hasattr(t, "_dynamo_shape_ids"):
+                # pyrefly: ignore [implicit-any]
                 t._dynamo_shape_ids = {}
             t._dynamo_shape_ids[index] = shape_id
 
@@ -1001,9 +1005,11 @@ def mark_dynamic(
 
             t._dynamo_dynamic_range = set()
 
+            # pyrefly: ignore [implicit-any]
             t._dynamo_hint_overrides = {}
 
         if not hasattr(t, "_specialize_on"):
+            # pyrefly: ignore [implicit-any]
             t._specialize_on = {}
 
         if hint_override:

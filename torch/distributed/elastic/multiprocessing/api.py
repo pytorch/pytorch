@@ -382,6 +382,7 @@ class DefaultLogsSpecs(LogsSpecs):
                         stderrs[local_rank] = os.devnull
 
                 error_file = os.path.join(clogdir, "error.json")
+                # pyrefly: ignore [unsupported-operation]
                 error_files[local_rank] = error_file
                 logger.info(
                     "Setting worker%s reply file to: %s", local_rank, error_file
@@ -393,6 +394,7 @@ class DefaultLogsSpecs(LogsSpecs):
             stderrs,
             tee_stdouts,
             tee_stderrs,
+            # pyrefly: ignore [bad-argument-type]
             error_files,
             os.path.join(attempt_log_dir, "filtered_stdout.log"),
             os.path.join(attempt_log_dir, "filtered_stderr.log"),

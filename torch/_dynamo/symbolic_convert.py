@@ -2691,7 +2691,7 @@ class InstructionTranslatorBase(
                 return True
             elif isinstance(exc_instance, variables.BuiltinVariable) and issubclass(
                 exc_instance.fn,
-                # pyrefly: ignore [missing-attribute]
+                # pyrefly: ignore [invalid-argument, missing-attribute]
                 expected_type.fn,
             ):
                 return True
@@ -2786,9 +2786,9 @@ class InstructionTranslatorBase(
             )
 
         # Map to a dictionary of str -> VariableTracker
-        # pyrefly: ignore [unbound-name, missing-attribute]
+        # pyrefly: ignore [bad-assignment, missing-attribute, unbound-name]
         kwargsvars = kwargsvars.keys_as_python_constant()
-        # pyrefly: ignore [unbound-name, missing-attribute]
+        # pyrefly: ignore [bad-argument-type, missing-attribute, unbound-name]
         self.call_function(fn, argsvars.items, kwargsvars)
 
     @break_graph_if_unsupported(
@@ -4047,6 +4047,7 @@ class InstructionTranslatorBase(
         else:
             if isinstance(contents[0], NullVariable):
                 fn = contents[1]
+                # pyrefly: ignore [implicit-any]
                 args = []
             else:
                 fn = contents[0]
@@ -4062,6 +4063,7 @@ class InstructionTranslatorBase(
             assert len(kwargs) == len(kw_names)
         else:
             args = args + contents[2:]
+            # pyrefly: ignore [implicit-any]
             kwargs = {}
 
         try:
@@ -5681,6 +5683,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             ):
                 assert isinstance(self, InliningGeneratorInstructionTranslator)
                 # When the generator returns None, we raise StopIteration
+                # pyrefly: ignore [implicit-any]
                 args = []
                 if not self.symbolic_result.is_constant_none():
                     args = [self.symbolic_result]

@@ -320,6 +320,7 @@ def set_union(
     return cls(union_set)
 
 
+# pyrefly: ignore [bad-return]
 def set_update(set1: set[T], *others: Iterable[T]) -> set[T]:
     if len(others) == 0:
         return set1
