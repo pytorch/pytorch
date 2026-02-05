@@ -226,12 +226,9 @@ struct VecRoundConvert<
         round_convert_float_to_int8<dst_t>(src[0]);
     at::vec::Vectorized<dst_t> vec2 =
         round_convert_float_to_int8<dst_t>(src[1]);
-    __m128 lane2 = _mm512_castps512_ps128(_mm512_castsi512_ps(vec2));
-    __m512 result = _mm512_insertf32x4(
-        _mm512_castsi512_ps(vec1),
-        lane2,
-        1); // Insert lane2 into the second 128-bit lane
-    return at::vec::Vectorized<dst_t>(_mm512_castps_si512(result));
+    __m128i vec2_lo = _mm512_castsi512_si128(vec2);
+    __m512i out = _mm512_inserti32x4(vec1, vec2_lo, 1);
+    return VectorizedN<dst_t, 1>(at::vec::Vectorized<dst_t>(out));
   }
 };
 
