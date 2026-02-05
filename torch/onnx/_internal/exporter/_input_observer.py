@@ -152,7 +152,7 @@ class InputCandidate:
         return len(self.flat_list)
 
     def str_obs(self) -> str:
-        """Prints out some information about the osbervations."""
+        """Prints out some information about the observations."""
         return (
             f"InputCandidate(args=#{len(self.args)}(...), "
             f"kwargs=#{len(self.kwargs)}{{...}}, cst_kwargs={self.cst_kwargs})"
