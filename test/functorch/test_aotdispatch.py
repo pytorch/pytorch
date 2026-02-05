@@ -6819,15 +6819,6 @@ def forward(self, primals_1, tangents_1):
 
             force_save_effectful_ops(gm)
 
-            for node in effect_token_nodes:
-                is_output = any(u.op == "output" for u in node.users)
-                if not is_output:
-                    self.assertEqual(
-                        node.meta.get("recompute"),
-                        CheckpointPolicy.MUST_RECOMPUTE,
-                        f"Intermediate effect token {node.name} should be MUST_RECOMPUTE",
-                    )
-
             for node in tensor_result_nodes:
                 self.assertEqual(
                     node.meta.get("recompute"),

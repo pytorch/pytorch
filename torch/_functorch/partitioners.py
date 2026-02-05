@@ -1282,6 +1282,9 @@ def default_partition(
 
     saved_values = list(dict.fromkeys(saved_values).keys())
     saved_sym_nodes = list(dict.fromkeys(saved_sym_nodes).keys())
+    # effectful ops w/ must_recompute get wired into the backward effect token chain...
+    # we can discard these
+    saved_values = list(filter(lambda n: not is_with_effects_token(n), saved_values))
 
     if config._sync_decision_cross_ranks:
         saved_values = _sync_decision_cross_ranks(joint_module.graph, saved_values)
@@ -1829,11 +1832,8 @@ def force_save_effectful_ops(joint_module: fx.GraphModule) -> None:
         for user in node.users:
             if user.target is operator.getitem:
                 if is_with_effects_token(user):
-                    if not any(u.op == "output" for u in user.users):
-                        # intermediate tokens will be re-wired into
-                        # the backward effect token chain, and we don't
-                        # want them to show up in tensors_saved_with_vc_check
-                        user.meta["recompute"] = CheckpointPolicy.MUST_RECOMPUTE
+                    # intermediate tokens are handled by re-wiring in
+                    # _extract_graph_with_inputs_outputs - don't mark them
                     continue
                 mark_getitem_outputs(user)
                 if not isinstance(user.meta.get("val"), (tuple, list)):
@@ -2226,6 +2226,10 @@ def solve_min_cut(
         if is_sym_node(node):
             weight = float(sym_node_size(node))
             cannot_save_reason = None
+        elif is_with_effects_token(node):
+            # effectful ops w/ must_recompute get wired into the backward effect token chain...
+            weight = math.inf
+            cannot_save_reason = "effect token"
         elif is_non_tensor_node:
             # FakeScriptObjects (opaque objects) should have weight 0.0 so they can be
             # properly partitioned between forward and backward, like BackwardState.
@@ -3517,6 +3521,9 @@ def min_cut_rematerialization_partition(
     # save_for_backward on tensors and stashes symints in autograd .ctx
     saved_sym_nodes = list(filter(is_sym_node, saved_values))
     saved_values = list(filter(lambda n: not is_sym_node(n), saved_values))
+    # effectful ops w/ must_recompute get wired into the backward effect token chain...
+    # we can discard these
+    saved_values = list(filter(lambda n: not is_with_effects_token(n), saved_values))
 
     # NB: saved_sym_nodes will be mutated to reflect the actual saved symbols
     fw_module, bw_module = _extract_fwd_bwd_modules(
