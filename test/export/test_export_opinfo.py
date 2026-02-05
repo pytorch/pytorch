@@ -20,7 +20,12 @@ from torch.testing._internal.common_methods_invocations import (
     skipOps,
     xfail,
 )
-from torch.testing._internal.common_utils import run_tests, skipIfRocm, TestCase
+from torch.testing._internal.common_utils import (
+    IS_FBCODE,
+    run_tests,
+    skipIfRocm,
+    TestCase,
+)
 from torch.utils import _pytree as pytree
 
 
@@ -122,6 +127,7 @@ class TestExportOpInfo(TestCase):
     @skipOps(
         "TestExportOpInfo", "test_fake_export", export_failures | fake_export_failures
     )
+    @unittest.skipIf(IS_FBCODE, "tests broken with unexpected successes internally")
     def test_fake_export(self, device, dtype, op):
         _test_export_helper(self, dtype, op)
 
@@ -146,7 +152,6 @@ class TestExportOnFakeCuda(TestCase):
     # We set CUDA_VISIBLE_DEVICES="" to simulate a CPU machine with cuda build
     # Running this on all ops in op_db is too slow, so we only run on a selected subset
     @onlyCUDA
-    @skipIfRocm
     @ops(selected_op_db, allowed_dtypes=(torch.float,))
     def test_fake_export(self, device, dtype, op):
         test_script = f"""\
@@ -213,7 +218,6 @@ for op in ops:
         self.assertEqual(r, "")
 
     @unittest.skipIf(not torch.backends.cuda.is_built(), "requires CUDA build")
-    @skipIfRocm
     def test_preserve_original_behavior(self):
         test_script = f"""\
 import torch

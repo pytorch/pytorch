@@ -1,17 +1,14 @@
-"""Utility functions for caching operations in PyTorch Inductor runtime.
+"""Utility functions
 
-This module provides helper functions for pickling/unpickling operations
-with error handling, LRU caching decorators, and type-safe serialization
-utilities used throughout the caching system.
+This module provides helper functions for LRU caching decorators used
+throughout the caching system.
 """
 
-import pickle
 from collections.abc import Callable
-from functools import lru_cache, partial, wraps
-from typing import Any
-from typing_extensions import ParamSpec, TypeVar
+from functools import lru_cache, wraps
+from typing_extensions import ParamSpec, TypedDict, TypeVar
 
-from . import exceptions
+from torch import Tensor
 
 
 # Type specification for function parameters
@@ -36,74 +33,34 @@ def _lru_cache(fn: Callable[P, R]) -> Callable[P, R]:
     cached_fn = lru_cache(maxsize=64, typed=True)(fn)
 
     @wraps(fn)
-    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:  # type: ignore[type-var]
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
         try:
-            return cached_fn(*args, **kwargs)  # type: ignore[arg-type]
+            return cached_fn(*args, **kwargs)
         except TypeError:
             return fn(*args, **kwargs)
 
     return wrapper
 
 
-@_lru_cache
-def _try_pickle(to_pickle: Any, raise_if_failed: type = exceptions.CacheError) -> bytes:
-    """Attempt to pickle an object with error handling.
+class EncodedTensor(TypedDict):
+    """TypedDict for encoded tensor metadata."""
 
-    Tries to serialize an object using pickle.dumps with appropriate error
-    handling and custom exception raising.
-
-    Args:
-        to_pickle: The object to be pickled.
-        raise_if_failed: Exception class to raise if pickling fails.
-
-    Returns:
-        The pickled bytes representation of the object.
-
-    Raises:
-        The exception class specified in raise_if_failed if pickling fails.
-    """
-    try:
-        pickled: bytes = pickle.dumps(to_pickle)
-    except (pickle.PicklingError, AttributeError) as err:
-        raise raise_if_failed(to_pickle) from err
-    return pickled
+    shape: tuple[int, ...]
+    stride: tuple[int, ...]
+    dtype: str
 
 
-# Specialized pickle function for cache keys with KeyPicklingError handling.
-_try_pickle_key: Callable[[Any], bytes] = partial(
-    _try_pickle, raise_if_failed=exceptions.KeyPicklingError
-)
-# Specialized pickle function for cache values with ValuePicklingError handling.
-_try_pickle_value: Callable[[Any], bytes] = partial(
-    _try_pickle, raise_if_failed=exceptions.ValuePicklingError
-)
-
-
-@_lru_cache
-def _try_unpickle(pickled: bytes, raise_if_failed: type = exceptions.CacheError) -> Any:
-    """Attempt to unpickle bytes with error handling.
-
-    Tries to deserialize bytes using pickle.loads with appropriate error
-    handling and custom exception raising.
+def _encode_tensor(t: Tensor) -> EncodedTensor:
+    """Encode a tensor's metadata into a JSON-serializable dict.
 
     Args:
-        pickled: The bytes to be unpickled.
-        raise_if_failed: Exception class to raise if unpickling fails.
+        t: PyTorch tensor to encode
 
     Returns:
-        The unpickled object.
-
-    Raises:
-        The exception class specified in raise_if_failed if unpickling fails.
+        Dict containing shape, stride, and dtype information
     """
-    try:
-        unpickled: Any = pickle.loads(pickled)
-    except pickle.UnpicklingError as err:
-        raise raise_if_failed(pickled) from err
-    return unpickled
-
-
-# Specialized unpickle function for cache keys with KeyUnPicklingError handling.
-_try_unpickle_value: Callable[[Any], bytes] = partial(
-    _try_unpickle, raise_if_failed=exceptions.ValueUnPicklingError
-)
+    return EncodedTensor(
+        shape=tuple(t.shape),
+        stride=tuple(t.stride()),
+        dtype=str(t.dtype),
+    )

@@ -130,6 +130,12 @@ c10::DeviceIndex maybeExchangeDevice(c10::DeviceIndex device_index) {
   impl.uncheckedSetDevice({device_type, device_index});
   return impl.getDevice().index();
 }
+
+c10::DeviceCapability getDeviceCapability(c10::DeviceIndex device_index) {
+  const auto device_type = getAccelerator(true).value();
+  c10::impl::VirtualGuardImpl impl(device_type);
+  return impl.getDeviceCapability({device_type, device_index});
+}
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace at::accelerator

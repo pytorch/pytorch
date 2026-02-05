@@ -719,6 +719,7 @@ def _maybe_get_custom_module_lstm_from_node_arg(
         If there is a match, return the last matched node, or None otherwise.
         """
         a = arg
+        # pyrefly: ignore [bad-assignment]
         for i, match in enumerate(match_pattern):
             if not match(a):
                 return None

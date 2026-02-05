@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional
 
 import torch
 import torch.optim._functional as F
@@ -68,7 +67,7 @@ class _FunctionalAdamW:
         # param group as it's not a common use case.
         self.param_group = {"params": params}
 
-    def step_param(self, param: Tensor, grad: Optional[Tensor]):
+    def step_param(self, param: Tensor, grad: Tensor | None):
         params_with_grad = []
         grads = []
         exp_avgs = []
@@ -129,7 +128,7 @@ class _FunctionalAdamW:
                 has_complex=has_complex,
             )
 
-    def step(self, gradients: list[Optional[Tensor]]):
+    def step(self, gradients: list[Tensor | None]):
         params = self.param_group["params"]
         params_with_grad = []
         grads = []
