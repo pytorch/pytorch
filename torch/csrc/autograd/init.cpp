@@ -591,6 +591,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
           py::arg("tensor"),
           py::arg("is_output"),
           py::arg("is_inplace_on_view") = false,
+          py::kw_only(),
           py::arg("_unsafe_internal_use_do_not_use") = false)
       .def(
           "unpack",
