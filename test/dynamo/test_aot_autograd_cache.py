@@ -2483,6 +2483,61 @@ class AOTAutogradCacheTests(InductorTestCase):
                 self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 2)
                 self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 0)
 
+    @inductor_config.patch("fx_graph_cache", True)
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @functorch_config.patch({"strict_autograd_cache": True})
+    def test_output_views_input_dynamic(self):
+        class OutputViewsInput(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(64, 64)
+
+            def forward(self, x):
+                batch, seq, hidden = x.shape
+                y = self.linear(x)
+                y = torch.relu(y)
+                x_view = x.view(batch * seq, hidden)
+                return y, x_view
+
+        model = OutputViewsInput()
+        x = torch.randn(2, 16, 64)
+
+        torch._dynamo.mark_dynamic(x, 0)
+        torch._dynamo.mark_dynamic(x, 1)
+
+        compiled = torch.compile(model, backend="inductor", dynamic=True)
+
+        # First call - should miss
+        y, x_view = compiled(x)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+        # Reset dynamo but keep cache
+        self._clear_dynamo_and_codecache()
+
+        # Use different dynamic shape
+        x2 = torch.randn(4, 8, 64)
+        torch._dynamo.mark_dynamic(x2, 0)
+        torch._dynamo.mark_dynamic(x2, 1)
+
+        # Second call with different shape - should hit cache
+        y2, x_view2 = compiled(x2)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+        # Verify correctness
+        eager_model = copy.deepcopy(model)
+        expected_y, expected_view = eager_model(x2)
+        self.assertEqual(y2, expected_y)
+        self.assertEqual(x_view2, expected_view)
+        # Verify the view shares storage with input (critical for view correctness)
+        self.assertEqual(
+            x_view2.untyped_storage().data_ptr(), x2.untyped_storage().data_ptr()
+        )
+
 
 @functorch_config.patch({"bundled_autograd_cache": True})
 class AOTAutogradCacheBundledTests(AOTAutogradCacheTests):
