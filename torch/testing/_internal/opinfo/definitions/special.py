@@ -478,9 +478,7 @@ op_db: list[OpInfo] = [
                 device_type="mps",
             ),
         ),
-        dtypesIfMPS=all_types_and(
-            torch.bool, torch.float16, torch.bfloat16, *_unsigned_int_types
-        ),
+        dtypesIfMPS=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         dtypes=all_types_and(torch.bool, *_unsigned_int_types),
         ref=scipy.special.y0 if TEST_SCIPY else None,
         supports_autograd=False,
