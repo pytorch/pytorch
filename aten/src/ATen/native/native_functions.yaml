@@ -8284,6 +8284,7 @@
   tags: view_copy
   dispatch:
     CompositeExplicitAutogradNonFunctional: lift_fresh_copy
+  autogen: lift_fresh_copy.out
 
 - func: is_set_to(Tensor self, Tensor tensor) -> bool
   variants: method
