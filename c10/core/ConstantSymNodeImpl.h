@@ -68,6 +68,8 @@ class C10_API ConstantSymNodeImpl : public SymNodeImpl {
   c10::SymNode lt(const c10::SymNode& other) override;
   c10::SymNode gt(const c10::SymNode& other) override;
   c10::SymNode mul(const c10::SymNode& other) override;
+  c10::SymNode sym_and(const c10::SymNode& other) override;
+  c10::SymNode sym_or(const c10::SymNode& other) override;
   ::std::string str() override {
     if constexpr (is_int_()) {
       return ::std::to_string(::std::get<int64_t>(value_));

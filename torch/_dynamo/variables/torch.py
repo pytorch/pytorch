@@ -25,6 +25,7 @@ This is a core part of Dynamo's tracing system, translating torch operations int
 traceable graph nodes while preserving correct semantics and handling edge cases.
 """
 
+import enum
 import functools
 import inspect
 import logging
@@ -32,7 +33,8 @@ import math
 import re
 from collections.abc import Callable, Iterable, Sequence
 from contextlib import nullcontext
-from typing import Any, NoReturn, Optional, TYPE_CHECKING, TypeVar
+from typing import Any, NoReturn, Optional, TYPE_CHECKING, TypeVar, Union
+from typing_extensions import TypeIs
 
 import torch._C
 import torch._refs
@@ -43,8 +45,9 @@ from torch._C import DispatchKeySet
 from torch._dynamo.variables.constant import ConstantVariable
 from torch._dynamo.variables.streams import StreamVariable
 from torch._dynamo.variables.torch_function import TorchFunctionModeVariable
-from torch._guards import Source, TracingContext
+from torch._guards import Guard, Source, TracingContext
 from torch._logging import warning_once
+from torch.autograd.graph import GradientEdge
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
 
 from .. import config, graph_break_hints, polyfills, variables
@@ -60,8 +63,9 @@ from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
     CallFunctionNoArgsSource,
+    GlobalStateSource,
+    ImportSource,
     SyntheticLocalSource,
-    TorchSource,
 )
 from ..utils import (
     check_unspec_or_constant_args,
@@ -83,7 +87,7 @@ from .ctx_manager import (
 from .dicts import ConstDictVariable
 from .distributed import DistributedVariable, ProcessGroupVariable
 from .functions import bind_args_cached, NestedUserFunctionVariable
-from .lists import ListVariable, TupleVariable
+from .lists import ListVariable, NamedTupleVariable, TupleVariable
 from .torch_function import (
     can_dispatch_torch_function,
     dispatch_torch_function,
@@ -105,6 +109,7 @@ except ModuleNotFoundError:
 
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
+    from torch._library.opaque_object import OpaqueType
     from torch.utils._pytree import TreeSpec
 
 
@@ -233,20 +238,121 @@ dispatch_key_set_functions = {
 }
 
 
+def _check_for_gradient_edge(var: VariableTracker, arg_name: str) -> None:
+    """Check if var contains a GradientEdge from outside the compiled region.
+
+    Used by handle_autograd_grad to reject external GradientEdge objects that
+    cannot be traced through.
+    """
+    from .lists import BaseListVariable
+
+    if isinstance(var, NamedTupleVariable) and var.tuple_cls is GradientEdge:
+        # Try to get source info for context
+        source_info = var.source.name if var.source else None
+        context = f"GradientEdge in {arg_name}"
+        if source_info:
+            context += f": {source_info}"
+
+        unimplemented(
+            gb_type="autograd.grad with external GradientEdge",
+            context=context,
+            explanation=(
+                "torch.autograd.grad() cannot be used with GradientEdge inputs "
+                "passed from outside the compiled region. The GradientEdge contains "
+                "a reference to an autograd node that was created before torch.compile "
+                "started tracing, so Dynamo cannot trace through its computation."
+            ),
+            hints=[
+                "Move the autograd.grad() call outside the torch.compile region.",
+                "Or use tensor inputs directly instead of GradientEdge objects.",
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
+    elif isinstance(var, BaseListVariable):
+        for i, item in enumerate(var.items):
+            _check_for_gradient_edge(item, f"{arg_name}[{i}]")
+
+
+def _collect_all_grad_fns(tensor: torch.Tensor) -> set[torch.autograd.graph.Node]:
+    from torch._subclasses.fake_tensor import get_plain_tensors
+    from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
+    grad_fns: set[torch.autograd.graph.Node] = set()
+
+    plain_tensors: list[torch.SymInt | torch.Tensor | int | OpaqueType] = []
+    # Get all plain tensors (handles nested subclasses)
+    if is_traceable_wrapper_subclass(tensor):
+        get_plain_tensors(tensor, out=plain_tensors)
+    else:
+        plain_tensors.append(tensor)
+
+    for t in plain_tensors:
+        if not isinstance(t, torch.Tensor):
+            continue
+
+        if t.grad_fn is not None:
+            grad_fns.add(t.grad_fn)
+
+        # For views, also include the base tensor's grad_fn
+        if t._base is not None and t._base.grad_fn is not None:
+            grad_fns.add(t._base.grad_fn)
+
+    return grad_fns
+
+
+def _collect_tensors_with_sources(
+    var: VariableTracker,
+) -> list[tuple[torch.Tensor, Optional[str]]]:
+    """Extract (fake_tensor, source_name) pairs from a VariableTracker.
+
+    Used by handle_autograd_grad to collect tensors from the outputs and inputs
+    arguments for grad_fn reachability analysis.
+    """
+    from .lazy import LazyVariableTracker
+    from .lists import BaseListVariable
+    from .tensor import TensorVariable
+
+    results: list[tuple[torch.Tensor, Optional[str]]] = []
+    if isinstance(var, TensorVariable):
+        fake_tensor = var.as_proxy().node.meta.get("example_value")
+        assert isinstance(fake_tensor, torch._subclasses.fake_tensor.FakeTensor)
+        source_name = var.source.name if var.source else None
+        results.append((fake_tensor, source_name))
+    elif isinstance(var, LazyVariableTracker):
+        # Realize the lazy var to get the actual TensorVariable
+        results.extend(_collect_tensors_with_sources(var.realize()))
+    elif isinstance(var, BaseListVariable):
+        for item in var.items:
+            results.extend(_collect_tensors_with_sources(item))
+    else:
+        unimplemented(
+            gb_type="autograd.grad with unsupported argument type",
+            context=f"got {type(var).__name__}",
+            explanation=(
+                f"torch.autograd.grad() received an argument of type {type(var).__name__} "
+                "which is not supported. Expected tensor or sequence of tensors."
+            ),
+            hints=[
+                "Ensure outputs and inputs arguments are tensors or sequences of tensors.",
+            ],
+        )
+    return results
+
+
 @functools.cache
 def get_overridable_functions() -> set[Callable[..., Any]]:
     from itertools import chain
 
     from torch.overrides import get_overridable_functions as get_overridable_functions_
+    from torch.utils._device import _device_constructors
 
     funcs = set(chain.from_iterable(get_overridable_functions_().values()))
+    funcs.update(_device_constructors())
     more: set[Callable[..., Any]] = {
-        torch.ones,
         torch.ones_like,
-        torch.zeros,
         torch.zeros_like,
-        torch.empty,
-        torch.full,
+        torch.empty_like,
+        torch.full_like,
     }
     funcs.update(more)
     return funcs
@@ -502,24 +608,36 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
         return super().call_function(tx, args, kwargs)
 
 
+class AllowInGraphKind(enum.Enum):
+    DEFAULT = "default"
+    NONSTRICT_TRACE = "nonstrict_trace"
+    LEAF_FUNCTION = "leaf_function"
+
+
 class TorchInGraphFunctionVariable(BaseTorchVariable):
     """Points to a torch function/method that should be put in FX graph"""
 
     def __init__(
         self,
         value: Callable[..., Any],
-        nonstrict_traceable: bool | None = None,
+        kind: AllowInGraphKind | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(value, **kwargs)
-        from ..trace_rules import is_nonstrict_trace_callable
+        from ..trace_rules import is_leaf_function, is_nonstrict_trace_callable
 
-        if nonstrict_traceable is None:
-            nonstrict_traceable = is_nonstrict_trace_callable(value)
-        self.nonstrict_traceable = nonstrict_traceable
+        if kind is None:
+            if is_leaf_function(value):
+                kind = AllowInGraphKind.LEAF_FUNCTION
+            elif is_nonstrict_trace_callable(value):
+                kind = AllowInGraphKind.NONSTRICT_TRACE
+            else:
+                kind = AllowInGraphKind.DEFAULT
+
+        self.kind = kind
 
     def __repr__(self) -> str:
-        return f"TorchInGraphFunctionVariable({self.value}, nonstrict_traceable={self.nonstrict_traceable})"
+        return f"TorchInGraphFunctionVariable({self.value}, kind={self.kind})"
 
     def get_function(self) -> Callable[..., Any]:
         return self.value
@@ -547,7 +665,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         from . import (
             ConstantVariable,
-            DeterministicAlgorithmsVariable,
             GradModeVariable,
             StreamContextVariable,
             SymNodeVariable,
@@ -810,13 +927,23 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         *graph_break_hints.SUPPORTABLE,
                     ],
                 )
-            return DeterministicAlgorithmsVariable.create(tx, mode.as_python_constant())
+
+            value = mode.as_python_constant()
+            tx.output.create_node(
+                "call_function", torch._C._set_deterministic_algorithms, (value,), {}
+            )
+            torch._C._set_deterministic_algorithms(value)
+            return ConstantVariable.create(None)
 
         @register(torch.are_deterministic_algorithms_enabled)
         def handle_are_deterministic_algorithms_enabled(
             self, tx: "InstructionTranslator"
         ) -> ConstantVariable:
-            install_guard(DeterministicAlgorithmsVariable._guards_singleton)
+            guard = Guard(
+                GlobalStateSource(),
+                GuardBuilder.DETERMINISTIC_ALGORITHMS,  # type: ignore[arg-type]
+            )
+            install_guard(guard)
             return ConstantVariable.create(torch.are_deterministic_algorithms_enabled())
 
         @register(torch._C._is_torch_function_enabled)
@@ -1155,6 +1282,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 *args: VariableTracker,
                 **kwargs: VariableTracker,
             ) -> VariableTracker:
+                from .builder import SourcelessBuilder
+
                 # rewrite non-primitive args/kwargs to be included in the on-the-fly prim function
                 # and rewrite args to have only proxyable args, then insert call_function
                 placements_vt = kwargs.get("placements")
@@ -1165,7 +1294,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 if placements_vt is None:
                     placements_vt = ConstantVariable.create(None)
                 elif isinstance(placements_vt, variables.UserDefinedObjectVariable):
-                    placements_vt = variables.BuiltinVariable(tuple).call_function(
+                    placements_vt = SourcelessBuilder.create(tx, tuple).call_function(
                         tx, [placements_vt], {}
                     )
 
@@ -1262,7 +1391,26 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 )
             return None
 
-        @register(torch.fx.experimental.symbolic_shapes.guard_size_oblivious)
+        @register(torch.fx.experimental.symbolic_shapes.size_hint)
+        def handle_size_hint(
+            self,
+            tx: "InstructionTranslator",
+            expr: VariableTracker,
+            fallback: Optional[VariableTracker] = None,
+        ) -> VariableTracker | None:
+            fallback_int = fallback.as_python_constant() if fallback else None
+            if isinstance(expr, SymNodeVariable):
+                return variables.ConstantVariable.create(
+                    torch.fx.experimental.symbolic_shapes.size_hint(
+                        expr.sym_num, fallback_int
+                    )
+                )
+            elif expr.is_python_constant():
+                return expr
+            else:
+                return None
+
+        @register(torch.fx.experimental.symbolic_shapes.guard_size_oblivious)  # type: ignore[deprecated]
         def handle_guard_size_oblivious(
             self, tx: "InstructionTranslator", expr: VariableTracker
         ) -> VariableTracker | None:
@@ -1270,7 +1418,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 # TODO: this probably should be folded somewhere else but I'm not sure where
                 # TODO: some of the other symbolic_shapes special tools can also get this treatment too
                 return variables.ConstantVariable.create(
-                    torch.fx.experimental.symbolic_shapes.guard_size_oblivious(
+                    torch.fx.experimental.symbolic_shapes.guard_size_oblivious(  # type: ignore[deprecated]
                         expr.sym_num
                     )
                 )
@@ -1586,7 +1734,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 install_guard(source.make_guard(GuardBuilder.ID_MATCH))
             # assumes `module` is in the form `torch.xyz`
             new_source = AttrSource(
-                TorchSource(),
+                ImportSource("torch"),
                 # pyrefly: ignore [unbound-name]
                 module.__name__.rsplit(".", maxsplit=1)[-1],
             )
@@ -1695,8 +1843,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         gb_type="Can't extract message from torch._check()",
                         context=str(message_vt),
                         explanation=(
-                            "The second argument of torch._check() must be a function"
-                            "defined within the torch.compile region"
+                            "The second argument of torch._check() must be a function "
+                            "defined within the torch.compile region "
                             "that does not reference a non-local variable."
                         ),
                         hints=[
@@ -1735,6 +1883,258 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 ),
             )
 
+        @register(torch.autograd.grad)
+        # pyrefly: ignore[implicit-any]
+        def handle_autograd_grad(self, tx: "InstructionTranslator", *args, **kwargs):
+            """
+            Handle torch.autograd.grad() calls within compiled regions.
+
+            NOTE [Tracing autograd.grad in dynamo]
+
+            We validate two things:
+
+            1. External grad_fns cannot be consumed: The grad_fn on external inputs
+               could change at runtime, so we would need to guard on it if we wanted
+               to trace through it. For now, we reject this case.
+               We compute "consumed" grad_fns (reachable from outputs, excluding
+               autograd.grad inputs parameter) and verify no graph input's grad_fn is in this set.
+
+            2. Returned tensors cannot have consumed grad_fns: If autograd.grad
+               consumes a grad_fn and we return a tensor connected to it, the user
+               would get "backward through graph a second time" error. We track
+               consumed grad_fns and check at output time. If violated, we retry
+               with a graph break at autograd.grad.
+
+            Safe vs Unsafe Cases:
+
+            Case 1 - Safe (external tensor is autograd.grad input):
+                x = torch.randn(4, requires_grad=True)
+                external = x * 2  # has external grad_fn
+
+                @torch.compile
+                def fn(external_input):
+                    loss = external_input.sum()
+                    return torch.autograd.grad(loss, external_input)
+
+                Safe because autograd.grad stops at external_input, never consuming
+                its external grad_fn.
+
+            Case 2 - Unsafe (external grad_fn in path):
+                @torch.compile
+                def fn(external_input):
+                    loss = mod(external_input).sum()
+                    return torch.autograd.grad(loss, mod.weight)
+
+                Unsafe because autograd.grad must traverse through external_input's
+                grad_fn to reach mod.weight. The external grad_fn could change at
+                runtime, so we would need to guard on it (like AOTAutograd does).
+                For now, we reject this case.
+
+            Case 3 - Unsafe (returning tensor with consumed grad_fn):
+                @torch.compile
+                def fn(x):
+                    y = x * 2
+                    grad = torch.autograd.grad(y.sum(), x)
+                    return y, grad  # y's grad_fn was consumed!
+
+                Unsafe because y's grad_fn was consumed by autograd.grad. Trying to
+                backward through y later would error.
+            """
+            from .. import compiled_autograd, config
+            from .builder import wrap_fx_proxy
+            from .constant import ConstantVariable
+            from .tensor import TensorVariable
+
+            if not config.trace_autograd_ops:
+                unimplemented(
+                    gb_type="using `torch.autograd.grad` with `torch._dynamo.config.trace_autograd_ops=False`",
+                    context=f"trace_autograd_ops={config.trace_autograd_ops}",
+                    explanation=(
+                        "Attempted to call `torch.autograd.grad` with config "
+                        "`torch._dynamo.config.trace_autograd_ops` set to `False`."
+                    ),
+                    hints=[
+                        "Change `torch._dynamo.config.trace_autograd_ops` to `True`.",
+                    ],
+                )
+
+            # Graph break if we detected on a previous attempt that autograd.grad
+            # consumed grad_fns of returned tensors. This gives better compile
+            # coverage than failing the entire compile.
+            if tx.speculation_log.graph_break_on_autograd_grad:
+                unimplemented(
+                    gb_type="autograd.grad consumed returned tensor's grad_fn",
+                    context="",
+                    explanation=(
+                        "torch.autograd.grad() consumes grad_fns that are needed by tensors "
+                        "returned from this compiled function. This would cause 'backward "
+                        "through graph a second time' errors."
+                    ),
+                    hints=[
+                        "If you don't need to backward through the returned tensor, "
+                        "call .detach() before returning: `return loss.detach()`",
+                        "If you need to backward through the returned tensor, use retain_graph=True in autograd.grad().",
+                    ],
+                )
+
+            # Graph break if compiled_autograd is enabled.
+            # Compiled autograd has limitations (e.g., view_fn in CopySlices)
+            # that would cause errors during fake tensor execution.
+            if compiled_autograd.compiled_autograd_enabled:
+                unimplemented(
+                    gb_type="autograd.grad with compiled autograd",
+                    context="compiled_autograd is currently enabled",
+                    explanation=(
+                        "torch.autograd.grad() inside torch.compile is not supported when "
+                        "compiled autograd is enabled. These two features have conflicting "
+                        "requirements for how the autograd graph is traced."
+                    ),
+                    hints=[
+                        "Disable compiled autograd by removing the compiled_autograd context manager.",
+                        "Or move the autograd.grad() call outside the torch.compile region.",
+                        "Or restructure your code so autograd.grad() and compiled_autograd don't overlap.",
+                    ],
+                )
+
+            # Check for external GradientEdge objects in outputs and inputs args
+            # if there is it will be a graph break
+            if len(args) >= 1:
+                _check_for_gradient_edge(args[0], "outputs")
+            if len(args) >= 2:
+                _check_for_gradient_edge(args[1], "inputs")
+
+            # Collect external grad_fn objects from graph inputs, along with their sources.
+            # We need to collect ALL grad_fns associated with each input tensor:
+            # - Direct grad_fn, base tensor's grad_fn (for views)
+            # - Inner tensors (for subclasses)
+            external_grad_fns: set[torch.autograd.graph.Node] = set()
+            # Map grad_fn -> source name for better error messages
+            grad_fn_to_source: dict[torch.autograd.graph.Node, str] = {}
+            for var in tx.output.input_source_to_var.values():
+                if isinstance(var, TensorVariable):
+                    fake_tensor = var.as_proxy().node.meta.get("example_value")
+                    assert isinstance(fake_tensor, torch.Tensor)
+                    tensor_grad_fns = _collect_all_grad_fns(fake_tensor)
+                    external_grad_fns.update(tensor_grad_fns)
+                    # Track source name for error messages
+                    if var.source is not None:
+                        for gf in tensor_grad_fns:
+                            grad_fn_to_source[gf] = var.source.name
+
+            # Collect tensors from outputs and inputs args
+            from ..output_graph import collect_reachable_grad_fns
+
+            outputs_with_sources = (
+                _collect_tensors_with_sources(args[0]) if len(args) >= 1 else []
+            )
+            inputs_with_sources = (
+                _collect_tensors_with_sources(args[1]) if len(args) >= 2 else []
+            )
+
+            # Collect grad_fns from the autograd.grad inputs tensors to use as stop points.
+            # For non-leaf tensors: we stop at their grad_fn
+            # For leaf tensors (requires_grad=True, grad_fn=None): we don't add anything here,
+            # but this is fine because their AccumulateGrad is created during fake tensor
+            # tracing and is not in external_grad_fns, so it won't trigger a false positive.
+            inputs_grad_fns: set[torch.autograd.graph.Node] = set()
+            for tensor, _ in inputs_with_sources:
+                if isinstance(tensor, torch.Tensor) and tensor.grad_fn is not None:
+                    inputs_grad_fns.add(tensor.grad_fn)
+
+            # Collect all consumed grad_fns that are reachable from outputs, stopping at inputs.
+            #
+            # Note: Do not try to "optimize" by only checking inputs in the `inputs` arg.
+            # Without guarding on the autograd graph, we can't distinguish:
+            #   Case 1: x, y are independent leaves -> OK, y's path not consumed
+            #   Case 2: y = x * 2 (y.grad_fn external) -> BAD, we hit external grad_fn
+            # Since the same compiled code could be called with either, we must check
+            # ALL graph inputs for external grad_fns.
+            consumed_grad_fns = collect_reachable_grad_fns(
+                outputs_with_sources, stop_at=inputs_grad_fns
+            )
+
+            # Check if any graph input's grad_fn is in the consumed set.
+            # If so, autograd.grad would need to traverse through external autograd nodes,
+            # which we cannot trace. (If a graph input is also an autograd.grad input,
+            # its grad_fn is already excluded from consumed_grad_fns via stop_at.)
+            external_in_consumed = consumed_grad_fns & external_grad_fns
+
+            if external_in_consumed:
+                sources = [
+                    grad_fn_to_source[gf]
+                    for gf in external_in_consumed
+                    if gf in grad_fn_to_source
+                ]
+                context = f"inputs with external grad_fn: {sources}" if sources else ""
+                unimplemented(
+                    gb_type="autograd.grad with external grad_fn",
+                    context=context,
+                    explanation=(
+                        "torch.autograd.grad() cannot trace through the autograd graph because "
+                        "it's output depends on a tensor that was created outside "
+                        "the compiled region and has a grad_fn attached. The autograd graph "
+                        "extends beyond the compiled region boundary, which Dynamo cannot trace."
+                    ),
+                    hints=[
+                        "If you don't need gradients to flow back to the original tensor outside "
+                        "the compiled region, detach the input: `tensor.detach().requires_grad_(True)`.",
+                        "Otherwise, move the autograd.grad() call outside the compiled region.",
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
+                )
+
+            # Track consumed grad_fns for later validation
+            # (to detect returning tensors whose grad_fn was consumed by autograd.grad)
+            # Skip if retain_graph=True or create_graph=True since the graph is not
+            # consumed in those cases and can be traversed again.
+            retain_graph = kwargs.get("retain_graph")
+            create_graph = kwargs.get("create_graph")
+            graph_preserved = (
+                isinstance(retain_graph, ConstantVariable)
+                and retain_graph.value is True
+            ) or (
+                isinstance(create_graph, ConstantVariable)
+                and create_graph.value is True
+            )
+            if not graph_preserved:
+                # Filter out AccumulateGrad nodes - they're never actually "consumed"
+                # by autograd. They just accumulate gradients into leaf.grad and can
+                # be traversed multiple times without issues.
+                non_leaf_consumed = {
+                    gf
+                    for gf in consumed_grad_fns
+                    if type(gf).__name__ != "AccumulateGrad"
+                }
+
+                # Check for double-consumption: if any grad_fn was already consumed
+                # by a previous autograd.grad, that's an error.
+                already_consumed = tx.output.autograd_grad_consumed_grad_fns
+                double_consumed = non_leaf_consumed & already_consumed
+                if double_consumed:
+                    unimplemented(
+                        gb_type="autograd.grad with already consumed grad_fn",
+                        context=f"double consumed grad_fns: {len(double_consumed)}",
+                        explanation=(
+                            "torch.autograd.grad() is trying to consume grad_fns that were "
+                            "already consumed by a previous autograd.grad() call. This would "
+                            "cause 'backward through graph a second time' errors at runtime."
+                        ),
+                        hints=[
+                            "Use retain_graph=True in the first autograd.grad() call if you "
+                            "need to compute gradients through the same graph multiple times.",
+                        ],
+                    )
+                tx.output.autograd_grad_consumed_grad_fns.update(non_leaf_consumed)
+
+            return wrap_fx_proxy(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    torch.autograd.grad,
+                    *proxy_args_kwargs(args, kwargs),
+                ),
+            )
+
         return handlers
 
     def call_function(
@@ -1746,8 +2146,11 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         from . import ConstantVariable, SymNodeVariable
         from .builder import wrap_fx_proxy
 
-        if self.nonstrict_traceable:
+        if self.kind == AllowInGraphKind.NONSTRICT_TRACE:
             return self._call_nonstrict_traceable_function(tx, args, kwargs)
+
+        if self.kind == AllowInGraphKind.LEAF_FUNCTION:
+            return self._call_leaf_function(tx, args, kwargs)
 
         if self.torch_function_override_enabled(tx, args, kwargs):
             return dispatch_torch_function(tx, self, args, kwargs)
@@ -2030,7 +2433,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         tx: "InstructionTranslator",
         args: Sequence[VariableTracker],
         kwargs: "dict[str, VariableTracker]",
-    ) -> "VariableTracker":
+    ) -> VariableTracker:
         from torch._higher_order_ops.flat_apply import (
             flat_apply,
             func_to_graphable,
@@ -2042,7 +2445,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         from torch.utils._pytree import tree_flatten
 
         from .base import AsPythonConstantNotImplementedError
-        from .builder import wrap_fx_proxy
+        from .builder import SourcelessBuilder, wrap_fx_proxy
 
         # 1. Convert `args, kwargs` into pytree-flattened proxy forms.
         #
@@ -2053,7 +2456,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         packed_input_vt = TupleVariable.build(
             tx, (TupleVariable.build(tx, args), ConstDictVariable.build(tx, kwargs))
         )
-        out_vt = variables.UserFunctionVariable(tree_flatten).call_function(  # type: ignore[arg-type]
+        out_vt = SourcelessBuilder.create(tx, tree_flatten).call_function(  # type: ignore[arg-type]
             tx, [packed_input_vt], {}
         )
         assert isinstance(out_vt, TupleVariable) and len(out_vt.items) == 2
@@ -2230,11 +2633,169 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 
         # Reuse the same pattern used above for tree_flatten: call the python
         # function through Dynamo so it symbolically interprets it.
-        out_vt = variables.UserFunctionVariable(_pytree.tree_unflatten).call_function(
+        out_vt = SourcelessBuilder.create(tx, _pytree.tree_unflatten).call_function(
             tx, [proxy_list_vt, out_spec_vt], {}
         )
 
         return out_vt
+
+    def _extract_nn_module_states(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> tuple[VariableTracker, VariableTracker]:
+        """
+        Extract nn.Module states from arguments for leaf function invocation.
+
+        Replaces nn.Module arguments with LeafModuleState objects containing
+        the module's index (for later retrieval), parameters, and buffers.
+        """
+        import torch.utils._pytree as pytree
+        from torch._dynamo.graph_bytecode_inputs import register_user_object
+        from torch._higher_order_ops.invoke_leaf_function import LeafModuleState
+
+        from .higher_order_ops import _make_inlined
+        from .nn_module import NNModuleVariable, UnspecializedNNModuleVariable
+
+        def is_module_variable(
+            var: VariableTracker,
+        ) -> TypeIs[Union["NNModuleVariable", "UnspecializedNNModuleVariable"]]:
+            return isinstance(var, (NNModuleVariable, UnspecializedNNModuleVariable))
+
+        flat_args_var, tree_spec_var = _make_inlined(tx, pytree.tree_flatten)(
+            VariableTracker.build(tx, (args, kwargs))
+        ).unpack_var_sequence(tx)
+
+        module_to_index: dict[int, int] = {}
+        for arg in flat_args_var.unpack_var_sequence(tx):
+            if is_module_variable(arg):
+                if arg.source is None:
+                    unimplemented(
+                        gb_type="leaf_function: nn.Module argument without source",
+                        context=f"module type: {type(arg.value).__name__}",
+                        explanation=(
+                            "leaf_function received an nn.Module argument that cannot be "
+                            "traced back to its origin. This typically happens when the "
+                            "module is created dynamically inside the compiled region."
+                        ),
+                        hints=[
+                            "Ensure the nn.Module is created outside the compiled function "
+                            "and passed as an argument.",
+                            "If the module is a class attribute, access it via self.module_name.",
+                        ],
+                    )
+                assert arg.source is not None  # make linter happy
+                module_to_index[id(arg.value)] = register_user_object(
+                    arg.value, arg.source
+                )
+
+        if not module_to_index:
+            args_var = VariableTracker.build(tx, tuple(args))
+            kwargs_var = VariableTracker.build(tx, kwargs)
+            return args_var, kwargs_var
+
+        def convert_modules_to_states(
+            values: Any, module_to_index: dict[int, int]
+        ) -> Any:
+            def module_to_state(val: Any) -> Any:
+                if isinstance(val, torch.nn.Module):
+                    return LeafModuleState(
+                        nn_module_index=module_to_index[id(val)],
+                        named_parameters=dict(val.named_parameters()),
+                        named_buffers=dict(val.named_buffers()),
+                    )
+                return val
+
+            return pytree.tree_map(module_to_state, values)
+
+        module_to_index_var = VariableTracker.build(tx, module_to_index)
+
+        result_var = _make_inlined(tx, convert_modules_to_states)(
+            VariableTracker.build(tx, (args, kwargs)), module_to_index_var
+        )
+        return result_var.unpack_var_sequence(tx)  # pyrefly: ignore [bad-return]
+
+    def _call_leaf_function(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        import torch.utils._pytree as pytree
+        from torch._higher_order_ops.flat_apply import func_to_graphable
+        from torch._higher_order_ops.invoke_leaf_function import (
+            invoke_leaf_function,
+            reconstruct_original_args,
+        )
+
+        from .builder import wrap_fx_proxy
+        from .higher_order_ops import _make_inlined
+
+        decorated_fn = self.value
+        real_impl = decorated_fn._torchdynamo_leaf_real_fn
+        fake_impl = decorated_fn._torchdynamo_leaf_fake_fn
+
+        if fake_impl is None:
+            raise ValueError(
+                f"leaf_function '{getattr(decorated_fn, '__name__', decorated_fn)}' "
+                "requires a fake implementation. Please provide one using the @<func>.register_fake "
+                "decorator. See the leaf_function docstring for details."
+            )
+
+        args_with_states, kwargs_with_states = self._extract_nn_module_states(
+            tx, args, kwargs
+        )
+        flat_args_var, input_spec_var = _make_inlined(tx, pytree.tree_flatten)(
+            VariableTracker.build(tx, (args_with_states, kwargs_with_states))
+        ).unpack_var_sequence(tx)
+        flat_arg_proxies = [
+            arg.as_proxy() for arg in flat_args_var.unpack_var_sequence(tx)
+        ]
+        input_spec = (
+            input_spec_var.as_python_constant()
+        )  # pyrefly: ignore [unbound-name]
+
+        def wrap_impl_for_leaf_module_state(
+            impl: Callable[..., Any],
+        ) -> Callable[..., Any]:
+            def wrapped_impl(*flat_args: Any) -> Any:
+                # NB: The flat_args contain flattened LeafModuleState objects.
+                # We need to unflatten them with input_spec then convert back to nn.Module
+                # before calling the original impl.
+                #
+                # input_spec is captured from the outer scope
+                with reconstruct_original_args(input_spec, flat_args) as (
+                    args_with_modules,
+                    kwargs_with_modules,
+                ):
+                    return impl(*args_with_modules, **kwargs_with_modules)
+
+            return wrapped_impl
+
+        wrapped_real_impl = wrap_impl_for_leaf_module_state(real_impl)
+        wrapped_fake_impl = wrap_impl_for_leaf_module_state(fake_impl)
+
+        _, real_impl_spec = func_to_graphable(wrapped_real_impl)
+        _, fake_impl_spec = func_to_graphable(wrapped_fake_impl)
+
+        def make_spec_proxy(name: str, spec: Any) -> Any:
+            proxy = tx.output.register_static_attr_and_return_proxy(name, spec)
+            proxy.node.type = type(spec)
+            return proxy
+
+        real_impl_proxy = make_spec_proxy("real_fn", real_impl_spec)
+        fake_impl_proxy = make_spec_proxy("fake_fn", fake_impl_spec)
+
+        invoke_args = (
+            real_impl_proxy,
+            fake_impl_proxy,
+            *flat_arg_proxies,
+        )
+        result_proxy = tx.output.create_proxy(
+            "call_function", invoke_leaf_function, invoke_args, {}
+        )
+        return wrap_fx_proxy(tx, result_proxy)
 
     def _call_ntuple(
         self,
@@ -2415,6 +2976,11 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         # grad_enabled. Since this is parameter, we can just override the
         # has_grad_fn field to False to workaround the issue.
         result.has_grad_fn = False  # type: ignore[union-attr]
+
+        # Register this parameter as a leaf tensor for backward() auto-detection.
+        # When backward() is called without inputs, we need to find all leaf tensors,
+        # including those created in-graph like nn.Parameter.
+        tx.output.leaf_var_creation_order.append(result)
 
         # TODO(jansel): if the new param falls out of scope, currently it won't get freed until
         # the end of the graph.  We should fix this.

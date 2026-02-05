@@ -198,7 +198,7 @@ void* CUDAPluggableAllocator::getBaseAllocation(void* ptr, size_t* size) {
 
 void CUDAPluggableAllocator::recordStream(
     const c10::DataPtr& ptr,
-    streamType stream) {
+    c10::cuda::CUDAStream stream) {
   if (record_stream_fn_) {
     record_stream_fn_(ptr.get(), stream);
   }
@@ -227,7 +227,8 @@ void CUDAPluggableAllocator::resetPeakStats(c10::DeviceIndex device) {
 }
 
 c10::cuda::CUDACachingAllocator::SnapshotInfo CUDAPluggableAllocator::snapshot(
-    c10::cuda::MempoolId_t mempool_id) {
+    c10::cuda::MempoolId_t mempool_id,
+    bool include_traces) {
   TORCH_CHECK(
       false,
       "CUDAPluggableAllocator does not yet support snapshot. "

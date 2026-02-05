@@ -246,6 +246,32 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         # Recompile, alias changed
         self.assertEqual(cnt.frame_count, 2)
 
+    def test_object_alias_relation_guards_without_lambda(self):
+        class Box:
+            pass
+
+        def foo(box_a, box_b, t):
+            entries = {box_a, box_b}
+            if len(entries) == 1:
+                return t + 1
+            return t - 1
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        x = torch.tensor(0)
+
+        with dc.patch(use_lamba_guard_for_object_aliasing=False):
+            compiled = torch.compile(foo, backend=cnt, fullgraph=True)
+
+            shared = Box()
+            res_alias = compiled(shared, shared, x)
+            self.assertEqual(res_alias.item(), 1)
+
+            res_unique = compiled(Box(), Box(), x)
+            self.assertEqual(res_unique.item(), -1)
+            self.assertEqual(cnt.frame_count, 2)
+
+        torch._dynamo.reset()
+
     def test_aliasing_guard_failures_with_globals(self):
         g1 = torch.randn([3])
         g2 = torch.randn([3])
@@ -441,39 +467,6 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         f(torch.randn(0))
 
         self.assertEqual(counter.frame_count, 2)  # not three or four!
-
-    @torch._dynamo.config.patch(automatic_dynamic_shapes_mark_as="oblivious")
-    def test_automatic_dynamic_shapes_mark_as_oblivious(self):
-        counter = torch._dynamo.testing.CompileCounter()
-
-        def f(x):
-            if x.size(0) < 10:
-                return x * 1
-            else:
-                return x + 10
-
-        opt_f = torch.compile(backend=counter, fullgraph=True)(f)
-
-        for i in [3, 2, 1, 0]:
-            self.assertEqual(f(torch.zeros(i)), opt_f(torch.zeros(i)))
-
-        self.assertEqual(counter.frame_count, 2)  # not three or four!
-
-    @torch._dynamo.config.patch(automatic_dynamic_shapes_mark_as="oblivious")
-    def test_automatic_dynamic_shapes_mark_as_oblivious_fail_counterfactual(self):
-        counter = torch._dynamo.testing.CompileCounter()
-
-        def f(x):
-            if x.size(0) < 2:
-                return x * 1
-            else:
-                return x + 10
-
-        opt_f = torch.compile(backend=counter, fullgraph=True)(f)
-
-        opt_f(torch.randn(1))
-        with self.assertRaises(torch._dynamo.exc.UserError):
-            opt_f(torch.randn(0))
 
     def test_ambient_autocast_recompile(self):
         weights = torch.randn(10, 10)

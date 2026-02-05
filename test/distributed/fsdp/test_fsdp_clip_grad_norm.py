@@ -337,6 +337,43 @@ class TestClipGradNorm(FSDPTest):
         self.assertEqual(total_norm.dtype, torch.float32)
         self.assertEqual(total_norm, torch.tensor(0.0, device=self.device_type))
 
+    @skip_if_lt_x_gpu(2)
+    def test_non_uniform_grad_dtype(self, device):
+        """Tests clip_grad_norm_ with non-uniform gradient dtypes via MixedPrecision."""
+        device_type = torch.device(device).type
+        model = nn.Sequential(nn.Linear(5, 5), nn.Linear(5, 5))
+        # bf16 and fp32 params with low-precision grads kept
+        model[0] = FSDP(
+            model[0],
+            mixed_precision=MixedPrecision(
+                param_dtype=torch.bfloat16,
+                keep_low_precision_grads=True,
+                cast_forward_inputs=True,
+            ),
+            device_id=device_type,
+        )
+        model[1] = FSDP(
+            model[1],
+            mixed_precision=MixedPrecision(
+                param_dtype=torch.float32,
+                cast_forward_inputs=True,
+            ),
+            device_id=device_type,
+        )
+        fsdp_model = FSDP(model, device_id=device_type)
+        fsdp_model(torch.randn((2, 5), device=device_type)).sum().backward()
+
+        # check that dtypes are actually mixed
+        grad_dtypes = {
+            p.grad.dtype for p in fsdp_model.parameters() if p.grad is not None
+        }
+        self.assertGreater(len(grad_dtypes), 1, "Expected mixed grad dtypes")
+
+        total_norm = fsdp_model.clip_grad_norm_(max_norm=1)
+
+        # check that total_norm is computed in fp32
+        self.assertEqual(total_norm.dtype, torch.float32)
+
 
 devices = ("cuda", "hpu", "xpu")
 instantiate_device_type_tests(

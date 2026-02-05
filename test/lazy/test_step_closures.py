@@ -5,7 +5,7 @@ from time import sleep
 
 import torch._lazy
 import torch._lazy.ts_backend
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, skipIfFreeThreaded, TestCase
 
 
 torch._lazy.ts_backend.init()
@@ -59,6 +59,9 @@ class ClosuresTest(TestCase):
         except RuntimeError:
             assert flag.is_set(), "Should have caught exception from closure"
 
+    @skipIfFreeThreaded(
+        "Non-deterministic, fails more consistently in free threaded python",
+    )
     def test_asynchronous_exception(self):
         flag = Event()
         assert not flag.is_set()

@@ -782,7 +782,13 @@ class CustomOpDef:
                 def wrapped_func(keyset, *args, **kwargs):
                     interpreter = retrieve_current_functorch_interpreter()
                     return custom_function_call_vmap_helper(
-                        interpreter, self._vmap_fn, self._opoverload, *args, **kwargs
+                        # pyrefly: ignore[bad-argument-type]
+                        interpreter,
+                        # pyrefly: ignore[bad-argument-type]
+                        self._vmap_fn,
+                        self._opoverload,
+                        *args,
+                        **kwargs,
                     )
 
                 self._lib.impl(
@@ -848,7 +854,10 @@ class CustomOpDef:
             self._autocast_cpu_dtype = cast_inputs
 
         def kernel(_, *args, **kwargs):
-            assert len(kwargs) == 0, "Custom ops do not support kwargs yet."
+            if len(kwargs) != 0:
+                raise AssertionError(
+                    f"Custom ops do not support kwargs yet, got {list(kwargs.keys())}"
+                )
             autocast_keyset = torch._C.DispatchKeySet(
                 torch._C.DispatchKey.AutocastCPU
             ) | torch._C.DispatchKeySet(torch._C.DispatchKey.AutocastCUDA)
@@ -942,7 +951,8 @@ def _maybe_get_opdef(
         return op
     if isinstance(op, _ops.OpOverload):
         op = op._name
-    assert isinstance(op, str)
+    if not isinstance(op, str):
+        raise AssertionError(f"op must be str, got {type(op)}")
     if op in OPDEFS:
         return OPDEFS[op]
     return None

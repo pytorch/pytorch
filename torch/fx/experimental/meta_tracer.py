@@ -26,7 +26,10 @@ def torch_nn_relu_override(self, x):
 
 
 def functional_relu_override(x, inplace=False):
-    assert not inplace, "dont support inplace functional.relu for metatensor analysis"
+    if inplace:
+        raise AssertionError(
+            "dont support inplace functional.relu for metatensor analysis"
+        )
     return x
 
 
@@ -37,7 +40,8 @@ def torch_where_override(condition, x, y):
 
 
 def torch_abs_override(input, *, out=None):
-    assert out is None, "Dont support in-place abs for MetaTensor analysis"
+    if out is not None:
+        raise AssertionError("Dont support in-place abs for MetaTensor analysis")
     return input
 
 
@@ -150,8 +154,10 @@ def proxys_to_metas(v):
     if isinstance(v, MetaDeviceAttribute):
         return "meta"
     if isinstance(v, torch.fx.Proxy):
-        assert isinstance(v, MetaProxy), f"Expected MetaProxy but got {type(v)}"
-        assert hasattr(v, "_tensor_meta"), "MetaProxy does not have an associated meta"
+        if not isinstance(v, MetaProxy):
+            raise AssertionError(f"Expected MetaProxy but got {type(v)}")
+        if not hasattr(v, "_tensor_meta"):
+            raise AssertionError("MetaProxy does not have an associated meta")
         return v._tensor_meta
     return v
 
@@ -207,7 +213,8 @@ class MetaTracer(torch.fx.Tracer):
                 meta_target = getattr(args_metas[0], target)  # type: ignore[index]
                 meta_out = meta_target(*args_metas[1:], **kwargs_metas)  # type: ignore[index]
             elif kind == "call_module":
-                assert hasattr(self, "orig_forward")
+                if not hasattr(self, "orig_forward"):
+                    raise AssertionError("orig_forward not set for call_module")
                 self._disable_module_getattr = True
                 try:
                     mod = self.root.get_submodule(target)
@@ -227,7 +234,8 @@ class MetaTracer(torch.fx.Tracer):
                     atoms = target.split(".")
                     for atom in atoms:
                         attr_itr = getattr(attr_itr, atom)
-                    assert isinstance(attr_itr, torch.Tensor)
+                    if not isinstance(attr_itr, torch.Tensor):
+                        raise AssertionError(f"Expected Tensor, got {type(attr_itr)}")
                     meta_out = attr_itr.to(device="meta")
                 finally:
                     self._disable_module_getattr = False
@@ -235,7 +243,8 @@ class MetaTracer(torch.fx.Tracer):
                 return rv
 
             # TODO
-            assert isinstance(rv, torch.fx.Proxy), "Dont support composite output yet"
+            if not isinstance(rv, torch.fx.Proxy):
+                raise AssertionError("Dont support composite output yet")
             rv.install_tensor_meta(meta_out)
         except Exception as e:
             warnings.warn(f"Could not compute metadata for {kind} target {target}: {e}")
@@ -284,7 +293,8 @@ class MetaTracer(torch.fx.Tracer):
         return MetaProxy(node, self)
 
     def trace(self, root, meta_args: dict[str, torch.Tensor], concrete_args=None):  # type: ignore[override]
-        assert isinstance(meta_args, dict)
+        if not isinstance(meta_args, dict):
+            raise AssertionError(f"Expected dict for meta_args, got {type(meta_args)}")
         self.meta_args = meta_args
 
         self.patched_torch_methods = {
