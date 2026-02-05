@@ -324,7 +324,7 @@ class TestDTensorDebugMode(TestCase):
         x = torch.randn(1, 8)
         x_dtensor = DTensor.from_local(x, mesh, [Shard(0)], run_check=False)
 
-        with DebugMode(record_torchfunction=False) as debug_mode:
+        with DebugMode() as debug_mode:
             x_dtensor.redistribute(mesh, [Replicate()])
 
         self.assertExpectedInline(
@@ -334,6 +334,19 @@ class TestDTensorDebugMode(TestCase):
       _c10d_functional::all_gather_into_tensor(t: f32[1, 8], 8, 0)  ->  t: f32[8, 8]
       _c10d_functional::_wrap_tensor_autograd(t: f32[8, 8])  ->  t: f32[8, 8]
       _c10d_functional::wait_tensor(t: f32[8, 8])  ->  t: f32[8, 8]""",
+        )
+
+        with DebugMode() as debug_mode:
+            x_dtensor.full_tensor()
+
+        self.assertExpectedInline(
+            debug_mode.debug_string(),
+            """\
+    redistribute_input [explicit] (t: f32[1, 8], trace: S(0)->R)
+      _c10d_functional::all_gather_into_tensor(t: f32[1, 8], 8, 0)  ->  t: f32[8, 8]
+      _c10d_functional::_wrap_tensor_autograd(t: f32[8, 8])  ->  t: f32[8, 8]
+      _c10d_functional::wait_tensor(t: f32[8, 8])  ->  t: f32[8, 8]
+    aten::view(t: f32[8, 8], [8, 8])  ->  t: f32[8, 8]""",
         )
 
     def test_output_placements(self):
@@ -755,7 +768,8 @@ class TestDTensorDebugMode(TestCase):
     aten::sum(t: f32[4, 4])  ->  t: f32[]
     aten::ones_like(t: f32[], pin_memory=False, memory_format=torch.preserve_format)  ->  t: f32[]
     aten::expand(t: f32[], [4, 4])  ->  t: f32[4, 4]
-    aten::clone(t: f32[4, 4], memory_format=torch.contiguous_format)  ->  t: f32[4, 4]
+    aten::empty_strided([4, 4], [4, 1], dtype=torch.float32, layout=torch.strided, device=cpu, pin_memory=False)  ->  t: f32[4, 4]
+    aten::copy_(t: f32[4, 4], t: f32[4, 4])  ->  t: f32[4, 4]
   [aot_eager region (compile)] enter
     [nn.Mod (compile)] L['self'].bar
       [nn.Mod (compile)] L['self'].bar.l3
@@ -1056,7 +1070,8 @@ class TestDTensorDebugMode(TestCase):
     aten::sum(t: f32[8, 8])  ->  t: f32[]
     aten::ones_like(t: f32[], pin_memory=False, memory_format=torch.preserve_format)  ->  t: f32[]
     aten::expand(t: f32[], [8, 8])  ->  t: f32[8, 8]
-    aten::clone(t: f32[8, 8], memory_format=torch.contiguous_format)  ->  t: f32[8, 8]
+    aten::empty_strided([8, 8], [8, 1], dtype=torch.float32, layout=torch.strided, device=cpu, pin_memory=False)  ->  t: f32[8, 8]
+    aten::copy_(t: f32[8, 8], t: f32[8, 8])  ->  t: f32[8, 8]
     torch.ops.higher_order.invoke_subgraph(partitioned_bw_subgraph_0_0, t: f32[8, 8], t: f32[8, 8])  ->  ('t: f32[8, 8]',)
     [annotate] [enter InvokeSubgraph HOP] partitioned_bw_subgraph_0_0
       aten::cos(t: f32[8, 8])  ->  t: f32[8, 8]

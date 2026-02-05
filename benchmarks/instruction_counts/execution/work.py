@@ -131,7 +131,8 @@ class _BenchmarkProcess:
     @property
     def result(self) -> Union[WorkerOutput, WorkerFailure]:
         self._maybe_collect()
-        assert self._result is not None
+        if self._result is None:
+            raise AssertionError("result is None after collection")
         return self._result
 
     def poll(self) -> Optional[int]:
@@ -169,7 +170,8 @@ class _BenchmarkProcess:
             # original TimerArgs. Grabbing all of stdout and stderr isn't
             # ideal, but we don't have a better way to determine what to keep.
             proc_stdout = self._proc.stdout
-            assert proc_stdout is not None
+            if proc_stdout is None:
+                raise AssertionError("proc_stdout is None")
             result = WorkerFailure(failure_trace=proc_stdout.read().decode("utf-8"))
 
         self._result = result

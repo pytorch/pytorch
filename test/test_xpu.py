@@ -344,8 +344,20 @@ if __name__ == "__main__":
         s2 = torch.xpu.Stream()
         torch.accelerator.set_stream(s1)
         self.assertEqual(torch.accelerator.current_stream().stream_id, s1.stream_id)
+        self.assertEqual(
+            torch.accelerator.current_stream().native_handle, s1.sycl_queue
+        )
+        self.assertEqual(
+            torch.accelerator.current_stream().native_handle, s1.native_handle
+        )
         torch.accelerator.set_stream(s2)
         self.assertEqual(torch.accelerator.current_stream().stream_id, s2.stream_id)
+        self.assertEqual(
+            torch.accelerator.current_stream().native_handle, s2.sycl_queue
+        )
+        self.assertEqual(
+            torch.accelerator.current_stream().native_handle, s2.native_handle
+        )
         with self.assertRaisesRegex(RuntimeError, "The device index is out of range"):
             torch.accelerator.current_stream(torch.accelerator.device_count())
 
