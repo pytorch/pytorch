@@ -56,6 +56,7 @@ class _ComputationType(str, Enum):
     FULL_BACKWARD = "B"
     OVERLAP_F_B = "OVERLAP_F_B"
     REDUCE_GRAD = "REDUCE_GRAD"
+    PREFETCH = "PREFETCH"
 
     @staticmethod
     def from_str(action: str) -> "_ComputationType":
@@ -77,6 +78,7 @@ RECV_B = _ComputationType.RECV_B
 FULL_BACKWARD = _ComputationType.FULL_BACKWARD
 OVERLAP_F_B = _ComputationType.OVERLAP_F_B
 REDUCE_GRAD = _ComputationType.REDUCE_GRAD
+PREFETCH = _ComputationType.PREFETCH
 
 # Convenience shorthand for compute actions only since they are used in 'simple schedule format'
 F = FORWARD
@@ -86,7 +88,7 @@ B = FULL_BACKWARD
 
 # Helper to parse an action string like 1F0 into a tuple of (stage_index, computation_type, microbatch_index)
 _action_regex = re.compile(
-    r"(\d+)(F|I|B|W|UNSHARD|RESHARD|REDUCE_GRAD|SEND_F|RECV_F|SEND_B|RECV_B)(\d*)"
+    r"(\d+)(F|I|B|W|UNSHARD|RESHARD|REDUCE_GRAD|SEND_F|RECV_F|SEND_B|RECV_B|PREFETCH)(\d*)"
 )
 
 
@@ -1202,6 +1204,68 @@ def _merge_bw(
     return merged_actions
 
 
+def _add_activation_prefetch(
+    actions: list[_Action],
+) -> list[_Action]:
+    """
+    Insert PREFETCH actions before backward passes.
+
+    For proper overlap, we prefetch activations ahead of time so the H2D transfer
+    can complete before the backward needs the data.
+
+    Currently uses a fixed lookahead of 2 actions before each backward.
+    TODO: Develop a better heuristic based on transfer time vs compute time.
+
+    Cleanup happens automatically at the end of each backward pass.
+    """
+    # TODO: develop better heuristic for lookahead
+    lookahead = 2
+
+    # Find all backward actions (by stage) and their order
+    backward_actions: list[tuple[int, _Action]] = []
+    for i, action in enumerate(actions):
+        if action.computation_type in (FULL_BACKWARD, BACKWARD_INPUT):
+            backward_actions.append((i, action))
+
+    if not backward_actions:
+        return list(actions)
+
+    # Group by stage_index to handle multi-stage schedules
+    stage_backwards: dict[int, list[tuple[int, _Action]]] = {}
+    for idx, action in backward_actions:
+        stage_idx = action.stage_index
+        if stage_idx not in stage_backwards:
+            stage_backwards[stage_idx] = []
+        stage_backwards[stage_idx].append((idx, action))
+
+    # For each backward, determine where to insert its prefetch
+    # Key: action_index where prefetch should be inserted
+    # Value: list of prefetch actions to insert before that index
+    prefetch_at: dict[int, list[_Action]] = {}
+
+    for stage_idx, stage_bwds in stage_backwards.items():
+        for i, (action_idx, action) in enumerate(stage_bwds):
+            mb_index = action.microbatch_index
+            if mb_index is None:
+                continue
+
+            # Calculate where to insert prefetch (lookahead actions before backward)
+            prefetch_idx = max(0, action_idx - lookahead + 1)
+
+            if prefetch_idx not in prefetch_at:
+                prefetch_at[prefetch_idx] = []
+            prefetch_at[prefetch_idx].append(_Action(stage_idx, PREFETCH, mb_index))
+
+    # Build result with prefetches inserted at calculated positions
+    result: list[_Action] = []
+    for i, action in enumerate(actions):
+        if i in prefetch_at:
+            result.extend(prefetch_at[i])
+        result.append(action)
+
+    return result
+
+
 def _add_send_recv(
     compute_actions: dict[int, list[_Action]],
     stage_to_rank: Callable[[int], int],
@@ -1860,8 +1924,19 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
     subclassed and the subclass can be responsible for creating a schedule IR.
     """
 
-    def __init__(self, *args, **kwargs):
+    def __init__(
+        self,
+        *args,
+        enable_activation_offload: bool = False,
+        **kwargs,
+    ):
         super().__init__(*args, **kwargs)
+        # Activation offloading
+        self.enable_activation_offload = enable_activation_offload
+        if enable_activation_offload:
+            for stage in self._stages:
+                stage.enable_activation_offload = True
+
         # Action to custom function mapping
         self._comp_type_to_function_map: dict[_ComputationType, Callable] = {}
         # count either full_backward or backward_weight together, to determine when to sync DP grads
@@ -1959,6 +2034,10 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                     self.pipeline_order_with_comms[rank],  # type: ignore[arg-type]
                     self._n_microbatches,
                 )
+                if self.enable_activation_offload:
+                    self.pipeline_order_with_comms[rank] = _add_activation_prefetch(
+                        self.pipeline_order_with_comms[rank],
+                    )
 
             self.pipeline_order_with_comms = _add_send_recv(
                 self.pipeline_order_with_comms,
@@ -2223,6 +2302,8 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
             elif comp_type == REDUCE_GRAD:
                 grad_scale_factor = self._n_microbatches if self.scale_grads else 1
                 stage.perform_reduce_grad(grad_scale_factor)
+            elif comp_type == PREFETCH:
+                stage.start_activation_prefetch(mb_index)
             else:
                 raise ValueError(f"{action=} is unknown or unsupported")
 
@@ -2297,6 +2378,7 @@ class ScheduleLoopedBFS(_PipelineScheduleRuntime):
         output_merge_spec: dict[str, Any] | tuple[Any] | None = None,
         scale_grads: bool = True,
         backward_requires_autograd: bool = True,
+        enable_activation_offload: bool = False,
     ):
         super().__init__(
             stages=stages,
@@ -2305,6 +2387,7 @@ class ScheduleLoopedBFS(_PipelineScheduleRuntime):
             output_merge_spec=output_merge_spec,
             scale_grads=scale_grads,
             backward_requires_autograd=backward_requires_autograd,
+            enable_activation_offload=enable_activation_offload,
         )
 
         # 1. Create the pipeline_order (all ranks do this calculation)
@@ -2532,6 +2615,7 @@ class ScheduleInterleaved1F1B(_PipelineScheduleRuntime):
         output_merge_spec: dict[str, Any] | tuple[Any] | None = None,
         scale_grads: bool = True,
         backward_requires_autograd: bool = True,
+        enable_activation_offload: bool = False,
     ):
         self.pp_group_size = stages[0].group_size
         super().__init__(
@@ -2543,6 +2627,7 @@ class ScheduleInterleaved1F1B(_PipelineScheduleRuntime):
             output_merge_spec=output_merge_spec,
             scale_grads=scale_grads,
             backward_requires_autograd=backward_requires_autograd,
+            enable_activation_offload=enable_activation_offload,
         )
         self.n_local_stages = len(stages)
         self.rank = stages[0].group_rank
@@ -2639,6 +2724,7 @@ class ScheduleInterleavedZeroBubble(_PipelineScheduleRuntime):
         output_merge_spec: dict[str, Any] | tuple[Any] | None = None,
         scale_grads: bool = True,
         backward_requires_autograd: bool = True,
+        enable_activation_offload: bool = False,
     ):
         # TODO: we dont support input/weight backward split with torch.compile
         _check_torch_compile_compatibility(stages, self.__class__.__name__)
@@ -2652,6 +2738,7 @@ class ScheduleInterleavedZeroBubble(_PipelineScheduleRuntime):
             output_merge_spec=output_merge_spec,
             scale_grads=scale_grads,
             backward_requires_autograd=backward_requires_autograd,
+            enable_activation_offload=enable_activation_offload,
         )
         self.n_local_stages = len(stages)
         self.rank = stages[0].group_rank
@@ -2834,6 +2921,7 @@ class ScheduleZBVZeroBubble(_PipelineScheduleRuntime):
         output_merge_spec: dict[str, Any] | tuple[Any] | None = None,
         scale_grads: bool = True,
         backward_requires_autograd: bool = True,
+        enable_activation_offload: bool = False,
     ):
         # TODO: we dont support input/weight backward split with torch.compile
         _check_torch_compile_compatibility(stages, self.__class__.__name__)
@@ -2847,6 +2935,7 @@ class ScheduleZBVZeroBubble(_PipelineScheduleRuntime):
             output_merge_spec=output_merge_spec,
             scale_grads=scale_grads,
             backward_requires_autograd=backward_requires_autograd,
+            enable_activation_offload=enable_activation_offload,
         )
         self.stage_index_to_group_rank = generate_stage_to_rank_mapping(
             self.pp_group_size, self._num_stages, style="v"
@@ -3018,6 +3107,7 @@ class ScheduleDualPipeV(_PipelineScheduleRuntime):
         output_merge_spec: dict[str, Any] | tuple[Any] | None = None,
         scale_grads: bool = True,
         backward_requires_autograd: bool = True,
+        enable_activation_offload: bool = False,
     ):
         # TODO: we dont support input/weight backward split with torch.compile
         _check_torch_compile_compatibility(stages, self.__class__.__name__)
@@ -3031,6 +3121,7 @@ class ScheduleDualPipeV(_PipelineScheduleRuntime):
             output_merge_spec=output_merge_spec,
             scale_grads=scale_grads,
             backward_requires_autograd=backward_requires_autograd,
+            enable_activation_offload=enable_activation_offload,
         )
         self.stage_index_to_group_rank = generate_stage_to_rank_mapping(
             self.pp_group_size, self._num_stages, style="v"
