@@ -188,7 +188,6 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
 
 // Copies tensor from cpu to mps backed by identical strided-contiguous data
 static void copy_to_mps_stride_contig(at::Tensor& dst, const at::Tensor& src, bool non_blocking) {
-  MPSStream* stream = getCurrentMPSStream();
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   auto dst_byte_offset = dst.storage_offset() * dst.itemsize();
   auto src_byte_offset = src.storage_offset() * src.itemsize();
@@ -258,9 +257,6 @@ static void copy_to_mps_stride_contig(at::Tensor& dst, const at::Tensor& src, bo
       }
     }
 
-    // Ensure the device sees the updated shared memory before any GPU work
-    stream->synchronize(SyncType::COMMIT_AND_WAIT);
-
     [sourceBuffer release];
   }
 }
@@ -291,7 +287,15 @@ static at::Tensor& copy_to_mps_(at::Tensor& dst_, const at::Tensor& src_, bool n
     dst = at::empty_like(src, at::device(at::kMPS));
   }
   copy_to_mps_stride_contig(dst, src, non_blocking && !needs_copy);
-  return needs_copy ? dst_.copy_(dst) : dst_;
+  if(needs_copy) {
+    dst_ = dst_.copy_(dst);
+  }
+  
+  // Ensure the device sees the updated shared memory before any GPU work
+  MPSStream* stream = getCurrentMPSStream();
+  stream->synchronize(SyncType::COMMIT_AND_WAIT);
+
+  return dst_;
 }
 
 void copy_blit_mps(void* dst, const void* src, size_t size) {
