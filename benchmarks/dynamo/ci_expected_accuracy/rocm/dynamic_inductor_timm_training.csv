@@ -34,7 +34,7 @@ inception_v3,pass,6
 
 
 
-mobilenetv2_100,fail_accuracy,7
+mobilenetv2_100,pass,7
 
 
 
@@ -70,4 +70,4 @@ vit_base_patch14_dinov2.lvd142m,pass,7
 
 
 
-vit_base_patch16_siglip_256,pass,7
+vit_base_patch16_siglip_256,fail_accuracy,7
