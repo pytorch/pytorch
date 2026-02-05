@@ -799,6 +799,55 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
                         torch.ones(2, 2, 2, 2),
                     )
 
+    @requires_gpu
+    def test_default_device_factory_functions(self):
+        """Test that factory functions respect default device in compiled code"""
+
+        @torch.compile(fullgraph=True)
+        def random_func(
+            x: torch.Tensor,
+        ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+            # Test various factory functions
+            rnd = torch.randint(0, 2**32, size=x.shape, dtype=torch.uint32)
+            zeros = torch.zeros_like(rnd, device="cpu")
+            zeros_matched = torch.zeros_like(rnd)
+            return x + rnd, rnd, zeros, zeros_matched
+
+        torch.set_default_device("cuda")
+        (result, rnd, zeros, zeros_matched) = random_func(torch.randn(()))
+
+        # Verify tensors are on CUDA
+        self.assertEqual(rnd.device.type, "cuda")
+        self.assertEqual(result.device.type, "cuda")
+        self.assertEqual(zeros.device.type, "cpu")
+        self.assertEqual(zeros_matched.device.type, rnd.device.type)
+
+        torch.set_default_device("cpu")
+        (result, rnd, zeros, zeros_matched) = random_func(torch.randn(()))
+
+        # Verify tensors are on cpu
+        self.assertEqual(rnd.device.type, "cpu")
+        self.assertEqual(result.device.type, "cpu")
+        self.assertEqual(zeros.device.type, "cpu")
+        self.assertEqual(zeros_matched.device.type, rnd.device.type)
+
+        torch.set_default_device(None)
+
+    @requires_gpu
+    def test_default_device_factory_functions_priority(self):
+        torch.set_default_device("cuda")
+
+        @torch.compile(fullgraph=True)
+        def with_explicit_device(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+            rnd = torch.randint(
+                0, 2**32, size=x.shape, dtype=torch.uint32, device="cpu"
+            )
+            return x + rnd, rnd
+
+        (result, rnd) = with_explicit_device(torch.randn(()))
+        self.assertEqual(rnd.device.type, "cpu")
+        self.assertEqual(result.device.type, "cuda")
+
 
 class InvokeSubgraphBackendTests(torch._dynamo.test_case.TestCase):
     @torch._dynamo.config.patch(force_compile_during_fx_trace=True)
@@ -968,7 +1017,8 @@ class outer_fn(torch.nn.Module):
             [
                 ["add"],  # seq_nr 21
                 [
-                    "clone",
+                    "copy",
+                    "empty_strided",
                     "getitem",
                     "getitem_1",
                     "getitem_2",
@@ -1026,30 +1076,23 @@ class GraphModule(torch.nn.Module):
 
         self.assertExpectedInline(
             normalize_gm(bw_graph.print_readable(print_output=False)),
-            """
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, getitem_1: "f32[3, 3]", tangents_1: "f32[]"):
-        # Annotation: {'seq_nr': 15} No stacktrace found for following nodes
         expand: "f32[3, 3]" = torch.ops.aten.expand.default(tangents_1, [3, 3]);  tangents_1 = None
-
-        # Annotation: {'seq_nr': 14} No stacktrace found for following nodes
-        clone: "f32[3, 3]" = torch.ops.aten.clone.default(expand, memory_format = torch.contiguous_format);  expand = None
+        empty_strided: "f32[3, 3]" = torch.ops.aten.empty_strided.default([3, 3], [3, 1], dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
+        copy: "f32[3, 3]" = torch.ops.aten.copy.default(empty_strided, expand);  empty_strided = expand = None
         repeated_subgraph1 = self.repeated_subgraph1
-        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph1, 'invoke_subgraph_1', getitem_1, clone);  repeated_subgraph1 = getitem_1 = clone = None
+        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph1, 'invoke_subgraph_1', getitem_1, copy);  repeated_subgraph1 = getitem_1 = copy = None
         getitem_2: "f32[3, 3]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
         return (getitem_2,)
-
     class repeated_subgraph1(torch.nn.Module):
         def forward(self, arg0_1: "f32[3, 3]", arg1_1: "f32[3, 3]"):
-            # Annotation: {'seq_nr': 10} File: test_modes.py:921 in inner_fn, code: return y / 2
             div: "f32[3, 3]" = torch.ops.aten.div.Tensor(arg1_1, 2);  arg1_1 = None
-
-            # Annotation: {'test': 'test', 'seq_nr': 9} File: test_modes.py:920 in inner_fn, code: y = x.cos()
             sin: "f32[3, 3]" = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
             neg: "f32[3, 3]" = torch.ops.aten.neg.default(sin);  sin = None
             mul: "f32[3, 3]" = torch.ops.aten.mul.Tensor(div, neg);  div = neg = None
-            return (mul,)
-        """,  # noqa: B950
+            return (mul,)""",  # noqa: B950
             ignore_comments=True,
             ignore_empty_lines=True,
         )
