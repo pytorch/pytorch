@@ -63,7 +63,6 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FP8,
     SM70OrLater,
     TEST_CUDA,
-    TEST_XPU,
 )
 from torch.testing._internal.common_device_type import (
     E4M3_MAX_POS,
@@ -77,7 +76,8 @@ from torch.testing._internal.common_utils import (
     skipIfHpu,
     skipIfWindows,
     TEST_WITH_ROCM,
-    xfailIfS390X,
+	xfailIfS390X,
+	TEST_XPU,
 )
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 from torch.testing._internal.two_tensor import TwoTensor
