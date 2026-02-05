@@ -53,6 +53,7 @@ from torch._decomp import decomposition_table
 from torch._dynamo.testing import normalize_gm
 from torch._dynamo.utils import counters
 from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
+from torch._functorch._aot_autograd.utils import is_with_effects_token
 from torch._functorch.aot_autograd import (
     _aot_export_function,
     aot_export_joint_simple,
@@ -5776,6 +5777,33 @@ def forward(self, primals, tangents):
         )
 
 
+class GraphCaptureBackend:
+    """A backend that captures the graph before passing to inductor.
+
+    Usage:
+        capture = GraphCaptureBackend()
+
+        @torch.compile(backend=capture)
+        def fn(x):
+            return x * 2
+
+        fn(torch.randn(4, 4))
+        gm = capture.gm  # The captured graph module
+    """
+
+    def __init__(self):
+        self.gm = None
+
+    def __call__(self, graph_module, example_inputs):
+        from torch._inductor.compile_fx import compile_fx, compile_fx_inner
+
+        def log_and_compile(graph_module, example_inputs, **kwargs):
+            self.gm = graph_module
+            return compile_fx_inner(graph_module, example_inputs, **kwargs)
+
+        return compile_fx(graph_module, example_inputs, inner_compile=log_and_compile)
+
+
 class TestPartitioning(AOTTestCase):
     @unittest.skipIf(not USE_NETWORKX, "networkx not available")
     def test_recompute_partitioning(self):
@@ -6523,24 +6551,9 @@ def forward(self, primals_1, tangents_1):
         handle = _register_effectful_op(effectful_op, EffectType.ORDERED)
 
         try:
-            gm = None
+            capture = GraphCaptureBackend()
 
-            def graph_capture_backend(graph_module, example_inputs):
-                """Custom backend that captures the graph before passing to inductor."""
-                nonlocal gm
-
-                from torch._inductor.compile_fx import compile_fx, compile_fx_inner
-
-                def log_and_compile(graph_module, example_inputs, **kwargs):
-                    nonlocal gm
-                    gm = graph_module
-                    return compile_fx_inner(graph_module, example_inputs, **kwargs)
-
-                return compile_fx(
-                    graph_module, example_inputs, inner_compile=log_and_compile
-                )
-
-            @torch.compile(backend=graph_capture_backend)
+            @torch.compile(backend=capture)
             def fn(x, weight):
                 a = torch.ops.test.effectful_op(x)
                 return a.sum() * weight
@@ -6549,6 +6562,7 @@ def forward(self, primals_1, tangents_1):
             weight = torch.randn(4, 4)
             fn(x, weight)
 
+            gm = capture.gm
             force_save_effectful_ops(gm)
 
             with_effects_nodes = [
@@ -6565,7 +6579,7 @@ def forward(self, primals_1, tangents_1):
                 for n in gm.graph.nodes
                 if n.op == "call_function"
                 and n.target == operator.getitem
-                and n.args[0] == with_effects_nodes[0]
+                and not is_with_effects_token(n)
             ]
 
             def is_must_save(node):
@@ -6574,8 +6588,8 @@ def forward(self, primals_1, tangents_1):
             must_save_count = sum(1 for n in getitem_nodes if is_must_save(n))
             self.assertEqual(
                 must_save_count,
-                2,
-                f"2 items should be MUST_SAVE, got {must_save_count}",
+                1,
+                f"1 items should be MUST_SAVE, got {must_save_count}",
             )
             self.assertEqual(
                 len(getitem_nodes),
@@ -6609,24 +6623,9 @@ def forward(self, primals_1, tangents_1):
         handle = _register_effectful_op(effectful_tuple_op, EffectType.ORDERED)
 
         try:
-            gm = None
+            capture = GraphCaptureBackend()
 
-            def graph_capture_backend(graph_module, example_inputs):
-                """Custom backend that captures the graph before passing to inductor."""
-                nonlocal gm
-
-                from torch._inductor.compile_fx import compile_fx, compile_fx_inner
-
-                def log_and_compile(graph_module, example_inputs, **kwargs):
-                    nonlocal gm
-                    gm = graph_module
-                    return compile_fx_inner(graph_module, example_inputs, **kwargs)
-
-                return compile_fx(
-                    graph_module, example_inputs, inner_compile=log_and_compile
-                )
-
-            @torch.compile(backend=graph_capture_backend)
+            @torch.compile(backend=capture)
             def fn(x):
                 a, b = torch.ops.test.effectful_tuple_op(x)
                 return a.sum() + b.sum()
@@ -6634,6 +6633,7 @@ def forward(self, primals_1, tangents_1):
             x = torch.randn(4, 4)
             fn(x)
 
+            gm = capture.gm
             with_effects_node = None
             for node in gm.graph.nodes:
                 if node.op == "call_function" and node.target == with_effects:
@@ -6646,7 +6646,7 @@ def forward(self, primals_1, tangents_1):
                 for n in gm.graph.nodes
                 if n.op == "call_function"
                 and n.target == operator.getitem
-                and n.args[0] == with_effects_node
+                and not is_with_effects_token(n)
             ]
 
             force_save_effectful_ops(gm)
@@ -6665,14 +6665,166 @@ def forward(self, primals_1, tangents_1):
 
             self.assertEqual(
                 tensor_getitem_count,
-                3,
-                f"expected 3 getitems, got {tensor_getitem_count}",
+                2,
+                f"expected 2 getitems, got {tensor_getitem_count}",
             )
             self.assertEqual(
                 must_save_count,
                 tensor_getitem_count,
                 f"all {tensor_getitem_count} tensor getitems should be MUST_SAVE, got {must_save_count}",
             )
+        finally:
+            handle.destroy()
+
+    def test_effect_token_rewiring_in_backward(self):
+        """Test that forward with_effects can be recomputed in backward via effect token re-wiring.
+
+        When a forward with_effects is inside an activation checkpointed region (marked
+        PREFER_RECOMPUTE), the partitioner should be able to include it in the backward
+        graph by re-wiring its effect token input to use the backward token chain.
+        """
+        from torch._functorch._aot_autograd.utils import is_with_effects
+        from torch._functorch.partitioners import _extract_graph_with_inputs_outputs
+        from torch._higher_order_ops.effects import _register_effectful_op, with_effects
+        from torch._library.effects import EffectType
+
+        @torch.library.custom_op("test::effectful_op_rewire", mutates_args=())
+        def effectful_op_rewire(x: torch.Tensor) -> torch.Tensor:
+            return x * 2
+
+        @effectful_op_rewire.register_fake
+        def _(x: torch.Tensor) -> torch.Tensor:
+            return torch.empty_like(x)
+
+        handle = _register_effectful_op(effectful_op_rewire, EffectType.ORDERED)
+
+        try:
+            import torch.fx as fx
+
+            graph = fx.Graph()
+
+            x = graph.placeholder("x")
+            x.meta["val"] = torch.randn(4, 4)
+
+            fwd_token = graph.placeholder("fwd_token")
+            fwd_token.meta["val"] = None  # Effect tokens are None at runtime
+
+            bwd_token = graph.placeholder("tangents_token")
+            bwd_token.meta["val"] = None
+
+            tangent = graph.placeholder("tangents_1")
+            tangent.meta["val"] = torch.randn(4, 4)
+
+            with_effects_node = graph.call_function(
+                with_effects,
+                args=(fwd_token, torch.ops.test.effectful_op_rewire, x),
+            )
+            with_effects_node.meta["val"] = (None, torch.randn(4, 4))
+
+            result = graph.call_function(operator.getitem, args=(with_effects_node, 1))
+            result.meta["val"] = torch.randn(4, 4)
+
+            graph.output((result,))
+
+            inputs = [bwd_token, tangent, x]
+            outputs = [result]
+
+            new_graph = _extract_graph_with_inputs_outputs(
+                graph,
+                inputs,
+                outputs,
+                outputs_descs=[],
+                subgraph="backward",
+            )
+
+            has_with_effects = False
+            for node in new_graph.nodes:
+                if node.op == "call_function" and is_with_effects(node):
+                    has_with_effects = True
+                    token_arg = node.args[0]
+                    self.assertEqual(
+                        token_arg.name,
+                        "tangents_token",
+                        f"Expected token to be re-wired to tangents_token, got {token_arg.name}",
+                    )
+                    break
+
+            self.assertTrue(
+                has_with_effects,
+                "Expected with_effects node to be included in backward graph via token re-wiring",
+            )
+        finally:
+            handle.destroy()
+
+    def test_mark_getitem_outputs_effect_tokens(self):
+        """Test that intermediate effect tokens are marked MUST_RECOMPUTE, not MUST_SAVE.
+
+        When force_save_effectful_ops marks outputs of with_effects nodes:
+        - Tensor outputs (getitem[1], etc.) should be marked MUST_SAVE
+        - Intermediate effect tokens (getitem[0] not used as output) should be MUST_RECOMPUTE
+          so they don't end up in saved_values (they'll be re-wired in backward instead)
+        - Effect tokens that ARE graph outputs should not be marked MUST_RECOMPUTE
+        """
+        from torch._functorch._aot_autograd.utils import (
+            is_with_effects,
+            is_with_effects_token,
+        )
+        from torch._functorch.partitioners import (
+            CheckpointPolicy,
+            force_save_effectful_ops,
+        )
+        from torch._higher_order_ops.effects import _register_effectful_op
+        from torch._library.effects import EffectType
+
+        @torch.library.custom_op("test::effectful_op_token_test", mutates_args=())
+        def effectful_op_token_test(x: torch.Tensor) -> torch.Tensor:
+            return x * 2
+
+        @effectful_op_token_test.register_fake
+        def _(x: torch.Tensor) -> torch.Tensor:
+            return torch.empty_like(x)
+
+        handle = _register_effectful_op(effectful_op_token_test, EffectType.ORDERED)
+
+        try:
+            capture = GraphCaptureBackend()
+
+            @torch.compile(backend=capture)
+            def fn(x):
+                return torch.ops.test.effectful_op_token_test(x).sum()
+
+            x = torch.randn(4, 4)
+            fn(x)
+
+            gm = capture.gm
+            effect_token_nodes = []
+            tensor_result_nodes = []
+            for node in gm.graph.nodes:
+                if node.op == "call_function" and node.target == operator.getitem:
+                    if is_with_effects_token(node):
+                        effect_token_nodes.append(node)
+                    elif isinstance(node.meta.get("val"), torch.Tensor):
+                        parent = node.args[0]
+                        if isinstance(parent, torch.fx.Node) and is_with_effects(
+                            parent
+                        ):
+                            tensor_result_nodes.append(node)
+
+            self.assertTrue(
+                len(effect_token_nodes) > 0, "Should have effect token nodes"
+            )
+            self.assertTrue(
+                len(tensor_result_nodes) > 0, "Should have tensor result nodes"
+            )
+
+            force_save_effectful_ops(gm)
+
+            for node in tensor_result_nodes:
+                self.assertEqual(
+                    node.meta.get("recompute"),
+                    CheckpointPolicy.MUST_SAVE,
+                    f"Tensor result {node.name} should be MUST_SAVE",
+                )
         finally:
             handle.destroy()
 

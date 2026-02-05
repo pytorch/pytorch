@@ -284,6 +284,15 @@ def is_with_effects(node: torch.fx.Node) -> bool:
     return False
 
 
+def is_with_effects_token(node: torch.fx.Node) -> bool:
+    """Check if a node is an effect token (getitem[0] from a with_effects node)."""
+    if node.target is not operator.getitem:
+        return False
+    parent = node.args[0] if node.args else None
+    idx = node.args[1] if len(node.args) > 1 else None
+    return isinstance(parent, torch.fx.Node) and idx == 0 and is_with_effects(parent)  # type: ignore[possibly-undefined]
+
+
 def unlift_tokens(
     fw_module: torch.fx.GraphModule,
     fw_metadata: "ViewAndMutationMeta",
