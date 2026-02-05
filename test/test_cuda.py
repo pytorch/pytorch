@@ -1455,24 +1455,6 @@ except RuntimeError as e:
     def _mute_init():
         os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stderr.fileno())
 
-    def _spawn_method(self, method, arg):
-        ctx = torch.multiprocessing.get_context("spawn")
-        with ctx.Pool(1, initializer=self._mute_init) as pool:
-            errors = pool.map(method, [arg])
-            for e in errors:
-                # CUDA raises cudaErrorAssert (710) with "device-side assert triggered"
-                # ROCm with TORCH_USE_HIP_DSA raises a proper device-side assertion
-                # ROCm without TORCH_USE_HIP_DSA raises hipErrorLaunchFailure (719)
-                # which still catches the error but with less specific messaging
-                is_cuda_assert = "device-side assert triggered" in str(e)
-                is_hip_assert = "hipErrorLaunchFailure" in str(e)
-                is_hip_assert = is_hip_assert or "unspecified launch failure" in str(e)
-                is_hip_assert = is_hip_assert or "HSA_STATUS_ERROR_EXCEPTION" in str(e)
-                if not (is_cuda_assert or is_hip_assert):
-                    self.fail(e)
-                if e.error_code not in (710, 719):
-                    self.fail(e)
-
     @slowTest
     def test_index_out_of_bounds_exception_cuda(self):
         # Test that indexing out of bounds causes assert
