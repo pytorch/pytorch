@@ -757,7 +757,7 @@ def _is_path(name_or_buffer: object) -> TypeIs[str | os.PathLike]:
     return isinstance(name_or_buffer, (str, os.PathLike))
 
 
-T = TypeVar("T")
+T = TypeVar("T")  # Checked
 
 
 class _opener(Generic[T]):
@@ -1336,6 +1336,11 @@ def load(
 
         See :ref:`weights-only-security` for more details.
 
+    .. note::
+        When ``weights_only=True``, this function expects the file-like object to be positioned
+        at the start of the valid zip archive. Sequential loading of multiple zip archives
+        concatenated in the same stream is **not supported** and will raise an error.
+
     :func:`torch.load` uses Python's unpickling facilities but treats storages,
     which underlie tensors, specially. They are first deserialized on the
     CPU and are then moved to the device they were saved from. If this fails
@@ -1567,7 +1572,7 @@ def load(
                     )
                 if weights_only:
                     try:
-                        return _load(
+                        return_value = _load(
                             opened_zipfile,
                             map_location,
                             _weights_only_unpickler,
@@ -1576,13 +1581,16 @@ def load(
                         )
                     except pickle.UnpicklingError as e:
                         raise pickle.UnpicklingError(_get_wo_message(str(e))) from None
-                return _load(
-                    opened_zipfile,
-                    map_location,
-                    pickle_module,
-                    overall_storage=overall_storage,
-                    **pickle_load_args,
-                )
+                else:
+                    return_value = _load(
+                        opened_zipfile,
+                        map_location,
+                        pickle_module,
+                        overall_storage=overall_storage,
+                        **pickle_load_args,
+                    )
+
+                return return_value
         if mmap:
             f_name = "" if not isinstance(f, str) else f"{f}, "
             raise RuntimeError(
@@ -1591,15 +1599,19 @@ def load(
                 "please torch.save your checkpoint with this option in order to use mmap."
             )
         if weights_only:
-            try:
-                return _legacy_load(
-                    opened_file,
-                    map_location,
-                    _weights_only_unpickler,
-                    **pickle_load_args,
-                )
-            except pickle.UnpicklingError as e:
-                raise pickle.UnpicklingError(_get_wo_message(str(e))) from None
+            # Legacy unpickling is disabled in weights_only mode, but we fall back to it
+            # if the stream is not a valid zipfile. Since concatenated zipfiles are not
+            # supported and look like non-zipfiles to the reader (at the 2nd file),
+            # we must fail loudly here instead of attempting legacy load.
+            raise RuntimeError(
+                "torch.load(..., weights_only=True) only supports files saved "
+                "with the zipfile-based serialization format starting at the "
+                "beginning of the stream. Multiple torch.save calls to the "
+                "same file-like object and sequential torch.load calls on a "
+                "concatenated stream are not supported. "
+                "Save all objects in a single container (e.g., tuple or dict) "
+                "in one torch.save call instead."
+            )
         return _legacy_load(
             opened_file, map_location, pickle_module, **pickle_load_args
         )
@@ -1784,7 +1796,12 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
         elif typename == "storage":
             storage_type, root_key, location, numel, view_metadata = data
             location = _maybe_decode_ascii(location)
-            dtype = storage_type.dtype
+            if storage_type is torch.UntypedStorage:
+                # Handle the case where storage_type is UntypedStorage (no dtype)
+                # This happens for uint32 tensors saved in legacy mode
+                dtype = torch.uint8
+            else:
+                dtype = storage_type.dtype
 
             nbytes = numel * torch._utils._element_size(dtype)
 
