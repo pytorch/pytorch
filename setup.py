@@ -1125,6 +1125,8 @@ class build_ext(setuptools.command.build_ext.build_ext):
             # on it. It's safe because pytorch only relies on
             # fmt::fmt-header-only.
             "fmt/",
+            # Same for pybind, and it's header-only by definition.
+            "pybind11/",
         ]
 
         # Marker to detect if a header is already wrapped
