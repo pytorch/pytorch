@@ -2301,6 +2301,8 @@ class PallasKernel(SIMDKernel):
             scatter_info = self._detect_scatter_pattern(index, name)
 
             if scatter_info is not None:
+                # Track iteration variables used in scatter index
+                self.used_iter_vars.update(self._get_used_iter_vars(index))
                 store_expr = self._build_scatter_store_expr(
                     out, value, scatter_info, name, mode
                 )
