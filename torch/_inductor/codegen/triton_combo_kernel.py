@@ -646,11 +646,6 @@ class ComboKernel(Kernel):
 
         # pyrefly: ignore [unsupported-operation]
         triton_meta["configs"] = [config_of(signature)]
-
-        if TritonKernel._enable_pdl_codegen():
-            # pyrefly: ignore [unsupported-operation]
-            triton_meta["launch_pdl"] = True
-
         mutated_args = self.get_mutated_args_sub_kernels()
         dispatch = self.dispatch_class
         assert dispatch is not None
@@ -859,7 +854,6 @@ class ComboKernel(Kernel):
                         code, sub_kernel, num
                     )
                     sub_kernel.codegen_body()
-                    sub_kernel._filter_pdl(sub_kernel.body)
                     uniquified_body = self.uniquify_block_sizes(
                         sub_kernel.body, num, uniquify
                     )
