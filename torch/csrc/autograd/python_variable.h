@@ -92,6 +92,8 @@ void pushPyOutToStack(
 
 py::handle get_dtensor_class();
 
+bool is_dtensor(PyObject* obj);
+
 py::object dispatchDTensorOp(
     const c10::OperatorHandle& op,
     py::handle py_op,
