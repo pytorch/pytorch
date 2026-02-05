@@ -1,6 +1,8 @@
 # Owner(s): ["oncall: cpu inductor"]
 import contextlib
 import copy
+import ctypes
+import ctypes.util
 import functools
 import itertools
 import math
@@ -31,13 +33,13 @@ from torch.autograd.functional import vjp
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
     IS_FBCODE,
     IS_MACOS,
+    TEST_MKL,
+    instantiate_parametrized_tests,
     parametrize,
     skipIfRocm,
     slowTest,
-    TEST_MKL,
     xfailIfS390X,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -5249,7 +5251,7 @@ class CPUReproTests(TestCase):
             v,
         )
         compiler_mode = torch.compile(mod)
-        from torch.nn.attention import sdpa_kernel, SDPBackend
+        from torch.nn.attention import SDPBackend, sdpa_kernel
 
         context = contextlib.nullcontext if not is_inference else torch.no_grad
         with (
@@ -5834,6 +5836,50 @@ class CPUReproTests(TestCase):
 
         torch.compile(fn)(torch.randn(2, 2))
 
+    def test_max_autotune_bmm_omp_dynamic(self):
+        # Simulate the issue where omp_set_dynamic(1) causes wrong results
+        # when combined with max_autotune and specific threading.
+        # Use RTLD_GLOBAL to access the OpenMP library already loaded by PyTorch.
+
+        try:
+            omp = ctypes.CDLL("", ctypes.RTLD_GLOBAL)
+        except OSError:
+            self.skipTest("Could not access OpenMP symbols from process")
+
+        if not hasattr(omp, "omp_set_dynamic") or not hasattr(omp, "omp_get_dynamic"):
+            self.skipTest("omp_set_dynamic/omp_get_dynamic not found in OpenMP library")
+
+        def fn(x, y):
+            return torch.bmm(x, y)
+
+        # Create inputs
+        # Sizes chosen to trigger the specific GEMM template
+        B, M, K, N = 1, 32, 32, 32
+        x = torch.randn(B, M, K)
+        y = torch.randn(B, K, N)
+
+        # Compile with max_autotune
+        # We need to ensure we hit the GEMM template that uses OpenMP
+        with config.patch({"max_autotune": True}):
+            compiled_fn = torch.compile(fn)
+
+            # Save original dynamic threading state
+            original_dynamic = omp.omp_get_dynamic()
+            # Set dynamic threading to 1 (enabled)
+            # This simulates what cv2 import does
+            omp.omp_set_dynamic(1)
+
+            try:
+                # Set num threads to something > 1
+                # The bug happens when we ask for N threads but OpenMP gives fewer
+                # because dynamic is enabled.
+                with set_num_threads(4):
+                    actual = compiled_fn(x, y)
+                    expected = fn(x, y)
+                    torch.testing.assert_close(actual, expected)
+            finally:
+                # Restore original dynamic threading state
+                omp.omp_set_dynamic(original_dynamic)
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
     @requires_vectorization
     @config.patch(freezing=True)
