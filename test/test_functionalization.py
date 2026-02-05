@@ -2321,25 +2321,30 @@ def forward(self, arg0_1):
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA required")
     def test_view_copy_preserves_pin_memory(self):
-        # Test that view_copy preserves pin_memory when using functionalize
-        # with remove='mutations_and_views' mode
-        # See https://github.com/pytorch/pytorch/issues/171894
+        # Test that view_copy ops preserve pin_memory (needed for CUDA graphs).
+        # Covers all codegen paths: view_copy, single tensor, and list returns.
         from torch.func import functionalize
-
-        def demo_function(x):
-            y = x.view(-1)
-            return y
 
         for pin_memory in [True, False]:
             with self.subTest(pin_memory=pin_memory):
                 x = torch.randn(4, pin_memory=pin_memory)
-                self.assertEqual(x.is_pinned(), pin_memory)
+                x_2d = torch.randn(2, 4, pin_memory=pin_memory)
 
-                # Functionalize with mutations_and_views replaces view with view_copy
-                result = functionalize(demo_function, remove="mutations_and_views")(x)
-
+                # view_copy special case
+                result = functionalize(lambda t: t.view(-1), remove="mutations_and_views")(x)
                 self.assertEqual(result.is_pinned(), pin_memory)
-                self.assertEqual(x.view(-1), result)
+
+                # Single tensor return (squeeze_copy, transpose_copy)
+                result = functionalize(lambda t: t.squeeze(), remove="mutations_and_views")(x)
+                self.assertEqual(result.is_pinned(), pin_memory)
+                result = functionalize(lambda t: t.transpose(0, 1), remove="mutations_and_views")(x_2d)
+                self.assertEqual(result.is_pinned(), pin_memory)
+
+                # List of tensors return (split_copy, unbind_copy)
+                for r in functionalize(lambda t: t.split(2), remove="mutations_and_views")(x):
+                    self.assertEqual(r.is_pinned(), pin_memory)
+                for r in functionalize(lambda t: t.unbind(0), remove="mutations_and_views")(x_2d):
+                    self.assertEqual(r.is_pinned(), pin_memory)
 
 
 @xfail_inherited_tests(
