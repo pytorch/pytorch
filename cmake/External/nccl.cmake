@@ -51,6 +51,9 @@ if(NOT __NCCL_INCLUDED)
         "BUILDDIR=${__NCCL_BUILD_DIR}"
         "VERBOSE=0"
         "DEBUG=0"
+        "CFLAGS=$ENV{NCCL_CFLAGS}"
+        "CXXFLAGS=$ENV{NCCL_CXXFLAGS}"
+        "LDFLAGS=$ENV{NCCL_LDFLAGS}"
       BUILD_BYPRODUCTS "${__NCCL_BUILD_DIR}/lib/libnccl_static.a"
       INSTALL_COMMAND ""
       )
