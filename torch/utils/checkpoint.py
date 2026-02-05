@@ -835,7 +835,9 @@ class _CheckpointFrame:
 
         for i, arg in enumerate(args):
             if isinstance(arg, torch.Tensor):
-                self.saved_tensors.append(SavedTensor(arg, is_output=False))
+                self.saved_tensors.append(
+                    SavedTensor(arg, is_output=False, _UNSAFE_INTERNAL_USE=True)
+                )
                 self.tensor_indices.append(i)
                 self.non_tensor_args.append(None)
             else:
