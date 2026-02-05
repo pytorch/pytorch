@@ -424,6 +424,7 @@ enum UIDS {
   RAG_DK_OFF,
   RAG_DV_OFF,
   RAG_O_OFF,
+  RAG_DO_OFF,
   RAG_LSE_OFF
 };
 
@@ -1267,6 +1268,13 @@ std::unique_ptr<fe::graph::Graph> build_graph_backward_nestedtensor(
                             .set_dim({b + 1, 1, 1, 1})
                             .set_stride({1, 1, 1, 1})
                             .set_data_type(fe::DataType_t::INT32));
+  auto RAG_DO_OFF_ =
+      mha_graph->tensor(fe::graph::Tensor_attributes()
+                            .set_uid(RAG_DO_OFF)
+                            .set_name("cum_seq_do")
+                            .set_dim({b + 1, 1, 1, 1})
+                            .set_stride({1, 1, 1, 1})
+                            .set_data_type(fe::DataType_t::INT32));
   auto RAG_STATS_OFF_ =
       mha_graph->tensor(fe::graph::Tensor_attributes()
                             .set_uid(RAG_LSE_OFF)
@@ -1287,7 +1295,7 @@ std::unique_ptr<fe::graph::Graph> build_graph_backward_nestedtensor(
   STATS->set_ragged_offset(RAG_STATS_OFF_);
   auto do_strides = dO.strides();
   auto DO_ = mha_graph->tensor(fe::graph::Tensor_attributes()
-                                   .set_ragged_offset(RAG_O_OFF_)
+                                   .set_ragged_offset(RAG_DO_OFF_)
                                    .set_uid(DO)
                                    .set_name("DO")
                                    .set_dim({b, h_q, s_q, d_v})
@@ -1825,6 +1833,7 @@ void run_cudnn_SDP_bprop_nestedtensor(
   auto rag_dq_off = cum_seqlen_q.mul(dQ.stride(-3));
   auto rag_dk_off = cum_seqlen_kv.mul(dK.stride(-3));
   auto rag_dv_off = cum_seqlen_kv.mul(dV.stride(-3));
+  auto rag_do_off = cum_seqlen_q.mul(dO_.stride(-3));
   auto rag_stats_off = cum_seqlen_q.mul(h_q);
 
   auto dprops = at::cuda::getCurrentDeviceProperties();
@@ -1908,6 +1917,7 @@ void run_cudnn_SDP_bprop_nestedtensor(
       {RAG_DQ_OFF, rag_dq_off.mutable_data_ptr()},
       {RAG_DK_OFF, rag_dk_off.mutable_data_ptr()},
       {RAG_DV_OFF, rag_dv_off.mutable_data_ptr()},
+      {RAG_DO_OFF, rag_do_off.mutable_data_ptr()},
       {RAG_LSE_OFF, rag_stats_off.mutable_data_ptr()},
       {SEQ_LEN_Q, seqlen_q.mutable_data_ptr()},
       {SEQ_LEN_KV, seqlen_kv.mutable_data_ptr()}};
