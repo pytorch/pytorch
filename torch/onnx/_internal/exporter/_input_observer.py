@@ -854,7 +854,7 @@ class InputObserver:
             onnx_program:
                 Exported Model to verify.
             atol:
-                Absolute tolerance, recommended values, 1e-4 for float, 1e-2 flot float16.
+                Absolute tolerance, recommended values, 1e-4 for float, 1e-2 for float16.
             rtol:
                 Relative tolerance.
             hist:
