@@ -5786,7 +5786,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     def needs_yz_grid_overflow(self, entry: IterationRangesRoot) -> bool:
         # Combo kernels use flattened dispatch where y_pid_offset is computed
         # from the flattened pid, so YZ overflow is not needed
-        if self.is_combo_kernel:
+        if self.is_combo_kernel and config.combo_kernel_per_subkernel_blocks:
             return False
         return (
             entry.grid_dim == 1
