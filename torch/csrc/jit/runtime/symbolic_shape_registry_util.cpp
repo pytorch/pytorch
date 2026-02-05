@@ -1,9 +1,4 @@
-#include <torch/csrc/jit/frontend/ir_emitter.h>
-#include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/passes/inliner.h>
-#include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/symbolic_shape_registry_util.h>
-#include <unordered_map>
 
 namespace torch::jit {
 

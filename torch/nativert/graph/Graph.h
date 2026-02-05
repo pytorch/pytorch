@@ -3,6 +3,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -112,7 +113,10 @@ using ValueId = int;
 class Value {
  public:
   explicit Value(ValueId id, std::string name, Type t, Node* producer)
-      : name_(std::move(name)), id_(id), type_(t), producer_(producer) {
+      : name_(std::move(name)),
+        id_(id),
+        type_(std::move(t)),
+        producer_(producer) {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(name_ == this->name());
   }
 

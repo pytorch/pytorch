@@ -48,20 +48,25 @@ class TestPrioritizations:
             if test.test_file not in files:
                 files[test.test_file] = copy(test)
             else:
-                assert (files[test.test_file] & test).is_empty(), (
-                    f"Test run `{test}` overlaps with `{files[test.test_file]}`"
-                )
+                if not (files[test.test_file] & test).is_empty():
+                    raise AssertionError(
+                        f"Test run `{test}` overlaps with `{files[test.test_file]}`"
+                    )
                 files[test.test_file] |= test
 
         for test in files.values():
-            assert test.is_full_file(), (
-                f"All includes should have been excluded elsewhere, and vice versa. Test run `{test}` violates that"
-            )  # noqa: B950
+            if not test.is_full_file():
+                raise AssertionError(
+                    f"All includes should have been excluded elsewhere, and vice versa. "
+                    f"Test run `{test}` violates that"
+                )
 
         # Ensure that the set of tests in the TestPrioritizations is identical to the set of tests passed in
-        assert self._original_tests == set(files.keys()), (
-            "The set of tests in the TestPrioritizations must be identical to the set of tests passed in"
-        )
+        if self._original_tests != set(files.keys()):
+            raise AssertionError(
+                "The set of tests in the TestPrioritizations must be identical "
+                "to the set of tests passed in"
+            )
 
     def _traverse_scores(self) -> Iterator[tuple[float, TestRun]]:
         # Sort by score, then alphabetically by test name
@@ -75,7 +80,7 @@ class TestPrioritizations:
             return  # We don't need this test
 
         relevant_test_runs: list[TestRun] = [
-            tr for tr in self._test_scores.keys() if tr & test_run and tr != test_run
+            tr for tr in self._test_scores if tr & test_run and tr != test_run
         ]
 
         # Set the score of all the tests that are covered by test_run to the same score
@@ -95,7 +100,7 @@ class TestPrioritizations:
             return
 
         relevant_test_runs: list[TestRun] = [
-            tr for tr in self._test_scores.keys() if tr & test_run
+            tr for tr in self._test_scores if tr & test_run
         ]
 
         for relevant_test_run in relevant_test_runs:
@@ -228,9 +233,11 @@ class AggregatedHeuristics:
     def validate(self) -> None:
         for heuristic, heuristic_results in self._heuristic_results.items():
             heuristic_results.validate()
-            assert heuristic_results._original_tests == self._all_tests, (
-                f"Tests in {heuristic.name} are not the same as the tests in the AggregatedHeuristics"
-            )
+            if heuristic_results._original_tests != self._all_tests:
+                raise AssertionError(
+                    f"Tests in {heuristic.name} are not the same as the tests in "
+                    "the AggregatedHeuristics"
+                )
 
     def add_heuristic_results(
         self, heuristic: HeuristicInterface, heuristic_results: TestPrioritizations

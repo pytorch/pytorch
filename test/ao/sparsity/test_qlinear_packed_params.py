@@ -226,7 +226,7 @@ class TestQlinearPackedParams(TestCase):
             state = lin._packed_params._packed_params.__getstate__()
             weight_bias = lin._weight_bias()
 
-            file_buff = tempfile.TemporaryFile()
+            file_buff = tempfile.TemporaryFile()  # noqa:SIM115
             torch.save(lin, file_buff)
             file_buff.seek(0)
 

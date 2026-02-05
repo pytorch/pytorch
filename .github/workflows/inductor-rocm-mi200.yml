@@ -2,7 +2,7 @@ name: inductor-rocm-mi200
 
 on:
   schedule:
-    - cron: 0 */3 * * *
+    - cron: 0 0,3,6,9,12,15,18,21 * * * # run every 3 hours for regression coverage
   push:
     branches:
       - release/*
@@ -53,7 +53,7 @@ jobs:
     uses: ./.github/workflows/_rocm-test.yml
     needs: linux-jammy-rocm-py3_10-inductor-build
     with:
-      build-environment: linux-jammy-rocm-py3.10
+      build-environment: ${{ needs.linux-jammy-rocm-py3_10-inductor-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-rocm-py3_10-inductor-build.outputs.docker-image }}
       test-matrix:  ${{ needs.linux-jammy-rocm-py3_10-inductor-build.outputs.test-matrix }}
     secrets: inherit

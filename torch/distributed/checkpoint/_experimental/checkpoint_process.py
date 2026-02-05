@@ -6,7 +6,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from enum import Enum
 from multiprocessing.connection import Connection
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch.multiprocessing as mp
 from torch.multiprocessing.spawn import ProcessExitedException
@@ -57,8 +57,8 @@ class WorkerRequest:
 class WorkerResponse:
     request_type: RequestType
     success: bool
-    error_msg: Optional[str] = None
-    payload: Optional[dict[str, Any]] = None
+    error_msg: str | None = None
+    payload: dict[str, Any] | None = None
 
 
 class CheckpointProcess:
@@ -83,8 +83,8 @@ class CheckpointProcess:
         self._checkpoint_writer_init_fn = checkpoint_writer_init_fn
         self._checkpoint_writer_init_args = checkpoint_writer_init_args
         self.process = None
-        self._parent_end: Optional[Connection] = None
-        self._child_end: Optional[Connection] = None
+        self._parent_end: Connection | None = None
+        self._child_end: Connection | None = None
 
         self.process_creation_future = self._executor.submit(
             self._create_subprocess,
@@ -243,7 +243,7 @@ class CheckpointProcess:
             )
             raise RuntimeError(error_msg) from e
 
-    def _recv(self) -> Optional[dict[str, Any]]:
+    def _recv(self) -> dict[str, Any] | None:
         try:
             if self._parent_end is None:
                 raise AssertionError("Parent end of pipe should be initialized")
@@ -262,10 +262,10 @@ class CheckpointProcess:
 
     def write(
         self,
-        state_dict: Union[STATE_DICT, Future[STATE_DICT]],
+        state_dict: STATE_DICT | Future[STATE_DICT],
         path: str,
         **kwargs: Any,
-    ) -> Optional[Future[None]]:
+    ) -> Future[None] | None:
         logger.debug("Waiting for subprocess initialization to complete")
 
         # wait until the process is started
@@ -280,7 +280,7 @@ class CheckpointProcess:
 
     def _write(
         self,
-        state_dict: Union[STATE_DICT, Future[STATE_DICT]],
+        state_dict: STATE_DICT | Future[STATE_DICT],
         path: str,
         **kwargs: Any,
     ) -> None:

@@ -2,7 +2,6 @@ import logging
 import operator
 import types
 from collections import defaultdict
-from typing import Optional
 
 import torch
 import torch.fx._pytree as fx_pytree
@@ -26,9 +25,10 @@ def _get_getitem_users(node: torch.fx.Node) -> set[torch.fx.Node]:
         if user.op == "output":
             continue
 
-        assert user.op == "call_function" and user.target is operator.getitem, (
-            f"Expected getitem node as user for {node}, instead got {user}"
-        )
+        if not (user.op == "call_function" and user.target is operator.getitem):
+            raise AssertionError(
+                f"Expected getitem node as user for {node}, instead got {user}"
+            )
         getitem_users.update(list(user.users.keys()))
     return getitem_users
 
@@ -63,14 +63,19 @@ def _try_remove_connecting_pytrees(curr_module_node: torch.fx.Node) -> None:
     log.debug("Trying to remove pytrees for module call %s", curr_module_node)
 
     curr_module_users = list(curr_module_node.users.keys())
-    assert len(curr_module_users) == 1, (
-        f"Expected only one user for module node, instead got {list(curr_module_users)}"
-    )
+    if len(curr_module_users) != 1:
+        raise AssertionError(
+            f"Expected only one user for module node, instead got {list(curr_module_users)}"
+        )
     flatten_node = curr_module_users[0]
-    assert (
+    if not (
         flatten_node.op == "call_function"
         and flatten_node.target is fx_pytree.tree_flatten_spec
-    )
+    ):
+        raise AssertionError(
+            f"Expected flatten_node to be a call_function with target tree_flatten_spec, "
+            f"but got op={flatten_node.op}, target={flatten_node.target}"
+        )
 
     flatten_getitem_users = _get_getitem_users(flatten_node)
     if len(flatten_getitem_users) != 1:
@@ -177,7 +182,7 @@ def _construct_inputs(
     signature: ModuleCallSignature,
     node_name_map: dict[str, torch.fx.Node],
 ) -> tuple[list[torch.fx.Node], dict[str, torch.fx.Node]]:
-    tree_unflatten_args: list[Optional[torch.fx.Node]] = []
+    tree_unflatten_args: list[torch.fx.Node | None] = []
     for input_ in signature.inputs:
         if isinstance(input_, ConstantArgument) and input_.value is None:
             # Constants should be directly embedded into the graph and not used
@@ -194,11 +199,23 @@ def _construct_inputs(
 
     unflatten_node = _generate_unflatten(gm, tree_unflatten_args, signature.in_spec)
 
-    assert signature.in_spec.num_children == 2
-    assert signature.in_spec.type is tuple
+    if signature.in_spec.num_children != 2:
+        raise AssertionError(
+            f"Expected in_spec to have 2 children, but got {signature.in_spec.num_children}"
+        )
+    if signature.in_spec.type is not tuple:
+        raise AssertionError(
+            f"Expected in_spec type to be tuple, but got {signature.in_spec.type}"
+        )
     args_spec, kwargs_spec = signature.in_spec.children()
-    assert args_spec.type is tuple
-    assert kwargs_spec.type is dict
+    if args_spec.type is not tuple:
+        raise AssertionError(
+            f"Expected args_spec type to be tuple, but got {args_spec.type}"
+        )
+    if kwargs_spec.type is not dict:
+        raise AssertionError(
+            f"Expected kwargs_spec type to be dict, but got {kwargs_spec.type}"
+        )
 
     args_node = gm.graph.call_function(operator.getitem, (unflatten_node, 0))
     args_nodes = [
@@ -370,11 +387,20 @@ def _fix_input_output_signature(
     forward_arg_names = signature.forward_arg_names
     if forward_arg_names is None:
         forward_arg_names = []
-        assert signature.in_spec.num_children == 2
+        if signature.in_spec.num_children != 2:
+            raise AssertionError(
+                f"Expected in_spec to have 2 children, but got {signature.in_spec.num_children}"
+            )
         arg_spec = signature.in_spec.child(0)
         kwarg_spec = signature.in_spec.child(1)
-        assert arg_spec.type is tuple
-        assert kwarg_spec.type is dict
+        if arg_spec.type is not tuple:
+            raise AssertionError(
+                f"Expected arg_spec type to be tuple, but got {arg_spec.type}"
+            )
+        if kwarg_spec.type is not dict:
+            raise AssertionError(
+                f"Expected kwarg_spec type to be dict, but got {kwarg_spec.type}"
+            )
         for i in range(arg_spec.num_children):
             forward_arg_names.append(f"arg_{i}")
         forward_arg_names.extend(kwarg_spec.context)
@@ -427,14 +453,20 @@ def _swap_modules(
     gm = ep.module()
     gm.validate_inputs = False  # type: ignore[assignment]
     gm.graph.eliminate_dead_code()  # type: ignore[operator, union-attr]
-    assert isinstance(gm, torch.fx.GraphModule)
+    if not isinstance(gm, torch.fx.GraphModule):
+        raise AssertionError(
+            f"Expected gm to be a torch.fx.GraphModule, but got {type(gm)}"
+        )
     _fix_input_output_signature(gm, ep.module_call_graph[0].signature)
 
     gm.module_call_graph = ep.module_call_graph
     gm.train = types.MethodType(type(gm).train, gm)  # type: ignore[assignment]
     gm.eval = types.MethodType(type(gm).eval, gm)  # type: ignore[assignment]
 
-    assert isinstance(gm, torch.fx.GraphModule)
+    if not isinstance(gm, torch.fx.GraphModule):
+        raise AssertionError(
+            f"Expected gm to be a torch.fx.GraphModule, but got {type(gm)}"
+        )
     gm = _swap_module_helper(gm, modules_to_swap, module_call_graph)
 
     return gm

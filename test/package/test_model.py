@@ -98,7 +98,7 @@ class ModelTest(PackageTestCase):
         # use the same API to load the package.
 
         # The convention is for each model to provide a
-        # 'model' package with a 'load' function that actual
+        # 'model' package with a 'load' function that actually
         # reads the model out of the archive.
 
         # How the load function is implemented is up to the

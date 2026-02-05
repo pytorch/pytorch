@@ -8,8 +8,7 @@ on:
       - ciflow/rocm-mi200/*
   workflow_dispatch:
   schedule:
-    - cron: 29 8 * * *  # about 1:29am PDT
-    - cron: 0 */3 * * *
+    - cron: 0 0,3,6,9,12,15,18,21 * * * # run every 3 hours for regression coverage
 
 
 concurrency:
@@ -68,7 +67,7 @@ jobs:
       - linux-jammy-rocm-py3_10-build
       - target-determination
     with:
-      build-environment: linux-jammy-rocm-py3.10
+      build-environment: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.test-matrix }}
     secrets: inherit
