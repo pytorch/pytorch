@@ -110,7 +110,10 @@ runs:
         # This is due to the device files (/dev/kfd & /dev/dri) being owned by video group on bare metal.
         # This video group ID maps to subgid 1 inside the docker image due to the /etc/subgid entries.
         # The group name corresponding to group ID 1 can change depending on the OS, so both are necessary.
-        echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd $DEVICE_FLAG --group-add video --group-add $render_gid --group-add daemon --group-add bin --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --network=host" >> "${GITHUB_ENV}"
+        # HIP runtime relies on the file /opt/amdgpu/share/libdrm/amdgpu.ids to look up the Product name of AMDGPU.
+        # This file might not exist or could be out of date in the CI docker containers. Mapping this file on the host
+        # to the container would make sure torch.cuda.get_device_name() gets the correct AMDGPU device name.
+        echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd $DEVICE_FLAG --group-add video --group-add $render_gid --group-add daemon --group-add bin --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --network=host -v /opt/amdgpu:/opt/amdgpu:ro" >> "${GITHUB_ENV}"
 
     - name: Login to ECR
       uses: pytorch/pytorch/.github/actions/ecr-login@main
