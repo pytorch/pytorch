@@ -191,15 +191,6 @@ og_module_named_parameters_fn_ptr = torch.nn.Module.named_parameters
 
 
 @dataclass(frozen=True)
-class VariableTrackerCacheKey:
-    vt_id: int
-    # Two different source can point to the same object. However, Dynamo handles
-    # globals and local source differently when it comes to guards and possibly
-    # some other parts as well. So, cache also relies on the source.
-    source: Source
-
-
-@dataclass(frozen=True)
 class AliasingInfo:
     has_aliasing: bool
     msg: str
@@ -209,30 +200,6 @@ class AliasingInfo:
 class MutationInfo:
     has_mutation: bool
     msg: str
-
-
-class VariableTrackerCache:
-    def __init__(self) -> None:
-        self.cache: dict[VariableTrackerCacheKey, VariableTracker] = {}
-
-    def lookup(self, value: Any, source: Source) -> Optional[VariableTracker]:
-        key = VariableTrackerCacheKey(id(value), source)
-        if key not in self.cache:
-            return None
-        return self.cache[key]
-
-    def add(self, value: Any, source: Source, vt: VariableTracker) -> None:
-        key = VariableTrackerCacheKey(id(value), source)
-        self.cache[key] = vt
-
-    def clone(self) -> "VariableTrackerCache":
-        # Needed for copy and restore graph state
-        new_cache = VariableTrackerCache()
-        new_cache.cache.update(self.cache)
-        return new_cache
-
-    def clear(self) -> None:
-        self.cache.clear()
 
 
 def collect_reachable_grad_fns(
@@ -687,7 +654,7 @@ class OutputGraph(OutputGraphCommon):
         self.side_effects = SideEffects(self)
         # Cached variable trackers. This makes symbolic analysis of LOAD_GLOBAL
         # and LOAD_ATTR for same python objects free.
-        self.variable_tracker_cache = VariableTrackerCache()
+        self.variable_tracker_cache: dict[Source, VariableTracker] = {}
         self.unique_var_id = itertools.count()
         self.code_options: dict[str, Any] = dict(code_options)
         self.output_instructions: list[Instruction] = []
