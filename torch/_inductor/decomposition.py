@@ -483,64 +483,44 @@ def angle(x: torch.Tensor) -> torch.Tensor:
     ret = torch.where(x < 0, pi, 0.0)
     return torch.where(torch.isnan(x), float("nan"), ret)
 
-
 @register_decomposition([aten.add])
 def add(
     x: torch.Tensor,
     y: torch.Tensor,
     *,
-    alpha: Optional[torch.types.Number] = None,
+    alpha=None,
 ) -> torch.Tensor:
-    # Require both x and y to be complex tensors.
-    x_is_complex_tensor = torch.is_tensor(x) and x.is_complex()
-    y_is_complex_tensor = torch.is_tensor(y) and y.is_complex()
-    if not x_is_complex_tensor or not y_is_complex_tensor:
+    # Only handle complex + complex tensors
+    if not (
+        torch.is_tensor(x)
+        and torch.is_tensor(y)
+        and x.is_complex()
+        and y.is_complex()
+    ):
         return NotImplemented
 
-    def _requires_fallback(tensor: torch.Tensor) -> bool:
-        if tensor.ndim == 0:
-            return tensor.is_complex()
-        if not tensor.is_complex():
-            return False
-        # Viewing complex tensors as their real dtype requires the last stride to be 1.
-        return tensor.stride()[-1] != 1
+    # Do not attempt to lower complex scalars
+    if x.ndim == 0 or y.ndim == 0:
+        return NotImplemented
 
     z = y
     if alpha is not None:
         z = alpha * z
 
-    output_size_zero = False
-    if x.ndim == 0 and z.ndim == 0:
-        output_size_zero = True
-    if x.ndim == 0:
-        x = x.reshape(1)
-    if z.ndim == 0:
-        z = z.reshape(1)
-
     complex_type = torch.promote_types(x.dtype, y.dtype)
 
-    if _requires_fallback(x) or _requires_fallback(z):
-        return NotImplemented
-
-    def reshape_tensor_complex(tensor: torch.Tensor) -> torch.Tensor:
+    def reshape_tensor_complex(tensor):
         *initial_dims, last_dim = tensor.shape
-        if last_dim % 2 != 0:
-            raise AssertionError(
-                "The size of the last dimension must be even to reshape it to [..., last_dim/2, 2]"
-            )
         return tensor.view(*initial_dims, last_dim // 2, 2)
 
-    # Manually resolve complex tensors
+    # Resolve conjugation explicitly
     x = x + 0
     z = z + 0
 
     x_reshaped = reshape_tensor_complex(x.view(x.real.dtype))
     z_reshaped = reshape_tensor_complex(z.view(y.real.dtype))
-    result = torch.flatten(x_reshaped + z_reshaped, start_dim=-2).view(complex_type)
+    return torch.flatten(x_reshaped + z_reshaped, start_dim=-2).view(complex_type)
 
-    if output_size_zero:
-        return result[0]
-    return result
 
 
 @register_decomposition([aten.conj_physical])
