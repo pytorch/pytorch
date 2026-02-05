@@ -8266,7 +8266,9 @@ for shape in [(1,), ()]:
 
         a = torch.randn(5, requires_grad=True)
         with torch.autograd.graph.saved_tensors_hooks(pack_hook, unpack_hook):
-            saved = torch.autograd.SavedTensor(a, is_output=False)
+            saved = torch.autograd.SavedTensor(
+                a, is_output=False, _unsafe_internal_use_do_not_use=True
+            )
             self.assertEqual(pack_count[0], 1)
             self.assertEqual(unpack_count[0], 0)
 
@@ -8274,6 +8276,14 @@ for shape in [(1,), ()]:
             self.assertEqual(pack_count[0], 1)
             self.assertEqual(unpack_count[0], 1)
             self.assertEqual(unpacked, a)
+
+    def test_saved_tensor_constructor_forbidden_without_flag(self):
+        a = torch.randn(5, requires_grad=True)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Trying to create a SavedTensor object from Python is forbidden",
+        ):
+            torch.autograd.SavedTensor(a, is_output=False)
 
     def test_custom_function_saved_tensors(self):
         def getFn(save=True):
