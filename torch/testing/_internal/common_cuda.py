@@ -238,7 +238,7 @@ def tf32_enabled(set_allow_tf_32_to_true=True, sdp_fp32_precision="ieee"):
     Restores the previous TF32 state after exiting the context.
     Also sets sdp precision and restores it after exiting.
     """
-    old_math_sdp_fp32_precision = torch.backends.cuda.math_sdp.fp32_precision    
+    old_math_sdp_fp32_precision = torch.backends.cuda.math_sdp.fp32_precision
     old_allow_tf32_matmul = torch.backends.cuda.matmul.allow_tf32
     try:
         torch.backends.cuda.math_sdp.fp32_precision = sdp_fp32_precision
