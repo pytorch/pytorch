@@ -3,6 +3,7 @@
 import itertools
 
 import pandas
+
 import torch
 from torch.onnx import InputObserver
 from torch.onnx._internal.exporter._input_observer import _infer_dynamic_dimensions
@@ -776,9 +777,7 @@ class TestInputObserver(common_utils.TestCase):
         self.assertEqual(iargs["w"].shape, (1, 6))
         self.assertEqual(iargs["z"].shape, (5, 6))
 
-        iargs = observer.infer_arguments(
-            (torch.randn((5, 6)), torch.randn((1, 6)))
-        )
+        iargs = observer.infer_arguments((torch.randn((5, 6)), torch.randn((1, 6))))
         self.assertEqual(len(iargs), 4)
         self.assertEqual(iargs["x"].shape, (5, 6))
         self.assertEqual(iargs["y"].shape, (1, 6))
@@ -872,7 +871,6 @@ class TestInputObserver(common_utils.TestCase):
         self.assertEqual(len(observer.info), 4)
         with self.assertRaises(RuntimeError):
             observer.infer_dynamic_shapes()
-
 
 
 if __name__ == "__main__":

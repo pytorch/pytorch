@@ -9,7 +9,6 @@ import time
 from typing import Any, TYPE_CHECKING
 
 import torch
-
 from torch.onnx._internal.exporter import _onnx_program
 
 
@@ -856,10 +855,10 @@ class InputObserver:
             rtol:
                 Relative tolerance.
             progress_bar:
-                Shows a progress bar (requires :epkg:`tqdm`).
+                Shows a progress bar (requires `tqdm`).
             initializer: The function to initialize the ONNX Runtime inference
                 session with the specified model. By default, it uses the
-                :func:`_ort_session_initializer` function.
+                `_ort_session_initializer` function.
 
         Returns:
             A list of dictionaries, ready to be consumed by a dataframe.
