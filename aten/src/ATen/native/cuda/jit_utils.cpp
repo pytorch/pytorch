@@ -254,7 +254,7 @@ const std::string jit_common_types = R"ESCAPE(
   _(at::BFloat16, BFloat16)                                        \
   _(uint16_t, UInt16)                                              \
   _(uint32_t, UInt32)                                              \
-  _(uint64_t, UInt64) 
+  _(uint64_t, UInt64)
 
 
   enum class ScalarType : int8_t {
