@@ -2773,12 +2773,10 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         def wrap_impl_for_leaf_module_state(
             impl: Callable[..., Any],
         ) -> Callable[..., Any]:
-            def wrapped_impl(*flat_args: Any) -> Any:
+            def wrapped_impl(input_spec: Any, *flat_args: Any) -> Any:
                 # NB: The flat_args contain flattened LeafModuleState objects.
                 # We need to unflatten them with input_spec then convert back to nn.Module
                 # before calling the original impl.
-                #
-                # input_spec is captured from the outer scope
                 with reconstruct_original_args(input_spec, flat_args) as (
                     args_with_modules,
                     kwargs_with_modules,
@@ -2800,10 +2798,12 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 
         real_impl_proxy = make_spec_proxy("real_fn", real_impl_spec)
         fake_impl_proxy = make_spec_proxy("fake_fn", fake_impl_spec)
+        input_spec_proxy = make_spec_proxy("input_spec", input_spec)
 
         invoke_args = (
             real_impl_proxy,
             fake_impl_proxy,
+            input_spec_proxy,
             *flat_arg_proxies,
         )
         result_proxy = tx.output.create_proxy(
