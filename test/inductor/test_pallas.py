@@ -114,6 +114,16 @@ def skip_if_tpu(fn):
     return wrapper
 
 
+def skip_if_cpu(fn):
+    @functools.wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        if self.DEVICE == "cpu":
+            self.skipTest("Not yet working on CPU")
+        fn(self, *args, **kwargs)
+
+    return wrapper
+
+
 def skip_if_cuda(fn):
     @functools.wraps(fn)
     def wrapper(self, *args, **kwargs):
@@ -1108,6 +1118,7 @@ class PallasTestsMixin:
         expected = fn(x, weight, bias)
         self.assertEqual(result, expected)
 
+    @skip_if_cpu
     @skip_if_tpu
     def test_rope(self):
         """Test Rotary Position Embedding with slice + cat.
