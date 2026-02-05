@@ -45,6 +45,7 @@ from .ctx_manager import (
 from .dicts import (
     ConstDictVariable,
     DefaultDictVariable,
+    DictItemsVariable,
     DictKeySetVariable,
     FrozensetVariable,
     MappingProxyVariable,
@@ -68,6 +69,7 @@ from .functions import (
     PyTreeGetNodeTypeFunctionVariable,
     PyTreeTreeIsLeafFunctionVariable,
     SkipFunctionVariable,
+    SparseTensorCreationSkipVariable,
     TMADescriptorExperimentalVariable,
     TMADescriptorStableVariable,
     UserFunctionVariable,

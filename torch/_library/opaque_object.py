@@ -39,9 +39,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Literal, NewType, Optional
+from typing_extensions import TypeIs
 from weakref import WeakKeyDictionary
 
 import torch
+from torch._opaque_base import OpaqueBase, OpaqueBaseMeta  # noqa: F401
 
 from .fake_class_registry import register_fake_class
 
@@ -158,6 +160,15 @@ def register_opaque_type(
             "registered as a pytree. Opaque objects must be pytree leaves."
         )
 
+    if not isinstance(cls, OpaqueBaseMeta):
+        raise TypeError(
+            f"Opaque type {cls} must subclass torch._opaque_base.OpaqueBase "
+            "or 'metaclass=torch._opaque_base.OpaqueBaseMeta'. "
+            "This is required so that FakeScriptObject can be registered "
+            "as a virtual subclass, allowing isinstance() checks to work "
+            "during torch.compile tracing. "
+        )
+
     if typ not in ["reference", "value"]:
         raise AssertionError(
             f"Opaque type must be either 'reference' or 'value', got {typ!r}"
@@ -206,6 +217,10 @@ def register_opaque_type(
     _OPAQUE_TYPES_BY_NAME[name] = type_info
 
     torch._C._register_opaque_type(name)
+
+
+def is_opaque_value(value: object) -> TypeIs[OpaqueType]:
+    return is_opaque_type(type(value))
 
 
 def is_opaque_type(cls: Any) -> bool:

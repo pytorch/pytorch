@@ -12,6 +12,7 @@
 #include <ATen/ops/empty.h>
 #include <ATen/ops/sparse_coo_tensor.h>
 #include <ATen/ops/where.h>
+#include <ATen/ops/zeros.h>
 #endif
 
 namespace at::native {
@@ -50,6 +51,12 @@ Tensor spdiags(
   TORCH_CHECK(
       offsets_1d.numel() == std::get<0>(at::_unique(offsets_1d)).numel(),
       "Offset tensor contains duplicate values");
+
+  // Handle zero-dimension shapes early - return empty sparse tensor
+  // This matches scipy.sparse.spdiags behavior
+  if (shape[0] == 0 || shape[1] == 0) {
+    return at::zeros(shape, diagonals_2d.options().layout(layout.value_or(Layout::Sparse)));
+  }
 
   auto nnz_per_diag = at::where(
       offsets_1d.le(0),

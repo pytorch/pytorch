@@ -51,7 +51,8 @@ def _is_autocast_sub_mod(node: torch.fx.Node) -> bool:
     Check if the first non-placeholder node is `torch.amp.autocast_mode._enter_autocast`.
     """
     if node.op == "call_module":
-        assert isinstance(node.target, str)
+        if not isinstance(node.target, str):
+            raise AssertionError(f"expected str target, got {type(node.target)}")
         subgm = getattr(node.graph.owning_module, node.target)
         first_non_ph = nodes_first(
             subgm.graph.nodes, lambda node: node.op != "placeholder"
@@ -70,22 +71,37 @@ def _is_autocast_sub_mod(node: torch.fx.Node) -> bool:
 def _check_valid_autocast_block(
     enter_autocast_node: torch.fx.Node, exit_autocast_node: torch.fx.Node
 ) -> None:
-    assert _is_enter_autocast_node(enter_autocast_node)
-    assert _is_exit_autocast_node(exit_autocast_node)
-    assert exit_autocast_node.args[0] == enter_autocast_node
+    if not _is_enter_autocast_node(enter_autocast_node):
+        raise AssertionError(
+            f"expected enter_autocast node, got {enter_autocast_node.target}"
+        )
+    if not _is_exit_autocast_node(exit_autocast_node):
+        raise AssertionError(
+            f"expected exit_autocast node, got {exit_autocast_node.target}"
+        )
+    if exit_autocast_node.args[0] != enter_autocast_node:
+        raise AssertionError(
+            "exit_autocast_node.args[0] must match enter_autocast_node"
+        )
 
 
 def _replace_with_hop(node: torch.fx.Node) -> None:
-    assert node.op == "call_module"
+    if node.op != "call_module":
+        raise AssertionError(f"expected call_module op, got {node.op}")
     graph: torch.fx.Graph = node.graph
-    assert graph.owning_module is not None
+    if graph.owning_module is None:
+        raise AssertionError("graph.owning_module must not be None")
     gm: torch.fx.GraphModule = graph.owning_module
-    assert isinstance(node.target, str)
+    if not isinstance(node.target, str):
+        raise AssertionError(f"expected str target, got {type(node.target)}")
     sub_gm = getattr(gm, node.target)
     sub_graph = sub_gm.graph
     autocast_nodes = nodes_filter(sub_graph.nodes, _is_autocast_node)
     if len(autocast_nodes) > 0:
-        assert len(autocast_nodes) > 1  # need at least an enter node and an exist node
+        if len(autocast_nodes) <= 1:
+            raise AssertionError(
+                f"need at least an enter node and an exit node, got {len(autocast_nodes)}"
+            )
         enter_autocast_node = autocast_nodes[0]
         exit_autocast_node = autocast_nodes[-1]
         _check_valid_autocast_block(enter_autocast_node, exit_autocast_node)
@@ -125,15 +141,20 @@ def _split_autocast(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
         if first_node_after_outer_most_exit or (
             len(enter_autocast_node_stack) == 0 and _is_enter_autocast_node(node)
         ):
-            assert len(enter_autocast_node_stack) == 0
+            if len(enter_autocast_node_stack) != 0:
+                raise AssertionError(
+                    f"expected empty stack, got {len(enter_autocast_node_stack)} items"
+                )
             first_node_after_outer_most_exit = False
             increment_id = True
         if _is_enter_autocast_node(node):
             enter_autocast_node_stack.append(node)
         elif _is_exit_autocast_node(node):
-            assert len(enter_autocast_node_stack) > 0
+            if len(enter_autocast_node_stack) == 0:
+                raise AssertionError("enter_autocast_node_stack must not be empty")
             last_enter_autocast_node = enter_autocast_node_stack.pop()
-            assert node.args[0] == last_enter_autocast_node
+            if node.args[0] != last_enter_autocast_node:
+                raise AssertionError("exit node args[0] must match last enter node")
             if len(enter_autocast_node_stack) == 0:
                 # next node should be in the next submodule since
                 # autocast block ends
@@ -166,8 +187,10 @@ def _sequential_split_and_maybe_inline_subgraphs(
         if _is_autocast_sub_mod(node):
             _replace_with_hop(node)
         else:
-            assert node.op == "call_module"
-            assert isinstance(node.target, str)
+            if node.op != "call_module":
+                raise AssertionError(f"expected call_module op, got {node.op}")
+            if not isinstance(node.target, str):
+                raise AssertionError(f"expected str target, got {type(node.target)}")
             node_inline_(node)
 
     return _sequential_split_and_maybe_inline_subgraphs_helper(
