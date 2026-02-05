@@ -4977,6 +4977,30 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         result_compiled = compiled_program(*args)
         self.assertTrue(torch.allclose(result_compiled, result_original))
 
+    def test_inductor_view_issue_172693(self):
+        class MinimalBugModule(torch.nn.Module):
+            def __init__(self, num_heads: int = 8):
+                super().__init__()
+                self.num_heads = num_heads
+
+            def forward(self, key):
+                reshaped_key = key.reshape(key.shape[0], self.num_heads, -1)
+                torch._dynamo.graph_break()
+                return reshaped_key + 1
+
+        num_heads = 8
+
+        bug_module = MinimalBugModule(num_heads=num_heads)
+
+        key = torch.empty_strided((2, 16, 9), (288, 9, 1)).normal_()
+
+        with torch.inference_mode():
+            eager_result = bug_module(key)
+            bug_module.compile(dynamic=True)
+            compiled_result = bug_module(key)
+
+        self.assertEqual(compiled_result, eager_result)
+
 
 instantiate_parametrized_tests(TestUnbacked)
 
