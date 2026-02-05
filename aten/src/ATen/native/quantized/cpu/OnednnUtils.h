@@ -463,7 +463,7 @@ at::Tensor _qconv_prepack_onednn(
 #define FP8E4M3_MAX 448.0
 
 #define CACHE_ONEDNN_CONTEXT_FLAG "ONEDNN_CACHE_CONTEXT_UNSAFE"
-#if IDEEP_PREREQ(3, 9, 0, 0)
+#if IDEEP_PREREQ(3, 9, 0, 0) && !defined(__powerpc__)
 #define ONEDNN_FP8_QCONV_SUPPORTED
 #endif
 
