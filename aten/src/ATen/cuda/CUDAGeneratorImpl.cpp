@@ -85,8 +85,61 @@ Generator createCUDAGenerator(DeviceIndex device_index) {
  * Creates a clone of this CUDA Generator State.
  */
 c10::intrusive_ptr<CUDAGeneratorState> CUDAGeneratorState::clone() {
-  return make_intrusive<CUDAGeneratorState>(
+  auto cloned = make_intrusive<CUDAGeneratorState>(
       seed_, philox_offset_per_thread_, offset_intragraph_);
+  // Copy sharding spec
+  cloned->set_sharding_spec(
+      tensor_dim_, local_shape_, global_offset_, global_shape_, global_strides_);
+  return cloned;
+}
+
+/**
+ * Gets the sharding spec for single-device RNG semantics.
+ */
+uint64_t CUDAGeneratorState::get_sharding_spec(
+    uint64_t local_shape[SHARDING_MAX_DIMS],
+    uint64_t global_offset[SHARDING_MAX_DIMS],
+    uint64_t global_shape[SHARDING_MAX_DIMS],
+    uint64_t global_strides[SHARDING_MAX_DIMS]) const {
+  at::cuda::assertNotCapturing(
+      "Cannot call CUDAGeneratorState::get_sharding_spec during capture.");
+  memcpy(local_shape, local_shape_, tensor_dim_ * sizeof(uint64_t));
+  memcpy(global_offset, global_offset_, tensor_dim_ * sizeof(uint64_t));
+  memcpy(global_shape, global_shape_, tensor_dim_ * sizeof(uint64_t));
+  memcpy(global_strides, global_strides_, tensor_dim_ * sizeof(uint64_t));
+  return tensor_dim_;
+}
+
+/**
+ * Sets the sharding spec for single-device RNG semantics.
+ */
+void CUDAGeneratorState::set_sharding_spec(
+    uint64_t tensor_dim,
+    const uint64_t local_shape[SHARDING_MAX_DIMS],
+    const uint64_t global_offset[SHARDING_MAX_DIMS],
+    const uint64_t global_shape[SHARDING_MAX_DIMS],
+    const uint64_t global_strides[SHARDING_MAX_DIMS]) {
+  at::cuda::assertNotCapturing(
+      "Cannot call CUDAGeneratorState::set_sharding_spec during capture.");
+  TORCH_CHECK(
+      tensor_dim <= SHARDING_MAX_DIMS,
+      "tensor has too many (> ",
+      SHARDING_MAX_DIMS,
+      ") dims");
+  tensor_dim_ = tensor_dim;
+  memcpy(local_shape_, local_shape, tensor_dim * sizeof(uint64_t));
+  memcpy(global_offset_, global_offset, tensor_dim * sizeof(uint64_t));
+  memcpy(global_shape_, global_shape, tensor_dim * sizeof(uint64_t));
+  memcpy(global_strides_, global_strides, tensor_dim * sizeof(uint64_t));
+}
+
+/**
+ * Clears the sharding spec (disables single-device RNG semantics).
+ */
+void CUDAGeneratorState::clear_sharding_spec() {
+  at::cuda::assertNotCapturing(
+      "Cannot call CUDAGeneratorState::clear_sharding_spec during capture.");
+  tensor_dim_ = 0;
 }
 
 /**
@@ -441,6 +494,38 @@ void CUDAGeneratorImpl::register_graph(cuda::CUDAGraph* graph) {
  */
 void CUDAGeneratorImpl::unregister_graph(cuda::CUDAGraph* graph) {
   state_->unregister_graph(graph);
+}
+
+/**
+ * Gets the sharding spec for single-device RNG semantics.
+ */
+uint64_t CUDAGeneratorImpl::get_sharding_spec(
+    uint64_t local_shape[SHARDING_MAX_DIMS],
+    uint64_t global_offset[SHARDING_MAX_DIMS],
+    uint64_t global_shape[SHARDING_MAX_DIMS],
+    uint64_t global_strides[SHARDING_MAX_DIMS]) const {
+  return state_->get_sharding_spec(
+      local_shape, global_offset, global_shape, global_strides);
+}
+
+/**
+ * Sets the sharding spec for single-device RNG semantics.
+ */
+void CUDAGeneratorImpl::set_sharding_spec(
+    uint64_t tensor_dim,
+    const uint64_t local_shape[SHARDING_MAX_DIMS],
+    const uint64_t global_offset[SHARDING_MAX_DIMS],
+    const uint64_t global_shape[SHARDING_MAX_DIMS],
+    const uint64_t global_strides[SHARDING_MAX_DIMS]) {
+  state_->set_sharding_spec(
+      tensor_dim, local_shape, global_offset, global_shape, global_strides);
+}
+
+/**
+ * Clears the sharding spec (disables single-device RNG semantics).
+ */
+void CUDAGeneratorImpl::clear_sharding_spec() {
+  state_->clear_sharding_spec();
 }
 
 /**

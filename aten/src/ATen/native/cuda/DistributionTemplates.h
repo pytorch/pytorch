@@ -12,6 +12,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
+#include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/core/DistributionsHelper.h>
 
@@ -87,6 +88,55 @@ __global__ void distribution_elementwise_grid_stride_kernel(int64_t numel,
   }
 }
 
+// Sharded version: computes virtual (global) index for single-device RNG semantics
+template<typename accscalar_t, int unroll_factor, typename dist_t, typename transform_t>
+C10_LAUNCH_BOUNDS_2(block_size_bound, grid_size_bound)
+__global__ void distribution_elementwise_grid_stride_kernel_sharded(
+    int64_t numel,
+    PhiloxCudaState philox_args,
+    const dist_t dist_func,
+    const transform_t transform_func,
+    uint64_t tensor_dim,
+    const uint64_t* __restrict__ local_shape,
+    const uint64_t* __restrict__ global_offset,
+    const uint64_t* __restrict__ global_shape,
+    const uint64_t* __restrict__ global_strides,
+    uint64_t single_thread_n) {
+  auto [seed, global_philox_offset] = at::cuda::philox::unpack(philox_args);
+  int64_t idx = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
+  curandStatePhilox4_32_10_t state;
+
+  int64_t rounded_size = ((numel - 1)/(blockDim.x * gridDim.x * unroll_factor)+1) *
+      blockDim.x * gridDim.x * unroll_factor;
+
+  for(int64_t linear_index = idx; linear_index < rounded_size; linear_index += blockDim.x * gridDim.x * unroll_factor) {
+    #pragma unroll
+    for (int ii = 0; ii < unroll_factor; ii++) {
+      int64_t li = linear_index + blockDim.x * gridDim.x * ii;
+      if (li < numel) {
+        // Compute global linear index from local index using sharding spec
+        uint64_t tmp_idx = li;
+        uint64_t global_entry_linear_idx = 0;
+        for (int d = tensor_dim - 1; d >= 0; --d) {
+          uint64_t global_idx_at_d = global_offset[d] + tmp_idx % local_shape[d];
+          tmp_idx /= local_shape[d];
+          global_entry_linear_idx += global_idx_at_d * global_strides[d];
+        }
+        // Compute virtual thread index and offset
+        uint64_t virtual_thread_idx = global_entry_linear_idx % single_thread_n;
+        uint64_t virtual_offset = global_entry_linear_idx / single_thread_n;
+        virtual_offset *= max_generator_offsets_per_curand_call / unroll_factor;
+        virtual_offset += global_philox_offset;
+        // Initialize curand with virtual position
+        curand_init(seed, virtual_thread_idx, 4 * (virtual_offset / 4), &state);
+        auto rand = dist_func(&state);
+        transform_func(li, static_cast<accscalar_t>((&rand.x)[virtual_offset % unroll_factor]));
+      }
+    }
+    __syncthreads();
+  }
+}
+
 /**
  * distribution_nullary_kernel is analogous to gpu_kernel in
  * ATen/native/cuda/Loops.cuh. Like gpu_kernel, it uses
@@ -121,11 +171,21 @@ void distribution_nullary_kernel(at::TensorIteratorBase& iter,
   }
 
   auto [counter_offset, grid, block] = calc_execution_policy(numel, unroll_factor);
+
+  // Get sharding spec from generator (for single-device RNG semantics)
+  uint64_t tensor_dim = 0;
+  uint64_t local_shape[SHARDING_MAX_DIMS];
+  uint64_t global_offset_arr[SHARDING_MAX_DIMS];
+  uint64_t global_shape[SHARDING_MAX_DIMS];
+  uint64_t global_strides[SHARDING_MAX_DIMS];
+
   PhiloxCudaState rng_engine_inputs;
   {
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(gen->mutex_);
     rng_engine_inputs = gen->philox_cuda_state(counter_offset);
+    tensor_dim = gen->get_sharding_spec(
+        local_shape, global_offset_arr, global_shape, global_strides);
   }
 
   if (!iter.can_use_32bit_indexing()) {
@@ -137,34 +197,122 @@ void distribution_nullary_kernel(at::TensorIteratorBase& iter,
   }
 
   char* out_data = (char*)iter.data_ptr(0);
-
   auto stream = at::cuda::getCurrentCUDAStream();
-  if (iter.is_trivial_1d()) {
-    auto strides = iter.get_inner_strides();
-    int stride0 = strides[0];
-    distribution_elementwise_grid_stride_kernel<accscalar_t, unroll_factor><<<grid, block, 0, stream>>>(
-      numel,
-      rng_engine_inputs,
-      dist_func,
-      [=]__device__(int idx, accscalar_t rand) {
-        scalar_t* out = (scalar_t*)&out_data[stride0 * idx];
-        *out = transform_func(rand);
+
+  // Check if sharding is enabled and valid
+  bool is_sharded = false;
+  uint64_t global_numel = 1;
+  if (tensor_dim > 0) {
+    is_sharded = true;
+    for (uint64_t i = 0; i < tensor_dim; ++i) {
+      global_numel *= global_shape[i];
+      if (local_shape[i] == 0) {
+        is_sharded = false;  // Empty local shard
       }
-    );
+    }
+  }
+
+  if (is_sharded) {
+    // Compute single_thread_n for the global tensor
+    auto global_exec_policy = calc_execution_policy(global_numel, unroll_factor);
+    uint64_t single_thread_n = std::get<1>(global_exec_policy).x *
+                               std::get<2>(global_exec_policy).x;
+
+    // Copy sharding spec to device using cudaMemcpyAsync
+    uint64_t* d_local_shape;
+    uint64_t* d_global_offset;
+    uint64_t* d_global_shape;
+    uint64_t* d_global_strides;
+
+    cudaMalloc(&d_local_shape, tensor_dim * sizeof(uint64_t));
+    cudaMalloc(&d_global_offset, tensor_dim * sizeof(uint64_t));
+    cudaMalloc(&d_global_shape, tensor_dim * sizeof(uint64_t));
+    cudaMalloc(&d_global_strides, tensor_dim * sizeof(uint64_t));
+
+    cudaMemcpyAsync(d_local_shape, local_shape, tensor_dim * sizeof(uint64_t),
+                    cudaMemcpyHostToDevice, stream);
+    cudaMemcpyAsync(d_global_offset, global_offset_arr, tensor_dim * sizeof(uint64_t),
+                    cudaMemcpyHostToDevice, stream);
+    cudaMemcpyAsync(d_global_shape, global_shape, tensor_dim * sizeof(uint64_t),
+                    cudaMemcpyHostToDevice, stream);
+    cudaMemcpyAsync(d_global_strides, global_strides, tensor_dim * sizeof(uint64_t),
+                    cudaMemcpyHostToDevice, stream);
+
+    if (iter.is_trivial_1d()) {
+      auto strides = iter.get_inner_strides();
+      int stride0 = strides[0];
+      distribution_elementwise_grid_stride_kernel_sharded<accscalar_t, unroll_factor>
+          <<<grid, block, 0, stream>>>(
+        numel,
+        rng_engine_inputs,
+        dist_func,
+        [=]__device__(int idx, accscalar_t rand) {
+          scalar_t* out = (scalar_t*)&out_data[stride0 * idx];
+          *out = transform_func(rand);
+        },
+        tensor_dim,
+        d_local_shape,
+        d_global_offset,
+        d_global_shape,
+        d_global_strides,
+        single_thread_n
+      );
+    } else {
+      auto offset_calc = make_offset_calculator<1>(iter);
+      distribution_elementwise_grid_stride_kernel_sharded<accscalar_t, unroll_factor>
+          <<<grid, block, 0, stream>>>(
+        numel,
+        rng_engine_inputs,
+        dist_func,
+        [=]__device__(int idx, accscalar_t rand) {
+          auto offsets = offset_calc.get(idx);
+          scalar_t* out = (scalar_t*)&out_data[offsets[0]];
+          *out = transform_func(rand);
+        },
+        tensor_dim,
+        d_local_shape,
+        d_global_offset,
+        d_global_shape,
+        d_global_strides,
+        single_thread_n
+      );
+    }
     C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+    // Free device memory after kernel completes
+    cudaFree(d_local_shape);
+    cudaFree(d_global_offset);
+    cudaFree(d_global_shape);
+    cudaFree(d_global_strides);
   } else {
-    auto offset_calc = make_offset_calculator<1>(iter);
-    distribution_elementwise_grid_stride_kernel<accscalar_t, unroll_factor><<<grid, block, 0, stream>>>(
-      numel,
-      rng_engine_inputs,
-      dist_func,
-      [=]__device__(int idx, accscalar_t rand) {
-        auto offsets = offset_calc.get(idx);
-        scalar_t* out = (scalar_t*)&out_data[offsets[0]];
-        *out = transform_func(rand);
-      }
-    );
-    C10_CUDA_KERNEL_LAUNCH_CHECK();
+    // Non-sharded path (original implementation)
+    if (iter.is_trivial_1d()) {
+      auto strides = iter.get_inner_strides();
+      int stride0 = strides[0];
+      distribution_elementwise_grid_stride_kernel<accscalar_t, unroll_factor><<<grid, block, 0, stream>>>(
+        numel,
+        rng_engine_inputs,
+        dist_func,
+        [=]__device__(int idx, accscalar_t rand) {
+          scalar_t* out = (scalar_t*)&out_data[stride0 * idx];
+          *out = transform_func(rand);
+        }
+      );
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+    } else {
+      auto offset_calc = make_offset_calculator<1>(iter);
+      distribution_elementwise_grid_stride_kernel<accscalar_t, unroll_factor><<<grid, block, 0, stream>>>(
+        numel,
+        rng_engine_inputs,
+        dist_func,
+        [=]__device__(int idx, accscalar_t rand) {
+          auto offsets = offset_calc.get(idx);
+          scalar_t* out = (scalar_t*)&out_data[offsets[0]];
+          *out = transform_func(rand);
+        }
+      );
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+    }
   }
 }
 
