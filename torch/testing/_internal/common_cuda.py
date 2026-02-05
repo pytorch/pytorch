@@ -232,30 +232,28 @@ def tf32_on(self, tf32_precision=1e-5):
 
 
 @contextlib.contextmanager
-def tf32_enabled():
+def tf32_enabled(sdp_fp32_precision = "ieee", set_allow_tf_32_to_true = True):
     """
     Context manager to temporarily enable TF32 for CUDA operations.
     Restores the previous TF32 state after exiting the context.
+    Also sets sdp precision and restores it after exiting.
     """
+    old_math_sdp_fp32_precision = torch.backends.cuda.math_sdp.fp32_precision    
     old_allow_tf32_matmul = torch.backends.cuda.matmul.allow_tf32
     try:
-        torch.backends.cuda.matmul.allow_tf32 = True
-        with torch.backends.cudnn.flags(
-            enabled=None, benchmark=None, deterministic=None, allow_tf32=True
-        ):
+        torch.backends.cuda.math_sdp.fp32_precision = sdp_fp32_precision
+        if set_allow_tf_32_to_true:
+            torch.backends.cuda.matmul.allow_tf32 = True
+            with torch.backends.cudnn.flags(
+                enabled=None, benchmark=None, deterministic=None, allow_tf32=True
+            ):
+                yield
+        else:
             yield
     finally:
+        torch.backends.cuda.math_sdp.fp32_precision = old_math_sdp_fp32_precision
         torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32_matmul
 
-
-@contextlib.contextmanager
-def math_sdp_precision(target_precision: str):
-    saved_precision = torch.backends.cuda.math_sdp.fp32_precision
-    try:
-        torch.backends.cuda.math_sdp.fp32_precision = target_precision
-        yield
-    finally:
-        torch.backends.cuda.math_sdp.fp32_precision = saved_precision
 
 # This is a wrapper that wraps a test to run this test twice, one with
 # allow_tf32=True, another with allow_tf32=False. When running with
