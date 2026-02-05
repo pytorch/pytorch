@@ -7026,7 +7026,7 @@ class AOTInductorTestsTemplate:
                 out = torch.empty((_M, N), device=x.device, dtype=torch.float32)
                 grid = lambda META: (  # noqa: E731
                     triton.cdiv(
-                        4096 * 2048, META["BLOCK_SIZE_M"] * META["BLOCK_SIZE_N"]
+                        4096 * 2046, META["BLOCK_SIZE_M"] * META["BLOCK_SIZE_N"]
                     ),
                 )
                 strange_config_matmul_kernel[grid](
@@ -7051,7 +7051,7 @@ class AOTInductorTestsTemplate:
                     torch._export.aot_compile, Model(), (x, y, m)
                 )
                 actual_grid, expected_grids = get_triton_grid_info(
-                    strange_config_matmul_kernel, 4096 * 2048, src_code
+                    strange_config_matmul_kernel, 4096 * 2046, src_code
                 )
                 self.assertTrue(
                     actual_grid is not None, "Could not find grid_0 in generated code"
@@ -7096,7 +7096,7 @@ class AOTInductorTestsTemplate:
                 out = torch.empty((_M, N), device=x.device, dtype=torch.float32)
                 grid = lambda META: (  # noqa: E731
                     triton.cdiv(
-                        4096 * 2048, META["BLOCK_SIZE_M"] * META["BLOCK_SIZE_N"]
+                        4096 * 2046, META["BLOCK_SIZE_M"] * META["BLOCK_SIZE_N"]
                     ),
                 )
                 strange_config_matmul_kernel[grid](
@@ -7121,7 +7121,7 @@ class AOTInductorTestsTemplate:
                     torch._export.aot_compile, Model(), (x, y, m)
                 )
                 actual_grid, expected_grids = get_triton_grid_info(
-                    strange_config_matmul_kernel, 4096 * 2048, src_code
+                    strange_config_matmul_kernel, 4096 * 2046, src_code
                 )
                 self.assertTrue(
                     actual_grid is not None, "Could not find grid_0 in generated code"
