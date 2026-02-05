@@ -14,7 +14,7 @@ import torch.fx.traceback as fx_traceback
 from torch.utils._pytree import tree_map
 from torch.testing._internal.logging_tensor import capture_logs, LoggingTensorMode
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch._C._autograd import SavedTensor
+from torch._C._autograd import _make_saved_tensor, SavedTensor
 from typing import NoReturn
 
 __all__ = [
@@ -820,7 +820,7 @@ class _CheckpointFrame:
 
     def save_inputs(self, *args):
         self.saved_args = [
-            SavedTensor(arg, is_output=False, _INTERNAL_USE_ONLY=True)
+            _make_saved_tensor(arg, is_output=False)
             if isinstance(arg, torch.Tensor) else arg
             for arg in args
         ]
