@@ -633,12 +633,11 @@ def invoke_leaf_function_dense(
     with pytree_unflatten_with_nn_module(flat_args, input_spec) as (args, kwargs):
         real_output = real_fn(*args, **kwargs)
 
-    _check_no_input_mutation(flat_args, version_before)
+        _check_no_input_mutation(flat_args, version_before)
 
-    if dynamo_config.leaf_function_validate_outputs:
-        fake_fn = unwrap_fn_spec(fake_fn_spec)
-        with pytree_unflatten_with_nn_module(flat_args, input_spec) as (args, kwargs):
+        if dynamo_config.leaf_function_validate_outputs:
+            fake_fn = unwrap_fn_spec(fake_fn_spec)
             fake_output = fake_fn(*args, **kwargs)
-        _validate_outputs_match(fake_output, real_output)
+            _validate_outputs_match(fake_output, real_output)
 
     return real_output
