@@ -28,6 +28,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch._guards import Source
 from torch._library.opaque_object import (
+    get_dynamo_call_method,
     get_member_type,
     is_opaque_reference_type,
     is_opaque_type,
@@ -219,19 +220,12 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
         ):
             real_obj = self.value.real_obj  # pyrefly: ignore[missing-attribute]
 
+            value_type = type(real_obj)
+
             member_type = get_member_type(
-                type(real_obj),
+                value_type,
                 name,
             )
-            if member_type is None:
-                unimplemented(
-                    gb_type="Attempted to access unregistered member on an OpaqueObject",
-                    context=f"value={real_obj}, attr={name}",
-                    explanation=f"Member '{name}' is not registered for this opaque object type.",
-                    hints=[
-                        f"Register '{name}' with a MemberType in register_opaque_type(members=...).",
-                    ],
-                )
 
             if member_type == MemberType.USE_REAL:
                 value = getattr(real_obj, name)
@@ -251,6 +245,20 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
                         lambda *args, **kwargs: self.call_method(tx, name, args, kwargs)
                     )
                 return super().var_getattr(tx, name)
+
+            if get_dynamo_call_method(value_type, name) is not None:
+                return LambdaVariable(
+                    lambda *args, **kwargs: self.call_method(tx, name, args, kwargs)
+                )
+
+            unimplemented(
+                gb_type="Attempted to access unregistered member on an OpaqueObject",
+                context=f"value={real_obj}, attr={name}",
+                explanation=f"Member '{name}' is not registered for this opaque object type.",
+                hints=[
+                    f"Register '{name}' with a MemberType in register_opaque_type(members=...).",
+                ],
+            )
 
         method = getattr(self.value, name, None)
         if method is None:
@@ -308,76 +316,85 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
                 value_type,
                 name,
             )
-            if member_type is None:
-                unimplemented(
-                    gb_type="Attempted to access unregistered member on an OpaqueObject",
-                    context=f"value={real_obj}, attr={name}",
-                    explanation=f"Member '{name}' is not registered for this opaque object type.",
-                    hints=[
-                        f"Register '{name}' with a MemberType in register_opaque_type(members=...).",
-                    ],
-                )
 
-            if member_type == MemberType.INLINED:
-                proxy_args, proxy_kwargs = proxy_args_kwargs(args, kwargs)
+            if member_type is not None:
+                if member_type == MemberType.INLINED:
+                    proxy_args, proxy_kwargs = proxy_args_kwargs(args, kwargs)
 
-                proxy = tx.output.create_proxy(
-                    "call_method",
-                    name,
-                    args=(self.proxy, *proxy_args),
-                    kwargs=proxy_kwargs,
-                )
+                    proxy = tx.output.create_proxy(
+                        "call_method",
+                        name,
+                        args=(self.proxy, *proxy_args),
+                        kwargs=proxy_kwargs,
+                    )
 
-                return wrap_fx_proxy(tx=tx, proxy=proxy)
+                    return wrap_fx_proxy(tx=tx, proxy=proxy)
 
-            elif member_type == MemberType.USE_REAL:
-                if inspect.getattr_static(value_type, "__getattr__", None) is not None:
+                elif member_type == MemberType.USE_REAL:
+                    if (
+                        inspect.getattr_static(value_type, "__getattr__", None)
+                        is not None
+                    ):
+                        unimplemented(
+                            gb_type="Opaque object with custom __getattr__ not supported",
+                            context=f"{value_type.__name__} with custom __getattr__",
+                            explanation="Dynamo does not support opaque objects types with custom __getattr__ methods",
+                            hints=[],
+                        )
+
+                    args_const = [x.as_python_constant() for x in args]
+                    kwargs_const = {
+                        k: v.as_python_constant() for k, v in kwargs.items()
+                    }
+
+                    method = getattr(real_obj, name)
+
+                    if name == "__setattr__":
+                        method(*args_const, **kwargs_const)
+                        return real_obj  # pyrefly: ignore[bad-return]
+
+                    constant_val = method(*args_const, **kwargs_const)
+
+                    if any(
+                        is_opaque_reference_type(type(r))
+                        for r in pytree.tree_leaves(constant_val)
+                    ):
+                        unimplemented(
+                            gb_type="Opaque object member with method-type USE_REAL returned a reference-type opaque object.",
+                            context=f"Opaque object type: {value_type}. Method name: '{name}'",
+                            explanation=(
+                                "To properly guard reference-type opaque objects, "
+                                "we must lift them as inputs to the graph. In order "
+                                "to do this, they must all have a source, meaning they "
+                                "come from a global value or are an attribute of an input."
+                            ),
+                            hints=[
+                                f"Register member '{name}' with MemberType.INLINED in "
+                                "register_opaque_type({value_type}, members=...).",
+                            ],
+                        )
+
+                    return VariableTracker.build(tx, constant_val)
+                else:
                     unimplemented(
-                        gb_type="Opaque object with custom __getattr__ not supported",
-                        context=f"{value_type.__name__} with custom __getattr__",
-                        explanation="Dynamo does not support opaque objects types with custom __getattr__ methods",
+                        gb_type="Unsupported member type on OpaqueObject",
+                        context=f"value={real_obj}, attr={name}, member_type={member_type}",
+                        explanation=f"Member type '{member_type}' is not supported for this operation.",
                         hints=[],
                     )
 
-                args_const = [x.as_python_constant() for x in args]
-                kwargs_const = {k: v.as_python_constant() for k, v in kwargs.items()}
+            dynamo_call_method = get_dynamo_call_method(value_type, name)
+            if dynamo_call_method is not None:
+                return dynamo_call_method(tx, self, name, args, kwargs)
 
-                method = getattr(real_obj, name)
-
-                if name == "__setattr__":
-                    method(*args_const, **kwargs_const)
-                    return real_obj  # pyrefly: ignore[bad-return]
-
-                constant_val = method(*args_const, **kwargs_const)
-
-                if any(
-                    is_opaque_reference_type(type(r))
-                    for r in pytree.tree_leaves(constant_val)
-                ):
-                    unimplemented(
-                        gb_type="Opaque object member with method-type USE_REAL returned a reference-type opaque object.",
-                        context=f"Opaque object type: {value_type}. Method name: '{name}'",
-                        explanation=(
-                            "To properly guard reference-type opaque objects, "
-                            "we must lift them as inputs to the graph. In order "
-                            "to do this, they must all have a source, meaning they "
-                            "come from a global value or are an attribute of an input."
-                        ),
-                        hints=[
-                            f"Register member '{name}' with MemberType.INLINED in "
-                            "register_opaque_type({value_type}, members=...).",
-                        ],
-                    )
-
-                return VariableTracker.build(tx, constant_val)
-
-            else:
-                unimplemented(
-                    gb_type="Unsupported member type on OpaqueObject",
-                    context=f"value={real_obj}, attr={name}, member_type={member_type}",
-                    explanation=f"Member type '{member_type}' is not supported for this operation.",
-                    hints=[],
-                )
+            unimplemented(
+                gb_type="Attempted to access unregistered member on an OpaqueObject",
+                context=f"value={real_obj}, attr={name}",
+                explanation=f"Member '{name}' is not registered for this opaque object type.",
+                hints=[
+                    f"Register '{name}' with a MemberType in register_opaque_type(members=...).",
+                ],
+            )
 
         unimplemented(
             gb_type="Weird method call on TorchScript object",
