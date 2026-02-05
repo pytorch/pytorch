@@ -232,7 +232,7 @@ def tf32_on(self, tf32_precision=1e-5):
 
 
 @contextlib.contextmanager
-def tf32_enabled(sdp_fp32_precision = "ieee", set_allow_tf_32_to_true = True):
+def tf32_enabled(set_allow_tf_32_to_true=True, sdp_fp32_precision="ieee"):
     """
     Context manager to temporarily enable TF32 for CUDA operations.
     Restores the previous TF32 state after exiting the context.
