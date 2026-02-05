@@ -422,13 +422,109 @@ class FrontendServer:
         return self._jinja_env.get_template(template).render(**kwargs).encode()
 
 
-def main(
-    port: int,
-    dump_dir: str | None,
-    dump_interval: float,
-    handlers: list[DebugHandler],
-    enabled_dumps: set[str],
-) -> None:
+    def _handle_stacks(self, req: HTTPRequestHandler) -> bytes:
+        addrs, resps = fetch_all("dump_traceback")
+        return self._render_template(
+            "raw_resp.html", title="Stacks", addrs=addrs, resps=resps
+        )
+
+    def _handle_pyspy_dump(self, req: HTTPRequestHandler) -> bytes:
+        addrs, resps = fetch_all("pyspy_dump", req.get_raw_query())
+        return self._render_template(
+            "pyspy_dump.html",
+            addrs=addrs,
+            resps=resps,
+        )
+
+    def _render_fr_trace(self, addrs: list[str], resps: list[Response]) -> bytes:
+        config = JobConfig()
+
+        args = config.parse_args(args=[])
+        args.allow_incomplete_ranks = True
+        args.verbose = True
+
+        details = {}
+        for rank, resp in enumerate(resps):
+            resp.raise_for_status()
+            dump = {
+                "rank": rank,
+                "host_name": addrs[rank],
+                **resp.json(),
+            }
+            if "entries" not in dump:
+                dump["entries"] = []
+            details[f"rank{rank}.json"] = dump
+
+        version = next(iter(details.values()))["version"]
+
+        # pyrefly: ignore [bad-argument-type]
+        db = build_db(details, args, version)
+
+        return self._render_template(
+            "fr_trace.html",
+            title="FlightRecorder",
+            groups=tabulate(db.groups, headers=Group._fields, tablefmt="html"),
+            memberships=tabulate(
+                db.memberships, headers=Membership._fields, tablefmt="html"
+            ),
+            collectives=tabulate(
+                db.collectives, headers=Collective._fields, tablefmt="html"
+            ),
+            ncclcalls=tabulate(db.ncclcalls, headers=NCCLCall._fields, tablefmt="html"),
+        )
+
+    def _handle_fr_trace(self, req: HTTPRequestHandler) -> bytes:
+        addrs, resps = fetch_all("fr_trace_json")
+
+        return self._render_fr_trace(addrs, list(resps))
+
+    def _handle_fr_trace_json(self, req: HTTPRequestHandler) -> bytes:
+        addrs, resps = fetch_all("fr_trace_json")
+
+        return self._render_template(
+            "json_resp.html",
+            title="FlightRecorder",
+            addrs=addrs,
+            resps=resps,
+        )
+
+    def _handle_fr_trace_nccl(self, req: HTTPRequestHandler) -> bytes:
+        addrs, resps = fetch_all("dump_nccl_trace_json", "onlyactive=true")
+
+        return self._render_fr_trace(addrs, list(resps))
+
+    def _handle_fr_trace_nccl_json(self, req: HTTPRequestHandler) -> bytes:
+        addrs, resps = fetch_all("dump_nccl_trace_json", "onlyactive=true")
+
+        return self._render_template(
+            "json_resp.html",
+            title="FlightRecorder NCCL",
+            addrs=addrs,
+            resps=resps,
+        )
+
+    def _handle_profiler(self, req: HTTPRequestHandler) -> bytes:
+        duration = req.get_query_arg("duration", default=1.0, type=float)
+
+        addrs, resps = fetch_all("torch_profile", f"duration={duration}")
+
+        return self._render_template("profile.html", addrs=addrs, resps=resps)
+
+    def _handle_wait_counters(self, req: HTTPRequestHandler) -> bytes:
+        addrs, resps = fetch_all("wait_counter_values")
+        return self._render_template(
+            "json_resp.html", title="Wait Counters", addrs=addrs, resps=resps
+        )
+
+    def _handle_tcpstore(self, req: HTTPRequestHandler) -> bytes:
+        store = tcpstore_client(prefix="")
+        keys = store.list_keys()
+        keys.sort()
+        values = [repr(v) for v in store.multi_get(keys)]
+        return self._render_template("tcpstore.html", keys=keys, values=values)
+
+
+def main(port: int) -> None:
     logger.setLevel(logging.INFO)
 
     server = FrontendServer(port=port, handlers=handlers)

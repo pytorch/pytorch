@@ -1885,26 +1885,36 @@ _POOL_HANDLE = NewType("_POOL_HANDLE", tuple[int, int])
 __all__ = [
     # Typed storage and tensors
     "BFloat16Storage",
+    # pyrefly: ignore [bad-dunder-all]
     "BFloat16Tensor",
     "BoolStorage",
+    # pyrefly: ignore [bad-dunder-all]
     "BoolTensor",
     "ByteStorage",
+    # pyrefly: ignore [bad-dunder-all]
     "ByteTensor",
     "CharStorage",
+    # pyrefly: ignore [bad-dunder-all]
     "CharTensor",
     "ComplexDoubleStorage",
     "ComplexFloatStorage",
     "DoubleStorage",
+    # pyrefly: ignore [bad-dunder-all]
     "DoubleTensor",
     "FloatStorage",
+    # pyrefly: ignore [bad-dunder-all]
     "FloatTensor",
     "HalfStorage",
+    # pyrefly: ignore [bad-dunder-all]
     "HalfTensor",
     "IntStorage",
+    # pyrefly: ignore [bad-dunder-all]
     "IntTensor",
     "LongStorage",
+    # pyrefly: ignore [bad-dunder-all]
     "LongTensor",
     "ShortStorage",
+    # pyrefly: ignore [bad-dunder-all]
     "ShortTensor",
     "CUDAGraph",
     "CudaError",
