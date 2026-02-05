@@ -305,6 +305,10 @@ try:
 except ModuleNotFoundError:
     np: ModuleType = None  # type: ignore[assignment]
 
+try:
+    from google.protobuf.internal.enum_type_wrapper import EnumTypeWrapper
+except ModuleNotFoundError:
+    EnumTypeWrapper = None
 
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
@@ -858,6 +862,8 @@ class VariableBuilder:
             return self.tx.output.side_effects.track_mutable(value, result)
         elif isinstance(value, torch.nn.Module):
             return self.wrap_module(value)
+        elif EnumTypeWrapper and isinstance(value, EnumTypeWrapper):
+            return EnumVariable(value)
         elif ConstantVariable.is_literal(value):  # non-atomic literals
             return self.wrap_literal(value)
         elif isinstance(value, torch.overrides.TorchFunctionMode):
