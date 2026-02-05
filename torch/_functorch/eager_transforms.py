@@ -1078,8 +1078,7 @@ def jvp(
         func (function): A Python function that takes one or more arguments,
             one of which must be a Tensor, and returns one or more Tensors
         primals (Tensors): Positional arguments to ``func`` that must all be
-            Tensors. The returned function will also be computing the
-            derivative with respect to these arguments
+            Tensors.
         tangents (Tensors): The "vector" for which Jacobian-vector-product is
             computed. Must be the same structure and sizes as the inputs to
             ``func``.
