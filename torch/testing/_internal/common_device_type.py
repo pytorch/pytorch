@@ -1678,10 +1678,6 @@ def onlyXPU(fn):
     return onlyOn("xpu")(fn)
 
 
-def onlyGPU(fn):
-    return onlyOn("cuda")(fn) or onlyOn("xpu")(fn)
-
-
 def onlyHPU(fn):
     return onlyOn("hpu")(fn)
 
