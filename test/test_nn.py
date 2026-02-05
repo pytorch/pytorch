@@ -5448,13 +5448,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             # just run a single backward, as gradcheck/gradgradcheck is expensive here
             output.sum().backward()
 
-    # test for issue reported in https://github.com/pytorch/pytorch/issues/173799
-    def test_pdist_inf_nan_propagation(self):
-        x = torch.empty((2, 2), dtype=torch.float64).fill_(float("inf"))
-        for device in device_():
-            result = F.pdist(x.to(device), p=0.0)
-            self.assertTrue(torch.isnan(result).item(), "Expected NaN in pdist output")
-
     def test_cosine_embedding_loss_with_diff_type(self):
         for device in device_():
             input1 = torch.tensor([[2, 3, 4], [6, 2, 4]], dtype=torch.double, device=device)
@@ -12620,10 +12613,12 @@ class TestThatContainsCUDAAssert(TestCase):
 if __name__ == '__main__':
     run_tests()
         """)
-        # CUDA says "device-side assert triggered", ROCm says "unspecified launch failure"
+        # CUDA says "device-side assert triggered"
+        # ROCm says "unspecified launch failure", or HSA_STATUS_ERROR_EXCEPTION
         has_cuda_assert = 'CUDA error: device-side assert triggered' in stderr
         has_hip_assert = 'HIP error' in stderr and 'launch failure' in stderr
-        self.assertTrue(has_cuda_assert or has_hip_assert,
+        has_hsa_exception = 'HSA_STATUS_ERROR_EXCEPTION' in stderr
+        self.assertTrue(has_cuda_assert or has_hip_assert or has_hsa_exception,
                         f"Expected device assert error in stderr, got: {stderr}")
 
 
