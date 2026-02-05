@@ -824,24 +824,18 @@ class _CheckpointFrame:
         self.forward_completed = False
         self.ignore_saved_mismatch = False
 
-    def pack_inputs(self, *args):
-        self.saved_args = []
-        for arg in args:
-            if isinstance(arg, torch.Tensor):
-                self.saved_args.append(
-                    SavedTensor(arg, is_output=False, _INTERNAL_USE_ONLY=True)
-                )
-            else:
-                self.saved_args.append(arg)
+    def save_inputs(self, *args):
+        self.saved_args = [
+            SavedTensor(arg, is_output=False, _INTERNAL_USE_ONLY=True)
+            if isinstance(arg, torch.Tensor) else arg
+            for arg in args
+        ]
 
-    def unpack_inputs(self):
-        args = []
-        for arg in self.saved_args:
-            if isinstance(arg, SavedTensor):
-                args.append(arg.unpack())
-            else:
-                args.append(arg)
-        return args
+    def get_inputs(self):
+        return [
+            arg.unpack() if isinstance(arg, SavedTensor) else arg
+            for arg in self.saved_args
+        ]
 
     def check_recomputed_tensors_match(self, gid) -> None:
         if self.ignore_saved_mismatch:
@@ -1150,7 +1144,7 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
                     gid = int(uuid.uuid4())
 
             if not frame.is_recomputed[gid]:
-                args = frame.unpack_inputs()
+                args = frame.get_inputs()
 
                 try:
                     with _recomputation_hook(
@@ -1601,17 +1595,13 @@ def _checkpoint_without_reentrant_generator(
         metadata_fn
     )
 
-    def any_inputs_require_grad():
-        for arg in args:
-            if isinstance(arg, torch.Tensor) and arg.requires_grad:
-                return True
-        return False
-
-    if not torch.is_grad_enabled() or not any_inputs_require_grad():
+    if not torch.is_grad_enabled() or not any(
+        isinstance(arg, torch.Tensor) and arg.requires_grad for arg in args
+    ):
         yield
         return
 
-    new_frame.pack_inputs(*args)
+    new_frame.save_inputs(*args)
 
     with _checkpoint_hook(new_frame), forward_context:
         yield
