@@ -428,13 +428,13 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-          path: pytorch
+          path: /home/runner/_work/pytorch/
           show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
-        working-directory: pytorch
+        working-directory: /home/runner/_work/pytorch/
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
@@ -544,13 +544,13 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-          path: pytorch
+          path: /home/runner/_work/pytorch/
           show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
-        working-directory: pytorch
+        working-directory: /home/runner/_work/pytorch/
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
@@ -1095,13 +1095,13 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-          path: pytorch
+          path: /home/runner/_work/pytorch/
           show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
-        working-directory: pytorch
+        working-directory: /home/runner/_work/pytorch/
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
@@ -1211,13 +1211,13 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-          path: pytorch
+          path: /home/runner/_work/pytorch/
           show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
-        working-directory: pytorch
+        working-directory: /home/runner/_work/pytorch/
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
@@ -1762,13 +1762,13 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-          path: pytorch
+          path: /home/runner/_work/pytorch/
           show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
-        working-directory: pytorch
+        working-directory: /home/runner/_work/pytorch/
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
@@ -1878,13 +1878,13 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-          path: pytorch
+          path: /home/runner/_work/pytorch/
           show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
-        working-directory: pytorch
+        working-directory: /home/runner/_work/pytorch/
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
@@ -2429,13 +2429,13 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-          path: pytorch
+          path: /home/runner/_work/pytorch/
           show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
-        working-directory: pytorch
+        working-directory: /home/runner/_work/pytorch/
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
@@ -2545,13 +2545,13 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-          path: pytorch
+          path: /home/runner/_work/pytorch/
           show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
-        working-directory: pytorch
+        working-directory: /home/runner/_work/pytorch/
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
@@ -3096,13 +3096,13 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-          path: pytorch
+          path: /home/runner/_work/pytorch/
           show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
-        working-directory: pytorch
+        working-directory: /home/runner/_work/pytorch/
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
@@ -3212,13 +3212,13 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-          path: pytorch
+          path: /home/runner/_work/pytorch/
           show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
-        working-directory: pytorch
+        working-directory: /home/runner/_work/pytorch/
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
@@ -3763,13 +3763,13 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-          path: pytorch
+          path: /home/runner/_work/pytorch/
           show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
-        working-directory: pytorch
+        working-directory: /home/runner/_work/pytorch/
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
@@ -3879,13 +3879,13 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-          path: pytorch
+          path: /home/runner/_work/pytorch/
           show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
-        working-directory: pytorch
+        working-directory: /home/runner/_work/pytorch/
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
@@ -4430,13 +4430,13 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-          path: pytorch
+          path: /home/runner/_work/pytorch/
           show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
-        working-directory: pytorch
+        working-directory: /home/runner/_work/pytorch/
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
@@ -4546,13 +4546,13 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-          path: pytorch
+          path: /home/runner/_work/pytorch/
           show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
-        working-directory: pytorch
+        working-directory: /home/runner/_work/pytorch/
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
