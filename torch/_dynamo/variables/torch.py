@@ -2738,10 +2738,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
     ) -> VariableTracker:
         import torch.utils._pytree as pytree
         from torch._higher_order_ops.flat_apply import func_to_graphable
-        from torch._higher_order_ops.invoke_leaf_function import (
-            invoke_leaf_function,
-            reconstruct_original_args,
-        )
+        from torch._higher_order_ops.invoke_leaf_function import invoke_leaf_function
 
         from .builder import wrap_fx_proxy
         from .higher_order_ops import _make_inlined
@@ -2771,22 +2768,16 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 
         # Wrap user fn to support nn.Module inputs and pytree inputs/outputs.
         # The wrapped function:
-        # 1. Takes flat_args containing flattened LeafModuleState objects
-        # 2. Unflattens them with input_spec and converts LeafModuleState back to nn.Module
-        # 3. Calls the original fn with reconstructed args/kwargs
-        # 4. Flattens the output and captures/verifies the output spec
-        # Note: input_spec is captured from the outer scope.
+        # 1. Takes unflattened args/kwargs with nn.Module restored from LeafModuleState
+        # 2. Calls the original fn with args/kwargs
+        # 3. Flattens the output and captures/verifies the output spec
         def make_leaf_function_wrapper(
             fn: Callable[..., Any],
         ) -> Callable[..., tuple[Any, ...]]:
-            def wrapper(*flat_args: Any) -> tuple[Any, ...]:
+            def wrapper(*args: Any, **kwargs: Any) -> tuple[Any, ...]:
                 nonlocal captured_out_spec
 
-                with reconstruct_original_args(input_spec, flat_args) as (
-                    args_with_modules,
-                    kwargs_with_modules,
-                ):
-                    out = fn(*args_with_modules, **kwargs_with_modules)
+                out = fn(*args, **kwargs)
 
                 flat_out, out_spec = pytree.tree_flatten(out)
                 if captured_out_spec is None:
@@ -2816,10 +2807,12 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 
         real_impl_proxy = make_spec_proxy("real_fn", real_impl_spec)
         fake_impl_proxy = make_spec_proxy("fake_fn", fake_impl_spec)
+        input_spec_proxy = make_spec_proxy("input_spec", input_spec)
 
         invoke_args = (
             real_impl_proxy,
             fake_impl_proxy,
+            input_spec_proxy,
             *flat_arg_proxies,
         )
         result_proxy = tx.output.create_proxy(
