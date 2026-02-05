@@ -29,6 +29,7 @@ from torch._prims_common import (
     Number,
     NumberType,
     suggest_memory_format,
+    sym_min,
     TensorLike,
 )
 from torch._prims_common.wrappers import (
@@ -931,10 +932,12 @@ def squareCheckInputs(self: Tensor, f_name: str):
         raise AssertionError(
             f"{f_name}: The input tensor must have at least 2 dimensions, got {self.dim()}"
         )
-    if self.size(-1) != self.size(-2):
-        raise AssertionError(
-            f"{f_name}: A must be batches of square matrices, but they are {self.size(-2)} by {self.size(-1)} matrices"
-        )
+    # Use torch._check to defer validation to runtime for unbacked symbolic dimensions.
+    torch._check(
+        self.size(-1) == self.size(-2),
+        lambda: f"{f_name}: A must be batches of square matrices, "
+        f"but they are {self.size(-2)} by {self.size(-1)} matrices",
+    )
 
 
 # Validates input shapes and devices
@@ -1290,7 +1293,8 @@ def linalg_lu_meta(A: Tensor, *, pivot: bool = True) -> tuple[Tensor, Tensor, Te
     sizes = list(A.shape)
     m = sizes[-2]
     n = sizes[-1]
-    k = min(m, n)
+    # Use sym_min to handle unbacked symbolic dimensions
+    k = sym_min(m, n)
 
     sizes[-1] = m
     if pivot:
@@ -1333,7 +1337,8 @@ def linalg_lu_factor_ex_meta(
 
     # Sets sizes to the size of pivots
     sizes.pop()
-    sizes[-1] = min(m, n)
+    # Use sym_min to handle unbacked symbolic dimensions
+    sizes[-1] = sym_min(m, n)
     pivots = A.new_empty(sizes, dtype=torch.int)
 
     # Sets sizes to the size of info
@@ -2469,14 +2474,29 @@ def calc_conv_nd_return_shape(
                 # pyrefly: ignore [bad-index, index-error]
                 _formula(dims[i], padding[i], dilation[i], kernel_size[i], stride[i])
             )
+    # NOTE: Backend behavior for zero-sized spatial dimensions is inconsistent.
+    # CUDA (cuDNN) handles zero-sized outputs gracefully by short-circuiting,
+    # but other backends fail: CPU rejects it, ROCm/miopen returns
+    # miopenStatusBadParm, and MPS asserts "Placeholder tensor is empty".
+    # We only allow zero-sized outputs on CUDA with cuDNN (not ROCm/HIP).
+    from torch._subclasses.fake_tensor import FakeTensor
     from torch.fx.experimental.symbolic_shapes import sym_or
 
-    torch._check(
-        sym_or(*[x > 0 for x in ret_shape[2:]]),
-        lambda: f"Given input size per channel: {list(dims)}. "
-        f"Calculated output size per channel: {ret_shape[2:]}. "
-        f"Output size is too small",
+    device = (
+        input_tensor.fake_device
+        if isinstance(input_tensor, FakeTensor)
+        else input_tensor.device
     )
+
+    # ROCm also reports device.type as "cuda", but miopen doesn't support zero-sized outputs
+    is_cudnn = device.type == "cuda" and torch.version.hip is None
+    if not is_cudnn:
+        torch._check(
+            sym_or(*[x > 0 for x in ret_shape[2:]]),
+            lambda: f"Given input size per channel: {list(dims)}. "
+            f"Calculated output size per channel: {ret_shape[2:]}. "
+            f"Output size is too small",
+        )
 
     return ret_shape
 
@@ -3567,6 +3587,7 @@ def meta_index_Tensor(self, indices):
         return self.as_strided(shape, strides)
 
     out = self.new_empty(before_shape + replacement_shape + after_shape)
+
     from torch.fx.experimental.symbolic_shapes import guard_or_false
 
     if guard_or_false(self.numel() == 0):
@@ -3608,10 +3629,36 @@ def meta_convolution_backward(
     backend_grad_weight = None
     backend_grad_bias = None
 
+    # Backend layout expectation: GPU backends (CUDA via cudnn_conv_suggest_memory_format,
+    # MPS via mps_conv_use_channels_last) return channels_last outputs when either input
+    # tensor is channels_last. This must be matched here to avoid stride assertion failures
+    # in inductor when the predicted strides don't match actual backend output strides.
+    # See: https://github.com/pytorch/pytorch/issues/171622
+    #
+    # Memory format inference rules (matching backend behavior):
+    #   - grad_input format: derived from grad_output and weight
+    #   - grad_weight format: derived from input and grad_output
+    def _conv_memory_format(t1, t2):
+        # Match the logic in cudnn_conv_suggest_memory_format and mps_conv_use_channels_last:
+        # Use channels_last if either tensor suggests it
+        fmt1 = suggest_memory_format(t1)
+        fmt2 = suggest_memory_format(t2)
+        if fmt1 == torch.channels_last or fmt2 == torch.channels_last:
+            return torch.channels_last
+        if fmt1 == torch.channels_last_3d or fmt2 == torch.channels_last_3d:
+            return torch.channels_last_3d
+        return torch.contiguous_format
+
     if output_mask[0]:
-        backend_grad_input = grad_output_.new_empty(input_.size())
+        memory_format = _conv_memory_format(grad_output_, weight_)
+        backend_grad_input = grad_output_.new_empty(input_.size()).to(
+            memory_format=memory_format
+        )
     if output_mask[1]:
-        backend_grad_weight = grad_output_.new_empty(weight_.size())
+        memory_format = _conv_memory_format(input_, grad_output_)
+        backend_grad_weight = grad_output_.new_empty(weight_.size()).to(
+            memory_format=memory_format
+        )
     if output_mask[2]:
         backend_grad_bias = grad_output_.new_empty(bias_sizes_opt)
 
@@ -5436,7 +5483,7 @@ def full(size, fill_value, *args, **kwargs):
     if not dtype:
         dtype = utils.get_dtype(fill_value)
     kwargs["dtype"] = dtype
-    # pyrefly: ignore [not-iterable]
+
     return torch.empty(size, *args, **kwargs)
 
 
@@ -5741,7 +5788,7 @@ def meta_scatter_(self, dim, index, src_or_value, reduce=None):
     return self
 
 
-@register_meta([aten._scaled_dot_product_flash_attention])
+@register_meta([aten._scaled_dot_product_flash_attention.default])
 def meta__scaled_dot_product_flash_attention(
     query: Tensor,
     key: Tensor,
@@ -5802,6 +5849,33 @@ def meta__scaled_dot_product_flash_attention(
         seed,
         offset,
         debug_mask,
+    )
+
+
+@register_meta([aten._scaled_dot_product_flash_attention.quantized])
+def meta__scaled_dot_product_flash_attention_quantized(
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    q_descale: Tensor | None,
+    k_descale: Tensor | None,
+    v_descale: Tensor | None,
+    dropout_p: float = 0.0,
+    is_causal: bool = False,
+    return_debug_mask: bool = False,
+    scale: float | None = None,
+):
+    if query.dtype == torch.float8_e4m3fn:
+        query = query.to(torch.bfloat16)
+
+    return meta__scaled_dot_product_flash_attention(
+        query,
+        key,
+        value,
+        dropout_p,
+        is_causal,
+        return_debug_mask,
+        scale,
     )
 
 
@@ -6205,7 +6279,7 @@ def meta__scaled_dot_product_cudnn_backward(
 
 @register_meta(
     [
-        aten._flash_attention_forward,
+        aten._flash_attention_forward.default,
     ]
 )
 def meta__flash_attention_forward(
@@ -6280,6 +6354,49 @@ def meta__flash_attention_forward(
         seed,
         offset,
         debug_mask,
+    )
+
+
+@register_meta([aten._flash_attention_forward.quantized])
+def meta__flash_attention_forward_quantized(
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    cum_seq_q: Tensor | None,
+    cum_seq_k: Tensor | None,
+    max_q: int,
+    max_k: int,
+    dropout_p: float,
+    is_causal: bool,
+    return_debug_mask: bool,
+    q_descale: Tensor | None,
+    k_descale: Tensor | None,
+    v_descale: Tensor | None,
+    scale: float | None = None,
+    window_size_left: int | None = None,
+    window_size_right: int | None = None,
+    seqused_k: Tensor | None = None,
+    alibi_slopes: Tensor | None = None,
+):
+    if query.dtype == torch.float8_e4m3fn:
+        query = query.to(torch.bfloat16)
+
+    return meta__flash_attention_forward(
+        query,
+        key,
+        value,
+        cum_seq_q,
+        cum_seq_k,
+        max_q,
+        max_k,
+        dropout_p,
+        is_causal,
+        return_debug_mask,
+        scale,
+        window_size_left,
+        window_size_right,
+        seqused_k,
+        alibi_slopes,
     )
 
 
@@ -6748,6 +6865,16 @@ def _check_scaled_mm_sizes_v2(
                 and recipe_b[0] == ScalingType.BlockWise1x32
             )
 
+        def is_nv_single_level(
+            recipe_a: list[ScalingType], recipe_b: list[ScalingType]
+        ):
+            return (
+                len(recipe_a) == 1
+                and len(recipe_b) == 1
+                and recipe_a[0] == ScalingType.BlockWise1x16
+                and recipe_b[0] == ScalingType.BlockWise1x16
+            )
+
         def is_nv(recipe_a: list[ScalingType], recipe_b: list[ScalingType]):
             return (
                 len(recipe_a) == 2
@@ -6923,6 +7050,23 @@ def _check_scaled_mm_sizes_v2(
                     f"and scale_b must have {expected_scale_b_elems} (got: {scale_b[0].numel()}). Scales must "
                     f"have types {torch.float8_e8m0fnu} (for self: {scale_a[0].dtype}, mat_b: {scale_b[0].dtype}) "
                     f"Must have swizzle type {expected_swizzle} (got self: {swizzle_a[0]}, mat_b: {swizzle_b[0]})"
+                ),
+            )
+        elif is_nv_single_level(scale_recipe_a, scale_recipe_b):
+            expected_scale_a_elems = round_up(M, 128) * round_up(ceil_div(K, 16), 4)
+            expected_scale_b_elems = round_up(N, 128) * round_up(ceil_div(K, 16), 4)
+            expected_swizzle = SwizzleType.SWIZZLE_32_4_4
+            torch._check(
+                scale_a[0].numel() == expected_scale_a_elems
+                and scale_a[0].dtype == torch.float8_e4m3fn
+                and scale_b[0].numel() == expected_scale_b_elems
+                and scale_b[0].dtype == torch.float8_e4m3fn
+                and swizzle_a[0] == expected_swizzle
+                and swizzle_b[0] == expected_swizzle,
+                lambda: (
+                    f"for single-level NV scaling scale_a must have {expected_scale_a_elems} (got: {scale_a[0].numel()}) "
+                    f"and scale_b must have {expected_scale_b_elems} (got: {scale_b[0].numel()}). Must have "
+                    f"swizzle type {expected_swizzle} (got self: {swizzle_a[0]}, mat_b: {swizzle_b[0]})"
                 ),
             )
         elif is_nv(scale_recipe_a, scale_recipe_b):
@@ -7205,7 +7349,6 @@ def rnn_cell_checkSizes(
     )
     torch._check(
         all(
-            # pyrefly: ignore [missing-attribute]
             x.device == input_gates.device
             for x in [hidden_gates, input_bias, hidden_bias, prev_hidden]
         ),
@@ -8031,7 +8174,13 @@ def _meta_grouped_mm_common(
     # aten/src/ATen/native/cuda/Blas.cpp.
 
     if scaled:
-        fp8_dtype = torch.float8_e4m3fnuz if torch.version.hip else torch.float8_e4m3fn
+        fp8_dtype = torch.float8_e4m3fn
+        if (
+            torch.version.hip
+            and torch.cuda.is_available()
+            and "gfx94" in torch.cuda.get_device_properties(0).gcnArchName
+        ):
+            fp8_dtype = torch.float8_e4m3fnuz
         torch._check(
             mat_a.dtype == fp8_dtype and mat_b.dtype == fp8_dtype,
             lambda: f"Expected inputs of E4M3 FP8 type but got mat_a.dtype={mat_a.dtype} and mat_b.dtype={mat_b.dtype}.",  # noqa: B950

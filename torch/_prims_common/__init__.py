@@ -23,7 +23,7 @@ from typing import (
 from typing_extensions import deprecated
 
 import torch
-from torch import sym_float, sym_int, sym_max
+from torch import sym_float, sym_int, sym_max, sym_min
 
 
 if TYPE_CHECKING:
@@ -1341,7 +1341,6 @@ def get_higher_dtype(
 
         raise RuntimeError("Unexpected type given to _extract_dtype!")
 
-    # pyrefly: ignore [bad-argument-type]
     a, b = _extract_dtype(a), _extract_dtype(b)
 
     if a is b:
@@ -1708,10 +1707,8 @@ def elementwise_dtypes(
 
         # Prefers dtype of tensors with one or more dimensions
         if one_plus_dim_tensor_dtype is not None:
-            # pyrefly: ignore [bad-return]
             return one_plus_dim_tensor_dtype
 
-        # pyrefly: ignore [bad-return]
         return zero_dim_tensor_dtype
 
     if highest_type is float:
@@ -1816,7 +1813,8 @@ def make_contiguous_strides_for(
     else:
         if len(shape) < 2:
             return result
-        return result[:-2] + (1, max(shape[-2], 1))
+        # Use sym_max to handle unbacked symbolic dimensions
+        return result[:-2] + (1, sym_max(shape[-2], 1))
 
 
 def make_channels_last_1d_strides_for(
@@ -2060,11 +2058,9 @@ def are_strides_like_channels_last_or_false(
         if d == 0 and min == strides[1]:
             return False
         min = strides[d]
-        # Assume stride is not 1, the consequence is min could be larger than needed,
-        # which would result in returning False for this function but not vice versa,
-        # so it's ok.
-        if guard_or_true(strides[d] > 1):
-            min *= shape[d]
+        # Only multiply by shape[d] when size >= 1, matching C++ logic
+        # shape[d]!=0 hence we know its >=1 here
+        min *= shape[d]
     return True
 
 

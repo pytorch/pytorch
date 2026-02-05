@@ -293,11 +293,13 @@ using fLI::FLAGS_minloglevel;
 using fLI::FLAGS_v;
 
 MessageLogger::MessageLogger(
-    const char* file,
-    int line,
+    SourceLocation source_location,
     int severity,
     bool exit_on_fatal)
-    : stream_(), severity_(severity), exit_on_fatal_(exit_on_fatal) {}
+    : stream_(),
+      severity_(severity),
+      exit_on_fatal_(exit_on_fatal),
+      source_location_(source_location) {}
 
 MessageLogger::~MessageLogger() noexcept(false) {
   if (severity_ == ::google::GLOG_FATAL) {
@@ -313,7 +315,7 @@ void MessageLogger::DealWithFatal() {
   if (exit_on_fatal_) {
     LOG(FATAL) << stream_.str();
   } else {
-    throw c10::Error(stream_.str(), nullptr, nullptr);
+    throw c10::Error(source_location_, stream_.str());
   }
 }
 
@@ -439,11 +441,12 @@ void ShowLogInfoToStderr() {
 }
 
 MessageLogger::MessageLogger(
-    const char* file,
-    int line,
+    SourceLocation source_location,
     int severity,
     bool exit_on_fatal)
-    : severity_(severity), exit_on_fatal_(exit_on_fatal) {
+    : severity_(severity),
+      exit_on_fatal_(exit_on_fatal),
+      source_location_(source_location) {
   if (severity_ < FLAGS_caffe2_log_level) {
     // Nothing needs to be logged.
     return;
@@ -478,8 +481,8 @@ MessageLogger::MessageLogger(
           << std::setfill('0') << ' ' << std::setw(2) << timeinfo->tm_hour
           << ':' << std::setw(2) << timeinfo->tm_min << ':' << std::setw(2)
           << timeinfo->tm_sec << '.' << std::setw(9) << ns << ' '
-          << c10::detail::StripBasename(std::string(file)) << ':' << line
-          << "] ";
+          << c10::detail::StripBasename(std::string(source_location_.file))
+          << ':' << source_location_.line << "] ";
 }
 
 // Output the contents of the stream to the proper channel on destruction.
@@ -531,7 +534,7 @@ void MessageLogger::DealWithFatal() {
   if (exit_on_fatal_) {
     abort();
   } else {
-    throw c10::Error(stream_.str(), nullptr, nullptr);
+    throw c10::Error(source_location_, stream_.str());
   }
 }
 
