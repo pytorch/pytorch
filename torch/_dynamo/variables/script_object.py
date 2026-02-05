@@ -226,6 +226,13 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
                 from torch._dynamo.symbolic_convert import InstructionTranslator
 
                 tx = InstructionTranslator.current_tx()
+                # if any kwargs (synthetic_graph_input doesn't support them yet)
+                # not a graph break because hard error more explicit here
+                # (and opaque objects are really just used for compile)
+                if self.ctor_args_kwargs[1]:
+                    raise RuntimeError(
+                        "NYI: extern opaque objects that accept kwargs, please pass as args"
+                    )
                 extern_vt = tx.output.synthetic_graph_input(
                     type(self.proxy), self.ctor_args_kwargs[0]
                 )

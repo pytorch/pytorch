@@ -623,7 +623,7 @@ class FxGraphCachePickler(pickle.Pickler):
 
     def _reduce_fake_script_object(
         self, t: FakeScriptObject
-    ) -> tuple[Callable[..., Any], tuple[Any]]:
+    ) -> tuple[Callable[..., Any], tuple[Any, ...]]:
         if t.real_obj is not None:
             cls = type(t.real_obj)
             # This is the only case where I'm sure it's cache safe.
