@@ -987,7 +987,7 @@ kernel void linalg_qr_householder(
     for (uint32_t i = k + tid; i < m; i += group_size) {
       T r_ik = R_batch[i * n + k];
       v_batch[i] = r_ik;
-      opmath_t val = static_cast<opmath_t>(r_ik);
+      const auto val = static_cast<opmath_t>(r_ik);
       norm_sq = fma(val, val, norm_sq);
     }
     const auto norm =
