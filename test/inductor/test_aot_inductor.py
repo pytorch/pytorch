@@ -7014,7 +7014,6 @@ class AOTInductorTestsTemplate:
         ):
             torch._export.aot_compile(Model(), (x, y, m))
 
-    @skipIfRocmArch(MI200_ARCH)
     def test_triton_autotuning(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
