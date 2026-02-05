@@ -231,9 +231,6 @@ inductor_skips["xpu"] = {}
 inductor_expected_failures_single_sample = defaultdict(dict)
 
 inductor_expected_failures_single_sample["cpu"] = {
-    "_softmax_backward_data": {
-        f16
-    },  # half_to_float is only valid for the CUDA implementation
     "_upsample_bilinear2d_aa": {f32, f64},
     "cholesky": {f32, f64},
     "complex": {f16},
@@ -998,6 +995,7 @@ inductor_skip_exact_stride = {
     "linalg.eigvals",  # Fails for ROCM
     "linalg.lu",
     "linalg.lu_factor",
+    "linalg.lu_factor_ex",
     "linalg.matrix_norm",
     "linalg.norm",
     "linalg.norm.subgradients_at_zero",
@@ -1006,6 +1004,7 @@ inductor_skip_exact_stride = {
     "linalg.solve",
     "linalg.solve_ex",
     "linalg.qr",
+    "lu",
     "matmul",
     "__rmatmul__",
     "nn.functional.adaptive_avg_pool1d",

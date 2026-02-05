@@ -249,7 +249,8 @@ class InputObserverInfo:
 
         # This is already checked by build_inputs_completed_with_none_values
         # but this is not always well captured by tools checking types.
-        assert self._max_args is not None and self._max_kwargs is not None
+        if self._max_args is None or self._max_kwargs is None:
+            raise AssertionError("_max_args and _max_kwargs must be non-None")
         if len({len(flat) for flat in flat_inputs}) != 1:
             raise NotImplementedError(
                 "infer_dynamic_shapes is not implemented "
@@ -317,7 +318,8 @@ class InputObserverInfo:
         """Infers arguments based on the collected tensors."""
         # This is already checked by _build_inputs_completed_with_none_values
         # but this is not always well captured by tools checking types.
-        assert self._max_args is not None and self._max_kwargs is not None
+        if self._max_args is None or self._max_kwargs is None:
+            raise AssertionError("_max_args and _max_kwargs must be non-None")
         candidate = None
         if index is None:
             for i, (args_kwargs, spec) in enumerate(
@@ -391,8 +393,10 @@ class InputObserver:
         _store_n_calls: int = 3,
         **kwargs,
     ):
-        assert _captured_method is not None, "_captured_forward cannot be None"
-        assert self.info is not None, "info cannot be None"
+        if _captured_method is None:
+            raise AssertionError("_captured_forward cannot be None")
+        if self.info is None:
+            raise AssertionError("info cannot be None")
         n_stored = len(self.info)
         if n_stored < _store_n_calls:
             self.info.add_inputs(args, kwargs)
@@ -471,7 +475,8 @@ class InputObserver:
                 dynamic.
         """
         self._check_captured()
-        assert self.info is not None  # missed by type checking
+        if self.info is None:
+            raise AssertionError("info must be non-None")
         return self.info.infer_dynamic_shapes(
             set_batch_dimension_for=set_batch_dimension_for
         )
@@ -481,5 +486,6 @@ class InputObserver:
     ) -> tuple[torch.Tensor, ...] | dict[str, torch.Tensor]:
         """Infers arguments based on the collected tensors."""
         self._check_captured()
-        assert self.info is not None  # missed by type checking
+        if self.info is None:
+            raise AssertionError("info must be non-None")
         return self.info.infer_arguments(index=index)
