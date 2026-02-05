@@ -284,7 +284,7 @@ class InputObserverInfo:
             cares about the order in kwargs and dynamic shapes, it needs
             to be the same in the ordered dictionaries `add_inputs` receive.
         default_values: Default values defined by the signature of the function,
-            any value equal to that is ignore to simplify the export.
+            any value equal to that is ignored to simplify the export.
     """
 
     def __init__(
