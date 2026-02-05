@@ -31,6 +31,7 @@
 #include <ATen/ops/linalg_lu_factor_ex_native.h>
 #include <ATen/ops/linalg_lu_factor_native.h>
 #include <ATen/ops/linalg_lu_native.h>
+#include <ATen/ops/linalg_qr.h>
 #include <ATen/ops/linalg_qr_native.h>
 #include <ATen/ops/linalg_solve_triangular_native.h>
 #include <ATen/ops/lu_unpack.h>
@@ -1457,7 +1458,7 @@ static void metal_qr_kernel_impl(const Tensor& A, const Tensor& Q, const Tensor&
     batch_size *= A.size(i);
   }
 
-  auto A_work = A.reshape({batch_size, m, n}).clone(at::MemoryFormat::Contiguous);
+  auto A_work = A.reshape({batch_size, m, n}).contiguous();
 
   QrParams params;
   params.m = m;
@@ -1492,8 +1493,9 @@ static void metal_qr_kernel_impl(const Tensor& A, const Tensor& Q, const Tensor&
   bool is_batched = A.dim() > 2;
 
   if (reduced_mode) {
-    auto Q_reduced = Q_work.narrow(-1, 0, n); // [batch, m, n]
-    auto R_reduced = R_work.narrow(-2, 0, n); // [batch, n, n]
+    auto k = std::min(m, n);
+    auto Q_reduced = Q_work.narrow(-1, 0, k); // [batch, m, k]
+    auto R_reduced = R_work.narrow(-2, 0, k); // [batch, k, n]
 
     if (is_batched) {
       Q.copy_(Q_reduced.reshape(Q.sizes()));
@@ -1522,7 +1524,6 @@ static void linalg_qr_out_impl_mps(const Tensor& A, const Tensor& Q, const Tenso
   using namespace mps;
 
   TORCH_CHECK(A.scalar_type() == kFloat, "linalg_qr: MPS currently supports float32 only");
-  TORCH_CHECK(!A.is_complex(), "linalg_qr: MPS does not support complex types yet");
 
   if (A.numel() == 0) {
     return;
@@ -1531,8 +1532,16 @@ static void linalg_qr_out_impl_mps(const Tensor& A, const Tensor& Q, const Tenso
   auto m = A.size(-2);
   auto n = A.size(-1);
 
-  TORCH_CHECK(m >= n, "linalg_qr: MPS requires m >= n");
-  TORCH_CHECK(n <= 512, "linalg_qr: MPS currently supports n <= 512");
+  if (std::min(m, n) > 512) {
+    TORCH_WARN_ONCE(
+        "linalg_qr: MPS implementation is currently limited to min(m,n) <= 512, "
+        "falling back to CPU.");
+    auto A_cpu = A.to(at::kCPU);
+    auto [Q_cpu, R_cpu] = at::linalg_qr(A_cpu, mode);
+    const_cast<Tensor&>(Q).copy_(Q_cpu.to(at::kMPS));
+    const_cast<Tensor&>(R).copy_(R_cpu.to(at::kMPS));
+    return;
+  }
 
   bool reduced_mode = (mode != "complete");
 

@@ -1,4 +1,6 @@
 #include <ATen/native/mps/kernels/LinearAlgebra.h>
+#include <c10/metal/common.h>
+#include <c10/metal/reduction_utils.h>
 #include <c10/metal/utils.h>
 #include <metal_array>
 #include <metal_simdgroup>
@@ -931,37 +933,6 @@ kernel void unpack_pivots(
   }
 }
 
-template <typename T>
-static T parallel_reduce_sum(
-    T local_value,
-    uint32_t tid,
-    uint32_t group_size,
-    threadgroup T* scratch) {
-  uint32_t num_simd_groups = group_size / 32;
-  if (tid < num_simd_groups) {
-    scratch[tid] = 0.0;
-  }
-  threadgroup_barrier(mem_flags::mem_threadgroup);
-
-  // reduce within each SIMD group
-  T simd_sum_val = simd_sum(local_value);
-  if (tid % 32 == 0) {
-    scratch[tid / 32] = simd_sum_val;
-  }
-  threadgroup_barrier(mem_flags::mem_threadgroup);
-
-  // sum across all SIMD groups
-  if (tid == 0) {
-    T sum = 0.0;
-    for (uint32_t i = 0; i < num_simd_groups; i++) {
-      sum += scratch[i];
-    }
-    scratch[0] = sum;
-  }
-  threadgroup_barrier(mem_flags::mem_threadgroup);
-
-  return scratch[0];
-}
 
 template <typename T>
 kernel void linalg_qr_householder(
@@ -993,7 +964,10 @@ kernel void linalg_qr_householder(
   device T* R_batch = R + batch_idx * R_stride;
   device T* v_batch = v_work + batch_idx * v_stride;
 
-  threadgroup opmath_t scratch[256];
+  constexpr auto kMaxThreadsPerThreadgroup = 1024;
+  constexpr auto kMaxSIMDGroups = kMaxThreadsPerThreadgroup / c10::metal::simdgroup_size;
+  
+  threadgroup opmath_t scratch[kMaxSIMDGroups];
   threadgroup opmath_t tau_shared;
 
   // initialize Q = Identity (m x m)
@@ -1007,25 +981,29 @@ kernel void linalg_qr_householder(
   }
   threadgroup_barrier(mem_flags::mem_device);
 
-  for (uint32_t k = 0; k < n; k++) {
+  for (uint32_t k = 0; k < min(m, n); k++) {
     // Step 1: compute norm of R[k:m, k] and copy to v_batch
     opmath_t norm_sq = 0.0;
     for (uint32_t i = k + tid; i < m; i += group_size) {
-      opmath_t val = static_cast<opmath_t>(R_batch[i * n + k]);
-      v_batch[i] = static_cast<T>(val);
+      T r_ik = R_batch[i * n + k];
+      v_batch[i] = r_ik;
+      opmath_t val = static_cast<opmath_t>(r_ik);
       norm_sq = fma(val, val, norm_sq);
     }
-    opmath_t norm =
-        sqrt(parallel_reduce_sum(norm_sq, tid, group_size, scratch));
+    const auto norm =
+        ::metal::precise::sqrt(c10::metal::threadgroup_sum(scratch, norm_sq, tid, group_size));
+
+    // scale norm_eps by matrix dimension to handle accumulated error
+    const auto norm_eps = ::metal::numeric_limits<opmath_t>::epsilon() * m;
+    const auto tau_eps = ::metal::numeric_limits<opmath_t>::epsilon();
 
     // Step 2: compute Householder vector and tau
     if (tid == 0) {
-      constexpr opmath_t eps = 1e-10;
       // LAPACK convention: skip reflection for last row to preserve natural
       // sign When k == m - 1, there's only one element in the column, so
       // reflection would just flip its sign. Instead, preserve whatever value
       // emerged from prior transformations to match LAPACK's behavior.
-      if (fabs(norm) < eps || k == m - 1) {
+      if (fabs(norm) < norm_eps || k == m - 1) {
         tau_shared = 0.0;
       } else {
         opmath_t alpha = static_cast<opmath_t>(v_batch[k]);
@@ -1045,8 +1023,8 @@ kernel void linalg_qr_householder(
     }
     threadgroup_barrier(mem_flags::mem_device);
 
-    opmath_t tau = tau_shared;
-    if (tau < 1e-10)
+    const auto tau = tau_shared;
+    if (tau < tau_eps)
       continue;
 
     // (zero out column k below diagonal)
@@ -1057,9 +1035,9 @@ kernel void linalg_qr_householder(
     // Step 3: apply reflection to trailing columns of R
     // Parallelize across columns: each SIMD group (32 threads) handles one
     // column
-    uint32_t simd_lane = tid % 32;
-    uint32_t simd_group_id = tid / 32;
-    uint32_t num_simd_groups = group_size / 32;
+    uint32_t simd_lane = tid % c10::metal::simdgroup_size;
+    uint32_t simd_group_id = tid / c10::metal::simdgroup_size;
+    uint32_t num_simd_groups = group_size / c10::metal::simdgroup_size;
 
     for (uint32_t j_base = k + 1; j_base < n; j_base += num_simd_groups) {
       uint32_t j = j_base + simd_group_id;
