@@ -157,10 +157,14 @@ class TestBytecodeDebugger(TestCase):
 
         def test_logic(sess, initial):
             output = initial
-            # Step until we hit a CALL instruction
-            while not re.search(r">>>.*\[\d+\]:\s*CALL\b", output):
+            # Step until we hit a CALL instruction (or PRECALL on Python 3.11)
+            if sys.version_info >= (3, 12):
+                call_pattern = r">>>.*\[\d+\]:\s*CALL\b"
+            else:
+                call_pattern = r">>>.*\[\d+\]:\s*PRECALL\b"
+            while not re.search(call_pattern, output):
                 output = yield "s"
-            # Get the stack at CALL
+            # Get the stack at CALL/PRECALL
             stack_output = yield "stack"
 
             # Extract just the stack lines (skip prompt)
@@ -376,8 +380,12 @@ Stack (TOS at end):
 
         def test_logic(sess, initial):
             output = initial
-            # Step until we hit a CALL instruction
-            while not re.search(r">>>.*\[\d+\]:\s*CALL\b", output):
+            # Step until we hit a CALL instruction (or PRECALL on Python 3.11)
+            if sys.version_info >= (3, 12):
+                call_pattern = r">>>.*\[\d+\]:\s*CALL\b"
+            else:
+                call_pattern = r">>>.*\[\d+\]:\s*PRECALL\b"
+            while not re.search(call_pattern, output):
                 output = yield "s"
 
             # Access __stack__ - should have function, NULL, and tensor
