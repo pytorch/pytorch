@@ -60,8 +60,6 @@ from .variables import (
     BuiltinVariable,
     FunctionalCallVariable,
     FunctorchHigherOrderVariable,
-    JvpDecrementNestingVariable,
-    JvpIncrementNestingVariable,
     LocalGeneratorFunctionVariable,
     LocalGeneratorObjectVariable,
     NestedUserFunctionVariable,
@@ -155,8 +153,6 @@ If you are removing an existing torch level API:
 manual_torch_name_rule_map: dict[
     str,
     Union[
-        type[JvpDecrementNestingVariable],
-        type[JvpIncrementNestingVariable],
         type[TorchInGraphFunctionVariable],
         type[SkipFunctionVariable],
         type[UserFunctionVariable],
@@ -345,8 +341,6 @@ manual_torch_name_rule_map: dict[
     "torch._C._functorch.is_batchedtensor": TorchInGraphFunctionVariable,
     "torch._C._functorch.peek_interpreter_stack": TorchInGraphFunctionVariable,
     "torch._C._functorch.unwrap_if_dead": TorchInGraphFunctionVariable,
-    "torch._C._functorch._jvp_increment_nesting": JvpIncrementNestingVariable,
-    "torch._C._functorch._jvp_decrement_nesting": JvpDecrementNestingVariable,
     "torch._functorch.predispatch._vmap_increment_nesting": TorchInGraphFunctionVariable,
     "torch._functorch.predispatch._vmap_decrement_nesting": TorchInGraphFunctionVariable,
     # everything else
