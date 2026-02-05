@@ -577,23 +577,11 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   py_context_manager_DEPRECATED<DisableFuncTorch>(_C_m, "_DisableFuncTorch");
   py_context_manager<DisableAutocast>(_C_m, "_DisableAutocast");
   py::class_<torch::autograd::SavedVariable>(std::move(m), "SavedTensor")
-      .def(
-          py::init(
-              [](const at::Tensor& tensor,
-                 bool is_output,
-                 bool is_inplace_on_view,
-                 bool _INTERNAL_USE_ONLY) -> torch::autograd::SavedVariable {
-                TORCH_CHECK(
-                    _INTERNAL_USE_ONLY,
-                    "SavedTensor constructor is exposed for internal use only and is subject to change.");
-                return torch::autograd::SavedVariable(
-                    tensor, is_output, is_inplace_on_view);
-              }),
-          py::arg("tensor"),
-          py::kw_only(),
-          py::arg("is_output"),
-          py::arg("is_inplace_on_view") = false,
-          py::arg("_INTERNAL_USE_ONLY") = false)
+      .def(py::init([]() -> torch::autograd::SavedVariable {
+        TORCH_CHECK(
+            false,
+            "Trying to create a SavedTensor object from Python is forbidden.");
+      }))
       .def(
           "unpack",
           [](const torch::autograd::SavedVariable& s) -> at::Tensor {
@@ -637,6 +625,17 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
             auto* unpack_ptr = unpack_safe.ptr(getPyInterpreter());
             return py::reinterpret_borrow<py::function>(unpack_ptr);
           });
+
+  m.def(
+      "_make_saved_tensor",
+      [](const at::Tensor& tensor,
+         bool is_output,
+         bool is_inplace_on_view) -> torch::autograd::SavedVariable {
+        return torch::autograd::SavedVariable(tensor, is_output, is_inplace_on_view);
+      },
+      py::arg("tensor"),
+      py::arg("is_output"),
+      py::arg("is_inplace_on_view") = false);
 
   torch::autograd::profiler::python_tracer::init();
   Py_RETURN_TRUE;
