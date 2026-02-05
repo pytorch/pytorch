@@ -613,6 +613,17 @@ class RangeVariable(BaseListVariable):
             return ConstantVariable.create(self.range_length())
         elif name in ("count", "__contains__"):
             return SourcelessBuilder.create(tx, self.range_count(*args))
+        elif name == "index":
+            x = args[0].as_python_constant()
+            start, stop, step = self.start(), self.stop(), self.step()
+            in_range = (start <= x < stop) if step > 0 else (stop < x <= start)
+            if in_range and ((x - start) % step) == 0:
+                return ConstantVariable.create((x - start) // step)
+            raise_observed_exception(
+                ValueError,
+                tx,
+                args=[ConstantVariable.create(f"{x} is not in range")],
+            )
         elif name == "__getitem__":
             return self.getitem_const(tx, *args)
         elif name in cmp_name_to_op_mapping:
@@ -1488,6 +1499,73 @@ class NamedTupleVariable(UserDefinedTupleVariable):
         if self.is_structseq():
             return self.python_type()([x.as_proxy() for x in self._tuple_vt.items])
         return self.python_type()(*[x.as_proxy() for x in self._tuple_vt.items])
+
+    def call_tree_map(
+        self,
+        tx: "InstructionTranslator",
+        tree_map_fn: UserFunctionVariable,
+        map_fn: VariableTracker,
+        rest: Sequence[VariableTracker],
+        tree_map_kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        is_leaf_var = tree_map_kwargs.get("is_leaf")
+        if is_leaf_var is not None and not is_leaf_var.is_constant_none():
+            pred_result = is_leaf_var.call_function(tx, [self], {})
+            try:
+                leaf_decision = pred_result.as_python_constant()
+            except NotImplementedError:
+                return self._tree_map_fallback(
+                    tx, tree_map_fn, map_fn, rest, tree_map_kwargs
+                )
+            if leaf_decision:
+                return map_fn.call_function(tx, [self, *rest], {})
+
+        return self.call_tree_map_branch(
+            tx,
+            tree_map_fn,
+            map_fn,
+            rest,
+            tree_map_kwargs,
+        )
+
+    def call_tree_map_branch(
+        self,
+        tx: "InstructionTranslator",
+        tree_map_fn: UserFunctionVariable,
+        map_fn: VariableTracker,
+        rest: Sequence[VariableTracker],
+        tree_map_kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        other_tuples: list[NamedTupleVariable] = []
+        for candidate in rest:
+            if (
+                not isinstance(candidate, NamedTupleVariable)
+                or len(candidate.items) != len(self.items)
+                or candidate.tuple_cls is not self.tuple_cls
+            ):
+                return self._tree_map_fallback(
+                    tx, tree_map_fn, map_fn, rest, tree_map_kwargs
+                )
+            other_tuples.append(candidate)
+
+        new_items: list[VariableTracker] = []
+        for idx, item in enumerate(self.items):
+            sibling_leaves = [candidate.items[idx] for candidate in other_tuples]
+            new_items.append(
+                item.call_tree_map(
+                    tx,
+                    tree_map_fn,
+                    map_fn,
+                    sibling_leaves,
+                    tree_map_kwargs,
+                )
+            )
+
+        return NamedTupleVariable(
+            new_items,
+            self.tuple_cls,
+            mutation_type=ValueMutationNew(),
+        )
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         if self.is_structseq():
