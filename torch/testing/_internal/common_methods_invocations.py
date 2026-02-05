@@ -42,7 +42,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM, IS_FBCODE, IS_WINDOWS, IS_MACOS, IS_S390X, TEST_SCIPY,
     torch_to_numpy_dtype_dict, numpy_to_torch_dtype, TEST_WITH_ASAN,
     GRADCHECK_NONDET_TOL, slowTest, TEST_WITH_SLOW,
-    TEST_WITH_TORCHINDUCTOR, MACOS_VERSION,
+    TEST_WITH_TORCHINDUCTOR,
 )
 from torch.testing._utils import wrapper_set_seed
 
@@ -12051,6 +12051,20 @@ def sample_inputs_alias_copy(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(make_tensor((S,), dtype=dtype, device=device, requires_grad=requires_grad))
     yield SampleInput(make_tensor((), dtype=dtype, device=device, requires_grad=requires_grad))
 
+def sample_inputs_abs(op_info, device, dtype, requires_grad, op_kwargs=None, **kwargs):
+    yield from sample_inputs_elementwise_unary(op_info, device, dtype, requires_grad, op_kwargs=None, **kwargs)
+    if dtype == torch.cfloat:
+        yield SampleInput(torch.tensor(
+            [
+                1e-30 + 1e-30j,
+                1e30 + 1e30j,
+                1e-30 + 1e30j,
+                1e30 + 1e-30j,
+            ],
+            device=device,
+            dtype=dtype,
+            requires_grad=requires_grad,
+        ))
 
 # Operator database (sorted alphabetically)
 op_db: list[OpInfo] = [
@@ -12060,6 +12074,7 @@ op_db: list[OpInfo] = [
                    dtypes=all_types_and_complex_and(torch.half, torch.bfloat16, torch.chalf),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
                    dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
+                   sample_inputs_func=sample_inputs_abs,
                    skips=(
                        DecorateInfo(unittest.skip("In-place abs not supported for complex tensors"), 'TestBwdGradients',
                                     'test_inplace_grad', dtypes=(torch.cdouble,)),
@@ -12751,14 +12766,6 @@ op_db: list[OpInfo] = [
                    unittest.expectedFailure, 'TestCommon', 'test_out',
                    device_type='mps', dtypes=(torch.float32,)
                ),
-               # Fast math on MacOS-13?
-               DecorateInfo(
-                   toleranceOverride({torch.float32: tol(atol=2e-5, rtol=5e-6)}),
-                   'TestConsistency',
-                   'test_output_match',
-                   active_if=lambda _: MACOS_VERSION < 14.0,
-                   device_type='mps',
-                   dtypes=(torch.float32,)),
            ),
            sample_inputs_func=sample_inputs_bmm),
     OpInfo('mv',
@@ -12905,6 +12912,11 @@ op_db: list[OpInfo] = [
                                     active_if=IS_WINDOWS),
                        DecorateInfo(unittest.skip("Skipped! sparse backward not supported"),
                                     'TestSparseUnaryUfuncs', 'test_sparse_fn_grad'),
+                       DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-4),
+                                                       torch.float16: tol(atol=1e-4, rtol=1e-4),
+                                                       torch.bfloat16: tol(atol=1e-4, rtol=1e-4),
+                                                       torch.complex64: tol(atol=1e-4, rtol=1e-4)}),
+                                    "TestConsistency", "test_output_match", device_type="mps"),
                    )),
     UnaryUfuncInfo('atan',
                    aliases=('arctan', ),
@@ -13749,12 +13761,6 @@ op_db: list[OpInfo] = [
                                      'test_fn_grad',
                                      dtypes=(torch.float64,),
                                      device_type='cpu'),
-                        DecorateInfo(unittest.skip("Broken on MacOS13"),
-                                     'TestConsistency',
-                                     'test_output_match',
-                                     device_type='mps',
-                                     dtypes=(torch.float16,),
-                                     active_if=lambda _: MACOS_VERSION < 14.0),
                         # The following dtypes worked in forward but are not listed by the OpInfo: {torch.bool}.
                         DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
                     )),
@@ -13987,12 +13993,6 @@ op_db: list[OpInfo] = [
                             "test_comprehensive",
                             device_type="cuda"
                         ),
-                        DecorateInfo(unittest.skip("Broken on MacOS13"),
-                                     'TestConsistency',
-                                     'test_output_match',
-                                     device_type='mps',
-                                     dtypes=(torch.float16,),
-                                     active_if=lambda _: MACOS_VERSION < 14.0),
                     )),
     UnaryUfuncInfo('frac',
                    ref=lambda x: np.modf(x)[0],
@@ -17976,14 +17976,6 @@ op_db: list[OpInfo] = [
                    'TestSchemaCheckModeOpInfo',
                    'test_schema_correctness',
                    dtypes=(torch.complex64, torch.complex128)),
-               # Fast math on MacOS-13?
-               DecorateInfo(
-                   toleranceOverride({torch.float32: tol(atol=2e-5, rtol=5e-6)}),
-                   'TestConsistency',
-                   'test_output_match',
-                   active_if=lambda _: MACOS_VERSION < 14.0,
-                   device_type='mps',
-                   dtypes=(torch.float32,)),
                # AssertionError: Tensor-likes are not close!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
            )),
@@ -22380,6 +22372,10 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager', device_type='mps'),
             # AssertionError: Tensor-likes are not close!
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='mps'),
+            DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-4),
+                                            torch.float16: tol(atol=1e-4, rtol=1e-4),
+                                            torch.bfloat16: tol(atol=1e-4, rtol=1e-4)}),
+                         "TestConsistency", "test_output_match", device_type="mps"),
         ),),
     OpInfo(
         "argwhere",

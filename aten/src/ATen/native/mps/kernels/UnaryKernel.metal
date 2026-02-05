@@ -91,50 +91,8 @@ struct abs_functor {
   }
   template <typename T, enable_if_t<is_complex_v<T>, bool> = true>
   inline T operator()(const T x) {
-    // The following implementation of complex abs provides better numerical
-    // stability than the naive implementation. It is based on:
-    // https://github.com/pearu/functional_algorithms/blob/7dbbfd7db225b1c202e0e364fc435423ccf52dbe/functional_algorithms/algorithms.py#L168
-    //
-    // This implementation changes the naive formula for the hypotenuse of a
-    // right triangle, `h = sqrt(a^2 + b^2)`, into three alternate forms to be
-    // used in different cases. The reason why the naive formula is unstable is
-    // because of the square terms. If `a` or `b` are very large or very small
-    // floating point numbers, then their squares will resolve to inf or 0.
-    //
-    // Assume `a >= b >= 0`. We can first change the formula to:
-    // `h = a sqrt(1 + (b / a)^2)`
-    // `h = a sqrt(1 + r)`
-    // where `r = (b / a)^2`. Since `a >= b >= 0`, then `1 >= r >= 0`.
-    //
-    // Case 1: `a == b`
-    //   The formula simplifies to `h = a sqrt(2)`.
-    //
-    // Case 2: `1 >> r > 0`
-    //   Due to floating point error, `sqrt(1 + r)` resolves to 1. So we use the
-    //   binomial approximation `sqrt(1 + r) ≈ 1 + r / 2`, and the formula
-    //   becomes `h ≈ a + a r / 2`.
-    //
-    // Case 3: All other cases.
-    //   Use `h = a sqrt(1 + r)`.
-
-    auto real_abs = ::precise::abs(x.x);
-    auto imag_abs = ::precise::abs(x.y);
-
-    auto a = max(real_abs, imag_abs);
-    auto b = min(real_abs, imag_abs);
-
-    auto b_over_a = c10::metal::div(b, a);
-    auto r = c10::metal::mul(b_over_a, b_over_a);
-    auto sqrt_2 = T(::precise::sqrt(T(2).x));
-    auto sqrt_1_plus_r = ::precise::sqrt(1 + r);
-
-    auto h1 = sqrt_2 * a;
-    auto h2 = a + a * r / 2;
-    auto h3 = a * sqrt_1_plus_r;
-    bool is_h1 = (a == b);
-    bool is_h2 = ((sqrt_1_plus_r == 1) && (r > 0));
-
-    return select(select(h3, h2, is_h2), h1, is_h1);
+    const auto abs_2 = ::precise::abs(float2(x));
+    return T(c10::metal::hypot(abs_2.x, abs_2.y));
   }
 };
 
