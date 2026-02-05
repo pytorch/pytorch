@@ -250,7 +250,10 @@ class Vectorized16 {
   static Vectorized<T> loadu(const void* ptr, int16_t count = size()) {
     if (count == size())
       return _mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr));
-
+    assert(count <= size() && "Vectorized16::loadu cannot load more than 16 elements!");
+    if (count > size()) {
+      count = size();
+    }
     __at_align__ int16_t tmp_values[size()];
 #ifndef __msvc_cl__
 #pragma unroll
