@@ -10045,7 +10045,6 @@ def forward(self, b_a_buffer, x):
         self.assertTrue(torch.allclose(ep.module()(xs), module_out))
 
     @requires_cuda_and_triton
-    @testing.expectedFailureStrictV2
     def test_export_associative_scan_lifted_buffers(self):
         if "cpp_runtime_nonstrict" in self.id():
             self.skipTest("TODO Unexpected success in OSS but not in fbcode.")
