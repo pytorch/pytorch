@@ -2,6 +2,14 @@ name: Build Flash Attention 3 wheels
 
 on:
   workflow_dispatch:
+    inputs:
+      test:
+        description: 'Build test wheels with date suffix in version'
+        required: false
+        default: true
+        type: boolean
+  schedule:
+    - cron: '0 0 1,15 * *'  # periodic builds (no uploads) every 2 weeks to test the script
   pull_request:
     paths:
       - .github/workflows/_binary-build-flash-attention-wheel-linux.yml
@@ -34,27 +42,31 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - cuda_version: "12.6"
+          - cuda_version: "12.6.3"
             arch: "x86_64"
             cuda_short: "126"
             torch_cuda_arch_list: "8.0;8.6;9.0"
             docker_image: "pytorch/manylinux2_28-builder:cuda12.6"
             runner: "linux.12xlarge.memory"
-          - cuda_version: "13.0"
+            manylinux_plat: "manylinux_2_28_x86_64"
+          - cuda_version: "13.0.2"
             arch: "x86_64"
             cuda_short: "130"
             torch_cuda_arch_list: "8.0;8.6;9.0;10.0"
             docker_image: "pytorch/manylinux2_28-builder:cuda13.0"
             runner: "linux.12xlarge.memory"
-          - cuda_version: "12.6"
+            manylinux_plat: "manylinux_2_28_x86_64"
+          - cuda_version: "12.6.3"
             arch: "aarch64"
             cuda_short: "126"
-            torch_cuda_arch_list: "8.0;8.6;9.0"
+            torch_cuda_arch_list: "9.0"
             docker_image: "quay.io/pypa/manylinux_2_34_aarch64"
             runner: "linux.arm64.r7g.12xlarge.memory"
             max_jobs: "4"
             nvcc_threads: "2"
-          - cuda_version: "13.0"
+            manylinux_plat: "manylinux_2_34_aarch64"
+            cuda_installer_name: "cuda_12.6.3_560.35.05_linux"
+          - cuda_version: "13.0.2"
             arch: "aarch64"
             cuda_short: "130"
             torch_cuda_arch_list: "9.0;10.0"
@@ -62,6 +74,8 @@ jobs:
             runner: "linux.arm64.r7g.12xlarge.memory"
             max_jobs: "4"
             nvcc_threads: "2"
+            manylinux_plat: "manylinux_2_34_aarch64"
+            cuda_installer_name: "cuda_13.0.2_580.95.05_linux"
     timeout-minutes: 1440
     env:
       DOCKER_IMAGE: ${{ matrix.docker_image }}
@@ -100,19 +114,20 @@ jobs:
             -w /pytorch \
             "${DOCKER_IMAGE}"
           )
-          PYTHON_EXECUTABLE=/opt/python/cp312-cp312/bin/python
+          PYTHON_EXECUTABLE=/opt/python/cp310-cp310/bin/python
           docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}" -m pip install \
-            torch --extra-index-url "https://download.pytorch.org/whl/cu${CUDA_SHORT}"
+            torch==2.10.0 --extra-index-url "https://download.pytorch.org/whl/cu${CUDA_SHORT}"
           docker exec -t \
             -e CUDA_VERSION="${CUDA_VERSION}" \
             -e CUDA_SHORT="${CUDA_SHORT}" \
             -e TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST}" \
             -e FA_FINAL_PACKAGE_DIR="/artifacts" \
-            -e WHEEL_PLAT="${{ matrix.arch }}" \
-            -e PYTORCH_ROOT="/pytorch" \
+            -e MANYLINUX_PLAT="${{ matrix.manylinux_plat }}" \
             -e PYTHON_EXECUTABLE="${PYTHON_EXECUTABLE}" \
             -e MAX_JOBS="${{ matrix.max_jobs }}" \
             -e NVCC_THREADS="${{ matrix.nvcc_threads }}" \
+            -e CUDA_INSTALLER_NAME="${{ matrix.cuda_installer_name }}" \
+            -e FA_TEST_BUILD="${{ inputs.test }}" \
             "${container_name}" bash -c \
             "bash /pytorch/.ci/flash-attention/build.sh"
           docker exec -t "${container_name}" chown -R 1000:1000 /artifacts
@@ -130,18 +145,22 @@ jobs:
     name: "Upload FA3 ${{ matrix.cuda_short }} ${{ matrix.arch }}"
     needs: build-wheel
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'workflow_dispatch' }}
+    if: github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
         include:
-          - cuda_short: "126"
+          - cuda_version: "12.6.3"
+            cuda_short: "126"
             arch: "x86_64"
-          - cuda_short: "130"
+          - cuda_version: "13.0.2"
+            cuda_short: "130"
             arch: "x86_64"
-          - cuda_short: "126"
+          - cuda_version: "12.6.3"
+            cuda_short: "126"
             arch: "aarch64"
-          - cuda_short: "130"
+          - cuda_version: "13.0.2"
+            cuda_short: "130"
             arch: "aarch64"
     permissions:
       id-token: write
