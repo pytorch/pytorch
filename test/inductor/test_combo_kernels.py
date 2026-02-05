@@ -471,13 +471,18 @@ class ComboKernelTests(TestCase):
                 if "triton_poi_fused_0" in event["name"]
             ]
             if torch._inductor.config.combo_kernel_per_subkernel_blocks:
-                # It uses max for y grid, flatten grid approach will optimize this
-                self.assertEqual([791, 1024, 1], triton_events[0]["args"]["grid"])
+                self.assertEqual([3795, 1, 1], triton_events[0]["args"]["grid"])
             else:
                 self.assertEqual([791, 4096, 1], triton_events[0]["args"]["grid"])
 
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+        if torch._inductor.config.combo_kernel_per_subkernel_blocks:
+            FileCheck().check("x_pid_offset = local_pid % x_blocks_0").check(
+                "y_pid_offset = local_pid // x_blocks_0"
+            ).run(code[0])
+        else:
+            FileCheck().check("pid_offset = pid").run(code[0])
 
 
 class ComboKernelBenchmarkTests(TestCase):
