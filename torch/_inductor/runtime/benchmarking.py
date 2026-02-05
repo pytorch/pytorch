@@ -1,11 +1,12 @@
 import functools
 import inspect
+import threading
 import time
 from collections.abc import Callable
 from functools import cached_property, wraps
 from itertools import chain
 from statistics import median
-from typing import Any, Concatenate, Optional, Union
+from typing import Any, ClassVar, Concatenate, Optional, TYPE_CHECKING, Union
 from typing_extensions import ParamSpec, Self, TypeVar
 
 import torch
@@ -100,8 +101,20 @@ class Benchmarker:
     inductor generated callables.
     """
 
+    _instances: ClassVar[dict[type, "Benchmarker"]] = {}
+    _instances_lock: ClassVar[threading.Lock] = threading.Lock()
+    _initialized: bool
+
+    def __new__(cls) -> Self:
+        with cls._instances_lock:
+            if cls not in cls._instances:
+                cls._instances[cls] = super().__new__(cls)
+            return cls._instances[cls]  # pyrefly: ignore[bad-return-type]
+
     def __init__(self: Self) -> None:
-        pass
+        if getattr(self, "_initialized", False):
+            return
+        self._initialized = True
 
     def infer_device(self, *fn_args: Any, **fn_kwargs: Any) -> torch.device:
         inferred_device: Optional[torch.device] = None
@@ -438,6 +451,136 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
             raise ValueError(
                 f"Unsupported return_mode: {return_mode}. Use 'min' or 'all'."
             )
+
+
+class ProfilingBenchmarker(Benchmarker):
+    """
+    Benchmarker using torch.profiler to capture device-side events.
+
+    Potentially more accurate than other benchmarking methods, as the
+    profiler timings entirely exclude host-side overhead that other
+    methods may include in adverse situations.
+    """
+
+    @may_distort_benchmarking_result
+    @time_and_count
+    # pyrefly: ignore [bad-override]
+    def benchmark_gpu(
+        self: Self,
+        _callable: Callable[[], object],
+        warmup: int = 25,
+        rep: int = 100,
+        is_vetted_benchmarking: bool = False,
+        **kwargs: object,
+    ) -> float:
+        """Benchmark a GPU callable using torch.profiler to capture device events.
+
+        Arguments:
+        - _callable: The GPU callable to benchmark.
+
+        Keyword Arguments:
+        - warmup: The duration, in milliseconds, to run `_callable` before
+          benchmarking starts.
+        - rep: The duration, in milliseconds, to run `_callable` during
+          benchmarking.
+        - is_vetted_benchmarking: In deterministic mode, we only allow
+          benchmarking in vetted cases.
+        - **kwargs: Additional kwargs (ignored for compatibility).
+
+        Returns:
+        - The runtime of `_callable`, in milliseconds.
+        """
+        # Lazy imports to avoid CUDA initialization at module load.
+        # Importing this module causes CUDA initialization (due to torch.cuda.is_available
+        # at module level), which can cause failures in vllm when creating child processes.
+        from torch._dynamo.device_interface import get_interface_for_device
+        from torch._inductor.utils import get_gpu_type
+        from torch.autograd import DeviceType
+        from torch.autograd.profiler_util import EventList
+
+        if not is_vetted_benchmarking:
+            may_ban_benchmarking()
+
+        device_type = get_gpu_type()
+        device_interface = get_interface_for_device(device_type)
+
+        _callable()
+        device_interface.synchronize()
+        cache = torch.empty(int(256e6 // 4), dtype=torch.int, device=device_type)
+
+        # Estimate the runtime of the function
+        start_event = device_interface.Event(enable_timing=True)
+        end_event = device_interface.Event(enable_timing=True)
+        start_event.record()
+        for _ in range(5):
+            cache.zero_()
+            _callable()
+        end_event.record()
+        device_interface.synchronize()
+        estimate_ms = start_event.elapsed_time(end_event) / 5
+
+        # Compute number of warmup and repeat
+        n_warmup = max(1, int(warmup / estimate_ms))
+        n_repeat = max(1, int(rep / estimate_ms))
+
+        # Warm-up
+        for _ in range(n_warmup):
+            _callable()
+
+        device_interface.synchronize()
+        with torch.profiler.profile(
+            activities=[
+                getattr(torch.profiler.ProfilerActivity, device_type.upper()),
+            ]
+        ) as profiler:
+            # Benchmark
+            for _ in range(n_repeat):
+                # Clear the L2 cache before each run
+                cache.zero_()
+                # Record time of `_callable`
+                _callable()
+            # Record clocks
+            device_interface.synchronize()
+
+        logger.debug("raw events")
+        logger.debug(
+            profiler.key_averages().table(
+                sort_by="self_device_time_total", row_limit=-1
+            )
+        )
+
+        filtered_events = EventList(
+            [
+                event
+                for event in profiler.events()
+                if event.device_type == DeviceType.CUDA
+                and event.name != "Context Sync"
+            ]
+        )
+        if len(filtered_events) % n_repeat != 0:
+            raise RuntimeError(
+                f"Failed to divide all profiling events into #repeat groups. "
+                f"#{device_type} events: {len(filtered_events)}, #repeats: {n_repeat}"
+            )
+        num_event_per_group = len(filtered_events) // n_repeat
+        actual_events = EventList(
+            [
+                event
+                for idx, event in enumerate(filtered_events)
+                if idx % num_event_per_group != 0
+            ]
+        )
+        actual_events._build_tree()
+        actual_events = actual_events.key_averages()
+
+        logger.debug("profiling time breakdown")
+        logger.debug(actual_events.table(row_limit=-1))
+
+        result = (
+            sum(event.device_time_total for event in actual_events) / 1000.0 / n_repeat
+        )
+        logger.debug("profiling results: %s ms", result)
+        return result
 
 
 benchmarker = (

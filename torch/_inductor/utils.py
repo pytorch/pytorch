@@ -284,118 +284,16 @@ def do_bench_using_profiling(
     rep: int = 100,
     is_vetted_benchmarking: bool = False,
 ) -> float:
-    # We did't use decorator may_distort_benchmarking_result directly since that
-    # requires us to import torch._inductor.runtime.benchmarking into global scope.
-    # Importing torch._inductor.runtime.benchmarking will cause cuda initialization
-    # (because of calling torch.cuda.available in global scope)
-    # which cause failure in vllm when it create child processes. Check log:
-    #   https://gist.github.com/shunting314/c194e147bf981e58df095c14874dd65a
-    #
-    # Another way to solve the issue is to just move do_bench_using_profiling
-    # to torch._inductor.runtime.benchmarking and change all the call site.
-    # But that's not trivial due to so many call sites in and out of pytorch.
-
-    from torch._inductor.runtime.benchmarking import may_distort_benchmarking_result
-
-    return may_distort_benchmarking_result(_do_bench_using_profiling)(
-        fn, warmup, rep, is_vetted_benchmarking
-    )
-
-
-def _do_bench_using_profiling(
-    fn: Callable[[], Any],
-    warmup: int = 25,
-    rep: int = 100,
-    is_vetted_benchmarking: bool = False,
-) -> float:
     """
-    Returns benchmark results by examining torch profiler events.
-    This could be more accurate as it doesn't count CPU side overhead.
-    However, this also requires manually excluding irrelevant event, e.g.
-    vectorized_elementwise_kernel which is used to fill L2 cache,
-    various CUDA events, etc, so could also be fragile.
+    Benchmark using torch.profiler to capture device-side events.
+
+    This is a convenience wrapper around ProfilingBenchmarker.benchmark_gpu().
     """
+    from torch._inductor.runtime.benchmarking import ProfilingBenchmarker
 
-    if not is_vetted_benchmarking:
-        from torch._inductor.runtime.benchmarking import may_ban_benchmarking
-
-        may_ban_benchmarking()
-
-    device_type = get_gpu_type()
-    device_interface = get_interface_for_device(device_type)
-    fn()
-    device_interface.synchronize()
-    cache = torch.empty(int(256e6 // 4), dtype=torch.int, device=device_type)
-
-    # Estimate the runtime of the function
-    start_event = device_interface.Event(enable_timing=True)
-    end_event = device_interface.Event(enable_timing=True)
-    start_event.record()
-    for _ in range(5):
-        cache.zero_()
-        fn()
-    end_event.record()
-    device_interface.synchronize()
-    estimate_ms = start_event.elapsed_time(end_event) / 5
-
-    # compute number of warmup and repeat
-    n_warmup = max(1, int(warmup / estimate_ms))
-    n_repeat = max(1, int(rep / estimate_ms))
-
-    # Warm-up
-    for _ in range(n_warmup):
-        fn()
-
-    device_interface.synchronize()
-    with torch.profiler.profile(
-        activities=[
-            getattr(torch.profiler.ProfilerActivity, device_type.upper()),
-        ]
-    ) as p:
-        # Benchmark
-        for _ in range(n_repeat):
-            # we clear the L2 cache before each run
-            cache.zero_()
-            # record time of `fn`
-            fn()
-        # Record clocks
-        device_interface.synchronize()
-
-    log.debug("raw events")
-    log.debug(p.key_averages().table(sort_by="self_device_time_total", row_limit=-1))
-
-    filtered_events = EventList(
-        [
-            event
-            for event in p.events()
-            if event.device_type == DeviceType.CUDA and event.name != "Context Sync"
-        ]
+    return ProfilingBenchmarker().benchmark_gpu(
+        fn, warmup=warmup, rep=rep, is_vetted_benchmarking=is_vetted_benchmarking
     )
-    if len(filtered_events) % n_repeat != 0:
-        raise RuntimeError(
-            "Failed to divide all profiling events into #repeat groups. "
-            "#%s events: %d, #repeats: %s",
-            device_type,
-            len(filtered_events),
-            n_repeat,
-        )
-    num_event_per_group = len(filtered_events) / n_repeat
-    actual_events = EventList(
-        [
-            event
-            for i, event in enumerate(filtered_events)
-            if i % num_event_per_group != 0
-        ]
-    )
-    actual_events._build_tree()
-    actual_events = actual_events.key_averages()
-
-    log.debug("profiling time breakdown")
-    log.debug(actual_events.table(row_limit=-1))
-
-    res = sum(event.device_time_total for event in actual_events) / 1000.0 / n_repeat
-    log.debug("profiling results: %s ms", res)
-    return res
 
 
 @functools.cache
