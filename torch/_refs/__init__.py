@@ -16,7 +16,7 @@ import torch
 import torch._prims as prims
 import torch._prims_common as utils
 import torch.utils._pytree as pytree
-from torch import sym_float, sym_int
+from torch import sym_float, sym_int, sym_max, sym_min
 from torch._prims_common import (
     BoolLike,
     DeviceLikeType,
@@ -387,6 +387,7 @@ def handle_noncontiguous_outputs(input_tlist, output):
 def _broadcast_shapes(*_shapes):
     from torch.fx.experimental.symbolic_shapes import (
         guard_or_false,
+        has_hint,
         is_nested_int,
         size_hint,
     )
@@ -433,9 +434,9 @@ def _broadcast_shapes(*_shapes):
                 #           specialize(s0) to be 1.
                 #      s0:4, s1:1 ==>
                 #           specialize(s1) to be 1.
-                if backed_so:
-                    a = size_hint(shape[idx], allow_none=True)
-                    b = size_hint(common_shape[idx], allow_none=True)
+                if backed_so and has_hint(shape[idx]) and has_hint(common_shape[idx]):
+                    a = size_hint(shape[idx])
+                    b = size_hint(common_shape[idx])
                     if a == 1 and b != 1:
                         torch._check(shape[idx] == 1)
                     if b == 1 and a != 1:
@@ -2735,7 +2736,7 @@ def addr(
         )
         torch._check(
             is_weakly_lesser_type(type(alpha), int),
-            lambda: f"expected bool/int alpha but got {type(beta)}",
+            lambda: f"expected bool/int alpha but got {type(alpha)}",
         )
         if not beta:
             return torch.outer(vec1, vec2) if alpha else torch.full_like(self, False)
@@ -3119,7 +3120,12 @@ def dstack(tensors: TensorSequenceType) -> TensorLikeType:
 
 @register_decomposition(aten.expand)
 def expand(a: Tensor, *shape, implicit: bool = False) -> Tensor:
-    from torch.fx.experimental.symbolic_shapes import guard_or_false, size_hint, sym_or
+    from torch.fx.experimental.symbolic_shapes import (
+        guard_or_false,
+        has_hint,
+        size_hint,
+        sym_or,
+    )
 
     backed_so = torch.fx.experimental._config.backed_size_oblivious
 
@@ -3161,9 +3167,9 @@ def expand(a: Tensor, *shape, implicit: bool = False) -> Tensor:
             #            The non-broadcast path is picked
             #      x:1, requested_length:4 ==>
             #           specialize(x) to be 1.
-            if backed_so:
-                x_hint = size_hint(x, allow_none=True)
-                requested_hint = size_hint(requested_length, allow_none=True)
+            if backed_so and has_hint(x) and has_hint(requested_length):
+                x_hint = size_hint(x)
+                requested_hint = size_hint(requested_length)
                 if x_hint == 1 and requested_hint != 1:
                     torch._check(x == 1)
 
@@ -4609,10 +4615,16 @@ def diagonal_scatter(
     dim1: int = 0,
     dim2: int = 1,
 ) -> TensorLikeType:
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_or
+
     out = utils.clone_preserve_strides(input)
     diag = out.diagonal(offset, dim1, dim2)
+    # Use sym_or + guard_or_false to handle unbacked symbolic dimensions.
     torch._check(
-        diag.shape == src.shape,
+        diag.ndim == src.ndim
+        and not guard_or_false(
+            sym_or(*(d1 != d2 for d1, d2 in zip(diag.shape, src.shape)))
+        ),
         lambda: "expected src to have a size equal to the diagonal of the input."
         f"Got {src.shape} for a diagonal of shape {diag.shape}",
     )
@@ -4640,16 +4652,13 @@ def diagonal(
 
     storage_offset = self.storage_offset()
 
+    # Use sym_min/sym_max to handle unbacked symbolic dimensions.
     if offset >= 0:
-        diag_size = max(min(self.size()[dim1], self.size()[dim2] - offset), 0)
+        diag_size = sym_max(sym_min(self.size()[dim1], self.size()[dim2] - offset), 0)
+        storage_offset += offset * self.stride()[dim2]
     else:
-        diag_size = max(min(self.size()[dim1] + offset, self.size()[dim2]), 0)
-
-    if diag_size > 0:
-        if offset >= 0:
-            storage_offset += offset * self.stride()[dim2]
-        else:
-            storage_offset -= offset * self.stride()[dim1]
+        diag_size = sym_max(sym_min(self.size()[dim1] + offset, self.size()[dim2]), 0)
+        storage_offset -= offset * self.stride()[dim1]
 
     sizes = [s for i, s in enumerate(self.size()) if i not in (dim1, dim2)]
     sizes.append(diag_size)
@@ -4914,7 +4923,23 @@ def unsqueeze(a: TensorLikeType, dim: int) -> TensorLikeType:
 # doesn't support unpacked shapes
 # TODO: Turn this into a decomposition (currently fails on reshape meta tests)
 @register_decomposition(aten.view.default)
-def view(a: TensorLikeType, *shape: ShapeType) -> TensorLikeType:
+def view(a: TensorLikeType, *shape: ShapeType | tuple[ShapeType]) -> TensorLikeType:
+    from torch._subclasses.fake_impls import (
+        _view_has_unbacked_input,
+        _view_unbacked_meta,
+    )
+
+    # Cast to satisfy the type checker since the varargs annotation creates
+    # tuple[ShapeType | tuple[ShapeType], ...] but the function expects
+    # Union[ShapeType, tuple[ShapeType]].
+    shape_tuple = utils.extract_shape_from_varargs(
+        cast(Union[ShapeType, tuple[ShapeType]], shape), validate=False
+    )
+    if torch.fx.experimental._config.backed_size_oblivious or _view_has_unbacked_input(
+        a,
+        shape_tuple,
+    ):
+        return _view_unbacked_meta(a, shape_tuple)
     return _reshape_view_helper(a, *shape, allow_copy=False)
 
 
@@ -5937,6 +5962,7 @@ def _uniform_helper(
     low: Union[bool, int, float] = 0.0,
     high: Union[bool, int, float] = 1.0,
     *,
+    stride: ShapeType,
     dtype: torch.dtype,
     device: DeviceLikeType,
 ) -> TensorLikeType:
@@ -5953,7 +5979,9 @@ def _uniform_helper(
         raise AssertionError(f"dtype must be torch.dtype, got {type(dtype)}")
     device = utils.canonicalize_device(device)
 
-    return prims._uniform_helper(shape, low=low, high=high, dtype=dtype, device=device)
+    return prims._uniform_helper(
+        shape, low=low, high=high, dtype=dtype, device=device, stride=stride
+    )
 
 
 @register_decomposition(aten.masked_fill)

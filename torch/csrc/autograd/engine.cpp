@@ -1103,7 +1103,6 @@ void Engine::evaluate_function(
           *func, InputBuffer::variables(std::move(inputs)));
     }
     if (auto* capture_vec = fn_info.captures_.get()) {
-      auto opt_parent_stream = (*func).stream();
       // Lock mutex for writing to graph_task->captured_vars_.
       std::lock_guard<std::mutex> lock(graph_task->mutex_);
       for (const auto& capture : *capture_vec) {

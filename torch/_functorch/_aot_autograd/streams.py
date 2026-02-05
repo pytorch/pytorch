@@ -1,4 +1,4 @@
-from typing import Any, Optional, TypeAlias
+from typing import Any, Optional, TYPE_CHECKING, TypeAlias
 
 import torch.fx
 import torch.fx.traceback
@@ -12,15 +12,22 @@ from torch.utils._runtime_estimation import (
     get_transfer_time,
 )
 
+
+if TYPE_CHECKING:
+    from .schemas import ViewAndMutationMeta  # noqa: TC004
+
 from .indexed_dict import IndexedDict
 
+
+aten = torch.ops.aten
 
 Node: TypeAlias = torch.fx.Node
 Graph: TypeAlias = torch.fx.Graph
 
 
 def get_roofline_estimate(node: Node) -> float:
-    assert node.op == "call_function", "non-func node in roofline estimate"
+    if node.op != "call_function":
+        raise AssertionError(f"non-func node in roofline estimate: {node.op}")
 
     def map_value(x: Any) -> Any:
         return x.meta.get("value", x) if isinstance(x, Node) else x
@@ -142,17 +149,20 @@ def handle_synced_deallocation(
     node: Node,
     last_usage: Node,
 ) -> None:
-    assert is_bwd_node(node), (
-        "synced allocations should only be handled on backward nodes"
-    )
-    assert is_bwd_node(last_usage), (
-        "synced allocations should only be handled on backward nodes"
-    )
+    if not is_bwd_node(node):
+        raise AssertionError(
+            "synced allocations should only be handled on backward nodes"
+        )
+    if not is_bwd_node(last_usage):
+        raise AssertionError(
+            "synced allocations should only be handled on backward nodes"
+        )
     allocating_stream = get_stream(node)
     side_stream = get_stream(last_usage)
-    assert allocating_stream != side_stream, (
-        "allocating and side stream should be different for synced deallocations"
-    )
+    if allocating_stream == side_stream:
+        raise AssertionError(
+            "allocating and side stream should be different for synced deallocations"
+        )
     if not torch.cuda.is_available():
         # fallback to record_stream in this case
         with graph.inserting_after(node):
@@ -279,3 +289,60 @@ def sync_deallocations(gm: torch.fx.GraphModule) -> None:
                 handle_synced_deallocation(
                     gm.graph, stream_to_exec_trace, node, last_user
                 )
+
+
+def assign_epilogue_copy_streams(gm: torch.fx.GraphModule) -> None:
+    for epi_copy in gm.graph.find_nodes(op="call_function", target=aten.copy_.default):
+        arg_stream = get_stream(epi_copy.args[1])
+        copy_stream = get_stream(epi_copy)
+        if arg_stream != copy_stream:
+            set_stream(epi_copy, get_stream_or_current_stream(epi_copy.args[1]))
+
+
+def populate_fw_metadata_with_stream_indices(
+    gm: torch.fx.GraphModule, fw_metadata: "ViewAndMutationMeta"
+) -> None:
+    """
+    Populates fw_metadata.mutated_inp_stream_indices with stream indices from the compiled graph.
+
+    The forward graph outputs are structured as:
+    (*mutated_inputs, *user_outputs, *intermediate_bases, *saved_tensors, *saved_symints)
+
+    We extract the stream index for each mutated input from the graph's output node.
+    """
+
+    num_mutated_inps = fw_metadata.num_mutated_inp_runtime_indices
+    if num_mutated_inps == 0:
+        fw_metadata.mutated_inp_stream_indices = []
+        return
+
+    # Find the output node in the graph
+    output_node = None
+    for node in gm.graph.find_nodes(op="output"):
+        output_node = node
+        break
+
+    if output_node is None:
+        raise AssertionError(
+            "No output node found in the graph when extracting stream indices"
+        )
+
+    # The output node's args[0] is a tuple/list of all outputs
+    output_args = output_node.args[0]
+
+    # Extract stream indices for the first num_mutated_inps outputs
+    stream_indices = []
+    for i in range(num_mutated_inps):
+        if i < len(output_args):
+            output_arg = output_args[i]
+            # Get the stream index from the node metadata
+            stream_idx = (
+                get_stream(output_arg)
+                if isinstance(output_arg, torch.fx.Node)
+                else None
+            )
+            stream_indices.append(stream_idx)
+        else:
+            stream_indices.append(None)
+
+    fw_metadata.mutated_inp_stream_indices = stream_indices

@@ -56,9 +56,11 @@ from torch import _guards
 
 # see discussion at https://github.com/pytorch/pytorch/issues/120699
 from torch._C._dynamo.eval_frame import (  # noqa: F401
+    _EvalFrameOverride,
     reset_code,
     set_code_exec_strategy,
     set_eval_frame,
+    set_eval_frame_override,
     set_guard_complete_hook,
     set_guard_error_hook,
     set_skip_guard_eval_unsafe,
@@ -67,6 +69,7 @@ from torch._C._dynamo.eval_frame import (  # noqa: F401
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.types import ConvertFrameReturn, FrameAction, FrameExecStrategy
 from torch._export.utils import _compiling_state_context
+from torch._library.opaque_object import is_opaque_type
 from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch._utils_internal import DISABLE_JUSTKNOBS, justknobs_check, log_export_usage
 from torch.export.dynamic_shapes import (
@@ -622,12 +625,22 @@ def innermost_fn(
     function. TorchDynamo caches on fn.__code__ object, so its necessary to find
     the innermost function to pass on the optimize, run, disable etc.
     """
+    # Don't unwrap bound methods. When a method is decorated at class definition
+    # time, _torchdynamo_orig_callable is set on the wrapper function. Accessing
+    # this attribute on a bound method delegates to __func__, which would return
+    # the unbound original function and lose the self binding.
+    if isinstance(fn, types.MethodType):
+        return fn
+
     unaltered_fn = fn
     while hasattr(unaltered_fn, unaltered_fn_attr):
         unaltered_fn = getattr(unaltered_fn, unaltered_fn_attr)
         assert callable(unaltered_fn), (
             f"A callable function is expected, but {type(unaltered_fn)} is provided."
         )
+        # Stop unwrapping if we hit a bound method
+        if isinstance(unaltered_fn, types.MethodType):
+            break
     return unaltered_fn
 
 
@@ -700,6 +713,12 @@ def guard_collectives_hook(guard_eval_result: bool) -> bool:
 
 
 _not_set = object()
+
+
+def _get_eval_frame_override() -> _EvalFrameOverride:
+    if torch._dynamo.config.error_on_dynamo_callback_in_fullgraph_compiled_code:
+        return _EvalFrameOverride.ERROR
+    return _EvalFrameOverride.SKIP
 
 
 class _TorchDynamoContext:
@@ -928,6 +947,11 @@ class _TorchDynamoContext:
         @functools.wraps(fn)
         def compile_wrapper(*args: Any, **kwargs: Any) -> Any:
             prior = set_eval_frame(None)
+            prior_eval_frame_override: _EvalFrameOverride | None = None
+            if self.fullgraph:
+                prior_eval_frame_override = set_eval_frame_override(
+                    _get_eval_frame_override()
+                )
             try:
                 # We shouldn't compile inside kernel invocation.
                 if tracing_context := torch._guards.TracingContext.try_get():
@@ -938,14 +962,20 @@ class _TorchDynamoContext:
                         return fn(*args, **kwargs)
                 # Skip nested compile during export (but not HOP internal compile)
                 # Only skip if there's an active TracingContext (nested), not for top-level export
-                if torch.compiler.is_exporting():
+                if (
+                    torch.compiler.is_exporting()
+                    and not config.force_compile_during_fx_trace
+                ):
                     from torch._higher_order_ops.utils import _in_hop_compile
 
                     if not _in_hop_compile():
                         if torch._guards.TracingContext.try_get() is not None:
                             return fn(*args, **kwargs)
                 # Skip nested compile - just inline the function
-                if is_fx_symbolic_tracing():
+                if (
+                    is_fx_symbolic_tracing()
+                    and not config.force_compile_during_fx_trace
+                ):
                     if config.error_on_nested_fx_trace:
                         raise RuntimeError(
                             "Detected that you are using FX to symbolically trace "
@@ -1002,6 +1032,8 @@ class _TorchDynamoContext:
                     set_eval_frame(None)
                     if prior_error_on_graph_break is not None:
                         _set_error_on_graph_break(prior_error_on_graph_break)
+                    if prior_eval_frame_override is not None:
+                        set_eval_frame_override(prior_eval_frame_override)
                     torch._C._functorch.pop_dynamic_layer_stack_and_undo_to_depth(
                         saved_dynamic_layer_stack_depth
                     )
@@ -1815,7 +1847,7 @@ def check_user_input_output(flat_values: list[Any], error_type: UserErrorType) -
     ] + list(common_constant_types)
 
     def is_supported_type(val: Any) -> bool:
-        return isinstance(val, tuple(supported_types))
+        return isinstance(val, tuple(supported_types)) or is_opaque_type(type(val))
 
     value_type = "input" if error_type == UserErrorType.INVALID_INPUT else "output"
     # We only check that the outputs are not None. Inputs can be None.

@@ -879,6 +879,10 @@ class BuiltinVariable(VariableTracker):
                         return ConstantVariable.create(op.__name__ != "is_")
                     if left is right:
                         return ConstantVariable.create(op(left, right))
+                    if istype(left, variables.ObjectVariable) and istype(
+                        right, variables.ObjectVariable
+                    ):
+                        return ConstantVariable.create(op(left.value, right.value))
                     if (
                         istype(left, variables.ExceptionVariable)
                         and istype(right, variables.ExceptionVariable)
@@ -1631,12 +1635,20 @@ class BuiltinVariable(VariableTracker):
                 # Default repr - build and trace it
                 fn_vt = VariableTracker.build(tx, repr_method)
                 return fn_vt.call_function(tx, [], {})
+            elif is_wrapper_or_member_descriptor(repr_method):
+                unimplemented(
+                    gb_type="Attempted to call repr() method implemented in C/C++",
+                    context="",
+                    explanation=f"{type(arg.value)} has a C/C++ based repr method. This is not supported.",
+                    hints=["Write the repr method in Python"],
+                )
             else:
-                # Custom repr - inline the method for tracing
                 bound_method = repr_method.__func__
                 fn_vt = VariableTracker.build(tx, bound_method)
                 return fn_vt.call_function(tx, [arg], {})
-        return None
+        if isinstance(arg, variables.UserDefinedClassVariable):
+            if type(arg.value).__repr__ is type.__repr__:
+                return variables.ConstantVariable.create(repr(arg.value))
 
     def call_str(
         self, tx: "InstructionTranslator", arg: VariableTracker
@@ -1833,8 +1845,10 @@ class BuiltinVariable(VariableTracker):
     def call_abs(
         self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker:
+        from .builder import SourcelessBuilder
+
         # Call arg.__abs__()
-        abs_method = BuiltinVariable(getattr).call_function(
+        abs_method = SourcelessBuilder.create(tx, getattr).call_function(
             tx, [arg, ConstantVariable.create("__abs__")], {}
         )
         return abs_method.call_function(tx, [], {})
@@ -1842,8 +1856,10 @@ class BuiltinVariable(VariableTracker):
     def call_pos(
         self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker:
+        from .builder import SourcelessBuilder
+
         # Call arg.__pos__()
-        pos_method = BuiltinVariable(getattr).call_function(
+        pos_method = SourcelessBuilder.create(tx, getattr).call_function(
             tx, [arg, ConstantVariable.create("__pos__")], {}
         )
         return pos_method.call_function(tx, [], {})
@@ -1870,8 +1886,10 @@ class BuiltinVariable(VariableTracker):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
+        from .builder import SourcelessBuilder
+
         # Call arg.__round__()
-        round_method = BuiltinVariable(getattr).call_function(
+        round_method = SourcelessBuilder.create(tx, getattr).call_function(
             tx, [arg, ConstantVariable.create("__round__")], {}
         )
         return round_method.call_function(tx, args, kwargs)
@@ -2014,6 +2032,8 @@ class BuiltinVariable(VariableTracker):
                 variables.ConstDictVariable,
                 variables.NNModuleVariable,
                 variables.TensorVariable,
+                variables.TupleVariable,
+                variables.DictItemsVariable,
             ),
         ):
             return obj.call_method(tx, "__iter__", [], {})
@@ -2216,6 +2236,8 @@ class BuiltinVariable(VariableTracker):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
+        from .builder import SourcelessBuilder
+
         # Can we merge this implementation and call_dict's one?
         assert not kwargs
         if not args:
@@ -2244,7 +2266,7 @@ class BuiltinVariable(VariableTracker):
                 out = tx.inline_user_function_return(iter_fn, args, kwargs)
                 if isinstance(out, SetVariable):
                     return out
-                return BuiltinVariable(set).call_set(tx, out)
+                return SourcelessBuilder.create(tx, set).call_set(tx, out)
         raise_observed_exception(
             TypeError,
             tx,
@@ -2288,6 +2310,8 @@ class BuiltinVariable(VariableTracker):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
+        from .builder import SourcelessBuilder
+
         if kwargs:
             if not (len(kwargs) == 1 and "strict" in kwargs):
                 raise_args_mismatch(
@@ -2297,7 +2321,10 @@ class BuiltinVariable(VariableTracker):
                     f"{len(kwargs)} kwargs",
                 )
         strict = kwargs.pop("strict", ConstantVariable.create(False))
-        iter_args = [BuiltinVariable(iter).call_function(tx, [arg], {}) for arg in args]
+        iter_args = [
+            SourcelessBuilder.create(tx, iter).call_function(tx, [arg], {})
+            for arg in args
+        ]
         return variables.ZipVariable(
             iter_args,
             strict=strict.as_python_constant(),
@@ -2636,6 +2663,7 @@ class BuiltinVariable(VariableTracker):
                 variables.TensorVariable,
                 variables.NamedTupleVariable,
                 variables.ConstantVariable,
+                variables.DefaultDictVariable,
                 variables.DistributedVariable,
                 variables.UserDefinedClassVariable,
                 variables.UserDefinedObjectVariable,
@@ -2674,7 +2702,7 @@ class BuiltinVariable(VariableTracker):
                         gb_type="Attempted to wrap sparse Tensor",
                         context="",
                         explanation="torch.compile does not support sparse Tensors",
-                        hints=[*graph_break_hints.SUPPORTABLE],
+                        hints=[*graph_break_hints.SPARSE_TENSOR],
                     )
 
             try:
@@ -2728,6 +2756,7 @@ class BuiltinVariable(VariableTracker):
         if isinstance(
             obj,
             (
+                variables.DefaultDictVariable,
                 variables.PlacementVariable,
                 variables.NamedTupleVariable,
                 variables.UserDefinedObjectVariable,

@@ -83,7 +83,8 @@ class BlackwellGPUGemmConfig(GemmConfig):
     targeting Nvidia Blackwell GPUs
     """
 
-    epilogue_subtile: bool = dataclasses.field(kw_only=True, default=False)
+    # epilogue_subtile must be a power of 2 (1 means no subtiling)
+    epilogue_subtile: int = dataclasses.field(kw_only=True, default=1)
     warp_specialize: bool = dataclasses.field(kw_only=True, default=True)
     flatten: bool = dataclasses.field(kw_only=True, default=True)
 
@@ -332,7 +333,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                 64,
                 4,
                 8,
-                epilogue_subtile=True,
+                epilogue_subtile=2,
                 warp_specialize=True,
                 flatten=True,
             ),
@@ -342,7 +343,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                 64,
                 3,
                 8,
-                epilogue_subtile=True,
+                epilogue_subtile=2,
                 warp_specialize=True,
                 flatten=True,
             ),
@@ -352,7 +353,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                 128,
                 2,
                 8,
-                epilogue_subtile=True,
+                epilogue_subtile=2,
                 warp_specialize=True,
                 flatten=True,
             ),
@@ -362,7 +363,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                 64,
                 3,
                 8,
-                epilogue_subtile=True,
+                epilogue_subtile=2,
                 warp_specialize=True,
                 flatten=True,
             ),
@@ -372,7 +373,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                 128,
                 3,
                 4,
-                epilogue_subtile=True,
+                epilogue_subtile=2,
                 warp_specialize=True,
                 flatten=True,
             ),
@@ -382,7 +383,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                 64,
                 3,
                 8,
-                epilogue_subtile=True,
+                epilogue_subtile=2,
                 warp_specialize=True,
                 flatten=True,
             ),
@@ -392,7 +393,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                 128,
                 3,
                 8,
-                epilogue_subtile=True,
+                epilogue_subtile=2,
                 warp_specialize=True,
                 flatten=True,
             ),
@@ -403,7 +404,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                 64,
                 3,
                 8,
-                epilogue_subtile=False,
+                epilogue_subtile=1,
                 warp_specialize=True,
                 flatten=True,
             ),
@@ -413,31 +414,62 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                 128,
                 3,
                 8,
-                epilogue_subtile=False,
+                epilogue_subtile=1,
+                warp_specialize=True,
+                flatten=True,
+            ),
+            # Include subtile=4. Always required for testing.
+            BlackwellGPUGemmConfig(
+                256,
+                128,
+                64,
+                4,
+                8,
+                epilogue_subtile=4,
+                warp_specialize=True,
+                flatten=True,
+            ),
+            BlackwellGPUGemmConfig(
+                128,
+                128,
+                128,
+                4,
+                8,
+                epilogue_subtile=4,
                 warp_specialize=True,
                 flatten=True,
             ),
         ]
 
         self.blackwell_persistent_addmm_configs: list[BaseConfig] = [
+            # Include each subtiling factor for testing.
             BlackwellGPUGemmConfig(
                 256,
                 128,
                 64,
                 2,
                 4,
-                epilogue_subtile=True,
+                epilogue_subtile=2,
                 warp_specialize=True,
                 flatten=True,
             ),
-            # Ensure we can test at least 1 non-subtiled version.
             BlackwellGPUGemmConfig(
                 256,
                 128,
                 64,
                 2,
                 4,
-                epilogue_subtile=False,
+                epilogue_subtile=1,
+                warp_specialize=True,
+                flatten=True,
+            ),
+            BlackwellGPUGemmConfig(
+                256,
+                128,
+                64,
+                2,
+                4,
+                epilogue_subtile=4,
                 warp_specialize=True,
                 flatten=True,
             ),
@@ -576,7 +608,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                 num_warps=c.num_warps,
                 hint_override=c.hint_override,
                 group_m=8,
-                epilogue_subtile=True,
+                epilogue_subtile=2,
                 warp_specialize=True,
                 flatten=True,
             )
@@ -691,6 +723,21 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             if group_m is not None:
                 key += (group_m,)
 
+            # Add BlackwellGPUGemmConfig specific fields to key if present
+            if isinstance(conf, BlackwellGPUGemmConfig):
+                key += (conf.epilogue_subtile, conf.warp_specialize, conf.flatten)
+
+            # Add TlxGemmConfig specific fields to key if present
+            if config.is_fbcode() and config.triton.enable_tlx_templates:
+                from torch._inductor.fb.tlx_templates.registry import (
+                    get_tlx_config_key_and_kwargs,
+                )
+
+                tlx_key_fields, tlx_kwargs = get_tlx_config_key_and_kwargs(conf)
+                key += tlx_key_fields
+            else:
+                tlx_kwargs = {}
+
             if key not in used and (
                 max_mm_configs is None or len(used) < max_mm_configs
             ):
@@ -709,6 +756,9 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                     kwargs["EPILOGUE_SUBTILE"] = conf.epilogue_subtile
                     kwargs["WARP_SPECIALIZE"] = conf.warp_specialize
                     kwargs["FLATTEN"] = conf.flatten
+
+                # Add TlxGemmConfig specific fields if present
+                kwargs.update(tlx_kwargs)
 
                 yield self.triton_config(conf.num_stages, num_warps, **kwargs)
 
@@ -737,9 +787,8 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         for hint_override in [None] + config.multi_kernel_hints:
             m_hint = max(
                 next_power_of_2(
-                    V.graph.sizevars.size_hint(
+                    V.graph.sizevars.optimization_hint_with_override(
                         m,
-                        fallback=config.unbacked_symint_fallback,  # type: ignore[arg-type]
                         hint_override=hint_override,
                     )
                 ),
@@ -747,9 +796,8 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             )
             n_hint = max(
                 next_power_of_2(
-                    V.graph.sizevars.size_hint(
+                    V.graph.sizevars.optimization_hint_with_override(
                         n,
-                        fallback=config.unbacked_symint_fallback,  # type: ignore[arg-type]
                         hint_override=hint_override,
                     )
                 ),
@@ -757,9 +805,8 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             )
             k_hint = max(
                 next_power_of_2(
-                    V.graph.sizevars.size_hint(
+                    V.graph.sizevars.optimization_hint_with_override(
                         k,
-                        fallback=config.unbacked_symint_fallback,  # type: ignore[arg-type]
                         hint_override=hint_override,
                     )
                 ),
@@ -1179,7 +1226,8 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
                 default_config = FlexConfig(64, 64, 3, 4)
             else:
                 default_config = FlexConfig(64, 64, 3, 4)
-            if capability >= (12, 0):
+            # here we are using sm_120_default_flex_config on THOR as well
+            if capability >= (11, 0):
                 default_config = self.sm_120_default_flex_config.get(
                     (dtype, head_dim), default_config
                 )
@@ -1221,6 +1269,8 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
             capability_class = "float32"
         elif major == 12:
             capability_class = "sm12x"
+        elif major == 11:
+            capability_class = "sm11x"
         elif major >= 10:
             capability_class = "sm10x"
         elif capability == (9, 0):
@@ -1251,11 +1301,18 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
                     64, 64, 64, 64, 3 if minor == 6 and h == 128 else 2, 4
                 )
             ),
+            "sm11x": lambda h: (
+                FlexBwDConfig(32, 128, 128, 32, 3, 4)
+                if h < 64
+                else FlexBwDConfig(
+                    64, 64, 64, 64, 1 if h >= 128 else 2, 4
+                )
+            ),
             "sm12x": lambda h: (
                 FlexBwDConfig(32, 128, 128, 32, 3, 4)
                 if h < 64
                 else FlexBwDConfig(
-                    64, 64, 64, 64, 3 if minor == 6 and h == 128 else 2, 4
+                    64, 64, 64, 64, 1 if h >= 128 else 2, 4
                 )
             ),
         }
@@ -1290,6 +1347,8 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
                 default_config = FlexDecodeConfig(64, 1, 2)
             else:
                 default_config = FlexDecodeConfig(64, 3, 2)
+        if capability == (11, 0):
+            default_config = FlexDecodeConfig(16, 1, 2)
         else:
             default_config = FlexDecodeConfig(64, 1, 2)
 
@@ -1793,7 +1852,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         assert isinstance(kernel_inputs, MMKernelInputs)
         m, n, k = kernel_inputs.mnk_symbolic()
         # Calculate allow_tf32
-        allow_tf32 = torch.backends.cuda.matmul.allow_tf32 and (
+        allow_tf32 = torch.backends.cuda.matmul.fp32_precision == "tf32" and (
             not inductor_config.force_same_precision
             or ((m % 16) == 0 and (n % 16) == 0 and (k % 8) == 0)
         )
@@ -2062,6 +2121,32 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
                 "WARP_SPECIALIZE": ws,
                 "FLATTEN": flatten,
             }
+
+    @staticmethod
+    def _generate_exhaustive_configs() -> list[BaseConfig]:
+        configs: list[BaseConfig] = []
+        for BLOCK_M, BLOCK_N, BLOCK_K in itertools.product(
+            [32, 64, 128, 256],
+            repeat=3,
+        ):
+            for num_stages in [2, 3, 4, 5, 6]:
+                # AutoWS doesn't work with num_warps < 4
+                for num_warps in [4, 8]:
+                    for EPILOGUE_SUBTILE in [1, 2, 4]:
+                        configs.append(
+                            BlackwellGPUGemmConfig(
+                                block_m=BLOCK_M,
+                                block_n=BLOCK_N,
+                                block_k=BLOCK_K,
+                                num_stages=num_stages,
+                                num_warps=num_warps,
+                                group_m=8,
+                                epilogue_subtile=EPILOGUE_SUBTILE,
+                                warp_specialize=True,
+                                flatten=True,
+                            )
+                        )
+        return configs
 
 
 # Scaled MM-specific mixin for scaled MM templates
@@ -2357,6 +2442,7 @@ class CUDABlackwellPersistentTMATemplateConfigHeuristic(
     def __init__(self) -> None:
         super().__init__()
         self.mm_configs = self.blackwell_persistent_mm_configs
+        self.exhaustive_configs = self._generate_exhaustive_configs()
 
 
 @register_template_heuristic(
@@ -2389,6 +2475,7 @@ class CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic(
             self.blackwell_persistent_mm_configs
             + self.blackwell_persistent_addmm_configs
         )
+        self.exhaustive_configs = self._generate_exhaustive_configs()
 
 
 @register_template_heuristic(

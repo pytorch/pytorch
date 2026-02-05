@@ -126,6 +126,10 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
         r2.sum().backward()
         self.assertTrue(same(input1.grad, input2.grad.float(), tol=0.01))
 
+        # Clean up compilation state before test returns to avoid false positive
+        # memory leak detection (leak check runs before tearDown)
+        torch._dynamo.reset()
+
     def test_eager(self, device):
         self._check_backend_works("eager", device, boxed=False)
 

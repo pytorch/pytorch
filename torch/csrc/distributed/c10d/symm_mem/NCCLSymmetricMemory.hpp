@@ -7,15 +7,11 @@
 namespace c10d {
 namespace symmetric_memory {
 
-struct NCCLAllocation;
+class NCCLPeerAllocInfo;
 
 class NCCLSymmetricMemory : public SymmetricMemory {
  public:
-  NCCLSymmetricMemory(
-      NCCLAllocation* allocation,
-      const std::string& group_name,
-      ncclWindow_t buffer_handle,
-      ncclWindow_t signal_handle);
+  NCCLSymmetricMemory(c10::intrusive_ptr<NCCLPeerAllocInfo> pai, size_t offset);
 
   ~NCCLSymmetricMemory() override = default;
 
@@ -45,27 +41,18 @@ class NCCLSymmetricMemory : public SymmetricMemory {
 
   c10::Device get_device() override;
 
-  const std::vector<int>& get_rank_to_global_rank() override;
-
-  int* get_rank_to_global_rank_dev() override;
-
   ncclWindow_t get_window();
 
   ncclWindow_t get_signal_pad_handle();
 
+  size_t get_offset() override;
+
  private:
-  size_t buffer_size_;
-  int device_idx_;
+  c10::intrusive_ptr<NCCLPeerAllocInfo> pai_;
+  size_t offset_;
   int rank_;
   int world_size_;
-  std::vector<void*> buffers_;
-  std::vector<void*> signal_pads_;
-  void** buffers_dev_;
-  void** signal_pads_dev_;
-  std::string group_name_;
-  ncclWindow_t buffer_win_;
-  ncclWindow_t signal_handle_;
-  std::vector<int> rank_to_global_rank_;
+  int device_idx_;
 };
 
 } // namespace symmetric_memory

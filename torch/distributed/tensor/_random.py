@@ -2,6 +2,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import contextlib
 import warnings
+from collections.abc import Sequence
 from logging import getLogger
 from typing import Optional
 
@@ -50,7 +51,12 @@ def _get_rng_tracker(device_mesh: DeviceMesh) -> Optional["_RNGStateTracker"]:
     """Get or create the RNG tracker based on the global config flag."""
     global _rng_tracker
     if _rng_tracker is None and is_rng_supported_mesh(device_mesh):
-        if _USE_THREAD_RNG_TRACKER:
+        import torch._dynamo as dynamo
+
+        # Disable ThreadBasedRNGTracker when torch.compile is active
+        # to avoid issues with CUDAGraph capture and compile tracing
+        use_thread_tracker = _USE_THREAD_RNG_TRACKER and not dynamo.is_compiling()
+        if use_thread_tracker:
             _rng_tracker = ThreadBasedRNGTracker(device_mesh)
         else:
             _rng_tracker = OffsetBasedRNGTracker(device_mesh)
@@ -739,7 +745,7 @@ def _calc_first_shard_size(spec: DTensorSpec) -> list[int]:
 
 
 def _calc_shard_info(
-    mesh_coordinate: list[int], spec: DTensorSpec
+    mesh_coordinate: Sequence[int], spec: DTensorSpec
 ) -> tuple[list[int], list[int]]:
     mesh = spec.mesh
     # note: dim_map does not allow double sharding which is the FSDP(fully_shard)+TP
