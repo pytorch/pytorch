@@ -13,7 +13,7 @@ import torch._dynamo
 import torch._dynamo.config
 import torch._dynamo.test_case
 import torch.utils._pytree as python_pytree
-from torch._dynamo.exc import ResumePrologueTracingError, Unsupported
+from torch._dynamo.exc import ResumePrologueTracingError, TorchRuntimeError, Unsupported
 from torch._dynamo.testing import skipIfNotPy312, skipIfOnlyNotPy312
 from torch._dynamo.utils import counters
 from torch.testing._internal.common_utils import (
@@ -557,7 +557,7 @@ Attempted to call function marked as skipped
             """\
 Observed exception
   Explanation: Dynamo found no exception handler at the top-level compiled function when encountering an exception. Exception will propagate outside the compiled region.
-  Hint: Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled.
+  Hint: Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance("force_eager")`.
   Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
 
   Developer debug context: raised exception RuntimeError([ConstantVariable(str: 'test')])
@@ -583,7 +583,7 @@ from user code:
             """\
 Uninitialized nn.Module
   Explanation: Attempted to trace an uninitialized nn.Module of type Foo.
-  Hint: Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled.
+  Hint: Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance("force_eager")`.
   Hint: Ensure your nn.Module instance has called `super().__init__()`.
 
   Developer debug context: Foo
@@ -868,6 +868,8 @@ User code traceback:
             """\
 NotImplementedError/UnsupportedFakeTensorException when running FX node
   Explanation: Dynamo failed to run FX node with fake tensors: call_function mylib.error_messages_faketensor(*(FakeTensor(..., size=(3,)),), **{}): got NotImplementedError()
+  Hint: Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance("force_eager")`.
+  Hint: If the op is a custom op, did you implement a fake tensor implementation? (e.g. with `@my_custom_op.register_fake`)
   Hint: If the op is a PyTorch op, please file an issue to PyTorch.
 
   Developer debug context:
@@ -877,6 +879,29 @@ NotImplementedError/UnsupportedFakeTensorException when running FX node
 from user code:
    File "test_error_messages.py", line N, in fn
     return torch.ops.mylib.error_messages_faketensor(x)""",
+        )
+
+    def test_fx_node_error_bad_user_code(self):
+        def fn(x, y):
+            return x + y
+
+        self.assertExpectedInlineMunged(
+            TorchRuntimeError,
+            lambda: torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.randn(3), torch.randn(4)
+            ),
+            """\
+RuntimeError when making fake tensor call
+  Explanation: Dynamo failed to run FX node with fake tensors: call_function <built-in function add>(*(FakeTensor(..., size=(3,)), FakeTensor(..., size=(4,))), **{}): got RuntimeError('Attempting to broadcast a dimension of length 4 at -1! Mismatching argument at index 1 had torch.Size([4]); but expected shape should be broadcastable to [3]')
+  Hint: Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance("force_eager")`.
+
+  Developer debug context:
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb4315.html
+
+from user code:
+   File "test_error_messages.py", line N, in fn
+    return x + y""",
         )
 
     def test_data_dependent_branching_fullgraph(self):
@@ -1850,8 +1875,6 @@ from user code:
         torch._dynamo.mark_dynamic(x, 2)
         torch._dynamo.mark_dynamic(y, 1)
 
-        from torch._dynamo.exc import TorchRuntimeError
-
         def post_munge(s):
             s = re.sub(r"s\d+: hint = 10", "s94: hint = 10", s)
             return s
@@ -1860,7 +1883,13 @@ from user code:
             TorchRuntimeError,
             lambda: torch.compile(fn, backend="eager", fullgraph=True)(x, y),
             """\
-Dynamo failed to run FX node with fake tensors: call_function <built-in function add>(*(FakeTensor(..., size=(4, 4)), FakeTensor(..., size=(10, s94))), **{}): got RuntimeError('The size of tensor a (4) must match the size of tensor b (s94: hint = 10) at non-singleton dimension 1)')
+RuntimeError when making fake tensor call
+  Explanation: Dynamo failed to run FX node with fake tensors: call_function <built-in function add>(*(FakeTensor(..., size=(4, 4)), FakeTensor(..., size=(10, s94))), **{}): got RuntimeError('The size of tensor a (4) must match the size of tensor b (s94: hint = 10) at non-singleton dimension 1)')
+  Hint: Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance("force_eager")`.
+
+  Developer debug context:
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb4315.html
 
 from user code:
    File "test_error_messages.py", line N, in fn
