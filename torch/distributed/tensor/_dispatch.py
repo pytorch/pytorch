@@ -223,11 +223,19 @@ class OpDispatcher:
             # We have basically inlined propagate() here, but WITHOUT the
             # output_sharding assignment
             if try_cache and not _are_we_tracing():
-                return self.sharding_propagator.propagate_op_sharding(op_info.schema)
+                result = self.sharding_propagator.propagate_op_sharding(op_info.schema)
             else:
-                return self.sharding_propagator.propagate_op_sharding_non_cached(
+                result = self.sharding_propagator.propagate_op_sharding_non_cached(
                     op_info.schema
                 )
+            if logger.handlers and logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    "sharding_prop MISS (C++ fast path): %s -> %s",
+                    op_info.schema,
+                    # pyrefly: ignore [missing-attribute]
+                    result.output_spec,
+                )
+            return result
         except NotImplementedError:
             if torch._C._dispatch_has_kernel_for_dispatch_key(
                 op_call.name(), torch._C.DispatchKey.CompositeImplicitAutograd
