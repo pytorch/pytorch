@@ -26,7 +26,7 @@ from torch._dynamo.utils import counters, is_node_meta_valid
 from torch._functorch._activation_checkpointing.ac_logging_utils import (
     create_structured_trace_for_min_cut_info,
 )
-from torch._functorch._aot_autograd.utils import is_with_effects
+from torch._functorch._aot_autograd.utils import is_with_effects, is_with_effects_token
 from torch._inductor import config as inductor_config
 from torch._inductor.custom_graph_pass import (
     CustomKnapsackSolver,
@@ -222,6 +222,12 @@ def _extract_graph_with_inputs_outputs(
     new_graph = fx.Graph()
     env = {}
 
+    # track the current effect token for re-wiring forward with_effects in backward.
+    # when we copy a forward with_effects into backward, we substitute its effect
+    # token input with the current backward token, then update current_effect_token
+    # to be the output token of the copied node.
+    current_effect_token: fx.Node | None = None
+
     # Add new placeholder nodes in the order specified by the inputs
     for node in inputs:
         new_node = new_graph.placeholder(node.name)
@@ -229,6 +235,9 @@ def _extract_graph_with_inputs_outputs(
         new_node.meta = node.meta
         # pyrefly: ignore [unsupported-operation]
         env[node] = new_node
+        # init current_effect_token from tangents_token placeholder
+        if subgraph == "backward" and node.name == "tangents_token":
+            current_effect_token = new_node
 
     for node in joint_graph.nodes:
         if not ignore_must_be_in_fw_bw:
@@ -257,16 +266,54 @@ def _extract_graph_with_inputs_outputs(
             env[node] = InvalidNode  # type: ignore[assignment]
         elif node.op == "call_function":
             all_args = pytree.arg_tree_leaves(*node.args, **node.kwargs)
-            all_args = [
+
+            # if with_effects, skip the token when checking validity - it can be re-wired to the backward token chain
+            skip_effect_token = (
+                is_with_effects(node)
+                and subgraph == "backward"
+                and current_effect_token is not None
+            )
+
+            effect_token_arg = node.args[0] if skip_effect_token else None
+            all_args_invalid = [
                 isinstance(env[x], InvalidNodeBase)
                 for x in all_args
-                if isinstance(x, fx.Node)
+                if isinstance(x, fx.Node) and x is not effect_token_arg
             ]
-            if any(all_args):
+            if any(all_args_invalid):
                 env[node] = InvalidNode  # type: ignore[assignment]
                 continue
-            # pyrefly: ignore [unsupported-operation, bad-argument-type]
-            env[node] = new_graph.node_copy(node, lambda x: env[x])
+
+            if skip_effect_token and isinstance(
+                env.get(effect_token_arg), InvalidNodeBase
+            ):
+                # substitute the invalid forward token with current backward token
+                def make_arg_mapper(effect_tok):
+                    def arg_mapper(x):
+                        if x is effect_token_arg:
+                            return effect_tok
+                        return env[x]
+
+                    return arg_mapper
+
+                new_node = new_graph.node_copy(
+                    node, make_arg_mapper(current_effect_token)
+                )
+                # pyrefly: ignore [unsupported-operation]
+                env[node] = new_node
+                new_node.meta["_rewired_with_effects"] = True
+                continue
+
+            copied_node = new_graph.node_copy(node, lambda x: env[x])
+            env[node] = copied_node
+
+            # update current_effect_token if we copy a getitem[0] from a rewired with_effects
+            # pyrefly: ignore [missing-attribute]
+            if is_with_effects_token(node) and env[node.args[0]].meta.get(
+                "_rewired_with_effects"
+            ):
+                current_effect_token = copied_node
+
         elif node.op == "get_attr":
             # pyrefly: ignore [unsupported-operation, bad-argument-type]
             env[node] = new_graph.node_copy(node, lambda x: env[x])
@@ -1235,6 +1282,9 @@ def default_partition(
 
     saved_values = list(dict.fromkeys(saved_values).keys())
     saved_sym_nodes = list(dict.fromkeys(saved_sym_nodes).keys())
+    # effectful ops w/ must_recompute get wired into the backward effect token chain...
+    # we can discard these
+    saved_values = list(filter(lambda n: not is_with_effects_token(n), saved_values))
 
     if config._sync_decision_cross_ranks:
         saved_values = _sync_decision_cross_ranks(joint_module.graph, saved_values)
@@ -1781,6 +1831,10 @@ def force_save_effectful_ops(joint_module: fx.GraphModule) -> None:
     def mark_getitem_outputs(node: fx.Node) -> None:
         for user in node.users:
             if user.target is operator.getitem:
+                if is_with_effects_token(user):
+                    # intermediate tokens are handled by re-wiring in
+                    # _extract_graph_with_inputs_outputs - don't mark them
+                    continue
                 mark_getitem_outputs(user)
                 if not isinstance(user.meta.get("val"), (tuple, list)):
                     user.meta["recompute"] = CheckpointPolicy.MUST_SAVE
@@ -1790,6 +1844,7 @@ def force_save_effectful_ops(joint_module: fx.GraphModule) -> None:
             is_with_effects(node)
             and not must_recompute(node)
             and not _has_tag_is_backward(node)
+            and not _has_tag_must_be_in_backward(node)
         ):
             mark_getitem_outputs(node)
 
@@ -2171,6 +2226,10 @@ def solve_min_cut(
         if is_sym_node(node):
             weight = float(sym_node_size(node))
             cannot_save_reason = None
+        elif is_with_effects_token(node):
+            # effectful ops w/ must_recompute get wired into the backward effect token chain...
+            weight = math.inf
+            cannot_save_reason = "effect token"
         elif is_non_tensor_node:
             # FakeScriptObjects (opaque objects) should have weight 0.0 so they can be
             # properly partitioned between forward and backward, like BackwardState.
@@ -3462,6 +3521,9 @@ def min_cut_rematerialization_partition(
     # save_for_backward on tensors and stashes symints in autograd .ctx
     saved_sym_nodes = list(filter(is_sym_node, saved_values))
     saved_values = list(filter(lambda n: not is_sym_node(n), saved_values))
+    # effectful ops w/ must_recompute get wired into the backward effect token chain...
+    # we can discard these
+    saved_values = list(filter(lambda n: not is_with_effects_token(n), saved_values))
 
     # NB: saved_sym_nodes will be mutated to reflect the actual saved symbols
     fw_module, bw_module = _extract_fwd_bwd_modules(
