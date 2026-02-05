@@ -64,9 +64,10 @@ class AddmmBenchmark(op_bench.TorchBenchmarkBase):
         M, K = input_one.shape
         M_check, N = mat1.shape
         N_check, K_check = mat2.shape
-        assert M == M_check and K == K_check and N == N_check, (
-            "Matrix dimensions must match"
-        )
+        if not (M == M_check and K == K_check and N == N_check):
+            raise AssertionError(
+                f"Matrix dimensions must match: M={M} vs {M_check}, K={K} vs {K_check}, N={N} vs {N_check}"
+            )
 
         bytes_per_element = input_one.element_size()
         total_elements = M * K + M * N + N * K + M * K
@@ -116,9 +117,10 @@ class AddbmmBenchmark(op_bench.TorchBenchmarkBase):
         M, N = input_one.shape
         B, M_check, K = batch1.shape
         B_check, K_check, N_check = batch2.shape
-        assert M == M_check and N == N_check and B == B_check and K == K_check, (
-            "Dimensions must match"
-        )
+        if not (M == M_check and N == N_check and B == B_check and K == K_check):
+            raise AssertionError(
+                f"Dimensions must match: M={M} vs {M_check}, N={N} vs {N_check}, B={B} vs {B_check}, K={K} vs {K_check}"
+            )
 
         bytes_per_element = input_one.element_size()
         total_elements = M * N + B * M * K + B * K * N + M * N
