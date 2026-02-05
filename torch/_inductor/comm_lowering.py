@@ -532,28 +532,7 @@ def register_symm_mem_lowerings():
             continue
 
         try:
-            _, op_part = qualname.rsplit("::", 1)
-            if "." in op_part:
-                op_base, overload = op_part.rsplit(".", 1)
-            else:
-                op_base = op_part
-                overload = "default"
-
-            # Get the operator from symm_mem namespace
-            if not hasattr(symm_mem, op_base):
-                log.debug("Operator %s not available in symm_mem namespace", op_base)
-                continue
-
-            packet = getattr(symm_mem, op_base)
-            if not hasattr(packet, overload):
-                log.debug(
-                    "Overload %s.%s not available in symm_mem namespace",
-                    op_base,
-                    overload,
-                )
-                continue
-
-            op = getattr(packet, overload)
+            op = torch._library.utils.lookup_op(qualname)
 
             # Create and register the lowering
             lowering_fn = _create_symm_mem_lowering(op, symm_mem_args)
