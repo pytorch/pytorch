@@ -68,7 +68,6 @@ struct orStream {
   }
 };
 
-
 orError_t openreg::addTaskToStream(
     orStream_t stream,
     std::function<void()> task) {
