@@ -44,6 +44,7 @@ from torch._inductor.custom_graph_pass import (
 from torch._inductor.output_code import OutputCode
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.utils import BoxedBool, should_use_remote_fx_graph_cache
+from torch._library.fake_class_registry import FakeScriptObject
 from torch._logging import LazyString
 from torch._utils_internal import log_cache_bypass
 from torch.compiler._cache import (
@@ -510,6 +511,7 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
             {
                 AOTConfig: functools.partial(self._reduce_aot_config),
                 torch.Tensor: functools.partial(self._reduce_tensor),
+                FakeScriptObject: functools.partial(self._reduce_fake_script_object),
             }
         )
 
