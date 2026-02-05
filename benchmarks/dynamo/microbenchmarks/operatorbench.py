@@ -261,22 +261,22 @@ def benchmark(
     output_csv = None
     if op == "all":
         filename = f"operatorbench_{suite}_{dtype}.csv"
-        output_fd = open(filename, "w")
-        output_csv = csv.writer(output_fd)
-        output_csv.writerow(
-            [
-                "operator",
-                *[
-                    f"{a} {b}"
-                    for a, b in itertools.product(
-                        backend_names,
-                        [f"{x * 100:.0f}th" for x in quantiles_thresholds],
-                    )
-                ],
-                "elapsed",
-                *map("{} abs".format, ["eager", *backend_names]),
-            ]
-        )
+        with open(filename, "w") as output_fd:
+            output_csv = csv.writer(output_fd)
+            output_csv.writerow(
+                [
+                    "operator",
+                    *[
+                        f"{a} {b}"
+                        for a, b in itertools.product(
+                            backend_names,
+                            [f"{x * 100:.0f}th" for x in quantiles_thresholds],
+                        )
+                    ],
+                    "elapsed",
+                    *map("{} abs".format, ["eager", *backend_names]),
+                ]
+            )
 
     dtype = torch.float16 if dtype == "float16" else torch.float32
 
