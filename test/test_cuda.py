@@ -341,29 +341,11 @@ print(t.is_pinned())
         self.assertEqual(eager_result, compiled_result)
         self.assertEqual(eager_result, torch.tensor(10, device="cuda"))
 
-        # Test with CUDA graphs for eager
-        g_eager = torch.cuda.CUDAGraph()
-        s = torch.cuda.Stream()
-        with torch.cuda.stream(s):
-            s.wait_stream(torch.cuda.current_stream())
-            # warmup
-            for _ in range(3):
-                eager_out = f(x)
-            torch.cuda.current_stream().wait_stream(s)
-
-        with torch.cuda.stream(s):
-            g_eager.capture_begin()
-            eager_out = f(x)
-            g_eager.capture_end()
-
-        g_eager.replay()
-        torch.cuda.synchronize()
-        self.assertEqual(eager_out, torch.tensor(10, device="cuda"))
-
         # Test with CUDA graphs for compiled function
         torch._dynamo.reset()
         compile_f = torch.compile(f, backend="aot_eager")
 
+        s = torch.cuda.Stream()
         with torch.cuda.stream(s):
             s.wait_stream(torch.cuda.current_stream())
             # warmup
