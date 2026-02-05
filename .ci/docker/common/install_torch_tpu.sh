@@ -1,5 +1,4 @@
 #!/bin/bash
-
 set -ex
 
 # 1. Guard Clause
