@@ -629,7 +629,11 @@ class FxGraphCachePickler(pickle.Pickler):
             # This is the only case where I'm sure it's cache safe.
             # I have not worked out the details for everything else
             # but I'm sure we could
-            if opaque_object.is_opaque_type(cls) and not opaque_object.has_members(cls):
+            if (
+                opaque_object.is_opaque_type(cls)
+                and opaque_object.is_opaque_extern(cls)
+                and not opaque_object.has_members(cls)
+            ):
                 return (_ident, (t.script_class_name,))
         return (_ident, (t.wrapped_obj, t.script_class_name, t.real_obj))
 
