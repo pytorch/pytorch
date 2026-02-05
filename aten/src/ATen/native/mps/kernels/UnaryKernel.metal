@@ -134,7 +134,7 @@ struct abs_functor {
     bool is_h1 = (a == b);
     bool is_h2 = ((sqrt_1_plus_r == 1) && (r > 0));
 
-    return is_h1 ? h1 : (is_h2 ? h2 : h3);
+    return select(select(h3, h2, is_h2), h1, is_h1);
   }
 };
 
