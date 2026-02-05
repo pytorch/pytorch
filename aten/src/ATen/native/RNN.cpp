@@ -1281,7 +1281,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backwar
     TORCH_CHECK(batch_sizes.dim() == 1, "batch_sizes tensor should be 1D"); \
     TORCH_CHECK(                                                            \
         batch_sizes.device().is_cpu(),                                      \
-        "batch_sizes should be on CPU, but got ",                           \
+        "batch_sizes tensor should be on CPU, but got ",                           \
         batch_sizes.device());                                              \
     if (use_cudnn(data)) {                                                  \
       Tensor output, hy;                                                    \
@@ -1376,7 +1376,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backwar
     TORCH_CHECK(batch_sizes.dim() == 1, "batch_sizes tensor should be 1D"); \
     TORCH_CHECK(                                                            \
         batch_sizes.device().is_cpu(),                                      \
-        "batch_sizes should be on CPU, but got ",                           \
+        "batch_sizes tensor should be on CPU, but got ",                           \
         batch_sizes.device());                                              \
     std::vector<QRNNCellParamsWrapper> params;                              \
     for (c10::intrusive_ptr<CellParamsBase> x : _params) {                  \
@@ -1520,7 +1520,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
   TORCH_CHECK(batch_sizes.dim() == 1, "batch_sizes tensor should be 1D");
   TORCH_CHECK(
       batch_sizes.device().is_cpu(),
-      "batch_sizes should be on CPU, but got ",
+      "batch_sizes tensor should be on CPU, but got ",
       batch_sizes.device());
   if (use_cudnn(data)) {
     Tensor output, hy, cy;
@@ -1800,7 +1800,7 @@ static std::tuple<Tensor, Tensor, Tensor> quantized_lstm_data(
   TORCH_CHECK(batch_sizes.dim() == 1, "batch_sizes tensor should be 1D");
   TORCH_CHECK(
       batch_sizes.device().is_cpu(),
-      "batch_sizes should be on CPU, but got ",
+      "batch_sizes tensor should be on CPU, but got ",
       batch_sizes.device());
 
   PackedSequence input { data, batch_sizes };

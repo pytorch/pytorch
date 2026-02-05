@@ -7359,6 +7359,7 @@ class TestCudaAutocast(TestAutocast):
     @unittest.skipIf(not TEST_CUDNN, "CUDNN not available")
     def test_rnn_packed_sequence_batch_sizes_must_be_cpu(self):
         # Verify that passing batch_sizes on CUDA raises an error instead of segfaulting
+        # Tests all affected RNN ops: rnn_relu, rnn_tanh, gru, lstm
         data = torch.randn([18, 16], dtype=torch.float32, device="cuda")
         batch_sizes = torch.tensor([8, 6, 4], dtype=torch.int64, device="cuda")
         hx = torch.randn([1, 8, 32], dtype=torch.float32, device="cuda")
@@ -7367,6 +7368,7 @@ class TestCudaAutocast(TestAutocast):
             torch.randn([32, 32], dtype=torch.float32, device="cuda"),
         ]
 
+        # Test rnn_relu
         with self.assertRaisesRegex(
             RuntimeError, "batch_sizes tensor should be on CPU"
         ):
@@ -7375,6 +7377,59 @@ class TestCudaAutocast(TestAutocast):
                 batch_sizes=batch_sizes,
                 hx=hx,
                 params=params,
+                has_biases=False,
+                num_layers=1,
+                dropout=0.5,
+                train=False,
+                bidirectional=False,
+            )
+
+        # Test rnn_tanh
+        with self.assertRaisesRegex(
+            RuntimeError, "batch_sizes tensor should be on CPU"
+        ):
+            torch.ops.aten.rnn_tanh(
+                data,
+                batch_sizes=batch_sizes,
+                hx=hx,
+                params=params,
+                has_biases=False,
+                num_layers=1,
+                dropout=0.5,
+                train=False,
+                bidirectional=False,
+            )
+
+        # Test gru
+        with self.assertRaisesRegex(
+            RuntimeError, "batch_sizes tensor should be on CPU"
+        ):
+            torch.ops.aten.gru(
+                data,
+                batch_sizes=batch_sizes,
+                hx=hx,
+                params=params,
+                has_biases=False,
+                num_layers=1,
+                dropout=0.5,
+                train=False,
+                bidirectional=False,
+            )
+
+        # Test lstm (requires both hx and cx)
+        cx = torch.randn([1, 8, 32], dtype=torch.float32, device="cuda")
+        lstm_params = [
+            torch.randn([128, 16], dtype=torch.float32, device="cuda"),  # weight_ih
+            torch.randn([128, 32], dtype=torch.float32, device="cuda"),  # weight_hh
+        ]
+        with self.assertRaisesRegex(
+            RuntimeError, "batch_sizes tensor should be on CPU"
+        ):
+            torch.ops.aten.lstm(
+                data,
+                batch_sizes=batch_sizes,
+                hx=[hx, cx],
+                params=lstm_params,
                 has_biases=False,
                 num_layers=1,
                 dropout=0.5,
