@@ -16,26 +16,12 @@ This checklist covers areas that CI cannot check. Skip items related to linting,
 
 When a PR introduces new API patterns, carefully evaluate the broader implications:
 
-- [ ] **No flag-based internal access** - Reject patterns like `_INTERNAL_USE_ONLY=True` flags that gate internal functionality. These are confusing to reason about, impossible to document properly, and create BC headaches. Use a separate private function instead (e.g., `_create_saved_tensor_internal()`)
+- [ ] **No flag-based internal access** - Reject patterns like `_internal=True` kwargs that gate internal functionality. These are confusing to reason about, impossible to document properly, and create BC headaches. Use a separate private function instead (e.g., `_my_internal_op()`)
 - [ ] **Pattern already exists?** - Before accepting a new pattern, search the codebase to check if this pattern is already established. If not, the PR is introducing a new convention that needs stronger justification
 - [ ] **Documentation implications** - Can this API be clearly documented? Flag-based access creates ambiguity about what is public vs private
-- [ ] **BC implications going forward** - Will this pattern create future BC constraints? Internal flags on public functions blur the public/private boundary
+- [ ] **BC implications going forward** - Will this pattern create future BC constraints?
 - [ ] **Testing implications** - Does this pattern require awkward test patterns? Internal-only flags often lead to tests that use "forbidden" parameters
 - [ ] **UX implications** - Is this pattern discoverable and understandable to users? Will it appear in autocomplete, type hints, or docs in confusing ways?
-
-**Preferred pattern for internal-only functionality:**
-```python
-# BAD: Flag-based internal access
-def create_thing(x, *, _INTERNAL_USE_ONLY=False):
-    if not _INTERNAL_USE_ONLY:
-        raise RuntimeError("This is internal")
-    return _create_thing_impl(x)
-
-# GOOD: Separate private function
-def _create_thing_internal(x):
-    """Internal use only. Subject to change without notice."""
-    return _create_thing_impl(x)
-```
 
 ### Code Clarity
 
@@ -74,17 +60,17 @@ def _create_thing_internal(x):
 
 **Example of good test structure:**
 ```python
-def _test_feature_with_config(self, device, dtype):
+def _test_feature_with_config(self, flag, expected_shape):
     """Shared test logic called by device-specific tests."""
-    x = torch.randn(10, device=device, dtype=dtype)
-    result = my_feature(x)
+    x = torch.randn(10)
+    result = my_feature(x, flag)
     self.assertEqual(result.shape, expected_shape)
 
-def test_feature_cpu(self):
-    self._test_feature_with_config("cpu", torch.float32)
+def test_feature_enabled(self):
+    self._test_feature_with_config(True, (10, 10))
 
-def test_feature_cuda(self):
-    self._test_feature_with_config("cuda", torch.float32)
+def test_feature_disabled(self):
+    self._test_feature_with_config(False, (10, 5))
 ```
 
 ### Common Testing Issues
@@ -92,16 +78,10 @@ def test_feature_cuda(self):
 - Tests that only check the happy path without error cases
 - Duplicated test code that should be a parameterized helper
 - Tests that don't clean up resources (files, CUDA memory)
-- Flaky tests (timing-dependent, order-dependent)
+- Flaky tests (timing-dependent, order-dependent, golden value)
 - Tests that skip without clear justification
 
 ## Security
-
-### Injection Vulnerabilities
-
-- [ ] **No command injection** - User input is not passed directly to shell commands
-- [ ] **No code injection** - No use of `eval()`, `exec()` with untrusted input
-- [ ] **Safe string formatting** - SQL, shell commands use parameterized queries/escaping
 
 ### Credential Handling
 
@@ -148,3 +128,4 @@ def test_feature_cuda(self):
 - Synchronous CUDA operations where async would work
 - Keeping computation graph alive longer than needed
 - Redundant clones or copies
+

@@ -2,6 +2,11 @@
 
 This document covers backward compatibility (BC) considerations for PyTorch PR reviews.
 
+As a top level principle, ANYTHING that changes ANY user-visible behavior is potentially BC-breaking.
+It will then need to be classified as a behavior not exercised in practice, a bug fix or a voluntary BC-breaking change.
+
+As a reviewer, you MUST be paranoid about any potentially BC-breaking change. Indeed, one of your key role is to identify such user-visible change in behavior and ensure that the PR author worked through the implication for all of them.
+
 ## What Constitutes a BC-Breaking Change
 
 ### API Changes
@@ -20,10 +25,10 @@ This document covers backward compatibility (BC) considerations for PyTorch PR r
 
 | Change Type | BC Impact | Action Required |
 |-------------|-----------|-----------------|
+| Any user-visible behavior change | Potentially breaking | Flag to author for further discussion |
 | Raising new exceptions | Potentially breaking | Validate it is expected and document |
 | Changing exception types | Potentially breaking | Document in release notes |
 | Changing default device | Breaking | Explicit migration |
-| Any user-visible change of existing behavior | Potentially breaking | Should be classified bug-fix or bc-breaking |
 
 ### What Is a Public API
 
@@ -39,7 +44,10 @@ An API is **public** if:
 ## Python Version Support
 
 PyTorch supports all non-EOL CPython versions which means the last 5 versions.
+Right now it support 3.10-3.14.
+Which means that all the code must be compatible with 3.10.
 
+PyTorch also supports free threaded CPython, so any C++ code must be compatible with it.
 
 ## When BC Breaks Are Acceptable
 
@@ -76,7 +84,6 @@ Immediate BC breaks may be acceptable for:
 - Security vulnerabilities
 - Serious bugs that make the API unusable
 - APIs explicitly marked experimental/beta
-- Changes during a major version bump (e.g., 2.x to 3.0)
 
 ## Common BC Pitfalls
 
@@ -156,24 +163,6 @@ class NewError(ValueError):  # Inherits from old type
 raise NewError("...")
 ```
 
-### 5. Changing Output Shape or Dtype
-
-**Bad:**
-```python
-# Silently returning different shape
-return x.squeeze()  # Was returning x.unsqueeze(0)
-```
-
-**Good:**
-```python
-# Add explicit parameter for new behavior
-def function(x, keepdim=None):
-    if keepdim is None:
-        warnings.warn("keepdim default changing to True", FutureWarning)
-        keepdim = False
-    ...
-```
-
 ## Review Checklist for BC
 
 When reviewing a PR, check:
@@ -185,6 +174,7 @@ When reviewing a PR, check:
 - [ ] **No changed exception types** - Or new types inherit from old
 - [ ] **Deprecation uses FutureWarning** - Not DeprecationWarning (for user-facing APIs)
 - [ ] **Deprecation has stacklevel=2** - Points to user code, not library internals
+- [ ] **Any other user-visible behavior change** - Give full list to author
 
 ## Questions to Ask
 
@@ -194,3 +184,4 @@ When unsure about BC impact:
 2. Would existing user code raise an exception (recoverable)?
 3. Is there a migration path that doesn't require users to change code immediately?
 4. Is this change documented in release notes?
+5. If still unsure, raise it in the review as a point to investigate further

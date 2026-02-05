@@ -91,11 +91,12 @@ For local mode, use `gh` commands to get:
 2. List of changed files
 3. Full diff of changes
 4. Existing comments/reviews
+5. Fetch associated issue information when applicable
 
 ### Step 2: Analyze Changes
 
 Read through the diff systematically:
-1. Identify the purpose of the change from title/description
+1. Identify the purpose of the change from title/description/issue
 2. Group changes by type (new code, tests, config, docs)
 3. Note the scope of changes (files affected, lines changed)
 
@@ -106,6 +107,7 @@ Perform thorough line-by-line analysis using the review checklist. See [review-c
 - Testing adequacy
 - Security considerations
 - Performance implications
+- Any behavior change not expected by author
 
 ### Step 4: Check Backward Compatibility
 
