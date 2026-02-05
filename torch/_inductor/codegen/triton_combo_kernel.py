@@ -33,9 +33,9 @@ from .common import (
     SizeArg,
     WorkspaceArg,
 )
-from .simd import prefix_is_reduction, SIMDScheduling
+from .simd import NodeInfo, prefix_is_reduction, SIMDScheduling
 from .simd_kernel_features import SIMDKernelFeatures
-from .triton import gen_common_triton_imports, TritonKernel
+from .triton import TritonKernel
 from .triton_utils import config_of, equal_1_arg_indices, signature_to_meta
 
 
@@ -48,8 +48,7 @@ BLOCK_UTILIZATION = 0.8
 def _default_custom_combo_kernel_horizontal_partition(
     nodes: list[BaseSchedulerNode],
     triton_scheduling: SIMDScheduling,
-    kernel_map: dict[BaseSchedulerNode, TritonKernel],
-    node_info_map: dict[BaseSchedulerNode, tuple[Any, Any, Any, Any]],
+    node_info_map: dict[BaseSchedulerNode, NodeInfo],
 ) -> list[list[BaseSchedulerNode]]:
     """Horizontally partition the given list of nodes into a list of list of nodes where each sublist
     represents a partition. Nodes in different partitions are implemented in different combo kernels.
@@ -59,8 +58,7 @@ def _default_custom_combo_kernel_horizontal_partition(
     Input arguments:
         nodes: a list of fused scheduler nodes to partition.
         triton_scheduling: TritonScheduling instance.
-        kernel_map: a map from node to its kernel.
-        node_info_map: a map from node to (node_schedule, tiled_groups, numel, rnumel).
+        node_info_map: a map from node to NodeInfo NamedTuple
     Output:
         a list of list of nodes with each sublist representing a partition.
 
@@ -73,17 +71,14 @@ def _default_custom_combo_kernel_horizontal_partition(
     assert len(nodes) >= 1
 
     # first partition nodes based on number of block dimensions
-    tilings = [node_info_map[n][1] for n in nodes]
+    tilings = [node_info_map[n].tiling for n in nodes]
 
     max_dims = max(len(t) for t in tilings)
     nodes_per_ndim: list[list[BaseSchedulerNode]] = []
     for i in range(2, max_dims + 1):
         group_per_dim = [n for n, t in zip(nodes, tilings) if len(t) == i]
         reduction = [
-            n
-            for n in group_per_dim
-            if kernel_map[n].inside_reduction
-            and not (kernel_map[n].persistent_reduction and kernel_map[n].no_x_dim)
+            n for n in group_per_dim if node_info_map[n].features.is_reduction()
         ]
         not_reduction = [n for n in group_per_dim if n not in reduction]
         # rnumel > 2048 usually has long execution time
@@ -105,10 +100,10 @@ def _default_custom_combo_kernel_horizontal_partition(
         large_pointwise = [
             n
             for n in not_reduction
-            if not kernel_map[n].inside_reduction
-            and len(kernel_map[n].numels) == 2
-            and V.graph.sizevars.shape_env.has_hint(kernel_map[n].numels["x"])
-            and V.graph.sizevars.size_hint(kernel_map[n].numels["x"]) > LARGE_NUMELS
+            if not node_info_map[n].features.is_reduction()
+            and len(node_info_map[n].tiling) == 2
+            and V.graph.sizevars.shape_env.has_hint(node_info_map[n].tiling["x"])
+            and V.graph.sizevars.size_hint(node_info_map[n].tiling["x"]) > LARGE_NUMELS
         ]
         if large_pointwise:
             # TODO benchmark the performance when large pointwise nodes combining with others
@@ -131,8 +126,7 @@ _custom_combo_kernel_horizontal_partition_algorithm: Callable[
     [
         list[BaseSchedulerNode],
         SIMDScheduling,
-        dict[BaseSchedulerNode, TritonKernel],
-        dict[BaseSchedulerNode, tuple[Any, Any, Any, Any]],
+        dict[BaseSchedulerNode, NodeInfo],
     ],
     list[list[BaseSchedulerNode]],
 ] = _default_custom_combo_kernel_horizontal_partition
@@ -143,8 +137,7 @@ def set_custom_combo_kernel_horizontal_partition(
         [
             list[BaseSchedulerNode],
             SIMDScheduling,
-            dict[BaseSchedulerNode, TritonKernel],
-            dict[BaseSchedulerNode, tuple[Any, Any, Any, Any]],
+            dict[BaseSchedulerNode, NodeInfo],
         ],
         list[list[BaseSchedulerNode]],
     ],
@@ -191,7 +184,7 @@ class ComboKernel(Kernel):
     def _base_horizontal_partition(
         subkernel_nodes: list[BaseSchedulerNode],
         triton_scheduling: SIMDScheduling,
-        node_info_map: dict[BaseSchedulerNode, tuple[Any, Any, Any, Any]],
+        node_info_map: dict[BaseSchedulerNode, NodeInfo],
         custom_algorithm: bool,
     ) -> list[list[BaseSchedulerNode]]:
         """Generates a list of lists of node info tuples which consist of (fused_nodes, tiling, numel, rnumel)
@@ -209,9 +202,10 @@ class ComboKernel(Kernel):
         yelem_to_partition_state: dict[int, PartitionState] = defaultdict(
             lambda: PartitionState([], [], 0)
         )
+        all_partitions = []
 
         for node in subkernel_nodes:
-            _node_schedule, tiled_groups, _numel, _rnumel = node_info_map[node]
+            tiled_groups = node_info_map[node].tiling
             node_info = node
 
             read_writes = node.read_writes
@@ -219,6 +213,13 @@ class ComboKernel(Kernel):
 
             ndim = len(tiled_groups)
             assert ndim >= 2, f"Combokernel not support tile {tiled_groups}"
+
+            # Skip 2d reductions (r0_,r1_) and 3D pointwise (x,y,z) from combo
+            keys = tiled_groups.keys()
+            if ("r0_" in keys and "r1_" in keys) or "z" in keys:
+                all_partitions.append([node_info])
+                continue
+
             if not mixed_sizes and ndim == 3:
                 y_elem = tiled_groups["y"]
                 partition_state = yelem_to_partition_state[y_elem]
@@ -232,22 +233,19 @@ class ComboKernel(Kernel):
                     partition_state, read_write_count, node_info
                 )
 
-        all_partitions = []
         for partition_state in ndim_to_partition_state.values():
             partition_state.finalize()
             all_partitions.extend(partition_state.partitions)
         for partition_state in yelem_to_partition_state.values():
             partition_state.finalize()
             all_partitions.extend(partition_state.partitions)
-
         return all_partitions
 
     @staticmethod
     def horizontal_partition(
         nodes: list[BaseSchedulerNode],
         triton_scheduling: SIMDScheduling,
-        kernel_map: dict[BaseSchedulerNode, TritonKernel],
-        node_info_map: dict[BaseSchedulerNode, tuple[Any, Any, Any, Any]],
+        node_info_map: dict[BaseSchedulerNode, NodeInfo],
         custom_algorithm: bool = False,
     ) -> list[list[BaseSchedulerNode]]:
         """Generates a list of lists of node info tuples which consist of (fused_nodes, tiling, numel, rnum)
@@ -260,7 +258,7 @@ class ComboKernel(Kernel):
         """
         if custom_algorithm:
             raw_partitions = _custom_combo_kernel_horizontal_partition_algorithm(
-                nodes, triton_scheduling, kernel_map, node_info_map
+                nodes, triton_scheduling, node_info_map
             )
         else:
             raw_partitions = [nodes]
@@ -321,7 +319,13 @@ class ComboKernel(Kernel):
                     else (kernel.min_x_blocks_list[i], True)
                 )
                 xblock_str = (
-                    f"tl.cdiv({xnumels}, XBLOCK)" if not no_x_dim else f"{xnumels}"
+                    (
+                        f"tl.cdiv({xnumels}, XBLOCK_{i})"
+                        if config.combo_kernel_per_subkernel_blocks
+                        else f"tl.cdiv({xnumels}, XBLOCK)"
+                    )
+                    if not no_x_dim
+                    else f"{xnumels}"
                 )
                 if i == 0:
                     code.splice(f"num_xblocks_{i} = {xblock_str}")
@@ -355,14 +359,19 @@ class ComboKernel(Kernel):
                 code.splice(f"pid_offset = pid // {num_kernels}")
 
     def __init__(
-        self, enable_autotune: bool = False, mixed_sizes: bool = False
+        self,
+        triton_kernel_cls: type[TritonKernel],
+        enable_autotune: bool = False,
+        mixed_sizes: bool = False,
     ) -> None:
         super().__init__()
+        self.triton_kernel_cls = triton_kernel_cls
         self.sub_kernels: list[TritonKernel] = []
         self.iter_vars_count = itertools.count()
         self.grids: list[list[int]] = []
         self.min_x_blocks_list: list[Union[int, str]] = []
         self.x_numels_list: list[Union[int, str]] = []
+        self.y_tree_list: list = []
         self.enable_autotune = enable_autotune
         self.mixed_sizes = mixed_sizes
         self.dispatch_class: Optional[
@@ -391,12 +400,13 @@ class ComboKernel(Kernel):
         tiling: dict[str, sympy.Expr],
         features: SIMDKernelFeatures,
         optimize_mask: bool,
+        triton_kernel_cls: type[TritonKernel],
     ) -> TritonKernel:
         """
         Only allow optimize_mask=True when 1) sequential dispatch is used,
         2) numels except x dimension are the same for each sub kernel.
         """
-        return TritonKernel(
+        return triton_kernel_cls(
             tiling,
             features=features,
             pid_cache={"tl.program_id(0)": "pid_offset"},
@@ -453,11 +463,18 @@ class ComboKernel(Kernel):
                 code.writeline(
                     f"{tree.prefix.upper()}BLOCK_{num}: tl.constexpr = {val}"
                 )
-                uniquify_block_sizes.append(f"{tree.prefix.upper()}BLOCK")
 
             if tree.prefix == "x" and sub_kernel.no_x_dim:
                 code.writeline(f"XBLOCK_{num}: tl.constexpr = 1")
                 uniquify_block_sizes.append("XBLOCK")
+            elif tree.prefix in ("x", "y") and config.combo_kernel_per_subkernel_blocks:
+                uniquify_block_sizes.append(f"{tree.prefix.upper()}BLOCK")
+            elif tree.is_reduction:
+                if (
+                    config.combo_kernel_per_subkernel_blocks
+                    or sub_kernel.persistent_reduction
+                ):
+                    uniquify_block_sizes.append(f"{tree.prefix.upper()}BLOCK")
         self.grids.append(grid)
         return uniquify_block_sizes
 
@@ -494,11 +511,7 @@ class ComboKernel(Kernel):
 
     def select_heuristics(self, sub_kernel: TritonKernel) -> tuple[str, dict[str, int]]:
         size_hints = {
-            prefix: next_power_of_2(
-                V.graph.sizevars.size_hint(
-                    numel, fallback=config.unbacked_symint_fallback
-                )
-            )
+            prefix: next_power_of_2(V.graph.sizevars.optimization_hint(numel))
             for prefix, numel in sub_kernel.numels.items()
             if not prefix_is_reduction(prefix) or sub_kernel.inside_reduction
         }
@@ -580,6 +593,9 @@ class ComboKernel(Kernel):
     def select_dispatch_strategy(self) -> None:
         if self.dispatch_class is not None:
             return
+        if config.combo_kernel_per_subkernel_blocks:
+            self.dispatch_class = ComboKernel.SequentialDispatch
+            return
         # mixed_sizes is used for optimize_mask, so it only allows sequential dispatch
         # Not mixed sizes on y dim technically is ok to use round robin as wells.
         if not self.mixed_sizes or any(isinstance(e, str) for e in self.x_numels_list):
@@ -604,8 +620,11 @@ class ComboKernel(Kernel):
         selected_kernel: TritonKernel,
         signature: list[Any],
         argdefs: list[ArgName],
+        size_hints_list: list[dict[str, int]],
         pointwise_with_reduce: bool = False,
     ) -> str:
+        """Write the @triton_heuristics.<heuristics> decorator line for the combo kernel."""
+
         can_use_32bit = all(k.index_dtype == "tl.int32" for k in self.sub_kernels)
         size_dtype = "tl.int32" if can_use_32bit else "tl.int64"
         for i, sub in enumerate(self.sub_kernels):
@@ -618,21 +637,30 @@ class ComboKernel(Kernel):
             "device": DeviceProperties.create(V.graph.get_current_device_or_throw()),
             "constants": {},
         }
+        triton_meta[
+            "enable_fp_fusion"
+        ] = not config.emulate_precision_casts  # pyrefly: ignore[unsupported-operation]
 
         for arg_num in equal_1_arg_indices(signature):
             triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index,union-attr]
 
         # pyrefly: ignore [unsupported-operation]
         triton_meta["configs"] = [config_of(signature)]
+
+        if TritonKernel._enable_pdl_codegen():
+            # pyrefly: ignore [unsupported-operation]
+            triton_meta["launch_pdl"] = True
+
         mutated_args = self.get_mutated_args_sub_kernels()
         dispatch = self.dispatch_class
         assert dispatch is not None
+
         inductor_meta = {
             "grid_type": dispatch.grid_expr.__name__,
-            "combo_grid_meta": self.combo_grid_meta(),
+            "combo_grid_meta": self.combo_grid_meta(size_hints_list),
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
             "mutated_arg_names": mutated_args,
-            **TritonKernel.inductor_meta_common(),
+            **self.triton_kernel_cls.inductor_meta_common(),
         }
 
         sub_kernel = selected_kernel
@@ -676,30 +704,28 @@ class ComboKernel(Kernel):
         return heuristics_line
 
     def codegen_blocks(self, code: IndentedBuffer) -> None:
+        has_yblock = any(self.y_tree_list)
+
         for block in self.block_args:
-            assert block in (
-                "XBLOCK",
-                "YBLOCK",
-                "R0_BLOCK",
-            ), f"{block} is not supported without autotuning"
-        if "YBLOCK" in self.block_args:
-            code.splice(f"XBLOCK: tl.constexpr = {self.block_size_2d}")
-            code.splice(f"YBLOCK: tl.constexpr = {self.block_size_2d}")
-        else:
-            code.splice(f"XBLOCK: tl.constexpr = {self.block_size_1d}")
-        if "R0_BLOCK" in self.block_args:
-            code.splice(f"R0_BLOCK: tl.constexpr = {self.block_size_reduce}")
-            code.splice(f"RBLOCK: tl.constexpr = {self.block_size_reduce}")
+            if "YBLOCK" in block:
+                size = self.block_size_2d
+            elif "XBLOCK" in block:
+                size = self.block_size_2d if has_yblock else self.block_size_1d
+            elif "R0_BLOCK" in block:
+                size = self.block_size_reduce
+            else:
+                raise AssertionError(f"{block} is not supported without autotuning")
+            code.splice(f"{block}: tl.constexpr = {size}")
 
     def get_block_args(self) -> list[ConstexprArg]:
         """
         Calculate blocks from sub_kernels and range_trees.
-        **Update self.block_args**
+        Update self.block_args, self.y_tree_list
         Return the block args
         """
         block_names = {}
-        for sub_kernel in self.sub_kernels:
-            # TODO: we assume all sub_kernels have the same block size
+        for i, sub_kernel in enumerate(self.sub_kernels):
+            y_tree = None
             for tree in sub_kernel.range_trees:
                 if tree.is_reduction and (
                     not sub_kernel.inside_reduction or sub_kernel.persistent_reduction
@@ -707,7 +733,13 @@ class ComboKernel(Kernel):
                     continue
                 if tree.prefix == "x" and sub_kernel.no_x_dim:
                     continue
-                block_names[f"{tree.prefix.upper()}BLOCK"] = tree.prefix
+                if tree.prefix == "y":
+                    y_tree = tree
+                if config.combo_kernel_per_subkernel_blocks:
+                    block_names[f"{tree.prefix.upper()}BLOCK_{i}"] = tree.prefix
+                else:
+                    block_names[f"{tree.prefix.upper()}BLOCK"] = tree.prefix
+            self.y_tree_list.append(y_tree)
         self.block_args = list(block_names.keys())
 
         return [ConstexprArg(x) for x in block_names]
@@ -754,15 +786,12 @@ class ComboKernel(Kernel):
 
                 if not tree.is_reduction or sub_kernel.inside_reduction:
                     extra_args.append(
-                        str(
-                            V.graph.sizevars.size_hint(
-                                tree.numel, fallback=config.unbacked_symint_fallback
-                            )
-                        )
+                        str(V.graph.sizevars.optimization_hint(tree.numel))
                     )
         return extra_args
 
     def codegen_kernel(self, name: Optional[str] = None) -> str:
+        """Generate the triton code for a combo kernel that fuses multiple sub-kernels."""
         # TODO: is it correct to use the first sub kernel's heuristics?
         heuristics_list, size_hints_list = [], []
         for subkernel in self.sub_kernels:
@@ -779,7 +808,7 @@ class ComboKernel(Kernel):
         )
         code = IndentedBuffer()
 
-        code.splice(gen_common_triton_imports())
+        code.splice(self.triton_kernel_cls.gen_common_triton_imports())
         if config.benchmark_combo_kernel:
             code.splice(self.imports_for_benchmark_kernel())
 
@@ -807,13 +836,17 @@ class ComboKernel(Kernel):
                 pointwise_with_reduce=pointwise_with_reduction,
                 signature=signature,
                 argdefs=argdefs,
+                size_hints_list=size_hints_list,
             )
         )
+        kernel_name = name or str(Placeholder.KERNEL_NAME)
         code.writeline(
-            f"def {name or str(Placeholder.KERNEL_NAME)}({', '.join(x.full_name() for x in argdefs)}):"
+            f"def {kernel_name}({', '.join(x.full_name() for x in argdefs)}):"
         )
 
         with code.indent():
+            if config.triton.proton_profiling:
+                code.writeline(f'pl.enter_scope("{kernel_name}")')
             code.splice("pid = tl.program_id(0)")
             if not self.enable_autotune:
                 self.codegen_blocks(code)
@@ -826,6 +859,7 @@ class ComboKernel(Kernel):
                         code, sub_kernel, num
                     )
                     sub_kernel.codegen_body()
+                    sub_kernel._filter_pdl(sub_kernel.body)
                     uniquified_body = self.uniquify_block_sizes(
                         sub_kernel.body, num, uniquify
                     )
@@ -834,6 +868,8 @@ class ComboKernel(Kernel):
             code.splice("else:")
             with code.indent():
                 code.splice("pass")
+            if config.triton.proton_profiling:
+                code.writeline(f'pl.exit_scope("{kernel_name}")')
 
         if config.benchmark_combo_kernel:
             code.splice(self.codegen_kernel_benchmark(num_gb=0))
@@ -861,24 +897,16 @@ class ComboKernel(Kernel):
                 var_name = f"arg_{next(name_cnt)}"
                 buf = V.graph.try_get_buffer(arg_name)
                 if buf:
-                    size = V.graph.sizevars.size_hints(
-                        buf.get_size(), fallback=config.unbacked_symint_fallback
-                    )
-                    stride = V.graph.sizevars.size_hints(
-                        buf.get_stride(), fallback=config.unbacked_symint_fallback
-                    )
+                    size = V.graph.sizevars.optimization_hints(buf.get_size())
+                    stride = V.graph.sizevars.optimization_hints(buf.get_stride())
                     result.writeline(
                         f"{var_name} = rand_strided({size}, {stride}, device='{buf.get_device()}', dtype={buf.get_dtype()})"  # noqa: B950 line too long
                     )
                 elif arg_name in V.graph.constants:
                     # note that random seed is put in V.graph.constants
                     const_tensor = V.graph.constants[arg_name]
-                    size = V.graph.sizevars.size_hints(
-                        const_tensor.size(), fallback=config.unbacked_symint_fallback
-                    )
-                    stride = V.graph.sizevars.size_hints(
-                        const_tensor.stride(), fallback=config.unbacked_symint_fallback
-                    )
+                    size = V.graph.sizevars.optimization_hints(const_tensor.size())
+                    stride = V.graph.sizevars.optimization_hints(const_tensor.stride())
                     result.writeline(
                         f"{var_name} = rand_strided({size}, {stride}, device='{const_tensor.device}', dtype={const_tensor.dtype})"  # type: ignore[arg-type]  # noqa: B950 line too long
                     )
@@ -990,7 +1018,7 @@ class ComboKernel(Kernel):
                 modified.writeline(line)
         return modified
 
-    def call_kernel(self, code: IndentedBuffer, name: str) -> None:
+    def call_kernel(self, name: str) -> None:
         _, call_args, _, arg_types = self.args.python_argdefs()
 
         wrapper = V.graph.wrapper_code
@@ -1005,32 +1033,66 @@ class ComboKernel(Kernel):
             arg_types=arg_types,
         )
 
-    def combo_grid_meta(self) -> dict[str, Any]:
+    def combo_grid_meta(self, size_hints_list: list[dict[str, int]]) -> dict[str, Any]:
         dynamic_shape = bool(self.dynamic_shape_args)
         num_kernels = len(self.sub_kernels)
         min_blocks = (
             max(self.min_x_blocks_list) * num_kernels if not dynamic_shape else None
         )
 
-        if not self.enable_autotune:
-            if "YBLOCK" in self.block_args:
-                default_config = {
-                    "XBLOCK": self.block_size_2d,
-                    "YBLOCK": self.block_size_2d,
-                }
-            else:
-                default_config = {"XBLOCK": self.block_size_1d}
-        else:
-            default_config = None
-
-        meta = {
+        meta: dict[str, Any] = {
             "num_kernels": num_kernels,
             "min_blocks": min_blocks,
-            "default_config": default_config,
         }
+
+        if not self.enable_autotune:
+            default_config: dict[str, int] = {}
+            if config.combo_kernel_per_subkernel_blocks:
+                # Per-subkernel block sizes: XBLOCK_0, XBLOCK_1, etc.
+                for num, sub_kernel in enumerate(self.sub_kernels):
+                    if sub_kernel.no_x_dim:
+                        default_config[f"XBLOCK_{num}"] = 1
+                    else:
+                        block_size = (
+                            self.block_size_2d
+                            if any(self.y_tree_list)
+                            else self.block_size_1d
+                        )
+                        default_config[f"XBLOCK_{num}"] = block_size
+
+                    if self.y_tree_list[num]:
+                        default_config[f"YBLOCK_{num}"] = self.block_size_2d
+            else:
+                if "YBLOCK" in self.block_args:
+                    default_config = {
+                        "XBLOCK": self.block_size_2d,
+                        "YBLOCK": self.block_size_2d,
+                    }
+                else:
+                    default_config = {"XBLOCK": self.block_size_1d}
+            meta["default_config"] = default_config
+        else:
+            meta["default_config"] = None
 
         for num, sub_kernel in enumerate(self.sub_kernels):
             meta[f"no_x_dim_{num}"] = sub_kernel.no_x_dim
+
+            if config.combo_kernel_per_subkernel_blocks:
+                meta[f"heuristic_{num}"] = (
+                    "persistent_reduction"
+                    if sub_kernel.persistent_reduction
+                    else "reduction"
+                    if sub_kernel.inside_reduction
+                    else "pointwise"
+                )
+
+                meta[f"size_hints_{num}"] = size_hints_list[num]
+                if meta[f"heuristic_{num}"] == "pointwise":
+                    if len(size_hints_list[num]) == 2:
+                        meta[f"tile_hint_{num}"] = "TileHint.SQUARE"
+                    else:
+                        meta[f"tile_hint_{num}"] = "TileHint.DEFAULT"
+
             for tree in sub_kernel.range_trees:
                 if not tree.is_reduction:
                     numel_name = f"{tree.prefix}numel_{num}"

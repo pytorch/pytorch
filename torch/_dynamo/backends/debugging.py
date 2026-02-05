@@ -149,6 +149,112 @@ def torchscript(
     return torch.jit.script(gm)
 
 
+def invoke_subgraph_inner_compiler(
+    subgraph: torch.fx.GraphModule, example_inputs: list[torch.Tensor]
+) -> Callable[..., Any]:
+    """Inner compiler that wraps forward/backward graphs in invoke_subgraph HOP.
+
+    This is used as the fw_compiler/bw_compiler for aot_autograd. When the resulting
+    function is traced by make_fx, it emits an invoke_subgraph HOP instead of inlining.
+    """
+    from torch._dynamo import disable
+    from torch._higher_order_ops.invoke_subgraph import invoke_subgraph_infer
+
+    @disable
+    @torch._dynamo.allow_in_graph
+    def invoke_subgraph_wrapper_unboxed(*operands: Any) -> Any:
+        return invoke_subgraph_infer(subgraph, *operands)
+
+    # NB: The direct to unboxed path is broken, you MUST DO THIS
+
+    def invoke_subgraph_wrapper(args: list[Any]) -> Any:
+        return invoke_subgraph_wrapper_unboxed(*args)
+
+    invoke_subgraph_wrapper._boxed_call = True  # type: ignore[attr-defined]
+
+    return invoke_subgraph_wrapper
+
+
+# I cannot say how many times I had to revert to this vibe coded version of
+# the code, which worked, and the cleaner versions of the code did not work,
+# so I'm leaving this here until we fix the rest of the bugs.
+'''
+# Counter for unique subgraph names in invoke_subgraph backend
+_invoke_subgraph_counter = 0
+
+
+def invoke_subgraph_inner_compiler_good(
+    fx_g: torch.fx.GraphModule, example_inputs: list[torch.Tensor]
+) -> Callable[..., Any]:
+    """Inner compiler that wraps forward/backward graphs in invoke_subgraph HOP.
+
+    This is used as the fw_compiler/bw_compiler for aot_autograd. When the resulting
+    function is traced by make_fx, it emits an invoke_subgraph HOP instead of inlining.
+    """
+    from torch._higher_order_ops.invoke_subgraph import (
+        invoke_subgraph as invoke_subgraph_hop,
+    )
+    from torch.fx.experimental.proxy_tensor import get_proxy_mode
+
+    global _invoke_subgraph_counter
+    _invoke_subgraph_counter += 1
+    name = f"invoke_subgraph_{_invoke_subgraph_counter}"
+
+    from torch._dynamo import disable
+
+    # Check if fx_g uses boxed calling convention
+    fx_g_is_boxed = getattr(fx_g, "_boxed_call", False)
+
+    @disable
+    @torch._dynamo.allow_in_graph
+    def invoke_subgraph_wrapper_unboxed(*args: Any) -> Any:
+        proxy_mode = get_proxy_mode()
+        if proxy_mode is not None:
+            # When being traced by make_fx, emit invoke_subgraph HOP
+            return invoke_subgraph_hop(fx_g, name, *args)  # type: ignore[arg-type]
+        else:
+            # Normal execution path - call fx_g with proper calling convention
+            if fx_g_is_boxed:
+                return fx_g(list(args))
+            else:
+                return fx_g(*args)
+
+    # Wrap to handle boxed arguments (list of args) as expected by AOTAutograd
+    def invoke_subgraph_wrapper(args: list[Any]) -> Any:
+        return invoke_subgraph_wrapper_unboxed(*args)
+
+    invoke_subgraph_wrapper._boxed_call = True  # type: ignore[attr-defined]
+    return invoke_subgraph_wrapper
+'''
+
+
+@register_backend
+def invoke_subgraph(
+    gm: torch.fx.GraphModule, fake_tensor_inputs: list[torch.Tensor], **kwargs: Any
+) -> Callable[..., Any]:
+    """Backend that wraps forward/backward graphs in invoke_subgraph HOP when traced by make_fx.
+
+    This backend uses AOTAutograd to partition into forward/backward graphs, then wraps
+    each in an invoke_subgraph HOP. This is useful for recursive Dynamo tracing scenarios
+    where you want the compiled subgraph to appear as invoke_subgraph HOPs in the outer
+    trace rather than being inlined.
+
+    Requires:
+    - torch._dynamo.config.force_compile_during_fx_trace = True
+      (this implicitly overrides error_on_nested_fx_trace)
+    """
+    if kwargs:
+        log.warning("invoke_subgraph backend ignoring extra kwargs %s", kwargs)
+
+    # Use AOTAutograd to partition into forward/backward
+    return aot_autograd(
+        fw_compiler=invoke_subgraph_inner_compiler,
+        bw_compiler=invoke_subgraph_inner_compiler,
+        partition_fn=min_cut_rematerialization_partition,
+        keep_inference_input_mutations=True,
+    )(gm, fake_tensor_inputs)
+
+
 # used boxed call to discard inputs when they are no longer needed
 def boxed_nop(
     fx_g: torch.fx.GraphModule, example_inputs: list[torch.Tensor]

@@ -1,0 +1,781 @@
+diff --git a/test/dynamo/cpython/3_13/test_patma.py b/test/dynamo/cpython/3_13/test_patma.py
+index 8325b83a593..4e37ebe18dc 100644
+--- a/test/dynamo/cpython/3_13/test_patma.py
++++ b/test/dynamo/cpython/3_13/test_patma.py
+@@ -1,3 +1,21 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_collections.py
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import run_tests
++
++# ======= END DYNAMO PATCH =======
++
+ import array
+ import collections
+ import dataclasses
+@@ -14,7 +32,7 @@ class Point:
+     y: int
+ 
+ 
+-class TestCompiler(unittest.TestCase):
++class TestCompiler(CPythonTestCase):
+ 
+     def test_refleaks(self):
+         # Hunting for leaks using -R doesn't catch leaks in the compiler itself,
+@@ -24,7 +42,7 @@ class TestCompiler(unittest.TestCase):
+             compile(file.read(), __file__, "exec")
+ 
+ 
+-class TestInheritance(unittest.TestCase):
++class TestInheritance(CPythonTestCase):
+ 
+     @staticmethod
+     def check_sequence_then_mapping(x):
+@@ -43,16 +61,17 @@ class TestInheritance(unittest.TestCase):
+                 return "seq"
+ 
+     def test_multiple_inheritance_mapping(self):
+-        class C:
+-            pass
+-        class M1(collections.UserDict, collections.abc.Sequence):
+-            pass
+-        class M2(C, collections.UserDict, collections.abc.Sequence):
+-            pass
+-        class M3(collections.UserDict, C, list):
+-            pass
+-        class M4(dict, collections.abc.Sequence, C):
+-            pass
++        with torch._dynamo.error_on_graph_break(False):
++            class C:
++                pass
++            class M1(collections.UserDict, collections.abc.Sequence):
++                pass
++            class M2(C, collections.UserDict, collections.abc.Sequence):
++                pass
++            class M3(collections.UserDict, C, list):
++                pass
++            class M4(dict, collections.abc.Sequence, C):
++                pass
+         self.assertEqual(self.check_sequence_then_mapping(M1()), "map")
+         self.assertEqual(self.check_sequence_then_mapping(M2()), "map")
+         self.assertEqual(self.check_sequence_then_mapping(M3()), "map")
+@@ -63,16 +82,17 @@ class TestInheritance(unittest.TestCase):
+         self.assertEqual(self.check_mapping_then_sequence(M4()), "map")
+ 
+     def test_multiple_inheritance_sequence(self):
+-        class C:
+-            pass
+-        class S1(collections.UserList, collections.abc.Mapping):
+-            pass
+-        class S2(C, collections.UserList, collections.abc.Mapping):
+-            pass
+-        class S3(list, C, collections.abc.Mapping):
+-            pass
+-        class S4(collections.UserList, dict, C):
+-            pass
++        with torch._dynamo.error_on_graph_break(False):
++            class C:
++                pass
++            class S1(collections.UserList, collections.abc.Mapping):
++                pass
++            class S2(C, collections.UserList, collections.abc.Mapping):
++                pass
++            class S3(list, C, collections.abc.Mapping):
++                pass
++            class S4(collections.UserList, dict, C):
++                pass
+         self.assertEqual(self.check_sequence_then_mapping(S1()), "seq")
+         self.assertEqual(self.check_sequence_then_mapping(S2()), "seq")
+         self.assertEqual(self.check_sequence_then_mapping(S3()), "seq")
+@@ -83,17 +103,18 @@ class TestInheritance(unittest.TestCase):
+         self.assertEqual(self.check_mapping_then_sequence(S4()), "seq")
+ 
+     def test_late_registration_mapping(self):
+-        class Parent:
+-            pass
+-        class ChildPre(Parent):
+-            pass
+-        class GrandchildPre(ChildPre):
+-            pass
+-        collections.abc.Mapping.register(Parent)
+-        class ChildPost(Parent):
+-            pass
+-        class GrandchildPost(ChildPost):
+-            pass
++        with torch._dynamo.error_on_graph_break(False):
++            class Parent:
++                pass
++            class ChildPre(Parent):
++                pass
++            class GrandchildPre(ChildPre):
++                pass
++            collections.abc.Mapping.register(Parent)
++            class ChildPost(Parent):
++                pass
++            class GrandchildPost(ChildPost):
++                pass
+         self.assertEqual(self.check_sequence_then_mapping(Parent()), "map")
+         self.assertEqual(self.check_sequence_then_mapping(ChildPre()), "map")
+         self.assertEqual(self.check_sequence_then_mapping(GrandchildPre()), "map")
+@@ -106,17 +127,18 @@ class TestInheritance(unittest.TestCase):
+         self.assertEqual(self.check_mapping_then_sequence(GrandchildPost()), "map")
+ 
+     def test_late_registration_sequence(self):
+-        class Parent:
+-            pass
+-        class ChildPre(Parent):
+-            pass
+-        class GrandchildPre(ChildPre):
+-            pass
+-        collections.abc.Sequence.register(Parent)
+-        class ChildPost(Parent):
+-            pass
+-        class GrandchildPost(ChildPost):
+-            pass
++        with torch._dynamo.error_on_graph_break(False):
++            class Parent:
++                pass
++            class ChildPre(Parent):
++                pass
++            class GrandchildPre(ChildPre):
++                pass
++            collections.abc.Sequence.register(Parent)
++            class ChildPost(Parent):
++                pass
++            class GrandchildPost(ChildPost):
++                pass
+         self.assertEqual(self.check_sequence_then_mapping(Parent()), "seq")
+         self.assertEqual(self.check_sequence_then_mapping(ChildPre()), "seq")
+         self.assertEqual(self.check_sequence_then_mapping(GrandchildPre()), "seq")
+@@ -129,7 +151,7 @@ class TestInheritance(unittest.TestCase):
+         self.assertEqual(self.check_mapping_then_sequence(GrandchildPost()), "seq")
+ 
+ 
+-class TestPatma(unittest.TestCase):
++class TestPatma(CPythonTestCase):
+ 
+     def test_patma_000(self):
+         match 0:
+@@ -190,8 +212,9 @@ class TestPatma(unittest.TestCase):
+ 
+     def test_patma_008(self):
+         x = 0
+-        class A:
+-            y = 1
++        with torch._dynamo.error_on_graph_break(False):
++            class A:
++                y = 1
+         match x:
+             case A.y as z:
+                 pass
+@@ -199,8 +222,9 @@ class TestPatma(unittest.TestCase):
+         self.assertEqual(A.y, 1)
+ 
+     def test_patma_009(self):
+-        class A:
+-            B = 0
++        with torch._dynamo.error_on_graph_break(False):
++            class A:
++                B = 0
+         match 0:
+             case x if x:
+                 z = 0
+@@ -1135,8 +1159,9 @@ class TestPatma(unittest.TestCase):
+         self.assertEqual(y, 0)
+ 
+     def test_patma_111(self):
+-        class A:
+-            B = 0
++        with torch._dynamo.error_on_graph_break(False):
++            class A:
++                B = 0
+         x = 0
+         match x:
+             case A.B:
+@@ -1146,9 +1171,10 @@ class TestPatma(unittest.TestCase):
+         self.assertEqual(y, 0)
+ 
+     def test_patma_112(self):
+-        class A:
+-            class B:
+-                C = 0
++        with torch._dynamo.error_on_graph_break(False):
++            class A:
++                class B:
++                    C = 0
+         x = 0
+         match x:
+             case A.B.C:
+@@ -1158,10 +1184,11 @@ class TestPatma(unittest.TestCase):
+         self.assertEqual(y, 0)
+ 
+     def test_patma_113(self):
+-        class A:
+-            class B:
+-                C = 0
+-                D = 1
++        with torch._dynamo.error_on_graph_break(False):
++            class A:
++                class B:
++                    C = 0
++                    D = 1
+         x = 1
+         match x:
+             case A.B.C:
+@@ -1174,10 +1201,11 @@ class TestPatma(unittest.TestCase):
+         self.assertEqual(y, 1)
+ 
+     def test_patma_114(self):
+-        class A:
+-            class B:
+-                class C:
+-                    D = 0
++        with torch._dynamo.error_on_graph_break(False):
++            class A:
++                class B:
++                    class C:
++                        D = 0
+         x = 0
+         match x:
+             case A.B.C.D:
+@@ -1187,11 +1215,12 @@ class TestPatma(unittest.TestCase):
+         self.assertEqual(y, 0)
+ 
+     def test_patma_115(self):
+-        class A:
+-            class B:
+-                class C:
+-                    D = 0
+-                    E = 1
++        with torch._dynamo.error_on_graph_break(False):
++            class A:
++                class B:
++                    class C:
++                        D = 0
++                        E = 1
+         x = 1
+         match x:
+             case A.B.C.D:
+@@ -1911,31 +1940,34 @@ class TestPatma(unittest.TestCase):
+         self.assertEqual(whereis(Point("X", "x")), "Not on the diagonal")
+ 
+     def test_patma_184(self):
+-        class Seq(collections.abc.Sequence):
+-            __getitem__ = None
+-            def __len__(self):
+-                return 0
++        with torch._dynamo.error_on_graph_break(False):
++            class Seq(collections.abc.Sequence):
++                __getitem__ = None
++                def __len__(self):
++                    return 0
+         match Seq():
+             case []:
+                 y = 0
+         self.assertEqual(y, 0)
+ 
+     def test_patma_185(self):
+-        class Seq(collections.abc.Sequence):
+-            __getitem__ = None
+-            def __len__(self):
+-                return 42
++        with torch._dynamo.error_on_graph_break(False):
++            class Seq(collections.abc.Sequence):
++                __getitem__ = None
++                def __len__(self):
++                    return 42
+         match Seq():
+             case [*_]:
+                 y = 0
+         self.assertEqual(y, 0)
+ 
+     def test_patma_186(self):
+-        class Seq(collections.abc.Sequence):
+-            def __getitem__(self, i):
+-                return i
+-            def __len__(self):
+-                return 42
++        with torch._dynamo.error_on_graph_break(False):
++            class Seq(collections.abc.Sequence):
++                def __getitem__(self, i):
++                    return i
++                def __len__(self):
++                    return 42
+         match Seq():
+             case [x, *_, y]:
+                 z = 0
+@@ -2062,10 +2094,11 @@ class TestPatma(unittest.TestCase):
+         self.assertIs(z, 0)
+ 
+     def test_patma_198(self):
+-        class Color(enum.Enum):
+-            RED = 0
+-            GREEN = 1
+-            BLUE = 2
++        with torch._dynamo.error_on_graph_break(False):
++            class Color(enum.Enum):
++                RED = 0
++                GREEN = 1
++                BLUE = 2
+         def f(color):
+             match color:
+                 case Color.RED:
+@@ -2088,10 +2121,11 @@ class TestPatma(unittest.TestCase):
+         self.assertIs(f(3.0), None)
+ 
+     def test_patma_199(self):
+-        class Color(int, enum.Enum):
+-            RED = 0
+-            GREEN = 1
+-            BLUE = 2
++        with torch._dynamo.error_on_graph_break(False):
++            class Color(int, enum.Enum):
++                RED = 0
++                GREEN = 1
++                BLUE = 2
+         def f(color):
+             match color:
+                 case Color.RED:
+@@ -2114,8 +2148,9 @@ class TestPatma(unittest.TestCase):
+         self.assertIs(f(3.0), None)
+ 
+     def test_patma_200(self):
+-        class Class:
+-            __match_args__ = ("a", "b")
++        with torch._dynamo.error_on_graph_break(False):
++            class Class:
++                __match_args__ = ("a", "b")
+         c = Class()
+         c.a = 0
+         c.b = 1
+@@ -2127,9 +2162,10 @@ class TestPatma(unittest.TestCase):
+         self.assertEqual(z, 0)
+ 
+     def test_patma_201(self):
+-        class Class:
+-            __match_args__ = ("a", "b")
+-        c = Class()
++        with torch._dynamo.error_on_graph_break(False):
++            class Class:
++                __match_args__ = ("a", "b")
++            c = Class()
+         c.a = 0
+         c.b = 1
+         match c:
+@@ -2140,11 +2176,12 @@ class TestPatma(unittest.TestCase):
+         self.assertEqual(z, 0)
+ 
+     def test_patma_202(self):
+-        class Parent:
+-            __match_args__ = "a", "b"
+-        class Child(Parent):
+-            __match_args__ = ("c", "d")
+-        c = Child()
++        with torch._dynamo.error_on_graph_break(False):
++            class Parent:
++                __match_args__ = "a", "b"
++            class Child(Parent):
++                __match_args__ = ("c", "d")
++            c = Child()
+         c.a = 0
+         c.b = 1
+         match c:
+@@ -2155,11 +2192,12 @@ class TestPatma(unittest.TestCase):
+         self.assertEqual(z, 0)
+ 
+     def test_patma_203(self):
+-        class Parent:
+-            __match_args__ = ("a", "b")
+-        class Child(Parent):
+-            __match_args__ = "c", "d"
+-        c = Child()
++        with torch._dynamo.error_on_graph_break(False):
++            class Parent:
++                __match_args__ = ("a", "b")
++            class Child(Parent):
++                __match_args__ = "c", "d"
++            c = Child()
+         c.a = 0
+         c.b = 1
+         match c:
+@@ -2457,9 +2495,10 @@ class TestPatma(unittest.TestCase):
+         self.assertEqual(y, 1)
+ 
+     def test_patma_232(self):
+-        class Eq:
+-            def __eq__(self, other):
+-                return True
++        with torch._dynamo.error_on_graph_break(False):
++            class Eq:
++                def __eq__(self, other):
++                    return True
+         x = eq = Eq()
+         # None
+         y = None
+@@ -2658,10 +2697,11 @@ class TestPatma(unittest.TestCase):
+         self.assertEqual(f((False, range(10, 20), True)), alts[4])
+ 
+     def test_patma_248(self):
+-        class C(dict):
+-            @staticmethod
+-            def get(key, default=None):
+-                return 'bar'
++        with torch._dynamo.error_on_graph_break(False):
++            class C(dict):
++                @staticmethod
++                def get(key, default=None):
++                    return 'bar'
+ 
+         x = C({'foo': 'bar'})
+         match x:
+@@ -2671,15 +2711,16 @@ class TestPatma(unittest.TestCase):
+         self.assertEqual(y, 'bar')
+ 
+     def test_patma_249(self):
+-        class C:
+-            __attr = "eggs"  # mangled to _C__attr
+-            _Outer__attr = "bacon"
+-        class Outer:
+-            def f(self, x):
+-                match x:
+-                    # looks up __attr, not _C__attr or _Outer__attr
+-                    case C(__attr=y):
+-                        return y
++        with torch._dynamo.error_on_graph_break(False):
++            class C:
++                __attr = "eggs"  # mangled to _C__attr
++                _Outer__attr = "bacon"
++            class Outer:
++                def f(self, x):
++                    match x:
++                        # looks up __attr, not _C__attr or _Outer__attr
++                        case C(__attr=y):
++                            return y
+         c = C()
+         setattr(c, "__attr", "spam")  # setattr is needed because we're in a class scope
+         self.assertEqual(Outer().f(c), "spam")
+@@ -2705,9 +2746,10 @@ class TestPatma(unittest.TestCase):
+                 case _:
+                     return None
+ 
+-        class X:
+-            def __init__(self, attr):
+-                self.attr = attr
++        with torch._dynamo.error_on_graph_break(False):
++            class X:
++                def __init__(self, attr):
++                    self.attr = attr
+ 
+         self.assertIs(f(1, X(1)), True)
+         self.assertIs(f(-1, X(-1)), False)
+@@ -2765,17 +2807,18 @@ class TestPatma(unittest.TestCase):
+         # Runtime-checkable protocol
+         from typing import Protocol, runtime_checkable
+ 
+-        @runtime_checkable
+-        class P(Protocol):
+-            x: int
+-            y: int
++        with torch._dynamo.error_on_graph_break(False):
++            @runtime_checkable
++            class P(Protocol):
++                x: int
++                y: int
+ 
+-        class A:
+-            def __init__(self, x: int, y: int):
+-                self.x = x
+-                self.y = y
++            class A:
++                def __init__(self, x: int, y: int):
++                    self.x = x
++                    self.y = y
+ 
+-        class B(A): ...
++            class B(A): ...
+ 
+         for cls in (A, B):
+             with self.subTest(cls=cls.__name__):
+@@ -2804,20 +2847,21 @@ class TestPatma(unittest.TestCase):
+ 
+         T = TypeVar('T')  # not using PEP695 to be able to backport changes
+ 
+-        @runtime_checkable
+-        class P(Protocol[T]):
+-            a: T
+-            b: T
++        with torch._dynamo.error_on_graph_break(False):
++            @runtime_checkable
++            class P(Protocol[T]):
++                a: T
++                b: T
+ 
+-        class A:
+-            def __init__(self, x: int, y: int):
+-                self.x = x
+-                self.y = y
++            class A:
++                def __init__(self, x: int, y: int):
++                    self.x = x
++                    self.y = y
+ 
+-        class G(Generic[T]):
+-            def __init__(self, x: T, y: T):
+-                self.x = x
+-                self.y = y
++            class G(Generic[T]):
++                def __init__(self, x: T, y: T):
++                    self.x = x
++                    self.y = y
+ 
+         for cls in (A, G):
+             with self.subTest(cls=cls.__name__):
+@@ -2834,18 +2878,19 @@ class TestPatma(unittest.TestCase):
+ 
+         # Used to fail before
+         # https://github.com/python/cpython/issues/110682
+-        @runtime_checkable
+-        class P(Protocol):
+-            __match_args__ = ('x', 'y')
+-            x: int
+-            y: int
++        with torch._dynamo.error_on_graph_break(False):
++            @runtime_checkable
++            class P(Protocol):
++                __match_args__ = ('x', 'y')
++                x: int
++                y: int
+ 
+-        class A:
+-            def __init__(self, x: int, y: int):
+-                self.x = x
+-                self.y = y
++            class A:
++                def __init__(self, x: int, y: int):
++                    self.x = x
++                    self.y = y
+ 
+-        class B(A): ...
++            class B(A): ...
+ 
+         for cls in (A, B):
+             with self.subTest(cls=cls.__name__):
+@@ -2888,7 +2933,7 @@ class TestPatma(unittest.TestCase):
+                 self.assertEqual(h, 1)
+ 
+ 
+-class TestSyntaxErrors(unittest.TestCase):
++class TestSyntaxErrors(CPythonTestCase):
+ 
+     def assert_syntax_error(self, code: str):
+         with self.assertRaises(SyntaxError):
+@@ -3222,11 +3267,12 @@ class TestSyntaxErrors(unittest.TestCase):
+                 pass
+         """)
+ 
+-class TestTypeErrors(unittest.TestCase):
++class TestTypeErrors(CPythonTestCase):
+ 
+     def test_accepts_positional_subpatterns_0(self):
+-        class Class:
+-            __match_args__ = ()
++        with torch._dynamo.error_on_graph_break(False):
++            class Class:
++                __match_args__ = ()
+         x = Class()
+         y = z = None
+         with self.assertRaises(TypeError):
+@@ -3247,9 +3293,10 @@ class TestTypeErrors(unittest.TestCase):
+         self.assertIs(y, None)
+ 
+     def test_got_multiple_subpatterns_for_attribute_0(self):
+-        class Class:
+-            __match_args__ = ("a", "a")
+-            a = None
++        with torch._dynamo.error_on_graph_break(False):
++            class Class:
++                __match_args__ = ("a", "a")
++                a = None
+         x = Class()
+         w = y = z = None
+         with self.assertRaises(TypeError):
+@@ -3261,9 +3308,10 @@ class TestTypeErrors(unittest.TestCase):
+         self.assertIs(z, None)
+ 
+     def test_got_multiple_subpatterns_for_attribute_1(self):
+-        class Class:
+-            __match_args__ = ("a",)
+-            a = None
++        with torch._dynamo.error_on_graph_break(False):
++            class Class:
++                __match_args__ = ("a",)
++                a = None
+         x = Class()
+         w = y = z = None
+         with self.assertRaises(TypeError):
+@@ -3275,8 +3323,9 @@ class TestTypeErrors(unittest.TestCase):
+         self.assertIs(z, None)
+ 
+     def test_match_args_elements_must_be_strings(self):
+-        class Class:
+-            __match_args__ = (None,)
++        with torch._dynamo.error_on_graph_break(False):
++            class Class:
++                __match_args__ = (None,)
+         x = Class()
+         y = z = None
+         with self.assertRaises(TypeError):
+@@ -3287,8 +3336,9 @@ class TestTypeErrors(unittest.TestCase):
+         self.assertIs(z, None)
+ 
+     def test_match_args_must_be_a_tuple_0(self):
+-        class Class:
+-            __match_args__ = None
++        with torch._dynamo.error_on_graph_break(False):
++            class Class:
++                __match_args__ = None
+         x = Class()
+         y = z = None
+         with self.assertRaises(TypeError):
+@@ -3299,8 +3349,9 @@ class TestTypeErrors(unittest.TestCase):
+         self.assertIs(z, None)
+ 
+     def test_match_args_must_be_a_tuple_1(self):
+-        class Class:
+-            __match_args__ = "XYZ"
++        with torch._dynamo.error_on_graph_break(False):
++            class Class:
++                __match_args__ = "XYZ"
+         x = Class()
+         y = z = None
+         with self.assertRaises(TypeError):
+@@ -3311,10 +3362,11 @@ class TestTypeErrors(unittest.TestCase):
+         self.assertIs(z, None)
+ 
+     def test_match_args_must_be_a_tuple_2(self):
+-        class Class:
+-            __match_args__ = ["spam", "eggs"]
+-            spam = 0
+-            eggs = 1
++        with torch._dynamo.error_on_graph_break(False):
++            class Class:
++                __match_args__ = ["spam", "eggs"]
++                spam = 0
++                eggs = 1
+         x = Class()
+         w = y = z = None
+         with self.assertRaises(TypeError):
+@@ -3335,7 +3387,8 @@ class TestTypeErrors(unittest.TestCase):
+ 
+     def test_regular_protocol(self):
+         from typing import Protocol
+-        class P(Protocol): ...
++        with torch._dynamo.error_on_graph_break(False):
++            class P(Protocol): ...
+         msg = (
+             'Instance and class checks can only be used '
+             'with @runtime_checkable protocols'
+@@ -3349,12 +3402,13 @@ class TestTypeErrors(unittest.TestCase):
+ 
+     def test_positional_patterns_with_regular_protocol(self):
+         from typing import Protocol
+-        class P(Protocol):
+-            x: int  # no `__match_args__`
+-            y: int
+-        class A:
+-            x = 1
+-            y = 2
++        with torch._dynamo.error_on_graph_break(False):
++            class P(Protocol):
++                x: int  # no `__match_args__`
++                y: int
++            class A:
++                x = 1
++                y = 2
+         w = None
+         with self.assertRaises(TypeError):
+             match A():
+@@ -3363,11 +3417,12 @@ class TestTypeErrors(unittest.TestCase):
+         self.assertIsNone(w)
+ 
+ 
+-class TestValueErrors(unittest.TestCase):
++class TestValueErrors(CPythonTestCase):
+ 
+     def test_mapping_pattern_checks_duplicate_key_1(self):
+-        class Keys:
+-            KEY = "a"
++        with torch._dynamo.error_on_graph_break(False):
++            class Keys:
++                KEY = "a"
+         x = {"a": 0, "b": 1}
+         w = y = z = None
+         with self.assertRaises(ValueError):
+@@ -3378,7 +3433,7 @@ class TestValueErrors(unittest.TestCase):
+         self.assertIs(y, None)
+         self.assertIs(z, None)
+ 
+-class TestSourceLocations(unittest.TestCase):
++class TestSourceLocations(CPythonTestCase):
+     def test_jump_threading(self):
+         # See gh-123048
+         def f():
+@@ -3397,7 +3452,7 @@ class TestSourceLocations(unittest.TestCase):
+             if inst.opcode in dis.hasjump:
+                 self.assertIsNotNone(inst.positions.lineno, "jump without location")
+ 
+-class TestTracing(unittest.TestCase):
++class TestTracing(CPythonTestCase):
+ 
+     @staticmethod
+     def _trace(func, *args, **kwargs):
+@@ -3514,37 +3569,4 @@ class TestTracing(unittest.TestCase):
+ 
+ 
+ if __name__ == "__main__":
+-    """
+-    # From inside environment using this Python, with pyperf installed:
+-    sudo $(which pyperf) system tune && \
+-         $(which python) -m test.test_patma --rigorous; \
+-    sudo $(which pyperf) system reset
+-    """
+-    import pyperf
+-
+-
+-    class PerfPatma(TestPatma):
+-
+-        def assertEqual(*_, **__):
+-            pass
+-
+-        def assertIs(*_, **__):
+-            pass
+-
+-        def assertRaises(*_, **__):
+-            assert False, "this test should be a method of a different class!"
+-
+-        def run_perf(self, count):
+-            tests = []
+-            for attr in vars(TestPatma):
+-                if attr.startswith("test_"):
+-                    tests.append(getattr(self, attr))
+-            tests *= count
+-            start = pyperf.perf_counter()
+-            for test in tests:
+-                test()
+-            return pyperf.perf_counter() - start
+-
+-
+-    runner = pyperf.Runner()
+-    runner.bench_time_func("patma", PerfPatma().run_perf)
++    run_tests()
