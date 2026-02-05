@@ -83,24 +83,24 @@ def test_feature_disabled(self):
 
 ## Security
 
-### Credential Handling
+### CI/CD and Workflow Security
 
-- [ ] **No hardcoded secrets** - No API keys, passwords, or tokens in code
-- [ ] **No credential logging** - Sensitive data is not written to logs or error messages
-- [ ] **Secure file handling** - Temporary files with credentials are properly cleaned up
+When reviewing changes to workflows, build scripts, or CI configuration:
 
-### Input Validation
+- [ ] **No secrets in workflow files** - PyTorch does not use repo secrets mechanism due to non-ephemeral runners; secrets can be compromised via reverse shell attacks
+- [ ] **Ephemeral runners for sensitive jobs** - Binary builds, uploads, and merge actions must run on ephemeral runners only
+- [ ] **No cache-dependent binaries in sensitive contexts** - sccache-backed builds are susceptible to cache corruption; these artifacts should not access sensitive info or be published for general use
+- [ ] **Protected branch rules respected** - Changes to merge rules, release workflows, or deployment environments require extra scrutiny
+- [ ] **Immutable artifact references** - Docker images use immutable tags; no overwriting of published artifacts
 
-- [ ] **Untrusted input validated** - External input (files, network, user) is validated
-- [ ] **Safe deserialization** - `pickle.load` and similar are not used on untrusted data
-- [ ] **Path traversal prevented** - File paths from user input are sanitized
+### PyTorch API Security
 
-### Common Security Issues
+When reviewing changes to PyTorch APIs and user-facing code:
 
-- Using `pickle.loads()` on data from external sources
-- Constructing shell commands with string concatenation
-- Logging stack traces that may contain sensitive data
-- Unbounded resource allocation from user-controlled input
+- [ ] **Model loading surfaces** - `torch.load` has a large attack surface; changes should not expand unsafe deserialization. Prefer safetensors for new serialization APIs
+- [ ] **TorchScript security** - TorchScript models are executable code; introspection tools like `torch.utils.model_dump` can execute code from untrusted models and should not be used
+- [ ] **Distributed primitives** - `torch.distributed`, RPC, and TCPStore have no auth/encryption and accept connections from anywhere; they are for internal networks only, not untrusted environments
+- [ ] **No new pickle usage** - Avoid adding `pickle.load` or `torch.load` without `weights_only=True` on paths that could receive untrusted data
 
 ## Performance
 
