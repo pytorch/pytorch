@@ -2771,15 +2771,14 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 
         # Wrap user fn to support nn.Module inputs and pytree inputs/outputs.
         # The wrapped function:
-        # 1. Takes flat_args containing flattened LeafModuleState objects
+        # 1. Takes input_spec and flat_args containing flattened LeafModuleState objects
         # 2. Unflattens them with input_spec and converts LeafModuleState back to nn.Module
         # 3. Calls the original fn with reconstructed args/kwargs
         # 4. Flattens the output and captures/verifies the output spec
-        # Note: input_spec is captured from the outer scope.
         def make_leaf_function_wrapper(
             fn: Callable[..., Any],
         ) -> Callable[..., tuple[Any, ...]]:
-            def wrapper(*flat_args: Any) -> tuple[Any, ...]:
+            def wrapper(input_spec: Any, *flat_args: Any) -> tuple[Any, ...]:
                 nonlocal captured_out_spec
 
                 with reconstruct_original_args(input_spec, flat_args) as (
@@ -2816,10 +2815,12 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 
         real_impl_proxy = make_spec_proxy("real_fn", real_impl_spec)
         fake_impl_proxy = make_spec_proxy("fake_fn", fake_impl_spec)
+        input_spec_proxy = make_spec_proxy("input_spec", input_spec)
 
         invoke_args = (
             real_impl_proxy,
             fake_impl_proxy,
+            input_spec_proxy,
             *flat_arg_proxies,
         )
         result_proxy = tx.output.create_proxy(
