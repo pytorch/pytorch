@@ -8,25 +8,34 @@
 
 namespace at::cuda {
 
-// EventPool - Thread-safe pool of CUDA events to avoid expensive
-// cudaEventCreate calls. cudaEventCreate when concurrently invoked from
-// multiple threads can be very expensive (especially on certain device/driver
-// combinations).
-using CUDAEventPtr =
-    std::unique_ptr<CUDAEvent, std::function<void(CUDAEvent*)>>;
+// CUDAEventPool - A thread-safe pool of CUDA events to avoid the overhead of
+// repeatedly calling cudaEventCreate(). Concurrent cudaEventCreate() calls
+// can incur significant cost on some device/driver combinations.
+//
+// This pool maintains per-device lists of pre-created CUDA events.
+// Borrowed events are returned to the pool via a custom unique_ptr deleter.
 
-class EventPool {
+class CUDAEventPool {
  public:
-  EventPool() : pools_(at::cuda::device_count()) {}
+ using Event = std::unique_ptr<
+      c10::cuda::CUDAEvent,
+      std::function<void(c10::cuda::CUDAEvent*)>>;
 
-  CUDAEventPtr get(const DeviceIndex device) {
-    // If the device is invalid, return a default event and no pooling
+  CUDAEventPool(size_t init_num_events = 0) : pools_(c10::cuda::device_count()) {
+    if (init_num_events > 0) {
+      reserve_events_on_pools(init_num_events);
+    }
+  }
+
+  // Acquire an event associated with a given device. If device is invalid, fall
+  // back to a regular CUDAEvent and no pooling.
+  Event get(const DeviceIndex device) {
     if (device < 0 || device >= (DeviceIndex)pools_.size()) {
       auto deleter = [](CUDAEvent* event) {
         delete event;
       };
-      return CUDAEventPtr(
-        std::make_unique<CUDAEvent>(cudaEventDisableTiming).release(), deleter);
+    return Event(
+        std::make_unique<CUDAEvent>().release(), deleter);
     }
 
     auto& pool = pools_[device];
@@ -44,12 +53,13 @@ class EventPool {
       if (!pool.event_pool_.empty()) {
         auto event = std::move(pool.event_pool_.back());
         pool.event_pool_.pop_back();
-        return CUDAEventPtr(event.release(), destructor);
+        return Event(event.release(), destructor);
       }
     }
 
-    return CUDAEventPtr(
-        std::make_unique<CUDAEvent>(cudaEventDisableTiming).release(),
+    // Pool is empty then create a new Event
+    return Event(
+        std::make_unique<CUDAEvent>().release(),
         destructor);
   }
 
@@ -60,24 +70,25 @@ class EventPool {
     }
   }
 
-  void init_num_events(const size_t num_events) {
-    for (DeviceIndex device_idx = 0; device_idx < at::cuda::device_count(); ++device_idx) {
-        CUDAGuard device_guard(device_idx);
-        std::vector<CUDAEventPtr> temp_events;
-        temp_events.reserve(num_events);
-        for (size_t i = 0; i < num_events; ++i) {
-          auto event = get(device_idx);
-          // Record the event to ensure it's properly initialized
-          event->record();
-          temp_events.emplace_back(std::move(event));
-        }
-        // Events will be returned to pool when temp_events is destroyed
+ private:
+  // Pre-initialize each device pool with N events. This prevents
+  // cudaEventCreate() from invoking during steady-state execution.
+  void reserve_events_on_pools(size_t num_events) {
+    for (const auto device : c10::irange(pools_.size())) {
+      std::vector<Event> temp_events;
+      temp_events.reserve(num_events);
+      pools_[device].event_pool_.reserve(num_events);
+      for([[maybe_unused]] const auto _ : c10::irange(num_events)) {
+        auto event = get(device);
+        event->create(device);
+        temp_events.emplace_back(std::move(event));
+      }
+      // Events will be returned to pool when temp_events is destroyed.
     }
   }
 
- private:
-  struct alignas(64) PerDevicePool {
-    alignas(64) std::mutex mutex_;
+  struct alignas(c10::hardware_destructive_interference_size) PerDevicePool {
+    alignas(c10::hardware_destructive_interference_size) std::mutex mutex_;
     std::vector<std::unique_ptr<CUDAEvent>> event_pool_;
   };
 

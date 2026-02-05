@@ -234,6 +234,12 @@ struct CUDAEvent {
     C10_CUDA_CHECK(cudaIpcGetEventHandle(handle, event_));
   }
 
+  void create(DeviceIndex device_index) {
+    if (!is_created_) {
+      createEvent(device_index);
+    }
+  }
+
  private:
   unsigned int flags_ = cudaEventDisableTiming;
   bool is_created_ = false;
