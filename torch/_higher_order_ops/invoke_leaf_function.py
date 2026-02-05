@@ -151,7 +151,7 @@ def check_escaped_gradients(
 
 
 @contextlib.contextmanager
-def pytree_unflatten_with_nn_module(
+def unflatten_args_with_modules(
     flat_args: tuple[Any, ...], input_spec: pytree.TreeSpec | None
 ) -> Generator[tuple[list[Any] | tuple[Any, ...], dict[str, Any]], None, None]:
     if input_spec is None:
@@ -181,7 +181,7 @@ def pytree_unflatten_with_nn_module(
         yield new_args, new_kwargs
 
 
-def pytree_flatten_with_nn_module(
+def flatten_args_with_modules(
     args_kwargs: tuple[Any, ...],
 ) -> list[Any]:
     def expand_module(x: Any) -> Any:
@@ -322,7 +322,7 @@ def _make_forward(
             with torch.enable_grad():
                 outputs = fn(*args, **kwargs)
 
-                flat_inputs = pytree_flatten_with_nn_module((args, kwargs))
+                flat_inputs = flatten_args_with_modules((args, kwargs))
                 requires_grad_indices = {
                     i
                     for i, inp in enumerate(flat_inputs)
@@ -606,7 +606,7 @@ def invoke_leaf_function_fake(
     real_fn_spec, fake_fn_spec, input_spec, *flat_args, requires_grad_indices=()
 ):
     fake_fn = unwrap_fn_spec(fake_fn_spec)
-    with pytree_unflatten_with_nn_module(flat_args, input_spec) as (args, kwargs):
+    with unflatten_args_with_modules(flat_args, input_spec) as (args, kwargs):
         return fake_fn(*args, **kwargs)
 
 
@@ -630,7 +630,7 @@ def invoke_leaf_function_dense(
     )
 
     real_fn = unwrap_fn_spec(real_fn_spec)
-    with pytree_unflatten_with_nn_module(flat_args, input_spec) as (args, kwargs):
+    with unflatten_args_with_modules(flat_args, input_spec) as (args, kwargs):
         real_output = real_fn(*args, **kwargs)
 
         _check_no_input_mutation(flat_args, version_before)
