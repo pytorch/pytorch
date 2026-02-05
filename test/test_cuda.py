@@ -1458,7 +1458,7 @@ except RuntimeError as e:
     @slowTest
     def test_index_out_of_bounds_exception_cuda(self):
         # Test that indexing out of bounds causes assert
-        stderr = TestCase.runWithPytorchAPIUsageStderr(f"""\
+        stderr = TestCase.runWithPytorchAPIUsageStderr("""\
 #!/usr/bin/env python3
 
 import torch
