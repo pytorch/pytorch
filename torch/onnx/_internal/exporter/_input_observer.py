@@ -888,9 +888,9 @@ class InputObserver:
                     f"There are ({len(inputs.aligned_flat_list)}) "
                     f"tensors but the model expects {len(input_names)}."
                 )
-            n_none = sum([t is None for t in inputs.aligned_flat_list])
+            n_none = sum(t is None for t in inputs.aligned_flat_list)
             n_empty = sum(
-                [t is None or t.numel() == 0 for t in inputs.aligned_flat_list]
+                t is None or t.numel() == 0 for t in inputs.aligned_flat_list
             )
 
             feeds = dict(zip(input_names, self.info.infer_arguments(inputs, flat=True)))
