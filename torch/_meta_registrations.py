@@ -29,6 +29,7 @@ from torch._prims_common import (
     Number,
     NumberType,
     suggest_memory_format,
+    sym_min,
     TensorLike,
 )
 from torch._prims_common.wrappers import (
@@ -931,10 +932,12 @@ def squareCheckInputs(self: Tensor, f_name: str):
         raise AssertionError(
             f"{f_name}: The input tensor must have at least 2 dimensions, got {self.dim()}"
         )
-    if self.size(-1) != self.size(-2):
-        raise AssertionError(
-            f"{f_name}: A must be batches of square matrices, but they are {self.size(-2)} by {self.size(-1)} matrices"
-        )
+    # Use torch._check to defer validation to runtime for unbacked symbolic dimensions.
+    torch._check(
+        self.size(-1) == self.size(-2),
+        lambda: f"{f_name}: A must be batches of square matrices, "
+        f"but they are {self.size(-2)} by {self.size(-1)} matrices",
+    )
 
 
 # Validates input shapes and devices
@@ -1290,7 +1293,8 @@ def linalg_lu_meta(A: Tensor, *, pivot: bool = True) -> tuple[Tensor, Tensor, Te
     sizes = list(A.shape)
     m = sizes[-2]
     n = sizes[-1]
-    k = min(m, n)
+    # Use sym_min to handle unbacked symbolic dimensions
+    k = sym_min(m, n)
 
     sizes[-1] = m
     if pivot:
@@ -1333,7 +1337,8 @@ def linalg_lu_factor_ex_meta(
 
     # Sets sizes to the size of pivots
     sizes.pop()
-    sizes[-1] = min(m, n)
+    # Use sym_min to handle unbacked symbolic dimensions
+    sizes[-1] = sym_min(m, n)
     pivots = A.new_empty(sizes, dtype=torch.int)
 
     # Sets sizes to the size of info
@@ -3582,6 +3587,7 @@ def meta_index_Tensor(self, indices):
         return self.as_strided(shape, strides)
 
     out = self.new_empty(before_shape + replacement_shape + after_shape)
+
     from torch.fx.experimental.symbolic_shapes import guard_or_false
 
     if guard_or_false(self.numel() == 0):
@@ -8168,7 +8174,13 @@ def _meta_grouped_mm_common(
     # aten/src/ATen/native/cuda/Blas.cpp.
 
     if scaled:
-        fp8_dtype = torch.float8_e4m3fnuz if torch.version.hip else torch.float8_e4m3fn
+        fp8_dtype = torch.float8_e4m3fn
+        if (
+            torch.version.hip
+            and torch.cuda.is_available()
+            and "gfx94" in torch.cuda.get_device_properties(0).gcnArchName
+        ):
+            fp8_dtype = torch.float8_e4m3fnuz
         torch._check(
             mat_a.dtype == fp8_dtype and mat_b.dtype == fp8_dtype,
             lambda: f"Expected inputs of E4M3 FP8 type but got mat_a.dtype={mat_a.dtype} and mat_b.dtype={mat_b.dtype}.",  # noqa: B950
