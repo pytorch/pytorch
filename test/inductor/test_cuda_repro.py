@@ -2706,6 +2706,20 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
         self.assertEqual(compile_decimal, Decimal(0))
 
+    @config.patch(
+        {"triton.use_block_ptr": True, "triton.codegen_upcast_to_fp32": False}
+    )
+    def test_float16_reduction_with_int_output(self):
+        @torch.compile
+        def fn(input: torch.Tensor) -> torch.Tensor:
+            return torch.argmax(input, dim=0)
+
+        input = torch.randn(20, 20, device="cuda", dtype=torch.float16)
+        _, code = run_and_get_code(fn, input)
+        # There should not be any conversions to float16 in this code, since the input
+        # is already float16 and the output is int64.
+        self.assertNotIn(".to(tl.float16)", code[0])
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
