@@ -2389,7 +2389,7 @@ class GraphModule(torch.nn.Module):
         _tree_spec_constant0 = self._tree_spec_constant0
         _tree_spec_constant1 = self._tree_spec_constant1
         _tree_spec_constant2 = self._tree_spec_constant2
-        invoke_leaf_function = torch.ops.higher_order.invoke_leaf_function(_tree_spec_constant0, _tree_spec_constant1, _tree_spec_constant2, 0, primals_2, primals_3, primals_1);  _tree_spec_constant0 = _tree_spec_constant1 = _tree_spec_constant2 = primals_2 = primals_3 = primals_1 = None
+        invoke_leaf_function = torch.ops.higher_order.invoke_leaf_function(_tree_spec_constant0, _tree_spec_constant1, _tree_spec_constant2, 0, primals_2, primals_3, primals_1, requires_grad_indices = (1, 2, 3));  _tree_spec_constant0 = _tree_spec_constant1 = _tree_spec_constant2 = primals_2 = primals_3 = primals_1 = None
         getitem: "f32[3, 3]" = invoke_leaf_function[0];  invoke_leaf_function = None
         return (getitem,)
 """,  # noqa: B950
@@ -2401,7 +2401,7 @@ class GraphModule(torch.nn.Module):
     def forward(self, tangents_1: "f32[3, 3]"):
         _tree_spec_constant3 = self._tree_spec_constant3
         _tree_spec_constant4 = self._tree_spec_constant4
-        invoke_leaf_function_1 = torch.ops.higher_order.invoke_leaf_function(_tree_spec_constant3, _tree_spec_constant4, None, tangents_1);  _tree_spec_constant3 = _tree_spec_constant4 = tangents_1 = None
+        invoke_leaf_function_1 = torch.ops.higher_order.invoke_leaf_function(_tree_spec_constant3, _tree_spec_constant4, None, tangents_1, requires_grad_indices = ());  _tree_spec_constant3 = _tree_spec_constant4 = tangents_1 = None
         getitem_2: "f32[3, 3]" = invoke_leaf_function_1[1]
         getitem_3: "f32[3]" = invoke_leaf_function_1[2]
         getitem_4: "f32[3, 3]" = invoke_leaf_function_1[3];  invoke_leaf_function_1 = None
@@ -2639,7 +2639,7 @@ class GraphModule(torch.nn.Module):
         _tree_spec_constant0 = self._tree_spec_constant0
         _tree_spec_constant1 = self._tree_spec_constant1
         _tree_spec_constant2 = self._tree_spec_constant2
-        invoke_leaf_function = torch.ops.higher_order.invoke_leaf_function(_tree_spec_constant0, _tree_spec_constant1, _tree_spec_constant2, 0, primals_2, primals_3, primals_4, primals_1);  _tree_spec_constant0 = _tree_spec_constant1 = _tree_spec_constant2 = primals_2 = primals_3 = primals_4 = primals_1 = None
+        invoke_leaf_function = torch.ops.higher_order.invoke_leaf_function(_tree_spec_constant0, _tree_spec_constant1, _tree_spec_constant2, 0, primals_2, primals_3, primals_4, primals_1, requires_grad_indices = (1, 2, 3, 4));  _tree_spec_constant0 = _tree_spec_constant1 = _tree_spec_constant2 = primals_2 = primals_3 = primals_4 = primals_1 = None
         getitem: "f32[3, 3]" = invoke_leaf_function[0];  invoke_leaf_function = None
         return (getitem,)
 """,  # noqa: B950
@@ -2651,7 +2651,7 @@ class GraphModule(torch.nn.Module):
     def forward(self, tangents_1: "f32[3, 3]"):
         _tree_spec_constant3 = self._tree_spec_constant3
         _tree_spec_constant4 = self._tree_spec_constant4
-        invoke_leaf_function_1 = torch.ops.higher_order.invoke_leaf_function(_tree_spec_constant3, _tree_spec_constant4, None, tangents_1);  _tree_spec_constant3 = _tree_spec_constant4 = tangents_1 = None
+        invoke_leaf_function_1 = torch.ops.higher_order.invoke_leaf_function(_tree_spec_constant3, _tree_spec_constant4, None, tangents_1, requires_grad_indices = ());  _tree_spec_constant3 = _tree_spec_constant4 = tangents_1 = None
         getitem_2: "f32[3]" = invoke_leaf_function_1[1]
         getitem_3: "f32[3, 3]" = invoke_leaf_function_1[2]
         getitem_4: "f32[3]" = invoke_leaf_function_1[3]
@@ -2764,7 +2764,7 @@ class GraphModule(torch.nn.Module):
         _tree_spec_constant0 = self._tree_spec_constant0
         _tree_spec_constant1 = self._tree_spec_constant1
         _tree_spec_constant2 = self._tree_spec_constant2
-        invoke_leaf_function = torch.ops.higher_order.invoke_leaf_function(_tree_spec_constant0, _tree_spec_constant1, _tree_spec_constant2, 0, primals_2, primals_3, primals_4, primals_5, primals_1);  _tree_spec_constant0 = _tree_spec_constant1 = _tree_spec_constant2 = primals_2 = primals_3 = primals_4 = primals_5 = primals_1 = None
+        invoke_leaf_function = torch.ops.higher_order.invoke_leaf_function(_tree_spec_constant0, _tree_spec_constant1, _tree_spec_constant2, 0, primals_2, primals_3, primals_4, primals_5, primals_1, requires_grad_indices = (1, 2, 3, 4, 5));  _tree_spec_constant0 = _tree_spec_constant1 = _tree_spec_constant2 = primals_2 = primals_3 = primals_4 = primals_5 = primals_1 = None
         getitem: "f32[3, 3]" = invoke_leaf_function[0];  invoke_leaf_function = None
         return (getitem,)
 """,  # noqa: B950
@@ -2776,7 +2776,7 @@ class GraphModule(torch.nn.Module):
     def forward(self, tangents_1: "f32[3, 3]"):
         _tree_spec_constant3 = self._tree_spec_constant3
         _tree_spec_constant4 = self._tree_spec_constant4
-        invoke_leaf_function_1 = torch.ops.higher_order.invoke_leaf_function(_tree_spec_constant3, _tree_spec_constant4, None, tangents_1);  _tree_spec_constant3 = _tree_spec_constant4 = tangents_1 = None
+        invoke_leaf_function_1 = torch.ops.higher_order.invoke_leaf_function(_tree_spec_constant3, _tree_spec_constant4, None, tangents_1, requires_grad_indices = ());  _tree_spec_constant3 = _tree_spec_constant4 = tangents_1 = None
         getitem_2: "f32[3, 3]" = invoke_leaf_function_1[1]
         getitem_3: "f32[3]" = invoke_leaf_function_1[2]
         getitem_4: "f32[3, 3]" = invoke_leaf_function_1[3]

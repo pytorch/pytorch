@@ -2738,10 +2738,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
     ) -> VariableTracker:
         import torch.utils._pytree as pytree
         from torch._higher_order_ops.flat_apply import func_to_graphable
-        from torch._higher_order_ops.invoke_leaf_function import (
-            invoke_leaf_function,
-            reconstruct_original_args,
-        )
+        from torch._higher_order_ops.invoke_leaf_function import invoke_leaf_function
 
         from .builder import wrap_fx_proxy
         from .higher_order_ops import _make_inlined
@@ -2771,21 +2768,16 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 
         # Wrap user fn to support nn.Module inputs and pytree inputs/outputs.
         # The wrapped function:
-        # 1. Takes input_spec and flat_args containing flattened LeafModuleState objects
-        # 2. Unflattens them with input_spec and converts LeafModuleState back to nn.Module
-        # 3. Calls the original fn with reconstructed args/kwargs
-        # 4. Flattens the output and captures/verifies the output spec
+        # 1. Takes unflattened args/kwargs with nn.Module restored from LeafModuleState
+        # 2. Calls the original fn with args/kwargs
+        # 3. Flattens the output and captures/verifies the output spec
         def make_leaf_function_wrapper(
             fn: Callable[..., Any],
         ) -> Callable[..., tuple[Any, ...]]:
-            def wrapper(input_spec: Any, *flat_args: Any) -> tuple[Any, ...]:
+            def wrapper(*args: Any, **kwargs: Any) -> tuple[Any, ...]:
                 nonlocal captured_out_spec
 
-                with reconstruct_original_args(input_spec, flat_args) as (
-                    args_with_modules,
-                    kwargs_with_modules,
-                ):
-                    out = fn(*args_with_modules, **kwargs_with_modules)
+                out = fn(*args, **kwargs)
 
                 flat_out, out_spec = pytree.tree_flatten(out)
                 if captured_out_spec is None:
