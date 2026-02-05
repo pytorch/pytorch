@@ -2738,10 +2738,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
     ) -> VariableTracker:
         import torch.utils._pytree as pytree
         from torch._higher_order_ops.flat_apply import func_to_graphable
-        from torch._higher_order_ops.invoke_leaf_function import (
-            invoke_leaf_function,
-            reconstruct_original_args,
-        )
+        from torch._higher_order_ops.invoke_leaf_function import invoke_leaf_function
 
         from .builder import wrap_fx_proxy
         from .higher_order_ops import _make_inlined
@@ -2757,6 +2754,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 "decorator. See the leaf_function docstring for details."
             )
 
+        captured_out_spec: pytree.TreeSpec | None = None
         args_with_states, kwargs_with_states = self._extract_nn_module_states(
             tx, args, kwargs
         )
@@ -2766,29 +2764,38 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         flat_arg_proxies = [
             arg.as_proxy() for arg in flat_args_var.unpack_var_sequence(tx)
         ]
-        input_spec = (
-            input_spec_var.as_python_constant()
-        )  # pyrefly: ignore [unbound-name]
+        input_spec = input_spec_var.as_python_constant()
 
-        def wrap_impl_for_leaf_module_state(
-            impl: Callable[..., Any],
-        ) -> Callable[..., Any]:
-            def wrapped_impl(*flat_args: Any) -> Any:
-                # NB: The flat_args contain flattened LeafModuleState objects.
-                # We need to unflatten them with input_spec then convert back to nn.Module
-                # before calling the original impl.
-                #
-                # input_spec is captured from the outer scope
-                with reconstruct_original_args(input_spec, flat_args) as (
-                    args_with_modules,
-                    kwargs_with_modules,
-                ):
-                    return impl(*args_with_modules, **kwargs_with_modules)
+        # Wrap user fn to support nn.Module inputs and pytree inputs/outputs.
+        # The wrapped function:
+        # 1. Takes unflattened args/kwargs with nn.Module restored from LeafModuleState
+        # 2. Calls the original fn with args/kwargs
+        # 3. Flattens the output and captures/verifies the output spec
+        def make_leaf_function_wrapper(
+            fn: Callable[..., Any],
+        ) -> Callable[..., tuple[Any, ...]]:
+            def wrapper(*args: Any, **kwargs: Any) -> tuple[Any, ...]:
+                nonlocal captured_out_spec
 
-            return wrapped_impl
+                out = fn(*args, **kwargs)
 
-        wrapped_real_impl = wrap_impl_for_leaf_module_state(real_impl)
-        wrapped_fake_impl = wrap_impl_for_leaf_module_state(fake_impl)
+                flat_out, out_spec = pytree.tree_flatten(out)
+                if captured_out_spec is None:
+                    captured_out_spec = out_spec
+                elif captured_out_spec != out_spec:
+                    raise AssertionError(
+                        f"leaf_function output structure mismatch: "
+                        f"expected {captured_out_spec}, got {out_spec}. "
+                        f"This can happen if the real function and fake function return "
+                        f"different pytree structures (e.g., dict vs tuple, different number "
+                        f"of elements). Ensure both functions return the same structure."
+                    )
+                return tuple(flat_out)
+
+            return wrapper
+
+        wrapped_real_impl = make_leaf_function_wrapper(real_impl)
+        wrapped_fake_impl = make_leaf_function_wrapper(fake_impl)
 
         _, real_impl_spec = func_to_graphable(wrapped_real_impl)
         _, fake_impl_spec = func_to_graphable(wrapped_fake_impl)
@@ -2800,16 +2807,26 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 
         real_impl_proxy = make_spec_proxy("real_fn", real_impl_spec)
         fake_impl_proxy = make_spec_proxy("fake_fn", fake_impl_spec)
+        input_spec_proxy = make_spec_proxy("input_spec", input_spec)
 
         invoke_args = (
             real_impl_proxy,
             fake_impl_proxy,
+            input_spec_proxy,
             *flat_arg_proxies,
         )
         result_proxy = tx.output.create_proxy(
             "call_function", invoke_leaf_function, invoke_args, {}
         )
-        return wrap_fx_proxy(tx, result_proxy)
+
+        flat_output_vt = wrap_fx_proxy(tx, result_proxy)
+
+        assert captured_out_spec is not None, (
+            "Output spec was not captured during fake tensor propagation. "
+            "This should not happen - please report a bug."
+        )
+        out_spec_vt = VariableTracker.build(tx, captured_out_spec)
+        return _make_inlined(tx, _pytree.tree_unflatten)(flat_output_vt, out_spec_vt)
 
     def _call_ntuple(
         self,
