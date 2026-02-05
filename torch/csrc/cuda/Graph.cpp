@@ -60,10 +60,13 @@ void THCPGraph_init(PyObject* module) {
           "instantiate",
           torch::wrap_pybind_function_no_gil(&at::cuda::CUDAGraph::instantiate))
       .def(
+          // CUDAGraph.register_generator_state() is now a no-op for
+          // compatibility This function does nothing and can be safely removed
+          // from user code.
           "register_generator_state",
-          [](::at::cuda::CUDAGraph& self, py::handle raw_generator) {
+          [](::at::cuda::CUDAGraph& self, py::handle /*raw_generator*/) {
             TORCH_WARN_DEPRECATION(
-                "CUDAGraph.register_generator_state() is deprecated and will be removed in a future PyTorch release.");
+                "CUDAGraph.register_generator_state() is deprecated, and will be removed in a future PyTorch release. It is now a no-op and can be safely removed from your code.");
           },
           py::arg("generator"))
       .def(

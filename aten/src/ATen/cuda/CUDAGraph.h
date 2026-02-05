@@ -45,11 +45,9 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   cudaGraph_t raw_cuda_graph();
   cudaGraphExec_t raw_cuda_graph_exec();
 
-  // Returns the mempool_id for this graph (set during capture_begin)
-  MempoolId_t mempool_id() const { return mempool_id_; }
-
-  // Returns the device for this graph (set during capture_begin)
-  c10::DeviceIndex capture_device() const { return capture_dev_; }
+private:
+  template <typename StreamType>
+  std::function<bool(StreamType)> create_allocate_filter() const;
 
  protected:
   cudaGraph_t graph_ = nullptr;
@@ -102,6 +100,11 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
 
   bool keep_graph_;
 };
+
+template <>
+std::function<bool(cudaStream_t)> CUDAGraph::create_allocate_filter<cudaStream_t>() const;
+template <>
+std::function<bool(c10::Stream)> CUDAGraph::create_allocate_filter<c10::Stream>() const;
 
 } // namespace cuda
 } // namespace at
