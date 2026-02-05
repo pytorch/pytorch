@@ -71,6 +71,22 @@ def wrap_inline(fn: Callable[_P, _R]) -> Callable[_P, _R]:
     return inner
 
 
+def is_dynamo_active_not_compiling() -> bool:
+    """
+    Check if Dynamo is managing eval frames but not actively compiling.
+
+    This is true during eager fallback after a frame skip (e.g., due to a graph
+    break in a loop). In this state, code runs eagerly but Dynamo is still active
+    and can re-engage tracing for subsequent function calls.
+
+    Returns False if Dynamo is not active at all, or if it's actively tracing.
+    """
+    from torch._C._dynamo.eval_frame import get_eval_frame_callback
+
+    callback = get_eval_frame_callback()
+    return callback is not False and callback is not None
+
+
 def call_hook(
     hook: Callable[..., Optional[torch.Tensor]], *args: Any, **kwargs: Any
 ) -> torch.Tensor:

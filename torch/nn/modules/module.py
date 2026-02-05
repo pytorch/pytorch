@@ -12,6 +12,7 @@ from typing_extensions import Self
 
 import torch
 from torch import device, dtype, Tensor
+from torch._dynamo.external_utils import is_dynamo_active_not_compiling, wrap_inline
 from torch._prims_common import DeviceLikeType
 from torch.nn.parameter import Buffer, Parameter
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -1788,16 +1789,10 @@ class Module:
                 or _global_forward_hooks or _global_forward_pre_hooks):
             return forward_call(*args, **kwargs)
 
-        # When Dynamo is active but we're in eager fallback (after a frame skip),
-        # wrap forward_call so that the forward can still be traced.
-        # The wrapper is not in skipfiles, so Dynamo will trace it.
-        # We only check get_eval_frame_callback() when NOT actively compiling,
-        # to avoid graph breaks from the callback check during tracing.
+        # When Dynamo is active but in eager fallback (after a frame skip),
+        # wrap forward_call so Dynamo can re-engage tracing.
         if not torch.compiler.is_compiling():
-            from torch._C._dynamo.eval_frame import get_eval_frame_callback
-            callback = get_eval_frame_callback()
-            if callback is not False and callback is not None:
-                from torch._dynamo.external_utils import wrap_inline
+            if is_dynamo_active_not_compiling():
                 forward_call = wrap_inline(forward_call)
 
         result = None
