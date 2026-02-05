@@ -14,32 +14,32 @@ This document covers backward compatibility (BC) considerations for PyTorch PR r
 | Adding required arguments without defaults | Breaking | Add default value instead |
 | Changing argument defaults | Potentially breaking | Document in release notes |
 | Changing return type | Breaking | Deprecation period required |
+| Removing, renaming or updating private API | Potentially Breaking | Validate no usage outside of PyTorch Core via global github search |
 
 ### Behavioral Changes
 
 | Change Type | BC Impact | Action Required |
 |-------------|-----------|-----------------|
-| Changing output tensor shape | Breaking | Deprecation/migration path |
-| Changing output dtype | Breaking | Deprecation/migration path |
-| Changing numerical results (beyond floating-point tolerance) | Breaking | Document and justify |
-| Raising new exceptions | Potentially breaking | Consider optional strict mode |
+| Raising new exceptions | Potentially breaking | Validate it is expected and document |
 | Changing exception types | Potentially breaking | Document in release notes |
 | Changing default device | Breaking | Explicit migration |
+| Any user-visible change of existing behavior | Potentially breaking | Should be classified bug-fix or bc-breaking |
 
-### What Is NOT a Public API
+### What Is a Public API
 
-- Functions/classes with leading underscore (`_internal_function`)
-- Modules under `torch._*` (except documented stable APIs)
-- Implementation details not in public documentation
-- Test utilities
+Per the [official PyTorch Public API definition](https://github.com/pytorch/pytorch/wiki/Public-API-definition-and-documentation):
+
+An API is **public** if:
+- It's name does not start with an `_`
+- Its submodule as reported by `__module__` starts with `"torch."`
+- Its submodule where no name in the path starts with underscore
+
+**Key rule**: If a function "looks public" and is documented on pytorch.org/docs, it is public. Undocumented functions that appear public may be changed or removed without deprecation.
 
 ## Python Version Support
 
-PyTorch currently supports Python 3.10-3.14. When reviewing:
+PyTorch supports all non-EOL CPython versions which means the last 5 versions.
 
-- [ ] Check that new code doesn't use syntax from Python 3.11+ without fallbacks
-- [ ] Verify type hints are compatible with supported versions
-- [ ] Watch for `match` statements (Python 3.10+) and other version-specific features
 
 ## When BC Breaks Are Acceptable
 

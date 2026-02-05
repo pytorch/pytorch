@@ -15,7 +15,7 @@ If the user invokes `/pr-review` with no arguments, **do not perform a review**.
 
 > What would you like me to review?
 > - A PR number or URL (e.g., `/pr-review 12345`)
-> - The current branch (e.g., `/pr-review branch`)
+> - A local branch (e.g., `/pr-review branch`)
 
 ### Local CLI Mode
 
@@ -30,7 +30,6 @@ For a detailed review with line-by-line specific comments:
 
 ```
 /pr-review 12345 detailed
-/pr-review 12345 in depth
 ```
 
 Use `gh` CLI to fetch PR data:
@@ -124,6 +123,7 @@ Structure your review with actionable feedback organized by category.
 | Area | Focus | Reference |
 |------|-------|-----------|
 | Code Quality | Abstractions, patterns, complexity | [review-checklist.md](review-checklist.md) |
+| API Design | New patterns, flag-based access, broader implications | [review-checklist.md](review-checklist.md) |
 | Testing | Coverage, patterns, edge cases | [review-checklist.md](review-checklist.md) |
 | Security | Injection, credentials, input handling | [review-checklist.md](review-checklist.md) |
 | Performance | Regressions, device handling, memory | [review-checklist.md](review-checklist.md) |
@@ -143,6 +143,9 @@ Brief overall assessment of the changes (1-2 sentences).
 
 ### Code Quality
 [Issues and suggestions, or "No concerns" if none]
+
+### API Design
+[Flag new patterns, internal-access flags, or broader implications if any. Otherwise omit this section.]
 
 ### Testing
 - [ ] Tests exist for new functionality

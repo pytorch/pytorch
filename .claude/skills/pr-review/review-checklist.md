@@ -12,6 +12,31 @@ This checklist covers areas that CI cannot check. Skip items related to linting,
 - [ ] **No premature abstraction** - Helpers and utilities are only created when reused; three similar lines is better than a one-use helper
 - [ ] **No trivial helpers** - Avoid 1-2 LOC helper functions used only once (unless significantly improves readability)
 
+### API Design
+
+When a PR introduces new API patterns, carefully evaluate the broader implications:
+
+- [ ] **No flag-based internal access** - Reject patterns like `_INTERNAL_USE_ONLY=True` flags that gate internal functionality. These are confusing to reason about, impossible to document properly, and create BC headaches. Use a separate private function instead (e.g., `_create_saved_tensor_internal()`)
+- [ ] **Pattern already exists?** - Before accepting a new pattern, search the codebase to check if this pattern is already established. If not, the PR is introducing a new convention that needs stronger justification
+- [ ] **Documentation implications** - Can this API be clearly documented? Flag-based access creates ambiguity about what is public vs private
+- [ ] **BC implications going forward** - Will this pattern create future BC constraints? Internal flags on public functions blur the public/private boundary
+- [ ] **Testing implications** - Does this pattern require awkward test patterns? Internal-only flags often lead to tests that use "forbidden" parameters
+- [ ] **UX implications** - Is this pattern discoverable and understandable to users? Will it appear in autocomplete, type hints, or docs in confusing ways?
+
+**Preferred pattern for internal-only functionality:**
+```python
+# BAD: Flag-based internal access
+def create_thing(x, *, _INTERNAL_USE_ONLY=False):
+    if not _INTERNAL_USE_ONLY:
+        raise RuntimeError("This is internal")
+    return _create_thing_impl(x)
+
+# GOOD: Separate private function
+def _create_thing_internal(x):
+    """Internal use only. Subject to change without notice."""
+    return _create_thing_impl(x)
+```
+
 ### Code Clarity
 
 - [ ] **Self-explanatory code** - Variable and function names convey intent; minimal comments needed
