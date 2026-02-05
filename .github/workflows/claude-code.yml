@@ -16,7 +16,7 @@ jobs:
     # 3. Must mention @claude
     if: |
       github.repository_owner == 'pytorch' &&
-      contains(fromJSON('["huydhn", "seemethere", "malfet", "ZainRizvi", "jeanschmidt", "atalman", "wdvr", "izaitsevfb", "yangw-dev", "ezyang", "drisspg", "albanD", "pytorch-auto-revert[bot]", "janeyx99", "SherlockNoMad"]'), github.actor) &&
+      contains(fromJSON('["huydhn", "seemethere", "malfet", "ZainRizvi", "jeanschmidt", "atalman", "wdvr", "izaitsevfb", "yangw-dev", "ezyang", "drisspg", "albanD", "pytorch-auto-revert[bot]", "janeyx99", "SherlockNoMad", "svekars", "sekyondaMeta", "AlannaBurke"]'), github.actor) &&
       (
         (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
         (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
