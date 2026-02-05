@@ -42,12 +42,74 @@ static py::object dynamo_call_callback(
 static py::handle _callback_from_action(
     py::handle callback,
     FrameAction action) {
-  if (action == SKIP) {
+  if (action == FrameAction::SKIP) {
     return Py_None;
-  } else if (action == RUN_ONLY) {
+  } else if (action == FrameAction::RUN_ONLY) {
     return Py_False;
   }
   return callback;
+}
+
+// c_recursion_remaining only defined in 3.12 and 3.13
+
+static int32_t c_recursion_limit = -1;
+
+void dynamo_set_c_recursion_limit(int32_t limit) {
+  if (limit < 1 && limit != -1) {
+    throw std::range_error("recursion limit must be >= 1, or -1 to reset");
+  }
+  c_recursion_limit = limit;
+}
+
+int32_t dynamo_get_c_recursion_limit() {
+  return c_recursion_limit;
+}
+
+#if IS_PYTHON_3_12_PLUS && !IS_PYTHON_3_14_PLUS
+
+struct CRecursionLimitRAII {
+  PyThreadState* tstate;
+  int32_t old_recursion_remaining;
+  CRecursionLimitRAII(PyThreadState* tstate) : tstate{tstate} {
+    auto limit = dynamo_get_c_recursion_limit();
+    auto& remaining = tstate->c_recursion_remaining;
+    this->old_recursion_remaining = remaining;
+    if (limit < 0) {
+      // no change to limit
+      return;
+    }
+    if (limit < remaining) {
+      std::stringstream ss;
+      ss << "new c_recursion limit (" << limit
+         << ") is lower than thread's current c_recursion_remaining ("
+         << remaining << ").";
+      PyErr_WarnEx(PyExc_RuntimeWarning, ss.str().c_str(), 1);
+    }
+    remaining = limit;
+  }
+  ~CRecursionLimitRAII() {
+    this->tstate->c_recursion_remaining = this->old_recursion_remaining;
+  }
+};
+
+#else
+
+struct CRecursionLimitRAII {
+  CRecursionLimitRAII(PyThreadState* tstate) {}
+};
+
+#endif
+
+EvalFrameOverride eval_frame_override = EvalFrameOverride::NONE;
+
+EvalFrameOverride get_eval_frame_override() {
+  return eval_frame_override;
+}
+
+EvalFrameOverride set_eval_frame_override(EvalFrameOverride override) {
+  EvalFrameOverride prev = eval_frame_override;
+  eval_frame_override = override;
+  return prev;
 }
 
 // frame and callback are borrowed references.
@@ -121,11 +183,38 @@ PyObject* dynamo__custom_eval_frame(
     }
   };
 
+  static std::optional<py::object> convert_frame_get_fail_callback =
+      std::nullopt;
+
   // NOTE: In 3.12+, the frame evaluation function (callee) is responsible for
   // clearing/popping the frame, meaning that unless we default evaluate the
   // original frame, we are responsible for clearing it - via
   // clear_old_frame_if_python_312_plus.
   auto eval_custom = [&]() {
+    // If we're attempting to run dynamo-generated code and eval frame override
+    // is set to SKIP, then we should set the callback to None to skip.
+    // If the override is set to ERROR, then we call
+    // torch._dynamo.convert_frame.get_fail_callback, which patches
+    // convert_frame.compile_frame with a function that errors unconditionally.
+    // This means Dynamo will error if it attempts to trace into the frame
+    // (Python-level skips pre-trace are permissible).
+    if (!recursive_callback.is_none() &&
+        !recursive_callback.is(py::bool_(false))) {
+      if (eval_frame_override == EvalFrameOverride::SKIP) {
+        recursive_callback = py::none();
+      } else if (eval_frame_override == EvalFrameOverride::ERROR) {
+        if (!convert_frame_get_fail_callback) {
+          convert_frame_get_fail_callback =
+              py::module_::import("torch._dynamo.convert_frame")
+                  .attr("get_fail_callback");
+          auto atexit = py::module_::import("atexit");
+          atexit.attr("register")(py::cpp_function(
+              []() { convert_frame_get_fail_callback = std::nullopt; }));
+        }
+        recursive_callback =
+            convert_frame_get_fail_callback.value()(recursive_callback);
+      }
+    }
     eval_frame_callback_set(recursive_callback.ptr());
     DEBUG_NULL_CHECK(cached_code);
     eval_result = dynamo_eval_custom_code(
@@ -166,7 +255,7 @@ PyObject* dynamo__custom_eval_frame(
       _callback_from_action(recursive_callback, strategy.recursive_action);
 
   // Skip this frame
-  if (strategy.cur_action == SKIP) {
+  if (strategy.cur_action == FrameAction::SKIP) {
     DEBUG_TRACE("skip %s", get_frame_name(frame));
     eval_default();
     return eval_result;
@@ -199,8 +288,8 @@ PyObject* dynamo__custom_eval_frame(
 
   // A callback of Py_False indicates "run only" mode, the cache is checked,
   // but we never compile.
-  bool run_only =
-      strategy.cur_action == RUN_ONLY || callback.is(py::bool_(false));
+  bool run_only = strategy.cur_action == FrameAction::RUN_ONLY ||
+      callback.is(py::bool_(false));
   if (run_only) {
     DEBUG_TRACE("In run only mode %s", get_frame_name(frame));
   }
@@ -258,6 +347,13 @@ PyObject* dynamo__custom_eval_frame(
   bool apply_to_code = false;
   PyObject* guarded_code = nullptr;
   try {
+    CRecursionLimitRAII tmp(tstate); // increase C recursion limit to the given
+                                     // value during compilation
+    // C recursion limit failure
+    if (PyErr_Occurred()) {
+      fail();
+      return eval_result;
+    }
     callback_result = dynamo_call_callback(
         callback, frame, locals.get(), cache_entry, frame_state);
     new_strategy =
@@ -278,7 +374,7 @@ PyObject* dynamo__custom_eval_frame(
   }
 
   // recursive frame action
-  if (strategy.recursive_action == DEFAULT) {
+  if (strategy.recursive_action == FrameAction::DEFAULT) {
     // old recursive action overrides new recursive action
     recursive_callback = _callback_from_action(
         recursive_callback, new_strategy.recursive_action);
@@ -286,10 +382,10 @@ PyObject* dynamo__custom_eval_frame(
 
   // possibly apply frame strategy to future frames with same code object
   if (apply_to_code) {
-    if (new_strategy.cur_action != DEFAULT) {
+    if (new_strategy.cur_action != FrameAction::DEFAULT) {
       DEBUG_TRACE("create action: %d\n", new_strategy.cur_action);
     }
-    if (new_strategy.recursive_action != DEFAULT) {
+    if (new_strategy.recursive_action != FrameAction::DEFAULT) {
       DEBUG_TRACE(
           "create recursive action: %d\n", new_strategy.recursive_action);
     }
@@ -320,7 +416,7 @@ PyObject* dynamo__custom_eval_frame(
   return eval_result;
 }
 
-PyObject* set_code_exec_strategy(PyObject* dummy, PyObject* args) {
+PyObject* dynamo_set_code_exec_strategy(PyObject* dummy, PyObject* args) {
   PyObject* code_obj = nullptr;
   PyObject* strategy_obj = nullptr;
   if (!PyArg_ParseTuple(args, "OO", &code_obj, &strategy_obj)) {
@@ -344,7 +440,7 @@ PyObject* set_code_exec_strategy(PyObject* dummy, PyObject* args) {
   Py_RETURN_NONE;
 }
 
-void skip_code_recursive(PyCodeObject* code) {
+void dynamo_skip_code_recursive(PyCodeObject* code) {
   ExtraState* extra = get_extra_state(code);
   if (extra == nullptr) {
     extra = init_and_set_extra_state(code);

@@ -87,7 +87,7 @@ def handlers():
         # to add a FloatMul to impede this optimization
         sympy.Pow: "pow_by_natural",
         Mod: "mod",
-        PythonMod: "mod",  # TODO: this is wrong
+        PythonMod: "python_mod",
         # TODO: Inductor can generate these, but it's ill-specified which
         # semantics were intended here.  Needs to be cleaned up along with
         # FloorDiv in a bigger cleanup

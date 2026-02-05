@@ -1,0 +1,5 @@
+ERROR
+  File "/home/oulgen/py312/lib/python3.12/site-packages/jax/_src/numpy/ufuncs.py", line 1569, in subtract
+    out = lax.sub(*promote_args("subtract", x, y))
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: sub got incompatible shapes for broadcasting: (10, 3, 10), (3, 10, 10).

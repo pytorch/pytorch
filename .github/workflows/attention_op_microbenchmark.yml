@@ -39,7 +39,7 @@ jobs:
     needs: attn-microbenchmark-build
     with:
       timeout-minutes: 500
-      build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm80
+      build-environment: ${{ needs.attn-microbenchmark-build.outputs.build-environment }}
       docker-image: ${{ needs.attn-microbenchmark-build.outputs.docker-image }}
       test-matrix: ${{ needs.attn-microbenchmark-build.outputs.test-matrix }}
     secrets: inherit
@@ -66,7 +66,7 @@ jobs:
     needs: opmicrobenchmark-build-b200
     with:
       timeout-minutes: 500
-      build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm100
+      build-environment: ${{ needs.opmicrobenchmark-build-b200.outputs.build-environment }}
       docker-image: ${{ needs.opmicrobenchmark-build-b200.outputs.docker-image }}
       test-matrix: ${{ needs.opmicrobenchmark-build-b200.outputs.test-matrix }}
       aws-role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
