@@ -10,7 +10,12 @@ from tqdm import tqdm
 import torch
 import torch.utils.benchmark as benchmark
 from torch._inductor.utils import do_bench_using_profiling
-from torch.nn.attention import sdpa_kernel, SDPBackend
+from torch.nn.attention import (
+    activate_flash_attention_impl,
+    restore_flash_attention_impl,
+    sdpa_kernel,
+    SDPBackend,
+)
 from torch.nn.functional import scaled_dot_product_attention
 
 
@@ -45,6 +50,7 @@ class ExperimentConfig:
     is_causal: bool
     dtype: torch.dtype
     backend: SDPBackend
+    flash_impl: str | None = None  # None/"FA2" for default, "FA3", or "FA4"
     device: torch.device = torch.device("cuda")
 
     @property
@@ -160,22 +166,38 @@ def run_single_experiment(config: ExperimentConfig) -> ExperimentResults:
     context = (
         sdpa_kernel(config.backend) if config.backend is not None else nullcontext()
     )
-    with context:
-        forward_time = benchmark_cuda_function_in_microseconds(
-            scaled_dot_product_attention,
-            q,
-            k,
-            v,
-            is_causal=is_causal,
-            attn_mask=None,
-        )
-        out_torch = scaled_dot_product_attention(
-            q, k, v, is_causal=is_causal, attn_mask=None
-        )
-        d_out = torch.randn_like(out_torch)
-        backward_time = benchmark_cuda_function_in_microseconds(
-            out_torch.backward, d_out, retain_graph=True
-        )
+
+    # Activate flash attention implementation if specified
+    if config.backend is SDPBackend.FLASH_ATTENTION and config.flash_impl in (
+        "FA3",
+        "FA4",
+    ):
+        activate_flash_attention_impl(config.flash_impl)
+
+    try:
+        with context:
+            forward_time = benchmark_cuda_function_in_microseconds(
+                scaled_dot_product_attention,
+                q,
+                k,
+                v,
+                is_causal=is_causal,
+                attn_mask=None,
+            )
+            out_torch = scaled_dot_product_attention(
+                q, k, v, is_causal=is_causal, attn_mask=None
+            )
+            d_out = torch.randn_like(out_torch)
+            backward_time = benchmark_cuda_function_in_microseconds(
+                out_torch.backward, d_out, retain_graph=True
+            )
+    finally:
+        # Restore default FA2 implementation if we activated a different one
+        if config.backend is SDPBackend.FLASH_ATTENTION and config.flash_impl in (
+            "FA3",
+            "FA4",
+        ):
+            restore_flash_attention_impl()
 
     # Calculate TFLOPS for forward and backward passes
     sparsity = 0.5 if is_causal else 0.0
@@ -196,10 +218,16 @@ def print_results(experiments: list[Experiment]):
     table_data = defaultdict(list)
     for experiment in experiments:
         for key, value in experiment.asdict().items():
+            # Display None flash_impl as "FA2" for readability
+            if key == "flash_impl" and value is None:
+                value = "FA2"
             table_data[key].append(value)
     del table_data["device"]
     if table_data["backend"][0] is None:
         del table_data["backend"]
+    # Hide flash_impl column if all values are "FA2" (default)
+    if all(v == "FA2" for v in table_data.get("flash_impl", [])):
+        del table_data["flash_impl"]
     print(tabulate(table_data, headers="keys", tablefmt="pretty", floatfmt=".3f"))
 
 
@@ -237,6 +265,9 @@ def write_results_to_csv(
             row = experiment.asdict()
             if "device" in row:
                 del row["device"]  # Remove device field
+            # Convert None flash_impl to "FA2" for readability
+            if row.get("flash_impl") is None:
+                row["flash_impl"] = "FA2"
             writer.writerow(row)
 
     print(f"Results written to: {filename}")
@@ -247,11 +278,16 @@ def generate_experiment_configs() -> list[ExperimentConfig]:
     num_heads = [16]
     q_kv_seq_lens = [(128, 128), (256, 256), (512, 512), (1024, 1024), (8192, 8192)]
     embed_dims = [2048]
-    backends = [None]  # If set to None, all backends are enabled
+    backends = [
+        None,
+        SDPBackend.FLASH_ATTENTION,
+    ]  # If set to None, all backends are enabled
     dtypes = [
         torch.bfloat16,
     ]
     is_causal = [True, False]
+    # None means FA2 (default), "FA3", "FA4" for the alternative implementations
+    flash_impls = [None, "FA3"]
     all_configs = []
     for (
         bsz,
@@ -261,9 +297,23 @@ def generate_experiment_configs() -> list[ExperimentConfig]:
         causal,
         dtype,
         backend,
+        flash_impl,
     ) in itertools.product(
-        batch_sizes, num_heads, q_kv_seq_lens, embed_dims, is_causal, dtypes, backends
+        batch_sizes,
+        num_heads,
+        q_kv_seq_lens,
+        embed_dims,
+        is_causal,
+        dtypes,
+        backends,
+        flash_impls,
     ):
+        # Alternative flash implementations are ignored if the backend is not Flash Attention
+        # Continue to avoid duplicate experiments
+        if backend is None and flash_impl is not None:
+            continue
+        if backend is not None and flash_impl is None:
+            continue
         all_configs.append(
             ExperimentConfig(
                 batch_size=bsz,
@@ -274,6 +324,7 @@ def generate_experiment_configs() -> list[ExperimentConfig]:
                 is_causal=causal,
                 dtype=dtype,
                 backend=backend,
+                flash_impl=flash_impl,
             )
         )
 

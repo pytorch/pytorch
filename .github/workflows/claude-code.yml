@@ -16,7 +16,7 @@ jobs:
     # 3. Must mention @claude
     if: |
       github.repository_owner == 'pytorch' &&
-      contains(fromJSON('["huydhn", "seemethere", "malfet", "ZainRizvi", "jeanschmidt", "atalman", "wdvr", "izaitsevfb", "yangw-dev", "ezyang", "drisspg", "albanD"]'), github.actor) &&
+      contains(fromJSON('["huydhn", "seemethere", "malfet", "ZainRizvi", "jeanschmidt", "atalman", "wdvr", "izaitsevfb", "yangw-dev", "ezyang", "drisspg", "albanD", "pytorch-auto-revert[bot]", "janeyx99", "SherlockNoMad"]'), github.actor) &&
       (
         (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
         (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
@@ -31,35 +31,7 @@ jobs:
       issues: write
       id-token: write
     steps:
-      # Check if this is a fork PR (not supported yet)
-      # See: https://github.com/anthropics/claude-code-action/issues/821
-      - name: Check if fork PR
-        id: fork-check
-        if: |
-          (github.event_name == 'issue_comment' && github.event.issue.pull_request) ||
-          github.event_name == 'pull_request_review_comment'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request_review_comment" ]; then
-            PR_NUMBER="${{ github.event.pull_request.number }}"
-          else
-            PR_NUMBER="${{ github.event.issue.number }}"
-          fi
-          IS_FORK=$(gh pr view $PR_NUMBER --repo ${{ github.repository }} --json isCrossRepository -q '.isCrossRepository')
-          echo "is_fork=$IS_FORK" >> $GITHUB_OUTPUT
-          echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
-          echo "Is fork PR: $IS_FORK (PR #$PR_NUMBER)"
-
-      - name: Post fork PR notice and exit
-        if: steps.fork-check.outputs.is_fork == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh pr comment ${{ steps.fork-check.outputs.pr_number }} --repo ${{ github.repository }} --body \
-            "Sorry, Claude can't review fork PRs yet due to a limitation in the GitHub Action. Tracking issue: https://github.com/anthropics/claude-code-action/issues/821"
-          echo "::error::Claude Code does not support fork PRs yet"
-          exit 1
+      # Fork PR support enabled by using izaitsevfb/claude-code-action@forked-pr-fix
 
       - uses: actions/checkout@v4
         with:
@@ -72,8 +44,14 @@ jobs:
           aws-region: us-east-1
 
       - name: Run Claude Code
-        uses: anthropics/claude-code-action@v1
+        uses: izaitsevfb/claude-code-action@forked-pr-fix
         with:
-          use_bedrock: "true"
+          # We filter by github.actor at workflow level, there is no point of filtering here as well
+          allowed_bots: "*"
           claude_args: "--model global.anthropic.claude-opus-4-5-20251101-v1:0"
           settings: '{"alwaysThinkingEnabled": true}'
+          use_bedrock: "true"
+
+      - name: Upload usage metrics
+        if: always()
+        uses: pytorch/test-infra/.github/actions/upload-claude-usage@main

@@ -1114,7 +1114,6 @@ def forward(self, tangents_1, tangents_token):
             )
 
     def test_with_effects_through_functional_tensor_mode(self):
-        """Test that with_effects can flow through FunctionalTensorMode."""
         from torch._subclasses.functional_tensor import (
             FunctionalTensor,
             FunctionalTensorMode,
@@ -1147,6 +1146,64 @@ def forward(self, tangents_1, tangents_token):
         if isinstance(result, FunctionalTensor):
             result = torch._from_functional_tensor(result.elem)
         self.assertEqual(result, expected)
+
+    @unittest.skipIf(IS_WINDOWS, "triton")
+    @unittest.skipIf(not SM80OrLater, "triton")
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    def test_effectful_op_with_flex_attention(self):
+        """Test that effectful custom ops work with flex_attention."""
+        from torch._library.effects import EffectType
+        from torch.nn.attention.flex_attention import flex_attention
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+
+            @torch.library.custom_op("mylib::noop", mutates_args=())
+            def noop(x: torch.Tensor) -> torch.Tensor:
+                return x.clone()
+
+            @noop.register_fake
+            def noop_fake(x: torch.Tensor) -> torch.Tensor:
+                return x.clone()
+
+            noop.register_effect(EffectType.ORDERED)
+
+            def score_mod(score, b, h, q_idx, kv_idx):
+                return score
+
+            def fn(q, k, v):
+                q = torch.ops.mylib.noop(q)
+                out = flex_attention(q, k, v, score_mod=score_mod)
+                return out
+
+            batch_size, num_heads, seq_len, head_dim = 2, 4, 128, 64
+            q = torch.randn(
+                batch_size,
+                num_heads,
+                seq_len,
+                head_dim,
+                device="cuda",
+                dtype=torch.float16,
+            )
+            k = torch.randn(
+                batch_size,
+                num_heads,
+                seq_len,
+                head_dim,
+                device="cuda",
+                dtype=torch.float16,
+            )
+            v = torch.randn(
+                batch_size,
+                num_heads,
+                seq_len,
+                head_dim,
+                device="cuda",
+                dtype=torch.float16,
+            )
+
+            compiled_fn = torch.compile(fn)
+            out = compiled_fn(q, k, v)
+            self.assertEqual(out.shape, (batch_size, num_heads, seq_len, head_dim))
 
 
 if __name__ == "__main__":

@@ -653,6 +653,35 @@ class TestExport(TestCase):
 
         self.assertEqual(counter, 1)
 
+    @skipIfCrossRef
+    def test_custom_tag_metadata_runtime_assert(self):
+        class Foo(torch.nn.Module):
+            @torch._dynamo.disable()
+            def forward(self, x, y):
+                if (
+                    x.shape[0] ** 2 - y.shape[0] ** 2 >= 4  # 16
+                    and x.shape[0] ** 2 - y.shape[0] ** 2 <= 20
+                    and x.shape[0] ** 2 - y.shape[0] ** 2 != 15
+                ):
+                    return x * 2, y * 2
+
+        inputs = (torch.randn(5), torch.randn(3))
+        shapes = {"x": (torch.export.Dim("dx"),), "y": (torch.export.Dim("dy"),)}
+        with torch.fx.traceback.preserve_node_meta():
+            ep = torch.export.export(
+                Foo(),
+                inputs,
+                dynamic_shapes=shapes,
+                prefer_deferred_runtime_asserts_over_guards=True,
+            )
+
+        gm = ep.module()
+
+        for node in gm.graph.nodes:
+            if node.op == "call_function":
+                self.assertTrue("custom" in node.meta)
+                self.assertTrue(node.meta["custom"] != {})
+
     @testing.expectedFailureSerDer  # can't serialize functorch ops
     @testing.expectedFailureSerDerNonStrict  # can't serialize functorch ops
     def test_vmap_to_assert(self):
@@ -776,6 +805,9 @@ class TestExport(TestCase):
 ('call_function', 'item', {'moo': 0})
 ('call_function', 'ge_1', {'moo': 0})
 ('call_function', '_assert_scalar_default', {'moo': 0})
+('call_function', 'mul_1', {'moo': 0})
+('call_function', 'le', {'moo': 0})
+('call_function', '_assert_scalar_default_1', {'moo': 0})
 ('call_function', 'mul', {'moo': 0})""",
         )
 
@@ -2656,9 +2688,7 @@ class GraphModule(torch.nn.Module):
         true_graph_0 = self.true_graph_0
         false_graph_0 = self.false_graph_0
         cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, ());  gt = true_graph_0 = false_graph_0 = None
-
         getitem_1: "Sym(u0)" = cond[0];  cond = None
-
         ge_1: "Sym(u0 >= 0)" = getitem_1 >= 0
         _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u0 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_default = None
         le_1: "Sym(u0 <= 1)" = getitem_1 <= 1
@@ -6888,6 +6918,24 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         list_tensor_map = Module()
         inps = (torch.ones(6, 4), torch.tensor(5), torch.tensor(4))
         self._test_export_same_as_eager(list_tensor_map, inps)
+
+    def test_map_dynamic_batch(self):
+        # Test that map works with dynamic batch dimension
+        class Module(torch.nn.Module):
+            def forward(self, xs):
+                def body(x):
+                    return x + 1
+
+                return torch._higher_order_ops.map(body, xs)
+
+        mod = Module()
+        inps = (torch.ones(3, 4),)
+        dim_batch = torch.export.Dim("batch", min=1)
+        ep = export(mod, inps, dynamic_shapes={"xs": {0: dim_batch}})
+        self.assertEqual(ep.module()(*inps), mod(*inps))
+
+        diff_batch_size_inp = (torch.randn(4, 4),)
+        self.assertEqual(ep.module()(*diff_batch_size_inp), mod(*diff_batch_size_inp))
 
     @unittest.expectedFailure
     def test_crop_like(self):
