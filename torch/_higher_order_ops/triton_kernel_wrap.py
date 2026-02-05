@@ -338,14 +338,16 @@ def generate_ttir(
     #   * N sizes, for a rank-N tensor
     # To account for this, we inject some fake arg names as placeholders for
     # the stride and size parameters.
+    #
+    # Additionally, tensors and scalars are both included as TTIR parameters,
+    # whereas `constexpr` are inlined, and None are excluded. This matters for
+    # "odd" ordering (eg. [tensor, scalar, tensor]).
     def get_arg_names(name: str, arg: Any) -> list[str]:
         param_idx = kernel.arg_names.index(name)
-        # Exclude constexpr and None arguments. They don't create MLIR function parameters.
+
         if kernel.params[param_idx].is_constexpr or arg is None:
             return []
 
-        if isinstance(arg, Tensor):
-            return [name]
         if is_stable_tensor_descriptor_arg(arg):
             stable_meta = maybe_unpack_tma_stable_metadata(
                 tma_descriptor_metadata[name]
@@ -997,7 +999,7 @@ def identify_mutated_tensors(
     ttir_module = None
     functions = None
     try:
-        ttir_module, ordered_tensor_names = generate_ttir(
+        ttir_module, ordered_arg_names = generate_ttir(
             kernel, kwargs, tma_descriptor_metadata
         )
 
@@ -1020,14 +1022,13 @@ def identify_mutated_tensors(
         analyze_kernel_mutations.reset()
         get_tma_stores.reset()
         mutations = analyze_kernel_mutations(
-            functions, kernel_name, len(ordered_tensor_names)
+            functions, kernel_name, len(ordered_arg_names)
         )
 
         return [
-            ordered_tensor_names[i]
+            ordered_arg_names[i]
             for i, mutated in enumerate(mutations)
-            if mutated
-            and isinstance(kwargs[ordered_tensor_names[i]], (Tensor, TensorBox))
+            if mutated and isinstance(kwargs[ordered_arg_names[i]], (Tensor, TensorBox))
         ]
     except Exception:
         log.warning(

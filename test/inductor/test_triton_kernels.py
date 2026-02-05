@@ -2772,12 +2772,16 @@ def forward(self, arg0_1, arg1_1):
             dst_ptr,
             n_elements,
             stride,
+            maybe_param,
             BLOCK_SIZE: tl.constexpr,
         ):
             pid = tl.program_id(0)
             offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
             mask = offs < n_elements
             x = tl.load(src_ptr + offs * stride, mask=mask)
+            scale = tl.where(maybe_param != 0, 0.5, 1.0)
+            x = x * scale
+
             tl.store(dst_ptr + offs * stride, x, mask=mask)
 
         t = torch.randn(1024, device=GPU_TYPE)
@@ -2788,18 +2792,20 @@ def forward(self, arg0_1, arg1_1):
             "dst_ptr": out,
             "n_elements": 1024,
             "stride": 1,
+            "maybe_param": None,  # semantically wrong, but testing frontend specialization
             "BLOCK_SIZE": 256,
         }
 
         ttir_module, _ = generate_ttir(copy_kernel, kwargs, tma_descriptor_metadata={})
         ttir_str = str(ttir_module)
 
-        # `constexpr` values get inlined, and do not appear as function parameters.
+        # `constexpr` and None values get inlined, and do not appear as function parameters.
         self.assertIn("src_ptr", ttir_str)
         self.assertIn("dst_ptr", ttir_str)
         self.assertIn("n_elements", ttir_str)
         self.assertIn("stride", ttir_str)
         self.assertNotIn("BLOCK_SIZE", ttir_str)
+        self.assertNotIn("maybe_param", ttir_str)
 
 
 def make_mutation_test(fn):
