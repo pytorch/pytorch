@@ -6393,7 +6393,7 @@ def use_two_step_variance(x, axis, keepdim):
     else:
         # 1024 is a default value to pass all the UTs about accuracy.
         # A larger threshold can still get performance benefits.
-        threshold = config.two_step_var_threshold
+        threshold = config.cpp.use_two_step_variance_threshold
     return (
         isinstance(reduction_numel, sympy.Integer)
         and int(reduction_numel) <= threshold
