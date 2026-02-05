@@ -38,7 +38,6 @@ tolerance:
     - tacotron2
     - yolov3
     - squeezenet1_1
-    - shufflenet_v2_x1_0
 
   higher_fp16:
     - doctr_reco_predictor

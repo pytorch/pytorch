@@ -1017,8 +1017,7 @@ class outer_fn(torch.nn.Module):
             [
                 ["add"],  # seq_nr 21
                 [
-                    "copy",
-                    "empty_strided",
+                    "clone",
                     "getitem",
                     "getitem_1",
                     "getitem_2",
@@ -1076,23 +1075,30 @@ class GraphModule(torch.nn.Module):
 
         self.assertExpectedInline(
             normalize_gm(bw_graph.print_readable(print_output=False)),
-            """\
+            """
 class GraphModule(torch.nn.Module):
     def forward(self, getitem_1: "f32[3, 3]", tangents_1: "f32[]"):
+        # Annotation: {'seq_nr': 15} No stacktrace found for following nodes
         expand: "f32[3, 3]" = torch.ops.aten.expand.default(tangents_1, [3, 3]);  tangents_1 = None
-        empty_strided: "f32[3, 3]" = torch.ops.aten.empty_strided.default([3, 3], [3, 1], dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
-        copy: "f32[3, 3]" = torch.ops.aten.copy.default(empty_strided, expand);  empty_strided = expand = None
+
+        # Annotation: {'seq_nr': 14} No stacktrace found for following nodes
+        clone: "f32[3, 3]" = torch.ops.aten.clone.default(expand, memory_format = torch.contiguous_format);  expand = None
         repeated_subgraph1 = self.repeated_subgraph1
-        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph1, 'invoke_subgraph_1', getitem_1, copy);  repeated_subgraph1 = getitem_1 = copy = None
+        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph1, 'invoke_subgraph_1', getitem_1, clone);  repeated_subgraph1 = getitem_1 = clone = None
         getitem_2: "f32[3, 3]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
         return (getitem_2,)
+
     class repeated_subgraph1(torch.nn.Module):
         def forward(self, arg0_1: "f32[3, 3]", arg1_1: "f32[3, 3]"):
+            # Annotation: {'seq_nr': 10} File: test_modes.py:921 in inner_fn, code: return y / 2
             div: "f32[3, 3]" = torch.ops.aten.div.Tensor(arg1_1, 2);  arg1_1 = None
+
+            # Annotation: {'test': 'test', 'seq_nr': 9} File: test_modes.py:920 in inner_fn, code: y = x.cos()
             sin: "f32[3, 3]" = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
             neg: "f32[3, 3]" = torch.ops.aten.neg.default(sin);  sin = None
             mul: "f32[3, 3]" = torch.ops.aten.mul.Tensor(div, neg);  div = neg = None
-            return (mul,)""",  # noqa: B950
+            return (mul,)
+        """,  # noqa: B950
             ignore_comments=True,
             ignore_empty_lines=True,
         )
