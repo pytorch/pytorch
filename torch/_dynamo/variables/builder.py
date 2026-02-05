@@ -57,6 +57,7 @@ from torch._guards import TracingContext
 from torch._higher_order_ops.flat_apply import flat_apply
 from torch._higher_order_ops.torchbind import call_torchbind
 from torch._library.opaque_object import (
+    is_opaque_extern,
     is_opaque_reference_type,
     is_opaque_type,
     is_opaque_value_type,
@@ -1594,7 +1595,7 @@ class VariableBuilder:
             fake_script_obj = torch._library.fake_class_registry.maybe_to_fake_obj(
                 self.tx.output.fake_mode, value
             )
-            if is_opaque_value_type(type(value)):
+            if is_opaque_value_type(type(value)) and not is_opaque_extern(type(value)):
                 proxy = value
             else:
                 proxy = self.tx.output.root_tracer.create_graph_input(
