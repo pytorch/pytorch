@@ -114,6 +114,16 @@ def skip_if_tpu(fn):
     return wrapper
 
 
+def skip_if_cpu(fn):
+    @functools.wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        if self.DEVICE == "cpu":
+            self.skipTest("Not yet working on CPU")
+        fn(self, *args, **kwargs)
+
+    return wrapper
+
+
 def skip_if_cuda(fn):
     @functools.wraps(fn)
     def wrapper(self, *args, **kwargs):
@@ -1042,6 +1052,96 @@ class PallasTestsMixin:
         x = torch.randn(16, device=self.DEVICE)
         result = compiled(x)
         expected = fn(x)
+        self.assertEqual(result, expected)
+
+    @skip_if_cuda
+    def test_softmax_two_pass(self):
+        """Test two-pass softmax (max reduction + sum reduction)."""
+
+        def fn(x):
+            return torch.softmax(x, dim=-1)
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(32, 64, device=self.DEVICE)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+    @skip_if_cuda
+    def test_rms_norm(self):
+        """Test RMS normalization (mean-of-squares reduction + rsqrt)."""
+
+        def fn(x, weight):
+            variance = x.pow(2).mean(-1, keepdim=True)
+            x = x * torch.rsqrt(variance + 1e-6)
+            return x * weight
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(32, 64, device=self.DEVICE)
+        weight = torch.randn(64, device=self.DEVICE)
+        result = compiled(x, weight)
+        expected = fn(x, weight)
+        self.assertEqual(result, expected)
+
+    @skip_if_cuda
+    def test_welford(self):
+        """Test Welford variance/mean computation (two-pass fallback)."""
+
+        def fn(x):
+            return torch.var_mean(x, dim=-1, keepdim=True)
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(32, 64, device=self.DEVICE)
+        var_result, mean_result = compiled(x)
+        var_expected, mean_expected = fn(x)
+        self.assertEqual(mean_result, mean_expected)
+        self.assertEqual(var_result, var_expected)
+
+    @skip_if_cuda
+    def test_layer_norm(self):
+        """Test layer normalization (mean + variance reduction, normalize, scale + shift)."""
+
+        def fn(x, weight, bias):
+            mean = x.mean(-1, keepdim=True)
+            variance = (x - mean).pow(2).mean(-1, keepdim=True)
+            x = (x - mean) * torch.rsqrt(variance + 1e-6)
+            return x * weight + bias
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(32, 64, device=self.DEVICE)
+        weight = torch.randn(64, device=self.DEVICE)
+        bias = torch.randn(64, device=self.DEVICE)
+        result = compiled(x, weight, bias)
+        expected = fn(x, weight, bias)
+        self.assertEqual(result, expected)
+
+    @skip_if_cpu
+    @skip_if_cuda
+    @skip_if_tpu
+    def test_rope(self):
+        """Test Rotary Position Embedding with slice + cat.
+
+        Splits input into halves, applies cos/sin rotation, and concatenates
+        back. Exercises non-contiguous output aliases via torch.cat.
+        """
+
+        def fn(x, cos, sin):
+            d = x.shape[-1]
+            x1 = x[..., : d // 2]
+            x2 = x[..., d // 2 :]
+            return torch.cat([x1 * cos - x2 * sin, x2 * cos + x1 * sin], dim=-1)
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(32, 64, device=self.DEVICE)
+        cos = torch.randn(32, 32, device=self.DEVICE)
+        sin = torch.randn(32, 32, device=self.DEVICE)
+        result = compiled(x, cos, sin)
+        expected = fn(x, cos, sin)
         self.assertEqual(result, expected)
 
     @skip_if_tpu
