@@ -15,6 +15,40 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 
+def run_python_code(
+    code: str,
+    cwd: Optional[str] = None,
+    env: Optional[dict] = None,
+    check: bool = True,
+    capture_output: bool = False,
+) -> subprocess.CompletedProcess:
+    """
+    Run Python code using the current interpreter (sys.executable).
+
+    This ensures we use the same Python that's running the CLI,
+    rather than whatever 'python' resolves to in PATH.
+
+    Args:
+        code: Python code to execute
+        cwd: Working directory
+        env: Environment variables (merged with os.environ)
+        check: If True, raise CalledProcessError on non-zero exit
+        capture_output: If True, capture stdout/stderr
+
+    Returns:
+        CompletedProcess instance
+    """
+    run_env = {**os.environ, **(env or {})}
+    return subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=capture_output,
+        text=True,
+        check=check,
+        cwd=cwd,
+        env=run_env,
+    )
+
+
 def run_command(
     cmd: str,
     use_shell: bool = False,
