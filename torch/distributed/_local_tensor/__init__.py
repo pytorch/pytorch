@@ -795,8 +795,8 @@ class _LocalOffsetBasedRNGTracker:
                 from torch.distributed.tensor._random import _PhiloxState
 
                 any_rank_philox = _PhiloxState(any_rank_device_state)
-                state.seed = any_rank_philox.seed
-                state.offset = any_rank_philox.offset
+                state.seed = int(any_rank_philox.seed.item())
+                state.offset = int(any_rank_philox.offset.item())
 
             old_offset = state.offset
             self._set_pre_op_offset(state, spec)
@@ -1964,7 +1964,7 @@ class _LocalPhiloxState:
         offsets = {}
         for rank, state in self._per_rank_states.items():
             rank_philox = _PhiloxState(state)
-            offsets[rank] = rank_philox.offset
+            offsets[rank] = int(rank_philox.offset.item())
 
         if len(set(offsets.values())) == 1:
             return next(iter(offsets.values()))
@@ -1979,12 +1979,13 @@ class _LocalPhiloxState:
             for rank, state in self._per_rank_states.items():
                 rank_offset = offset.node._local_ints[rank]
                 rank_philox = _PhiloxState(state)
-                rank_philox.offset = rank_offset
+                rank_philox.offset = torch.tensor([rank_offset], dtype=torch.int64)
         else:
             offset_int = int(offset) if isinstance(offset, SymInt) else offset
+            offset_tensor = torch.tensor([offset_int], dtype=torch.int64)
             for state in self._per_rank_states.values():
                 rank_philox = _PhiloxState(state)
-                rank_philox.offset = offset_int
+                rank_philox.offset = offset_tensor
 
     @property
     def seed(self) -> int | SymInt:
@@ -1993,7 +1994,7 @@ class _LocalPhiloxState:
         seeds = {}
         for rank, state in self._per_rank_states.items():
             rank_philox = _PhiloxState(state)
-            seeds[rank] = rank_philox.seed
+            seeds[rank] = int(rank_philox.seed.item())
 
         if len(set(seeds.values())) == 1:
             return next(iter(seeds.values()))
@@ -2007,12 +2008,13 @@ class _LocalPhiloxState:
             for rank, state in self._per_rank_states.items():
                 rank_seed = seed.node._local_ints[rank]
                 rank_philox = _PhiloxState(state)
-                rank_philox.seed = rank_seed
+                rank_philox.seed = torch.tensor([rank_seed], dtype=torch.int64)
         else:
             seed_int = int(seed) if isinstance(seed, SymInt) else seed
+            seed_tensor = torch.tensor([seed_int], dtype=torch.int64)
             for state in self._per_rank_states.values():
                 rank_philox = _PhiloxState(state)
-                rank_philox.seed = seed_int
+                rank_philox.seed = seed_tensor
 
     def apply_to_local_tensor_mode(self, device_handle) -> None:
         """
