@@ -32,7 +32,7 @@
 #include <ATen/ops/empty_like.h>
 #include <ATen/ops/hspmm_native.h>
 #include <ATen/ops/mul.h>
-#include <ATen/ops/result_type.h>
+#include <ATen/ops/result_type_native.h>
 #include <ATen/ops/scalar_tensor.h>
 #include <ATen/ops/zeros_like.h>
 #endif
@@ -284,7 +284,7 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, const SparseT
     return r_;
   }
 
-  auto commonDtype = at::result_type(dense, sparse);
+  auto commonDtype = at::native::result_type(dense, sparse);
   TORCH_CHECK(canCast(commonDtype, r_.scalar_type()), "Can't convert result type ", commonDtype, " to output ", r_.scalar_type());
 
   Tensor r = r_;
@@ -386,7 +386,7 @@ SparseTensor& add_out_sparse_cuda(const SparseTensor& t, const SparseTensor& src
 
   TORCH_CHECK(cuda::check_device({r_, t, src}));
 
-  auto commonDtype = at::result_type(t, src);
+  auto commonDtype = at::native::result_type(t, src);
   TORCH_CHECK(canCast(commonDtype, r_.scalar_type()), "Can't convert result type ", commonDtype, " to output ", r_.scalar_type());
 
   TORCH_CHECK(t.sizes().equals(src.sizes()), "add: expected 'self' and 'other' to have same size, but ", t.sizes(), " != ", src.sizes());
