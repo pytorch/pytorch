@@ -565,6 +565,8 @@ class ShardingPropagator:
 
             op_strategy = None
             if DecompShardingStrategy.has_decomp(op_schema.op):
+                # Ensure schema_info is registered for proper cache key computation
+                DecompShardingStrategy.ensure_schema_info(op_schema.op, self)
                 try:
                     op_strategy = DecompShardingStrategy.propagate_strategy(
                         op_schema, self
