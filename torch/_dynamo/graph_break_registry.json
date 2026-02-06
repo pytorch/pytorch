@@ -1713,6 +1713,20 @@
       "Hints": []
     }
   ],
+  "GB9672": [
+    {
+      "Gb_type": "unsupported type.__dict__['{attr_name}'].__get__ call",
+      "Context": "call_function {self}, args: {args}, kwargs: {kwargs}",
+      "Explanation": "`torch.compile` only supports calling type.__dict__['{attr_name}'].__get__ on a single constant argument (i.e. a type).",
+      "Hints": [
+        "Make sure your call to type.__dict__['{attr_name}'].__get__ only has ",
+        "one positional argument (no keyword arguments).",
+        "Make sure the argument to type.__dict__['{attr_name}'].__get__ is a constant ",
+        "(i.e. type). For example, `object`, `int`, `MyCustomClass`.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0149": [
     {
       "Gb_type": "Unsupported functorch tracing attempt",
@@ -1893,6 +1907,18 @@
       "Hints": [
         "Remove the mutation or move it outside of the HigherOrderOp.",
         "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
+      ]
+    }
+  ],
+  "GB6210": [
+    {
+      "Gb_type": "leaf_function: nn.Module argument without source",
+      "Context": "module type: {type(arg.value).__name__}",
+      "Explanation": "leaf_function received an nn.Module argument that cannot be traced back to its origin. This typically happens when the module is created dynamically inside the compiled region.",
+      "Hints": [
+        "Ensure the nn.Module is created outside the compiled function ",
+        "and passed as an argument.",
+        "If the module is a class attribute, access it via self.module_name."
       ]
     }
   ],
@@ -2137,6 +2163,16 @@
       "Hints": [
         "Manually convert the argument to a list.",
         "Ensure all keys are hashable."
+      ]
+    }
+  ],
+  "GB3840": [
+    {
+      "Gb_type": "leaf_function without fake_fn",
+      "Context": "fn={fn}",
+      "Explanation": "The leaf_function decorator requires a fake_fn to be provided, but none was found on the decorated function.",
+      "Hints": [
+        "Ensure the function is decorated with @leaf_function(fake_fn)"
       ]
     }
   ],

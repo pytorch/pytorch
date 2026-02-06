@@ -17,6 +17,7 @@
 #include <ATen/ops/div.h>
 #include <ATen/ops/exponential_native.h>
 #include <ATen/ops/full_like.h>
+#include <ATen/ops/geometric_native.h>
 #include <ATen/ops/log_normal_native.h>
 #include <ATen/ops/multinomial_native.h>
 #include <ATen/ops/normal_native.h>
@@ -30,6 +31,11 @@
 
 namespace at::native {
 namespace mps {
+#ifndef PYTORCH_JIT_COMPILE_SHADERS
+static auto& lib = MetalShaderLibrary::getBundledLibrary();
+#else
+#include <ATen/native/mps/Distributions_metallib.h>
+#endif
 
 struct RandomCachedGraph : public MPSCachedGraph {
   RandomCachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
@@ -461,30 +467,70 @@ Tensor& log_normal_mps_(Tensor& self, double mean, double std, std::optional<Gen
 Tensor& cauchy_mps_(Tensor& self, double median, double sigma, std::optional<Generator> gen) {
   TORCH_CHECK(sigma > 0.0, "cauchy_ expects sigma > 0.0, but found sigma=", sigma);
 
+  if (self.numel() == 0) {
+    return self;
+  }
+
+  using namespace mps;
+
+  auto mps_gen = get_generator_or_default<MPSGeneratorImpl>(gen, at::mps::detail::getDefaultMPSGenerator());
+  auto stream = getCurrentMPSStream();
+  const auto needs_copy = !self.is_contiguous();
+  auto output = needs_copy ? at::empty_like(self, MemoryFormat::Contiguous) : self;
+
+  @autoreleasepool {
+    std::string kernel_name = "cauchy_" + scalarToMetalTypeString(output);
+    auto cauchyPSO = lib.getPipelineStateForFunc(kernel_name);
+
+    int64_t seed;
+    int64_t base_offset;
+    {
+      // See Note [Acquire lock when using random generators]
+      std::lock_guard<std::mutex> lock(mps_gen->mutex_);
+      seed = static_cast<int64_t>(mps_gen->current_seed());
+      base_offset = static_cast<int64_t>(mps_gen->get_offset());
+      mps_gen->set_offset(base_offset + output.numel());
+    }
+
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+      @autoreleasepool {
+        auto computeEncoder = stream->commandEncoder();
+        [computeEncoder setComputePipelineState:cauchyPSO];
+        auto median_f = static_cast<float>(median);
+        auto sigma_f = static_cast<float>(sigma);
+        mtl_setArgs(
+            computeEncoder, output, std::array<float, 2>{median_f, sigma_f}, std::array<long, 2>{seed, base_offset});
+        mtl_dispatch1DJob(computeEncoder, cauchyPSO, output.numel());
+      }
+    });
+  }
+
+  if (needs_copy) {
+    self.copy_(output);
+  }
+
+  return self;
+}
+
+Tensor& geometric_mps_(Tensor& self, double p, std::optional<Generator> gen) {
+  TORCH_CHECK(p > 0.0 && p < 1.0, "geometric_ expects p to be in (0, 1), but got p=", p);
+
   mps::RandomOpBlock random_op_block = ^RandomOpFn(cachedGraph, randomTensor) {
     auto mpsGraph = cachedGraph->graph();
-    // cauchy distwith inverse CDF: median + sigma * tan(pi * (U - 0.5))
-    const auto halfTensor = [mpsGraph constantWithScalar:0.5 dataType:randomTensor.dataType];
-    const auto piTensor = [mpsGraph constantWithScalar:M_PI dataType:randomTensor.dataType];
-    const auto medianTensor = [mpsGraph constantWithScalar:median dataType:randomTensor.dataType];
-    const auto sigmaTensor = [mpsGraph constantWithScalar:sigma dataType:randomTensor.dataType];
+    // inverse CDF: ceil(log(U) / log(1-p))
+    // where U is a uniform random variable in (0, 1)
+    const auto logOneMinusP = std::log(1.0 - p);
+    const auto logOneMinusPTensor = [mpsGraph constantWithScalar:logOneMinusP dataType:randomTensor.dataType];
 
-    // (U - 0.5)
-    const auto shiftedTensor = [mpsGraph subtractionWithPrimaryTensor:randomTensor secondaryTensor:halfTensor name:nil];
-    // pi * (U - 0.5)
-    const auto scaledTensor = [mpsGraph multiplicationWithPrimaryTensor:piTensor
-                                                        secondaryTensor:shiftedTensor
-                                                                   name:nil];
-    // tan(pi * (U - 0.5))
-    const auto tanTensor = [mpsGraph tanWithTensor:scaledTensor name:nil];
+    // log(U)
+    const auto logUTensor = [mpsGraph logarithmWithTensor:randomTensor name:nil];
 
-    // sigma * tan(pi * (U - 0.5))
-    const auto multipliedTensor = [mpsGraph multiplicationWithPrimaryTensor:sigmaTensor
-                                                            secondaryTensor:tanTensor
-                                                                       name:nil];
-    // median + sigma * tan(pi * (U - 0.5))
-    return [mpsGraph additionWithPrimaryTensor:medianTensor secondaryTensor:multipliedTensor name:nil];
+    // log(U) / log(1-p)
+    const auto divTensor = [mpsGraph divisionWithPrimaryTensor:logUTensor secondaryTensor:logOneMinusPTensor name:nil];
+    // ceil(log(U) / log(1-p))
+    return [mpsGraph ceilWithTensor:divTensor name:nil];
   };
+
   auto eps = std::numeric_limits<float>::epsilon();
   return mps::random_mps_impl<double>(self,
                                       eps,
@@ -493,7 +539,7 @@ Tensor& cauchy_mps_(Tensor& self, double median, double sigma, std::optional<Gen
                                       std::nullopt,
                                       MPSGraphRandomDistributionUniform,
                                       gen,
-                                      "cauchy_mps_:" + std::to_string(median) + ":" + std::to_string(sigma),
+                                      "geometric_mps_:" + std::to_string(p),
                                       random_op_block);
 }
 

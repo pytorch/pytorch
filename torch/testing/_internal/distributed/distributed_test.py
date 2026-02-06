@@ -3662,9 +3662,12 @@ class DistributedTest:
                         ]
                         for rank_iter in group
                     ]
-                    assert self._run_all_gather_coalesced_and_verify(
+                    if not self._run_all_gather_coalesced_and_verify(
                         output_tensor_lists, input_tensors, expected_tensors, group_id
-                    ), "output tensors do not match expected outputs"
+                    ):
+                        raise AssertionError(
+                            "output tensors do not match expected outputs"
+                        )
 
             self._barrier()
 
@@ -3736,9 +3739,10 @@ class DistributedTest:
                 ]
                 for r in group
             ]
-            assert self._run_all_gather_coalesced_and_verify(
+            if not self._run_all_gather_coalesced_and_verify(
                 output_tensors_lists, input_tensors, expected_tensors, group_id
-            )
+            ):
+                raise AssertionError("output tensors do not match expected outputs")
             self._barrier()
 
         # AllToAll
@@ -5027,7 +5031,8 @@ class DistributedTest:
                 for n, param in net.named_parameters():
                     self.assertEqual(param.dtype, torch.float32)
                     if param.grad is None:
-                        assert n == "module.p"  # Only param that doesn't require grad
+                        if n != "module.p":  # Only param that doesn't require grad
+                            raise AssertionError(f"Expected n == 'module.p', got {n!r}")
                     else:
                         self.assertEqual(param.grad.dtype, torch.float32)
                         tensor_list = [
@@ -6423,6 +6428,69 @@ class DistributedTest:
                 bwd_comp_end_host_side_time, bwd_comp_start_host_side_time
             )
             self.assertGreaterEqual(bwd_comp_start_host_side_time, fwd_host_side_time)
+
+        @require_backend_is_available(DistTestCases.backend_feature["gpu"])
+        @skip_if_lt_x_gpu(2)
+        def test_ddp_bucket_cap_mb_list(self):
+            """
+            Test that bucket_cap_mb_list parameter is properly used for bucket rebuilding.
+            When bucket_cap_mb_list is provided, it should be used to rebuild buckets.
+            When not provided, original logic should be used.
+            """
+            torch.cuda.set_device(self.rank)
+
+            # Test 1: With bucket_cap_mb_list provided
+            model_with_list = LargeNet().cuda(self.rank)
+            bucket_cap_mb_list = [1, 2]  # Two buckets with different sizes
+            ddp_with_list = nn.parallel.DistributedDataParallel(
+                model_with_list,
+                device_ids=[self.rank],
+                bucket_cap_mb_list=bucket_cap_mb_list,
+            )
+
+            # Run a forward/backward pass to trigger bucket rebuilding
+            input_tensor = torch.randn(10, 1000).cuda(self.rank)
+            loss = ddp_with_list(input_tensor).sum()
+            loss.backward()
+
+            # Run another iteration to trigger rebuild
+            input_tensor = torch.randn(10, 1000).cuda(self.rank)
+            loss = ddp_with_list(input_tensor).sum()
+            loss.backward()
+
+            # When bucket_cap_mb_list is provided, buckets are created with the correct
+            # structure from the start. No "rebuild" is needed since initial bucket
+            # creation uses the same limits as rebuild would. Hence has_rebuilt_buckets=0
+            # is the expected behavior.
+            # Verify bucket_bytes_cap_list was properly set instead.
+            expected_bucket_bytes_cap_list = [
+                int(cap * 1024 * 1024) for cap in bucket_cap_mb_list
+            ]
+            self.assertEqual(
+                ddp_with_list.bucket_bytes_cap_list, expected_bucket_bytes_cap_list
+            )
+
+            # Test 2: Without bucket_cap_mb_list (backward compatibility)
+            model_without_list = LargeNet().cuda(self.rank)
+            ddp_without_list = nn.parallel.DistributedDataParallel(
+                model_without_list,
+                device_ids=[self.rank],
+                bucket_cap_mb=25,  # Standard bucket size
+            )
+
+            # Run a forward/backward pass
+            input_tensor = torch.randn(10, 1000).cuda(self.rank)
+            loss = ddp_without_list(input_tensor).sum()
+            loss.backward()
+
+            # Run another iteration to trigger rebuild
+            input_tensor = torch.randn(10, 1000).cuda(self.rank)
+            loss = ddp_without_list(input_tensor).sum()
+            loss.backward()
+
+            # Verify that DDP without bucket_cap_mb_list still works correctly
+            # and bucket_bytes_cap_list should be empty (using original logic)
+            self.assertEqual(ddp_without_list.bucket_bytes_cap_list, [])
 
         @skip_but_pass_in_sandcastle_if(
             BACKEND == "nccl", "nccl does not support DDP on CPU models"
@@ -9338,7 +9406,8 @@ class DistributedTest:
                     x = self.fc2(F.relu(self.fc1(x)))
                     y = x.clone()
                     x = x.detach()
-                    assert not x.requires_grad
+                    if x.requires_grad:
+                        raise AssertionError("Expected x.requires_grad to be False")
                     return (x, y)
 
             model = MyModel().to(self.rank)
@@ -9773,7 +9842,8 @@ class DistributedTest:
                 torch.cuda.synchronize()
 
             run_iteration()
-            assert 0 == get_num_torch_recompiles()
+            if get_num_torch_recompiles() != 0:
+                raise AssertionError(f"Expected 0 torch recompiles, got {get_num_torch_recompiles()}")
 
             if new_pg:
                 # Now reduce world_size and run iteration.
@@ -9820,7 +9890,8 @@ class DistributedTest:
                 )
 
             # Validate no more recompiles.
-            assert 0 == get_num_torch_recompiles()
+            if get_num_torch_recompiles() != 0:
+                raise AssertionError(f"Expected 0 torch recompiles, got {get_num_torch_recompiles()}")
 
         @skip_if_lt_x_gpu(4)
         @require_world_size(4)

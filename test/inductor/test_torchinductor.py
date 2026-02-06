@@ -767,7 +767,16 @@ def _run_and_assert_no_indirect_indexing(
                 stmt = line.split(".store")[-1]
             elif "[" in line:
                 stmt = line.split("[")[-1].split("]")[0]
-            if "tl.make_block_ptr(" in line:
+            # Block descriptors do not support indirect indexing
+            if any(
+                block_descriptor_syntax in line
+                for block_descriptor_syntax in (
+                    "block_ptr",
+                    "tma_descriptor",
+                    "tl.make_block_ptr",
+                    "tl.make_tensor_descriptor",
+                )
+            ):
                 continue
 
             if stmt is None:
@@ -6789,11 +6798,13 @@ class CommonTemplate:
     @skip_if_gpu_halide
     # Constant folding was explicitly turned off due to issue #108388
     # Turn it back on for test
-    @unittest.skipIf(config.triton.native_matmul, "native matmul has better precision")
     @torch._inductor.config.patch(
-        joint_graph_constant_folding=True,
-        # Numerical accuracy failure for triton fp16
-        max_autotune_gemm_backends="ATEN",
+        {
+            "joint_graph_constant_folding": True,
+            # Numerical accuracy failure for triton fp16
+            "max_autotune_gemm_backends": "ATEN",
+            "triton.native_matmul": False,
+        }
     )
     def test_remove_no_ops(self):
         def matmul_with_op(x, y, fn):
@@ -7222,12 +7233,15 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(code0, code1)
 
     @config.patch(
-        force_disable_caches=True,
-        # Test expects a single (fused) kernel to be generated
-        max_autotune_gemm_backends="ATEN",
+        {
+            "force_disable_caches": True,
+            # Test expects a single (fused) kernel to be generated
+            "max_autotune_gemm_backends": "ATEN",
+            # native matmul codegens the matrix multiplication
+            "triton.native_matmul": False,
+        }
     )
     @skip_if_cpp_wrapper("run_and_get_kernels issue")
-    @unittest.skipIf(config.triton.native_matmul, "matmul is now generated")
     def test_deterministic_codegen_with_suffix(self):
         if "cpu" in str(self.device) and config.is_fbcode():
             raise unittest.SkipTest("cpp packaging is wacky in fbcode")
@@ -9436,35 +9450,37 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertTrue(0.9 < result2.mean().item() < 1.1)
 
     @dynamo_config.patch(automatic_dynamic_shapes=True)
-    def test_dropout_deterministic(self):
+    @parametrize("cudagraphs", (True, False))
+    def test_dropout_deterministic(self, cudagraphs):
         @torch.compile(backend="inductor")
         def fn(a):
             return torch.nn.functional.dropout(a, 0.55, True)
 
-        for cg in [False, True]:
-            with patch.object(config.triton, "cudagraphs", cg):
-                torch._dynamo.reset()
+        with patch.object(config.triton, "cudagraphs", cudagraphs):
+            torch._dynamo.reset()
 
-                x = torch.ones(1024, device=self.device, dtype=torch.float32)
+            x = torch.ones(1024, device=self.device, dtype=torch.float32)
 
-                torch.manual_seed(1234)
-                a0 = fn(x).clone()
-                a1 = fn(x).clone()
-                a2 = fn(x).clone()
+            random.seed(1234)
+            torch.manual_seed(1234)
+            a0 = fn(x).clone()
+            a1 = fn(x).clone()
+            a2 = fn(x).clone()
 
-                torch.manual_seed(1234)
-                b0 = fn(x).clone()
-                b1 = fn(x).clone()
-                b2 = fn(x).clone()
+            random.seed(1234)
+            torch.manual_seed(1234)
+            b0 = fn(x).clone()
+            b1 = fn(x).clone()
+            b2 = fn(x).clone()
 
-                # same seed, same values
-                self.assertTrue(torch.allclose(a0, b0))
-                self.assertTrue(torch.allclose(a1, b1))
-                self.assertTrue(torch.allclose(a2, b2))
+            # same seed, same values
+            self.assertTrue(torch.allclose(a0, b0))
+            self.assertTrue(torch.allclose(a1, b1))
+            self.assertTrue(torch.allclose(a2, b2))
 
-                # different calls, different values
-                self.assertFalse(torch.allclose(a0, a1))
-                self.assertFalse(torch.allclose(a1, a2))
+            # different calls, different values
+            self.assertFalse(torch.allclose(a0, a1))
+            self.assertFalse(torch.allclose(a1, a2))
 
     @parametrize("combo_kernels", (False, True))
     def test_rand_like_deterministic(self, combo_kernels):
@@ -9476,11 +9492,13 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
             x = torch.ones(1024, device=self.device, dtype=torch.float32)
 
+            random.seed(1234)
             torch.manual_seed(1234)
             a0 = fn(x)[0].clone()
             a1 = fn(x)[0].clone()
             a2 = fn(x)[0].clone()
 
+            random.seed(1234)
             torch.manual_seed(1234)
             b0 = fn(x)[0].clone()
             b1 = fn(x)[0].clone()
@@ -10434,7 +10452,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @xfail_if_mps
     @config.patch(search_autotune_cache=False)
-    @unittest.skipIf(config.triton.native_matmul, "matmul count is different")
     def test_dropout3(self):
         m = torch.nn.Sequential(
             torch.nn.Linear(32, 32, bias=False),
@@ -10463,7 +10480,15 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             # so we get only 1 kernel.
             self.assertEqual(fw_code.count("tl.rand"), 2)
             self.assertEqual(bw_code.count("tl.rand"), 0)
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 4)
+            self.assertEqual(
+                torch._inductor.metrics.generated_kernel_count,
+                4 if not config.triton.native_matmul else 6,
+            )
+        else:
+            self.assertEqual(
+                torch._inductor.metrics.generated_kernel_count,
+                4,
+            )
 
     @xfail_if_mps  # Only works for triton
     def test_randint_kernel_count(self):
@@ -11316,7 +11341,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         code2 = run_and_get_triton_code(override, x_small)
         self.assertNotEqual(code1, code2)
 
-        self.assertEqual(no_override(x_small), override(x_small))
+        # Different size hints can produce different reduction orderings,
+        # so we need tolerance for floating-point associativity differences
+        self.assertEqual(no_override(x_small), override(x_small), atol=1e-4, rtol=1e-4)
 
         with self.assertRaisesRegex(
             RuntimeError, "Could not guard on data-dependent expression"
@@ -14656,6 +14683,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ms = do_bench(lambda: opt_f(x_large))
             print(f"{ms=:.3f}")
 
+    @skip_if_halide
     @expectedFailureCodegenDynamic
     def test_special_polygamma(self):
         fn = torch.special.polygamma
@@ -14821,8 +14849,12 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         return code_allowed != code_disallowed
 
     # If matmul is implemented by triton there is more reuse
-    @config.patch(max_autotune_gemm_backends="ATEN")
-    @unittest.skipIf(config.triton.native_matmul, "matmul is now generated")
+    @config.patch(
+        {
+            "max_autotune_gemm_backends": "ATEN",
+            "triton.native_matmul": False,
+        }
+    )
     def test_allow_reuse_disable_if_exceed_peak(self):
         @torch.compile
         def fn(inp):  # 1*N^2
@@ -15405,26 +15437,50 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         a, b = [torch.randn(s, device=GPU_TYPE) for s in [(1024, 512), (512, 1024)]]
         self.common(fn, (a, b))
         code = run_and_get_triton_code(torch.compile(fn, mode="max-autotune"), a, b)
-        (
-            FileCheck()
-            # first kernel
-            .check("'launch_pdl': True")
-            .check("gdc_wait")
-            .check("load")
-            .check("gdc_launch")
-            .check("store")
-            # second kernel, no need to wait before load
-            .check("'launch_pdl': True")
-            .check("load")
-            .check("gdc_wait")
-            .check("gdc_launch")
-            .check("store")
-            # matmul template
-            .check_not("'launch_pdl': True")
-            .check_not("gdc_wait")
-            .check_not("gdc_launch")
-            .check("store")
-        ).run(code)
+        if is_dynamic_shape_enabled():
+            # Dynamic shapes version: store comes before gdc_launch
+            (
+                FileCheck()
+                # first kernel
+                .check("'launch_pdl': True")
+                .check("gdc_wait")
+                .check("load")
+                .check("store")
+                .check("gdc_launch")
+                # second kernel, no need to wait before load
+                .check("'launch_pdl': True")
+                .check("load")
+                .check("gdc_wait")
+                .check("store")
+                .check("gdc_launch")
+                # matmul template
+                .check_not("'launch_pdl': True")
+                .check_not("gdc_wait")
+                .check_not("gdc_launch")
+                .check("store")
+            ).run(code)
+        else:
+            # Static shapes version: gdc_launch comes before store
+            (
+                FileCheck()
+                # first kernel
+                .check("'launch_pdl': True")
+                .check("gdc_wait")
+                .check("load")
+                .check("gdc_launch")
+                .check("store")
+                # second kernel, no need to wait before load
+                .check("'launch_pdl': True")
+                .check("load")
+                .check("gdc_wait")
+                .check("gdc_launch")
+                .check("store")
+                # matmul template
+                .check_not("'launch_pdl': True")
+                .check_not("gdc_wait")
+                .check_not("gdc_launch")
+                .check("store")
+            ).run(code)
 
     def test_use_deterministic_algorithms(self):
         @torch.compile(backend="inductor", fullgraph=True)

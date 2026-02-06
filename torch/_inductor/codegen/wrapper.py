@@ -1077,7 +1077,7 @@ class PythonWrapperCodegen(CodeGen):
     Generate outer wrapper in Python that calls the kernels.
     """
 
-    supports_caching = True  # Whether the output code is cacheable.
+    supports_caching: bool = True  # Whether the output code is cacheable.
 
     def __init__(self):
         super().__init__()
@@ -1683,10 +1683,8 @@ class PythonWrapperCodegen(CodeGen):
         dims = desc.dims
         block_dims = desc.block_dims
         if apply_size_hints:
-            dims = tuple(V.graph.sizevars.atomically_apply_size_hint(d) for d in dims)
-            block_dims = tuple(
-                V.graph.sizevars.atomically_apply_size_hint(d) for d in block_dims
-            )
+            dims = V.graph.sizevars.optimization_hint(dims)
+            block_dims = V.graph.sizevars.optimization_hints(block_dims)
 
         ptr = f"{desc.tensor.codegen_reference()}.data_ptr()"
         # Explicitly call the Python version of val_to_arg_str
@@ -1704,9 +1702,7 @@ class PythonWrapperCodegen(CodeGen):
     def _generate_tma_descriptor_call_stable(self, desc, apply_size_hints=False):
         block_shape = desc.block_shape
         if apply_size_hints:
-            block_shape = tuple(
-                V.graph.sizevars.atomically_apply_size_hint(d) for d in block_shape
-            )
+            block_shape = V.graph.sizevars.optimization_hints(block_shape)
 
         prefix = "triton.tools.tensor_descriptor.TensorDescriptor"
         fn = f"{prefix}.from_tensor"
@@ -2324,7 +2320,9 @@ class PythonWrapperCodegen(CodeGen):
                     # invalid benchmark code, because it's not guaranteed 42
                     # is actually a valid value for the kernel in question.
                     # See https://github.com/pytorch/pytorch/issues/124686
-                    add_expr_input(name, V.graph.sizevars.size_hint(value, fallback=42))
+                    add_expr_input(
+                        name, V.graph.sizevars.optimization_hint(value, fallback=42)
+                    )
                 elif isinstance(value, ir.GeneratorState):
                     add_expr_input(
                         name,
@@ -2332,7 +2330,7 @@ class PythonWrapperCodegen(CodeGen):
                     )
                 else:
                     shape = [
-                        V.graph.sizevars.size_hint(x, fallback=42)
+                        V.graph.sizevars.optimization_hint(x, fallback=42)
                         for x in value.get_size()
                     ]
                     stride = [
@@ -2425,6 +2423,16 @@ class PythonWrapperCodegen(CodeGen):
     def define_subgraph_launcher_fn(self, name: str, subgraph_code):
         self.subgraph_definitions.splice(subgraph_code.value)
 
+    @classmethod
+    def _get_triton_info_kernel_cls(cls):
+        # Other inductor triton backends may subclass from
+        # the `TritonKernel` class. An override of this method
+        # allows them to set which subclass to use to get information
+        # such as common triton imports or inductor metadata
+        from .triton import TritonKernel
+
+        return TritonKernel
+
     def define_user_defined_triton_kernel(
         self,
         kernel,
@@ -2446,7 +2454,6 @@ class PythonWrapperCodegen(CodeGen):
             TensorArg,
             TMADescriptorArg,
         )
-        from .triton import gen_common_triton_imports, TritonKernel
 
         original_name = kernel.__name__
         signature: list[KernelArgType] = []
@@ -2659,11 +2666,13 @@ class PythonWrapperCodegen(CodeGen):
             compile_wrapper.writeline(f"async_compile.triton({original_name!r}, '''")
 
         inductor_meta["kernel_name"] = name
-        inductor_meta.update(TritonKernel.inductor_meta_common())
+        triton_info_kernel_cls = self._get_triton_info_kernel_cls()
+        inductor_meta.update(triton_info_kernel_cls.inductor_meta_common())
 
-        compile_wrapper.splice(gen_common_triton_imports())
+        compile_wrapper.splice(triton_info_kernel_cls.gen_common_triton_imports())
         if config.triton.proton_profiling:
             compile_wrapper.writeline('pl.enable_semantic("triton")')
+
         compile_wrapper.splice(
             f"""
             @triton_heuristics.user_autotune(
@@ -2853,33 +2862,15 @@ class PythonWrapperCodegen(CodeGen):
                 self.kernel_autotune_tmp_arg_idx += 1
 
             assert buf is not None, f"Failed to find a buffer for arg {arg}"
-            size = tuple(
-                V.graph.sizevars.atomically_apply_size_hint(
-                    e,
-                    fallback=config.unbacked_symint_fallback,
-                )
-                for e in buf.get_size()
+            size = V.graph.sizevars.optimization_hints(buf.get_size())
+            allocation_size = V.graph.sizevars.optimization_hints(
+                V.graph.get_allocation_size(buf)
             )
-            allocation_size = tuple(
-                V.graph.sizevars.atomically_apply_size_hint(
-                    e,
-                    fallback=config.unbacked_symint_fallback,
-                )
-                for e in V.graph.get_allocation_size(buf)
-            )
-            stride = tuple(
-                V.graph.sizevars.atomically_apply_size_hint(
-                    e,
-                    fallback=config.unbacked_symint_fallback,
-                )
-                for e in buf.get_stride()
-            )
+            stride = V.graph.sizevars.optimization_hints(buf.get_stride())
+
             device = buf.get_device()
             dtype = buf.get_dtype()
-            offset = V.graph.sizevars.size_hint(
-                buf.get_layout().offset,
-                fallback=config.unbacked_symint_fallback,
-            )
+            offset = V.graph.sizevars.optimization_hint(buf.get_layout().offset)
             value = f"generate_example_value({size}, {stride}, '{device}', {dtype}, {offset}, {allocation_size})"
             self.kernel_autotune_calls.writeline(f"{buf_name} = {value}")
 
@@ -2907,11 +2898,7 @@ class PythonWrapperCodegen(CodeGen):
             if arg in V.graph.sizevars.inv_precomputed_replacements:
                 arg = V.graph.sizevars.inv_precomputed_replacements[arg]
 
-            return str(
-                V.graph.sizevars.atomically_apply_size_hint(
-                    arg, fallback=config.unbacked_symint_fallback
-                )
-            )
+            return str(V.graph.sizevars.optimization_hint(arg))
 
         elif isinstance(arg, (str, int, float, bool)):
             return str(arg)

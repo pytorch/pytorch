@@ -5,10 +5,9 @@ import logging
 from collections.abc import Callable, Sequence
 from typing import Any
 
-from onnxscript import ir
-
 import torch
 import torch.fx
+from torch.onnx._internal._lazy_import import onnx_ir as ir
 from torch.onnx._internal.exporter import _registration, _schemas
 
 
@@ -207,7 +206,8 @@ def _get_first_tensor_in_node_list(
 
 
 def _get_named_fx_node_args(node: torch.fx.Node) -> dict[str, torch.fx.node.Argument]:
-    assert hasattr(node.target, "_schema")
+    if not hasattr(node.target, "_schema"):
+        raise AssertionError("node.target must have _schema attribute")
     torch_schema: torch.FunctionSchema = node.target._schema  # type: ignore[union-attr]
     node_args = {}
     for arg, schema_arg in zip(node.args, torch_schema.arguments):
@@ -284,7 +284,8 @@ def get_matching_overload(
                     isinstance(t, torch.fx.Node) for t in arg
                 ):
                     first_tensor = _get_first_tensor_in_node_list(arg)  # type: ignore[arg-type]
-                    assert first_tensor is not None
+                    if first_tensor is None:
+                        raise AssertionError("first_tensor must be non-None")
                     # FIXME: Handle symfloat here
                     arg = ir.SequenceType(_get_type_from_tensor(first_tensor))  # type: ignore[assignment]
                 elif isinstance(arg, torch.fx.Node):

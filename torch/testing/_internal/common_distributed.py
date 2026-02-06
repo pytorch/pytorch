@@ -2,6 +2,7 @@
 
 import faulthandler
 import functools
+import inspect
 import itertools
 import logging
 import multiprocessing
@@ -300,9 +301,12 @@ def nccl_skip_if_lt_x_gpu(backend, x):
 def verify_ddp_error_logged(model_DDP, err_substr):
     # Verify error was logged in ddp_logging_data.
     ddp_logging_data = model_DDP._get_ddp_logging_data()
-    assert "iteration" in ddp_logging_data
-    assert "has_error" in ddp_logging_data
-    assert "error" in ddp_logging_data
+    if "iteration" not in ddp_logging_data:
+        raise AssertionError("Expected 'iteration' in ddp_logging_data")
+    if "has_error" not in ddp_logging_data:
+        raise AssertionError("Expected 'has_error' in ddp_logging_data")
+    if "error" not in ddp_logging_data:
+        raise AssertionError("Expected 'error' in ddp_logging_data")
     logging_err = ddp_logging_data["error"]
     # Remove C++ stacktrace if needed.
     actual = (
@@ -310,9 +314,10 @@ def verify_ddp_error_logged(model_DDP, err_substr):
         if err_substr.find("\nException raised from ") == -1
         else err_substr.split("\nException raised from ")[0]
     )
-    assert actual in logging_err, (
-        f"Did not find expected {actual} in ddp logging data error: {logging_err}"
-    )
+    if actual not in logging_err:
+        raise AssertionError(
+            f"Did not find expected {actual} in ddp logging data error: {logging_err}"
+        )
 
 
 def with_nccl_blocking_wait(func):
@@ -945,7 +950,8 @@ class MultiProcessTestCase(TestCase):
             if signal_send_pipe is not None:
                 signal_send_pipe.send(None)
 
-            assert event_listener_thread is not None
+            if event_listener_thread is None:
+                raise AssertionError("Expected event_listener_thread to not be None")
             event_listener_thread.join()
             # Close pipe after done with test.
             parent_pipe.close()
@@ -1682,6 +1688,8 @@ class MultiProcContinuousTest(TestCase):
     timeout: timedelta = timedelta(seconds=120)
     # Poison pill for rest of tests if one of them fails
     poison_pill: bool = False
+    # Flag for lazy process spawning (to support instantiate_device_type_tests)
+    _processes_spawned: bool = False
 
     @classmethod
     def backend_str(cls) -> Optional[str]:
@@ -1711,7 +1719,8 @@ class MultiProcContinuousTest(TestCase):
 
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file):
-        assert rdvz_file is not None
+        if rdvz_file is None:
+            raise AssertionError("Expected rdvz_file to not be None")
         # rank should be local_rank for tests running on <= 8 gpus which is how all these tests are designed
         # and we expect LOCAL_RANK set by torchrun. Setting it lets init_device_mesh set the device without
         # issuing a warning
@@ -1748,7 +1757,10 @@ class MultiProcContinuousTest(TestCase):
     def _worker_loop(cls, rank, world_size, rdvz_file, task_queue, completion_queue):
         raised_exception = False
         # Sub tests are going to access these values, check first
-        assert 0 <= rank < world_size
+        if not (0 <= rank < world_size):
+            raise AssertionError(
+                f"Expected 0 <= rank < world_size, got rank={rank}, world_size={world_size}"
+            )
         # set class variables for the test class
         cls.rank = rank
         cls.world_size = world_size
@@ -1839,33 +1851,78 @@ class MultiProcContinuousTest(TestCase):
             logger.debug("Started process %s with pid %s", rank, process.pid)  # noqa: UP031
 
     @classmethod
+    def _get_world_size(cls, device_type: str) -> int:
+        """
+        Get world_size, handling both class variable and property definitions.
+        Properties are instance-level and need special handling in class methods.
+        """
+        # Check if world_size is defined as a property (instance-level)
+        world_size_attr = inspect.getattr_static(cls, "world_size", None)
+        if isinstance(world_size_attr, property):
+            # Create a temporary instance to evaluate the property
+            # We use object.__new__ to avoid calling __init__ which may have side effects
+            temp_instance = object.__new__(cls)
+            world_size = world_size_attr.fget(temp_instance)
+        else:
+            world_size = cls.world_size
+
+        # If world_size is not set (== -2), use device count
+        if world_size == -2:
+            world_size = torch.get_device_module(device_type).device_count()
+            if world_size == 0:
+                raise unittest.SkipTest(f"No {device_type} devices available")
+
+        return world_size
+
+    @classmethod
     def setUpClass(cls):
         """
         Class-scope test fixture. Run once for entire test class, before any test starts.
-        Set up the process group.
+        Note: Process spawning is deferred to setUp to support instantiate_device_type_tests,
+        which calls setUpClass during class creation before any tests run.
         """
         super().setUpClass()
 
-        # Use device count as world size
-        device_type = cls.device_type()
-        # If world_size is not set, use device count
-        if cls.world_size == -2:
-            cls.world_size = torch.get_device_module(device_type).device_count()
-            if cls.world_size == 0:
-                raise unittest.SkipTest(f"No {device_type} devices available")
+    @classmethod
+    def _ensure_processes_spawned(cls):
+        """
+        Lazily spawn worker processes on first test run.
+        This supports instantiate_device_type_tests which calls setUpClass during
+        class creation (before any tests run), when spawning would be premature.
+        """
+        if cls._processes_spawned:
+            return
+
+        # Handle both method and string attribute for device_type
+        # (instantiate_device_type_tests sets device_type as a string attribute,
+        # making this compatible as a drop-in replacement for MultiProcessTestCase)
+        device_type_attr = cls.device_type
+        if callable(device_type_attr):
+            device_type = device_type_attr()
+        else:
+            device_type = device_type_attr
+
+        # Get world_size (handles both class variable and property)
+        cls.world_size = cls._get_world_size(device_type)
 
         logger.info(
             f"Testing class {cls.__name__} on {cls.world_size} {device_type}"  # noqa: G004
         )
 
         cls._spawn_processes(cls.world_size)
+        cls._processes_spawned = True
 
     @classmethod
     def tearDownClass(cls):
         """
         Class-scope test fixture. Run once for entire test class, after all tests finish.
-        Tear down the process group.
+        Tear down the process group if spawned.
         """
+        # If processes were never spawned (e.g., all tests were skipped), nothing to tear down
+        if not cls._processes_spawned:
+            super().tearDownClass()
+            return
+
         logger.debug(f"Joining {cls.world_size} workers")  # noqa: G004
         # Enqueue "None" to all workers to tell them to exit
         for task_queue in cls.task_queues:
@@ -1889,6 +1946,9 @@ class MultiProcContinuousTest(TestCase):
         Test fixture. Run before each test.
         """
         super().setUp()
+
+        # Ensure processes are spawned (lazy initialization for instantiate_device_type_tests)
+        self.__class__._ensure_processes_spawned()
 
         # I am the dispatcher
         self.rank = self.MAIN_PROCESS_RANK
@@ -1924,7 +1984,10 @@ class MultiProcContinuousTest(TestCase):
                         raise rv
 
                     # Success
-                    assert rv == self.id()
+                    if rv != self.id():
+                        raise AssertionError(
+                            f"Expected rv == self.id(), got {rv} != {self.id()}"
+                        )
                     logger.debug(
                         f"Main proc detected rank {i} finished {self.id()}"  # noqa: G004
                     )

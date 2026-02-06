@@ -76,6 +76,7 @@ from ..utils import (
     check_constant_args,
     cmp_name_to_op_mapping,
     dict_methods,
+    enum_type_methods,
     frozenset_methods,
     get_custom_getattr,
     has_torch_function,
@@ -155,6 +156,15 @@ def is_cython_function(obj: object) -> bool:
 
 class UserDefinedVariable(VariableTracker):
     value: object
+
+    def _maybe_get_baseclass_method(self, name: str) -> Any:
+        """Get method from the base class if not overridden in value's __dict__."""
+        if name not in getattr(self.value, "__dict__", {}):
+            try:
+                return inspect.getattr_static(type(self.value), name)
+            except AttributeError:
+                pass
+        return None
 
 
 class UserDefinedClassVariable(UserDefinedVariable):
@@ -986,6 +996,45 @@ class UserDefinedExceptionClassVariable(UserDefinedClassVariable):
         return self.value
 
 
+class UserDefinedEnumClassVariable(UserDefinedClassVariable):
+    """
+    Represents Enum class objects (the class itself, not instances).
+
+    Handles Enum metaclass methods like __contains__ by checking if the method
+    is from the standard EnumType metaclass and executing it directly.
+
+    Not yet supported:
+    - __iter__: iteration over enum members (e.g., `for x in SomeEnum`)
+    - __reversed__: reversed iteration
+    - Flag enum membership checks (e.g., `Flag.A in combined_flags`)
+    """
+
+    # pyrefly: ignore[bad-override]
+    value: type[enum.Enum]
+
+    def call_method(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        method = self._maybe_get_baseclass_method(name)
+        if method in enum_type_methods:
+            if name == "__contains__" and len(args) == 1 and not kwargs:
+                arg = args[0]
+                if isinstance(arg, variables.EnumVariable):
+                    # Check if the enum value is a member of this enum class
+                    return variables.ConstantVariable.create(arg.value in self.value)
+                elif arg.is_python_constant():
+                    # Check if a constant value is in the enum
+                    return variables.ConstantVariable.create(
+                        arg.as_python_constant() in self.value
+                    )
+
+        return super().call_method(tx, name, args, kwargs)
+
+
 class NO_SUCH_SUBOBJ:
     pass
 
@@ -1155,14 +1204,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             random.uniform,
         }
         return fns
-
-    def _maybe_get_baseclass_method(self, name: str) -> set[types.FunctionType] | None:
-        if name not in getattr(self.value, "__dict__", {}):
-            try:
-                return inspect.getattr_static(type(self.value), name)
-            except AttributeError:
-                pass
-        return None
 
     def call_method(
         self,

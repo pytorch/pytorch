@@ -30,7 +30,7 @@ and run forward/pre-forward hooks.  If you install hooks before calling `torch.c
 or alter the hooks later, your use case should be supported by default.
 
 Backward/Pre-backward hooks are generally also supported, with similar caveats: currently graph-breaks in dynamo
-occur when accessing backward_hooks dicts, which is probably avoiable with some work.  Graph-breaks also impact the
+occur when accessing backward_hooks dicts, which is probably avoidable with some work.  Graph-breaks also impact the
 timing of firing backward hooks, since graph-segments are run as autograd-functions which produce all their grads at
 the same time.  Assuming it were possible for dynamo to not graph-break on the presence of backward-hooks, we would
 still expect the backward hooks for a series of modules to all fire together after the whole compiled graph's backward

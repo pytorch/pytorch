@@ -369,7 +369,8 @@ def get_attribute_fqn_from_ts_node(
 
 def get_op_overload(node: torch._C.Node):
     schema_str = node.schema()
-    assert schema_str != "(no schema)", f"got empty schema for {node}"
+    if schema_str == "(no schema)":
+        raise AssertionError(f"got empty schema for {node}")
     schema: torch._C.FunctionSchema = torch._C.parse_schema(schema_str)
     ns, op_name = str(schema.name).split("::")
     override = schema.overload_name
@@ -624,9 +625,10 @@ class TS2FXGraphConverter:
                     self.fx_graph, name, self.is_top_level_graph()
                 )
             elif name in self.name_to_constant:
-                assert isinstance(self.name_to_constant[name], torch.ScriptObject), (
-                    "Input conversion only handles ScriptObject"
-                )
+                if not isinstance(self.name_to_constant[name], torch.ScriptObject):
+                    raise AssertionError(
+                        f"Input conversion only handles ScriptObject, got {type(self.name_to_constant[name])}"
+                    )
                 normalized_name = normalize_name(name)
                 self.input_specs.append(
                     InputSpec(
@@ -847,15 +849,15 @@ class TS2FXGraphConverter:
                 k = self.get_fx_value_by_ir_value(inp)
             else:
                 v = self.get_fx_value_by_ir_value(inp)
-                assert k is not None and v is not None, (
-                    "DictConstruct has an empty key value pair."
-                )
+                if k is None or v is None:
+                    raise AssertionError("DictConstruct has an empty key value pair.")
                 output_dict[k] = v
                 k, v = None, None
 
-        assert k is None and v is None, (
-            "DictConstruct has an odd number of elements (violating our assumption)."
-        )
+        if k is not None or v is not None:
+            raise AssertionError(
+                "DictConstruct has an odd number of elements (violating our assumption)."
+            )
 
         output_name = node.output().debugName()
         self.name_to_node[output_name] = output_dict
@@ -983,7 +985,8 @@ class TS2FXGraphConverter:
             )
 
             if has_mutable_target:
-                assert len(args) >= 4
+                if len(args) < 4:
+                    raise AssertionError(f"expected at least 4 args, got {len(args)}")
                 new_args = list(args)
                 new_args[3] = True  # copy, override to True
                 fx_node = self.fx_graph.call_function(
@@ -1070,7 +1073,8 @@ class TS2FXGraphConverter:
             node, global_arguments
         )
 
-        assert len(subgraph_nodes) == 1
+        if len(subgraph_nodes) != 1:
+            raise AssertionError(f"expected 1 subgraph node, got {len(subgraph_nodes)}")
         subgraph_converter = subgraph_converters[0]
         if not self.is_top_level_graph():
             self.name_update_from_subblock_to_parent = (
@@ -1140,7 +1144,8 @@ class TS2FXGraphConverter:
         self._check_set_attr_in_if_block(node)
 
         inputs = list(node.inputs())
-        assert len(inputs) == 1
+        if len(inputs) != 1:
+            raise AssertionError(f"expected 1 input for prim::If, got {len(inputs)}")
         predicate = self.get_fx_value_by_ir_value(inputs[0])
 
         # Find inputs.
@@ -1153,7 +1158,10 @@ class TS2FXGraphConverter:
         arguments = list(arguments)
         subgraph_nodes, _ = self._convert_block_to_subgraph(node, arguments)
 
-        assert len(subgraph_nodes) == 2
+        if len(subgraph_nodes) != 2:
+            raise AssertionError(
+                f"expected 2 subgraph nodes, got {len(subgraph_nodes)}"
+            )
 
         fx_block_args = [self.get_fx_value_by_fqn(name) for name in arguments]
 
@@ -1544,9 +1552,10 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
         for spec in ep.graph_signature.input_specs:
             # Mark as constant tensors for erroneously traced buffers.
             if spec.kind == InputKind.BUFFER and spec.target in name_to_constant:
-                assert isinstance(name_to_constant[spec.target], torch.Tensor), (
-                    f"{type(name_to_constant[spec.target])} has been erroneously marked as buffer"
-                )
+                if not isinstance(name_to_constant[spec.target], torch.Tensor):
+                    raise AssertionError(
+                        f"{type(name_to_constant[spec.target])} has been erroneously marked as buffer"
+                    )
                 spec.kind = InputKind.CONSTANT_TENSOR
                 spec.persistent = None
         ep.verifier().check(ep)

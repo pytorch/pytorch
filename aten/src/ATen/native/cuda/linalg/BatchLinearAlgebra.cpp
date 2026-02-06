@@ -158,14 +158,6 @@ void magmaEig(
     value_t *rwork,
     magma_int_t *info);
 
-template<class scalar_t, class value_t=scalar_t>
-void magmaSvd(
-    magma_vec_t jobz, magma_int_t m, magma_int_t n, scalar_t* A,
-    magma_int_t lda, value_t* s, scalar_t* U, magma_int_t ldu,
-    scalar_t* Vh, magma_int_t ldvh, scalar_t* work, magma_int_t lwork,
-    value_t* rwork,
-    magma_int_t* iwork, magma_int_t* info);
-
 template<class scalar_t>
 void magmaLuSolve(
     magma_int_t n, magma_int_t nrhs, scalar_t* dA, magma_int_t ldda, magma_int_t* ipiv,
@@ -810,60 +802,6 @@ void magmaEig<c10::complex<float>, float>(
 }
 
 template<>
-void magmaSvd<double>(
-    magma_vec_t jobz, magma_int_t m, magma_int_t n, double* A,
-    magma_int_t lda, double* s, double* U, magma_int_t ldu,
-    double* Vh, magma_int_t ldvh, double* work, magma_int_t lwork,
-    double *rwork, magma_int_t* iwork, magma_int_t* info) {
-  (void)rwork; // unused
-  MagmaStreamSyncGuard guard;
-  magma_dgesdd(jobz, m, n, A, lda, s, U, ldu, Vh, ldvh, work, lwork, iwork, info);
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template<>
-void magmaSvd<float>(
-    magma_vec_t jobz, magma_int_t m, magma_int_t n, float* A,
-    magma_int_t lda, float* s, float* U, magma_int_t ldu,
-    float* Vh, magma_int_t ldvh, float* work, magma_int_t lwork,
-    float* rwork, magma_int_t* iwork, magma_int_t* info) {
-  (void)rwork; // unused
-  MagmaStreamSyncGuard guard;
-  magma_sgesdd(jobz, m, n, A, lda, s, U, ldu, Vh, ldvh, work, lwork, iwork, info);
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template<>
-void magmaSvd<c10::complex<float>, float>(
-    magma_vec_t jobz, magma_int_t m, magma_int_t n, c10::complex<float>* A,
-    magma_int_t lda, float* s, c10::complex<float>* U, magma_int_t ldu,
-    c10::complex<float>* Vh, magma_int_t ldvh, c10::complex<float>* work, magma_int_t lwork,
-    float *rwork, magma_int_t* iwork, magma_int_t* info) {
-  MagmaStreamSyncGuard guard;
-  magma_cgesdd(jobz, m, n, reinterpret_cast<magmaFloatComplex*>(A), lda, s,
-                reinterpret_cast<magmaFloatComplex*>(U), ldu,
-                reinterpret_cast<magmaFloatComplex*>(Vh), ldvh,
-                reinterpret_cast<magmaFloatComplex*>(work), lwork,
-                rwork, iwork, info);
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template<>
-void magmaSvd<c10::complex<double>, double>(
-    magma_vec_t jobz, magma_int_t m, magma_int_t n, c10::complex<double>* A,
-    magma_int_t lda, double* s, c10::complex<double>* U, magma_int_t ldu,
-    c10::complex<double>* Vh, magma_int_t ldvh, c10::complex<double>* work, magma_int_t lwork,
-    double *rwork, magma_int_t* iwork, magma_int_t* info) {
-  MagmaStreamSyncGuard guard;
-  magma_zgesdd(jobz, m, n, reinterpret_cast<magmaDoubleComplex*>(A), lda, s,
-                reinterpret_cast<magmaDoubleComplex*>(U), ldu,
-                reinterpret_cast<magmaDoubleComplex*>(Vh), ldvh,
-                reinterpret_cast<magmaDoubleComplex*>(work), lwork,
-                rwork, iwork, info);
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template<>
 void magmaLuSolve<double>(
     magma_int_t n, magma_int_t nrhs, double* dA, magma_int_t ldda, magma_int_t* ipiv,
     double* dB, magma_int_t lddb, magma_int_t* info, magma_trans_t trans) {
@@ -1032,6 +970,18 @@ magma_trans_t to_magma(TransposeType trans) {
   name = static_cast<type*>(storage_##name.mutable_data());
 
 namespace {
+
+void _warn_once_magma_deprecation(const std::string& op_name) {
+  if (at::globalContext().linalgPreferredBackend() == at::LinalgBackend::Magma) {
+    TORCH_WARN_ONCE(
+      op_name, ": ",
+      "MAGMA, as a linear algebra backend, is deprecated and will be removed ",
+      "in future releases. ",
+      op_name, " will try dispatching to cuSOLVER instead. "
+      "If you see any error messages, please, file an issue on GitHub."
+    );
+  }
+}
 
 template <typename scalar_t>
 void apply_ldl_factor_magma(
@@ -2120,116 +2070,6 @@ REGISTER_CUDA_DISPATCH(linalg_eig_stub, &linalg_eig_kernel)
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ svd ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-template<typename scalar_t>
-static void apply_svd_magma(const Tensor& A,
-                            const bool full_matrices,
-                            const bool compute_uv,
-                            const Tensor& U,
-                            const Tensor& S,
-                            const Tensor& Vh,
-                            const Tensor& info) {
-#if !AT_MAGMA_ENABLED()
-TORCH_CHECK(false, "linalg.svd: MAGMA library not found in "
-    "compilation. Please rebuild with MAGMA.");
-#else
-  using value_t = typename c10::scalar_value_type<scalar_t>::type;
-  const auto A_data = A.data_ptr<scalar_t>();
-  const auto U_data = compute_uv ? U.data_ptr<scalar_t>() : nullptr;
-  const auto S_data = S.data_ptr<value_t>();
-  const auto Vh_data = compute_uv ? Vh.data_ptr<scalar_t>() : nullptr;
-  const auto info_data = info.data_ptr<magma_int_t>();
-  const auto A_stride = matrixStride(A);
-  const auto U_stride = compute_uv ? matrixStride(U) : 0;
-  const auto S_stride = S.size(-1);
-  const auto Vh_stride = compute_uv ? matrixStride(Vh) : 0;
-  const auto batchsize = batchCount(A);
-  const auto jobz = compute_uv ? (full_matrices ? MagmaAllVec : MagmaSomeVec) : MagmaNoVec;
-
-  const auto m = magma_int_cast(A.size(-2), "m");
-  const auto n = magma_int_cast(A.size(-1), "n");
-  const auto lda = magma_int_cast(A.strides().end()[-1], "lda");
-  const auto ldu = compute_uv ? magma_int_cast(U.strides().end()[-1], "ldu") : magma_int_t{1};
-  const auto ldvh = compute_uv ? magma_int_cast(Vh.strides().end()[-1], "ldvh") : magma_int_t{1};
-
-  c10::Storage storage_rwork;
-  value_t* rwork = nullptr;
-  if (A.is_complex()) {
-    auto lrwork = computeLRWorkDim(compute_uv ? (full_matrices ? 'A' : 'S') : 'N', m, n);
-    storage_rwork = pin_memory<value_t>(lrwork);
-    rwork = static_cast<value_t*>(storage_rwork.mutable_data());
-  }
-
-  magma_int_t* iwork;
-  ALLOCATE_ARRAY(iwork, magma_int_t, 8 * std::min(m, n));
-
-  // Query svd for the optimal lwork size
-  magma_int_t lwork = -1;
-  {
-    scalar_t wkopt = 1; // MAGMA might not set the value for the optimal workspace therefore use 1 as the default value
-    magmaSvd<scalar_t, value_t>(jobz, m, n,
-                                A_data, lda,
-                                S_data,
-                                compute_uv ? U_data : nullptr, ldu,
-                                compute_uv ? Vh_data : nullptr, ldvh,
-                                &wkopt, lwork, rwork, iwork, info_data);
-    lwork = magma_int_cast(real_impl<scalar_t, value_t>(wkopt), "work_size");
-  }
-  scalar_t* work;
-  ALLOCATE_ARRAY(work, scalar_t, lwork);
-
-  for (int64_t i = 0; i < batchsize; i++) {
-    // Compute S, U (optionally), Vh (optionally)
-    magmaSvd<scalar_t, value_t>(jobz, m, n,
-                                A_data + i * A_stride, lda,
-                                S_data + i * S_stride,
-                                compute_uv ? U_data + i * U_stride : nullptr, ldu,
-                                compute_uv ? Vh_data + i * Vh_stride : nullptr, ldvh,
-                                work, lwork, rwork, iwork,
-                                info_data + i);
-  }
-#endif
-}
-
-void svd_magma(const Tensor& A,
-               const bool full_matrices,
-               const bool compute_uv,
-               const Tensor& U,
-               const Tensor& S,
-               const Tensor& Vh,
-               const Tensor& info) {
-  // A is on GPU and may not have the right strides.
-  // We copy it into CPU with the correct strides and in pinned_memory as MAGMA moves things between CPU and GPU
-  const auto A_ = A.mT()
-                   .to(A.options()
-                        .device(kCPU)
-                        .memory_format(at::MemoryFormat::Contiguous)
-                        .pinned_memory(true))
-                   .mT();
-  // U, S, Vh, info are the right size and strides, but are on GPU
-  // We copy them into CPU in pinned_memory
-  const auto empty_like_cpu = [](const Tensor& t) {
-    return at::empty_like(t, t.options().device(kCPU).pinned_memory(true));
-  };
-  auto U_ = compute_uv ? empty_like_cpu(U) : Tensor{};
-  auto S_ = empty_like_cpu(S);
-  auto Vh_ = compute_uv ? empty_like_cpu(Vh) : Tensor{};
-  auto info_ = empty_like_cpu(info);
-
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(A.scalar_type(), "svd_cuda", [&] {
-    apply_svd_magma<scalar_t>(A_, full_matrices, compute_uv, U_, S_, Vh_, info_);
-  });
-
-  // Copy from CPU back to CUDA
-  // We can do a non_blocking copy, as there is an unconditional check of the infos in
-  // the calling function
-  if (compute_uv) {
-    U.copy_(U_, /*non_blocking*/true);
-    Vh.copy_(Vh_, /*non_blocking*/true);
-  }
-  S.copy_(S_, /*non_blocking*/true);
-  info.copy_(info, /*non_blocking*/true);
-}
-
 void svd_kernel(const Tensor& A,
                 const bool full_matrices,
                 const bool compute_uv,
@@ -2238,22 +2078,13 @@ void svd_kernel(const Tensor& A,
                 const Tensor& S,
                 const Tensor& Vh,
                 const Tensor& info) {
-#ifdef USE_LINALG_SOLVER
-  // We always use cuSOLVER unless the user has specified they want to use MAGMA
-  bool use_magma = at::globalContext().linalgPreferredBackend() == at::LinalgBackend::Magma;
-  if (use_magma) {
-    svd_magma(A, full_matrices, compute_uv, U, S, Vh, info);
-  } else {
-    // svd_cusolver computes V rather than Vh, so we pass a view of Vh.mT
-    // and then conjugate Vh in-place
-    svd_cusolver(A, full_matrices, compute_uv, driver, U, S, compute_uv ? Vh.mT() : Vh, info);
-    if (compute_uv && Vh.is_complex()) {
-      Vh._set_conj(!Vh.is_conj());
-    }
+  _warn_once_magma_deprecation("linalg.svd");
+  // svd_cusolver computes V rather than Vh, so we pass a view of Vh.mT
+  // and then conjugate Vh in-place
+  svd_cusolver(A, full_matrices, compute_uv, driver, U, S, compute_uv ? Vh.mT() : Vh, info);
+  if (compute_uv && Vh.is_complex()) {
+    Vh._set_conj(!Vh.is_conj());
   }
-#else
-  svd_magma(A, full_matrices, compute_uv, U, S, Vh, info);
-#endif
 }
 
 REGISTER_CUDA_DISPATCH(svd_stub, &svd_kernel)

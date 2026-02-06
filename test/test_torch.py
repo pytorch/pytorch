@@ -35,7 +35,7 @@ from torch.testing._internal.common_optimizers import (
     optim_db, optims, _get_optim_inputs_including_global_cliquey_kwargs)
 
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
-    MI300_ARCH, TEST_WITH_TORCHINDUCTOR, TEST_WITH_ROCM, run_tests, IS_JETSON,
+    MI200_ARCH, MI300_ARCH, TEST_WITH_TORCHINDUCTOR, TEST_WITH_ROCM, run_tests, IS_JETSON,
     IS_FILESYSTEM_UTF8_ENCODING,
     IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, skipIfRocmArch, skipIfTorchInductor, load_tests, slowTest, slowTestIf,
     skipIfCrossRef, TEST_WITH_CROSSREF, skipIfTorchDynamo, set_default_dtype,
@@ -44,7 +44,7 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard,
     bytes_to_scalar, parametrize, skipIfMPS, noncontiguous_like,
     AlwaysWarnTypedStorageRemoval, TEST_WITH_TORCHDYNAMO, xfailIfTorchDynamo,
-    xfailIfS390X, set_warn_always_context)
+    xfailIfS390X, set_warn_always_context, decorateIf, isRocmArchAnyOf)
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta,
@@ -182,6 +182,7 @@ class TestTorchDeviceType(TestCase):
     @largeTensorTest('56GB', device='cuda')
     @dtypes(torch.bfloat16)
     @unittest.skipIf(IS_JETSON, "Large tensor tests are too large for Jetson.")
+    @decorateIf(unittest.expectedFailure, lambda params: isRocmArchAnyOf(MI200_ARCH))
     def test_int64_upsample3d(self, device, dtype):
         x = torch.ones((1, 256, 16, 720, 1280), dtype=dtype, device=device)
         try:
@@ -1984,7 +1985,7 @@ class TestTorchDeviceType(TestCase):
             assert src.grad is not None
             grad = src.grad.detach().clone()
 
-            if torch.device(device).type == 'cuda':
+            if torch.device(device).type == 'cuda' or torch.device(device).type == 'mtia':
                 for _ in range(2):
                     src.grad.data.zero_()
                     res = torch.gather(src, dim, idx)

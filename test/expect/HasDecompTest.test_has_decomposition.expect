@@ -306,6 +306,8 @@ aten::_foreach_pow.Scalar_out
 aten::_foreach_pow_.List
 aten::_foreach_pow_.Scalar
 aten::_foreach_pow_.ScalarList
+aten::_foreach_powsum.Scalar
+aten::_foreach_powsum.Scalar_out
 aten::_foreach_reciprocal
 aten::_foreach_reciprocal.out
 aten::_foreach_reciprocal_
@@ -894,6 +896,7 @@ aten::kthvalue
 aten::kthvalue.values
 aten::lift_fresh_copy
 aten::lift_fresh_copy.out
+aten::linalg__powsum
 aten::linalg_cholesky_ex
 aten::linalg_cholesky_ex.L
 aten::linalg_eig

@@ -314,7 +314,6 @@ if torch.backends.mps.is_available():
             "put": None,
             "cholesky_solve": None,
             "frexp": None,
-            "gcd": None,
             "geqrf": None,
             "nn.functional.grid_sample": None,  # Unsupported Border padding mode
             "hash_tensor": None,
@@ -608,8 +607,6 @@ if torch.backends.mps.is_available():
             "segment_reduce_": None,
             "_upsample_bilinear2d_aa": [torch.uint8],  # uint8 is for CPU only
             "_upsample_bicubic2d_aa": [torch.uint8],  # uint8 is for CPU only
-            "geometric": None,
-            "geometric_": None,
             "cdouble": None,
             "double": None,
             "log_softmaxwith_dtype": [
@@ -704,6 +701,16 @@ if torch.backends.mps.is_available():
             "exponential": [torch.float16, torch.float32, torch.bfloat16],
             "log_normal": [torch.float16, torch.float32, torch.bfloat16],
             "cauchy": [torch.float16, torch.float32, torch.bfloat16],
+            "geometric": [
+                torch.float16,
+                torch.float32,
+                torch.bfloat16,
+                torch.int32,
+                torch.int16,
+                torch.int64,
+                torch.int8,
+                torch.uint8,
+            ],
             "nn.functional.feature_alpha_dropoutwith_train": [
                 torch.float16,
                 torch.float32,
@@ -945,6 +952,7 @@ if torch.backends.mps.is_available():
             "exponential": [torch.float16, torch.float32],
             "log_normal": [torch.float16, torch.float32],
             "cauchy": [torch.float16, torch.float32],
+            "geometric": [torch.float16, torch.float32],
             # CPU errors
             # derivative for zeta is not implemented
             "special.zeta": None,
@@ -977,8 +985,6 @@ if torch.backends.mps.is_available():
             "signal.windows.kaiser": [torch.float32],
             "signal.windows.nuttall": [torch.float32],
             "eye": [torch.float16, torch.float32],
-            # topk fails with duplicate indices
-            "topk": [torch.float16],
             # Could not run 'aten::uniform_' with arguments from the 'SparseCPU' backend
             "to_sparse": None,
             # Exception: the derivative for '_unique2' is not implemented.

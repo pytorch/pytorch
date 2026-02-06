@@ -114,8 +114,8 @@ public:
     allocator_->recordStream(ptr, stream);
   }
 
-  HIPCachingAllocator::SnapshotInfo snapshot(MempoolId_t mempool_id = {0, 0}) override {
-    return allocator_->snapshot(mempool_id);
+  HIPCachingAllocator::SnapshotInfo snapshot(MempoolId_t mempool_id = {0, 0}, bool include_traces = true) override {
+    return allocator_->snapshot(mempool_id, include_traces);
   }
 
   void beginAllocateToPool(

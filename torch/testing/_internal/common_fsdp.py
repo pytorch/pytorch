@@ -51,6 +51,7 @@ from torch.distributed.tensor.parallel import (
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import (
+    MultiProcContinuousTest,
     MultiProcessTestCase,
     MultiThreadedTestCase,
     run_subtests,
@@ -154,9 +155,11 @@ def _assert_module_states(
     olist = [None for _ in range(world_size)]
     dist.all_gather_object(olist, named_module_states, group=process_group)
     rank0_states = olist[0]
-    assert rank0_states is not None  # mypy
+    if rank0_states is None:
+        raise AssertionError("Expected rank0_states to not be None")  # mypy
     for state in olist[1:]:
-        assert state is not None  # mypy
+        if state is None:
+            raise AssertionError("Expected state to not be None")  # mypy
         for (_, p1), (_, p2) in zip(rank0_states, state, strict=True):
             assert_fn(p1, p2)
 
@@ -1144,7 +1147,8 @@ def check_sharded_parity(
             clean_sharded_name = clean_sharded_name.replace(prefix, "")
         cls.assertEqual(replicated_name, clean_sharded_name)
         cls.assertIsInstance(sharded_param, DTensor)
-        assert isinstance(sharded_param, DTensor)  # mypy
+        if not isinstance(sharded_param, DTensor):
+            raise AssertionError("Expected sharded_param to be a DTensor")  # mypy
         mesh, placements = sharded_param.device_mesh, sharded_param.placements
         if tuple(placements) == (Shard(0), Shard(0)):
             raise AssertionError(
@@ -1159,7 +1163,8 @@ def check_sharded_parity(
         cls.assertIsNotNone(sharded_param.grad)
         sharded_ref_grad = distribute_tensor(replicated_param.grad, mesh, placements)
         cls.assertIsInstance(sharded_param.grad, DTensor)
-        assert isinstance(sharded_param.grad, DTensor)  # mypy
+        if not isinstance(sharded_param.grad, DTensor):
+            raise AssertionError("Expected sharded_param.grad to be a DTensor")  # mypy
         cls.assertEqual(sharded_param.grad.to_local(), sharded_ref_grad.to_local())
 
 
@@ -1183,31 +1188,11 @@ class FSDPTestMultiThread(MultiThreadedTestCase):
         torch._dynamo.reset()
 
 
-class FSDPTest(MultiProcessTestCase):
-    def setUp(self):
-        super().setUp()
-        # Set TORCH_NCCL_DESYNC_DEBUG=0 to disable the NCCL `workCleanupLoop()`,
-        # which can cause unit test flakiness:
-        # https://github.com/pytorch/pytorch/issues/90848
-        os.environ["TORCH_NCCL_DESYNC_DEBUG"] = "0"
-        self._spawn_processes()
-
-    @property
-    def world_size(self):
-        return DEVICE_COUNT
-
-    @property
-    def process_group(self):
-        return dist.distributed_c10d._get_default_group()
-
-    @property
-    def destroy_pg_upon_exit(self) -> bool:
-        # Overriding base test class: do not auto destroy PG upon exit.
-        return False
-
-    @property
-    def init_method(self):
-        return f"{FILE_SCHEMA}{self.file_name}"
+class FSDPTestMixin:
+    """
+    Mixin class containing shared test utilities for FSDP tests.
+    Provides common helper methods for both FSDPTest and FSDPTestContinuous.
+    """
 
     def _check_cpu_offload(self, fsdp_model, cpu_offload):
         self.assertEqual(cpu_offload, fsdp_model.cpu_offload)
@@ -1220,61 +1205,6 @@ class FSDPTest(MultiProcessTestCase):
 
     def run_subtests(self, *args, **kwargs):
         return run_subtests(self, *args, **kwargs)
-
-    @classmethod
-    def _run(cls, rank, test_name, file_name, pipe, **kwargs):  # type: ignore[override]
-        self = cls(test_name)
-        self.rank = rank
-        self.file_name = file_name
-        fake_pg = kwargs.get("fake_pg", False)
-
-        print(f"dist init r={self.rank}, world={self.world_size}")
-        if torch.accelerator.device_count() < self.world_size:
-            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
-
-        # Specify gloo backend to make 'init_process_group()' succeed,
-        # Actual tests will be skipped if there is no enough GPUs.
-        try:
-            if fake_pg:
-                store = torch.testing._internal.distributed.fake_pg.FakeStore()
-                dist.init_process_group(
-                    backend="fake",
-                    world_size=self.world_size,
-                    rank=rank,
-                    store=store,
-                )
-            else:
-                dist.init_process_group(
-                    init_method=self.init_method,
-                    backend=DISTRIBUTED_BACKEND,
-                    world_size=int(self.world_size),
-                    rank=self.rank,
-                )
-        except RuntimeError as e:
-            if "recompile" in e.args[0]:
-                sys.exit(TEST_SKIPS["backend_unavailable"].exit_code)
-
-            raise
-
-        device_ids = None
-        device_id = self.rank % DEVICE_COUNT
-        if TEST_CUDA or TEST_XPU:
-            torch.accelerator.set_device_index(device_id)
-        device_ids = [device_id]
-
-        # Execute barrier prior to running test to ensure that every process
-        # has finished initialization and that the following test
-        # immediately exiting due to a skip doesn't cause flakiness.
-        dist.barrier(device_ids=device_ids)
-
-        torch._dynamo.reset()
-        set_rng_seed()
-        self.run_test(test_name, pipe)
-        torch._dynamo.reset()
-
-        dist.barrier(device_ids=device_ids)
-
-        dist.destroy_process_group()
 
     def _train_for_several_steps(
         self,
@@ -1328,16 +1258,20 @@ class FSDPTest(MultiProcessTestCase):
             loss = sharded_grad_scaler.scale(loss)
 
             if not mixed_precision and not use_pure_fp16:
-                assert loss.dtype == torch.float32, (
-                    "loss data type should be float32, as the original \
-                    parameter data type is float32."
-                )
+                if loss.dtype != torch.float32:
+                    raise AssertionError(
+                        "loss data type should be float32, as the original "
+                        "parameter data type is float32."
+                    )
             else:
                 if use_pure_fp16:
                     self.assertEqual(loss.dtype, torch.float16)
                 # FSDP loss is fp16, DDP AMP loss is fp32
                 elif isinstance(model, FSDP):
-                    assert mixed_precision is not None  # mypy
+                    if mixed_precision is None:
+                        raise AssertionError(
+                            "Expected mixed_precision to not be None"
+                        )  # mypy
                     self.assertEqual(loss.dtype, mixed_precision.param_dtype)
                 else:
                     self.assertEqual(loss.dtype, torch.float32)
@@ -1397,9 +1331,8 @@ class FSDPTest(MultiProcessTestCase):
                 wrapper should provide data parallel semantics. If ``None``,
                 then the callable defaults to the DDP constructor.
         """
-        assert fsdp_init_mode != FSDPInitMode.NO_FSDP, (
-            "Expects an FSDP init mode that wraps with FSDP"
-        )
+        if fsdp_init_mode == FSDPInitMode.NO_FSDP:
+            raise AssertionError("Expects an FSDP init mode that wraps with FSDP")
         if init_kwargs is None:
             init_kwargs = {}
         lr = 1e-2
@@ -1531,6 +1464,135 @@ class FSDPTest(MultiProcessTestCase):
                 exact_device=True,
                 msg="FSDP did not match DDP",
             )
+
+
+class FSDPTest(FSDPTestMixin, MultiProcessTestCase):
+    def setUp(self):
+        super().setUp()
+        # Set TORCH_NCCL_DESYNC_DEBUG=0 to disable the NCCL `workCleanupLoop()`,
+        # which can cause unit test flakiness:
+        # https://github.com/pytorch/pytorch/issues/90848
+        os.environ["TORCH_NCCL_DESYNC_DEBUG"] = "0"
+        self._spawn_processes()
+
+    @property
+    def world_size(self):
+        return DEVICE_COUNT
+
+    @property
+    def process_group(self):
+        return dist.distributed_c10d._get_default_group()
+
+    @property
+    def destroy_pg_upon_exit(self) -> bool:
+        # Overriding base test class: do not auto destroy PG upon exit.
+        return False
+
+    @property
+    def init_method(self):
+        return f"{FILE_SCHEMA}{self.file_name}"
+
+    @classmethod
+    def _run(cls, rank, test_name, file_name, pipe, **kwargs):  # type: ignore[override]
+        self = cls(test_name)
+        self.rank = rank
+        self.file_name = file_name
+        fake_pg = kwargs.get("fake_pg", False)
+
+        print(f"dist init r={self.rank}, world={self.world_size}")
+        if torch.accelerator.device_count() < self.world_size:
+            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
+
+        # Specify gloo backend to make 'init_process_group()' succeed,
+        # Actual tests will be skipped if there is no enough GPUs.
+        try:
+            if fake_pg:
+                store = torch.testing._internal.distributed.fake_pg.FakeStore()
+                dist.init_process_group(
+                    backend="fake",
+                    world_size=self.world_size,
+                    rank=rank,
+                    store=store,
+                )
+            else:
+                dist.init_process_group(
+                    init_method=self.init_method,
+                    backend=DISTRIBUTED_BACKEND,
+                    world_size=int(self.world_size),
+                    rank=self.rank,
+                )
+        except RuntimeError as e:
+            if "recompile" in e.args[0]:
+                sys.exit(TEST_SKIPS["backend_unavailable"].exit_code)
+
+            raise
+
+        device_ids = None
+        device_id = self.rank % DEVICE_COUNT
+        if TEST_CUDA or TEST_XPU:
+            torch.accelerator.set_device_index(device_id)
+        device_ids = [device_id]
+
+        # Execute barrier prior to running test to ensure that every process
+        # has finished initialization and that the following test
+        # immediately exiting due to a skip doesn't cause flakiness.
+        dist.barrier(device_ids=device_ids)
+
+        torch._dynamo.reset()
+        set_rng_seed()
+        self.run_test(test_name, pipe)
+        torch._dynamo.reset()
+
+        dist.barrier(device_ids=device_ids)
+
+        dist.destroy_process_group()
+
+
+class FSDPTestContinuous(FSDPTestMixin, MultiProcContinuousTest):
+    """
+    FSDP test base class using MultiProcContinuousTest for faster test execution.
+    This class reuses worker processes across tests, reducing process spawn overhead.
+    Use this for tests that don't require fresh process state between tests.
+    """
+
+    world_size: int = DEVICE_COUNT
+
+    @classmethod
+    def backend_str(cls) -> str:
+        return DISTRIBUTED_BACKEND
+
+    @classmethod
+    def device_type(cls) -> str:
+        return DEVICE_TYPE
+
+    @classmethod
+    def _init_pg(cls, rank, world_size, rdvz_file):
+        # Set TORCH_NCCL_DESYNC_DEBUG=0 to disable the NCCL `workCleanupLoop()`,
+        # which can cause unit test flakiness:
+        # https://github.com/pytorch/pytorch/issues/90848
+        os.environ["TORCH_NCCL_DESYNC_DEBUG"] = "0"
+
+        if torch.accelerator.device_count() < world_size:
+            sys.exit(TEST_SKIPS[f"multi-gpu-{world_size}"].exit_code)
+
+        device_id = rank % DEVICE_COUNT
+        if TEST_CUDA or TEST_XPU:
+            torch.accelerator.set_device_index(device_id)
+
+        super()._init_pg(rank, world_size, rdvz_file)
+
+    def setUp(self):
+        super().setUp()
+        torch._dynamo.reset()
+        set_rng_seed()
+
+    def tearDown(self):
+        super().tearDown()
+        torch._dynamo.reset()
+
+    @property
+    def process_group(self):
+        return self.__class__.pg
 
 
 def compiled_fsdp_test(compile_compute_on_module: Optional[type] = None):

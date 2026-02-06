@@ -191,7 +191,6 @@ ROCM_BLOCKLIST = [
     "distributed/rpc/test_tensorpipe_agent",
     "distributed/rpc/test_share_memory",
     "distributed/rpc/cuda/test_tensorpipe_agent",
-    "inductor/test_max_autotune",  # taking excessive time, many tests >30 min
     "test_determination",
     "test_jit_legacy",
     "test_cuda_nvml_based_avail",
@@ -1391,7 +1390,9 @@ def parse_args():
         "--mps",
         "--mps",
         action="store_true",
-        help=("If this flag is present, we will only run test_mps and test_metal"),
+        help=(
+            "If this flag is present, we will only run subset of tests, such as test_mps, test_nn, ..."
+        ),
     )
     parser.add_argument(
         "--xpu",
@@ -1679,7 +1680,9 @@ def get_selected_tests(options) -> list[str]:
         options.exclude.extend(CPP_TESTS)
 
     if options.mps:
+        os.environ["PYTORCH_TEST_OPS_ONLY_MPS"] = "1"
         selected_tests = [
+            "test_ops",
             "test_mps",
             "test_metal",
             "test_modules",

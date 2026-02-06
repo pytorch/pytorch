@@ -43,6 +43,13 @@ project-excludes = [
   "*/.*",
 ]
 ignore-missing-imports = [
+    # XPU memory symbols not present for builds without XPU support
+    "torch._C._xpu_beginAllocateCurrentThreadToPool",
+    "torch._C._xpu_endAllocateToPool",
+    "torch._C._xpu_releasePool",
+    "torch._C._xpu_XPUAllocator",
+    "torch._C._XPUMemPool",
+    "torch._C._StaticXpuLauncher",
     "torch._C._jit_tree_views.*",
     "torch.for_onnx.onnx.*",
     "torch.ao.quantization.experimental.apot_utils.*",
@@ -137,15 +144,15 @@ matches = "torch/_dispatch/**"
 implicit-import = false
 implicit-any = true
 
-
 [[sub-config]]
 matches = "torch/_subclasses/**"
 [sub-config.errors]
 implicit-import = false
 implicit-any = true
 
+
 [[sub-config]]
-matches = "torch/_functorch/_aot_autograd/schemas.py"
+matches = "torch/_functorch/_activation_checkpointing/remat_using_tags_for_fwd_loss_bwd_graph_pass.py"
 [sub-config.errors]
 implicit-import = false
 implicit-any = true

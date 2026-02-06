@@ -43,7 +43,8 @@ class CodeTemplate:
             env = {}
 
         def lookup(v: str) -> object:
-            assert env is not None
+            if env is None:
+                raise AssertionError("env must be non-None")
             return kwargs[v] if v in kwargs else env[v]
 
         def indent_lines(indent: str, v: Sequence[object]) -> str:
