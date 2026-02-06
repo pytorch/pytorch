@@ -8,6 +8,7 @@
 #include <torch/headeronly/util/Float8_e5m2.h>
 #include <torch/headeronly/util/Float8_e5m2fnuz.h>
 #include <torch/headeronly/util/Float8_e8m0fnu.h>
+#include <torch/headeronly/util/Float8_e8m0fnu_x4.h>
 #include <torch/headeronly/util/Half.h>
 #include <torch/headeronly/util/bits.h>
 #include <torch/headeronly/util/complex.h>
@@ -90,6 +91,11 @@ TEST(TestDtype, TestFloat8_e5m2fnuz) {
 TEST(TestDtype, TestFloat8_e8m0fnu) {
   torch::headeronly::Float8_e8m0fnu a = 1.0f;
   ASSERT_FALSE(a.isnan());
+}
+
+TEST(TestDtype, TestFloat8_e8m0fnu_x4) {
+  // not much you can do with this type, just make sure it compiles
+  torch::headeronly::Float8_e8m0fnu_x4 a(0xffffffff);
 }
 
 TEST(TestDtype, TestFloat4) {
@@ -200,6 +206,7 @@ TEST(TestDtype, TestScalarType) {
       ScalarType::Int7,
       ScalarType::Float8_e8m0fnu,
       ScalarType::Float4_e2m1fn_x2,
+      ScalarType::Float8_e8m0fnu_x4,
       ScalarType::Undefined,
   };
   for (int8_t i = 0; i < static_cast<int8_t>(torch::headeronly::NumScalarTypes);

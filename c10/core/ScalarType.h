@@ -8,6 +8,7 @@
 #include <c10/util/Float8_e5m2.h>
 #include <c10/util/Float8_e5m2fnuz.h>
 #include <c10/util/Float8_e8m0fnu.h>
+#include <c10/util/Float8_e8m0fnu_x4.h>
 #include <c10/util/Half.h>
 #include <c10/util/bits.h>
 #include <c10/util/complex.h>
@@ -78,7 +79,8 @@ inline bool isFloat8Type(ScalarType t) {
 
 inline bool isReducedFloatingType(ScalarType t) {
   return t == ScalarType::Half || t == ScalarType::BFloat16 ||
-      isFloat8Type(t) || t == ScalarType::Float4_e2m1fn_x2;
+      isFloat8Type(t) || t == ScalarType::Float4_e2m1fn_x2 ||
+      t == ScalarType::Float8_e8m0fnu_x4;
 }
 
 inline bool isFloatingType(ScalarType t) {
@@ -179,6 +181,7 @@ inline bool isSignedType(ScalarType t) {
     case ScalarType::UInt5:
     case ScalarType::UInt6:
     case ScalarType::UInt7:
+    case ScalarType::Float8_e8m0fnu_x4:
       return false;
     case ScalarType::Undefined:
     case ScalarType::NumOptions:
