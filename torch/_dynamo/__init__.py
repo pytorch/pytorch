@@ -12,6 +12,7 @@ import torch
 
 from . import (
     aot_compile,
+    bytecode_debugger,
     config,
     convert_frame,
     eval_frame,
@@ -79,6 +80,7 @@ from .polyfills import loader as _  # usort: skip # noqa: F401
 __all__ = [
     "allow_in_graph",
     "assume_constant_result",
+    "bytecode_debugger",
     "config",
     "disable",
     "disable_nested_graph_breaks",

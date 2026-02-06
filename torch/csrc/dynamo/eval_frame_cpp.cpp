@@ -5,11 +5,143 @@
 #include <torch/csrc/dynamo/debug_macros.h>
 #include <torch/csrc/dynamo/eval_frame.h>
 #include <torch/csrc/dynamo/eval_frame_cpp.h>
+#include <torch/csrc/dynamo/extra_state.h>
 #include <torch/csrc/dynamo/framelocals_mapping.h>
+#include <torch/csrc/dynamo/stackref_bridge.h>
 #include <torch/csrc/utils/python_compat.h>
 
 extern "C" {
 extern PyObject* guard_complete_hook;
+}
+
+// Bytecode debugger callback - stored as raw PyObject* to avoid
+// shutdown issues with static py::object destructor running after Python
+// finalizes.
+namespace {
+PyObject* bytecode_debugger_callback_obj = nullptr;
+} // namespace
+
+void set_bytecode_debugger_callback(py::object callback) {
+  if (callback.is_none()) {
+    Py_XSETREF(bytecode_debugger_callback_obj, nullptr);
+  } else {
+    Py_XSETREF(bytecode_debugger_callback_obj, callback.inc_ref().ptr());
+  }
+}
+
+py::object get_bytecode_debugger_callback() {
+  if (bytecode_debugger_callback_obj == nullptr) {
+    return py::none();
+  }
+  return py::reinterpret_borrow<py::object>(
+      py::handle(bytecode_debugger_callback_obj));
+}
+
+// NullStackValue singleton for representing NULL stack values
+NullStackValue& NullStackValue::get_singleton() {
+  static NullStackValue instance;
+  return instance;
+}
+
+py::object get_null_stack_value() {
+  return py::cast(
+      NullStackValue::get_singleton(), py::return_value_policy::reference);
+}
+
+// Caller must provide the expected stack depth because frame->stacktop is -1
+// during INSTRUCTION monitoring callbacks. In CPython 3.12+, the interpreter
+// keeps the stack pointer in a local variable and only saves it to the frame
+// via _PyFrame_SetStackPointer() before certain callbacks (e.g., line tracing).
+// However, INSTRUMENTED_INSTRUCTION calls _Py_call_instrumentation_instruction
+// without saving the stack pointer first, leaving stacktop as -1.
+// See: cpython/Include/internal/pycore_frame.h (_PyFrame_GetStackPointer)
+py::list _get_frame_value_stack_with_depth(
+    const py::handle& frame_obj,
+    int depth) {
+  if (!PyFrame_Check(frame_obj.ptr())) {
+    throw py::type_error("expected a frame object!");
+  }
+
+  py::list result;
+  if (depth <= 0) {
+    return result;
+  }
+
+#if IS_PYTHON_3_11_PLUS
+  PyFrameObject* frame = (PyFrameObject*)frame_obj.ptr();
+  _PyInterpreterFrame* iframe = frame->f_frame;
+  if (iframe == nullptr) {
+    return result;
+  }
+
+  PyCodeObject* code = F_CODE(iframe);
+  if (code == nullptr) {
+    return result;
+  }
+
+  int nlocalsplus = code->co_nlocalsplus;
+  int stacksize = code->co_stacksize;
+
+  // Clamp depth to valid range
+  if (depth > stacksize) {
+    depth = stacksize;
+  }
+
+#if IS_PYTHON_3_14_PLUS
+  // For Python 3.14+, use stackpointer-based access
+  if (iframe->stackpointer == nullptr) {
+    return result;
+  }
+  _PyStackRef* stack_base = iframe->localsplus + nlocalsplus;
+  for (int i = 0; i < depth; i++) {
+    PyObject* obj = THP_PyStackRef_AsPyObjectBorrow(&stack_base[i]);
+    if (obj == nullptr) {
+      result.append(get_null_stack_value());
+    } else {
+      result.append(py::reinterpret_borrow<py::object>(py::handle(obj)));
+    }
+  }
+#else
+  // Python 3.11/3.12/3.13 - read 'depth' values from the stack area
+  int stack_start = nlocalsplus;
+  for (int i = 0; i < depth; i++) {
+    PyObject* obj = iframe->localsplus[stack_start + i];
+    if (obj == nullptr) {
+      result.append(get_null_stack_value());
+    } else {
+      result.append(py::reinterpret_borrow<py::object>(py::handle(obj)));
+    }
+  }
+#endif
+
+#else
+  // Python 3.10 and earlier - use f_valuestack
+  PyFrameObject* frame = (PyFrameObject*)frame_obj.ptr();
+  if (frame->f_valuestack == nullptr) {
+    return result;
+  }
+
+  PyCodeObject* code = frame->f_code;
+  if (code == nullptr) {
+    return result;
+  }
+
+  int stacksize = code->co_stacksize;
+  if (depth > stacksize) {
+    depth = stacksize;
+  }
+
+  for (int i = 0; i < depth; i++) {
+    PyObject* obj = frame->f_valuestack[i];
+    if (obj == nullptr) {
+      result.append(get_null_stack_value());
+    } else {
+      result.append(py::reinterpret_borrow<py::object>(py::handle(obj)));
+    }
+  }
+#endif // IS_PYTHON_3_11_PLUS
+
+  return result;
 }
 
 static constexpr const char* cache_lookup_profiler_str =
@@ -217,6 +349,12 @@ PyObject* dynamo__custom_eval_frame(
     }
     eval_frame_callback_set(recursive_callback.ptr());
     DEBUG_NULL_CHECK(cached_code);
+    // Call bytecode debugger callback if set, to allow instruction-level
+    // debugging of the Dynamo-generated code
+    py::object debugger_cb = get_bytecode_debugger_callback();
+    if (!debugger_cb.is_none()) {
+      debugger_cb(py::handle((PyObject*)cached_code));
+    }
     eval_result = dynamo_eval_custom_code(
         tstate, frame, cached_code, trace_annotation, throw_flag);
     if (!callback.is(recursive_callback)) {
