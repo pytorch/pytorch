@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import collections
 import functools
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Any, NewType, Optional, Protocol, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import ParamSpec
@@ -693,6 +693,15 @@ class ViewAndMutationMeta:
         for inp_meta in self.subclass_tangent_meta:
             if isinstance(inp_meta, SubclassCreationMeta):
                 inp_meta.make_runtime_safe()
+
+        # Clear view_meta_sequence when it has symbolic inputs, since it won't
+        # be used at runtime anyway (gen_alias_from_base skips view replay for
+        # symbolic inputs) and the SymInt references make it unpicklable.
+        for i, out_info in enumerate(self.output_info):
+            if out_info.view_meta_sequence is not None and any(
+                vm.has_symbolic_inputs for vm in out_info.view_meta_sequence.sequence
+            ):
+                self.output_info[i] = replace(out_info, view_meta_sequence=None)
 
     @property
     def tensors_saved_for_backwards_slice(self) -> slice:

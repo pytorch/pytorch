@@ -1852,7 +1852,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         assert isinstance(kernel_inputs, MMKernelInputs)
         m, n, k = kernel_inputs.mnk_symbolic()
         # Calculate allow_tf32
-        allow_tf32 = torch.backends.cuda.matmul.allow_tf32 and (
+        allow_tf32 = torch.backends.cuda.matmul.fp32_precision == "tf32" and (
             not inductor_config.force_same_precision
             or ((m % 16) == 0 and (n % 16) == 0 and (k % 8) == 0)
         )
