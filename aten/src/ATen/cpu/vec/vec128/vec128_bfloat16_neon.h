@@ -692,6 +692,94 @@ Vectorized<c10::BFloat16> inline fnmsub(
 #endif
 }
 
+inline void transpose4x4_f32(
+    Vectorized<float>& a,
+    Vectorized<float>& b,
+    Vectorized<float>& c,
+    Vectorized<float>& d) {
+  // Standard 4x4 float32 transpose built from lane interleaves.
+  float32x4x2_t t0 = vtrnq_f32(a, b);
+  float32x4x2_t t1 = vtrnq_f32(c, d);
+
+  float32x4_t r0 = vcombine_f32(vget_low_f32(t0.val[0]), vget_low_f32(t1.val[0]));
+  float32x4_t r1 = vcombine_f32(vget_low_f32(t0.val[1]), vget_low_f32(t1.val[1]));
+  float32x4_t r2 =
+      vcombine_f32(vget_high_f32(t0.val[0]), vget_high_f32(t1.val[0]));
+  float32x4_t r3 =
+      vcombine_f32(vget_high_f32(t0.val[1]), vget_high_f32(t1.val[1]));
+
+  a = Vectorized<float>(r0);
+  b = Vectorized<float>(r1);
+  c = Vectorized<float>(r2);
+  d = Vectorized<float>(r3);
+}
+
+template <>
+inline void transpose_mxn<c10::BFloat16>(
+    const c10::BFloat16* src,
+    int64_t ld_src,
+    c10::BFloat16* dst,
+    int64_t ld_dst,
+    int M,
+    int N) {
+  // NEON path targets tiles up to 8x8. Larger tiles fall back to the generic
+  // implementation in vec_base.h.
+  if (M > 8 || N > 8) {
+    for (int i = 0; i < M; ++i) {
+      for (int j = 0; j < N; ++j) {
+        dst[j * ld_dst + i] = src[i * ld_src + j];
+      }
+    }
+    return;
+  }
+
+  Vectorized<c10::BFloat16> rows[8];
+  // Pad rows with zeros so the vectorized 8x8 transpose can safely run on
+  // partial tiles.
+  for (int i = 0; i < 8; ++i) {
+    if (i < M) {
+      rows[i] = Vectorized<c10::BFloat16>::loadu(src + i * ld_src, N);
+    } else {
+      rows[i] = Vectorized<c10::BFloat16>(c10::BFloat16(0));
+    }
+  }
+
+  Vectorized<float> lo[8];
+  Vectorized<float> hi[8];
+  for (int i = 0; i < 8; ++i) {
+    std::tie(lo[i], hi[i]) = convert_bfloat16_float(rows[i]);
+  }
+
+  transpose4x4_f32(lo[0], lo[1], lo[2], lo[3]);
+  transpose4x4_f32(lo[4], lo[5], lo[6], lo[7]);
+  transpose4x4_f32(hi[0], hi[1], hi[2], hi[3]);
+  transpose4x4_f32(hi[4], hi[5], hi[6], hi[7]);
+
+  Vectorized<c10::BFloat16> out_rows[8] = {
+      convert_float_bfloat16(lo[0], lo[4]),
+      convert_float_bfloat16(lo[1], lo[5]),
+      convert_float_bfloat16(lo[2], lo[6]),
+      convert_float_bfloat16(lo[3], lo[7]),
+      convert_float_bfloat16(hi[0], hi[4]),
+      convert_float_bfloat16(hi[1], hi[5]),
+      convert_float_bfloat16(hi[2], hi[6]),
+      convert_float_bfloat16(hi[3], hi[7])};
+
+  const int64_t store_count = M;
+  for (int r = 0; r < N; ++r) {
+    out_rows[r].store(dst + r * ld_dst, store_count);
+  }
+}
+
+template <>
+inline void transpose_mxn<c10::BFloat16, 8, 8>(
+    const c10::BFloat16* src,
+    int64_t ld_src,
+    c10::BFloat16* dst,
+    int64_t ld_dst) {
+  transpose_mxn<c10::BFloat16>(src, ld_src, dst, ld_dst, 8, 8);
+}
+
 #endif // !defined(C10_MOBILE) && defined(__aarch64__)
 
 } // namespace CPU_CAPABILITY
