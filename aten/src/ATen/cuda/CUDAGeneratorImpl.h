@@ -4,6 +4,7 @@
 #include <ATen/core/Generator.h>
 #include <ATen/core/TensorBase.h>
 #include <ATen/cuda/PhiloxCudaState.h>
+#include <array>
 #include <atomic>
 #include <memory>
 #include <unordered_set>
@@ -122,6 +123,13 @@ struct CUDAGeneratorState : public c10::intrusive_ptr_target {
   c10::intrusive_ptr<CUDAGeneratorState> clone();
 };
 
+// aten/src/ATen/cuda/detail/OffsetCalculator.cuh
+#if defined(USE_ROCM)
+constexpr int MAX_DIMS = 16;
+#else
+constexpr int MAX_DIMS = 25;
+#endif
+
 struct TORCH_CUDA_CPP_API CUDAGeneratorImpl : public c10::GeneratorImpl {
   // Constructors
   CUDAGeneratorImpl(DeviceIndex device_index = -1);
@@ -152,6 +160,17 @@ struct TORCH_CUDA_CPP_API CUDAGeneratorImpl : public c10::GeneratorImpl {
   // Generates a PhiloxCudaState with a specified increment, and increment
   // current state
   PhiloxCudaState philox_cuda_state(uint64_t increment);
+  uint64_t get_sharding_spec(
+      std::array<uint64_t, MAX_DIMS>& local_shape,
+      std::array<uint64_t, MAX_DIMS>& global_offset,
+      std::array<uint64_t, MAX_DIMS>& global_shape,
+      std::array<uint64_t, MAX_DIMS>& global_strides) const;
+  void set_sharding_spec(
+      uint64_t num_dims,
+      const std::array<uint64_t, MAX_DIMS>& local_shape,
+      const std::array<uint64_t, MAX_DIMS>& global_offset,
+      const std::array<uint64_t, MAX_DIMS>& global_shape,
+      const std::array<uint64_t, MAX_DIMS>& global_strides);
 
   bool reset_rnn_state() {
     return !no_reset_rnn_state_.test_and_set();
@@ -167,6 +186,11 @@ struct TORCH_CUDA_CPP_API CUDAGeneratorImpl : public c10::GeneratorImpl {
   CUDAGeneratorImpl* clone_impl() const override;
 
   c10::intrusive_ptr<CUDAGeneratorState> state_;
+  uint64_t num_dims_ = 0;
+  std::array<uint64_t, MAX_DIMS> local_shape_{};
+  std::array<uint64_t, MAX_DIMS> global_offset_{};
+  std::array<uint64_t, MAX_DIMS> global_shape_{};
+  std::array<uint64_t, MAX_DIMS> global_strides_{};
   std::atomic_flag no_reset_rnn_state_;
 };
 
