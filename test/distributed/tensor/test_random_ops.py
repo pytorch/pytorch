@@ -872,12 +872,12 @@ class DTensorThreadRNGTrackerTest(DTensorTestBase):
 
             # Verify DTensor produces identical results to regular torch tensors
             self.assertTrue(
-                torch.allclose(reference_tensor_1, gathered_tensor_1),
+                torch.equal(reference_tensor_1, gathered_tensor_1),
                 f"First DTensor at randn call does not match torch.randn with same seed. "
                 f"Expected: {reference_tensor_1.tolist()}, Got: {gathered_tensor_1.tolist()}",
             )
             self.assertTrue(
-                torch.allclose(reference_tensor_2, gathered_tensor_2),
+                torch.equal(reference_tensor_2, gathered_tensor_2),
                 f"Second DTensor randn call does not match torch.randn with same seed. "
                 f"Expected: {reference_tensor_2.tolist()}, Got: {gathered_tensor_2.tolist()}",
             )
@@ -951,7 +951,7 @@ class DTensorThreadRNGTrackerTest(DTensorTestBase):
 
             # Verify DTensor produces identical results to regular torch tensors
             self.assertTrue(
-                torch.allclose(reference_tensor, gathered_tensor),
+                torch.equal(reference_tensor, gathered_tensor),
                 f"Second DTensor randn call does not match torch.randn with same seed. "
                 f"Expected: {reference_tensor.tolist()}, Got: {gathered_tensor.tolist()}",
             )
