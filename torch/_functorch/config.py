@@ -430,6 +430,13 @@ force_autograd_cache = False
 # on to explicitly annotate. This is currently only used by inductor lite mode.
 selective_decompose: bool = False
 
+# Complex Support
+# This config disallows decomposition of complex-valued Tensors using
+# `torch._subclasses.complex_tensor.ComplexTensor` by decomposing everything into
+# real-valued operations, passing through the regular pipeline as necessary,
+# then converting back to a regular tensor.
+enable_complex_wrapper: bool = False
+
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
