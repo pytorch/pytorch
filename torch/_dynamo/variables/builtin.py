@@ -2141,27 +2141,6 @@ class BuiltinVariable(VariableTracker):
             # VT(foo.__dict__). This simplifies the construction of the new
             # dict.
             args_list[0] = args_list[0].get_forwarded_dict(tx)
-        elif len(args_list) == 1 and isinstance(
-            args_list[0], variables.ConstDictVariable
-        ):
-            return args_list[0].clone()
-        elif (
-            len(args_list) == 1
-            and not kwargs
-            and user_cls is dict
-            and isinstance(args_list[0], variables.ListVariable)
-        ):
-            # Fast path: list of 2-tuples -> direct ConstDictVariable construction
-            items = args_list[0].items
-            if all(
-                isinstance(item, variables.TupleVariable) and len(item.items) == 2
-                for item in items
-            ):
-                d = {
-                    item.items[0]: item.items[1]  # pyrefly: ignore [missing-attribute]
-                    for item in items
-                }
-                return variables.ConstDictVariable(d)
         return tx.inline_user_function_return(
             VariableTracker.build(tx, polyfills.construct_dict),
             [VariableTracker.build(tx, user_cls), *args_list],
