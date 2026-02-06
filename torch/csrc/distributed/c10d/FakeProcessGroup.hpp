@@ -179,13 +179,21 @@ class FakeProcessGroup : public Backend {
     return c10::make_intrusive<FakeWork>();
   }
 
+  // NOTE [alltoall_base on FakeProcessGroup]
+  // When input and output split sizes are identical, this is effectively a
+  // permutation where each rank sends and receives the same amount of data.
+  // In a fake single-rank scenario, we can simulate this by copying input to
+  // output since the data would just be shuffled among "virtual" ranks.
   c10::intrusive_ptr<Work> alltoall_base(
-      at::Tensor& /* outputBuffer */,
-      at::Tensor& /* inputBuffer */,
-      std::vector<int64_t>& /* outputSplitSizes */,
-      std::vector<int64_t>& /* inputSplitSizes */,
+      at::Tensor& outputBuffer,
+      at::Tensor& inputBuffer,
+      std::vector<int64_t>& outputSplitSizes,
+      std::vector<int64_t>& inputSplitSizes,
       const AllToAllOptions& /* opts */ = AllToAllOptions()) override {
     checkCollectiveError();
+    if (outputSplitSizes == inputSplitSizes) {
+      outputBuffer.copy_(inputBuffer);
+    }
     return c10::make_intrusive<FakeWork>();
   }
 
