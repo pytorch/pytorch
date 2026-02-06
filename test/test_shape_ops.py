@@ -14,6 +14,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
+    dtypesIfMPS,
     dtypesIfXPU,
     instantiate_device_type_tests,
     largeTensorTest,
@@ -289,6 +290,47 @@ class TestShapeOps(TestCase):
             [100, 100],
             [20, 100],
             [100, 20],
+        )
+        for shape in shapes:
+            test(shape)
+
+    @onlyNativeDeviceTypes
+    @dtypes(torch.float, torch.double)
+    # MPS doesn't support float64, see https://github.com/pytorch/pytorch/issues/115350
+    @dtypesIfMPS(torch.float)
+    def test_trace_backward(self, device, dtype):
+        """
+        Test that torch.trace backward produces correct gradients for non-square inputs.
+
+        Regression test for https://github.com/pytorch/pytorch/issues/171704
+        The bug was that for non-square matrices where n > m, the backward pass
+        would write gradients outside the diagonal (e.g., at position (3, 0) for
+        a 4x2 matrix).
+        """
+
+        def test(shape):
+            n, m = shape
+            x = torch.zeros(shape, dtype=dtype, device=device, requires_grad=True)
+            out = torch.trace(x)
+            out.backward()
+
+            # Expected gradient: 1s on the main diagonal, 0s elsewhere
+            # Diagonal length is min(n, m)
+            expected = torch.zeros(shape, dtype=dtype, device=device)
+            diag_len = min(n, m)
+            for i in range(diag_len):
+                expected[i, i] = 1
+
+            self.assertEqual(x.grad, expected)
+
+        # Test various non-square and square shapes
+        shapes = (
+            (4, 2),  # n > m (the bug case)
+            (2, 4),  # m > n
+            (1, 5),  # single row
+            (5, 1),  # single column
+            (3, 3),  # square
+            (1, 1),  # 1x1
         )
         for shape in shapes:
             test(shape)
