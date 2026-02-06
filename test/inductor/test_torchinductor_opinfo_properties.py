@@ -242,8 +242,8 @@ INDUCTOR_NUMERICS_OPTIONS = {
     "deterministic": True,
     "fallback_random": True,
     "emulate_precision_casts": True,
-    # Note: config key has typo: not "division" (missing 'i')
-    "emulate_divison_rounding": True,
+    "eager_numerics.division_rounding": True,
+    "eager_numerics.disable_ftz": True,
 }
 
 
@@ -365,16 +365,16 @@ EAGER_EQUIV_XFAILS = {
     "aot_eager_decomp_partition": {
         "nn.functional.gelu": {fp32},
         "nn.functional.layer_norm": {fp32},
-        "nn.functional.rms_norm": {ALL},
+        "nn.functional.rms_norm": {fp32},
         "softmax": {fp32},
         "log_softmax": {fp32},
         "matmul": {fp32},
     },
     "inductor_default": {
-        "div": {ALL},
-        "reciprocal": {ALL},
-        "sigmoid": {ALL},
-        "nn.functional.gelu": {ALL},
+        "div": {fp32},
+        "reciprocal": {fp32},
+        "sigmoid": {fp32},
+        "nn.functional.gelu": {fp32},
         "nn.functional.layer_norm": {fp32},
         "nn.functional.silu": {fp16, fp32},
         "softmax": {fp32},
@@ -383,9 +383,9 @@ EAGER_EQUIV_XFAILS = {
         "pow": {fp32},
     },
     "inductor_numerics": {
-        "reciprocal": {ALL},
-        "sigmoid": {ALL},
-        "nn.functional.gelu": {ALL},
+        "reciprocal": {fp32},
+        "sigmoid": {fp32},
+        "nn.functional.gelu": {fp32},
         "nn.functional.layer_norm": {fp32},
         "softmax": {fp32},
         "log_softmax": {fp32},
@@ -394,9 +394,7 @@ EAGER_EQUIV_XFAILS = {
     },
 }
 
-DETERMINISM_XFAILS = {
-    "inductor_default": {"matmul": {fp32}},
-}
+DETERMINISM_XFAILS = {}
 
 BATCH_INVARIANCE_XFAILS = {
     "aot_eager_decomp_partition": {
@@ -429,15 +427,8 @@ UNARY_NUMERICAL_XFAILS = {
         "tanh": {fp32},
     },
     "inductor_numerics": {
-        "exp2": {bf16, fp32},
-        "expm1": {bf16, fp32},
-        "log1p": {fp32},
         "reciprocal": {fp32},
-        "rsqrt": {bf16, fp32},
         "sigmoid": {fp32},
-        "sin": {fp32},
-        "tan": {bf16, fp32},
-        "tanh": {fp32},
     },
 }
 
@@ -449,8 +440,7 @@ BINARY_NUMERICAL_XFAILS = {
         "remainder": {ALL},
     },
     "inductor_numerics": {
-        "fmod": {bf16, fp32},
-        "pow": {ALL},
+        "pow": {fp16, fp32},
         "remainder": {ALL},
     },
 }
