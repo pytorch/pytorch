@@ -60,13 +60,13 @@ from ..exc import (
 from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
+    CellContentsSource,
     ClosureSource,
-    CollectionsSource,
     ConstantSource,
     DefaultsSource,
     GetItemSource,
+    ImportSource,
     SkipGuardSource,
-    TorchSource,
     TypeSource,
 )
 from ..utils import (
@@ -133,7 +133,8 @@ class ClosureConversionError(NotImplementedError):
 @functools.lru_cache
 def get_pytree_SUPPORTED_NODES_source() -> AttrSource:
     return AttrSource(
-        AttrSource(AttrSource(TorchSource(), "utils"), "_pytree"), "SUPPORTED_NODES"
+        AttrSource(AttrSource(ImportSource("torch"), "utils"), "_pytree"),
+        "SUPPORTED_NODES",
     )
 
 
@@ -215,29 +216,15 @@ def bind_args_cached(
             # Maybe override pos-defaults applied above
             ba[name] = wrap_bound_arg(tx, rem_kw.pop(name))
         elif name not in ba:
-            raise_observed_exception(
-                TypeError,
-                tx,
-                args=[
-                    ConstantVariable.create(
-                        f"Missing required positional argument: {name}"
-                    )
-                ],
-            )
+            raise TypeError(f"missing required positional argument: {name}")
 
     # 2) *args
     extra = args[len(spec.all_pos_names) :]
     if spec.varargs_name:
         ba[spec.varargs_name] = wrap_bound_arg(tx, tuple(extra))
     elif extra:
-        raise_observed_exception(
-            TypeError,
-            tx,
-            args=[
-                ConstantVariable.create(
-                    f"Too many positional arguments: got {len(args)}, expected {len(spec.all_pos_names)}"
-                )
-            ],
+        raise TypeError(
+            f"Too many positional arguments: got {len(args)}, expected {len(spec.all_pos_names)}"
         )
 
     # 3) Keyword-only
@@ -250,27 +237,13 @@ def bind_args_cached(
                 kwdefault_source = DefaultsSource(fn_source, name, is_kw=True)
             ba[name] = wrap_bound_arg(tx, spec.kwdefaults[name], kwdefault_source)
         else:
-            raise_observed_exception(
-                TypeError,
-                tx,
-                args=[
-                    ConstantVariable.create(
-                        f"Missing required keyword-only argument: {name}"
-                    )
-                ],
-            )
+            raise TypeError(f"Missing required keyword-only argument: {name}")
 
     # 4) **kwargs
     if spec.varkw_name:
         ba[spec.varkw_name] = wrap_bound_arg(tx, rem_kw)
     elif rem_kw:
-        raise_observed_exception(
-            TypeError,
-            tx,
-            args=[
-                ConstantVariable.create(f"Unexpected keyword arguments: {list(rem_kw)}")
-            ],
-        )
+        raise TypeError(f"Unexpected keyword arguments: {list(rem_kw)}")
 
     return ba
 
@@ -383,12 +356,18 @@ def fn_var_getattr(
 
 class BaseUserFunctionVariable(VariableTracker):
     def get_filename(self) -> str:
-        return self.get_code().co_filename  # type: ignore[attr-defined]
+        return self.get_code().co_filename
 
     def get_name(self) -> str:
-        return self.get_code().co_name  # type: ignore[attr-defined]
+        return self.get_code().co_name
 
     def get_globals(self) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def get_code(self) -> types.CodeType:
+        raise NotImplementedError
+
+    def has_self(self) -> bool:
         raise NotImplementedError
 
     def call_function(
@@ -547,7 +526,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
 
             elif source:
                 closure_cell = GetItemSource(ClosureSource(source), idx)
-                closure_cell_contents = AttrSource(closure_cell, "cell_contents")
+                closure_cell_contents = CellContentsSource(
+                    closure_cell, "cell_contents", freevar_name=name
+                )
                 try:
                     contents_var = VariableTracker.build(
                         parent, cell.cell_contents, closure_cell_contents
@@ -651,7 +632,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                 )
 
             fn = fn_var.fn
-            return variables.TorchInGraphFunctionVariable(fn, nonstrict_traceable=True)
+            return variables.TorchInGraphFunctionVariable(
+                fn, kind=variables.torch.AllowInGraphKind.NONSTRICT_TRACE
+            )
 
         if self.is_constant:
             return invoke_and_store_as_constant(
@@ -964,14 +947,6 @@ class LocalGeneratorObjectVariable(VariableTracker):
                 self.remaining_items = self.force_unpack_var_sequence(tx)
             variables.ListIteratorVariable(self.remaining_items).reconstruct(codegen)
 
-    def bind_args(
-        self,
-        tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> dict[str, VariableTracker]:
-        return self.vt.bind_args(tx, args, kwargs)  # type: ignore[attr-defined]
-
     def get_globals(self) -> dict[str, Any]:
         return self.f_globals
 
@@ -1271,7 +1246,7 @@ class LocalGeneratorFunctionVariable(BaseUserFunctionVariable):
 
     def __init__(
         self,
-        vt: VariableTracker,
+        vt: BaseUserFunctionVariable,
         *,
         generator_cls: type = LocalGeneratorObjectVariable,
         **kwargs: Any,
@@ -1285,8 +1260,15 @@ class LocalGeneratorFunctionVariable(BaseUserFunctionVariable):
             return getattr(self, name)
         return getattr(self.vt, name)
 
+    # These need to be explicit so the custom __getattr__ doesn't fall back to the unimplemented base class version
+    def get_code(self) -> types.CodeType:
+        return self.vt.get_code()
+
     def get_globals(self) -> dict[str, Any]:
-        return self.vt.get_globals()  # type: ignore[attr-defined]
+        return self.vt.get_globals()
+
+    def has_self(self) -> bool:
+        return self.vt.has_self()
 
     def _build_inline_tracer(
         self,
@@ -1309,10 +1291,10 @@ class LocalGeneratorFunctionVariable(BaseUserFunctionVariable):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if not is_generator(self.vt.get_code()):  # type: ignore[attr-defined]
+        if not is_generator(self.vt.get_code()):
             unimplemented(
                 gb_type="non-generator contextlib.contextmanager",
-                context=str(self.vt.get_code()),  # type: ignore[attr-defined]
+                context=str(self.vt.get_code()),
                 explanation="Cannot compile function decorated with `@contextlib.contextmanager` that is not a generator"
                 ", i.e. does not use `yield`",
                 hints=[
@@ -1322,8 +1304,8 @@ class LocalGeneratorFunctionVariable(BaseUserFunctionVariable):
             )
 
         inline_tracer = self._build_inline_tracer(tx, list(args), kwargs)
-        code = self.vt.get_code()  # type: ignore[attr-defined]
-        f_globals = self.vt.get_globals()  # type: ignore[attr-defined]
+        code = self.vt.get_code()
+        f_globals = self.vt.get_globals()
 
         # calling a generator returns a generator object
         return self.generator_cls(
@@ -1343,7 +1325,7 @@ class FunctionDecoratedByContextlibContextManagerVariable(
         This is only used when the function is annotated with @contextlib.contextmanager
     """
 
-    def __init__(self, vt: VariableTracker, **kwargs: Any) -> None:
+    def __init__(self, vt: BaseUserFunctionVariable, **kwargs: Any) -> None:
         super().__init__(
             vt,
             generator_cls=ContextlibContextManagerLocalGeneratorObjectVariable,
@@ -1420,12 +1402,19 @@ class UserMethodVariable(UserFunctionVariable):
         #
         # We might be able to simplify this away by canonicalizing the
         # function/method wrapping code paths.
-        from ..trace_rules import is_nonstrict_trace_callable
+        from ..trace_rules import is_leaf_function, is_nonstrict_trace_callable
 
         if is_nonstrict_trace_callable(self.fn):
             call_args = [*self.self_args(), *args]
             var = variables.TorchInGraphFunctionVariable(
-                self.fn, nonstrict_traceable=True
+                self.fn, kind=variables.torch.AllowInGraphKind.NONSTRICT_TRACE
+            )
+            return var.call_function(tx, call_args, kwargs)
+
+        if is_leaf_function(self.fn):
+            call_args = [*self.self_args(), *args]
+            var = variables.TorchInGraphFunctionVariable(
+                self.fn, kind=variables.torch.AllowInGraphKind.LEAF_FUNCTION
             )
             return var.call_function(tx, call_args, kwargs)
 
@@ -1628,6 +1617,13 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         finally:
             _converting.discard(self_id)
 
+    def is_python_constant(self) -> bool:
+        try:
+            self.as_python_constant()
+            return True
+        except (NotImplementedError, Unsupported):
+            return False
+
     def _get_function_impl(self, _converting: set[int]) -> types.FunctionType:
         closure_cells = None
         if self.closure:
@@ -1821,7 +1817,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
 class WrappedNestedUserFunctionVariable(NestedUserFunctionVariable):
     def __init__(
         self,
-        wrapped: Any,
+        wrapped: NestedUserFunctionVariable,
         context: "ContextWrappingVariable",
         **kwargs: Any,
     ) -> None:
@@ -1858,7 +1854,7 @@ class WrappedNestedUserFunctionVariable(NestedUserFunctionVariable):
         return result
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        codegen.add_push_null(lambda: codegen(self.context))  # type: ignore[arg-type]
+        codegen.add_push_null(lambda: codegen(self.context))
         codegen(self.wrapped)
         codegen.extend_output(create_call_function(1, False))
 
@@ -2073,13 +2069,13 @@ class SkipFunctionVariable(VariableTracker):
 class WrappedSkipFunctionVariable(SkipFunctionVariable):
     def __init__(
         self,
-        wrapped: VariableTracker,
+        wrapped: SkipFunctionVariable,
         context: "ContextWrappingVariable",
         **kwargs: Any,
     ) -> None:
         kwargs.pop("value", None)
         kwargs.pop("reason", None)
-        super().__init__(wrapped.value, reason=wrapped.reason, **kwargs)  # type: ignore[attr-defined]
+        super().__init__(wrapped.value, reason=wrapped.reason, **kwargs)
         self.wrapped = wrapped
         self.context = context
 
@@ -2095,7 +2091,7 @@ class WrappedSkipFunctionVariable(SkipFunctionVariable):
         return result
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        codegen.add_push_null(lambda: codegen(self.context))  # type: ignore[arg-type]
+        codegen.add_push_null(lambda: codegen(self.context))
         codegen(self.wrapped)
         codegen.extend_output(create_call_function(1, False))
 
@@ -3106,7 +3102,7 @@ class PyTreeGetNodeTypeFunctionVariable(UserFunctionVariable):
             type_source = TypeSource(args[0].source)
         python_type = args[0].python_type()
         if is_namedtuple_class(python_type):
-            type_source = AttrSource(CollectionsSource(), "namedtuple")
+            type_source = AttrSource(ImportSource("collections"), "namedtuple")
             return VariableTracker.build(tx, namedtuple, type_source)
         return VariableTracker.build(tx, python_type, source=type_source)
 
@@ -3164,3 +3160,32 @@ class PyTreeTreeIsLeafFunctionVariable(UserFunctionVariable):
         )
         out = supported_nodes_var.call_method(tx, "__contains__", [node_type_var], {})
         return ConstantVariable.create(not out.value)
+
+
+class SparseTensorCreationSkipVariable(SkipFunctionVariable):
+    """
+    Skip variable for sparse tensor factory functions with clear messaging regarding lack of support.
+    """
+
+    def __init__(self, value: Any, **kwargs: Any) -> None:
+        reason = "sparse tensor creation is not supported in torch.compile"
+        super().__init__(value, reason=reason, **kwargs)
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        from .. import graph_break_hints
+
+        fn_name = getattr(self.value, "__name__", str(self.value))
+        unimplemented(
+            gb_type="Sparse tensor creation not supported",
+            context=f"function: {fn_name}",
+            explanation=(
+                f"torch.compile does not support sparse tensor creation functions like {fn_name}. "
+                "Sparse tensors require specialized handling that is not yet implemented in the compiler."
+            ),
+            hints=[*graph_break_hints.SPARSE_TENSOR],
+        )

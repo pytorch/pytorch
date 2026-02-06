@@ -583,11 +583,6 @@ def forward(self, b_parametrizations_buffer_original0, x):
         # note: the expected output placements below are chosen via unbacked cost hinting,
         # so it's reasonable for them to change along with hinting/strategy selection.
         test_placements(
-            (Partial(), Partial()),
-            (Replicate(), Replicate()),
-            (Partial(), Partial()),
-        )
-        test_placements(
             (Partial(), Partial()), (Partial(), Partial()), (Partial(), Partial())
         )
         test_placements(
@@ -634,42 +629,53 @@ def forward(self, b_parametrizations_buffer_original0, x):
             self.assertEqual(cnt.frame_count, 1)
             self.assertEqual(c_out.shape, eager_out.shape)
 
-    def test_dtensor_matmul_cost_upper_bound(self):
-        # use 2x2 mesh for testing
+    def test_dtensor_matmul_cost_hint_or_upper_bound(self):
         dist.destroy_process_group()
         dist.init_process_group("fake", store=FakeStore(), rank=0, world_size=4)
-        device_mesh = init_device_mesh(self.device_type, (2, 2))
+        device_mesh = init_device_mesh(self.device_type, (4,))
 
         x_dt = DTensor.from_local(
             torch.randn(8, 8),
             device_mesh=device_mesh,
-            placements=[Shard(0), Shard(1)],
+            placements=[Shard(0)],
         )
         y_dt = DTensor.from_local(
             torch.randn(8, 8),
             device_mesh=device_mesh,
-            placements=[Shard(1), Shard(0)],
+            placements=[Shard(1)],
         )
         torch._dynamo.decorators.mark_unbacked(x_dt, 0)
         torch._dynamo.decorators.mark_unbacked(y_dt, 1)
 
         # large k dim tells compiler it's cheaper to all-gather on x
         def f1(x, y):
-            torch._check(x.size(0) <= 16)
+            torch._check(x.size(0) <= 32)
             torch._check(y.size(1) <= 16384)
             return x @ y
 
         out = torch.compile(f1, backend="aot_eager", fullgraph=True)(x_dt, y_dt)
-        self.assertEqual(out.placements, (Shard(1), Partial()))
+        self.assertEqual(out.placements, (Shard(1),))
 
         # for the reverse, all-gather on y
         def f2(x, y):
             torch._check(x.size(0) <= 16384)
-            torch._check(y.size(1) <= 16)
+            torch._check(y.size(1) <= 32)
             return x @ y
 
         out = torch.compile(f2, backend="aot_eager", fullgraph=True)(x_dt, y_dt)
-        self.assertEqual(out.placements, (Shard(0), Partial()))
+        self.assertEqual(out.placements, (Shard(0),))
+
+        # specifying hint_override also determines the strategy
+        def f3(x, y):
+            return x @ y
+
+        x_dt = x_dt + 1
+        y_dt = y_dt + 1
+        torch._dynamo.decorators.mark_unbacked(x_dt, 0, hint_override=16)
+        torch._dynamo.decorators.mark_unbacked(x_dt, 1, hint_override=1024)
+
+        out = torch.compile(f3, backend="aot_eager", fullgraph=True)(x_dt, y_dt)
+        self.assertEqual(out.placements, (Shard(1),))
 
     def test_dtensor_requires_grad_recompile(self):
         cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
@@ -1057,6 +1063,39 @@ def forward(self, b_parametrizations_buffer_original0, x):
         out_test = fn_opt(dt)
         self.assertEqual(out_ref, out_test)
 
+    def test_dynamo_to_local_custom_partial_placement(self):
+        """Test that to_local works with custom Partial subclasses in grad_placements.
+
+        This tests the fix for custom placement objects like _ScaledPartial that
+        cannot be converted to Python constants via as_python_constant().
+        """
+
+        # Define a custom Partial subclass similar to _ScaledPartial in torchtitan
+        class ScaledPartial(Partial):
+            def __init__(self, reduction_divide_factor: float):
+                self.reduction_divide_factor = reduction_divide_factor
+                super().__init__(reduce_op="sum")
+
+            def _reduce_value(
+                self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
+            ) -> torch.Tensor:
+                tensor.div_(self.reduction_divide_factor)
+                return super()._reduce_value(tensor, mesh, mesh_dim)
+
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        scaled_partial = ScaledPartial(reduction_divide_factor=2.0)
+
+        def fn(x):
+            return x.to_local(grad_placements=[scaled_partial]) + 2
+
+        fn_opt = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        x = torch.ones(4)
+        dt = DTensor.from_local(x, mesh, [Replicate()], run_check=False)
+
+        out_ref = fn(dt)
+        out_test = fn_opt(dt)
+        self.assertEqual(out_ref, out_test)
+
     def test_dynamo_to_local_kwargs_forward_hook(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -1380,6 +1419,136 @@ def forward(self, primals_1):
     @torch._inductor.config.patch("graph_partition", True)
     def test_tp_compile_comm_reordering_graph_partition(self):
         self._test_tp_compile_comm_reordering()
+
+    @torch._dynamo.config.patch(force_compile_during_fx_trace=True)
+    def test_make_fx_with_invoke_subgraph_dtensor(self):
+        """Test that make_fx can trace over torch.compile with invoke_subgraph backend and DTensor.
+
+        This tests the scenario where:
+        1. An outer make_fx traces a function
+        2. Inside that function, a torch.compile'd function with invoke_subgraph backend is called
+        3. The compiled function operates on DTensor inputs
+        4. The invoke_subgraph HOP should appear in the traced graph
+        """
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        mesh = DeviceMesh("cpu", torch.arange(self.world_size))
+
+        torch._dynamo.reset()
+
+        def inner_fn(dt):
+            # Redistribute DTensor
+            return dt.redistribute(mesh, [Replicate()])
+
+        compiled_fn = torch.compile(inner_fn, backend="invoke_subgraph", fullgraph=True)
+
+        def outer_fn(x):
+            # Convert plain tensor to DTensor
+            dt = DTensor.from_local(x + 1, mesh, [Shard(0)], run_check=False)
+            # Call compiled function with DTensor
+            dt_out = compiled_fn(dt)
+            # Convert back to plain tensor
+            return dt_out.to_local()
+
+        x = torch.randn(4, 4, device="cpu")
+
+        # Trace with make_fx
+        traced = make_fx(
+            outer_fn, tracing_mode="fake", _disable_torch_fn_metadata_mode=True
+        )(x)
+
+        # Verify the full graph structure including invoke_subgraph
+        graph_str = "\n".join(
+            line.rstrip()
+            for line in traced.print_readable(print_output=False).strip().split("\n")
+        )
+        self.assertExpectedInline(
+            graph_str,
+            """\
+class outer_fn(torch.nn.Module):
+    def forward(self, x_1: "f32[4, 4]"):
+        # No stacktrace found for following nodes
+        add: "f32[4, 4]" = torch.ops.aten.add.Tensor(x_1, 1);  x_1 = None
+        view: "f32[4, 4]" = torch.ops.aten.view.default(add, [4, 4]);  add = None
+        repeated_subgraph0 = self.repeated_subgraph0
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'invoke_subgraph_0', view);  repeated_subgraph0 = view = None
+        getitem: "f32[8, 4]" = invoke_subgraph[0];  invoke_subgraph = None
+        view_1: "f32[8, 4]" = torch.ops.aten.view.default(getitem, [8, 4]);  getitem = None
+        return view_1
+
+    class repeated_subgraph0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[4, 4]"):
+            # No stacktrace found for following nodes
+            all_gather_into_tensor: "f32[8, 4]" = torch.ops._c10d_functional.all_gather_into_tensor.default(arg0_1, 2, '0');  arg0_1 = None
+            wait_tensor: "f32[8, 4]" = torch.ops._c10d_functional.wait_tensor.default(all_gather_into_tensor);  all_gather_into_tensor = None
+            return (wait_tensor,)""",  # noqa: B950
+        )
+
+    @torch._dynamo.config.patch(force_compile_during_fx_trace=True)
+    def test_aot_autograd_over_dynamo_dtensor_requires_grad(self):
+        """Test AOTAutograd over Dynamo with DTensor inputs/outputs and requires_grad.
+
+        This tests the scenario where:
+        1. An outer aot_function traces a function with DTensor requires_grad inputs
+        2. Inside that function, a torch.compile'd function with invoke_subgraph backend is called
+        3. Both inner and outer operate on DTensors
+        4. The inner Dynamo region should only be compiled once
+        """
+        from torch._dynamo.testing import CompileCounterWithBackend
+        from torch._functorch.aot_autograd import aot_function
+        from torch._functorch.compilers import nop
+
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        torch._dynamo.reset()
+
+        # Use a compile counter to track how many times Dynamo compiles
+        compile_counter = CompileCounterWithBackend("invoke_subgraph")
+
+        def inner_fn(dt):
+            # Simple operation on DTensor
+            return dt * 2 + 1
+
+        compiled_fn = torch.compile(inner_fn, backend=compile_counter)
+
+        def outer_fn(dt):
+            # Outer function also operates on DTensor
+            dt2 = dt + 1
+            dt3 = compiled_fn(dt2)
+            return dt3.sum()
+
+        # Create DTensor with requires_grad
+        local_tensor = torch.randn(4, 4, requires_grad=True)
+        dt_input = DTensor.from_local(local_tensor, mesh, [Shard(0)], run_check=False)
+
+        # Track forward graph to verify invoke_subgraph appears
+        fw_graph = None
+
+        def fw_compiler(gm, example_inputs):
+            nonlocal fw_graph
+            fw_graph = gm
+            return gm
+
+        aot_fn = aot_function(
+            outer_fn,
+            fw_compiler=fw_compiler,
+            bw_compiler=nop,
+            _disable_torch_fn_metadata_mode=True,
+        )
+
+        # Run forward and backward
+        result = aot_fn(dt_input)
+        result.backward()
+
+        # Check that we got a forward graph
+        self.assertIsNotNone(fw_graph, "Expected a forward graph")
+
+        # Check compile count - should be exactly 1 compilation
+        self.assertEqual(
+            compile_counter.frame_count,
+            1,
+            f"Expected 1 compilation, got {compile_counter.frame_count}",
+        )
 
 
 @instantiate_parametrized_tests
