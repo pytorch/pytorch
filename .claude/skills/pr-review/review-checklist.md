@@ -26,7 +26,7 @@ When a PR introduces new API patterns, carefully evaluate the broader implicatio
 ### Code Clarity
 
 - [ ] **Self-explanatory code** - Variable and function names convey intent; minimal comments needed
-- [ ] **Useful comments only** - Comments explain non-obvious context that cannot be inferred locally
+- [ ] **Useful comments only** - Comments explain non-obvious context that cannot be inferred locally. For large comment use the `# Note [Good note title]` and `See Note [Good note title]` to write larger comments that can be referenced from multiple places in the codebase.
 - [ ] **No backward-compatibility hacks** - Unused code is deleted completely, not renamed with underscores or marked with "removed" comments
 - [ ] **Appropriate complexity** - Solutions are as simple as possible for the current requirements
 
@@ -43,14 +43,17 @@ When a PR introduces new API patterns, carefully evaluate the broader implicatio
 ### Test Existence
 
 - [ ] **Tests exist** - New functionality has corresponding tests
-- [ ] **Tests are in the right place** - Test files match the convention (`test/test_*.py`)
+- [ ] **Tests are in the right place** - Tests should be added to an existing test file next to other related tests
+- [ ] **New test file is rare** - New test file should only be added when new major features are added
 
 ### Test Patterns
 
+- [ ] **Use OpInfo** - Any testing for an operator or a cross cutting feature must be done via OpInfo
 - [ ] **Use TestCase** - Tests inherit from `torch.testing._internal.common_utils.TestCase`
 - [ ] **Use run_tests** - Test file ends with `if __name__ == "__main__": run_tests()`
 - [ ] **Use assertEqual for tensors** - Tensor comparisons use `assertEqual`, not raw assertions
 - [ ] **Descriptive test names** - Test method names describe what is being tested
+- [ ] **Device generic** - Any test checking compute result should happen in a Device-generic test class (taking device as an argument). Device-specific test should be very rare and in device-specific test files.
 
 ### Test Quality
 
@@ -128,4 +131,3 @@ When reviewing changes to PyTorch APIs and user-facing code:
 - Synchronous CUDA operations where async would work
 - Keeping computation graph alive longer than needed
 - Redundant clones or copies
-

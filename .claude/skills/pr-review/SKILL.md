@@ -200,3 +200,4 @@ When reviewing, consult these project files for context:
 - `CLAUDE.md` - Coding style philosophy and testing patterns
 - `CONTRIBUTING.md` - PR requirements and review process
 - `torch/testing/_internal/common_utils.py` - Test patterns and utilities
+- `torch/testing/_internal/opinfo/core.py` - OpInfo test framework
