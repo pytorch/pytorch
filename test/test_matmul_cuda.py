@@ -182,6 +182,31 @@ class TestMatmulCuda(InductorTestCase):
         torch.backends.cuda.matmul.allow_fp16_accumulation = orig_fp16_accumulate
 
     @onlyCUDA
+    @dtypes(torch.cfloat, torch.cdouble)
+    @parametrize("backend", ["cublas", "cublaslt"])
+    def test_euclidean_inner_product(self, dtype, backend):
+        # Testing X -> X @ X.mH / X.mH @ X, the root cause of
+        # https://github.com/pytorch/pytorch/issues/174382
+        val = 3 + 4j
+        x = torch.zeros(2, 3, dtype=dtype, device="cuda")
+        x.diagonal().fill_(val)
+
+        ref_inner = torch.zeros(3, 3, dtype=dtype, device="cuda")
+        ref_inner.diagonal().fill_(val * val.conjugate())
+        ref_inner[-1, -1] = 0
+
+        ref_corrcoef = torch.empty(2, 2, dtype=dtype, device="cuda")
+        ref_corrcoef.fill_(-0.5)
+        ref_corrcoef.diagonal().fill_(1.0)
+
+        with blas_library_context(backend):
+            for a, b in zip((x, x.mH), (x.mH, x)):
+                inner_prod = a @ b
+                self.assertEqual(inner_prod, ref_inner[:len(a), :len(a)])
+
+            self.assertEqual(torch.corrcoef(x), ref_corrcoef)
+
+    @onlyCUDA
     # imported 'tol' as 'xtol' to avoid aliasing in code above
     @toleranceOverride({torch.float16: xtol(atol=1e-4, rtol=1e-4),
                         torch.bfloat16: xtol(atol=1e-4, rtol=1e-4),
