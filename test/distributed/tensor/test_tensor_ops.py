@@ -812,6 +812,48 @@ class DistTensorOpsTest(DTensorTestBase):
         self.assertEqual(misses, 2)
 
     @with_comms
+    def test_to_copy_partial_reduces_for_nonlinear_cast(self):
+        """Test that Partial reduces before non-linear dtype casts."""
+        device_mesh = self.build_device_mesh()
+        local_tensor = torch.full(
+            (self.world_size,), 0.6, dtype=torch.float32, device=self.device_type
+        )
+        sharded = distribute_tensor(local_tensor, device_mesh, [Shard(0)])
+
+        # Partial(sum): float→int and float→bool must reduce (non-linear)
+        partial_sum = sharded.sum()
+        self.assertTrue(partial_sum.placements[0].is_partial())
+
+        result_int = partial_sum.to(torch.int32)
+        self.assertTrue(result_int.placements[0].is_replicate())
+        self.assertEqual(result_int.full_tensor(), local_tensor.sum().to(torch.int32))
+
+        result_bool = partial_sum.to(torch.bool)
+        self.assertTrue(result_bool.placements[0].is_replicate())
+        self.assertEqual(result_bool.full_tensor(), local_tensor.sum().to(torch.bool))
+
+        # Partial(sum): float→float preserves Partial (linear)
+        result_f64 = partial_sum.to(torch.float64)
+        self.assertTrue(result_f64.placements[0].is_partial())
+        self.assertEqual(result_f64.full_tensor(), local_tensor.sum().to(torch.float64))
+
+        # Partial(max): float→int preserves Partial (monotonic), but →bool must reduce
+        partial_max = sharded.max()
+        self.assertTrue(partial_max.placements[0].is_partial())
+
+        result_max_int = partial_max.to(torch.int32)
+        self.assertTrue(result_max_int.placements[0].is_partial())
+        self.assertEqual(
+            result_max_int.full_tensor(), local_tensor.max().to(torch.int32)
+        )
+
+        result_max_bool = partial_max.to(torch.bool)
+        self.assertTrue(result_max_bool.placements[0].is_replicate())
+        self.assertEqual(
+            result_max_bool.full_tensor(), local_tensor.max().to(torch.bool)
+        )
+
+    @with_comms
     def test_slice(self):
         mesh = self.build_device_mesh()  # 1D mesh
         comm_mode = CommDebugMode()
