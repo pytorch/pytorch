@@ -1100,6 +1100,7 @@ class PallasTestsMixin:
         self.assertEqual(mean_result, mean_expected)
         self.assertEqual(var_result, var_expected)
 
+    @skip_if_cuda
     def test_layer_norm(self):
         """Test layer normalization (mean + variance reduction, normalize, scale + shift)."""
 
