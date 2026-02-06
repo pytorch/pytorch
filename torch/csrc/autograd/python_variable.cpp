@@ -979,6 +979,7 @@ static bool arg_type_tensor_or_tensor_list_like(py::handle arg) {
   _(needs_redistribute)                                       \
   _(op)                                                       \
   _(op_to_schema_info)                                        \
+  _(op_to_schema_info_for_single_dim_strategy)                \
   _(output_sharding)                                          \
   _(output_spec)                                              \
   _(schema_info)                                              \
@@ -2227,11 +2228,21 @@ static py::object get_runtime_schema_info_for_op(py::handle py_op) {
       op_dispatcher.attr(dtensor_interned_strings.sharding_propagator);
   const py::dict op_to_schema_info = py::reinterpret_borrow<py::dict>(
       sharding_propagator.attr(dtensor_interned_strings.op_to_schema_info));
+  const py::dict op_to_schema_info_for_single_dim_strategy =
+      py::reinterpret_borrow<py::dict>(sharding_propagator.attr(
+          dtensor_interned_strings.op_to_schema_info_for_single_dim_strategy));
 
   PyObject* runtime_schema_info =
       PyDict_GetItemWithError(op_to_schema_info.ptr(), py_op.ptr());
   if (!runtime_schema_info && PyErr_Occurred()) {
     throw py::error_already_set();
+  }
+  if (!runtime_schema_info) {
+    runtime_schema_info = PyDict_GetItemWithError(
+        op_to_schema_info_for_single_dim_strategy.ptr(), py_op.ptr());
+    if (!runtime_schema_info && PyErr_Occurred()) {
+      throw py::error_already_set();
+    }
   }
   return py::reinterpret_borrow<py::object>(runtime_schema_info);
 }
