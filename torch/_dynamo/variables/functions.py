@@ -185,6 +185,23 @@ def bind_args_cached(
     kwargs: dict[str, Any],
 ) -> dict[str, VariableTracker]:
     spec = _get_spec(func)
+
+    # Fast path: simple positional-only, no defaults, no varargs/varkw
+    # This is the common case for small utility functions called repeatedly.
+    if (
+        len(args) == spec.arg_count
+        and not func.__defaults__
+        and not kwargs
+        and not spec.varargs_name
+        and not spec.varkw_name
+        and not spec.kwonly_names
+    ):
+        return {
+            name: wrap_bound_arg(tx, args[i])
+            for i, name in enumerate(spec.all_pos_names)
+        }
+
+    # Full path with all features
     spec.update_defaults(func)
     ba = {}
     rem_kw = dict(kwargs)
