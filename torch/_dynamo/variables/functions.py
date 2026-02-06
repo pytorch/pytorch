@@ -817,6 +817,42 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         return isinstance(other, variables.UserFunctionVariable) and self.fn is other.fn
 
 
+class InspectSignatureVariable(UserFunctionVariable):
+    """
+    Variable tracker for inspect.signature with caching support.
+
+    inspect.Signature is expensive to trace. When inspect.signature is called
+    repeatedly on the same function during tracing, we cache the result to avoid
+    retracing the signature construction each time. Although this is different
+    from CPython behavior, it is safe to do so because inspect.signature does
+    not change across different calls to the same function.
+    """
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # Fast path: cache results for repeated calls on the same function
+        if len(args) == 1 and not kwargs:
+            target_arg = args[0]
+            cache_key = None
+
+            if isinstance(target_arg, (UserFunctionVariable, UserMethodVariable)):
+                cache_key = target_arg.get_function()
+
+            if cache_key is not None:
+                if cache_key in tx.output.signature_cache:
+                    return tx.output.signature_cache[cache_key]
+
+                result = super().call_function(tx, args, kwargs)
+                tx.output.signature_cache[cache_key] = result
+                return result
+
+        return super().call_function(tx, args, kwargs)
+
+
 class TreeMapOnlyFunctionVariable(BaseUserFunctionVariable):
     _nonvar_fields = {
         "allowed_types",
