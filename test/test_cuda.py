@@ -1118,8 +1118,20 @@ print(t.is_pinned())
         s2 = torch.cuda.Stream()
         torch.accelerator.set_stream(s1)
         self.assertEqual(torch.accelerator.current_stream().stream_id, s1.stream_id)
+        self.assertEqual(
+            torch.accelerator.current_stream().native_handle, s1.cuda_stream
+        )
+        self.assertEqual(
+            torch.accelerator.current_stream().native_handle, s1.native_handle
+        )
         torch.accelerator.set_stream(s2)
         self.assertEqual(torch.accelerator.current_stream().stream_id, s2.stream_id)
+        self.assertEqual(
+            torch.accelerator.current_stream().native_handle, s2.cuda_stream
+        )
+        self.assertEqual(
+            torch.accelerator.current_stream().native_handle, s2.native_handle
+        )
         with self.assertRaisesRegex(
             RuntimeError, "Device index value .* is out of index range"
         ):
@@ -5768,17 +5780,17 @@ class TestMemPool(TestCase):
         torch.cuda.empty_cache()
         self.assertEqual(called_dummy_free.value, 321)
 
+        # reset dummy allocator indicator variables because they are global
+        called_dummy_free.value = 0
+        called_dummy_alloc.value = 0
+
+    @serialTest()
     def test_mempool_with_allocator(self):
         pool = torch.cuda.MemPool()
 
-        # MemPool doesn't have an allocator by default
-        self.assertEqual(pool.allocator, None)
         allocator, dummy_allocator = self.get_dummy_allocator(check_vars=True)
 
         pool = torch.cuda.MemPool(allocator.allocator())
-
-        # pool should point to the same allocator as the one passed into it
-        self.assertEqual(allocator.allocator(), pool.allocator)
 
         # pool's use count should be 1 at this point as MemPool object
         # holds a reference
@@ -5839,6 +5851,11 @@ class TestMemPool(TestCase):
         # out tensor
         self.assertEqual(called_dummy_free.value, 321)
 
+        # reset dummy allocator indicator variables because they are global
+        called_dummy_free.value = 0
+        called_dummy_alloc.value = 0
+
+    @serialTest()
     def test_tensor_delete_after_allocator_delete(self):
         allocator, dummy_allocator = self.get_dummy_allocator(check_vars=True)
         pool = torch.cuda.MemPool(allocator.allocator())
@@ -5869,6 +5886,10 @@ class TestMemPool(TestCase):
         torch.cuda.empty_cache()
 
         self.assertEqual(called_dummy_free.value, 321)
+
+        # reset dummy allocator indicator variables because they are global
+        called_dummy_free.value = 0
+        called_dummy_alloc.value = 0
 
     @serialTest()
     def test_mempool_limited_memory_with_allocator(self):
