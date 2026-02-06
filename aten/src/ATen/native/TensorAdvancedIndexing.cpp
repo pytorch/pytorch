@@ -170,9 +170,12 @@ TORCH_META_FUNC(gather)
   if (!is_index_empty) {
     TORCH_CHECK(
         index.scalar_type() == ScalarType::Long ||
-            index.scalar_type() == ScalarType::Int,
+            index.scalar_type() == ScalarType::Int ||
+            index.scalar_type() == ScalarType::Short ||
+            index.scalar_type() == ScalarType::UInt16 ||
+            index.scalar_type() == ScalarType::Byte,
         "gather",
-        "(): Expected dtype int32/int64 for index");
+        "(): Expected dtype int16, uint16, int32, int64, or uint8 for index");
   }
   if (is_index_empty)
     return;
@@ -1614,8 +1617,11 @@ Tensor& index_select_out_cpu_(
       " value(s)");
   TORCH_CHECK(
       index.scalar_type() == ScalarType::Long ||
-          index.scalar_type() == ScalarType::Int,
-      "index_select(): Expected dtype int32 or int64 for index");
+          index.scalar_type() == ScalarType::Int ||
+          index.scalar_type() == ScalarType::Short ||
+          index.scalar_type() == ScalarType::UInt16 ||
+          index.scalar_type() == ScalarType::Byte,
+      "index_select(): Expected dtype int16, uint16, int32, int64, or uint8 for index");
   TORCH_CHECK(
       self.scalar_type() == result.scalar_type(),
       "index_select(): self and result must have the same scalar type");

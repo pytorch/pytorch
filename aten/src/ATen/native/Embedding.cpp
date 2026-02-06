@@ -38,7 +38,7 @@ Tensor embedding_symint(const Tensor & weight, const Tensor & indices,
                         c10::SymInt padding_idx, bool scale_grad_by_freq, bool sparse) {
   TORCH_CHECK(weight.dim() == 2,  "'weight' must be 2-D");
   auto indices_arg = TensorArg(indices, "indices", 1);
-  checkScalarTypes("embedding", indices_arg, {kLong, kInt});
+  checkScalarTypes("embedding", indices_arg, {kLong, kInt, kShort, kUInt16, kByte});
 
   // TODO: use tensor.index() after improving perf
   if (indices.dim() == 1) {
@@ -77,7 +77,7 @@ Tensor embedding_sparse_backward(
     int64_t padding_idx, bool scale_grad_by_freq) {
 
   auto indices_arg = TensorArg(indices_, "indices", 2);
-  checkScalarTypes("embedding_backward", indices_arg, {kLong, kInt});
+  checkScalarTypes("embedding_backward", indices_arg, {kLong, kInt, kShort, kUInt16, kByte});
 
   // TODO: implement scale_grad_by_freq
   if (scale_grad_by_freq) {
@@ -114,7 +114,7 @@ Tensor embedding_dense_backward_cpu(
     int64_t padding_idx, bool scale_grad_by_freq) {
 
   auto indices_arg = TensorArg(indices, "indices", 2);
-  checkScalarTypes("embedding_backward", indices_arg, {kLong, kInt});
+  checkScalarTypes("embedding_backward", indices_arg, {kLong, kInt, kByte});
 
   auto grad_weight = at::zeros({num_weights, grad_.size(-1)}, grad_.options());
   auto indices_contig = indices.contiguous();
@@ -183,7 +183,7 @@ Tensor & embedding_renorm_cpu_(
   auto self_arg = TensorArg(self, "self", 1);
   auto indices_arg = TensorArg(indices, "indices", 2);
   checkDim("embedding_renorm_", self_arg, 2);
-  checkScalarTypes("embedding_renorm_", indices_arg, {kLong, kInt});
+  checkScalarTypes("embedding_renorm_", indices_arg, {kLong, kInt, kShort, kUInt16, kByte});
 
   auto indices_contig = indices.contiguous();
   auto num_indices = indices.numel();
