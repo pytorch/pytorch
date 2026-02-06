@@ -322,6 +322,7 @@ def _do_bench_using_profiling(
         may_ban_benchmarking()
 
     device_type = get_gpu_type()
+    device_type_upper = device_type.upper()
     device_interface = get_interface_for_device(device_type)
     fn()
     device_interface.synchronize()
@@ -349,7 +350,7 @@ def _do_bench_using_profiling(
     device_interface.synchronize()
     with torch.profiler.profile(
         activities=[
-            getattr(torch.profiler.ProfilerActivity, device_type.upper()),
+            getattr(torch.profiler.ProfilerActivity, device_type_upper),
         ]
     ) as p:
         # Benchmark
@@ -368,7 +369,8 @@ def _do_bench_using_profiling(
         [
             event
             for event in p.events()
-            if event.device_type == DeviceType.CUDA and event.name != "Context Sync"
+            if event.device_type == getattr(DeviceType, device_type_upper)
+            and event.name != "Context Sync"
         ]
     )
     if len(filtered_events) % n_repeat != 0:
@@ -2774,7 +2776,9 @@ def get_device_tflops(dtype: torch.dtype) -> float:
     We don't want to throw errors in this function. First check to see if the device is in device_info.py,
     then fall back to the inaccurate triton estimation.
     """
-    ds_tops = datasheet_tops(dtype, is_tf32=torch.backends.cuda.matmul.allow_tf32)
+    ds_tops = datasheet_tops(
+        dtype, is_tf32=torch.backends.cuda.matmul.fp32_precision == "tf32"
+    )
     if ds_tops is not None:
         return ds_tops
 
@@ -2795,7 +2799,7 @@ def get_device_tflops(dtype: torch.dtype) -> float:
         if dtype in (torch.float16, torch.bfloat16) and SM80OrLater:
             return get_max_tensorcore_tflops(dtype, sm_clock)
 
-        if torch.backends.cuda.matmul.allow_tf32:
+        if torch.backends.cuda.matmul.fp32_precision == "tf32":
             return get_max_tensorcore_tflops(torch.float32, sm_clock)
         else:
             return get_max_simd_tflops(torch.float32, sm_clock)
@@ -2803,7 +2807,7 @@ def get_device_tflops(dtype: torch.dtype) -> float:
         if dtype in (torch.float16, torch.bfloat16) and SM80OrLater:
             return get_max_tensorcore_tflops(dtype)
 
-        if torch.backends.cuda.matmul.allow_tf32:
+        if torch.backends.cuda.matmul.fp32_precision == "tf32":
             return get_max_tensorcore_tflops(torch.float32)
         else:
             return get_max_simd_tflops(torch.float32)
