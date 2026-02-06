@@ -3,7 +3,7 @@
 # This workflow runs smoke tests on B200 hardware
 #
 # Flow:
-# 1. Builds PyTorch with CUDA 12.8+ and sm100 architecture for B200
+# 1. Builds PyTorch with CUDA 12.8 and CUDA 13.0, sm100 architecture for B200
 # 2. Runs smoke tests on linux.dgx.b200 runner
 # 3. Tests executed are defined in .ci/pytorch/test.sh -> test_python_smoke_b200() function
 #    - Includes matmul, scaled_matmul, FP8, and FlashAttention CuTe tests
@@ -74,5 +74,33 @@ jobs:
       build-environment: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-sm100-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-sm100-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-sm100-build.outputs.test-matrix }}
+      aws-role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
+    secrets: inherit
+
+  linux-jammy-cuda13_0-py3_10-gcc11-sm100-build:
+    name: linux-jammy-cuda13.0-py3.10-gcc11-sm100
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner: linux.r7i.4xlarge
+      build-environment: linux-jammy-cuda13.0-py3.10-gcc11-sm100
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11
+      cuda-arch-list: '10.0'
+      test-matrix: |
+        { include: [
+          { config: "smoke_b200", shard: 1, num_shards: 1, runner: "linux.dgx.b200" },
+        ]}
+    secrets: inherit
+
+  linux-jammy-cuda13_0-py3_10-gcc11-sm100-test:
+    name: linux-jammy-cuda13.0-py3.10-gcc11-sm100
+    uses: ./.github/workflows/_linux-test.yml
+    needs:
+      - linux-jammy-cuda13_0-py3_10-gcc11-sm100-build
+    with:
+      build-environment: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-sm100-build.outputs.build-environment }}
+      docker-image: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-sm100-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-sm100-build.outputs.test-matrix }}
       aws-role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
     secrets: inherit
