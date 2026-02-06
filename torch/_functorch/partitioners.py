@@ -15,7 +15,7 @@ import warnings
 from collections import defaultdict, deque
 from collections.abc import Callable
 from dataclasses import dataclass, replace
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 import torch._inductor.inductor_prims
@@ -88,11 +88,11 @@ prims = torch.ops.prims
 class OpTypes:
     """Class for keeping track of different operator categories"""
 
-    fusible_ops: OrderedSet[Callable]
-    compute_intensive_ops: OrderedSet[Callable]
-    random_ops: OrderedSet[Callable]
-    view_ops: OrderedSet[Callable]
-    recomputable_ops: OrderedSet[Callable]
+    fusible_ops: OrderedSet[Callable[..., Any]]
+    compute_intensive_ops: OrderedSet[Callable[..., Any]]
+    random_ops: OrderedSet[Callable[..., Any]]
+    view_ops: OrderedSet[Callable[..., Any]]
+    recomputable_ops: OrderedSet[Callable[..., Any]]
 
     def is_fusible(self, node: fx.Node) -> bool:
         return get_aten_target(node) in self.fusible_ops
@@ -201,39 +201,53 @@ def is_not_collective(node: fx.Node) -> bool:
 InvalidNode = InvalidNodeBase()
 
 
+def _is_copy_node_bw_only(node: fx.Node) -> fx.Node | None:
+    """Check if node is a view/reshape of a higher-order op output that aliases an input.
+
+    Returns the original input node from the higher-order op's kwargs if the pattern
+    matches, None otherwise.
+    """
+    if node.target not in (torch.ops.aten.view.default, torch.ops.aten.reshape.default):
+        return None
+    source = node.args[0]
+    if not isinstance(source, fx.Node) or source.target != operator.getitem:
+        return None
+    ho_result = source.args[0]
+    key = source.args[1]
+    if not isinstance(ho_result, fx.Node) or ho_result.op != "call_function":
+        return None
+    if "kwargs" not in ho_result.kwargs:
+        return None
+    kwargs = ho_result.kwargs["kwargs"]
+    # pyrefly: ignore [not-iterable, unsupported-operation]
+    if key not in kwargs:
+        return None
+    # pyrefly: ignore [bad-index, unsupported-operation]
+    original_input = kwargs[key]
+    if isinstance(original_input, fx.Node):
+        return original_input
+    return None
+
+
 def _find_input_for_invalid_output(
     node: fx.Node,
     env: dict[fx.Node, Any],
     inputs_set: OrderedSet[fx.Node],
-) -> Optional[fx.Node]:
+) -> fx.Node | None:
     """Try to find a valid input replacement for an invalid forward output.
 
     This handles cases where a forward output depends on backward nodes but
     semantically aliases an input. For example, a view of a getitem from a
     triton kernel that mutates a buffer in backward.
     """
-    # For view ops, check if we can trace back to an input
-    if node.target in (torch.ops.aten.view.default, torch.ops.aten.reshape.default):
-        source = node.args[0]
-        if isinstance(source, fx.Node):
-            # Check if source is a getitem of a higher-order op
-            if source.target == operator.getitem:
-                ho_result = source.args[0]
-                key = source.args[1]
-                if isinstance(ho_result, fx.Node) and ho_result.op == "call_function":
-                    # Check if this higher-order op has kwargs with an input
-                    if "kwargs" in ho_result.kwargs:
-                        kwargs = ho_result.kwargs["kwargs"]
-                        # pyrefly: ignore [not-iterable]
-                        if key in kwargs:
-                            original_input = kwargs[key]
-                            if (
-                                isinstance(original_input, fx.Node)
-                                and original_input in inputs_set
-                                and original_input in env
-                                and not isinstance(env[original_input], InvalidNodeBase)
-                            ):
-                                return env[original_input]
+    original_input = _is_copy_node_bw_only(node)
+    if (
+        original_input is not None
+        and original_input in inputs_set
+        and original_input in env
+        and not isinstance(env[original_input], InvalidNodeBase)
+    ):
+        return env[original_input]
     return None
 
 
@@ -256,7 +270,7 @@ def _extract_graph_with_inputs_outputs(
     in valid proxies. Then, all dead code is eliminated.
     """
     new_graph = fx.Graph()
-    env = {}
+    env: dict[fx.Node, fx.Node] = {}
 
     # Add new placeholder nodes in the order specified by the inputs
     for node in inputs:
@@ -671,7 +685,7 @@ def get_quant_type() -> torch.dtype:
     return getattr(torch, quant_type.split(".")[-1])
 
 
-def calculate_range(dtype: torch.dtype) -> tuple:
+def calculate_range(dtype: torch.dtype) -> tuple[float, float]:
     """
     Calculate the range of values for a given torch.dtype.
     Args:
@@ -689,7 +703,8 @@ def quantize_activation_fw(graph: torch.fx.Graph) -> None:
     quant_type = get_quant_type()
     clamp_min, clamp_max = calculate_range(quant_type)
     position_to_quant = dict()
-    tensor_scale_nodes, sym_scale_nodes = [], []
+    tensor_scale_nodes: list[fx.Node] = []
+    sym_scale_nodes: list[fx.Node] = []
     for position, node in enumerate(fwd_outputs):
         # check if the activation node is the node saved for quantization
         if node.meta.get("saved_for_quantization", False):
@@ -931,7 +946,7 @@ def enable_activation_quantization(
     ):
         return
 
-    static_input_names = (
+    static_input_names: list[str] = (
         [node.name for node in static_lifetime_input_nodes]
         if static_lifetime_input_nodes
         else []
@@ -1690,7 +1705,7 @@ def functionalize_rng_ops(
             "Couldn't find tangent node in graph inputs. This is unexpected, please file a bug if you see this"
         )
 
-    fw_rng_state_outputs = []
+    fw_rng_state_outputs: list[fx.Node] = []
 
     last_fwd_input = next(reversed(fw_module.graph.find_nodes(op="placeholder")))
     last_bwd_input = next(reversed(bw_module.graph.find_nodes(op="placeholder")))
@@ -1745,7 +1760,10 @@ def functionalize_rng_ops(
                 functional_fw_node = fw_graph.create_node(
                     "call_function",
                     run_and_save_rng,
-                    args=(fw_node.target, *fw_node.args),
+                    args=(
+                        fw_node.target,
+                        *fw_node.args,
+                    ),  # pyrefly: ignore[bad-argument-type]
                     kwargs=fw_node.kwargs,
                 )
                 state = fw_graph.create_node(
@@ -1782,7 +1800,11 @@ def functionalize_rng_ops(
                 rng_output = bw_graph.create_node(
                     "call_function",
                     run_with_rng_state,
-                    args=(bw_rng_state_node, bw_node.target, *bw_node.args),
+                    args=(
+                        bw_rng_state_node,
+                        bw_node.target,
+                        *bw_node.args,
+                    ),  # pyrefly: ignore[bad-argument-type]
                     kwargs=bw_node.kwargs,
                 )
 
@@ -2659,7 +2681,7 @@ def visualize_min_cut_graph(
 
 
 def get_default_op_list() -> OpTypes:
-    default_recomputable_ops: list[Callable] = [
+    default_recomputable_ops: list[Callable[..., Any]] = [
         aten.add,
         aten.sub,
         aten.div,
@@ -3313,7 +3335,7 @@ def thread_graphsafe_rng_from_hops(
     ):
         subgraph = getattr(module, hop_node.args[0].target)
         if isinstance(subgraph, fx.GraphModule):
-            new_rng_inputs = []
+            new_rng_inputs: list[fx.Node] = []
             for placeholder_node in subgraph.graph.find_nodes(op="placeholder"):
                 if rng_string in placeholder_node.name:
                     # Found a rng state placeholder in the hop graph, lets add
@@ -3607,7 +3629,7 @@ def draw_graph(
         new_graph = copy.deepcopy(traced.graph)
         traced = fx.GraphModule(traced, new_graph)
         for node in traced.graph.nodes:
-            node.meta = {}
+            node.meta = {}  # pyrefly: ignore[implicit-any]
     base, ext = os.path.splitext(fname)
     if not ext:
         ext = "." + config.torch_compile_graph_format

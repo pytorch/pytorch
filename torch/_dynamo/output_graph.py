@@ -191,15 +191,6 @@ og_module_named_parameters_fn_ptr = torch.nn.Module.named_parameters
 
 
 @dataclass(frozen=True)
-class VariableTrackerCacheKey:
-    vt_id: int
-    # Two different source can point to the same object. However, Dynamo handles
-    # globals and local source differently when it comes to guards and possibly
-    # some other parts as well. So, cache also relies on the source.
-    source: Source
-
-
-@dataclass(frozen=True)
 class AliasingInfo:
     has_aliasing: bool
     msg: str
@@ -209,30 +200,6 @@ class AliasingInfo:
 class MutationInfo:
     has_mutation: bool
     msg: str
-
-
-class VariableTrackerCache:
-    def __init__(self) -> None:
-        self.cache: dict[VariableTrackerCacheKey, VariableTracker] = {}
-
-    def lookup(self, value: Any, source: Source) -> Optional[VariableTracker]:
-        key = VariableTrackerCacheKey(id(value), source)
-        if key not in self.cache:
-            return None
-        return self.cache[key]
-
-    def add(self, value: Any, source: Source, vt: VariableTracker) -> None:
-        key = VariableTrackerCacheKey(id(value), source)
-        self.cache[key] = vt
-
-    def clone(self) -> "VariableTrackerCache":
-        # Needed for copy and restore graph state
-        new_cache = VariableTrackerCache()
-        new_cache.cache.update(self.cache)
-        return new_cache
-
-    def clear(self) -> None:
-        self.cache.clear()
 
 
 def collect_reachable_grad_fns(
@@ -687,7 +654,7 @@ class OutputGraph(OutputGraphCommon):
         self.side_effects = SideEffects(self)
         # Cached variable trackers. This makes symbolic analysis of LOAD_GLOBAL
         # and LOAD_ATTR for same python objects free.
-        self.variable_tracker_cache = VariableTrackerCache()
+        self.variable_tracker_cache: dict[Source, VariableTracker] = {}
         self.unique_var_id = itertools.count()
         self.code_options: dict[str, Any] = dict(code_options)
         self.output_instructions: list[Instruction] = []
@@ -799,6 +766,30 @@ class OutputGraph(OutputGraphCommon):
         # Set of inlined unspecialized modules names to generate the
         # dynamo_flat_name_to_original_fqn mapping.
         self.used_inlined_inbuilt_modules_names: OrderedSet[str] = OrderedSet()
+
+        self.attr_source_cache: dict[tuple[Source, str], AttrSource] = {}
+
+    def get_chained_attr_source(self, base: Source, path: str) -> AttrSource:
+        parts = path.split(".")
+        key = (base, parts[0])
+        if key not in self.attr_source_cache:
+            self.attr_source_cache[key] = AttrSource(base, parts[0])
+        result = self.attr_source_cache[key]
+        for part in parts[1:]:
+            key = (result, part)
+            if key not in self.attr_source_cache:
+                self.attr_source_cache[key] = AttrSource(result, part)
+            result = self.attr_source_cache[key]
+        return result
+
+    def get_chained_param_buffer_source(
+        self, base: Source, path: str
+    ) -> "ParamBufferSource":
+        parts = path.rsplit(".", 1)
+        if len(parts) == 1:
+            return ParamBufferSource(base, path)
+        intermediate_base = self.get_chained_attr_source(base, parts[0])
+        return ParamBufferSource(intermediate_base, parts[1])
 
     def mark_bytecode_tracing_start(self) -> None:
         self.compiler_trace_stack.enter_context(
@@ -1336,7 +1327,7 @@ class OutputGraph(OutputGraphCommon):
 
             def register_leaf_name(leaf_name: str) -> None:
                 assert self.param_name_to_source is not None
-                new_source = ParamBufferSource(source, leaf_name)
+                new_source = self.get_chained_param_buffer_source(source, leaf_name)
                 new_name = f"{name}.{leaf_name}"
                 self.param_name_to_source[new_name] = new_source
                 if isinstance(source, LocalSource):
@@ -2295,22 +2286,23 @@ class OutputGraph(OutputGraphCommon):
                 # while creating the graph module because self.graph and root
                 # are out of sync. This only happens for `get_attr` nodes, so
                 # here we clean up the get_attr nodes that are unused.
-                for attr in dir(root):
-                    subgraph = getattr(root, attr)
-                    if isinstance(subgraph, fx.GraphModule):
-                        insert_deferred_runtime_asserts(
-                            subgraph,
-                            self.shape_env,
-                            name,
-                            export=self.export,
-                        )
-                self.remove_unused_get_attr_nodes()
-                insert_deferred_runtime_asserts(
-                    fx.GraphModule(root, self.graph),
-                    self.shape_env,
-                    name,
-                    export=self.export,
-                )
+                with dynamo_timed("insert_deferred_runtime_asserts"):
+                    for attr in dir(root):
+                        subgraph = getattr(root, attr)
+                        if isinstance(subgraph, fx.GraphModule):
+                            insert_deferred_runtime_asserts(
+                                subgraph,
+                                self.shape_env,
+                                name,
+                                export=self.export,
+                            )
+                    self.remove_unused_get_attr_nodes()
+                    insert_deferred_runtime_asserts(
+                        fx.GraphModule(root, self.graph),
+                        self.shape_env,
+                        name,
+                        export=self.export,
+                    )
             # NB: deferred runtime asserts can keep graphargs live, so make sure
             # those are inserted before pruning
             self.remove_unused_graphargs()
@@ -2375,6 +2367,8 @@ class OutputGraph(OutputGraphCommon):
             self.call_cleanup_hooks()
             old_fake_mode = self.tracing_context.fake_mode
             assert old_fake_mode is not None
+            # Store old_fake_mode so it can be cleared at end of compile
+            self._old_fake_mode = old_fake_mode
             if not self.export:
                 import torch._functorch.config as _config
 
@@ -2943,7 +2937,7 @@ class OutputGraph(OutputGraphCommon):
 
         def register_leaf_name(leaf_name: str) -> None:
             assert self.param_name_to_source is not None
-            new_source = ParamBufferSource(source, leaf_name)
+            new_source = self.get_chained_param_buffer_source(source, leaf_name)
             new_name = f"{name}.{leaf_name}"
             self.param_name_to_source[new_name] = new_source
             if isinstance(source, LocalSource):

@@ -30,6 +30,7 @@ from torch.testing._internal.common_utils import (
     get_report_path,
     IS_CI,
     IS_MACOS,
+    isRocmArchAnyOf,
     retry_shell,
     set_cwd,
     shell,
@@ -191,12 +192,16 @@ ROCM_BLOCKLIST = [
     "distributed/rpc/test_tensorpipe_agent",
     "distributed/rpc/test_share_memory",
     "distributed/rpc/cuda/test_tensorpipe_agent",
-    "inductor/test_max_autotune",  # taking excessive time, many tests >30 min
     "test_determination",
     "test_jit_legacy",
     "test_cuda_nvml_based_avail",
     "test_jit_cuda_fuser",
 ]
+
+# Add architecture-specific blocklist entries
+if TEST_WITH_ROCM and isRocmArchAnyOf(("gfx1100",)):
+    # Some autotune tests on gfx1100 are hanging, disable for now
+    ROCM_BLOCKLIST.append("inductor/test_max_autotune")
 
 S390X_BLOCKLIST = [
     # these tests fail due to various reasons
