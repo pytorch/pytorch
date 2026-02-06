@@ -12871,6 +12871,32 @@ class TestConsistency(TestCaseMPS):
         out_mps = torch.grid_sampler_3d(input.to(device), grid_nan.to(device), 0, 0, True)
         self.assertEqual(out_mps, out_cpu)
 
+    def test_householder_product_race(self, device):
+        # Regression testing for https://github.com/pytorch/pytorch/issues/173972
+        # Check correctness for input matrices that have more elements than the
+        # maximum number of threads per threadgroup. Before the issue was fixed,
+        # this test would fail due to a race.
+        max_threads_per_threadgroup = torch.mps.compile_shader("kernel void foo() {}").foo.max_threads_per_threadgroup
+        m0 = int(max_threads_per_threadgroup**(0.5))
+
+        for m in range(m0, 5 * m0, m0):
+            for num_batches in range(1, 11):
+                A = torch.eye(m, m).repeat(num_batches, 1, 1)
+                # Set one random non-diagonal element of each identity matrix to
+                # 1. This is better than using a fully random matrix, because
+                # that can cause fairly large errors for CPU vs MPS due to
+                # normal floating point error.
+                for i in range(num_batches):
+                    j = random.randint(0, m - 1)
+                    k = j
+                    while k == j:
+                        k = random.randint(0, m - 1)
+                    A[i, j, k] = 1
+                tau = torch.randn(num_batches, m)
+                r_cpu = torch.orgqr(A, tau)
+                r_mps = torch.orgqr(A.to('mps'), tau.to('mps'))
+                self.assertEqual(r_cpu, r_mps)
+
     def test_fmax_mixed_dtypes(self, device):
         # Regression testing for https://github.com/pytorch/pytorch/issues/149951
         # fmax and fmin are implemented as binary metal shaders and they were implemented

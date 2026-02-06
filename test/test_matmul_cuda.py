@@ -197,8 +197,8 @@ class TestMatmulCuda(InductorTestCase):
 
         with blas_library_context(backend):
             for a in (x, x.mH):
-                norm = (a @ a.mH).sum().item()
-                self.assertEqual(norm, 50 + 0j)
+                norm_squared = (a @ a.mH).sum().item()
+                self.assertEqual(norm_squared, 50 + 0j)
 
             self.assertEqual(torch.corrcoef(x), ref_corrcoef)
 
