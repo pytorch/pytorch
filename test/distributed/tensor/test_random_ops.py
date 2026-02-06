@@ -678,16 +678,17 @@ class DistTensorRandomOpTest(DTensorTestBase):
         (which uses uint64 view) and then re-setting it would fail with:
         OverflowError: can't convert negative int to unsigned
 
-        The fix ensures the seed getter uses uint64 view, preventing negative
-        values from appearing when the high bit is set.
+        The fix ensures the seed getter returns a tensor, preventing any
+        int conversion issues when the high bit is set.
         """
         from torch.distributed.tensor._random import _PhiloxState
 
         state = torch.zeros(16, dtype=torch.uint8, device="cpu")
         philox = _PhiloxState(state)
-        test_seed = 2**63 + 42  # This has the sign bit set when viewed as int64
+        # Create a seed with the sign bit set (valid uint64, negative as int64)
+        test_seed = torch.tensor([2**63 + 42], dtype=torch.uint64)
         philox.seed = test_seed
-        philox.seed = philox.seed
+        philox.seed = philox.seed.clone()
 
 
 class DistTensorRandomOpsTest3D(DTensorTestBase):
