@@ -2803,14 +2803,18 @@ class Module:
                 memo.add(module)
                 yield name, module
 
-    def modules(self) -> Iterator["Module"]:
+    def modules(self, remove_duplicate: bool = True) -> Iterator["Module"]:
         r"""Return an iterator over all modules in the network.
+
+        Args:
+            remove_duplicate: whether to remove the duplicated module instances in the result
+                or not.
 
         Yields:
             Module: a module in the network
 
         Note:
-            Duplicate modules are returned only once. In the following
+            Duplicate modules are returned only once by default. In the following
             example, ``l`` will be returned only once.
 
         Example::
@@ -2827,7 +2831,7 @@ class Module:
             1 -> Linear(in_features=2, out_features=2, bias=True)
 
         """
-        for _, module in self.named_modules():
+        for _, module in self.named_modules(remove_duplicate=remove_duplicate):
             yield module
 
     def named_modules(
