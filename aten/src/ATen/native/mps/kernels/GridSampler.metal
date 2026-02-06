@@ -262,21 +262,23 @@ static T interpolate_nearest_2d(
     int32_t inp_sW,
     GridSamplerPadding padding_mode,
     bool align_corners) {
-  ix = grid_sampler_unnormalize<T>(ix, inp_W, align_corners);
-  iy = grid_sampler_unnormalize<T>(iy, inp_H, align_corners);
+  // For Border and Reflection modes, apply padding to float coordinates
+  // before rounding (matches CPU behavior)
+  ix = compute_source_index<T>(ix, inp_W, padding_mode, align_corners);
+  iy = compute_source_index<T>(iy, inp_H, padding_mode, align_corners);
 
   int32_t ix_nearest = static_cast<int32_t>(rint(ix));
   int32_t iy_nearest = static_cast<int32_t>(rint(iy));
 
-  int32_t ix_p =
-      pad_input_index(ix_nearest, inp_W, padding_mode, align_corners);
-  int32_t iy_p =
-      pad_input_index(iy_nearest, inp_H, padding_mode, align_corners);
-
-  if (ix_p == IDX_ZERO || iy_p == IDX_ZERO) {
-    return static_cast<T>(0);
+  // For Zeros padding, check bounds after rounding
+  if (padding_mode == GridSamplerPadding::Zeros) {
+    if (ix_nearest < 0 || ix_nearest >= inp_W ||
+        iy_nearest < 0 || iy_nearest >= inp_H) {
+      return static_cast<T>(0);
+    }
   }
-  return input[iy_p * inp_sH + ix_p * inp_sW];
+
+  return input[iy_nearest * inp_sH + ix_nearest * inp_sW];
 }
 
 // Helper to get bounded value for bicubic interpolation
@@ -613,11 +615,14 @@ void grid_sampler_single_element(
     auto scale = coord - left_idx;
 
     if (interpolation_mode == GridSamplerInterpolation::Nearest) {
-      // TODO: For some reason, rounding the scale to 0 or 1 and then using
-      // linear interpolation seems to work perfectly with zero padding mode,
-      // but we get flaky failures with border and reflection padding modes.
-      // Need to investigate and fix it.
-      scale = (scale <= 0.5) ? 0 : 1;
+      // Round to nearest even (banker's rounding) - matches CPU behavior
+      // For halfway cases (scale == 0.5), pick the even-indexed neighbor
+      if (scale == 0.5) {
+        // left_idx even -> pick left (scale=0), left_idx odd -> pick right (scale=1)
+        scale = (left_idx % 2 == 0) ? 0 : 1;
+      } else {
+        scale = (scale < 0.5) ? 0 : 1;
+      }
     }
     scales[input_dim] = scale;
   }

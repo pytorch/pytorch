@@ -633,7 +633,7 @@ torch_set_requires_grad(AtenTensorHandle tensor, bool requires_grad) {
   });
 }
 
-AOTITorchError torch_from_blob(
+AOTI_TORCH_EXPORT AOTITorchError torch_from_blob(
     void* data,
     int64_t ndim,
     const int64_t* sizes_ptr,
