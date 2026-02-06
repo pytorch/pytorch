@@ -51,6 +51,7 @@ class TORCH_API AOTIModelPackageLoader {
   std::string temp_dir_;
   std::unique_ptr<AOTIModelContainerRunner> runner_;
   std::unordered_map<std::string, std::string> metadata_;
+  bool shared_mode_=false;
 
   void load_metadata(const std::string& cpp_filename);
 };
