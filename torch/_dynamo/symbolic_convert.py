@@ -4734,7 +4734,7 @@ class InstructionTranslatorBase(
                 )
             self.output.add_output_instructions(cg.get_instructions())
 
-        # --- Step 3: Add the comprehension bytecode ---
+        # --- Step 3: Load closure variables into local slots ---
 
         vars_for_co_varnames = (
             analysis.iterator_vars
@@ -4747,16 +4747,21 @@ class InstructionTranslatorBase(
             if var_name not in self.output.code_options["co_varnames"]:
                 self.output.code_options["co_varnames"] += (var_name,)
 
-        deref_to_fast_vars = {
+        captured_closure_vars = {
             var_name
             for var_name in analysis.captured_vars
             if var_name in self.cell_and_freevars()
         }
 
-        # Load closure variables into local slots.
-        if deref_to_fast_vars:
+        # Load closure variables into local slots before copying comprehension bytecode.
+        # We convert LOAD_DEREF to LOAD_FAST in the copied bytecode, so we must first
+        # populate those local slots with the closure values. Three cases:
+        # 1. Top-level (parent is None): emit LOAD_DEREF -> STORE_FAST
+        # 2. Inlined, var in freevars: extract from closure, load as const or global
+        # 3. Inlined, var in cellvars: load via side_effects from symbolic_locals
+        if captured_closure_vars:
             cg = PyCodegen(self)
-            for var_name in deref_to_fast_vars:
+            for var_name in captured_closure_vars:
                 if self.parent is None:
                     cg.extend_output(
                         [
@@ -4791,6 +4796,7 @@ class InstructionTranslatorBase(
                                     create_instruction("STORE_FAST", argval=var_name),
                                 ]
                             )
+                    # Variable is a cellvar
                     else:
                         cell = self.symbolic_locals[var_name]
                         cell_contents = self.output.side_effects.load_cell(cell)
@@ -4800,15 +4806,17 @@ class InstructionTranslatorBase(
                         )
             self.output.add_output_instructions(cg.get_instructions())
 
+        # --- Step 4: Add the comprehension bytecode ---
+
         copied_insts = self._copy_comprehension_bytecode(
-            start_ip, analysis.end_ip, deref_to_fast_vars
+            start_ip, analysis.end_ip, captured_closure_vars
         )
         self.output.add_output_instructions(copied_insts)
 
         if analysis.result_on_stack:
             self.push(UnknownVariable())
 
-        # --- Step 4: Generate code to pass variables to resume function ---
+        # --- Step 5: Generate code to pass variables to resume function ---
 
         # Variables the comprehension creates that need to be passed to resume:
         # - result_var: variable the comprehension result is assigned to
@@ -4846,7 +4854,7 @@ class InstructionTranslatorBase(
             )
             self.output.add_output_instructions(resume_cg.get_instructions())
 
-        # --- Step 5: Create the resume function ---
+        # --- Step 6: Create the resume function ---
 
         resume_inst = self.instructions[analysis.end_ip]
         self.output.add_output_instructions(
@@ -4856,12 +4864,12 @@ class InstructionTranslatorBase(
         self.instruction_pointer = None
 
     def _copy_comprehension_bytecode(
-        self, start_ip: int, end_ip: int, deref_to_fast_vars: set[str] | None = None
+        self, start_ip: int, end_ip: int, captured_closure_vars: set[str] | None = None
     ) -> list[Instruction]:
         """Copy comprehension bytecode instructions, updating jump targets.
 
         Args:
-            deref_to_fast_vars: Variable names to convert from LOAD_DEREF to LOAD_FAST
+            captured_closure_vars: Variable names to convert from LOAD_DEREF to LOAD_FAST
         """
         inst_map: dict[Instruction, Instruction] = {}
         copied_insts: list[Instruction] = []
@@ -4884,9 +4892,9 @@ class InstructionTranslatorBase(
                 copied_inst.target = inst_map[copied_inst.target]
 
             if (
-                deref_to_fast_vars
+                captured_closure_vars
                 and copied_inst.opname == "LOAD_DEREF"
-                and copied_inst.argval in deref_to_fast_vars
+                and copied_inst.argval in captured_closure_vars
             ):
                 copied_inst.opname = "LOAD_FAST"
                 copied_inst.opcode = dis.opmap["LOAD_FAST"]
@@ -5906,7 +5914,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     def _can_speculate_comprehension_nested(self) -> bool:
         """Check if comprehension speculation is allowed in this inlined context.
 
-        Unlike should_compile_partial_graph(), this skips the exception table entry check
+        Unlike should_compile_partial_graph(), this skips the exception table entry check.
         """
         if not config.nested_graph_breaks:
             return False
