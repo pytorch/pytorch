@@ -3438,8 +3438,7 @@ class InstructionTranslatorBase(
     def _can_speculate_comprehension_nested(self) -> bool:
         """Check if comprehension speculation is allowed in nested context.
 
-        For the base class (non-inlined), this always returns False since
-        self.parent is None. Subclasses override to check nested conditions.
+        For the base class (non-inlined), this always returns False.
         """
         return False
 
@@ -3463,12 +3462,6 @@ class InstructionTranslatorBase(
             and self.output.current_tracer.parent is None
         )
 
-        # For inlined functions, allow speculation if nested_graph_breaks is enabled
-        # and all parent frames can compile partial graphs.
-        # We don't use should_compile_partial_graph() directly because it includes
-        # an exception table entry check that isn't appropriate for comprehension
-        # speculation (the comprehension bytecode has its own exception handling
-        # that we'll copy to run in eager mode).
         if can_speculate and self.parent is not None:
             can_speculate = self._can_speculate_comprehension_nested()
         # Only set up speculation at depth 0 (outermost comprehension)
@@ -4569,7 +4562,6 @@ class InstructionTranslatorBase(
                     if var_name not in defined_inside and var_name not in captured_vars:
                         captured_vars.append(var_name)
 
-            # Detect LOAD_DEREF referencing closure variables
             elif inst.opname == "LOAD_DEREF":
                 var_name = inst.argval
                 if var_name not in captured_vars:
@@ -4706,7 +4698,6 @@ class InstructionTranslatorBase(
             # Tensors/symnodes must already be in their correct slot
             if isinstance(var, (TensorVariable, SymNodeVariable)):
                 # In nested context, tensor may be from parent frame argument
-                # compile_subgraph handles passing it through frame_list correctly
                 if self.parent is None and not in_correct_slot:
                     unimplemented(
                         gb_type="Comprehension with captured tensor not in local slot",
@@ -4745,11 +4736,6 @@ class InstructionTranslatorBase(
 
         # --- Step 3: Add the comprehension bytecode ---
 
-        # Ensure all variables used by comprehension bytecode are in co_varnames.
-        # - iterator_vars: variables from LOAD_FAST_AND_CLEAR pattern
-        # - walrus_vars: variables created by walrus operator (:=)
-        # - captured_vars: outer scope variables accessed via LOAD_FAST
-        # - result_var: variable the comprehension result is assigned to
         vars_for_co_varnames = (
             analysis.iterator_vars
             + analysis.walrus_vars
@@ -4761,22 +4747,17 @@ class InstructionTranslatorBase(
             if var_name not in self.output.code_options["co_varnames"]:
                 self.output.code_options["co_varnames"] += (var_name,)
 
-        # Identify closure vars that need LOAD_DEREF -> LOAD_FAST conversion.
-        # These are captured_vars that are in cell_and_freevars (closure variables).
         deref_to_fast_vars = {
             var_name
             for var_name in analysis.captured_vars
             if var_name in self.cell_and_freevars()
         }
 
-        # Load closure variables into local slots before the comprehension bytecode.
-        # LOAD_DEREF instructions will be converted to LOAD_FAST, so we need
-        # the values in local slots.
+        # Load closure variables into local slots.
         if deref_to_fast_vars:
             cg = PyCodegen(self)
             for var_name in deref_to_fast_vars:
                 if self.parent is None:
-                    # Top-level function: use LOAD_DEREF
                     cg.extend_output(
                         [
                             create_instruction("LOAD_DEREF", argval=var_name),
@@ -4784,9 +4765,6 @@ class InstructionTranslatorBase(
                         ]
                     )
                 else:
-                    # Inlined function: the closure variable is not in the outer
-                    # function's freevars. Get the actual closure cell contents
-                    # from the function's closure and install it as a global.
                     assert hasattr(self, "funcvar"), (
                         "Expected InliningInstructionTranslator to have funcvar"
                     )
@@ -4804,7 +4782,6 @@ class InstructionTranslatorBase(
                                 ]
                             )
                         else:
-                            # Mutable object: install as a global
                             global_name = self.output.install_global_by_id(
                                 f"__closure_{var_name}", actual_value
                             )
@@ -4815,7 +4792,6 @@ class InstructionTranslatorBase(
                                 ]
                             )
                     else:
-                        # Fall back to symbolic reconstruction
                         cell = self.symbolic_locals[var_name]
                         cell_contents = self.output.side_effects.load_cell(cell)
                         cg(cell_contents, allow_cache=False)
@@ -4907,7 +4883,6 @@ class InstructionTranslatorBase(
             if copied_inst.target is not None and copied_inst.target in inst_map:
                 copied_inst.target = inst_map[copied_inst.target]
 
-            # Convert LOAD_DEREF to LOAD_FAST for closure vars loaded to local slots
             if (
                 deref_to_fast_vars
                 and copied_inst.opname == "LOAD_DEREF"
@@ -5931,11 +5906,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     def _can_speculate_comprehension_nested(self) -> bool:
         """Check if comprehension speculation is allowed in this inlined context.
 
-        Checks that nested_graph_breaks is enabled, the function allows nested
-        graph breaks, and parent frames can compile partial graphs. Unlike
-        should_compile_partial_graph(), this skips the exception table entry
-        check for the current frame since comprehension bytecode has its own
-        exception handling that will be copied for eager execution.
+        Unlike should_compile_partial_graph(), this skips the exception table entry check
         """
         if not config.nested_graph_breaks:
             return False

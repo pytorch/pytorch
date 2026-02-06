@@ -211,7 +211,7 @@ class ComprehensionTests(torch._inductor.test_case.TestCase):
         x = torch.randn(4)
 
         self.assertEqual(compiled(x), fn(x))
-        self.assertGreaterEqual(len(backend.graphs), 1)
+        self.assertEqual(len(backend.graphs), 1)
         self.assertEqual(count_op(backend.graphs[0], operator.add), 1)
 
     def test_walrus_operator_in_comprehension(self):
@@ -741,9 +741,6 @@ class ComprehensionTests(torch._inductor.test_case.TestCase):
         self.assertEqual(count_op(backend.graphs[0], operator.add), 1)
         self.assertEqual(count_op(backend.graphs[1], operator.add), 1)
 
-
-@skipIfNotPy312
-class NestedGraphBreakTests(torch._inductor.test_case.TestCase):
     @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_nested_function_calls_with_comprehension_graph_break(self):
         """Test nested function calls where inner function has comprehension with graph break."""
@@ -775,6 +772,9 @@ class NestedGraphBreakTests(torch._inductor.test_case.TestCase):
         for i in range(6):
             self.assertEqual(count_op(backend.graphs[i], operator.add), 1)
 
+
+@skipIfNotPy312
+class NestedGraphBreakTests(torch._inductor.test_case.TestCase):
     @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_nested_function_calls_with_comprehension_graph_break_nested_graph_breaks_true(
         self,
@@ -813,13 +813,13 @@ class NestedGraphBreakTests(torch._inductor.test_case.TestCase):
         """Nested function with comprehension containing walrus operator."""
 
         def inner(x):
-            x = x + 1
-            result = [(y := i * 2) for i in [torch._dynamo.graph_break() or 1, 2, 3]]
             x = x + 2
+            result = [(y := i * 2) for i in [torch._dynamo.graph_break() or 1, 2, 3]]
+            x = x + 3
             return x + sum(result) + y
 
         def outer(x):
-            x = x + 3
+            x = x + 1
             x = inner(x)
             x = x + 4
             return x
@@ -830,20 +830,22 @@ class NestedGraphBreakTests(torch._inductor.test_case.TestCase):
 
         self.assertEqual(compiled(x), outer(x))
         self.assertEqual(len(backend.graphs), 2)
+        self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
+        self.assertEqual(count_op(backend.graphs[1], operator.add), 4)
 
     @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_nested_function_comprehension_with_captured_var(self):
         """Nested function with comprehension capturing outer variable passed as parameter."""
 
         def inner(x, multiplier):
-            x = x + 1
+            x = x + 2
             result = [multiplier * i for i in [torch._dynamo.graph_break() or 1, 2, 3]]
-            x = x + 2 + sum(result)
+            x = x + 3 + sum(result)
             return x
 
         def outer(x):
             multiplier = 5
-            x = x + 3
+            x = x + 1
             x = inner(x, multiplier)
             x = x + 4
             return x
@@ -854,6 +856,8 @@ class NestedGraphBreakTests(torch._inductor.test_case.TestCase):
 
         self.assertEqual(compiled(x), outer(x))
         self.assertEqual(len(backend.graphs), 2)
+        self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
+        self.assertEqual(count_op(backend.graphs[1], operator.add), 3)
 
     @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_triple_nested_function_comprehension(self):
@@ -889,9 +893,7 @@ class NestedGraphBreakTests(torch._inductor.test_case.TestCase):
 
         self.assertEqual(compiled(x), f(x))
         self.assertEqual(len(backend.graphs), 2)
-        # Before comprehension: x+1, x+2, x+3, x+4 = 4 adds
         self.assertEqual(count_op(backend.graphs[0], operator.add), 4)
-        # After comprehension: x+5, x+6, x+7, x+8 = 4 adds
         self.assertEqual(count_op(backend.graphs[1], operator.add), 4)
 
     @torch._dynamo.config.patch(nested_graph_breaks=True)
@@ -922,20 +924,23 @@ class NestedGraphBreakTests(torch._inductor.test_case.TestCase):
         self.assertEqual(compiled(x), outer(x))
         # Graph 1: x+1, Graph 2: x+2, x+3, Graph 3: x+4
         self.assertEqual(len(backend.graphs), 3)
+        self.assertEqual(count_op(backend.graphs[0], operator.add), 1)
+        self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
+        self.assertEqual(count_op(backend.graphs[2], operator.add), 1)
 
     @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_nested_function_comprehension_with_outer_list_mutation(self):
         """Nested function with comprehension mutating outer list."""
 
         def inner(x, results):
-            x = x + 1
-            [results.append(torch._dynamo.graph_break() or i) for i in range(3)]
             x = x + 2
+            [results.append(torch._dynamo.graph_break() or i) for i in range(3)]
+            x = x + 3
             return x
 
         def outer(x):
             results = []
-            x = x + 3
+            x = x + 1
             x = inner(x, results)
             x = x + 4
             return x, results
@@ -944,11 +949,10 @@ class NestedGraphBreakTests(torch._inductor.test_case.TestCase):
         compiled = torch.compile(outer, backend=backend)
         x = torch.randn(4)
 
-        compiled_result = compiled(x)
-        eager_result = outer(x)
-        self.assertEqual(compiled_result[0], eager_result[0])
-        self.assertEqual(compiled_result[1], eager_result[1])
+        self.assertEqual(compiled(x), outer(x))
         self.assertEqual(len(backend.graphs), 2)
+        self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
+        self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
 
     @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_nested_list_comprehension_graph_break(self):
@@ -1184,8 +1188,9 @@ class NestedGraphBreakTests(torch._inductor.test_case.TestCase):
         x = torch.randn(4)
 
         self.assertEqual(compiled(x), outer(x))
-        self.assertGreaterEqual(len(backend.graphs), 1)
+        self.assertEqual(len(backend.graphs), 2)
         self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
+        self.assertEqual(count_op(backend.graphs[1], operator.add), 1)
 
     @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_nested_walrus_operator_in_comprehension(self):
