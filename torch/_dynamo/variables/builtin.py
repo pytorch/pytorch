@@ -1646,7 +1646,9 @@ class BuiltinVariable(VariableTracker):
                 bound_method = repr_method.__func__
                 fn_vt = VariableTracker.build(tx, bound_method)
                 return fn_vt.call_function(tx, [arg], {})
-        return None
+        if isinstance(arg, variables.UserDefinedClassVariable):
+            if type(arg.value).__repr__ is type.__repr__:
+                return variables.ConstantVariable.create(repr(arg.value))
 
     def call_str(
         self, tx: "InstructionTranslator", arg: VariableTracker
@@ -2661,6 +2663,7 @@ class BuiltinVariable(VariableTracker):
                 variables.TensorVariable,
                 variables.NamedTupleVariable,
                 variables.ConstantVariable,
+                variables.DefaultDictVariable,
                 variables.DistributedVariable,
                 variables.UserDefinedClassVariable,
                 variables.UserDefinedObjectVariable,
@@ -2753,6 +2756,7 @@ class BuiltinVariable(VariableTracker):
         if isinstance(
             obj,
             (
+                variables.DefaultDictVariable,
                 variables.PlacementVariable,
                 variables.NamedTupleVariable,
                 variables.UserDefinedObjectVariable,
