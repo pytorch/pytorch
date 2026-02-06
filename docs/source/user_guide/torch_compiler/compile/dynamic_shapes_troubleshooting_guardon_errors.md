@@ -1,10 +1,30 @@
 (troubleshooting_guardondatadependentsymnode_errors)=
 
 # Troubleshooting GuardOnDataDependentSymNode Errors
+When working with PyTorch models that have unbacked symbols which could be coming from data dependent ops like `item()`, `tolist()`, or `nonzero())`, or from manually marking some input sized dynamic using `torch._dynamo.decorators.mark_unbacked` you may encounter `GuardOnDataDependentSymNode` errors. This section explains what these errors are and how to fix them.
 
-When working with PyTorch models that have data-dependent control flow (using functions
-like `item()`, `tolist()`, or `nonzero())`, you may encounter `GuardOnDataDependentSymNode` errors.
-This section explains what these errors are and how to fix them.
+## Background:
+
+**Backed dynamic shapes** emerged as a solution to the "endless recompilations" problem in PyTorch 2. When a function like `torch.ones(x)` was compiled with `x=10`, Dynamo would insert a guard checking that "the input x is exactly 10" and generate a graph hard-coded for size 10. Calling with `x=20` would trigger another compilation, and so on. To solve this, we stopped hard-coding sizes and represented them symbolically. However, the compiler still needed to make branching decisions (e.g., `if x < 1024`), so we "backed" each dynamic shape with a hint—a concrete value from the example input used during compilation. The hint guides branch selection, and Dynamo adds guards ensuring the branch condition remains valid. These are called *backed* (or *guardable*) shapes because they are backed by a hint and can have guards constraining them.
+
+**Unbacked dynamic shapes** arose from a different need: supporting data-dependent operations like `x.item()`. For such operations, the output value depends on tensor data and is unknown at compile time. Initially, these would trigger graph breaks, but this was problematic for export and performance. To keep data-dependent operations within the graph, we represent their outputs symbolically—but unlike backed shapes, we have no hint to resolve branching. These are called *unbacked* (or *guardless*) shapes. Over time, users have also deliberately chosen unbacked shapes for primary graph inputs to avoid branch-induced recompilations and compile graphs that work across all input shapes.
+
+### Data-Dependent Errors
+
+**Data-Dependent Errors** A key challenge with unbacked shapes is handling branches: without a hint, the compiler cannot determine which path to take, and the default behavior is to throw a `GuardOnDataDependentSymNode` error.
+
+## Framework vs User Code  Errors
+
+Data-dependent errors (DDEs) can originate from two sources: **framework code** (PyTorch internals) and **user code** (your model). Historically, DDEs were a major pain point—especially for export users—because many common framework operations like reshaping, slicing, narrowing, selection, contiguity checks, and broadcasting checks would trigger these errors when encountering unbacked shapes.
+
+**Framework code should no longer throw DDEs.** We have implemented explicit unbacked semantics throughout the PyTorch framework, addressing major code branches and eliminating the vast majority of framework-originated DDEs. Operations that previously failed—such as `view`, `narrow`, `select`, and various shape checks—now handle unbacked shapes correctly by automatically selecting general code paths that work for all input values (by sometimes potentially deviating from eager semantics). This means you can now capture specialization-free graphs much more reliably without hitting framework DDEs.
+
+If you encounter a DDE originating from PyTorch framework code (identifiable by the "Potential framework code culprit" in the error message pointing to files under `torch/`), this is likely a bug that should be reported, and fixed using the same methods explained later in this document. Note that some operations are inherently not unbacked-friendly (such as `unbind` and `chunk`) because they require knowing the concrete number of outputs at compile time. The remaining DDEs you may encounter will typically originate from **user code**—branches in your model that depend on data-dependent values.
+
+The rest of this document explains how to deal with unbacked shapes in your code. The solutions generally fall into two categories:
+
+1. **Avoid the DDE by rewriting your code to be resilient** — restructure your code so that it doesn't require branching on unbacked symbols, or use alternative APIs that handle unbacked shapes gracefully.
+2. **Provide hints using `torch._check`** — when rewriting is not feasible, you can try using `torch._check` to assert conditions and teach the symbolic reasoning system facts about your unbacked `SymInts`. However, this doesn't always work, as some cases are fundamentally incompatible with unbacked shapes.
 
 ## Common Error Pattern
 The following output shows the common error pattern `GuardOnDataDependentSymNode` errors:
@@ -21,17 +41,6 @@ For extended logs when we create symbols, also add TORCHDYNAMO_EXTENDED_DEBUG_CR
 If you suspect the guard was triggered from C++, add TORCHDYNAMO_EXTENDED_DEBUG_CPP=1
 For more debugging help, see https://docs.google.com/document/d/1HSuTTVvYH1pTew89Rtpeu84Ht3nQEFTYhAX3Ypa_xJs/edit?usp=sharing
 ```
-
-## Root Cause
-
-These errors occur when PyTorch tries to convert a symbolic quantity (for example, `u2 == -1`)
-into a concrete value (such as, `False`) to make branching decisions. In a typical scenario,
-where data-dependent sizes are not involved, PyTorch can determine the concrete value at
-compile time and install a guard to ensure the compilation result remains valid. However,
-with data-dependent quantities, the true value is unknown at compile time, resulting in errors.
-
-You can often rewrite your model, by adding `torch._check` or `torch._check_is_size` to
-bypass these issues. This document aims to teach you how.
 
 ## Debugging Tools
 
@@ -52,7 +61,7 @@ Here is a the list of error variations that you might encounter:
 
 ## How to Diagnose Your Problem
 
-### Step 1: Examine the Potential Framework Culprit (Python Backtrace)
+### Step 1: Examine the Potential Culprit (Python Backtrace)
 
 The exception provides a backtrace, which often indicates the problem.
 Given that PT2 backtraces can be lengthy, the error message will also
@@ -63,42 +72,6 @@ Potential framework code culprit (scroll up for full backtrace):
   File "/data/users/ezyang/a/pytorch/torch/_prims_common/__init__.py", line 855, in infer_size
     if d == -1:
 ```
-
-**Consider the Following:**
-
-* Does it make sense that this condition is triggering a guard on a
-data-dependent symbol?
-* Should we know if the quantity in question is size-like?
-(The exception lists size-like symbols; if a symbol is not listed,
-it might be an arbitrary integer.)
-* If the equation involves two distinct symbols, should we know
-they are actually equal?
-*  If all symbols are size-like but the equation involves 0 or 1,
-are we missing a `guard_size_oblivious` wrapper? (Remember, for
-`guard_size_oblivious` between two size tuples, use `sym_eq` instead
-of regular equality.)
-
-In the example above, testing if `d` (a data-dependent value) is `-1` suggests
-that `d` should be non-negative if it were a size. This indicates a missing
-`torch._check_is_size`. If `d` is already size-like but `numel() == 0` fails,
-consider wrapping it in `guard_size_oblivious`.
-
-Using `TORCH_LOGS=dynamic` and examining the user stack trace is crucial for
-understanding how to fix the problem, as they guide you on how to modify the
-user program.
-
-```sh
-[INFO] create_unbacked_symint u0 [-9223372036854775808, 9223372036854775807] (w.py:40 in custom_op_meta)
-```
-
-This log message indicates where (`w.py:40`) the unbacked `SymInt` was
-allocated. An unbacked `SymInt` may be allocated multiple times, so track
-their equalities:
-
-```sh
-[INFO] set_replacement u1 = u0 (trivial_lhs) ValueRanges(lower=0, upper=9223372036854775807, is_bool=False)
-```
-
 ### Step 2: Examine the C++ Backtrace
 
 If the framework code culprit is uninformative, the guard might be in C++. You can
@@ -127,13 +100,120 @@ at::Tensor::item() const
 ```
 
 In this example, `at::native::narrow_tensor_symint` calls into `item`, which
-triggers the guard on a data-dependent `SymNode`. You can modify the C++ code to
-avoid specializing, or verify if you should be in this C++ code (e.g., `start` was
-not expected to be a `Tensor`, and modifying this fixed the problem).
+triggers the guard on a data-dependent `SymNode`.
 
-## Tools for Fixing Errors
+**Consider the Following:**
 
-There are a few important functions which you should use to troubleshoot this problem.
+* Does it make sense that this condition is triggering a guard on a
+data-dependent symbol?
+* If the equation involves two distinct symbols, should we know
+they are actually equal?
+* Is it possible to teach that piece of code how to handle inputs in
+a generic way that works for all shapes?
+
+Using `TORCH_LOGS=dynamic` and examining the user stack trace is crucial for
+understanding how to fix the problem, as they guide you on how to modify the
+user program.
+
+```sh
+[INFO] create_unbacked_symint u0 [-9223372036854775808, 9223372036854775807] (w.py:40 in custom_op_meta)
+```
+
+This log message indicates where (`w.py:40`) the unbacked `SymInt` was
+allocated. An unbacked `SymInt` may be allocated multiple times, so track
+their equalities:
+
+```sh
+[INFO] set_replacement u1 = u0 (trivial_lhs) ValueRanges(lower=0, upper=9223372036854775807, is_bool=False)
+```
+
+## Fixing the Error
+
+Once you've identified the source of the error, ask yourself the following questions in order:
+
+### Step 1: Can I rewrite my code to use a general path?
+
+The best solution is to restructure your code so that it doesn't require branching on unbacked symbols at all. Ask yourself: **Is there a general code path that works for all shapes?**
+
+For example, instead of:
+```python
+i = x.item()
+if i > 4:
+    return x * 2
+else:
+    return x + 3
+```
+
+Can you rewrite the logic to work without the branch? If the branch exists only for optimization or edge-case handling, consider using a single general path that handles all cases.
+
+#### Useful Utilities for Mindful Branching
+
+PyTorch provides several utilities to express branching in a more compilation-friendly manner:
+
+**`statically_known_true(expr)`**: The most friendly API for compilation and data dependency. It:
+- Never adds a new guard (no recompilation risk)
+- Never fails on data dependency
+
+The API tries to evaluate the expression without adding guards. If it cannot, it returns `False`. Use this for short circuits that don't affect performance or optimizations that don't warrant recompilation.
+
+```python
+from torch.fx.experimental.symbolic_shapes import statically_known_true
+
+# Instead of: if x.numel() > 10:
+if statically_known_true(x.numel() > 10):
+    # optimization path
+    ...
+else:
+    # general path (taken when unknown)
+    ...
+```
+
+**`guard_or_false(expr)` / `guard_or_true(expr)`**: These may add guards but will never fail with data-dependent errors. If evaluation fails due to data dependency, they return `False` or `True` instead of hard failing. Use for performance optimizations that warrant recompilation:
+
+```python
+from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+# Instead of: if x == 0:
+if guard_or_false(x == 0):
+    return 1
+else:
+    torch._check(x != 0)  # runtime check for the general path
+    return compute(x)
+```
+
+**`hint_int(expr, fallback=None)`**: Extracts a hint from a symbolic size and uses it in a branch. You can use it to evaluate the expression using the traced program's input shapes without guarding. Unlike `statically_known_true`, it picks the path that works for the input example instead of returning `False`. The optional `fallback` argument substitutes for unbacked symbols; if not provided and the symbol is unbacked, it will raise a data-dependent error.
+
+```python
+from torch.fx.experimental.symbolic_shapes import hint_int
+
+# Use ONLY for optimizations, not correctness-critical branches
+if hint_int(x.numel(), fallback=0) > 1024:
+    # optimized path for large tensors
+    ...
+else:
+    # general path
+    ...
+```
+
+**Important:** These utilities should only be used for optimizations that do not require guarding (e.g., selecting a faster code path). Do not use them for correctness-critical branching, as the path chosen depends on the example input's values during tracing.
+
+
+### Step 2: Do I know one path will always be taken?
+
+If you cannot eliminate the branch, ask yourself: **For my specific model, do I know that one path will always be taken?**
+
+If yes, you can use `torch._check` to inform the compiler which branch to take:
+
+```python
+i = x.item()
+torch._check(i > 4)  # Assert that i > 4 is always true for your use case
+if i > 4:
+    return x * 2
+else:
+    return x + 3
+```
+
+By asserting `torch._check(i > 4)`, the symbolic reasoning system learns that `i > 4` is always `True`, allowing the branch to be resolved without error. The else branch becomes dead code from the compiler's perspective.
 
 ### torch._check(cond, msg_fn)
 
@@ -175,110 +255,19 @@ to eliminate u0, we can refine its value range. The value range specifies
 what the set of possible values for a variable are. By default, size-like
 unbacked SymInts have a value range of `[0, Inf]`; if you assert it is
 equal to an expression with a refined value range, say `[2, 20]`, then
-`u0`’s value range will be updated to `[2, 20]`. We also have limited
+`u0`'s value range will be updated to `[2, 20]`. We also have limited
 support for propagating value ranges in reverse.
 
 * If you perform a boolean test `f(u0)`, we will remember that this expression always evaluates to True, and if you evaluate an expression that contains this expression, we will substitute it with True. We also support some limited reasoning on logically equivalent statements. For example, if you `torch._check(u0 < 4)`, we will also know that `u0 >= 4` evaluates to `False`, and so performing a test like this in a normal non-check conditional will go through fine.
 
+You can also use `torch._check` to assert constraints and refine value ranges. For example, `torch._check(u0 >= 0)` establishes that `u0` is non-negative, refining its value range to `[0, Inf]`. Similarly, `torch._check(x > 7)` constrains `x` to be greater than 7.
 
-### `torch._check_is_size(size)` and `guard_size_oblivious(cond)`
+When unbacked symbols are passed to factory functions like `torch.empty`, they are automatically recognized as representing sizes.
+### Step 3: Is it unfixable?
 
-Example:
-```python
-u0 = y.item()
-torch._check_is_size(u0)
-```
+If both branches are genuinely needed at runtime (i.e., sometimes `i > 4` and sometimes `i <= 4`), then no `torch._check` can help—it is impossible to trace as is. In such cases, you may need to consider alternative approaches, such as using `torch.cond`.
 
-**Semantic Equivalent:**
-
-```python
-if u0 < 0:
-    raise RuntimeError("u0 is not a size")
-```
-
-**Key Differences:**
-
-Like `torch._check`, this test will always succeed at compile time, and it will establish that `u0 >= 0`. This refines the value range of `u0` to `[0, Inf]` instead of `[-Inf, Inf]`.
-
-Marking `u0` as size-like is crucial. Size-like unbacked `SymInts` behave like
-their regular counterparts, except when involved in a boolean expression
-evaluated with `guard_size_oblivious`. In such cases, they are assumed not to equal zero or one, temporarily setting their value range to `[2, Inf]`. For instance, a conditional check like `u0 == 1` will evaluate to `False` when `u0` is size-like, instead of causing an error.
-
-For example, `guard_size_oblivious(u0 == 1)` will always return `False` when `u0`
-is size-like.
-
-Marking unbacked symbols as size-like is essential in contexts where tensor
-sizes are expected. PyTorch internals often check if sizes are zero or one to
-handle special cases related to empty or single-element tensors. If you pass an
-unbacked symbol to a factory function like `torch.empty`, it will automatically
-be marked as size-like. However, some quantities, like arguments to `Tensor.view`,
-cannot be inferred as size-like because `-1` is a valid argument. In such cases,
-you need to explicitly use `torch._check_is_size` on an unbacked `SymInt` before
-passing it to `view`.
-
-In PyTorch framework code, if you need to test a size for zero or one, wrap the
-test in `guard_size_oblivious` to assume that size-like unbacked `SymInts` will
-not pass this test. Generally, most framework code has logic for the `>= 2`
-case, which works for the `0/1` case. If using `guard_size_oblivious` in
-PyTorch framework code resolves your issue, it's likely acceptable. However,
-avoid using `guard_size_oblivious` in user code, especially if different
-behavior is required for the `0/1` case at runtime, such as in a
-hand-tracking application.
-
-In C++, this can be done with `TORCH_GUARD_SIZE_OBLIVIOUS(u0.sym_eq(0))`, for example.
-
-### torch._check_is_size(size, max=upper_bound) (New)
-
-This function is semantically equivalent to `torch._check(size <= upper_bound)`.
-However, under `guard_size_oblivious`, it assumes that `size < upper_bound`.
-This functionality only works when the upper bound is an integer constant. If
-`upper_bound` is a symbolic expression, normal semantics apply. There is
-potential to extend this functionality to symbolic expressions with further
-development.
-
-For more details, see the related issue https://github.com/pytorch/pytorch/issues/120288.
-
-
-### `torch._constrain_as_value` and `torch._constrain_as_size`
-
-These APIs are more specialized and are effectively equivalent to
-`torch._check` and `torch._check_is_size`, with the added capability
-of adjusting the value range of a variable by specifying minimum and
-maximum values. However, in recommendation models, these functions are
-unlikely to resolve `GuardOnDataDependentSymNode` errors effectively.
-
-While `constrain_as_value` might seem like a convenient way to ensure a
-variable stays within the bounds of another tensor, it is often impractical.
-This is because value ranges only support constant bounds, and it's common
-for the tensor you want to index into to have a symbolic dimension (for
-example, `s0`). Using its size as the maximum value for a value range
-will force specialization, which is usually undesirable. Instead, if
-necessary, manually handle range checks by using `torch._check()` on
-appropriate expressions based on the errors you encounter.
-
-## Common Fix Patterns
-
-There are several common methods to resolve issues like this. Below,
-we outline the most frequently used solutions.
-
-### When It's Unfixable
-
-In some cases, the issue is genuinely unfixable due to the nature of the code.
-Consider the following example:
-
-```python
-i = x.item()
-if i > 4:
-  return x * 2
-else:
-  return x + 3
-```
-
-If the user code is branching on a data-dependent value, it is impossible to
-trace as is. In such cases, you may need to consider alternative approaches,
-such as using `torch.cond`.
-
-Another common pattern involves indexing with a data-dependent value:
+Another common unfixable pattern involves indexing with a data-dependent value:
 
 ```python
 return self.mlps[x.item()]
@@ -286,48 +275,7 @@ return self.mlps[x.item()]
 
 Here, `self.mlps` is a Python list or `ModuleList`, and the code branches on a data-dependent value. The simplest solution is to induce a graph break before the indexing operation.
 
-### `u0` is a Size, but We Don’t Know It
-
-Some guards fail on tests that essentially ask, "Is this a size?" but we don't know it is a size. These fall into two categories:
-
-1. **Regular Tests:**
-
-   These are tests like `u0 >= 0` or `u0 != -1` that are unconditionally true
-   for sizes. Adding a `torch._check_is_size(...)` on the relevant size will
-   assert that these tests are true. This is typically uncommon because if
-   the test is for error checking, we can infer that the condition must be
-   true, as an error would occur otherwise. An important exception is APIs
-   that accept both sizes and `-1`; in such cases, the user must indicate that
-   the input data-dependent quantity cannot be `-1`, as something unusual would
-   happen otherwise. For an example, see
-   https://github.com/pytorch/pytorch/pull/107788.
-
-   Sometimes, you can refactor an error-checking API to split a logical
-   disjunction of conditionals into separate conditionals. If you can do so
-   to achieve a single `torch._check(x == y)` statement, it will enable
-   the automatic generation of a deferred runtime assertion. For an example,
-   see https://github.com/pytorch/pytorch/pull/110979.
-
-2. **Edge Case Tests:**
-
-   These are tests like `u0 == 0` or `u0 == 1`, which are not always true for
-   sizes, but where our choice doesn’t really matter. These tests handle edge
-   cases, such as dealing with an empty tensor or testing for broadcasting when
-   we want to assume broadcasting is not occurring. To resolve these situations,
-   two steps are needed:
-
-   * First, the guard itself must be evaluated via `guard_size_oblivious`,
-   which assumes that size-like integers cannot equal zero or one, with the
-   promise that if they do, something reasonable will happen.
-   * Second, the symbols themselves must be marked as size-like, either
-   inferred because they were passed to tensor factory functions or explicitly
-   specified with `torch._check_is_size(...)`. For examples of making guards
-   size-oblivious, see https://github.com/pytorch/pytorch/pull/118579.
-
-Sometimes, these tests can occur in C++. While there are corresponding
-C++ APIs for these tests, it can be more challenging to localize the problem,
-as you do not get a useful backtrace by default.
-
+## Some Common Fix Patterns
 ### `u0` is Actually Equal to `u1`, but We Don’t Know It
 
 Multiple unbacked `SymInts` can be known to be equal at compile time:
