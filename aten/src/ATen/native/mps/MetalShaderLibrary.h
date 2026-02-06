@@ -16,6 +16,7 @@ typedef void* MTLComputeCommandEncoder_t;
 #include <c10/core/Scalar.h>
 #include <c10/util/OptionalArrayRef.h>
 #include <functional>
+#include <mutex>
 #include <optional>
 #include <type_traits>
 #include <unordered_map>
@@ -166,21 +167,23 @@ class MetalShaderLibrary {
   virtual MTLLibrary_t getLibrary();
   virtual MTLLibrary_t getLibrary(
       const std::initializer_list<std::string>& params);
-  MTLLibrary_t library = nullptr;
+  std::mutex library_mutex_;
+  MTLLibrary_t cached_library_ = nullptr;
 
  private:
   std::pair<MTLComputePipelineState_t, MTLFunction_t> getLibraryPipelineState(
       MTLLibrary_t lib,
       const std::string& fname);
-  MTLLibrary_t compileLibrary(const std::string& src);
+  MTLLibrary_t compileLibrary(const std::string& src) const;
   std::string shaderSource;
   unsigned nparams;
   MTLCompileOptions* compile_options;
-  std::unordered_map<std::string, MTLLibrary_t> libMap;
+  std::mutex maps_mutex_;
+  std::unordered_map<std::string, MTLLibrary_t> lib_map_;
   std::unordered_map<
       std::string,
       std::pair<MTLComputePipelineState_t, MTLFunction_t>>
-      cplMap;
+      cpl_map_;
   // Cache for kernel functions returned by getCachedKernelFunctionPtr
   std::unordered_map<std::string, std::unique_ptr<MetalKernelFunction>>
       kernelCache;
