@@ -1292,6 +1292,12 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
   //On ROCm, std::min -> ::min did not work as expected on when outTotalSize>=2147483648
   dim3 largeIndexBlock( (sourceTotalSize < defaultMaxBlockThreads) ? sourceTotalSize : defaultMaxBlockThreads );
 
+#ifdef USE_ROCM
+  bool IS_CACHE = true;
+#else
+  bool IS_CACHE = false;
+#endif
+
   if (cuda::detail::canUse32BitIndexMath(result) &&
       cuda::detail::canUse32BitIndexMath(source) &&
       cuda::detail::canUse32BitIndexMath(index)) {
@@ -1325,12 +1331,6 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
           }
         } else {
           const bool indexIsMajor = indexShouldBeMajor(selfInfo, selfAddDim);
-
-#ifdef USE_ROCM
-  bool IS_CACHE = true;
-#else
-  bool IS_CACHE = false;
-#endif
 
           if (selfInfo.dims == 1 && sourceInfo.dims == 1 && indContig) {
             LARGE_INDEX(scalar_t, index_t, unsigned int, 1, 1, -2, true);
