@@ -21,7 +21,9 @@ Data-dependent errors (DDEs) can originate from two sources: **framework code** 
 
 **Framework code should no longer throw DDEs.** We have implemented explicit unbacked semantics throughout the PyTorch framework, addressing major code branches and eliminating the vast majority of framework-originated DDEs. Operations that previously failed—such as `view`, `narrow`, `select`, and various shape checks—now handle unbacked shapes correctly by automatically selecting general code paths that work for all input values (by sometimes potentially deviating from eager semantics). This means you can now capture specialization-free graphs much more reliably without hitting framework DDEs.
 
-If you encounter a DDE originating from PyTorch framework code (identifiable by the "Potential framework code culprit" in the error message pointing to files under `torch/`), this is likely a bug that should be reported, and fixed using the same methods explained later in this document. Note that some operations are inherently not unbacked-friendly (such as `unbind` and `chunk`) because they require knowing the concrete number of outputs at compile time. The remaining DDEs you may encounter will typically originate from **user code**—branches in your model that depend on data-dependent values.
+If you encounter a DDE originating from PyTorch framework code (identifiable by the "Potential framework code culprit" in the error message pointing to files under `torch/`), this is likely a bug that should be reported, and fixed using the same methods explained later in this document.
+
+Note that some operations are inherently not unbacked-friendly (such as `unbind` and `chunk`) because they require knowing the concrete number of outputs at compile time. The remaining DDEs you may encounter will typically originate from **user code**—branches in your model that depend on data-dependent values.
 
 The rest of this document explains how to deal with unbacked shapes in your code. The solutions generally fall into two categories:
 
@@ -101,7 +103,7 @@ symbolic_shapes: [INFO]   File "../ATen/core/TensorBody.h", line 4274, in
 at::Tensor::item() const
 ```
 
-In this example, `at::native::narrow_tensor_symint` calls into `item`, which
+In this example, `at::native::narrow_tensor_symint` calls into `item<long>`, which
 triggers the guard on a data-dependent `SymNode`.
 
 **Consider the Following:**
@@ -277,7 +279,26 @@ return self.mlps[x.item()]
 Here, `self.mlps` is a Python list or `ModuleList`, and the code branches on a data-dependent value. The simplest solution is to induce a graph break before the indexing operation.
 
 ## Some Common Fix Patterns
-### `u0` is Actually Equal to `u1`, but We Don’t Know It
+
+### Using `torch._check` for Sanity Checks in Model Code
+
+If you have sanity checks in your model code that validate conditions, you can use `torch._check` instead of `if` statements. `torch._check` handles data dependency by deferring the checks to runtime, so they won't cause compile-time errors.
+
+**Note:** For C++ code, use `TORCH_SYM_CHECK` which is the C++ equivalent of `torch._check`.
+
+When combining conditions, use `sym_or`, `sym_and`, etc. to ensure expressions are not eagerly evaluated (which would trigger data-dependent errors):
+
+```python
+# Instead of:
+# if x != y or x > y:
+#     raise RuntimeError("...")
+
+# Use:
+from torch.fx.experimental.symbolic_shapes import sym_or
+torch._check(sym_or(x != y, x > y), lambda: "Validation failed: expected x != y or x > y")
+```
+
+### `u0` is Actually Equal to `u1`, but We Don't Know It
 
 Multiple unbacked `SymInts` can be known to be equal at compile time:
 
