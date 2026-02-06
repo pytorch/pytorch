@@ -28,7 +28,7 @@ CUDA_ARCHES_FULL_VERSION = {
     "12.6": "12.6.3",
     "12.8": "12.8.1",
     "12.9": "12.9.1",
-    "13.0": "13.0.1",
+    "13.0": "13.0.2",
 }
 CUDA_ARCHES_CUDNN_VERSION = {
     "12.6": "9",
@@ -74,10 +74,9 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'"
     ),
     "13.0": (
-        "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cufile,nvjitlink,nvtx]==13.0.1; platform_system == 'Linux' | "  # noqa: B950
+        "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.2; platform_system == 'Linux' | "  # noqa: B950
         "cuda-bindings==13.0.3; platform_system == 'Linux' | "
         "nvidia-cudnn-cu13==9.17.1.4; platform_system == 'Linux' | "
-        "nvidia-cublas==13.1.0.3; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu13==0.8.0; platform_system == 'Linux' | "
         "nvidia-nccl-cu13==2.29.3; platform_system == 'Linux' | "
         "nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
