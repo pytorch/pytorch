@@ -226,7 +226,8 @@ class TestIsreal(TestCase):
     def test_isreal_real(self):
         z = np.array([-1, 0, 1])
         res = isreal(z)
-        assert res.all()
+        if not res.all():
+            raise AssertionError("Expected res.all() to be True")
 
 
 class TestIscomplexobj(TestCase):
@@ -360,30 +361,36 @@ class TestNanToNum(TestCase):
         assert_all(vals[0] < -1e10) and assert_all(np.isfinite(vals[0]))
         assert_(vals[1] == 0)
         assert_all(vals[2] > 1e10) and assert_all(np.isfinite(vals[2]))
-        assert isinstance(vals, np.ndarray)
+        if not isinstance(vals, np.ndarray):
+            raise AssertionError(f"Expected vals to be np.ndarray, got {type(vals)}")
 
         # perform the same tests but with nan, posinf and neginf keywords
         vals = nan_to_num(np.array((-1.0, 0, 1)) / 0.0, nan=10, posinf=20, neginf=30)
         assert_equal(vals, [30, 10, 20])
         assert_all(np.isfinite(vals[[0, 2]]))
-        assert isinstance(vals, np.ndarray)
+        if not isinstance(vals, np.ndarray):
+            raise AssertionError(f"Expected vals to be np.ndarray, got {type(vals)}")
 
     def test_array(self):
         vals = nan_to_num([1])
         assert_array_equal(vals, np.array([1], int))
-        assert isinstance(vals, np.ndarray)
+        if not isinstance(vals, np.ndarray):
+            raise AssertionError(f"Expected vals to be np.ndarray, got {type(vals)}")
         vals = nan_to_num([1], nan=10, posinf=20, neginf=30)
         assert_array_equal(vals, np.array([1], int))
-        assert isinstance(vals, np.ndarray)
+        if not isinstance(vals, np.ndarray):
+            raise AssertionError(f"Expected vals to be np.ndarray, got {type(vals)}")
 
     @skip(reason="we return OD arrays not scalars")
     def test_integer(self):
         vals = nan_to_num(1)
         assert_all(vals == 1)
-        assert isinstance(vals, np.int_)
+        if not isinstance(vals, np.int_):
+            raise AssertionError(f"Expected vals to be np.int_, got {type(vals)}")
         vals = nan_to_num(1, nan=10, posinf=20, neginf=30)
         assert_all(vals == 1)
-        assert isinstance(vals, np.int_)
+        if not isinstance(vals, np.int_):
+            raise AssertionError(f"Expected vals to be np.int_, got {type(vals)}")
 
     @skip(reason="we return OD arrays not scalars")
     def test_float(self):
@@ -398,7 +405,8 @@ class TestNanToNum(TestCase):
     def test_complex_good(self):
         vals = nan_to_num(1 + 1j)
         assert_all(vals == 1 + 1j)
-        assert isinstance(vals, np.complex128)
+        if not isinstance(vals, np.complex128):
+            raise AssertionError(f"Expected vals to be np.complex128, got {type(vals)}")
         vals = nan_to_num(1 + 1j, nan=10, posinf=20, neginf=30)
         assert_all(vals == 1 + 1j)
         assert_equal(type(vals), np.complex128)
@@ -433,7 +441,8 @@ class TestNanToNum(TestCase):
         assert_all(np.isfinite(vals[[0, 2]]))
         assert_all(vals[0] < -1e10)
         assert_equal(vals[[1, 2]], [np.inf, 999])
-        assert isinstance(vals, np.ndarray)
+        if not isinstance(vals, np.ndarray):
+            raise AssertionError(f"Expected vals to be np.ndarray, got {type(vals)}")
 
 
 class TestRealIfClose(TestCase):
