@@ -287,9 +287,9 @@ unittest-xml-reporting<=3.2.0,>=2.0.0
 #test that import:
 
 #lintrunner is supported on aarch64-linux only from 0.12.4 version
-lintrunner==0.12.7
+lintrunner==0.12.11
 #Description: all about linters!
-#Pinned versions: 0.12.7
+#Pinned versions: 0.12.11
 #test that import:
 
 redis>=4.0.0
@@ -345,7 +345,7 @@ onnx==1.20.0
 #Pinned versions:
 #test that import:
 
-onnxscript==0.5.4
+onnxscript==0.6.0
 #Description: Required by mypy and test_public_bindings.py when checking torch.onnx._internal
 #Pinned versions:
 #test that import:
