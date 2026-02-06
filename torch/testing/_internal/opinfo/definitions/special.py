@@ -130,6 +130,7 @@ op_db: list[OpInfo] = [
         dtypes=all_types_and(
             torch.bool, torch.half, torch.bfloat16, *_unsigned_int_types
         ),
+        dtypesIfMPS=all_types_and(torch.bool, torch.half, torch.bfloat16),
         sample_inputs_func=sample_inputs_i0_i1,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
@@ -143,6 +144,7 @@ op_db: list[OpInfo] = [
         dtypes=all_types_and(
             torch.bool, torch.half, torch.bfloat16, *_unsigned_int_types
         ),
+        dtypesIfMPS=all_types_and(torch.bool, torch.half, torch.bfloat16),
         backward_dtypes=floating_types(),
         sample_inputs_func=sample_inputs_i0_i1,
         decorators=(
@@ -173,6 +175,7 @@ op_db: list[OpInfo] = [
         dtypes=all_types_and(
             torch.bool, torch.half, torch.bfloat16, *_unsigned_int_types
         ),
+        dtypesIfMPS=all_types_and(torch.bool, torch.half, torch.bfloat16),
         backward_dtypes=floating_types(),
         sample_inputs_func=sample_inputs_i0_i1,
         supports_forward_ad=True,
@@ -186,6 +189,7 @@ op_db: list[OpInfo] = [
         dtypes=all_types_and(
             torch.bool, torch.half, torch.bfloat16, *_unsigned_int_types
         ),
+        dtypesIfMPS=all_types_and(torch.bool, torch.half, torch.bfloat16),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         skips=(
@@ -247,6 +251,7 @@ op_db: list[OpInfo] = [
         dtypes=all_types_and(
             torch.bool, torch.half, torch.bfloat16, *_unsigned_int_types
         ),
+        dtypesIfMPS=all_types_and(torch.bool, torch.half, torch.bfloat16),
         promotes_int_to_float=True,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
@@ -297,6 +302,7 @@ op_db: list[OpInfo] = [
         dtypes=all_types_and(
             torch.bool, torch.half, torch.bfloat16, *_unsigned_int_types
         ),
+        dtypesIfMPS=all_types_and(torch.bool, torch.half, torch.bfloat16),
         skips=(
             DecorateInfo(
                 unittest.skip("Skipped!"),
@@ -326,6 +332,7 @@ op_db: list[OpInfo] = [
         aten_name="special_log_ndtr",
         ref=scipy.special.log_ndtr if TEST_SCIPY else None,
         dtypes=all_types_and(torch.bool, *_unsigned_int_types),
+        dtypesIfMPS=all_types_and(torch.bool),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         skips=(
@@ -373,6 +380,7 @@ op_db: list[OpInfo] = [
             ),
         ),
         dtypes=all_types_and(torch.bool, *_unsigned_int_types),
+        dtypesIfMPS=all_types_and(torch.bool),
         ref=lambda x: scipy.special.airy(x)[0] if TEST_SCIPY else None,
         skips=(
             DecorateInfo(
@@ -601,6 +609,7 @@ op_db: list[OpInfo] = [
     BinaryUfuncInfo(
         "special.laguerre_polynomial_l",
         dtypes=all_types_and(torch.bool, *_unsigned_int_types),
+        dtypesIfMPS=all_types_and(torch.bool),
         promotes_int_to_float=True,
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), "TestCudaFuserOpInfo"),
@@ -650,6 +659,7 @@ op_db: list[OpInfo] = [
     BinaryUfuncInfo(
         "special.legendre_polynomial_p",
         dtypes=all_types_and(torch.bool, *_unsigned_int_types),
+        dtypesIfMPS=all_types_and(torch.bool),
         promotes_int_to_float=True,
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), "TestCudaFuserOpInfo"),
