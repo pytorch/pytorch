@@ -75,6 +75,7 @@ list(APPEND ATen_CUDA_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_reportMemoryUsage_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_allocatorTraceTracker_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_stream_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/cuda_caching_allocator_ipc_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_vectorized_test.cu)
 if(CAFFE2_USE_CUDNN)
   list(APPEND ATen_CUDA_TEST_SRCS
