@@ -791,7 +791,7 @@ Tensor mkldnn_convolution_transpose_pointwise_meta(
     torch::List<std::optional<at::Scalar>> scalars,
     std::optional<std::string_view> algorithm) {
 
-  std::vector<int64_t> weight_IOHW_sizes = _original_deconv_weight_size(weight_t, groups);
+  std::vector<int64_t> weight_IOHW_sizes = weight_t.is_mkldnn() ? _original_deconv_weight_size(weight_t, groups) : weight_t.sizes().vec();
   int64_t dim = input_t.ndimension() - 2;
   const auto padding_expanded = expand_param_if_needed(padding, "padding", dim);
   const auto stride_expanded = expand_param_if_needed(stride, "stride", dim);
