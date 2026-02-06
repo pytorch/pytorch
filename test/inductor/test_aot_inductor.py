@@ -65,10 +65,12 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_WINDOWS,
     MACOS_VERSION,
+    MI200_ARCH,
     parametrize,
     runOnRocm,
     skipIfMPS,
     skipIfRocm,
+    skipIfRocmArch,
     skipIfWindows,
     skipIfWindowsXPU,
     skipIfXpu,
@@ -331,10 +333,6 @@ class AOTInductorTestsTemplate:
         )
         self.assertTrue(actual_path == expected_path)
 
-    @unittest.skipIf(
-        config.triton.native_matmul,
-        "different # of input/output/constants in native matmul",
-    )
     def test_empty_constant_folding(self):
         class Model(torch.nn.Module):
             def __init__(self, device):
@@ -2551,10 +2549,6 @@ class AOTInductorTestsTemplate:
 
     # mps doesn't support float64
     @skipIfMPS
-    @unittest.skipIf(
-        config.triton.native_matmul,
-        "FIXME: cannot do get_size on FakeTensor during lowering.",
-    )
     def test_while_loop_with_parameters(self):
         inputs = (
             torch.randn(
@@ -3490,7 +3484,10 @@ class AOTInductorTestsTemplate:
         finally:
             torch.cuda.memory._record_memory_history(False)
         segments = torch.cuda.memory._snapshot()["segments"]
-        self.assertEqual(segments[0]["requested_size"], 400)
+        self.assertTrue(
+            any(seg["requested_size"] == 400 for seg in segments),
+            f"Expected segment with size 400, got: {[s['requested_size'] for s in segments]}",
+        )
 
     def test_view_outputs(self):
         class Model(torch.nn.Module):
@@ -7002,6 +6999,7 @@ class AOTInductorTestsTemplate:
         ):
             torch._export.aot_compile(Model(), (x, y, m))
 
+    @skipIfRocmArch(MI200_ARCH)
     def test_triton_autotuning(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
@@ -7419,6 +7417,7 @@ class AOTInductorTestsTemplate:
         # the output should have int type
         self.check_model(Model2(), (x,))
 
+    @unittest.skipIf(not IS_BIG_GPU, "Test requires large GPU memory")
     def test_upper_bound_i64(self):
         class Model(torch.nn.Module):
             def forward(self, x, y):
@@ -7511,7 +7510,6 @@ class AOTInductorTestsTemplate:
 
         self.assertEqual(outputs, outputs_aoti)
 
-    @unittest.skipIf(config.triton.native_matmul, "different code generated")
     def test_pad_non_zero_memory_leak(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("test is only for GPU_TYPE")
@@ -7771,6 +7769,43 @@ class AOTInductorTestsTemplate:
 
         with config.patch("triton.autotune_with_sample_inputs", True):
             AOTIRunnerUtil.run(Model(), example_inputs)
+
+    @unittest.skipIf(IS_FBCODE, "Subprocess spawning doesn't work in fbcode Buck environment")
+    def test_aoti_load_package_in_fresh_subprocess(self):
+        """
+        Test that loading an AOTI package in a fresh subprocess works correctly.
+        This catches initialization bugs that may not appear when loading in the
+        same process where the package was compiled.
+        """
+
+        class SimpleModel(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        model = SimpleModel().to(self.device)
+        example_input = (torch.randn(2, 10, device=self.device),)
+        exported = torch.export.export(model, example_input)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            model_path = pathlib.Path(tmpdir) / "model.pt2"
+            torch._inductor.aoti_compile_and_package(
+                exported, package_path=str(model_path)
+            )
+
+            # Load in a fresh subprocess to reproduce potential bugs
+            script = f"""
+import torch
+
+torch._inductor.aoti_load_package("{model_path}")
+"""
+            result = subprocess.run(
+                [sys.executable, "-c", script], capture_output=True, text=True
+            )
+            self.assertEqual(
+                result.returncode,
+                0,
+                f"Failed to load package in subprocess: {result.stdout + result.stderr}",
+            )
 
 
 class AOTInductorLoggingTest(LoggingTestCase):

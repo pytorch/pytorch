@@ -17,6 +17,7 @@ import collections
 import functools
 import logging
 from collections.abc import Callable, ItemsView, KeysView, Sequence, ValuesView
+from contextvars import ContextVar
 from enum import Enum
 from typing import Any, NoReturn, Optional, TYPE_CHECKING
 
@@ -39,6 +40,13 @@ if TYPE_CHECKING:
 
 
 log = logging.getLogger(__name__)
+
+# Tracks active method calls on VariableTracker instances to detect self-referential
+# calls (e.g., as_python_constant on a list that contains itself). Maps
+# (id(instance), method_name) tuples to track which calls are in progress.
+_vt_active_calls: ContextVar[set[tuple[int, str]] | None] = ContextVar(
+    "_vt_active_calls", default=None
+)
 
 
 class SourceType(Enum):
@@ -861,18 +869,22 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         ):
             return
 
-        guard_attr = f"_dynamo_{method}_called_once"
-
         @functools.wraps(original_method)
         def guarded_method(self, *args: Any, **kwargs: Any) -> VariableTracker:
-            if getattr(self, guard_attr, False):
+            active = _vt_active_calls.get()
+            if active is None:
+                active = set()
+                _vt_active_calls.set(active)
+
+            key = (id(self), method)
+            if key in active:
                 callback(self)
 
+            active.add(key)
             try:
-                setattr(self, guard_attr, True)
                 return original_method(self, *args, **kwargs)
             finally:
-                setattr(self, guard_attr, False)
+                active.discard(key)
 
         guarded_method._call_once_guarded = True  # pyrefly: ignore[missing-attribute]
         setattr(cls, method, guarded_method)

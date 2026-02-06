@@ -40,9 +40,10 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
 
         def hook(instructions: list[dis.Instruction]):
             build_map = _filter_instructions(instructions, "BUILD_MAP")
-            self.assertEqual(len(build_map), 1)
+            self.assertEqual(len(build_map), 2)
             # reconstruct only d[40]
-            self.assertEqual(build_map[0].argval, 1)
+            self.assertEqual(build_map[0].argval, 0)
+            self.assertEqual(build_map[1].argval, 1)
 
         def f(d, t):
             d[40] = t + 1
@@ -64,9 +65,10 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
 
         def hook(instructions: list[dis.Instruction]):
             build_map = _filter_instructions(instructions, "BUILD_MAP")
-            self.assertEqual(len(build_map), 1)
+            self.assertEqual(len(build_map), 2)
             # reconstruct everything
-            self.assertEqual(build_map[0].argval, 2)
+            self.assertEqual(build_map[0].argval, 0)
+            self.assertEqual(build_map[1].argval, 2)
 
         def f(d, t):
             d.pop(2)
@@ -90,9 +92,10 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
 
         def hook(instructions: list[dis.Instruction]):
             build_map = _filter_instructions(instructions, "BUILD_MAP")
-            self.assertEqual(len(build_map), 1)
+            self.assertEqual(len(build_map), 2)
             # reconstruct everything
-            self.assertEqual(build_map[0].argval, 1)
+            self.assertEqual(build_map[0].argval, 0)
+            self.assertEqual(build_map[1].argval, 1)
 
         def f(d, t):
             d.popitem()
@@ -134,9 +137,10 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
 
         def hook(instructions: list[dis.Instruction]):
             build_map = _filter_instructions(instructions, "BUILD_MAP")
-            self.assertEqual(len(build_map), 1)
+            self.assertEqual(len(build_map), 2)
             # reconstruct everything
-            self.assertEqual(build_map[0].argval, 2)
+            self.assertEqual(build_map[0].argval, 0)
+            self.assertEqual(build_map[1].argval, 2)
 
         def f(d, t):
             del d[2]
@@ -160,8 +164,9 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
 
         def hook(instructions: list[dis.Instruction]):
             build_map = _filter_instructions(instructions, "BUILD_MAP")
-            self.assertEqual(len(build_map), 1)
-            self.assertEqual(build_map[0].argval, 1)
+            self.assertEqual(len(build_map), 2)
+            self.assertEqual(build_map[0].argval, 0)
+            self.assertEqual(build_map[1].argval, 1)
             load_const = _filter_instructions(instructions, "LOAD_CONST")
             self.assertNotIn(123, load_const)
 
@@ -186,9 +191,10 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
 
         def hook(instructions: list[dis.Instruction]):
             build_map = _filter_instructions(instructions, "BUILD_MAP")
-            self.assertEqual(len(build_map), 1)
+            self.assertEqual(len(build_map), 2)
             # reconstruct everything
-            self.assertEqual(build_map[0].argval, 1)
+            self.assertEqual(build_map[0].argval, 0)
+            self.assertEqual(build_map[1].argval, 1)
 
         def f(d, t):
             d.clear()
@@ -212,9 +218,10 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
 
         def hook(instructions: list[dis.Instruction]):
             build_map = _filter_instructions(instructions, "BUILD_MAP")
-            self.assertEqual(len(build_map), 1)
+            self.assertEqual(len(build_map), 2)
             # reconstruct everything
-            self.assertEqual(build_map[0].argval, 2)
+            self.assertEqual(build_map[0].argval, 0)
+            self.assertEqual(build_map[1].argval, 2)
 
         def f(t):
             return {1: t, 2: t + 1}

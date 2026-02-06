@@ -127,7 +127,8 @@ ft_compute_sample_grad = vmap(ft_compute_grad, in_dims=(None, None, 0, 0))
 # Finally, let's used our transformed function to compute per-sample-gradients:
 ft_per_sample_grads = ft_compute_sample_grad(params, buffers, data, targets)
 for per_sample_grad, ft_per_sample_grad in zip(per_sample_grads, ft_per_sample_grads):
-    assert torch.allclose(per_sample_grad, ft_per_sample_grad, atol=1e-6, rtol=1e-6)
+    if not torch.allclose(per_sample_grad, ft_per_sample_grad, atol=1e-6, rtol=1e-6):
+        raise AssertionError("per_sample_grad does not match ft_per_sample_grad")
 
 # A quick note: there are limitations around what types of functions can be
 # transformed by vmap. The best functions to transform are ones that are

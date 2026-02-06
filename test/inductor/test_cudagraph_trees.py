@@ -2074,10 +2074,7 @@ if HAS_CUDA_AND_TRITON:
                     foo2_cg([torch.zeros_like(x1)])
 
             self.assertTrue(
-                any(
-                    "re-recording due to" in record.getMessage()
-                    for record in log.records
-                )
+                any("Re-recording" in record.getMessage() for record in log.records)
             )
 
         @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
@@ -3314,7 +3311,7 @@ if HAS_CUDA_AND_TRITON:
                 foo(torch.ones([10], device="cuda"), torch.ones([20]))
 
             FileCheck().check_count(
-                "Recording function 0 (partition_0) of graph recording id 0",
+                "Recording function=partition_0, cuda_graph_id=0",
                 1,
                 exactly=True,
             ).run(log_stream.getvalue())
