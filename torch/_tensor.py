@@ -1049,7 +1049,7 @@ class Tensor(torch._C.TensorBase):
 
         return Resize.apply(self, tensor.size())
 
-    def split(self, split_size, dim=0):
+    def split(self, split_size, dim=0) -> tuple["Tensor", ...]:
         r"""See :func:`torch.split`"""
         if has_torch_function_unary(self):
             return handle_torch_function(
