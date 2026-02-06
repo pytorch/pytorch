@@ -1342,10 +1342,11 @@ class ReplacementPatternEntry(PatternEntry):
                 for user in old_uses:
                     idx = maybe_getitem(user)
                     if idx is None:
-                        raise AssertionError(
-                            "Deleted index from getitem, did you erase the index and not properly replace it?"
-                        )
-                    replace(user, new[idx])
+                        # Output is used directly
+                        # pyrefly: ignore [bad-argument-type]
+                        old.replace_all_uses_with(new)
+                    else:
+                        replace(user, new[idx])
                 graph.erase_node(old)
 
             if len(output_nodes) == len(replacement):
@@ -2226,7 +2227,8 @@ def joint_fwd_bwd(fn: Callable[..., Any], args: Sequence[Any]) -> torch.fx.Graph
     with torch._guards.tracing(None):
         aot_function(
             fn,
-            lambda g, i: make_boxed_func(g),
+            # pyrefly: ignore[bad-argument-type]
+            lambda gm, example_inputs: make_boxed_func(gm),
             partition_fn=record_joint_graph,
             decompositions=select_decomp_table(),
             keep_inference_input_mutations=True,

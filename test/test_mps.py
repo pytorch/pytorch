@@ -848,6 +848,17 @@ class TestMPS(TestCaseMPS):
                          f"  (up to {allowed_uncertainty:.3e} allowed)")
             raise AssertionError(error_msg)
 
+    def _helper_kl_divergence(self, cpu_tensor, mps_tensor):
+        """Helper for checking whether 2 distributions match or not"""
+        mps_tensor = mps_tensor.cpu()
+        all_vals = torch.cat([cpu_tensor, mps_tensor])
+        min_val, max_val = all_vals.min().item(), all_vals.max().item()
+        cpu_hist = torch.histc(cpu_tensor.float(), bins=50, min=min_val, max=max_val) + 1e-10
+        mps_hist = torch.histc(mps_tensor.float(), bins=50, min=min_val, max=max_val) + 1e-10
+        p = cpu_hist / cpu_hist.sum()
+        q = mps_hist / mps_hist.sum()
+        kl_div = F.kl_div(q.log(), p, reduction='sum').item()
+        self.assertLess(kl_div, 0.03)
 
     def test_exp(self, device="mps", dtype=torch.float):
         for v in (2, -2) + ((1j, 1 + 1j) if dtype.is_complex else ()):
@@ -7982,6 +7993,8 @@ class TestMPS(TestCaseMPS):
             ("random_with_to", lambda t: t.random_(10)),
             ("random_with_range", lambda t: t.random_(0, 10)),
             ("log_normal_", lambda t: t.log_normal_(mean=1.0, std=2.0)),
+            ("cauchy_", lambda t: t.cauchy_()),
+            ("geometric_", lambda t: t.geometric_(p=0.9)),
         ]
 
         for name, op_func in ops:
@@ -8006,23 +8019,6 @@ class TestMPS(TestCaseMPS):
         self.assertFalse(result.is_contiguous(), "rand_like result should be non-contiguous")
         self.assertNotEqual(result.max().item(), 0.0, "rand_like should generate non-zero values")
 
-    # Test exponential
-    @unittest.skip("This does not test anything")
-    def test_exponential(self):
-        def helper(shape, lambda_, dtype=torch.float32):
-
-            mps_out = torch.zeros(shape, device='mps', dtype=dtype)
-            mps_out.exponential_(lambda_)
-
-            print(mps_out.to('cpu').float().mean(), 1 / lambda_)
-            print(mps_out.to('cpu').float().std() ** 2, 1 / (lambda_**2))
-
-        for dtype in [torch.float32, torch.float16]:
-            helper([100, 100], 2, dtype)
-            helper([100, 100], 1, dtype)
-            helper([100, 100], 3, dtype)
-            helper([100, 100], 0.5, dtype)
-
     def test_exponential_1(self):
         rate = torch.randn(5, 5).abs().requires_grad_()
         rate_1d = torch.randn(1).abs().requires_grad_()
@@ -8039,20 +8035,28 @@ class TestMPS(TestCaseMPS):
             a = torch.empty(32_000, device="mps", dtype=dtype).exponential_()
             self.assertTrue((a != 0).all())
 
-    def test_log_normal(self):
-        # test with kl divergence
-        cpu_a = torch.zeros(50, 50).log_normal_(mean=1.0, std=2.0).flatten()
-        mps_a = torch.zeros(50, 50, device="mps").log_normal_(mean=1.0, std=2.0).cpu().flatten()
-
-        all_vals = torch.cat([cpu_a, mps_a])
-        min_val, max_val = all_vals.min().item(), all_vals.max().item()
-
-        cpu_hist = torch.histc(cpu_a, bins=50, min=min_val, max=max_val) + 1e-10
-        mps_hist = torch.histc(mps_a, bins=50, min=min_val, max=max_val) + 1e-10
-
-        p, q = cpu_hist / cpu_hist.sum(), mps_hist / mps_hist.sum()
-        kl_div = (p * (p / q).log()).sum().item()
-        self.assertLess(kl_div, 0.05)
+    def test_distributions(self):
+        ops = [
+            ("normal_", lambda t: t.normal_(0, 1), []),
+            ("uniform_", lambda t: t.uniform_(0, 1), []),
+            ("exponential_", lambda t: t.exponential_(1.0), []),
+            ("bernoulli_", lambda t: t.bernoulli_(0.5), []),
+            ("random_", lambda t: t.random_(), []),
+            ("random_with_to", lambda t: t.random_(10), []),
+            ("random_with_range", lambda t: t.random_(0, 10), []),
+            ("log_normal_", lambda t: t.log_normal_(mean=1.0, std=2.0), []),
+            ("cauchy_", lambda t: t.cauchy_(), []),
+            ("geometric_", lambda t: t.geometric_(p=0.2), [torch.int32, torch.int16, torch.int8, torch.uint8]),
+        ]
+        for name, op_func, extra_dtypes in ops:
+            with self.subTest(operation=name):
+                cpu_tensor = op_func(torch.zeros(100, 100)).flatten()
+                mps_tensor = op_func(torch.zeros(100, 100)).flatten()
+                self._helper_kl_divergence(cpu_tensor, mps_tensor)
+            for extra_dtype in extra_dtypes:
+                cpu_tensor = op_func(torch.zeros(100, 100, dtype=extra_dtype)).flatten()
+                mps_tensor = op_func(torch.zeros(100, 100, dtype=extra_dtype)).flatten()
+                self._helper_kl_divergence(cpu_tensor, mps_tensor)
 
     # Test add
     def test_add_sub(self):
@@ -12617,7 +12621,6 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.softmin',
         'cross', 'linalg.cross',
         'prod', 'masked.prod',
-        'nextafter',
         'native_layer_norm',
         'nn.functional.layer_norm',
         'nn.functional.interpolate',
@@ -12674,8 +12677,8 @@ class TestConsistency(TestCaseMPS):
     NEW_ALLOW_LIST = defaultdict(list)
     NEW_ALLOW_LIST_GRAD = defaultdict(list)
 
-    def _run_op(self, op, mps_sample):
-        cpu_sample = transform_opinfo_sample_to_cpu(mps_sample)
+    def _run_op(self, op, mps_sample, dtype=None):
+        cpu_sample = transform_opinfo_sample_to_cpu(mps_sample, dtype)
 
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=UserWarning)
@@ -12686,13 +12689,17 @@ class TestConsistency(TestCaseMPS):
                 # TODO: Handle list inputs later
                 if not isinstance(mps_out, torch.Tensor):
                     raise
+                if mps_sample.input.dtype not in [torch.float16, torch.bfloat16]:
+                    raise
+                dtype = torch.float32
 
-                if mps_sample.input.dtype in [torch.float16, torch.bfloat16]:
-                    # Often CPU ops are not implemented for low precision dtypes
-                    # In that case, upcast to higher precision and try again
-                    cpu_sample = transform_opinfo_sample_to_cpu(mps_sample, dtype=torch.float32)
-                    cpu_out = op(cpu_sample.input, *cpu_sample.args, **cpu_sample.kwargs)
-                    cpu_out = cpu_out.to(dtype=mps_out.dtype)
+                # Often CPU ops are not implemented for low precision dtypes
+                # In that case, upcast to higher precision and try again
+                cpu_sample = transform_opinfo_sample_to_cpu(mps_sample, dtype=torch.float32)
+                cpu_out = op(cpu_sample.input, *cpu_sample.args, **cpu_sample.kwargs)
+
+        if dtype is not None:
+            cpu_out = cpu_out.to(dtype=mps_out.dtype)
 
         return mps_out, cpu_out, cpu_sample
 
@@ -12709,7 +12716,11 @@ class TestConsistency(TestCaseMPS):
                 include_conjugated_inputs=include_conjugated_inputs,
                 set_seed=True):
 
-            mps_out, cpu_out, cpu_sample = self._run_op(op, mps_sample)
+            opt_dtype = None
+            # CPU implementation is less precise than MPS one so compare MPS to full fp32
+            if dtype in [torch.float16, torch.bfloat16] and op.name == "grid_sampler_3d":
+                opt_dtype = torch.float32
+            mps_out, cpu_out, cpu_sample = self._run_op(op, mps_sample, opt_dtype)
 
             atol, rtol = self._compute_tolerances(op, dtype)
             if (op.name == "nn.functional.interpolate" and dtype == torch.uint8 and
@@ -12725,9 +12736,6 @@ class TestConsistency(TestCaseMPS):
                and mps_sample.kwargs.get("scale_factors") == [1.7, 0.9]):
                 # Similar to the above, float vs double precision aresults in slight error
                 atol, rtol = 2e-5, 2e-6
-
-            if op.name in ["grid_sampler_3d", "asinh"]:
-                atol, rtol = 1e-4, 1e-4
 
             if op.name == "kthvalue":
                 self.assertEqual(cpu_out[0], mps_out[0], atol=atol, rtol=rtol)
@@ -12747,8 +12755,7 @@ class TestConsistency(TestCaseMPS):
         for mps_sample in op.sample_inputs(
                 device, dtype,
                 requires_grad=(dtype.is_floating_point or dtype.is_complex),
-                # TODO: Enable per-sample seed setting and tweak tolerances / fix xfails
-                set_seed=False):
+                set_seed=True):
             #
             # Forward check
             #

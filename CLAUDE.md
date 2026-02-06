@@ -25,6 +25,26 @@ entirely.
 
 Disclose that the PR was authored with Claude.
 
+# Coding Style Guidelines
+
+Follow these rules for all code changes in this repository:
+
+- Minimize comments; be concise; code should be self-explanatory and self-documenting.
+- Comments should be useful, for example, comments that remind the reader about
+  some global context that is non-obvious and can't be inferred locally.
+- Don't make trivial (1-2 LOC) helper functions that are only used once unless
+  it significantly improves code readability.
+- Prefer clear abstractions. State management should be explicit.
+  For example, if managing state in a Python class: there should be a clear
+  class definition that has all of the members: don't dynamically `setattr`
+  a field on an object and then dynamically `getattr` the field on the object.
+- Match existing code style and architectural patterns.
+- Assume the reader has familiarity with PyTorch. They may not be the expert
+  on the code that is being read, but they should have some experience in the
+  area.
+
+If uncertain, choose the simpler, more concise implementation.
+
 # Dynamo Config
 
 Use `torch._dynamo.config.patch` for temporarily changing config. It can be used as a decorator on test methods or as a context manager:
@@ -68,3 +88,46 @@ this line is too long...
 """,  # noqa: B950
     )
 ```
+
+# Logging and Structured Tracing
+
+When adding debug logging for errors or diagnostic info, consider two user personas:
+
+1. **Local development**: Users run locally and can access files on disk
+2. **Production jobs**: Users can only access logs via `tlparse` from structured traces
+
+For production debugging, use `trace_structured` to log artifacts:
+
+```python
+from torch._logging import trace_structured
+
+# Log an artifact (graph, edge list, etc.)
+trace_structured(
+    "artifact",
+    metadata_fn=lambda: {
+        "name": "my_debug_artifact",
+        "encoding": "string",
+    },
+    payload_fn=lambda: my_content_string,
+)
+```
+
+To check if structured tracing is enabled (for conditional messaging):
+
+```python
+from torch._logging._internal import trace_log
+
+if trace_log.handlers:
+    # Structured tracing is enabled, suggest tlparse in error messages
+    msg += "[Use tlparse to extract debug artifacts]"
+```
+
+**Best practices for error diagnostics:**
+
+- Always log to `trace_structured` for production (no runtime cost if disabled)
+- If you're dumping debug info in the event of a true internal compiler exception,
+  you can also consider writing to local files for local debugging convenience
+- In error messages, tell users about both options:
+  - Local files: "FX graph dump: min_cut_failed_graph.txt"
+  - Production: "Use tlparse to extract artifacts" (only if tracing enabled)
+- Use `_get_unique_path()` pattern to avoid overwriting existing debug files
