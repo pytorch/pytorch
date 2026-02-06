@@ -63,6 +63,8 @@ from torch.testing._internal.common_utils import (
     TEST_CUDA,
     TEST_HPU,
     TEST_XPU,
+    TEST_PRIVATEUSE1,
+    TEST_PRIVATEUSE1_DEVICE_TYPE,
 )
 from torch.utils._triton import has_triton
 
@@ -80,6 +82,10 @@ elif TEST_XPU:
     DEVICE_TYPE = "xpu"
     DISTRIBUTED_BACKEND = "xccl"
     DEVICE_COUNT = torch.xpu.device_count()
+elif TEST_PRIVATEUSE1:
+    DEVICE_TYPE = TEST_PRIVATEUSE1_DEVICE_TYPE
+    DISTRIBUTED_BACKEND = TEST_PRIVATEUSE1_DEVICE_TYPE
+    DEVICE_COUNT = torch.accelerator.device_count()
 else:
     DEVICE_TYPE = "cpu"
     DISTRIBUTED_BACKEND = "gloo"
@@ -1262,7 +1268,7 @@ class FSDPTest(MultiProcessTestCase):
 
         device_ids = None
         device_id = self.rank % DEVICE_COUNT
-        if TEST_CUDA or TEST_XPU:
+        if TEST_CUDA or TEST_XPU or TEST_PRIVATEUSE1:
             torch.accelerator.set_device_index(device_id)
         device_ids = [device_id]
 
