@@ -61,6 +61,7 @@ class BenchmarkRunnerDepthwiseConv:
 
     def run_benchmark(self, batch_size, c, h, s, k):
         w = h
+        # Note: cuDNN depthwise conv only supports FP16
         x = torch.randn(
             batch_size, c, h, w, device="cuda", dtype=torch.half, requires_grad=True
         )
