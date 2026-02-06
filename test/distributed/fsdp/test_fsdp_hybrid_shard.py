@@ -28,7 +28,7 @@ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     DEVICEInitMode,
     FSDPInitMode,
-    FSDPTest,
+    FSDPTestContinuous,
     TransformerWithSharedParams,
 )
 from torch.testing._internal.common_utils import (
@@ -96,7 +96,7 @@ class ShardingStrategyMode(Enum):
     MIXED_HYBRID_FULL_SHARD = auto()
 
 
-class TestFSDPHybridShard(FSDPTest):
+class TestFSDPHybridShard(FSDPTestContinuous):
     @property
     def world_size(self):
         return max(torch.accelerator.device_count(), 2)
