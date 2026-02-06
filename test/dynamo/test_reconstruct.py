@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import collections
 import contextlib
 import dis
 import unittest
@@ -39,9 +40,10 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
 
         def hook(instructions: list[dis.Instruction]):
             build_map = _filter_instructions(instructions, "BUILD_MAP")
-            self.assertEqual(len(build_map), 1)
+            self.assertEqual(len(build_map), 2)
             # reconstruct only d[40]
-            self.assertEqual(build_map[0].argval, 1)
+            self.assertEqual(build_map[0].argval, 0)
+            self.assertEqual(build_map[1].argval, 1)
 
         def f(d, t):
             d[40] = t + 1
@@ -63,9 +65,10 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
 
         def hook(instructions: list[dis.Instruction]):
             build_map = _filter_instructions(instructions, "BUILD_MAP")
-            self.assertEqual(len(build_map), 1)
+            self.assertEqual(len(build_map), 2)
             # reconstruct everything
-            self.assertEqual(build_map[0].argval, 2)
+            self.assertEqual(build_map[0].argval, 0)
+            self.assertEqual(build_map[1].argval, 2)
 
         def f(d, t):
             d.pop(2)
@@ -89,9 +92,10 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
 
         def hook(instructions: list[dis.Instruction]):
             build_map = _filter_instructions(instructions, "BUILD_MAP")
-            self.assertEqual(len(build_map), 1)
+            self.assertEqual(len(build_map), 2)
             # reconstruct everything
-            self.assertEqual(build_map[0].argval, 1)
+            self.assertEqual(build_map[0].argval, 0)
+            self.assertEqual(build_map[1].argval, 1)
 
         def f(d, t):
             d.popitem()
@@ -133,9 +137,10 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
 
         def hook(instructions: list[dis.Instruction]):
             build_map = _filter_instructions(instructions, "BUILD_MAP")
-            self.assertEqual(len(build_map), 1)
+            self.assertEqual(len(build_map), 2)
             # reconstruct everything
-            self.assertEqual(build_map[0].argval, 2)
+            self.assertEqual(build_map[0].argval, 0)
+            self.assertEqual(build_map[1].argval, 2)
 
         def f(d, t):
             del d[2]
@@ -159,8 +164,9 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
 
         def hook(instructions: list[dis.Instruction]):
             build_map = _filter_instructions(instructions, "BUILD_MAP")
-            self.assertEqual(len(build_map), 1)
-            self.assertEqual(build_map[0].argval, 1)
+            self.assertEqual(len(build_map), 2)
+            self.assertEqual(build_map[0].argval, 0)
+            self.assertEqual(build_map[1].argval, 1)
             load_const = _filter_instructions(instructions, "LOAD_CONST")
             self.assertNotIn(123, load_const)
 
@@ -185,9 +191,10 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
 
         def hook(instructions: list[dis.Instruction]):
             build_map = _filter_instructions(instructions, "BUILD_MAP")
-            self.assertEqual(len(build_map), 1)
+            self.assertEqual(len(build_map), 2)
             # reconstruct everything
-            self.assertEqual(build_map[0].argval, 1)
+            self.assertEqual(build_map[0].argval, 0)
+            self.assertEqual(build_map[1].argval, 1)
 
         def f(d, t):
             d.clear()
@@ -211,9 +218,10 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
 
         def hook(instructions: list[dis.Instruction]):
             build_map = _filter_instructions(instructions, "BUILD_MAP")
-            self.assertEqual(len(build_map), 1)
+            self.assertEqual(len(build_map), 2)
             # reconstruct everything
-            self.assertEqual(build_map[0].argval, 2)
+            self.assertEqual(build_map[0].argval, 0)
+            self.assertEqual(build_map[1].argval, 2)
 
         def f(t):
             return {1: t, 2: t + 1}
@@ -446,6 +454,88 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         ref = create_tma(x)
         res = torch.compile(create_tma, backend="eager")(x)
         self.assertEqual(ref, res)
+
+    def test_self_referential_sourceful(self):
+        l = []
+        l.append((0, l))
+
+        def fn(x, l):
+            x = x + 1
+            # self-referential object on the stack during a graph break
+            print(l)
+            return x + len(l)
+
+        opt_fn = torch.compile(fn, backend="eager")
+        inp = torch.randn(3)
+        self.assertEqual(fn(inp, l), opt_fn(inp, l))
+
+    def test_self_referential_sourceless(self):
+        @torch.compile(backend="eager")
+        def fn(x, construct_fn):
+            l = construct_fn()
+
+            x += 1
+            print(l)
+            x += 1
+            # if reconstruction failed on the graph break, we should error here
+            assert torch.compiler.is_compiling()
+            return l
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn2(x, construct_fn):
+            l = construct_fn()
+            x += 1
+            return l
+
+        def construct_list():
+            l = []
+            l.append(l)
+            return l
+
+        out = fn(torch.ones(3), construct_list)
+        self.assertIs(out[0], out)
+        out = fn2(torch.ones(3), construct_list)
+        self.assertIs(out[0], out)
+
+        def construct_deque():
+            d = collections.deque()
+            d.append(d)
+            return d
+
+        out = fn(torch.ones(3), construct_deque)
+        self.assertIs(out[0], out)
+        out = fn2(torch.ones(3), construct_deque)
+        self.assertIs(out[0], out)
+
+        def construct_dict():
+            d = {}
+            d[0] = d
+            return d
+
+        out = fn(torch.ones(3), construct_dict)
+        self.assertIs(out[0], out)
+        out = fn2(torch.ones(3), construct_dict)
+        self.assertIs(out[0], out)
+
+        def construct_ordereddict():
+            d = collections.OrderedDict()
+            d[0] = d
+            return d
+
+        out = fn(torch.ones(3), construct_ordereddict)
+        self.assertIs(out[0], out)
+        out = fn2(torch.ones(3), construct_ordereddict)
+        self.assertIs(out[0], out)
+
+        def construct_defaultdict():
+            d = collections.defaultdict()
+            d[0] = d
+            return d
+
+        out = fn(torch.ones(3), construct_defaultdict)
+        self.assertIs(out[0], out)
+        out = fn2(torch.ones(3), construct_defaultdict)
+        self.assertIs(out[0], out)
 
 
 if __name__ == "__main__":
