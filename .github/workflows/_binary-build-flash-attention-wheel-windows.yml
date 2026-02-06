@@ -35,6 +35,13 @@ jobs:
             cuda_short: "128"
             torch_cuda_arch_list: "8.0;8.6;9.0"
             runner: "windows.12xlarge"
+            # python 3.10 because 3.9 is not supported by torch >= 2.9; FA3 is ABI stable after 2.9
+            python_version: "3.10"
+            pytorch_version: "2.10.0"
+            pytorch_min_version: "2.9.0"
+            einops_version: "0.8.2"
+            ninja_version: "1.13.0"
+            numpy_version: "2.2.6"
     timeout-minutes: 1440
     defaults:
       run:
@@ -42,12 +49,12 @@ jobs:
     env:
       CUDA_VERSION: ${{ matrix.cuda_short }}
       TORCH_CUDA_ARCH_LIST: ${{ matrix.torch_cuda_arch_list }}
-      # we are building with python 3.10 because 3.9 is not supported by torch >= 2.9 and FA3 is ABI stable after 2.9
-      PYTHON_VERSION: "3.10"
-      PYTORCH_VERSION: "2.10.0"
-      EINOPS_VERSION: "0.8.2"
-      NINJA_VERSION: "1.13.0"
-      NUMPY_VERSION: "2.2.6"
+      PYTHON_VERSION: ${{ matrix.python_version }}
+      PYTORCH_VERSION: ${{ matrix.pytorch_version }}
+      PYTORCH_MIN_VERSION: ${{ matrix.pytorch_min_version }}
+      EINOPS_VERSION: ${{ matrix.einops_version }}
+      NINJA_VERSION: ${{ matrix.ninja_version }}
+      NUMPY_VERSION: ${{ matrix.numpy_version }}
       VC_YEAR: "2022"
       DISTUTILS_USE_SDK: 1
     steps:
@@ -103,7 +110,7 @@ jobs:
           sed -i '/flags.append(f'"'"'ldflags = /i\    ldflags.remove("/LTCG")' setup.py
 
           sed -i "s/python_requires=\">=3.8\"/python_requires=\">=${PYTHON_VERSION}\"/" setup.py
-          sed -i "s/\"torch\",/\"torch>=${PYTORCH_VERSION}\",/" setup.py
+          sed -i "s/\"torch\",/\"torch>=${PYTORCH_MIN_VERSION}\",/" setup.py
 
           BUILD_DATE=$(date +%Y%m%d)
           sed -i "s/version=\"3.0.0.b1\"/version=\"3.0.0b1+cu${CUDA_VERSION}.${BUILD_DATE}\"/" setup.py
