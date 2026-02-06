@@ -102,13 +102,13 @@ class _TestHeap:
     def test_naive_nbest(self):
         with torch._dynamo.error_on_graph_break(False):
             data = [randrange(2000) for i in range(1000)]
-        heap = []
-        for item in data:
-            self.module.heappush(heap, item)
-            if len(heap) > 10:
-                self.module.heappop(heap)
-        heap.sort()
-        self.assertEqual(heap, sorted(data)[-10:])
+            heap = []
+            for item in data:
+                self.module.heappush(heap, item)
+                if len(heap) > 10:
+                    self.module.heappop(heap)
+            heap.sort()
+            self.assertEqual(heap, sorted(data)[-10:])
 
     def heapiter(self, heap):
         # An iterator returning a heap's elements, smallest-first.
@@ -126,26 +126,26 @@ class _TestHeap:
         # (10 log-time steps).
         with torch._dynamo.error_on_graph_break(False):
             data = [randrange(2000) for i in range(1000)]
-        heap = data[:10]
-        self.module.heapify(heap)
-        for item in data[10:]:
-            if item > heap[0]:  # this gets rarer the longer we run
-                self.module.heapreplace(heap, item)
-        self.assertEqual(list(self.heapiter(heap)), sorted(data)[-10:])
+            heap = data[:10]
+            self.module.heapify(heap)
+            for item in data[10:]:
+                if item > heap[0]:  # this gets rarer the longer we run
+                    self.module.heapreplace(heap, item)
+            self.assertEqual(list(self.heapiter(heap)), sorted(data)[-10:])
 
-        self.assertRaises(TypeError, self.module.heapreplace, None)
-        self.assertRaises(TypeError, self.module.heapreplace, None, None)
-        self.assertRaises(IndexError, self.module.heapreplace, [], None)
+            self.assertRaises(TypeError, self.module.heapreplace, None)
+            self.assertRaises(TypeError, self.module.heapreplace, None, None)
+            self.assertRaises(IndexError, self.module.heapreplace, [], None)
 
     def test_nbest_with_pushpop(self):
         with torch._dynamo.error_on_graph_break(False):
             data = [randrange(2000) for i in range(1000)]
-        heap = data[:10]
-        self.module.heapify(heap)
-        for item in data[10:]:
-            self.module.heappushpop(heap, item)
-        self.assertEqual(list(self.heapiter(heap)), sorted(data)[-10:])
-        self.assertEqual(self.module.heappushpop([], 'x'), 'x')
+            heap = data[:10]
+            self.module.heapify(heap)
+            for item in data[10:]:
+                self.module.heappushpop(heap, item)
+            self.assertEqual(list(self.heapiter(heap)), sorted(data)[-10:])
+            self.assertEqual(self.module.heappushpop([], 'x'), 'x')
 
     def test_heappushpop(self):
         h = []
@@ -243,22 +243,22 @@ class _TestHeap:
     def test_nsmallest(self):
         with torch._dynamo.error_on_graph_break(False):
             data = [(randrange(2000), i) for i in range(1000)]
-        for f in (None, lambda x:  x[0] * 547 % 2000):
-            for n in (0, 1, 2, 10, 100, 400, 999, 1000, 1100):
-                self.assertEqual(list(self.module.nsmallest(n, data)),
-                                 sorted(data)[:n])
-                self.assertEqual(list(self.module.nsmallest(n, data, key=f)),
-                                 sorted(data, key=f)[:n])
+            for f in (None, lambda x:  x[0] * 547 % 2000):
+                for n in (0, 1, 2, 10, 100, 400, 999, 1000, 1100):
+                    self.assertEqual(list(self.module.nsmallest(n, data)),
+                                    sorted(data)[:n])
+                    self.assertEqual(list(self.module.nsmallest(n, data, key=f)),
+                                    sorted(data, key=f)[:n])
 
     def test_nlargest(self):
         with torch._dynamo.error_on_graph_break(False):
             data = [(randrange(2000), i) for i in range(1000)]
-        for f in (None, lambda x:  x[0] * 547 % 2000):
-            for n in (0, 1, 2, 10, 100, 400, 999, 1000, 1100):
-                self.assertEqual(list(self.module.nlargest(n, data)),
-                                 sorted(data, reverse=True)[:n])
-                self.assertEqual(list(self.module.nlargest(n, data, key=f)),
-                                 sorted(data, key=f, reverse=True)[:n])
+            for f in (None, lambda x:  x[0] * 547 % 2000):
+                for n in (0, 1, 2, 10, 100, 400, 999, 1000, 1100):
+                    self.assertEqual(list(self.module.nlargest(n, data)),
+                                    sorted(data, reverse=True)[:n])
+                    self.assertEqual(list(self.module.nlargest(n, data, key=f)),
+                                    sorted(data, key=f, reverse=True)[:n])
 
     def test_comparison_operator(self):
         # Issue 3051: Make sure heapq works with both __lt__
@@ -279,9 +279,9 @@ class _TestHeap:
                 def __le__(self, other):
                     return self.x >= other.x
             data = [random.random() for i in range(100)]
-        target = sorted(data, reverse=True)
-        self.assertEqual(hsort(data, LT), target)
-        self.assertRaises(TypeError, data, LE)
+            target = sorted(data, reverse=True)
+            self.assertEqual(hsort(data, LT), target)
+            self.assertRaises(TypeError, data, LE)
 
 
 class TestHeapPython(_TestHeap, __TestCase):
