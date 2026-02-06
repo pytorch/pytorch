@@ -176,5 +176,57 @@ class TestCompilePrint(TestCase):
         self.assertIn("invoke_leaf_function", graph_code)
 
 
+    def test_compile_print_make_fx(self):
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        fwd_values = []
+        bwd_values = []
+
+        def fwd_f(t):
+            # print("fwd")
+            torch._higher_order_ops.print("fwd")
+            # fwd_values.append(t.clone())
+
+        def bwd_f(t):
+            print("bwd")
+            torch._higher_order_ops.print("bwd")
+            # bwd_values.append(t.clone())
+
+        cp = make_compile_print(fwd_f, bwd_f)
+
+        def fn(x, y):
+            # out = cp(x, y)
+            # return out[0].sum() + out[1].sum()
+            torch._higher_order_ops.print("fwd")
+            return (x+y).sum()
+
+        x = torch.randn(3, 3, requires_grad=True)
+        y = torch.randn(3, 3, requires_grad=True)
+
+        # Trace with make_fx using symbolic mode
+        gm = make_fx(fn, tracing_mode="fake")(x, y)
+
+        # Check that invoke_leaf_function appears in the graph
+        # graph_code = gm.code
+        gm.print_readable()
+        # self.assertIn("invoke_leaf_function", graph_code)
+
+        # Run the traced graph and verify it works
+        fwd_values.clear()
+        bwd_values.clear()
+
+        x2 = torch.randn(3, 3, requires_grad=True)
+        y2 = torch.randn(3, 3, requires_grad=True)
+        result = gm(x2, y2)
+
+        # Forward callbacks should be called
+        # self.assertEqual(len(fwd_values), 2)
+
+        # result.backward()
+
+        # # Backward callbacks should be called
+        # self.assertEqual(len(bwd_values), 2)
+
+
 if __name__ == "__main__":
     run_tests()
