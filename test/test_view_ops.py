@@ -31,7 +31,6 @@ from torch.testing._internal.common_dtype import (
 from torch.testing._internal.common_utils import (
     gradcheck,
     gradgradcheck,
-    IS_FBCODE,
     numpy_to_torch_dtype_dict,
     run_tests,
     skipIfTorchDynamo,
@@ -992,9 +991,7 @@ class TestViewOps(TestCase):
         nv[1, 1] = 0
         self.assertNotEqual(t[2, 2], nv[1, 1])
 
-    @unittest.skipIf(
-        IS_FBCODE, "TorchScript backend not yet supported in FBCODE/OVRSOURCE builds"
-    )
+    @skipLazy  # Torchscript backend not supported
     def test_advanced_indexing_assignment(self, device):
         t = torch.ones(3, 3, device=device)
         rows = torch.tensor([[0, 0], [2, 2]], device=device)
