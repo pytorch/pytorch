@@ -1,5 +1,5 @@
 """
-Inductor pass to replace functional custom ops to their out variants.
+Inductor pass to replace functional ops with their out variants.
 """
 
 import logging
@@ -59,6 +59,8 @@ def _transform_node(
     num_outputs: int,
 ) -> bool:
     """Transform a functional op node to its out variant."""
+    from torch._library._out_variant import get_out_arg_names
+
     # TODO(tianrengao): add reinplace logic
     # Get output tensor info from fake tensor metadata
     output_tensors = _get_output_tensors(node)
@@ -66,10 +68,21 @@ def _transform_node(
         log.warning("Could not get output tensors for %s", node.target)
         return False
 
+    # Get out argument names from schema
+    out_arg_names = get_out_arg_names(out_op)
+    if len(out_arg_names) != num_outputs:
+        log.warning(
+            "Out arg name count mismatch for %s: expected %d, got %d",
+            out_op,
+            num_outputs,
+            len(out_arg_names),
+        )
+        return False
+
     with graph.inserting_before(node):
         # Create allocation nodes for each output
-        alloc_nodes = []
-        for i, fake_tensor in enumerate(output_tensors):
+        alloc_nodes: list[fx.Node] = []
+        for fake_tensor in output_tensors:
             alloc_node = graph.call_function(
                 torch.empty,
                 args=(tuple(fake_tensor.shape),),
@@ -82,9 +95,11 @@ def _transform_node(
             alloc_node.meta["val"] = _create_fake_like(fake_tensor, node)
             alloc_nodes.append(alloc_node)
 
-        # Create out variant call: out_op(out1, out2, ..., input1, input2, ...)
-        out_args = tuple(alloc_nodes) + tuple(node.args)
-        out_call = graph.call_function(out_op, args=out_args, kwargs=dict(node.kwargs))
+        # Create out variant call: out_op(inputs..., *, out1=tensor1, out2=tensor2)
+        # Out args must be passed as kwargs (they are keyword-only in the schema)
+        out_kwargs = dict(node.kwargs)
+        out_kwargs.update(zip(out_arg_names, alloc_nodes))
+        out_call = graph.call_function(out_op, args=node.args, kwargs=out_kwargs)
         out_call.meta["val"] = None
 
     # Replace uses of original outputs with allocated buffers
