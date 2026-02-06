@@ -1,7 +1,7 @@
 (troubleshooting_guardondatadependentsymnode_errors)=
 
 # Troubleshooting GuardOnDataDependentSymNode Errors
-When working with PyTorch models that have unbacked symbols which could be coming from data dependent ops like `item()`, `tolist()`, or `nonzero())`, or from manually marking some input sized dynamic using `torch._dynamo.decorators.mark_unbacked` you may encounter `GuardOnDataDependentSymNode` errors. This section explains what these errors are and how to fix them.
+When working with PyTorch models that have unbacked symbols which could be coming from data dependent ops like `item()`, `tolist()`, or `nonzero()`, or from manually marking some input sizes as dynamic using `torch._dynamo.decorators.mark_unbacked` you may encounter `GuardOnDataDependentSymNode` errors. This section explains what these errors are and how to fix them.
 
 ## Background:
 
