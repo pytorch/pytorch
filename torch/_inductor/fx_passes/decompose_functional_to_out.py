@@ -1,25 +1,5 @@
 """
-Inductor pass to decompose functional custom ops to their out variants.
-
-This pass enables CUDAGraph compatibility for custom ops by:
-1. Finding functional ops that have registered .out variants
-2. Inserting buffer allocation nodes before the op
-3. Replacing the functional op call with the out variant
-
-The out variant detection is automatic for ops following the .out naming convention.
-No manual registration is required.
-
-Usage:
-    # User registers ops with .out convention
-    @torch.library.custom_op("mylib::my_op", mutates_args=())
-    def my_op(x: Tensor) -> Tensor: ...
-
-    @torch.library.custom_op("mylib::my_op.out", mutates_args=("out",))
-    def my_op_out(out: Tensor, x: Tensor) -> None: ...
-
-    # Enable the pass
-    with torch._inductor.config.patch(decompose_functional_to_out=True):
-        compiled = torch.compile(fn)
+Inductor pass to replace functional custom ops to their out variants.
 """
 
 import logging
@@ -27,6 +7,7 @@ import operator
 
 import torch
 import torch.fx as fx
+from torch._ops import OpOverload
 
 
 log = logging.getLogger(__name__)
@@ -35,14 +16,8 @@ log = logging.getLogger(__name__)
 def decompose_functional_to_out(graph: fx.Graph) -> bool:
     """
     Decompose functional custom ops to their out variants.
-
-    Args:
-        graph: The FX graph to transform
-
-    Returns:
-        True if any transformations were made
     """
-    from torch._library.schema_utils import find_out_variant, get_out_arg_count
+    from torch._library._out_variant import get_out_arg_count, to_out_variant
 
     modified = False
     nodes_to_process = []
@@ -52,7 +27,10 @@ def decompose_functional_to_out(graph: fx.Graph) -> bool:
         if node.op != "call_function":
             continue
 
-        out_op = find_out_variant(node.target)
+        if not isinstance(node.target, OpOverload):
+            continue
+
+        out_op = to_out_variant(node.target)
         if out_op is not None:
             nodes_to_process.append((node, out_op))
 
@@ -81,6 +59,7 @@ def _transform_node(
     num_outputs: int,
 ) -> bool:
     """Transform a functional op node to its out variant."""
+    # TODO(tianrengao): add reinplace logic
     # Get output tensor info from fake tensor metadata
     output_tensors = _get_output_tensors(node)
     if output_tensors is None or len(output_tensors) != num_outputs:

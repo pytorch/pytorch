@@ -11,15 +11,7 @@ class TestDecomposeFunctionalToOut(TestCase):
     """Tests for the decompose pass with auto-detection."""
 
     def setUp(self):
-        from torch._library.schema_utils import clear_cache
-
-        clear_cache()
         self._setup_test_ops()
-
-    def tearDown(self):
-        from torch._library.schema_utils import clear_cache
-
-        clear_cache()
 
     def _setup_test_ops(self):
         """Create test custom ops with .out convention."""
@@ -47,11 +39,13 @@ class TestDecomposeFunctionalToOut(TestCase):
 
     def test_find_out_variant(self):
         """Test that schema-based detection finds the out variant."""
-        from torch._library.schema_utils import find_out_variant
+        from torch._library._out_variant import check_out_variant, to_out_variant
 
-        out_op = find_out_variant(self.functional_op)
+        out_op = to_out_variant(self.functional_op)
         self.assertIsNotNone(out_op)
         self.assertEqual(out_op, self.out_op)
+
+        self.assertTrue(check_out_variant(self.functional_op, self.out_op))
 
     def test_decompose_with_config_enabled(self):
         """Test decomposition when config is enabled."""
@@ -84,41 +78,33 @@ class TestDecomposeFunctionalToOut(TestCase):
         torch.testing.assert_close(result, expected)
 
 
-class TestSchemaUtils(TestCase):
-    """Tests for schema_utils module."""
+class TestOutVariantDetection(TestCase):
+    """Tests for out variant detection utilities."""
 
-    def test_find_out_variant_no_match(self):
+    def test_no_out_variant_returns_none(self):
         """Test that None is returned when no out variant exists."""
-        from torch._library.schema_utils import find_out_variant
+        from torch._library._out_variant import to_out_variant
 
-        # aten::relu has no .out overload with matching signature
-        result = find_out_variant(torch.ops.aten.relu.default)
-        # relu does have relu.out, so this might find it
-        # The test is just to ensure the function doesn't crash
+        # Create an op without an out variant
+        @torch.library.custom_op("test_no_out::my_op", mutates_args=())
+        def my_op(x: torch.Tensor) -> torch.Tensor:
+            return x * 2
 
-    def test_get_out_arg_count(self):
-        """Test counting out arguments."""
-        from torch._library.schema_utils import get_out_arg_count
+        @my_op.register_fake
+        def _(x):
+            return torch.empty_like(x)
 
-        # aten::add.out has 1 out argument
-        count = get_out_arg_count(torch.ops.aten.add.out)
-        self.assertEqual(count, 1)
+        result = to_out_variant(torch.ops.test_no_out.my_op.default)
+        self.assertIsNone(result)
 
+    def test_native_op_out_variant(self):
+        """Test detection works for native ops too."""
+        from torch._library._out_variant import to_out_variant
 
-class TestConfigOption(TestCase):
-    """Test config option exists and works."""
-
-    def test_config_option_exists(self):
-        """Test that config option exists."""
-        from torch._inductor import config
-
-        self.assertTrue(hasattr(config, "decompose_functional_to_out"))
-
-    def test_config_default_is_false(self):
-        """Test that config defaults to False (opt-in)."""
-        from torch._inductor import config
-
-        self.assertFalse(config.decompose_functional_to_out)
+        # aten::add has an out variant
+        out_op = to_out_variant(torch.ops.aten.add.Tensor)
+        self.assertIsNotNone(out_op)
+        self.assertEqual(out_op, torch.ops.aten.add.out)
 
 
 if __name__ == "__main__":
