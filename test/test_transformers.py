@@ -3331,12 +3331,18 @@ class TestSDPACudaOnly(NNTestCase):
         if "cuda" in str(device):
             device_capability = torch.cuda.get_device_capability()
         prefer_cudnn = "TORCH_CUDNN_SDPA_PREFERRED" not in os.environ or bool(os.environ["TORCH_CUDNN_SDPA_PREFERRED"])
-        # cuDNN prioritization requires cuDNN >= 9.9.0 (90900) per sdp_utils.cpp:83
+        # cuDNN prioritization requires cuDNN > 9.15.0 (91500) per sdp_utils.cpp:83
+        # cuDNN 9.15.1 required for seq_len not divisible by 128 fix, CUDA <= 12.9 wheels
+        # ship with older cuDNN see #169849
         cudnn_version = torch.backends.cudnn.version() if torch.backends.cudnn.is_available() else 0
-        is_hopper_or_newer = device_capability and (device_capability == (9, 0) or device_capability == (10, 0))
-        prefer_cudnn = prefer_cudnn and is_hopper_or_newer and cudnn_version >= 90900
+        # Match C++ logic: (major == 9 || major == 10) && (!minor || minor == 3)
+        # device_capability is a tuple (major_version, minor_version) from get_device_capability()
+        # where major_version is at index 0 and minor_version is at index 1
+        # major_version 9 indicates Hopper architecture (e.g., H100), major_version 10 indicates Blackwell architecture (e.g., B100)
+        is_hopper_or_newer = device_capability and (device_capability in ((9, 0), (9, 3), (10, 0), (10, 3)))
+        prefer_cudnn = prefer_cudnn and is_hopper_or_newer and cudnn_version > 91500
 
-        # cuDNN is enabled by default on SM 9.0/10.0 with cuDNN >= 9.9.0 (per #162073)
+        # cuDNN is enabled by default on SM 9.0/9.3/10.0/10.3 with cuDNN > 9.15.0 (per #169849)
         # For older cuDNN versions or other architectures, Flash Attention is preferred
         if type != "nested" and PLATFORM_SUPPORTS_CUDNN_ATTENTION and prefer_cudnn:
             self.assertEqual(torch._fused_sdp_choice(query, key, value), SDPBackend.CUDNN_ATTENTION.value)
