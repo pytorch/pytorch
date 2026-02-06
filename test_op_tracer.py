@@ -1,142 +1,66 @@
 #!/usr/bin/env python3
 """
-Test script for OpTracer - traces DoubleLinear model forward and backward ops.
+Test script for OpTracer - traces Transformer model.
 
 Usage:
     python test_op_tracer.py
 """
 
-import sys
 import os
+import sys
 
-# Add pytorch to path if needed
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import torch
-import torch.nn as nn
-from torch._subclasses.op_tracer import OpTracer, trace_model, TracedOp
-from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses.op_tracer import trace_model
+from torch.testing._internal.distributed._tensor.common_dtensor import (
+    ModelArgs,
+    Transformer,
+)
 
 
-# Import DoubleLinear from common_fsdp
-from torch.testing._internal.common_fsdp import DoubleLinear
-
-
-def test_double_linear_tracing():
-    """Test tracing DoubleLinear model with forward and backward passes."""
+def test_transformer_tracing():
+    """Test tracing Transformer model with forward and backward passes."""
     print("=" * 60)
-    print("Testing OpTracer with DoubleLinear")
+    print("Testing OpTracer with Transformer")
     print("=" * 60)
 
-    # Create model
-    dim = 16
-    batch_size = 4
-    model = DoubleLinear(dim=dim, use_second_linear=True)
+    # Create model with small config for testing
+    args = ModelArgs(
+        n_layers=2,
+        vocab_size=32,
+        max_seq_len=16,
+        dim=32,
+        n_heads=4,
+        dropout_p=0.0,
+        weight_tying=False,
+        checkpoint_activations=False,
+    )
+    model = Transformer(args)
 
-    # Create input tensor
-    x = torch.randn(batch_size, dim, requires_grad=True)
+    # Create input tokens
+    batch_size = 2
+    seq_len = 8
+    tokens = torch.randint(0, args.vocab_size, (batch_size, seq_len))
 
-    print(f"\nModel: DoubleLinear(dim={dim})")
-    print(f"Input shape: {x.shape}")
-    print(f"Model structure:")
-    print(f"  - lin1: Linear({dim}, {dim})")
-    print(f"  - lin2: Linear({dim}, {dim})")
-    print(f"  - relu: ReLU()")
+    print("\nModel: Transformer")
+    print(f"  n_layers: {args.n_layers}")
+    print(f"  dim: {args.dim}")
+    print(f"  n_heads: {args.n_heads}")
+    print(f"  vocab_size: {args.vocab_size}")
+    print(f"Input shape: {tokens.shape}")
     print()
 
-    # Trace the model
-    tracer = trace_model(model, (x,), backward=True)
+    # Trace the model (filter to aten ops only for cleaner output)
+    tracer = trace_model(model, (tokens,), backward=True, filter_namespaces=["aten"])
 
     # Print summary
-    print(tracer.summary())
-
-    print("\n" + "=" * 60)
-    print("Forward Operations (detailed):")
-    print("=" * 60)
-    for i, op in enumerate(tracer.get_forward_ops()):
-        print(f"{i:3d}. {op.op_name}")
-        print(f"     Inputs:  {op.input_shapes} ({op.input_dtypes})")
-        print(f"     Outputs: {op.output_shapes} ({op.output_dtypes})")
-
-    print("\n" + "=" * 60)
-    print("Backward Operations (detailed):")
-    print("=" * 60)
-    for i, op in enumerate(tracer.get_backward_ops()):
-        print(f"{i:3d}. {op.op_name}")
-        print(f"     Inputs:  {op.input_shapes} ({op.input_dtypes})")
-        print(f"     Outputs: {op.output_shapes} ({op.output_dtypes})")
-
-    return tracer
-
-
-def test_manual_tracing():
-    """Test manual tracing with explicit control over the tracing context."""
-    print("\n" + "=" * 60)
-    print("Testing Manual Tracing")
-    print("=" * 60)
-
-    dim = 8
-    model = DoubleLinear(dim=dim, use_second_linear=False)  # Single output
-
-    fake_mode = FakeTensorMode(allow_non_fake_inputs=False)
-
-    with fake_mode:
-        # Convert model to fake tensors
-        from torch._subclasses.op_tracer import _convert_module_to_fake
-        fake_model = _convert_module_to_fake(model, fake_mode)
-
-        # Create fake input
-        x = torch.randn(2, dim, requires_grad=True)
-        fake_x = fake_mode.from_tensor(x)
-        fake_x.requires_grad_(True)
-
-        # Create tracer with aten filter
-        tracer = OpTracer(filter_namespaces=["aten"])
-
-        with tracer:
-            # Forward
-            print("\nRunning forward pass...")
-            output = fake_model(fake_x)
-            print(f"Forward ops recorded: {len(tracer.get_forward_ops())}")
-
-            # Backward
-            print("Running backward pass...")
-            loss = output.sum()
-            with tracer.mark_backward():
-                loss.backward()
-            print(f"Backward ops recorded: {len(tracer.get_backward_ops())}")
-
-    print(f"\nTotal ops: {len(tracer.trace)}")
-    print("\nAll operations:")
-    for op in tracer.trace:
-        print(f"  {op}")
-
-    return tracer
-
-
-def test_op_statistics():
-    """Analyze operation statistics from tracing."""
-    print("\n" + "=" * 60)
-    print("Operation Statistics")
-    print("=" * 60)
-
-    dim = 32
-    model = DoubleLinear(dim=dim, use_second_linear=True)
-    x = torch.randn(8, dim, requires_grad=True)
-
-    tracer = trace_model(model, (x,), backward=True, filter_namespaces=["aten"])
+    print(f"Total ops: {len(tracer.trace)}")
+    print(f"Forward ops: {len(tracer.get_forward_ops())}")
+    print(f"Backward ops: {len(tracer.get_backward_ops())}")
 
     # Count operations by type
-    op_counts: dict[str, int] = {}
-    for op in tracer.trace:
-        name = op.op_name
-        op_counts[name] = op_counts.get(name, 0) + 1
-
-    print("\nOperation counts:")
-    for name, count in sorted(op_counts.items(), key=lambda x: -x[1]):
-        print(f"  {name}: {count}")
-
-    # Separate forward/backward counts
     fwd_counts: dict[str, int] = {}
     bwd_counts: dict[str, int] = {}
     for op in tracer.trace:
@@ -146,31 +70,29 @@ def test_op_statistics():
         else:
             fwd_counts[name] = fwd_counts.get(name, 0) + 1
 
-    print("\nForward operation counts:")
-    for name, count in sorted(fwd_counts.items(), key=lambda x: -x[1]):
+    print("\nForward operation counts (top 15):")
+    for name, count in sorted(fwd_counts.items(), key=lambda x: -x[1])[:15]:
         print(f"  {name}: {count}")
 
-    print("\nBackward operation counts:")
-    for name, count in sorted(bwd_counts.items(), key=lambda x: -x[1]):
+    print("\nBackward operation counts (top 15):")
+    for name, count in sorted(bwd_counts.items(), key=lambda x: -x[1])[:15]:
         print(f"  {name}: {count}")
+
+    # Show a sample of forward and backward ops
+    print("\n" + "-" * 40)
+    print("Sample Forward Operations (first 20):")
+    print("-" * 40)
+    for op in tracer.get_forward_ops()[:20]:
+        print(f"  {op}")
+
+    print("\n" + "-" * 40)
+    print("Sample Backward Operations (first 20):")
+    print("-" * 40)
+    for op in tracer.get_backward_ops()[:20]:
+        print(f"  {op}")
 
     return tracer
 
 
-def main():
-    print("OpTracer Test Suite")
-    print("=" * 60)
-    print()
-
-    # Run tests
-    test_double_linear_tracing()
-    test_manual_tracing()
-    test_op_statistics()
-
-    print("\n" + "=" * 60)
-    print("All tests completed!")
-    print("=" * 60)
-
-
 if __name__ == "__main__":
-    main()
+    test_transformer_tracing()
