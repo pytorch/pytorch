@@ -1298,93 +1298,117 @@ test_custom_script_ops() {
 }
 
 test_libtorch_agnostic_targetting() {
-    echo "Testing libtorch_agnostic runs correctly on TORCH_TARGET_VERSION"
+    echo "Testing libtorch_agnostic backward compatibility across versions"
 
     REPO_DIR=$(pwd)
     WHEEL_DIR="${REPO_DIR}/test/cpp_extensions/.wheels"
-
-    # Build wheel with current PyTorch (this has TORCH_TARGET_VERSION 2_9_0)
-    echo "Building 2.9 extension wheel with current PyTorch..."
-    pushd test/cpp_extensions/libtorch_agn_2_9_extension
-    time python setup.py bdist_wheel
-
-    # Save the wheel
     mkdir -p "$WHEEL_DIR"
-    cp dist/*.whl "$WHEEL_DIR/"
-    WHEEL_FILE=$(find "$WHEEL_DIR" -maxdepth 1 -name "*.whl" -type f | head -1)
-    echo "Built wheel: $(basename "$WHEEL_FILE")"
-    popd
 
-    # Create venv and install PyTorch 2.9
-    python -m venv venv_pytorch_2_9
-    # shellcheck disable=SC1091
-    . venv_pytorch_2_9/bin/activate
+    local cleanup_items=("$WHEEL_DIR")
+    trap 'rm -rf "${cleanup_items[@]}"' EXIT
 
-    # Clear PYTHONPATH to avoid using the development PyTorch
-    echo "Clearing PYTHONPATH to use only venv packages..."
-    unset PYTHONPATH
+    # Helper: Parse version "X.Y.Z" into {prefix}_major and {prefix}_minor
+    parse_version() {
+        local ver="$1" prefix="$2" rest
+        printf -v "${prefix}_major" '%s' "${ver%%.*}"
+        rest="${ver#*.}"; printf -v "${prefix}_minor" '%s' "${rest%%.*}"
+    }
 
-    # Upgrade pip to latest version
-    echo "Upgrading pip to latest version..."
-    pip install --upgrade pip
-    pip --version
-
-    echo "Installing PyTorch 2.9..."
-
-    # Install from release channel only
-    PYTORCH_VERSION="2.9.0"
-
-    # Extract CUDA version from BUILD_ENVIRONMENT (e.g., "cuda12.1" -> "cu121")
-    if [[ "$BUILD_ENVIRONMENT" =~ cuda([0-9]+)\.([0-9]+) ]]; then
-        CUDA_MAJOR="${BASH_REMATCH[1]}"
-        CUDA_MINOR="${BASH_REMATCH[2]}"
-        CUDA_VERSION="cu${CUDA_MAJOR}${CUDA_MINOR}"
-        echo "  Detected CUDA ${CUDA_MAJOR}.${CUDA_MINOR} from BUILD_ENVIRONMENT, using ${CUDA_VERSION}"
-    else
-        # Default to CPU build
-        CUDA_VERSION="cpu"
-        echo "  No CUDA detected in BUILD_ENVIRONMENT, using CPU build"
-    fi
-
-    if pip install torch=="${PYTORCH_VERSION}" --index-url https://download.pytorch.org/whl/${CUDA_VERSION}/; then
-        echo "Installed PyTorch ${PYTORCH_VERSION} from release channel (${CUDA_VERSION})"
-    else
-        echo "  FAILED to install PyTorch 2.9.0 from release channel"
-        echo "  URL: https://download.pytorch.org/whl/${CUDA_VERSION}/"
-        deactivate
-        rm -rf venv_pytorch_2_9
+    # Helper: Find best CUDA version for a PyTorch version by querying the index
+    find_cuda_for_pytorch() {
+        local torch_ver="$1" cuda
+        for cuda in $(curl -sfL "https://download.pytorch.org/whl/" 2>/dev/null \
+            | grep -oP 'href="cu\d+/"' | grep -oP 'cu\d+' | sort -rV | uniq); do
+            curl -sfL "https://download.pytorch.org/whl/${cuda}/torch/" 2>/dev/null \
+                | grep -q "torch-${torch_ver}[+.-]" && { echo "$cuda"; return 0; }
+        done
         return 1
-    fi
+    }
 
-    INSTALLED_VERSION=$(python -c "import torch; print(torch.__version__)" 2>/dev/null || echo "unknown")
-    echo "  Installed version: $INSTALLED_VERSION"
+    # Helper: Setup isolated venv with PyTorch and test dependencies
+    setup_runtime_venv() {
+        local runtime_version="$1" venv_name="$2" use_cuda="$3"
+        local runtime_major runtime_minor cuda_idx installed
 
-    # Install test dependencies
-    echo "Installing test dependencies..."
-    pip install expecttest numpy unittest-xml-reporting
+        parse_version "$runtime_version" "runtime"
+        python -m venv --clear "$venv_name"
+        VENV_PY="${REPO_DIR}/${venv_name}/bin/python"
+        VENV_UV="${REPO_DIR}/${venv_name}/bin/uv"
+        unset PYTHONPATH PYTHONHOME LD_LIBRARY_PATH
 
-    # Install the pre-built wheel
-    echo ""
-    echo "Installing pre-built 2.9 extension wheel (built with PyTorch 2.10)..."
-    pip install "$WHEEL_FILE"
-    echo "Installed $(basename "$WHEEL_FILE") into PyTorch 2.9 environment"
+        "${REPO_DIR}/${venv_name}/bin/pip" install uv
 
-    # Run tests with PyTorch 2.9 runtime (2.10 tests will be skipped automatically)
-    echo ""
-    echo "Running tests with PyTorch 2.9 runtime (using wheel built on PyTorch 2.10)..."
-    if time python test/cpp_extensions/test_libtorch_agnostic.py -v; then
-        echo ""
-        echo "  Wheel built with current torch and TORCH_TARGET_VERSION 2_9_0 works with PyTorch 2.9 runtime!"
-    else
-        echo "targeting test failed"
-        deactivate
-        rm -rf venv_pytorch_2_9 "$WHEEL_DIR"
-        return 1
-    fi
+        cuda_idx=$($use_cuda && find_cuda_for_pytorch "$runtime_version" || echo "cpu")
+        [[ "$cuda_idx" == "" ]] && { echo "  ERROR: No CUDA wheel for PyTorch ${runtime_version}"; return 1; }
 
-    deactivate
-    rm -rf venv_pytorch_2_9 "$WHEEL_DIR"
+        if ! "$VENV_UV" pip install --python "$VENV_PY" torch=="${runtime_version}" \
+             --index-url "https://download.pytorch.org/whl/${cuda_idx}/" 2>/dev/null; then
+            echo "  ERROR: Failed to install PyTorch from ${cuda_idx}"; return 1
+        fi
 
+        installed=$("$VENV_PY" -I -c "import torch; print(torch.__version__)" 2>/dev/null | tail -1)
+        [[ "$installed" =~ ^${runtime_major}\.${runtime_minor}\. ]] || \
+            { echo "  ERROR: Got $installed instead of ${runtime_major}.${runtime_minor}.x"; return 1; }
+        echo "  ✓ PyTorch ${installed} (${cuda_idx})"
+
+        "$VENV_UV" pip install --python "$VENV_PY" expecttest numpy unittest-xml-reporting
+    }
+
+    CURRENT_VERSION=$(python -c "import torch; print(torch.__version__.split('+')[0].split('a')[0].split('b')[0].split('rc')[0])")
+    local CURRENT_major CURRENT_minor
+    parse_version "$CURRENT_VERSION" "CURRENT"
+    echo "Current: ${CURRENT_major}.${CURRENT_minor}, CUDA: $([[ "$BUILD_ENVIRONMENT" =~ cuda ]] && echo yes || echo no)"
+
+    USE_CUDA=false; [[ "$BUILD_ENVIRONMENT" =~ cuda ]] && USE_CUDA=true
+    MIN_MINOR=9
+    declare -A WHEEL_FILES
+    TESTS_FAILED=0
+
+    # Build extension wheels
+    for ((m = MIN_MINOR; m < CURRENT_minor; m++)); do
+        ext_path="test/cpp_extensions/libtorch_agn_${CURRENT_major}_${m}_extension"
+        [[ -d "$ext_path" ]] || { echo "ERROR: Missing ${ext_path}"; return 1; }
+
+        echo "Building ${ext_path}..."
+        pushd "$ext_path" > /dev/null
+        rm -rf build dist ./*.egg-info install
+        python setup.py bdist_wheel 2>&1 | tail -3
+        wheel_file=$(find dist -name "*.whl" -type f 2>/dev/null | head -1)
+        [[ -n "$wheel_file" ]] || { echo "  ERROR: Build failed"; popd > /dev/null; return 1; }
+        cp "$wheel_file" "$WHEEL_DIR/"
+        WHEEL_FILES["${CURRENT_major}.${m}"]="${WHEEL_DIR}/$(basename "$wheel_file")"
+        echo "  ✓ $(basename "$wheel_file")"
+        popd > /dev/null
+    done
+
+    # Test on each runtime version
+    local runtime_major runtime_minor target_major target_minor
+    for target_ver in "${!WHEEL_FILES[@]}"; do
+        parse_version "$target_ver" "runtime"
+        runtime_version="${runtime_major}.${runtime_minor}.0"
+        venv_name="venv_pytorch_${runtime_major}_${runtime_minor}"
+        cleanup_items+=("$venv_name")
+
+        echo -e "\n[Runtime ${runtime_version}]"
+        local OLD_LD="${LD_LIBRARY_PATH:-}"
+        setup_runtime_venv "$runtime_version" "$venv_name" "$USE_CUDA" || return 1
+
+        # Install compatible extensions (target <= runtime)
+        INSTALLED_EXTS=()
+        for tv in "${!WHEEL_FILES[@]}"; do
+            parse_version "$tv" "target"
+            (( target_major < runtime_major || (target_major == runtime_major && target_minor <= runtime_minor) )) && \
+                { "$VENV_UV" pip install --python "$VENV_PY" "${WHEEL_FILES[$tv]}"; INSTALLED_EXTS+=("$tv"); }
+        done
+        [[ ${#INSTALLED_EXTS[@]} -eq 0 ]] && { echo "  No compatible extensions, skipping"; continue; }
+        echo "  ✓ Extensions: ${INSTALLED_EXTS[*]}"
+
+        echo "  Running tests..."
+        "$VENV_PY" -I "$REPO_DIR/test/cpp_extensions/test_libtorch_agnostic.py" -v || ((TESTS_FAILED++))
+        if [[ -n "$OLD_LD" ]]; then export LD_LIBRARY_PATH="$OLD_LD"; else unset LD_LIBRARY_PATH; fi
+    done
+
+    [[ "$TESTS_FAILED" -eq 0 ]] || return 1
     assert_git_not_dirty
 }
 
