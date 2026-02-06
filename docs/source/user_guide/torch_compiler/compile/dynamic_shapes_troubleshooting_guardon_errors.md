@@ -5,15 +5,17 @@ When working with PyTorch models that have unbacked symbols which could be comin
 
 ## Background:
 
-**Backed dynamic shapes** emerged as a solution to the "endless recompilations" problem in PyTorch 2. When a function like `torch.ones(x)` was compiled with `x=10`, Dynamo would insert a guard checking that "the input x is exactly 10" and generate a graph hard-coded for size 10. Calling with `x=20` would trigger another compilation, and so on. To solve this, we stopped hard-coding sizes and represented them symbolically. However, the compiler still needed to make branching decisions (e.g., `if x < 1024`), so we "backed" each dynamic shape with a hint—a concrete value from the example input used during compilation. The hint guides branch selection, and Dynamo adds guards ensuring the branch condition remains valid. These are called *backed* (or *guardable*) shapes because they are backed by a hint and can have guards constraining them.
+**Backed dynamic shapes** emerged as a solution to the "endless recompilations" problem in PyTorch 2. When a function like `torch.ones(x)` was compiled with `x=10`, without dynamic shapes, Dynamo would insert a guard checking that "the input x is exactly 10" and generate a graph hard-coded for size 10. Calling with `x=20` would trigger another compilation, and so on.
+
+To solve this, dynamic shapes can be used to stop hard-coding sizes and represent them symbolically. However, the compiler still needed to make branching decisions (e.g., `if x < 1024`), so we "backed" each dynamic shape with a hint—a concrete value from the example input used during compilation. The hint guides branch selection, and Dynamo adds guards ensuring the branch condition remains valid. These are called *backed* (or *guardable*) shapes because they are backed by a hint and can have guards constraining them.
 
 **Unbacked dynamic shapes** arose from a different need: supporting data-dependent operations like `x.item()`. For such operations, the output value depends on tensor data and is unknown at compile time. Initially, these would trigger graph breaks, but this was problematic for export and performance. To keep data-dependent operations within the graph, we represent their outputs symbolically—but unlike backed shapes, we have no hint to resolve branching. These are called *unbacked* (or *guardless*) shapes. Over time, users have also deliberately chosen unbacked shapes for primary graph inputs to avoid branch-induced recompilations and compile graphs that work across all input shapes.
 
 ### Data-Dependent Errors
 
-**Data-Dependent Errors** A key challenge with unbacked shapes is handling branches: without a hint, the compiler cannot determine which path to take, and the default behavior is to throw a `GuardOnDataDependentSymNode` error.
+A key challenge with unbacked shapes is handling branches: without a hint, the compiler cannot determine which path to take, and the default behavior is to throw a `GuardOnDataDependentSymNode` error.
 
-## Framework vs User Code  Errors
+## Framework vs User Code Errors
 
 Data-dependent errors (DDEs) can originate from two sources: **framework code** (PyTorch internals) and **user code** (your model). Historically, DDEs were a major pain point—especially for export users—because many common framework operations like reshaping, slicing, narrowing, selection, contiguity checks, and broadcasting checks would trigger these errors when encountering unbacked shapes.
 
@@ -24,7 +26,7 @@ If you encounter a DDE originating from PyTorch framework code (identifiable by 
 The rest of this document explains how to deal with unbacked shapes in your code. The solutions generally fall into two categories:
 
 1. **Avoid the DDE by rewriting your code to be resilient** — restructure your code so that it doesn't require branching on unbacked symbols, or use alternative APIs that handle unbacked shapes gracefully.
-2. **Provide hints using `torch._check`** — when rewriting is not feasible, you can try using `torch._check` to assert conditions and teach the symbolic reasoning system facts about your unbacked `SymInts`. However, this doesn't always work, as some cases are fundamentally incompatible with unbacked shapes.
+2. **Provide hints using `torch._check`** — when rewriting is not feasible, you can try using `torch._check` to assert conditions and teach the symbolic reasoning system facts about your unbacked `SymInts`.
 
 ## Common Error Pattern
 The following output shows the common error pattern `GuardOnDataDependentSymNode` errors:
@@ -52,7 +54,7 @@ Here is the list of some of the debugging tools available in PyTorch that you ca
 
 ## Error Variations
 
-Here is a the list of error variations that you might encounter:
+Here is the list of error variations that you might encounter:
 
 | Error Variations | Description |
 |------------------|-------------|
@@ -238,8 +240,7 @@ Semantically, the function behaves like a conditional check:
 if not cond:
     raise RuntimeError(msg_fn())
 ```
-
-But there a number of key differences:
+But there are a number of key differences:
 
 * The condition is always assumed true at compile time, even if it involves unbacked `SymInts`. The actual check is deferred to runtime, avoiding
 compile-time errors. Instead of setting up a guard, we implement a
@@ -318,7 +319,8 @@ This issue is less likely to cause problems now because the return value of
 In non-strict export mode, consider the following code:
 
 ```python
-u0 = x.sum().item() return y[:u0]
+u0 = x.sum().item()
+return y[:u0]
 ```
 
 This code will fail when trying to evaluate `u0` because, when a `SymInt` is
@@ -329,7 +331,8 @@ To resolve this, you can rewrite the program to avoid specialization.
 For the example above, you can fix it by not using slices:
 
 ```python
-u0 = x.sum().item() return y.narrow(0, 0, u0)
+u0 = x.sum().item()
+return y.narrow(0, 0, u0)
 ```
 
 For more details, see the related issue
