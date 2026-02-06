@@ -32,14 +32,18 @@ class TestIndexing(TestCase):
     def test_indexing_simple(self):
         a = np.array([[1, 2, 3], [4, 5, 6]])
 
-        assert isinstance(a[0, 0], np.ndarray)
-        assert isinstance(a[0, :], np.ndarray)
-        assert a[0, :].tensor._base is a.tensor
+        if not isinstance(a[0, 0], np.ndarray):
+            raise AssertionError(f"Expected np.ndarray, got {type(a[0, 0])}")
+        if not isinstance(a[0, :], np.ndarray):
+            raise AssertionError(f"Expected np.ndarray, got {type(a[0, :])}")
+        if a[0, :].tensor._base is not a.tensor:
+            raise AssertionError("Expected tensor._base to be a.tensor")
 
     def test_setitem(self):
         a = np.array([[1, 2, 3], [4, 5, 6]])
         a[0, 0] = 8
-        assert isinstance(a, np.ndarray)
+        if not isinstance(a, np.ndarray):
+            raise AssertionError(f"Expected np.ndarray, got {type(a)}")
         assert_equal(a, [[8, 2, 3], [4, 5, 6]])
 
 
@@ -48,10 +52,12 @@ class TestReshape(TestCase):
     def test_reshape_function(self):
         arr = [[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12]]
         tgt = [[1, 2, 3, 4, 5, 6], [7, 8, 9, 10, 11, 12]]
-        assert np.all(np.reshape(arr, (2, 6)) == tgt)
+        if not np.all(np.reshape(arr, (2, 6)) == tgt):
+            raise AssertionError("reshape result does not match expected")
 
         arr = np.asarray(arr)
-        assert np.transpose(arr, (1, 0)).tensor._base is arr.tensor
+        if np.transpose(arr, (1, 0)).tensor._base is not arr.tensor:
+            raise AssertionError("Expected transpose tensor._base to be arr.tensor")
 
     @skipif(TEST_WITH_TORCHDYNAMO, reason=".tensor attribute")
     def test_reshape_method(self):
@@ -61,26 +67,39 @@ class TestReshape(TestCase):
         tgt = [[1, 2, 3, 4, 5, 6], [7, 8, 9, 10, 11, 12]]
 
         # reshape(*shape_tuple)
-        assert np.all(arr.reshape(2, 6) == tgt)
-        assert arr.reshape(2, 6).tensor._base is arr.tensor  # reshape keeps the base
-        assert arr.shape == arr_shape  # arr is intact
+        if not np.all(arr.reshape(2, 6) == tgt):
+            raise AssertionError("reshape(2, 6) result does not match expected")
+        if arr.reshape(2, 6).tensor._base is not arr.tensor:  # reshape keeps the base
+            raise AssertionError("Expected reshape tensor._base to be arr.tensor")
+        if arr.shape != arr_shape:  # arr is intact
+            raise AssertionError(f"Expected shape {arr_shape}, got {arr.shape}")
 
         # XXX: move out to dedicated test(s)
-        assert arr.reshape(2, 6).tensor._base is arr.tensor
+        if arr.reshape(2, 6).tensor._base is not arr.tensor:
+            raise AssertionError("Expected reshape tensor._base to be arr.tensor")
 
         # reshape(shape_tuple)
-        assert np.all(arr.reshape((2, 6)) == tgt)
-        assert arr.reshape((2, 6)).tensor._base is arr.tensor
-        assert arr.shape == arr_shape
+        if not np.all(arr.reshape((2, 6)) == tgt):
+            raise AssertionError("reshape((2, 6)) result does not match expected")
+        if arr.reshape((2, 6)).tensor._base is not arr.tensor:
+            raise AssertionError("Expected reshape tensor._base to be arr.tensor")
+        if arr.shape != arr_shape:
+            raise AssertionError(f"Expected shape {arr_shape}, got {arr.shape}")
 
         tgt = [[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12]]
-        assert np.all(arr.reshape(3, 4) == tgt)
-        assert arr.reshape(3, 4).tensor._base is arr.tensor
-        assert arr.shape == arr_shape
+        if not np.all(arr.reshape(3, 4) == tgt):
+            raise AssertionError("reshape(3, 4) result does not match expected")
+        if arr.reshape(3, 4).tensor._base is not arr.tensor:
+            raise AssertionError("Expected reshape tensor._base to be arr.tensor")
+        if arr.shape != arr_shape:
+            raise AssertionError(f"Expected shape {arr_shape}, got {arr.shape}")
 
-        assert np.all(arr.reshape((3, 4)) == tgt)
-        assert arr.reshape((3, 4)).tensor._base is arr.tensor
-        assert arr.shape == arr_shape
+        if not np.all(arr.reshape((3, 4)) == tgt):
+            raise AssertionError("reshape((3, 4)) result does not match expected")
+        if arr.reshape((3, 4)).tensor._base is not arr.tensor:
+            raise AssertionError("Expected reshape tensor._base to be arr.tensor")
+        if arr.shape != arr_shape:
+            raise AssertionError(f"Expected shape {arr_shape}, got {arr.shape}")
 
 
 # XXX : order='C' / 'F'
@@ -102,7 +121,8 @@ class TestTranspose(TestCase):
         assert_equal(np.transpose(arr, (1, 0)), tgt)
 
         arr = np.asarray(arr)
-        assert np.transpose(arr, (1, 0)).tensor._base is arr.tensor
+        if np.transpose(arr, (1, 0)).tensor._base is not arr.tensor:
+            raise AssertionError("Expected transpose tensor._base to be arr.tensor")
 
     @skipif(TEST_WITH_TORCHDYNAMO, reason=".tensor attribute")
     def test_transpose_method(self):
@@ -113,7 +133,8 @@ class TestTranspose(TestCase):
         assert_raises((RuntimeError, ValueError), lambda: a.transpose(0, 0))
         assert_raises((RuntimeError, ValueError), lambda: a.transpose(0, 1, 2))
 
-        assert a.transpose().tensor._base is a.tensor
+        if a.transpose().tensor._base is not a.tensor:
+            raise AssertionError("Expected transpose tensor._base to be a.tensor")
 
 
 class TestRavel(TestCase):
@@ -124,14 +145,16 @@ class TestRavel(TestCase):
         assert_equal(np.ravel(a), tgt)
 
         arr = np.asarray(a)
-        assert np.ravel(arr).tensor._base is arr.tensor
+        if np.ravel(arr).tensor._base is not arr.tensor:
+            raise AssertionError("Expected ravel tensor._base to be arr.tensor")
 
     @skipif(TEST_WITH_TORCHDYNAMO, reason=".tensor attribute")
     def test_ravel_method(self):
         a = np.array([[0, 1], [2, 3]])
         assert_equal(a.ravel(), [0, 1, 2, 3])
 
-        assert a.ravel().tensor._base is a.tensor
+        if a.ravel().tensor._base is not a.tensor:
+            raise AssertionError("Expected ravel tensor._base to be a.tensor")
 
 
 class TestNonzero(TestCase):
@@ -235,11 +258,13 @@ class TestArgmaxArgminCommon(TestCase):
         res_orig = _res_orig.reshape(new_shape)
         res = method(arr, axis=axis, keepdims=True)
         assert_equal(res, res_orig)
-        assert res.shape == new_shape
+        if res.shape != new_shape:
+            raise AssertionError(f"Expected shape {new_shape}, got {res.shape}")
 
         outarray = np.empty(res.shape, dtype=res.dtype)
         res1 = method(arr, axis=axis, out=outarray, keepdims=True)
-        assert res1 is outarray
+        if res1 is not outarray:
+            raise AssertionError("Expected res1 to be outarray")
         assert_equal(res, outarray)
 
         if len(size) > 0:
@@ -264,11 +289,13 @@ class TestArgmaxArgminCommon(TestCase):
         res_orig = _res_orig.reshape(new_shape)
         res = method(arr.T, axis=axis, keepdims=True)
         assert_equal(res, res_orig)
-        assert res.shape == new_shape
+        if res.shape != new_shape:
+            raise AssertionError(f"Expected shape {new_shape}, got {res.shape}")
         outarray = np.empty(new_shape[::-1], dtype=res.dtype)
         outarray = outarray.T
         res1 = method(arr.T, axis=axis, out=outarray, keepdims=True)
-        assert res1 is outarray
+        if res1 is not outarray:
+            raise AssertionError("Expected res1 to be outarray")
         assert_equal(res, outarray)
 
         if len(size) > 0:
@@ -299,7 +326,8 @@ class TestArgmaxArgminCommon(TestCase):
             aarg_maxmin = arg_method(i)
             axes = list(range(a.ndim))
             axes.remove(i)
-            assert np.all(a_maxmin == aarg_maxmin.choose(*a.transpose(i, *axes)))
+            if not np.all(a_maxmin == aarg_maxmin.choose(*a.transpose(i, *axes))):
+                raise AssertionError("maxmin values do not match choose result")
 
     @parametrize("method", ["argmax", "argmin"])
     def test_output_shape(self, method):
@@ -333,7 +361,8 @@ class TestArgmaxArgminCommon(TestCase):
         arg_method = getattr(a, method)
         out = np.empty((256,) * ndim, dtype=np.intp)
         ret = arg_method(axis=0, out=out)
-        assert ret is out
+        if ret is not out:
+            raise AssertionError("Expected ret to be out")
 
     @parametrize(
         "arr_method, np_method", [("argmax", np.argmax), ("argmin", np.argmin)]
@@ -640,8 +669,10 @@ class TestAmin(TestCase):
 class TestContains(TestCase):
     def test_contains(self):
         a = np.arange(12).reshape(3, 4)
-        assert 2 in a
-        assert 42 not in a
+        if 2 not in a:
+            raise AssertionError("Expected 2 to be in array")
+        if 42 in a:
+            raise AssertionError("Expected 42 to not be in array")
 
 
 @instantiate_parametrized_tests
@@ -661,16 +692,22 @@ class TestIter(TestCase):
         # numpy generates array scalars, we do 0D arrays
         a = np.arange(5)
         lst = list(a)
-        assert all(type(x) is np.ndarray for x in lst), f"{[type(x) for x in lst]}"
-        assert all(x.ndim == 0 for x in lst)
+        if not all(type(x) is np.ndarray for x in lst):
+            raise AssertionError(
+                f"Expected all np.ndarray, got {[type(x) for x in lst]}"
+            )
+        if not all(x.ndim == 0 for x in lst):
+            raise AssertionError("Expected all elements to have ndim == 0")
 
     def test_iter_2d(self):
         # numpy iterates over the 0th axis
         a = np.arange(5)[None, :]
         lst = list(a)
-        assert len(lst) == 1
+        if len(lst) != 1:
+            raise AssertionError(f"Expected length 1, got {len(lst)}")
         # FIXME: "is" cannot be used here because dynamo fails
-        assert type(lst[0]) == np.ndarray  # noqa: E721
+        if type(lst[0]) != np.ndarray:  # noqa: E721
+            raise AssertionError(f"Expected np.ndarray, got {type(lst[0])}")
         assert_equal(lst[0], np.arange(5))
 
 

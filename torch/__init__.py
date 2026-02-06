@@ -132,7 +132,6 @@ __all__ = [
     "sym_min",
     "sym_not",
     "sym_sum",
-    "thread_safe_generator",
     "typename",
     "unravel_index",
     "use_deterministic_algorithms",
@@ -327,6 +326,9 @@ def _preload_cuda_lib(lib_folder: str, lib_name: str, required: bool = True) -> 
 
 def _preload_cuda_deps(err: OSError | None = None) -> None:
     cuda_libs: list[tuple[str, str]] = [
+        # NOTE: Order matters! Libraries must be loaded before their dependents.
+        # libcublasLt must be loaded before libcublas (cublas depends on cublasLt)
+        ("cublaslt", "libcublasLt.so.*[0-9]"),
         ("cublas", "libcublas.so.*[0-9]"),
         ("cudnn", "libcudnn.so.*[0-9]"),
         ("cuda_nvrtc", "libnvrtc.so.*[0-9]"),
@@ -2140,14 +2142,7 @@ _tensor_classes: set[type["torch.Tensor"]] = set()
 from torch import amp as amp, random as random, serialization as serialization
 from torch._tensor_str import set_printoptions
 from torch.amp import autocast, GradScaler
-from torch.random import (
-    get_rng_state,
-    initial_seed,
-    manual_seed,
-    seed,
-    set_rng_state,
-    thread_safe_generator,
-)
+from torch.random import get_rng_state, initial_seed, manual_seed, seed, set_rng_state
 from torch.serialization import load, save
 
 
