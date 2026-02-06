@@ -631,7 +631,8 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       [](const at::Tensor& tensor,
          bool is_output,
          bool is_inplace_on_view) -> torch::autograd::SavedVariable {
-        return torch::autograd::SavedVariable(tensor, is_output, is_inplace_on_view);
+        return torch::autograd::SavedVariable(
+            tensor, is_output, is_inplace_on_view);
       },
       py::arg("tensor"),
       py::arg("is_output"),
