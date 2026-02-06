@@ -2,6 +2,7 @@
 
 #include <c10/util/Enumerate.h>
 #include <c10/util/Synchronized.h>
+#include <c10/util/thread_name.h>
 #include <torch/nativert/executor/ExecutionFrame.h>
 #include <torch/nativert/executor/Executor.h>
 #include <torch/nativert/executor/ParallelGraphExecutor.h>
@@ -28,6 +29,10 @@ Executor::Executor(
       inactiveExecutionFrames_(executorConfig_.maxNumConcurrentThreads),
       numExecutionFrames_(0),
       lastClearedTimestamp_(getCurrentTimestampSeconds()) {
+  // Start background cleanup thread if cleanup is enabled
+  if (executorConfig_.doExecutionFrameCleanup) {
+    cleanupThread_ = std::thread(&Executor::cleanupThreadLoop, this);
+  }
   if (weights) {
     initialize(weights, pytorchStreamReader);
   }
@@ -271,14 +276,12 @@ void Executor::clearStaleExecutionFrames() {
 
 void Executor::returnExecutorFrameToPool(
     std::unique_ptr<ExecutionFrame> frame) {
-  // Check if it's time to clean up stale frames
-  // TODO: consider moving cleanup to a dedicated thread so it does not impact
-  // p99 latency
+  // Request background cleanup if it's time (non-blocking)
   if (executorConfig_.doExecutionFrameCleanup &&
       lastClearedTimestamp_ +
               executorConfig_.executionFramePoolCleanupIntervalSec <
           getCurrentTimestampSeconds()) {
-    clearStaleExecutionFrames();
+    requestCleanup();
   }
 
   try {
@@ -375,6 +378,49 @@ std::vector<DelegateExecutor*> Executor::getDelegates() {
     delegates.emplace_back(delegateExecutor.get());
   }
   return delegates;
+}
+
+void Executor::cleanupThreadLoop() {
+  c10::setThreadName("pt_exec_cleanup");
+
+  while (!stopCleanupThread_.load(std::memory_order_relaxed)) {
+    std::unique_lock<std::mutex> lock(cleanupMutex_);
+
+    // Wait until cleanup is requested or thread should stop
+    cleanupCv_.wait(lock, [this] {
+      return cleanupRequested_.load(std::memory_order_relaxed) ||
+          stopCleanupThread_.load(std::memory_order_relaxed);
+    });
+
+    if (stopCleanupThread_.load(std::memory_order_relaxed)) {
+      break;
+    }
+
+    // Reset the flag before doing cleanup
+    cleanupRequested_.store(false, std::memory_order_relaxed);
+    lock.unlock();
+
+    // Do the actual cleanup (this can take time)
+    clearStaleExecutionFrames();
+  }
+}
+
+void Executor::requestCleanup() {
+  // Only request if not already requested (avoid spamming)
+  bool expected = false;
+  if (cleanupRequested_.compare_exchange_strong(
+          expected, true, std::memory_order_relaxed)) {
+    cleanupCv_.notify_one();
+  }
+}
+
+Executor::~Executor() {
+  // Stop the cleanup thread gracefully
+  if (cleanupThread_.joinable()) {
+    stopCleanupThread_.store(true, std::memory_order_relaxed);
+    cleanupCv_.notify_one();
+    cleanupThread_.join();
+  }
 }
 
 } // namespace torch::nativert
