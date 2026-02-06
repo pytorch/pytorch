@@ -2,6 +2,7 @@
 
 import faulthandler
 import functools
+import inspect
 import itertools
 import logging
 import multiprocessing
@@ -1687,6 +1688,8 @@ class MultiProcContinuousTest(TestCase):
     timeout: timedelta = timedelta(seconds=120)
     # Poison pill for rest of tests if one of them fails
     poison_pill: bool = False
+    # Flag for lazy process spawning (to support instantiate_device_type_tests)
+    _processes_spawned: bool = False
 
     @classmethod
     def backend_str(cls) -> Optional[str]:
@@ -1763,7 +1766,19 @@ class MultiProcContinuousTest(TestCase):
         cls.world_size = world_size
 
         # Initialize the process group
-        cls._init_pg(rank, world_size, rdvz_file)
+        init_skip_reason = None
+        try:
+            cls._init_pg(rank, world_size, rdvz_file)
+        except SystemExit as ex:
+            exit_code = getattr(ex, "code", None)
+            skip_entry = next(
+                (v for v in TEST_SKIPS.values() if v.exit_code == exit_code),
+                None,
+            )
+            if skip_entry:
+                init_skip_reason = skip_entry.message
+            else:
+                raise
 
         # End of bootstrap
         logger.debug("Setup complete")
@@ -1775,6 +1790,11 @@ class MultiProcContinuousTest(TestCase):
             # None means exit
             if test_id is None:
                 break
+
+            # If init failed with a skip, respond with SkipTest for all tests
+            if init_skip_reason is not None:
+                completion_queue.put(unittest.SkipTest(init_skip_reason))
+                continue
 
             # Run the test
             try:
@@ -1848,33 +1868,78 @@ class MultiProcContinuousTest(TestCase):
             logger.debug("Started process %s with pid %s", rank, process.pid)  # noqa: UP031
 
     @classmethod
+    def _get_world_size(cls, device_type: str) -> int:
+        """
+        Get world_size, handling both class variable and property definitions.
+        Properties are instance-level and need special handling in class methods.
+        """
+        # Check if world_size is defined as a property (instance-level)
+        world_size_attr = inspect.getattr_static(cls, "world_size", None)
+        if isinstance(world_size_attr, property):
+            # Create a temporary instance to evaluate the property
+            # We use object.__new__ to avoid calling __init__ which may have side effects
+            temp_instance = object.__new__(cls)
+            world_size = world_size_attr.fget(temp_instance)
+        else:
+            world_size = cls.world_size
+
+        # If world_size is not set (== -2), use device count
+        if world_size == -2:
+            world_size = torch.get_device_module(device_type).device_count()
+            if world_size == 0:
+                raise unittest.SkipTest(f"No {device_type} devices available")
+
+        return world_size
+
+    @classmethod
     def setUpClass(cls):
         """
         Class-scope test fixture. Run once for entire test class, before any test starts.
-        Set up the process group.
+        Note: Process spawning is deferred to setUp to support instantiate_device_type_tests,
+        which calls setUpClass during class creation before any tests run.
         """
         super().setUpClass()
 
-        # Use device count as world size
-        device_type = cls.device_type()
-        # If world_size is not set, use device count
-        if cls.world_size == -2:
-            cls.world_size = torch.get_device_module(device_type).device_count()
-            if cls.world_size == 0:
-                raise unittest.SkipTest(f"No {device_type} devices available")
+    @classmethod
+    def _ensure_processes_spawned(cls):
+        """
+        Lazily spawn worker processes on first test run.
+        This supports instantiate_device_type_tests which calls setUpClass during
+        class creation (before any tests run), when spawning would be premature.
+        """
+        if cls._processes_spawned:
+            return
+
+        # Handle both method and string attribute for device_type
+        # (instantiate_device_type_tests sets device_type as a string attribute,
+        # making this compatible as a drop-in replacement for MultiProcessTestCase)
+        device_type_attr = cls.device_type
+        if callable(device_type_attr):
+            device_type = device_type_attr()
+        else:
+            device_type = device_type_attr
+
+        # Get world_size (handles both class variable and property)
+        cls.world_size = cls._get_world_size(device_type)
 
         logger.info(
             f"Testing class {cls.__name__} on {cls.world_size} {device_type}"  # noqa: G004
         )
 
         cls._spawn_processes(cls.world_size)
+        cls._processes_spawned = True
 
     @classmethod
     def tearDownClass(cls):
         """
         Class-scope test fixture. Run once for entire test class, after all tests finish.
-        Tear down the process group.
+        Tear down the process group if spawned.
         """
+        # If processes were never spawned (e.g., all tests were skipped), nothing to tear down
+        if not cls._processes_spawned:
+            super().tearDownClass()
+            return
+
         logger.debug(f"Joining {cls.world_size} workers")  # noqa: G004
         # Enqueue "None" to all workers to tell them to exit
         for task_queue in cls.task_queues:
@@ -1898,6 +1963,9 @@ class MultiProcContinuousTest(TestCase):
         Test fixture. Run before each test.
         """
         super().setUp()
+
+        # Ensure processes are spawned (lazy initialization for instantiate_device_type_tests)
+        self.__class__._ensure_processes_spawned()
 
         # I am the dispatcher
         self.rank = self.MAIN_PROCESS_RANK
