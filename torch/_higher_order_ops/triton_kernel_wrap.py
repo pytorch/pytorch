@@ -1030,6 +1030,8 @@ def identify_mutated_tensors(
             functions, kernel_name, len(ordered_arg_names)
         )
 
+        # Filter out scalars as analyze_kernel_mutations will flag any parameter transitively
+        # used by a mutating operation.
         return [
             ordered_arg_names[i]
             for i, mutated in enumerate(mutations)
