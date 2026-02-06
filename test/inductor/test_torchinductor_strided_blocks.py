@@ -1073,6 +1073,37 @@ class CommonTemplate:
         # Check for 3D tiling
         self._assert_pointwise_ndims(code, 3)
 
+    def test_fusion_heuristic_prevents_4d_permute(self):
+        """
+        This tests the fusion heuristic which promotes block pointer generation.
+
+        In this test, the tensors are all 4D, and we have a number of permutes swapping 2
+        dimensions each. If we fuse them, the resulting permutation would affect all 4
+        dimensions, and we cannot not emit a block pointer as the max tiling is 3D.
+
+        The test passes if we anticipate this scenario and decline the fusion.
+        """
+
+        def foo(x):
+            a = x.permute(dims=(1, 0, 2, 3))
+            b = a.permute(dims=(0, 1, 3, 2))
+            return b
+
+        inps = (torch.rand((9, 7, 5, 3), device=self.device, dtype=torch.float32),)
+        result, (code,) = self._run_and_compare(
+            foo,
+            *inps,
+            expected_num_triton_kernels=2,
+            expected_num_block_pointers=4,
+            config_patches={
+                "triton.max_tiles": 3,
+                "triton.prefer_nd_tiling": True,
+            },
+        )
+
+        # Check for 2D tiling.
+        self._assert_pointwise_ndims(code, 2)
+
     @torch._dynamo.config.patch({"capture_scalar_outputs": True})
     @parametrize("num_tile_candidates", (1, 2))
     def test_unbacked_size_on_non_contig_dim(self, num_tile_candidates: int):
