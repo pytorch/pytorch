@@ -13,11 +13,7 @@ import torch.distributed.tensor._dispatch as op_dispatch
 import torch.distributed.tensor._random as random
 import torch.nn as nn
 from torch._export.wrappers import mark_subclass_constructor_exportable_experimental
-from torch.distributed.device_mesh import (
-    _mesh_resources,
-    _register_distributed_opaque_types,
-    DeviceMesh,
-)
+from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
 from torch.distributed.tensor._collective_utils import check_tensor_meta, mesh_broadcast
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._redistribute import (
@@ -54,6 +50,25 @@ __all__ = [
 aten = torch.ops.aten
 
 
+def _normalize_placements_for_grad(
+    placements: tuple[Placement, ...],
+) -> tuple[Placement, ...]:
+    """
+    Normalize gradient placements by converting Partial to Replicate.
+
+    See the gradient placement guarantees documented in DTensor.from_local's docstring
+    for why Partial forward placements map to Replicate gradient placements. We do this
+    for both from_local and to_local backward.
+    """
+    normalized: list[Placement] = []
+    for p in placements:
+        if p.is_partial():
+            normalized.append(Replicate())
+        else:
+            normalized.append(p)
+    return tuple(normalized)
+
+
 # NOTE [Autograd interaction between torch.Tensor]
 #
 # The autograd functions defined below are being used by the public
@@ -83,6 +98,7 @@ class _ToTorchTensor(torch.autograd.Function):
     ):
         ctx.dtensor_spec = input._spec
         ctx.grad_placements = grad_placements
+        ctx.set_materialize_grads(False)
         local_tensor = input._local_tensor
 
         # We need to return a fresh Tensor object there as autograd metadata
@@ -91,7 +107,10 @@ class _ToTorchTensor(torch.autograd.Function):
         return local_tensor.view_as(local_tensor)
 
     @staticmethod
-    def backward(ctx, grad_output: torch.Tensor):  # type: ignore[override]
+    def backward(ctx, grad_output: torch.Tensor | None):  # type: ignore[override]
+        if grad_output is None:
+            return None, None
+
         dtensor_spec = ctx.dtensor_spec
         mesh = dtensor_spec.mesh
         grad_placements = ctx.grad_placements
@@ -101,7 +120,13 @@ class _ToTorchTensor(torch.autograd.Function):
             grad_output, mesh, dtensor_spec.placements
         )
         tensor_stride = tuple(tensor_stride)
-        grad_placements = grad_placements or dtensor_spec.placements
+
+        # user should provide grad_placements as there's no guarantee on input gradient placement
+        # if grad_placement is None, we provide default placement
+        if grad_placements is None:
+            # See DTensor.from_local docstring for gradient placement guarantees
+            grad_placements = _normalize_placements_for_grad(dtensor_spec.placements)
+
         if (
             tensor_stride == dtensor_meta.stride
             and grad_placements == dtensor_spec.placements
@@ -145,6 +170,7 @@ class _FromTorchTensor(torch.autograd.Function):
     ) -> "DTensor":
         ctx.forward_input_placements = placements
         ctx.forward_input_device_mesh = device_mesh
+        ctx.set_materialize_grads(False)
 
         if shape and stride:
             tensor_shape, tensor_stride = shape, stride
@@ -204,14 +230,16 @@ class _FromTorchTensor(torch.autograd.Function):
         return dist_tensor
 
     @staticmethod
-    def backward(ctx, grad_output: "DTensor"):  # type: ignore[override]
+    def backward(ctx, grad_output: "DTensor | None"):  # type: ignore[override]
         forward_input_placements = ctx.forward_input_placements
         forward_input_device_mesh = ctx.forward_input_device_mesh
+
+        if grad_output is None:
+            return None, None, None, None, None, None
 
         # reshard to the placement when creating DistributedTensor
         # so that the gradient layout matches, and we could return
         # local gradients directly
-        normalized_placements: list[Placement] = []
         # if forward placement is partial, we always redistribute grad_input to Replicate:
         # Partial(fwd) - Replicate(grad_output) - Replicate(grad_input): no redistribution needed
         # Partial(fwd) - Partial(grad_output) - Replicate(grad_input): redistribute Partial to Replicate
@@ -219,17 +247,16 @@ class _FromTorchTensor(torch.autograd.Function):
         # The second case is BC breaking:
         # was: Partial(fwd) - Partial(grad_output) - Partial(grad_input)
         # now: Partial(fwd) - Partial(grad_output) - Replicate(grad_input)
-        for current, target in zip(grad_output.placements, forward_input_placements):
-            if target.is_partial():
-                normalized_placements.append(Replicate())
-            else:
-                normalized_placements.append(target)
+        # See DTensor.from_local docstring for gradient placement guarantees
+        normalized_placements: tuple[Placement, ...] = _normalize_placements_for_grad(
+            forward_input_placements
+        )
 
-        if grad_output.placements != tuple(normalized_placements):
+        if grad_output.placements != normalized_placements:
             current_spec: DTensorSpec = grad_output._spec
             target_spec = DTensorSpec(
                 forward_input_device_mesh,
-                tuple(normalized_placements),
+                normalized_placements,
                 tensor_meta=grad_output._spec.tensor_meta,
             )
             local_tensor = grad_output._local_tensor
@@ -1437,6 +1464,3 @@ def zeros(  # type: ignore[no-untyped-def]
         device_mesh=device_mesh,
         placements=placements,
     )
-
-
-_register_distributed_opaque_types()
