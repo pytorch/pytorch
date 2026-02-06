@@ -2091,7 +2091,7 @@ class TestTEFuser(JitTestCase):
                 h = t3 - t4
                 k = (w > t) & (h > t)
                 if k.dtype != torch.bool:
-                    raise AssertionError(f"k.dtype should be bool, got {k.dtype}")
+                    raise AssertionError("k.dtype should be bool")
                 if t > 0.5:
                     # Putting a use of k in a never-executed conditional prevents
                     # profiling its type, which leaves it as "Tensor".  If we
