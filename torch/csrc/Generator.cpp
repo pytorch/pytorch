@@ -222,6 +222,31 @@ static PyObject* THPGenerator_getOffset(PyObject* _self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPGenerator_setUseThreadBasedRng(
+    PyObject* _self,
+    PyObject* value) {
+  HANDLE_TH_ERRORS
+  auto self = reinterpret_cast<THPGenerator*>(_self);
+  TORCH_CHECK(
+      PyBool_Check(value),
+      "set_use_thread_based_rng expected a bool, but got ",
+      THPUtils_typename(value));
+  std::scoped_lock<std::mutex> lock(self->cdata.mutex());
+  self->cdata.unsafeGetGeneratorImpl()->set_use_thread_based_rng(
+      value == Py_True);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPGenerator_useThreadBasedRng(PyObject* _self, PyObject*) {
+  HANDLE_TH_ERRORS
+  auto self = reinterpret_cast<THPGenerator*>(_self);
+  std::scoped_lock<std::mutex> lock(self->cdata.mutex());
+  return PyBool_FromLong(
+      self->cdata.unsafeGetGeneratorImpl()->use_thread_based_rng());
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPGenerator_get_device(THPGenerator* self, void* unused) {
   HANDLE_TH_ERRORS
   return THPDevice_New(self->cdata.device());
@@ -304,6 +329,14 @@ static PyMethodDef THPGenerator_methods[] = {
     {"seed", THPGenerator_seed, METH_NOARGS, nullptr},
     {"initial_seed", THPGenerator_initialSeed, METH_NOARGS, nullptr},
     {"get_offset", THPGenerator_getOffset, METH_NOARGS, nullptr},
+    {"set_use_thread_based_rng",
+     THPGenerator_setUseThreadBasedRng,
+     METH_O,
+     nullptr},
+    {"use_thread_based_rng",
+     THPGenerator_useThreadBasedRng,
+     METH_NOARGS,
+     nullptr},
     {nullptr}};
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
