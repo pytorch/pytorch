@@ -471,6 +471,8 @@ class TransformerEncoder(Module):
             why_not_sparsity_fast_path = (
                 f"input not batched; expected src.dim() of 3 but got {src.dim()}"
             )
+        elif mask is not None:
+            why_not_sparsity_fast_path = "attn_mask (mask) is not None"
         elif src_key_padding_mask is None:
             why_not_sparsity_fast_path = "src_key_padding_mask was None"
         # This check avoids a call to torch._nested_tensor_from_mask_left_aligned() that
