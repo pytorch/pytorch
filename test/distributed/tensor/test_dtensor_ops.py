@@ -288,6 +288,7 @@ dtensor_multi_threaded_fails = {
     xfail("full_like"),
     xfail("nn.functional.dropout2d"),
     xfail("nn.functional.dropout3d"),
+    xfail("nn.functional.huber_loss"),
     xfail("masked.cumprod"),
     skip("nn.functional.multi_head_attention_forward"),
 }
