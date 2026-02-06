@@ -8,6 +8,7 @@ from __future__ import annotations
 import base64
 import contextlib
 import functools
+import hashlib
 import json
 import logging
 import os
@@ -23,7 +24,12 @@ from typing_extensions import override
 import torch
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.trace_rules import torch_non_c_binding_in_graph_functions
-from torch._dynamo.utils import chromium_event_log_active, CompileEventLogger, counters
+from torch._dynamo.utils import (
+    chromium_event_log_active,
+    CompileEventLogger,
+    counters,
+    warn_once,
+)
 from torch._functorch import config
 from torch._inductor.codecache import (
     _ident,
@@ -520,54 +526,80 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
         # Return NotImplemented to fall back to default behavior
         return NotImplemented
 
+    # [NOTE] Tensor subclass stable hashing for AOT autograd cache
+    # Python's hash() varies with PYTHONHASHSEED, making cache keys unstable
+    # across processes. We use blake2b for cross-process determinism.
+    #
+    # EXTENSION POINT: Traceable wrapper subclasses can override cache key
+    # generation by implementing _stable_hash_for_caching(self) -> str.
+    # This method should return a deterministic string that uniquely identifies
+    # the tensor's metadata for caching purposes. See DTensor for an example.
+    #
+    # We can't define a default method on subclasses because there is no abstract
+    # base subclass, and we don't want to pollute torch.Tensor. Instead, we provide
+    # a default implementation here that uses __tensor_flatten__ to recursively
+    # hash inner tensors and metadata.
+
     def _reduce_tensor_subclass(self, tensor: torch.Tensor) -> Any:
         """
         Reduce a tensor subclass to a stable key for caching.
-        Uses the metadata from __tensor_flatten__ to capture subclass-specific info.
         """
-        from torch._inductor.codecache import extract_tensor_metadata_for_cache_key
         from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
-        metadata = extract_tensor_metadata_for_cache_key(tensor)
+        if not is_traceable_wrapper_subclass(tensor):
+            return self._reduce_tensor(tensor)
 
-        # Recursively handle inner tensors for nested subclasses
-        inner_metadata = {}
-        subclass_metadata = None
-        if is_traceable_wrapper_subclass(tensor):
-            inner_tensors, subclass_metadata = tensor.__tensor_flatten__()
-            for name in inner_tensors:
-                inner_tensor = getattr(tensor, name)
-                if is_traceable_wrapper_subclass(inner_tensor):
-                    inner_metadata[name] = self._reduce_tensor_subclass(inner_tensor)
+        if hasattr(tensor, "_stable_hash_for_caching"):
+            return (_ident, (tensor._stable_hash_for_caching(),))
 
-        subclass_key = self._subclass_cache_key(subclass_metadata)
-        return (_ident, (metadata, subclass_key, inner_metadata))
+        # Warn once about missing _stable_hash_for_caching
+        warn_once(
+            f"{type(tensor).__name__} does not implement _stable_hash_for_caching. "
+            "Using default implementation based on __tensor_flatten__. "
+            "Consider implementing _stable_hash_for_caching(self) -> str for optimal caching."
+        )
 
-    def _subclass_cache_key(self, subclass_metadata: Any) -> Any:
+        # Default implementation for traceable wrapper subclasses
+        return (_ident, (self._default_stable_hash_for_caching(tensor),))
+
+    def _get_stable_hash(self, tensor: torch.Tensor) -> str:
         """
-        Get a stable cache key for subclass metadata.
-        For DTensorSpec, use repr() which is stable across processes.
-        For other types, fall back to hash().
+        Get stable hash for a tensor, dispatching to custom or default implementation.
         """
-        from torch.distributed.tensor._dtensor_spec import DTensorSpec
+        from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
-        # TODO: For cross-process cache stability, we ideally want stable hashing
-        # for all tensor subclasses. However, making DTensorSpec/DeviceMesh use
-        # stable hashing (e.g., blake2b) has performance implications for eager
-        # runtime where these hashes are used frequently in sharding propagation.
-        # Since DTensorSpec and its components (DeviceMesh, Placement types) have
-        # stable repr() implementations, we use repr() here for DTensor specifically.
-        # Other subclasses fall back to hash() which may not be cross-process stable.
-        #
-        # DTensor's __tensor_flatten__ returns (DTensorSpec, requires_grad)
-        if (
-            isinstance(subclass_metadata, tuple)
-            and len(subclass_metadata) >= 1
-            and isinstance(subclass_metadata[0], DTensorSpec)
-        ):
-            return repr(subclass_metadata)
+        if hasattr(tensor, "_stable_hash_for_caching"):
+            return tensor._stable_hash_for_caching()
+        elif is_traceable_wrapper_subclass(tensor):
+            return self._default_stable_hash_for_caching(tensor)
+        else:
+            # Regular tensor
+            metadata = extract_tensor_metadata_for_cache_key(tensor)
+            return hashlib.blake2b(repr(metadata).encode(), digest_size=16).hexdigest()
 
-        return hash(subclass_metadata)
+    def _default_stable_hash_for_caching(self, tensor: torch.Tensor) -> str:
+        """
+        Default stable hash implementation for traceable wrapper subclasses.
+        """
+        inner_tensor_names, subclass_metadata = tensor.__tensor_flatten__()  # type: ignore[attr-defined]
+
+        # Recursively get hashes of inner tensors
+        inner_hashes = {}
+        for name in inner_tensor_names:
+            inner_tensor = getattr(tensor, name)
+            inner_hashes[name] = self._get_stable_hash(inner_tensor)
+
+        cache_data = repr(
+            (
+                tensor.shape,
+                tensor.dtype,
+                tensor.device,
+                tensor.requires_grad,
+                subclass_metadata,
+                inner_hashes,
+            )
+        )
+        return hashlib.blake2b(cache_data.encode(), digest_size=16).hexdigest()
 
     def _reduce_aot_config(self, aot_config: AOTConfig):
         """
@@ -591,6 +623,7 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
         """
         Reduce the tensor to a stable key for caching.
         """
+
         metadata = extract_tensor_metadata_for_cache_key(tensor)
         return (_ident, (metadata,))
 
