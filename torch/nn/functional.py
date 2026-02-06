@@ -6754,6 +6754,8 @@ def scaled_mm(
     output_dtype: Optional[torch.dtype] = torch.bfloat16,
     contraction_dim: list[int] | tuple[int, ...] = (),
     use_fast_accum: bool = False,
+    *,
+    out: Optional[torch.Tensor] = None,
 ) -> Tensor:
     r"""
     scaled_mm(mat_a, mat_b, scale_a, scale_recipe_a, scale_b, scale_recipe_b, swizzle_a, swizzle_b, bias, output_dtype,
@@ -6773,6 +6775,7 @@ def scaled_mm(
         output_dtype: dtype used for the output tensor
         contraction_dim: describe which dimensions are :math:`K` in the matmul.
         use_fast_accum: enable/disable tensor-core fast accumulation (Hopper-GPUs only)
+        out: User-provided output tensor
     """
 
     def expand_single_value(v: _Any | list[_Any] | None) -> list[_Any]:
@@ -6820,6 +6823,7 @@ def scaled_mm(
         output_dtype,
         contraction_dim,
         use_fast_accum,
+        out=out,
     )
 
     return out
