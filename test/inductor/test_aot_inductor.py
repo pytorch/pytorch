@@ -7044,8 +7044,8 @@ class AOTInductorTestsTemplate:
         m = torch.tensor([4096], dtype=torch.int32, device=self.device)
 
         with config.patch("triton.autotune_with_sample_inputs", True):
-            # ROCm: Use dynamic grid checking (portable across different configs)
             if torch.version.hip:
+                # ROCm: Use dynamic grid checking (portable across different configs)
                 # Compile and get the generated code
                 _, src_code = run_and_get_cpp_code(
                     torch._export.aot_compile, Model(), (x, y, m)
