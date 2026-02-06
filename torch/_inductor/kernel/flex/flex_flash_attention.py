@@ -15,6 +15,7 @@ from torch.fx import GraphModule
 
 from ...ir import FixedLayout, ShapeAsConstantBuffer, Subgraph, TensorBox
 from ...lowering import empty_strided
+from ...virtualized import V
 from .common import infer_dense_strides, load_flex_template, SubgraphResults
 
 
@@ -177,11 +178,6 @@ def is_trivial_mask_graph(graph_module: GraphModule) -> bool:
 
 
 @functools.lru_cache(maxsize=1)
-def _supports_nontrivial_mask_graphs() -> bool:
-    """Currently only supported on Blackwell (SM100) GPUs."""
-    return torch.cuda.get_device_capability()[0] == 10
-
-
 def _is_symbol_from_tensor_shape(symbol: sympy.Symbol, shape_env: Any) -> bool:
     """Check if a symbol originates from a tensor size/stride (TensorPropertySource)."""
     from torch._dynamo.source import TensorPropertySource
@@ -245,17 +241,6 @@ def _can_use_flex_flash_attention(
             "Input buffers require gradients (not supported by flash attention)",
         )
 
-    mask_trivial = is_trivial_mask_graph(mask_graph.graph_module)
-
-    if mask_trivial:
-        return True, ""
-
-    if not _supports_nontrivial_mask_graphs():
-        return (
-            False,
-            "NYI: Non-trivial mask graphs only supported on Blackwell (SM100) for flash attention",
-        )
-
     return True, ""
 
 
@@ -311,10 +296,18 @@ def create_flex_flash_attention_kernel(
     kv_indices: TensorBox | None,
     full_kv_num_blocks: TensorBox | None,
     full_kv_indices: TensorBox | None,
+    sparse_q_block_size: int,
+    sparse_kv_block_size: int,
     mask_graph: Subgraph,
     subgraph: Subgraph | None = None,
 ) -> tuple[TensorBox, TensorBox]:
     """Create a flex flash attention kernel using CuteDSL template."""
+    if query.dtype != key.dtype or query.dtype != value.dtype:
+        raise ValueError(
+            f"Mixed query, key, and value dtype is not supported on this platform, "
+            f"got query.dtype: {query.dtype}, key.dtype: {key.dtype}, "
+            f"and value.dtype: {value.dtype}."
+        )
     if not ensure_flash_available():
         raise RuntimeError("CUTE flash attention not available")
 
@@ -352,10 +345,16 @@ def create_flex_flash_attention_kernel(
         stride=[sympy.sympify(s) for s in output.get_stride()],
     )
 
-    # Used to check if we can skip block sparse impl
+    sparse_q_block_size = V.graph.sizevars.guard_int(sparse_q_block_size)
+    sparse_kv_block_size = V.graph.sizevars.guard_int(sparse_kv_block_size)
+
     mask_graph_is_trivial = is_trivial_mask_graph(mask_graph.graph_module)
+    score_graph_is_trivial = subgraph is None or is_trivial_score_graph(
+        subgraph.graph_module
+    )
 
     needs_block_mask = not mask_graph_is_trivial
+    has_score_mod = not score_graph_is_trivial
     has_full_blocks = full_kv_num_blocks is not None
 
     choices: list[Any] = []
@@ -372,15 +371,23 @@ def create_flex_flash_attention_kernel(
             "Flash attention with block mask but without full blocks is not supported yet"
         )
 
+    subgraphs = []
+    if has_score_mod:
+        subgraphs.append(subgraph_buffer)
+    subgraphs.append(mask_graph_buffer)
+
     with patch_fixed_layout_indexer_for_cutedsl():
         error = flash_attention_cutedsl_template.maybe_append_choice(
             choices,
             input_nodes=input_nodes,
             layout=output_layout,
             mutated_inputs=[lse],
-            subgraphs=[subgraph_buffer, mask_graph_buffer],
+            subgraphs=subgraphs,
             SM_SCALE=scale,
+            HAS_SCORE_MOD=has_score_mod,
             NEEDS_BLOCK_MASK=needs_block_mask,
+            SPARSE_Q_BLOCK_SIZE=sparse_q_block_size,
+            SPARSE_KV_BLOCK_SIZE=sparse_kv_block_size,
         )
 
     for choice in choices:
@@ -405,14 +412,6 @@ def _can_use_flex_flash_attention_backward(
 ) -> tuple[bool, str]:
     if not ensure_flash_available():
         return False, "CUTE flash attention is not available"
-
-    mask_trivial = is_trivial_mask_graph(mask_graph.graph_module)
-    if not mask_trivial:
-        if not _supports_nontrivial_mask_graphs():
-            return (
-                False,
-                "NYI: Block sparsity in backward only supported on SM100",
-            )
 
     if input_buffers_require_grads(
         fw_subgraph.graph_module, num_score_mod_placeholders
@@ -484,6 +483,8 @@ def create_flex_flash_attention_backward_kernel(
     grad_out: TensorBox,
     scale: float,
     kernel_options: dict[str, Any],
+    sparse_q_block_size: int,
+    sparse_kv_block_size: int,
     fw_subgraph_buffer: Optional[SubgraphResults] = None,
     joint_subgraph_buffer: Optional[Any] = None,
     score_mod_other_buffers: Optional[list[TensorBox]] = None,
@@ -541,6 +542,9 @@ def create_flex_flash_attention_backward_kernel(
         stride=[sympy.sympify(s) for s in grad_query.get_stride()],
     )
 
+    sparse_q_block_size = V.graph.sizevars.guard_int(sparse_q_block_size)
+    sparse_kv_block_size = V.graph.sizevars.guard_int(sparse_kv_block_size)
+
     choices: list[Any] = []
 
     input_nodes: list[TensorBox] = [
@@ -586,6 +590,8 @@ def create_flex_flash_attention_backward_kernel(
             SM_SCALE=scale,
             HAS_SCORE_MOD=has_score_mod,
             HAS_BLOCK_MASK=has_block_mask,
+            SPARSE_Q_BLOCK_SIZE=sparse_q_block_size,
+            SPARSE_KV_BLOCK_SIZE=sparse_kv_block_size,
         )
 
     for choice in choices:

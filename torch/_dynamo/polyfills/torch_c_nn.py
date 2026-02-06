@@ -2,6 +2,8 @@
 Polyfills for torch._C._nn functions.
 """
 
+from typing import Any
+
 import torch
 from torch.overrides import _is_torch_function_mode_enabled, _pop_mode_temporarily
 
@@ -9,7 +11,9 @@ from ..decorators import substitute_in_graph
 
 
 @substitute_in_graph(torch._C._nn._parse_to, skip_signature_check=True)
-def _parse_to_polyfill(*args, **kwargs):  # noqa: F821
+def _parse_to_polyfill(
+    *args: Any, **kwargs: Any
+) -> tuple[torch.device, torch.dtype, bool, torch.memory_format]:
     """
     Polyfill for torch._C._nn._parse_to that parses arguments to nn.Module.to().
 
@@ -76,6 +80,7 @@ def _parse_to_polyfill(*args, **kwargs):  # noqa: F821
     if "memory_format" in kwargs:
         memory_format = kwargs["memory_format"]
 
+    # pyrefly: ignore[bad-return]
     return (device, dtype, non_blocking, memory_format)
 
 

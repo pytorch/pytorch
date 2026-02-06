@@ -149,8 +149,12 @@ if __name__ == "__main__":
         )
         for pr_info in data:
             # sometimes users does not get added, so we check it got uploaded
-            assert "users" in pr_info
-            assert isinstance(pr_info["users"], list)
+            if "users" not in pr_info:
+                raise AssertionError("'users' key not found in pr_info")
+            if not isinstance(pr_info["users"], list):
+                raise AssertionError(
+                    f"'users' must be a list, got {type(pr_info['users'])}"
+                )
         print(f"uploading the following data: \n {data}")
         upload_to_s3(
             bucket_name="torchci-contribution-data",

@@ -19,6 +19,12 @@ from torch._functorch.pyfunctorch import dispatch_functorch, TransformType
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
+try:
+    from types import NotImplementedType  # Python 3.10+
+except ImportError:  # pragma: no cover
+    NotImplementedType = type(NotImplemented)  # type: ignore[misc]
+
+
 if TYPE_CHECKING:
     from torch._subclasses.functional_tensor import BaseFunctionalizeAPI
 
@@ -174,7 +180,16 @@ class OperatorBase:
 
         def functionalize_dispatch_mode_fn(
             mode: FunctionalTensorMode | None, *args: _P.args, **kwargs: _P.kwargs
-        ) -> _T:
+        ) -> _T | NotImplementedType:
+            from torch._higher_order_ops.utils import has_user_subclass
+            from torch._subclasses import FakeTensor
+            from torch._subclasses.functional_tensor import FunctionalTensor
+
+            if has_user_subclass(
+                (args, kwargs),
+                allowed_subclasses=(FakeTensor, FunctionalTensor),
+            ):
+                return NotImplemented
             return fn(PythonFunctionalizeAPI(mode), *args, **kwargs)
 
         def functionalize_functorch_fn(
@@ -1001,9 +1016,9 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
 
         r = self.py_kernels.get(final_key, final_key)
         if cache_result:
-            self._dispatch_cache[key] = r  # pyrefly: ignore [unsupported-operation]
+            self._dispatch_cache[key] = r
             add_cached_op(self)
-        return r  # pyrefly: ignore [bad-return]
+        return r
 
     def name(self):
         return self._name
@@ -1109,7 +1124,7 @@ class TorchBindOpOverload(OpOverload[_P, _T]):
 
         if not isinstance(handler, Callable):  # type: ignore[arg-type]
             raise AssertionError(f"handler must be callable, got {type(handler)}")
-        return handler(*args, **kwargs)  # pyrefly: ignore [bad-return]
+        return handler(*args, **kwargs)
 
 
 def _must_dispatch_in_python(args, kwargs):
