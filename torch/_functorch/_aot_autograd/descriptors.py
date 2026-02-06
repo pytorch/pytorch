@@ -315,6 +315,10 @@ for ease of understanding the data flow:
 """
 
 import dataclasses
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from torch._guards import Source
 
 
 # TODO: the is_* predicates are a little suspicious because (1) they're not
@@ -326,7 +330,19 @@ import dataclasses
 
 @dataclasses.dataclass(frozen=True)
 class AOTInput:
-    """Describes where an input from an AOTAutograd produced FX graph comes from"""
+    """Describes where an input from an AOTAutograd produced FX graph comes from
+
+    Attributes:
+        source: Optional Dynamo source for this input. When the graph comes from
+            Dynamo, this will be populated with the source that describes where
+            in user code this input originated from. This is useful for deduplication
+            guards and understanding the provenance of inputs.
+    """
+
+    # kw_only=True allows child classes to have non-default fields
+    # repr=False excludes this field from the auto-generated __repr__ to keep
+    # output concise and avoid breaking existing tests/expectations
+    source: "Source | None" = dataclasses.field(default=None, kw_only=True, repr=False)
 
     def expr(self) -> str:
         raise NotImplementedError("Subclasses must implement expr()")
