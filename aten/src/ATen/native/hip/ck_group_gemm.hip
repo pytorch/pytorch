@@ -377,7 +377,7 @@ void launch_grouped_bgemm_ck_impl_dispatch(
     if (p_a_ptrs.size() == 0) {
         return;
     }
-    
+
     // Initialize d_ptrs with the correct size
     std::vector<std::array<const void*, 0>> d_ptrs(p_a_ptrs.size());
 
