@@ -22,13 +22,18 @@ Programmatic breakpoints (for Dynamo developers):
         codegen.extend_output(create_breakpoint())
 """
 
+from __future__ import annotations
+
 import dis
 import sys
 import types
-from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any, cast
+from typing import Any, cast, Self, TYPE_CHECKING
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Generator
 
 from .bytecode_transformation import cleaned_instructions, Instruction
 
@@ -47,9 +52,9 @@ class _BreakpointMarker:
     """
 
     __slots__ = ()
-    _instance: "_BreakpointMarker | None" = None
+    _instance: _BreakpointMarker | None = None
 
-    def __new__(cls) -> "_BreakpointMarker":
+    def __new__(cls) -> Self:
         if cls._instance is None:
             cls._instance = cast("_BreakpointMarker", object.__new__(cls))
         return cls._instance
@@ -603,7 +608,7 @@ class _DebugContext:
     # Context manager implementation
     # =========================================================================
 
-    def __enter__(self) -> "_DebugContext":
+    def __enter__(self) -> Self:
         """Start the debug context."""
         from torch._C._dynamo.eval_frame import set_bytecode_debugger_callback
 
