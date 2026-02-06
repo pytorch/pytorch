@@ -107,7 +107,7 @@ pull_torch_tpu() {
     echo "Done."
 }
 
-# sleep 28800 # Debug sleep to connect to runner to streamline debugging, do not submit 
+# sleep 28800 # Debug sleep to connect to runner to streamline debugging, do not submit
 
 # 3. Configuration
 TORCH_TPU_REPO="${TORCH_TPU_REPO:-https://github.com/google-ml-infra/torch_tpu.git}"
