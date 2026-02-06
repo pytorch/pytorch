@@ -24,12 +24,11 @@ jobs:
       build-generates-artifacts: true
       # To match the one pre-installed in the m1 runners
       python-version: 3.12.7
-      # The runner macos-m2-14 is not a typo, it's a custom runner that is different
-      # than our AWS macos-m1-14 runners
       test-matrix: |
         { include: [
           { config: "test_mps", shard: 1, num_shards: 1, runner: "macos-m1-14" },
           { config: "test_mps", shard: 1, num_shards: 1, runner: "macos-m2-15" },
+          { config: "test_mps", shard: 1, num_shards: 1, runner: "macos-m2-26" },
         ]}
     secrets: inherit
 
