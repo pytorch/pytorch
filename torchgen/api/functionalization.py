@@ -108,12 +108,15 @@ def name(
     if reapply_views is None:
         # reapply_views is only important for the fwd lambda,
         # since we always plumb the runtime "reapply_views" argument into the reverse function.
-        assert is_reverse
+        if not is_reverse:
+            raise AssertionError("reapply_views can only be None for reverse")
     if is_reverse:
         return reverse_name(g.view, include_namespace)
     # in the forward case, we just directly call into the at::_ops API (so we always need the namespace)
-    assert include_namespace
-    assert g.view_copy is not None
+    if not include_namespace:
+        raise AssertionError("include_namespace must be True for forward")
+    if g.view_copy is None:
+        raise AssertionError("view_copy must be non-None for forward")
     api_name = (
         g.view.func.name.unambiguous_name()
         if reapply_views
@@ -136,9 +139,11 @@ def reverse_name(f: NativeFunction, include_namespace: bool) -> str:
 
 def returns_type(func: FunctionSchema) -> CType:
     # Assertion: all view ops return tensor-like outputs
-    assert len(func.returns) >= 1
+    if len(func.returns) < 1:
+        raise AssertionError("Expected at least one return value")
     for ret in func.returns:
-        assert ret.type.is_tensor_like()
+        if not ret.type.is_tensor_like():
+            raise AssertionError(f"Expected tensor-like return type, got {ret.type}")
     # However, the return type of the lambda is always an individual tensor.
     # For multi-tensor outputs, each tensor needs to be tracked individually.
     return BaseCType(tensorT)
@@ -178,7 +183,8 @@ def extra_ctor_arguments(func: FunctionSchema) -> list[Binding]:
 # think of them as values that should be captured from the functionalization kernel.
 def attributes(func: FunctionSchema, owning: bool = True) -> list[Binding]:
     args = func.arguments.flat_all
-    assert args[0].type == BaseType(BaseTy.Tensor)
+    if args[0].type != BaseType(BaseTy.Tensor):
+        raise AssertionError(f"Expected first arg to be Tensor, got {args[0].type}")
     return [
         reapply_views_binding,
         inverse_return_mode_binding,
@@ -188,7 +194,8 @@ def attributes(func: FunctionSchema, owning: bool = True) -> list[Binding]:
 
 def op_arguments(func: FunctionSchema, is_reverse: bool) -> list[Binding]:
     args = func.arguments.flat_all
-    assert args[0].type == BaseType(BaseTy.Tensor)
+    if args[0].type != BaseType(BaseTy.Tensor):
+        raise AssertionError(f"Expected first arg to be Tensor, got {args[0].type}")
     non_self_args = args[1:]
     # The forward lambda calls the at::_ops API, while the reverse lambda calls the view inverse API.
     # Both of these follow the dispatcher API.

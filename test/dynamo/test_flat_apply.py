@@ -194,7 +194,8 @@ class GraphModule(torch.nn.Module):
         t: "f32[10]" = l_x_ + l_y_
 
         trace_point_tensor_f_spec : torch.utils._pytree.TreeSpec = self.trace_point_tensor_f_spec
-        flat_apply = torch.ops.higher_order.flat_apply(trace_point_tensor_f_spec, None, l_x_, l_y_, t);  trace_point_tensor_f_spec = l_x_ = l_y_ = t = None
+        trace_point_tensor_input_spec : torch.utils._pytree.TreeSpec = self.trace_point_tensor_input_spec
+        flat_apply = torch.ops.higher_order.flat_apply(trace_point_tensor_f_spec, trace_point_tensor_input_spec, l_x_, l_y_, t);  trace_point_tensor_f_spec = trace_point_tensor_input_spec = l_x_ = l_y_ = t = None
         res: "f32[10]" = flat_apply[0];  flat_apply = None
         return (res,)
 """,  # NOQA: B950
@@ -269,7 +270,8 @@ class GraphModule(torch.nn.Module):
 
         # code: y, z_result1, z_result2 = gn(i.count, i.values)
         gn_f_spec : torch.utils._pytree.TreeSpec = self.gn_f_spec
-        flat_apply = torch.ops.higher_order.flat_apply(gn_f_spec, None, 5, l_i_values);  gn_f_spec = l_i_values = None
+        gn_input_spec : torch.utils._pytree.TreeSpec = self.gn_input_spec
+        flat_apply = torch.ops.higher_order.flat_apply(gn_f_spec, gn_input_spec, 5, l_i_values);  gn_f_spec = gn_input_spec = l_i_values = None
         y: "f32[4, 4]" = flat_apply[0]
         z_result1: "f32[4, 4]" = flat_apply[1]
         z_result2: "f32[4, 4]" = flat_apply[2];  flat_apply = None
@@ -321,7 +323,8 @@ class GraphModule(torch.nn.Module):
 
         # code: y, z_result1, z_result2 = gn(i)
         gn_f_spec : torch.utils._pytree.TreeSpec = self.gn_f_spec
-        flat_apply = torch.ops.higher_order.flat_apply(gn_f_spec, None, 5, l_i_values);  gn_f_spec = l_i_values = None
+        gn_input_spec : torch.utils._pytree.TreeSpec = self.gn_input_spec
+        flat_apply = torch.ops.higher_order.flat_apply(gn_f_spec, gn_input_spec, 5, l_i_values);  gn_f_spec = gn_input_spec = l_i_values = None
         y: "f32[4, 4]" = flat_apply[0]
         z_result1: "f32[4, 4]" = flat_apply[1]
         z_result2: "f32[4, 4]" = flat_apply[2];  flat_apply = None
@@ -402,7 +405,8 @@ class GraphModule(torch.nn.Module):
 
         # code: y, z = gn(i.count, i.values)
         gn_f_spec : torch.utils._pytree.TreeSpec = self.gn_f_spec
-        flat_apply = torch.ops.higher_order.flat_apply(gn_f_spec, None, 5, l_i_values);  gn_f_spec = l_i_values = None
+        gn_input_spec : torch.utils._pytree.TreeSpec = self.gn_input_spec
+        flat_apply = torch.ops.higher_order.flat_apply(gn_f_spec, gn_input_spec, 5, l_i_values);  gn_f_spec = gn_input_spec = l_i_values = None
         y: "f32[4, 4]" = flat_apply[0]
         value: "f32[4, 4]" = flat_apply[1]
         value_1: "f32[4, 4]" = flat_apply[2];  flat_apply = None
