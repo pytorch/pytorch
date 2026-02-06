@@ -277,6 +277,27 @@ class TestLibtorchAgnostic(TestCase):
                 curr_mem = torch.cuda.memory_allocated(device)
                 self.assertEqual(curr_mem, init_mem)
 
+    @xfailIfTorchDynamo
+    @skipIfTorchVersionLessThan(2, 11)  # Requires 2.11 for Float8_e8m0fnu support
+    def test_my_ones_like_with_Float8_e8m0fnu(self, device):
+        import libtorch_agn_2_11 as libtorch_agnostic
+
+        t = torch.zeros(3, 1, device=device, dtype=torch.float8_e8m0fnu)
+        cpu_t = libtorch_agnostic.ops.my_ones_like(t, "cpu")
+        self.assertEqual(cpu_t, torch.ones_like(t, device="cpu"))
+
+        def _make_cuda_tensors(prior_mem):
+            cuda_t = libtorch_agnostic.ops.my_ones_like(t, device)
+            self.assertGreater(torch.cuda.memory_allocated(device), prior_mem)
+            self.assertEqual(cuda_t, torch.ones_like(t, device=device))
+
+        if t.is_cuda:
+            init_mem = torch.cuda.memory_allocated(device)
+            for _ in range(3):
+                _make_cuda_tensors(init_mem)
+                curr_mem = torch.cuda.memory_allocated(device)
+                self.assertEqual(curr_mem, init_mem)
+
     def test_my_transpose(self, device):
         import libtorch_agn_2_9 as libtorch_agnostic
 
