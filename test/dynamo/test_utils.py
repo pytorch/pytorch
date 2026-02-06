@@ -266,7 +266,8 @@ def test_reinplace_counters_use_trigger_name_not_enum_value(self):
 
     # Test edge case: check that we don't use the enum integer value
     # ReInplaceTrigger.AUTO_FUNC_V1 has value 1, so we verify "missed_tensors_1" doesn't exist
-    self.assertNotIn(f"missed_tensors_{trigger.value}",
+    self.assertNotIn(
+        f"missed_tensors_{trigger.value}",
         ReinplaceCounters._values,
         "Should not use enum value (integer) in key, should use trigger.name instead",
     )
