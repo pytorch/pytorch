@@ -519,7 +519,13 @@ void VariableHooks::set_data(
   // hatch for changing a tensor's metadata regardless of its
   // `allow_tensor_metadata_change_` value, and the users are responsible for
   // ensuring this is the behavior they want.
-  self.unsafeGetTensorImpl()->shallow_copy_from(new_data.getIntrusivePtr());
+  c10::TensorImpl *self_impl = self_base.unsafeGetTensorImpl();
+  c10::TensorImpl *new_impl = new_data.unsafeGetTensorImpl();
+  new_impl->unsafe_move_autograd(self_impl);
+
+  // It enables an instance of a subclass of TensorImpl to keep its attributes.
+  at::TensorBase *_self_base = const_cast<at::TensorBase*>(&self_base);
+  _self_base->unsafeSetTensorImpl(new_data);
 }
 
 at::TensorBase VariableHooks::data(const at::TensorBase& self) const {
