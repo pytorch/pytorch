@@ -1537,6 +1537,10 @@ class FunctionSchema:
                 self_a
                 and self_a.argument.annotation
                 and self_a.argument.annotation.is_write
+            ), (
+                f"Inplace operators (ending with '_') must have a mutable self argument "
+                f"with a write annotation (e.g., 'Tensor(a!) self'). "
+                f"schema: {str(self)}"
             )
             if self_a.argument.type == BaseType(BaseTy.Tensor):
                 # All inplace ops with an ordinary `Tensor self` argument should return self,
