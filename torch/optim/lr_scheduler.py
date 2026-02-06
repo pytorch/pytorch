@@ -1156,7 +1156,7 @@ class SequentialLR(LRScheduler):
             )
         self._schedulers = schedulers
         self._milestones = milestones
-        self.last_epoch = last_epoch + 1
+        self.last_epoch = 0
         self.optimizer = optimizer
 
         # Reset learning rates back to initial values
@@ -1169,7 +1169,15 @@ class SequentialLR(LRScheduler):
         # Perform the initial step for only the first scheduler
         self._schedulers[0]._initial_step()
 
-        self._last_lr = schedulers[0].get_last_lr()
+        # Fast-forward to last_epoch by simulating steps
+        # After initialization, last_epoch=0. We need to step (last_epoch - 0) times
+        # to reach the desired last_epoch. For default last_epoch=-1, we don't step.
+        if last_epoch > -1:
+            for _ in range(last_epoch):
+                self.step()
+
+        idx = bisect_right(self._milestones, self.last_epoch)
+        self._last_lr = self._schedulers[idx].get_last_lr()
 
     def recursive_undo(self, sched=None) -> None:
         """
