@@ -251,8 +251,10 @@ pip install --group dev
 ```bash
 pip install mkl-static mkl-include
 # CUDA only: Add LAPACK support for the GPU if needed
-# magma installation: run with active conda environment. specify CUDA version to install
+# CONDA: magma installation: run with active conda environment. specify CUDA version to install, e.g. CUDA 12.4
 .ci/docker/common/install_magma_conda.sh 12.4
+# NON-CONDA: magma installation: in non-conda environment, e.g. venv
+.ci/docker/common/install_magma.sh 12.4
 
 # (optional) If using torch.compile with inductor/triton, install the matching version of triton
 # Run from the pytorch directory after cloning
