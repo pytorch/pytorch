@@ -1365,6 +1365,73 @@ class PallasTestsMixin:
         expected = fn(*ws, x)
         self.assertEqual(result, expected)
 
+    @skip_if_cuda  # Mosaic GPU backend doesn't support axis-based reductions needed for softmax
+    def test_nanogpt(self):
+        """Test a minimal NanoGPT-style transformer block.
+
+        Tests the core transformer operations used in GPT-style models:
+        - Single-head self-attention with causal masking
+        - MLP (feed-forward) block with GELU activation
+        - Residual connections
+
+        Uses 2D tensors (seq_len, embed_dim) to match the existing test_simple_mlp
+        pattern and avoid 3D tensor shape issues in Pallas codegen.
+
+        Note: Skipped on CUDA because JAX's Mosaic GPU backend doesn't support
+        axis-based reductions (reduce with axis= parameter), which is required
+        for softmax. Full reductions work, but partial reductions do not.
+        """
+        seq_len = 32
+        n_embd = 64
+
+        def transformer_block(x, w_q, w_k, w_v, w_proj, w_fc, w_out, mask):
+            T, C = x.shape
+
+            # === Self-Attention ===
+            q = x @ w_q  # (T, C)
+            k = x @ w_k
+            v = x @ w_v
+
+            # Scaled dot-product attention
+            scale = 1.0 / (C**0.5)
+            att = (q @ k.t()) * scale  # (T, T)
+            att = att + mask  # Apply causal mask
+            att = torch.softmax(att, dim=-1)
+            attn_out = att @ v  # (T, C)
+
+            # Output projection + residual
+            x = x + (attn_out @ w_proj)
+
+            # === MLP (Feed-Forward) ===
+            h = x @ w_fc  # (T, 4C)
+            # GELU activation (tanh approximation)
+            h = 0.5 * h * (1.0 + torch.tanh(0.7978845608 * (h + 0.044715 * h * h * h)))
+            x = x + (h @ w_out)  # Residual + project back
+
+            return x
+
+        compiled = self._compile(transformer_block)
+
+        # Initialize weights
+        w_q = torch.randn(n_embd, n_embd, device=self.DEVICE) * 0.02
+        w_k = torch.randn(n_embd, n_embd, device=self.DEVICE) * 0.02
+        w_v = torch.randn(n_embd, n_embd, device=self.DEVICE) * 0.02
+        w_proj = torch.randn(n_embd, n_embd, device=self.DEVICE) * 0.02
+        w_fc = torch.randn(n_embd, 4 * n_embd, device=self.DEVICE) * 0.02
+        w_out = torch.randn(4 * n_embd, n_embd, device=self.DEVICE) * 0.02
+
+        # Causal mask
+        mask = torch.triu(
+            torch.full((seq_len, seq_len), float("-inf"), device=self.DEVICE),
+            diagonal=1,
+        )
+
+        x = torch.randn(seq_len, n_embd, device=self.DEVICE)
+
+        result = compiled(x, w_q, w_k, w_v, w_proj, w_fc, w_out, mask)
+        expected = transformer_block(x, w_q, w_k, w_v, w_proj, w_fc, w_out, mask)
+        self.assertEqual(result, expected)
+
     def test_warpgroup_size_2d_aligned_32x8(self):
         """Test 2D tensor with 32x8 = 256 elements (2 warpgroups)."""
 

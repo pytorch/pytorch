@@ -185,7 +185,8 @@ torch.profiler._utils._init_for_cuda_graphs()
 add_one_graphed = torch.cuda.graphs.make_graphed_callables(add_one, sample_args=(sample_arg,))
 zeros = torch.zeros(10, device="cuda")
 out = add_one_graphed(zeros)
-assert out[0] == 1
+if out[0] != 1:
+    raise AssertionError(f"Expected out[0] == 1, got {out[0]}")
 
 with profile(activities=[ProfilerActivity.CPU]):
     add_one_graphed(zeros)
@@ -1667,7 +1668,8 @@ with profile(
     for _ in range(niters):
         run_batch()
         p.step()
-assert KinetoStepTracker.current_step() == initial_step + 2 * niters
+if KinetoStepTracker.current_step() != initial_step + 2 * niters:
+    raise AssertionError(f"Expected step {initial_step + 2 * niters}, got {KinetoStepTracker.current_step()}")
 """
         try:
             subprocess.check_output(
@@ -2832,7 +2834,8 @@ class TestExperimentalUtils(TestCase):
             with open(json_file_path, "w") as f:
                 json.dump([kineto_events, profiler_events], f)
 
-        assert os.path.exists(json_file_path)
+        if not os.path.exists(json_file_path):
+            raise AssertionError(f"JSON file not found: {json_file_path}")
         with open(json_file_path) as f:
             kineto_events, profiler_events = json.load(f)
 
@@ -3366,23 +3369,40 @@ aten::mm""",
             aten_add_parent: list[FunctionEvent] = [
                 event for event in prof.events() if len(event.cpu_children) == 2
             ]
-            assert len(aten_add_parent) == 1
+            if len(aten_add_parent) != 1:
+                raise AssertionError(
+                    f"Expected 1 parent event, got {len(aten_add_parent)}"
+                )
             aten_add_parent = aten_add_parent[0]
-            assert aten_add_parent.overload_name == "Tensor"
+            if aten_add_parent.overload_name != "Tensor":
+                raise AssertionError(
+                    f"Expected overload_name 'Tensor', got '{aten_add_parent.overload_name}'"
+                )
 
             aten_add_out_event = [
                 c for c in aten_add_parent.cpu_children if c.overload_name == "out"
             ]
-            assert len(aten_add_out_event) == 1
+            if len(aten_add_out_event) != 1:
+                raise AssertionError(
+                    f"Expected 1 out event, got {len(aten_add_out_event)}"
+                )
 
             # Without group_by_overload_name, the overload name is ignored in the key averages
             key_averages = prof.key_averages()
-            assert len(key_averages) == 2
-            assert "Overload Name" not in key_averages.table()
+            if len(key_averages) != 2:
+                raise AssertionError(
+                    f"Expected 2 key averages, got {len(key_averages)}"
+                )
+            if "Overload Name" in key_averages.table():
+                raise AssertionError("Overload Name should not be in table")
 
             key_averages = prof.key_averages(group_by_overload_name=True)
-            assert len(key_averages) == 3
-            assert "Overload Name" in key_averages.table()
+            if len(key_averages) != 3:
+                raise AssertionError(
+                    f"Expected 3 key averages with group_by_overload_name, got {len(key_averages)}"
+                )
+            if "Overload Name" not in key_averages.table():
+                raise AssertionError("Overload Name should be in table")
             validate_json(prof)
 
     def test_expose_kineto_event_metadata(self):
@@ -3394,19 +3414,27 @@ aten::mm""",
                     found_op = False
                     for e in events:
                         if "name" in e and "args" in e and e["name"] == op_name:
-                            assert metadata_key in e["args"], (
-                                f"Metadata for '{op_name}' in Chrome trace did not contain '{metadata_key}'."
-                            )
+                            if metadata_key not in e["args"]:
+                                raise AssertionError(
+                                    f"Metadata for '{op_name}' in Chrome trace did not contain '{metadata_key}'."
+                                )
                             found_op = True
-                    assert found_op, f"Could not find op '{op_name}' in Chrome trace."
+                    if not found_op:
+                        raise AssertionError(
+                            f"Could not find op '{op_name}' in Chrome trace."
+                        )
                 found_op = False
                 for event in prof.events():
                     if event.name == op_name:
-                        assert metadata_key in event.metadata_json, (
-                            f"Metadata for '{op_name}' in FunctionEvent did not contain '{metadata_key}'."
-                        )
+                        if metadata_key not in event.metadata_json:
+                            raise AssertionError(
+                                f"Metadata for '{op_name}' in FunctionEvent did not contain '{metadata_key}'."
+                            )
                         found_op = True
-                assert found_op, f"Could not find op '{op_name}' in prof.events()."
+                if not found_op:
+                    raise AssertionError(
+                        f"Could not find op '{op_name}' in prof.events()."
+                    )
 
         experimental_config = torch._C._profiler._ExperimentalConfig(
             expose_kineto_event_metadata=True
