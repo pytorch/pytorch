@@ -3828,6 +3828,16 @@ def check_verbose(obj: Any, is_inlined_call: bool = False) -> SkipResult:
             "don't skip because we're inside _force_inline() context",
         )
 
+    # For eval frame callback (not inlined calls), allow tracing nn.Module.forward
+    # methods even if they're in skipfiles. This enables Dynamo to capture
+    # operations after a frame skip (e.g., when FSDP hooks cause graph breaks).
+    if not is_inlined_call and isinstance(obj, types.CodeType):
+        if is_builtin_nn_module_forward(obj):
+            return SkipResult(
+                False,
+                "builtin nn.Module.forward allowed for eval frame tracing",
+            )
+
     if isinstance(
         obj,
         (
@@ -3890,6 +3900,34 @@ def check_verbose(obj: Any, is_inlined_call: bool = False) -> SkipResult:
 
 def check(obj: Any, is_inlined_call: bool = False) -> bool:
     return check_verbose(obj, is_inlined_call).skipped
+
+
+@functools.cache
+def _nn_modules_dir() -> Optional[str]:
+    """Get the directory path for torch.nn.modules."""
+    import torch.nn.modules
+
+    return _module_dir(torch.nn.modules)
+
+
+def is_builtin_nn_module_forward(code: types.CodeType) -> bool:
+    """
+    Check if a code object is a forward method from a built-in nn.Module.
+
+    This is used by the eval frame callback to allow tracing of nn.Module.forward
+    methods even when they're in skipfiles. This enables Dynamo to capture
+    operations after a frame skip (e.g., from FSDP hooks causing graph breaks).
+
+    Returns True if:
+    - The function is named "forward"
+    - It's defined in torch/nn/modules/
+    """
+    if code.co_name != "forward":
+        return False
+    nn_modules_path = _nn_modules_dir()
+    if nn_modules_path is None:
+        return False
+    return code.co_filename.startswith(nn_modules_path)
 
 
 # skip common third party libs
