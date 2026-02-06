@@ -2352,10 +2352,6 @@ def destroy_process_group(group: ProcessGroup | None = None):
         # We only reset this when WORLD is being destroyed because if this
         # process group is in good state, we aren't dealing with failures.
         _world.group_count = 0
-
-        # Finalize torchcomm comm objects when destroying all process groups
-        if _use_torchcomms_enabled():
-            _world.finalize_comms()
     else:
         pg.shutdown()
         del _world.pg_map[pg]
