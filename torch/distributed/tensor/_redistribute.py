@@ -179,7 +179,6 @@ def _get_flattened_mesh_by_layout(
     """
     root_mesh = mesh._get_root_mesh()
     mesh_dim_names = mesh.mesh_dim_names
-    # test
 
     if mesh_dim_names is None:
         return None
