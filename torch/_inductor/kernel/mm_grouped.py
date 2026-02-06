@@ -254,8 +254,8 @@ def create_offsets(offs_box, m1_is_2d, m2_is_2d, m, n, k, alignment):
         else:
             return None
 
-    end_hint = V.graph.sizevars.size_hint(end)
-    noffs_hint = V.graph.sizevars.size_hint(offs_box.get_size()[0])
+    end_hint = V.graph.sizevars.optimization_hint(end)
+    noffs_hint = V.graph.sizevars.optimization_hint(offs_box.get_size()[0])
     offs = torch.arange(1, noffs_hint + 1, dtype=torch.float32) * (
         end_hint / noffs_hint
     )
