@@ -14,6 +14,7 @@ from torch.types import _dtype
 from torch.utils._exposed_in import exposed_in
 
 from . import autograd, utils
+from ._out_variant import generate_out_variant
 from .effects import EffectType
 
 
@@ -31,6 +32,7 @@ def custom_op(
     device_types: device_types_t = None,
     schema: Optional[str] = None,
     tags: Optional[Sequence[_C.Tag]] = None,
+    autogen_out: Optional[list[str]] = None,
 ) -> Callable[[Callable[..., object]], "CustomOpDef"]: ...
 
 
@@ -44,6 +46,7 @@ def custom_op(
     device_types: device_types_t = None,
     schema: Optional[str] = None,
     tags: Optional[Sequence[_C.Tag]] = None,
+    autogen_out: Optional[list[str]] = None,
 ) -> "CustomOpDef": ...
 
 
@@ -57,6 +60,7 @@ def custom_op(
     device_types: device_types_t = None,
     schema: Optional[str] = None,
     tags: Optional[Sequence[_C.Tag]] = None,
+    autogen_out: Optional[list[str]] = None,
 ) -> Union[Callable[[Callable[..., object]], "CustomOpDef"], "CustomOpDef"]:
     """Wraps a function into custom operator.
 
@@ -89,6 +93,11 @@ def custom_op(
             annotations. We recommend letting us infer a schema unless you
             have a specific reason not to.
             Example: "(Tensor x, int y) -> (Tensor, Tensor)".
+        autogen_out (list[str] | None): If provided, automatically generates an
+            out variant for this operator. The list should contain the names
+            for the out parameters, one per tensor output. For example,
+            ``autogen_out=["output"]`` for a single-output op, or
+            ``autogen_out=["output", "output_scale"]`` for a two-output op.
 
     .. note::
         We recommend not passing in a ``schema`` arg and instead letting us infer
@@ -169,6 +178,11 @@ def custom_op(
                     f"Please make these consistent."
                 )
         result.register_kernel(device_types)(fn)
+
+        # Generate out variant if requested
+        if autogen_out is not None:
+            result._generate_out_variant(autogen_out)
+
         return result
 
     if fn is None:
@@ -799,6 +813,18 @@ class CustomOpDef:
             return register
         else:
             return register(func)
+
+    def _generate_out_variant(self, out_names: list[str]) -> None:
+        r"""Generate and register an out variant for this custom op.
+
+        The out variant is registered with CompositeExplicitAutograd, which works for all
+        backends. If the original op doesn't support a particular backend, the error will
+        occur when the out variant calls the original op.
+
+        Args:
+            out_names: List of names for the out parameters.
+        """
+        generate_out_variant(self._opoverload, out_names, self._lib)
 
     def register_autocast(
         self,

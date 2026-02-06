@@ -423,6 +423,27 @@ class Library:
         handle = hoo_register_effect(op_name, effect)
         self._registration_handles.append(handle)
 
+    def _generate_out_variant(
+        self,
+        op_name: str,
+        out_names: list[str],
+    ) -> None:
+        r"""Generate and register an out variant for a functional operator.
+
+        The out variant is registered with CompositeExplicitAutograd, which works for all
+        backends. If the original op doesn't support a particular backend, the error will
+        occur when the out variant calls the original op.
+
+        Args:
+            op_name: Operator name (along with the overload), e.g. "my_op" or "my_op.overload".
+            out_names: List of names for the out parameters.
+        """
+        from torch._library._out_variant import generate_out_variant
+
+        qualname = f"{self.ns}::{op_name}"
+        op = torch._library.utils.lookup_op(qualname)
+        generate_out_variant(op, out_names, lib=self)
+
     def _destroy(self):
         if self.m is not None:
             self.m.reset()
@@ -1482,6 +1503,67 @@ def register_vmap(
         return register
     else:
         return register(func)
+
+
+def _generate_out_variant(
+    op: _op_identifier,
+    out_names: list[str],
+    /,
+    *,
+    lib: Library | None = None,
+) -> None:
+    r"""Generate and register an out variant for a functional operator.
+
+    Given a functional operator (one that does not mutate its inputs), this function
+    automatically generates an out variant that writes results to pre-allocated output
+    tensors. The out variant calls the functional operator and copies results to the
+    provided output tensors.
+
+    Args:
+        op: The functional operator.
+        out_names: List of names for the out parameters (e.g., ["result"] for single
+            output or ["output", "indices"] for multiple outputs). The number of names
+            must match the number of Tensor outputs from the operator.
+
+    Example::
+        >>> import torch
+        >>>
+        >>> # Define a functional operator
+        >>> torch.library.define("mylib::double", "(Tensor x) -> Tensor")
+        >>>
+        >>> @torch.library.impl("mylib::double", "cpu")
+        >>> def double_impl(x):
+        >>>     return x * 2
+        >>>
+        >>> # Generate the out variant
+        >>> torch.library._generate_out_variant(
+        ...     "mylib::double",
+        ...     ["out"],
+        ... )
+        >>>
+        >>> # Use the out variant
+        >>> x = torch.randn(3)
+        >>> result = torch.empty(3)
+        >>> torch.ops.mylib.double.out(x, out=result)
+        >>> assert torch.allclose(result, x * 2)
+
+    """
+    opdef = _maybe_get_opdef(op)
+    if opdef is not None:
+        return opdef._generate_out_variant(out_names)
+    if isinstance(op, torch._ops.OpOverload):
+        op = op._name
+    if not isinstance(op, str):
+        raise ValueError(
+            f"_generate_out_variant({op}): got unexpected type for op: {type(op)}"
+        )
+
+    namespace, op_name = torch._library.utils.parse_namespace(op)
+    if lib is None:
+        lib = Library(namespace, "FRAGMENT")
+        _keep_alive.append(lib)
+
+    lib._generate_out_variant(op_name, out_names)
 
 
 # If the op was defined in C++, then we want to make sure there was an
