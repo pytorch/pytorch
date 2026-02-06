@@ -8,6 +8,12 @@
 #include <torch/csrc/stable/library.h>
 #include <torch/library.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty_strided.h>
+#include <ATen/ops/from_blob.h>
+#endif // AT_PER_OPERATOR_HEADERS
 #include <ATen/Parallel.h>
 #include <torch/csrc/shim_conversion_utils.h>
 #include <torch/csrc/stable/c/shim.h>
@@ -624,5 +630,48 @@ torch_set_requires_grad(AtenTensorHandle tensor, bool requires_grad) {
     at::Tensor* t =
         torch::aot_inductor::tensor_handle_to_tensor_pointer(tensor);
     t->set_requires_grad(requires_grad);
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError torch_from_blob(
+    void* data,
+    int64_t ndim,
+    const int64_t* sizes_ptr,
+    const int64_t* strides_ptr,
+    int64_t storage_offset,
+    int32_t dtype,
+    int32_t device_type,
+    int32_t device_index,
+    AtenTensorHandle* ret_new_tensor,
+    int32_t layout,
+    const uint8_t* opaque_metadata,
+    int64_t opaque_metadata_size,
+    void (*deleter)(void*)) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    c10::IntArrayRef sizes(sizes_ptr, ndim);
+    c10::IntArrayRef strides(strides_ptr, ndim);
+    c10::Device device(static_cast<c10::DeviceType>(device_type), device_index);
+    c10::TensorOptions options = c10::TensorOptions().device(device).dtype(
+        static_cast<c10::ScalarType>(dtype));
+    at::Tensor tensor;
+    if (data != nullptr) {
+      if (deleter != nullptr) {
+        tensor = at::for_blob(data, sizes)
+                     .strides(strides)
+                     .storage_offset(storage_offset)
+                     .deleter(deleter)
+                     .options(options)
+                     .make_tensor();
+      } else {
+        tensor = at::for_blob(data, sizes)
+                     .strides(strides)
+                     .storage_offset(storage_offset)
+                     .options(options)
+                     .make_tensor();
+      }
+    } else {
+      tensor = at::empty_strided(sizes, strides, options);
+    }
+    *ret_new_tensor = torch::aot_inductor::new_tensor_handle(std::move(tensor));
   });
 }

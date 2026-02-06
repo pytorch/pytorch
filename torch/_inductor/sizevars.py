@@ -939,8 +939,8 @@ class SizeVarAllocator:
                 }
                 # Each node is its own leader/parent initially
                 self.leader = list(range(len(self.expressions)))
-                # Track rank for union-by-rank
-                self.rank = [1] * len(self.expressions)
+                # Track size for union-by-size
+                self.size = [1] * len(self.expressions)
 
                 # Takes each edge from the undirected graph and starts merging them.
                 self._build_canonical_expr_mapping()
@@ -962,7 +962,7 @@ class SizeVarAllocator:
                     return False  # already connected
                 leader, other = self.choose_leader(rootA, rootB)
                 self.leader[other] = leader
-                self.rank[leader] += self.rank[other]
+                self.size[leader] += self.size[other]
                 return True
 
             def find_expr(self, expr: Expr):
@@ -978,12 +978,13 @@ class SizeVarAllocator:
             def choose_leader(self, a: int, b: int):
                 """
                 The leader will become the canonical expression.
+                Returns a (leader, follower) tuple.
 
                 Here are the heuristics used for choosing a leader:
                 1. Backed expression or constants preferred over unbacked expr
                 2. Simpler sub-expr when one contains the other
                 3. Higher frequency across equalities from deferred runtime assertions
-                4. Rank/size of the set
+                4. Size of the set
                 5. Fallback to sympy.Basic.compare
                 """
 
@@ -1013,10 +1014,10 @@ class SizeVarAllocator:
                     if degrees_lhs != degrees_rhs:
                         return degrees_lhs > degrees_rhs
 
-                    # Try to apply union-by-rank optimization to flatten the
+                    # Try to apply union-by-size optimization to flatten the
                     # leader trees.
-                    if self.rank[x] != self.rank[y]:
-                        return self.rank[x] > self.rank[y]
+                    if self.size[x] != self.size[y]:
+                        return self.size[x] > self.size[y]
 
                     # Fallback to sympy.Basic.compare for a deterministic ordering.
                     return lhs.compare(rhs) == -1
