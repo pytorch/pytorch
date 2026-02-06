@@ -469,7 +469,7 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         inp = torch.randn(3)
         self.assertEqual(fn(inp, l), opt_fn(inp, l))
 
-    def test_self_referential_souYrceless(self):
+    def test_self_referential_sourceless(self):
         @torch.compile(backend="eager")
         def fn(x, construct_fn):
             l = construct_fn()
