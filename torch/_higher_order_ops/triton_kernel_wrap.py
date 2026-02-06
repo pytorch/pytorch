@@ -330,6 +330,11 @@ def generate_ttir(
                 return True
         return False
 
+    def is_tensor_like_arg(arg: Any) -> bool:
+        if isinstance(arg, Tensor) or is_stable_tensor_descriptor_arg(arg):
+            return True
+        return False
+
     # Note: one would expect that each input to the triton kernel maps to
     # one input parameter in the TTIR. This is _not_ true for TMA descriptors:
     # one TMA descriptor gets converted into:
@@ -363,7 +368,7 @@ def generate_ttir(
 
         return [name]
 
-    ordered_tensor_names = list(
+    ordered_arg_names = list(
         itertools.chain.from_iterable(
             get_arg_names(name, arg) for name, arg in ordered_args.items()
         )
@@ -525,7 +530,7 @@ def generate_ttir(
     if not ttir_module.verify():
         raise RuntimeError("Verification for TTIR module has failed")
 
-    return ttir_module, ordered_tensor_names
+    return ttir_module, ordered_arg_names
 
 
 def ttir_to_functions(
