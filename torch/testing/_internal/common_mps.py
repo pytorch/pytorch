@@ -43,6 +43,7 @@ if torch.backends.mps.is_available():
             "acos",
             "atan",
             "baddbmm",
+            "block_diag",
             "broadcast_tensors",
             "broadcast_to",
             "chalf",
@@ -927,7 +928,6 @@ if torch.backends.mps.is_available():
             "cdist": None,
             "masked.scatter": [torch.float16, torch.float32],
             "grid_sampler_3d": None,
-            "index_fill": [torch.float16, torch.float32],  # missing `aten::_unique`.
             "igamma": None,  # currently not supported for any device
             "igammac": None,  # currently not supported for any device
             "linalg.solve": [torch.float16, torch.float32],  # missing `aten::lu_solve`.
@@ -985,8 +985,6 @@ if torch.backends.mps.is_available():
             "signal.windows.kaiser": [torch.float32],
             "signal.windows.nuttall": [torch.float32],
             "eye": [torch.float16, torch.float32],
-            # topk fails with duplicate indices
-            "topk": [torch.float16],
             # Could not run 'aten::uniform_' with arguments from the 'SparseCPU' backend
             "to_sparse": None,
             # Exception: the derivative for '_unique2' is not implemented.

@@ -50,6 +50,25 @@ __all__ = [
 aten = torch.ops.aten
 
 
+def _normalize_placements_for_grad(
+    placements: tuple[Placement, ...],
+) -> tuple[Placement, ...]:
+    """
+    Normalize gradient placements by converting Partial to Replicate.
+
+    See the gradient placement guarantees documented in DTensor.from_local's docstring
+    for why Partial forward placements map to Replicate gradient placements. We do this
+    for both from_local and to_local backward.
+    """
+    normalized: list[Placement] = []
+    for p in placements:
+        if p.is_partial():
+            normalized.append(Replicate())
+        else:
+            normalized.append(p)
+    return tuple(normalized)
+
+
 # NOTE [Autograd interaction between torch.Tensor]
 #
 # The autograd functions defined below are being used by the public
@@ -97,7 +116,13 @@ class _ToTorchTensor(torch.autograd.Function):
             grad_output, mesh, dtensor_spec.placements
         )
         tensor_stride = tuple(tensor_stride)
-        grad_placements = grad_placements or dtensor_spec.placements
+
+        # user should provide grad_placements as there's no guarantee on input gradient placement
+        # if grad_placement is None, we provide default placement
+        if grad_placements is None:
+            # See DTensor.from_local docstring for gradient placement guarantees
+            grad_placements = _normalize_placements_for_grad(dtensor_spec.placements)
+
         if (
             tensor_stride == dtensor_meta.stride
             and grad_placements == dtensor_spec.placements
@@ -207,7 +232,6 @@ class _FromTorchTensor(torch.autograd.Function):
         # reshard to the placement when creating DistributedTensor
         # so that the gradient layout matches, and we could return
         # local gradients directly
-        normalized_placements: list[Placement] = []
         # if forward placement is partial, we always redistribute grad_input to Replicate:
         # Partial(fwd) - Replicate(grad_output) - Replicate(grad_input): no redistribution needed
         # Partial(fwd) - Partial(grad_output) - Replicate(grad_input): redistribute Partial to Replicate
@@ -215,17 +239,16 @@ class _FromTorchTensor(torch.autograd.Function):
         # The second case is BC breaking:
         # was: Partial(fwd) - Partial(grad_output) - Partial(grad_input)
         # now: Partial(fwd) - Partial(grad_output) - Replicate(grad_input)
-        for current, target in zip(grad_output.placements, forward_input_placements):
-            if target.is_partial():
-                normalized_placements.append(Replicate())
-            else:
-                normalized_placements.append(target)
+        # See DTensor.from_local docstring for gradient placement guarantees
+        normalized_placements: tuple[Placement, ...] = _normalize_placements_for_grad(
+            forward_input_placements
+        )
 
-        if grad_output.placements != tuple(normalized_placements):
+        if grad_output.placements != normalized_placements:
             current_spec: DTensorSpec = grad_output._spec
             target_spec = DTensorSpec(
                 forward_input_device_mesh,
-                tuple(normalized_placements),
+                normalized_placements,
                 tensor_meta=grad_output._spec.tensor_meta,
             )
             local_tensor = grad_output._local_tensor

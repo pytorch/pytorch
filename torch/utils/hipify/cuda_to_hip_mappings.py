@@ -3444,7 +3444,6 @@ CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict([
     ("HIP_CHECK", "CUDA_CHECK"),
     # ("HIPContext", "CUDAContext"),
     ("CUBLAS_ENFORCE", "HIPBLAS_ENFORCE"),
-    ("getCurrentHIPStream", "getCurrentCUDAStream"),
     ("CaffeHipGetDevice", "CaffeCudaGetDevice"),
 ])
 
