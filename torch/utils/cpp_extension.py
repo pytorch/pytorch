@@ -2625,21 +2625,45 @@ def _get_rocm_arch_flags(cflags: list[str] | None = None) -> list[str]:
                 has_gpu_rdc_flag = True
         if has_custom_flags:
             return [] if has_gpu_rdc_flag else ['-fno-gpu-rdc']
-    # Use same defaults as used for building PyTorch
     # Allow env var to override, just like during initial cmake build.
     _archs = os.environ.get('PYTORCH_ROCM_ARCH', None)
-    if not _archs:
-        archFlags = torch._C._cuda_getArchFlags()
-        if archFlags:
-            archs = archFlags.split()
+
+    # If not given or set as native, determine what's best for the visible GPUs
+    if not _archs or _archs == "native":
+        archs = []
+        # Detect architectures from visible devices (similar to CUDA behavior)
+        try:
+            for i in range(torch.cuda.device_count()):
+                props = torch.cuda.get_device_properties(i)
+                # gcnArchName returns e.g. "gfx942:sramecc+:xnack-", extract just "gfx942"
+                gcn_arch = props.gcnArchName.split(":")[0]
+                if gcn_arch and gcn_arch not in archs:
+                    archs.append(gcn_arch)
+        except Exception:
+            pass  # Fall through to PyTorch build flags
+
+        archs = sorted(archs)  # Sort for consistent ordering (like CUDA)
+        if archs:
+            if not _archs:
+                # Only log on rank 0 in distributed settings to avoid spam
+                if not torch.distributed.is_available() or not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0:
+                    archs_str = ';'.join(archs)
+                    logger.debug(
+                        "PYTORCH_ROCM_ARCH is not set, using PYTORCH_ROCM_ARCH='%s' "
+                        "for visible GPU architectures. Set os.environ['PYTORCH_ROCM_ARCH'] to override.",
+                        archs_str)
         else:
-            archs = []
-            logger.warning(
-                "Failed to auto-detect ROCm architecture. Extensions will be compiled "
-                "without architecture-specific optimizations. Set PYTORCH_ROCM_ARCH "
-                "environment variable to specify target architectures "
-                "(e.g., export PYTORCH_ROCM_ARCH='gfx90a;gfx942')."
-            )
+            # Fall back to PyTorch build-time architectures if no devices detected
+            archFlags = torch._C._cuda_getArchFlags()
+            if archFlags:
+                archs = archFlags.split()
+            else:
+                logger.warning(
+                    "Failed to auto-detect ROCm architecture. Extensions will be compiled "
+                    "without architecture-specific optimizations. Set PYTORCH_ROCM_ARCH "
+                    "environment variable to specify target architectures "
+                    "(e.g., export PYTORCH_ROCM_ARCH='gfx90a;gfx942')."
+                )
     else:
         archs = _archs.replace(' ', ';').split(';')
     flags = [f'--offload-arch={arch}' for arch in archs]
