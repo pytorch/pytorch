@@ -1813,7 +1813,8 @@ test_operator_microbenchmark() {
   TEST_DIR=$(pwd)
 
   test_inductor_set_cpu_affinity
-
+  pip install torch==2.10.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/test/cu128 --force-reinstall
+  pip install ninja --force-reinstall
   cd benchmarks/operator_benchmark/pt_extension
   python -m pip install . -v --no-build-isolation
 
