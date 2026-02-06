@@ -82,8 +82,7 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss_tensor(
 #include <ATen/TensorUtils.h>
 #include <c10/util/irange.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 bool _use_cudnn_ctc_loss(
     const Tensor& log_probs,
@@ -346,7 +345,6 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss_tensor(
   return std::make_tuple(costs, grad);
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
 
 #endif

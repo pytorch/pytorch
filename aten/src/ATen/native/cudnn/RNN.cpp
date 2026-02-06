@@ -115,8 +115,7 @@ Tensor _cudnn_init_dropout_state(
 
 #include <ATen/native/cudnn/RNNUtils.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 // DropoutDescriptor
@@ -1284,7 +1283,7 @@ int64_t _cudnn_rnn_flatten_weight_prologue(
 #endif
 }
 
-} // namespace native
+} // namespace at::native
 
 // Utilities exposed in RNNUtils.h
 namespace cudnn_rnn {
@@ -1679,7 +1678,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
         CUDNN_FWD_MODE_INFERENCE,
         x_descs_arr.desc(),
         &workspace_size,
-        NULL));
+        nullptr));
 #endif
     workspace = at::empty(workspace_size, input.options().dtype(kByte));
     reserve = at::empty({0}, input.options().dtype(kByte));
@@ -1899,7 +1898,7 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
       CUDNN_FWD_MODE_TRAINING,
       x_descs_arr.desc(),
       &workspace_size,
-      NULL));
+      nullptr));
 #endif
   // TODO: put this in the correct device???
   Tensor workspace = at::empty(workspace_size, input.options().dtype(kByte));
@@ -2087,7 +2086,7 @@ std::vector<Tensor> _cudnn_rnn_backward_weight(
       CUDNN_FWD_MODE_TRAINING,
       x_descs_arr.desc(),
       &workspace_size,
-      NULL));
+      nullptr));
 #endif
   Tensor workspace = at::empty(workspace_size, input.options().dtype(kByte));
 #ifndef USE_CUDNN_RNN_V8_API
@@ -2595,6 +2594,10 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
       bidirectional);
 
   TORCH_CHECK(_batch_sizes.dim() == 1, "batch_sizes tensor should be 1D");
+  TORCH_CHECK(
+      _batch_sizes.device().is_cpu(),
+      "batch_sizes tensor should be on CPU, but got ",
+      _batch_sizes.device());
   IntArrayRef batch_sizes{
       _batch_sizes.data_ptr<int64_t>(),
       static_cast<size_t>(_batch_sizes.size(0))};
@@ -2819,7 +2822,6 @@ TORCH_LIBRARY_IMPL(aten, Meta, m) {
 
 } // namespace
 
-} // namespace at
-} // namespace at
+} // namespace at::native
 
 #endif // AT_CUDNN_ENABLED()

@@ -10,8 +10,6 @@
 #include <ATen/ops/unsqueeze.h>
 #endif
 
-#include <onnx/onnx_pb.h>
-
 namespace torch::jit {
 namespace onnx {
 using namespace ::c10::onnx;

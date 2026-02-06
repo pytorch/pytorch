@@ -1,8 +1,5 @@
 #include <ATen/core/Tensor.h>
-#include <ATen/core/Formatting.h>
 #include <ATen/core/VariableHooksInterface.h>
-#include <ATen/core/LegacyTypeDispatch.h>
-#include <ATen/FunctionalTensorWrapper.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/MethodOperators.h>

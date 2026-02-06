@@ -199,6 +199,7 @@ def is_lazy(param: Any) -> bool:
     return isinstance(param, UninitializedTensorMixin)
 
 
+# pyrefly: ignore [inconsistent-inheritance]
 class UninitializedParameter(UninitializedTensorMixin, Parameter):
     r"""A parameter that is not initialized.
 

@@ -71,8 +71,7 @@
 //  - Things that happen in TensorArg
 //    - Check arguments (type, GPU, shape)
 
-namespace at {
-namespace native {
+namespace at::native {
 
 // ---------------------------------------------------------------------
 //
@@ -825,7 +824,6 @@ REGISTER_CUDA_DISPATCH(
     cudnn_convolution_transpose_backward_stub,
     &cudnn_convolution_transpose_backward)
 
-} // namespace native
-} // namespace at
+} // namespace at::native
 
 #endif // AT_CUDNN_ENABLED

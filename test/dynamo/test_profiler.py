@@ -6,6 +6,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._dynamo.utils
 from torch._dynamo.utils import dynamo_timed
+from torch.profiler import record_function
 from torch.testing._internal.common_utils import TemporaryFileName
 
 
@@ -217,6 +218,149 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
                 "Torch-Compiled Region: 1/0",
                 "Torch-Compiled Region: 0/1",
                 "Torch-Compiled Region: 1/0",
+            ],
+        )
+
+    @torch._dynamo.config.patch("capture_profiler_record_function", True)
+    def test_dynamo_preserve_record_func(self):
+        def fn(x):
+            with record_function("my_net1"):
+                a = x.sin()
+            with record_function("my_cos"):
+                b = a.cos()
+            with record_function("my_net2"):
+                c = b + 2
+            return c
+
+        backend = torch._dynamo.testing.AotEagerAndRecordGraphs()
+        fn_c = torch.compile(fn, backend=backend)
+        fn_c(
+            torch.randn(10),
+        )
+        self.assertExpectedInline(
+            backend.graphs[0].code.strip(),
+            """\
+def forward(self, L_x_ : torch.Tensor):
+    l_x_ = L_x_
+    _record_function_enter_new = torch.ops.profiler._record_function_enter_new('my_net1', None)
+    a = l_x_.sin();  l_x_ = None
+    _record_function_exit__record_function = torch.ops.profiler._record_function_exit._RecordFunction(_record_function_enter_new);  _record_function_enter_new = _record_function_exit__record_function = None
+    _record_function_enter_new_1 = torch.ops.profiler._record_function_enter_new('my_cos', None)
+    b = a.cos();  a = None
+    _record_function_exit__record_function_1 = torch.ops.profiler._record_function_exit._RecordFunction(_record_function_enter_new_1);  _record_function_enter_new_1 = _record_function_exit__record_function_1 = None
+    _record_function_enter_new_2 = torch.ops.profiler._record_function_enter_new('my_net2', None)
+    c = b + 2;  b = None
+    _record_function_exit__record_function_2 = torch.ops.profiler._record_function_exit._RecordFunction(_record_function_enter_new_2);  _record_function_enter_new_2 = _record_function_exit__record_function_2 = None
+    return (c,)""",  # noqa: B950
+        )
+        self.assertExpectedInline(
+            backend.fw_graphs[0].code.strip(),
+            """\
+def forward(self, arg0_1):
+    _record_function_enter_new = torch.ops.profiler._record_function_enter_new.default('my_net1')
+    sin = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
+    _record_function_exit = torch.ops.profiler._record_function_exit._RecordFunction(_record_function_enter_new);  _record_function_enter_new = _record_function_exit = None
+    _record_function_enter_new_1 = torch.ops.profiler._record_function_enter_new.default('my_cos')
+    cos = torch.ops.aten.cos.default(sin);  sin = None
+    _record_function_exit_1 = torch.ops.profiler._record_function_exit._RecordFunction(_record_function_enter_new_1);  _record_function_enter_new_1 = _record_function_exit_1 = None
+    _record_function_enter_new_2 = torch.ops.profiler._record_function_enter_new.default('my_net2')
+    add = torch.ops.aten.add.Tensor(cos, 2);  cos = None
+    _record_function_exit_2 = torch.ops.profiler._record_function_exit._RecordFunction(_record_function_enter_new_2);  _record_function_enter_new_2 = _record_function_exit_2 = None
+    return (add,)""",  # noqa: B950
+        )
+        with torch.profiler.profile() as prof:
+            fn_c(
+                torch.randn(10),
+            )
+
+        annotations = [e.name for e in prof.events() if "my_" in e.name]
+        self.assertEqual(
+            annotations,
+            [
+                "my_net1",
+                "my_cos",
+                "my_net2",
+            ],
+        )
+
+    @torch._dynamo.config.patch("capture_profiler_record_function", True)
+    def test_dynamo_preserve_record_func_with_graph_break(self):
+        # Test that record_function works correctly with graph breaks
+        def fn(x):
+            with record_function("pre_graph_break"):
+                a = x.sin()
+            # This causes a graph break
+            torch._dynamo.graph_break()
+            with record_function("post_graph_break"):
+                b = a.cos()
+            return b
+
+        backend = torch._dynamo.testing.AotEagerAndRecordGraphs()
+        fn_c = torch.compile(fn, backend=backend)
+        fn_c(
+            torch.randn(10),
+        )
+
+        # We expect 2 graphs due to the graph break
+        self.assertEqual(len(backend.graphs), 2)
+
+        # First graph should have the pre_graph_break record_function
+        self.assertIn("pre_graph_break", backend.graphs[0].code)
+        self.assertIn("_record_function_enter_new", backend.graphs[0].code)
+        self.assertIn("_record_function_exit", backend.graphs[0].code)
+
+        # Second graph should have the post_graph_break record_function
+        self.assertIn("post_graph_break", backend.graphs[1].code)
+        self.assertIn("_record_function_enter_new", backend.graphs[1].code)
+        self.assertIn("_record_function_exit", backend.graphs[1].code)
+
+        # Verify profiler events work correctly
+        with torch.profiler.profile() as prof:
+            fn_c(
+                torch.randn(10),
+            )
+
+        annotations = [
+            e.name
+            for e in prof.events()
+            if e.name in ["pre_graph_break", "post_graph_break"]
+        ]
+        # Both record_function contexts should appear in profiler events
+        self.assertEqual(
+            annotations,
+            [
+                "pre_graph_break",
+                "post_graph_break",
+            ],
+        )
+
+    @torch._dynamo.config.patch("capture_profiler_record_function", True)
+    def test_dynamo_preserve_record_func_spanning_graph_break(self):
+        # Test that record_function that spans across a graph break raises an error
+        # This prevents the confusing behavior where the context gets duplicated across graphs
+        def fn(x):
+            x = x + 1
+            with record_function("spanning_context"):
+                a = x.sin()
+                torch._dynamo.graph_break()
+                b = a.cos()
+            b = b - 1
+            return b
+
+        fn_c = torch.compile(fn, backend="aot_eager")
+        x = torch.randn(10)
+        fn_c(x)
+        with torch.profiler.profile() as prof:
+            result = fn_c(x)
+
+        self.assertEqual(fn(x), result)
+
+        annotations = [e.name for e in prof.events() if e.name == "spanning_context"]
+        # record_function contexts should appear in profiler events once
+        self.assertEqual(
+            annotations,
+            [
+                "spanning_context",
             ],
         )
 

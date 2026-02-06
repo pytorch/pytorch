@@ -12,7 +12,7 @@ import uuid
 import warnings
 import zipfile
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any
 from typing_extensions import deprecated
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse  # noqa: F401
@@ -77,6 +77,7 @@ __all__ = [
 
 # matches bfd8deac from resnet18-bfd8deac.pth
 HASH_REGEX = re.compile(r"-([a-f0-9]*)\.")
+_PATH_SEP_PATTERN = re.compile(r"[/\\]")
 
 _TRUSTED_REPO_OWNERS = (
     "facebookresearch",
@@ -91,7 +92,7 @@ DEFAULT_CACHE_DIR = "~/.cache"
 VAR_DEPENDENCY = "dependencies"
 MODULE_HUBCONF = "hubconf.py"
 READ_DATA_CHUNK = 128 * 1024
-_hub_dir: Optional[str] = None
+_hub_dir: str | None = None
 
 
 @contextlib.contextmanager
@@ -109,9 +110,11 @@ def _import_module(name, path):
     from importlib.abc import Loader
 
     spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None
+    if spec is None:
+        raise AssertionError(f"failed to load spec from {path}")
     module = importlib.util.module_from_spec(spec)
-    assert isinstance(spec.loader, Loader)
+    if not isinstance(spec.loader, Loader):
+        raise AssertionError(f"expected Loader, got {type(spec.loader)}")
     spec.loader.exec_module(module)
     return module
 
@@ -122,6 +125,48 @@ def _remove_if_exists(path):
             os.remove(path)
         else:
             shutil.rmtree(path)
+
+
+def _safe_extract_zip(zip_file, extract_to):
+    """
+    Safely extract a zip file, preventing zipslip attacks.
+
+    Args:
+        zip_file: ZipFile object to extract
+        extract_to: Directory to extract to
+
+    Raises:
+        ValueError: If any archive entry contains unsafe paths
+    """
+    # Normalize the extraction directory path
+    extract_to = Path(extract_to).resolve(strict=False)
+
+    for member in zip_file.infolist():
+        # Get the normalized path
+        filename = os.path.normpath(member.filename)
+
+        # Check for directory traversal attempts
+        if filename.startswith(("/", "\\")):
+            raise ValueError(f"Archive entry has absolute path: {member.filename}")
+
+        if len(filename) >= 2 and filename[1] == ":" and filename[0].isalpha():
+            raise ValueError(f"Archive entry has absolute path: {member.filename}")
+
+        if ".." in re.split(_PATH_SEP_PATTERN, filename):
+            raise ValueError(
+                f"Archive entry contains directory traversal: {member.filename}"
+            )
+
+        # Construct the full extraction path and verify it's within extract_to
+        out = (extract_to / filename).resolve(strict=False)
+
+        if not out.is_relative_to(extract_to):
+            raise ValueError(
+                f"Archive entry escapes target directory: {member.filename}"
+            )
+
+        # Extract the member safely
+        zip_file.extract(member, extract_to)
 
 
 def _git_archive_link(repo_owner, repo_name, ref):
@@ -223,7 +268,6 @@ def _get_cache_or_reload(
     github,
     force_reload,
     trust_repo,
-    calling_fn,
     verbose=True,
     skip_validation=False,
 ):
@@ -249,7 +293,6 @@ def _get_cache_or_reload(
         repo_name,
         owner_name_branch,
         trust_repo=trust_repo,
-        calling_fn=calling_fn,
     )
 
     use_cache = (not force_reload) and os.path.exists(repo_dir)
@@ -294,8 +337,8 @@ def _get_cache_or_reload(
             extraced_repo_name = cached_zipfile.infolist()[0].filename
             extracted_repo = os.path.join(hub_dir, extraced_repo_name)
             _remove_if_exists(extracted_repo)
-            # Unzip the code and rename the base folder
-            cached_zipfile.extractall(hub_dir)
+            # Unzip the code and rename the base folder using safe extraction
+            _safe_extract_zip(cached_zipfile, hub_dir)
 
         _remove_if_exists(cached_file)
         _remove_if_exists(repo_dir)
@@ -309,7 +352,6 @@ def _check_repo_is_trusted(
     repo_name,
     owner_name_branch,
     trust_repo,
-    calling_fn="load",
 ):
     hub_dir = get_dir()
     filepath = os.path.join(hub_dir, "trusted_list")
@@ -329,20 +371,6 @@ def _check_repo_is_trusted(
         or owner_name_branch in trusted_repos_legacy
         or repo_owner in _TRUSTED_REPO_OWNERS
     )
-
-    # TODO: Remove `None` option in 2.0 and change the default to "check"
-    if trust_repo is None:
-        if not is_trusted:
-            warnings.warn(
-                "You are about to download and run code from an untrusted repository. In a future release, this won't "
-                f"be allowed. To add the repository to your trusted list, change the command to {calling_fn}(..., "
-                "trust_repo=False) and a command prompt will appear asking for an explicit confirmation of trust, "
-                f"or {calling_fn}(..., trust_repo=True), which will assume that the prompt is to be answered with "
-                f"'yes'. You can also use {calling_fn}(..., trust_repo='check') which will only prompt for "
-                f"confirmation if the repo is not already trusted. This will eventually be the default behaviour",
-                stacklevel=2,
-            )
-        return
 
     if (trust_repo is False) or (trust_repo == "check" and not is_trusted):
         response = input(
@@ -417,7 +445,7 @@ def get_dir() -> str:
     return os.path.join(_get_torch_home(), "hub")
 
 
-def set_dir(d: Union[str, os.PathLike]) -> None:
+def set_dir(d: str | os.PathLike) -> None:
     r"""
     Optionally set the Torch Hub directory used to save downloaded models & weights.
 
@@ -432,7 +460,7 @@ def list(
     github,
     force_reload=False,
     skip_validation=False,
-    trust_repo=None,
+    trust_repo="check",
     verbose=True,
 ):
     r"""
@@ -449,7 +477,7 @@ def list(
             specified by the ``github`` argument properly belongs to the repo owner. This will make
             requests to the GitHub API; you can specify a non-default GitHub token by setting the
             ``GITHUB_TOKEN`` environment variable. Default is ``False``.
-        trust_repo (bool, str or None): ``"check"``, ``True``, ``False`` or ``None``.
+        trust_repo (bool or str): ``"check"``, ``True`` or ``False``.
             This parameter was introduced in v1.12 and helps ensuring that users
             only run code from repos that they trust.
 
@@ -460,12 +488,8 @@ def list(
             - If ``"check"``, the repo will be checked against the list of
               trusted repos in the cache. If it is not present in that list, the
               behaviour will fall back onto the ``trust_repo=False`` option.
-            - If ``None``: this will raise a warning, inviting the user to set
-              ``trust_repo`` to either ``False``, ``True`` or ``"check"``. This
-              is only present for backward compatibility and will be removed in
-              v2.0.
 
-            Default is ``None`` and will eventually change to ``"check"`` in v2.0.
+            Default is ``"check"``.
         verbose (bool, optional): If ``False``, mute messages about hitting
             local caches. Note that the message about first download cannot be
             muted. Default is ``True``.
@@ -481,7 +505,6 @@ def list(
         github,
         force_reload,
         trust_repo,
-        "list",
         verbose=verbose,
         skip_validation=skip_validation,
     )
@@ -500,7 +523,7 @@ def list(
     return entrypoints
 
 
-def help(github, model, force_reload=False, skip_validation=False, trust_repo=None):
+def help(github, model, force_reload=False, skip_validation=False, trust_repo="check"):
     r"""
     Show the docstring of entrypoint ``model``.
 
@@ -516,7 +539,7 @@ def help(github, model, force_reload=False, skip_validation=False, trust_repo=No
             specified by the ``github`` argument properly belongs to the repo owner. This will make
             requests to the GitHub API; you can specify a non-default GitHub token by setting the
             ``GITHUB_TOKEN`` environment variable. Default is ``False``.
-        trust_repo (bool, str or None): ``"check"``, ``True``, ``False`` or ``None``.
+        trust_repo (bool or str): ``"check"``, ``True`` or ``False``.
             This parameter was introduced in v1.12 and helps ensuring that users
             only run code from repos that they trust.
 
@@ -527,12 +550,8 @@ def help(github, model, force_reload=False, skip_validation=False, trust_repo=No
             - If ``"check"``, the repo will be checked against the list of
               trusted repos in the cache. If it is not present in that list, the
               behaviour will fall back onto the ``trust_repo=False`` option.
-            - If ``None``: this will raise a warning, inviting the user to set
-              ``trust_repo`` to either ``False``, ``True`` or ``"check"``. This
-              is only present for backward compatibility and will be removed in
-              v2.0.
 
-            Default is ``None`` and will eventually change to ``"check"`` in v2.0.
+            Default is ``"check"``.
     Example:
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_HUB)
         >>> print(torch.hub.help("pytorch/vision", "resnet18", force_reload=True))
@@ -541,7 +560,6 @@ def help(github, model, force_reload=False, skip_validation=False, trust_repo=No
         github,
         force_reload,
         trust_repo,
-        "help",
         verbose=True,
         skip_validation=skip_validation,
     )
@@ -560,7 +578,7 @@ def load(
     model,
     *args,
     source="github",
-    trust_repo=None,
+    trust_repo="check",
     force_reload=False,
     verbose=True,
     skip_validation=False,
@@ -590,7 +608,7 @@ def load(
         *args (optional): the corresponding args for callable ``model``.
         source (str, optional): 'github' or 'local'. Specifies how
             ``repo_or_dir`` is to be interpreted. Default is 'github'.
-        trust_repo (bool, str or None): ``"check"``, ``True``, ``False`` or ``None``.
+        trust_repo (bool or str): ``"check"``, ``True`` or ``False``.
             This parameter was introduced in v1.12 and helps ensuring that users
             only run code from repos that they trust.
 
@@ -601,12 +619,8 @@ def load(
             - If ``"check"``, the repo will be checked against the list of
               trusted repos in the cache. If it is not present in that list, the
               behaviour will fall back onto the ``trust_repo=False`` option.
-            - If ``None``: this will raise a warning, inviting the user to set
-              ``trust_repo`` to either ``False``, ``True`` or ``"check"``. This
-              is only present for backward compatibility and will be removed in
-              v2.0.
 
-            Default is ``None`` and will eventually change to ``"check"`` in v2.0.
+            Default is ``"check"``.
         force_reload (bool, optional): whether to force a fresh download of
             the github repo unconditionally. Does not have any effect if
             ``source = 'local'``. Default is ``False``.
@@ -648,7 +662,6 @@ def load(
             repo_or_dir,
             force_reload,
             trust_repo,
-            "load",
             verbose=verbose,
             skip_validation=skip_validation,
         )
@@ -694,7 +707,7 @@ def _load_local(hubconf_dir, model, *args, **kwargs):
 def download_url_to_file(
     url: str,
     dst: str,
-    hash_prefix: Optional[str] = None,
+    hash_prefix: str | None = None,
     progress: bool = True,
 ) -> None:
     r"""Download object at the given URL to a local path.
@@ -716,17 +729,6 @@ def download_url_to_file(
         ... )
 
     """
-    file_size = None
-    req = Request(url, headers={"User-Agent": "torch.hub"})
-    u = urlopen(req)
-    meta = u.info()
-    if hasattr(meta, "getheaders"):
-        content_length = meta.getheaders("Content-Length")
-    else:
-        content_length = meta.get_all("Content-Length")
-    if content_length is not None and len(content_length) > 0:
-        file_size = int(content_length[0])
-
     # We deliberately save it in a temp file and move it after
     # download is complete. This prevents a local working checkpoint
     # being overridden by a broken download.
@@ -736,39 +738,48 @@ def download_url_to_file(
     for _ in range(tempfile.TMP_MAX):
         tmp_dst = dst + "." + uuid.uuid4().hex + ".partial"
         try:
-            f = open(tmp_dst, "w+b")
+            f = open(tmp_dst, "w+b")  # noqa: SIM115
         except FileExistsError:
             continue
         break
     else:
         raise FileExistsError(errno.EEXIST, "No usable temporary file name found")
-
+    req = Request(url, headers={"User-Agent": "torch.hub"})
     try:
-        if hash_prefix is not None:
-            sha256 = hashlib.sha256()
-        with tqdm(
-            total=file_size,
-            disable=not progress,
-            unit="B",
-            unit_scale=True,
-            unit_divisor=1024,
-        ) as pbar:
-            while True:
-                buffer = u.read(READ_DATA_CHUNK)
-                if len(buffer) == 0:
-                    break
-                f.write(buffer)  # type: ignore[possibly-undefined]
-                if hash_prefix is not None:
-                    sha256.update(buffer)  # type: ignore[possibly-undefined]
-                pbar.update(len(buffer))
+        with urlopen(req) as u:
+            meta = u.info()
+            if hasattr(meta, "getheaders"):
+                content_length = meta.getheaders("Content-Length")
+            else:
+                content_length = meta.get_all("Content-Length")
+            file_size = None
+            if content_length is not None and len(content_length) > 0:
+                file_size = int(content_length[0])
 
-        f.close()
-        if hash_prefix is not None:
-            digest = sha256.hexdigest()  # type: ignore[possibly-undefined]
-            if digest[: len(hash_prefix)] != hash_prefix:
-                raise RuntimeError(
-                    f'invalid hash value (expected "{hash_prefix}", got "{digest}")'
-                )
+            sha256 = hashlib.sha256() if hash_prefix is not None else None
+            with tqdm(
+                total=file_size,
+                disable=not progress,
+                unit="B",
+                unit_scale=True,
+                unit_divisor=1024,
+            ) as pbar:
+                while True:
+                    buffer = u.read(READ_DATA_CHUNK)
+                    if len(buffer) == 0:
+                        break
+                    f.write(buffer)
+                    if sha256 is not None:
+                        sha256.update(buffer)
+                    pbar.update(len(buffer))
+
+            f.close()
+            if sha256 is not None and hash_prefix is not None:
+                digest = sha256.hexdigest()
+                if digest[: len(hash_prefix)] != hash_prefix:
+                    raise RuntimeError(
+                        f'invalid hash value (expected "{hash_prefix}", got "{digest}")'
+                    )
         shutil.move(f.name, dst)
     finally:
         f.close()
@@ -806,7 +817,8 @@ def _legacy_zip_load(
         members = f.infolist()
         if len(members) != 1:
             raise RuntimeError("Only one file(not dir) is allowed in the zipfile")
-        f.extractall(model_dir)
+        # Use safe extraction to prevent zipslip attacks
+        _safe_extract_zip(f, model_dir)
         extraced_name = members[0].filename
         extracted_file = os.path.join(model_dir, extraced_name)
     return torch.load(
@@ -816,11 +828,11 @@ def _legacy_zip_load(
 
 def load_state_dict_from_url(
     url: str,
-    model_dir: Optional[str] = None,
+    model_dir: str | None = None,
     map_location: MAP_LOCATION = None,
     progress: bool = True,
     check_hash: bool = False,
-    file_name: Optional[str] = None,
+    file_name: str | None = None,
     weights_only: bool = False,
 ) -> dict[str, Any]:
     r"""Loads the Torch serialized object at the given URL.

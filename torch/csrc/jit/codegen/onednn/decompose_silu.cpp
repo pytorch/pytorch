@@ -1,9 +1,7 @@
 #include <torch/csrc/jit/codegen/onednn/decompose_silu.h>
 #include <torch/csrc/jit/codegen/onednn/operator.h>
 
-#include <ATen/code_template.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
-#include <torch/csrc/jit/passes/subgraph_rewrite.h>
 
 namespace torch::jit::fuser::onednn {
 

@@ -1,8 +1,9 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/layer_norm.h>
 
-#include <tuple>
 #include <type_traits>
+
+#include <thrust/tuple.h>
 
 #include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
@@ -63,7 +64,7 @@ __global__ void RowwiseMomentsCUDAKernel(
     T_ACC* rstd) {
   using WelfordType = WelfordData<T_ACC, int64_t>;
   using WelfordOp =
-      WelfordOps<T_ACC, T_ACC, int64_t, thrust::pair<T_ACC, T_ACC>>;
+      WelfordOps<T_ACC, T_ACC, int64_t, std::pair<T_ACC, T_ACC>>;
 
   __shared__
       typename std::aligned_storage<sizeof(WelfordType), alignof(WelfordType)>::
@@ -1049,7 +1050,7 @@ void launch_vectorized_layer_norm_kernel(
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 
 #ifdef USE_ROCM
-    // the blocks.x contains the max grid x dimention without invalid configuration error
+    // the blocks.x contains the max grid x dimension without invalid configuration error
     // Fix invalid configuration https://github.com/pytorch/pytorch/issues/136291
     // Ensure all elements are processed. Prepare for next round
     int64_t remaining = M - blocks.x;

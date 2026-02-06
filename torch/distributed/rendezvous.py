@@ -11,7 +11,6 @@ import os
 import sys
 from collections.abc import Callable, Iterator
 from datetime import timedelta
-from typing import Optional
 
 from torch.distributed import FileStore, Store, TCPStore
 
@@ -71,7 +70,7 @@ def _get_use_libuv_from_query_dict(query_dict: dict[str, str]) -> bool:
     return query_dict.get("use_libuv", os.environ.get("USE_LIBUV", "1")) == "1"
 
 
-def _rendezvous_helper(url: str, rank: int, world_size_opt: Optional[int], **kwargs):
+def _rendezvous_helper(url: str, rank: int, world_size_opt: int | None, **kwargs):
     result = urlparse(url)
     if world_size_opt is None:
         world_size = -1
@@ -112,7 +111,6 @@ def rendezvous(url: str, rank: int = -1, world_size: int = -1, **kwargs):
     if not isinstance(world_size, numbers.Integral):
         raise RuntimeError(f"`world_size` must be an integer. {world_size}")
 
-    # pyrefly: ignore [bad-argument-type]
     return _rendezvous_helper(url, rank, world_size, **kwargs)
 
 

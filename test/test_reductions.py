@@ -24,9 +24,15 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS)
 from torch.testing._internal.common_device_type import (
     OpDTypes, expectedFailureMeta, instantiate_device_type_tests, onlyCPU, dtypes, dtypesIfCUDA, dtypesIfCPU,
-    onlyNativeDeviceTypes, onlyCUDA, largeTensorTest, ops, precisionOverride)
+    dtypesIfXPU, onlyNativeDeviceTypes, onlyCUDA, onlyOn, largeTensorTest, ops, precisionOverride)
 from torch.testing._internal.common_methods_invocations import (
     ReductionOpInfo, ReductionPythonRefInfo, reduction_ops, reference_masked_ops)
+
+
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
+
 
 # TODO: replace with make_tensor
 def _generate_input(shape, dtype, device, with_extremal):
@@ -94,7 +100,6 @@ def _reduced_shape(shape, empty_dim_as_none=False, dim=None, keepdim=False):
     return result
 
 class TestReductions(TestCase):
-
     ###########################################################################
     # ReductionOpInfo unit tests
     ###########################################################################
@@ -421,6 +426,8 @@ class TestReductions(TestCase):
          allowed_dtypes=[torch.float32, torch.complex64])
     def test_ref_extremal_values(self, device, dtype, op: ReductionOpInfo):
         """Compares op against reference for input tensors with extremal values"""
+        if "xpu" in device and dtype is torch.complex64 and op.name == "mean":
+            self.skipTest("accuracy issue with this test, see https://github.com/intel/torch-xpu-ops/issues/2300")
         t = make_tensor((5,), dtype=dtype, device=device, exclude_zero=True)
         extremals = [0, 1, nan, inf, -inf]
         for extremal in extremals:
@@ -521,6 +528,8 @@ class TestReductions(TestCase):
 
     @skipIfNoSciPy
     @dtypes(torch.complex64, torch.complex128)
+    @dtypesIfXPU(torch.complex128)
+    # Skip the torch.complex64 for XPU, see https://github.com/intel/torch-xpu-ops/issues/2279 for details
     def test_logcumsumexp_complex(self, device, dtype):
         # logcumsumexp is a more precise way to compute than ``log(cumsum(exp(a)))``
         # and faster than ``[log(sum(exp(a[:i]))) for i in range(a.shape[0])]``
@@ -809,8 +818,8 @@ class TestReductions(TestCase):
                         expected = numpy_op(tensor.cpu().numpy(), dim)
                     actual = pytorch_op(tensor, dim)
                     self._assert_matches_numpy(actual, expected)
-                    if torch.cuda.is_available():
-                        self._assert_matches_numpy(pytorch_op(tensor.cuda(), dim).cpu(), expected)
+                    if device_type in ["cuda", "xpu"]:
+                        self._assert_matches_numpy(pytorch_op(tensor.to(device_type), dim).cpu(), expected)
         do_one(self._make_tensors((5, 400000), use_floating=use_floating,
                                   use_integral=use_integral, use_complex=use_complex), 1)
         do_one(self._make_tensors((3, 5, 7), use_floating=use_floating,
@@ -1013,7 +1022,7 @@ class TestReductions(TestCase):
         # Check whether the returned values are the mode
         self.assertTrue((values == v).all().item())
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @dtypes(*all_types_and(torch.half, torch.bfloat16))
     def test_mode_large(self, device, dtype):
         # i should be less than (d - 2) / 2
@@ -1083,7 +1092,7 @@ class TestReductions(TestCase):
         test_for_dtypes(torch.int32, torch.int32, torch.float32, indices_err)
         test_for_dtypes(torch.float32, torch.float32, torch.float64, indices_err)
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     def test_mode_wrong_device(self, device):
         # CPU Input Tensor
         x = torch.ones(2)
@@ -1144,6 +1153,7 @@ class TestReductions(TestCase):
         self.assertEqual(torch.ne(b, c).sum(), 0)
 
     @dtypesIfCUDA(torch.half, torch.bfloat16, torch.float, torch.double)
+    @dtypesIfXPU(torch.half, torch.bfloat16, torch.float, torch.double)
     @dtypes(torch.half, torch.bfloat16, torch.float, torch.double)
     def test_max_with_inf(self, device, dtype):
         a = torch.tensor([[-inf, -inf, inf, 3], [inf, inf, -inf, -1]], dtype=dtype, device=device)
@@ -1153,6 +1163,7 @@ class TestReductions(TestCase):
         self.assertTrue(torch.amax(a).item() == inf)
 
     @dtypesIfCUDA(torch.half, torch.bfloat16, torch.float, torch.double)
+    @dtypesIfXPU(torch.half, torch.bfloat16, torch.float, torch.double)
     @dtypes(torch.half, torch.float, torch.bfloat16, torch.double)
     def test_min_with_inf(self, device, dtype):
         a = torch.tensor([[-inf, -inf, inf, 3], [inf, inf, -inf, -1]], dtype=dtype, device=device)
@@ -1212,24 +1223,28 @@ class TestReductions(TestCase):
 
     @dtypesIfCPU(torch.float, torch.double, torch.long, torch.bool, torch.half)
     @dtypesIfCUDA(torch.half, torch.float, torch.long, torch.bool)
+    @dtypesIfXPU(torch.half, torch.float, torch.long, torch.bool)
     @dtypes(torch.half, torch.float, torch.double)
     def test_max(self, device, dtype):
         self._test_minmax_helper(torch.max, np.amax, device, dtype)
 
     @dtypesIfCPU(torch.float, torch.double, torch.long, torch.bool, torch.half)
     @dtypesIfCUDA(torch.half, torch.float, torch.long, torch.bool)
+    @dtypesIfXPU(torch.half, torch.float, torch.long, torch.bool)
     @dtypes(torch.half, torch.float, torch.double)
     def test_min(self, device, dtype):
         self._test_minmax_helper(torch.min, np.amin, device, dtype)
 
     @dtypesIfCPU(torch.half, torch.float, torch.double, torch.int, torch.long, torch.bool)
     @dtypesIfCUDA(torch.half, torch.float, torch.int, torch.long, torch.bool)
+    @dtypesIfXPU(torch.half, torch.float, torch.int, torch.long, torch.bool)
     @dtypes(torch.half, torch.float, torch.double)
     def test_amin(self, device, dtype):
         self._test_minmax_helper(torch.amin, np.amin, device, dtype)
 
     @dtypesIfCPU(torch.half, torch.float, torch.double, torch.int, torch.long, torch.bool)
     @dtypesIfCUDA(torch.half, torch.float, torch.int, torch.long, torch.bool)
+    @dtypesIfXPU(torch.half, torch.float, torch.int, torch.long, torch.bool)
     @dtypes(torch.float, torch.double)
     def test_amax(self, device, dtype):
         self._test_minmax_helper(torch.amax, np.amax, device, dtype)
@@ -1237,6 +1252,7 @@ class TestReductions(TestCase):
     @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double, torch.bfloat16, torch.half)
     @dtypesIfCUDA(torch.half, torch.float, torch.bfloat16)
+    @dtypesIfXPU(torch.half, torch.float, torch.bfloat16)
     def test_aminmax(self, device, dtype):
 
         def _amin_wrapper(x, dim=None, keepdims=False):
@@ -1481,7 +1497,7 @@ class TestReductions(TestCase):
         torch.sum(x, (2, 1), out=res2)
         self.assertEqual(res1, res2)
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @dtypes(torch.float16, torch.float32)
     def test_prod_gpu(self, device, dtype):
         x = torch.tensor([2, 3, 6, 9, 8], dtype=dtype, device=device)
@@ -1537,9 +1553,9 @@ class TestReductions(TestCase):
     @onlyCPU
     def test_max_mixed_devices(self, device):
         a = torch.randn(10, device=device)
-        if torch.cuda.is_available():
-            values = torch.randn(10).cuda()
-            indices = torch.cuda.LongTensor()
+        if torch.accelerator.is_available():
+            values = torch.randn(10).to(device_type)
+            indices = torch.LongTensor().to(device_type)
             self.assertRaises(RuntimeError,
                               lambda: torch.max(a, 0, out=(values, indices)))
             self.assertRaises(RuntimeError,
@@ -1548,9 +1564,9 @@ class TestReductions(TestCase):
     @onlyCPU
     def test_min_mixed_devices(self, device):
         a = torch.randn(10, device=device)
-        if torch.cuda.is_available():
-            values = torch.randn(10).cuda()
-            indices = torch.cuda.LongTensor()
+        if torch.accelerator.is_available():
+            values = torch.randn(10).to(device_type)
+            indices = torch.LongTensor().to(device_type)
             self.assertRaises(RuntimeError,
                               lambda: torch.min(a, 0, out=(values, indices)))
             self.assertRaises(RuntimeError,
@@ -1810,6 +1826,8 @@ class TestReductions(TestCase):
             self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None, atol=atol, rtol=rtol)
 
     @dtypes(*all_types_and(torch.half))
+    @dtypesIfXPU(torch.half, torch.int8, torch.uint8, torch.float32)
+    # Acc issue for other types on xpu, see https://github.com/intel/torch-xpu-ops/issues/2295
     def test_argminmax_multiple(self, device, dtype):
         # Case: All Ones
         t = torch.ones(3, 3, device=device, dtype=dtype)
@@ -2019,7 +2037,7 @@ class TestReductions(TestCase):
                     op(x, dim=dim)
 
     # TODO: update this test to compare against NumPy
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     def test_var(self, device):
         cpu_tensor = torch.randn(2, 3, 3)
         device_tensor = cpu_tensor.to(device)
@@ -2035,7 +2053,7 @@ class TestReductions(TestCase):
         self.assertEqual(device_tensor.var(), cpu_tensor.var())
 
     # TODO: update this test to compare against NumPy
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     def test_var_large_input(self, device):
         # Large, not-nice input
         cpu_tensor = torch.randn(2 * 32 * 1024 + 1, 2, 67)
@@ -2044,7 +2062,7 @@ class TestReductions(TestCase):
         self.assertEqual(cpu_tensor.var(2), device_tensor.var(2))
 
     # TODO: update this to compare against NumPy instead of CPU
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @dtypes(torch.double)
     def test_sum_noncontig(self, device, dtype):
         x = torch.randn(1, 75, 57, 20, dtype=dtype, device=device).permute(0, 3, 1, 2)
@@ -2054,7 +2072,7 @@ class TestReductions(TestCase):
         self.assertEqual(x.sum(dim=(1, 3)).cpu(), y.sum(dim=(1, 3)))
 
     # TODO: update this to compare against NumPy instead of CPU
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     def test_min_max_nan(self, device):
         tests = [(lambda x: x.min(), 'min'),
                  (lambda x: x.max(), 'max'),
@@ -2074,7 +2092,7 @@ class TestReductions(TestCase):
                              expected[~torch.isnan(expected)], msg=f'nans for {name}')
 
     # TODO: make this test generic using OpInfos
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     def test_sum_cpu_device_mismatch(self, device):
         x = torch.randn(20, dtype=torch.float32, device=device)
         y = torch.randn(1, dtype=torch.float32)
@@ -2085,7 +2103,7 @@ class TestReductions(TestCase):
             torch.sum(x, dim=[0], dtype=torch.float32, out=y)
 
         # tests half to float promotion
-        if self.device_type == 'cuda':
+        if self.device_type != 'cpu':
             x = x.half()
             with self.assertRaisesRegex(RuntimeError, err_string):
                 torch.sum(x, dim=[0], dtype=torch.float32, out=y)
@@ -2340,7 +2358,7 @@ class TestReductions(TestCase):
         expected = fn(y, 1, keepdim=False)
         self.assertEqual(x[:, 1], expected, msg=f'{fn_name} with out= kwarg')
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @largeTensorTest('10GB')
     def test_reduction_split(self, device):
         # Test reduction when there is a 32bit-indexing split
@@ -2350,7 +2368,7 @@ class TestReductions(TestCase):
         expect = input_[0] + input_[1] + input_[2] + input_[3] + input_[4]
         self.assertEqual(result, expect)
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @dtypes(torch.half, torch.float, torch.double, torch.bfloat16)
     def test_reduction_vectorize_along_input_corner(self, device, dtype):
         # 1D case: sum
@@ -2449,6 +2467,7 @@ class TestReductions(TestCase):
                 self.assertEqual(xs2[j].item(), size[1] - i)
 
     @onlyCUDA
+    # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
     @dtypes(torch.half, torch.float, torch.double, torch.bfloat16)
     def test_reduction_vectorize_along_output(self, device, dtype):
         def run_test(input_):
@@ -2472,7 +2491,7 @@ class TestReductions(TestCase):
         run_test(torch.zeros(64, 61, dtype=dtype, device=device))
         run_test(torch.zeros(64, 1, dtype=dtype, device=device))
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     def test_argminmax_large_axis(self, device):
         # Regression test for gh-32863
         x = torch.zeros(2**31, device=device, dtype=torch.int8)
@@ -2501,6 +2520,7 @@ class TestReductions(TestCase):
 
     @dtypes(torch.int, torch.long, torch.float, torch.double)
     @dtypesIfCUDA(torch.int, torch.long, torch.half, torch.float, torch.double)
+    @dtypesIfXPU(torch.int, torch.long, torch.half, torch.float, torch.double)
     def test_median_real_values(self, device, dtype):
         # Generate random 0-3D sizes
         sizes = [random.sample(range(1, 32), i) for i in range(4) for _ in range(2)]
@@ -2530,6 +2550,7 @@ class TestReductions(TestCase):
 
     @dtypes(torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypesIfXPU(torch.half, torch.float, torch.double)
     def test_median_nan_values(self, device, dtype):
         # Generate random 0-3D sizes
         sizes = [random.sample(range(1, 32), i) for i in range(4) for _ in range(2)]
@@ -2652,7 +2673,7 @@ class TestReductions(TestCase):
                                               [None] + list(range(a.ndim))):
                 result = torch_op(a, q, dim=dim, keepdim=keepdim, interpolation=interpolation)
                 expected = numpy_op(a.cpu().numpy(), q.cpu().numpy(), dim,
-                                    interpolation=interpolation, keepdims=keepdim)
+                                    method=interpolation, keepdims=keepdim)
                 self.assertEqual(result.cpu(), torch.from_numpy(np.array(expected)).type(result.type()))
 
                 # Test out variation
@@ -2696,8 +2717,7 @@ class TestReductions(TestCase):
 
         if self.device_type == "cpu":
             check([1.], [0.5, 1.1, -1], [], {}, r'q values must be in the range \[0, 1\]')
-
-        if self.device_type == "cuda":
+        else:
             with self.assertRaisesRegex(
                     RuntimeError, r'quantile\(\) q tensor must be on the same device as the input tensor'):
                 torch.randn(1, device=device).quantile(torch.tensor(0.5))
@@ -2799,6 +2819,8 @@ class TestReductions(TestCase):
         self.assertEqual(torch_result, numpy_result, exact_dtype=exact_dtype)
 
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    # Driver issue for float64 on XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
+    @dtypesIfXPU(torch.float, torch.cfloat, torch.cdouble)
     def test_var_vs_numpy(self, device, dtype):
         _size = (20, 20)
 
@@ -2810,6 +2832,8 @@ class TestReductions(TestCase):
             self._compare_std_var_with_numpy('var', device, dtype, *test_case)
 
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    # Driver issue for float64 on XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
+    @dtypesIfXPU(torch.float, torch.cfloat, torch.cdouble)
     def test_std_vs_numpy(self, device, dtype):
         _size = (20, 20)
 
@@ -2821,6 +2845,8 @@ class TestReductions(TestCase):
             self._compare_std_var_with_numpy('std', device, dtype, *test_case)
 
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    # Driver issue for float64 on XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
+    @dtypesIfXPU(torch.float, torch.cfloat, torch.cdouble)
     def test_var_correction_vs_numpy(self, device, dtype):
         _size = (20, 20)
         test_args = [
@@ -2855,6 +2881,8 @@ class TestReductions(TestCase):
             self.assertEqual(torch_res, numpy_res)
 
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    # Driver issue for float64 on XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
+    @dtypesIfXPU(torch.float, torch.cfloat, torch.cdouble)
     def test_std_correction_vs_numpy(self, device, dtype):
         _size = (20, 20)
         test_args = [
@@ -2889,6 +2917,8 @@ class TestReductions(TestCase):
             self.assertEqual(torch_res, numpy_res)
 
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    # Driver issue on XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
+    @dtypesIfXPU(torch.float, torch.cfloat)
     def test_std_mean_correction(self, device, dtype):
         _size = (20, 20)
         test_args = [
@@ -2920,6 +2950,8 @@ class TestReductions(TestCase):
             self.assertEqual(mean1, mean2)
 
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    # Driver issue on XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
+    @dtypesIfXPU(torch.float, torch.cfloat)
     def test_var_mean_correction(self, device, dtype):
         _size = (20, 20)
         test_args = [
@@ -3148,7 +3180,7 @@ class TestReductions(TestCase):
             bins=4)
         self.assertEqual(3.0, actual.sum())
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @dtypes(torch.uint8, torch.int8, torch.int, torch.long)
     def test_histc_min_max_corner_cases_cuda(self, device, dtype):
         actual = torch.histc(
@@ -3739,9 +3771,11 @@ as the input tensor excluding its innermost dimension'):
 
             self.assertEqual(actual, expected, msg, exact_dtype=exact_dtype)
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @largeTensorTest("8GB")
     @dtypes(torch.half, torch.chalf, torch.bfloat16)
+    # skip chalf and half when XPU, see issues https://github.com/intel/torch-xpu-ops/issues/1973
+    @dtypesIfXPU(torch.bfloat16)
     def test_reductions_large_half_tensors(self, device, dtype):
         t = torch.ones(2**31, device=device, dtype=dtype)
         t[2**30:] = -1
@@ -3793,7 +3827,7 @@ as the input tensor excluding its innermost dimension'):
         self.assertEqual(result_eager.shape, result_compiled.shape)
         self.assertEqual(result_eager.shape, torch.Size([2, 2]))
 
-instantiate_device_type_tests(TestReductions, globals())
+instantiate_device_type_tests(TestReductions, globals(), allow_xpu=True)
 
 if __name__ == '__main__':
     run_tests()

@@ -2788,7 +2788,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
                 )
 
             def forward(self, x):
-                for activation_name in self.activations.keys():
+                for activation_name in self.activations:
                     x = self.activations[activation_name](x)
                 return x
 
@@ -3117,6 +3117,24 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertFalse(hasattr(compiled_model, "foo"))
 
     def test_globals_change_in_other_file(self):
+        global _variable, _variable1
+
+        prev_variable = _variable
+        prev_variable1 = _variable1
+        prev_test_functions_variable = test_functions._variable
+
+        def restore_globals():
+            global _variable, _variable1
+            _variable = prev_variable
+            _variable1 = prev_variable1
+            test_functions._variable = prev_test_functions_variable
+
+        self.addCleanup(restore_globals)
+
+        _variable = 0
+        _variable1 = 0
+        test_functions._variable = 0
+
         @torch.compile(backend="eager", fullgraph=True)
         def fn(x):
             # Let `update_global` get invoked in a nested frame, to make sure
@@ -3365,7 +3383,8 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
             def __bool__(self):
                 self.bool_invoked += 1
-                return len(self.key_cache)
+                # __bool__ must return a real bool; use truthiness of cache size
+                return len(self.key_cache) > 0
 
         @torch.compile(fullgraph=True, backend="eager")
         def f(x):
@@ -3489,6 +3508,106 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         assert hasattr(model.linear, "weight")
         assert not hasattr(compiled_model.linear, "_tmp_weight")
         torch.testing.assert_close(eager_output, compiled_output)
+
+    def test_submodule_forward_hooks_with_kwargs(self):
+        # Repro from https://github.com/pytorch/pytorch/issues/170110
+        # Tests the forward_hooks_with_kwargs does not result in error
+        # or large number of recompiles by default
+        class SimpleLinear(torch.nn.Module):
+            def __init__(self, dim):
+                super().__init__()
+                self.linear = torch.nn.Linear(dim, dim)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        class NLayerModel(torch.nn.Module):
+            def __init__(self, num_layers, dim):
+                super().__init__()
+                self.layers = torch.nn.ModuleDict(
+                    {str(i): SimpleLinear(dim) for i in range(num_layers)}
+                )
+
+            def forward(self, x):
+                for layer in self.layers.values():
+                    x = layer(x)
+                return x
+
+        def noop_hook(module, args, kwargs, output):
+            pass
+
+        inp = torch.randn(4, 4)
+        model = NLayerModel(num_layers=20, dim=4)
+        output_eager = model(inp)
+
+        # Set hooks for compiled layers
+        for _, layer in model.layers.named_children():
+            layer.linear.register_forward_hook(noop_hook, with_kwargs=True)
+
+        for i, layer in model.layers.named_children():
+            model.layers.register_module(i, torch.compile(layer, fullgraph=True))
+
+        output = model(inp)
+        self.assertEqual(output_eager, output)
+
+    # We cannot skip hook_guards here for correctness - otherwise, we will not
+    # treat the compiled subgraphs correctly (i.e, setting to True results in
+    # incorrect number of compiled hooks called)
+    @patch.object(torch._dynamo.config, "skip_nnmodule_hook_guards", False)
+    def test_submodule_forward_hooks_with_kwargs_complex(self):
+        class SimpleLinear(torch.nn.Module):
+            def __init__(self, dim):
+                super().__init__()
+                self.linear = torch.nn.Linear(dim, dim)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        class NLayerModel(torch.nn.Module):
+            def __init__(self, num_layers, dim):
+                super().__init__()
+                self.layers = torch.nn.ModuleDict(
+                    {str(i): SimpleLinear(dim) for i in range(num_layers)}
+                )
+
+            def forward(self, x):
+                for layer in self.layers.values():
+                    x = layer(x)
+                return x
+
+        def noop_hook(module, args, kwargs, output):
+            pass
+
+        # Tensor avoids recompiles - check that this is called
+        # the same # of times.  NOTE: when skip_nnmodule_hook_guards
+        # is false, these values don't match as we explicitly don't guard
+        call_count = torch.zeros(1)
+
+        def scale_output(module, args, kwargs, output):
+            call_count[0] += 1
+            return output * 0.5
+
+        inp = torch.randn(4, 4)
+        model = NLayerModel(num_layers=20, dim=4)
+        for idx, (_, layer) in enumerate(model.layers.named_children()):
+            if idx % 3 == 0:
+                layer.linear.register_forward_hook(noop_hook, with_kwargs=True)
+            elif idx % 3 == 1:
+                layer.linear.register_forward_hook(scale_output, with_kwargs=True)
+
+        output_eager = model(inp)
+        eager_call_count = call_count.item()
+        self.assertEqual(eager_call_count, 7)
+
+        for i, layer in model.layers.named_children():
+            model.layers.register_module(i, torch.compile(layer, fullgraph=True))
+
+        call_count[0] = 0
+        output = model(inp)
+        compiled_call_count = call_count.item()
+
+        self.assertEqual(compiled_call_count, eager_call_count)
+        self.assertTrue(torch.allclose(output_eager, output))
 
 
 devices = ["cuda", "hpu", "xpu"]

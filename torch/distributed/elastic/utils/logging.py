@@ -10,12 +10,11 @@ import inspect
 import logging
 import os
 import warnings
-from typing import Optional
 
 from torch.distributed.elastic.utils.log_level import get_log_level
 
 
-def get_logger(name: Optional[str] = None) -> logging.Logger:
+def get_logger(name: str | None = None) -> logging.Logger:
     """
     Util function to set up a simple logger that writes
     into stderr. The loglevel is fetched from the LOGLEVEL
@@ -32,13 +31,13 @@ def get_logger(name: Optional[str] = None) -> logging.Logger:
     return _setup_logger(name or _derive_module_name(depth=2))
 
 
-def _setup_logger(name: Optional[str] = None) -> logging.Logger:
+def _setup_logger(name: str | None = None) -> logging.Logger:
     logger = logging.getLogger(name)
     logger.setLevel(os.environ.get("LOGLEVEL", get_log_level()))
     return logger
 
 
-def _derive_module_name(depth: int = 1) -> Optional[str]:
+def _derive_module_name(depth: int = 1) -> str | None:
     """
     Derives the name of the caller module from the stack frames.
 

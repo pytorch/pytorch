@@ -1287,6 +1287,59 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(grad_input.shape, input.shape)
         self.assertEqual(grad_weight.shape, weight.shape)
 
+    def test_aten_conv_backward_op(self, device):
+        # test low-level aten.convolution_backward ops
+        def test_aten_conv_backward_op_output_mask(output_mask):
+            input_cpu = torch.randn(1, 1, 4, 4, device="cpu")
+            weight_cpu = torch.randn(1, 1, 3, 3, device="cpu")
+            grad_output_cpu = torch.randn(1, 1, 2, 2, device="cpu")
+            grad_input_cpu, grad_weight_cpu, grad_bias_cpu = (
+                torch.ops.aten.convolution_backward(
+                    grad_output_cpu,
+                    input_cpu,
+                    weight_cpu,
+                    [1],
+                    (1, 1),
+                    (0, 0),
+                    (1, 1),
+                    False,
+                    (0, 0),
+                    1,
+                    output_mask,
+                )
+            )
+            input = input_cpu.to(device=device)
+            weight = weight_cpu.to(device=device)
+            grad_output = grad_output_cpu.to(device=device)
+            grad_input, grad_weight, grad_bias = torch.ops.aten.convolution_backward(
+                grad_output,
+                input,
+                weight,
+                [1],
+                (1, 1),
+                (0, 0),
+                (1, 1),
+                False,
+                (0, 0),
+                1,
+                output_mask,
+            )
+            if output_mask[0]:
+                self.assertEqual(grad_input_cpu, grad_input)
+            if output_mask[1]:
+                self.assertEqual(grad_weight_cpu, grad_weight)
+            if output_mask[2]:
+                self.assertEqual(grad_bias_cpu, grad_bias)
+
+        test_aten_conv_backward_op_output_mask([True, True, True])
+        test_aten_conv_backward_op_output_mask([True, True, False])
+        test_aten_conv_backward_op_output_mask([True, False, True])
+        test_aten_conv_backward_op_output_mask([True, False, False])
+        test_aten_conv_backward_op_output_mask([False, True, True])
+        test_aten_conv_backward_op_output_mask([False, True, False])
+        test_aten_conv_backward_op_output_mask([False, False, True])
+        test_aten_conv_backward_op_output_mask([False, False, False])
+
     @onlyXPU
     @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
     def test_channels_last_ouput_stride(self, device, dtype):
