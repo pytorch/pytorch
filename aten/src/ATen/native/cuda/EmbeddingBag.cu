@@ -486,9 +486,9 @@ __global__ static void _embedding_bag_per_sample_weights_backward_kernel(
     index_t padding_idx) {
   using accscalar_t = acc_type<scalar_t, true>;
   const int idx = threadIdx.x + blockIdx.x * blockDim.x;
-  const int warp = idx / C10_WARP_SIZE;
-  const int thread_in_warp = idx % C10_WARP_SIZE;
-  const int num_warps = blockDim.x * gridDim.x / C10_WARP_SIZE;
+  const int warp = idx / warpSize;
+  const int thread_in_warp = idx % warpSize;
+  const int num_warps = blockDim.x * gridDim.x / warpSize;
 
   // Each warp is responsible for the accumulation of one sample.
   // This involves doing one dot product between grad[bag_idx] and weight[embedding_idx].
@@ -498,7 +498,7 @@ __global__ static void _embedding_bag_per_sample_weights_backward_kernel(
     const int embedding_idx = (int)indices[sample_idx];
     if (embedding_idx != padding_idx) {
       for (int feature_idx = thread_in_warp; feature_idx < embedding_features;
-          feature_idx += C10_WARP_SIZE) {
+          feature_idx += warpSize) {
         result +=
             grad[grad_stride0 * bag_idx + grad_stride1 * feature_idx] *
             weight[weight_stride0 * embedding_idx + weight_stride1 * feature_idx];

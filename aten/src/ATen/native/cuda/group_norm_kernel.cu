@@ -47,7 +47,7 @@ __global__ void RowwiseMomentsCUDAKernel(
     const int64_t index = i * N + j;
     val = welford_op.reduce(val, static_cast<T_ACC>(X[index]), index);
   }
-  if (blockDim.x <= C10_WARP_SIZE) {
+  if (blockDim.x <= warpSize) {
     val = cuda_utils::WarpReduce(val, welford_op);
   } else {
     // There will be a warning if we declare a __shared__ WelfordType array.
@@ -121,7 +121,7 @@ __global__ void Compute1dBackwardFusedParamsCUDAKernel(
     sum1 += dY[index] * X[index] * gamma_v;
     sum2 += dY[index] * gamma_v;
   }
-  if (blockDim.x <= C10_WARP_SIZE) {
+  if (blockDim.x <= warpSize) {
     sum1 = cuda_utils::WarpReduceSum<T_ACC>(sum1);
     sum2 = cuda_utils::WarpReduceSum<T_ACC>(sum2);
   } else {
@@ -288,7 +288,7 @@ __global__ void ComputeInternalGradientsCUDAKernel(
     sum1 += static_cast<T_ACC>(dY[index]) * static_cast<T_ACC>(X[index]);
     sum2 += static_cast<T_ACC>(dY[index]);
   }
-  if (blockDim.x <= C10_WARP_SIZE) {
+  if (blockDim.x <= warpSize) {
     sum1 = cuda_utils::WarpReduceSum<T_ACC>(sum1);
     sum2 = cuda_utils::WarpReduceSum<T_ACC>(sum2);
   } else {
@@ -331,7 +331,7 @@ __global__ void ComputeBackwardFusedParamsCUDAKernel(
     sum1 += ds[index] * gamma_v;
     sum2 += db[index] * gamma_v;
   }
-  if (blockDim.x <= C10_WARP_SIZE) {
+  if (blockDim.x <= warpSize) {
     sum1 = cuda_utils::WarpReduceSum<T_ACC>(sum1);
     sum2 = cuda_utils::WarpReduceSum<T_ACC>(sum2);
   } else {
