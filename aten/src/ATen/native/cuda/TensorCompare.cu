@@ -6,6 +6,7 @@
 #include <ATen/native/TensorCompare.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <c10/core/Scalar.h>
+#include <c10/util/overflows.h>
 
 
 namespace at::native {
@@ -58,6 +59,27 @@ void clamp_kernel_impl(TensorIteratorBase& iter) {
 void inline launch_clamp_scalar(TensorIteratorBase& iter, Scalar lim0, Scalar lim1, at::native::detail::ClampLimits minmax){
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(), "clamp_scalar_cuda", [&] {
     using opmath_t = at::opmath_type<scalar_t>;
+
+    // Check for overflow when converting scalar limits to the tensor's dtype.
+    // This matches CPU behavior which throws an error for values that cannot
+    // be represented in the target dtype (e.g., 65507.0 for float16).
+    if (lim0.isFloatingPoint()) {
+      TORCH_CHECK(
+          !c10::overflows<scalar_t>(lim0.toDouble()),
+          "clamp_scalar_cuda: value cannot be converted to type ",
+          typeid(scalar_t).name(),
+          " without overflow: ",
+          lim0.toDouble());
+    }
+    if (minmax == at::native::detail::ClampLimits::MinMax && lim1.isFloatingPoint()) {
+      TORCH_CHECK(
+          !c10::overflows<scalar_t>(lim1.toDouble()),
+          "clamp_scalar_cuda: value cannot be converted to type ",
+          typeid(scalar_t).name(),
+          " without overflow: ",
+          lim1.toDouble());
+    }
+
     auto lim0_val = lim0.to<opmath_t>();
     auto lim1_val = lim1.to<opmath_t>();
 
