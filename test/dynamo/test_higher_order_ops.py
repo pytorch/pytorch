@@ -6144,6 +6144,41 @@ class GraphModule(torch.nn.Module):
         ):
             torch.func.vjp(get_vjp, x)
 
+    def test_compile_vjp_fn_returns_correct_gradients(self):
+        def f(x):
+            return x.sin().sum()
+
+        x = torch.randn(4, 5)
+        _, vjp_fn = torch.func.vjp(f, x)
+        v = torch.ones(())
+
+        expected = vjp_fn(v)[0]
+
+        compiled = torch.compile(vjp_fn, backend="eager")
+        self.assertEqual(compiled(v)[0], expected)
+
+        compiled_inductor = torch.compile(vjp_fn, backend="inductor")
+        self.assertEqual(compiled_inductor(v)[0], expected)
+
+    def test_compile_vjp_fn_with_functional_call(self):
+        model = torch.nn.Linear(4, 1)
+        x = torch.randn(4, 4)
+        params = dict(model.named_parameters())
+
+        def f(p):
+            return torch.func.functional_call(model, p, x)
+
+        _, vjp_fn = torch.func.vjp(f, params)
+        v = torch.ones(4, 1)
+
+        expected = vjp_fn(v)[0]
+        compiled = torch.compile(vjp_fn, backend="eager")
+        actual = compiled(v)[0]
+
+        for key in expected:
+            self.assertEqual(actual[key], expected[key])
+            self.assertTrue(expected[key].abs().sum() > 0)
+
     def test_grad_call_compiled_backward_fn(self):
         # See PyTorch issue #138422
         @torch.compile
