@@ -409,10 +409,11 @@ class TestAutogenOut(TestCase):
         @torch.library.custom_op(
             "_TestAutogenOut::multi_out_test",
             mutates_args=(),
-            autogen_out=["output", "output_scale"],
         )
         def multi_out_test(x: Tensor) -> tuple[Tensor, Tensor]:
             return x * 2, x * 3
+
+        multi_out_test._generate_out_variant(["output", "output_scale"])
 
         self.assertTrue("out" in torch.ops._TestAutogenOut.multi_out_test.overloads())
         self.assertExpectedInline(
@@ -438,10 +439,13 @@ class TestAutogenOut(TestCase):
         @torch.library.custom_op(
             "_TestAutogenOut::overloaded_op.scalar",
             mutates_args=(),
-            autogen_out=["result"],
         )
         def overloaded_op_scalar(x: Tensor, n: int) -> Tensor:
             return x * n
+
+        torch.library._generate_out_variant(
+            torch.ops._TestAutogenOut.overloaded_op.scalar, ["result"]
+        )
 
         self.assertTrue(
             "scalar_out" in torch.ops._TestAutogenOut.overloaded_op.overloads()

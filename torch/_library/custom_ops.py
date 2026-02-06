@@ -181,7 +181,7 @@ def custom_op(
 
         # Generate out variant if requested
         if autogen_out is not None:
-            generate_out_variant(result._opoverload, autogen_out, result._lib)
+            result._generate_out_variant(autogen_out)
 
         return result
 
@@ -796,7 +796,13 @@ class CustomOpDef:
                 def wrapped_func(keyset, *args, **kwargs):
                     interpreter = retrieve_current_functorch_interpreter()
                     return custom_function_call_vmap_helper(
-                        interpreter, self._vmap_fn, self._opoverload, *args, **kwargs
+                        # pyrefly: ignore[bad-argument-type]
+                        interpreter,
+                        # pyrefly: ignore[bad-argument-type]
+                        self._vmap_fn,
+                        self._opoverload,
+                        *args,
+                        **kwargs,
                     )
 
                 self._lib.impl(
@@ -807,6 +813,18 @@ class CustomOpDef:
             return register
         else:
             return register(func)
+
+    def _generate_out_variant(self, out_names: list[str]) -> None:
+        r"""Generate and register an out variant for this custom op.
+
+        The out variant is registered with CompositeExplicitAutograd, which works for all
+        backends. If the original op doesn't support a particular backend, the error will
+        occur when the out variant calls the original op.
+
+        Args:
+            out_names: List of names for the out parameters.
+        """
+        generate_out_variant(self._opoverload, out_names, self._lib)
 
     def register_autocast(
         self,

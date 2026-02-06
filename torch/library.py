@@ -1489,7 +1489,12 @@ def register_vmap(
         def wrapped_func(keyset, *args, **kwargs):
             interpreter = retrieve_current_functorch_interpreter()
             return custom_function_call_vmap_helper(
-                interpreter, func, op, *args, **kwargs
+                # pyrefly: ignore[bad-argument-type]
+                interpreter,
+                func,
+                op,
+                *args,
+                **kwargs,
             )
 
         lib.impl(opname, wrapped_func, "FuncTorchBatched", with_keyset=True)
@@ -1543,23 +1548,16 @@ def _generate_out_variant(
         >>> assert torch.allclose(result, x * 2)
 
     """
-    if not isinstance(
-        op, (str, torch._ops.OpOverload, torch._library.custom_ops.CustomOpDef)
-    ):
+    opdef = _maybe_get_opdef(op)
+    if opdef is not None:
+        return opdef._generate_out_variant(out_names)
+    if isinstance(op, torch._ops.OpOverload):
+        op = op._name
+    if not isinstance(op, str):
         raise ValueError(
             f"_generate_out_variant({op}): got unexpected type for op: {type(op)}"
         )
 
-    if isinstance(op, torch._library.custom_ops.CustomOpDef):
-        raise ValueError(
-            "_generate_out_variant does not support CustomOpDef. "
-            "Use autogen_out parameter when defining the custom op instead."
-        )
-
-    if isinstance(op, torch._ops.OpOverload):
-        op = op._name
-
-    assert isinstance(op, str)
     namespace, op_name = torch._library.utils.parse_namespace(op)
     if lib is None:
         lib = Library(namespace, "FRAGMENT")

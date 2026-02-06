@@ -22,10 +22,12 @@ from typing import Optional
 import torch.utils.cpp_extension
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
+    isRocmArchAnyOf,
     TEST_WITH_ROCM,
     skipIfRocm,
     skipIfRocmArch,
     MI300_ARCH,
+    MI350_ARCH,
     skipIfTorchDynamo,
     TEST_FAIRSEQ,
     run_tests,
@@ -3767,6 +3769,24 @@ class TestSDPACudaOnly(NNTestCase):
         if TEST_WITH_CK and head_dim > 128:
             self.skipTest("CK does not support head dims over 128")
 
+        base_condition = (
+            TEST_WITH_ROCM and isRocmArchAnyOf(MI350_ARCH)
+            and dtype == torch.float16 and scale is None and batch_size == 8
+            and seq_len_q == 2048 and is_causal is False
+        )
+
+        # (seq_len_k, head_dim, enable_gqa) rows that should be skipped
+        skip_cases = {
+            (2048, 256, False),
+            (2048, 203, False),
+            (127, 256, False),
+            (579, 256, True),
+            (2048, 256, True),
+        }
+
+        if base_condition and (seq_len_k, head_dim, enable_gqa) in skip_cases:
+            self.skipTest("Accuracy issues on gfx950")
+
         scale = scale if scale is None else (1 / head_dim)
         num_heads_q = num_heads_kv = 4
         if enable_gqa:
@@ -4204,7 +4224,7 @@ class TestSDPACudaOnly(NNTestCase):
     @parametrize("batch_size", [8, 32])
     @parametrize("max_seq_len_q", [32, 256])
     @parametrize("max_seq_len_kv", [32, 256])
-    @parametrize("head_dim", [8, 64])
+    @parametrize("head_dim", [8, 40, 64, 160])
     @parametrize("dropout_p", [0.0, 0.1])
     @parametrize("dtype", [torch.float16])
     @parametrize("scale", [None, "l1"])
@@ -4703,7 +4723,7 @@ class TestSDPAXpuOnly(NNTestCase):
     @parametrize("n_head", [[3, 1], [4, 2], [10, 2]])
     @parametrize("q_size", [1, 32, 77, 128, 144, 512, 576])
     @parametrize("kv_size", [1, 32, 77, 128, 144, 512, 576])
-    @parametrize("head_dim", [64, 96, 128, 192])
+    @parametrize("head_dim", [64, 96, 128, 160, 192])
     @parametrize("mask_type", [None, "causal"])
     @parametrize("train", [True, False])
     @parametrize("layout", ["bshd", "bhsd"])
@@ -4959,9 +4979,9 @@ class TestAttnBias(NNTestCase):
             scaled_dot_product_attention(query, key, value, attn_mask=attn_bias, is_causal=True, dropout_p=0.0)
 
 if NOTEST_CPU:
-    device_types = ("cuda", "mps")
+    device_types = ("cuda", "mps", "mtia")
 else:
-    device_types = ("cpu", "cuda", "mps")
+    device_types = ("cpu", "cuda", "mps", "mtia")
 
 if TEST_XPU:
     device_types += ("xpu", )

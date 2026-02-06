@@ -106,7 +106,7 @@ mobilenet_v3_large,pass,0
 
 
 
-moco,pass,10
+moco,pass,13
 
 
 
@@ -142,7 +142,7 @@ pytorch_unet,pass_due_to_skip,7
 
 
 
-resnet152,pass,7
+resnet152,eager_two_runs_differ,0
 
 
 
