@@ -613,6 +613,17 @@ class RangeVariable(BaseListVariable):
             return ConstantVariable.create(self.range_length())
         elif name in ("count", "__contains__"):
             return SourcelessBuilder.create(tx, self.range_count(*args))
+        elif name == "index":
+            x = args[0].as_python_constant()
+            start, stop, step = self.start(), self.stop(), self.step()
+            in_range = (start <= x < stop) if step > 0 else (stop < x <= start)
+            if in_range and ((x - start) % step) == 0:
+                return ConstantVariable.create((x - start) // step)
+            raise_observed_exception(
+                ValueError,
+                tx,
+                args=[ConstantVariable.create(f"{x} is not in range")],
+            )
         elif name == "__getitem__":
             return self.getitem_const(tx, *args)
         elif name in cmp_name_to_op_mapping:
