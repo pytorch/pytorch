@@ -1020,7 +1020,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # Hierarchically, tx can be seen as the parent of the inline tracer
             # created on call_function. Any exception needs to be propagated to tx
             # for Dynamo to behave correctly
-            return tracer.inline_call_()
+            return tracer.inline_call_with_profiling()
         except ObservedException as e:
             tracer.generator_exhausted = True
             raise e
