@@ -978,8 +978,9 @@ class RedistributeTest(DTensorTestBase):
 
     @with_comms
     def test_redistribute_zero_size_shards(self):
-        # Test redistribution when tensor_size < mesh_size, creating zero-size shards.
-        # With world_size=4 and tensor dim 0 size=2, ranks 2 and 3 have empty local shards.
+        # Adding this test to ensure sharding works when tensor size < mesh size.
+        # Tests correct redistribution with world size = 4, tensor dim size = 2,
+        # ranks 2 & 3 have empty local shards.
         mesh = self.build_device_mesh()
 
         full_tensor = torch.randn(2, 8, device=self.device_type)

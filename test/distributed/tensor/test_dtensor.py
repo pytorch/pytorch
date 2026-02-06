@@ -883,8 +883,9 @@ class DTensorTest(DTensorTestBase):
 
     @with_comms
     def test_ops_zero_size_shards(self):
-        # Test pointwise ops and reductions when tensor_size < mesh_size.
-        # With world_size=4 and tensor dim 0 size=2, ranks 2 and 3 have empty local shards.
+        # Adding this test to ensure sharding works when tensor size < mesh size.
+        # Tests pointwise & reduction with world size = 4, tensor dim size = 2,
+        # ranks 2 & 3 have empty local shards.
         mesh = self.build_device_mesh()
 
         full_tensor = torch.randn(2, 8, device=self.device_type)
