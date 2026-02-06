@@ -462,18 +462,19 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def _contains_self_reference(self) -> bool:
         """Check if this variable references itself (directly or indirectly)."""
-        found_self = [False]
-        cache: dict[int, Any] = {}
+        found_self = False
 
         def check(vt: "VariableTracker") -> None:
+            nonlocal found_self
             if vt is self:
-                found_self[0] = True
+                found_self = True
 
+        # unwrap first iteration - otherwise we can't detect if we revisit self
         for key, subvalue in self.__dict__.items():
             if key not in self._nonvar_fields:
-                VariableTracker.visit(check, subvalue, cache)
+                VariableTracker.visit(check, subvalue)
 
-        return found_self[0]
+        return found_self
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         raise NotImplementedError
