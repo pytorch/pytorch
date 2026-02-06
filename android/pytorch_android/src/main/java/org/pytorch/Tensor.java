@@ -392,7 +392,7 @@ public abstract class Tensor {
   /** Calculates the number of elements in a tensor with the specified shape. */
   public static long numel(long[] shape) {
     checkShape(shape);
-    int result = 1;
+    long result = 1;
     for (long s : shape) {
       result *= s;
     }
