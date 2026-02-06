@@ -231,8 +231,16 @@ def test_reinplace_counters_use_trigger_name_not_enum_value(self):
     expected_bytes_key = "missed_bytes_AUTO_FUNC_V1"
 
     # Verify the keys exist with the correct format
-    self.assertIn(expected_tensor_key, ReinplaceCounters._values, f"Expected key {expected_tensor_key} not found")
-    self.assertIn(expected_bytes_key, ReinplaceCounters._values, f"Expected key {expected_bytes_key} not found")
+    self.assertIn(
+        expected_tensor_key,
+        ReinplaceCounters._values,
+        f"Expected key {expected_tensor_key} not found",
+    )
+    self.assertIn(
+        expected_bytes_key,
+        ReinplaceCounters._values,
+        f"Expected key {expected_bytes_key} not found",
+    )
 
     # Verify the values are correct
     self.assertEqual(ReinplaceCounters._values[expected_tensor_key], 2)
@@ -246,7 +254,11 @@ def test_reinplace_counters_use_trigger_name_not_enum_value(self):
     ReinplaceCounters.add_missed_opportunities(trigger2, 3)
 
     expected_key2 = "missed_tensors_TRITON_OPS"
-    self.assertIn(expected_key2, ReinplaceCounters._values, f"Expected key {expected_key2} not found")
+    self.assertIn(
+        expected_key2,
+        ReinplaceCounters._values,
+        f"Expected key {expected_key2} not found",
+    )
     self.assertEqual(ReinplaceCounters._values[expected_key2], 3)
 
     # Verify the old key doesn't exist
@@ -254,7 +266,10 @@ def test_reinplace_counters_use_trigger_name_not_enum_value(self):
 
     # Test edge case: check that we don't use the enum integer value
     # ReInplaceTrigger.AUTO_FUNC_V1 has value 1, so we verify "missed_tensors_1" doesn't exist
-    self.assertNotIn(f"missed_tensors_{trigger.value}", ReinplaceCounters._values, "Should not use enum value (integer) in key, should use trigger.name instead")
+    self.assertNotIn(f"missed_tensors_{trigger.value}",
+        ReinplaceCounters._values,
+        "Should not use enum value (integer) in key, should use trigger.name instead",
+    )
 
 
 class TestModel(torch.nn.Module):
