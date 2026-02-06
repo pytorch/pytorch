@@ -895,23 +895,27 @@ class ListVariable(CommonListMethodsVariable):
         return self.debug_repr_helper("[", "]")
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        # To deal with self-referential lists
-        codegen.extend_output(
-            [
-                create_instruction("BUILD_LIST", arg=0),
-                create_dup_top(),
-            ]
-        )
-        codegen.add_cache(self)
+        if self._contains_self_reference():
+            # Self-referential list: create empty, cache, then extend
+            codegen.extend_output(
+                [
+                    create_instruction("BUILD_LIST", arg=0),
+                    create_dup_top(),
+                ]
+            )
+            codegen.add_cache(self)
 
-        # Actually populate the list with the items
-        codegen.foreach(self.items)
-        codegen.extend_output(
-            [
-                create_instruction("BUILD_LIST", arg=len(self.items)),
-                create_instruction("LIST_EXTEND", arg=1),
-            ]
-        )
+            codegen.foreach(self.items)
+            codegen.extend_output(
+                [
+                    create_instruction("BUILD_LIST", arg=len(self.items)),
+                    create_instruction("LIST_EXTEND", arg=1),
+                ]
+            )
+        else:
+            # Non-self-referential: use simple codegen
+            codegen.foreach(self.items)
+            codegen.append_output(create_instruction("BUILD_LIST", arg=len(self.items)))
 
     def call_method(
         self,

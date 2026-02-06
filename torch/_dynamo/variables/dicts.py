@@ -353,33 +353,41 @@ class ConstDictVariable(VariableTracker):
                     ]
                 )
             )
-            codegen.extend_output(
-                [
-                    *create_call_function(0, False),
-                    create_dup_top(),
-                ]
-            )
-            codegen.add_cache(self)
+            if self._contains_self_reference():
+                codegen.extend_output(
+                    [
+                        *create_call_function(0, False),
+                        create_dup_top(),
+                    ]
+                )
+                codegen.add_cache(self)
 
-            codegen.append_output(create_dup_top())
-            codegen.load_method("update")
-            self.reconstruct_kvs_into_new_dict(codegen)
-            codegen.extend_output(
-                [
-                    *create_call_method(1),
-                    create_instruction("POP_TOP"),
-                ]
-            )
+                codegen.append_output(create_dup_top())
+                codegen.load_method("update")
+                self.reconstruct_kvs_into_new_dict(codegen)
+                codegen.extend_output(
+                    [
+                        *create_call_method(1),
+                        create_instruction("POP_TOP"),
+                    ]
+                )
+            else:
+                self.reconstruct_kvs_into_new_dict(codegen)
+                codegen.extend_output(create_call_function(1, False))
         else:
-            codegen.extend_output(
-                [
-                    create_instruction("BUILD_MAP", arg=0),
-                    create_dup_top(),
-                ]
-            )
-            codegen.add_cache(self)
-            self.reconstruct_kvs_into_new_dict(codegen)
-            codegen.append_output(create_instruction("DICT_UPDATE", arg=1))
+            if self._contains_self_reference():
+                codegen.extend_output(
+                    [
+                        create_instruction("BUILD_MAP", arg=0),
+                        create_dup_top(),
+                    ]
+                )
+                codegen.add_cache(self)
+                self.reconstruct_kvs_into_new_dict(codegen)
+                codegen.append_output(create_instruction("DICT_UPDATE", arg=1))
+            else:
+                # Non-self-referential: use simple codegen
+                self.reconstruct_kvs_into_new_dict(codegen)
 
     def getitem_const_raise_exception_if_absent(
         self, tx: "InstructionTranslator", arg: VariableTracker
