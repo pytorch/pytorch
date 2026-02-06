@@ -4450,9 +4450,9 @@ Reducing with the addition operation is the same as using
 
 Args:
     dim (int): the axis along which to index
-    index (LongTensor): the indices of elements to scatter, can be either empty
-        or of the same dimensionality as ``src``. When empty, the operation
-        returns ``self`` unchanged.
+    index (Tensor): the indices of elements to scatter. Must have dtype ``torch.int32`` or
+        ``torch.int64``. Can be either empty or of the same dimensionality as ``src``.
+        When empty, the operation returns ``self`` unchanged.
     src (Tensor): the source element(s) to scatter.
 
 Keyword args:
@@ -4548,9 +4548,9 @@ Note:
 
 Args:
     dim (int): the axis along which to index
-    index (LongTensor): the indices of elements to scatter and add, can be
-        either empty or of the same dimensionality as ``src``. When empty, the
-        operation returns ``self`` unchanged.
+    index (Tensor): the indices of elements to scatter and add. Must have dtype ``torch.int32``
+        or ``torch.int64``. Can be either empty or of the same dimensionality as ``src``.
+        When empty, the operation returns ``self`` unchanged.
     src (Tensor): the source elements to scatter and add
 
 Example::
@@ -4610,7 +4610,8 @@ Note:
 
 Args:
     dim (int): the axis along which to index
-    index (LongTensor): the indices of elements to scatter and reduce.
+    index (Tensor): the indices of elements to scatter and reduce. Must have dtype
+        ``torch.int32`` or ``torch.int64``.
     src (Tensor): the source elements to scatter and reduce
     reduce (str): the reduction operation to apply for non-unique indices
         (:obj:`"sum"`, :obj:`"prod"`, :obj:`"mean"`, :obj:`"amax"`, :obj:`"amin"`)
