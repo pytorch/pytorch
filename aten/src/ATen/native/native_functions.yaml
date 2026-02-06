@@ -3027,6 +3027,22 @@
   autogen: native_group_norm_backward.out
   tags: core
 
+# Real-to-Real FFT (rdfft) - inplace CUDA implementation
+- func: fft_rdfft_(Tensor(a!) self, SymInt? n=None, int dim=-1, str? norm=None) -> Tensor(a!)
+  python_module: fft
+  variants: function
+  dispatch:
+    CUDA: fft_rdfft_cuda_
+  autogen: fft_rdfft, fft_rdfft.out
+
+# Inverse Real-to-Real FFT (irdfft) - inplace CUDA implementation
+- func: fft_irdfft_(Tensor(a!) self, SymInt? n=None, int dim=-1, str? norm=None) -> Tensor(a!)
+  python_module: fft
+  variants: function
+  dispatch:
+    CUDA: fft_irdfft_cuda_
+  autogen: fft_irdfft, fft_irdfft.out
+
 # Real to complex forward FFT
 - func: _fft_r2c(Tensor self, int[] dim, int normalization, bool onesided) -> Tensor
   variants: function
