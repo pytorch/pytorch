@@ -471,9 +471,16 @@ def _get_proxies(t: torch.Tensor) -> list[Proxy]:
     mode = torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY)
     if mode is None:
         return proxies
-    if not isinstance(mode, ProxyTorchDispatchMode):
-        raise AssertionError(f"Expected ProxyTorchDispatchMode, got {type(mode)}")
-    tracer = mode.tracer
+    # Accept both ProxyTorchDispatchMode and UnifiedInfraMode (for static dispatch)
+    if not isinstance(mode, (ProxyTorchDispatchMode, UnifiedInfraMode)):
+        raise AssertionError(f"Expected ProxyTorchDispatchMode or UnifiedInfraMode, got {type(mode)}")
+    # Get tracer from the mode
+    if isinstance(mode, UnifiedInfraMode):
+        tracer = mode.static_dispatcher.proxy_mode.tracer if mode.static_dispatcher.proxy_mode else None
+    else:
+        tracer = mode.tracer
+    if tracer is None:
+        return proxies
     for t_inner in get_plain_tensors(t, out=[]):
         if isinstance(t_inner, FunctionalTensor):
             t_inner = torch._from_functional_tensor(t_inner.elem)
@@ -1208,8 +1215,27 @@ def proxy_call(
         name=proxy_mode.tracer.graph._target_to_str(func.overloadpacket.__name__),
     )
 
-    with _enable_thunkify(proxy_mode.tracer):
-        out = func(*args, **kwargs)
+    # When in static dispatch mode, we need to call the fake_mode directly
+    # to get the output shape/dtype without re-entering the full dispatch stack.
+    # This avoids the circular dependency: proxy_call -> func() -> UnifiedInfraMode
+    # -> StaticInfraDispatcher -> proxy_mode.__torch_dispatch__ -> proxy_call
+    static_dispatcher = getattr(proxy_mode, '_static_dispatcher', None)
+    if static_dispatcher is not None and static_dispatcher.fake_mode is not None:
+        # Use fake_mode directly to compute output metadata
+        fake_mode = static_dispatcher.fake_mode
+        with _enable_thunkify(proxy_mode.tracer):
+            out = fake_mode.__torch_dispatch__(
+                func,
+                tuple(type(a) for a in args if isinstance(a, Tensor)),
+                args,
+                kwargs
+            )
+            if out is NotImplemented:
+                # Fallback to direct execution if fake_mode doesn't handle it
+                out = func(*args, **kwargs)
+    else:
+        with _enable_thunkify(proxy_mode.tracer):
+            out = func(*args, **kwargs)
 
     # In some circumstances, we will be tracing in a situation where a tensor
     # is *statically* known to be a constant (currently, this only happens if
@@ -1587,8 +1613,9 @@ def wrap_key(
                 f"Expected same length: {len(flat_proxies)} vs {len(flat_tensors)}"
             )
         with disable_proxy_modes_tracing() as m:
-            if not isinstance(m, ProxyTorchDispatchMode):
-                raise AssertionError(f"Expected ProxyTorchDispatchMode, got {type(m)}")
+            # Accept both ProxyTorchDispatchMode and UnifiedInfraMode (for static dispatch)
+            if not isinstance(m, (ProxyTorchDispatchMode, UnifiedInfraMode)):
+                raise AssertionError(f"Expected ProxyTorchDispatchMode or UnifiedInfraMode, got {type(m)}")
             track_tensor_tree(flat_tensors, flat_proxies, constant=None, tracer=tracer)
 
         if getattr(tracer, "proxy_module_inputs", False):
@@ -1728,6 +1755,106 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
 _temp_remove_pre_dispatch_torch_function_mode = _make_temp_remove_mode_context_manager(
     PreDispatchTorchFunctionMode
 )
+
+
+# Thread-local storage for current decomposition table used by static dispatch
+STATIC_DISPATCH_DECOMP_TABLE: Optional[Mapping[OpOverload, Callable]] = None
+
+
+class StaticInfraDispatcher:
+    """
+    Static dispatcher for infra modes that pre-computes the mode chain.
+
+    Instead of walking through TLS to find modes at each op dispatch,
+    this class holds references to the modes and dispatches through them
+    in a fixed order: functional → proxy → fake.
+
+    Re-entry handling is done in proxy_call - when it detects _static_dispatcher
+    on proxy_mode, it calls fake_mode directly instead of calling func().
+    """
+
+    def __init__(
+        self,
+        functional_mode: Optional[Any] = None,
+        proxy_mode: Optional["ProxyTorchDispatchMode"] = None,
+        fake_mode: Optional[FakeTensorMode] = None,
+        decomposition_table: Optional[Mapping[OpOverload, Callable]] = None,
+    ) -> None:
+        self.functional_mode = functional_mode
+        self.proxy_mode = proxy_mode
+        self.fake_mode = fake_mode
+        self.decomposition_table = decomposition_table or {}
+
+    def dispatch(
+        self,
+        func: OpOverload,
+        types: tuple[type, ...],
+        args: tuple[object, ...],
+        kwargs: dict[str, object],
+    ) -> object:
+        """
+        Dispatch through infra modes in static order.
+
+        The re-entry handling is now done in proxy_call itself - when proxy_call
+        calls func(*args, **kwargs), it checks for _static_dispatcher and calls
+        fake_mode directly instead of re-entering this dispatcher.
+        """
+        # Check decomposition table first (before functionalization)
+        if func in self.decomposition_table:
+            return self.decomposition_table[func](*args, **kwargs)
+
+        # Chain through modes: functional → proxy → fake
+        if self.functional_mode is not None:
+            result = self.functional_mode.__torch_dispatch__(func, types, args, kwargs)
+            if result is not NotImplemented:
+                return result
+
+        if self.proxy_mode is not None:
+            # proxy_call is aware of static dispatch and handles re-entry internally
+            result = self.proxy_mode.__torch_dispatch__(func, types, args, kwargs)
+            if result is not NotImplemented:
+                return result
+
+        # Fallback to fake mode or direct execution
+        if self.fake_mode is not None:
+            result = self.fake_mode.__torch_dispatch__(func, types, args, kwargs)
+            if result is not NotImplemented:
+                return result
+
+        # All modes declined - execute the op directly
+        return func(*args, **kwargs)
+
+
+class UnifiedInfraMode(TorchDispatchMode):
+    """
+    Single TorchDispatchMode that wraps StaticInfraDispatcher.
+
+    This mode replaces the stack of individual infra modes with a single
+    mode that statically routes dispatch through them in the correct order.
+    """
+
+    def __init__(
+        self,
+        static_dispatcher: StaticInfraDispatcher,
+        dispatch_key: Optional[torch._C.DispatchKey] = None,
+    ) -> None:
+        super().__init__(dispatch_key)
+        self.static_dispatcher = static_dispatcher
+        # Mark as infra mode
+        self._mode_key = torch._C._TorchDispatchModeKey.PROXY
+
+    def __torch_dispatch__(
+        self,
+        func: OpOverload,
+        types: tuple[type, ...],
+        args: tuple[object, ...] = (),
+        kwargs: Optional[dict[str, object]] = None,
+    ) -> object:
+        return self.static_dispatcher.dispatch(func, types, args, kwargs or {})
+
+    @classmethod
+    def is_infra_mode(cls) -> bool:
+        return True
 
 
 class ProxyTorchDispatchMode(TorchDispatchMode):
@@ -2414,6 +2541,7 @@ class _MakefxTracer:
         parent_tracer: Optional[_MakefxTracer] = None,
         proxy_module_inputs: bool = False,
         _disable_torch_fn_metadata_mode: bool = False,
+        static_dispatch: bool = False,
     ) -> None:
         # Configurations that are used to initialize the context managers and their states.
         # Should not modify them during tracing.
@@ -2429,6 +2557,7 @@ class _MakefxTracer:
         self.record_module_stack: bool = record_module_stack
         self._allow_fake_constant: bool = _allow_fake_constant
         self._error_on_data_dependent_ops: bool = _error_on_data_dependent_ops
+        self.static_dispatch: bool = static_dispatch
 
         # All context managers and their states should be initialized before tracing based on the inputs
         # and configurations. After tracing, their states should be cleaned except for shape_env.
@@ -2722,7 +2851,132 @@ class _MakefxTracer:
 
     def trace(self, f: Callable, *args: object) -> fx.GraphModule:
         with self._init_modes_from_inputs(f, args):
-            return self._trace_inner(f, *args)
+            if self.static_dispatch:
+                return self._trace_with_static_dispatch(f, *args)
+            else:
+                return self._trace_inner(f, *args)
+
+    def _trace_with_static_dispatch(self, f: Callable, *args: object) -> GraphModule:
+        """
+        Trace using static dispatch mode with UnifiedInfraMode.
+
+        This mode eliminates TLS stack navigation by using a single mode
+        that statically routes dispatch through infra modes in a known order:
+        FunctionalTensorMode → ProxyTorchDispatchMode → FakeTensorMode
+        """
+        phs = pytree.tree_map(lambda _: fx.PH, args)
+
+        def _wrap_fake(args: T) -> T:
+            arg_count = 0
+
+            def inner_wrap_fake(x: object) -> object:
+                nonlocal arg_count
+                if isinstance(x, torch.Tensor):
+                    return self._wrap_fake_for_trace_inner(x, phs, arg_count)
+                return x
+
+            wrapped = pytree.tree_map_with_path(
+                lambda keypath, x: inner_wrap_fake(x), args
+            )
+            return wrapped
+
+        def _wrap_func(f: Callable, phs: tuple[object, ...]) -> Callable:
+            if not hasattr(inspect.unwrap(f), "__code__"):
+                return f
+            if hasattr(f, "__wrapped__"):
+                f = f.__wrapped__  # type: ignore[union-attr]
+            argcount = f.__code__.co_argcount  # type: ignore[union-attr]
+            if argcount != len(phs):
+                return fake_signature(f, len(phs))
+            return f
+
+        args = _wrap_fake(args)
+        func = _wrap_func(f, phs)
+
+        proxy_mode: ProxyTorchDispatchMode = typing.cast(
+            ProxyTorchDispatchMode, self.proxy_mode
+        )
+
+        # Create static dispatcher with all infra modes
+        static_dispatcher = StaticInfraDispatcher(
+            functional_mode=None,
+            proxy_mode=proxy_mode,
+            fake_mode=self.fake_tensor_mode,
+            decomposition_table=self.decomposition_table,
+        )
+
+        # Set the static dispatcher on proxy_mode so proxy_call can access it
+        # This allows proxy_call to bypass re-entry and call fake_mode directly
+        proxy_mode._static_dispatcher = static_dispatcher  # type: ignore[attr-defined]
+
+        # Create unified mode that wraps the static dispatcher
+        unified_mode = UnifiedInfraMode(static_dispatcher)
+
+        if self.fx_tracer is None:
+            raise AssertionError("fx_tracer should not be None")
+
+        # Trace with unified mode instead of individual mode stack
+        # IMPORTANT: Do NOT enter fake_tensor_mode separately when using static dispatch.
+        # The StaticInfraDispatcher handles fake_tensor_mode internally, and entering it
+        # separately would cause the TLS stack to have fake_mode, which would intercept
+        # re-entrant calls from proxy_call's func(*args, **kwargs) before our static
+        # dispatcher can handle them properly.
+        with ExitStack() as stack:
+            stack.enter_context(decompose(self.decomposition_table))
+            # Use unified mode instead of proxy_mode (and instead of fake_tensor_mode)
+            stack.enter_context(unified_mode)
+            stack.enter_context(self.python_dispatcher_mode)
+            stack.enter_context(self.proxy_function_mode)
+            stack.enter_context(self.torch_fn_metadata_mode)
+            stack.enter_context(disable_autocast_cache())
+            stack.enter_context(_set_make_fx_tracer(self))
+
+            try:
+                t = dispatch_trace(
+                    wrap_key(func, args, self.fx_tracer, self.pre_dispatch),
+                    tracer=self.fx_tracer,
+                    concrete_args=tuple(phs),
+                )
+            except Exception:
+                trace_structured(
+                    "artifact",
+                    metadata_fn=lambda: {
+                        "name": "make_fx_fail_partial_static",
+                        "encoding": "string",
+                    },
+                    payload_fn=lambda: self.fx_tracer.graph.python_code(  # type: ignore[union-attr]
+                        root_module="self",
+                        verbose=True,
+                        include_stride=True,
+                        include_device=True,
+                    ).src,
+                )
+                raise
+
+        if self.tracing_mode == "symbolic":
+            if self.fake_tensor_mode is None:
+                raise AssertionError("fake_tensor_mode should not be None")
+            t.shape_env = self.fake_tensor_mode.shape_env  # type: ignore[assignment]
+
+        return t
+
+    def _wrap_fake_for_trace_inner(
+        self, x: torch.Tensor, phs: tuple[object, ...], arg_count: int
+    ) -> torch.Tensor:
+        """Wrap a tensor for tracing, reusing logic from _trace_inner."""
+        if self.tracing_mode == "real":
+            return x
+
+        if self.fake_tensor_mode is None:
+            raise AssertionError("fake_tensor_mode should not be None")
+
+        if isinstance(x, FakeTensor):
+            return x
+
+        # Create fake tensor
+        return self.fake_tensor_mode.from_tensor(
+            x, static_shapes=self.tracing_mode == "fake"
+        )
 
     def is_hop_subgraph_tracer(self) -> bool:
         return self.parent_tracer is not None
@@ -2789,6 +3043,7 @@ def make_fx(
     record_stack_traces: bool = False,
     proxy_module_inputs: bool = False,
     _disable_torch_fn_metadata_mode: bool = False,
+    static_dispatch: bool = False,
 ) -> Callable[..., GraphModule]:
     """
     Given a function f, return a new function which when executed with valid
@@ -2796,6 +3051,9 @@ def make_fx(
     were executed during the course of execution.
 
     If record_stack_traces is True, the stack trace will be preserved on node.meta["stack_trace"]
+
+    If static_dispatch is True, use unified schema dispatch mode for potentially
+    faster tracing by avoiding dynamic dispatch overhead.
     """
 
     if tracing_mode not in ["real", "fake", "symbolic"]:
@@ -2817,6 +3075,7 @@ def make_fx(
         or config.trace.provenance_tracking_level == 1,
         proxy_module_inputs=proxy_module_inputs,
         _disable_torch_fn_metadata_mode=_disable_torch_fn_metadata_mode,
+        static_dispatch=static_dispatch,
     )
 
     @functools.wraps(f)
