@@ -771,6 +771,25 @@ class MultiStepLR(LRScheduler):
             for base_lr in self.base_lrs
         ]
 
+    @override
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+        """Load the scheduler's state.
+
+        Args:
+            state_dict (dict): scheduler state. Should be an object returned
+                from a call to :meth:`state_dict`.
+
+        Note:
+            This method converts the milestone keys to integers to handle
+            checkpoints where the keys were serialized as strings.
+        """
+        if "milestones" in state_dict:
+            state_dict = state_dict.copy()
+            state_dict["milestones"] = Counter(
+                {int(k): v for k, v in state_dict["milestones"].items()}
+            )
+        super().load_state_dict(state_dict)
+
 
 class ConstantLR(LRScheduler):
     """Multiply the learning rate of each parameter group by a small constant factor.
