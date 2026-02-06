@@ -69,7 +69,8 @@ def from_fun(t: object) -> object:
     if not isinstance(t, FunctionalTensor):
         # quick sanity assert
         if isinstance(t, torch.Tensor):
-            assert not torch._is_functional_tensor(t)  # type: ignore[attr-defined]
+            if torch._is_functional_tensor(t):  # type: ignore[attr-defined]
+                raise AssertionError("expected non-functional tensor")
         return t
     sync_functional_tensor(t)
     return torch._from_functional_tensor(t.elem)
@@ -85,7 +86,10 @@ def is_fun(t: object) -> TypeGuard[FunctionalTensor | Tensor]:
         t_inners = [getattr(t, attr) for attr in t_attrs]
         any_fun = any(is_fun(x) for x in t_inners)
         all_fun = all(is_fun(x) for x in t_inners)
-        assert any_fun == all_fun
+        if any_fun != all_fun:
+            raise AssertionError(
+                f"mixed functional/non-functional inner tensors: any_fun={any_fun}, all_fun={all_fun}"
+            )
         return any_fun
 
     return isinstance(t, FunctionalTensor)
@@ -102,7 +106,8 @@ def has_data_mutation(t: object) -> bool:
         return any(has_data_mutation(getattr(t, attr)) for attr in attrs)
     else:
         if isinstance(t, torch.Tensor):
-            assert isinstance(t, FunctionalTensor)
+            if not isinstance(t, FunctionalTensor):
+                raise AssertionError(f"expected FunctionalTensor, got {type(t)}")
             return torch._functionalize_has_data_mutation(t.elem)  # type: ignore[attr-defined]
         return False
 
@@ -115,7 +120,8 @@ def are_all_mutations_hidden_from_autograd(t: object) -> bool:
             are_all_mutations_hidden_from_autograd(getattr(t, attr)) for attr in attrs
         )
     elif isinstance(t, torch.Tensor):
-        assert isinstance(t, FunctionalTensor)
+        if not isinstance(t, FunctionalTensor):
+            raise AssertionError(f"expected FunctionalTensor, got {type(t)}")
         return torch._functionalize_are_all_mutations_hidden_from_autograd(t.elem)
     else:
         return False
@@ -129,7 +135,8 @@ def are_all_mutations_under_no_grad_or_inference_mode(t: torch.Tensor) -> bool:
             for attr in attrs
         )
     else:
-        assert isinstance(t, FunctionalTensor)
+        if not isinstance(t, FunctionalTensor):
+            raise AssertionError(f"expected FunctionalTensor, got {type(t)}")
         return torch._functionalize_are_all_mutations_under_no_grad_or_inference_mode(
             t.elem
         )
@@ -146,7 +153,8 @@ def was_inductor_storage_resized(t: object) -> bool:
     elif not isinstance(t, torch.Tensor):
         return False
     else:
-        assert isinstance(t, FunctionalTensor)
+        if not isinstance(t, FunctionalTensor):
+            raise AssertionError(f"expected FunctionalTensor, got {type(t)}")
         return torch._functionalize_was_inductor_storage_resized(t.elem)
 
 
@@ -176,10 +184,17 @@ def has_metadata_mutation(
         )
     else:
         if not isinstance(f_arg, torch.Tensor):
-            assert not isinstance(arg, torch.Tensor)
+            if isinstance(arg, torch.Tensor):
+                raise AssertionError(
+                    f"f_arg is not a Tensor but arg is: {type(f_arg)} vs {type(arg)}"
+                )
             return False
-        assert isinstance(f_arg, FunctionalTensor)
-        assert isinstance(arg, FakeTensor)
+        if not isinstance(f_arg, FunctionalTensor):
+            raise AssertionError(
+                f"expected FunctionalTensor for f_arg, got {type(f_arg)}"
+            )
+        if not isinstance(arg, FakeTensor):
+            raise AssertionError(f"expected FakeTensor for arg, got {type(arg)}")
 
         arg_after = torch._from_functional_tensor(f_arg.elem)
         # This is true if the current tensor experienced at least one set_() call
@@ -257,10 +272,11 @@ def gen_alias_from_base(
         # If re-applying the ViewMeta sequence succeeded, there should be no more
         # problems going forward. We just check we got to the target shape and
         # patch requires_grad flag.
-        assert out.shape == target_meta_tensor.shape, (
-            "incorrect out shape after application of ViewMeta sequence: "
-            f"{tuple(out.shape)} (actual) vs {tuple(target_meta_tensor.shape)} (expected)"
-        )
+        if out.shape != target_meta_tensor.shape:
+            raise AssertionError(
+                "incorrect out shape after application of ViewMeta sequence: "
+                f"{tuple(out.shape)} (actual) vs {tuple(target_meta_tensor.shape)} (expected)"
+            )
         return patch_requires_grad(out)
 
     # Try to do view-replay if possible.
@@ -376,7 +392,8 @@ class MetadataKey:
 # i.e. a parenthesized list of view operations within that ViewMeta sequence.
 class ViewMetaSequence:
     def __init__(self, tensor: FunctionalTensor) -> None:
-        assert torch._is_functional_tensor(tensor.elem)
+        if not torch._is_functional_tensor(tensor.elem):
+            raise AssertionError("expected tensor.elem to be a functional tensor")
         self.sequence = _functionalization.get_view_meta_sequence(tensor.elem)
         self.metadata = MetadataKey.make(tensor)
 
@@ -414,10 +431,14 @@ class ViewMetaSequence:
 # from Subclass(FakeTensor) to Subclass(FunctionalTensor(FakeTensor))
 def was_tensor_updated(arg: torch.Tensor, new_arg: torch.Tensor) -> bool:
     if is_traceable_wrapper_subclass(arg):
-        assert is_traceable_wrapper_subclass(new_arg)
+        if not is_traceable_wrapper_subclass(new_arg):
+            raise AssertionError(
+                f"expected new_arg to be traceable wrapper subclass, got {type(new_arg)}"
+            )
         attrs, _ = arg.__tensor_flatten__()
         new_attrs, _ = new_arg.__tensor_flatten__()
-        assert attrs == new_attrs
+        if attrs != new_attrs:
+            raise AssertionError(f"attrs mismatch: {attrs} != {new_attrs}")
         # A tensor subclass was updated if any of its inner elements were updated
         return any(
             was_tensor_updated(getattr(arg, attr), getattr(new_arg, attr))
@@ -436,10 +457,14 @@ def was_tensor_updated(arg: torch.Tensor, new_arg: torch.Tensor) -> bool:
 # but shares storage with the old input
 def was_tensor_metadata_updated(arg: Any, new_arg: Any) -> bool:
     if is_traceable_wrapper_subclass(arg):
-        assert is_traceable_wrapper_subclass(new_arg)
+        if not is_traceable_wrapper_subclass(new_arg):
+            raise AssertionError(
+                f"expected new_arg to be traceable wrapper subclass, got {type(new_arg)}"
+            )
         attrs, _ = arg.__tensor_flatten__()
         new_attrs, _ = new_arg.__tensor_flatten__()
-        assert attrs == new_attrs
+        if attrs != new_attrs:
+            raise AssertionError(f"attrs mismatch: {attrs} != {new_attrs}")
         # A tensor subclass was updated if any of its inner elements were updated
         return any(
             was_tensor_metadata_updated(getattr(arg, attr), getattr(new_arg, attr))
@@ -486,7 +511,8 @@ def _is_functional_graph(fx_g: torch.fx.Graph) -> tuple[str | None, int]:
 
 def assert_functional_graph(fx_g: torch.fx.Graph) -> int:
     error, mutation_count = _is_functional_graph(fx_g)
-    assert error is None, error
+    if error is not None:
+        raise AssertionError(error)
     return mutation_count
 
 
@@ -499,9 +525,10 @@ def propagate_input_mutation_stacktraces(fx_g: torch.fx.Graph) -> None:
             if n.target is torch.ops.aten.copy_.default:
                 # Can only copy_ into an input, and can only do so once
                 if "set_buffer_donor_" not in str(n.args[0]):
-                    assert n.args[0] in placeholders, (
-                        f"n={str(n)}, n.args[0]={str(n.args[0])}, placeholders={str(placeholders)}, graph={str(fx_g)}"
-                    )
+                    if n.args[0] not in placeholders:
+                        raise AssertionError(
+                            f"n={str(n)}, n.args[0]={str(n.args[0])}, placeholders={str(placeholders)}, graph={str(fx_g)}"
+                        )
                     placeholders.remove(n.args[0])
                 copy_from_node = n.args[1]
                 # Pre-condition: every node has a "stack_trace" field in its meta,
@@ -537,7 +564,8 @@ def _check_if_mutation_can_be_in_graph(
     # resize_() gets the same treatment
     if mutation_inductor_storage_resize or mutates_storage_metadata:
         op_name = "resize_" if mutation_inductor_storage_resize else "set_"
-        assert in_graph, f"""\
+        if not in_graph:
+            raise AssertionError(f"""\
 Encountered a {op_name} on a graph input, but the input has other mutations that we cannot
 keep in the graph. This is not supported today. Current state:
   keep_input_mutations={keep_input_mutations}
@@ -546,5 +574,5 @@ keep in the graph. This is not supported today. Current state:
   mutations_hidden_from_autograd={mutations_hidden_from_autograd}
   mutations_under_no_grad_or_inference_mode={mutations_under_no_grad_or_inference_mode}
   mutation_inductor_storage_resize={mutation_inductor_storage_resize}
-  requires_grad={requires_grad}"""
+  requires_grad={requires_grad}""")
     return in_graph
