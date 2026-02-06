@@ -976,6 +976,32 @@ class RedistributeTest(DTensorTestBase):
             "Planner should collect all reduce ops from both src and dst",
         )
 
+    @with_comms
+    def test_redistribute_zero_size_shards(self):
+        # Test redistribution when tensor_size < mesh_size, creating zero-size shards.
+        # With world_size=4 and tensor dim 0 size=2, ranks 2 and 3 have empty local shards.
+        mesh = self.build_device_mesh()
+
+        full_tensor = torch.randn(2, 8, device=self.device_type)
+        dt = distribute_tensor(full_tensor, mesh, [Shard(0)])
+
+        # Verify some ranks have zero-size local tensors
+        if self.rank < 2:
+            self.assertEqual(dt._local_tensor.shape, (1, 8))
+        else:
+            self.assertEqual(dt._local_tensor.shape, (0, 8))
+
+        # Test Shard(0) -> Replicate()
+        dt_rep = dt.redistribute(mesh, [Replicate()])
+        self.assertEqual(dt_rep._local_tensor.shape, (2, 8))
+        self.assertEqual(dt_rep.full_tensor(), dt.full_tensor())
+
+        # Test Shard(0) -> Shard(1)
+        dt_shard1 = dt.redistribute(mesh, [Shard(1)])
+        # With mesh=4 and dim 1 size=8, each rank has local shape (2, 2)
+        self.assertEqual(dt_shard1._local_tensor.shape, (2, 2))
+        self.assertEqual(dt_shard1.full_tensor(), dt.full_tensor())
+
 
 instantiate_parametrized_tests(RedistributeTest)
 
