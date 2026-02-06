@@ -1,9 +1,6 @@
-#include <pybind11/pybind11.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Event.h>
 #include <torch/csrc/Stream.h>
-#include <torch/csrc/THP.h>
-#include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 
@@ -130,6 +127,16 @@ static PyObject* THPStream_get_device(THPStream* self, void* unused) {
   return THPDevice_New(c10::Device(
       static_cast<c10::DeviceType>(self->device_type),
       static_cast<c10::DeviceIndex>(self->device_index)));
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPStream_get_native_handle(THPStream* self, void* unused) {
+  HANDLE_TH_ERRORS
+  auto stream = c10::Stream::unpack3(
+      self->stream_id,
+      static_cast<c10::DeviceIndex>(self->device_index),
+      static_cast<c10::DeviceType>(self->device_type));
+  return PyLong_FromVoidPtr(stream.native_handle());
   END_HANDLE_TH_ERRORS
 }
 
@@ -402,6 +409,11 @@ static const std::initializer_list<PyMemberDef> THPStream_members = {
 static const std::initializer_list<PyGetSetDef> THPStream_properties = {
     {"device",
      reinterpret_cast<getter>(THPStream_get_device),
+     nullptr,
+     nullptr,
+     nullptr},
+    {"native_handle",
+     reinterpret_cast<getter>(THPStream_get_native_handle),
      nullptr,
      nullptr,
      nullptr},

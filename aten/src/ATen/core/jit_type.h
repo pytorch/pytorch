@@ -887,7 +887,7 @@ struct TORCH_API ListType
   // this function will return the global singleton type pointer
   // the type List<T>.
   // The extra "identifier" argument is needed because we have multiple container types
-  // that all re-use this function (List<T>, array<T, N>, etc.)
+  // that all reuse this function (List<T>, array<T, N>, etc.)
   static TypePtr get(const std::string& identifier, TypePtr inner);
 
   // common cast List[Tensor]
@@ -985,7 +985,7 @@ struct TORCH_API DictType : public SharedType {
   // this function will return the global singleton type pointer
   // the type List<T>.
   // The extra "identifier" argument is needed because we have multiple container types
-  // that all re-use this function (Dict<K, V> and unordered_map<K, V>)
+  // that all reuse this function (Dict<K, V> and unordered_map<K, V>)
   static TypePtr get(const std::string& identifier, TypePtr key, TypePtr val);
 
  private:
@@ -2243,7 +2243,7 @@ static const TypeKind Kind = TypeKind::ScalarTypeType;
 static ScalarTypeTypePtr get();
 
 private:
-ScalarTypeType()  {}
+ScalarTypeType() = default;
 };
 
 struct MemoryFormatType;
@@ -2257,7 +2257,7 @@ static const TypeKind Kind = TypeKind::MemoryFormatType;
 static MemoryFormatTypePtr get();
 
 private:
-MemoryFormatType()  {}
+MemoryFormatType() = default;
 };
 
 struct LayoutType;
@@ -2271,7 +2271,7 @@ static const TypeKind Kind = TypeKind::LayoutType;
 static LayoutTypePtr get();
 
 private:
-LayoutType()  {}
+LayoutType() = default;
 };
 
 namespace detail {

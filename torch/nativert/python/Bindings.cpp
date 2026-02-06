@@ -10,8 +10,7 @@ namespace py = pybind11;
 template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 
-namespace torch {
-namespace nativert {
+namespace torch::nativert {
 
 using torch::nativert::detail::argsToIValue;
 
@@ -76,5 +75,4 @@ void initModelRunnerPybind(py::module& m) {
 #endif // !defined(OVRSOURCE)
 }
 
-} // namespace nativert
-} // namespace torch
+} // namespace torch::nativert

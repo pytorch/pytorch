@@ -1,12 +1,12 @@
 name: inductor-rocm-mi300
 
 on:
+  schedule:
+    - cron: 0 0,3,6,9,12,15,18,21 * * * # run every 3 hours for regression coverage
   push:
     branches:
-      - main
       - release/*
     tags:
-      - ciflow/inductor-rocm/*
       - ciflow/inductor-rocm-mi300/*
   workflow_dispatch:
 
@@ -61,7 +61,7 @@ jobs:
     uses: ./.github/workflows/_rocm-test.yml
     needs: linux-noble-rocm-py3_12-inductor-build
     with:
-      build-environment: linux-noble-rocm-py3.12-mi300
+      build-environment: ${{ needs.linux-noble-rocm-py3_12-inductor-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-noble-rocm-py3_12-inductor-build.outputs.docker-image }}
       test-matrix:  ${{ needs.linux-noble-rocm-py3_12-inductor-build.outputs.test-matrix }}
     secrets: inherit

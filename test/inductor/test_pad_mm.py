@@ -6,16 +6,15 @@ import torch._inductor.config as inductor_config
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import counters
 from torch._inductor.fx_passes.pad_mm import (
+    can_pad,
     get_alignment_size,
     get_pad_cache,
     get_padded_length,
-    should_pad_common,
     should_pad_mm_bf16,
 )
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache, is_big_gpu, run_and_get_code
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import skipIfRocm
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU_AND_TRITON
 
 
@@ -400,7 +399,7 @@ class PadMMTest(TestCase):
         expected_alignment = get_alignment_size(mat1)
 
         assert expected_alignment == 8, "Alignment for float16 should be 8"
-        assert should_pad_common(mat1, mat2), (
+        assert can_pad(mat1, mat2, torch.ops.aten.bmm), (
             "This should pass the common padding criteria"
         )
 
@@ -475,7 +474,6 @@ class PadMMTest(TestCase):
         and (not torch.xpu.is_available()),
         "No perf regression on H100+ with BF16",
     )
-    @skipIfRocm
     @fresh_cache()
     @inductor_config.patch(
         post_grad_fusion_options={"pad_aten_mm_pass": {"k_threshold_to_pad": 8388608}}
@@ -489,7 +487,7 @@ class PadMMTest(TestCase):
         expected_alignment = get_alignment_size(mat1)
 
         assert expected_alignment == 8, "Alignment for bfloat16 should be 8"
-        assert should_pad_common(mat1, mat2), (
+        assert can_pad(mat1, mat2, torch.ops.aten.mm), (
             "This should pass the common padding criteria"
         )
         assert should_pad_mm_bf16(mat1.dtype, m, n, k), (

@@ -45,17 +45,19 @@ void initPlacementBindings(PyObject* module) {
           [](const py::dict& d) {
             return Shard(py::cast<int64_t>(d["dim"]));
           }));
-  py::class_<StridedShard, Shard>(distributed_module, "StridedShard")
+  py::class_<StridedShard, Placement>(distributed_module, "StridedShard")
       .def(
           py::init<int64_t, int64_t>(),
           py::arg("dim"),
           py::kw_only(),
           py::arg("split_factor"))
+      .def_readonly("dim", &StridedShard::dim)
       .def_readonly("split_factor", &StridedShard::split_factor)
-      .def("is_shard", &StridedShard::is_shard, py::arg("dim") = py::none())
       .def(
           "__eq__",
-          [](const StridedShard& lhs, const Shard& rhs) { return lhs == rhs; },
+          [](const StridedShard& lhs, const StridedShard& rhs) {
+            return lhs == rhs;
+          },
           py::is_operator())
       .def(py::pickle(
           [](const StridedShard& shard) {

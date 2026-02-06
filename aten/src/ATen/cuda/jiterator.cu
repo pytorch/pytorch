@@ -32,7 +32,7 @@ static inline void launch_jitted_vectorized_kernel_dynamic(
 
   // Different kernels are compiled depending on what we're vectorizing up to (1, 2 or 4 elements)
   //   fn_ptr is set to the appropriate function based on the vec size and GPU used
-  // TODO: Memory use can probably be optimized by re-using kernels across GPUs with
+  // TODO: Memory use can probably be optimized by reusing kernels across GPUs with
   //   the same compute capability
 
   std::string f_inputs_type_str = at::cuda::jit::typeName(common_dtype);

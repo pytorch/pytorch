@@ -1,27 +1,15 @@
 #include <torch/csrc/distributed/rpc/request_callback_impl.h>
 
 #include <c10/util/Exception.h>
-#include <torch/csrc/autograd/profiler.h>
-#include <torch/csrc/distributed/autograd/context/container.h>
-#include <torch/csrc/distributed/autograd/context/context.h>
-#include <torch/csrc/distributed/autograd/engine/dist_engine.h>
-#include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_req.h>
-#include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_resp.h>
-#include <torch/csrc/distributed/autograd/rpc_messages/propagate_gradients_req.h>
-#include <torch/csrc/distributed/autograd/rpc_messages/propagate_gradients_resp.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_profiling_req.h>
-#include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_profiling_resp.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/rref_backward_req.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/rref_backward_resp.h>
-#include <torch/csrc/distributed/autograd/utils.h>
-#include <torch/csrc/distributed/rpc/profiler/server_process_global_profiler.h>
 #include <torch/csrc/distributed/rpc/py_rref.h>
 #include <torch/csrc/distributed/rpc/python_call.h>
 #include <torch/csrc/distributed/rpc/python_remote_call.h>
 #include <torch/csrc/distributed/rpc/python_resp.h>
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
-#include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/rref_impl.h>
 #include <torch/csrc/distributed/rpc/rref_proto.h>
 #include <torch/csrc/distributed/rpc/script_call.h>
@@ -29,7 +17,6 @@
 #include <torch/csrc/distributed/rpc/script_resp.h>
 #include <torch/csrc/distributed/rpc/unpickled_python_call.h>
 #include <torch/csrc/distributed/rpc/unpickled_python_remote_call.h>
-#include <torch/csrc/distributed/rpc/utils.h>
 #include <torch/csrc/jit/python/python_ivalue.h>
 
 #include <utility>
@@ -121,7 +108,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackImpl::runPythonFunction(
     e.restore();
     PyErr_Clear();
     return future;
-  } catch (std::exception& e) {
+  } catch (std::exception&) {
     return asFuture(std::current_exception());
   }
 

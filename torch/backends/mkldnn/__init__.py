@@ -68,9 +68,10 @@ class verbose:
         if self.level == VERBOSE_OFF:
             return
         st = torch._C._verbose.mkldnn_set_verbose(self.level)
-        assert st, (
-            "Failed to set MKLDNN into verbose mode. Please consider to disable this verbose scope."
-        )
+        if not st:
+            raise AssertionError(
+                "Failed to set MKLDNN into verbose mode. Please consider to disable this verbose scope."
+            )
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -133,5 +134,6 @@ if TYPE_CHECKING:
     enabled: ContextProp
     deterministic: ContextProp
     allow_tf32: ContextProp
+    fp32_precision: str
 
 sys.modules[__name__] = MkldnnModule(sys.modules[__name__], __name__)

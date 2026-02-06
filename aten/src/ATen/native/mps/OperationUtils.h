@@ -775,4 +775,22 @@ void MetalShaderLibrary::exec_binary_kernel_with_params(TensorIteratorBase& iter
   });
 }
 
+// Checks if one tensor is broadcastable into another
+static bool is_dense_broadcastable(const Tensor& from, const Tensor& into) {
+  if (!from.is_contiguous() || !into.is_contiguous()) {
+    return false;
+  }
+  bool checking_squeezable_dims = false;
+  for (const auto dim : c10::irange(from.ndimension())) {
+    if (checking_squeezable_dims) {
+      if (from.size(-dim - 1) == 1) {
+        continue;
+      }
+      return false;
+    }
+    checking_squeezable_dims = from.size(-dim - 1) != into.size(-dim - 1);
+  }
+  return true;
+}
+
 } // namespace at::native::mps

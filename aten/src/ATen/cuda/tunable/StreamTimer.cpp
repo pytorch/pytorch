@@ -7,12 +7,10 @@
 // Adapting TunableOp into PyTorch
 // Copyright (c) Advanced Micro Devices, Inc.
 //
-#include <cuda_runtime.h>
 
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cuda/tunable/StreamTimer.h>
 #include <c10/cuda/CUDAStream.h>
-#include <cmath>
 
 namespace at::cuda::tunable {
 

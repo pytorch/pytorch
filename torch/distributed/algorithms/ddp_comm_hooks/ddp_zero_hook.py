@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import weakref
 from collections.abc import Callable
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import torch.distributed as dist
@@ -47,7 +47,7 @@ def _perform_local_step(
     # expects `None` in a list position to indicate that the corresponding
     # parameter should not be updated
     num_local_optim_params = len(zero.optim.param_groups[0]["params"])
-    gradients: list[Optional[torch.Tensor]] = [
+    gradients: list[torch.Tensor | None] = [
         _NO_PARAM_UPDATE for _ in range(num_local_optim_params)
     ]
     assert bucket_index in overlap_info.offsets, (

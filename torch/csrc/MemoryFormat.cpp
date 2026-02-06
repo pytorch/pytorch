@@ -6,7 +6,6 @@
 
 #include <c10/core/MemoryFormat.h>
 
-#include <structmember.h>
 #include <cstring>
 #include <string>
 

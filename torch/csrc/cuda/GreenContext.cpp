@@ -9,5 +9,15 @@ void THCPGreenContext_init(PyObject* module) {
   py::class_<at::cuda::GreenContext>(m, "_CUDAGreenContext")
       .def_static("create", &::at::cuda::GreenContext::create)
       .def("set_context", &::at::cuda::GreenContext::setContext)
-      .def("pop_context", &::at::cuda::GreenContext::popContext);
+      .def("pop_context", &::at::cuda::GreenContext::popContext)
+      .def("Stream", [](at::cuda::GreenContext& self) {
+        auto s = self.Stream();
+        cudaStream_t raw = self.Stream();
+        auto ptr_val = reinterpret_cast<uintptr_t>(raw);
+
+        py::object torch_cuda = py::module::import("torch.cuda");
+        py::object ExternalStream = torch_cuda.attr("ExternalStream");
+
+        return ExternalStream(ptr_val, py::int_(s.device_index()));
+      });
 }

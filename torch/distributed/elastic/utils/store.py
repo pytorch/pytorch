@@ -10,7 +10,6 @@
 from collections.abc import Callable, Iterable
 from contextlib import contextmanager
 from datetime import timedelta
-from typing import Optional
 
 import torch
 
@@ -109,7 +108,7 @@ def _try_detecting_missing_ranks(
     rank: int,
     rank_decoder: Callable[[int], str],
     trace_timeout: float,
-) -> Optional[Iterable[str]]:
+) -> Iterable[str] | None:
     store.set(f"{key_prefix}{rank}{_TRACE}", "<val_ignored>")
 
     def _find_missing_ranks():
@@ -169,8 +168,8 @@ def barrier(
     world_size: int,
     key_prefix: str,
     barrier_timeout: float = 300,
-    rank: Optional[int] = None,
-    rank_tracing_decoder: Optional[Callable[[int], str]] = None,
+    rank: int | None = None,
+    rank_tracing_decoder: Callable[[int], str] | None = None,
     trace_timeout: float = 10,
 ) -> None:
     """

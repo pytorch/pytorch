@@ -1,11 +1,8 @@
 #include <c10/core/alignment.h>
 #include <torch/csrc/jit/runtime/static/memory_planner.h>
 
-#include <ATen/Tensor.h>
-#include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
-#include <iterator>
 
 namespace torch::jit {
 
@@ -134,8 +131,7 @@ std::vector<StorageGroup> assignStorageToManagedTensors(
   return managed_tensor_groups;
 }
 
-ManagedStorages::ManagedStorages()
-    : storages_(nullptr), size_(0), capacity_(0) {}
+ManagedStorages::ManagedStorages() = default;
 
 ManagedStorages::~ManagedStorages() {
   deallocate();

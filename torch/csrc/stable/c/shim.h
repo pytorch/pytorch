@@ -16,7 +16,6 @@ extern "C" {
 #endif
 
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
-using StableIValue = uint64_t;
 
 // Has the same semantic as aoti_torch_call_dispatcher, but takes an
 // additional argument for the extension build version. This is
@@ -122,9 +121,60 @@ torch_string_c_str(StringHandle handle, const char** data);
 AOTI_TORCH_EXPORT AOTITorchError
 torch_get_current_cuda_blas_handle(void** ret_handle);
 
+AOTI_TORCH_EXPORT AOTITorchError
+torch_set_current_cuda_stream(void* stream, int32_t device_index);
+
+AOTI_TORCH_EXPORT AOTITorchError torch_get_cuda_stream_from_pool(
+    bool isHighPriority,
+    int32_t device_index,
+    void** ret_stream);
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_cuda_stream_synchronize(void* stream, int32_t device_index);
+
+// Wrapper around c10_cuda_check_implementation that captures the error message
+// without propagating the exception. The caller must free error_msg using
+// torch_c10_cuda_free_error_msg if it is non-null.
+AOTI_TORCH_EXPORT AOTITorchError torch_c10_cuda_check_msg(
+    int32_t err,
+    const char* filename,
+    const char* function_name,
+    uint32_t line_number,
+    bool include_device_assertions,
+    char** error_msg);
+
+// Free error message allocated by torch_c10_cuda_check_msg
+AOTI_TORCH_EXPORT void torch_c10_cuda_free_error_msg(char* error_msg);
+
 #endif // USE_CUDA
 
+// Set requires_grad on a tensor
+AOTI_TORCH_EXPORT AOTITorchError
+torch_set_requires_grad(AtenTensorHandle tensor, bool requires_grad);
+
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_11_0
+
+// Creates a tensor from an existing data blob with an optional deleter.
+// The deleter is called with the data pointer when the tensor's storage
+// is deallocated.
+AOTI_TORCH_EXPORT AOTITorchError torch_from_blob(
+    void* data,
+    int64_t ndim,
+    const int64_t* sizes_ptr,
+    const int64_t* strides_ptr,
+    int64_t storage_offset,
+    int32_t dtype,
+    int32_t device_type,
+    int32_t device_index,
+    AtenTensorHandle* ret, // returns new reference
+    int32_t layout,
+    const uint8_t* opaque_metadata,
+    int64_t opaque_metadata_size,
+    void (*deleter)(void*));
+
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_11_0
 
 #ifdef __cplusplus
 } // extern "C"

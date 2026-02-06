@@ -498,7 +498,7 @@ class TestPruningNN(NNTestCase):
     def test_unstructured_pruning_same_magnitude(self):
         r"""Since it may happen that the tensor to prune has entries with the
         same exact magnitude, it is important to check that pruning happens
-        consistenly based on the bottom % of weights, and not by threshold,
+        consistently based on the bottom % of weights, and not by threshold,
         which would instead kill off *all* units with magnitude = threshold.
         """
         AMOUNT = 0.2

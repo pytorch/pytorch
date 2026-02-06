@@ -23,7 +23,6 @@
 #include <ATen/ops/_aminmax_native.h>
 #include <ATen/ops/_assert_async_native.h>
 #include <ATen/ops/_assert_scalar_native.h>
-#include <ATen/ops/_async_error_native.h>
 #include <ATen/ops/_functional_assert_async_native.h>
 #include <ATen/ops/_functional_assert_scalar_native.h>
 #include <ATen/ops/_make_per_tensor_quantized_tensor.h>
@@ -478,14 +477,6 @@ Tensor isfinite(const Tensor& self) {
     return (self == self) *
         (self.abs() != std::numeric_limits<scalar_t>::infinity());
   });
-}
-
-void _async_error(std::string_view msg) {
-  TORCH_CHECK(0, msg);
-}
-
-void _async_error_meta(std::string_view msg) {
-  // Do NOT error, it's an async error!
 }
 
 void _assert_async_cpu(const Tensor& self) {

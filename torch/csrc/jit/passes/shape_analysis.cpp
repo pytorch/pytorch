@@ -11,9 +11,6 @@
 #include <torch/csrc/jit/runtime/exception_message.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
-#include <torch/csrc/autograd/variable.h>
-
-#include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/core/symbol.h>
 

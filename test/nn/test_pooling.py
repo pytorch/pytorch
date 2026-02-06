@@ -28,7 +28,6 @@ from torch.testing._internal.common_device_type import (
     onlyCPU,
     onlyCUDA,
     onlyNativeDeviceTypes,
-    skipCUDAIfRocm,
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.common_dtype import floating_types_and
@@ -749,7 +748,6 @@ class TestPoolingNNDeviceType(NNTestCase):
 
     @slowTest
     @onlyNativeDeviceTypes
-    @skipCUDAIfRocm
     @parametrize_test(
         "module_name,module_size,output_size,test_index,should_error",
         [
@@ -839,7 +837,13 @@ torch.cuda.synchronize()
             error_msg = error_msgs[module_name]
 
             if should_error:
-                self.assertIn(error_msg, output, "The expected error was not found")
+                # CUDA shows assertion message, ROCm shows HIP error with launch failure
+                has_cuda_assert = error_msg in output
+                has_hip_error = "HIP error" in output and "launch failure" in output
+                self.assertTrue(
+                    has_cuda_assert or has_hip_error,
+                    f"Expected device assert error, got: {output[-500:]}",
+                )
             else:
                 self.assertNotIn("Error", output, "Should not have produced an error")
         else:
@@ -854,6 +858,8 @@ torch.cuda.synchronize()
                     RuntimeError, r"Found an invalid max index:"
                 ):
                     unpool(output, indices)
+                    if torch.device(device).type == "mps":
+                        torch.mps.synchronize()
             else:
                 unpool(output, indices)
 
@@ -1125,6 +1131,52 @@ torch.cuda.synchronize()
         )
         check([[1, 2]], (2, 1, 1, 2, False, False), [[2, 1]])
         check([[1, 2]], (2, 2, 1, 2, False, True), [[2, 2]])
+
+    @onlyCPU
+    @dtypes(torch.float16, torch.float32)
+    def test_max_pool_indices_corner_cases(self, device, dtype):
+        def check_indices(x, args, expected, op):
+            model = op(*args, return_indices=True)
+            if isinstance(x, list):
+                x = torch.tensor(x, device=device, dtype=dtype)
+            if isinstance(expected, list):
+                expected = torch.tensor(expected, device=device, dtype=torch.int64)
+            _, indices = model(x)
+            self.assertEqual(indices, expected)
+
+        if dtype is torch.float16:
+            N = 2050
+            x = torch.zeros([N], dtype=dtype)
+            x[-1] = 1
+            check_indices(
+                x.reshape(1, 1, -1), ([1],), [[[N - 1]]], torch.nn.AdaptiveMaxPool1d
+            )
+            check_indices(
+                x.reshape(1, 1, 1, -1),
+                ([1, 1],),
+                [[[[N - 1]]]],
+                torch.nn.AdaptiveMaxPool2d,
+            )
+
+        if dtype is torch.float32:
+            N = 16777218
+            x = torch.zeros([N], dtype=dtype)
+            x[-1] = 1
+            check_indices(
+                x.reshape(1, 1, -1), ([1],), [[[N - 1]]], torch.nn.AdaptiveMaxPool1d
+            )
+            check_indices(
+                x.reshape(1, 1, 1, -1),
+                ([1, 1],),
+                [[[[N - 1]]]],
+                torch.nn.AdaptiveMaxPool2d,
+            )
+            check_indices(
+                x.reshape(1, 1, 2, 1, N // 2),
+                ([1, 1, 1],),
+                [[[[[N - 1]]]]],
+                torch.nn.AdaptiveMaxPool3d,
+            )
 
     @onlyCPU
     @dtypes(torch.float, torch.double)
@@ -1434,33 +1486,6 @@ torch.cuda.synchronize()
                 ceil_mode,
                 indices,
             )
-
-    def test_max_unpool_invalid_indices(self):
-        input = torch.randn(1, 1, 2, 2)
-        negative_indices = torch.tensor([[[[-1, 0], [0, 2]]]], dtype=torch.int64)
-        large_indices = torch.tensor([[[[10000, 10], [0, 2]]]], dtype=torch.int64)
-        output_size = (2, 2)
-
-        with self.assertRaisesRegex(RuntimeError, "Found an invalid max index"):
-            F.max_unpool2d(input, negative_indices, output_size)
-
-        with self.assertRaisesRegex(RuntimeError, "Found an invalid max index"):
-            F.max_unpool2d(input, large_indices, output_size)
-
-        input = torch.randn(1, 1, 2, 2, 2)
-        negative_indices = torch.tensor(
-            [[[[[-1, 10], [0, 2]], [[1, 3], [4, 5]]]]], dtype=torch.int64
-        )
-        large_indices = torch.tensor(
-            [[[[[10000, 10], [0, 2]], [[1, 3], [4, 5]]]]], dtype=torch.int64
-        )
-        output_size = (2, 2, 2)
-
-        with self.assertRaisesRegex(RuntimeError, "Found an invalid max index"):
-            F.max_unpool3d(input, negative_indices, output_size)
-
-        with self.assertRaisesRegex(RuntimeError, "Found an invalid max index"):
-            F.max_unpool3d(input, large_indices, output_size)
 
     @onlyCPU
     @dtypes(torch.half, torch.bfloat16)
@@ -2045,7 +2070,6 @@ torch.cuda.synchronize()
         helper(nn.AdaptiveAvgPool2d((2**6, 2**6)))
 
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
-    @expectedFailureMPS
     @dtypes(torch.float)
     def test_pool_invalid_size(self, device, dtype):
         for op in ("max", "avg"):

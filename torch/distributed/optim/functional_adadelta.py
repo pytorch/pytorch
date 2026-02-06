@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional
 
 import torch
 import torch.optim._functional as F
@@ -53,7 +52,7 @@ class _FunctionalAdadelta:
 
         self.state = torch.jit.annotate(dict[torch.Tensor, dict[str, torch.Tensor]], {})
 
-    def step(self, gradients: list[Optional[Tensor]]):
+    def step(self, gradients: list[Tensor | None]):
         params = self.param_group["params"]
         params_with_grad = []
         grads = []
