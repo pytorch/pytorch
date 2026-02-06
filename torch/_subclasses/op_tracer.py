@@ -16,6 +16,13 @@ from torch.utils._python_dispatch import TorchDispatchMode
 
 
 @dataclass
+class TensorPlaceholder:
+    """Marker for tensor positions in traced args structure."""
+
+    tensor_id: int
+
+
+@dataclass
 class TracedOp:
     """Represents a single traced operation."""
 
@@ -28,6 +35,10 @@ class TracedOp:
     input_dtypes: list[torch.dtype]
     output_dtypes: list[torch.dtype]
     is_backward: bool = False
+    # For replay: store the actual function and non-tensor args
+    func: Any = None  # The actual aten function
+    args_structure: Any = None  # Structure of args with tensor positions marked
+    kwargs_structure: Any = None  # Structure of kwargs
 
     def __repr__(self) -> str:
         direction = "BWD" if self.is_backward else "FWD"
@@ -92,6 +103,25 @@ class OpTracer(TorchDispatchMode):
                 dtypes.append(arg.dtype)
         return tensor_ids, shapes, dtypes
 
+    def _create_args_structure(
+        self, args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> tuple[Any, Any]:
+        """
+        Create a structure that marks tensor positions for later replay.
+
+        Returns args and kwargs with tensors replaced by TensorPlaceholder.
+        """
+
+        def mark_tensor(x: Any) -> Any:
+            if isinstance(x, torch.Tensor):
+                tid = self._get_tensor_id(x)
+                return TensorPlaceholder(tensor_id=tid)
+            return x
+
+        args_structure = pytree.tree_map(mark_tensor, args)
+        kwargs_structure = pytree.tree_map(mark_tensor, kwargs)
+        return args_structure, kwargs_structure
+
     def _is_backward_op(self, func: Any, args: tuple[Any, ...]) -> bool:
         """
         Determine if this operation is part of the backward pass.
@@ -126,6 +156,9 @@ class OpTracer(TorchDispatchMode):
 
         # Record input tensor info
         input_ids, input_shapes, input_dtypes = self._extract_tensor_info(args)
+
+        # Capture args structure for replay
+        args_structure, kwargs_structure = self._create_args_structure(args, kwargs)
 
         # Check if this is a backward op
         is_backward = self._is_backward_op(func, args)
@@ -165,6 +198,9 @@ class OpTracer(TorchDispatchMode):
             input_dtypes=input_dtypes,
             output_dtypes=output_dtypes,
             is_backward=is_backward,
+            func=func,
+            args_structure=args_structure,
+            kwargs_structure=kwargs_structure,
         )
         self.trace.append(traced_op)
 
@@ -312,3 +348,113 @@ def trace_model(
                     loss.backward()
 
     return tracer
+
+
+def execute_trace(
+    trace: list[TracedOp],
+    initial_tensors: dict[int, torch.Tensor],
+    device: Optional[torch.device] = None,
+) -> dict[int, torch.Tensor]:
+    """
+    Execute a trace of operations with real tensors.
+
+    Args:
+        trace: List of TracedOp from OpTracer
+        initial_tensors: Dict mapping tensor IDs to initial real tensors
+        device: Device to create tensors on (default: cpu)
+
+    Returns:
+        Dict mapping tensor IDs to result tensors
+    """
+    device = device or torch.device("cpu")
+    tensor_map: dict[int, torch.Tensor] = dict(initial_tensors)
+
+    def substitute_tensors(structure: Any) -> Any:
+        """Replace TensorPlaceholder with actual tensors from tensor_map."""
+
+        def substitute(x: Any) -> Any:
+            if isinstance(x, TensorPlaceholder):
+                tensor_id = x.tensor_id
+                if tensor_id not in tensor_map:
+                    raise KeyError(
+                        f"Tensor ID {tensor_id} not found in tensor_map. "
+                        f"Available IDs: {list(tensor_map.keys())}"
+                    )
+                return tensor_map[tensor_id]
+            return x
+
+        return pytree.tree_map(substitute, structure)
+
+    for i, op in enumerate(trace):
+        if op.func is None:
+            raise ValueError(
+                f"Op {i} ({op.op_name}) has no func stored. "
+                "Make sure tracing captured the function."
+            )
+
+        # Substitute tensor placeholders with actual tensors
+        args = substitute_tensors(op.args_structure)
+        kwargs = substitute_tensors(op.kwargs_structure)
+
+        # Execute the operation
+        result = op.func(*args, **kwargs)
+
+        # Store output tensors in the map
+        if isinstance(result, tuple):
+            tensor_map.update(
+                {
+                    tid: tensor
+                    for tid, tensor in zip(op.output_tensor_ids, result)
+                    if isinstance(tensor, torch.Tensor)
+                }
+            )
+        elif isinstance(result, torch.Tensor):
+            if op.output_tensor_ids:
+                tensor_map[op.output_tensor_ids[0]] = result
+
+    return tensor_map
+
+
+def create_random_inputs(
+    trace: list[TracedOp],
+    device: Optional[torch.device] = None,
+) -> dict[int, torch.Tensor]:
+    """
+    Create random input tensors for the first operations in a trace.
+
+    This identifies which tensor IDs are "inputs" (used but never produced)
+    and creates random tensors with the appropriate shapes/dtypes.
+
+    Args:
+        trace: List of TracedOp from OpTracer
+        device: Device to create tensors on (default: cpu)
+
+    Returns:
+        Dict mapping input tensor IDs to random tensors
+    """
+    device = device or torch.device("cpu")
+
+    # Find all tensor IDs that are produced by operations
+    produced_ids: set[int] = set()
+    for op in trace:
+        produced_ids.update(op.output_tensor_ids)
+
+    # Find input tensor IDs (used but not produced by any previous op)
+    input_tensors: dict[int, torch.Tensor] = {}
+
+    for op in trace:
+        for tid, shape, dtype in zip(
+            op.input_tensor_ids, op.input_shapes, op.input_dtypes
+        ):
+            if tid not in produced_ids and tid not in input_tensors:
+                # This is an input tensor - create a random one
+                if dtype.is_floating_point:
+                    tensor = torch.randn(shape, dtype=dtype, device=device)
+                elif dtype == torch.bool:
+                    tensor = torch.randint(0, 2, shape, dtype=dtype, device=device)
+                else:
+                    # Integer types
+                    tensor = torch.randint(0, 10, shape, dtype=dtype, device=device)
+                input_tensors[tid] = tensor
+
+    return input_tensors
