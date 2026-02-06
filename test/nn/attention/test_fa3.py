@@ -13,6 +13,7 @@ from torch.nn.attention.experimental._scaled_dot_product_attention_quantized imp
     _scaled_dot_product_attention_quantized,
     DescaleType,
 )
+from torch.nn.attention.varlen import varlen_attn
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
 
@@ -368,6 +369,60 @@ class TestFlashAttentionFA3(FlashAttentionTestMixin, TestCase):
             torch.allclose(out_eager, out_compiled),
             f"Compiled output differs from eager. Max diff: {(out_eager - out_compiled).abs().max().item()}",
         )
+
+    # ==================== VARLEN TESTS ====================
+
+    @unittest.skipUnless(_fa3_dependencies_available(), "FA3 backend unavailable")
+    @parametrize("dtype", [torch.bfloat16, torch.float16])
+    def test_varlen_basic_functionality(self, device, dtype):
+        torch.manual_seed(42)
+
+        num_seqs = 2
+        seq_len = 512
+        heads = 16
+        head_dim = 64
+
+        total_tokens = num_seqs * seq_len
+        q = torch.randn(
+            total_tokens,
+            heads,
+            head_dim,
+            device=device,
+            dtype=dtype,
+            requires_grad=True,
+        )
+        k = torch.randn(
+            total_tokens,
+            heads,
+            head_dim,
+            device=device,
+            dtype=dtype,
+            requires_grad=True,
+        )
+        v = torch.randn(
+            total_tokens,
+            heads,
+            head_dim,
+            device=device,
+            dtype=dtype,
+            requires_grad=True,
+        )
+        cu_seq = torch.tensor(
+            [0, seq_len, total_tokens], device=device, dtype=torch.int32
+        )
+
+        output = varlen_attn(q, k, v, cu_seq, cu_seq, seq_len, seq_len)
+
+        self.assertEqual(output.shape, (total_tokens, heads, head_dim))
+        self.assertEqual(output.device, torch.device(device))
+        self.assertEqual(output.dtype, dtype)
+
+        grad_out = torch.ones_like(output)
+        dq, dk, dv = torch.autograd.grad(output, (q, k, v), grad_out)
+
+        self.assertEqual(dq.shape, q.shape)
+        self.assertEqual(dk.shape, k.shape)
+        self.assertEqual(dv.shape, v.shape)
 
 
 instantiate_device_type_tests(TestFlashAttentionFA3, globals(), only_for="cuda")

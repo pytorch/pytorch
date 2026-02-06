@@ -55,7 +55,7 @@ class TestUtils(TestCase):
 
     def test_larger_multiplier_for_even_smaller_tensor(self):
         """
-        Tesnor numel <=10
+        Tensor numel <=10
         """
         fp64_ref = torch.DoubleTensor([0.0])
         a = torch.Tensor([1.0])
@@ -435,6 +435,7 @@ class TestDynamoTimed(TestCase):
  'create_aot_dispatcher_function': [0.0],
  'fx_codegen_and_compile': [0.0, 0.0],
  'gc': [0.0],
+ 'insert_deferred_runtime_asserts': [0.0],
  'min_cut_rematerialization_partition': [0.0],
  'pass.joint_graph_passes.constant_fold_uniform_value': [0.0],
  'pass.joint_graph_passes.pass_pattern_0': [0.0],
@@ -488,6 +489,7 @@ class TestDynamoTimed(TestCase):
  'create_aot_dispatcher_function': [0.0],
  'fx_codegen_and_compile': [0.0, 0.0],
  'gc': [0.0],
+ 'insert_deferred_runtime_asserts': [0.0],
  'min_cut_rematerialization_partition': [0.0],
  'pass.joint_graph_passes.constant_fold_uniform_value': [0.0],
  'pass.joint_graph_passes.pass_pattern_0': [0.0],
