@@ -3478,6 +3478,9 @@ class InstructionTranslatorBase(
                 self._handle_comprehension_graph_break(inst)
                 return True
             self.current_speculation = speculation
+        end_for_ip = self._find_comprehension_end_for_ip()
+        assert end_for_ip is not None
+        self._comprehension_end_for_ips.add(end_for_ip)
         self._comprehension_depth += 1
         return False
 
@@ -4217,10 +4220,13 @@ class InstructionTranslatorBase(
             self.pop()
         else:
             self.popn(2)
-        # Decrement comprehension depth when exiting a comprehension's for loop.
-        # This ensures sequential comprehensions each set up their own speculation.
-        if self._comprehension_depth > 0:
-            self._comprehension_depth -= 1
+
+        # Decrement comprehension depth if exiting a comprehension layer
+        if sys.version_info >= (3, 12):
+            current_ip = self.indexof[inst]
+            if current_ip in self._comprehension_end_for_ips:
+                self._comprehension_end_for_ips.discard(current_ip)
+                self._comprehension_depth -= 1
 
     def LOAD_FAST_CHECK(self, inst: Instruction) -> None:
         if istype(self.symbolic_locals.get(inst.argval, None), NullVariable):
@@ -4479,6 +4485,22 @@ class InstructionTranslatorBase(
 
         return prefix == pattern
 
+    def _find_comprehension_end_for_ip(self) -> int | None:
+        """Find the instruction pointer of the outermost END_FOR for current comprehension."""
+        assert sys.version_info >= (3, 12)
+        assert self.instruction_pointer is not None
+
+        nesting_depth = 0
+        for search_ip in range(self.instruction_pointer, len(self.instructions)):
+            inst = self.instructions[search_ip]
+            if inst.opname == "FOR_ITER":
+                nesting_depth += 1
+            elif inst.opname == "END_FOR":
+                nesting_depth -= 1
+                if nesting_depth == 0:
+                    return search_ip
+        return None
+
     def _analyze_comprehension(self) -> ComprehensionAnalysis:
         """Analyze comprehension bytecode to determine result handling pattern."""
         assert sys.version_info >= (3, 12)
@@ -4505,19 +4527,8 @@ class InstructionTranslatorBase(
                 break
         defined_inside.update(iterator_vars)
 
-        # Find the outermost END_FOR by tracking nesting depth
-        end_for_ip = -1
-        nesting_depth = 0
-        for search_ip in range(self.instruction_pointer, len(self.instructions)):
-            inst = self.instructions[search_ip]
-            if inst.opname == "FOR_ITER":
-                nesting_depth += 1
-            elif inst.opname == "END_FOR":
-                nesting_depth -= 1
-                if nesting_depth == 0:
-                    end_for_ip = search_ip
-                    break
-        if end_for_ip < 0:
+        end_for_ip = self._find_comprehension_end_for_ip()
+        if end_for_ip is None:
             unimplemented(
                 gb_type="Comprehension analysis failed: No END_FOR",
                 context="",
@@ -5108,6 +5119,7 @@ class InstructionTranslatorBase(
         self.exn_vt_stack = exn_vt_stack
         self.latest_bytecode_queue = deque(maxlen=20)
         self._comprehension_depth = 0
+        self._comprehension_end_for_ips: set[int] = set()
 
         # Properties of the input/output code
         self.instructions: list[Instruction] = instructions
