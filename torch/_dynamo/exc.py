@@ -131,6 +131,11 @@ class SkipFrame(TorchDynamoException):
     pass
 
 
+class FullGraphCompileError(TorchDynamoException):
+    # Raised when torch.compile(..., fullgraph=True) is requested but Dynamo does not produce a graph.
+    pass
+
+
 class TorchRuntimeError(TorchDynamoException):
     def __init__(self, msg: str, real_stack: StackSummary | None = None) -> None:
         super().__init__(msg)
