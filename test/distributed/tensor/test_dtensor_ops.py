@@ -273,6 +273,7 @@ dtensor_multi_threaded_fails = {
     xfail("full_like"),
     xfail("nn.functional.dropout2d"),
     xfail("nn.functional.dropout3d"),
+    xfail("nn.functional.huber_loss"),
     xfail("masked.cumprod"),
     skip("nn.functional.multi_head_attention_forward"),
 }
@@ -387,7 +388,6 @@ dtensor_fails_no_strategy = {
     xfail("nn.functional.grid_sample"),
     xfail("nn.functional.group_norm"),
     xfail("nn.functional.hardshrink"),
-    xfail("nn.functional.huber_loss"),
     xfail("nn.functional.instance_norm"),
     xfail("nn.functional.local_response_norm"),
     xfail("nn.functional.max_pool1d"),

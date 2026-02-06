@@ -49,10 +49,15 @@ def _infer_schema_info_from_op(op: OpOverload) -> RuntimeSchemaInfo:
         if arg.kwarg_only and arg.type.kind() != "TensorType":
             kwarg_only_names.append(arg.name)
 
-    return RuntimeSchemaInfo(
-        static_argnum=static_argnum if static_argnum is not None else 100,
-        static_kwargkey=kwarg_only_names if kwarg_only_names else None,
-    )
+    kwargs = {}
+    if static_argnum is not None:
+        kwargs["static_argnum"] = static_argnum
+    if kwarg_only_names:
+        # pyrefly: ignore [unsupported-operation]
+        kwargs["static_kwargkey"] = kwarg_only_names
+
+    # pyrefly: ignore [bad-argument-type]
+    return RuntimeSchemaInfo(**kwargs)
 
 
 from torch.utils._pytree import tree_any, tree_flatten, tree_map, tree_map_only
