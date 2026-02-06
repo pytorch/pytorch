@@ -608,9 +608,7 @@ __launch_bounds__(Warps* kWarpSize) void tinygemm_m16n8k16_chunk_kernel(
     int32_t kTiles) {
   constexpr int32_t kMTileSize = 16;
 #if defined(USE_ROCM)
-  if(!(__builtin_amdgcn_processor_is("gfx90a") ||
-       __builtin_amdgcn_processor_is("gfx942") ||
-       __builtin_amdgcn_processor_is("gfx950"))) {
+  if (!__builtin_amdgcn_is_invocable(__builtin_amdgcn_mfma_f32_16x16x16bf16_1k)) {
     printf("__builtin_amdgcn_mfma_f32_16x16x16bf16_1k is only supported on AMD gpu arch greater than or equal to CDNA2\n");
     return;
   }
@@ -708,6 +706,9 @@ __launch_bounds__(Warps* kWarpSize) void tinygemm_m16n8k16_chunk_kernel(
         // execution dependency. Instead, we only periodically accumulate into
         // `c`
 #if defined(USE_ROCM)
+        // TODO: revisit this, we should not be diverging around the use of
+        //       vectors, it is possible to obtain the underlying native vector
+        //       type and feed it into the builtin.
         VecT<float, 4> cTmp[2];
 #else
         float4 cTmp[2];

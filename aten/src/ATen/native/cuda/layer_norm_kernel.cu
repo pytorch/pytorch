@@ -139,6 +139,7 @@ WelfordDataLN cuWelfordOnlineSum(
   if constexpr (!rms_norm){
     U delta = val - curr_sum.mean;
     U new_count = curr_sum.count + 1.f;
+    // TODO: should this use __fdividef?
     auto fn_rcp_mul = [](auto a, auto b) {return a * (1.0f / b);};
 #if defined(USE_ROCM) && defined(USE_LAYERNORM_FAST_RECIPROCAL)
     //Due to low CU count, we run into accuracy issues on gfx90a with `__builtin_amdgcn_rcpf`
@@ -165,6 +166,7 @@ WelfordDataLN cuWelfordCombine(
     U count = dataA.count + dataB.count;
     U mean, sigma2;
     if (count > decltype(dataB.count){0}) {
+    // TODO: should this use __fdividef?
     auto fn_rcp = [](auto a) {return 1.0f / a;};
 #if defined(USE_ROCM) && defined(USE_LAYERNORM_FAST_RECIPROCAL)
 //Due to low CU count, we run into accuracy issues on gfx90a with `__builtin_amdgcn_rcpf`
