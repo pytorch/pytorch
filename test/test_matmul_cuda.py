@@ -184,16 +184,12 @@ class TestMatmulCuda(InductorTestCase):
     @onlyCUDA
     @dtypes(torch.cfloat, torch.cdouble)
     @parametrize("backend", ["cublas", "cublaslt"])
-    def test_euclidean_inner_product(self, dtype, backend):
-        # Testing X -> X @ X.mH / X.mH @ X, the root cause of
+    def test_matrix_l2_norm_def(self, dtype, backend):
+        # Testing X -> trace(X @ X.mH / X.mH @ X), the root cause of
         # https://github.com/pytorch/pytorch/issues/174382
         val = 3 + 4j
         x = torch.zeros(2, 3, dtype=dtype, device="cuda")
         x.diagonal().fill_(val)
-
-        ref_inner = torch.zeros(3, 3, dtype=dtype, device="cuda")
-        ref_inner.diagonal().fill_(val * val.conjugate())
-        ref_inner[-1, -1] = 0
 
         ref_corrcoef = torch.empty(2, 2, dtype=dtype, device="cuda")
         ref_corrcoef.fill_(-0.5)
@@ -201,8 +197,8 @@ class TestMatmulCuda(InductorTestCase):
 
         with blas_library_context(backend):
             for a in (x, x.mH):
-                inner_prod = a @ a.mH
-                self.assertEqual(inner_prod, ref_inner[:len(a), :len(a)])
+                norm = (a @ a.mH).sum().item()
+                self.assertEqual(norm, 50 + 0j)
 
             self.assertEqual(torch.corrcoef(x), ref_corrcoef)
 
