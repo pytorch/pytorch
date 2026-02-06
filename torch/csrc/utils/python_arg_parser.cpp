@@ -289,8 +289,9 @@ static py::object maybe_get_registered_torch_dispatch_rule(
           .get_stored();
 #else
   static const py::handle find_torch_dispatch_rule =
-      py::object(py::module_::import("torch._library.simple_registry")
-                     .attr("find_torch_dispatch_rule"))
+      py::object(
+          py::module_::import("torch._library.simple_registry")
+              .attr("find_torch_dispatch_rule"))
           .release();
 #endif
   auto result = find_torch_dispatch_rule(
@@ -422,6 +423,75 @@ static py::object dispatch_on_subclass(
   return ret;
 }
 
+// Static dispatch fast path - avoids TLS push/pop per operation
+static std::tuple<py::object, py::object> dispatch_on_mode_static(
+    PyObject* args,
+    PyObject* kwargs,
+    py::tuple py_types,
+    PyObject* torch_api_function,
+    const char* torch_function_name_str) {
+  // Get current mode from static dispatch chain (no TLS manipulation)
+  auto mode = c10::impl::TorchDispatchModeTLS::get_current_static_mode();
+  if (!mode) {
+    return std::make_tuple(py::object(), py::object());
+  }
+
+  // Advance to next mode for any nested dispatch calls
+  c10::impl::TorchDispatchModeTLS::advance_static_dispatch();
+
+  py::object mode_obj =
+      py::reinterpret_borrow<py::object>(mode->ptr(getPyInterpreter()));
+
+  py::object torch_function =
+      PyObject_FastGetAttrString(mode_obj.ptr(), torch_function_name_str);
+  if (!torch_function) {
+    TORCH_INTERNAL_ASSERT(0);
+  }
+
+  // Check for registered torch dispatch rule
+  auto maybe_torch_dispatch_rule =
+      maybe_get_registered_torch_dispatch_rule(torch_api_function, mode_obj);
+  if (!maybe_torch_dispatch_rule.is_none()) {
+    auto ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(
+        maybe_torch_dispatch_rule.ptr(),
+        mode_obj.ptr(),
+        torch_api_function,
+        py_types.ptr(),
+        args,
+        kwargs,
+        NULL));
+    if (ret.ptr() == nullptr) {
+      throw python_error();
+    }
+    return std::make_tuple(ret, mode_obj);
+  }
+
+  // Call __torch_dispatch__
+  py::object ret;
+  if (kwargs == nullptr) {
+    ret = py::reinterpret_steal<py::object>(PyObject_CallMethod(
+        mode_obj.ptr(),
+        torch_function_name_str,
+        "OOO",
+        torch_api_function,
+        py_types.ptr(),
+        args));
+  } else {
+    ret = py::reinterpret_steal<py::object>(PyObject_CallMethod(
+        mode_obj.ptr(),
+        torch_function_name_str,
+        "OOOO",
+        torch_api_function,
+        py_types.ptr(),
+        args,
+        kwargs));
+  }
+  if (ret.ptr() == nullptr) {
+    throw python_error();
+  }
+  return std::make_tuple(ret, mode_obj);
+}
+
 static std::tuple<py::object, py::object> dispatch_on_mode(
     PyObject* args,
     PyObject* kwargs,
@@ -429,6 +499,14 @@ static std::tuple<py::object, py::object> dispatch_on_mode(
     PyObject* torch_api_function,
     bool is_torch_function,
     const char* torch_function_name_str) {
+  // Fast path: use static dispatch if enabled (for torch_dispatch only)
+  if (!is_torch_function &&
+      c10::impl::TorchDispatchModeTLS::is_static_dispatch_enabled()) {
+    return dispatch_on_mode_static(
+        args, kwargs, py_types, torch_api_function, torch_function_name_str);
+  }
+
+  // Original dynamic path with TLS manipulation
   // Disable mode on the inside; this makes for a more user-friendly
   // experience if you try to, e.g., print your tensors.
   std::optional<torch::overrides::StashTorchFunctionModeGuard> tf_g;
@@ -1771,9 +1849,10 @@ bool FunctionSignature::parse(
                   param.name,
                   arg_pos + 1,
                   param.type_name(),
-                  Py_TYPE(py::reinterpret_steal<py::object>(
-                              PySequence_GetItem(obj, failed_idx))
-                              .ptr())
+                  Py_TYPE(
+                      py::reinterpret_steal<py::object>(
+                          PySequence_GetItem(obj, failed_idx))
+                          .ptr())
                       ->tp_name,
                   failed_idx));
         }

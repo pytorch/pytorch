@@ -2858,7 +2858,7 @@ class _MakefxTracer:
 
     def _trace_with_static_dispatch(self, f: Callable, *args: object) -> GraphModule:
         """
-        Trace using static dispatch mode with UnifiedInfraMode.
+        Trace using static dispatch mode for optimized tracing.
 
         This mode eliminates TLS stack navigation by using a single mode
         that statically routes dispatch through infra modes in a known order:
