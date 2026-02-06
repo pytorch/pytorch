@@ -483,6 +483,30 @@ Stack (TOS at end):
         sess = InteractiveDebugSession(multi_call_fn, (inp1, inp2), test_logic)
         self.assertEqual(sess.result, (inp1 + 1, inp2 * 2))
 
+    def test_graph_break(self):
+        """Test stepping through compiled resume function"""
+
+        from torch._dynamo.resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
+
+        @torch.compile(backend="eager")
+        def fn(x):
+            x = x + 1
+            torch._dynamo.graph_break()
+            return x + 2
+
+        def test_logic(sess, initial):
+            self.assertIn("Entering Dynamo-generated code: fn", initial)
+            output = yield "c"
+            self.assertIn(
+                "Entering Dynamo-generated code: " + TORCH_DYNAMO_RESUME_IN_PREFIX,
+                output,
+            )
+            output = yield "c"
+            self.assertRegex(output, rf"{TORCH_DYNAMO_RESUME_IN_PREFIX}\w+ returned:")
+            self.assertIn("fn returned: ", output)
+
+        InteractiveDebugSession(fn, (torch.randn(3),), test_logic)
+
     def test_stack_at_return_value(self):
         """Test that stack has exactly 1 element at RETURN_VALUE instruction.
 
@@ -705,11 +729,14 @@ Stack (TOS at end):
             self.assertIn("x =", locals_output)  # Input tensor should be in locals
 
             # Verify we can inspect the stack at the exception point
-            # Stack should have the operands from the failed division
+            # Note: On Python 3.11 with settrace, when an exception is raised,
+            # CPython has already popped the operands from the stack before the
+            # division fails, so we can't see them.
             stack_output = yield "stack"
             self.assertIn("Stack", stack_output)
-            self.assertIn("31415", stack_output)
-            self.assertRegex(stack_output, r"\[\d+\].*\b0\b")  # constant 0
+            if sys.version_info >= (3, 12):
+                self.assertIn("31415", stack_output)
+                self.assertRegex(stack_output, r"\[\d+\].*\b0\b")  # constant 0
 
             # Verify we can evaluate expressions
             eval_output = yield "1 + 1"

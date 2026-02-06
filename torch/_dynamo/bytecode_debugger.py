@@ -22,15 +22,20 @@ Programmatic breakpoints (for Dynamo developers):
         codegen.extend_output(create_breakpoint())
 """
 
+from __future__ import annotations
+
 import dis
 import sys
 import types
-from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any, cast
+from typing import Any, cast, Self, TYPE_CHECKING
 
-from .bytecode_transformation import cleaned_instructions, Instruction
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Generator
+
+from .bytecode_transformation import convert_instruction, Instruction, instruction_size
 
 
 # Python 3.12+ has sys.monitoring for efficient instruction-level tracing
@@ -47,9 +52,9 @@ class _BreakpointMarker:
     """
 
     __slots__ = ()
-    _instance: "_BreakpointMarker | None" = None
+    _instance: _BreakpointMarker | None = None
 
-    def __new__(cls) -> "_BreakpointMarker":
+    def __new__(cls) -> Self:
         if cls._instance is None:
             cls._instance = cast("_BreakpointMarker", object.__new__(cls))
         return cls._instance
@@ -129,14 +134,24 @@ class _DebugContext:
     def _get_or_create_state(self, code: types.CodeType) -> DebuggerState:
         """Get or create debugger state for a code object."""
         if code not in self._code_states:
-            instructions = cleaned_instructions(code, safe=True)
+            # Use dis.get_instructions directly to preserve original offsets.
+            # cleaned_instructions strips EXTENDED_ARG and recalculates offsets,
+            # which would cause mismatches with offsets reported by callbacks.
+            instructions = [convert_instruction(i) for i in dis.get_instructions(code)]
 
+            # In 3.11+, instructions have inline cache entries that occupy
+            # bytecode space (e.g. BINARY_OP is 2 bytes + 2 bytes cache).
+            # dis.get_instructions only reports the instruction start offset,
+            # but sys.monitoring RAISE reports offsets within cache entries.
+            # Map the full byte range of each instruction so lookups succeed.
             offset_to_inst: dict[int, Instruction] = {}
             offset_to_index: dict[int, int] = {}
             for i, inst in enumerate(instructions):
                 if inst.offset is not None:
-                    offset_to_inst[inst.offset] = inst
-                    offset_to_index[inst.offset] = i
+                    inst_size = instruction_size(inst)
+                    for off in range(inst.offset, inst.offset + inst_size, 2):
+                        offset_to_inst[off] = inst
+                        offset_to_index[off] = i
 
             max_index = len(instructions) - 1 if instructions else 0
             max_offset = max(
@@ -644,7 +659,7 @@ class _DebugContext:
     # Context manager implementation
     # =========================================================================
 
-    def __enter__(self) -> "_DebugContext":
+    def __enter__(self) -> Self:
         """Start the debug context."""
         from torch._C._dynamo.eval_frame import set_bytecode_debugger_callback
 
