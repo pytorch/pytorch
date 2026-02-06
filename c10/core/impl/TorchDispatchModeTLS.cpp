@@ -8,6 +8,8 @@
 namespace c10::impl {
 
 thread_local static TorchDispatchModeTLS torchDispatchModeState;
+// Thread-local static dispatch state for optimized tracing
+thread_local static StaticDispatchState staticDispatchState;
 
 bool TorchDispatchModeTLS::any_modes_set(bool skip_infra_modes) {
   if (!torchDispatchModeState.stack_.empty())
@@ -174,7 +176,62 @@ void TorchDispatchModeTLS::set_state(TorchDispatchModeTLS state) {
   }
 }
 
+// ============================================================================
+// Static Dispatch Optimization Implementation
+// ============================================================================
+
+void TorchDispatchModeTLS::enable_static_dispatch() {
+  // Reset any existing state
+  staticDispatchState.reset();
+
+  // Snapshot the current mode stack from bottom to top
+  // The dispatch chain is ordered from lowest to highest priority
+  // (infra modes first, then user modes)
+  int64_t total_len = stack_len();
+  staticDispatchState.dispatch_chain.reserve(total_len);
+
+  for (int64_t i = 0; i < total_len; ++i) {
+    staticDispatchState.dispatch_chain.push_back(get_stack_at(i));
+  }
+
+  // Start from the top of the stack (highest priority)
+  staticDispatchState.current_idx = total_len - 1;
+  staticDispatchState.enabled = true;
+}
+
+void TorchDispatchModeTLS::disable_static_dispatch() {
+  staticDispatchState.reset();
+}
+
+bool TorchDispatchModeTLS::is_static_dispatch_enabled() {
+  return staticDispatchState.enabled;
+}
+
+std::shared_ptr<PyObject_TorchDispatchMode> TorchDispatchModeTLS::
+    get_current_static_mode() {
+  if (!staticDispatchState.enabled || staticDispatchState.current_idx < 0) {
+    return nullptr;
+  }
+  return staticDispatchState
+      .dispatch_chain[static_cast<size_t>(staticDispatchState.current_idx)];
+}
+
+void TorchDispatchModeTLS::advance_static_dispatch() {
+  if (staticDispatchState.enabled && staticDispatchState.current_idx >= 0) {
+    staticDispatchState.current_idx--;
+  }
+}
+
+void TorchDispatchModeTLS::reset_static_dispatch_index() {
+  if (staticDispatchState.enabled) {
+    staticDispatchState.current_idx =
+        static_cast<int64_t>(staticDispatchState.dispatch_chain.size()) - 1;
+  }
+}
+
+// ============================================================================
 // UTIL
+// ============================================================================
 
 bool dispatch_mode_enabled() {
   return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python) &&
