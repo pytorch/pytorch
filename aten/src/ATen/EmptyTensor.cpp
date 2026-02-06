@@ -53,6 +53,9 @@ inline void raise_warning_for_complex_half(ScalarType dtype) {
   if (dtype == kComplexHalf) {
     TORCH_WARN_ONCE(
         "ComplexHalf support is experimental and many operators don't support it yet.");
+  } else if (dtype == kBComplex32) {
+    TORCH_WARN_ONCE(
+        "BComplex32 support is experimental and many operators don't support it yet.");
   }
 }
 
