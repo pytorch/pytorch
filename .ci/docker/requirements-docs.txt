@@ -3,7 +3,6 @@ sphinx==7.2.6
 #Pinned versions: 7.2.6
 
 # for testing only
-
 git+https://github.com/pytorch/pytorch_sphinx_theme.git@add-dropdown-support
 
 # pytorch_sphinx_theme2==0.3.0
