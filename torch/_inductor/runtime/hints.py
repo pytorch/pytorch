@@ -12,13 +12,49 @@ from torch.utils._triton import has_triton_package
 
 # The following maximums only apply to runtime autotuning, when using FixedTritonConfig one may see larger values
 # NOTE: if these fail asserts submit a PR to increase them
-TRITON_MAX_BLOCK = {
-    "X": 8192 if torch.version.hip else 4096,
-    "Y": 1024,
-    "Z": 1024,
-    "R0_": 4096 * 16,  # * 16 is multi-kernel only
-    "R1_": 2048 * 16,  # * 16 is multi-kernel only
-}
+class _TritonMaxBlock(dict):
+    """
+    Lazy-evaluated dict for TRITON_MAX_BLOCK.
+
+    The "X" dimension maximum depends on torch.version.hip, which may not be
+    properly initialized at module import time. This class defers the evaluation
+    until the value is actually accessed, ensuring correct platform detection.
+
+    See https://github.com/pytorch/pytorch/issues/164185
+    """
+
+    _STATIC_VALUES = {
+        "Y": 1024,
+        "Z": 1024,
+        "R0_": 4096 * 16,  # * 16 is multi-kernel only
+        "R1_": 2048 * 16,  # * 16 is multi-kernel only
+    }
+
+    def __getitem__(self, key):
+        if key == "X":
+            # Evaluate at access time to ensure torch.version.hip is properly set
+            return 8192 if torch.version.hip else 4096
+        return self._STATIC_VALUES[key]
+
+    def __contains__(self, key):
+        return key == "X" or key in self._STATIC_VALUES
+
+    def keys(self):
+        return ["X"] + list(self._STATIC_VALUES.keys())
+
+    def values(self):
+        return [self["X"]] + list(self._STATIC_VALUES.values())
+
+    def items(self):
+        return [(k, self[k]) for k in self.keys()]
+
+    def get(self, key, default=None):
+        if key in self:
+            return self[key]
+        return default
+
+
+TRITON_MAX_BLOCK = _TritonMaxBlock()
 TRITON_MAX_RSPLIT = 64
 
 
