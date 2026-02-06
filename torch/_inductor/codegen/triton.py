@@ -825,16 +825,27 @@ class TritonPrinter(PythonPrinter):
         return f"tl.sqrt_rn(({self._print(expr)}).to(tl.float32))"
 
     def _print_FloatPow(self, expr: sympy.Expr) -> str:
-        return (
-            f"libdevice.pow({self._print(expr.args[0])}, {self._print(expr.args[1])})"
-        )
+        base = self._print(expr.args[0])
+        exp = self._print(expr.args[1])
+        # libdevice.pow requires both arguments to have the same type.
+        # Always cast to float64 for consistency. This is scalar shape math,
+        # not tensor ops, so the performance impact is negligible.
+        return f"libdevice.pow(({base}).to(tl.float64), ({exp}).to(tl.float64))"
 
     def _print_PowByNatural(self, expr: sympy.Expr) -> str:
         if expr.args[0].is_Integer:
-            return f"libdevice.pow({float(expr.args[0])}, {self._print(expr.args[1])})"
-        return (
-            f"libdevice.pow({self._print(expr.args[0])}, {self._print(expr.args[1])})"
-        )
+            base = f"tl.full([], {float(expr.args[0])}, tl.float64)"
+        else:
+            base = f"({self._print(expr.args[0])}).to(tl.float64)"
+        exp_val = expr.args[1]
+        if exp_val.is_Integer:
+            exp = f"tl.full([], {float(exp_val)}, tl.float64)"
+        else:
+            exp = f"({self._print(exp_val)}).to(tl.float64)"
+        # libdevice.pow requires both arguments to have the same type.
+        # Always cast to float64 for consistency. This is scalar shape math,
+        # not tensor ops, so the performance impact is negligible.
+        return f"libdevice.pow({base}, {exp})"
 
     def _print_Where(self, expr: sympy.Expr) -> str:
         c = self.doprint(expr.args[0])
