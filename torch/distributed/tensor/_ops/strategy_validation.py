@@ -617,7 +617,7 @@ def get_aten_op_for_sample(op, sample, op_name: str = ""):
     return captured_op, non_tensor_args, non_tensor_kwargs
 
 
-def query_single_dim_strategy(op_overload, tensors, mesh):
+def query_single_dim_strategy(op_overload, tensors, mesh, kwargs=None):
     """
     Query DTensor's single-dim strategy for given input tensors.
     Returns list of [output_placement, *input_placements] rules.
@@ -637,7 +637,7 @@ def query_single_dim_strategy(op_overload, tensors, mesh):
     )
 
     try:
-        result = strategy_func(op_overload, args_meta, {})
+        result = strategy_func(op_overload, args_meta, kwargs or {})
 
         expanded_result = []
         for combo in result:
@@ -925,7 +925,9 @@ def compare_operator(
 
             strategy_start = time.time()
             if aten_op and aten_op in propagator.op_single_dim_strategy_funcs:
-                strategy_result = query_single_dim_strategy(aten_op, tensors, None)
+                strategy_result = query_single_dim_strategy(
+                    aten_op, tensors, None, kwargs=non_tensor_kwargs
+                )
                 if strategy_result:
                     # Parse strategy result to get valid combinations
                     # The result is a list of placement combinations

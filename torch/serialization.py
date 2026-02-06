@@ -661,7 +661,9 @@ def validate_hpu_device(location):
 def _deserialize(backend_name, obj, location):
     if backend_name == "privateuse1":
         backend_name = torch._C._get_privateuse1_backend_name()
-    if location.startswith(backend_name):
+    if location == backend_name or bool(
+        re.match(f"{backend_name}(:|[0-9]+)", location)
+    ):
         device = _validate_device(location, backend_name)
         return obj.to(device=device)
 

@@ -246,4 +246,5 @@ enabled: bool
 deterministic: bool
 benchmark: bool
 allow_tf32: bool
+fp32_precision: str
 benchmark_limit: int

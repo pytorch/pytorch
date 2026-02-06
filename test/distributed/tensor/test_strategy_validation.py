@@ -27,6 +27,7 @@ from torch.distributed.tensor._ops.strategy_validation import (
     parse_placement,
     placement_tuple_to_str,
     PlacementCombination,
+    query_single_dim_strategy,
     validate_combination,
 )
 from torch.distributed.tensor.placement_types import Partial, Shard
@@ -908,6 +909,68 @@ class TestPartialCombinationValidity(TestCase):
             )
 
         self.assertTrue(is_valid, f"add Pmin,R->Pmin should be valid: {msg}")
+
+
+class TestQuerySingleDimStrategyKwargs(TestCase):
+    """Test that query_single_dim_strategy forwards kwargs to strategy functions."""
+
+    def test_kwargs_forwarded_to_strategy(self):
+        """
+        A kwargs-aware strategy should receive the actual kwargs, not {}.
+
+        torch.add(a, b, alpha=-1) changes which Partial rules are valid:
+        with alpha=1, R,P(max)->P(max) is valid; with alpha=-1, it becomes
+        R,P(max)->P(min) instead. A strategy that accounts for alpha needs
+        to receive it through kwargs.
+        """
+        from torch.distributed.tensor._api import DTensor
+        from torch.distributed.tensor._ops.single_dim_strategy import (
+            _ShardingPlaceholder,
+        )
+
+        propagator = DTensor._op_dispatcher.sharding_propagator
+        aten_add = torch.ops.aten.add.Tensor
+
+        # A strategy that returns different rules depending on alpha.
+        # With alpha >= 0: R,P(max)->P(max) is valid
+        # With alpha < 0:  R,P(max)->P(min) is valid (negation flips max to min)
+        def alpha_aware_add_strategy(op, args_schema, kwargs_schema):
+            alpha = kwargs_schema.get("alpha", 1)
+            rules = [
+                [_ShardingPlaceholder(0), _ShardingPlaceholder(0), _ShardingPlaceholder(0)],
+                [Partial("sum"), Partial("sum"), Partial("sum")],
+            ]
+            if alpha < 0:
+                rules.append([Partial("min"), Replicate(), Partial("max")])
+            else:
+                rules.append([Partial("max"), Replicate(), Partial("max")])
+            return rules
+
+        original = propagator.op_single_dim_strategy_funcs.get(aten_add)
+        propagator.op_single_dim_strategy_funcs[aten_add] = alpha_aware_add_strategy
+        try:
+            tensors = [("a", torch.randn(4, 3)), ("b", torch.randn(4, 3))]
+
+            # Query with alpha=-1 kwargs
+            result = query_single_dim_strategy(
+                aten_add, tensors, None, kwargs={"alpha": -1}
+            )
+            self.assertIsNotNone(result)
+
+            # The third rule's output should be P(min) for alpha=-1
+            self.assertEqual(len(result), 3)
+            self.assertIsInstance(result[2][0], Partial)
+            self.assertEqual(
+                result[2][0].reduce_op,
+                "min",
+                "With alpha=-1, the strategy should produce P(min) output "
+                "but got P(max) — kwargs were not forwarded",
+            )
+        finally:
+            if original is not None:
+                propagator.op_single_dim_strategy_funcs[aten_add] = original
+            else:
+                propagator.op_single_dim_strategy_funcs.pop(aten_add, None)
 
 
 if __name__ == "__main__":
