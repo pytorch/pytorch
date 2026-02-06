@@ -121,16 +121,6 @@ void magmaCholeskySolveBatched(
     scalar_t** dB_array, magma_int_t lddb, magma_int_t& info, magma_int_t batchsize, const MAGMAQueue& magma_queue);
 
 template<class scalar_t>
-void magmaCholesky(
-    magma_uplo_t uplo, magma_int_t n, scalar_t* dA,
-    magma_int_t ldda, magma_int_t* info);
-
-template<class scalar_t>
-void magmaCholeskyBatched(
-    magma_uplo_t uplo, magma_int_t n, scalar_t** dA_array, magma_int_t ldda,
-    magma_int_t* info_array, magma_int_t batchsize, const MAGMAQueue& magma_queue);
-
-template<class scalar_t>
 void magmaTriangularSolveBatched(
     magma_side_t side, magma_uplo_t uplo, magma_trans_t trans, magma_diag_t diag, magma_int_t m, magma_int_t n,
     scalar_t** dA_array, magma_int_t ldda, scalar_t** dB_array, magma_int_t lddb, magma_int_t batchsize,
@@ -150,7 +140,6 @@ void magmaSyevd(
     value_t* w, scalar_t* wA, magma_int_t ldwa, scalar_t* work, magma_int_t lwork, value_t* rwork,
     magma_int_t lrwork, magma_int_t* iwork, magma_int_t liwork, magma_int_t* info);
 
-#ifdef USE_ROCM
 template<class scalar_t, class value_t=scalar_t>
 void magmaEig(
     magma_vec_t jobvl, magma_vec_t jobvr, magma_int_t n, scalar_t *A, magma_int_t lda,
@@ -158,7 +147,6 @@ void magmaEig(
     scalar_t *VR, magma_int_t ldvr, scalar_t *work, magma_int_t lwork,
     value_t *rwork,
     magma_int_t *info);
-#endif
 
 template<class scalar_t>
 void magmaLuSolve(
@@ -452,74 +440,6 @@ void magmaCholeskySolveBatched<c10::complex<float>>(
 }
 
 template<>
-void magmaCholesky<double>(
-    magma_uplo_t uplo, magma_int_t n, double* dA,
-    magma_int_t ldda, magma_int_t* info) {
-  MagmaStreamSyncGuard guard;
-  magma_dpotrf_gpu(uplo, n, dA, ldda, info);
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template<>
-void magmaCholesky<float>(
-    magma_uplo_t uplo, magma_int_t n, float* dA,
-    magma_int_t ldda, magma_int_t* info) {
-  MagmaStreamSyncGuard guard;
-  magma_spotrf_gpu(uplo, n, dA, ldda, info);
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template<>
-void magmaCholesky<c10::complex<double>>(
-    magma_uplo_t uplo, magma_int_t n, c10::complex<double>* dA,
-    magma_int_t ldda, magma_int_t* info) {
-  MagmaStreamSyncGuard guard;
-  magma_zpotrf_gpu(uplo, n, reinterpret_cast<magmaDoubleComplex*>(dA), ldda, info);
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template<>
-void magmaCholesky<c10::complex<float>>(
-    magma_uplo_t uplo, magma_int_t n, c10::complex<float>* dA,
-    magma_int_t ldda, magma_int_t* info) {
-  MagmaStreamSyncGuard guard;
-  magma_cpotrf_gpu(uplo, n, reinterpret_cast<magmaFloatComplex*>(dA), ldda, info);
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template<>
-void magmaCholeskyBatched<double>(
-    magma_uplo_t uplo, magma_int_t n, double** dA_array, magma_int_t ldda,
-    magma_int_t* info_array, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
-  magma_dpotrf_batched(uplo, n, dA_array, ldda, info_array, batchsize, magma_queue.get_queue());
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template<>
-void magmaCholeskyBatched<float>(
-    magma_uplo_t uplo, magma_int_t n, float** dA_array, magma_int_t ldda,
-    magma_int_t* info_array, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
-  magma_spotrf_batched(uplo, n, dA_array, ldda, info_array, batchsize, magma_queue.get_queue());
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template<>
-void magmaCholeskyBatched<c10::complex<double>>(
-    magma_uplo_t uplo, magma_int_t n, c10::complex<double>** dA_array, magma_int_t ldda,
-    magma_int_t* info_array, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
-  magma_zpotrf_batched(uplo, n, reinterpret_cast<magmaDoubleComplex**>(dA_array), ldda, info_array, batchsize, magma_queue.get_queue());
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template<>
-void magmaCholeskyBatched<c10::complex<float>>(
-    magma_uplo_t uplo, magma_int_t n, c10::complex<float>** dA_array, magma_int_t ldda,
-    magma_int_t* info_array, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
-  magma_cpotrf_batched(uplo, n, reinterpret_cast<magmaFloatComplex**>(dA_array), ldda, info_array, batchsize, magma_queue.get_queue());
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template<>
 void magmaTriangularSolveBatched<double>(
     magma_side_t side, magma_uplo_t uplo, magma_trans_t trans, magma_diag_t diag, magma_int_t m, magma_int_t n,
     double** dA_array, magma_int_t ldda, double** dB_array, magma_int_t lddb, magma_int_t batchsize,
@@ -723,7 +643,6 @@ void magmaSyevd<c10::complex<float>, float>(
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
-#ifdef USE_ROCM
 template<>
 void magmaEig<double>(
     magma_vec_t jobvl, magma_vec_t jobvr, magma_int_t n,
@@ -803,7 +722,6 @@ void magmaEig<c10::complex<float>, float>(
          rwork, info);
   AT_CUDA_CHECK(cudaGetLastError());
 }
-#endif
 
 template<>
 void magmaLuSolve<double>(
@@ -975,17 +893,14 @@ magma_trans_t to_magma(TransposeType trans) {
 
 namespace {
 
-void _warn_once_magma_deprecation(const std::string& op_name, bool force_cusolver = true) {
+void _warn_once_magma_deprecation(const std::string& op_name) {
   if (at::globalContext().linalgPreferredBackend() == at::LinalgBackend::Magma) {
-    std::string warn_force_cusolver = force_cusolver
-      ? " " + op_name + " will try dispatching to cuSOLVER instead. " +
-        "If you see any error messages, please, file an issue on GitHub."
-      : "";
     TORCH_WARN_ONCE(
-      op_name, ": "
-      "MAGMA, as a linear algebra backend, is deprecated and will be removed "
-      "in future releases.",
-      warn_force_cusolver
+      op_name, ": ",
+      "MAGMA, as a linear algebra backend, is deprecated and will be removed ",
+      "in future releases. ",
+      op_name, " will try dispatching to cuSOLVER instead. "
+      "If you see any error messages, please, file an issue on GitHub."
     );
   }
 }
@@ -1221,118 +1136,9 @@ Tensor _cholesky_solve_helper_cuda(const Tensor& self, const Tensor& A, bool upp
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ cholesky ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-template <typename scalar_t>
-static void apply_cholesky(const Tensor& self, bool upper, const Tensor& info) {
-#if !AT_MAGMA_ENABLED()
-  TORCH_CHECK(
-      false,
-      "Calling torch.linalg.cholesky on a CUDA tensor requires compiling ",
-      "PyTorch with MAGMA. Please use PyTorch built with MAGMA support.");
-#else
-  magma_uplo_t uplo = upper ? MagmaUpper : MagmaLower;
-
-  auto self_data = self.data_ptr<scalar_t>();
-  magma_int_t n = magma_int_cast(self.size(-2), "self.size(-2)");
-  auto lda = std::max<magma_int_t>(1, n);
-
-  if (self.dim() == 2) {
-    // magmaCholesky requires info to be on CPU
-    magma_int_t info_cpu = 0;
-    magmaCholesky<scalar_t>(uplo, n, self_data, lda, &info_cpu);
-    info.fill_(info_cpu);
-  } else {
-    TORCH_INTERNAL_ASSERT(info.is_cuda());
-    auto info_data = info.data_ptr<magma_int_t>();
-
-    // magmaCholeskyBatched supports only upper=false
-    uplo = MagmaLower;
-
-    auto self_mat_stride = matrixStride(self);
-    magma_int_t batch_size = magma_int_cast(batchCount(self), "batchCount");
-
-    scalar_t** self_array;
-
-    ALLOCATE_ARRAY(self_array, scalar_t*, batch_size);
-
-    // Set up the created arrays
-    for (int64_t i = 0; i < batch_size; i++) {
-      self_array[i] = &self_data[i * self_mat_stride];
-    }
-
-    MAGMAQueue magma_queue(self.get_device());
-
-    // Compute as many batches of 262140 possible
-    // 262140 is the size of the largest batch of matrices that can be run with
-    // violating maximum kernel configuration
-    // For complex input the batch limit is 65535 (determined experimentally, see https://github.com/pytorch/pytorch/pull/47047#discussion_r516086923 for more information)
-    int64_t batch_limit = self.is_complex() ? 65535 : 262140;
-
-    for (int64_t mini_idx = 0; mini_idx < batch_size; mini_idx += batch_limit) {
-      int64_t nbatches = std::min(batch_limit, batch_size - mini_idx);
-      scalar_t** self_array_cur = &self_array[mini_idx];
-      magma_int_t* info_array_cur = &info_data[mini_idx];
-
-      magmaCholeskyBatched<scalar_t>(
-        uplo, n, self_array_cur, lda, info_array_cur, nbatches, magma_queue);
-    }
-  }
-#endif
-}
-
-void cholesky_helper_magma(const Tensor& input, bool upper, const Tensor& info) {
-  Tensor result = input;
-  if (input.dim() > 2) {
-    // MAGMA's batched cholesky operator has an off-by-one error causing IMA
-    // (see https://github.com/pytorch/pytorch/issues/42666). This code is based
-    // on the #cloneBatchedColumnMajor function however it pads the input with
-    // one extra element utilizing the fact that the resize_as_ method preserves
-    // the storage even if it's larger than the new sizes. This way if MAGMA
-    // reads off bounds it will still be valid user memory.
-    result = at::empty(input.numel() + 1, input.options());
-    result.resize_as_(input).transpose_(-2, -1);
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.mT().is_contiguous());
-
-    // batched MAGMA doesn't support upper=true
-    // we transpose and conjugate the input as a workaround
-    result.copy_(upper ? input.mH() : input);
-  }
-
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
-    input.scalar_type(), "cholesky_cuda", [&] {
-      apply_cholesky<scalar_t>(result, upper, info);
-    });
-
-  if (input.dim() > 2) {
-    // if upper=true we need to transpose and conjugate the result tensor
-    // because the cholesky decomposition is stored in the lower triangular part
-    if (upper) {
-      input.copy_(result.mH());
-    } else {
-      input.copy_(result);
-    }
-  }
-}
-
 static void cholesky_kernel(const Tensor& input, const Tensor& info, bool upper) {
-#if defined(USE_LINALG_SOLVER)
-  auto preferred_backend = at::globalContext().linalgPreferredBackend();
-  switch (preferred_backend) {
-    case at::LinalgBackend::Cusolver:
-      cholesky_helper_cusolver(input, upper, info);
-      break;
-    case at::LinalgBackend::Magma:
-      cholesky_helper_magma(input, upper, info);
-      break;
-    default:
-      if (batchCount(input) == 1 || !use_magma_ || use_cusolver_potrf_batched_) {
-        cholesky_helper_cusolver(input, upper, info);
-      } else {
-        cholesky_helper_magma(input, upper, info);
-      }
-  }
-#else
-  cholesky_helper_magma(input, upper, info);
-#endif // USE_LINALG_SOLVER
+  _warn_once_magma_deprecation("linalg.eig");
+  cholesky_helper_cusolver(input, upper, info);
 }
 
 REGISTER_CUDA_DISPATCH(cholesky_stub, &cholesky_kernel)
@@ -1975,7 +1781,6 @@ This is an in-place routine, content of 'input', 'values', 'vectors' is overwrit
 'infos' is an int Tensor containing error codes for each matrix in the batched input.
 For more information see MAGMA's documentation for GEEV routine.
 */
-#ifdef USE_ROCM
 template <typename scalar_t>
 void apply_magma_eig(Tensor& values, Tensor& vectors, Tensor& input, Tensor& infos, bool compute_eigenvectors) {
 #if !AT_MAGMA_ENABLED()
@@ -2053,22 +1858,25 @@ void linalg_eig_magma(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos, 
   eigenvectors.copy_(eigenvectors_cpu);
   infos.copy_(infos_cpu);
 }
-#endif // USE_ROCM
-
 void linalg_eig_kernel(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos, const Tensor& input, bool compute_eigenvectors) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.is_cuda());
   // This function calculates the non-symmetric eigendecomposition in-place
   // tensors should be in batched column major memory format
   // the content of eigenvalues, eigenvectors and infos is overwritten by 'linalg_eig_magma' or
   // 'linalg_eig_cusolver_xgeev' both geev routines modify the provided input matrix in-place, therefore we need a copy
-#ifndef USE_ROCM
-  _warn_once_magma_deprecation("linalg.eig");
-  linalg_eig_cusolver_xgeev(eigenvalues, eigenvectors, input, infos, compute_eigenvectors);
-#else
-  // hipSolver does not have `geev`
-  _warn_once_magma_deprecation("linalg.eig", /*force_cusolver=*/false);
-  linalg_eig_magma(eigenvalues, eigenvectors, infos, input, compute_eigenvectors);
+
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.is_cuda());
+#if defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)
+  auto preferred_backend = at::globalContext().linalgPreferredBackend();
+  switch (preferred_backend) {
+    case at::LinalgBackend::Cusolver:
+    default:
+      linalg_eig_cusolver_xgeev(eigenvalues, eigenvectors, input, infos, compute_eigenvectors);
+      return;
+    case at::LinalgBackend::Magma:
+      break; // MAGMA path handled below
+  }
 #endif
+  linalg_eig_magma(eigenvalues, eigenvectors, infos, input, compute_eigenvectors);
 }
 
 REGISTER_CUDA_DISPATCH(linalg_eig_stub, &linalg_eig_kernel)
