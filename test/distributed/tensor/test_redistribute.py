@@ -986,10 +986,11 @@ class RedistributeTest(DTensorTestBase):
         dt = distribute_tensor(full_tensor, mesh, [Shard(0)])
 
         # Verify some ranks have zero-size local tensors
-        if self.rank < 2:
-            self.assertEqual(dt._local_tensor.shape, (1, 8))
-        else:
-            self.assertEqual(dt._local_tensor.shape, (0, 8))
+        if not self.is_local_tensor_enabled:
+            if self.rank < 2:
+                self.assertEqual(dt._local_tensor.shape, (1, 8))
+            else:
+                self.assertEqual(dt._local_tensor.shape, (0, 8))
 
         # Test Shard(0) -> Replicate()
         dt_rep = dt.redistribute(mesh, [Replicate()])

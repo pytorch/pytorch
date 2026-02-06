@@ -798,10 +798,11 @@ class DTensorTest(DTensorTestBase):
         dt = distribute_tensor(full_tensor, mesh, [Shard(0)])
 
         # Verify expected local shard sizes
-        if self.rank < 2:
-            self.assertEqual(dt._local_tensor.shape, (1, 8))
-        else:
-            self.assertEqual(dt._local_tensor.shape, (0, 8))
+        if not self.is_local_tensor_enabled:
+            if self.rank < 2:
+                self.assertEqual(dt._local_tensor.shape, (1, 8))
+            else:
+                self.assertEqual(dt._local_tensor.shape, (0, 8))
 
         # Test add
         out_add = dt + dt
