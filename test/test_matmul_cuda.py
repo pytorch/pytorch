@@ -200,8 +200,8 @@ class TestMatmulCuda(InductorTestCase):
         ref_corrcoef.diagonal().fill_(1.0)
 
         with blas_library_context(backend):
-            for a, b in zip((x, x.mH), (x.mH, x)):
-                inner_prod = a @ b
+            for a in (x, x.mH):
+                inner_prod = a @ a.mH
                 self.assertEqual(inner_prod, ref_inner[:len(a), :len(a)])
 
             self.assertEqual(torch.corrcoef(x), ref_corrcoef)
