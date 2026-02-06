@@ -346,6 +346,7 @@ RAIIDataPtr RAII_gpuMalloc(size_t num_bytes) {
 
 #elif defined(USE_XPU)
 
+// NOLINTNEXTLINE(clang-diagnostic-unneeded-internal-declaration)
 RAIIDataPtr RAII_gpuMalloc(size_t num_bytes) {
   sycl::queue* queue_ptr = nullptr;
   aoti_torch_get_current_sycl_queue((void**)&queue_ptr);
@@ -504,6 +505,9 @@ class AOTInductorModelBase {
       (*run_finished_)->wait_and_throw();
       delete *run_finished_;
       run_finished_.reset();
+    }
+    if (stream == nullptr) {
+      aoti_torch_get_current_xpu_stream(this->device_idx_, (void**)&stream);
     }
 #else // !USE_CUDA && !USE_XPU
     run_finished_ = false;
