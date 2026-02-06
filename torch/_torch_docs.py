@@ -217,6 +217,66 @@ sparse_support_notes = {
 }
 
 add_docstr(
+    torch.pi,
+    r"""
+pi -> float
+
+Returns `pi(3.1415...) <https://en.wikipedia.org/wiki/Pi>` also known as :math:`\huge \pi`.
+
+Example::
+
+    >>> torch.pi
+    3.141592653589793
+
+""",
+)
+
+add_docstr(
+    torch.e,
+    r"""
+e -> float
+
+Returns `Euler's number(2.7182...) <https://en.wikipedia.org/wiki/E_(mathematical_constant)>` also known as Napier’s constant and the base of `natural logarithms <https://en.wikipedia.org/wiki/Natural_logarithm>`.
+Be careful, Euler's number is different from `Euler's constant(0.5772...) <https://en.wikipedia.org/wiki/Euler%27s_constant>` also known as Euler–Mascheroni constant.
+Example::
+
+    >>> torch.e
+    2.718281828459045
+
+""",
+)
+
+add_docstr(
+    torch.nan,
+    r"""
+nan -> float
+
+Returns NaN(Not a Number).
+
+Example::
+
+    >>> torch.nan
+    nan
+
+""",
+)
+
+add_docstr(
+    torch.inf,
+    r"""
+inf -> float
+
+Returns (positive) infinity.
+
+Example::
+
+    >>> torch.inf
+    inf
+
+""",
+)
+
+add_docstr(
     torch.abs,
     r"""
 abs(input: Tensor, *, out: Optional[Tensor]) -> Tensor
