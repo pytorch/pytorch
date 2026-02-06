@@ -24,7 +24,6 @@ def to_out_variant(op: torch._ops.OpOverload) -> torch._ops.OpOverload | None:
             f"Failed to find out variant for op '{op}' as its schema is not functional. \n"
             f"  {op._schema}"
         )
-        return None
 
     # Get the normalized signature for matching
     signature = dataclasses.replace(native_schema.signature(), returns=())
@@ -83,7 +82,7 @@ def check_out_variant(
         raise AssertionError(
             f"We did not find an out variant for {functional_op}. Some common mistakes include:\n"
             "  1. The out variant is not an overload of the original op (e.g., 'op.out' or 'op.overload_out') \n"
-            "  2. The out variant's input arguments does not match the functional op's signature.\n"
+            "  2. The out variant's input arguments does not match the functional op's signature (excluding the out kwargs).\n"
             "  3. The original operator is not functional.\n"
             f"Found overloads for {functional_op}:\n"
             f"{out_variants_info}"

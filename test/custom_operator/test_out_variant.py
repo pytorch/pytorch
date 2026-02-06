@@ -365,6 +365,47 @@ class TestOutVariant(TestCase):
                 torch.ops._TestOutVariant.default_mismatch.out,
             )
 
+    def test_compile_out_variant(self):
+        self.lib.define("div(Tensor x, Tensor y) -> Tensor")
+
+        @torch.library.impl("_TestOutVariant::div", "CompositeExplicitAutograd")
+        def div_impl(x: Tensor, y: Tensor) -> Tensor:
+            return x / y
+
+        @torch.library.impl("_TestOutVariant::div", "Meta")
+        def div_fake(x: Tensor, y: Tensor) -> Tensor:
+            return torch.empty_like(x)
+
+        self.lib.define("div.out(Tensor x, Tensor y, *, Tensor(a!) result) -> ()")
+
+        @torch.library.impl("_TestOutVariant::div.out", "CompositeExplicitAutograd")
+        def div_out_impl(x: Tensor, y: Tensor, *, result: Tensor) -> None:
+            result.copy_(x / y)
+            return
+            return result
+
+        @torch.library.impl("_TestOutVariant::div.out", "Meta")
+        def div_out_fake(x: Tensor, y: Tensor, *, result: Tensor) -> None:
+            return
+            return result
+
+        def fn(x, y, out):
+            torch.ops._TestOutVariant.div.out(x, y, result=out)
+            return out
+
+        x = torch.randn(3, 4)
+        y = torch.randn(3, 4)
+        out = torch.empty(3, 4)
+
+        compiled_fn = torch.compile(fn)
+        compiled_fn(x, y, out)
+        self.assertEqual(out, x / y)
+
+        check_out_variant(
+            torch.ops._TestOutVariant.div.default,
+            torch.ops._TestOutVariant.div.out,
+        )
+
 
 if __name__ == "__main__":
     run_tests()
