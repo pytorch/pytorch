@@ -51,11 +51,24 @@ verify_correctness = False
 # [@compile_ignored: debug]
 debug_backend_override: str = os.environ.get("TORCH_COMPILE_OVERRIDE_BACKENDS", "")
 
+# Validate that fake_fn and real_fn in @leaf_function decorators produce outputs
+# with matching shapes and dtypes in eager mode. Helps catch mismatches early.
+# Disabled by default to avoid runtime overhead.
+# [@compile_ignored: debug]
+leaf_function_validate_outputs = False
+
+# Check for escaped gradients in @leaf_function. When a leaf_function closes over
+# a tensor with requires_grad=True, gradients won't flow back to it. This check
+# walks the autograd graph to detect such cases and raises an error.
+# Disabled by default to avoid runtime overhead. Enable for debugging.
+# [@compile_ignored: debug]
+leaf_function_check_escaped_gradients = False
+
 # need this many ops to create an FX graph (deprecated: not used)
 minimum_call_count = 1
 
 # turn on/off DCE pass (deprecated: always true)
-dead_code_elimination = True
+dead_code_elimination = None
 
 # Enable or disable side effect replay after graph execution.
 # When False, mutations to Python objects (lists, dicts, attributes) won't be
@@ -218,6 +231,12 @@ disable = os.environ.get("TORCH_COMPILE_DISABLE", "0") == "1"
 
 # [@compile_ignored: runtime_behaviour] Get a cprofile trace of Dynamo
 cprofile = os.environ.get("TORCH_COMPILE_CPROFILE", False)
+
+# Enable Dynamo profiler. When enabled, prints pstats output showing
+# time spent tracing each user function. Set to True to enable, or set to a
+# file path to save the .prof file for snakeviz.
+# [@compile_ignored: runtime_behaviour]
+dynamo_profiler: bool | str = os.environ.get("TORCH_COMPILE_DYNAMO_PROFILER", False)
 
 # Legacy config, does nothing now!
 skipfiles_inline_module_allowlist: dict[Any, Any] = {}
@@ -505,6 +524,12 @@ inline_inbuilt_nn_modules = Config(  # type: ignore[var-annotated]
 # Resume tracing in nested frames if a nested graph break occurs
 # Old behavior is to bubble up the graph break to the top level frame.
 nested_graph_breaks = False
+
+# If True, error if Dynamo attempts to trace more code while running compiled code in fullgraph=True.
+# If Dynamo determines that it should skip tracing the code (either at the C/C++ or Python level),
+# no error will be raised.
+# Set to false if force falling back to eager is desired.
+error_on_dynamo_callback_in_fullgraph_compiled_code = False
 
 # Install "free" tensor variables (globals, non-locals, nn module attributes)
 # as graph attributes.  This is useful for export, as it
@@ -815,6 +840,15 @@ _custom_ops_profile: Optional[Any] = None
 # Experimental flag to enable regional compile on invoke_subgraph HOP.
 # For testing only!
 enable_invoke_subgraph_regional_compile: bool = False
+
+# Clear WeakIdRef entries from TracingContext.tensor_to_context and
+# MetaTensorDescriber.lookup_tensor at the end of compile. These weakrefs
+# can block torch.utils.swap_tensors from working after compile.
+# - None (default): clear for registered backends (inductor, eager, etc.),
+#   don't clear for custom backends (to support standalone_compile, etc.)
+# - True: always clear regardless of backend
+# - False: never clear regardless of backend
+invalidate_compile_context_weakrefs: Optional[bool] = None
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403

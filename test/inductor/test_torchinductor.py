@@ -660,7 +660,6 @@ def check_model(
     torch._dynamo.reset()
 
 
-@skipIfRocmArch(MI200_ARCH)
 @torch._inductor.config.patch("triton.cudagraphs", False)
 def check_model_gpu(
     self: TestCase,
@@ -4655,7 +4654,11 @@ class CommonTemplate:
 
     @parametrize("dilation", (1, 2))
     @parametrize("dim", (subtest(2), subtest(3)))
-    def test_low_memory_max_pool(self, dilation: int, dim: int):
+    @parametrize(
+        "use_block_ptr",
+        [subtest(False), subtest(True, decorators=[skip_if_not_triton])],
+    )
+    def test_low_memory_max_pool(self, dilation: int, dim: int, use_block_ptr: bool):
         prims = torch.ops.prims
 
         def fn(x):
@@ -4682,7 +4685,8 @@ class CommonTemplate:
             )
             return vals, indices, offsets
 
-        self.common(fn, (torch.randn(1, 3, *[10] * dim),))
+        with config.patch({"triton.use_block_ptr": use_block_ptr}):
+            self.common(fn, (torch.randn(1, 3, *[10] * dim),))
 
     @skipIfMPS
     def test_max_unpool_empty_output(self):
@@ -5627,7 +5631,7 @@ class CommonTemplate:
         )
 
     def test_avg_pool2d7(self):
-        # Large kernel size, use fallback
+        # Large kernel size with stride != size
         def fn(x):
             return aten.avg_pool2d(x, [13, 13], [1, 1], [0, 0])
 
@@ -6172,6 +6176,19 @@ class CommonTemplate:
         actual = compiled()
         self.assertEqual(actual, expected)
 
+    def test_uniform(self):
+        def fn(x):
+            return aten.uniform.default(x, 0, 1)
+
+        a = torch.randn([5, 3]).permute(1, 0)
+
+        self.common(
+            fn,
+            (a,),
+            exact_stride=True,
+            reference_in_float=False,
+        )
+
     def test_complex_from_real_imag(self):
         def fn(x, y):
             return aten.complex.default(x, y)
@@ -6233,6 +6250,39 @@ class CommonTemplate:
         x = torch.randn(4, dtype=torch.complex64)
 
         self.common(fn, (x,))
+
+    @xfail_if_mps
+    def test_complex_real_imag_conj(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/171665
+        # Tests that extracting real/imag from conjugated tensors works when compiled.
+        # The issue was that clone operations from resolve_conj() were incorrectly
+        # removed by remove_noop_ops because same_meta didn't check is_conj().
+        def fn(x):
+            x = x.conj()
+            return x.real + x.imag
+
+        x = torch.randn(4, dtype=torch.complex64)
+
+        self.common(fn, (x,))
+
+    def test_complex_conv2d_conj(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/171665
+        # Tests that complex convolution works on conjugated inputs when compiled.
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 1, 2, dtype=torch.complex64)
+
+            def forward(self, x):
+                x = x.conj()
+                x = x.view(2, 1, 2, 2)
+                return self.conv(x)
+
+        model = Model().to(self.device)
+        x = torch.randn(2, 4, dtype=torch.complex64, device=self.device)
+
+        self.common(model, (x,), check_lowp=False)
 
     def test_polar(self):
         def fn(dist, angle):
@@ -6798,11 +6848,13 @@ class CommonTemplate:
     @skip_if_gpu_halide
     # Constant folding was explicitly turned off due to issue #108388
     # Turn it back on for test
-    @unittest.skipIf(config.triton.native_matmul, "native matmul has better precision")
     @torch._inductor.config.patch(
-        joint_graph_constant_folding=True,
-        # Numerical accuracy failure for triton fp16
-        max_autotune_gemm_backends="ATEN",
+        {
+            "joint_graph_constant_folding": True,
+            # Numerical accuracy failure for triton fp16
+            "max_autotune_gemm_backends": "ATEN",
+            "triton.native_matmul": False,
+        }
     )
     def test_remove_no_ops(self):
         def matmul_with_op(x, y, fn):
@@ -7231,12 +7283,15 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(code0, code1)
 
     @config.patch(
-        force_disable_caches=True,
-        # Test expects a single (fused) kernel to be generated
-        max_autotune_gemm_backends="ATEN",
+        {
+            "force_disable_caches": True,
+            # Test expects a single (fused) kernel to be generated
+            "max_autotune_gemm_backends": "ATEN",
+            # native matmul codegens the matrix multiplication
+            "triton.native_matmul": False,
+        }
     )
     @skip_if_cpp_wrapper("run_and_get_kernels issue")
-    @unittest.skipIf(config.triton.native_matmul, "matmul is now generated")
     def test_deterministic_codegen_with_suffix(self):
         if "cpu" in str(self.device) and config.is_fbcode():
             raise unittest.SkipTest("cpp packaging is wacky in fbcode")
@@ -9388,15 +9443,44 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, [], assert_equal=False)
 
+    # `requires_gpu` otherwise
+    # RuntimeError: pin_memory=True requires a CUDA or other accelerator backend;
+    # no pinned memory allocator is available on this system.
+    @requires_gpu()
+    @unittest.skipIf(IS_MACOS, "fails on macos")
+    @parametrize(
+        "constructor",
+        [torch.empty, torch.ones, torch.zeros, torch.rand, torch.randn],
+        name_fn=lambda constructor: constructor.__name__,
+    )
+    def test_constructors_pin_memory(self, constructor):
+        if self.device != "cpu":
+            raise unittest.SkipTest("pin_memory is not supported on non-CPU devices")
+
+        failing_constructors = [torch.rand, torch.ones, torch.zeros]
+
+        def fn():
+            return constructor([1, 128, 128], pin_memory=True, device=self.device)
+
+        result = torch.compile(fn, backend="inductor")()
+        if constructor in failing_constructors:
+            # We will get signal when one of the constructor correctly supports `pin_memory=True`.
+            self.assertFalse(result.is_pinned())
+        else:
+            self.assertTrue(result.is_pinned())
+        self.assertEqual(result.shape, [1, 128, 128])
+
     def test_new_empty(self):
         def fn(a):
             return aten.new_empty(a, [1, 128, 128])
 
-        self.common(fn, [torch.randn(55)], assert_equal=False)
+        self.common(fn, [torch.randn(55, device=self.device)], assert_equal=False)
 
     def test_empty_strided(self):
         def fn():
-            return aten.empty_strided([1, 128, 128], [16384, 128, 1])
+            return aten.empty_strided(
+                [1, 128, 128], [16384, 128, 1], device=self.device
+            )
 
         self.common(fn, [], assert_equal=False)
 
@@ -9404,7 +9488,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         def fn(a):
             return aten.new_empty_strided(a, [1, 128, 128], [16384, 128, 1])
 
-        self.common(fn, [torch.randn(55)], assert_equal=False)
+        self.common(fn, [torch.randn(55, device=self.device)], assert_equal=False)
 
     def test_dropout_trivial_0(self):
         def fn1(a):
@@ -9445,35 +9529,37 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertTrue(0.9 < result2.mean().item() < 1.1)
 
     @dynamo_config.patch(automatic_dynamic_shapes=True)
-    def test_dropout_deterministic(self):
+    @parametrize("cudagraphs", (True, False))
+    def test_dropout_deterministic(self, cudagraphs):
         @torch.compile(backend="inductor")
         def fn(a):
             return torch.nn.functional.dropout(a, 0.55, True)
 
-        for cg in [False, True]:
-            with patch.object(config.triton, "cudagraphs", cg):
-                torch._dynamo.reset()
+        with patch.object(config.triton, "cudagraphs", cudagraphs):
+            torch._dynamo.reset()
 
-                x = torch.ones(1024, device=self.device, dtype=torch.float32)
+            x = torch.ones(1024, device=self.device, dtype=torch.float32)
 
-                torch.manual_seed(1234)
-                a0 = fn(x).clone()
-                a1 = fn(x).clone()
-                a2 = fn(x).clone()
+            random.seed(1234)
+            torch.manual_seed(1234)
+            a0 = fn(x).clone()
+            a1 = fn(x).clone()
+            a2 = fn(x).clone()
 
-                torch.manual_seed(1234)
-                b0 = fn(x).clone()
-                b1 = fn(x).clone()
-                b2 = fn(x).clone()
+            random.seed(1234)
+            torch.manual_seed(1234)
+            b0 = fn(x).clone()
+            b1 = fn(x).clone()
+            b2 = fn(x).clone()
 
-                # same seed, same values
-                self.assertTrue(torch.allclose(a0, b0))
-                self.assertTrue(torch.allclose(a1, b1))
-                self.assertTrue(torch.allclose(a2, b2))
+            # same seed, same values
+            self.assertTrue(torch.allclose(a0, b0))
+            self.assertTrue(torch.allclose(a1, b1))
+            self.assertTrue(torch.allclose(a2, b2))
 
-                # different calls, different values
-                self.assertFalse(torch.allclose(a0, a1))
-                self.assertFalse(torch.allclose(a1, a2))
+            # different calls, different values
+            self.assertFalse(torch.allclose(a0, a1))
+            self.assertFalse(torch.allclose(a1, a2))
 
     @parametrize("combo_kernels", (False, True))
     def test_rand_like_deterministic(self, combo_kernels):
@@ -9485,11 +9571,13 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
             x = torch.ones(1024, device=self.device, dtype=torch.float32)
 
+            random.seed(1234)
             torch.manual_seed(1234)
             a0 = fn(x)[0].clone()
             a1 = fn(x)[0].clone()
             a2 = fn(x)[0].clone()
 
+            random.seed(1234)
             torch.manual_seed(1234)
             b0 = fn(x)[0].clone()
             b1 = fn(x)[0].clone()
@@ -9847,7 +9935,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(f, (torch.zeros((4, 2)),))
 
-    @xfail_if_triton_cpu  # libdevice.fma
     def test_softmax_backward_data(self):
         def fn(a, b):
             return aten._softmax_backward_data(a, b, dim=1, input_dtype=torch.float32)
@@ -10443,7 +10530,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @xfail_if_mps
     @config.patch(search_autotune_cache=False)
-    @unittest.skipIf(config.triton.native_matmul, "matmul count is different")
     def test_dropout3(self):
         m = torch.nn.Sequential(
             torch.nn.Linear(32, 32, bias=False),
@@ -10472,7 +10558,15 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             # so we get only 1 kernel.
             self.assertEqual(fw_code.count("tl.rand"), 2)
             self.assertEqual(bw_code.count("tl.rand"), 0)
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 4)
+            self.assertEqual(
+                torch._inductor.metrics.generated_kernel_count,
+                4 if not config.triton.native_matmul else 6,
+            )
+        else:
+            self.assertEqual(
+                torch._inductor.metrics.generated_kernel_count,
+                4,
+            )
 
     @xfail_if_mps  # Only works for triton
     def test_randint_kernel_count(self):
@@ -11881,6 +11975,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             (torch.randn(32), torch.randn(32)),
         )
 
+    @skipIfRocmArch(MI200_ARCH)
     def test_conv_with_as_strided(self):
         class Model(nn.Module):
             def __init__(self) -> None:
@@ -14667,6 +14762,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ms = do_bench(lambda: opt_f(x_large))
             print(f"{ms=:.3f}")
 
+    @skip_if_halide
     @expectedFailureCodegenDynamic
     def test_special_polygamma(self):
         fn = torch.special.polygamma
@@ -14832,8 +14928,12 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         return code_allowed != code_disallowed
 
     # If matmul is implemented by triton there is more reuse
-    @config.patch(max_autotune_gemm_backends="ATEN")
-    @unittest.skipIf(config.triton.native_matmul, "matmul is now generated")
+    @config.patch(
+        {
+            "max_autotune_gemm_backends": "ATEN",
+            "triton.native_matmul": False,
+        }
+    )
     def test_allow_reuse_disable_if_exceed_peak(self):
         @torch.compile
         def fn(inp):  # 1*N^2
@@ -15277,9 +15377,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         _, code = run_and_get_code(fn, self_tensor, tensor1, tensor2)
         code = " ".join(code)
-        self.assertIn(
-            "libdevice.fma", code, "Expected FMA to be used in generated code"
-        )
+        self.assertIn("tl.fma", code, "Expected FMA to be used in generated code")
 
     @requires_cuda_and_triton
     @config.patch({"emulate_precision_casts": True})

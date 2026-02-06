@@ -1323,12 +1323,12 @@ def run_tests(argv=None):
                 print(f"Test exited with non-zero exitcode {exitcode}. Command to reproduce: {string_cmd}")
                 failed_tests.append(test_case_full_name)
 
-            if len(failed_tests) != 0:
-                raise AssertionError(
-                    "{} unit test(s) failed:\n\t{}".format(
-                        len(failed_tests), '\n\t'.join(failed_tests)
-                    )
+        if len(failed_tests) != 0:
+            raise AssertionError(
+                "{} unit test(s) failed:\n\t{}".format(
+                    len(failed_tests), '\n\t'.join(failed_tests)
                 )
+            )
 
     elif RUN_PARALLEL > 1:
         test_cases = discover_test_cases_recursively(suite)
@@ -1735,7 +1735,8 @@ def xfailIfROCm(func):
 
 
 def skipIfFreeThreaded(msg="Test doesn't work with free-threaded python"):
-    assert isinstance(msg, str), "Are you using skipIfFreeThreaded correctly?"
+    if not isinstance(msg, str):
+        raise AssertionError("Are you using skipIfFreeThreaded correctly?")
     return unittest.skipIf(sysconfig.get_config_var("Py_GIL_DISABLED") == 1, msg)
 
 
