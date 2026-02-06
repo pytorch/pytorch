@@ -35,47 +35,53 @@ def _get_flat_args_unique(
 def _detect_cycles(
     graph: Graph, node_to_additional_deps: dict[Node, OrderedSet[Node]]
 ) -> str:
-    current_path: deque[Node] = deque()
-    current_path_set: set[Node] = set()
-    pending: deque[tuple[Node, Node]] = deque()
-
-    def add_to_current_path(node: Node) -> None:
-        current_path.append(node)
-        current_path_set.add(node)
-
-    def pop_current_path() -> None:
-        node = current_path.pop()
-        current_path_set.remove(node)
-
-    def current_path_head() -> Node:
-        return current_path[-1]
-
-    for origin in graph.find_nodes(op="output"):
-        current_path.clear()
-        current_path_set.clear()
-        add_to_current_path(origin)
-        for child in _get_flat_args_unique(origin, node_to_additional_deps):
-            pending.append((child, origin))
-
-        while pending:
-            cur_node, parent = pending.pop()
-
-            # handle backtracking
-            while current_path and current_path_head() != parent:
-                pop_current_path()
-
-            if not isinstance(cur_node, Node):
-                continue
-
-            if cur_node in current_path_set:
-                current_path.append(cur_node)
-                return f"cycle detected in path: {current_path}"
-
-            add_to_current_path(cur_node)
-
-            for child in _get_flat_args_unique(cur_node, node_to_additional_deps):
-                pending.append((child, cur_node))
-
+    # States: 0=Unvisited, 1=Visiting, 2=Visited(Safe)
+    state: dict[Node, int] = {}
+    
+    # We iterate over all output nodes to cover the graph backwards
+    all_nodes = reversed(graph.nodes)
+    
+    for root in all_nodes:
+        if root in state:
+            continue
+            
+        # Stack holds tuples of: (current_node, children_iterator)
+        # Using an iterator allows us to pause and resume processing a node
+        stack = [(root, iter(_get_flat_args_unique(root, node_to_additional_deps)))]
+        state[root] = 1  # Mark as Visiting
+        
+        while stack:
+            parent, children = stack[-1]
+            
+            try:
+                # Get the next child to visit
+                child = next(children)
+                
+                if not isinstance(child, Node):
+                    continue
+                
+                child_state = state.get(child, 0)
+                
+                if child_state == 1:
+                    # Found a node that is currently being visited -> CYCLE DETECTED!
+                    cycle_path = [node for node, _ in stack] + [child]
+                    return f"cycle detected in path: {cycle_path}"
+                
+                if child_state == 0:
+                    # Found an unvisited node -> Push to stack and mark as Visiting
+                    state[child] = 1
+                    stack.append((child, iter(_get_flat_args_unique(child, node_to_additional_deps))))
+                
+                # If child_state == 2:
+                # It means this node and its subgraph are already checked and safe.
+                # We do nothing and continue to the next child.
+                
+            except StopIteration:
+                # All children of 'parent' have been processed.
+                # Mark 'parent' as Visited (Safe) and pop from stack.
+                stack.pop()
+                state[parent] = 2
+                
     return "no cycle detected"
 
 
