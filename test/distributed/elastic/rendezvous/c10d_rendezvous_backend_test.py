@@ -27,6 +27,7 @@ from torch.distributed.elastic.rendezvous.c10d_rendezvous_backend import (
     create_backend,
 )
 from torch.distributed.elastic.utils.distributed import get_free_port
+from torch.testing._internal.common_utils import run_tests
 
 
 class TCPStoreBackendTest(TestCase, RendezvousBackendTestMixin):
@@ -285,3 +286,7 @@ class CreateBackendTest(TestCase):
             r"details.$",
         ):
             create_backend(self._params_filestore)
+
+
+if __name__ == "__main__":
+    run_tests()
