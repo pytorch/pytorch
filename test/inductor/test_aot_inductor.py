@@ -6818,6 +6818,22 @@ class AOTInductorTestsTemplate:
         self.check_model(Model(), example_inputs)
 
     @skipIfMPS
+    @parametrize("input_dtype", [torch.float16, torch.bfloat16])
+    def test_mm_out_dtype(self, input_dtype):
+        if self.device not in ("cuda", "xpu"):
+            raise unittest.SkipTest("out_dtype is only supported on CUDA or XPU")
+
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.mm(x, y, out_dtype=torch.float32)
+
+        example_inputs = (
+            torch.randn(64, 32, device=self.device, dtype=input_dtype),
+            torch.randn(32, 64, device=self.device, dtype=input_dtype),
+        )
+        self.check_model(Model(), example_inputs)
+
+    @skipIfMPS
     @parametrize("m", [32])
     @parametrize("n", [64])
     @parametrize("q_group", [32, 64])
@@ -7770,7 +7786,9 @@ class AOTInductorTestsTemplate:
         with config.patch("triton.autotune_with_sample_inputs", True):
             AOTIRunnerUtil.run(Model(), example_inputs)
 
-    @unittest.skipIf(IS_FBCODE, "Subprocess spawning doesn't work in fbcode Buck environment")
+    @unittest.skipIf(
+        IS_FBCODE, "Subprocess spawning doesn't work in fbcode Buck environment"
+    )
     def test_aoti_load_package_in_fresh_subprocess(self):
         """
         Test that loading an AOTI package in a fresh subprocess works correctly.
