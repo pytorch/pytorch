@@ -1,5 +1,6 @@
 # Owner(s): ["module: unknown"]
 
+import contextlib
 import unittest
 
 import torch
@@ -7,7 +8,6 @@ from torch.testing._internal.autocast_test_lists import (
     AutocastCPUTestLists,
     TestAutocast,
 )
-from torch.testing._internal.common_device_type import expectedFailureMPSPre14
 from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
 from torch.utils._python_dispatch import TorchDispatchMode
 
@@ -353,14 +353,23 @@ class TestAutocastMPS(TestCase):
             with torch.autocast(device_type="mps", dtype=torch.float32):
                 _ = torch.ones(10)
 
-    # torch.bfloat16 is only supported on macOS 14 and above.
-    @expectedFailureMPSPre14
     def test_mps_autocast_bfloat16_supported(self):
-        with torch.amp.autocast(device_type="mps", dtype=torch.bfloat16):
-            x = torch.randn(2, 3, device="mps")
-            y = torch.randn(3, 3, device="mps")
-            result = torch.mm(x, y)
-            self.assertEqual(result.dtype, torch.bfloat16)
+        supports_bf16 = torch.backends.mps.is_macos_or_newer(14, 0)
+
+        if not supports_bf16:
+            warn_context = self.assertWarnsRegex(
+                UserWarning,
+                "In MPS autocast, but the target dtype torch.bfloat16 is not supported",
+            )
+        else:
+            warn_context = contextlib.nullcontext()
+
+        with warn_context:
+            with torch.amp.autocast(device_type="mps", dtype=torch.bfloat16):
+                x = torch.randn(2, 3, device="mps")
+                y = torch.randn(3, 3, device="mps")
+                result = torch.mm(x, y)
+                self.assertEqual(result.dtype, torch.bfloat16)
 
 
 class TestTorchAutocast(TestCase):
