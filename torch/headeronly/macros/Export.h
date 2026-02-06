@@ -130,12 +130,22 @@
 #define TORCH_CUDA_CU_API C10_IMPORT
 #endif
 
+// Note: TORCH_HIP_CPP_API may already be defined by hipification of the
+// TORCH_CUDA_CPP_API block above, so we guard against redefinition.
+#ifndef TORCH_HIP_CPP_API
 #if defined(TORCH_HIP_BUILD_MAIN_LIB)
 #define TORCH_HIP_CPP_API C10_EXPORT
-#define TORCH_HIP_API C10_EXPORT
 #else
 #define TORCH_HIP_CPP_API C10_IMPORT
+#endif
+#endif
+
+#ifndef TORCH_HIP_API
+#if defined(TORCH_HIP_BUILD_MAIN_LIB)
+#define TORCH_HIP_API C10_EXPORT
+#else
 #define TORCH_HIP_API C10_IMPORT
+#endif
 #endif
 
 #if defined(TORCH_XPU_BUILD_MAIN_LIB)
