@@ -3461,7 +3461,6 @@ class TestPrologueFusion(TestCase):
             .run(code[0])
         )
 
-    @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FP8,
         "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
