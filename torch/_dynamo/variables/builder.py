@@ -306,6 +306,39 @@ from .user_defined import (
 )
 
 
+# Fallback classes/functions for triton-related types when triton is not available.
+# These are defined at module level to avoid creating new class/function objects
+# (with closures) on every call to _wrap(), which would cause GC overhead.
+class _FallbackJITFunction:
+    """Fallback for triton.runtime.jit.JITFunction when triton is not available."""
+
+    pass
+
+
+class _FallbackAutotuner:
+    """Fallback for triton.runtime.autotuner.Autotuner when triton is not available."""
+
+    pass
+
+
+class _FallbackTensorDescriptor:
+    """Fallback for triton.tools.tensor_descriptor.TensorDescriptor when not available."""
+
+    @staticmethod
+    def from_tensor() -> None:
+        pass
+
+
+def _fallback_create_1d_tma_descriptor() -> None:
+    """Fallback for triton.tools.experimental_descriptor.create_1d_tma_descriptor."""
+    pass
+
+
+def _fallback_create_2d_tma_descriptor() -> None:
+    """Fallback for triton.tools.experimental_descriptor.create_2d_tma_descriptor."""
+    pass
+
+
 try:
     import numpy as np
 except ModuleNotFoundError:
@@ -711,28 +744,19 @@ class VariableBuilder:
             ErrorOnGraphBreakDecoratorContextManager,
         )
 
+        # Use module-level fallbacks to avoid creating new class/function objects
+        # with closures on every call, which causes GC overhead.
         if has_triton():
             from triton.runtime.autotuner import Autotuner
             from triton.runtime.jit import JITFunction
         else:
-
-            class JITFunction:
-                pass
-
-            class Autotuner:
-                pass
+            JITFunction = _FallbackJITFunction
+            Autotuner = _FallbackAutotuner
 
         # default implementations, in case we don't have triton (or the wrong triton version)
-        def create_1d_tma_descriptor() -> None:
-            pass
-
-        def create_2d_tma_descriptor() -> None:
-            pass
-
-        class TensorDescriptor:
-            @staticmethod
-            def from_tensor() -> None:
-                pass
+        create_1d_tma_descriptor = _fallback_create_1d_tma_descriptor
+        create_2d_tma_descriptor = _fallback_create_2d_tma_descriptor
+        TensorDescriptor = _FallbackTensorDescriptor
 
         if has_triton_experimental_host_tma():
             from triton.tools.experimental_descriptor import (  # noqa: F811

@@ -174,3 +174,370 @@ def fx_insert_profiling(gm: torch.fx.GraphModule, example_inputs: list[Any]) -> 
 
     Profiler.unique_graphs += 1
     return _wrapped
+
+
+# =============================================================================
+# Trace Timing Profiler API
+#
+# This section provides APIs for measuring what percentage of compile time
+# is spent tracing each user function.
+# =============================================================================
+
+import collections
+import json
+import threading
+from typing import Literal, Optional
+
+
+@dataclasses.dataclass
+class TraceTiming:
+    """Timing information for a single compiled function."""
+
+    compile_id: str
+    function_name: str
+    filename: str
+    lineno: int
+    tracing_time_s: float
+    total_compile_time_s: float
+    tracing_percent: float
+    attempt_count: int
+    cache_size: int
+
+
+# Thread-local scratchpad for collecting timing events during a single compile
+_trace_profiler_tls = threading.local()
+
+# Global storage for trace timing entries (bounded deque)
+_trace_timing_entries: collections.deque[TraceTiming] = collections.deque(maxlen=256)
+_trace_timing_lock = threading.Lock()
+
+
+def _get_trace_profiler_scratchpad() -> dict[str, int]:
+    """Get the thread-local scratchpad for collecting timing events."""
+    if not hasattr(_trace_profiler_tls, "scratchpad"):
+        _trace_profiler_tls.scratchpad = {}
+    return _trace_profiler_tls.scratchpad
+
+
+def _clear_trace_profiler_scratchpad() -> None:
+    """Clear the thread-local scratchpad."""
+    _trace_profiler_tls.scratchpad = {}
+
+
+def _record_trace_timing(event_name: str, duration_us: int) -> None:
+    """
+    Record a timing event during compilation.
+
+    Called from dynamo_timed for allowlisted events.
+    """
+    scratchpad = _get_trace_profiler_scratchpad()
+    if event_name not in scratchpad:
+        scratchpad[event_name] = 0
+    scratchpad[event_name] += duration_us
+
+
+def _flush_trace_timing(
+    compile_id: str,
+    co_name: str,
+    co_filename: str,
+    co_firstlineno: int,
+    cache_size: int = 0,
+    attempt_count: int = 1,
+) -> None:
+    """
+    Flush the scratchpad into the global trace timing entries.
+
+    Called from record_compilation_metrics at the end of compilation.
+    """
+    scratchpad = _get_trace_profiler_scratchpad()
+    if not scratchpad:
+        return
+
+    tracing_us = scratchpad.get("bytecode_tracing", 0)
+    total_us = scratchpad.get("entire_frame_compile", 0)
+
+    # Compute percentage (avoid division by zero)
+    if total_us > 0:
+        tracing_percent = (tracing_us / total_us) * 100.0
+    else:
+        tracing_percent = 0.0
+
+    entry = TraceTiming(
+        compile_id=compile_id,
+        function_name=co_name,
+        filename=co_filename,
+        lineno=co_firstlineno,
+        tracing_time_s=tracing_us / 1_000_000.0,
+        total_compile_time_s=total_us / 1_000_000.0,
+        tracing_percent=tracing_percent,
+        attempt_count=attempt_count,
+        cache_size=cache_size,
+    )
+
+    with _trace_timing_lock:
+        _trace_timing_entries.append(entry)
+
+    _clear_trace_profiler_scratchpad()
+
+
+def trace_breakdown(
+    aggregate_by: Literal["compile_id", "frame"] = "compile_id",
+) -> list[TraceTiming]:
+    """
+    Get per-function breakdown of tracing time vs total compile time.
+
+    Args:
+        aggregate_by: How to group results
+            - "compile_id": One row per compilation (includes recompiles separately)
+            - "frame": Aggregate all compiles of the same function
+
+    Returns:
+        List of TraceTiming entries, sorted by tracing_percent descending
+    """
+    with _trace_timing_lock:
+        entries = list(_trace_timing_entries)
+
+    if aggregate_by == "frame":
+        # Aggregate by (filename, lineno, function_name)
+        aggregated: dict[tuple[str, int, str], TraceTiming] = {}
+        for e in entries:
+            key = (e.filename, e.lineno, e.function_name)
+            if key not in aggregated:
+                aggregated[key] = TraceTiming(
+                    compile_id=e.compile_id,  # Keep first compile_id
+                    function_name=e.function_name,
+                    filename=e.filename,
+                    lineno=e.lineno,
+                    tracing_time_s=0.0,
+                    total_compile_time_s=0.0,
+                    tracing_percent=0.0,
+                    attempt_count=0,
+                    cache_size=0,
+                )
+            agg = aggregated[key]
+            agg.tracing_time_s += e.tracing_time_s
+            agg.total_compile_time_s += e.total_compile_time_s
+            agg.attempt_count += e.attempt_count
+            agg.cache_size = max(agg.cache_size, e.cache_size)
+
+        # Recompute percentages
+        for agg in aggregated.values():
+            if agg.total_compile_time_s > 0:
+                agg.tracing_percent = (
+                    agg.tracing_time_s / agg.total_compile_time_s
+                ) * 100.0
+
+        entries = list(aggregated.values())
+
+    # Sort by tracing_percent descending
+    entries.sort(key=lambda e: e.tracing_percent, reverse=True)
+    return entries
+
+
+def print_trace_breakdown(
+    top_n: int = 20,
+    aggregate_by: Literal["compile_id", "frame"] = "frame",
+) -> None:
+    """
+    Print a formatted table of tracing time breakdown.
+
+    Args:
+        top_n: Maximum number of entries to print
+        aggregate_by: How to group results ("compile_id" or "frame")
+    """
+    entries = trace_breakdown(aggregate_by=aggregate_by)[:top_n]
+
+    if not entries:
+        print("No trace timing data collected.")
+        return
+
+    # Calculate totals
+    total_tracing = sum(e.tracing_time_s for e in entries)
+    total_compile = sum(e.total_compile_time_s for e in entries)
+    overall_percent = (total_tracing / total_compile * 100) if total_compile > 0 else 0
+
+    print(f"\nDynamo Tracing Time Breakdown (top {top_n} by % time in tracing):\n")
+    print(
+        f"{'Function':<25} {'File:Line':<30} {'Tracing':>10} {'Total':>10} {'%':>8} {'Att':>5}"
+    )
+    print("-" * 95)
+
+    for e in entries:
+        # Shorten filename for display
+        short_filename = e.filename.split("/")[-1] if "/" in e.filename else e.filename
+        file_line = f"{short_filename}:{e.lineno}"
+        if len(file_line) > 28:
+            file_line = "..." + file_line[-25:]
+
+        func_name = e.function_name
+        if len(func_name) > 23:
+            func_name = func_name[:20] + "..."
+
+        print(
+            f"{func_name:<25} {file_line:<30} {e.tracing_time_s:>9.3f}s {e.total_compile_time_s:>9.3f}s {e.tracing_percent:>7.1f}% {e.attempt_count:>5}"
+        )
+
+    print("-" * 95)
+    print(
+        f"{'Total':<25} {'':<30} {total_tracing:>9.3f}s {total_compile:>9.3f}s {overall_percent:>7.1f}%"
+    )
+    print()
+
+
+def export_trace_breakdown(
+    filepath: str,
+    aggregate_by: Literal["compile_id", "frame"] = "compile_id",
+) -> None:
+    """
+    Export trace breakdown to a JSON file for offline analysis.
+
+    Args:
+        filepath: Path to write JSON output
+        aggregate_by: How to group results
+    """
+    entries = trace_breakdown(aggregate_by=aggregate_by)
+
+    total_tracing = sum(e.tracing_time_s for e in entries)
+    total_compile = sum(e.total_compile_time_s for e in entries)
+    overall_percent = (total_tracing / total_compile * 100) if total_compile > 0 else 0
+
+    data = {
+        "version": 1,
+        "entries": [dataclasses.asdict(e) for e in entries],
+        "summary": {
+            "total_tracing_s": total_tracing,
+            "total_compile_s": total_compile,
+            "overall_tracing_percent": overall_percent,
+            "entry_count": len(entries),
+        },
+    }
+
+    with open(filepath, "w") as f:
+        json.dump(data, f, indent=2)
+
+
+def clear() -> None:
+    """Clear all collected trace timing data."""
+    with _trace_timing_lock:
+        _trace_timing_entries.clear()
+        _inlined_function_times.clear()
+    _clear_trace_profiler_scratchpad()
+
+
+# =============================================================================
+# Per-Inlined-Function Timing
+#
+# Tracks time spent tracing each individual function that gets inlined
+# during a single compilation.
+# =============================================================================
+
+@dataclasses.dataclass
+class InlinedFunctionTiming:
+    """Timing for a single inlined function during tracing."""
+
+    function_name: str
+    filename: str
+    lineno: int
+    time_us: int
+    call_count: int = 1
+
+
+# Global storage for inlined function timings, keyed by (filename, lineno, name)
+_inlined_function_times: dict[tuple[str, int, str], InlinedFunctionTiming] = {}
+_inlined_function_lock = threading.Lock()
+
+
+def _record_inlined_function_time(
+    co_name: str,
+    co_filename: str,
+    co_firstlineno: int,
+    duration_us: int,
+) -> None:
+    """
+    Record time spent tracing an inlined function.
+
+    Called from InliningInstructionTranslator.inline_call_().
+    """
+    key = (co_filename, co_firstlineno, co_name)
+    with _inlined_function_lock:
+        if key in _inlined_function_times:
+            entry = _inlined_function_times[key]
+            entry.time_us += duration_us
+            entry.call_count += 1
+        else:
+            _inlined_function_times[key] = InlinedFunctionTiming(
+                function_name=co_name,
+                filename=co_filename,
+                lineno=co_firstlineno,
+                time_us=duration_us,
+                call_count=1,
+            )
+
+
+def inlined_function_breakdown(top_n: int = 50) -> list[InlinedFunctionTiming]:
+    """
+    Get breakdown of time spent tracing each inlined function.
+
+    Returns list sorted by time_us descending.
+    """
+    with _inlined_function_lock:
+        entries = list(_inlined_function_times.values())
+    entries.sort(key=lambda e: e.time_us, reverse=True)
+    return entries[:top_n]
+
+
+def print_inlined_function_breakdown(top_n: int = 30) -> None:
+    """
+    Print a table of time spent tracing each inlined function.
+
+    Shows two percentage columns:
+    - % Inlined: percentage of total inlined function time (cumulative, may exceed 100%)
+    - % Trace: percentage of top-level tracing time (what fraction of tracing this represents)
+    """
+    entries = inlined_function_breakdown(top_n=top_n)
+
+    if not entries:
+        print("No inlined function timing data collected.")
+        return
+
+    # Get total tracing time from top-level breakdown
+    trace_entries = trace_breakdown()
+    total_tracing_time_s = sum(e.tracing_time_s for e in trace_entries)
+    total_tracing_time_us = int(total_tracing_time_s * 1_000_000)
+
+    # Sum of all inlined function times (may be > tracing time due to nesting)
+    total_inlined_us = sum(e.time_us for e in entries)
+    total_inlined_s = total_inlined_us / 1_000_000.0
+
+    print(f"\nInlined Function Tracing Breakdown (top {top_n}):\n")
+    print(
+        f"{'Function':<30} {'File:Line':<30} {'Time':>9} {'% Trace':>9} {'Calls':>6}"
+    )
+    print("-" * 90)
+
+    for e in entries:
+        # Shorten filename for display
+        short_filename = e.filename.split("/")[-1] if "/" in e.filename else e.filename
+        file_line = f"{short_filename}:{e.lineno}"
+        if len(file_line) > 28:
+            file_line = "..." + file_line[-25:]
+
+        func_name = e.function_name
+        if len(func_name) > 28:
+            func_name = func_name[:25] + "..."
+
+        time_s = e.time_us / 1_000_000.0
+        # % of top-level tracing time
+        pct_trace = (e.time_us / total_tracing_time_us * 100) if total_tracing_time_us > 0 else 0
+
+        print(
+            f"{func_name:<30} {file_line:<30} {time_s:>8.3f}s {pct_trace:>8.1f}% {e.call_count:>6}"
+        )
+
+    print("-" * 90)
+    print(
+        f"{'Total (cumulative)':<30} {'':<30} {total_inlined_s:>8.3f}s "
+        f"{'':>9} {sum(e.call_count for e in entries):>6}"
+    )
+    print(f"{'Top-level tracing time':<30} {'':<30} {total_tracing_time_s:>8.3f}s")
+    print()

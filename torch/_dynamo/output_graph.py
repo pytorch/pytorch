@@ -2902,6 +2902,9 @@ class OutputGraph(OutputGraphCommon):
         for node in self.graph.nodes:
             if "grapharg" in node.meta:
                 del node.meta["grapharg"]
+            # Clear example_value to release FakeTensors held by graph nodes
+            if "example_value" in node.meta:
+                del node.meta["example_value"]
         self.real_value_cache.clear()
         self.input_name_to_proxy.clear()
         self.side_effects.clear()
@@ -2913,6 +2916,18 @@ class OutputGraph(OutputGraphCommon):
         self.leaf_var_creation_order.clear()
         self.unspec_variable_map.clear()
         self.backward_state.clear()
+
+        # Break FakeTensorMode → ShapeEnv → TrackedFake → FakeTensor cycle
+        # This was previously only done on exception paths in _cleanup_output_graph
+        if self.tracing_context.fake_mode:
+            if self.tracing_context.fake_mode.shape_env:
+                self.tracing_context.fake_mode.shape_env.tracked_fakes = None
+            # Clear the tensor_memo to release FakeTensors held by the converter
+            if self.tracing_context.fake_mode.fake_tensor_converter:
+                self.tracing_context.fake_mode.fake_tensor_converter.tensor_memo.clear()
+
+        # Clear tracked_fakes list to break the cycle from our side too
+        self.tracked_fakes.clear()
 
     def add_graph_finalizer(
         self, register_finalizer: Callable[[fx.GraphModule], None]

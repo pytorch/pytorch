@@ -1590,6 +1590,27 @@ def get_code_keys() -> list[str]:
     return keys
 
 
+def _cleanup_instructions(instructions: list[Instruction]) -> None:
+    """
+    Break reference cycles in instructions to allow immediate cleanup.
+
+    Instructions form cycles via:
+    - target: points to another Instruction (for jumps)
+    - exn_tab_entry: points to InstructionExnTabEntry which contains Instruction refs
+
+    After bytecode is assembled, these fields are no longer needed, so we can
+    clear them to break cycles and avoid GC overhead.
+    """
+    for inst in instructions:
+        inst.target = None
+        if inst.exn_tab_entry is not None:
+            # Clear the InstructionExnTabEntry references too
+            inst.exn_tab_entry.start = None  # type: ignore[assignment]
+            inst.exn_tab_entry.end = None  # type: ignore[assignment]
+            inst.exn_tab_entry.target = None  # type: ignore[assignment]
+            inst.exn_tab_entry = None
+
+
 def transform_code_object(
     code: types.CodeType,
     transformations: Callable[
@@ -1607,6 +1628,12 @@ def transform_code_object(
 
     tracer_output = transformations(instructions, code_options)
     _, bytecode = clean_and_assemble_instructions(instructions, keys, code_options)
+
+    # Break reference cycles in instructions to allow immediate cleanup
+    # without waiting for garbage collection. Instructions have cycles via
+    # target (jump targets) and exn_tab_entry fields.
+    _cleanup_instructions(instructions)
+
     return bytecode, tracer_output
 
 

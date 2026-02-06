@@ -5633,8 +5633,20 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             strict_ctx = self.strict_translation_mode(parent.strict_checks_fn)
 
         try:
+            # Time the inlined function tracing for profiler
+            _inline_start_ns = time.time_ns()
             with strict_ctx:
                 self.run()
+            _inline_duration_us = (time.time_ns() - _inline_start_ns) // 1000
+            # Record to profiler
+            from torch._dynamo import profiler as trace_profiler
+
+            trace_profiler._record_inlined_function_time(
+                code.co_name,
+                code.co_filename,
+                code.co_firstlineno,
+                _inline_duration_us,
+            )
         except exc.ObservedException as e:
             msg = f"Observed exception DURING INLING {code} : {e}"
             log.debug(msg)
