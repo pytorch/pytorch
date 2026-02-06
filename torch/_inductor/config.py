@@ -1506,6 +1506,7 @@ class cpp:
     # threshold between two step reduction algorithm and welford reduction algorithm
     use_two_step_variance_threshold = 1024
 
+
 class triton:
     """
     Config specific to codegen/triton.py
