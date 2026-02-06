@@ -2141,8 +2141,10 @@ class BuiltinVariable(VariableTracker):
             # VT(foo.__dict__). This simplifies the construction of the new
             # dict.
             args_list[0] = args_list[0].get_forwarded_dict(tx)
-        elif len(args_list) == 1 and isinstance(
-            args_list[0], variables.ConstDictVariable
+        elif (
+            len(args_list) == 1
+            and not kwargs
+            and isinstance(args_list[0], variables.ConstDictVariable)
         ):
             return args_list[0].clone()
         return tx.inline_user_function_return(
