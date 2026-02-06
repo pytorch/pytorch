@@ -910,6 +910,39 @@ class TestPartialCombinationValidity(TestCase):
 
         self.assertTrue(is_valid, f"add Pmin,R->Pmin should be valid: {msg}")
 
+    def test_all_zero_output_false_positive(self):
+        """
+        When ground truth is all zeros, every placement trivially validates.
+
+        Zeros are a fixed point of all reduce operations (sum, max, min),
+        so any Partial output placement matches ground truth. This means
+        invalid rules like mul P(sum),P(sum)->P(sum) appear valid when
+        inputs produce all-zero output.
+        """
+        a = torch.zeros(8, 4)
+        b = torch.randn(8, 4)
+        sample = SampleInput(a, args=(b,))
+        tensors = extract_tensors_from_sample(sample)
+        ground_truth = a * b  # all zeros
+
+        # P(sum),P(sum)->P(sum) is NOT valid for mul in general, but
+        # with all-zero output it trivially passes: sum(0,0)=0=ground_truth
+        combo = PlacementCombination(
+            input_placements=(Partial("sum"), Partial("sum")),
+            output_placement=Partial("sum"),
+        )
+
+        with LocalTensorMode(frozenset(range(self.world_size))):
+            mesh = init_device_mesh("cpu", (self.world_size,))
+            is_valid, msg = validate_combination(
+                torch.mul, sample, tensors, combo, ground_truth, self.world_size, mesh
+            )
+
+        self.assertFalse(
+            is_valid,
+            "mul Psum,Psum->Psum should be invalid even with all-zero output",
+        )
+
 
 class TestQuerySingleDimStrategyKwargs(TestCase):
     """Test that query_single_dim_strategy forwards kwargs to strategy functions."""
