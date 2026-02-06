@@ -12677,8 +12677,8 @@ class TestConsistency(TestCaseMPS):
     NEW_ALLOW_LIST = defaultdict(list)
     NEW_ALLOW_LIST_GRAD = defaultdict(list)
 
-    def _run_op(self, op, mps_sample):
-        cpu_sample = transform_opinfo_sample_to_cpu(mps_sample)
+    def _run_op(self, op, mps_sample, dtype=None):
+        cpu_sample = transform_opinfo_sample_to_cpu(mps_sample, dtype)
 
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=UserWarning)
@@ -12691,12 +12691,15 @@ class TestConsistency(TestCaseMPS):
                     raise
                 if mps_sample.input.dtype not in [torch.float16, torch.bfloat16]:
                     raise
+                dtype = torch.float32
 
                 # Often CPU ops are not implemented for low precision dtypes
                 # In that case, upcast to higher precision and try again
                 cpu_sample = transform_opinfo_sample_to_cpu(mps_sample, dtype=torch.float32)
                 cpu_out = op(cpu_sample.input, *cpu_sample.args, **cpu_sample.kwargs)
-                cpu_out = cpu_out.to(dtype=mps_out.dtype)
+
+        if dtype is not None:
+            cpu_out = cpu_out.to(dtype=mps_out.dtype)
 
         return mps_out, cpu_out, cpu_sample
 
@@ -12713,7 +12716,11 @@ class TestConsistency(TestCaseMPS):
                 include_conjugated_inputs=include_conjugated_inputs,
                 set_seed=True):
 
-            mps_out, cpu_out, cpu_sample = self._run_op(op, mps_sample)
+            opt_dtype = None
+            # CPU implementation is less precise than MPS one so compare MPS to full fp32
+            if dtype in [torch.float16, torch.bfloat16] and op.name == "grid_sampler_3d":
+                opt_dtype = torch.float32
+            mps_out, cpu_out, cpu_sample = self._run_op(op, mps_sample, opt_dtype)
 
             atol, rtol = self._compute_tolerances(op, dtype)
             if (op.name == "nn.functional.interpolate" and dtype == torch.uint8 and
@@ -12729,9 +12736,6 @@ class TestConsistency(TestCaseMPS):
                and mps_sample.kwargs.get("scale_factors") == [1.7, 0.9]):
                 # Similar to the above, float vs double precision aresults in slight error
                 atol, rtol = 2e-5, 2e-6
-
-            if op.name in ["grid_sampler_3d", "asinh"]:
-                atol, rtol = 1e-4, 1e-4
 
             if op.name == "kthvalue":
                 self.assertEqual(cpu_out[0], mps_out[0], atol=atol, rtol=rtol)
