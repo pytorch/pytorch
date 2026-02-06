@@ -114,12 +114,12 @@ struct FlightRecorder {
     reset_epoch_start_idx_[0] = 0;
   }
   struct Entry {
-    size_t id_; // incremented id in the trace buffer
-                // used to figure out where in the circular entries
-                // buffer this entry will be located to
-                // update state information
-    size_t reset_epoch_; // epoch when this entry was created
-    size_t pg_id_;
+    size_t id_{}; // incremented id in the trace buffer
+                  // used to figure out where in the circular entries
+                  // buffer this entry will be located to
+                  // update state information
+    size_t reset_epoch_{}; // epoch when this entry was created
+    size_t pg_id_{};
     std::tuple<std::string, std::string> pg_name_; // <group_name, group_desc>
 
     // collective_seq_id and p2p_seq_id refer to actual kernel launches (e.g. 1
@@ -128,9 +128,9 @@ struct FlightRecorder {
     // all ranks in the group). p2p_seq_id only increments over non-collective
     // operations in the group. op_id refers to logical operations (e.g. one per
     // op inside coalesced group)
-    size_t collective_seq_id_;
-    size_t p2p_seq_id_;
-    size_t op_id_;
+    size_t collective_seq_id_{};
+    size_t p2p_seq_id_{};
+    size_t op_id_{};
     std::string profiling_name_;
 
     std::shared_ptr<torch::CapturedTraceback> traceback_;
@@ -141,13 +141,13 @@ struct FlightRecorder {
 
     // timestamp when the entry was created, likely close to the time the work
     // was 'enqueued'- not necessarily started
-    c10::time_t time_created_;
+    c10::time_t time_created_{};
 
     // configured timeout for this entry
-    c10::time_t timeout_ms_;
+    c10::time_t timeout_ms_{};
 
     // Is this a P2P event?
-    bool isP2P_;
+    bool isP2P_{};
 
     std::optional<float> duration_;
 

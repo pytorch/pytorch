@@ -175,9 +175,9 @@ struct BarrierOptions {
 
 struct DistributedBackendOptions {
   c10::intrusive_ptr<::c10d::Store> store;
-  int group_rank;
-  int group_size;
-  std::chrono::duration<float> timeout;
+  int group_rank{};
+  int group_size{};
+  std::chrono::duration<float> timeout{};
   std::string group_id;
   std::vector<int64_t> global_ranks_in_group;
 };
