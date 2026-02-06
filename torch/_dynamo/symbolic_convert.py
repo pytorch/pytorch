@@ -5900,7 +5900,6 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         self.is_generator_from_ctx_manager = False
 
     def inline_call_(self) -> VariableTracker:
-        """Override inline_call_() to add profiler timing for generator next() calls."""
         with profile_inline_call(self.output, self.f_code, lambda: self.inline_depth):
             return super().inline_call_()
 
