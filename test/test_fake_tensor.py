@@ -2824,33 +2824,23 @@ class FakeTensorPreferDeviceType(TestCase):
                 self.assertTrue(isinstance(result, FakeTensor))
 
     def test_check_for_subclass_arg_parameter_subclass(self):
-        """
-        Test that _check_for_subclass_arg correctly handles nn.Parameter subclasses.
-
-        Parameter subclasses (like vLLM's ModelWeightParameter) should NOT be
-        flagged as unrecognized tensor subclasses. They should be treated the
-        same as nn.Parameter itself.
-        """
+        """Parameter subclasses should not be flagged, but wrapper subclasses
+        wrapped in Parameter should still be flagged."""
+        from torch.testing._internal.two_tensor import TwoTensor
 
         class ParameterSubclass(torch.nn.Parameter):
-            """A simple Parameter subclass for testing."""
+            pass
 
-        # Regular tensor should not be flagged
-        tensor = torch.randn(10)
-        self.assertFalse(_check_for_subclass_arg(tensor))
+        self.assertFalse(_check_for_subclass_arg(torch.randn(10)))
+        self.assertFalse(_check_for_subclass_arg(torch.nn.Parameter(torch.randn(10))))
+        self.assertFalse(_check_for_subclass_arg(ParameterSubclass(torch.randn(10))))
 
-        # nn.Parameter should not be flagged
-        param = torch.nn.Parameter(torch.randn(10))
-        self.assertFalse(_check_for_subclass_arg(param))
-
-        # Parameter subclass should also NOT be flagged (this was the bug)
-        param_subclass = ParameterSubclass(torch.randn(10))
-        self.assertFalse(_check_for_subclass_arg(param_subclass))
-
-        # FakeTensor should not be flagged
         with FakeTensorMode() as mode:
-            fake = mode.from_tensor(torch.randn(10))
-            self.assertFalse(_check_for_subclass_arg(fake))
+            self.assertFalse(_check_for_subclass_arg(mode.from_tensor(torch.randn(10))))
+
+        # Wrapper subclass wrapped in Parameter should still be flagged
+        tt_param = torch.nn.Parameter(TwoTensor(torch.randn(4, 4), torch.randn(4, 4)))
+        self.assertTrue(_check_for_subclass_arg(tt_param))
 
 
 if __name__ == "__main__":
