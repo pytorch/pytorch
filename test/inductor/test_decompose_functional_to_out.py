@@ -7,6 +7,8 @@ to their out variants by:
 1. Detecting out variants via schema matching
 2. Allocating output buffers with torch.empty
 3. Replacing functional calls with out variant calls
+
+Tests use vLLM-style schema format: Tensor! (positional mutable args, void return)
 """
 
 import torch
@@ -23,7 +25,7 @@ class TestDecomposeFunctionalToOut(TestCase):
 
     @classmethod
     def _setup_test_ops(cls):
-        """Register test ops with functional and out variants."""
+        """Register test ops with functional and out variants (vLLM style)."""
         cls.lib = torch.library.Library("test_decompose", "FRAGMENT")
 
         # === Single output op ===
@@ -37,16 +39,16 @@ class TestDecomposeFunctionalToOut(TestCase):
         def add_one_meta(x: Tensor) -> Tensor:
             return torch.empty_like(x)
 
-        cls.lib.define("add_one.out(Tensor x, *, Tensor(a!) out) -> Tensor(a!)")
+        # vLLM style: positional Tensor! arg, returns ()
+        cls.lib.define("add_one.out(Tensor x, Tensor! out) -> ()")
 
         @torch.library.impl("test_decompose::add_one.out", "CompositeExplicitAutograd")
-        def add_one_out_impl(x: Tensor, *, out: Tensor) -> Tensor:
+        def add_one_out_impl(x: Tensor, out: Tensor) -> None:
             out.copy_(x + 1)
-            return out
 
         @torch.library.impl("test_decompose::add_one.out", "Meta")
-        def add_one_out_meta(x: Tensor, *, out: Tensor) -> Tensor:
-            return out
+        def add_one_out_meta(x: Tensor, out: Tensor) -> None:
+            pass
 
         # === Multiple outputs op ===
         cls.lib.define("split_scale(Tensor x, float scale) -> (Tensor, Tensor)")
@@ -59,26 +61,26 @@ class TestDecomposeFunctionalToOut(TestCase):
         def split_scale_meta(x: Tensor, scale: float) -> tuple[Tensor, Tensor]:
             return torch.empty_like(x), torch.empty_like(x)
 
+        # vLLM style: positional Tensor! args, returns ()
         cls.lib.define(
-            "split_scale.out(Tensor x, float scale, *, "
-            "Tensor(a!) out_scaled, Tensor(b!) out_divided) -> (Tensor(a!), Tensor(b!))"
+            "split_scale.out(Tensor x, float scale, "
+            "Tensor! out_scaled, Tensor! out_divided) -> ()"
         )
 
         @torch.library.impl(
             "test_decompose::split_scale.out", "CompositeExplicitAutograd"
         )
         def split_scale_out_impl(
-            x: Tensor, scale: float, *, out_scaled: Tensor, out_divided: Tensor
-        ) -> tuple[Tensor, Tensor]:
+            x: Tensor, scale: float, out_scaled: Tensor, out_divided: Tensor
+        ) -> None:
             out_scaled.copy_(x * scale)
             out_divided.copy_(x / scale)
-            return out_scaled, out_divided
 
         @torch.library.impl("test_decompose::split_scale.out", "Meta")
         def split_scale_out_meta(
-            x: Tensor, scale: float, *, out_scaled: Tensor, out_divided: Tensor
-        ) -> tuple[Tensor, Tensor]:
-            return out_scaled, out_divided
+            x: Tensor, scale: float, out_scaled: Tensor, out_divided: Tensor
+        ) -> None:
+            pass
 
     def test_single_output_graph_transformation(self):
         """
