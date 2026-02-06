@@ -825,7 +825,6 @@ class DistTensorOpsTest(DTensorTestBase):
         from torch.distributed.tensor._op_schema import RuntimeSchemaInfo
         from torch.distributed.tensor._ops.single_dim_strategy import (
             _ShardingPlaceholder,
-            register_single_dim_strategy,
         )
         from torch.distributed.tensor.debug import _clear_sharding_prop_cache
 
