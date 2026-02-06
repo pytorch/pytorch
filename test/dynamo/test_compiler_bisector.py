@@ -2,6 +2,7 @@
 
 from contextlib import contextmanager
 from importlib import import_module
+from unittest import skipIf
 
 import torch
 import torch._prims_common as utils
@@ -10,7 +11,11 @@ from torch._inductor import config
 from torch._inductor.compiler_bisector import CompilerBisector
 from torch._inductor.test_case import TestCase
 from torch.library import _scoped_library, Library
-from torch.testing._internal.triton_utils import requires_cuda_and_triton
+from torch.testing._internal.inductor_utils import HAS_XPU_AND_TRITON
+from torch.testing._internal.triton_utils import requires_gpu_and_triton
+
+
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 
 aten = torch.ops.aten
@@ -21,7 +26,7 @@ i64 = torch.int64
 i32 = torch.int32
 
 
-@requires_cuda_and_triton
+@requires_gpu_and_triton
 class TestCompilerBisector(TestCase):
     test_ns = "_test_bisector"
 
@@ -82,7 +87,7 @@ class TestCompilerBisector(TestCase):
             torch._dynamo.reset()
             with patch_exp_decomp():
                 vq_compiled = torch.compile(vq)
-                x = torch.randn(4, 400, 256).cuda()
+                x = torch.randn(4, 400, 256).to(device_type)
                 with torch._dynamo.utils.preserve_rng_state():
                     vq(x)
                 out_compiled = vq_compiled(x)
@@ -146,7 +151,7 @@ class TestCompilerBisector(TestCase):
         def test_fn():
             torch._dynamo.reset()
 
-            inp = torch.rand([10], device="cuda")
+            inp = torch.rand([10], device=device_type)
 
             out = foo(inp)
             out_c = torch.compile(foo)(inp)
@@ -160,9 +165,12 @@ class TestCompilerBisector(TestCase):
         self.assertEqual(out.bisect_number, 4)
         self.assertTrue("joint_custom_post_pass" in out.debug_info)
 
+    @skipIf(
+        HAS_XPU_AND_TRITON, "String comparison failed: 'eager' != 'inductor' on XPU"
+    )
     def test_rng(self):
         def foo():
-            return torch.rand([10], device="cuda") + 1
+            return torch.rand([10], device=device_type) + 1
 
         def test_fn():
             torch._dynamo.reset()
@@ -236,7 +244,7 @@ class TestCompilerBisector(TestCase):
 
             dtype = torch.bfloat16
             torch.manual_seed(0)
-            inp = torch.randn(16, 16, 768, dtype=dtype, device="cuda")
+            inp = torch.randn(16, 16, 768, dtype=dtype, device=device_type)
             eager_scale = calculate_scale(inp)
             compile_scale = torch.compile(calculate_scale)(inp)
 
@@ -254,7 +262,7 @@ class TestCompilerBisector(TestCase):
                 def my_func(x):
                     return ((x * -1) - 0.01).relu()
 
-                inp = torch.rand([100], device="cuda")
+                inp = torch.rand([100], device=device_type)
 
                 return torch.allclose(torch.compile(my_func)(inp), my_func(inp))
 
@@ -316,7 +324,7 @@ class TestCompilerBisector(TestCase):
         def test_fn():
             torch._dynamo.reset()
 
-            x = torch.randn(1024, device="cuda")
+            x = torch.randn(1024, device=device_type)
             with config.patch("triton.inject_relu_bug_TESTING_ONLY", "accuracy"):
                 opt_f = torch.compile(f, backend=MyBackend())
                 return torch.allclose(opt_f(x), f(x))
