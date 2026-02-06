@@ -175,14 +175,16 @@ def simulate_fp8_precision(input, variant):
     is_odd = (mantissa_val_rounded & last_unrounded_bit) != 0
     mantissa_val_rounded += (ties & is_odd) * last_unrounded_bit
 
-    # Re-compose mantissa and exponent
-    vals = (mantissa_val_rounded * 2.0 ** (-23 + exponent)).to(dtype)
+    # Re-compose mantissa, exponent, and sign
+    vals = (mantissa_val_rounded * 2.0 ** (-23 + exponent)).to(dtype) * signs
 
-    # Replace overflows with inf/NaN as appropriate (no saturation)
-    have_inf = variant in FLOAT8_DTYPES_WITH_INF
-    vals[vals > torch.finfo(variant).max] = torch.inf if have_inf else torch.nan
-
-    return vals * signs
+    # Replace overflows with inf/max as appropriate
+    has_inf = variant in FLOAT8_DTYPES_WITH_INF
+    max_v = torch.finfo(variant).max
+    min_v = torch.finfo(variant).min
+    vals[vals > max_v] = torch.inf if has_inf else max_v
+    vals[vals < min_v] = -torch.inf if has_inf else min_v
+    return vals
 
 
 def _round_e8m0_rne(biased_exponent, lsb, g, r, s):
