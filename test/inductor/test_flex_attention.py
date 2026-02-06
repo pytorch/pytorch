@@ -1755,13 +1755,16 @@ class TestFlexAttention(InductorTestCase):
         )
         bias_proj_compiled.load_state_dict(bias_proj_eager.state_dict())
 
+        torch.manual_seed(0)
         eager_weight_grad = run_and_get_weight_grad(bias_proj_eager, x, compiled=False)
         self.assertEqual(eager_weight_grad.dtype, bias_proj_eager.weight.dtype)
 
+        torch.manual_seed(0)
         compiled_weight_grad = run_and_get_weight_grad(
             bias_proj_compiled, x, compiled=True
         )
         self.assertEqual(compiled_weight_grad.dtype, bias_proj_compiled.weight.dtype)
+        self.assertEqual(eager_weight_grad, compiled_weight_grad, atol=1e-1, rtol=1e-1)
 
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)

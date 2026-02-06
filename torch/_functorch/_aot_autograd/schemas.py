@@ -180,14 +180,18 @@ class MemoryFormatMeta:
     memory_format: Optional[torch.memory_format] = None
 
     @staticmethod
-    def from_tensor(t: torch.Tensor) -> Optional[MemoryFormatMeta]:
+    def from_tensor(
+        t: torch.Tensor, force_use_memory_format: bool = False
+    ) -> Optional[MemoryFormatMeta]:
         # We only memorize expected memory format for
         # 1. Traceable wrapper subclasses
         # We can not create restrided subclass tensor, as torch.empty_strided works only with dense tensors.
         # 2. Dynamic shape tensors
         # Support for symbolic shapes is not implemented yet.
+        # 3. force_use_memory_format=True (e.g., local_map where shapes change)
         use_memory_format: bool = (
-            not torch._functorch.config.guess_tangent_strides_as_outputs
+            force_use_memory_format
+            or not torch._functorch.config.guess_tangent_strides_as_outputs
             or is_traceable_wrapper_subclass(t)
         )
         if not use_memory_format:
@@ -669,7 +673,7 @@ class ViewAndMutationMeta:
                 "traced_tangent_metas should be None before calling make_runtime_safe"
             )
 
-        def extract_metadata(t: object) -> tuple[list[object], object | None] | None:
+        def extract_metadata(t: object) -> tuple[Sequence[str], object] | None:
             if isinstance(t, torch.Tensor) and is_traceable_wrapper_subclass(t):
                 (inner_tensors, flatten_spec) = t.__tensor_flatten__()  # type: ignore[attr-defined]
                 # Technically, we only need the flatten_spec, not the inner tensors.
@@ -975,7 +979,7 @@ class GraphSignature:
         output_tokens = graph_outputs[start:stop]
 
         names = [*input_tokens, *parameters, *buffers, *user_inputs]
-        mutations = []
+        mutations: list[str] = []
         for idx, input_info in enumerate(view_mutation_metadata.input_info):
             if input_info.mutates_data:
                 if trace_joint:
@@ -998,9 +1002,9 @@ class GraphSignature:
         )
         outputs_to_mutations = dict(zip(graph_outputs[start:stop], mutations))
 
-        user_inputs_to_mutate = {}
-        buffers_to_mutate = {}
-        parameters_to_mutate = {}
+        user_inputs_to_mutate: dict[GraphOutputName, GraphInputName] = {}
+        buffers_to_mutate: dict[GraphOutputName, FQN] = {}
+        parameters_to_mutate: dict[GraphOutputName, FQN] = {}
         for output_name, mutation_name in outputs_to_mutations.items():
             if mutation_name in user_inputs:
                 # pyrefly: ignore [unsupported-operation]

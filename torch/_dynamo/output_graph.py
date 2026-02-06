@@ -800,6 +800,30 @@ class OutputGraph(OutputGraphCommon):
         # dynamo_flat_name_to_original_fqn mapping.
         self.used_inlined_inbuilt_modules_names: OrderedSet[str] = OrderedSet()
 
+        self.attr_source_cache: dict[tuple[Source, str], AttrSource] = {}
+
+    def get_chained_attr_source(self, base: Source, path: str) -> AttrSource:
+        parts = path.split(".")
+        key = (base, parts[0])
+        if key not in self.attr_source_cache:
+            self.attr_source_cache[key] = AttrSource(base, parts[0])
+        result = self.attr_source_cache[key]
+        for part in parts[1:]:
+            key = (result, part)
+            if key not in self.attr_source_cache:
+                self.attr_source_cache[key] = AttrSource(result, part)
+            result = self.attr_source_cache[key]
+        return result
+
+    def get_chained_param_buffer_source(
+        self, base: Source, path: str
+    ) -> "ParamBufferSource":
+        parts = path.rsplit(".", 1)
+        if len(parts) == 1:
+            return ParamBufferSource(base, path)
+        intermediate_base = self.get_chained_attr_source(base, parts[0])
+        return ParamBufferSource(intermediate_base, parts[1])
+
     def mark_bytecode_tracing_start(self) -> None:
         self.compiler_trace_stack.enter_context(
             dynamo_timed(
@@ -1336,7 +1360,7 @@ class OutputGraph(OutputGraphCommon):
 
             def register_leaf_name(leaf_name: str) -> None:
                 assert self.param_name_to_source is not None
-                new_source = ParamBufferSource(source, leaf_name)
+                new_source = self.get_chained_param_buffer_source(source, leaf_name)
                 new_name = f"{name}.{leaf_name}"
                 self.param_name_to_source[new_name] = new_source
                 if isinstance(source, LocalSource):
@@ -2295,22 +2319,23 @@ class OutputGraph(OutputGraphCommon):
                 # while creating the graph module because self.graph and root
                 # are out of sync. This only happens for `get_attr` nodes, so
                 # here we clean up the get_attr nodes that are unused.
-                for attr in dir(root):
-                    subgraph = getattr(root, attr)
-                    if isinstance(subgraph, fx.GraphModule):
-                        insert_deferred_runtime_asserts(
-                            subgraph,
-                            self.shape_env,
-                            name,
-                            export=self.export,
-                        )
-                self.remove_unused_get_attr_nodes()
-                insert_deferred_runtime_asserts(
-                    fx.GraphModule(root, self.graph),
-                    self.shape_env,
-                    name,
-                    export=self.export,
-                )
+                with dynamo_timed("insert_deferred_runtime_asserts"):
+                    for attr in dir(root):
+                        subgraph = getattr(root, attr)
+                        if isinstance(subgraph, fx.GraphModule):
+                            insert_deferred_runtime_asserts(
+                                subgraph,
+                                self.shape_env,
+                                name,
+                                export=self.export,
+                            )
+                    self.remove_unused_get_attr_nodes()
+                    insert_deferred_runtime_asserts(
+                        fx.GraphModule(root, self.graph),
+                        self.shape_env,
+                        name,
+                        export=self.export,
+                    )
             # NB: deferred runtime asserts can keep graphargs live, so make sure
             # those are inserted before pruning
             self.remove_unused_graphargs()
@@ -2943,7 +2968,7 @@ class OutputGraph(OutputGraphCommon):
 
         def register_leaf_name(leaf_name: str) -> None:
             assert self.param_name_to_source is not None
-            new_source = ParamBufferSource(source, leaf_name)
+            new_source = self.get_chained_param_buffer_source(source, leaf_name)
             new_name = f"{name}.{leaf_name}"
             self.param_name_to_source[new_name] = new_source
             if isinstance(source, LocalSource):

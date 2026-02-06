@@ -400,7 +400,9 @@ def flex_attention(
                 "num_buffers_warp_spec", num_buffers_warp_spec
             )
 
-        cur_kernel_options.setdefault("USE_TMA", False)
+        # Intel GPU enables TMA by default
+        cur_kernel_options.setdefault("USE_TMA", bool(torch.xpu.is_available()))
+
         if cur_kernel_options["USE_TMA"] and not can_use_tma(query, key, value):
             cur_kernel_options["USE_TMA"] = False
 
@@ -732,27 +734,12 @@ def flex_attention_backward(*args, **kwargs):
         joint_placeholder_inps + list(score_mod_other_buffers),
         joint_graph,
     )
+
     freeze_irnodes(all_joint_outputs)
 
     joint_outputs = process_joint_outputs(
         all_joint_outputs, len(joint_placeholder_inps)
     )
-    if joint_outputs.captured_grads:
-        casted_captured_grads: list[Optional[TensorBox]] = []
-        for grad, buf in zip(joint_outputs.captured_grads, score_mod_other_buffers):
-            if grad is None:
-                casted_captured_grads.append(None)
-                continue
-            buf_dtype = buf.get_dtype()
-            casted_captured_grads.append(
-                to_dtype(grad, buf_dtype) if grad.get_dtype() != buf_dtype else grad
-            )
-        joint_outputs = JointOutputResult(
-            grad_input=joint_outputs.grad_input,
-            captured_grads_compute=joint_outputs.captured_grads_compute,
-            captured_grads=casted_captured_grads,
-            mutated_grads=joint_outputs.mutated_grads,
-        )
 
     mask_graph_placeholder_inps = [
         create_placeholder(name, dtype, query.get_device())
@@ -1020,7 +1007,16 @@ def flex_attention_backward(*args, **kwargs):
         grad_key = lowerings[aten.sum](broadcasted_grad_key, axis=0, keepdims=True)
         grad_value = lowerings[aten.sum](broadcasted_grad_value, axis=0, keepdims=True)
 
-    return (grad_query, grad_key, grad_value, tuple(joint_outputs.captured_grads))
+    # Cast captured grads to match original buffer dtypes. Gradients are accumulated
+    # in fp32 for precision, then cast to the original dtype (e.g., bf16) here.
+    captured_grads = tuple(
+        to_dtype(g, orig.get_dtype())
+        if g is not None and g.get_dtype() != orig.get_dtype()
+        else g
+        for g, orig in zip(joint_outputs.captured_grads, score_mod_other_buffers)
+    )
+
+    return (grad_query, grad_key, grad_value, captured_grads)
 
 
 def get_bwd_subgraph_outputs(

@@ -1321,7 +1321,9 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         directly look into the underlying datastructures. This saves a lot of
         compilation time.
         """
-        name_vt = variables.ConstantVariable(name)
+        from .builder import SourcelessBuilder
+
+        name_vt = SourcelessBuilder.create(tx, name)
         out = self.getattr_helper(tx, "_parameters", name_vt)
         if out is None:
             out = self.getattr_helper(tx, "_modules", name_vt)

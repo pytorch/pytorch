@@ -8309,6 +8309,50 @@ for shape in [(1,), ()]:
         self.assertEqual(y.grad_fn.saved_tensors, ())
         self.assertEqual(y.grad_fn._raw_saved_tensors, ())
 
+    @skipIfTorchDynamo("dynamo accesses saved_tensors multiple times")
+    def test_clear_saved_tensors_on_access(self):
+        class MyFn(Function):
+            clear_saved_tensors_on_access = True
+
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                (x,) = ctx.saved_tensors
+                ref = weakref.ref(x)
+                del x
+                # Local variable should be the only remaining reference
+                self.assertIsNone(ref())
+                return grad_output
+
+        x = torch.randn(3, requires_grad=True)
+        y = MyFn.apply(x.clone())
+        y.sum().backward()
+
+    @skipIfTorchDynamo("test tests an error that dynamo does not reproduce")
+    def test_clear_saved_tensors_on_access_double_access_error(self):
+        class MyFn(Function):
+            clear_saved_tensors_on_access = True
+
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                _ = ctx.saved_tensors  # first access
+                _ = ctx.saved_tensors  # second access - should raise
+                return grad_output
+
+        x = torch.randn(3, requires_grad=True)
+        y = MyFn.apply(x)
+        with self.assertRaisesRegex(RuntimeError, "can only be accessed once"):
+            y.sum().backward()
+
     def test_autograd_node_isinstance(self):
         # Node is a "virtual" base class of codegen'd nodes. This means that
         # isinstance and issubclass are overridden, but mro is unchanged
