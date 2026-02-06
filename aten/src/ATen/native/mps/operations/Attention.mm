@@ -58,7 +58,6 @@ static std::tuple<Tensor, Tensor> sdpa_general_mps(const Tensor& query,
     MPSGraphTensor* vTensor = nil;
     MPSGraphTensor* maskTensor = nil;
     MPSGraphTensor* outputTensor = nil;
-    MPSGraphTensor* attnTensor = nil;
   };
   const auto macOS15_0_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
   int64_t batchSize = query.size(0);
@@ -67,7 +66,6 @@ static std::tuple<Tensor, Tensor> sdpa_general_mps(const Tensor& query,
   int64_t headSize = query.size(3);
   int64_t maxSeqLength = key.size(2);
   auto out = at::empty({batchSize, num_head, qSize, headSize}, query.options());
-  auto attn = at::empty({batchSize, num_head, qSize, maxSeqLength}, query.options());
   auto scale_factor = sdp::calculate_scale(query, scale).expect_float();
   @autoreleasepool {
     auto mkey = __func__ + getTensorsStringKey({query, key, value}) + ":" + std::to_string(is_causal) + ":" +
@@ -131,13 +129,11 @@ static std::tuple<Tensor, Tensor> sdpa_general_mps(const Tensor& query,
           graph->kTensor = kTensor;
           graph->vTensor = vTensor;
           graph->outputTensor = castMPSTensor(mpsGraph, output, qTensor.dataType);
-          graph->attnTensor = castMPSTensor(mpsGraph, sm, qTensor.dataType);
         });
     auto qPlaceholder = Placeholder(cachedGraph->qTensor, query);
     auto kPlaceholder = Placeholder(cachedGraph->kTensor, key);
     auto vPlaceholder = Placeholder(cachedGraph->vTensor, value);
     auto outputPlaceholder = Placeholder(cachedGraph->outputTensor, out);
-    auto attnPlaceholder = Placeholder(cachedGraph->attnTensor, attn);
     NSDictionary* feeds = nil;
     if (!attn_mask) {
       feeds = dictionaryFromPlaceholders(qPlaceholder, kPlaceholder, vPlaceholder);
@@ -145,18 +141,14 @@ static std::tuple<Tensor, Tensor> sdpa_general_mps(const Tensor& query,
       auto mPlaceholder = Placeholder(cachedGraph->maskTensor, *attn_mask);
       feeds = dictionaryFromPlaceholders(qPlaceholder, kPlaceholder, vPlaceholder, mPlaceholder);
     }
-    NSDictionary* outs = dictionaryFromPlaceholders(outputPlaceholder, attnPlaceholder);
+    NSDictionary* outs = dictionaryFromPlaceholders(outputPlaceholder);
     runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, outs);
   }
 
   auto final_out = unsqueezed ? out.view_as(orig_query) : out;
-  auto final_attn = unsqueezed ? (orig_query.dim() == 3 ? attn.squeeze(0) : [&]{
-    std::vector<int64_t> shape(orig_query.sizes().begin(), orig_query.sizes().end() - 3);
-    shape.insert(shape.end(), {attn.size(1), attn.size(2), attn.size(3)});
-    return attn.view(shape);
-  }()) : attn;
-
-  return {std::move(final_out), std::move(final_attn)};
+  // Return empty tensor with correct shape for attention weights - they are not used by the caller
+  auto attn_weights = at::empty({batchSize, num_head, qSize, maxSeqLength}, query.options());
+  return {std::move(final_out), std::move(attn_weights)};
 }
 
 // Vector mode (One–pass variant)
@@ -187,7 +179,6 @@ static std::tuple<Tensor, Tensor> sdpa_vector_fast_mps(const Tensor& q_,
   uint v_seq_stride = v_.stride(2);
 
   auto out = at::empty({batchSize, num_head, qSize, headSize}, q_.options());
-  auto attn = at::empty({batchSize, num_head, qSize, maxSeqLength}, q_.options());
   auto scale_factor = sdp::calculate_scale(q_, scale).expect_float();
   MPSStream* mpsStream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
@@ -226,13 +217,9 @@ static std::tuple<Tensor, Tensor> sdpa_vector_fast_mps(const Tensor& q_,
   });
   // reshape back to original dimension
   auto final_out = unsqueezed ? out.view_as(orig_query) : out;
-  auto final_attn = unsqueezed ? (orig_query.dim() == 3 ? attn.squeeze(0) : [&]{
-    std::vector<int64_t> shape(orig_query.sizes().begin(), orig_query.sizes().end() - 3);
-    shape.insert(shape.end(), {attn.size(1), attn.size(2), attn.size(3)});
-    return attn.view(shape);
-  }()) : attn;
-
-  return {std::move(final_out), std::move(final_attn)};
+  // Return empty tensor with correct shape for attention weights - they are not used by the caller
+  auto attn_weights = at::empty({batchSize, num_head, qSize, maxSeqLength}, q_.options());
+  return {std::move(final_out), std::move(attn_weights)};
 }
 
 // Vector mode (Two–pass variant)
@@ -317,7 +304,9 @@ static std::tuple<Tensor, Tensor> sdpa_vector_2pass_mps(const Tensor& q_,
   });
 
   auto final_out = unsqueezed ? out.view_as(orig_query) : out;
-  return {std::move(final_out), std::move(intermediate)};
+  // Return empty tensor with correct shape for attention weights - they are not used by the caller
+  auto attn_weights = at::empty({batchSize, num_heads, seq_len_q, N}, q_.options());
+  return {std::move(final_out), std::move(attn_weights)};
 }
 
 // Implementation 3: Full attention mode
@@ -418,7 +407,9 @@ static std::tuple<Tensor, Tensor> sdpa_full_attention_mps(const Tensor& q_,
   });
 
   auto final_out = unsqueezed ? out.view_as(orig_query) : out;
-  return {std::move(final_out), std::move(final_out)};
+  // Return empty tensor with correct shape for attention weights - they are not used by the caller
+  auto attn_weights = at::empty({batchSize, num_heads, qL, kL}, q_.options());
+  return {std::move(final_out), std::move(attn_weights)};
 }
 
 std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& query,
