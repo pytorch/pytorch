@@ -19043,12 +19043,12 @@ op_db: list[OpInfo] = [
                    promotes_int_to_float=True,
                    skips=(
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
-                                    dtypes=(torch.cfloat, torch.cdouble)),
+                                    dtypes=(torch.cfloat, torch.cdouble), device_type='cuda'),
                        # AssertionError: Tensor-likes are not close!
                        # Greatest absolute difference: nan at index (700,) (up to 0.01 allowed)
                        # Greatest relative difference: nan at index (700,) (up to 0.001 allowed)
                        DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_reference_numerics_large',
-                                    dtypes=(torch.chalf,)),
+                                    dtypes=(torch.chalf,), device_type='cuda'),
                    )),
     UnaryUfuncInfo('sqrt',
                    ref=np.sqrt,
@@ -24388,13 +24388,13 @@ python_ref_db = [
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
                          'test_reference_numerics_extremal',
-                         dtypes=(torch.cfloat, torch.cdouble)),
+                         dtypes=(torch.cfloat, torch.cdouble), device_type='cuda'),
             # AssertionError: Tensor-likes are not close!
             # Greatest absolute difference: nan at index (700,) (up to 0.01 allowed)
             # Greatest relative difference: nan at index (700,) (up to 0.001 allowed)
             DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs',
                          'test_reference_numerics_large',
-                         dtypes=(torch.chalf,)),
+                         dtypes=(torch.chalf,), device_type='cuda'),
         ),
     ),
     ElementwiseUnaryPythonRefInfo(
