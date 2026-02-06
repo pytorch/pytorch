@@ -460,6 +460,21 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         except NotImplementedError:
             return None
 
+    def _contains_self_reference(self) -> bool:
+        """Check if this variable references itself (directly or indirectly)."""
+        found_self = [False]
+        cache: dict[int, Any] = {}
+
+        def check(vt: "VariableTracker") -> None:
+            if vt is self:
+                found_self[0] = True
+
+        for key, subvalue in self.__dict__.items():
+            if key not in self._nonvar_fields:
+                VariableTracker.visit(check, subvalue, cache)
+
+        return found_self[0]
+
     def reconstruct(self, codegen: "PyCodegen") -> None:
         raise NotImplementedError
 
