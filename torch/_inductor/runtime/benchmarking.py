@@ -395,9 +395,10 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
         estimated_timing = self.get_event_pairs_min_timing(event_pairs)
 
         # adjust `benchmark_iters` to fit in the maximum benchmarking duration
-        benchmark_iters = max(
-            min(benchmark_iters, int(max_benchmark_duration // estimated_timing)), 1
-        )
+        if estimated_timing > 0:
+            benchmark_iters = max(
+                min(benchmark_iters, int(max_benchmark_duration // estimated_timing)), 1
+            )
 
         # do the memory warmup
         for _ in range(memory_warmup_iters):

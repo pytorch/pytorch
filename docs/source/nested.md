@@ -8,7 +8,7 @@
 
 
 ```{warning}
-  The PyTorch API of nested tensors is in prototype stage and will change in the near future.
+  Nested tensors are not currently under active development. Use at your own risk.
 ```
 
 Nested tensors allow for ragged-shaped data to be contained within and operated upon as a

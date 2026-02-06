@@ -22,6 +22,7 @@
 #include <torch/csrc/autograd/python_anomaly_mode.h>
 #include <torch/csrc/autograd/python_cpp_function.h>
 #include <torch/csrc/autograd/python_hook.h>
+#include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/autograd/saved_variable.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/dynamo/compiled_autograd.h>
@@ -253,7 +254,8 @@ auto PyNode::apply_with_saved_impl(
   THPObjectPtr saved_tensors(unpack_saved_variables(
       py_fn, [](const Variable& var) { return THPVariable_Wrap(var); }));
 
-  auto [bwd_idx, maybe_bwd_state_idx] = saved.retrieve_pynode_objs(this);
+  auto [bwd_idx, maybe_bwd_state_idx, opaque_obj_indices] =
+      saved.retrieve_pynode_objs(this);
 
   PyObject* backward_state_idx = Py_None;
   if (maybe_bwd_state_idx.has_value()) {
@@ -261,16 +263,30 @@ auto PyNode::apply_with_saved_impl(
     // this might be simplifiable now that we no longer inline
     Py_CLEAR(py_fn->compiled_autograd_backward_state);
   }
+
+  THPObjectPtr opaque_indices_list(
+      PyList_New(static_cast<Py_ssize_t>(opaque_obj_indices.size())));
+  if (!opaque_indices_list) {
+    throw_python_error();
+  }
+  for (size_t i = 0; i < opaque_obj_indices.size(); i += 1) {
+    PyList_SET_ITEM(
+        opaque_indices_list.get(),
+        i,
+        THPUtils_packUInt64(opaque_obj_indices[i]));
+  }
+
   THPObjectPtr r(PyObject_CallMethod(
       saved.get_py_compiler(),
       "proxy_call_backward",
-      "OOOiOO",
+      "OOOiOOO",
       pyInputs.get(),
       fwdInputMetadatas.get(),
       saved_tensors.get(),
       bwd_idx,
       obj,
-      backward_state_idx));
+      backward_state_idx,
+      opaque_indices_list.get()));
 
   if (!r)
     throw_python_error();
@@ -369,8 +385,29 @@ void PyNode::compiled_args(CompiledNodeArgs& args) const {
     Py_INCREF(bw_state);
     backward_state_obj = c10::SafePyObject(bw_state, getPyInterpreter());
   }
+
+  std::vector<c10::SafePyObject> opaque_objs;
+  if (THPObjectPtr opaque_objs_ptr =
+          THPObjectPtr(PyObject_GetAttrString(obj, "opaque_objects"))) {
+    Py_ssize_t size = PySequence_Size(opaque_objs_ptr.get());
+    if (size > 0) {
+      opaque_objs.reserve(static_cast<size_t>(size));
+      for (Py_ssize_t i = 0; i < size; i += 1) {
+        opaque_objs.emplace_back(c10::SafePyObject(
+            PySequence_GetItem(opaque_objs_ptr.get(), i), getPyInterpreter()));
+      }
+    } else if (size < 0) {
+      PyErr_Clear();
+    }
+  } else {
+    PyErr_Clear();
+  }
+
   args.collect_pynode_objs(
-      this, std::move(backward_obj), std::move(backward_state_obj));
+      this,
+      std::move(backward_obj),
+      std::move(backward_state_obj),
+      std::move(opaque_objs));
 }
 
 variable_list PyNode::apply_with_saved(
@@ -541,6 +578,8 @@ static PyObject* THPFunction_new(
   self->materialize_grads = true;
   self->pure_view = false;
   self->materialize_non_diff_grads = true;
+  self->clear_saved_tensors_on_access = false;
+  self->saved_tensors_accessed_and_cleared = false;
   return obj;
 }
 
@@ -733,14 +772,54 @@ static void _wrap_outputs(
     } else {
       if (is_executable) {
         // If one of the grad outputs is undefined, a correctly-shaped zeros
-        // should be used instead. To construct these for NJT, zeros_like() must
-        // be used until we have factory function support.
+        // should be used instead. To construct these for NJT or DTensor,
+        // zeros_like() must be used to preserve the tensor type. Failing to
+        // do this may result in undefined errors depending on the tensor
+        // subclass's behavior. DTensor will error out due to mixing DTensor
+        // and torch.Tensor in the following computation.
+        // Note: We specifically check for DTensor rather than all tensor
+        // subclasses to avoid affecting other subclasses that may not need
+        // this behavior.
         bool is_differentiable =
             (non_differentiable.count(wrapped_output->unsafeGetTensorImpl()) ==
                  0 &&
              isDifferentiableType(wrapped_output->scalar_type()));
-        bool use_zeros_like =
-            is_differentiable && num_outputs > 1 && wrapped_output->is_nested();
+        bool output_is_dtensor = is_dtensor(obj);
+        bool use_zeros_like = is_differentiable && num_outputs > 1 &&
+            (wrapped_output->is_nested() || output_is_dtensor);
+        // Only warn if materialize_grads is true. If the user has already
+        // called ctx.set_materialize_grads(False), gradients won't be
+        // materialized anyway, so no need to warn.
+        if (use_zeros_like && output_is_dtensor && self->materialize_grads) {
+          // Strip "Backward" suffix from name for clearer user messaging.
+          // The autograd function's backward class is named "<Name>Backward",
+          // but users define "<Name>" in their code.
+          std::string node_name = cdata->name();
+          const std::string suffix = "Backward";
+          if (node_name.size() >= suffix.size() &&
+              node_name.compare(
+                  node_name.size() - suffix.size(), suffix.size(), suffix) ==
+                  0) {
+            node_name = node_name.substr(0, node_name.size() - suffix.size());
+          }
+          TORCH_WARN_ONCE(
+              "Autograd is calling zeros_like() on a DTensor to materialize "
+              "the gradient for an unused output in autograd.Function '",
+              node_name,
+              "'. This preserves the DTensor type but may have performance "
+              "implications. To avoid this:\n"
+              "(1) In eager mode (i.e., the function name is not "
+              "'CompiledFunction'): One of the "
+              "autograd.Function's outputs is unused. Call "
+              "ctx.set_materialize_grads(False) in forward() and handle None "
+              "gradients in backward(). Note that if the function name "
+              "is ApplyTemplate, turn off torch.compile and rerun to see "
+              "the actual name.\n"
+              "(2) In compile mode: One of the compiled region's outputs is "
+              "unused. Call detach() on unused outputs that are returned from "
+              "the compiled region, whether explicitly or implicitly (e.g., "
+              "saved as a global).");
+        }
         self->output_info.emplace_back(wrapped_output.value(), use_zeros_like);
       }
       PyTuple_SetItem(outputs, i, THPVariable_Wrap(wrapped_output.value()));
@@ -1337,6 +1416,18 @@ PyObject* THPFunction_apply(PyObject* cls, PyObject* inputs) {
   ctx->needs_input_grad = input_info.needs_input_grad.release();
   ctx->is_variable_input = std::move(input_info.is_variable_input);
 
+  // Get clear_saved_tensors_on_access from the Function class
+  THPObjectPtr clear_attr(
+      PyObject_GetAttrString(cls, "clear_saved_tensors_on_access"));
+  TORCH_CHECK(
+      clear_attr,
+      "autograd.Function is missing clear_saved_tensors_on_access attribute");
+  TORCH_CHECK(
+      PyBool_Check(clear_attr.get()),
+      "clear_saved_tensors_on_access must be a bool, got ",
+      Py_TYPE(clear_attr.get())->tp_name);
+  ctx->clear_saved_tensors_on_access = clear_attr.get() == Py_True;
+
   // autograd.Function may optionally override a setup_context staticmethod.
   // In this case, autograd.Function.forward does NOT accept a ctx object.
   // Determine if this is the case.
@@ -1501,12 +1592,28 @@ int THPFunction_set_materialize_non_diff_grads(
 
 PyObject* THPFunction_saved_tensors(THPFunction* self, void* _unused) {
   HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      !self->saved_tensors_accessed_and_cleared,
+      "saved_tensors can only be accessed once when "
+      "clear_saved_tensors_on_access=True is set on the autograd.Function. "
+      "Either access saved_tensors only once, or set "
+      "clear_saved_tensors_on_access=False.");
   if (self->saved_for_forward) {
     Py_INCREF(self->saved_for_forward);
     return self->saved_for_forward;
   } else {
-    return unpack_saved_variables(
+    PyObject* result = unpack_saved_variables(
         self, [](const Variable& var) { return THPVariable_Wrap(var); });
+    if (!result) {
+      return nullptr;
+    }
+
+    if (self->clear_saved_tensors_on_access) {
+      self->saved_variables.clear();
+      self->saved_tensors_accessed_and_cleared = true;
+    }
+
+    return result;
   }
   END_HANDLE_TH_ERRORS
 }
@@ -1519,8 +1626,24 @@ PyObject* THPFunction_saved_variables(THPFunction* self, void* _unused) {
       0);
   if (r != 0)
     throw python_error();
-  return unpack_saved_variables(
+  TORCH_CHECK(
+      !self->saved_tensors_accessed_and_cleared,
+      "saved_tensors can only be accessed once when "
+      "clear_saved_tensors_on_access=True is set on the autograd.Function. "
+      "Either access saved_tensors only once, or set "
+      "clear_saved_tensors_on_access=False.");
+  PyObject* result = unpack_saved_variables(
       self, [](const Variable& var) { return THPVariable_Wrap(var); });
+  if (!result) {
+    return nullptr;
+  }
+
+  if (self->clear_saved_tensors_on_access) {
+    self->saved_variables.clear();
+    self->saved_tensors_accessed_and_cleared = true;
+  }
+
+  return result;
   END_HANDLE_TH_ERRORS
 }
 
