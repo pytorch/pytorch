@@ -59,6 +59,73 @@ class DistTensorOpsTest(DTensorTestBase):
             self.assertEqual(cloned_mat.to_local(), mat.to_local())
 
     @with_comms
+    def test_searchsorted(self):
+        """Test torch.searchsorted with DTensor sharding."""
+        mesh = self.build_device_mesh()
+
+        # Test 1: S(innermost), R -> P(sum) strategy
+        # This is the mathematical property: sharding the search dim
+        # and summing local indices gives the correct global index
+        sorted_seq = torch.arange(16, dtype=torch.float, device=self.device_type)
+        values = torch.tensor([1.5, 7.5, 14.5], device=self.device_type)
+        expected = torch.searchsorted(sorted_seq, values)
+
+        dt_sorted = distribute_tensor(sorted_seq, mesh, [Shard(0)])
+        dt_values = distribute_tensor(values, mesh, [Replicate()])
+        result = torch.searchsorted(dt_sorted, dt_values)
+        self.assertEqual(result.placements, (Partial(),))
+        self.assertEqual(result.full_tensor(), expected)
+
+        # Test 2: R, S(0) -> S(0) strategy (2D values sharded on batch dim)
+        sorted_seq_2d = torch.tensor(
+            [[1.0, 2.0, 3.0, 4.0], [1.0, 3.0, 5.0, 7.0]],
+            device=self.device_type,
+        )
+        values_2d = torch.tensor(
+            [[1.5, 2.5, 3.5], [2.0, 4.0, 6.0]],
+            device=self.device_type,
+        )
+        expected_2d = torch.searchsorted(sorted_seq_2d, values_2d)
+
+        dt_sorted_2d = distribute_tensor(sorted_seq_2d.clone(), mesh, [Replicate()])
+        dt_values_2d = distribute_tensor(values_2d.clone(), mesh, [Shard(0)])
+
+        with CommDebugMode() as comm_mode:
+            result_2d = torch.searchsorted(dt_sorted_2d, dt_values_2d)
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+            self.assertEqual(result_2d.placements, (Shard(0),))
+
+        self.assertEqual(result_2d.full_tensor(), expected_2d)
+
+        # Test 3: S(0), S(0) -> S(0) strategy (batch dim sharding)
+        sorted_seq_batched = torch.tensor(
+            [
+                [1.0, 2.0, 3.0, 4.0],
+                [2.0, 4.0, 6.0, 8.0],
+                [0.5, 1.5, 2.5, 3.5],
+                [3.0, 6.0, 9.0, 12.0],
+            ],
+            device=self.device_type,
+        )
+        values_batched = torch.tensor(
+            [[1.5, 3.5], [3.0, 7.0], [1.0, 3.0], [5.0, 10.0]],
+            device=self.device_type,
+        )
+        expected_batched = torch.searchsorted(sorted_seq_batched, values_batched)
+
+        dt_sorted_batched = distribute_tensor(
+            sorted_seq_batched.clone(), mesh, [Shard(0)]
+        )
+        dt_values_batched = distribute_tensor(values_batched.clone(), mesh, [Shard(0)])
+
+        with CommDebugMode() as comm_mode:
+            result_batched = torch.searchsorted(dt_sorted_batched, dt_values_batched)
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+            self.assertEqual(result_batched.placements, (Shard(0),))
+
+        self.assertEqual(result_batched.full_tensor(), expected_batched)
+
+    @with_comms
     def test_copy_(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
 
