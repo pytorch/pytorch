@@ -65,10 +65,22 @@ For nightly wheels
 
 For previous versions
 
+v2.9.1
+
 .. code-block:: bash
 
     pip install torch==2.9.1 torchvision==0.24.1 torchaudio==2.9.1 --index-url https://download.pytorch.org/whl/xpu
+
+v2.9.0
+
+.. code-block:: bash
+
     pip install torch==2.9.0 torchvision==0.24.0 torchaudio==2.9.0 --index-url https://download.pytorch.org/whl/xpu
+
+v2.8.0
+
+.. code-block:: bash
+
     pip install torch==2.8.0 torchvision==0.23.0 torchaudio==2.8.0 --index-url https://download.pytorch.org/whl/xpu
 
 From Source
