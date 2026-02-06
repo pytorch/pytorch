@@ -5,6 +5,8 @@
 
 #include <torch/csrc/stable/version.h>
 
+// Trigger linter
+
 // This header defines stable C API extensions for backward/forward
 // compatibility when calling ATen operations through the dispatcher.
 //
