@@ -6754,6 +6754,7 @@ def scaled_mm(
     output_dtype: Optional[torch.dtype] = torch.bfloat16,
     contraction_dim: list[int] | tuple[int, ...] = (),
     use_fast_accum: bool = False,
+    *,
     out: Optional[torch.Tensor] = None,
 ) -> Tensor:
     r"""
