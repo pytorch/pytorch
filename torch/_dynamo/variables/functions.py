@@ -856,12 +856,8 @@ class InspectSignatureVariable(UserFunctionVariable):
             target_arg = args[0]
             cache_key = None
 
-            if isinstance(target_arg, UserFunctionVariable):
-                cache_key = target_arg.fn
-            elif isinstance(target_arg, UserMethodVariable) and isinstance(
-                target_arg.fn, UserFunctionVariable
-            ):
-                cache_key = target_arg.fn.fn
+            if isinstance(target_arg, (UserFunctionVariable, UserMethodVariable)):
+                cache_key = target_arg.get_function()
 
             if cache_key is not None:
                 if cache_key in tx.output.signature_cache:
