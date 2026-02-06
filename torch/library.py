@@ -370,6 +370,54 @@ class Library:
         _impls.add(key)
         self._op_impls.add(key)
 
+    def register_symm_mem_args(self, op_name, arg_names):
+        r"""Registers which arguments require symmetric memory allocation for an operator.
+
+        This method allows operators to declaratively specify which arguments need
+        symmetric memory treatment. This enables automatic lowering in Inductor and
+        allows custom operators to leverage symmetric memory optimizations.
+
+        Args:
+            op_name: operator name (along with the overload) or OpOverload object.
+            arg_names: list of argument names that require symmetric memory allocation.
+
+        Example::
+            >>> # In a TORCH_LIBRARY_FRAGMENT block (from C++ or Python)
+            >>> my_lib = Library("symm_mem", "FRAGMENT")
+            >>> my_lib.define("one_shot_all_reduce(Tensor input, str reduce_op, str group_name) -> Tensor")
+            >>> my_lib.register_symm_mem_args("one_shot_all_reduce", ["input"])
+
+            >>> # For custom operators
+            >>> custom_lib = Library("mylib", "DEF")
+            >>> custom_lib.define("my_collective(Tensor input, str group) -> Tensor")
+            >>> custom_lib.register_symm_mem_args("my_collective", ["input"])
+        """
+        if isinstance(op_name, str):
+            if "::" in op_name:
+                qualname = op_name
+            else:
+                qualname = f"{self.ns}::{op_name}"
+            op_overload = None
+        elif isinstance(op_name, OpOverload):
+            qualname = op_name.__qualname__
+            op_overload = op_name
+        else:
+            raise RuntimeError(
+                "register_symm_mem_args should be passed either a name or an OpOverload object "
+                "as the first argument"
+            )
+
+        if op_overload is None:
+            try:
+                op_overload = torch._library.utils.lookup_op(qualname)
+            except (ValueError, AttributeError):
+                pass
+
+        entry = torch._library.simple_registry.singleton.find(qualname)
+
+        # Register the symm_mem args
+        entry.symm_mem_args.register(arg_names, op_overload=op_overload)
+
     def fallback(self, fn, dispatch_key="", *, with_keyset=False):
         r"""Registers the function implementation as the fallback for the given key.
 
