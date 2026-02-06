@@ -2367,6 +2367,8 @@ class OutputGraph(OutputGraphCommon):
             self.call_cleanup_hooks()
             old_fake_mode = self.tracing_context.fake_mode
             assert old_fake_mode is not None
+            # Store old_fake_mode so it can be cleared at end of compile
+            self._old_fake_mode = old_fake_mode
             if not self.export:
                 import torch._functorch.config as _config
 
