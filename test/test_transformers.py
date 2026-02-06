@@ -4224,7 +4224,7 @@ class TestSDPACudaOnly(NNTestCase):
     @parametrize("batch_size", [8, 32])
     @parametrize("max_seq_len_q", [32, 256])
     @parametrize("max_seq_len_kv", [32, 256])
-    @parametrize("head_dim", [8, 64])
+    @parametrize("head_dim", [8, 40, 64, 160])
     @parametrize("dropout_p", [0.0, 0.1])
     @parametrize("dtype", [torch.float16])
     @parametrize("scale", [None, "l1"])
@@ -4723,7 +4723,7 @@ class TestSDPAXpuOnly(NNTestCase):
     @parametrize("n_head", [[3, 1], [4, 2], [10, 2]])
     @parametrize("q_size", [1, 32, 77, 128, 144, 512, 576])
     @parametrize("kv_size", [1, 32, 77, 128, 144, 512, 576])
-    @parametrize("head_dim", [64, 96, 128, 192])
+    @parametrize("head_dim", [64, 96, 128, 160, 192])
     @parametrize("mask_type", [None, "causal"])
     @parametrize("train", [True, False])
     @parametrize("layout", ["bshd", "bhsd"])
@@ -4979,9 +4979,9 @@ class TestAttnBias(NNTestCase):
             scaled_dot_product_attention(query, key, value, attn_mask=attn_bias, is_causal=True, dropout_p=0.0)
 
 if NOTEST_CPU:
-    device_types = ("cuda", "mps")
+    device_types = ("cuda", "mps", "mtia")
 else:
-    device_types = ("cpu", "cuda", "mps")
+    device_types = ("cpu", "cuda", "mps", "mtia")
 
 if TEST_XPU:
     device_types += ("xpu", )

@@ -2774,7 +2774,9 @@ def get_device_tflops(dtype: torch.dtype) -> float:
     We don't want to throw errors in this function. First check to see if the device is in device_info.py,
     then fall back to the inaccurate triton estimation.
     """
-    ds_tops = datasheet_tops(dtype, is_tf32=torch.backends.cuda.matmul.allow_tf32)
+    ds_tops = datasheet_tops(
+        dtype, is_tf32=torch.backends.cuda.matmul.fp32_precision == "tf32"
+    )
     if ds_tops is not None:
         return ds_tops
 
@@ -2795,7 +2797,7 @@ def get_device_tflops(dtype: torch.dtype) -> float:
         if dtype in (torch.float16, torch.bfloat16) and SM80OrLater:
             return get_max_tensorcore_tflops(dtype, sm_clock)
 
-        if torch.backends.cuda.matmul.allow_tf32:
+        if torch.backends.cuda.matmul.fp32_precision == "tf32":
             return get_max_tensorcore_tflops(torch.float32, sm_clock)
         else:
             return get_max_simd_tflops(torch.float32, sm_clock)
@@ -2803,7 +2805,7 @@ def get_device_tflops(dtype: torch.dtype) -> float:
         if dtype in (torch.float16, torch.bfloat16) and SM80OrLater:
             return get_max_tensorcore_tflops(dtype)
 
-        if torch.backends.cuda.matmul.allow_tf32:
+        if torch.backends.cuda.matmul.fp32_precision == "tf32":
             return get_max_tensorcore_tflops(torch.float32)
         else:
             return get_max_simd_tflops(torch.float32)
@@ -3165,6 +3167,11 @@ def get_cloned_parameter_buffer_name(name: str) -> str:
 
 def is_gpu(device: Optional[str]) -> bool:
     return device in GPU_TYPES
+
+
+def is_rocm() -> bool:
+    """Check if we're running on ROCm/HIP platform."""
+    return torch.version.hip is not None
 
 
 def device_need_guard(device: str) -> bool:

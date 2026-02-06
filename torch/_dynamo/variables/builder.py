@@ -498,7 +498,7 @@ class VariableBuilder:
                 side_effect_result.set_nn_module_stack_source(self.source)
             return side_effect_result
 
-        cached_vt = self.tx.output.variable_tracker_cache.lookup(value, self.source)
+        cached_vt = self.tx.output.variable_tracker_cache.get(self.source)
         if cached_vt:
             # If allow_lazy_constant=False but the cached VT is a lazy variable,
             # we need to rebuild to get a non-lazy version. This happens when
@@ -532,7 +532,13 @@ class VariableBuilder:
         ):
             vt = self.tx.output.side_effects.track_object_existing(value, vt)
 
-        self.tx.output.variable_tracker_cache.add(value, self.source, vt)
+        # Skip caching for JVP_NESTING source because
+        # JvpIncrementNestingCtxManagerVariable hides global JVP mutation from
+        # Dynamo, resulting in stale value. We attempted a fix in
+        # https://github.com/pytorch/pytorch/pull/174329 but it exposed other
+        # issues.  This only affects cache hit rate, NOT correctness.
+        if "JVP_NESTING" not in self.source.name:
+            self.tx.output.variable_tracker_cache[self.source] = vt
         return vt
 
     def _can_lift_attrs_to_inputs(self, vt: VariableTracker) -> bool:
@@ -647,9 +653,7 @@ class VariableBuilder:
                 ],
             )
 
-        def build_key_value(
-            k: Any, v: Any
-        ) -> tuple[VariableTracker, LazyVariableTracker]:
+        def build_key_value(k: Any, v: Any) -> tuple[VariableTracker, VariableTracker]:
             key = ConstantVariable.create(k)
             source_key = k
 
@@ -822,7 +826,7 @@ class VariableBuilder:
             # _HashableTracker class in dicts.py
             def build_key_value(
                 i: Any, k: Any, v: Any
-            ) -> tuple[LazyVariableTracker, LazyVariableTracker]:
+            ) -> tuple[VariableTracker, VariableTracker]:
                 base = self.get_source()
                 if all_const:
                     key = ConstantVariable.create(k)
@@ -1635,7 +1639,7 @@ class VariableBuilder:
             # _HashableTracker class in dicts.py
             def build_key_value(
                 i: Any, k: Any, v: Any
-            ) -> tuple[LazyVariableTracker, LazyVariableTracker]:
+            ) -> tuple[VariableTracker, VariableTracker]:
                 base = self.get_source()
                 source_key = ConstDictKeySource(base, i)
                 key = LazyVariableTracker.create(k, source_key)
@@ -4069,8 +4073,38 @@ class SourcelessBuilder:
     def __init__(self) -> None:
         raise AssertionError("Use SourcelessBuilder.create()")
 
+    @overload
     @staticmethod
-    def create(tx: "InstructionTranslator", value: Any) -> VariableTracker:
+    def create(
+        tx: "InstructionTranslatorBase",
+        value: type[set[Any]]
+        | type[dict[Any, Any]]
+        | type[tuple[Any, ...]]
+        | type[list[Any]],
+    ) -> BuiltinVariable: ...
+
+    @overload
+    @staticmethod
+    def create(tx: "InstructionTranslatorBase", value: list[Any]) -> ListVariable: ...
+
+    @overload
+    @staticmethod
+    def create(
+        tx: "InstructionTranslatorBase", value: tuple[Any, ...]
+    ) -> TupleVariable: ...
+
+    @overload
+    @staticmethod
+    def create(
+        tx: "InstructionTranslatorBase", value: bool | int | float | str
+    ) -> ConstantVariable: ...
+
+    @overload
+    @staticmethod
+    def create(tx: "InstructionTranslatorBase", value: Any) -> VariableTracker: ...
+
+    @staticmethod
+    def create(tx: "InstructionTranslatorBase", value: Any) -> VariableTracker:
         value_type = type(value)
         # type: ignore[attr-defined]
         fast_handler = SourcelessBuilder._type_handlers.get(value_type)
@@ -4129,6 +4163,7 @@ class SourcelessBuilder:
             assert getattr(value.__self__, value.__func__.__name__) == value
             cls_obj_vt = SourcelessBuilder.create(tx, value.__self__)
             try:
+                # pyrefly: ignore[bad-argument-type]
                 return cls_obj_vt.var_getattr(tx, value.__func__.__name__)
             except NotImplementedError:
                 pass  # failthrough to unimplemented branch
