@@ -166,7 +166,7 @@ template <int vec_size, typename func_t, typename array_t>
 C10_LAUNCH_BOUNDS_1(num_threads())
 __global__ void vectorized_elementwise_kernel(int N, func_t f, array_t data) {
   if constexpr (vec_size == 8) {
-#if __CUDA_ARCH__ == 900 || __CUDA_ARCH__ / 100 == 10 || __CUDA_ARCH_FAMILY_SPECIFIC__ == 1000
+#if __CUDA_ARCH__ == 900 || __CUDA_ARCH__ / 100 == 10
     using traits = function_traits<func_t>;
     constexpr auto io_size = calc_io_size<func_t>();
     int remaining = N - io_block_work_size<io_size>() * blockIdx.x;
@@ -191,7 +191,7 @@ __global__ void vectorized_elementwise_kernel(int N, func_t f, array_t data) {
       elementwise_kernel_helper(
       f, memory::policies::vectorized<vec_size, array_t, elems_per_thread<io_size>()>(data));
     }
-#endif // __CUDA_ARCH__ == 900 || __CUDA_ARCH__ / 100 == 10 || __CUDA_ARCH_FAMILY_SPECIFIC__ == 1000
+#endif // __CUDA_ARCH__ == 900 || __CUDA_ARCH__ / 100 == 10
   } else {
     using traits = function_traits<func_t>;
     constexpr auto io_size = calc_io_size<func_t>();
