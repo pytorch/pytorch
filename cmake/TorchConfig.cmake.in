@@ -12,7 +12,17 @@
 #
 # and the following imported targets:
 #
-#   torch
+#   torch              -- The main PyTorch library
+#   torch_python       -- Python bindings (requires Python component)
+#
+# Components:
+#
+#   Python             -- Python bindings (torch_python, shm targets)
+#
+# Example usage:
+#
+#   find_package(Torch REQUIRED)                     # libtorch only
+#   find_package(Torch REQUIRED COMPONENTS Python)   # with Python bindings
 macro(append_torchlib_if_found)
   foreach (_arg ${ARGN})
     find_library(${_arg}_LIBRARY ${_arg} PATHS "${TORCH_INSTALL_PREFIX}/lib")
@@ -165,6 +175,21 @@ set_target_properties(torch PROPERTIES
 )
 if(TORCH_CXX_FLAGS)
   set_property(TARGET torch PROPERTY INTERFACE_COMPILE_OPTIONS "${TORCH_CXX_FLAGS}")
+endif()
+
+# Handle Python component for torch_python target
+if("Python" IN_LIST Torch_FIND_COMPONENTS)
+  set(_torch_python_targets_file "${CMAKE_CURRENT_LIST_DIR}/TorchPythonTargets.cmake")
+  if(EXISTS "${_torch_python_targets_file}")
+    include("${_torch_python_targets_file}")
+    set(Torch_Python_FOUND TRUE)
+  else()
+    set(Torch_Python_FOUND FALSE)
+    if(Torch_FIND_REQUIRED_Python)
+      message(FATAL_ERROR "Torch Python component requested but TorchPythonTargets.cmake not found. "
+                          "Was PyTorch built with BUILD_PYTHON=ON?")
+    endif()
+  endif()
 endif()
 
 find_package_handle_standard_args(Torch DEFAULT_MSG TORCH_LIBRARY TORCH_INCLUDE_DIRS)
