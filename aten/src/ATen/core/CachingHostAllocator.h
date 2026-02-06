@@ -385,6 +385,8 @@ struct CachingHostAllocatorImpl {
       auto index = size_index(block->size_);
       std::lock_guard<std::mutex> g(pool.free_list_[index].mutex_);
       pool.free_list_[index].list_.push_back(block);
+      stats_.active_bucket_stats[index].decrease(1);
+      stats_.active_bytes_bucket_stats[index].decrease(block->size_);
     } else if (allocated_during_capture) {
       // pass: No events are ever recorded during stream capture.
 
@@ -723,7 +725,7 @@ struct CachingHostAllocatorImpl {
         std::lock_guard<std::mutex> g(pool.free_list_[index].mutex_);
         pool.free_list_[index].list_.push_back(block);
         stats_.active_bucket_stats[index].decrease(1);
-        stats_.active_bytes_bucket_stats[index].decrease(size);
+        stats_.active_bytes_bucket_stats[index].decrease(block->size_);
         if (size != -1) {
           return;
         }
