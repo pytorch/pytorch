@@ -7,6 +7,7 @@ no CUDA calls shall be made, including torch.cuda.device_count(), etc.
 torch.testing._internal.common_cuda.py can freely initialize CUDA context when imported.
 """
 
+import sysconfig
 import argparse
 import contextlib
 import copy
@@ -1322,12 +1323,12 @@ def run_tests(argv=None):
                 print(f"Test exited with non-zero exitcode {exitcode}. Command to reproduce: {string_cmd}")
                 failed_tests.append(test_case_full_name)
 
-            if len(failed_tests) != 0:
-                raise AssertionError(
-                    "{} unit test(s) failed:\n\t{}".format(
-                        len(failed_tests), '\n\t'.join(failed_tests)
-                    )
+        if len(failed_tests) != 0:
+            raise AssertionError(
+                "{} unit test(s) failed:\n\t{}".format(
+                    len(failed_tests), '\n\t'.join(failed_tests)
                 )
+            )
 
     elif RUN_PARALLEL > 1:
         test_cases = discover_test_cases_recursively(suite)
@@ -1731,6 +1732,12 @@ def xfailIfWindows(func):
 
 def xfailIfROCm(func):
     return unittest.expectedFailure(func) if torch.version.hip is not None else func
+
+
+def skipIfFreeThreaded(msg="Test doesn't work with free-threaded python"):
+    if not isinstance(msg, str):
+        raise AssertionError("Are you using skipIfFreeThreaded correctly?")
+    return unittest.skipIf(sysconfig.get_config_var("Py_GIL_DISABLED") == 1, msg)
 
 
 def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):
