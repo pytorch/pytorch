@@ -319,6 +319,7 @@ static inline void launch_vectorized_kernel(
 #endif
   int bws = tws * num_threads();
   int64_t grid = (N + bws - 1) / bws;
+  C10_CUDA_CLEAR_ERROR();
   switch (vec_size) {
 #ifdef USE_ROCM
     case 16:
@@ -440,6 +441,7 @@ static inline void launch_vectorized_templated_kernel(
       vectorized_templated_config::block_work_size();
   auto stream = at::cuda::getCurrentCUDAStream();
   int vec_size = memory::can_vectorize_up_to<func_t>(data);
+  C10_CUDA_CLEAR_ERROR();
   switch (vec_size) {
     case 8:
       vectorized_templated_elementwise_kernel<
@@ -512,6 +514,7 @@ static inline void launch_unrolled_kernel(
 
   int64_t grid = (N + elementwise_block_work_size() - 1) / elementwise_block_work_size();
   auto stream = at::cuda::getCurrentCUDAStream();
+  C10_CUDA_CLEAR_ERROR();
   unrolled_elementwise_kernel<func_t, array_t, elementwise_thread_work_size()>
       <<<grid, num_threads(), 0, stream>>>(N, f, data, ic, oc, l, s);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -541,6 +544,7 @@ static void launch_legacy_kernel(int64_t N, const func_t& f) {
   dim3 block(nt);
   dim3 grid((N + block.x * vt - 1) / (block.x * vt));
   auto stream = at::cuda::getCurrentCUDAStream();
+  C10_CUDA_CLEAR_ERROR();
   elementwise_kernel<nt, vt, func_t><<<grid, block, 0, stream>>>(N, f);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
@@ -574,6 +578,7 @@ static void launch_legacy_kernel_manual_unroll(int64_t N, const func_t& f) {
   dim3 block(nt);
   dim3 grid((N + block.x * vt - 1) / (block.x * vt));
   auto stream = at::cuda::getCurrentCUDAStream();
+  C10_CUDA_CLEAR_ERROR();
   elementwise_kernel_manual_unroll<nt, vt, func_t><<<grid, block, 0, stream>>>(N, f);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
