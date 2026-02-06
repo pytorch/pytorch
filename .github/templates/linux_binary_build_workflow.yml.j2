@@ -173,7 +173,7 @@ jobs:
       id-token: write
       contents: read
     steps:
-      !{{ common.checkout(deep_clone=False, directory="/home/runner/_work/pytorch/") }}
+      !{{ common.checkout(deep_clone=False, directory=".") }}
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
       - uses: !{{ common.download_artifact_action }}
