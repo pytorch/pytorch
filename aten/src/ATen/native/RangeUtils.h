@@ -38,14 +38,24 @@ int64_t compute_arange_size(const Scalar& start, const Scalar& end, const Scalar
   // and the effective output size starts differing on CPU vs GPU because of precision issues, which
   // we dont want.
   // the corner-case we do want to take into account is int64_t, which has higher precision than double
+  // However, if any input is floating-point, we must use double to avoid truncation
+  // (e.g., step=0.5 truncated to int64_t=0 would cause division by zero).
+  // See https://github.com/pytorch/pytorch/issues/173574
   double size_d;
+  bool inputs_are_integral = !start.isFloatingPoint() && !end.isFloatingPoint() && !step.isFloatingPoint();
   if constexpr (std::is_same_v<scalar_t, int64_t>) {
-    using accscalar_t = at::acc_type<scalar_t, false>;
-    auto xstart = start.to<accscalar_t>();
-    auto xend = end.to<accscalar_t>();
-    auto xstep = step.to<accscalar_t>();
-    int64_t sgn = (xstep > 0) - (xstep < 0);
-    size_d = std::ceil((xend - xstart + xstep - sgn) / xstep);
+    if (inputs_are_integral) {
+      using accscalar_t = at::acc_type<scalar_t, false>;
+      auto xstart = start.to<accscalar_t>();
+      auto xend = end.to<accscalar_t>();
+      auto xstep = step.to<accscalar_t>();
+      int64_t sgn = (xstep > 0) - (xstep < 0);
+      size_d = std::ceil((xend - xstart + xstep - sgn) / xstep);
+    } else {
+      // Float inputs with int64_t output: use double to avoid truncation
+      size_d = std::ceil((end.to<double>() - start.to<double>())
+                          / step.to<double>());
+    }
   } else {
     size_d = std::ceil((end.to<double>() - start.to<double>())
                         / step.to<double>());
