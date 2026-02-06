@@ -152,12 +152,8 @@ def check_escaped_gradients(
 
 @contextlib.contextmanager
 def unflatten_args_with_modules(
-    flat_args: tuple[Any, ...], input_spec: pytree.TreeSpec | None
+    flat_args: tuple[Any, ...], input_spec: pytree.TreeSpec
 ) -> Generator[tuple[list[Any] | tuple[Any, ...], dict[str, Any]], None, None]:
-    if input_spec is None:
-        yield flat_args, {}
-        return
-
     args, kwargs = pytree.tree_unflatten(flat_args, input_spec)
 
     with contextlib.ExitStack() as stack:
@@ -464,7 +460,10 @@ class InvokeLeafFunctionAutogradOp(torch.autograd.Function):
     def backward(ctx, *grads):
         _, real_bw_spec = func_to_graphable(ctx.real_backward)
         _, fake_bw_spec = func_to_graphable(ctx.fake_backward)
-        fw_grads = invoke_leaf_function(real_bw_spec, fake_bw_spec, None, *grads)
+        _, bw_input_spec = pytree.tree_flatten((grads, {}))
+        fw_grads = invoke_leaf_function(
+            real_bw_spec, fake_bw_spec, bw_input_spec, *grads
+        )
         return None, None, None, *fw_grads
 
 
