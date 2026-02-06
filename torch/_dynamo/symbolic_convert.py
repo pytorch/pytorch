@@ -3479,7 +3479,7 @@ class InstructionTranslatorBase(
                 return True
             self.current_speculation = speculation
         end_for_ip = self._find_comprehension_end_for_ip()
-        assert end_for_ip is not None
+        assert end_for_ip >= 0
         self._comprehension_end_for_ips.add(end_for_ip)
         self._comprehension_depth += 1
         return False
@@ -4485,7 +4485,7 @@ class InstructionTranslatorBase(
 
         return prefix == pattern
 
-    def _find_comprehension_end_for_ip(self) -> int | None:
+    def _find_comprehension_end_for_ip(self) -> int:
         """Find the instruction pointer of the outermost END_FOR for current comprehension."""
         assert sys.version_info >= (3, 12)
         assert self.instruction_pointer is not None
@@ -4499,7 +4499,7 @@ class InstructionTranslatorBase(
                 nesting_depth -= 1
                 if nesting_depth == 0:
                     return search_ip
-        return None
+        return -1
 
     def _analyze_comprehension(self) -> ComprehensionAnalysis:
         """Analyze comprehension bytecode to determine result handling pattern."""
@@ -4528,7 +4528,7 @@ class InstructionTranslatorBase(
         defined_inside.update(iterator_vars)
 
         end_for_ip = self._find_comprehension_end_for_ip()
-        if end_for_ip is None:
+        if end_for_ip == -1:
             unimplemented(
                 gb_type="Comprehension analysis failed: No END_FOR",
                 context="",
