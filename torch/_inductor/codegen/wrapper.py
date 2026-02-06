@@ -3729,27 +3729,6 @@ class PythonWrapperCodegen(CodeGen):
             # move the Tensor predicate to host
             predicate = f"{predicate}.item()"
 
-        # Get branch-specific inp_out_same_identity mappings for tensor identity preservation.
-        # These maps output_idx -> input_idx where the output should be the same object
-        # as the input.
-        true_inp_out_same_identity = (
-            getattr(conditional, "true_inp_out_same_identity", None) or {}
-        )
-        false_inp_out_same_identity = (
-            getattr(conditional, "false_inp_out_same_identity", None) or {}
-        )
-
-        # Save references to operands that need to be used for output.
-        # This must be done before subgraph calls as buffers may be freed
-        all_aliased_operand_indices = OrderedSet(
-            true_inp_out_same_identity.values()
-        ) | OrderedSet(false_inp_out_same_identity.values())
-        saved_operand_refs: dict[int, str] = {}
-        for operand_idx in sorted(all_aliased_operand_indices):
-            saved_name = f"{name}_saved_operand_{operand_idx}"
-            self.writeline(f"{saved_name} = {outer_inputs[operand_idx]}")
-            saved_operand_refs[operand_idx] = saved_name
-
         self.writeline(f"{name} = [None] * {len(conditional.outputs)}")
         self.writeline(f"if {predicate}:")
         self.writeline(EnterSubgraphLine(self, conditional.true_subgraph.graph))
@@ -3761,12 +3740,6 @@ class PythonWrapperCodegen(CodeGen):
         else:
             self.codegen_subgraph(conditional.true_subgraph, outer_inputs, name)
 
-        # For true branch: replace outputs that should have same identity as input
-        if true_inp_out_same_identity:
-            self.writeline(f"{name} = list({name})")
-            for out_idx, operand_idx in true_inp_out_same_identity.items():
-                self.writeline(f"{name}[{out_idx}] = {saved_operand_refs[operand_idx]}")
-
         self.writeline(ExitSubgraphLine(self))
         self.writeline("else:")
         self.writeline(EnterSubgraphLine(self, conditional.false_subgraph.graph))
@@ -3777,13 +3750,6 @@ class PythonWrapperCodegen(CodeGen):
             )
         else:
             self.codegen_subgraph(conditional.false_subgraph, outer_inputs, name)
-
-        # For false branch: replace outputs that should have same identity as input
-        if false_inp_out_same_identity:
-            self.writeline(f"{name} = list({name})")
-            for out_idx, operand_idx in false_inp_out_same_identity.items():
-                self.writeline(f"{name}[{out_idx}] = {saved_operand_refs[operand_idx]}")
-
         self.writeline(ExitSubgraphLine(self))
 
     def codegen_while_loop(self, while_loop, stack_output):
