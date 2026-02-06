@@ -2,7 +2,7 @@
 # -r requirements.txt
 
 # JAX & TPU v7 artifact registries
---extra-index-url https://us-python.pkg.dev/ml-oss-artifacts-published/jax/simple/
+--extra-index-url https://us-python.pkg.dev/ml-oss-artifacts-published/jax/simple/ #@lint-ignore index does not have landing page
 --find-links https://storage.googleapis.com/jax-releases/libtpu_releases.html
 --pre
 
