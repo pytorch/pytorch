@@ -207,7 +207,7 @@ GEMM_TEMPLATE = r"""
 {%- endif %}
 
 {%- if num_threads > 1 %}
-    #pragma omp parallel num_threads({{num_threads}})
+    #pragma omp parallel
     {
         {{ template.codegen_multi_threads_params()|indent(8, false) }}
 {%- else %}
