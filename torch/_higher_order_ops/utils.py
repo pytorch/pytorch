@@ -1145,11 +1145,17 @@ class FunctionalizeCtxWrapper:
 
     def __call__(self, *args, **kwargs):
         if isinstance(self.subgraph, torch.fx.GraphModule):
-            # Running graph with interpreter is needed for propagating the stack_trace
-            with fx_traceback.preserve_node_meta():
-                return self.ctx.functionalize(torch.fx.Interpreter(self.subgraph).run)(
-                    *args, **kwargs
-                )
+            # Handle boxed calling convention
+            if getattr(self.subgraph, "_boxed_call", False):
+                # For boxed call, call the GraphModule directly with a list
+                # (GraphModule handles the boxed calling convention internally)
+                return self.ctx.functionalize(self.subgraph)(list(args))
+            else:
+                # Running graph with interpreter is needed for propagating the stack_trace
+                with fx_traceback.preserve_node_meta():
+                    return self.ctx.functionalize(
+                        torch.fx.Interpreter(self.subgraph).run
+                    )(*args, **kwargs)
         return self.ctx.functionalize(self.subgraph)(*args, **kwargs)
 
 
