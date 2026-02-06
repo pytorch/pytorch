@@ -4825,8 +4825,8 @@ def forward(self, x_1) -> torch.Tensor:
     add = torch.ops.aten.add.Tensor(view_copy, ones);  view_copy = ones = None
     view_copy_1 = torch.ops.aten.view_copy.default(add, [4, 2]);  add = None
     view_copy_2 = torch.ops.aten.view_copy.default(view_copy_1, [4, 2]);  view_copy_2 = None
-    copy_ = torch.ops.aten.copy_.default(x_1, view_copy_1);  x_1 = copy_ = None
-    return view_copy_1
+    copy_ = torch.ops.aten.copy_.default(x_1, view_copy_1);  x_1 = view_copy_1 = None
+    return copy_
     """,
         )
 
@@ -4931,8 +4931,8 @@ def forward(self, x_1) -> torch.Tensor:
     add = torch.ops.aten.add.Tensor(view, ones);  view = ones = None
     view_1 = torch.ops.aten.view.default(add, [4, 2]);  add = None
     view_2 = torch.ops.aten.view.default(view_1, [4, 2]);  view_2 = None
-    copy_ = torch.ops.aten.copy_.default(x_1, view_1);  x_1 = copy_ = None
-    return view_1
+    copy_ = torch.ops.aten.copy_.default(x_1, view_1);  x_1 = view_1 = None
+    return copy_
     """,
         )
 
@@ -5024,6 +5024,15 @@ def forward(self, x_1):
     return None
     """,
         )
+
+    def test_functionalize_output_is_mutated_input_identity(self, device):
+        def f(a):
+            return a.sin_().add_(1)
+
+        x = torch.randn(2, device=device)
+        out = functionalize(f)(x)
+        self.assertEqual(out, x)
+        self.assertIs(out, x)
 
 
 def construct_sum_pyop():

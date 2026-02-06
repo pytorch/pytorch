@@ -8967,12 +8967,12 @@ class GraphModule(torch.nn.Module):
             data = org_data.clone()
             output = torch.compile(fn)(predicate_false, data)
             torch.testing.assert_close(output, expected)
-            assert id(output) == id(data)
+            self.assertIs(output, data)
 
             data = org_data.clone()
             output = torch.compile(fn)(predicate_true, data)
             torch.testing.assert_close(output, org_data + 1)
-            assert id(output) != id(data)
+            self.assertIsNot(output, data)
 
     @skipIfTorchDynamo("Graph is not captured correctly when test with dynamo")
     def test_while_loop_unbacked_bindings(self):

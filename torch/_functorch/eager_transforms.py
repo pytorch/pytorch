@@ -1748,15 +1748,34 @@ def functionalize(
             flattened_unwrapped_kwargs = pytree.arg_tree_leaves(**kwargs)
             flattened_wrapped_kwargs = pytree.arg_tree_leaves(**func_kwargs)
 
+            # When the function returns an mutated input tensor,
+            # we need to preserve the identity relationship (id(output) == id(input)).
+            input_id_to_orig = {}
+            for orig, wrapped in zip(flattened_unwrapped_args, flattened_wrapped_args):
+                if isinstance(wrapped, torch.Tensor):
+                    input_id_to_orig[id(wrapped)] = orig
+            for orig, wrapped in zip(
+                flattened_unwrapped_kwargs, flattened_wrapped_kwargs
+            ):
+                if isinstance(wrapped, torch.Tensor):
+                    input_id_to_orig[id(wrapped)] = orig
+
             func_outputs = func(*func_args, **func_kwargs)
-            outputs = _unwrap_all_tensors_from_functional(
-                func_outputs, reapply_views=reapply_views
-            )
+            # Track which outputs are inputs
+            flat_func_outputs, out_spec = pytree.tree_flatten(func_outputs)
+            output_is_input_map: dict[int, Any] = {}
+            for out_idx, o in enumerate(flat_func_outputs):
+                if isinstance(o, torch.Tensor) and id(o) in input_id_to_orig:
+                    output_is_input_map[out_idx] = input_id_to_orig[id(o)]
 
             for a in flattened_wrapped_args + flattened_wrapped_kwargs:
                 if isinstance(a, torch.Tensor):
                     # Call sync_() on the inputs, to ensure that any pending mutations have been applied.
                     torch._sync(a)
+
+            outputs = _unwrap_all_tensors_from_functional(
+                func_outputs, reapply_views=reapply_views
+            )
 
             # And if any mutations were applied to the inputs, we need to propagate them back to the user.
             for unwrapped, wrapped in zip(
@@ -1773,6 +1792,13 @@ def functionalize(
                     wrapped, torch.Tensor
                 ):
                     _propagate_functional_input_mutation(unwrapped, wrapped)
+
+            # If output is mutated input, return the original input instead of unwrapped tensor
+            if output_is_input_map:
+                flat_outputs = list(pytree.tree_leaves(outputs))
+                for out_idx, orig_input in output_is_input_map.items():
+                    flat_outputs[out_idx] = orig_input
+                outputs = pytree.tree_unflatten(flat_outputs, out_spec)
 
             return outputs
         finally:
