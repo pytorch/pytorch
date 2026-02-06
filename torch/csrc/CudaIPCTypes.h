@@ -21,7 +21,7 @@ struct CudaIPCReceivedData final {
 struct CudaIPCSentData final {
   std::string handle_;
   uint64_t offset_;
-  uint64_t* counter_ptr_; // Reference counter shared memory block
+  int64_t* counter_ptr_; // Reference counter shared memory block
   at::DataPtr original_ptr_; // Original mem allocation
   cudaEvent_t event_; // Sync cuEventDestroy
   bool event_sync_required_;
@@ -30,11 +30,11 @@ struct CudaIPCSentData final {
   CudaIPCSentData(
       std::string handle,
       uint64_t offset,
-      uint64_t* counter_ptr,
+      int64_t* counter_ptr,
       at::Device device);
   ~CudaIPCSentData();
 
-  uint64_t counter_value();
+  int64_t counter_value();
   std::string handle() {
     return handle_;
   }
@@ -84,11 +84,11 @@ struct CudaIPCRefCountersFile final {
         handle_(std::move(handle)),
         refcounted_shared_mem_(std::move(data_ptr)) {}
 
-  uint64_t* counter_ptr() {
-    return static_cast<uint64_t*>(refcounted_shared_mem_.get()) + next_offset_;
+  int64_t* counter_ptr() {
+    return static_cast<int64_t*>(refcounted_shared_mem_.get()) + next_offset_;
   }
 
-  void set_counter(uint64_t value) {
+  void set_counter(int64_t value) {
     *counter_ptr() = value;
   }
 
