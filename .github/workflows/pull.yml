@@ -516,3 +516,27 @@ jobs:
           { config: "default", shard: 4, num_shards: 4, runner: "linux.idc.xpu" },
         ]}
     secrets: inherit
+
+  # ABI Compatibility Check (opt-in via 'ci/abi-check' label)
+  # To enable enforcement for all PRs, remove the label check from the 'if' condition
+  abi-check-cpu:
+    name: abi-check-cpu
+    uses: ./.github/workflows/_abi-check.yml
+    needs: linux-jammy-py3_10-gcc11-build
+    if: contains(github.event.pull_request.labels.*.name, 'ci/abi-check')
+    with:
+      build-environment: ${{ needs.linux-jammy-py3_10-gcc11-build.outputs.build-environment }}
+      docker-image: ${{ needs.linux-jammy-py3_10-gcc11-build.outputs.docker-image }}
+      build-type: cpu
+    secrets: inherit
+
+  abi-check-cuda:
+    name: abi-check-cuda
+    uses: ./.github/workflows/_abi-check.yml
+    needs: linux-jammy-cuda12_8-cudnn9-py3_10-clang12-build
+    if: contains(github.event.pull_request.labels.*.name, 'ci/abi-check')
+    with:
+      build-environment: ${{ needs.linux-jammy-cuda12_8-cudnn9-py3_10-clang12-build.outputs.build-environment }}
+      docker-image: ${{ needs.linux-jammy-cuda12_8-cudnn9-py3_10-clang12-build.outputs.docker-image }}
+      build-type: cuda
+    secrets: inherit
