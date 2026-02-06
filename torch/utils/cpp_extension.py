@@ -2572,7 +2572,9 @@ def _get_cuda_arch_flags(cflags: list[str] | None = None) -> list[str]:
             # used to build pytorch, so we use the maximum supported capability of pytorch
             # to clamp the capability.
             capability = min(max_supported_sm, capability)
-            arch = f'{capability[0]}.{capability[1]}'
+            cap_str = str(capability[0] * 10 + capability[1])
+            suffix = next((a[-1] if a[-1] in 'af' else '' for a in torch.cuda.get_arch_list() if a.startswith(f'sm_{cap_str}')), '')
+            arch = f'{capability[0]}.{capability[1]}{suffix}'
             if arch not in arch_list:
                 arch_list.append(arch)
         arch_list = sorted(arch_list)
