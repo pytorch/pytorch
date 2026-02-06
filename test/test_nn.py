@@ -505,6 +505,9 @@ class TestNN(NNTestCase):
         n = Net()
         s = nn.Sequential(n, n, n, n)
         self.assertEqual(list(s.modules()), [s, n, l])
+        # test the option to not remove duplicate module instances
+        self.assertEqual(list(s.modules(remove_duplicate=False)), [
+            s, n, l, l, n, l, l, n, l, l, n, l, l])
 
     def test_named_modules(self):
         class Net(nn.Module):
@@ -4343,7 +4346,11 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         inp = inp.cuda()
         # otherwise, subsequent warnings will be hidden, and further tests rely on them
         warnings.simplefilter("always")
-        self.assertEqual(m(inp)[0].cpu(), out_expected[0])
+        # Relax tolerances: non-contiguous weights cause cuDNN to use different
+        # algorithms, leading to small numerical differences vs CPU computation.
+        # Observed max: atol ~6.4e-5, rtol ~3.1e-3. Using 1.5x margin.
+        # See https://github.com/pytorch/pytorch/issues/163072
+        self.assertEqual(m(inp)[0].cpu(), out_expected[0], atol=1e-4, rtol=5e-3)
 
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     @set_default_dtype(torch.double)
@@ -11063,7 +11070,7 @@ class TestNNDeviceType(NNTestCase):
     @largeTensorTest("64GB", "cpu")
     def test_warp_softmax_64bit_indexing(self, device, dtype):
         def run_test(*shape):
-            x = torch.randn(shape, device="cuda", dtype=torch.float16, requires_grad=True)
+            x = torch.randn(shape, device=device, dtype=torch.float16, requires_grad=True)
             y = F.log_softmax(x, dim=-1, dtype=dtype)
             y.backward(y)
             with torch.no_grad():
@@ -12574,7 +12581,6 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(grad_long, grad_byte)
 
     @onlyCUDA
-    @skipIfRocm
     @dtypes(torch.float16, torch.float32)
     def test_cross_entropy_loss_2d_out_of_bounds_class_index(self, device, dtype):
         # Test for issue #117532
@@ -12610,7 +12616,13 @@ class TestThatContainsCUDAAssert(TestCase):
 if __name__ == '__main__':
     run_tests()
         """)
-        self.assertIn('CUDA error: device-side assert triggered', stderr)
+        # CUDA says "device-side assert triggered"
+        # ROCm says "unspecified launch failure", or HSA_STATUS_ERROR_EXCEPTION
+        has_cuda_assert = 'CUDA error: device-side assert triggered' in stderr
+        has_hip_assert = 'HIP error' in stderr and 'launch failure' in stderr
+        has_hsa_exception = 'HSA_STATUS_ERROR_EXCEPTION' in stderr
+        self.assertTrue(has_cuda_assert or has_hip_assert or has_hsa_exception,
+                        f"Expected device assert error in stderr, got: {stderr}")
 
 
 
