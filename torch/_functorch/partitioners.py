@@ -74,7 +74,6 @@ from ._aot_autograd.utils import (
     _is_primal,
     _is_tangent,
     get_cuda_generator_meta_val,
-    is_with_effects,
 )
 from .compile_utils import fx_graph_cse, get_aten_target, raise_getitems
 
