@@ -231,9 +231,6 @@ inductor_skips["xpu"] = {}
 inductor_expected_failures_single_sample = defaultdict(dict)
 
 inductor_expected_failures_single_sample["cpu"] = {
-    "_softmax_backward_data": {
-        f16
-    },  # half_to_float is only valid for the CUDA implementation
     "_upsample_bilinear2d_aa": {f32, f64},
     "cholesky": {f32, f64},
     "complex": {f16},
@@ -1028,6 +1025,17 @@ inductor_skip_exact_stride = {
     "unbind_copy",
 }
 
+# On XPU, Inductor may apply additional layout optimizations that can change
+# tensor strides compared to eager mode, so exact stride checks are relaxed
+# for certain ops.
+inductor_skip_exact_stride_xpu = {
+    "nn.functional.conv2d",
+    "nn.functional.conv_transpose2d",
+    "nn.functional.max_unpool2d",
+    "nn.functional.max_unpool2d.grad",
+    "nn.functional.rms_norm",
+}
+
 # Custom replacements for assertEquals, in cases where a difference in value
 # may not indicate correctness.
 
@@ -1399,6 +1407,9 @@ class TestInductorOpInfo(TestCase):
 
                         # Call the appropriate check method based on device type
                         exact_stride = op_name not in inductor_skip_exact_stride
+                        # XPU has additional layout optimizations that change strides differently from eager mode.
+                        if exact_stride and GPU_TYPE == "xpu":
+                            exact_stride = op_name not in inductor_skip_exact_stride_xpu
                         if device_type == GPU_TYPE:
                             self.check_model_gpu(
                                 fn,
