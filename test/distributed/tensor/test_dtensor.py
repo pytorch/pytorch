@@ -788,6 +788,99 @@ class DTensorTest(DTensorTestBase):
         local_tensor = sharded_tensor.to_local()
         self.assertEqual(local_tensor.item(), self.rank)
 
+    @with_comms
+    def test_undefined_grad_preserves_dtensor_type(self):
+        """
+        Test that gradients for unused outputs preserve DTensor type.
+        When an operator has multiple outputs but only some are used downstream,
+        the gradients for unused outputs are materialized as zeros.
+        These zeros should be DTensors to avoid mixing DTensor and torch.Tensor.
+        """
+        device_mesh = self.build_device_mesh()
+
+        for use_compile in [True, False]:
+            with self.subTest(use_compile=use_compile):
+
+                class MultiOutputFunc(torch.autograd.Function):
+                    gout1 = None
+                    gout2 = None
+
+                    @staticmethod
+                    def forward(ctx, x, y):
+                        # Uncomment this line to make warning dispears for eager
+                        # ctx.set_materialize_grads(False)
+                        return (x * 2), (y * 3)
+
+                    @staticmethod
+                    def backward(ctx, grad_out1, grad_out2):
+                        assert isinstance(grad_out2, DTensor)
+                        if not use_compile:
+                            MultiOutputFunc.gout1 = grad_out1
+                            MultiOutputFunc.gout2 = grad_out2
+                        return grad_out1 * 2, grad_out2 * 3
+
+                x_local = torch.randn(4, 4, device=self.device_type, requires_grad=True)
+                y_local = torch.randn(4, 4, device=self.device_type, requires_grad=True)
+                x = DTensor.from_local(x_local, device_mesh, [Replicate()])
+                y = DTensor.from_local(y_local, device_mesh, [Replicate()])
+
+                def func(x, y):
+                    return MultiOutputFunc.apply(x, y)
+
+                if use_compile:
+                    out1, out2 = torch.compile(func, fullgraph=True)(x, y)
+                else:
+                    out1, out2 = func(x, y)
+
+                # Only use out1, so out2's gradient should be zeros.
+                loss = out1.sum()
+                loss.backward()
+
+                if not use_compile:
+                    gout1, gout2 = MultiOutputFunc.gout1, MultiOutputFunc.gout2
+                    self.assertIsInstance(out1, DTensor)
+                    self.assertIsInstance(out2, DTensor)
+                    self.assertIsInstance(
+                        gout1, DTensor, "grad_out1 should be a DTensor"
+                    )
+                    self.assertIsInstance(
+                        gout2, DTensor, "grad_out2 should be a DTensor"
+                    )
+                    self.assertTrue(
+                        torch.all(gout2.to_local() == 0),
+                        "grad_out2 should be all zeros since out2 was not used",
+                    )
+                    self.assertEqual(
+                        gout2.placements,
+                        out2.placements,
+                        "grad_out2 should have the same placements as out2",
+                    )
+
+    @with_comms
+    def test_autograd_function_without_materialize_grads(self):
+        device_mesh = self.build_device_mesh()
+
+        class MultiOutputFunc(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, y):
+                ctx.set_materialize_grads(False)
+                return (x * 2), (y * 3)
+
+            @staticmethod
+            def backward(ctx, grad_out1, grad_out2):
+                assert grad_out2 is None
+                return grad_out1 * 2, grad_out2
+
+        x_local = torch.randn(4, 4, device=self.device_type, requires_grad=True)
+        y_local = torch.randn(4, 4, device=self.device_type, requires_grad=True)
+        x = DTensor.from_local(x_local, device_mesh, [Replicate()])
+        y = DTensor.from_local(y_local, device_mesh, [Replicate()])
+
+        out1, _ = MultiOutputFunc.apply(x, y)
+
+        loss = out1.sum()
+        loss.backward()
+
 
 DTensorTestWithLocalTensor = create_local_tensor_test_class(
     DTensorTest,
@@ -798,6 +891,7 @@ DTensorTestWithLocalTensor = create_local_tensor_test_class(
         # integration
         "test_dtensor_save_load",
         "test_dtensor_save_load_import",
+        "test_undefined_grad_preserves_dtensor_type",
     ],
 )
 
