@@ -38,6 +38,7 @@ runs:
         cd "${GITHUB_WORKSPACE}"
         git config --global fetch.parallel 0
         git config --global submodule.fetchJobs 0
+        git config --global clone.filterSubmodules true
 
         # Clean workspace. The default checkout action should also do this, but
         # do it here as well just in case
