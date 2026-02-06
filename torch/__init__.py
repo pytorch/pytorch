@@ -330,7 +330,7 @@ def _preload_cuda_deps(err: OSError | None = None) -> None:
         # libcublas from loading a mismatched system-wide libcublasLt via its RUNPATH.
         # Without this, if a different CUDA Toolkit version exists in the system PATH,
         # libcublas may load the wrong libcublasLt, causing symbol errors or runtime failures.
-        ("cublas" "libcublasLt.so.*[0-9]"),
+        ("cublas", "libcublasLt.so.*[0-9]"),
         ("cublas", "libcublas.so.*[0-9]"),
         ("cudnn", "libcudnn.so.*[0-9]"),
         ("cuda_nvrtc", "libnvrtc.so.*[0-9]"),
