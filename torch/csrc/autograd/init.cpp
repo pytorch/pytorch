@@ -1512,6 +1512,41 @@ static PyObject* len_torch_dispatch_stack(PyObject* _unused, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
+// Static dispatch optimization Python bindings
+static PyObject* enable_static_dispatch(PyObject* _unused, PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  c10::impl::TorchDispatchModeTLS::enable_static_dispatch();
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* disable_static_dispatch(PyObject* _unused, PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  c10::impl::TorchDispatchModeTLS::disable_static_dispatch();
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* is_static_dispatch_enabled(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  if (c10::impl::TorchDispatchModeTLS::is_static_dispatch_enabled()) {
+    Py_RETURN_TRUE;
+  }
+  Py_RETURN_FALSE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* reset_static_dispatch_index(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  c10::impl::TorchDispatchModeTLS::reset_static_dispatch_index();
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPModule_increment_version(
     PyObject* _unused,
     PyObject* tensor_list) {
@@ -1670,6 +1705,17 @@ static PyMethodDef methods[] = {
     {"_set_dispatch_mode", set_dispatch_mode, METH_O, nullptr},
     {"_get_dispatch_mode", get_dispatch_mode, METH_O, nullptr},
     {"_unset_dispatch_mode", unset_dispatch_mode, METH_O, nullptr},
+    // Static dispatch optimization APIs
+    {"_enable_static_dispatch", enable_static_dispatch, METH_NOARGS, nullptr},
+    {"_disable_static_dispatch", disable_static_dispatch, METH_NOARGS, nullptr},
+    {"_is_static_dispatch_enabled",
+     is_static_dispatch_enabled,
+     METH_NOARGS,
+     nullptr},
+    {"_reset_static_dispatch_index",
+     reset_static_dispatch_index,
+     METH_NOARGS,
+     nullptr},
 
     {nullptr, nullptr, 0, nullptr}};
 

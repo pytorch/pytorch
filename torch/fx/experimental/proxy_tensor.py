@@ -1216,6 +1216,7 @@ def proxy_call(
     )
 
     with _enable_thunkify(proxy_mode.tracer):
+        # change here with fake_mode_dispatch
         out = func(*args, **kwargs)
 
     # In some circumstances, we will be tracing in a situation where a tensor
@@ -1772,7 +1773,7 @@ class StaticInfraDispatcher:
     ) -> object:
         """
         Dispatch through infra modes in static order.
-        Returns the result or NotImplemented if all modes decline.
+        Falls back to calling the function directly if all modes decline.
         """
         # Check decomposition table first (before functionalization)
         # This ensures decomposed ops go through FunctionalTensorMode
@@ -1795,7 +1796,9 @@ class StaticInfraDispatcher:
             if result is not NotImplemented:
                 return result
 
-        return NotImplemented
+        # All modes declined - call the function directly to let native handle it
+        # This is the fallback for when no mode wants to handle the operation
+        return func(*args, **kwargs)
 
 
 class UnifiedInfraMode(TorchDispatchMode):
@@ -2831,100 +2834,29 @@ class _MakefxTracer:
 
     def _trace_with_static_dispatch(self, f: Callable, *args: object) -> GraphModule:
         """
-        Trace using static dispatch mode with UnifiedInfraMode.
+        Trace using static dispatch mode for optimized tracing.
 
-        This mode eliminates TLS stack navigation by using a single mode
-        that statically routes dispatch through infra modes in a known order:
-        FunctionalTensorMode → ProxyTorchDispatchMode → FakeTensorMode
+        This mode enables C++ static dispatch optimization which:
+        1. Snapshots the mode stack at the beginning of tracing
+        2. Avoids TLS push/pop for every operation
+        3. Uses a pre-computed dispatch chain instead
+
+        Falls back to regular tracing if C++ static dispatch is not available.
         """
-        phs = pytree.tree_map(lambda _: fx.PH, args)
+        # Check if C++ static dispatch is available
+        has_cpp_static_dispatch = hasattr(torch._C, "_enable_static_dispatch")
 
-        def _wrap_fake(args: T) -> T:
-            arg_count = 0
+        if has_cpp_static_dispatch:
+            # Enable static dispatch at C++ level - snapshots current mode stack
+            torch._C._enable_static_dispatch()
 
-            def inner_wrap_fake(x: object) -> object:
-                nonlocal arg_count
-                if isinstance(x, torch.Tensor):
-                    return self._wrap_fake_for_trace_inner(x, phs, arg_count)
-                return x
-
-            wrapped = pytree.tree_map_with_path(
-                lambda keypath, x: inner_wrap_fake(x), args
-            )
-            return wrapped
-
-        def _wrap_func(f: Callable, phs: tuple[object, ...]) -> Callable:
-            if not hasattr(inspect.unwrap(f), "__code__"):
-                return f
-            if hasattr(f, "__wrapped__"):
-                f = f.__wrapped__  # type: ignore[union-attr]
-            argcount = f.__code__.co_argcount  # type: ignore[union-attr]
-            if argcount != len(phs):
-                return fake_signature(f, len(phs))
-            return f
-
-        args = _wrap_fake(args)
-        func = _wrap_func(f, phs)
-
-        proxy_mode: ProxyTorchDispatchMode = typing.cast(
-            ProxyTorchDispatchMode, self.proxy_mode
-        )
-
-        # Create static dispatcher with all infra modes
-        static_dispatcher = StaticInfraDispatcher(
-            functional_mode=None,
-            proxy_mode=proxy_mode,
-            fake_mode=self.fake_tensor_mode,
-            decomposition_table=self.decomposition_table,
-        )
-
-        # Create unified mode that wraps the static dispatcher
-        unified_mode = UnifiedInfraMode(static_dispatcher)
-
-        if self.fx_tracer is None:
-            raise AssertionError("fx_tracer should not be None")
-
-        # Trace with unified mode instead of individual mode stack
-        with ExitStack() as stack:
-            stack.enter_context(decompose(self.decomposition_table))
-            if self.fake_tensor_mode:
-                stack.enter_context(self.fake_tensor_mode)
-            # Use unified mode instead of proxy_mode
-            stack.enter_context(unified_mode)
-            stack.enter_context(self.python_dispatcher_mode)
-            stack.enter_context(self.proxy_function_mode)
-            stack.enter_context(self.torch_fn_metadata_mode)
-            stack.enter_context(disable_autocast_cache())
-            stack.enter_context(_set_make_fx_tracer(self))
-
-            try:
-                t = dispatch_trace(
-                    wrap_key(func, args, self.fx_tracer, self.pre_dispatch),
-                    tracer=self.fx_tracer,
-                    concrete_args=tuple(phs),
-                )
-            except Exception:
-                trace_structured(
-                    "artifact",
-                    metadata_fn=lambda: {
-                        "name": "make_fx_fail_partial_static",
-                        "encoding": "string",
-                    },
-                    payload_fn=lambda: self.fx_tracer.graph.python_code(  # type: ignore[union-attr]
-                        root_module="self",
-                        verbose=True,
-                        include_stride=True,
-                        include_device=True,
-                    ).src,
-                )
-                raise
-
-        if self.tracing_mode == "symbolic":
-            if self.fake_tensor_mode is None:
-                raise AssertionError("fake_tensor_mode should not be None")
-            t.shape_env = self.fake_tensor_mode.shape_env  # type: ignore[assignment]
-
-        return t
+        try:
+            # Use the regular trace inner
+            return self._trace_inner(f, *args)
+        finally:
+            # Always disable static dispatch when done
+            if has_cpp_static_dispatch:
+                torch._C._disable_static_dispatch()
 
     def _wrap_fake_for_trace_inner(
         self, x: torch.Tensor, phs: tuple[object, ...], arg_count: int

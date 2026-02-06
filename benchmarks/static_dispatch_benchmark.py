@@ -201,6 +201,118 @@ def create_simple_resnet() -> Tuple[nn.Module, Tuple[torch.Tensor]]:
     return model, inputs
 
 
+class MultiHeadAttention(nn.Module):
+    """Multi-head attention module similar to BERT."""
+
+    def __init__(self, hidden_size: int, num_heads: int, dropout: float = 0.1):
+        super().__init__()
+        self.num_heads = num_heads
+        self.head_dim = hidden_size // num_heads
+        self.scale = self.head_dim ** -0.5
+
+        self.q_proj = nn.Linear(hidden_size, hidden_size)
+        self.k_proj = nn.Linear(hidden_size, hidden_size)
+        self.v_proj = nn.Linear(hidden_size, hidden_size)
+        self.out_proj = nn.Linear(hidden_size, hidden_size)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+        batch_size, seq_len, _ = x.shape
+
+        q = self.q_proj(x).view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+        k = self.k_proj(x).view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+        v = self.v_proj(x).view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+
+        attn_weights = torch.matmul(q, k.transpose(-2, -1)) * self.scale
+        if mask is not None:
+            attn_weights = attn_weights.masked_fill(mask == 0, float('-inf'))
+        attn_weights = torch.softmax(attn_weights, dim=-1)
+        attn_weights = self.dropout(attn_weights)
+
+        attn_output = torch.matmul(attn_weights, v)
+        attn_output = attn_output.transpose(1, 2).contiguous().view(batch_size, seq_len, -1)
+        return self.out_proj(attn_output)
+
+
+class TransformerBlock(nn.Module):
+    """Transformer block similar to BERT."""
+
+    def __init__(self, hidden_size: int, num_heads: int, mlp_ratio: float = 4.0, dropout: float = 0.1):
+        super().__init__()
+        self.attention = MultiHeadAttention(hidden_size, num_heads, dropout)
+        self.norm1 = nn.LayerNorm(hidden_size)
+        self.norm2 = nn.LayerNorm(hidden_size)
+        self.mlp = nn.Sequential(
+            nn.Linear(hidden_size, int(hidden_size * mlp_ratio)),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(int(hidden_size * mlp_ratio), hidden_size),
+            nn.Dropout(dropout),
+        )
+
+    def forward(self, x: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+        x = x + self.attention(self.norm1(x), mask)
+        x = x + self.mlp(self.norm2(x))
+        return x
+
+
+class SimpleBERT(nn.Module):
+    """Simple BERT-like model for benchmarking."""
+
+    def __init__(
+        self,
+        vocab_size: int = 30522,
+        hidden_size: int = 768,
+        num_layers: int = 12,
+        num_heads: int = 12,
+        max_seq_len: int = 512,
+        dropout: float = 0.1,
+    ):
+        super().__init__()
+        self.embedding = nn.Embedding(vocab_size, hidden_size)
+        self.position_embedding = nn.Embedding(max_seq_len, hidden_size)
+        self.dropout = nn.Dropout(dropout)
+        self.layers = nn.ModuleList([
+            TransformerBlock(hidden_size, num_heads, dropout=dropout)
+            for _ in range(num_layers)
+        ])
+        self.norm = nn.LayerNorm(hidden_size)
+        self.pooler = nn.Linear(hidden_size, hidden_size)
+
+    def forward(self, input_ids: torch.Tensor) -> torch.Tensor:
+        batch_size, seq_len = input_ids.shape
+        positions = torch.arange(seq_len, device=input_ids.device).unsqueeze(0).expand(batch_size, -1)
+
+        x = self.embedding(input_ids) + self.position_embedding(positions)
+        x = self.dropout(x)
+
+        for layer in self.layers:
+            x = layer(x)
+
+        x = self.norm(x)
+        # Pool the first token (CLS token)
+        pooled = torch.tanh(self.pooler(x[:, 0]))
+        return pooled
+
+
+def create_simple_bert(
+    num_layers: int = 12,
+    hidden_size: int = 768,
+    seq_len: int = 128,
+    batch_size: int = 1,
+) -> Tuple[nn.Module, Tuple[torch.Tensor]]:
+    """Create a simple BERT-like model for benchmarking."""
+    model = SimpleBERT(
+        hidden_size=hidden_size,
+        num_layers=num_layers,
+        num_heads=12,
+        max_seq_len=512,
+    )
+    model.eval()
+    inputs = (torch.randint(0, 30522, (batch_size, seq_len)),)
+    return model, inputs
+
+
 # ============================================================================
 # Benchmarking Functions
 # ============================================================================
@@ -442,35 +554,81 @@ def main():
         # Use fallback models
         print("\nUsing fallback models (no TorchBench)")
 
-        # Simple MLP
-        print("\nLoading model: simple_mlp")
-        x = torch.randn(32, 64)
-        result = run_single_benchmark(
-            "simple_mlp",
-            nn.Sequential(
-                nn.Linear(64, 128),
-                nn.ReLU(),
-                nn.Linear(128, 64),
-                nn.ReLU(),
-                nn.Linear(64, 10),
-            ),
-            (x,),
-            num_runs=args.num_runs,
-            tracing_mode=args.tracing_mode,
-        )
-        results.append(result)
+        # Determine which model to run
+        if args.only:
+            models_to_run = [args.only.lower()]
+        else:
+            models_to_run = ["simple_bert", "simple_resnet", "simple_mlp"]
 
-        # Simple ResNet
-        print("\nLoading model: simple_resnet")
-        model, inputs = create_simple_resnet()
-        result = run_single_benchmark(
-            "simple_resnet",
-            model,
-            inputs,
-            num_runs=args.num_runs,
-            tracing_mode=args.tracing_mode,
-        )
-        results.append(result)
+        for model_name in models_to_run:
+            try:
+                if model_name in ("bert", "simple_bert", "bert_pytorch"):
+                    # SimpleBERT - 12 layer transformer
+                    print("\nLoading model: SimpleBERT (12 layers, 768 hidden)")
+                    model, inputs = create_simple_bert(num_layers=12, hidden_size=768, seq_len=128)
+                    result = run_single_benchmark(
+                        "SimpleBERT",
+                        model,
+                        inputs,
+                        num_runs=args.num_runs,
+                        tracing_mode=args.tracing_mode,
+                    )
+                    results.append(result)
+
+                elif model_name in ("bert_small", "simple_bert_small"):
+                    # Smaller BERT for faster iteration
+                    print("\nLoading model: SimpleBERT-Small (6 layers, 512 hidden)")
+                    model, inputs = create_simple_bert(num_layers=6, hidden_size=512, seq_len=64)
+                    result = run_single_benchmark(
+                        "SimpleBERT-Small",
+                        model,
+                        inputs,
+                        num_runs=args.num_runs,
+                        tracing_mode=args.tracing_mode,
+                    )
+                    results.append(result)
+
+                elif model_name in ("resnet", "simple_resnet"):
+                    # Simple ResNet
+                    print("\nLoading model: SimpleResNet")
+                    model, inputs = create_simple_resnet()
+                    result = run_single_benchmark(
+                        "SimpleResNet",
+                        model,
+                        inputs,
+                        num_runs=args.num_runs,
+                        tracing_mode=args.tracing_mode,
+                    )
+                    results.append(result)
+
+                elif model_name in ("mlp", "simple_mlp"):
+                    # Simple MLP
+                    print("\nLoading model: SimpleMLP")
+                    x = torch.randn(32, 64)
+                    result = run_single_benchmark(
+                        "SimpleMLP",
+                        nn.Sequential(
+                            nn.Linear(64, 128),
+                            nn.ReLU(),
+                            nn.Linear(128, 64),
+                            nn.ReLU(),
+                            nn.Linear(64, 10),
+                        ),
+                        (x,),
+                        num_runs=args.num_runs,
+                        tracing_mode=args.tracing_mode,
+                    )
+                    results.append(result)
+
+                else:
+                    print(f"\nUnknown model: {model_name}")
+                    print("Available fallback models: simple_bert, simple_bert_small, simple_resnet, simple_mlp")
+
+            except Exception as e:
+                print(f"\nError loading/running {model_name}: {e}")
+                import traceback
+                traceback.print_exc()
+                continue
 
     # Summary
     print(f"\n{'='*60}")
@@ -503,4 +661,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
