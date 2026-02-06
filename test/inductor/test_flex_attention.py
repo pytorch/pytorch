@@ -1701,6 +1701,72 @@ class TestFlexAttention(InductorTestCase):
         self.run_test_with_paged_attention(all_bias, dtype, device=device)
 
     @supported_platform
+    @skip_on_cpu
+    @skip_on_xpu
+    def test_bf16_score_mod_captured_grad_dtype(self, device):
+        """
+        Tests with tensors that require gradients with bf16 dtype in the score_mod
+        """
+        if not PLATFORM_SUPPORTS_BF16:
+            self.skipTest("Platform does not support bf16")
+
+        B_local, H_local, S_local, D_local = 2, 4, 32, 64
+        dtype = torch.bfloat16
+        x = torch.randn(
+            (B_local, S_local, D_local),
+            device=device,
+            dtype=dtype,
+        )
+
+        def forward(bias_proj, x):
+            q = x.view(B_local, S_local, H_local, D_local // H_local).permute(
+                0, 2, 1, 3
+            )
+            k = x.view(B_local, S_local, H_local, D_local // H_local).permute(
+                0, 2, 1, 3
+            )
+            v = x.view(B_local, S_local, H_local, D_local // H_local).permute(
+                0, 2, 1, 3
+            )
+            attn_bias = (
+                bias_proj(x)
+                .view(B_local, S_local, H_local, S_local)
+                .permute(0, 2, 1, 3)
+            )
+
+            def bias_mod(score, b, h, q_idx, kv_idx):
+                return score + attn_bias[b, h, q_idx, kv_idx]
+
+            return flex_attention(q, k, v, score_mod=bias_mod)
+
+        def run_and_get_weight_grad(bias_proj, x, compiled):
+            bias_proj.zero_grad(set_to_none=True)
+            fn = torch.compile(forward) if compiled else forward
+            out = fn(bias_proj, x)
+            grad = torch.randn_like(out)
+            out.backward(grad)
+            return bias_proj.weight.grad
+
+        bias_proj_eager = nn.Linear(
+            D_local, H_local * S_local, device=device, dtype=dtype, bias=False
+        )
+        bias_proj_compiled = nn.Linear(
+            D_local, H_local * S_local, device=device, dtype=dtype, bias=False
+        )
+        bias_proj_compiled.load_state_dict(bias_proj_eager.state_dict())
+
+        torch.manual_seed(0)
+        eager_weight_grad = run_and_get_weight_grad(bias_proj_eager, x, compiled=False)
+        self.assertEqual(eager_weight_grad.dtype, bias_proj_eager.weight.dtype)
+
+        torch.manual_seed(0)
+        compiled_weight_grad = run_and_get_weight_grad(
+            bias_proj_compiled, x, compiled=True
+        )
+        self.assertEqual(compiled_weight_grad.dtype, bias_proj_compiled.weight.dtype)
+        self.assertEqual(eager_weight_grad, compiled_weight_grad, atol=1e-1, rtol=1e-1)
+
+    @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
