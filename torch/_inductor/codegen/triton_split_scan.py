@@ -85,6 +85,7 @@ class TritonSplitScanKernel(TritonKernel):
     def reduction(self, dtype, src_dtype, reduction_type, value):
         raise NotImplementedError("NYI TritonSplitDimKernel reductions")
 
+    # pyrefly: ignore [bad-override]
     def scan(self, dtypes, combine_fn, values):
         """
         Perform an associative scan on 'values'.
@@ -152,7 +153,7 @@ class TritonSplitScanKernel(TritonKernel):
             dtype=dtype,
             shape=self.dense_size_list(),
         )
-
+        # pyrefly: ignore [missing-argument]
         combine_helper_fn = self._lift_helper(combine_fn, (value,), (dtype,))
         dim = self.triton_tensor_ndim() - 1
         assert dim == 0, ""
