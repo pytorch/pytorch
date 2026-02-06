@@ -92,8 +92,10 @@ autograd_cache_normalize_inputs = not is_fbcode()
 #   - When True: Raises RuntimeError on aliasing violations.
 #   - When False: Emits UserWarning on aliasing violations.
 #
-# Currently both are only enabled in CI, but eventually we should enable them everywhere.
-check_custom_op_aliasing = bool(os.getenv("CI"))
+# Deprecated: Custom ops returning aliased outputs is deprecated and will
+# become an error in PyTorch 2.12. Currently error_on_custom_op_aliasing
+# is True only in CI.
+check_custom_op_aliasing = True
 error_on_custom_op_aliasing = bool(os.getenv("CI"))
 
 
@@ -397,7 +399,8 @@ disable_guess_zero_tangent_for_mutated_input_subclass = False
 # At runtime non contiguous tangents will be coerced to be contiguous.
 # This config changes this guess for tangents strides to be the same as outputs.
 # TODO(ivankobzarev): Remove this config once extra memory usage is investigated.
-guess_tangent_strides_as_outputs = False
+guess_tangent_strides_as_outputs = not is_fbcode()
+
 
 # This is a temporary config to ensure all ranks take the same decision in the partitioner
 # it will untimately be removed once we share size_hints across ranks through compiler collectives

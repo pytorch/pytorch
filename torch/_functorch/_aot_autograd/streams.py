@@ -291,7 +291,7 @@ def sync_deallocations(gm: torch.fx.GraphModule) -> None:
                 )
 
 
-def assign_epilogue_copy_streams(gm: torch.fx.GraphModule):
+def assign_epilogue_copy_streams(gm: torch.fx.GraphModule) -> None:
     for epi_copy in gm.graph.find_nodes(op="call_function", target=aten.copy_.default):
         arg_stream = get_stream(epi_copy.args[1])
         copy_stream = get_stream(epi_copy)
@@ -301,7 +301,7 @@ def assign_epilogue_copy_streams(gm: torch.fx.GraphModule):
 
 def populate_fw_metadata_with_stream_indices(
     gm: torch.fx.GraphModule, fw_metadata: "ViewAndMutationMeta"
-):
+) -> None:
     """
     Populates fw_metadata.mutated_inp_stream_indices with stream indices from the compiled graph.
 
