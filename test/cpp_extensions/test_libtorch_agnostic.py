@@ -166,7 +166,8 @@ class TestLibtorchAgnostic(TestCase):
             t = torch.rand(32, 32, device=device)
             self.assertGreater(torch.cuda.memory_allocated(device), prior_mem)
             identi_t = libtorch_agnostic.ops.identity(t)
-            assert identi_t is t
+            if identi_t is not t:
+                raise AssertionError("Expected identity op to return the same tensor")
 
         init_mem = torch.cuda.memory_allocated(device)
 
