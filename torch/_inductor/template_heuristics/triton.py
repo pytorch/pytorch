@@ -161,7 +161,7 @@ class ROCmGemmConfig(GemmConfig):
 
     matrix_instr_nonkdim: int = 16
     waves_per_eu: int = 0
-    kpack: int = 2
+    kpack: int = 1
 
 
 @dataclasses.dataclass
@@ -172,7 +172,7 @@ class ROCmConvConfig(ConvConfig):
 
     matrix_instr_nonkdim: int = 16
     waves_per_eu: int = 0
-    kpack: int = 2
+    kpack: int = 1
 
 
 @dataclasses.dataclass
@@ -183,7 +183,7 @@ class ROCmFlexConfig(FlexConfig):
 
     matrix_instr_nonkdim: int = 0
     waves_per_eu: int = 0
-    kpack: int = 2
+    kpack: int = 1
 
 
 @dataclasses.dataclass
@@ -194,7 +194,7 @@ class ROCmFlexBwDConfig(FlexBwDConfig):
 
     matrix_instr_nonkdim: int = 0
     waves_per_eu: int = 0
-    kpack: int = 2
+    kpack: int = 1
 
 
 @dataclasses.dataclass
@@ -205,7 +205,7 @@ class ROCmFlexDecodeConfig(FlexDecodeConfig):
 
     matrix_instr_nonkdim: int = 0
     waves_per_eu: int = 0
-    kpack: int = 2
+    kpack: int = 1
 
 
 class BaseHeuristicSingleton(type):
@@ -1446,7 +1446,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             for group_m in [4, 8, 16]
             for matrix_instr_nonkdim in [0, 16]
             for waves_per_eu in [0, 2]
-            for kpack in [2]
+            for kpack in [1, 2]
         ]
 
         self.default_flex_config = {
@@ -1522,12 +1522,13 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
         ]
 
         self.exhaustive_flex_decode_configs: list[FlexDecodeConfig] = [
-            ROCmFlexDecodeConfig(block_n, num_stages, num_warps, mfma, wpeu, kpack=2)
+            ROCmFlexDecodeConfig(block_n, num_stages, num_warps, mfma, wpeu, kpack=kpack)
             for block_n in [16, 32, 64, 128]
             for num_stages in [1, 2]
             for num_warps in [2, 4, 8]
             for mfma in [0, 16]
             for wpeu in [0, int(8 // num_warps)]
+            for kpack in [1, 2]
         ]
 
     def _prune_exhaustive_configs(
@@ -1572,7 +1573,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             # Defaults for AMD triton backend kern args if not set
             matrix_instr_nonkdim = getattr(conf, "matrix_instr_nonkdim", 16)
             waves_per_eu = getattr(conf, "waves_per_eu", 0)
-            kpack = getattr(conf, "kpack", 2)
+            kpack = getattr(conf, "kpack", config.rocm.default_kpack)
 
             if matrix_instr_nonkdim != 0 and (
                 conf.block_m % matrix_instr_nonkdim != 0
