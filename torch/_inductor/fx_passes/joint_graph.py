@@ -387,9 +387,29 @@ class UniformValueConstantFolder(ConstantFolder):
         return self.unknown_value
 
 
+def _has_self_referential_shape(
+    shapes: list[int | torch.fx.Node], node: torch.fx.Node
+) -> bool:
+    """
+    Check if any shape in `shapes` depends on `node`.
+
+    This is used to detect cycles when constant_fold_uniform_value creates a
+    replacement full() node whose shape includes a sym_size computed from the
+    original tensor being replaced.
+
+    Checks direct args only - shape nodes typically come from sym_size(tensor, dim)
+    where tensor is a direct arg.
+    """
+    for shape_node in shapes:
+        if isinstance(shape_node, torch.fx.Node):
+            if node in shape_node.args:
+                return True
+    return False
+
+
 def constant_fold_uniform_value(gm: torch.fx.GraphModule):
+    """Runs constant folding and replaces constants which can be constructed with a single `full` call. Calls into remove_no_ops."""
     with torch.utils._python_dispatch._disable_current_modes():
-        "Runs constant folding and replaces constants which can be constructed with a single `full` call. Calls into remove_no_ops."
         aten = torch.ops.aten
 
         # Constant folding can leak memory, especially with repeated compilation, so we are only going to
@@ -471,6 +491,11 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
                     cf.symint_nodes[s] if isinstance(s, torch.SymInt) else s
                     for s in node_replacements_shapes[node]
                 ]
+
+                # Check if any shape depends on a symint that was computed from
+                # the node being replaced - this would create a cycle
+                if _has_self_referential_shape(shapes, node):
+                    continue
 
                 # zeros and ones just get traced into full, so we insert those
                 new_node = graph.call_function(
