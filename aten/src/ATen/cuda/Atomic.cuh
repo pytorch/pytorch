@@ -344,10 +344,9 @@ inline __device__ void gpuAtomicAddNoReturn(at::BFloat16 *address, at::BFloat16 
  */
 #if defined(USE_ROCM)
 inline __device__ void gpuAtomicAddNoReturn(float *address, float val) {
-  if(__builtin_amdgcn_processor_is("gfx908"))
-      atomicAddNoRet(address, val);
-  else
-      (void)unsafeAtomicAdd(address, val);
+  if (__builtin_amdgcn_processor_is("gfx908"))
+    return atomicAddNoRet(address, val);
+  (void)unsafeAtomicAdd(address, val);
 }
 inline __device__ void gpuAtomicAddNoReturn(double *address, double val) { (void)unsafeAtomicAdd(address, val); }
 #else

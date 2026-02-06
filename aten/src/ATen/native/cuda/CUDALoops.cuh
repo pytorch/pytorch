@@ -223,16 +223,11 @@ __global__ void vectorized_elementwise_kernel(int N, func_t f, array_t data) {
 }
 
 #else // USE_ROCM
-template <int vec_size, typename func_t, typename array_t>
-C10_LAUNCH_BOUNDS_1(num_threads())
-__global__ void vectorized_elementwise_kernel(int N, func_t f, array_t data) {
+template <int vec_size, int tws, typename func_t, typename array_t>
+__forceinline__ __device__ void vectorized_elementwise_kernel_impl(int N, func_t f, array_t data) {
   using traits = function_traits<func_t>;
   constexpr auto io_size = calc_io_size<func_t>();
-
-  // Similar check in launch_vectorized_kernel() as well. Both should be in sync.
-  constexpr int tws = elems_per_thread<io_size>();
-  constexpr int tws_gfx942 = 16;
-  int bws = (__builtin_amdgcn_processor_is("gfx942")? tws_gfx942: tws) * num_threads();
+  constexpr int bws = tws * num_threads();
   int remaining = N - bws * blockIdx.x;
 
   if (remaining < bws) { // if this block handles the reminder,
@@ -241,39 +236,33 @@ __global__ void vectorized_elementwise_kernel(int N, func_t f, array_t data) {
     auto output_calc = TrivialOffsetCalculator<1>();
     auto loader = memory::LoadWithoutCast();
     auto storer = memory::StoreWithoutCast();
-    if(__builtin_amdgcn_processor_is("gfx942")) {
-        auto policy =
-      memory::policies::unroll<
-        array_t,
-        decltype(input_calc),
-        decltype(output_calc),
-        memory::LoadWithoutCast,
-        memory::StoreWithoutCast,
-        tws_gfx942>(
-            data, remaining, input_calc, output_calc, loader, storer);
-        elementwise_kernel_helper(f, policy);
-      } else {
-        auto policy =
-      memory::policies::unroll<
+    auto policy = memory::policies::unroll<
         array_t,
         decltype(input_calc),
         decltype(output_calc),
         memory::LoadWithoutCast,
         memory::StoreWithoutCast,
         tws>(
-         data, remaining, input_calc, output_calc, loader, storer);
-        elementwise_kernel_helper(f, policy);
-     }
+        data, remaining, input_calc, output_calc, loader, storer);
+    elementwise_kernel_helper(f, policy);
   } else { // if this block has a full `block_work_size` data to handle, use
            // vectorized memory access
     constexpr auto optimal_vec_size = calc_optimal_vec_size<vec_size, io_size>();
-    if(__builtin_amdgcn_processor_is("gfx942"))
-      elementwise_kernel_helper(
-        f, memory::policies::vectorized<optimal_vec_size, array_t, tws_gfx942>(data));
-    else
-      elementwise_kernel_helper(
+    elementwise_kernel_helper(
         f, memory::policies::vectorized<optimal_vec_size, array_t, tws>(data));
   }
+}
+
+template <int vec_size, typename func_t, typename array_t>
+C10_LAUNCH_BOUNDS_1(num_threads())
+__global__ void vectorized_elementwise_kernel(int N, func_t f, array_t data) {
+    constexpr auto io_size = calc_io_size<func_t>();
+  constexpr auto tws_942 = 16;
+  constexpr auto tws = elems_per_thread<io_size>();
+  if (__builtin_amdgcn_processor_is("gfx942"))
+    return vectorized_elementwise_kernel_impl<vec_size, tws_942>(N, f, data);
+
+  vectorized_elementwise_kernel_impl<vec_size, tws>(N, f, data);
 }
 #endif // USE_ROCM
 
