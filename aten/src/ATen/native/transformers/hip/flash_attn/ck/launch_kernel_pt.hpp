@@ -27,11 +27,14 @@ __launch_bounds__(Kernel::kBlockSize, MinBlockPerCu)
 #endif
     __global__ void kentry_pt(Args... args)
 {
-#if (defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__))
-    Kernel{}(args...);
-#else
-    CUDA_KERNEL_ASSERT(false && "Fatal! Attempting to call a CK SDPA kernel on unsupported hardware");
-#endif
+    // Use runtime check for SPIR-V compatibility
+    if (__builtin_amdgcn_processor_is("gfx90a") ||
+        __builtin_amdgcn_processor_is("gfx942") ||
+        __builtin_amdgcn_processor_is("gfx950")) {
+        Kernel{}(args...);
+    } else {
+        CUDA_KERNEL_ASSERT(false && "Fatal! Attempting to call a CK SDPA kernel on unsupported hardware");
+    }
 }
 
 

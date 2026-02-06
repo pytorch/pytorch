@@ -140,8 +140,11 @@ WelfordDataLN cuWelfordOnlineSum(
     U delta = val - curr_sum.mean;
     U new_count = curr_sum.count + 1.f;
 //Due to low CU count, we run into accuracy issues on gfx90a with `__builtin_amdgcn_rcpf`
-#if defined(USE_ROCM) && !defined(__gfx90a__) && defined(USE_LAYERNORM_FAST_RECIPROCAL)
-    U new_mean = curr_sum.mean + delta * __builtin_amdgcn_rcpf(new_count);
+#if defined(USE_ROCM) && defined(USE_LAYERNORM_FAST_RECIPROCAL)
+    // Use runtime check for SPIR-V compatibility: fast reciprocal on all archs except gfx90a
+    U new_mean = (!__builtin_amdgcn_processor_is("gfx90a") && __builtin_amdgcn_is_invocable(__builtin_amdgcn_rcpf))
+        ? curr_sum.mean + delta * __builtin_amdgcn_rcpf(new_count)
+        : curr_sum.mean + delta * (1.f/new_count);
 #else
     U new_mean = curr_sum.mean + delta * (1.f/new_count); //proper division is slow, this is less accurate but noticeably faster
 #endif
@@ -163,8 +166,11 @@ WelfordDataLN cuWelfordCombine(
     U mean, sigma2;
     if (count > decltype(dataB.count){0}) {
 //Due to low CU count, we run into accuracy issues on gfx90a with `__builtin_amdgcn_rcpf`
-#if defined(USE_ROCM) && !defined(__gfx90a__) && defined(USE_LAYERNORM_FAST_RECIPROCAL)
-      auto coef = __builtin_amdgcn_rcpf(count);
+#if defined(USE_ROCM) && defined(USE_LAYERNORM_FAST_RECIPROCAL)
+      // Use runtime check for SPIR-V compatibility: fast reciprocal on all archs except gfx90a
+      auto coef = (!__builtin_amdgcn_processor_is("gfx90a") && __builtin_amdgcn_is_invocable(__builtin_amdgcn_rcpf))
+          ? __builtin_amdgcn_rcpf(count)
+          : 1.f/count;
 #else
       auto coef = 1.f/count; //NB we don't use --use_fast_math, but this is emulation, 1./count goes to intrinsic, `* coef` is multiplication, instead of slow fp division
 #endif
