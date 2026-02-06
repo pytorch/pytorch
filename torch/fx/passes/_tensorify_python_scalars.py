@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import operator
 import os
 from typing import Any, TYPE_CHECKING, Union
 
@@ -232,6 +233,40 @@ def tensorify_python_scalars(
                     expr_to_tensor_proxy[s], torch.float64
                 )
 
+            elif (
+                node is not None
+                and node.op == "call_method"
+                and node.target == "item"
+                and isinstance(node.args[0], fx.Node)
+                and node.args[0] in placeholders
+            ):
+                arg0 = node.args[0]
+                if "val" not in arg0.meta:
+                    continue
+
+                dtype = arg0.meta["val"].dtype
+                sym = node.meta.get("val")
+                if sym is None or not isinstance(sym, torch.SymFloat):
+                    continue
+
+                s = sym.node.expr
+
+                expr_to_sym_proxy[s] = MetaProxy(
+                    node, tracer=tracer, fake_mode=fake_mode
+                )
+
+                # only tensorify if the dtype is floating point
+                if not dtype.is_floating_point:
+                    continue
+
+                expr_to_tensor_proxy[s] = MetaProxy(
+                    arg0, tracer=tracer, fake_mode=fake_mode
+                )
+                # Upcast the float tensor to torch.float64 to avoid precision problem
+                expr_to_tensor_proxy[s] = torch.ops.prims.convert_element_type.default(
+                    expr_to_tensor_proxy[s], torch.float64
+                )
+
             # pyrefly: ignore [bad-argument-type]
             elif (sym_expr := _get_sym_val(node)) is not None:
                 if sym_expr not in expr_to_sym_proxy and not isinstance(
@@ -328,6 +363,55 @@ def tensorify_python_scalars(
                         metrics_context.set(
                             "tensorify_float_success", True, overwrite=True
                         )
+            elif (
+                node.op == "call_function"
+                and node.target is operator.mul
+                and isinstance((sym_val := node.meta.get("val")), torch.SymFloat)
+            ):
+                # Tensorify SymFloat produced by Python "<built-in function mul>"
+                # so it doesn't get specialized into a value-guard later.
+                did_transform = False
+
+                if node.users and all(
+                    isinstance(u.meta.get("val"), FakeTensor) for u in node.users
+                ):
+                    user_compute_dtypes = {
+                        get_computation_dtype(u.meta["val"].dtype)
+                        for u in node.users
+                    }
+                    if len(user_compute_dtypes) == 1:
+                        compute_dtype = next(iter(user_compute_dtypes))
+                        try:
+                            proxy = _sympy_interp(sym_val.node.expr)
+                        except NotImplementedError:
+                            proxy = None
+
+                        if proxy is not None:
+                            if (
+                                compute_dtype != torch.bool
+                                and proxy.node.meta["val"].dtype != compute_dtype
+                            ):
+                                proxy = torch.ops.prims.convert_element_type.default(
+                                    proxy, compute_dtype
+                                )
+
+                            for s in sym_val.node.expr.free_symbols:
+                                tensorified_symbols.add(s)
+
+                            node.replace_all_uses_with(proxy.node)
+                            graph.erase_node(node)
+                            did_transform = True
+
+                # Preserve existing diagnostics if we did not transform.
+                if not did_transform:
+                    for a in node.args:
+                        if (
+                            isinstance(a, fx.Node)
+                            and "val" in a.meta
+                            and isinstance(a.meta["val"], torch.SymFloat)
+                        ):
+                            failed_tensorify_ops.update(str(node.target))
+                            log.info("Failed to tensorify %s", str(node.target))
             else:
                 for a in node.args:
                     if (
