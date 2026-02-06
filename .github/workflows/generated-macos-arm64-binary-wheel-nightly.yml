@@ -63,7 +63,7 @@ jobs:
           python-version: "3.10.4"
           freethreaded: false
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -112,7 +112,7 @@ jobs:
 
           # shellcheck disable=SC2086
           python "${PYTORCH_ROOT}/.ci/pytorch/smoke_test/smoke_test.py" --package torchonly ${SMOKE_TEST_PARAMS}
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6.0.0
         if: always()
         with:
           name: wheel-py3_10-cpu
@@ -173,7 +173,7 @@ jobs:
           python-version: "3.11.4"
           freethreaded: false
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -222,7 +222,7 @@ jobs:
 
           # shellcheck disable=SC2086
           python "${PYTORCH_ROOT}/.ci/pytorch/smoke_test/smoke_test.py" --package torchonly ${SMOKE_TEST_PARAMS}
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6.0.0
         if: always()
         with:
           name: wheel-py3_11-cpu
@@ -283,7 +283,7 @@ jobs:
           python-version: "3.12.4"
           freethreaded: false
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -332,7 +332,7 @@ jobs:
 
           # shellcheck disable=SC2086
           python "${PYTORCH_ROOT}/.ci/pytorch/smoke_test/smoke_test.py" --package torchonly ${SMOKE_TEST_PARAMS}
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6.0.0
         if: always()
         with:
           name: wheel-py3_12-cpu
@@ -393,7 +393,7 @@ jobs:
           python-version: "3.13.4"
           freethreaded: false
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -442,7 +442,7 @@ jobs:
 
           # shellcheck disable=SC2086
           python "${PYTORCH_ROOT}/.ci/pytorch/smoke_test/smoke_test.py" --package torchonly ${SMOKE_TEST_PARAMS}
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6.0.0
         if: always()
         with:
           name: wheel-py3_13-cpu
@@ -503,7 +503,7 @@ jobs:
           python-version: "3.13.4"
           freethreaded: true
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -552,7 +552,7 @@ jobs:
 
           # shellcheck disable=SC2086
           python "${PYTORCH_ROOT}/.ci/pytorch/smoke_test/smoke_test.py" --package torchonly ${SMOKE_TEST_PARAMS}
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6.0.0
         if: always()
         with:
           name: wheel-py3_13t-cpu
@@ -613,7 +613,7 @@ jobs:
           python-version: "3.14.0"
           freethreaded: false
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -662,7 +662,7 @@ jobs:
 
           # shellcheck disable=SC2086
           python "${PYTORCH_ROOT}/.ci/pytorch/smoke_test/smoke_test.py" --package torchonly ${SMOKE_TEST_PARAMS}
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6.0.0
         if: always()
         with:
           name: wheel-py3_14-cpu
@@ -723,7 +723,7 @@ jobs:
           python-version: "3.14.0"
           freethreaded: true
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -772,7 +772,7 @@ jobs:
 
           # shellcheck disable=SC2086
           python "${PYTORCH_ROOT}/.ci/pytorch/smoke_test/smoke_test.py" --package torchonly ${SMOKE_TEST_PARAMS}
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6.0.0
         if: always()
         with:
           name: wheel-py3_14t-cpu
