@@ -154,7 +154,8 @@ class TestModTracker(TestCase):
                         )
                     else:
                         x = block(x)
-                    assert x is not None
+                    if x is None:
+                        raise AssertionError("Expected x to not be None")
                     x = torch.nn.functional.relu(x)
                 return x
 

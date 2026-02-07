@@ -33,11 +33,12 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 def subprocess_init_fn(name: str, parent_pid: int) -> None:
     """Initialize the subprocess for async checkpointer tests."""
-    assert name == "test-async-checkpointer", f"Unexpected subprocess name: {name}"
-    assert os.getpid() != parent_pid, "This was supposed to run in a different process"
-    assert os.getppid() == parent_pid, (
-        "This was supposed to run as a child to main process"
-    )
+    if name != "test-async-checkpointer":
+        raise AssertionError(f"Unexpected subprocess name: {name}")
+    if os.getpid() == parent_pid:
+        raise AssertionError("This was supposed to run in a different process")
+    if os.getppid() != parent_pid:
+        raise AssertionError("This was supposed to run as a child to main process")
 
 
 def ckpt_writer_init_fn(**kwargs) -> CheckpointWriter:

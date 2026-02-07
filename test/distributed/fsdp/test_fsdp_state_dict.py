@@ -178,7 +178,10 @@ class TestFSDPStateDict(FSDPTest):
     def _compare_models(
         self, model, model_new, assert_fn, check_fp16=False, check_buffers=True
     ):
-        assert assert_fn in (self.assertEqual, self.assertNotEqual)
+        if assert_fn not in (self.assertEqual, self.assertNotEqual):
+            raise AssertionError(
+                f"Expected assert_fn in (self.assertEqual, self.assertNotEqual), got {assert_fn}"
+            )
         with FSDP.summon_full_params(model):
             with FSDP.summon_full_params(model_new):
                 self._state_compare(model, model_new, assert_fn)
@@ -1212,8 +1215,12 @@ class TestFSDPStateDict(FSDPTest):
         # Create an unexpected key
         sd["unexpected"] = torch.ones(1)
         missing, unexpected = model.load_state_dict(sd, strict=False)
-        assert len(missing) == 1
-        assert len(unexpected) == 1
+        if len(missing) != 1:
+            raise AssertionError(f"Expected len(missing) == 1, got {len(missing)}")
+        if len(unexpected) != 1:
+            raise AssertionError(
+                f"Expected len(unexpected) == 1, got {len(unexpected)}"
+            )
         self.assertTrue(FSDP_PREFIX not in missing[0])
         self.assertTrue(FSDP_PREFIX not in unexpected[0])
 

@@ -53,16 +53,18 @@ class UnflattenTests(TestCase):
             {"constant": constant},
         )
 
-        assert pipe.num_stages == 4
+        if pipe.num_stages != 4:
+            raise AssertionError(
+                f"Expected pipe.num_stages == 4, got {pipe.num_stages}"
+            )
         orig_state_dict = mod.state_dict()
 
         # Check qualnames
         for stage_idx in range(pipe.num_stages):
             stage_mod = pipe.get_stage_module(stage_idx)
             for param_name, _ in stage_mod.named_parameters():
-                assert param_name in orig_state_dict, (
-                    f"{param_name} not in original state dict"
-                )
+                if param_name not in orig_state_dict:
+                    raise AssertionError(f"{param_name} not in original state dict")
         print("Param qualname test passed")
 
         # Check equivalence
