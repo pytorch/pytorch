@@ -1,11 +1,12 @@
 import functools
 import inspect
+import threading
 import time
 from collections.abc import Callable
 from functools import cached_property, wraps
 from itertools import chain
 from statistics import median
-from typing import Any, Concatenate, Optional, Union
+from typing import Any, ClassVar, Concatenate, Optional, TYPE_CHECKING, Union
 from typing_extensions import ParamSpec, Self, TypeVar
 
 import torch
@@ -100,8 +101,20 @@ class Benchmarker:
     inductor generated callables.
     """
 
+    _instances: ClassVar[dict[type, "Benchmarker"]] = {}
+    _instances_lock: ClassVar[threading.Lock] = threading.Lock()
+    _initialized: bool
+
+    def __new__(cls) -> Self:
+        with cls._instances_lock:
+            if cls not in cls._instances:
+                cls._instances[cls] = super().__new__(cls)
+            return cls._instances[cls]  # pyrefly: ignore[bad-return-type]
+
     def __init__(self: Self) -> None:
-        pass
+        if getattr(self, "_initialized", False):
+            return
+        self._initialized = True
 
     def infer_device(self, *fn_args: Any, **fn_kwargs: Any) -> torch.device:
         inferred_device: Optional[torch.device] = None
