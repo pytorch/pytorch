@@ -130,7 +130,7 @@ def lazy_register_extern_choice(fn):
 aten_mm = ExternKernelChoice(torch.mm, "at::mm_out", op_overload=aten.mm.out)
 aten_mm_dtype = ExternKernelChoice(
     torch.mm,
-    "at::_mm_dtype_out_xpu" if torch.xpu.is_available() else "at::_mm_dtype_out_cuda",
+    "at::mm_dtype_out",
     name="mm_dtype",
     op_overload=aten.mm.dtype_out,
 )
