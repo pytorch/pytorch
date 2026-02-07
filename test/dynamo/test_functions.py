@@ -252,6 +252,21 @@ class FunctionTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         self.assertTrue(same(actual, expected))
         self.assertTrue(cnt.frame_count, 1)
 
+    def test_foreach_norm_inf_dynamic(self):
+        def fn(tensors):
+            return torch._foreach_norm(tensors, float("inf"))
+
+        fn_opt = torch.compile(fn, fullgraph=True, dynamic=True)
+
+        tensors = [torch.randn(10), torch.randn(20, 30)]
+
+        expected = fn(tensors)
+        actual = fn_opt(tensors)
+
+        self.assertEqual(len(actual), len(expected))
+        for a, e in zip(actual, expected):
+            self.assertEqual(a, e)
+
     def test_addcmul_(self):
         from copy import deepcopy
 
