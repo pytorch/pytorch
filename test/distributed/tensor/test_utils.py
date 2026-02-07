@@ -30,6 +30,7 @@ from torch.distributed.tensor._utils import (
     compute_local_shape_and_global_offset,
     compute_local_tensor_info,
     ExplicitRedistributionContext,
+    get_logical_shape,
 )
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.placement_types import (
@@ -1539,86 +1540,36 @@ class LocalTensorTestBase(TestCase):
 
 
 class TestStridedShardCollectiveOpUtils:
-    from collections import namedtuple
-
-    ShardConfig = namedtuple("ShardConfig", ["mesh_dim", "split_factor"], defaults=(1,))
-
-    def _convert_default_order_placements_to_ShardConfig(
-        self, placements: Sequence[Placement]
-    ) -> dict[int, list["TestStridedShardCollectiveOpUtils.ShardConfig"]]:
-        """
-        Convert placements to a shard_map for use with _get_logical_shape.
-
-        Given placements like [Shard(0), _StridedShard(0, split_factor=2), Shard(1)],
-        creates a mapping from tensor dimension to list of ShardConfigs:
-        {
-            0: [ShardConfig(mesh_dim=0, split_factor=1), ShardConfig(mesh_dim=1, split_factor=2)],
-            1: [ShardConfig(mesh_dim=2, split_factor=1)]
-        }
-
-        Each mesh_dim corresponds to the index of the placement in the placements list.
-        """
-        shard_map: dict[int, list[TestStridedShardCollectiveOpUtils.ShardConfig]] = {}
-
-        for mesh_dim, placement in enumerate(placements):
-            if isinstance(placement, _StridedShard):
-                tensor_dim = placement.dim
-                split_factor = placement.split_factor
-            elif isinstance(placement, Shard):
-                tensor_dim = placement.dim
-                split_factor = 1
-            else:
-                continue
-
-            if tensor_dim not in shard_map:
-                shard_map[tensor_dim] = []
-            shard_map[tensor_dim].append(
-                self.ShardConfig(mesh_dim=mesh_dim, split_factor=split_factor)
-            )
-
-        return shard_map
-
-    def _get_logical_shape(
+    def _compute_logical_shape_for_placements(
         self,
-        shard_map: dict[int, list["TestStridedShardCollectiveOpUtils.ShardConfig"]],
+        placements: Sequence[Placement],
         mesh: DeviceMesh,
         operate_mesh_dim: int,
         full_tensor_shape: tuple[int, ...],
     ) -> list[int]:
         """
-        Compute the logical shape after applying sharding, excluding `operate_mesh_dim`.
+        Compute the logical shape for a given set of placements using the
+        get_logical_shape utility from placement_types.
 
         Args:
-            shard_map: Maps tensor dim to list of ShardConfigs describing how it's sharded
+            placements: The placements describing how tensor is sharded
             mesh: The device mesh
-            operate_mesh_dim: The mesh dimension to exclude from shape computation
+            operate_mesh_dim: The mesh dimension to compute logical shape for
             full_tensor_shape: The original full tensor shape
 
         Returns:
-            The logical shape after applying all sharding except on operate_mesh_dim
+            The logical shape at the specified mesh dimension
         """
-        new_logical_shape = list(full_tensor_shape)
-        coordinate = mesh.get_coordinate()
-        assert coordinate is not None
-
-        for tensor_dim, shard_configs in shard_map.items():
-            for config in shard_configs:
-                if operate_mesh_dim == config.mesh_dim:
-                    continue
-                if config.split_factor == 1:
-                    placement = Shard(tensor_dim)
-                else:
-                    placement = _StridedShard(
-                        tensor_dim, split_factor=config.split_factor
-                    )
-                new_size, _ = placement._local_shard_size_and_offset(
-                    curr_local_size=new_logical_shape[tensor_dim],
-                    num_chunks=mesh.size(mesh_dim=config.mesh_dim),
-                    rank=coordinate[config.mesh_dim],
-                )
-                new_logical_shape[tensor_dim] = new_size
-
-        return new_logical_shape
+        shard_order = DTensorSpec.compute_default_shard_order(
+            tuple(placements), treat_strided_shard_as_shard=True
+        )
+        return get_logical_shape(
+            tuple(placements),
+            shard_order,
+            mesh,
+            full_tensor_shape,
+            operate_mesh_dim,
+        )
 
 
 class TestStridedShardReplicate(TestStridedShardCollectiveOpUtils, DTensorTestBase):
@@ -1634,8 +1585,8 @@ class TestStridedShardReplicate(TestStridedShardCollectiveOpUtils, DTensorTestBa
                 a = torch.arange(tensor_size)
                 src_p = (_StridedShard(0, split_factor=split_factor),)
                 a_dt = distribute_tensor(a, mesh, src_p, src_data_rank=None)
-                logical_shape = self._get_logical_shape(
-                    self._convert_default_order_placements_to_ShardConfig(src_p),
+                logical_shape = self._compute_logical_shape_for_placements(
+                    src_p,
                     mesh,
                     0,
                     a.shape,
