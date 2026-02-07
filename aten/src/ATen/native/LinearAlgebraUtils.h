@@ -140,6 +140,9 @@ inline void checkInputsSolver(const Tensor& A,
                                      const char* const f_name) {
   squareCheckInputs(A, f_name, "A");
   checkIsMatrix(B, f_name, "B");
+  TORCH_CHECK(A.device() == B.device(),
+              f_name, ": Expected A and B to be on the same device, but found A on ",
+              A.device(), " and B on ", B.device(), " instead.");
   TORCH_CHECK(left ? A.size(-2) == B.size(-2) : A.size(-1) == B.size(-1),
               f_name, ": Incompatible shapes of A and B for the equation ",
               left ? "AX = B" : "XA = B",
