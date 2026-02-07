@@ -1642,6 +1642,65 @@ class GraphModule(torch.nn.Module):
         loss_compiled = out_compiled.sum()
         loss_compiled.backward()
 
+    @requires_gpu
+    def test_triton_kernel_backward_readonly_passthrough_output(self):
+        """Test autograd function where backward triton kernel takes a read-only
+        tensor (e.g. seq_offsets) that is also a forward output.
+
+        The functional wrapper for capture_triton returns all kwargs as outputs
+        including read-only ones. When the wrapper is backward-only, a getitem
+        extracting the read-only tensor is invalid in the forward graph but still
+        listed as a forward output. The partitioner must replace it with the
+        original input node.
+        """
+        import triton.language as tl
+
+        @triton.jit
+        def bwd_kernel(
+            grad_out_ptr,
+            offsets_ptr,
+            grad_x_ptr,
+            n_elements,
+            BLOCK_SIZE: tl.constexpr,
+        ):
+            pid = tl.program_id(0)
+            block_start = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = block_start < n_elements
+            grad_out = tl.load(grad_out_ptr + block_start, mask=mask)
+            # Read offsets (read-only, not written back)
+            _offsets_val = tl.load(offsets_ptr + 0)  # noqa: F841
+            tl.store(grad_x_ptr + block_start, grad_out, mask=mask)
+
+        class FnWithReadOnlyBwdInput(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, offsets):
+                ctx.save_for_backward(offsets)
+                ctx.n_elements = x.numel()
+                return x.clone(), offsets
+
+            @staticmethod
+            def backward(ctx, grad_out, grad_offsets):
+                (offsets,) = ctx.saved_tensors
+                n_elements = ctx.n_elements
+                grad_x = torch.empty_like(grad_out)
+
+                grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)  # noqa: E731
+                bwd_kernel[grid](grad_out, offsets, grad_x, n_elements, BLOCK_SIZE=1024)
+
+                return grad_x, None
+
+        @torch.compile(backend="aot_eager")
+        def compiled_f(x, offsets):
+            return FnWithReadOnlyBwdInput.apply(x, offsets)
+
+        x = torch.randn(1024, device=device_type, requires_grad=True)
+        offsets = torch.tensor([0, 512, 1024], device=device_type)
+
+        out, offsets_out = compiled_f(x, offsets)
+        loss = out.sum()
+        loss.backward()
+        self.assertIsNotNone(x.grad)
+
     def test_nonlocal_list_mutation_in_autograd_function(self):
         """Test that nonlocal list mutation in autograd.Function forward is handled correctly."""
 
