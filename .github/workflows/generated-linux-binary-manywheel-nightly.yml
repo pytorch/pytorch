@@ -440,7 +440,7 @@ jobs:
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
-          name: manywheel-py3_10-rocm7_0
+          name: manywheel-py3_10-rocm7_1
           path: "${{ runner.temp }}/artifacts/"
       - name: ROCm set GPU_FLAG
         run: |
@@ -472,7 +472,7 @@ jobs:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
         uses: ./pytorch/.github/actions/teardown-rocm
-  manywheel-py3_10-rocm7_0-upload:  # Uploading
+  manywheel-py3_10-rocm7_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -556,7 +556,7 @@ jobs:
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
-          name: manywheel-py3_10-rocm7_1
+          name: manywheel-py3_10-rocm7_2
           path: "${{ runner.temp }}/artifacts/"
       - name: ROCm set GPU_FLAG
         run: |
@@ -588,7 +588,7 @@ jobs:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
         uses: ./pytorch/.github/actions/teardown-rocm
-  manywheel-py3_10-rocm7_1-upload:  # Uploading
+  manywheel-py3_10-rocm7_2-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -1107,7 +1107,7 @@ jobs:
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
-          name: manywheel-py3_11-rocm7_0
+          name: manywheel-py3_11-rocm7_1
           path: "${{ runner.temp }}/artifacts/"
       - name: ROCm set GPU_FLAG
         run: |
@@ -1139,7 +1139,7 @@ jobs:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
         uses: ./pytorch/.github/actions/teardown-rocm
-  manywheel-py3_11-rocm7_0-upload:  # Uploading
+  manywheel-py3_11-rocm7_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -1223,7 +1223,7 @@ jobs:
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
-          name: manywheel-py3_11-rocm7_1
+          name: manywheel-py3_11-rocm7_2
           path: "${{ runner.temp }}/artifacts/"
       - name: ROCm set GPU_FLAG
         run: |
@@ -1255,7 +1255,7 @@ jobs:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
         uses: ./pytorch/.github/actions/teardown-rocm
-  manywheel-py3_11-rocm7_1-upload:  # Uploading
+  manywheel-py3_11-rocm7_2-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -1774,7 +1774,7 @@ jobs:
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
-          name: manywheel-py3_12-rocm7_0
+          name: manywheel-py3_12-rocm7_1
           path: "${{ runner.temp }}/artifacts/"
       - name: ROCm set GPU_FLAG
         run: |
@@ -1806,7 +1806,7 @@ jobs:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
         uses: ./pytorch/.github/actions/teardown-rocm
-  manywheel-py3_12-rocm7_0-upload:  # Uploading
+  manywheel-py3_12-rocm7_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -1890,7 +1890,7 @@ jobs:
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
-          name: manywheel-py3_12-rocm7_1
+          name: manywheel-py3_12-rocm7_2
           path: "${{ runner.temp }}/artifacts/"
       - name: ROCm set GPU_FLAG
         run: |
@@ -1922,7 +1922,7 @@ jobs:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
         uses: ./pytorch/.github/actions/teardown-rocm
-  manywheel-py3_12-rocm7_1-upload:  # Uploading
+  manywheel-py3_12-rocm7_2-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -2441,7 +2441,7 @@ jobs:
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
-          name: manywheel-py3_13-rocm7_0
+          name: manywheel-py3_13-rocm7_1
           path: "${{ runner.temp }}/artifacts/"
       - name: ROCm set GPU_FLAG
         run: |
@@ -2473,7 +2473,7 @@ jobs:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
         uses: ./pytorch/.github/actions/teardown-rocm
-  manywheel-py3_13-rocm7_0-upload:  # Uploading
+  manywheel-py3_13-rocm7_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -2557,7 +2557,7 @@ jobs:
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
-          name: manywheel-py3_13-rocm7_1
+          name: manywheel-py3_13-rocm7_2
           path: "${{ runner.temp }}/artifacts/"
       - name: ROCm set GPU_FLAG
         run: |
@@ -2589,7 +2589,7 @@ jobs:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
         uses: ./pytorch/.github/actions/teardown-rocm
-  manywheel-py3_13-rocm7_1-upload:  # Uploading
+  manywheel-py3_13-rocm7_2-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -3108,7 +3108,7 @@ jobs:
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
-          name: manywheel-py3_13t-rocm7_0
+          name: manywheel-py3_13t-rocm7_1
           path: "${{ runner.temp }}/artifacts/"
       - name: ROCm set GPU_FLAG
         run: |
@@ -3140,7 +3140,7 @@ jobs:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
         uses: ./pytorch/.github/actions/teardown-rocm
-  manywheel-py3_13t-rocm7_0-upload:  # Uploading
+  manywheel-py3_13t-rocm7_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -3224,7 +3224,7 @@ jobs:
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
-          name: manywheel-py3_13t-rocm7_1
+          name: manywheel-py3_13t-rocm7_2
           path: "${{ runner.temp }}/artifacts/"
       - name: ROCm set GPU_FLAG
         run: |
@@ -3256,7 +3256,7 @@ jobs:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
         uses: ./pytorch/.github/actions/teardown-rocm
-  manywheel-py3_13t-rocm7_1-upload:  # Uploading
+  manywheel-py3_13t-rocm7_2-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -3775,7 +3775,7 @@ jobs:
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
-          name: manywheel-py3_14-rocm7_0
+          name: manywheel-py3_14-rocm7_1
           path: "${{ runner.temp }}/artifacts/"
       - name: ROCm set GPU_FLAG
         run: |
@@ -3807,7 +3807,7 @@ jobs:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
         uses: ./pytorch/.github/actions/teardown-rocm
-  manywheel-py3_14-rocm7_0-upload:  # Uploading
+  manywheel-py3_14-rocm7_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -3891,7 +3891,7 @@ jobs:
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
-          name: manywheel-py3_14-rocm7_1
+          name: manywheel-py3_14-rocm7_2
           path: "${{ runner.temp }}/artifacts/"
       - name: ROCm set GPU_FLAG
         run: |
@@ -3923,7 +3923,7 @@ jobs:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
         uses: ./pytorch/.github/actions/teardown-rocm
-  manywheel-py3_14-rocm7_1-upload:  # Uploading
+  manywheel-py3_14-rocm7_2-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -4442,7 +4442,7 @@ jobs:
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
-          name: manywheel-py3_14t-rocm7_0
+          name: manywheel-py3_14t-rocm7_1
           path: "${{ runner.temp }}/artifacts/"
       - name: ROCm set GPU_FLAG
         run: |
@@ -4474,7 +4474,7 @@ jobs:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
         uses: ./pytorch/.github/actions/teardown-rocm
-  manywheel-py3_14t-rocm7_0-upload:  # Uploading
+  manywheel-py3_14t-rocm7_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
@@ -4558,7 +4558,7 @@ jobs:
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
-          name: manywheel-py3_14t-rocm7_1
+          name: manywheel-py3_14t-rocm7_2
           path: "${{ runner.temp }}/artifacts/"
       - name: ROCm set GPU_FLAG
         run: |
@@ -4590,7 +4590,7 @@ jobs:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
         uses: ./pytorch/.github/actions/teardown-rocm
-  manywheel-py3_14t-rocm7_1-upload:  # Uploading
+  manywheel-py3_14t-rocm7_2-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
