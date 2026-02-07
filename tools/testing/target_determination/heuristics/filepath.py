@@ -56,6 +56,14 @@ def is_valid_keyword(keyword: str) -> bool:
         "ns",
         "tools",
         "internal",
+        "github",
+        ".github",
+        "ci",
+        ".ci",
+        "workflows",
+        "docker",
+        "docs",
+        "scripts",
     ]
     return keyword == "nn" or (keyword not in not_keyword and len(keyword) > 2)
 
