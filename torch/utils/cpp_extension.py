@@ -947,6 +947,20 @@ class BuildExtension(build_ext):
         def win_hip_flags(cflags):
             return (COMMON_HIPCC_FLAGS + COMMON_HIP_FLAGS + cflags + _get_rocm_arch_flags(cflags))
 
+        def win_filter_msvc_include_dirs(pp_opts) -> list[str]:
+            """Filter out MSVC include dirs from pp_opts for oneAPI 2025.3+."""
+            # oneAPI 2025.3+ changed include path ordering to match MSVC behavior.
+            # Filter out MSVC headers to avoid conflicting declarations with oneAPI's std headers.
+            icpx_version = int(_get_icpx_version())
+            if icpx_version >= 20250300:
+                vc_tools_dir = os.path.normcase(os.environ.get('VCToolsInstallDir', ''))
+                if vc_tools_dir:
+                    pp_opts = [
+                        path for path in pp_opts
+                        if vc_tools_dir not in os.path.normcase(path)
+                    ]
+            return pp_opts
+
         def win_wrap_single_compile(sources,
                                     output_dir=None,
                                     macros=None,
@@ -1116,7 +1130,7 @@ class BuildExtension(build_ext):
             sycl_post_cflags = None
             sycl_dlink_post_cflags = None
             if with_sycl:
-                sycl_cflags = common_cflags + pp_opts + _COMMON_SYCL_FLAGS
+                sycl_cflags = common_cflags + win_filter_msvc_include_dirs(pp_opts) + _COMMON_SYCL_FLAGS
                 if isinstance(extra_postargs, dict):
                     sycl_post_cflags = extra_postargs['sycl']
                 else:
