@@ -302,9 +302,10 @@ def preferred_blas_library(
     * If `"ck"` is set then CK will be used wherever possible.
     * If `"default"` (the default) is set then heuristics will be used to pick between the other options.
     * When no input is given, this function returns the currently preferred library.
-    * User may use the environment variable TORCH_BLAS_PREFER_CUBLASLT=1 to set the preferred library to cuBLASLt
-      globally.
-      This flag only sets the initial value of the preferred library and the preferred library
+    * User may use environment variables to set the preferred library globally:
+      - TORCH_BLAS_PREFER_CUBLASLT=1 or TORCH_BLAS_PREFER_HIPBLASLT=1 for cuBLASLt
+      - TORCH_BLAS_PREFER_CUBLAS=1 or TORCH_BLAS_PREFER_ROCBLAS=1 for cuBLAS
+      These flags only set the initial value of the preferred library and the preferred library
       may still be overridden by this function call later in your script.
 
     Note: When a library is preferred other libraries may still be used if the preferred library
