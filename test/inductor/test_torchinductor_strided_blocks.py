@@ -1085,16 +1085,17 @@ class CommonTemplate:
         """
 
         def foo(x):
-            a = x.permute(dims=(1, 0, 2, 3))
-            b = a.permute(dims=(0, 1, 3, 2))
-            return b
+            a = x - 3
+            b = x.permute(dims=(1, 0, 2, 3)).contiguous() + 1
+            c = b.permute(dims=(0, 1, 3, 2)).contiguous() * 2
+            return a, c.contiguous()
 
         inps = (torch.rand((9, 7, 5, 3), device=self.device, dtype=torch.float32),)
         result, (code,) = self._run_and_compare(
             foo,
             *inps,
             expected_num_triton_kernels=2,
-            expected_num_block_pointers=4,
+            expected_num_block_pointers=5,
             config_patches={
                 "triton.max_tiles": 3,
                 "triton.prefer_nd_tiling": True,

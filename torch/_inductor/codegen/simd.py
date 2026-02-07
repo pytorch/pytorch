@@ -20,7 +20,10 @@ import torch
 import torch._logging
 from torch._inductor import metrics
 from torch._inductor.ir import MultiTemplateBuffer
-from torch._inductor.tiling_utils import analyze_memory_coalescing
+from torch._inductor.tiling_utils import (
+    analyze_memory_coalescing,
+    extract_normalized_read_writes,
+)
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.fx.immutable_collections import immutable_dict
 from torch.utils._ordered_set import OrderedSet
@@ -1295,6 +1298,16 @@ class SIMDScheduling(BaseScheduling):
 
     kernel_type: type[Any] = SIMDKernel  # override in subclass
 
+    def _fusion_frustrates_structured_access(self, node1, node2, numel, rnumel):
+        # Analyze the reads and writes for the fused and unfused cases.
+        fused_node = scheduler.FusedSchedulerNode(
+            self.scheduler, node1.get_nodes() + node2.get_nodes()
+        )
+        read_writes1, read_writes2, fused_read_writes = (
+            extract_normalized_read_writes(node) for node in (node1, node2, fused_node)
+        )
+        breakpoint()  # XXX
+
     def group_fn(self, sizes):
         return tuple(V.graph.sizevars.simplify(sympy_product(s)) for s in sizes)
 
@@ -1401,6 +1414,12 @@ class SIMDScheduling(BaseScheduling):
             for n in (node1, node2):
                 if n.is_template():
                     return True
+
+            # Check if the fusion complicates memory accesses, preventing us from emitting
+            # block pointers.
+            # TODO gate behind a flag.
+            if self._fusion_frustrates_structured_access(node1, node2, numel1, rnumel1):
+                return False
 
             # check for a bad combined tiling
             tiling1 = self.select_tiling(node1.get_nodes(), numel1, rnumel1)
