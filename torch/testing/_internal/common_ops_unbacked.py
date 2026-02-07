@@ -244,7 +244,6 @@ ops_dde_xfail = {
     xfail("uniform"),
     xfail("unsafe_chunk"),
     xfail("unsafe_split"),
-    xfail("view_as_complex"),
     xfail("vsplit"),
 }
 
