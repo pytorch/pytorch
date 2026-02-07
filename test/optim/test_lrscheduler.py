@@ -1055,6 +1055,198 @@ class TestLRScheduler(TestCase):
         schedulers[1] = CosineAnnealingLR(self.opt, T_max=epochs, eta_min=eta_min)
         self._test(schedulers, targets, epochs)
 
+    def test_reduce_lr_on_plateau_with_invalid_metrics(self):
+        """Test ReduceLROnPlateau handles NaN and infinite metrics gracefully"""
+        import math
+
+        # Test 1: NaN metrics are treated as no improvement
+        opt1 = SGD(
+            [
+                {"params": self.net.conv1.parameters()},
+                {"params": self.net.conv2.parameters(), "lr": 0.5},
+            ],
+            lr=0.5,
+        )
+
+        scheduler_nan = ReduceLROnPlateau(
+            opt1,
+            mode="min",
+            factor=0.1,
+            patience=2,
+            threshold=0.01
+        )
+
+        # Initial LR should be 0.5
+        initial_lr = opt1.param_groups[0]["lr"]
+        self.assertEqual(initial_lr, 0.5)
+
+        # Step with a good initial metric
+        opt1.step()
+        scheduler_nan.step(1.0)
+        self.assertEqual(opt1.param_groups[0]["lr"], 0.5)
+
+        # Step with NaN - this counts as no improvement, patience counter starts
+        opt1.step()
+        scheduler_nan.step(float('nan'))
+        self.assertEqual(opt1.param_groups[0]["lr"], 0.5)  # patience = 1
+
+        # Another NaN - patience counter increases
+        opt1.step()
+        scheduler_nan.step(float('nan'))
+        self.assertEqual(opt1.param_groups[0]["lr"], 0.5)  # patience = 2
+
+        # Third NaN - patience exhausted, LR should reduce
+        opt1.step()
+        scheduler_nan.step(float('nan'))
+        self.assertAlmostEqual(opt1.param_groups[0]["lr"], 0.05, places=5)
+
+        # Verify scheduler didn't crash and internal state is valid
+        self.assertFalse(math.isnan(opt1.param_groups[0]["lr"]))
+        self.assertFalse(math.isinf(opt1.param_groups[0]["lr"]))
+
+        # Test 2: Infinity in 'min' mode
+        opt2 = SGD(
+            [
+                {"params": self.net.conv1.parameters()},
+                {"params": self.net.conv2.parameters(), "lr": 0.05},
+            ],
+            lr=0.5,
+        )
+
+        scheduler_inf = ReduceLROnPlateau(
+            opt2,
+            mode="min",
+            factor=0.1,
+            patience=2,
+            threshold=0.01
+        )
+
+        # Step with finite value first
+        opt2.step()
+        scheduler_inf.step(1.0)
+        self.assertEqual(opt2.param_groups[0]["lr"], 0.5)
+
+        # Step with positive infinity - counts as worse (no improvement)
+        opt2.step()
+        scheduler_inf.step(float('inf'))
+        self.assertEqual(opt2.param_groups[0]["lr"], 0.5)  # patience = 1
+
+        # Another inf
+        opt2.step()
+        scheduler_inf.step(float('inf'))
+        self.assertEqual(opt2.param_groups[0]["lr"], 0.5)  # patience = 2
+
+        # Third inf - patience exhausted
+        opt2.step()
+        scheduler_inf.step(float('inf'))
+        self.assertAlmostEqual(opt2.param_groups[0]["lr"], 0.05, places=5)
+
+        # Test 3: Negative infinity in 'max' mode is treated as no improvement
+        opt3 = SGD(
+            [
+                {"params": self.net.conv1.parameters()},
+                {"params": self.net.conv2.parameters(), "lr": 0.05},
+            ],
+            lr=0.5,
+        )
+
+        scheduler_inf_max = ReduceLROnPlateau(
+            opt3,
+            mode="max",
+            factor=0.1,
+            patience=2,
+            threshold=0.01
+        )
+
+        opt3.step()
+        scheduler_inf_max.step(1.0)
+        self.assertEqual(opt3.param_groups[0]["lr"], 0.5)
+
+        opt3.step()
+        scheduler_inf_max.step(float('-inf'))
+        self.assertEqual(opt3.param_groups[0]["lr"], 0.5)  # patience = 1
+
+        opt3.step()
+        scheduler_inf_max.step(float('-inf'))
+        self.assertEqual(opt3.param_groups[0]["lr"], 0.5)  # patience = 2
+
+        opt3.step()
+        scheduler_inf_max.step(float('-inf'))
+        self.assertAlmostEqual(opt3.param_groups[0]["lr"], 0.05, places=5)
+
+        # Test 4: Recovery after NaN - good metric should reset patience
+        opt4 = SGD(
+            [
+                {"params": self.net.conv1.parameters()},
+                {"params": self.net.conv2.parameters(), "lr": 1.0},
+            ],
+            lr=1.0,
+        )
+
+        scheduler_recovery = ReduceLROnPlateau(
+            opt4,
+            mode="min",
+            factor=0.5,
+            patience=2,
+            threshold=0.0001
+        )
+
+        # Good metric
+        opt4.step()
+        scheduler_recovery.step(1.0)
+        self.assertEqual(opt4.param_groups[0]["lr"], 1.0)
+
+        # NaN (patience = 1)
+        opt4.step()
+        scheduler_recovery.step(float('nan'))
+        self.assertEqual(opt4.param_groups[0]["lr"], 1.0)
+
+        # Better metric - should reset patience
+        opt4.step()
+        scheduler_recovery.step(0.5)
+        self.assertEqual(opt4.param_groups[0]["lr"], 1.0)
+
+        # Two more NaNs shouldn't reduce yet (patience reset)
+        opt4.step()
+        scheduler_recovery.step(float('nan'))
+        self.assertEqual(opt4.param_groups[0]["lr"], 1.0)
+
+        opt4.step()
+        scheduler_recovery.step(float('nan'))
+        self.assertEqual(opt4.param_groups[0]["lr"], 1.0)
+
+        # Third NaN after reset - now reduce
+        opt4.step()
+        scheduler_recovery.step(float('nan'))
+        self.assertAlmostEqual(opt4.param_groups[0]["lr"], 0.5, places=5)
+
+        # Test 5: Verify no crashes with extreme values
+        opt5 = SGD(
+            [
+                {"params": self.net.conv1.parameters()},
+                {"params": self.net.conv2.parameters(), "lr": 0.8},
+            ],
+            lr=0.8,
+        )
+
+        scheduler_extreme = ReduceLROnPlateau(
+            opt5,
+            mode="min",
+            factor=0.1,
+            patience=1
+        )
+
+        # Mix of extreme values - should not crash
+        extreme_values = [1.0, float('nan'), float('inf'), float('-inf'), float('nan')]
+        for val in extreme_values:
+            opt5.step()
+            scheduler_extreme.step(val)
+            # Verify LR is always a valid number
+            current_lr = opt5.param_groups[0]["lr"]
+            self.assertFalse(math.isnan(current_lr))
+            self.assertFalse(math.isinf(current_lr))
+            self.assertGreater(current_lr, 0)
+
     def test_compound_cosanneal_and_exp_lr(self):
         epochs = 10
         eta_min = 1e-10
