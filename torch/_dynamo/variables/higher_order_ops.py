@@ -5532,13 +5532,13 @@ class CompilePrintFwdVariable(TorchHigherOrderOperatorVariable):
 
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
 
-        # First two args are callback IDs (constants), rest are tensors
-        fwd_callback_id = args[0].as_python_constant()
-        bwd_callback_id = args[1].as_python_constant()
+        # First two args are opaque CallbackWrapper objects, rest are tensors
+        fwd_callback = args[0].as_proxy()
+        bwd_callback = args[1].as_proxy()
         tensor_args = args[2:]
 
         tensor_proxies = [arg.as_proxy() for arg in tensor_args]
-        proxy_args = (fwd_callback_id, bwd_callback_id, *tensor_proxies)
+        proxy_args = (fwd_callback, bwd_callback, *tensor_proxies)
 
         return wrap_fx_proxy(
             tx=tx,
@@ -5565,12 +5565,12 @@ class CompilePrintBwdVariable(TorchHigherOrderOperatorVariable):
 
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
 
-        # First arg is callback ID (constant), rest are tensors
-        bwd_callback_id = args[0].as_python_constant()
+        # First arg is opaque CallbackWrapper object, rest are tensors
+        bwd_callback = args[0].as_proxy()
         tensor_args = args[1:]
 
         tensor_proxies = [arg.as_proxy() for arg in tensor_args]
-        proxy_args = (bwd_callback_id, *tensor_proxies)
+        proxy_args = (bwd_callback, *tensor_proxies)
 
         return wrap_fx_proxy(
             tx=tx,

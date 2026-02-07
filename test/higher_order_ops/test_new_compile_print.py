@@ -10,20 +10,18 @@ from torch._higher_order_ops.new_compile_print import (
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
-def normalize_callback_ids(graph_str: str) -> str:
-    """Normalize callback IDs in graph output to make tests deterministic."""
-    # Replace compile_print_fwd(N, M, ...) with compile_print_fwd(FWD_ID, BWD_ID, ...)
+def normalize_opaque_refs(graph_str: str) -> str:
+    """Normalize opaque object references in graph output to make tests deterministic."""
+    # Normalize opaque object variable names (e.g., _opaque_obj0, _opaque_obj1_1)
+    graph_str = re.sub(r"_opaque_obj\d+(_\d+)?", "_opaque_obj", graph_str)
+    # Normalize closure variable names
     graph_str = re.sub(
-        r"compile_print_fwd\(\d+, \d+,",
-        "compile_print_fwd(FWD_ID, BWD_ID,",
+        r"[gGlL]_cp_closure_\d+_cell_contents",
+        "callback_var",
         graph_str,
     )
-    # Replace compile_print_bwd(N, ...) with compile_print_bwd(BWD_ID, ...)
-    graph_str = re.sub(
-        r"compile_print_bwd\(\d+,",
-        "compile_print_bwd(BWD_ID,",
-        graph_str,
-    )
+    # Normalize self._opaque_obj references
+    graph_str = re.sub(r"self\._opaque_obj\d+", "self._opaque_obj", graph_str)
     return graph_str
 
 
@@ -506,17 +504,19 @@ class TestNewCompilePrint(TestCase):
         loss.backward()
 
         self.assertExpectedInline(
-            normalize_callback_ids(
+            normalize_opaque_refs(
                 normalize_gm(backend.graphs[0].print_readable(print_output=False))
             ),
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_x_: "f32[3, 3]"):
+    def forward(self, L_x_: "f32[3, 3]", callback_var : torch._higher_order_ops.new_compile_print.CallbackWrapper, callback_var : torch._higher_order_ops.new_compile_print.CallbackWrapper):
         l_x_ = L_x_
+        callback_var = callback_var
+        callback_var = callback_var
 
-        compile_print_fwd = torch.ops.higher_order.compile_print_fwd(FWD_ID, BWD_ID, l_x_);  compile_print_fwd = None
+        compile_print_fwd = torch.ops.higher_order.compile_print_fwd(callback_var, callback_var, l_x_);  callback_var = callback_var = compile_print_fwd = None
         sum_1: "f32[]" = l_x_.sum();  l_x_ = None
-        return (sum_1,)""",
+        return (sum_1,)""",  # noqa: B950
             ignore_empty_lines=True,
         )
 
@@ -558,28 +558,31 @@ class GraphModule(torch.nn.Module):
         loss.backward()
 
         self.assertExpectedInline(
-            normalize_callback_ids(
+            normalize_opaque_refs(
                 normalize_gm(fw_graph.print_readable(print_output=False))
             ),
             """\
 class GraphModule(torch.nn.Module):
     def forward(self, primals_1: "f32[3, 3]"):
-        compile_print_fwd = torch.ops.higher_order.compile_print_fwd(FWD_ID, BWD_ID, primals_1);  compile_print_fwd = None
+        _opaque_obj = self._opaque_obj
+        _opaque_obj = self._opaque_obj
+        compile_print_fwd = torch.ops.higher_order.compile_print_fwd(_opaque_obj, _opaque_obj, primals_1);  _opaque_obj = _opaque_obj = compile_print_fwd = None
         sum_1: "f32[]" = torch.ops.aten.sum.default(primals_1);  primals_1 = None
-        return (sum_1,)""",
+        return (sum_1,)""",  # noqa: B950
             ignore_empty_lines=True,
         )
 
         self.assertExpectedInline(
-            normalize_callback_ids(
+            normalize_opaque_refs(
                 normalize_gm(bw_graph.print_readable(print_output=False))
             ),
             """\
 class GraphModule(torch.nn.Module):
     def forward(self, tangents_1: "f32[]"):
         expand: "f32[3, 3]" = torch.ops.aten.expand.default(tangents_1, [3, 3]);  tangents_1 = None
-        compile_print_bwd = torch.ops.higher_order.compile_print_bwd(BWD_ID, expand);  compile_print_bwd = None
-        return (expand,)""",
+        _opaque_obj = self._opaque_obj
+        compile_print_bwd = torch.ops.higher_order.compile_print_bwd(_opaque_obj, expand);  _opaque_obj = compile_print_bwd = None
+        return (expand,)""",  # noqa: B950
             ignore_empty_lines=True,
         )
 

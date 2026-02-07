@@ -1,33 +1,39 @@
 from collections.abc import Callable
-from typing import Optional
+from typing import Any
 
 import torch
 import torch.utils._pytree as pytree
+from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.opaque_object import register_opaque_type
+from torch._opaque_base import OpaqueBase
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
 
 
-# Global registry for callback functions
-_CALLBACK_REGISTRY: dict[int, Callable[[torch.Tensor], None]] = {}
-_NEXT_CALLBACK_ID = 0
+class CallbackWrapper(OpaqueBase):
+    """Opaque wrapper for a callback function that takes a tensor and returns None."""
+
+    def __init__(self, fn: Callable[[torch.Tensor], None]) -> None:
+        self.fn = fn
+
+    def __call__(self, t: torch.Tensor) -> None:
+        self.fn(t)
 
 
-def _register_callback(fn: Callable[[torch.Tensor], None]) -> int:
-    global _NEXT_CALLBACK_ID
-    callback_id = _NEXT_CALLBACK_ID
-    _NEXT_CALLBACK_ID += 1
-    _CALLBACK_REGISTRY[callback_id] = fn
-    return callback_id
+register_opaque_type(CallbackWrapper, typ="reference")
 
 
-def _get_callback(callback_id: int) -> Optional[Callable[[torch.Tensor], None]]:
-    return _CALLBACK_REGISTRY.get(callback_id)
+def _get_real_callback(callback: Any) -> CallbackWrapper:
+    """Extract the real CallbackWrapper from a FakeScriptObject if needed."""
+    if isinstance(callback, FakeScriptObject):
+        return callback.real_obj
+    return callback
 
 
 class CompilePrintFwd(HigherOrderOperator):
     """
-    compile_print_fwd(fwd_callback_id, bwd_callback_id, *tensors) -> None
+    compile_print_fwd(fwd_callback, bwd_callback, *tensors) -> None
 
     Forward pass HOP that calls the forward callback on each tensor.
     Returns None (pure side-effect operation).
@@ -38,25 +44,25 @@ class CompilePrintFwd(HigherOrderOperator):
 
     def __call__(
         self,
-        fwd_callback_id: int,
-        bwd_callback_id: int,
+        fwd_callback: CallbackWrapper,
+        bwd_callback: CallbackWrapper,
         *tensors: torch.Tensor,
     ) -> None:
         # pyrefly: ignore [missing-attribute]
-        return super().__call__(fwd_callback_id, bwd_callback_id, *tensors)
+        return super().__call__(fwd_callback, bwd_callback, *tensors)
 
     # pyrefly: ignore [bad-override]
     def gen_schema(
         self,
-        fwd_callback_id: int,
-        bwd_callback_id: int,
+        fwd_callback: Any,
+        bwd_callback: Any,
         *tensors: torch.Tensor,
     ) -> torch.FunctionSchema:
         from torch._higher_order_ops.schema import HopSchemaGenerator
 
         schema_gen = HopSchemaGenerator(self)
-        schema_gen.add_arg("fwd_callback_id", fwd_callback_id)
-        schema_gen.add_arg("bwd_callback_id", bwd_callback_id)
+        schema_gen.add_arg("fwd_callback", fwd_callback)
+        schema_gen.add_arg("bwd_callback", bwd_callback)
         for i, t in enumerate(tensors):
             schema_gen.add_arg(f"tensor{i}", t)
         # No outputs - pure side effect
@@ -68,7 +74,7 @@ compile_print_fwd = CompilePrintFwd()
 
 class CompilePrintBwd(HigherOrderOperator):
     """
-    compile_print_bwd(bwd_callback_id, *grads) -> None
+    compile_print_bwd(bwd_callback, *grads) -> None
 
     Backward pass HOP that calls the backward callback on each gradient.
     Returns None (pure side-effect operation).
@@ -77,18 +83,18 @@ class CompilePrintBwd(HigherOrderOperator):
     def __init__(self) -> None:
         super().__init__("compile_print_bwd")
 
-    def __call__(self, bwd_callback_id: int, *grads: torch.Tensor) -> None:
+    def __call__(self, bwd_callback: CallbackWrapper, *grads: torch.Tensor) -> None:
         # pyrefly: ignore [missing-attribute]
-        return super().__call__(bwd_callback_id, *grads)
+        return super().__call__(bwd_callback, *grads)
 
     # pyrefly: ignore [bad-override]
     def gen_schema(
-        self, bwd_callback_id: int, *grads: torch.Tensor
+        self, bwd_callback: Any, *grads: torch.Tensor
     ) -> torch.FunctionSchema:
         from torch._higher_order_ops.schema import HopSchemaGenerator
 
         schema_gen = HopSchemaGenerator(self)
-        schema_gen.add_arg("bwd_callback_id", bwd_callback_id)
+        schema_gen.add_arg("bwd_callback", bwd_callback)
         for i, g in enumerate(grads):
             schema_gen.add_arg(f"grad{i}", g)
         # No outputs - pure side effect
@@ -104,11 +110,11 @@ compile_print_bwd = CompilePrintBwd()
 @compile_print_fwd.py_impl(ProxyTorchDispatchMode)
 def compile_print_fwd_proxy(
     mode: ProxyTorchDispatchMode,
-    fwd_callback_id: int,
-    bwd_callback_id: int,
+    fwd_callback: CallbackWrapper,
+    bwd_callback: CallbackWrapper,
     *tensors: torch.Tensor,
 ) -> None:
-    proxy_args = (fwd_callback_id, bwd_callback_id) + pytree.tree_map(
+    proxy_args = (fwd_callback, bwd_callback) + pytree.tree_map(
         mode.tracer.unwrap_proxy,  # pyrefly: ignore [missing-attribute]
         tensors,
     )
@@ -119,8 +125,8 @@ def compile_print_fwd_proxy(
 @compile_print_fwd.py_impl(FakeTensorMode)
 def compile_print_fwd_fake(
     mode: FakeTensorMode,
-    fwd_callback_id: int,
-    bwd_callback_id: int,
+    fwd_callback: CallbackWrapper,
+    bwd_callback: CallbackWrapper,
     *tensors: torch.Tensor,
 ) -> None:
     return None
@@ -128,28 +134,27 @@ def compile_print_fwd_fake(
 
 @compile_print_fwd.py_impl(torch._C.DispatchKey.CompositeExplicitAutograd)
 def compile_print_fwd_impl(
-    fwd_callback_id: int,
-    bwd_callback_id: int,
+    fwd_callback: CallbackWrapper,
+    bwd_callback: CallbackWrapper,
     *tensors: torch.Tensor,
 ) -> None:
-    fwd_fn = _get_callback(fwd_callback_id)
-    if fwd_fn is not None:
-        for t in tensors:
-            if isinstance(t, torch.Tensor):
-                fwd_fn(t)
+    real_callback = _get_real_callback(fwd_callback)
+    for t in tensors:
+        if isinstance(t, torch.Tensor):
+            real_callback(t)
     return None
 
 
 @compile_print_fwd.py_functionalize_impl
 def compile_print_fwd_func(
     ctx,
-    fwd_callback_id: int,
-    bwd_callback_id: int,
+    fwd_callback: CallbackWrapper,
+    bwd_callback: CallbackWrapper,
     *tensors: torch.Tensor,
 ):
     unwrapped_tensors = ctx.unwrap_tensors(tensors)
     with ctx.redispatch_to_next():
-        compile_print_fwd(fwd_callback_id, bwd_callback_id, *unwrapped_tensors)
+        compile_print_fwd(fwd_callback, bwd_callback, *unwrapped_tensors)
     return None
 
 
@@ -158,36 +163,35 @@ def compile_print_fwd_func(
 
 @compile_print_bwd.py_impl(ProxyTorchDispatchMode)
 def compile_print_bwd_proxy(
-    mode: ProxyTorchDispatchMode, bwd_callback_id: int, *grads: torch.Tensor
+    mode: ProxyTorchDispatchMode, bwd_callback: CallbackWrapper, *grads: torch.Tensor
 ) -> None:
     # pyrefly: ignore [missing-attribute]
-    proxy_args = (bwd_callback_id,) + pytree.tree_map(mode.tracer.unwrap_proxy, grads)
+    proxy_args = (bwd_callback,) + pytree.tree_map(mode.tracer.unwrap_proxy, grads)
     mode.tracer.create_proxy("call_function", compile_print_bwd, proxy_args, {})
     return None
 
 
 @compile_print_bwd.py_impl(FakeTensorMode)
 def compile_print_bwd_fake(
-    mode: FakeTensorMode, bwd_callback_id: int, *grads: torch.Tensor
+    mode: FakeTensorMode, bwd_callback: CallbackWrapper, *grads: torch.Tensor
 ) -> None:
     return None
 
 
 @compile_print_bwd.py_impl(torch._C.DispatchKey.CompositeExplicitAutograd)
-def compile_print_bwd_impl(bwd_callback_id: int, *grads: torch.Tensor) -> None:
-    bwd_fn = _get_callback(bwd_callback_id)
-    if bwd_fn is not None:
-        for g in grads:
-            if isinstance(g, torch.Tensor):
-                bwd_fn(g)
+def compile_print_bwd_impl(bwd_callback: CallbackWrapper, *grads: torch.Tensor) -> None:
+    real_callback = _get_real_callback(bwd_callback)
+    for g in grads:
+        if isinstance(g, torch.Tensor):
+            real_callback(g)
     return None
 
 
 @compile_print_bwd.py_functionalize_impl
-def compile_print_bwd_func(ctx, bwd_callback_id: int, *grads: torch.Tensor):
+def compile_print_bwd_func(ctx, bwd_callback: CallbackWrapper, *grads: torch.Tensor):
     unwrapped_grads = ctx.unwrap_tensors(grads)
     with ctx.redispatch_to_next():
-        compile_print_bwd(bwd_callback_id, *unwrapped_grads)
+        compile_print_bwd(bwd_callback, *unwrapped_grads)
     return None
 
 
@@ -200,9 +204,9 @@ compile_print_bwd.fallthrough(torch._C.DispatchKey.AutogradCUDA)
 class _CompilePrintAutogradOp(torch.autograd.Function):
     @staticmethod
     # pyrefly: ignore [bad-override]
-    def forward(ctx, fwd_callback_id, bwd_callback_id, *tensors):
+    def forward(ctx, fwd_callback, bwd_callback, *tensors):
         with torch._C._AutoDispatchBelowAutograd():
-            compile_print_fwd(fwd_callback_id, bwd_callback_id, *tensors)
+            compile_print_fwd(fwd_callback, bwd_callback, *tensors)
 
         # Register hooks on input tensors to call backward callback
         # when they receive gradients (even if our output isn't used).
@@ -210,15 +214,15 @@ class _CompilePrintAutogradOp(torch.autograd.Function):
         for t in tensors:
             if isinstance(t, torch.Tensor) and t.requires_grad:
 
-                def make_hook(callback_id):
+                def make_hook(callback):
                     def hook(grad):
                         # Emit compile_print_bwd call (gets traced in compiled mode)
-                        compile_print_bwd(callback_id, grad)
+                        compile_print_bwd(callback, grad)
                         return None  # Don't modify the gradient
 
                     return hook
 
-                t.register_hook(make_hook(bwd_callback_id))
+                t.register_hook(make_hook(bwd_callback))
 
         return None
 
@@ -231,11 +235,11 @@ class _CompilePrintAutogradOp(torch.autograd.Function):
 
 @compile_print_fwd.py_autograd_impl
 def compile_print_fwd_autograd(
-    fwd_callback_id: int,
-    bwd_callback_id: int,
+    fwd_callback: CallbackWrapper,
+    bwd_callback: CallbackWrapper,
     *tensors: torch.Tensor,
 ):
-    return _CompilePrintAutogradOp.apply(fwd_callback_id, bwd_callback_id, *tensors)
+    return _CompilePrintAutogradOp.apply(fwd_callback, bwd_callback, *tensors)
 
 
 def make_compile_print(
@@ -270,11 +274,11 @@ def make_compile_print(
     Returns:
         A function that takes tensors, calls the callbacks, and returns None.
     """
-    fwd_callback_id = _register_callback(fwd_f)
-    bwd_callback_id = _register_callback(bwd_f)
+    fwd_callback = CallbackWrapper(fwd_f)
+    bwd_callback = CallbackWrapper(bwd_f)
 
     def compile_print_impl(*tensors: torch.Tensor) -> None:
-        return compile_print_fwd(fwd_callback_id, bwd_callback_id, *tensors)
+        return compile_print_fwd(fwd_callback, bwd_callback, *tensors)
 
     return compile_print_impl
 
