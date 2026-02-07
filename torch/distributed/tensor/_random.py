@@ -545,7 +545,7 @@ class ThreadBasedRNGTracker(OffsetBasedRNGTracker):
             state = _PhiloxState(self._get_device_state())
 
         if self.distribute_region_enabled:
-            old_offset = state.offset
+            old_offset = state.offset.clone()
             self._set_pre_op_sharding_spec(state, spec)
             with torch.random.fork_rng(
                 devices=[self._device], device_type=self._device.type
@@ -681,7 +681,7 @@ class ThreadBasedRNGTracker(OffsetBasedRNGTracker):
             state._state = torch.cat([seed_tensor, spec_tensor])
 
     def _set_post_op_offset(
-        self, state: _PhiloxState, spec: DTensorSpec, old_offset: int
+        self, state: _PhiloxState, spec: DTensorSpec, old_offset: torch.Tensor
     ) -> None:
         """Restore the RNG state to a synchronized form after random op execution.
 
@@ -697,7 +697,7 @@ class ThreadBasedRNGTracker(OffsetBasedRNGTracker):
             state (:class:`_PhiloxState`): The generator state to restore and update.
             spec (:class:`DTensorSpec`): The spec of the DTensor object on which
                 we post-process the offset for running random ops.
-            old_offset (int): The RNG offset before the random operation was executed.
+            old_offset (:class:`Tensor`): The RNG offset before the random operation was executed.
 
         Returns:
             None
