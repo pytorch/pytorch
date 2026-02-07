@@ -6105,6 +6105,43 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertEqual(result, result_test)
         self.assertEqual(x, x_test)
 
+    # https://github.com/pytorch/pytorch/issues/167009
+    def test_inbuilt_nn_module_forward_after_hook_graph_break(self):
+        # When a @dynamo.disable hook is on an inbuilt nn.Module, the module's
+        # forward should still be traced after the hook causes a graph break.
+
+        @torch._dynamo.disable
+        def my_hook(module, inp):
+            return inp
+
+        class Wrapper(nn.Module):
+            def __init__(self, lin):
+                super().__init__()
+                self.lin = lin
+
+            def forward(self, x):
+                return self.lin(x)
+
+        lin = nn.Linear(10, 5)
+        lin.register_forward_pre_hook(my_hook)
+        model = Wrapper(lin)
+
+        backend = EagerAndRecordGraphs()
+        torch._dynamo.reset()
+        compiled = torch.compile(model, backend=backend)
+        output = compiled(torch.randn(3, 10))
+
+        self.assertEqual(output.shape, torch.Size([3, 5]))
+        self.assertGreater(len(backend.graphs), 0)
+        linear_found = any(
+            "linear" in gm.print_readable(print_output=False).lower()
+            for gm in backend.graphs
+        )
+        self.assertTrue(
+            linear_found,
+            "Linear operations should be captured in compiled graphs",
+        )
+
     def test_aot_autograd_runtime_wrapper_prologue_profiled(self):
         # Names for prologue profiling event
         prologue_name = "AOTDispatcher Runtime Wrapper Prologue"
