@@ -28,7 +28,7 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
-      opt_out_experiments: lf
+      #opt_out_experiments: lf
 
   linux-jammy-rocm-py3_10-inductor-build:
     name: rocm-py3.10-inductor
@@ -40,8 +40,8 @@ jobs:
       docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3
       test-matrix: |
         { include: [
-          { config: "inductor", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.2" },
-          { config: "inductor", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.2" },
+          { config: "inductor", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.mi210.1" },
+          { config: "inductor", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.mi210.1" },
         ]}
     secrets: inherit
 
@@ -51,7 +51,8 @@ jobs:
       contents: read
     name: rocm-py3.10-inductor
     uses: ./.github/workflows/_rocm-test.yml
-    needs: linux-jammy-rocm-py3_10-inductor-build
+    needs:
+      - linux-jammy-rocm-py3_10-inductor-build
     with:
       build-environment: ${{ needs.linux-jammy-rocm-py3_10-inductor-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-rocm-py3_10-inductor-build.outputs.docker-image }}
