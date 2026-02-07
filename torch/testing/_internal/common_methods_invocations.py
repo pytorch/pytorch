@@ -21748,6 +21748,10 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
             # Skip Nvfuser
             DecorateInfo(unittest.skip('Skipped!'), 'TestCudaFuserOpInfo'),
+            DecorateInfo(unittest.skip("Jiterator is not supported on XPU"), 
+                                       "TestCompositeCompliance", 
+                                       "test_cow_input", 
+                                       device_type="xpu"),
         )
     ),
     BinaryUfuncInfo(
@@ -21777,6 +21781,10 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
             # Skip Nvfuser
             DecorateInfo(unittest.skip('Skipped!'), 'TestCudaFuserOpInfo'),
+            DecorateInfo(unittest.skip("Jiterator is not supported on XPU"), 
+                                       "TestCompositeCompliance", 
+                                       "test_cow_input", 
+                                       device_type="xpu"),
         )
     ),
     OpInfo(
@@ -21802,6 +21810,10 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
             # Skip Nvfuser
             DecorateInfo(unittest.skip('Skipped!'), 'TestCudaFuserOpInfo'),
+            DecorateInfo(unittest.skip("Jiterator is not supported on XPU"), 
+                                       "TestCompositeCompliance", 
+                                       "test_cow_input", 
+                                       device_type="xpu"),
         )
     ),
     BinaryUfuncInfo(
@@ -21833,6 +21845,10 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
             # Skip Nvfuser
             DecorateInfo(unittest.skip('Skipped!'), 'TestCudaFuserOpInfo'),
+            DecorateInfo(unittest.skip("Jiterator is not supported on XPU"), 
+                                       "TestCompositeCompliance", 
+                                       "test_cow_input", 
+                                       device_type="xpu"),
         )
     ),
     OpInfo(
@@ -21864,6 +21880,10 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
             # Skip Nvfuser
             DecorateInfo(unittest.skip('Skipped!'), 'TestCudaFuserOpInfo'),
+            DecorateInfo(unittest.skip("Jiterator is not supported on XPU"), 
+                                       "TestCompositeCompliance", 
+                                       "test_cow_input", 
+                                       device_type="xpu"),
         )
     ),
     # `torch.norm` has multiple code paths depending on the value of `p`.
