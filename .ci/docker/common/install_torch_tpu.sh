@@ -172,7 +172,10 @@ fi
 
 # 9. Build Dependencies
 # Using the confirmed path: requirements/requirements.txt
-pip_install -r requirements/requirements.txt
+# Filter out torch pins to prevent downgrading the CI build
+grep -vE "torch|torchvision|torchaudio" requirements/requirements.txt > requirements_no_torch.txt
+pip_install -r requirements_no_torch.txt
+rm requirements_no_torch.txt
 
 # 10. Build
 echo "Building TorchTPU Wheel..."
