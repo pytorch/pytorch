@@ -1362,7 +1362,7 @@ test_libtorch_agnostic_targetting() {
         "$VENV_UV" pip install --python "$VENV_PY" expecttest numpy unittest-xml-reporting
     }
 
-    CURRENT_VERSION=$(python -c "import torch; print(torch.__version__.split('+')[0].split('a')[0].split('b')[0].split('rc')[0])")
+    CURRENT_VERSION=$(python -I -c "import torch; print(torch.__version__.split('+')[0].split('a')[0].split('b')[0].split('rc')[0])")
     local CURRENT_major CURRENT_minor
     parse_version "$CURRENT_VERSION" "CURRENT"
     echo "Current: ${CURRENT_major}.${CURRENT_minor}, CUDA: $([[ "$BUILD_ENVIRONMENT" =~ cuda ]] && echo yes || echo no)"
