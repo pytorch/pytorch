@@ -12,6 +12,7 @@ __all__ = [
     "cuFFTPlanCache",
     "cuFFTPlanCacheManager",
     "cuBLASModule",
+    "MathSDPModule",
     "preferred_linalg_library",
     "preferred_blas_library",
     "preferred_rocm_fa_library",
@@ -203,6 +204,18 @@ class cuBLASModule:
             return torch._C._set_cublas_allow_fp16_accumulation(value)
         elif name == "fp32_precision":
             return torch._C._set_fp32_precision_setter("cuda", "matmul", value)
+        raise AttributeError("Unknown attribute " + name)
+
+
+class MathSDPModule:
+    def __getattr__(self, name):
+        if name == "fp32_precision":
+            return torch._C._get_fp32_precision_getter("cuda", "math_sdp")
+        raise AttributeError("Unknown attribute " + name)
+
+    def __setattr__(self, name, value):
+        if name == "fp32_precision":
+            return torch._C._set_fp32_precision_setter("cuda", "math_sdp", value)
         raise AttributeError("Unknown attribute " + name)
 
 
@@ -591,3 +604,4 @@ def sdp_kernel(
 
 cufft_plan_cache = cuFFTPlanCacheManager()
 matmul = cuBLASModule()
+math_sdp = MathSDPModule()
