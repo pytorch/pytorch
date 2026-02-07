@@ -484,7 +484,7 @@ jobs:
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
-        uses: ./pytorch/.github/actions/teardown-rocm
+        uses: ./.github/actions/teardown-rocm
   libtorch-rocm7_1-shared-with-deps-release-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -603,7 +603,7 @@ jobs:
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
-        uses: ./pytorch/.github/actions/teardown-rocm
+        uses: ./.github/actions/teardown-rocm
   libtorch-rocm7_2-shared-with-deps-release-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
