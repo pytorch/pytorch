@@ -28,7 +28,7 @@ class GraphInfoProvider:
         recorded_knapsack_input_memories: Optional[list[float]] = None,
         recorded_knapsack_input_runtimes: Optional[list[float]] = None,
         joint_graph: Optional[Graph] = None,
-    ):
+    ) -> None:
         self.graph_nodes_in_order = graph_nodes_in_order
         self.graph_edges = graph_edges
         self.all_node_runtimes: dict[str, float] = dict()
