@@ -10,6 +10,7 @@ An aot_dispatch_* function:
 
 import copy
 import dataclasses
+import inspect
 import itertools
 import logging
 import operator
@@ -1753,12 +1754,28 @@ def _aot_stage2a_partition(
             static_lifetime_input_indices = fw_metadata.static_input_indices
             if aot_config.partition_fn is None:
                 raise AssertionError("aot_config.partition_fn must not be None")
-            fw_module, bw_module = aot_config.partition_fn(
-                fx_g,
-                joint_inputs,
-                num_fwd_outputs=num_inner_fwd_outputs,
-                static_lifetime_input_indices=static_lifetime_input_indices,
-            )
+
+            # Check if partition_fn accepts fw_metadata
+            partition_fn_sig = inspect.signature(aot_config.partition_fn)
+            partition_fn_params = partition_fn_sig.parameters
+
+            if 'fw_metadata' in partition_fn_params:
+                fw_module, bw_module = aot_config.partition_fn(
+                    fx_g,
+                    joint_inputs,
+                    num_fwd_outputs=num_inner_fwd_outputs,
+                    static_lifetime_input_indices=static_lifetime_input_indices,
+                    fw_metadata=fw_metadata,
+                )
+            else:
+                # Backward compatible - don't pass if not expected
+                fw_module, bw_module = aot_config.partition_fn(
+                    fx_g,
+                    joint_inputs,
+                    num_fwd_outputs=num_inner_fwd_outputs,
+                    static_lifetime_input_indices=static_lifetime_input_indices,
+                )
+
             rng_states = [
                 n
                 for n in fw_module.graph.find_nodes(op="placeholder")
