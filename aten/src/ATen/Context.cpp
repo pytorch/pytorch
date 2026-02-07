@@ -85,6 +85,28 @@ std::string precision2str(Float32Precision prec) {
   TORCH_CHECK(false, "Invalid enum Float32Precision(", static_cast<int>(prec), ")");
 }
 
+CuDNNForce str2cudnnforce(const std::string& name) {
+  if (name == "heuristic")
+    return CuDNNForce::HEURISTIC;
+  else if (name == "on")
+    return CuDNNForce::ON;
+  else if (name == "off")
+    return CuDNNForce::OFF;
+  TORCH_CHECK(false, "Unknown cuDNN force mode: ", name);
+}
+
+std::string cudnnforce2str(CuDNNForce force) {
+  switch (force) {
+    case CuDNNForce::HEURISTIC:
+      return "heuristic";
+    case CuDNNForce::ON:
+      return "on";
+    case CuDNNForce::OFF:
+      return "off";
+  }
+  TORCH_CHECK(false, "Invalid enum CuDNNForce(", static_cast<int>(force), ")");
+}
+
 #ifdef USE_ROCM
 static constexpr const auto rocm_allow_group_gemm_ck = "ROCM_ALLOW_GROUP_GEMM_CK";
 #endif
@@ -180,6 +202,14 @@ bool Context::userEnabledNNPACK() const {
 
 void Context::setUserEnabledNNPACK(bool e) {
   enabled_nnpack = e;
+}
+
+CuDNNForce Context::userForceCuDNN() const {
+  return force_cudnn;
+}
+
+void Context::setUserForceCuDNN(CuDNNForce f) {
+  force_cudnn = f;
 }
 
 bool Context::allowTF32CuDNN(std::optional<Float32Op> op) const {
