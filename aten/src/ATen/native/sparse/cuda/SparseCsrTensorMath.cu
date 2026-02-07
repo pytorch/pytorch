@@ -721,14 +721,24 @@ void _apply_sparse_csr_linear_solve(
   TORCH_CHECK(b.layout() == kStrided, "b must be a strided tensor");
   TORCH_CHECK(x.layout() == kStrided, "x must be a strided tensor");
   // dim check
-  TORCH_CHECK(b.dim() == 1, "b must be a 1D tensor");
+  TORCH_CHECK(b.dim() == 1 || b.dim() == 2, "b must be a 1D or 2D tensor");
   TORCH_CHECK(b.stride(0) == 1, "b must be a column major tensor");
   TORCH_CHECK(b.size(0) == A.size(0), "linear system size mismatch.");
-  TORCH_CHECK(x.dim() == 1, "x must be a 1D tensor");
+  if (b.dim() == 2 && b.size(1) > 1) {
+    TORCH_CHECK(b.stride(1) >= b.size(0), "b must be a column major tensor");
+  }
+
+  TORCH_CHECK(x.dim() == b.dim(), "x must have the same number of dimensions as b");
   TORCH_CHECK(x.stride(0) == 1, "x must be a column major tensor");
   TORCH_CHECK(x.size(0) == A.size(1), "linear system size mismatch.");
+  if (x.dim() == 2 && x.size(1) > 1) {
+    TORCH_CHECK(x.stride(1) >= x.size(0), "x must be a column major tensor");
+  }
+  if (b.dim() == 2) {
+    TORCH_CHECK(b.size(1) == x.size(1), "x columns count must be the same as b");
+  }
   TORCH_CHECK(A.dtype() == b.dtype() && A.dtype() == x.dtype(), "A, x, and b must have the same dtype");
-  TORCH_CHECK(left == true, "only left == true is supported by the Sparse CSR backend")
+  TORCH_CHECK(left == true, "only left == true is supported by the Sparse CSR backend");
 
   Tensor crow = A.crow_indices();
   Tensor col = A.col_indices();
@@ -739,6 +749,11 @@ void _apply_sparse_csr_linear_solve(
   int* rowOffsets = crow.data_ptr<int>();
   int* colIndices = col.data_ptr<int>();
   Tensor values = A.values();
+  const int64_t nrhs = b.dim() == 1 ? 1 : b.size(1);
+  // For column-major layout, leading dimension must be >= nrows.
+  // When nrhs==1, stride(1) can be less than size(0), so use max.
+  const int64_t b_ld = b.dim() == 1 ? b.size(0) : std::max(b.size(0), b.stride(1));
+  const int64_t x_ld = x.dim() == 1 ? x.size(0) : std::max(x.size(0), x.stride(1));
   // cuDSS data structures and handle initialization
   cudssConfig_t config;
   cudssMatrix_t b_mt;
@@ -755,8 +770,8 @@ void _apply_sparse_csr_linear_solve(
     scalar_t* b_ptr = b.data_ptr<scalar_t>();
     scalar_t* x_ptr = x.data_ptr<scalar_t>();
     auto CUDA_R_TYP = std::is_same_v<scalar_t, double> ? CUDA_R_64F : CUDA_R_32F;
-    TORCH_CUDSS_CHECK(cudssMatrixCreateDn(&b_mt, b.size(0), 1, b.size(0), b_ptr, CUDA_R_TYP, CUDSS_LAYOUT_COL_MAJOR));
-    TORCH_CUDSS_CHECK(cudssMatrixCreateDn(&x_mt, x.size(0), 1, x.size(0), x_ptr, CUDA_R_TYP, CUDSS_LAYOUT_COL_MAJOR));
+    TORCH_CUDSS_CHECK(cudssMatrixCreateDn(&b_mt, b.size(0), nrhs, b_ld, b_ptr, CUDA_R_TYP, CUDSS_LAYOUT_COL_MAJOR));
+    TORCH_CUDSS_CHECK(cudssMatrixCreateDn(&x_mt, x.size(0), nrhs, x_ld, x_ptr, CUDA_R_TYP, CUDSS_LAYOUT_COL_MAJOR));
     TORCH_CUDSS_CHECK(cudssMatrixCreateCsr(&A_mt, A.size(0), A.size(1),  A._nnz(), rowOffsets, rowOffsets + crow.size(0), colIndices, values_ptr, CUDA_R_32I, CUDA_R_TYP, CUDSS_MTYPE_GENERAL, CUDSS_MVIEW_FULL, CUDSS_BASE_ZERO));
   }));
   TORCH_CUDSS_CHECK(cudssExecute(handle, CUDSS_PHASE_ANALYSIS, config, cudss_data, A_mt, x_mt, b_mt));
@@ -801,8 +816,18 @@ Tensor _sparse_csr_prod_cuda(const Tensor& input, IntArrayRef dims_to_reduce, bo
 }
 
 Tensor _sparse_csr_linear_solve(const Tensor& A, const Tensor& b, const bool left) {
+  TORCH_CHECK(b.numel() > 0, "Expected non-empty other tensor, but found empty tensor");
+  Tensor out = at::empty(b.sizes(), b.options());
+  if (b.dim() == 2) {
+    // cuDSS expects column-major dense matrices. Convert the row-major contiguous
+    // RHS to a column-major strided view backed by a contiguous transpose.
+    Tensor b_col_major = b.transpose(-2, -1).contiguous().transpose(-2, -1);
+    Tensor x_col_major = at::empty({b.size(1), b.size(0)}, b.options()).transpose(-2, -1);
+    _apply_sparse_csr_linear_solve(A, b_col_major, left, x_col_major);
+    out.copy_(x_col_major);
+    return out;
+  }
   Tensor b_copy = b.contiguous();
-  Tensor out = b_copy.new_empty(b_copy.sizes());
   _apply_sparse_csr_linear_solve(A, b_copy, left, out);
   return out;
 }
