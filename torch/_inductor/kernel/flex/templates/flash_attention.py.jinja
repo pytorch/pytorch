@@ -51,7 +51,7 @@
         ) | indent_except_first(2) }}
         return mask_mod_output
     {{ set_cute_hash("mask_mod", "mask") }}
-    block_sparse_tensors = BlockSparseTensorsTorch(KV_NUM_BLKS, KV_IDX, FULL_KV_NUM_BLKS, FULL_KV_IDX)
+    block_sparse_tensors = BlockSparseTensorsTorch(KV_NUM_BLKS, KV_IDX, FULL_KV_NUM_BLKS, FULL_KV_IDX, block_size=({{SPARSE_Q_BLOCK_SIZE}}, {{SPARSE_KV_BLOCK_SIZE}}))
     {% else %}
     block_sparse_tensors = None
     mask_mod = None
