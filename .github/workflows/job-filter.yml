@@ -40,6 +40,23 @@ jobs:
     outputs:
       jobs: ${{ steps.set.outputs.jobs }}
     steps:
+      - name: Checkout for file-based filtering
+        if: ${{ inputs.jobs-to-include == '' && github.event_name == 'pull_request' }}
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine jobs from changed files
+        id: determine
+        if: ${{ inputs.jobs-to-include == '' && github.event_name == 'pull_request' }}
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          result=$(python3 .github/scripts/determine_jobs.py)
+          jobs=$(echo "$result" | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['jobs'])")
+          echo "determined_jobs=$jobs" >> "$GITHUB_OUTPUT"
+
       - id: set
         env:
           EVENT_NAME: ${{ github.event_name }}
@@ -49,7 +66,6 @@ jobs:
           REPOSITORY: ${{ github.repository }}
           REF: ${{ github.ref }}
         run: |
-          # Log dispatch context for debugging and future restriction of unlimited dispatches
           echo "::group::Workflow dispatch context"
           echo "event_name: $EVENT_NAME"
           echo "actor: $ACTOR"
@@ -59,9 +75,17 @@ jobs:
           echo "ref: $REF"
           echo "::endgroup::"
 
+          # Manual override takes priority
           jobs="${{ inputs.jobs-to-include }}"
           if [ -n "$jobs" ]; then
+            echo "Using manual job filter: $jobs"
             echo "jobs= ${jobs} " >> "$GITHUB_OUTPUT"
+          # File-based filtering for PRs
+          elif [ -n "${{ steps.determine.outputs.determined_jobs }}" ]; then
+            echo "Using file-based job filter: ${{ steps.determine.outputs.determined_jobs }}"
+            echo "jobs=${{ steps.determine.outputs.determined_jobs }}" >> "$GITHUB_OUTPUT"
           else
+            # No filter — run everything (push to main, schedule, etc.)
+            echo "No filter applied, running all jobs"
             echo "jobs=" >> "$GITHUB_OUTPUT"
           fi
