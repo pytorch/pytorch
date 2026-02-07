@@ -467,7 +467,10 @@ class DTensorTest(DTensorTestBase):
         # test the case under no-grad we directly return the local tensor
         with torch.no_grad():
             local_no_grad = sharded_tensor.to_local()
-            assert local_no_grad is sharded_tensor._local_tensor
+            if local_no_grad is not sharded_tensor._local_tensor:
+                raise AssertionError(
+                    "Expected local_no_grad to be sharded_tensor._local_tensor"
+                )
 
     @with_comms
     def test_to_local_grad_hint(self):
@@ -813,7 +816,10 @@ class DTensorTest(DTensorTestBase):
 
                     @staticmethod
                     def backward(ctx, grad_out1, grad_out2):
-                        assert isinstance(grad_out2, DTensor)
+                        if not isinstance(grad_out2, DTensor):
+                            raise AssertionError(
+                                f"grad_out2 should be a DTensor but is {type(grad_out2)}"
+                            )
                         if not use_compile:
                             MultiOutputFunc.gout1 = grad_out1
                             MultiOutputFunc.gout2 = grad_out2
@@ -868,7 +874,8 @@ class DTensorTest(DTensorTestBase):
 
             @staticmethod
             def backward(ctx, grad_out1, grad_out2):
-                assert grad_out2 is None
+                if grad_out2 is not None:
+                    raise AssertionError("grad_out2 should be None")
                 return grad_out1 * 2, grad_out2
 
         x_local = torch.randn(4, 4, device=self.device_type, requires_grad=True)
