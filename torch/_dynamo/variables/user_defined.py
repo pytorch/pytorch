@@ -1086,6 +1086,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         "value",
         "value_type",
         "attrs_directly_modifed_on_dict",
+        "_assume_constant_attributes",
         *UserDefinedVariable._nonvar_fields,
     }
 
@@ -1137,6 +1138,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             install_guard(self.source.make_guard(GuardBuilder.EQUALS_MATCH))
 
         self._object_has_getattribute = object_has_getattribute(self.value)
+        self._assume_constant_attributes = bool(
+            getattr(self.value_type, "__dynamo_assume_constant_attributes__", False)
+        )
 
     def __str__(self) -> str:
         inner = self.value_type.__name__
@@ -1290,6 +1294,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         value: VariableTracker,
         directly_update_dict: bool = False,
     ) -> VariableTracker:
+        self._assume_constant_attributes = False
         name_str = ""
         try:
             name_str = name.as_python_constant()
@@ -1575,6 +1580,20 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         )
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+        if self._assume_constant_attributes:
+            source = self.source and AttrSource(self.source, name)
+            try:
+                attr = getattr(self.value, name)
+            except AttributeError:
+                raise_observed_exception(
+                    AttributeError,
+                    tx,
+                    args=[
+                        f"'{type(self.value).__name__}' object has no attribute '{name}'"
+                    ],
+                )
+            return VariableTracker.build(tx, attr, source=source)
+
         from . import ConstantVariable
 
         source: Source | None = AttrSource(self.source, name) if self.source else None
