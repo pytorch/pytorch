@@ -216,7 +216,8 @@ def _get_weights_and_functional_call(net, mechanism):
     if mechanism == "make_functional":
         return make_functional(net)
     else:
-        assert mechanism == "functional_call"
+        if mechanism != "functional_call":
+            raise AssertionError(f"Expected 'functional_call', got {mechanism!r}")
         # this makes it so the function from make_functional and this call have the same signature
 
         def net_func(weights, data):
@@ -229,7 +230,8 @@ def _get_weights_and_functional_call_with_buffers(net, mechanism):
     if mechanism == "make_functional":
         return make_functional_with_buffers(net)
     else:
-        assert mechanism == "functional_call"
+        if mechanism != "functional_call":
+            raise AssertionError(f"Expected 'functional_call', got {mechanism!r}")
 
         # this makes it so the function from make_functional and this call have the same signature
         def net_func(weights, buffers, data):
@@ -452,9 +454,11 @@ class TestGradTransform(TestCase):
         x = torch.tensor(1 + 1j)
 
         def foo(x):
-            assert not x.is_conj()
+            if x.is_conj():
+                raise AssertionError("Expected x to not be conj")
             y = x.conj()
-            assert y.is_conj()
+            if not y.is_conj():
+                raise AssertionError("Expected y to be conj")
             return y.abs()
 
         res = grad(foo)(x)
@@ -765,14 +769,18 @@ class TestGradTransform(TestCase):
         # Check list output
         output, vjp_fn = vjp(lambda x: [x, x.sum()], x)
         (vjp_out,) = vjp_fn([t, t.sum()])
-        assert isinstance(output, list) and len(output) == 2
-        assert isinstance(vjp_out, torch.Tensor)
+        if not isinstance(output, list) or len(output) != 2:
+            raise AssertionError(f"Expected list of length 2, got {type(output)}")
+        if not isinstance(vjp_out, torch.Tensor):
+            raise AssertionError(f"Expected Tensor, got {type(vjp_out)}")
 
         # Check dict output
         output, vjp_fn = vjp(lambda x: {"x": x, "xsum": x.sum()}, x)
         (vjp_out,) = vjp_fn({"x": t, "xsum": t.sum()})
-        assert isinstance(output, dict) and len(output) == 2 and "xsum" in output
-        assert isinstance(vjp_out, torch.Tensor)
+        if not isinstance(output, dict) or len(output) != 2 or "xsum" not in output:
+            raise AssertionError(f"Expected dict with 'xsum', got {output}")
+        if not isinstance(vjp_out, torch.Tensor):
+            raise AssertionError(f"Expected Tensor, got {type(vjp_out)}")
 
         def composite_output(x):
             out = x.sum()
@@ -786,9 +794,12 @@ class TestGradTransform(TestCase):
                 (t.sum(), {"a": t, "out": [t, t.sum()]}),
             ]
         )
-        assert isinstance(output, list)
-        assert isinstance(output[0], tuple) and isinstance(output[0][1], dict)
-        assert isinstance(vjp_out, torch.Tensor)
+        if not isinstance(output, list):
+            raise AssertionError(f"Expected list, got {type(output)}")
+        if not isinstance(output[0], tuple) or not isinstance(output[0][1], dict):
+            raise AssertionError(f"Expected tuple with dict, got {output[0]}")
+        if not isinstance(vjp_out, torch.Tensor):
+            raise AssertionError(f"Expected Tensor, got {type(vjp_out)}")
 
     def test_vjp_pytree_error(self, device):
         def f(x):
