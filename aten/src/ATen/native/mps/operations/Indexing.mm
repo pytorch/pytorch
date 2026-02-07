@@ -850,6 +850,8 @@ Tensor& masked_scatter__mps(Tensor& self, const Tensor& mask, const Tensor& sour
   TORCH_CHECK(mask.scalar_type() == ScalarType::Byte || mask.scalar_type() == ScalarType::Bool,
               "masked_scatter: expected BoolTensor or ByteTensor for mask");
 
+  bool was_scalar = self.dim() == 0;
+
   auto mask_temp =
       (mask.dim() == 0) ? c10::MaybeOwned<Tensor>::owned(mask.unsqueeze(0)) : c10::MaybeOwned<Tensor>::borrowed(mask);
   auto self_temp =
@@ -879,7 +881,11 @@ Tensor& masked_scatter__mps(Tensor& self, const Tensor& mask, const Tensor& sour
   for (const auto index : indices) {
     final_indices.push_back(index);
   }
-  return at::index_put_out(self, *std::get<1>(mask_self_expanded), final_indices, source.resize_(indices[0].numel()));
+  at::index_put_out(self, *std::get<1>(mask_self_expanded), final_indices, source.resize_(indices[0].numel()));
+  if (was_scalar) {
+    self.squeeze_();
+  }
+  return self;
 }
 
 Tensor& index_fill_mps_(Tensor& self, int64_t dim, const Tensor& index, const Tensor& source) {
