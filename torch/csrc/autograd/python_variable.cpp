@@ -1797,6 +1797,7 @@ static PyObject* THPVariable_dtensor_new(
       extra_dispatch_keys);
   tensor.set_requires_grad(requires_grad);
   tensor.unsafeGetTensorImpl()->set_python_dispatch(true);
+  tensor.unsafeGetTensorImpl()->set_python_custom_zeros_like(true);
   py::object py_tensor = py::reinterpret_steal<py::object>(
       THPVariable_WrapWithType(std::move(tensor), (PyTypeObject*)cls));
   py_tensor.attr(dtensor_interned_strings._spec) = spec;
