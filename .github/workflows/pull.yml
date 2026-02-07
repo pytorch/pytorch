@@ -160,6 +160,7 @@ jobs:
     with:
       build-environment: ${{ needs.linux-jammy-py3_10-gcc11-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-py3_10-gcc11-build.outputs.docker-image }}
+      run-doxygen: true
     secrets: inherit
 
   linux-jammy-py3_10-gcc11-no-ops:
