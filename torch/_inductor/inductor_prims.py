@@ -8,6 +8,7 @@ from typing import Optional, TYPE_CHECKING
 
 import torch
 from torch import _prims, Tensor
+from torch._utils import _get_device_index
 
 
 if TYPE_CHECKING:
@@ -85,8 +86,8 @@ lookup_seed = make_prim(
 # the dtype, so it always faithfully produces a float32 tensor during tracing,
 # even if the default dtype is set to something else.
 random = make_prim(
-    "inductor_random(SymInt[] size, Tensor seed, str mode) -> Tensor",
-    lambda size, seed, mode: getattr(torch, mode)(
+    "inductor_random(SymInt[] size, Tensor seed, str mode, *, ScalarType? align_dtype=None) -> Tensor",
+    lambda size, seed, mode, *, align_dtype=None: getattr(torch, mode)(
         size, device=seed.device, dtype=torch.float32
     ),
     doc="torch.rand()/torch.randn() using backend-specific RNG that can be fused",
@@ -96,6 +97,104 @@ randint = make_prim(
     lambda low, high, size, seed: torch.randint(low, high, size, device=seed.device),
     doc="torch.randint() using backend-specific RNG that can be fused",
 )
+
+
+def _reserve_rng_state(device: torch.device, used_offset):
+    """
+    Reserve `used_offset` 32-bit Philox samples on the given CUDA device and
+    return (seed, base), where base is in Philox-4x32 units.
+
+    This mirrors how Inductor accounts for Philox consumption so compiled
+    dropout kernels can reconstruct eager RNG state.
+    """
+    dev = device if isinstance(device, torch.device) else torch.device(device)
+    if dev.type != "cuda":
+        # Only CUDA devices have Philox-based CUDAGenerator. For non-CUDA
+        # devices this prim should be dead code and never actually run.
+        return 0, 0
+
+    dev_index = _get_device_index(dev, optional=True)
+    if dev_index is None:
+        dev_index = torch.cuda.current_device()
+
+    gen = torch.cuda.default_generators[dev_index]
+    seed_t, off_t, intra_t = torch.ops.inductor_prims.inductor_reserve_rng_state(
+        gen, used_offset
+    )
+
+    # NOTE: for correctness in eager, intra_t should be 0.
+    # Keep everything as tensor math to avoid host sync.
+    if intra_t.device.type != off_t.device.type:
+        intra = int(intra_t.item())
+        base = torch.div(off_t + intra, 4, rounding_mode="floor")
+    else:
+        base = torch.div(off_t + intra_t, 4, rounding_mode="floor")
+    return seed_t, base
+
+
+def _rand_eager_offset_impl(offset, device: torch.device) -> Tensor:
+    """
+    Reserve `offset` 32-bit Philox samples and return a 1-element int64 tensor
+    with packed (seed, base) in the lower 64 bits:
+        should not enter this, this is just placeholder
+        packed = (seed << 32) | (base & 0xFFFFFFFF).
+    """
+    return torch.empty(1, dtype=torch.int64, device=device)
+
+
+def _rand_eager_offsets_impl(offsets, device: torch.device) -> Tensor:
+    """
+    Batched version of _rand_eager_offset_impl. For each entry in `offsets`,
+    reserve that many 32-bit Philox samples and return a 1D int64 tensor
+    containing the packed (seed, base) values for each reservation.
+    """
+    states = [_reserve_rng_state(device, int(off)) for off in offsets]
+    seeds = [s for s, _ in states]
+    bases = [b for _, b in states]
+
+    def _to_i64(x):
+        if isinstance(x, torch.Tensor):
+            return x
+        return torch.as_tensor(x, device=device, dtype=torch.int64)
+
+    seeds_tensor = torch.stack([_to_i64(x) for x in seeds]).view(-1)
+    bases_tensor = torch.stack([_to_i64(x) for x in bases]).view(-1)
+    i64 = torch.int64
+    packed = (seeds_tensor.to(dtype=i64) << 32) | (
+        bases_tensor.to(dtype=i64) & 0xFFFFFFFF
+    )
+    return packed
+
+
+def _rand_eager_offsets_meta(offsets, device: torch.device):
+    return torch.empty((len(offsets),), dtype=torch.int64, device=device)
+
+
+rand_eager_offset = make_prim(
+    "inductor_rand_eager_offset(SymInt offset, Device device) -> Tensor",
+    _rand_eager_offset_impl,
+    doc=(
+        "Reserve `offset` 32-bit Philox samples on `device` and return a "
+        "1-element int64 tensor containing packed (seed, base)."
+    ),
+    tags=(torch.Tag.nondeterministic_seeded,),
+)
+
+
+rand_eager_offsets = _prims._make_prim(
+    schema="inductor_rand_eager_offsets(SymInt[] offsets, Device device) -> Tensor",
+    return_type=_prims.RETURN_TYPE.NEW,
+    meta=_rand_eager_offsets_meta,
+    impl_aten=_rand_eager_offsets_impl,
+    doc=(
+        "Batched version of inductor_rand_eager_offset. For each entry in "
+        "`offsets`, reserves that many 32-bit Philox samples and returns "
+        "packed (seed, base) values."
+    ),
+    tags=(torch.Tag.nondeterministic_seeded,),
+)
+
+
 force_stride_order = make_prim(
     "inductor_force_stride_order(Tensor input, SymInt[] stride) -> Tensor",
     eager_force_stride,
