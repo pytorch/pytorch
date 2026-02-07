@@ -759,12 +759,123 @@ class TestViewOps(DTensorTestBase):
         expected = tensor[2:, :]
         self.assertEqual(sliced_dtensor.full_tensor(), expected)
 
+    @with_comms
+    def test_unbacked_view_ops(self):
+        """
+        Test view ops with unbacked symbolic dimensions.
+
+        This verifies that view/reshape sharding propagation works correctly
+        when tensor dimensions are marked as unbacked (data-dependent).
+        The key is that operations must not require divisibility guards.
+        """
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+
+        def test_view_with_placements(input_shape, output_shape, placements):
+            """Test a view op with given shapes and placements."""
+            tensor = torch.randn(input_shape, device=self.device_type)
+            dtensor = distribute_tensor(tensor, mesh, placements)
+
+            # Mark all dimensions as unbacked (like the matmul tests)
+            for i in range(dtensor.ndim):
+                torch._dynamo.decorators.mark_unbacked(dtensor, i)
+
+            # Compile with fullgraph=True to catch DDEs
+            torch._dynamo.reset()
+
+            @torch.compile(backend="eager", fullgraph=True)
+            def do_view(x, shape):
+                return x.view(*shape)
+
+            result = do_view(dtensor, output_shape)
+            return result
+
+        # Test 1: Simple split with Replicate - no sharding constraints
+        # (12,) -> (3, 4) with Replicate() should work
+        result = test_view_with_placements((12,), (3, 4), [Replicate()])
+        self.assertEqual(result.shape, torch.Size([3, 4]))
+        self.assertEqual(result.placements[0], Replicate())
+
+        # Test 2: Reshape between same total elements with Replicate
+        result = test_view_with_placements((6, 4), (2, 12), [Replicate()])
+        self.assertEqual(result.shape, torch.Size([2, 12]))
+        self.assertEqual(result.placements[0], Replicate())
+
+        # Test 3: 1D -> 3D split with Replicate
+        result = test_view_with_placements((24,), (2, 3, 4), [Replicate()])
+        self.assertEqual(result.shape, torch.Size([2, 3, 4]))
+        self.assertEqual(result.placements[0], Replicate())
+
+        # Test 4: Flatten 3D -> 1D with Replicate
+        result = test_view_with_placements((2, 3, 4), (24,), [Replicate()])
+        self.assertEqual(result.shape, torch.Size([24]))
+        self.assertEqual(result.placements[0], Replicate())
+
+    @with_comms
+    def test_unbacked_reshape_ops(self):
+        """
+        Test reshape ops with unbacked symbolic dimensions.
+        """
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+
+        def test_reshape_with_placements(input_shape, output_shape, placements):
+            """Test a reshape op with given shapes and placements."""
+            tensor = torch.randn(input_shape, device=self.device_type)
+            dtensor = distribute_tensor(tensor, mesh, placements)
+
+            # Mark all dimensions as unbacked
+            for i in range(dtensor.ndim):
+                torch._dynamo.decorators.mark_unbacked(dtensor, i)
+
+            torch._dynamo.reset()
+
+            @torch.compile(backend="eager", fullgraph=True)
+            def do_reshape(x, shape):
+                return x.reshape(*shape)
+
+            result = do_reshape(dtensor, output_shape)
+            return result
+
+        # Test reshape with complex shape changes
+        result = test_reshape_with_placements((6, 4), (2, 12), [Replicate()])
+        self.assertEqual(result.shape, torch.Size([2, 12]))
+
+        result = test_reshape_with_placements((24,), (2, 3, 4), [Replicate()])
+        self.assertEqual(result.shape, torch.Size([2, 3, 4]))
+
+    @with_comms
+    def test_unbacked_flatten_ops(self):
+        """
+        Test flatten ops with unbacked symbolic dimensions.
+        """
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+
+        tensor = torch.randn(6, 4, device=self.device_type)
+        dtensor = distribute_tensor(tensor, mesh, [Replicate()])
+
+        # Mark all dimensions as unbacked
+        for i in range(dtensor.ndim):
+            torch._dynamo.decorators.mark_unbacked(dtensor, i)
+
+        torch._dynamo.reset()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def do_flatten(x):
+            return torch.flatten(x)
+
+        result = do_flatten(dtensor)
+        self.assertEqual(result.shape, torch.Size([24]))
+        self.assertEqual(result.placements[0], Replicate())
+
 
 TestViewOpsWithLocalTensor = create_local_tensor_test_class(
     TestViewOps,
     skipped_tests=[
         # Comparing data pointers is not supported for local tensor
         "test_dtensor_view_op_uneven",
+        # mark_unbacked is not supported for local tensor wrapper subclass
+        "test_unbacked_view_ops",
+        "test_unbacked_reshape_ops",
+        "test_unbacked_flatten_ops",
     ],
 )
 
