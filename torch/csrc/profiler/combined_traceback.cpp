@@ -13,8 +13,11 @@ std::shared_ptr<CapturedTraceback> CapturedTraceback::gather(
   if (python) {
     auto p = python_support_.load();
     while (p && r->frames_.empty()) {
-      r->frames_ = p->gather();
-      r->python_ = p;
+      // Check if it's safe to gather Python frames from current thread
+      if (p->canGather()) {
+        r->frames_ = p->gather();
+        r->python_ = p;
+      }
       p = p->next_;
     }
   }

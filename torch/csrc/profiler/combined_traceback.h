@@ -36,6 +36,9 @@ struct TORCH_API CapturedTraceback : public c10::GatheredContext {
   using visitproc = int (*)(void* self, void* arg);
 
   struct Python {
+    // Check if it's safe to gather Python frames from the current thread.
+    // Returns false for pure C++ threads that cannot acquire the GIL.
+    virtual bool canGather() = 0;
     virtual std::vector<PyFrame> gather() = 0;
     virtual void release(std::vector<PyFrame>& frames) = 0;
     virtual void appendSymbolized(

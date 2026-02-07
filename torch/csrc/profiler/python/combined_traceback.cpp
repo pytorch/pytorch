@@ -22,10 +22,24 @@ namespace {
 static std::mutex to_free_frames_mutex;
 static std::vector<CapturedTraceback::PyFrame> to_free_frames;
 struct PythonTraceback : public CapturedTraceback::Python {
-  std::vector<CapturedTraceback::PyFrame> gather() override {
+  bool canGather() override {
+    // Check if it's safe to gather Python frames from the current thread.
+    // Returns false for pure C++ threads that cannot acquire the GIL.
     if (!Py_IsInitialized()) {
-      return {};
+      return false;
     }
+    // Already holding GIL - safe to gather
+    if (PyGILState_Check() == 1) {
+      return true;
+    }
+    // Thread is registered with Python - can acquire GIL
+    if (PyGILState_GetThisThreadState() != nullptr) {
+      return true;
+    }
+    // Pure C++ thread with no Python state - cannot acquire GIL
+    return false;
+  }
+  std::vector<CapturedTraceback::PyFrame> gather() override {
     std::vector<CapturedTraceback::PyFrame> frames;
     py::gil_scoped_acquire acquire;
     {
