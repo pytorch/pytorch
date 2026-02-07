@@ -5541,10 +5541,11 @@ class TestBlockStateAbsorption(TestCase):
         torch._C._cuda_setCheckpointPoolState(device, small_state, [], out1_storage)
 
         large_mapped_blocks = get_large_mapped_blocks()
-        # private memory pool never decreases size so we still have 40 MB segment. When we set checkpoint pool state for small_state, we
-        # allocate a 2 MB (or 2097152 bytes) active block and a 18 MB (or 18874368 bytes) inactive block. Since the total segment size is 40 MB,
-        # we still have a 20 MB inactive block. These two inactive blocks automatically merge into a single 38 MB (or 39845888 bytes) inactive block.
-        # As a result, we have a 2 MB active block and a 38 MB inactive block in the memory snapshot.
+        # private memory pool never decreases size so we still have 40 MB segment. When we set checkpoint pool state for
+        # small_state, we allocate a 2 MB (or 2097152 bytes) active block and a 18 MB (or 18874368 bytes) inactive block.
+        # Since the total segment size is 40 MB, we still have a 20 MB inactive block. These two inactive blocks
+        # automatically merge into a single 38 MB (or 39845888 bytes) inactive block. As a result, we have a 2 MB active
+        # block and a 38 MB inactive block in the memory snapshot.
         self.assertEqual(
             large_mapped_blocks, [(2097152, "active_allocated"), (39845888, "inactive")]
         )
