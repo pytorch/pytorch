@@ -7,6 +7,10 @@
 #import <torch/script.h>
 #import <fmt/format.h>
 
+#if __has_include(<xplat/lazy_static/lazy_static.h>) && defined(LAZY_GATE_coreml_backend)
+#import <xplat/lazy_static/lazy_static.h>
+#endif
+
 #import <CoreML/CoreML.h>
 
 #if C10_IOS
@@ -218,7 +222,16 @@ class CoreMLBackend: public torch::jit::PyTorchBackendInterface {
   }
 };
 
+#if __has_include(<xplat/lazy_static/lazy_static.h>) && defined(LAZY_GATE_coreml_backend)
+// Type alias for the backend registration object
+using CoreMLBackendRegistrar = decltype(torch::jit::backend<CoreMLBackend>("coreml"));
+
+// Lazy-initialized CoreML backend registration
+// Gating is done at compile-time via LAZY_GATE_coreml_backend
+LAZY_STATIC(CoreMLBackendRegistrar, cls, torch::jit::backend<CoreMLBackend>("coreml"), coreml_backend);
+#else
 static auto cls = torch::jit::backend<CoreMLBackend>("coreml");
+#endif
 
 struct PTMCoreMLContext : public ContextInterface {
   void setModelCacheDirectory(std::string dir) override {
@@ -228,7 +241,14 @@ struct PTMCoreMLContext : public ContextInterface {
 
 static BackendRegistrar g_coreml_backend(new PTMCoreMLContext());
 
-} // namespace
+#if __has_include(<xplat/lazy_static/lazy_static.h>)  && defined(LAZY_GATE_coreml_backend)
+void registerBackend() {
+  // Trigger lazy initialization of the CoreML backend registration
+  (void)cls();
 }
-}
-}
+#endif
+
+} // namespace coreml
+} // namespace mobile
+} // namespace jit
+} // namespace torch
