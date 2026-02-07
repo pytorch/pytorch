@@ -5521,7 +5521,12 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
 class CompilePrintFwdVariable(TorchHigherOrderOperatorVariable):
     _HOP_NAME = "torch.ops.higher_order.compile_print_fwd"
 
-    def _call_function(self, tx, args, kwargs):
+    def _call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         from .builder import wrap_fx_proxy
         from .lazy import LazyVariableTracker
 
@@ -5549,7 +5554,12 @@ class CompilePrintFwdVariable(TorchHigherOrderOperatorVariable):
 class CompilePrintBwdVariable(TorchHigherOrderOperatorVariable):
     _HOP_NAME = "torch.ops.higher_order.compile_print_bwd"
 
-    def _call_function(self, tx, args, kwargs):
+    def _call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         from .builder import wrap_fx_proxy
         from .lazy import LazyVariableTracker
 
