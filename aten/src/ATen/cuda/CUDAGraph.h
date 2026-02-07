@@ -19,13 +19,19 @@ namespace cuda {
 // to CUDAGraph::capture_begin
 TORCH_CUDA_CPP_API MempoolId_t graph_pool_handle();
 
+struct CUDAGraph;
+
+// Get the CUDAGraph associated with a capture ID, if any.
+// Returns nullptr if no graph is associated with the given capture ID.
+TORCH_CUDA_CPP_API CUDAGraph* get_graph_from_capture_id(CaptureId_t capture_id);
+
 struct TORCH_CUDA_CPP_API CUDAGraph {
   CUDAGraph(bool keep_graph=false);
   ~CUDAGraph();
 
-  // See Note [Explicit Registration of Generators to the CUDA Graph]
+  // See Note [Lazy Registration of Generators to the CUDA Graph]
+  // Called internally by CUDAGeneratorState::increase() during capture
   void register_generator_state(c10::intrusive_ptr<at::CUDAGeneratorState> state);
-  void register_generator_state(const at::Generator& generator);
   void capture_begin(
       MempoolId_t pool = {0, 0},
       cudaStreamCaptureMode capture_mode = cudaStreamCaptureModeGlobal);
@@ -38,6 +44,10 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   void debug_dump(const std::string& debug_path);
   cudaGraph_t raw_cuda_graph();
   cudaGraphExec_t raw_cuda_graph_exec();
+
+private:
+  template <typename StreamType>
+  std::function<bool(StreamType)> create_allocate_filter() const;
 
  protected:
   cudaGraph_t graph_ = nullptr;
@@ -90,6 +100,11 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
 
   bool keep_graph_;
 };
+
+template <>
+std::function<bool(cudaStream_t)> CUDAGraph::create_allocate_filter<cudaStream_t>() const;
+template <>
+std::function<bool(c10::Stream)> CUDAGraph::create_allocate_filter<c10::Stream>() const;
 
 } // namespace cuda
 } // namespace at
