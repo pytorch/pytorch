@@ -1028,6 +1028,13 @@ void Unpickler::rebuildTensorFromTypeV2() {
     // base tensor.
     // Eg. `rebuildTensor`, `rebuildSpareTensor`.
     stack_.emplace_back(base_tensor_args);
+
+    TORCH_CHECK(
+        curr_globals_idx + 1 < globals_.size(),
+        "Parsing error: expected base tensor rebuild function after "
+        "torch._tensor._rebuild_from_type_v2, but globals_ has size ",
+        globals_.size());
+
     globals_[curr_globals_idx + 1]();
     stack_.emplace_back(pop(stack_));
   });
