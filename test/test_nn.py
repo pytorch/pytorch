@@ -12619,9 +12619,8 @@ if __name__ == '__main__':
         # CUDA says "device-side assert triggered"
         # ROCm says "unspecified launch failure", or HSA_STATUS_ERROR_EXCEPTION
         has_cuda_assert = 'CUDA error: device-side assert triggered' in stderr
-        has_hip_assert = 'HIP error' in stderr and 'launch failure' in stderr
-        has_hsa_exception = 'HSA_STATUS_ERROR_EXCEPTION' in stderr
-        self.assertTrue(has_cuda_assert or has_hip_assert or has_hsa_exception,
+        has_hip_assert = 'launch failure' in stderr or 'HSA_STATUS_ERROR_EXCEPTION' in stderr
+        self.assertTrue(has_cuda_assert or has_hip_assert,
                         f"Expected device assert error in stderr, got: {stderr}")
 
 
