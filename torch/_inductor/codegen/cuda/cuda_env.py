@@ -50,6 +50,7 @@ def get_cuda_version() -> Optional[str]:
         return None
 
 
+@clear_on_fresh_cache
 @functools.cache
 def nvcc_exist(nvcc_path: Optional[str] = "nvcc") -> bool:
     return nvcc_path is not None and shutil.which(nvcc_path) is not None
