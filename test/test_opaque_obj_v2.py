@@ -328,7 +328,10 @@ class TensorWithCounter(torch.Tensor):
         if outer_stride is None:
             outer_stride = a.stride()
 
-        assert a.device == b.device and a.dtype == b.dtype
+        if not (a.device == b.device and a.dtype == b.dtype):
+            raise AssertionError(
+                f"device/dtype mismatch: {a.device}/{a.dtype} vs {b.device}/{b.dtype}"
+            )
         kwargs = {}
         kwargs["strides"] = outer_stride
         kwargs["storage_offset"] = a.storage_offset()
@@ -414,7 +417,8 @@ class TestOpaqueObject(TestCase):
             "_TestOpaqueObject::queue_push", "CompositeExplicitAutograd", lib=self.lib
         )
         def push_impl(queue: OpaqueQueue, b: torch.Tensor) -> None:
-            assert isinstance(queue, OpaqueQueue)
+            if not isinstance(queue, OpaqueQueue):
+                raise AssertionError(f"expected OpaqueQueue, got {type(queue)}")
             queue.push(b)
 
         @torch.library.register_fake("_TestOpaqueObject::queue_push", lib=self.lib)
@@ -430,7 +434,8 @@ class TestOpaqueObject(TestCase):
         )
 
         def pop_impl(queue: OpaqueQueue) -> torch.Tensor:
-            assert isinstance(queue, OpaqueQueue)
+            if not isinstance(queue, OpaqueQueue):
+                raise AssertionError(f"expected OpaqueQueue, got {type(queue)}")
             return queue.pop()
 
         self.lib.impl("queue_pop", pop_impl, "CompositeExplicitAutograd")
@@ -453,7 +458,8 @@ class TestOpaqueObject(TestCase):
             mutates_args=[],
         )
         def size_impl(queue: OpaqueQueue) -> int:
-            assert isinstance(queue, OpaqueQueue)
+            if not isinstance(queue, OpaqueQueue):
+                raise AssertionError(f"expected OpaqueQueue, got {type(queue)}")
             return queue.size()
 
         @size_impl.register_fake
@@ -474,7 +480,8 @@ class TestOpaqueObject(TestCase):
             "_TestOpaqueObject::noisy_inject", "CompositeExplicitAutograd", lib=self.lib
         )
         def noisy_inject(x: torch.Tensor, rng_state: RNGState) -> torch.Tensor:
-            assert isinstance(rng_state, RNGState)
+            if not isinstance(rng_state, RNGState):
+                raise AssertionError(f"expected RNGState, got {type(rng_state)}")
             out = x.clone()
             for i in range(out.numel()):
                 out.view(-1)[i] += rng_state.rng.random()
@@ -482,8 +489,10 @@ class TestOpaqueObject(TestCase):
 
         @torch.library.register_fake("_TestOpaqueObject::noisy_inject", lib=self.lib)
         def noisy_inject_fake(x: torch.Tensor, obj: RNGState) -> torch.Tensor:
-            assert isinstance(obj, RNGState)
-            assert obj.seed >= 0
+            if not isinstance(obj, RNGState):
+                raise AssertionError(f"expected RNGState, got {type(obj)}")
+            if obj.seed < 0:
+                raise AssertionError(f"seed must be >= 0, got {obj.seed}")
             return torch.empty_like(x)
 
         @torch.library.custom_op(
@@ -491,7 +500,8 @@ class TestOpaqueObject(TestCase):
             mutates_args=["prev"],
         )
         def increment_counter_impl(c: Counter, prev: torch.Tensor) -> torch.Tensor:
-            assert isinstance(c, Counter)
+            if not isinstance(c, Counter):
+                raise AssertionError(f"expected Counter, got {type(c)}")
             prev.copy_(c.counter)
             c.increment_counter()
             return c.counter
@@ -515,7 +525,8 @@ class TestOpaqueObject(TestCase):
         def process_with_config_impl(
             x: torch.Tensor, config: ValueConfig
         ) -> torch.Tensor:
-            assert isinstance(config, ValueConfig)
+            if not isinstance(config, ValueConfig):
+                raise AssertionError(f"expected ValueConfig, got {type(config)}")
             if config.mode == "square":
                 return x * x
             elif config.mode == "double":
@@ -546,7 +557,8 @@ class TestOpaqueObject(TestCase):
         def process_nested_config_impl(
             x: torch.Tensor, config: NestedValueSize
         ) -> torch.Tensor:
-            assert isinstance(config, NestedValueSize)
+            if not isinstance(config, NestedValueSize):
+                raise AssertionError(f"expected NestedValueSize, got {type(config)}")
             if config.config.mode == "square":
                 return x * x
             elif config.config.mode == "double":
@@ -957,7 +969,8 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
     def test_compile1(self):
         def foo(rng_state, x):
-            assert isinstance(rng_state, RNGState)
+            if not isinstance(rng_state, RNGState):
+                raise AssertionError(f"expected RNGState, got {type(rng_state)}")
             x = torch.ops._TestOpaqueObject.noisy_inject(x, rng_state)
             x = x * x
             x = torch.ops._TestOpaqueObject.noisy_inject(x, rng_state)
@@ -1293,7 +1306,8 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             "_TestOpaqueObject::module_mul", "CompositeExplicitAutograd", lib=self.lib
         )
         def module_mul_impl(m: AddModule, a: torch.Tensor, b: int) -> torch.Tensor:
-            assert isinstance(m, AddModule)
+            if not isinstance(m, AddModule):
+                raise AssertionError(f"expected AddModule, got {type(m)}")
             return m(a, b)
 
         @torch.library.register_fake("_TestOpaqueObject::module_mul", lib=self.lib)

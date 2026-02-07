@@ -220,7 +220,8 @@ class SparseSemiStructuredTensorCompileTest(torch._dynamo.test_case.TestCase):
         # assert sparse and sparse_compile have the same strides,
         # as meta registrations may return contiguous tensors when the output is transposed
         # https://github.com/pytorch/pytorch/pull/114477
-        assert sparse_result.stride() == sparse_compile_result.stride()
+        if sparse_result.stride() != sparse_compile_result.stride():
+            raise AssertionError(f"stride mismatch: {sparse_result.stride()} != {sparse_compile_result.stride()}")
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile not supported on windows")
     @unittest.skipIf("cusparselt" not in SEMI_STRUCTURED_SUPPORTED_BACKENDS, "cusparselt not supported on this machine")
@@ -281,12 +282,17 @@ class TestSparseSemiStructured(TestCase):
         A = rand_sparse_semi_structured_mask(128, 256, dtype=dtype)
         A_sparse = to_sparse_semi_structured(A)
 
-        assert A.shape == A_sparse.shape
-        assert A.device == A_sparse.device
-        assert A.dtype == A_sparse.dtype
+        if A.shape != A_sparse.shape:
+            raise AssertionError(f"shape mismatch: {A.shape} != {A_sparse.shape}")
+        if A.device != A_sparse.device:
+            raise AssertionError(f"device mismatch: {A.device} != {A_sparse.device}")
+        if A.dtype != A_sparse.dtype:
+            raise AssertionError(f"dtype mismatch: {A.dtype} != {A_sparse.dtype}")
 
-        assert isinstance(A, torch.Tensor)
-        assert isinstance(A_sparse, SparseSemiStructuredTensor)
+        if not isinstance(A, torch.Tensor):
+            raise AssertionError(f"A should be torch.Tensor, got {type(A)}")
+        if not isinstance(A_sparse, SparseSemiStructuredTensor):
+            raise AssertionError(f"A_sparse should be SparseSemiStructuredTensor, got {type(A_sparse)}")
 
     @inference_dtypes
     @parametrize_backends
@@ -485,8 +491,10 @@ class TestSparseSemiStructured(TestCase):
             self.skipTest("CUTLASS not supported on Windows")
         A = rand_sparse_semi_structured_mask(128, 128)
         A_sparse = to_sparse_semi_structured(A)
-        assert A_sparse.values().shape == (128, 64)
-        assert (A_sparse.values() == 1).all()
+        if A_sparse.values().shape != (128, 64):
+            raise AssertionError(f"values shape should be (128, 64), got {A_sparse.values().shape}")
+        if not (A_sparse.values() == 1).all():
+            raise AssertionError("values should all be 1")
 
     @parametrize_backends
     def test_indices(self, backend):
@@ -495,7 +503,8 @@ class TestSparseSemiStructured(TestCase):
             self.skipTest("CUTLASS not supported on Windows")
         A = rand_sparse_semi_structured_mask(128, 128)
         A_sparse = to_sparse_semi_structured(A)
-        assert A_sparse.indices().shape == (128, 8)
+        if A_sparse.indices().shape != (128, 8):
+            raise AssertionError(f"indices shape should be (128, 8), got {A_sparse.indices().shape}")
 
     @inference_dtypes
     @parametrize_backends
@@ -643,12 +652,14 @@ class TestSparseSemiStructuredTraining(TestCase):
         sInp = SEMI_STRUCTURED_SUPPORTED_BACKENDS[backend].prune_dense_static_sort(inp, algorithm="largest_abs_values_greedy")
 
         mask = sInp.to_dense() / inp
-        assert mask[:4, :4].int().tolist() == [
+        expected = [
             [1, 1, 0, 0],
             [0, 1, 1, 0],
             [0, 0, 1, 1],
             [1, 0, 0, 1],
         ]
+        if mask[:4, :4].int().tolist() != expected:
+            raise AssertionError(f"mask[:4, :4] mismatch: {mask[:4, :4].int().tolist()} != {expected}")
 
     @training_dtypes
     def test_gemm(self, dtype) -> None:
@@ -679,7 +690,8 @@ class TestSparseSemiStructuredTraining(TestCase):
         # Construct x to make sure we always have exactly 8 elements per 4x4 tile
         a = (4 * torch.arange(8))[:, None] + torch.arange(8)[None, :]
         a = a.repeat(M // 8, N // 8)
-        assert a.shape == (M, N)
+        if a.shape != (M, N):
+            raise AssertionError(f"a.shape should be ({M}, {N}), got {a.shape}")
         a = a.cuda().to(dtype)
         b = torch.randn([a.shape[1], 128], device="cuda", dtype=dtype)
 
@@ -688,7 +700,8 @@ class TestSparseSemiStructuredTraining(TestCase):
         mask_dense = sparse24_largest_mask_2d(a).to(dtype)
 
         if backend == "cutlass":
-            assert isinstance(a_sparse, SparseSemiStructuredTensorCUTLASS)
+            if not isinstance(a_sparse, SparseSemiStructuredTensorCUTLASS):
+                raise AssertionError(f"a_sparse should be SparseSemiStructuredTensorCUTLASS, got {type(a_sparse)}")
             (packed, meta, packed_t, meta_t, bitmask) = torch._sparse_semi_structured_tile(
                 mask_dense, use_cutlass=True)
 
@@ -770,11 +783,15 @@ class TestSparseSemiStructuredTraining(TestCase):
         a[:4, :4] = quad
         packed, meta, packed_t, meta_t = torch._sparse_semi_structured_tile(a)[:4]
         # Check first line in A
-        assert packed[0, 0].item() == 2
-        assert packed[0, 1].item() == 0
+        if packed[0, 0].item() != 2:
+            raise AssertionError(f"packed[0, 0] should be 2, got {packed[0, 0].item()}")
+        if packed[0, 1].item() != 0:
+            raise AssertionError(f"packed[0, 1] should be 0, got {packed[0, 1].item()}")
         # And first column in A.t
-        assert packed_t[0, 0].item() == 2
-        assert packed_t[0, 1].item() == 0
+        if packed_t[0, 0].item() != 2:
+            raise AssertionError(f"packed_t[0, 0] should be 2, got {packed_t[0, 0].item()}")
+        if packed_t[0, 1].item() != 0:
+            raise AssertionError(f"packed_t[0, 1] should be 0, got {packed_t[0, 1].item()}")
 
     @training_dtypes
     @unittest.skipIf(TEST_WITH_ROCM, "Not supported on ROCm")
@@ -1280,10 +1297,12 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         torch.testing.assert_close(sparse_result, dense_result, rtol=1e-3, atol=1e-3)
 
     def test_cusparselt_backend(self):
-        assert torch.backends.cusparselt.is_available()
+        if not torch.backends.cusparselt.is_available():
+            raise AssertionError("cusparselt backend should be available")
 
         # PyTorch CUDA 12.4+ using cuSPARSELt v0.6.2+
-        assert torch.backends.cusparselt.version() >= 602
+        if torch.backends.cusparselt.version() < 602:
+            raise AssertionError(f"cusparselt version should be >= 602, got {torch.backends.cusparselt.version()}")
 
 if len(SEMI_STRUCTURED_SUPPORTED_BACKENDS) > 0:
     instantiate_device_type_tests(TestSparseSemiStructured, globals(), only_for="cuda")
