@@ -2,13 +2,6 @@
 
 set -e -u
 
-# first import docker image
-if [ -f ./manywheel-s390x.tar ] ; then
-        docker image load --input manywheel-s390x.tar
-        docker image tag docker.io/pytorch/manylinuxs390x-builder:cpu-s390x docker.io/pytorch/manylinuxs390x-builder:cpu-s390x-main
-        rm -f manywheel-s390x.tar
-fi
-
 token_file=registration-token.json
 
 ACCESS_TOKEN="$(cat /run/runner_secret)"
