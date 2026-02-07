@@ -1150,8 +1150,14 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     def _shaped_constant(value, dtype, shape):
         type_ = torch._prims_common.dtype_to_type(dtype)
-        triton_val = constant_repr(type_(value))
         triton_type = triton_compute_type(dtype)
+
+        # Quantize value to dtype before promotion such that
+        # the literal matches what a tensor load would produce,
+        # see https://github.com/pytorch/pytorch/issues/173987.
+        if triton_type != dtype:
+            value = torch.tensor(value, dtype=dtype, device="cpu")
+        triton_val = constant_repr(type_(value))
 
         # NOTE: We use tl.full here to get the expected type.
         # Otherwise, subnormal float32 values are treated as fp64
