@@ -133,6 +133,7 @@ class ModelArgs:
     use_attn_mask: bool = True
     weight_tying: bool = True
     checkpoint_activations: bool = False
+    num_experts: int = 0
 
 
 class Attention(nn.Module):
@@ -188,19 +189,63 @@ class FeedForward(nn.Module):
         return self.resid_dropout(self.w2(self.gelu(self.w1(x))))
 
 
+class Experts(nn.Module):
+    def __init__(self, dim: int, hidden_dim: int, num_experts: int):
+        super().__init__()
+        self.num_experts = num_experts
+        self.w1 = nn.Parameter(torch.empty(num_experts, hidden_dim, dim))
+        self.w2 = nn.Parameter(torch.empty(num_experts, dim, hidden_dim))
+        self.gelu = nn.GELU()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if isinstance(self.w1, DTensor):
+            w1, w2 = self.w1.to_local(), self.w2.to_local()
+        else:
+            w1, w2 = self.w1, self.w2
+        E = w1.shape[0]
+        x_exp = x.unsqueeze(0).expand(E, -1, -1)
+        h = self.gelu(torch.bmm(x_exp, w1.transpose(-2, -1)))
+        out = torch.bmm(h, w2.transpose(-2, -1))
+        return out.sum(dim=0)
+
+
+class ExpertLayer(nn.Module):
+    def __init__(self, num_experts: int, dim: int, hidden_dim: int):
+        super().__init__()
+        self.num_experts = num_experts
+        self.experts = Experts(dim=dim, hidden_dim=hidden_dim, num_experts=num_experts)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        bs, slen, dim = x.shape
+        x_flat = x.view(-1, dim)
+        expert_out = self.experts(x_flat)
+        expert_out = expert_out / self.num_experts
+        return expert_out.view(bs, slen, dim)
+
+
 class TransformerBlock(nn.Module):
     def __init__(self, args: ModelArgs):
         super().__init__()
         self.attention_norm = nn.LayerNorm(args.dim)
         self.attention = Attention(args)
         self.ffn_norm = nn.LayerNorm(args.dim)
-        self.feed_forward = FeedForward(
-            args.dim, hidden_dim=4 * args.dim, dropout_p=args.dropout_p
-        )
+
+        self.has_experts = args.num_experts > 0
+        if self.has_experts:
+            self.expert_layer = ExpertLayer(
+                args.num_experts, dim=args.dim, hidden_dim=4 * args.dim,
+            )
+        else:
+            self.feed_forward = FeedForward(
+                args.dim, hidden_dim=4 * args.dim, dropout_p=args.dropout_p,
+            )
 
     def forward(self, x):
         h = x + self.attention(self.attention_norm(x))
-        out = h + self.feed_forward(self.ffn_norm(h))
+        if self.has_experts:
+            out = h + self.expert_layer(self.ffn_norm(h))
+        else:
+            out = h + self.feed_forward(self.ffn_norm(h))
         return out
 
 
@@ -219,7 +264,7 @@ class Transformer(nn.Module):
         self.pos_embeddings = nn.Embedding(args.max_seq_len, args.dim)
         self.dropout = nn.Dropout(args.dropout_p)
         self.layers = nn.ModuleList()
-        for _ in range(args.n_layers):
+        for i in range(args.n_layers):
             self.layers.append(TransformerBlock(args))
         self.norm = nn.LayerNorm(args.dim)
         self.output = nn.Linear(args.dim, args.vocab_size, bias=False)
@@ -246,6 +291,23 @@ class Transformer(nn.Module):
         h = self.norm(h)
         output = self.output(h).float()
         return output
+
+    def init_weights(self):
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                nn.init.normal_(module.weight, std=0.02)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
+            elif isinstance(module, nn.Embedding):
+                nn.init.normal_(module.weight, std=0.02)
+            elif isinstance(module, nn.LayerNorm):
+                nn.init.ones_(module.weight)
+                nn.init.zeros_(module.bias)
+            elif isinstance(module, Experts):
+                nn.init.normal_(module.w1, std=0.02)
+                nn.init.normal_(module.w2, std=0.02)
+        if self.model_args.weight_tying:
+            self.output.weight = self.tok_embeddings.weight
 
     @staticmethod
     def parallelize(
@@ -304,16 +366,17 @@ class Transformer(nn.Module):
                 else RowwiseParallel()
             )
 
-            layer_parallelize_plan["feed_forward.w1"] = (
-                ColwiseParallel(input_layouts=Shard(1))
-                if use_seq_parallel
-                else ColwiseParallel()
-            )
-            layer_parallelize_plan["feed_forward.w2"] = (
-                RowwiseParallel(output_layouts=Shard(1))
-                if use_seq_parallel
-                else RowwiseParallel()
-            )
+            if not layer.has_experts:
+                layer_parallelize_plan["feed_forward.w1"] = (
+                    ColwiseParallel(input_layouts=Shard(1))
+                    if use_seq_parallel
+                    else ColwiseParallel()
+                )
+                layer_parallelize_plan["feed_forward.w2"] = (
+                    RowwiseParallel(output_layouts=Shard(1))
+                    if use_seq_parallel
+                    else RowwiseParallel()
+                )
 
             parallelize_module(layer, device_mesh, layer_parallelize_plan)
 
