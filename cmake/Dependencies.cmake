@@ -1659,7 +1659,22 @@ if(USE_KINETO)
 
   if(NOT LIBKINETO_NOROCTRACER)
     if("$ENV{ROCM_SOURCE_DIR}" STREQUAL "")
-      set(ENV{ROCM_SOURCE_DIR} "/opt/rocm")
+      if(ROCM_SDK_EXECUTABLE)
+        execute_process(
+          COMMAND ${ROCM_SDK_EXECUTABLE} path --root
+          OUTPUT_VARIABLE _ROCM_SDK_ROOT
+          OUTPUT_STRIP_TRAILING_WHITESPACE
+          RESULT_VARIABLE _ROCM_SDK_RESULT
+          ERROR_QUIET
+        )
+        if(_ROCM_SDK_RESULT EQUAL 0 AND EXISTS "${_ROCM_SDK_ROOT}")
+          set(ENV{ROCM_SOURCE_DIR} "${_ROCM_SDK_ROOT}")
+        else()
+          set(ENV{ROCM_SOURCE_DIR} "/opt/rocm")
+        endif()
+      else()
+        set(ENV{ROCM_SOURCE_DIR} "/opt/rocm")
+      endif()
     endif()
   endif()
 
