@@ -210,7 +210,7 @@ def initialize_cuda_context_rng():
 def tf32(
     enable=True,
     *,
-    test_case=None,
+    test_self=None,
     precision=None,
     math_sdp_precision='ieee',
 ):
@@ -221,16 +221,16 @@ def tf32(
     Args:
         enable: True to enable TF32 for CUDA operations., False to disable, None to leave unchanged.
         precision: If set with test_self, temporarily set test_self.precision.
-        test_case: Test class instance to set precision.
+        test_self: Test class instance to set precision.
         math_sdp_precision: Temporarily set math_sdp.fp32_precision.
     """
-    change_precision = precision is not None and test_case is not None
-    old_precision = test_case.precision if change_precision else None
+    change_precision = precision is not None and test_self is not None
+    old_precision = test_self.precision if change_precision else None
     old_math_sdp_fp32_precision = torch.backends.cuda.math_sdp.fp32_precision if math_sdp_precision is not None else None
     old_allow_tf32_matmul = torch.backends.cuda.matmul.allow_tf32 if enable is not None else None
     try:
         if change_precision:
-            test_case.precision = precision
+            test_self.precision = precision
         if math_sdp_precision is not None:
             torch.backends.cuda.math_sdp.fp32_precision = math_sdp_precision
         if enable is not None:
@@ -247,7 +247,7 @@ def tf32(
         if enable is not None:
             torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32_matmul
         if change_precision:
-            test_case.precision = old_precision
+            test_self.precision = old_precision
 
 
 def tf32_off():
