@@ -1796,6 +1796,7 @@ def _export_to_aten_ir_make_fx(
         with enable_python_dispatcher():
             ctx = nullcontext()
             non_strict_root = getattr(mod, "_export_root", None)
+            hook = None
             if non_strict_root is not None:
                 ctx = _detect_attribute_assignment(non_strict_root)  # type: ignore[assignment]
 
@@ -1902,38 +1903,42 @@ def _export_to_aten_ir_make_fx(
                 finally:
                     torch._C._set_grad_enabled(old_state)
 
-            with (
-                ctx,
-                override_getattribute_for_subclasses(flat_args),
-                _maybe_restore_grad_state(),
-            ):
-                gm = make_fx(
-                    wrapped_fn,
-                    record_module_stack=True,
-                    pre_dispatch=True,
-                )(*flat_args)
+            try:
+                with (
+                    ctx,
+                    override_getattribute_for_subclasses(flat_args),
+                    _maybe_restore_grad_state(),
+                ):
+                    gm = make_fx(
+                        wrapped_fn,
+                        record_module_stack=True,
+                        pre_dispatch=True,
+                    )(*flat_args)
 
-            if non_strict_root is not None:
-                input_names = _graph_input_names(gm)
-                buffer_input_names = {
-                    name: input_names[param_len + i]
-                    for i, (name, buf) in enumerate(non_strict_root._buffers.items())
-                    if buf is not None
-                }
-                output_node = list(gm.graph.nodes)[-1]
-                # We copy nodes corresponding to buffer assignments to buffers in the graph.
-                for buf, name in assigned_buffers.items():  # type: ignore[possibly-undefined]
-                    buf_node = _find_node(gm, buffer_input_names[buf])
-                    name_node = _find_node(gm, name)
-                    with gm.graph.inserting_before(output_node):
-                        new_node = gm.graph.create_node(
-                            "call_function",
-                            torch.ops.aten.copy_.default,
-                            args=(buf_node, name_node),
+                if non_strict_root is not None:
+                    input_names = _graph_input_names(gm)
+                    buffer_input_names = {
+                        name: input_names[param_len + i]
+                        for i, (name, buf) in enumerate(
+                            non_strict_root._buffers.items()
                         )
-                        new_node.meta = name_node.meta
-
-                hook.remove()  # type: ignore[possibly-undefined]
+                        if buf is not None
+                    }
+                    output_node = list(gm.graph.nodes)[-1]
+                    # We copy nodes corresponding to buffer assignments to buffers in the graph.
+                    for buf, name in assigned_buffers.items():  # type: ignore[possibly-undefined]
+                        buf_node = _find_node(gm, buffer_input_names[buf])
+                        name_node = _find_node(gm, name)
+                        with gm.graph.inserting_before(output_node):
+                            new_node = gm.graph.create_node(
+                                "call_function",
+                                torch.ops.aten.copy_.default,
+                                args=(buf_node, name_node),
+                            )
+                            new_node.meta = name_node.meta
+            finally:
+                if hook is not None:
+                    hook.remove()  # type: ignore[possibly-undefined]
 
             def _is_impure(node):
                 if node.op == "call_function" and node.target in (
