@@ -930,7 +930,12 @@ def _input_mask(input: Tensor | MaskedTensor, *args, **kwargs) -> Tensor:
         raise ValueError("_input_mask requires explicit mask")
 
     # mask shape must match with input shape
-    if mask.shape != input.shape:
+    # Use guard_or_false for unbacked symbolic dims to avoid data-dependent errors.
+    try:
+        shapes_mismatch = mask.shape != input.shape
+    except torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode:
+        shapes_mismatch = False
+    if shapes_mismatch:
         if mask.ndim > input.ndim:
             raise IndexError(
                 "_input_mask expected broadcastable mask (got mask dimensionality higher than of the input)"
