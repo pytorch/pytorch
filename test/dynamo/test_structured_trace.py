@@ -296,21 +296,24 @@ class StructuredTraceTest(TestCase):
             frame_id=1,
             frame_compile_id=2,
         )
-        assert cid == torch._guards.CompileId.from_string(str(cid))
+        if cid != torch._guards.CompileId.from_string(str(cid)):
+            raise AssertionError("CompileId round-trip failed")
 
         cid = torch._guards.CompileId(
             compiled_autograd_id=1,
             frame_id=2,
             frame_compile_id=3,
         )
-        assert cid == torch._guards.CompileId.from_string(str(cid))
+        if cid != torch._guards.CompileId.from_string(str(cid)):
+            raise AssertionError("CompileId round-trip failed")
 
         cid = torch._guards.CompileId(
             compiled_autograd_id=1,
             frame_id=None,
             frame_compile_id=None,
         )
-        assert cid == torch._guards.CompileId.from_string(str(cid))
+        if cid != torch._guards.CompileId.from_string(str(cid)):
+            raise AssertionError("CompileId round-trip failed")
 
         for bad_cid in ["-/-", "-/1", "1/-", "!1/2", "!1/-/-"]:
             with self.assertRaises(ValueError):

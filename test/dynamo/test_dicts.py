@@ -445,7 +445,8 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
         args1 = {"a": torch.randn(10), "b": torch.randn(10)}
         args2 = dict(args1)
-        assert fn(args1) is args1
+        if fn(args1) is not args1:
+            raise AssertionError("Expected fn(args1) to be args1")
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
         self.assertIs(opt_fn(args2), args2)
@@ -706,7 +707,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
             def fn(x):
                 c = CustomDict()
                 c["key"] = x
-                assert "key" in c
+                assert "key" in c  # noqa: S101
                 return c["key"] + 1
 
             opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
