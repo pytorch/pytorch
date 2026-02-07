@@ -14,7 +14,6 @@ import os
 import re
 import subprocess
 import sys
-from pathlib import Path
 
 
 # Categories of changes and which jobs they require.
@@ -341,11 +340,15 @@ def main() -> None:
     else:
         jobs_str = ""
 
-    print(json.dumps({
-        "jobs": jobs_str,
-        "categories": sorted(categories),
-        "changed_files": changed_files,
-    }))
+    print(
+        json.dumps(
+            {
+                "jobs": jobs_str,
+                "categories": sorted(categories),
+                "changed_files": changed_files,
+            }
+        )
+    )
 
 
 if __name__ == "__main__":
