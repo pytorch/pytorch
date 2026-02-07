@@ -3333,7 +3333,7 @@ class TestSDPACudaOnly(NNTestCase):
         prefer_cudnn = "TORCH_CUDNN_SDPA_PREFERRED" not in os.environ or bool(os.environ["TORCH_CUDNN_SDPA_PREFERRED"])
         # cuDNN prioritization requires cuDNN >= 9.9.0 (90900) per sdp_utils.cpp:83
         cudnn_version = torch.backends.cudnn.version() if torch.backends.cudnn.is_available() else 0
-        is_hopper_or_newer = device_capability and (device_capability == (9, 0) or device_capability == (10, 0))
+        is_hopper_or_newer = device_capability and (device_capability[0] == 9 or device_capability[0] == 10)
         prefer_cudnn = prefer_cudnn and is_hopper_or_newer and cudnn_version >= 90900
 
         # cuDNN is enabled by default on SM 9.0/10.0 with cuDNN >= 9.9.0 (per #162073)
@@ -4224,7 +4224,7 @@ class TestSDPACudaOnly(NNTestCase):
     @parametrize("batch_size", [8, 32])
     @parametrize("max_seq_len_q", [32, 256])
     @parametrize("max_seq_len_kv", [32, 256])
-    @parametrize("head_dim", [8, 64])
+    @parametrize("head_dim", [8, 40, 64, 160])
     @parametrize("dropout_p", [0.0, 0.1])
     @parametrize("dtype", [torch.float16])
     @parametrize("scale", [None, "l1"])
@@ -4723,7 +4723,7 @@ class TestSDPAXpuOnly(NNTestCase):
     @parametrize("n_head", [[3, 1], [4, 2], [10, 2]])
     @parametrize("q_size", [1, 32, 77, 128, 144, 512, 576])
     @parametrize("kv_size", [1, 32, 77, 128, 144, 512, 576])
-    @parametrize("head_dim", [64, 96, 128, 192])
+    @parametrize("head_dim", [64, 96, 128, 160, 192])
     @parametrize("mask_type", [None, "causal"])
     @parametrize("train", [True, False])
     @parametrize("layout", ["bshd", "bhsd"])
