@@ -3775,6 +3775,60 @@ class Scheduler:
         with dynamo_timed("benchmark_codegened_module"):
             return backend.benchmark_codegened_module(module)
 
+    def _has_layout_conflict_for_template(
+        self, multi_node: ir.MultiTemplateBuffer
+    ) -> bool:
+        """
+        Check if selecting a Triton template would cause layout conflicts.
+
+        A conflict exists when:
+        1. An input has FlexibleLayout (not yet frozen)
+        2. The template expects certain strides from that input
+        3. The input's layout has already been frozen to different strides
+           by another consumer, OR another consumer would freeze it differently
+
+        Returns True if there's a conflict and we should fall back to ATen.
+        """
+        choices = multi_node.choices
+        constraints = None
+        for choice in choices:
+            if isinstance(choice, TritonTemplateCallerBase):
+                if getattr(choice, "layout_constraints", None) is None:
+                    break
+
+                if constraints is None:
+                    constraints = choice.layout_constraints
+                else:
+                    # All TritonTemplateCallers should have same constraints
+                    assert choice.layout_constraints == constraints
+
+        if constraints is None:
+            return False
+
+        log.debug(f"Node {multi_node} has constraints {constraints}")
+        for inp in multi_node.inputs:
+            inp_name = inp.get_name()
+            if inp_name not in constraints:
+                continue
+
+            expected_layout = constraints[inp_name]
+            layout = inp.layout
+            # If layout is already frozen (FixedLayout), check if it matches expected
+            assert isinstance(layout, ir.FixedLayout)
+            if expected_layout != layout:
+                log.warning(
+                    "Layout conflict detected for %s: template expects %s but layout is frozen to %s",
+                    inp_name,
+                    expected_layout,
+                    layout,
+                )
+                log.warning(
+                    "Falling back to ATen due to layout conflict for %s", multi_node
+                )
+                return True
+
+        return False
+
     def finalize_multi_template_buffers(self) -> None:
         """
         Finalize a backing choice for MultiTemplateBuffers which did not already have a
@@ -3803,6 +3857,27 @@ class Scheduler:
                             )
                         ),
                     )
+
+                if isinstance(
+                    min_node_unfused,
+                    torch._inductor.ir.TritonTemplateCallerBase,
+                ):
+                    # Check for layout conflicts before committing to Triton template
+                    if self._has_layout_conflict_for_template(multi_node):
+                        # Fall back to first ExternKernelCaller (ATen)
+                        for choice in multi_node.choice_timings():
+                            if isinstance(
+                                choice,
+                                torch._inductor.select_algorithm.ExternKernelCaller,
+                            ):
+                                min_node_unfused = choice
+                                break
+
+                        assert isinstance(
+                            choice, torch._inductor.select_algorithm.ExternKernelCaller
+                        ), (
+                            "No extern kernel detected to fallback to when layout constraints fail for Triton templates"
+                        )
 
                 if isinstance(
                     min_node_unfused,
@@ -3983,6 +4058,9 @@ class Scheduler:
                 else node2.get_template_node()
             )
             assert isinstance(multi_node, ir.MultiTemplateBuffer)
+            # Check for layout conflicts before committing to Triton template
+            if self._has_layout_conflict_for_template(multi_node):
+                return FusionResult.fuse(False)
 
             hint_override_best_fusion_choice: dict[
                 Optional[int], TritonTemplateCallerBase

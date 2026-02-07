@@ -2476,6 +2476,57 @@ class TestMaxAutotune(TestCase):
         self.assertObjectIn(k, (15, 16))
         self.assertEqual("'EVEN_K': True" in cache_key, k == 16 and not dynamic)
 
+    @config.patch(
+        {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "ATEN,TRITON",
+            "force_pointwise_cat": True,
+        }
+    )
+    @parametrize("epilogue", (True, False))
+    def test_deferred_layout_constraint_cat_fusion(self, epilogue):
+        def mm_with_cat(a, b1, b2, d):
+            catted_b = torch.cat([b1, b2], dim=1)
+            catted_b_add = catted_b + 1.0
+
+            # Not padded at lowering time
+            catted_bf16 = catted_b_add.to(torch.bfloat16)
+
+            # bmm1 as output -> no padding occurs, however after fusion
+            # the buffer is padded, layout constraint violated
+            bmm1 = torch.bmm(a.to(torch.bfloat16), catted_bf16)
+            fused = catted_bf16 - d
+            if epilogue:
+                bmm1_fp32 = bmm1.to(torch.float32)
+                return bmm1, bmm1_fp32, fused
+            
+            return bmm1, fused
+
+        batch = 32
+        m = 512
+        k1, k2 = 256, 256
+        n = 1490  # Would normally trigger padding (1490 -> 1536)
+
+        a = torch.randn(batch, m, k1 + k2, device=GPU_TYPE)
+        b1 = torch.randn(batch, k1, n, device=GPU_TYPE)
+        b2 = torch.randn(batch, k2, n, device=GPU_TYPE)
+        d = torch.cat([b1, b2], dim=1).to(torch.bfloat16)
+
+        with (
+            fresh_cache(),
+            mock.patch.object(
+                AlgorithmSelectorCache,
+                "benchmark_choice",
+                mock_benchmark_choice_wrapper(aten_time=1.0, triton_time=0.1),
+            ),
+        ):
+            compiled = torch.compile(mm_with_cat, mode="max-autotune-no-cudagraphs")
+            _, code = run_and_get_code(compiled, a, b1, b2, d)
+
+            # Despite Triton being 10x faster in benchmarks, the layout conflict
+            # should force fallback to extern_kernels.bmm
+            FileCheck().check("extern_kernels.bmm").run(code[0])
+
 
 @instantiate_parametrized_tests
 class TestTemplateConfigPruning(TestCase):

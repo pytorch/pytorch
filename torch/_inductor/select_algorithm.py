@@ -545,6 +545,10 @@ class TritonTemplateKernel(TritonKernel):
         # Tracking for intermediate variables
         self.tmp_var_ctr = itertools.count()
 
+        # Track speculative layout constraints for deferred freeze validation.
+        # Maps input node name -> expected strides (computed without freezing)
+        self.layout_constraints: dict[str, list[Any]] = {}
+
     def _gen_tmp_var(self) -> str:
         return f"_tmp_var{next(self.tmp_var_ctr)}"
 
@@ -1062,7 +1066,13 @@ class TritonTemplateKernel(TritonKernel):
             self.ops_handler = StoreOutputSubstitution
 
             input_node = self.named_input_nodes[input_name]
-            output_index = input_node.make_indexer()(index_symbols)
+            if isinstance(input_node.layout, ir.FlexibleLayout):
+                # This will set a layout constraint on the template
+                self.get_stride_and_maybe_freeze_layout(input_node)
+                with patch.object(ir.FlexibleLayout, "allow_indexing", True):
+                    output_index = input_node.make_indexer()(index_symbols)
+            else:
+                output_index = input_node.make_indexer()(index_symbols)
 
             # in def_kernel above we define the inputs with the storage offset adjusted
             # creating the load in input_node.make_indexer() will also adjust by storage offset
@@ -1557,8 +1567,41 @@ class TritonTemplateKernel(TritonKernel):
         ]
 
     def get_stride_and_maybe_freeze_layout(self, node) -> list[int]:
-        node.data.freeze_layout()
-        return node.get_stride()
+        """
+        Get the stride of an input node for template code generation.
+
+        This method now uses DEFERRED layout freezing:
+        - If the layout is FlexibleLayout, compute speculative strides without freezing
+        - Record the expected layout (as FixedLayout) as a constraint for later validation
+        - Only freeze at finalization time after validating no conflicts exist
+
+        This allows the scheduler to detect layout conflicts between multiple
+        consumers before committing to a layout, and fall back to ATen if needed.
+        """
+        layout = node.data.layout if hasattr(node, "data") else node.layout
+        node_name = node.get_name() if hasattr(node, "get_name") else str(node)
+
+        if isinstance(layout, ir.FlexibleLayout):
+            # Compute what strides WOULD be if frozen, without actually freezing
+            speculative_strides = layout.get_stride_without_freezing()
+            log.debug(
+                f"{node_name} get_stride_and_maybe_freeze_layout with strides {speculative_strides}"
+            )
+            # Store a FixedLayout representing the frozen state for later comparison
+            frozen_layout = ir.FixedLayout(
+                layout.device,
+                layout.dtype,
+                layout.size,
+                speculative_strides,
+                layout.offset,
+                layout.is_pinned,
+            )
+            self.layout_constraints[node_name] = frozen_layout
+
+            return speculative_strides
+        else:
+            # Already frozen or not a FlexibleLayout, just return current strides
+            return node.get_stride()
 
 
 @functools.cache
@@ -1584,6 +1627,7 @@ class GenerateAndLoadResult(NamedTuple):
     prologue_supported_inputs: OrderedSet[str]
     kernel_args_sizevars_keys: tuple[sympy.Expr, ...]
     kernel_options: dict[str, Any]
+    layout_constraints: dict[str, ir.FixedLayout]
 
 
 class GeneratedCodeCacheEntry(NamedTuple):
@@ -1980,6 +2024,7 @@ class TritonTemplate(KernelTemplate):
             prologue_supported_inputs,
             kernel_args_sizevars_keys,
             kernel_options,
+            kernel.layout_constraints,
         )
 
     def generate(  # type: ignore[override]
@@ -2202,6 +2247,7 @@ class TritonTemplate(KernelTemplate):
             workspace_arg=workspace_arg,
             allowed_prologue_inps=result.prologue_supported_inputs,
             hint_override=hint_override,
+            layout_constraints=result.layout_constraints,
         )
 
 
@@ -2314,6 +2360,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         workspace_arg: Optional[WorkspaceArg] = None,
         allowed_prologue_inps: Optional[OrderedSet[str]] = None,
         hint_override: Optional[int] = None,
+        layout_constraints: Optional[dict[str, ir.FixedLayout]] = None,
     ) -> None:
         super().__init__(name, input_nodes, layout, description)
         self.make_kernel_render = make_kernel_render
@@ -2334,6 +2381,9 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
             allowed_prologue_inps if allowed_prologue_inps is not None else OrderedSet()
         )
         self.hint_override = hint_override
+        self.layout_constraints = (
+            layout_constraints if layout_constraints is not None else {}
+        )
 
     def benchmark(self, *args, out):
         assert self.bmreq is not None

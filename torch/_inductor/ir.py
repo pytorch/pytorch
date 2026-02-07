@@ -4054,6 +4054,20 @@ class FlexibleLayout(Layout):
 
     allow_indexing = False
 
+    def get_stride_without_freezing(self) -> list[Expr]:
+        """
+        Compute what the strides would be if this layout were frozen,
+        without actually modifying the layout. This is used for speculative
+        stride computation during Triton template code generation.
+
+        Returns the strides that would result from calling as_fixed().
+        """
+        if self.should_pad_strides():
+            # Compute padded strides without modifying self.stride
+            padded_strides = self._pad_strides(list(self.stride), self.size, self.dtype)
+            return padded_strides
+        return list(self.stride)
+
     # WARNING!  This doesn't handle zero size tensors correctly
     @staticmethod
     def contiguous_strides(sizes: Sequence[int]) -> list[Expr]:
