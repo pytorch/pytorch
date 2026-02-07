@@ -35,7 +35,7 @@ struct orStream {
   std::mutex mtx;
   std::condition_variable cv;
   std::thread worker;
-  std::atomic<bool> stop_flag{false};
+  bool stop_flag = false;
   int device_index = -1;
 
   orStream() {
@@ -45,9 +45,9 @@ struct orStream {
         {
           std::unique_lock<std::mutex> lock(this->mtx);
           this->cv.wait(lock, [this] {
-            return this->stop_flag.load() || !this->tasks.empty();
+            return this->stop_flag || !this->tasks.empty();
           });
-          if (this->stop_flag.load() && this->tasks.empty()) {
+          if (this->stop_flag && this->tasks.empty()) {
             return;
           }
           task = std::move(this->tasks.front());
@@ -59,7 +59,10 @@ struct orStream {
   }
 
   ~orStream() {
-    stop_flag.store(true);
+    {
+      std::lock_guard<std::mutex> lock(this->mtx);
+      stop_flag = true;
+    }
     cv.notify_one();
     worker.join();
   }
