@@ -131,6 +131,7 @@ class _ReplicateState(_State):
         if self._init_args or self._init_kwargs:
             self.lazy_init()
         self._ddp.require_backward_grad_sync = not self._no_sync
+        DistributedDataParallel._active_ddp_module = self._ddp
         return self._ddp._pre_forward(*args, **kwargs)
 
     def forward_post_hook(
@@ -139,6 +140,7 @@ class _ReplicateState(_State):
         input: tuple[torch.Tensor],
         output: torch.Tensor,
     ) -> torch.Tensor:
+        DistributedDataParallel._active_ddp_module = None
         return self._ddp._post_forward(output)
 
 
