@@ -1649,6 +1649,9 @@ class BuiltinVariable(VariableTracker):
         if isinstance(arg, variables.UserDefinedClassVariable):
             if type(arg.value).__repr__ is type.__repr__:
                 return variables.ConstantVariable.create(repr(arg.value))
+        if isinstance(arg, VariableTracker):
+            return variables.ConstantVariable.create(arg.debug_repr())
+        return None
 
     def call_str(
         self, tx: "InstructionTranslator", arg: VariableTracker
