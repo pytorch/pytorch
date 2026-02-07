@@ -111,14 +111,19 @@ class HopSchemaGenerator:
         is_mutated: bool = False,
         kw_only: bool = False,
     ) -> None:
-        if callable(example_value):
-            if not isinstance(
-                example_value, (torch.fx.GraphModule, torch._ops.OperatorBase)
-            ):
-                raise AssertionError(
-                    "Expect callable to be a GraphModule or an OperatorBase. Please call materialize_as_graph first "
-                    f"to turn callable arguments {example_value} into a GraphModule."
-                )
+        # Check for opaque types first - they may be callable but should be treated as values
+        if not (
+            isinstance(example_value, FakeScriptObject)
+            or is_opaque_type(type(example_value))
+        ):
+            if callable(example_value):
+                if not isinstance(
+                    example_value, (torch.fx.GraphModule, torch._ops.OperatorBase)
+                ):
+                    raise AssertionError(
+                        "Expect callable to be a GraphModule or an OperatorBase. Please call materialize_as_graph first "
+                        f"to turn callable arguments {example_value} into a GraphModule."
+                    )
         _, flat_spec = pytree.tree_flatten(example_value)
         if not flat_spec.is_leaf():
             raise RuntimeError(
