@@ -217,7 +217,14 @@ def expand(input_shape: Shape, shape: Shape) -> DimMap:
 
 
 def normalize_sizes(sizes: Shape | tuple[Shape]) -> Shape:
-    if isinstance(sizes[0], int):
+    from torch import SymInt
+
+    # Handle empty shapes (scalar tensors)
+    if len(sizes) == 0:
+        return cast(Shape, sizes)
+
+    # Check if the first element is a scalar (int or SymInt) vs a sequence
+    if not isinstance(sizes[0], (list, tuple)):
         return cast(Shape, sizes)
     elif len(sizes) == 1:
         return sizes[0]
@@ -343,6 +350,29 @@ def view_groups(from_size: Shape, to_size: Shape) -> DimMap:
     - in the above, input is flattened into a single dimension and then split
       into two separate dimensions with different sizes from the input.
     """
+    from torch import SymInt
+
+    # Check if any shape dimension is an unbacked symbol
+    def has_unbacked_symbols(shape):
+        # Normalize shape first to handle nested tuples/lists
+        shape = normalize_sizes(shape)
+        for s in shape:
+            if isinstance(s, SymInt):
+                # Check if it's unbacked (no source or can't be evaluated statically)
+                try:
+                    int(s)  # Try to convert to int - fails for unbacked
+                except Exception:
+                    return True
+        return False
+
+    # For unbacked symbols, use the symbolic implementation that runs through
+    # the meta-kernel and analyzes expression provenance
+    if has_unbacked_symbols(from_size) or has_unbacked_symbols(to_size):
+        from torch.distributed.tensor._ops._symbolic_view_groups import (
+            view_groups_symbolic,
+        )
+        return view_groups_symbolic(from_size, to_size)
+
     from_nelem = prod(from_size)
     to_size = infer_size(from_nelem, normalize_sizes(to_size))
 
