@@ -3713,7 +3713,33 @@ class Scheduler:
                 or config.loop_index_inversion_in_fusion
             ):
                 nodes = self.fuse_nodes_once(nodes, is_reorder_round=True)
+
+            # After all fusions are complete, optionally split nodes to maximize block
+            # pointers.
+            for node in list(nodes):
+                self.split_node(node)
+            nodes = self.split_nodes(nodes)
+
             return nodes
+
+    def split_node(self, node):
+        memory_deps = [
+            dep
+            for dep in node.read_writes.reads_and_writes()
+            if isinstance(dep, MemoryDep) and len(dep.ranges) > 0
+        ]
+        for dep in memory_deps:
+            #TODO somehow match block ptrs on the memory dep.
+            # Follow the approach in simd.py, but might need some refactors.
+            # If the block turns out to have a permutation of >3d (configurable),
+            # split it into 2 permutations. Create a new FusedSchedulerNode for the
+            # remainder. If it's a load, this goes before the current, after if a store.
+            # Then rewrite the dep to point to the new node, reorder its index by the
+            # inverse of the new permutation.
+            # See node.apply_new_loop_order for inspiration on how to reorder.
+
+            # Could use a similar trick for broadcasts and reshapes.
+
 
     def process_grouped_nodes(self) -> None:
         """
