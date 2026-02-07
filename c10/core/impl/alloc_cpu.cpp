@@ -149,7 +149,7 @@ void* alloc_cpu(size_t nbytes) {
 
   // move data to a thread's NUMA node
   NUMAMove(data, nbytes, GetCurrentNUMANode());
-  CHECK(
+  C10_CHECK(
       !FLAGS_caffe2_cpu_allocator_do_zero_fill ||
       !FLAGS_caffe2_cpu_allocator_do_junk_fill)
       << "Cannot request both zero-fill and junk-fill at the same time";

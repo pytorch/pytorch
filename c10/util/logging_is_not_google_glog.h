@@ -105,7 +105,7 @@ static_assert(
               .stream()
 
 // Check for a given boolean condition.
-#define CHECK(condition) FATAL_IF(condition) << "Check failed: " #condition " "
+#define C10_CHECK(condition) FATAL_IF(condition) << "Check failed: " #condition " "
 
 #ifndef NDEBUG
 // Debug only version of CHECK
