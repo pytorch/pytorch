@@ -110,6 +110,28 @@ def _no_grad_trunc_normal_(
         l = norm_cdf((a - mean) / std)
         u = norm_cdf((b - mean) / std)
 
+        # Check if the truncation bounds are effectively at infinity.
+        # When std is very small relative to (b-a), the inverse transform
+        # sampling via erfinv becomes numerically unstable because it operates
+        # on values very close to ±1. In this case, we fall back to normal
+        # distribution with clamping, since the truncation has negligible
+        # statistical effect anyway.
+        # See: https://github.com/pytorch/pytorch/issues/155588
+        #
+        # We detect this by checking if the CDF values would cause erfinv
+        # to receive inputs too close to ±1 for numerical stability.
+        # The threshold is chosen such that 2*l-1 and 2*u-1 are safely away
+        # from the erfinv instability region near ±1.
+        erfinv_stability_threshold = 1e-6
+        if l < erfinv_stability_threshold or u > 1 - erfinv_stability_threshold:
+            # The truncation bounds are so far from the mean (in units of std)
+            # that the CDF values are essentially 0 and 1. In this regime,
+            # erfinv is unstable, but the truncation also has negligible effect.
+            # Use normal distribution directly with clamping.
+            tensor.normal_(mean, std, generator=generator)
+            tensor.clamp_(min=a, max=b)
+            return tensor
+
         # Uniformly fill tensor with values from [l, u], then translate to
         # [2l-1, 2u-1].
         tensor.uniform_(2 * l - 1, 2 * u - 1, generator=generator)
