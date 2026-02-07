@@ -3832,10 +3832,10 @@ def check_verbose(obj: Any, is_inlined_call: bool = False) -> SkipResult:
     # methods even if they're in skipfiles. This enables Dynamo to capture
     # operations after a frame skip (e.g., when FSDP hooks cause graph breaks).
     if not is_inlined_call and isinstance(obj, types.CodeType):
-        if is_builtin_nn_module_forward(obj):
+        if is_inbuilt_nn_module_forward(obj):
             return SkipResult(
                 False,
-                "builtin nn.Module.forward allowed for eval frame tracing",
+                "inbuilt nn.Module.forward allowed for eval frame tracing",
             )
 
     if isinstance(
@@ -3910,9 +3910,9 @@ def _nn_modules_dir() -> Optional[str]:
     return _module_dir(torch.nn.modules)
 
 
-def is_builtin_nn_module_forward(code: types.CodeType) -> bool:
+def is_inbuilt_nn_module_forward(code: types.CodeType) -> bool:
     """
-    Check if a code object is a forward method from a built-in nn.Module.
+    Check if a code object is a forward method from an inbuilt nn.Module.
 
     This is used by the eval frame callback to allow tracing of nn.Module.forward
     methods even when they're in skipfiles. This enables Dynamo to capture
