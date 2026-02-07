@@ -395,6 +395,151 @@ struct HeaderOnlyIndexBoundsCheck {
 
 } // namespace detail
 
+// ============================================================================
+// RestrictPtrTraits Workaround
+// ============================================================================
+// NVIDIA's nvcc does not recognize __restrict__ on member pointers in structs
+// passed to kernels (see https://github.com/pytorch/pytorch/issues/76632).
+// This means RestrictPtrTraits has no effect when using PackedTensorAccessor.
+//
+// The workaround is to decouple the pointer from the accessor metadata:
+//   1. Pass the data pointer as a separate __restrict__ kernel argument
+//   2. Pass the metadata (sizes/strides) in a PackedTensorAccessorMetadata
+//   3. Use packed_accessor_index() to compute offsets
+//
+// Example usage in CUDA kernel:
+//   __global__ void kernel(
+//       float* __restrict__ data,
+//       PackedTensorAccessorMetadata<3, int32_t> meta) {
+//     // Access element at [i][j][k]:
+//     int64_t offset = packed_accessor_offset(meta, i, j, k);
+//     data[offset] = ...;
+//   }
+//
+// On host, create metadata from an existing accessor:
+//   auto accessor = tensor.packed_accessor32<float, 3>();
+//   auto meta = make_packed_accessor_metadata(accessor);
+//   kernel<<<...>>>(tensor.data_ptr<float>(), meta);
+// ============================================================================
+
+/// Holds only the sizes and strides for a packed tensor accessor.
+/// This allows the data pointer to be passed separately as __restrict__.
+template <size_t N, typename index_t = int64_t>
+struct PackedTensorAccessorMetadata {
+  // NOLINTNEXTLINE(*c-arrays*)
+  index_t sizes[N];
+  // NOLINTNEXTLINE(*c-arrays*)
+  index_t strides[N];
+
+  C10_HOST_DEVICE index_t size(index_t i) const {
+    return sizes[i];
+  }
+  C10_HOST_DEVICE index_t stride(index_t i) const {
+    return strides[i];
+  }
+};
+
+/// Create metadata from a GenericPackedTensorAccessor.
+template <
+    typename ItemAccessor,
+    typename IndexBoundsCheck,
+    typename T,
+    size_t N,
+    template <typename U> class PtrTraits,
+    typename index_t>
+C10_HOST PackedTensorAccessorMetadata<N, index_t> make_packed_accessor_metadata(
+    const detail::GenericPackedTensorAccessor<
+        ItemAccessor,
+        IndexBoundsCheck,
+        T,
+        N,
+        PtrTraits,
+        index_t>& accessor) {
+  PackedTensorAccessorMetadata<N, index_t> meta;
+  for (size_t i = 0; i < N; ++i) {
+    meta.sizes[i] = accessor.size(static_cast<index_t>(i));
+    meta.strides[i] = accessor.stride(static_cast<index_t>(i));
+  }
+  return meta;
+}
+
+/// Create metadata from a GenericPackedTensorAccessorBase.
+template <
+    typename IndexBoundsCheck,
+    typename T,
+    size_t N,
+    template <typename U> class PtrTraits,
+    typename index_t>
+C10_HOST PackedTensorAccessorMetadata<N, index_t> make_packed_accessor_metadata(
+    const detail::GenericPackedTensorAccessorBase<
+        IndexBoundsCheck,
+        T,
+        N,
+        PtrTraits,
+        index_t>& accessor) {
+  PackedTensorAccessorMetadata<N, index_t> meta;
+  for (size_t i = 0; i < N; ++i) {
+    meta.sizes[i] = accessor.size(static_cast<index_t>(i));
+    meta.strides[i] = accessor.stride(static_cast<index_t>(i));
+  }
+  return meta;
+}
+
+namespace detail {
+
+// Base case for offset calculation (no more indices)
+template <size_t N, typename index_t>
+C10_HOST_DEVICE index_t packed_accessor_offset_impl(
+    const PackedTensorAccessorMetadata<N, index_t>& /*meta*/,
+    size_t /*dim*/) {
+  return 0;
+}
+
+// Recursive case for offset calculation
+template <size_t N, typename index_t, typename... Indices>
+C10_HOST_DEVICE index_t packed_accessor_offset_impl(
+    const PackedTensorAccessorMetadata<N, index_t>& meta,
+    size_t dim,
+    index_t first,
+    Indices... rest) {
+  return first * meta.strides[dim] +
+      packed_accessor_offset_impl(meta, dim + 1, rest...);
+}
+
+} // namespace detail
+
+/// Compute the linear offset for given indices using accessor metadata.
+/// Usage: packed_accessor_offset(meta, i, j, k) for a 3D accessor
+template <size_t N, typename index_t, typename... Indices>
+C10_HOST_DEVICE index_t packed_accessor_offset(
+    const PackedTensorAccessorMetadata<N, index_t>& meta,
+    Indices... indices) {
+  static_assert(
+      sizeof...(Indices) == N,
+      "Number of indices must match accessor dimensions");
+  return detail::packed_accessor_offset_impl(meta, 0, indices...);
+}
+
+/// Access an element using a separate pointer and metadata.
+/// This enables proper __restrict__ optimization when the pointer is passed
+/// as a __restrict__ kernel argument.
+template <typename T, size_t N, typename index_t, typename... Indices>
+C10_HOST_DEVICE T& packed_accessor_get(
+    T* data,
+    const PackedTensorAccessorMetadata<N, index_t>& meta,
+    Indices... indices) {
+  return data[packed_accessor_offset(meta, indices...)];
+}
+
+/// Const version of packed_accessor_get.
+template <typename T, size_t N, typename index_t, typename... Indices>
+C10_HOST_DEVICE const T& packed_accessor_get(
+    const T* data,
+    const PackedTensorAccessorMetadata<N, index_t>& meta,
+    Indices... indices) {
+  return data[packed_accessor_offset(meta, indices...)];
+}
+
 // HeaderOnlyTensorAccessorBase is same as at::TensorAccessorBase
 // except sizes() and strides() return IntHeaderOnlyArrayRef instead
 // of IntArrayRef.
