@@ -622,7 +622,6 @@ dtensor_compiled_xfails = {
     xfail("select"),
     xfail("select_scatter"),
     xfail("slice"),
-    xfail("sparse.sampled_addmm"),
     xfail("special.airy_ai"),
     xfail("special.bessel_j0"),
     xfail("special.bessel_j1"),
