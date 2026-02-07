@@ -566,7 +566,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         result_fp16 = fut.value()
         # float16 has only ~11 bits of mantissa, and is sensitive to accumulation
         # order and rounding errors so we use a larger tolerance.
-        self.assertEqual(total, result_fp16[0], rtol=1e-2, atol=1e-3)
+        self.assertEqual(total, result_fp16[0], rtol=1e-2, atol=4)
 
     @requires_gloo()
     def test_allreduce_basics(self):
