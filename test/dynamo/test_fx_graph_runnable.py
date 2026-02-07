@@ -86,6 +86,13 @@ if has_triton():
         output = x + y
         tl.atomic_add(output_ptr + offsets, output, mask=mask)
 
+    autotuned_subtract = triton.autotune(
+        configs=[
+            triton.Config({"BLOCK_SIZE": 1024}, num_warps=4, num_stages=2),
+        ],
+        key=["n_elements"],
+    )(subtract_kernel_inner)
+
 
 from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.testing._internal.triton_utils import requires_gpu
@@ -222,6 +229,29 @@ class FxGraphRunnableTest(TestCase):
         y = torch.ones((4096,), device=GPU_TYPE, dtype=torch.float16) * 0.5
 
         torch.compile(subtract_nested)(x, y)
+        self._exec_and_verify_payload()
+
+    @unittest.skipUnless(has_triton(), "Triton not available")
+    @requires_gpu
+    def test_nested_and_autotuned_same_kernel(self):
+        def f(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            output1 = torch.empty_like(x)
+            output2 = torch.empty_like(x)
+            n_elements = x.numel()
+
+            def grid(meta):
+                return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+            autotuned_subtract[grid](x, y, output2, n_elements)
+            subtract_kernel_inner[(n_elements,)](
+                x, y, output1, n_elements, BLOCK_SIZE=1024
+            )
+            return output1 + output2
+
+        x = torch.ones((4096,), device="cuda", dtype=torch.float16)
+        y = torch.ones((4096,), device="cuda", dtype=torch.float16) * 0.5
+
+        torch.compile(f)(x, y)
         self._exec_and_verify_payload()
 
     def test_two_inputs_matmul(self):

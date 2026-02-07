@@ -424,6 +424,44 @@ python_binary(
         return ""
 
 
+def generate_custom_triton_kernel(kernel: Any) -> str:
+    res = ""
+    if isinstance(kernel, Autotuner):
+        # pyrefly: ignore [missing-attribute]
+        if isinstance(kernel.fn, Heuristics):
+            res += "ERROR: Repro will not work as intended, "
+            res += "triton.runtime.autotuner.Heuristics is not currently supported\n"
+            return res
+
+        config_strs = []
+        # pyrefly: ignore [missing-attribute]
+        for kernel_config in kernel.configs:
+            # pyrefly: ignore [bad-argument-type]
+            config_strs.append(f"""triton.Config(
+                    {str(kernel_config.kwargs)},
+                    num_warps={kernel_config.num_warps},
+                    num_stages={kernel_config.num_stages},
+                )""")
+
+        config_str = ",".join(config_strs)
+        res += textwrap.dedent(f"""
+        @triton.autotune(
+            configs=[
+                {config_str}
+            ],
+            key=[]
+        )
+        """).strip()
+
+    # pyrefly: ignore [missing-attribute]
+    src_code = kernel.src if isinstance(kernel, JITFunction) else kernel.fn.src
+    res += "\n@triton.jit\n"
+    res += src_code
+    res += "\n"
+
+    return res
+
+
 def generate_compiler_repro_string(
     gm: torch.fx.GraphModule,
     args: Sequence[Any],
@@ -528,77 +566,32 @@ if "__compile_source__" in globals():
             and val is not jit_fn
         ]
 
-    def write_jit_function(
-        jit_fn: JITFunction,
-        written_fns: set[str],
-    ) -> str:
-        result = ""
-        fn_name = jit_fn._fn_name.split(".")[-1]  # pyrefly: ignore [missing-attribute]
-        if fn_name in written_fns:
-            return ""
-        # Write nested dependencies first (recursively)
-        for nested_fn in get_nested_jit_functions(jit_fn):
-            result += write_jit_function(nested_fn, written_fns)
-        # Now write this function
-        if fn_name not in written_fns:
-            result += "\n@triton.jit\n"
-            result += jit_fn.src  # pyrefly: ignore [missing-attribute]
-            result += "\n"
-            written_fns.add(fn_name)
-        return result
+    def get_fn_name(kernel: Any):
+        fn_name = (
+            # pyrefly: ignore [missing-attribute]
+            kernel._fn_name if isinstance(kernel, JITFunction) else kernel.fn._fn_name
+        )
+        fn_name = fn_name.split(".")[-1]
+        return fn_name
 
     written_kernel_names: set[str] = set()
-    # Track which grid entry corresponds to the best config
+
     for id in kernel_side_table.id_to_kernel:
         kernel = kernel_side_table.get_kernel(id)
 
         try:
             # First, write out any nested kernel dependencies
             for nested_fn in get_nested_jit_functions(kernel):
-                model_str += write_jit_function(nested_fn, written_kernel_names)
+                nested_fn_name = get_fn_name(nested_fn)
+                if nested_fn_name not in written_kernel_names:
+                    model_str += generate_custom_triton_kernel(kernel)
+                    written_kernel_names.add(nested_fn_name)
 
-            if isinstance(kernel, Autotuner):
-                # pyrefly: ignore [missing-attribute]
-                if isinstance(kernel.fn, Heuristics):
-                    model_str += "ERROR: Repro will not work as intended, "
-                    model_str += "triton.runtime.autotuner.Heuristics is not currently supported\n"
-                    break
-
-                config_strs = []
-                # pyrefly: ignore [missing-attribute]
-                for kernel_config in kernel.configs:
-                    # pyrefly: ignore [bad-argument-type]
-                    config_strs.append(f"""triton.Config(
-                            {str(kernel_config.kwargs)},
-                            num_warps={kernel_config.num_warps},
-                            num_stages={kernel_config.num_stages},
-                        )""")
-
-                config_str = ",".join(config_strs)
-                model_str += textwrap.dedent(f"""
-                @triton.autotune(
-                    configs=[
-                        {config_str}
-                    ],
-                    key=[]
-                )
-                """).strip()
-
-            # pyrefly: ignore [missing-attribute]
-            src_code = kernel.src if isinstance(kernel, JITFunction) else kernel.fn.src
-            fn_name = (
-                # pyrefly: ignore [missing-attribute]
-                kernel._fn_name
-                if isinstance(kernel, JITFunction)
-                else kernel.fn._fn_name
-            )
-            fn_name = fn_name.split(".")[-1]
+            fn_name = get_fn_name(kernel)
 
             # Only write the kernel if not already written (could have been a nested dep)
             if fn_name not in written_kernel_names:
-                model_str += "\n@triton.jit\n"
-                model_str += src_code
-                model_str += "\n"
+                model_str += generate_custom_triton_kernel(kernel)
                 written_kernel_names.add(fn_name)
             model_str += f"{kernel_side_table_prefix}.add_kernel({fn_name})\n"
         except AttributeError as e:
