@@ -245,7 +245,7 @@ def tf32(
         if math_sdp_precision is not None:
             torch.backends.cuda.math_sdp.fp32_precision = old_math_sdp_fp32_precision
         if enable is not None:
-            torch.backends.cuda.matmul.allow_tf32=old_allow_tf32_matmul
+            torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32_matmul
         if change_precision:
             test_case.precision = old_precision
 
