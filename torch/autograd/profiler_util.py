@@ -987,13 +987,12 @@ class MemRecordsAcc:
             tmp = sorted([(r[0].start_ns(), i) for i, r in enumerate(mem_records)])
             self._start_nses, self._indices = zip(*tmp)  # type: ignore[assignment]
 
-    def in_interval(self, start_us, end_us):
+    def in_interval(self, start_ns, end_ns):
         r"""
         Return all records in the given interval
-        To maintain backward compatibility, convert us to ns in function
         """
-        start_idx = bisect.bisect_left(self._start_nses, start_us * 1000)
-        end_idx = bisect.bisect_right(self._start_nses, end_us * 1000)
+        start_idx = bisect.bisect_left(self._start_nses, start_ns)
+        end_idx = bisect.bisect_right(self._start_nses, end_ns)
         for i in range(start_idx, end_idx):
             yield self._mem_records[self._indices[i]]
 
@@ -1425,7 +1424,7 @@ def _canonicalize_profiler_events(events):
 
         events_with_traces.append(
             {
-                "event_name": event_name[:20],
+                "event_name": event_name[:30],
                 "node_name": node_name,
                 "stack_trace": stack_trace,
                 "start_time": event.get("ts", 0),
