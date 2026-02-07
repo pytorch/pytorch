@@ -325,9 +325,18 @@ Tensor& addmv_out(
     self_v = self;
   }
 
-  Tensor vec_v = vec.view({vec.size(0), 1});
-  at::native::xpu::addmm_out(self_v, mat, vec_v, beta, alpha, out);
-  out.resize_({mat.size(0)});
+  if (mat.numel() == 0) {
+    if (beta.toComplexDouble() == 0.0) {
+      out.zero_();
+    } else {
+      at::mul_out(out, self, beta);
+    }
+  } else {
+    Tensor vec_v = vec.view({vec.size(0), 1});
+    at::native::xpu::addmm_out(self_v, mat, vec_v, beta, alpha, out);
+    out.resize_({mat.size(0)});
+  }
+
   return out;
 }
 
