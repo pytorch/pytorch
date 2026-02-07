@@ -73,6 +73,7 @@ from .bytecode_analysis import (
 )
 from .bytecode_transformation import (
     cleaned_instructions,
+    clear_instruction_args,
     create_binary_slice,
     create_call_function,
     create_call_function_ex,
@@ -136,6 +137,7 @@ from .utils import (
     get_instruction_source_311,
     get_metrics_context,
     graph_break_dup_warning_checker,
+    is_safe_constant,
     istype,
     LazyString,
     proxy_args_kwargs,
@@ -3433,6 +3435,13 @@ class InstructionTranslatorBase(
         items = self.popn(inst.argval)
         self.push(SliceVariable(items, tx=self))  # type: ignore[arg-type]
 
+    def _can_speculate_comprehension_nested(self) -> bool:
+        """Check if comprehension speculation is allowed in nested context.
+
+        For the base class (non-inlined), this always returns False.
+        """
+        return False
+
     def _maybe_setup_comprehension_speculation(self, inst: Instruction) -> bool:
         """
         Handle comprehension start for Python 3.12+ BUILD_LIST/BUILD_MAP with argval 0.
@@ -3451,8 +3460,10 @@ class InstructionTranslatorBase(
             and not self.is_tracing_resume_prologue
             and not self.active_generic_context_managers
             and self.output.current_tracer.parent is None
-            and self.parent is None
         )
+
+        if can_speculate and self.parent is not None:
+            can_speculate = self._can_speculate_comprehension_nested()
         # Only set up speculation at depth 0 (outermost comprehension)
         if can_speculate and self._comprehension_depth == 0:
             speculation = self.speculate()
@@ -3460,6 +3471,9 @@ class InstructionTranslatorBase(
                 self._handle_comprehension_graph_break(inst)
                 return True
             self.current_speculation = speculation
+        end_for_ip = self._find_comprehension_end_for_ip()
+        assert end_for_ip >= 0
+        self._comprehension_end_for_ips.add(end_for_ip)
         self._comprehension_depth += 1
         return False
 
@@ -4200,6 +4214,13 @@ class InstructionTranslatorBase(
         else:
             self.popn(2)
 
+        # Decrement comprehension depth if exiting a comprehension layer
+        if sys.version_info >= (3, 12):
+            current_ip = self.indexof[inst]
+            if current_ip in self._comprehension_end_for_ips:
+                self._comprehension_end_for_ips.discard(current_ip)
+                self._comprehension_depth -= 1
+
     def LOAD_FAST_CHECK(self, inst: Instruction) -> None:
         if istype(self.symbolic_locals.get(inst.argval, None), NullVariable):
             unimplemented(
@@ -4449,6 +4470,22 @@ class InstructionTranslatorBase(
 
         return prefix == pattern
 
+    def _find_comprehension_end_for_ip(self) -> int:
+        """Find the instruction pointer of the outermost END_FOR for current comprehension."""
+        assert sys.version_info >= (3, 12)
+        assert self.instruction_pointer is not None
+
+        nesting_depth = 0
+        for search_ip in range(self.instruction_pointer, len(self.instructions)):
+            inst = self.instructions[search_ip]
+            if inst.opname == "FOR_ITER":
+                nesting_depth += 1
+            elif inst.opname == "END_FOR":
+                nesting_depth -= 1
+                if nesting_depth == 0:
+                    return search_ip
+        return -1
+
     def _analyze_comprehension(self) -> ComprehensionAnalysis:
         """Analyze comprehension bytecode to determine result handling pattern."""
         assert sys.version_info >= (3, 12)
@@ -4475,19 +4512,8 @@ class InstructionTranslatorBase(
                 break
         defined_inside.update(iterator_vars)
 
-        # Find the outermost END_FOR by tracking nesting depth
-        end_for_ip = -1
-        nesting_depth = 0
-        for search_ip in range(self.instruction_pointer, len(self.instructions)):
-            inst = self.instructions[search_ip]
-            if inst.opname == "FOR_ITER":
-                nesting_depth += 1
-            elif inst.opname == "END_FOR":
-                nesting_depth -= 1
-                if nesting_depth == 0:
-                    end_for_ip = search_ip
-                    break
-        if end_for_ip < 0:
+        end_for_ip = self._find_comprehension_end_for_ip()
+        if end_for_ip == -1:
             unimplemented(
                 gb_type="Comprehension analysis failed: No END_FOR",
                 context="",
@@ -4527,6 +4553,11 @@ class InstructionTranslatorBase(
                 for var_name in var_names:
                     if var_name not in defined_inside and var_name not in captured_vars:
                         captured_vars.append(var_name)
+
+            elif inst.opname == "LOAD_DEREF":
+                var_name = inst.argval
+                if var_name not in captured_vars:
+                    captured_vars.append(var_name)
 
         # Extract pre_store_ops: all opcodes from END_FOR+1 until first STORE_FAST
         pre_store_ops: list[str] = []
@@ -4658,7 +4689,8 @@ class InstructionTranslatorBase(
             )
             # Tensors/symnodes must already be in their correct slot
             if isinstance(var, (TensorVariable, SymNodeVariable)):
-                if not in_correct_slot:
+                # In nested context, tensor may be from parent frame argument
+                if self.parent is None and not in_correct_slot:
                     unimplemented(
                         gb_type="Comprehension with captured tensor not in local slot",
                         context="",
@@ -4694,15 +4726,89 @@ class InstructionTranslatorBase(
                 )
             self.output.add_output_instructions(cg.get_instructions())
 
-        # --- Step 3: Add the comprehension bytecode ---
+        # --- Step 3: Load closure variables into local slots ---
 
-        copied_insts = self._copy_comprehension_bytecode(start_ip, analysis.end_ip)
+        vars_for_co_varnames = (
+            analysis.iterator_vars
+            + analysis.walrus_vars
+            + analysis.captured_vars
+            + ([analysis.result_var] if analysis.result_var else [])
+        )
+
+        for var_name in vars_for_co_varnames:
+            if var_name not in self.output.code_options["co_varnames"]:
+                self.output.code_options["co_varnames"] += (var_name,)
+
+        captured_closure_vars = {
+            var_name
+            for var_name in analysis.captured_vars
+            if var_name in self.cell_and_freevars()
+        }
+
+        # Load closure variables into local slots before copying comprehension bytecode.
+        # We convert LOAD_DEREF to LOAD_FAST in the copied bytecode, so we must first
+        # populate those local slots with the closure values. Three cases:
+        # 1. Top-level (parent is None): emit LOAD_DEREF -> STORE_FAST
+        # 2. Inlined, var in freevars: extract from closure, load as const or global
+        # 3. Inlined, var in cellvars: load via side_effects from symbolic_locals
+        if captured_closure_vars:
+            cg = PyCodegen(self)
+            for var_name in captured_closure_vars:
+                if self.parent is None:
+                    cg.extend_output(
+                        [
+                            create_instruction("LOAD_DEREF", argval=var_name),
+                            create_instruction("STORE_FAST", argval=var_name),
+                        ]
+                    )
+                else:
+                    assert hasattr(self, "funcvar"), (
+                        "Expected InliningInstructionTranslator to have funcvar"
+                    )
+                    fn = self.funcvar.fn
+                    closure = fn.__closure__ or ()
+                    freevars = fn.__code__.co_freevars
+                    if var_name in freevars:
+                        idx = freevars.index(var_name)
+                        actual_value = closure[idx].cell_contents
+                        if is_safe_constant(actual_value):
+                            cg.extend_output(
+                                [
+                                    cg.create_load_const(actual_value),
+                                    create_instruction("STORE_FAST", argval=var_name),
+                                ]
+                            )
+                        else:
+                            global_name = self.output.install_global_by_id(
+                                f"__closure_{var_name}", actual_value
+                            )
+                            cg.extend_output(
+                                [
+                                    cg.create_load_global(global_name, add=True),
+                                    create_instruction("STORE_FAST", argval=var_name),
+                                ]
+                            )
+                    # Variable is a cellvar
+                    else:
+                        cell = self.symbolic_locals[var_name]
+                        cell_contents = self.output.side_effects.load_cell(cell)
+                        cg(cell_contents, allow_cache=False)
+                        cg.extend_output(
+                            [create_instruction("STORE_FAST", argval=var_name)]
+                        )
+            self.output.add_output_instructions(cg.get_instructions())
+
+        # --- Step 4: Add the comprehension bytecode ---
+
+        copied_insts = self._copy_comprehension_bytecode(
+            start_ip, analysis.end_ip, captured_closure_vars
+        )
         self.output.add_output_instructions(copied_insts)
 
         if analysis.result_on_stack:
             self.push(UnknownVariable())
 
-        # --- Step 4: Generate code to pass variables to resume function ---
+        # --- Step 5: Generate code to pass variables to resume function ---
 
         # Variables the comprehension creates that need to be passed to resume:
         # - result_var: variable the comprehension result is assigned to
@@ -4740,7 +4846,7 @@ class InstructionTranslatorBase(
             )
             self.output.add_output_instructions(resume_cg.get_instructions())
 
-        # --- Step 5: Create the resume function ---
+        # --- Step 6: Create the resume function ---
 
         resume_inst = self.instructions[analysis.end_ip]
         self.output.add_output_instructions(
@@ -4750,9 +4856,13 @@ class InstructionTranslatorBase(
         self.instruction_pointer = None
 
     def _copy_comprehension_bytecode(
-        self, start_ip: int, end_ip: int
+        self, start_ip: int, end_ip: int, captured_closure_vars: set[str] | None = None
     ) -> list[Instruction]:
-        """Copy comprehension bytecode instructions, updating jump targets."""
+        """Copy comprehension bytecode instructions, updating jump targets.
+
+        Args:
+            captured_closure_vars: Variable names to convert from LOAD_DEREF to LOAD_FAST
+        """
         inst_map: dict[Instruction, Instruction] = {}
         copied_insts: list[Instruction] = []
 
@@ -4763,9 +4873,23 @@ class InstructionTranslatorBase(
             inst_map[original_inst] = copied_inst
             copied_insts.append(copied_inst)
 
+        # Clear instruction args so fix_vars can recalculate them for the new context.
+        # This is needed because the copied bytecode has arg values that reference
+        # indices in the original function's co_varnames/co_consts, which may differ
+        # from the generated code's.
+        clear_instruction_args(copied_insts)
+
         for copied_inst in copied_insts:
             if copied_inst.target is not None and copied_inst.target in inst_map:
                 copied_inst.target = inst_map[copied_inst.target]
+
+            if (
+                captured_closure_vars
+                and copied_inst.opname == "LOAD_DEREF"
+                and copied_inst.argval in captured_closure_vars
+            ):
+                copied_inst.opname = "LOAD_FAST"
+                copied_inst.opcode = dis.opmap["LOAD_FAST"]
 
         return copied_insts
 
@@ -4970,6 +5094,7 @@ class InstructionTranslatorBase(
         self.exn_vt_stack = exn_vt_stack
         self.latest_bytecode_queue = deque(maxlen=20)
         self._comprehension_depth = 0
+        self._comprehension_end_for_ips: set[int] = set()
 
         # Properties of the input/output code
         self.instructions: list[Instruction] = instructions
@@ -5777,6 +5902,19 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
     def run_ctx_mgr(self) -> Any:
         return TracingContext.current_frame(self.parent.frame_summary())
+
+    def _can_speculate_comprehension_nested(self) -> bool:
+        """Check if comprehension speculation is allowed in this inlined context.
+
+        Unlike should_compile_partial_graph(), this skips the exception table entry check.
+        """
+        if not config.nested_graph_breaks:
+            return False
+        if not self.funcvar.should_allow_nested_graph_breaks():
+            return False
+        if not self.parent.should_compile_partial_graph():
+            return False
+        return True
 
     def should_compile_partial_graph(self) -> bool:
         if config.nested_graph_breaks:
