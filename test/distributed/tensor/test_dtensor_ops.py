@@ -965,6 +965,7 @@ ops_unbacked_dtensor_dde = {
     xfail("vdot"),
     xfail("view"),
     xfail("view_as"),
+    xfail("view_as_complex"),
     xfail("view_copy"),
     xfail("vstack"),
     xfail("where"),
