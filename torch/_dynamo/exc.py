@@ -309,10 +309,6 @@ class UncapturedHigherOrderOpError(TorchDynamoException):
         )
 
 
-class IncorrectUsage(Exception):
-    pass
-
-
 # TODO: I'm a little uncertain about what error classification we should have
 # for this.  This is potentially a user error, but regressions in
 # specialization in PyTorch proper could also trigger this problem
