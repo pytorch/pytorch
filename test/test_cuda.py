@@ -5062,12 +5062,14 @@ def get_all_cudagraph_segments():
     return [segment for segment in segments if segment["segment_pool_id"] != (0, 0)]
 
 
-def cudagraphify(fn, inputs, pool=None):
+def cudagraphify(fn, inputs, pool=None, stream=None):
     if not TEST_CUDA_GRAPH:
         raise unittest.SkipTest("cuda graph test is skipped")
 
     torch.cuda.synchronize()
-    stream = torch.cuda.Stream()
+    if stream is None:
+        stream = torch.cuda.Stream()
+
     stream.wait_stream(torch.cuda.current_stream())
     with torch.cuda.stream(stream):
         fn(*inputs)
@@ -5470,6 +5472,83 @@ class TestBlockStateAbsorption(TestCase):
         torch.cuda.empty_cache()
 
         self.assertEqual(len(get_cudagraph_segments(pool)), 0)
+
+    @unittest.skipIf(not EXPANDABLE_SEGMENTS, "requires expandable_segments")
+    def test_expandable_segment_checkpoint_growth(self):
+        # Test restoring checkpoint when expandable segment has grown.
+        # Captures graph1 (small), checkpoints, then captures graph2 (larger)
+        # which grows the segment. Restoring to the smaller checkpoint should
+        # handle the extra mapped memory correctly.
+        pool_id = torch.cuda.graph_pool_handle()
+        stream = torch.cuda.Stream()
+        device = torch.cuda.current_device()
+
+        def get_large_mapped_blocks():
+            # memory_snapshot only includes mapped blocks
+            snapshot_segments = torch.cuda.memory_snapshot()
+            res = []
+            for segment in snapshot_segments:
+                if segment["segment_type"] != "large":
+                    continue
+                blocks = segment["blocks"]
+                for block in blocks:
+                    res.append((block["size"], block["state"]))
+            return res
+
+        with torch.cuda.stream(stream):
+            g = torch.cuda.CUDAGraph()
+            g.capture_begin(pool=pool_id)
+            g.capture_end()
+        original_state = torch._C._cuda_getCheckpointState(device, pool_id)
+
+        # 2MB allocation
+        def small_fn():
+            return (torch.empty(2 * 1024 * 1024, device="cuda", dtype=torch.int8),)
+
+        graph1, out1 = cudagraphify(small_fn, [], pool=pool_id, stream=stream)
+
+        large_mapped_blocks = get_large_mapped_blocks()
+        # small_fn allocates 2 MB, which leads to a 20 MB segment in large blocks. This becomes a 2 MB (or 2097152 bytes)
+        # active allocated block and a 18 MB (or 18874368 bytes) inactive block.
+        self.assertEqual(
+            large_mapped_blocks, [(2097152, "active_allocated"), (18874368, "inactive")]
+        )
+
+        small_state = torch._C._cuda_getCheckpointState(device, pool_id)
+        out1_metadata = [tensor_metadata(t) for t in out1]
+        del out1
+
+        self.setCheckpointPoolState(device, original_state, [], [])
+
+        # 32MB allocation
+        def large_fn():
+            return (torch.empty(32 * 1024 * 1024, device="cuda", dtype=torch.int8),)
+
+        graph2, out2 = cudagraphify(large_fn, [], pool=pool_id, stream=stream)
+
+        large_mapped_blocks = get_large_mapped_blocks()
+        # large_fn allocates 32 MB, which leads to a 40 MB segment in large blocks. This becomes a 32 MB (or 33554432 bytes)
+        # active allocated block and a 8 MB (or 8388608 bytes) inactive block.
+        self.assertEqual(
+            large_mapped_blocks, [(33554432, "active_allocated"), (8388608, "inactive")]
+        )
+
+        self.setCheckpointPoolState(device, original_state, out2, [])
+
+        graph1.replay()
+        reconstructed = [reconstruct_from_tensor_metadata(m) for m in out1_metadata]
+        out1_storage = [o.untyped_storage()._cdata for o in reconstructed]
+        torch._C._cuda_setCheckpointPoolState(device, small_state, [], out1_storage)
+
+        large_mapped_blocks = get_large_mapped_blocks()
+        # private memory pool never decreases size so we still have 40 MB segment. When we set checkpoint pool state for
+        # small_state, we allocate a 2 MB (or 2097152 bytes) active block and a 18 MB (or 18874368 bytes) inactive block.
+        # Since the total segment size is 40 MB, we still have a 20 MB inactive block. These two inactive blocks
+        # automatically merge into a single 38 MB (or 39845888 bytes) inactive block. As a result, we have a 2 MB active
+        # block and a 38 MB inactive block in the memory snapshot.
+        self.assertEqual(
+            large_mapped_blocks, [(2097152, "active_allocated"), (39845888, "inactive")]
+        )
 
     def test_no_triton_on_import(self):
         """Test that Triton is not imported on first GPU use"""
