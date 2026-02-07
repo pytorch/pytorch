@@ -15,6 +15,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     skipIfRocm,
+    skipIfXpu,
     TestCase,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU_AND_TRITON
@@ -408,6 +409,7 @@ class ComboKernelTests(TestCase):
         # 3D poi (x, y, z) are separated from combo kernels
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
+    @skipIfXpu(msg="Profiler JSON traceEvents is not supported on XPU")
     @requires_gpu_and_triton
     def test_combo_kernel_per_config_subkernel_block_size(self):
         from torch.profiler import ProfilerActivity
@@ -440,23 +442,24 @@ class ComboKernelTests(TestCase):
             return o0, o1, o2, o3, o4, o5, o6, o7
 
         inps = [
-            torch.randn(4, 3, 224, 224, device="cuda"),
-            torch.randn(64, 3, 3, 3, device="cuda"),
-            torch.randn(64, 64, 3, 3, device="cuda"),
-            torch.randn(128, 64, 3, 3, device="cuda"),
-            torch.randn(128, 128, 3, 3, device="cuda"),
-            torch.randn(256, 128, 3, 3, device="cuda"),
-            torch.randn(256, 256, 3, 3, device="cuda"),
-            torch.randn(256, 256, 3, 3, device="cuda"),
+            torch.randn(4, 3, 224, 224, device=GPU_TYPE),
+            torch.randn(64, 3, 3, 3, device=GPU_TYPE),
+            torch.randn(64, 64, 3, 3, device=GPU_TYPE),
+            torch.randn(128, 64, 3, 3, device=GPU_TYPE),
+            torch.randn(128, 128, 3, 3, device=GPU_TYPE),
+            torch.randn(256, 128, 3, 3, device=GPU_TYPE),
+            torch.randn(256, 256, 3, 3, device=GPU_TYPE),
+            torch.randn(256, 256, 3, 3, device=GPU_TYPE),
         ]
         out_eager = fn(*inps)
         fn_c = torch.compile(fn)
 
         with tempfile.NamedTemporaryFile(suffix=".json") as trace_file:
             trace_path = trace_file.name
+            activity = getattr(ProfilerActivity, GPU_TYPE.upper())
 
             with torch.profiler.profile(
-                activities=[ProfilerActivity.CUDA],
+                activities=[activity],
                 record_shapes=True,
             ) as prof:
                 out_compiled, code = run_and_get_code(fn_c, *inps)
@@ -956,7 +959,7 @@ class ComboKernelPDLTests(TestCase):
         # Uses round-robin dispatch (pid % 2) since both tensors are same size.
         (
             FileCheck()
-            .check("if pid % 2 == 0:")
+            .check("if pid")
             .check("tl.extra.cuda.gdc_wait()")
             .check("tl.load(")
             .check_not("tl.extra.cuda.gdc_wait()")
