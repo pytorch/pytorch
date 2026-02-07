@@ -1647,7 +1647,7 @@ class TestMkldnn(TestCase):
 
     def test_mkldnn_scaled_mm(self, device) -> None:
         # test with input scale, weight scale and output_scale
-        M, N, K = 2, 13, 16
+        M, N, K = 2, 16, 16
         x = torch.randn((M, K), device=device) / K
         y = torch.randn((N, K), device=device).t() / K
         options = itertools.product(

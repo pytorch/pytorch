@@ -8962,7 +8962,7 @@ def sample_inputs_scaled_mm_v2(op_info, device, dtype, requires_grad, **kwargs):
     mat1 = make_mat_e4m3((M, K))
     mat2 = make_mat_e4m3((K, N)).t().contiguous().t()
 
-    if torch.device(device).type == "cuda":
+    if torch.cuda.is_available() and torch.device(device).type == "cuda":
         dmajor, dminor = torch.cuda.get_device_capability()
 
         # Blockwise scaling requires cublasLt >= 12.9 (CUDA 12.9+)
