@@ -114,9 +114,12 @@ jobs:
 
 
   linux-jammy-py3_14t-clang15-build:
+    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.14t-clang15 ') }}
     name: linux-jammy-py3.14t-clang15
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs:
+      - get-label-type
+      - job-filter
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3.14t-clang15
@@ -139,11 +142,13 @@ jobs:
     secrets: inherit
 
   linux-jammy-py3_14t-clang15-test:
+    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.14t-clang15 ') }}
     name: linux-jammy-py3.14t-clang15
     uses: ./.github/workflows/_linux-test.yml
     needs:
       - linux-jammy-py3_14t-clang15-build
       - target-determination
+      - job-filter
     with:
       build-environment: linux-jammy-py3.14t-clang15
       docker-image: ${{ needs.linux-jammy-py3_14t-clang15-build.outputs.docker-image }}
