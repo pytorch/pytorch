@@ -230,7 +230,7 @@ def tf32(
     old_allow_tf32_matmul = torch.backends.cuda.matmul.allow_tf32 if enable is not None else None
     try:
         if change_precision:
-            test_case.precision = precision 
+            test_case.precision = precision
         if math_sdp_precision is not None:
             torch.backends.cuda.math_sdp.fp32_precision = math_sdp_precision
         if enable is not None:
@@ -240,22 +240,22 @@ def tf32(
             ):
                 yield
         else:
-            yield            
+            yield
     finally:
-        if math_sdp_precision is not None:        
+        if math_sdp_precision is not None:
             torch.backends.cuda.math_sdp.fp32_precision = old_math_sdp_fp32_precision
         if enable is not None:
             torch.backends.cuda.matmul.allow_tf32=old_allow_tf32_matmul
         if change_precision:
-            test_case.precision = old_precision 
+            test_case.precision = old_precision
 
 
 def tf32_off():
-    return tf32(False, sdp_fp32_precision=None)
+    return tf32(False, math_sdp_precision=None)
 
 
 def tf32_on(self, tf32_precision=1e-5):
-    return tf32(True, test_self=self, tf32_precision=tf32_precision, sdp_fp32_precision=None)
+    return tf32(True, test_self=self, tf32_precision=tf32_precision, math_sdp_precision=None)
 
 
 # This is a wrapper that wraps a test to run this test twice, one with
