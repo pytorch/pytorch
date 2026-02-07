@@ -6,6 +6,7 @@ import contextlib
 import copy
 import functools
 import itertools
+import os
 import sys
 import types
 from collections.abc import Callable, Iterator, Sequence
@@ -17,6 +18,7 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.distributed import config as dist_config
 from torch.distributed._local_tensor import (
     LocalIntNode,
     LocalTensor,
@@ -431,6 +433,8 @@ class DTensorTestBase(MultiProcessTestCase):
             "gloo",
             "mpi",
             f"cpu:gloo,{self.device_type}:{curr_backend}",
+            "cpu:gloo,cuda:ncclx",
+            "cuda:ncclx",
             "hccl",
             "xccl",
             "fake",
@@ -449,6 +453,12 @@ class DTensorTestBase(MultiProcessTestCase):
                 torch.device(f"{self.device_type}:{self.rank}") if eager_init else None
             )
 
+        if dist_config.use_torchcomms:
+            # Rank/size are needed from env vars for torchcomms
+            os.environ["TORCHCOMM_RANK"] = str(self.rank)
+            os.environ["TORCHCOMM_SIZE"] = str(self.world_size)
+            # Set fallback store env var - use FileStore since init_method uses file://
+            os.environ["TORCHCOMM_STORE_PATH"] = self.file_name  # pyre-ignore[16]
         # For nccl backend, bind the device to the process if device_id is not None
         # so the nccl communicator is immediately formed and we can use `ncclCommSplit`
         # for form subgroup to avoid unnecessary overhead.
@@ -482,6 +492,11 @@ class DTensorTestBase(MultiProcessTestCase):
         else:
             dist.barrier(device_ids=[device_id])
 
+        if dist_config.use_torchcomms:
+            os.environ.pop("TORCHCOMM_RANK", None)
+            os.environ.pop("TORCHCOMM_SIZE", None)
+            os.environ.pop("TORCHCOMM_STORE_PATH", None)
+        # destroy_process_group will finalize torchcomms via _world.finalize_comms()
         dist.destroy_process_group()
 
     def setUp(self) -> None:
@@ -533,7 +548,8 @@ TestFunc = Callable[[...], object]
 
 # wrapper to initialize comms (processgroup)
 def with_comms(
-    eager_init: Union[TestFunc, bool] = False, backend: Optional[str] = None
+    eager_init: Union[TestFunc, bool] = False,
+    backend: Optional[str] = None,
 ) -> TestFunc:
     def decorator(func, eager_init: bool = False, backend: Optional[str] = None):
         @wraps(func)  # pyre-ignore[6]
