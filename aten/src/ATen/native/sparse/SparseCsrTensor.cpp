@@ -469,7 +469,7 @@ Tensor _sparse_compressed_tensor_unsafe_symint(
   }
   Layout layout_ = layout.value();
   AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(layout_, "sparse_compressed_tensor_unsafe", [&]{});
-  if (at::globalContext().checkSparseTensorInvariants()) {
+  if (at::globalContext().checkSparseTensorInvariants().value_or(false)) {
     _validate_sparse_compressed_tensor_args_worker(compressed_indices, plain_indices, values, C10_AS_INTARRAYREF_SLOW(size), layout_, true);
   }
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout_).device(device).pinned_memory(pin_memory);
@@ -493,7 +493,7 @@ static Tensor _sparse_compressed_tensor_unsafe_template(const Tensor& compressed
                                                  std::optional<bool> pin_memory) {
   Layout layout_ = layout.value_or(required_layout);
   TORCH_CHECK(layout_ == required_layout, "sparse compressed layout must be ",required_layout, " but got ", layout_);
-  if (at::globalContext().checkSparseTensorInvariants()) {
+  if (at::globalContext().checkSparseTensorInvariants().value_or(false)) {
     _validate_sparse_compressed_tensor_args_worker(compressed_indices, plain_indices, values, size, layout_, true);
   }
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout_).device(device).pinned_memory(pin_memory);
