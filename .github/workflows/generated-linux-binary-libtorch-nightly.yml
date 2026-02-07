@@ -441,15 +441,15 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-          path: /home/runner/_work/pytorch/
+          path: pytorch
           show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
-        working-directory: /home/runner/_work/pytorch/
+        working-directory: pytorch
       - name: Setup ROCm
-        uses: ./.github/actions/setup-rocm
+        uses: ./pytorch/.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -484,7 +484,7 @@ jobs:
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
-        uses: ./.github/actions/teardown-rocm
+        uses: ./pytorch/.github/actions/teardown-rocm
   libtorch-rocm7_0-shared-with-deps-release-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -560,15 +560,15 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-          path: /home/runner/_work/pytorch/
+          path: pytorch
           show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
-        working-directory: /home/runner/_work/pytorch/
+        working-directory: pytorch
       - name: Setup ROCm
-        uses: ./.github/actions/setup-rocm
+        uses: ./pytorch/.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -603,7 +603,7 @@ jobs:
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
-        uses: ./.github/actions/teardown-rocm
+        uses: ./pytorch/.github/actions/teardown-rocm
   libtorch-rocm7_1-shared-with-deps-release-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:

@@ -173,9 +173,9 @@ jobs:
       id-token: write
       contents: read
     steps:
-      !{{ common.checkout(deep_clone=False, directory=".") }}
+      !{{ common.checkout(deep_clone=False, directory="pytorch") }}
       - name: Setup ROCm
-        uses: ./.github/actions/setup-rocm
+        uses: ./pytorch/.github/actions/setup-rocm
       - uses: !{{ common.download_artifact_action }}
         name: Download Build Artifacts
         with:
@@ -210,7 +210,7 @@ jobs:
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
-        uses: ./.github/actions/teardown-rocm
+        uses: ./pytorch/.github/actions/teardown-rocm
     {%- endif %}
 
 {%- if branches == "nightly" %}

@@ -428,15 +428,15 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-          path: /home/runner/_work/pytorch/
+          path: pytorch
           show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
-        working-directory: /home/runner/_work/pytorch/
+        working-directory: pytorch
       - name: Setup ROCm
-        uses: ./.github/actions/setup-rocm
+        uses: ./pytorch/.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -471,7 +471,7 @@ jobs:
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
-        uses: ./.github/actions/teardown-rocm
+        uses: ./pytorch/.github/actions/teardown-rocm
   manywheel-py3_10-rocm7_0-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -544,15 +544,15 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-          path: /home/runner/_work/pytorch/
+          path: pytorch
           show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
-        working-directory: /home/runner/_work/pytorch/
+        working-directory: pytorch
       - name: Setup ROCm
-        uses: ./.github/actions/setup-rocm
+        uses: ./pytorch/.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -587,7 +587,7 @@ jobs:
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
-        uses: ./.github/actions/teardown-rocm
+        uses: ./pytorch/.github/actions/teardown-rocm
   manywheel-py3_10-rocm7_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -1095,15 +1095,15 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-          path: /home/runner/_work/pytorch/
+          path: pytorch
           show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
-        working-directory: /home/runner/_work/pytorch/
+        working-directory: pytorch
       - name: Setup ROCm
-        uses: ./.github/actions/setup-rocm
+        uses: ./pytorch/.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -1138,7 +1138,7 @@ jobs:
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
-        uses: ./.github/actions/teardown-rocm
+        uses: ./pytorch/.github/actions/teardown-rocm
   manywheel-py3_11-rocm7_0-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -1211,15 +1211,15 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-          path: /home/runner/_work/pytorch/
+          path: pytorch
           show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
-        working-directory: /home/runner/_work/pytorch/
+        working-directory: pytorch
       - name: Setup ROCm
-        uses: ./.github/actions/setup-rocm
+        uses: ./pytorch/.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -1254,7 +1254,7 @@ jobs:
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
-        uses: ./.github/actions/teardown-rocm
+        uses: ./pytorch/.github/actions/teardown-rocm
   manywheel-py3_11-rocm7_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -1762,15 +1762,15 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-          path: /home/runner/_work/pytorch/
+          path: pytorch
           show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
-        working-directory: /home/runner/_work/pytorch/
+        working-directory: pytorch
       - name: Setup ROCm
-        uses: ./.github/actions/setup-rocm
+        uses: ./pytorch/.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -1805,7 +1805,7 @@ jobs:
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
-        uses: ./.github/actions/teardown-rocm
+        uses: ./pytorch/.github/actions/teardown-rocm
   manywheel-py3_12-rocm7_0-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -1878,15 +1878,15 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-          path: /home/runner/_work/pytorch/
+          path: pytorch
           show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
-        working-directory: /home/runner/_work/pytorch/
+        working-directory: pytorch
       - name: Setup ROCm
-        uses: ./.github/actions/setup-rocm
+        uses: ./pytorch/.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -1921,7 +1921,7 @@ jobs:
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
-        uses: ./.github/actions/teardown-rocm
+        uses: ./pytorch/.github/actions/teardown-rocm
   manywheel-py3_12-rocm7_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -2429,15 +2429,15 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-          path: /home/runner/_work/pytorch/
+          path: pytorch
           show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
-        working-directory: /home/runner/_work/pytorch/
+        working-directory: pytorch
       - name: Setup ROCm
-        uses: ./.github/actions/setup-rocm
+        uses: ./pytorch/.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -2472,7 +2472,7 @@ jobs:
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
-        uses: ./.github/actions/teardown-rocm
+        uses: ./pytorch/.github/actions/teardown-rocm
   manywheel-py3_13-rocm7_0-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -2545,15 +2545,15 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-          path: /home/runner/_work/pytorch/
+          path: pytorch
           show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
-        working-directory: /home/runner/_work/pytorch/
+        working-directory: pytorch
       - name: Setup ROCm
-        uses: ./.github/actions/setup-rocm
+        uses: ./pytorch/.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -2588,7 +2588,7 @@ jobs:
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
-        uses: ./.github/actions/teardown-rocm
+        uses: ./pytorch/.github/actions/teardown-rocm
   manywheel-py3_13-rocm7_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -3096,15 +3096,15 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-          path: /home/runner/_work/pytorch/
+          path: pytorch
           show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
-        working-directory: /home/runner/_work/pytorch/
+        working-directory: pytorch
       - name: Setup ROCm
-        uses: ./.github/actions/setup-rocm
+        uses: ./pytorch/.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -3139,7 +3139,7 @@ jobs:
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
-        uses: ./.github/actions/teardown-rocm
+        uses: ./pytorch/.github/actions/teardown-rocm
   manywheel-py3_13t-rocm7_0-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -3212,15 +3212,15 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-          path: /home/runner/_work/pytorch/
+          path: pytorch
           show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
-        working-directory: /home/runner/_work/pytorch/
+        working-directory: pytorch
       - name: Setup ROCm
-        uses: ./.github/actions/setup-rocm
+        uses: ./pytorch/.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -3255,7 +3255,7 @@ jobs:
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
-        uses: ./.github/actions/teardown-rocm
+        uses: ./pytorch/.github/actions/teardown-rocm
   manywheel-py3_13t-rocm7_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -3763,15 +3763,15 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-          path: /home/runner/_work/pytorch/
+          path: pytorch
           show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
-        working-directory: /home/runner/_work/pytorch/
+        working-directory: pytorch
       - name: Setup ROCm
-        uses: ./.github/actions/setup-rocm
+        uses: ./pytorch/.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -3806,7 +3806,7 @@ jobs:
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
-        uses: ./.github/actions/teardown-rocm
+        uses: ./pytorch/.github/actions/teardown-rocm
   manywheel-py3_14-rocm7_0-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -3879,15 +3879,15 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-          path: /home/runner/_work/pytorch/
+          path: pytorch
           show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
-        working-directory: /home/runner/_work/pytorch/
+        working-directory: pytorch
       - name: Setup ROCm
-        uses: ./.github/actions/setup-rocm
+        uses: ./pytorch/.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -3922,7 +3922,7 @@ jobs:
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
-        uses: ./.github/actions/teardown-rocm
+        uses: ./pytorch/.github/actions/teardown-rocm
   manywheel-py3_14-rocm7_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -4430,15 +4430,15 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-          path: /home/runner/_work/pytorch/
+          path: pytorch
           show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
-        working-directory: /home/runner/_work/pytorch/
+        working-directory: pytorch
       - name: Setup ROCm
-        uses: ./.github/actions/setup-rocm
+        uses: ./pytorch/.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -4473,7 +4473,7 @@ jobs:
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
-        uses: ./.github/actions/teardown-rocm
+        uses: ./pytorch/.github/actions/teardown-rocm
   manywheel-py3_14t-rocm7_0-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -4546,15 +4546,15 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-          path: /home/runner/_work/pytorch/
+          path: pytorch
           show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
-        working-directory: /home/runner/_work/pytorch/
+        working-directory: pytorch
       - name: Setup ROCm
-        uses: ./.github/actions/setup-rocm
+        uses: ./pytorch/.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -4589,7 +4589,7 @@ jobs:
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
-        uses: ./.github/actions/teardown-rocm
+        uses: ./pytorch/.github/actions/teardown-rocm
   manywheel-py3_14t-rocm7_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
