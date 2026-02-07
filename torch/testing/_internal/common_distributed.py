@@ -1922,6 +1922,19 @@ class MultiProcContinuousTest(TestCase):
         # Get world_size (handles both class variable and property)
         cls.world_size = cls._get_world_size(device_type)
 
+        # Check if the specified backend is available before spawning processes
+        backend = cls.backend_str() if callable(cls.backend_str) else cls.backend_str
+        if backend is not None:
+            backend_checks = {
+                "nccl": c10d.is_nccl_available,
+                "gloo": c10d.is_gloo_available,
+                "mpi": c10d.is_mpi_available,
+                "xccl": c10d.is_xccl_available,
+            }
+            check_fn = backend_checks.get(backend)
+            if check_fn is not None and not check_fn():
+                raise unittest.SkipTest(f"Backend '{backend}' is not available")
+
         logger.info(
             f"Testing class {cls.__name__} on {cls.world_size} {device_type}"  # noqa: G004
         )
