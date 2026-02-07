@@ -1,7 +1,9 @@
 #pragma once
 
 #include <atomic>
+#include <condition_variable>
 #include <memory>
+#include <thread>
 
 #include <c10/util/FbcodeMaps.h>
 #include <c10/util/Logging.h>
@@ -81,6 +83,9 @@ class Executor {
       const std::shared_ptr<Weights>& weights,
       const std::shared_ptr<caffe2::serialize::PyTorchStreamReader>&
           pytorchStreamReader = nullptr);
+
+  // Destructor - stops cleanup thread
+  ~Executor();
 
   std::shared_ptr<Weights> getWeights() {
     std::shared_ptr<Weights> ret;
@@ -177,6 +182,16 @@ class Executor {
   std::atomic_int64_t lastClearedTimestamp_;
   std::mutex cleanupLock_;
   std::atomic_bool clearingInProgress_{false};
+
+  // Background cleanup thread members
+  std::thread cleanupThread_;
+  std::mutex cleanupMutex_;
+  std::condition_variable cleanupCv_;
+  std::atomic_bool stopCleanupThread_{false};
+  std::atomic_bool cleanupRequested_{false};
+
+  void cleanupThreadLoop();
+  void requestCleanup();
 };
 
 } // namespace torch::nativert
