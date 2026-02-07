@@ -201,7 +201,9 @@ if __name__ == "__main__":
 
     # Allow processor specific binaries for platform (e.g. Intel/M1 for macOS, x86_64/aarch64 for Linux)
     # Try arch-specific first, then fall back to generic platform
-    host_platform = HOST_PLATFORM_ARCH if HOST_PLATFORM_ARCH in config else HOST_PLATFORM
+    host_platform = (
+        HOST_PLATFORM_ARCH if HOST_PLATFORM_ARCH in config else HOST_PLATFORM
+    )
     # If the host platform is not in platform_to_hash, it is unsupported.
     if host_platform not in config:
         logging.error("Unsupported platform: %s/%s", HOST_PLATFORM, HOST_PLATFORM_ARCH)
