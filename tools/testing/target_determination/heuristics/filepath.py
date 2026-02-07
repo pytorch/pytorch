@@ -31,7 +31,9 @@ keyword_synonyms: dict[str, list[str]] = {
     "ops": ["opinfo"],
     "hop": ["higher_order_op"],
     "aot": ["flex_attention", "autograd"],
-    "inductor": ["dynamo", "export"],  # not actually synonyms but they interact a lot
+    "inductor": ["torchinductor"],
+    "dynamo": [],
+    "export": [],
 }
 
 
@@ -54,6 +56,14 @@ def is_valid_keyword(keyword: str) -> bool:
         "ns",
         "tools",
         "internal",
+        "github",
+        ".github",
+        "ci",
+        ".ci",
+        "workflows",
+        "docker",
+        "docs",
+        "scripts",
     ]
     return keyword == "nn" or (keyword not in not_keyword and len(keyword) > 2)
 
