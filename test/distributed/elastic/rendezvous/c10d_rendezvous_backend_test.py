@@ -168,7 +168,9 @@ class CreateBackendTest(TestCase):
     def test_create_backend_returns_backend_if_is_host_is_not_specified_and_store_already_exists(
         self,
     ) -> None:
-        TCPStore(  # type: ignore[call-arg]
+        # Need variable assignment below to keep the store alive for the duration
+        # of the test or GC is removing it
+        _ = TCPStore(  # type: ignore[call-arg]
             self._expected_endpoint_host, self._expected_endpoint_port, is_master=True
         )
 
