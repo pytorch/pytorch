@@ -17,8 +17,10 @@ from torch.testing._internal.common_device_type import (
     ops,
 )
 from torch.testing._internal.common_methods_invocations import DecorateInfo, op_db
-from torch.testing._internal.common_ops_unbacked import ops_dde_xfail, ops_unbacked_skip
 from torch.testing._internal.common_utils import run_tests, suppress_warnings, TestCase
+from torch.testing._internal.distributed._tensor.dtensor_xfails import (
+    unbacked_base_xfails,
+)
 from torch.utils._pytree import tree_flatten, tree_map_
 
 
@@ -60,7 +62,7 @@ def apply_skip_decorators(all_opinfos, test_case_name, base_test_name, to_skip):
 
 
 apply_skip_decorators(
-    op_db, "TestOpsUnbacked", "test_unbacked_op_db", ops_dde_xfail | ops_unbacked_skip
+    op_db, "TestOpsUnbacked", "test_unbacked_op_db", unbacked_base_xfails
 )
 
 
