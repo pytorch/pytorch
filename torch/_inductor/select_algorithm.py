@@ -3044,6 +3044,25 @@ class AlgorithmSelectorCache(PersistentCache):
 
         # if we got any timings at all, pick the best of those
         choice = min(timings, key=timings.__getitem__)
+        best_time = timings[choice]
+
+        # If the best timing is Infinity, all benchmarks failed.
+        # Fall back to ExternKernelCaller (e.g., ATen) if available, otherwise log a warning.
+        if math.isinf(best_time):
+            extern_choices = [c for c in choices if isinstance(c, ExternKernelCaller)]
+            if extern_choices:
+                choice = extern_choices[0]
+                log.warning(
+                    "All autotuning benchmarks failed (timing=inf). Falling back to ExternKernelCaller: %s",
+                    choice.name,
+                )
+            else:
+                log.warning(
+                    "All autotuning benchmarks failed (timing=inf) and no ExternKernelCaller fallback available. "
+                    "Selected kernel %s may cause runtime errors.",
+                    choice.name,
+                )
+
         node = choice.output_node()
 
         log.debug("Autotuning selected choice: %s", node)
@@ -3827,6 +3846,21 @@ class AlgorithmSelectorCache(PersistentCache):
         """
         Benchmark a list of choices and return timing dict.
         """
+        from torch._inductor.codegen.cutlass.cuda_kernel import CUDATemplateCaller
+
+        # Reorder choices to benchmark stable kernels (ATen/cuBLAS) BEFORE potentially
+        # unstable CUTLASS kernels. This ensures we have valid fallback timings before
+        # any CUTLASS kernel can corrupt the CUDA context (issue #171094).
+        def choice_priority(c: ChoiceCaller) -> int:
+            if isinstance(c, ExternKernelCaller):
+                return 0  # ATen/cuBLAS first
+            elif isinstance(c, CUDATemplateCaller):
+                return 2  # CUTLASS last
+            else:
+                return 1  # Triton and others in the middle
+
+        choices = sorted(choices, key=choice_priority)
+
         if is_collective:
             import torch.distributed as dist
 
@@ -3916,6 +3950,26 @@ class AlgorithmSelectorCache(PersistentCache):
                 )
                 timings.update({c: float("inf") for c in choices if c not in timings})
                 break
+
+            # If a CUTLASS choice caused a CUDA error, skip remaining CUTLASS choices
+            # to prevent further CUDA context corruption (issue #171094)
+            if not math.isfinite(timing) and isinstance(choice, CUDATemplateCaller):
+                # Check if we have at least one valid non-CUTLASS timing to fall back to
+                has_valid_fallback = any(
+                    math.isfinite(t) and not isinstance(c, CUDATemplateCaller)
+                    for c, t in timings.items()
+                )
+                if has_valid_fallback:
+                    log.warning(
+                        "CUTLASS choice %s failed during benchmarking. "
+                        "Skipping remaining CUTLASS choices to avoid CUDA context corruption.",
+                        getattr(choice, "name", "<unknown>"),
+                    )
+                    # Mark all remaining CUTLASS choices as failed and break
+                    for c in choices:
+                        if c not in timings and isinstance(c, CUDATemplateCaller):
+                            timings[c] = float("inf")
+                    break
 
         return timings
 
@@ -4049,6 +4103,11 @@ class AlgorithmSelectorCache(PersistentCache):
         # skip prescreening if the number of candidates is too small
         if len(candidates) < 10:
             return []
+
+        # Include ATen choices in prescreening as fallback (#171094), ensuring
+        # valid fallback timings exist before potentially unstable CUTLASS kernels.
+        extern_choices = [c for c in choices if isinstance(c, ExternKernelCaller)]
+        candidates = extern_choices + candidates
 
         return candidates  # type: ignore[return-value]
 
