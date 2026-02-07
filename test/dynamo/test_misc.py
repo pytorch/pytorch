@@ -13771,6 +13771,84 @@ fn
                 )
 
 
+    def test_assume_constant_attributes_custom_getattr(self):
+        class MyConfig:
+            __dynamo_assume_constant_attributes__ = True
+
+            def __init__(self):
+                self._data = {"lr": 0.01, "momentum": 0.9}
+
+            def __getattr__(self, name):
+                if name.startswith("_"):
+                    raise AttributeError(name)
+                return self._data[name]
+
+        cfg = MyConfig()
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter, fullgraph=True)
+        def fn(x):
+            return x * cfg.lr + cfg.momentum
+
+        result = fn(torch.ones(3))
+        self.assertEqual(result, torch.ones(3) * 0.01 + 0.9)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_assume_constant_attributes_missing_attr(self):
+        class MyConfig:
+            __dynamo_assume_constant_attributes__ = True
+
+        cfg = MyConfig()
+
+        @torch.compile(backend="eager")
+        def fn(x):
+            if hasattr(cfg, "missing"):
+                return x * 2
+            return x * 3
+
+        result = fn(torch.ones(3))
+        self.assertEqual(result, torch.ones(3) * 3)
+
+    def test_assume_constant_attributes_mutation_fallback(self):
+        class MyConfig:
+            __dynamo_assume_constant_attributes__ = True
+
+            def __init__(self):
+                self.lr = 0.01
+
+        cfg = MyConfig()
+
+        @torch.compile(backend="eager")
+        def fn(x):
+            cfg.lr = 0.02
+            return x * cfg.lr
+
+        result = fn(torch.ones(3))
+        self.assertEqual(result, torch.ones(3) * 0.02)
+
+    def test_assume_constant_attributes_guard_recompile(self):
+        class MyConfig:
+            __dynamo_assume_constant_attributes__ = True
+
+            def __init__(self):
+                self.lr = 0.01
+
+        cfg = MyConfig()
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter)
+        def fn(x):
+            return x * cfg.lr
+
+        result1 = fn(torch.ones(3))
+        self.assertEqual(result1, torch.ones(3) * 0.01)
+
+        cfg.lr = 0.05
+        result2 = fn(torch.ones(3))
+        self.assertEqual(result2, torch.ones(3) * 0.05)
+        self.assertEqual(counter.frame_count, 2)
+
+
 class MiscTestsPyTree(torch._inductor.test_case.TestCase):
     @parametrize_pytree_module
     def test_tracing_pytree(self, pytree):
