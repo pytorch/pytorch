@@ -225,11 +225,7 @@ class SubstringSet:
         return item in self.items
 
 
-DEVICE_SUPPORTS_BACKWARDS = SubstringSet(
-    [
-        "cuda",
-    ]
-)
+DEVICE_SUPPORTS_BACKWARDS = SubstringSet(["cuda", "xpu"])
 
 device_configs["cuda"] = DeviceConfig(
     dtypes=(
@@ -969,7 +965,6 @@ class TestFlexAttention(InductorTestCase):
         q1_gold, k1_gold, v1_gold = query_key_value_clones(q1, k1, v1, torch.float64)
         ref_out1 = sdpa_partial1(q1_ref, k1_ref, v1_ref)
         golden_out1 = sdpa_partial1(q1_gold, k1_gold, v1_gold)
-
         if requires_grad:
             backward_grad1 = torch.randn((B, H, S, D), dtype=dtype, device=device)
             golden_out1.backward(backward_grad1.to(torch.float64))
@@ -5232,11 +5227,13 @@ class GraphModule(torch.nn.Module):
     @skip_on_cpu
     @skipCUDAIf(not has_triton_tma_device(), "Requires TMA enabled CUDA device")
     def test_tma_with_customer_kernel_options(self, device):
+        requires_grad = device in DEVICE_SUPPORTS_BACKWARDS
         make_tensor = functools.partial(
             torch.ones,
             (1, 1, 256, 128),
             device=device,
             dtype=torch.bfloat16,
+            requires_grad=requires_grad,
         )
         query, key, value = make_tensor(), make_tensor(), make_tensor()
 
@@ -5248,13 +5245,69 @@ class GraphModule(torch.nn.Module):
         kernel_options_2 = {"BLOCK_M": 32, "BLOCK_N": 32, "USE_TMA": True}
 
         flex_compile = torch.compile(flex_attention, fullgraph=True, dynamic=True)
-        out_compiled = flex_compile(query, key, value, kernel_options=kernel_options_1)
-        out_tma_compiled = flex_compile(
-            query, key, value, kernel_options=kernel_options_2
+        out_compiled, compiled_code = run_and_get_code(
+            flex_compile,
+            query,
+            key,
+            value,
+            kernel_options=kernel_options_1,
         )
+        out_tma_compiled, tma_compiled_code = run_and_get_code(
+            flex_compile,
+            query,
+            key,
+            value,
+            kernel_options=kernel_options_2,
+        )
+
+        compiled_flag = "q = load_checked_2d(Q, offs_m, offs_k, stride_qm, stride_qk, IS_DIVISIBLE, SAFE_HEAD_DIM, Q_LEN, QK_HEAD_DIM)"
+        tma_compiled_flag = "desc_q = tl.make_tensor_descriptor("
+        self.assertIn(compiled_flag, str(compiled_code[0]))
+        self.assertIn(tma_compiled_flag, str(tma_compiled_code[0]))
 
         # vanilla compiled vs TMA compiled
         torch.testing.assert_close(out_tma_compiled, out_compiled, atol=2e-1, rtol=2e-1)
+
+        if requires_grad:
+            grad_output = torch.randn_like(out_compiled)
+
+            out_compiled.backward(grad_output)
+            compiled_grads = [query.grad, key.grad, value.grad]
+            query.grad = None
+            key.grad = None
+            value.grad = None
+
+            out_tma_compiled.backward(grad_output)
+            tma_grads = [query.grad, key.grad, value.grad]
+            query.grad = None
+            key.grad = None
+            value.grad = None
+
+            backward_compiled_flag = (
+                "# load K and V: they stay in SRAM throughout the inner loop."
+            )
+            backward_tma_compiled_flag = "desc_k_dkdv = tl.make_tensor_descriptor("
+            self.assertIn(backward_compiled_flag, str(compiled_code[1]))
+            self.assertIn(backward_tma_compiled_flag, str(tma_compiled_code[1]))
+
+            torch.testing.assert_close(
+                compiled_grads[0],
+                tma_grads[0],
+                atol=2e-1,
+                rtol=2e-1,
+            )
+            torch.testing.assert_close(
+                compiled_grads[1],
+                tma_grads[1],
+                atol=2e-1,
+                rtol=2e-1,
+            )
+            torch.testing.assert_close(
+                compiled_grads[2],
+                tma_grads[2],
+                atol=2e-1,
+                rtol=2e-1,
+            )
 
     @supported_platform
     @skip_on_cpu
@@ -6805,7 +6858,8 @@ def get_params(dtypes: list[torch.dtype]) -> list[Params]:
 
 supports_learnable_bias = unittest.skipUnless(
     (
-        (torch.cuda.is_available() and has_triton())
+        (torch.xpu.is_available() and has_triton())
+        or (torch.cuda.is_available() and has_triton())
         and (torch.cuda.get_device_capability() >= (8, 0) or torch.version.hip)
     ),
     "Requires Triton + A100 or Triton + ROCm",
