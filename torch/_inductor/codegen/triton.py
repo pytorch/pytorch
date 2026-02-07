@@ -2233,11 +2233,13 @@ class TMACompatibilityChecker:
             return True
         if not (
             (
-                V.graph.get_current_device_or_throw().type == "cuda"
-                and torch.cuda.get_device_capability()[0] >= 9
-                and config.assume_aligned_inputs
+                (
+                    V.graph.get_current_device_or_throw().type == "cuda"
+                    and torch.cuda.get_device_capability()[0] >= 9
+                    and config.assume_aligned_inputs
+                )
+                or V.graph.get_current_device_or_throw().type == "xpu"
             )
-            or V.graph.get_current_device_or_throw().type == "xpu"
             and config.triton.use_tensor_descriptor
             and has_triton_stable_tma_api()
             # For CUDA The base ptr needs to be aligned
