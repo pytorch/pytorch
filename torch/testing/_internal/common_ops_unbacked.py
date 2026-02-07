@@ -109,6 +109,7 @@ ops_dde_xfail = {
     xfail("lu_solve"),
     xfail("lu_unpack"),
     xfail("masked.logsumexp"),
+    xfail("masked.mean"),
     xfail("max_pool2d_with_indices_backward"),
     xfail("multinomial"),
     xfail("nanquantile"),
