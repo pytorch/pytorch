@@ -17,6 +17,7 @@
 #include <ATen/native/Sorting.h>
 #include <ATen/native/SortingUtils.h>
 #include <ATen/native/ReduceOpsUtils.h>
+#include <ATen/native/cuda/Sort.h>
 #include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -962,22 +963,26 @@ TORCH_IMPL_FUNC(sort_stable_out)
     dim = maybe_wrap_dim(dim, self.dim());
 
     c10::MaybeOwned<Tensor> indices_tmp;
-    auto indices_dtype = at::kLong; // default kLong is set in meta function, if functional is used.
+    auto tocast_dtype = at::kLong; // kLong is used as default, if functional op is used.
 
     const auto sort_size = self.dim() > 0 ? self.size(dim) : 1;
-    if (sort_size - 1 <= std::numeric_limits<uint8_t>::max()) {
-      indices_dtype = at::kByte;
+    if (should_use_small_sort(self, dim)) { // SortInplace in cuda: no benefits of down-upcast
+      tocast_dtype = at::kLong;  // use existing logic
     } else if (sort_size - 1 <= std::numeric_limits<uint16_t>::max()) {
-      indices_dtype = at::kUInt16;
+      tocast_dtype = at::kUInt16;
     } else if (sort_size - 1 <= std::numeric_limits<int32_t>::max()) {
-      indices_dtype = at::kInt;
+      tocast_dtype = at::kInt;
     }
 
     if (indices.scalar_type() != kLong) {
+      // indices.scalar_type():= {kChar, kByte, kShort, kUInt16, kInt}
       // use the indices_dtype w/o down upcast in case of out-variant op with indices.
       indices_tmp = c10::MaybeOwned<Tensor>::borrowed(indices);
-    } else {
-      indices_tmp = c10::MaybeOwned<Tensor>::owned(indices.to(indices_dtype));
+    } else { // indices.scalar_type():= { kLong }
+      if (tocast_dtype == at::kLong)
+        indices_tmp = c10::MaybeOwned<Tensor>::borrowed(indices);
+      else // If tocast_dtype isn't kLong, down-upcast is done automatically.
+        indices_tmp = c10::MaybeOwned<Tensor>::owned(indices.to(tocast_dtype));
     }
 
     sort_stub(self.device().type(), self, values, *indices_tmp, dim, descending, stable.value_or(false));
