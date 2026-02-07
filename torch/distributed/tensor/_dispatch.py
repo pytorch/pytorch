@@ -326,7 +326,14 @@ class OpDispatcher:
                     local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
             else:
                 # normal case, run local sharded op computation
-                local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
+                # Use rewritten op if sharding_prop changed it (e.g., squeeze rewrite)
+                effective_op = op_call
+                if (
+                    output_sharding.redistribute_schema is not None
+                    and output_sharding.redistribute_schema.op != op_call
+                ):
+                    effective_op = output_sharding.redistribute_schema.op
+                local_results = effective_op(*local_tensor_args, **op_info.local_kwargs)
 
         else:
             # For a non-participating device (happens on rank that does not belong to
@@ -522,6 +529,14 @@ class OpDispatcher:
                     new_local_args.append(reshard_arg_spec)
                 else:
                     new_local_args.append(arg_spec)
+
+        # Append extra args from rewritten schema (e.g., squeeze.default -> squeeze.dims).
+        # These are non-tensor args (like dims tuple) that can be appended directly.
+        if use_val_from_redistribute_schema:
+            for i in range(
+                len(op_info.flat_args_schema), len(flatten_args_schema_to_reshard)
+            ):
+                new_local_args.append(flatten_args_schema_to_reshard[i])
 
         op_info.local_args = tuple(new_local_args)
 

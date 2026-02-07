@@ -665,6 +665,185 @@ class TestViewOps(DTensorTestBase):
         self.assertEqual(dist_x.placements, [Partial(), Shard(0)])
 
     @with_comms
+    def test_squeeze_variants(self):
+        """Test all squeeze variants with DTensor.
+
+        Tests squeeze.default, squeeze.dim, and squeeze.dims.
+        For sharded tensors, we only squeeze dims that are NOT sharded to avoid
+        the FIXME bug where sharded dims with local size 1 get incorrectly squeezed.
+        """
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+
+        # Test 1: squeeze.dims on sharded tensor - squeeze non-sharded dims
+        x1 = torch.randn(self.world_size, 1, 1, 8, device=self.device_type)
+        dt1 = distribute_tensor(x1, mesh, [Shard(0)])
+        result1 = dt1.squeeze((1, 2))
+        self.assertEqual(result1.shape, torch.Size([self.world_size, 8]))
+        self.assertEqual(result1.placements, (Shard(0),))
+        self.assertEqual(result1.to_local().shape, torch.Size([1, 8]))
+
+        # Test 2: squeeze.dim on sharded tensor - squeeze non-sharded dim
+        x2 = torch.randn(self.world_size, 1, 8, device=self.device_type)
+        dt2 = distribute_tensor(x2, mesh, [Shard(0)])
+        result2 = dt2.squeeze(1)
+        self.assertEqual(result2.shape, torch.Size([self.world_size, 8]))
+        self.assertEqual(result2.placements, (Shard(0),))
+        self.assertEqual(result2.to_local().shape, torch.Size([1, 8]))
+
+        # Test 3: squeeze.default on replicated tensor (avoids FIXME bug)
+        x3 = torch.randn(4, 1, 1, 8, device=self.device_type)
+        dt3 = distribute_tensor(x3, mesh, [Replicate()])
+        result3 = dt3.squeeze()
+        self.assertEqual(result3.shape, torch.Size([4, 8]))
+        self.assertEqual(result3.placements, (Replicate(),))
+
+        # Test 4: squeeze.dims on replicated tensor
+        x4 = torch.randn(2, 1, 3, 1, device=self.device_type)
+        dt4 = distribute_tensor(x4, mesh, [Replicate()])
+        result4 = dt4.squeeze((1, 3))
+        self.assertEqual(result4.shape, torch.Size([2, 3]))
+        self.assertEqual(result4.placements, (Replicate(),))
+
+        # Test 5: squeeze dim that is NOT size 1 (should be no-op)
+        x5 = torch.randn(self.world_size, 4, device=self.device_type)
+        dt5 = distribute_tensor(x5, mesh, [Shard(0)])
+        result5 = dt5.squeeze(1)  # dim 1 has size 4, not 1
+        self.assertEqual(result5.shape, torch.Size([self.world_size, 4]))
+        self.assertEqual(result5.placements, (Shard(0),))
+
+        # Test 6: squeeze [1] with Partial("max") -> [] Replicate
+        # When output numel=1, max(x)=x so P(max) reduces to R trivially
+        x6 = torch.randn(1, device=self.device_type)
+        dt6 = DTensor.from_local(x6, mesh, [Partial("max")])
+        result6 = dt6.squeeze()
+        self.assertEqual(result6.shape, torch.Size([]))
+        self.assertEqual(result6.placements, (Replicate(),))
+        # Verify redistribution happened and value is correct
+        self.assertEqual(result6.to_local(), result6.full_tensor())
+        self.assertEqual(result6.full_tensor(), x6.squeeze())
+
+        # Test 7: squeeze [1] with Partial("min") -> [] Replicate
+        x7 = torch.randn(1, device=self.device_type)
+        dt7 = DTensor.from_local(x7, mesh, [Partial("min")])
+        result7 = dt7.squeeze()
+        self.assertEqual(result7.shape, torch.Size([]))
+        self.assertEqual(result7.placements, (Replicate(),))
+        self.assertEqual(result7.to_local(), result7.full_tensor())
+        self.assertEqual(result7.full_tensor(), x7.squeeze())
+
+        # Test 8: squeeze [1,1] with Partial("max") -> [] Replicate (numel=1)
+        x8 = torch.randn(1, 1, device=self.device_type)
+        dt8 = DTensor.from_local(x8, mesh, [Partial("max")])
+        result8 = dt8.squeeze()
+        self.assertEqual(result8.shape, torch.Size([]))
+        self.assertEqual(result8.placements, (Replicate(),))
+        self.assertEqual(result8.to_local(), result8.full_tensor())
+        self.assertEqual(result8.full_tensor(), x8.squeeze())
+
+        # Test 9: squeeze [1,4] dim=0 with Partial("max") -> [4] stays Partial
+        # numel=4 > 1, so max reduction is NOT trivial
+        x9 = torch.randn(1, 4, device=self.device_type)
+        dt9 = DTensor.from_local(x9, mesh, [Partial("max")])
+        result9 = dt9.squeeze(0)
+        self.assertEqual(result9.shape, torch.Size([4]))
+        self.assertEqual(result9.placements, (Partial("max"),))
+
+        # Test 10: squeeze [1] with Partial("sum") -> [] stays Partial
+        # sum is NOT trivial even for numel=1: sum(x,x,x,...)=n*x
+        x10 = torch.randn(1, device=self.device_type)
+        dt10 = DTensor.from_local(x10, mesh, [Partial("sum")])
+        result10 = dt10.squeeze()
+        self.assertEqual(result10.shape, torch.Size([]))
+        self.assertEqual(result10.placements, (Partial("sum"),))
+
+        # Test 11: view [1] to [1,1] with Partial("max") -> Replicate
+        # numel=1, so P(max) reduces to R trivially
+        x11 = torch.randn(1, device=self.device_type)
+        dt11 = DTensor.from_local(x11, mesh, [Partial("max")])
+        result11 = dt11.view(1, 1)
+        self.assertEqual(result11.shape, torch.Size([1, 1]))
+        self.assertEqual(result11.placements, (Replicate(),))
+        self.assertEqual(result11.to_local(), result11.full_tensor())
+        self.assertEqual(result11.full_tensor(), x11.view(1, 1))
+
+        # Test 12: view [1] to [1,1] with Partial("min") -> Replicate
+        x12 = torch.randn(1, device=self.device_type)
+        dt12 = DTensor.from_local(x12, mesh, [Partial("min")])
+        result12 = dt12.view(1, 1)
+        self.assertEqual(result12.shape, torch.Size([1, 1]))
+        self.assertEqual(result12.placements, (Replicate(),))
+        self.assertEqual(result12.to_local(), result12.full_tensor())
+        self.assertEqual(result12.full_tensor(), x12.view(1, 1))
+
+        # Test 13: view [4] to [2,2] with Partial("max") stays Partial
+        # numel=4 > 1, not trivial
+        x13 = torch.randn(4, device=self.device_type)
+        dt13 = DTensor.from_local(x13, mesh, [Partial("max")])
+        result13 = dt13.view(2, 2)
+        self.assertEqual(result13.shape, torch.Size([2, 2]))
+        self.assertEqual(result13.placements, (Partial("max"),))
+
+        # Test 14: squeeze on sharded dim should NOT remove it
+        # Global shape [world_size, 8], local shape [1, 8] - dim 0 is NOT globally singleton
+        x14 = (
+            torch.arange(self.world_size * 8, device=self.device_type)
+            .reshape(self.world_size, 8)
+            .float()
+        )
+        dt14 = distribute_tensor(x14, mesh, [Shard(0)])
+        result14 = dt14.squeeze()  # should not squeeze dim 0
+        self.assertEqual(result14.shape, torch.Size([self.world_size, 8]))
+        self.assertEqual(result14._local_tensor.shape, torch.Size([1, 8]))
+        self.assertEqual(result14.placements, (Shard(0),))
+        self.assertEqual(result14.full_tensor(), x14)
+
+        # Test 15: squeeze.dims on sharded dim should NOT remove it
+        x15 = (
+            torch.arange(self.world_size * 8, device=self.device_type)
+            .reshape(self.world_size, 8)
+            .float()
+        )
+        dt15 = distribute_tensor(x15, mesh, [Shard(0)])
+        result15 = dt15.squeeze((0,))  # explicitly try to squeeze dim 0
+        self.assertEqual(result15.shape, torch.Size([self.world_size, 8]))
+        self.assertEqual(result15._local_tensor.shape, torch.Size([1, 8]))
+        self.assertEqual(result15.placements, (Shard(0),))
+        self.assertEqual(result15.full_tensor(), x15)
+
+        # Test 16: squeeze.dims with mixed singleton/non-singleton dims (filtering)
+        # Global shape [1, 4, 1] - dims 0 and 2 are singleton, dim 1 is not
+        # squeeze.dims([0, 1, 2]) should only squeeze dims 0 and 2
+        x16 = torch.randn(1, 4, 1, device=self.device_type)
+        dt16 = distribute_tensor(x16, mesh, [Replicate()])
+        result16 = dt16.squeeze(
+            (0, 1, 2)
+        )  # asks for all dims, but only 0,2 are singleton
+        self.assertEqual(result16.shape, torch.Size([4]))
+        self.assertEqual(result16.placements, (Replicate(),))
+        self.assertEqual(result16.full_tensor(), x16.squeeze())
+
+        # Test 17: squeeze.dims filtering with sharded non-singleton dim
+        # Global [1, world_size, 1] sharded on dim 1, local [1, 1, 1]
+        # squeeze.dims([0, 1, 2]) should only squeeze dims 0 and 2 (globally singleton)
+        x17 = torch.randn(1, self.world_size, 1, device=self.device_type)
+        dt17 = distribute_tensor(x17, mesh, [Shard(1)])
+        result17 = dt17.squeeze((0, 1, 2))
+        self.assertEqual(result17.shape, torch.Size([self.world_size]))
+        self.assertEqual(result17._local_tensor.shape, torch.Size([1]))
+        self.assertEqual(result17.placements, (Shard(0),))  # dim shifted after squeeze
+        self.assertEqual(result17.full_tensor(), x17.squeeze((0, 2)))
+
+        # Test 18: squeeze with uneven sharding (tensor_dim < mesh_dim)
+        # Global [1, 4] sharded on dim 0 -> rank 0 gets [1, 4], others get [0, 4]
+        # Squeeze should remove dim 0 (global singleton) and redistribute to Replicate
+        x18 = torch.randn(1, 4, device=self.device_type)
+        dt18 = distribute_tensor(x18, mesh, [Shard(0)])
+        result18 = dt18.squeeze()
+        self.assertEqual(result18.shape, torch.Size([4]))
+        self.assertEqual(result18.placements, (Replicate(),))
+        self.assertEqual(result18.full_tensor(), x18.squeeze())
+
+    @with_comms
     def test_storage_offset_slice(self):
         """
         Test that storage_offset is properly tracked on DTensor when slicing
