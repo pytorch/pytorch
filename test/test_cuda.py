@@ -5510,7 +5510,9 @@ class TestBlockStateAbsorption(TestCase):
         large_mapped_blocks = get_large_mapped_blocks()
         # small_fn allocates 2 MB, which leads to a 20 MB segment in large blocks. This becomes a 2 MB (or 2097152 bytes)
         # active allocated block and a 18 MB (or 18874368 bytes) inactive block.
-        self.assertEqual(large_mapped_blocks, [(2097152, "active_allocated"), (18874368, "inactive")])
+        self.assertEqual(
+            large_mapped_blocks, [(2097152, "active_allocated"), (18874368, "inactive")]
+        )
 
         small_state = torch._C._cuda_getCheckpointState(device, pool_id)
         out1_metadata = [tensor_metadata(t) for t in out1]
@@ -5527,7 +5529,9 @@ class TestBlockStateAbsorption(TestCase):
         large_mapped_blocks = get_large_mapped_blocks()
         # large_fn allocates 32 MB, which leads to a 40 MB segment in large blocks. This becomes a 32 MB (or 33554432 bytes)
         # active allocated block and a 8 MB (or 8388608 bytes) inactive block.
-        self.assertEqual(large_mapped_blocks, [(33554432, "active_allocated"), (8388608, "inactive")])
+        self.assertEqual(
+            large_mapped_blocks, [(33554432, "active_allocated"), (8388608, "inactive")]
+        )
 
         self.setCheckpointPoolState(device, original_state, out2, [])
 
@@ -5541,8 +5545,9 @@ class TestBlockStateAbsorption(TestCase):
         # allocate a 2 MB (or 2097152 bytes) active block and a 18 MB (or 18874368 bytes) inactive block. Since the total segment size is 40 MB,
         # we still have a 20 MB inactive block. These two inactive blocks automatically merge into a single 38 MB (or 39845888 bytes) inactive block.
         # As a result, we have a 2 MB active block and a 38 MB inactive block in the memory snapshot.
-        self.assertEqual(large_mapped_blocks, [(2097152, "active_allocated"), (39845888, "inactive")])
-
+        self.assertEqual(
+            large_mapped_blocks, [(2097152, "active_allocated"), (39845888, "inactive")]
+        )
 
     def test_no_triton_on_import(self):
         """Test that Triton is not imported on first GPU use"""
