@@ -219,6 +219,17 @@ class CoordescTuner:
             xblock = config.kwargs["XBLOCK"]
             split_size = config.kwargs["RSPLIT_SIZE"]
             return xblock <= split_size
+
+        # Skip configs that cause ROCm compiler hangs due to extreme register pressure.
+        # The combination of num_warps=1, high waves_per_eu, and large BLOCK_K creates
+        # conflicting requirements that can cause the compiler to hang indefinitely.
+        if self.inductor_meta.get("is_hip"):
+            num_warps = config.num_warps
+            waves_per_eu = config.kwargs.get("waves_per_eu", 0)
+            block_k = config.kwargs.get("BLOCK_K", 0)
+            if num_warps == 1 and waves_per_eu >= 4 and block_k >= 256:
+                return False
+
         return True
 
     def check_all_tuning_directions(

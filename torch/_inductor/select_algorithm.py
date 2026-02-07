@@ -3426,11 +3426,16 @@ class AlgorithmSelectorCache(PersistentCache):
             # returns tuple[CachingAutotuner, int]
             return None, elapsed_ns // 1000
 
+        completed_count = [0]  # Use list to allow modification in nested function
+
         def on_complete(future):
             if not future.exception():
                 _, precompile_elapsed_us = future.result()
                 elapsed_seconds = precompile_elapsed_us / 1e6
                 elapsed_times[future] = elapsed_seconds
+                choice = futures.get(future)
+                completed_count[0] += 1
+                print(f"Precompilation complete ({completed_count[0]}/{len(futures)}): {choice.name if choice else 'unknown'} took {elapsed_seconds:.2f}s")
                 log.debug(
                     "Precompilation complete for future: %s, elapsed time: %.02fs",
                     future,
@@ -3459,6 +3464,8 @@ class AlgorithmSelectorCache(PersistentCache):
                 seen_choices.add(c.kernel_hash_key())
 
             if hasattr(c, "precompile"):
+                module_path = getattr(getattr(c, 'bmreq', None), 'module_path', 'N/A')
+                print(f"Starting precompilation for {c.name} {c.description} (file: {module_path})")
                 triton_cuda_choice = isinstance(c, TritonTemplateCaller) and isinstance(
                     c.bmreq, TritonGPUBenchmarkRequest
                 )
@@ -3484,6 +3491,7 @@ class AlgorithmSelectorCache(PersistentCache):
             Returns:
                 Dict mapping each choice to its precompilation time in seconds.
             """
+            print(f"Waiting on {len(futures)} precompilation futures...")
             log.debug("Waiting on futures")
             counters["inductor"]["select_algorithm_precompile"] += 1
             exceptions: list[tuple[ChoiceCaller, BaseException]] = []
