@@ -343,6 +343,53 @@ class DTensorTest(DTensorTestBase):
         self.assertEqual(comm_mode.get_total_counts(), 0)
 
     @with_comms
+    def test_from_local_grad_dtype_propagation(self):
+        """Test that grad_dtype is properly propagated when converting between DTensor and torch.Tensor"""
+        device_mesh = self.build_device_mesh()
+        shard_spec = [Shard(0)]
+
+        # Test 1: Converting torch.Tensor with grad_dtype to DTensor
+        local_tensor = torch.randn(3, 3, requires_grad=True, dtype=torch.bfloat16)
+        local_tensor.grad_dtype = torch.float32
+
+        dtensor = DTensor.from_local(local_tensor, device_mesh, shard_spec)
+        # The grad_dtype should be propagated to the DTensor
+        self.assertEqual(dtensor.grad_dtype, torch.float32)
+
+        # Test 2: Converting DTensor back to torch.Tensor preserves grad_dtype
+        recovered_tensor = dtensor.to_local()
+        # The grad_dtype should be preserved in the recovered tensor
+        self.assertEqual(recovered_tensor.grad_dtype, torch.float32)
+
+        # Test 3: grad_dtype with None (allow any dtype)
+        local_tensor2 = torch.randn(3, 3, requires_grad=True)
+        local_tensor2.grad_dtype = None
+        dtensor2 = DTensor.from_local(local_tensor2, device_mesh, shard_spec)
+        self.assertIsNone(dtensor2.grad_dtype)
+
+    @with_comms
+    def test_redistribute_grad_dtype(self):
+        """Test that grad_dtype is properly propagated during redistribute operations"""
+        device_mesh = self.build_device_mesh()
+
+        # Create a local tensor with grad_dtype set
+        local_tensor = torch.randn(3, 3, requires_grad=True, dtype=torch.bfloat16)
+
+        # Create a DTensor with specific sharding
+        dtensor = DTensor.from_local(local_tensor, device_mesh, [Shard(0)])
+        self.assertEqual(dtensor.grad_dtype, torch.bfloat16)
+
+        # Redistribute to a different sharding
+        redistributed = dtensor.redistribute(device_mesh, [Shard(1)])
+        # grad_dtype should be equal to dtype
+        self.assertEqual(redistributed.grad_dtype, redistributed.dtype)
+
+        # Redistribute to a different sharding
+        redistributed = dtensor.redistribute(device_mesh, [Shard(1)], backward_dtype=torch.float32)
+        # grad_dtype should be equal to backward_dtype
+        self.assertEqual(redistributed.grad_dtype, torch.float32)
+
+    @with_comms
     def test_from_local_uneven_sharding(self):
         device_mesh = self.build_device_mesh()
 
