@@ -351,11 +351,9 @@ keep-runtime-typing = true
 "test/dynamo/**" = ["S101"]
 "test/functorch/**" = ["S101"]
 "test/fx/**" = ["S101"]
-"test/higher_order_ops/**" = ["S101"]
 "test/inductor/**" = ["S101"]
 "test/onnx/**" = ["S101"]
 "test/quantization/**" = ["S101"]
-"test/xpu/**" = ["S101"]
 # torch/ folders still needing S101 migration
 "torch/_dynamo/**" = ["S101"]
 "torch/_inductor/**" = ["S101"]
