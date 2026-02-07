@@ -1974,7 +1974,8 @@ class TestIndexing(TestCase):
     def _prepare_data_for_index_copy_and_add_deterministic(
         self, dim: int, device: torch.device
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        assert dim >= 0 and dim < 3
+        if not (dim >= 0 and dim < 3):
+            raise AssertionError(f"dim must be in [0, 3), got {dim}")
         a = [5, 4, 3]
         a[dim] = 2000
         x = torch.zeros(a, device=device)

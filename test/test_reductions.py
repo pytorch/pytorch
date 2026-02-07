@@ -324,7 +324,8 @@ class TestReductions(TestCase):
 
     def _test_noncontiguous(self, op: ReductionOpInfo, t: torch.Tensor, **reduction_kwargs):
         """Helper method to test noncontiguous input tensors."""
-        assert not t.is_contiguous()
+        if t.is_contiguous():
+            raise AssertionError("expected tensor to be non-contiguous")
 
         t_contig = t.contiguous()
         for args, kwargs in op.generate_args_kwargs(t_contig, **reduction_kwargs):
@@ -1333,8 +1334,10 @@ class TestReductions(TestCase):
         inputs = torch.tensor([[0, 0], [3, 1], [2, 1], [1, 1], [3, 4]], device=device)
         weights = torch.tensor([[.1, 1], [.2, 2], [.3, 3], [.4, 4], [.5, 5]], device=device)
         for i in [0, 1]:
-            assert not inputs[:, i].is_contiguous(), "Inputs are supposed to be non-contiguous"
-            assert not weights[:, i].is_contiguous(), "Weights are supposed to be non-contiguous"
+            if inputs[:, i].is_contiguous():
+                raise AssertionError("Inputs are supposed to be non-contiguous")
+            if weights[:, i].is_contiguous():
+                raise AssertionError("Weights are supposed to be non-contiguous")
         # inputs are non-contiguous but weights are contiguous
         self.assertEqual(inputs[:, 0].bincount(), torch.tensor([1, 1, 1, 2]))
         # inputs and weights are non-contiguous
@@ -1439,7 +1442,8 @@ class TestReductions(TestCase):
     def _test_memory_format_transformations(self, device, input_generator_fn, transformation_fn,
                                             memory_format, compare_data=True, default_is_preserve=False):
 
-        assert memory_format == torch.channels_last or memory_format == torch.channels_last_3d
+        if memory_format not in (torch.channels_last, torch.channels_last_3d):
+            raise AssertionError(f"unexpected memory_format: {memory_format}")
 
         # xc is a channels last tensor
         xc = input_generator_fn(device)
