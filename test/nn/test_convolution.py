@@ -65,6 +65,7 @@ from torch.testing._internal.common_utils import (
     serialTest,
     set_default_dtype,
     skipIfRocmArch,
+    skipIfTorchDynamo,
     subtest,
     TEST_SCIPY,
     TEST_WITH_ROCM,
@@ -2346,6 +2347,551 @@ class TestConvolutionNNDeviceType(NNTestCase):
             (x, y),
             check_fwd_over_rev=check_forward_ad,
         )
+
+    # conv_transpose*d_padding_* tests adapted from conv*d_padding_*
+
+    def test_ConvTranspose1d_module_same_padding(self):
+        # Compare module against functional: without strides/dilation, asymmetric padding
+        x = torch.rand(1, 1, 20)
+        module = nn.ConvTranspose1d(
+            in_channels=1, out_channels=1, kernel_size=10, padding="same"
+        )
+        expect = F.conv_transpose1d(x, module.weight, module.bias, padding="same")
+        self.assertEqual(expect, module(x))
+
+        # Test dilation, symmetric padding
+        module = nn.ConvTranspose1d(
+            in_channels=1, out_channels=1, kernel_size=10, padding="same", dilation=2
+        )
+        expect = F.conv_transpose1d(
+            x, module.weight, module.bias, padding="same", dilation=2
+        )
+        self.assertEqual(expect, module(x))
+
+        # Test connstruction with invalid padding string raises
+        with self.assertRaisesRegex(ValueError, "Invalid padding string"):
+            module = nn.ConvTranspose1d(
+                in_channels=3, out_channels=33, kernel_size=10, padding="foo"
+            )
+
+        # Test connstruction with same padding and strides raises
+        with self.assertRaisesRegex(
+            ValueError, "^padding='same' is not supported for strided convolutions$"
+        ):
+            module = nn.ConvTranspose1d(
+                in_channels=3, out_channels=33, kernel_size=10, padding="same", stride=2
+            )
+
+    def test_ConvTranspose2d_module_same_padding(self):
+        # Compare module against functional:
+        # without strides/dilation, both symmetric and asymmetric padding
+        x = torch.rand(1, 1, 9, 20)
+        module = nn.ConvTranspose2d(
+            in_channels=1, out_channels=1, kernel_size=(5, 10), padding="same"
+        )
+        expect = F.conv_transpose2d(x, module.weight, module.bias, padding="same")
+        self.assertEqual(expect, module(x))
+
+        # with dilation, symmetric padding
+        module = nn.ConvTranspose2d(
+            in_channels=1,
+            out_channels=1,
+            kernel_size=(3, 4),
+            padding="same",
+            dilation=(1, 2),
+        )
+        expect = F.conv_transpose2d(
+            x, module.weight, module.bias, padding="same", dilation=(1, 2)
+        )
+        self.assertEqual(expect, module(x))
+
+        # Test connstruction with invalid padding string raises
+        with self.assertRaisesRegex(ValueError, "Invalid padding string"):
+            module = nn.ConvTranspose2d(
+                in_channels=3, out_channels=33, kernel_size=10, padding="foo"
+            )
+
+        # Test connstruction with same padding and strides raises
+        with self.assertRaisesRegex(
+            ValueError, "^padding='same' is not supported for strided convolutions$"
+        ):
+            module = nn.ConvTranspose2d(
+                in_channels=3, out_channels=33, kernel_size=10, padding="same", stride=2
+            )
+        with self.assertRaisesRegex(
+            ValueError, "^padding='same' is not supported for strided convolutions$"
+        ):
+            module = nn.ConvTranspose2d(
+                in_channels=3,
+                out_channels=33,
+                kernel_size=10,
+                padding="same",
+                stride=(1, 3),
+            )
+        with self.assertRaisesRegex(
+            ValueError, "^padding='same' is not supported for strided convolutions$"
+        ):
+            module = nn.ConvTranspose2d(
+                in_channels=3,
+                out_channels=33,
+                kernel_size=10,
+                padding="same",
+                stride=(4, 1),
+            )
+
+    def test_ConvTranspose3d_module_same_padding(self):
+        # Compare module against functional:
+        x = torch.rand(1, 1, 4, 4, 4)
+        # without dilation, both symmetric and asymmetric padding
+        module = nn.ConvTranspose3d(
+            in_channels=1, out_channels=1, kernel_size=(2, 3, 4), padding="same"
+        )
+        expect = F.conv_transpose3d(x, module.weight, module.bias, padding="same")
+        self.assertEqual(expect, module(x))
+
+        # with dilation, both symmetric and asymmetric padding
+        module = nn.ConvTranspose3d(
+            in_channels=1,
+            out_channels=1,
+            kernel_size=(2, 3, 4),
+            padding="same",
+            dilation=(3, 2, 1),
+        )
+        expect = F.conv_transpose3d(
+            x, module.weight, module.bias, padding="same", dilation=(3, 2, 1)
+        )
+        self.assertEqual(expect, module(x))
+
+        # Test connstruction with invalid padding string raises
+        with self.assertRaisesRegex(ValueError, "Invalid padding string"):
+            module = nn.ConvTranspose3d(
+                in_channels=3, out_channels=33, kernel_size=10, padding="foo"
+            )
+
+        # Test connstruction with same padding and strides raises
+        with self.assertRaisesRegex(
+            ValueError, "^padding='same' is not supported for strided convolutions$"
+        ):
+            module = nn.ConvTranspose3d(
+                in_channels=3, out_channels=33, kernel_size=10, padding="same", stride=2
+            )
+        with self.assertRaisesRegex(
+            ValueError, "^padding='same' is not supported for strided convolutions$"
+        ):
+            module = nn.ConvTranspose3d(
+                in_channels=3,
+                out_channels=33,
+                kernel_size=10,
+                padding="same",
+                stride=(1, 1, 3),
+            )
+        with self.assertRaisesRegex(
+            ValueError, "^padding='same' is not supported for strided convolutions$"
+        ):
+            module = nn.ConvTranspose3d(
+                in_channels=3,
+                out_channels=33,
+                kernel_size=10,
+                padding="same",
+                stride=(1, 4, 1),
+            )
+        with self.assertRaisesRegex(
+            ValueError, "^padding='same' is not supported for strided convolutions$"
+        ):
+            module = nn.ConvTranspose3d(
+                in_channels=3,
+                out_channels=33,
+                kernel_size=10,
+                padding="same",
+                stride=(5, 1, 1),
+            )
+
+    @dtypesIfMPS(
+        *([torch.float] if MACOS_VERSION < 14.0 else [torch.float, torch.cfloat])
+    )  # Complex not supported on MacOS13
+    @dtypes(torch.float, torch.cfloat)
+    def test_conv_transpose1d_same_padding(self, device, dtype):
+        if dtype is torch.cfloat:
+            rtol, atol = 2e-6, 2e-6
+        else:
+            rtol, atol = None, None
+
+        # Test padding='same' outputs the correct shape and results
+        test_args = [
+            # in_size
+            range(50, 55),
+            # kernel_size
+            [1, 2, 3, 100, 101],
+            # dilation
+            range(1, 4),
+            # stride
+            [1],
+        ]
+        for in_size, k_size, dilation, stride in itertools.product(*test_args):
+            input_ = torch.rand(1, 1, in_size, device=device, dtype=dtype)
+            kernel = torch.rand(1, 1, k_size, device=device, dtype=dtype)
+            actual = F.conv_transpose1d(
+                input_, kernel, padding="same", dilation=dilation, stride=stride
+            )
+
+            # test output_size is equal to input_size
+            self.assertEqual(actual.size(2), in_size)
+
+            effective_kernel_size = dilation * (k_size - 1)
+            is_asymmetric_padding = effective_kernel_size % 2 == 1
+            common_pad = effective_kernel_size // 2
+
+            expect = F.conv_transpose1d(
+                input_, kernel, stride=stride, padding=common_pad, dilation=dilation
+            )
+
+            # asymmetric padding for transposed convolution removes the extra value on the right side
+            if is_asymmetric_padding:
+                expect = expect[:, :, 1:]
+
+            self.assertEqual(expect, actual, rtol=rtol, atol=atol)
+
+    @dtypesIfMPS(
+        *([torch.float] if MACOS_VERSION < 14.0 else [torch.float, torch.cfloat])
+    )  # Complex not supported on MacOS13
+    @dtypes(torch.float, torch.cfloat)
+    def test_conv_transpose2d_same_padding(self, device, dtype):
+        if dtype is torch.cfloat:
+            rtol, atol = 2e-6, 2e-6
+        else:
+            rtol, atol = None, None
+        # transpose convolution output size:
+        # o = (i - 1) * s + (k - 1) * d - (2 * p) + 1
+
+        # Compare F.conv_transpose2d padding='same' output against manual padding
+        # Without strides/dilation
+        x = torch.rand(1, 1, 10, 11, device=device, dtype=dtype)  # Bsize, Cin, Hin, Win
+        y = torch.rand(1, 1, 4, 5, device=device, dtype=dtype)
+        # same convolution ensures that o = i
+        # To satisfy this, p = (k - 1) / 2
+        # for k = 4, the padding is asymmetric (p = 1.5),
+        # so we will slice two units on the left and one on the right.
+        # For k = 5, the padding is symetric (p = 2)
+        expect = F.conv_transpose2d(x, y, padding=(1, 2))[..., 1:, :]
+        actual = F.conv_transpose2d(x, y, padding="same")
+        self.assertEqual(expect, actual, rtol=rtol, atol=atol)
+
+        # With dilation, the padding is p = d * (k-1) / 2
+        expect = F.conv_transpose2d(x, y, padding=(3, 4), dilation=2)
+        actual = F.conv_transpose2d(x, y, padding="same", dilation=2)
+        self.assertEqual(expect, actual, rtol=rtol, atol=atol)
+
+        # Dilation with asymmetric padding
+        y = torch.rand(1, 1, 4, 4, device=device, dtype=dtype)
+        expect = F.conv_transpose2d(x, y, padding=10, dilation=7)[..., 1:, 1:]
+        actual = F.conv_transpose2d(x, y, padding="same", dilation=7)
+        self.assertEqual(expect, actual, rtol=rtol, atol=atol)
+
+    @dtypes(torch.float, torch.cfloat)
+    def test_conv_transpose3d_same_padding(self, device, dtype):
+        if dtype is torch.cfloat:
+            rtol, atol = 2e-6, 2e-6
+        else:
+            rtol, atol = None, None
+        # Compare F.conv3d padding='same' output against manual padding
+        # Without strides/dilation
+        x = torch.rand(1, 1, 10, 11, 12, device=device, dtype=dtype)
+        y = torch.rand(1, 1, 1, 2, 5, device=device, dtype=dtype)
+        expect = F.conv_transpose3d(x, y, padding=(0, 0, 2))[..., :, 1:, :]
+        actual = F.conv_transpose3d(x, y, padding="same")
+        self.assertEqual(expect, actual, rtol=rtol, atol=atol)
+
+        # With dilation
+        expect = F.conv_transpose3d(x, y, padding=(0, 1, 4), dilation=2)
+        actual = F.conv_transpose3d(x, y, padding="same", dilation=2)
+        self.assertEqual(expect, actual, rtol=rtol, atol=atol)
+
+        # Dilation with asymmetric padding
+        y = torch.rand(1, 1, 4, 4, 4, device=device, dtype=dtype)
+        expect = F.conv_transpose3d(x, y, padding=4, dilation=3)[..., 1:, 1:, 1:]
+        actual = F.conv_transpose3d(x, y, padding="same", dilation=3)
+        self.assertEqual(expect, actual, rtol=rtol, atol=atol)
+
+    @dtypes(torch.float, torch.cfloat)
+    @dtypesIfMPS(
+        *([torch.float] if MACOS_VERSION < 14.0 else [torch.float, torch.cfloat])
+    )  # Complex not supported on MacOS13
+    def test_conv_transpose1d_valid_padding(self, device, dtype):
+        # Test F.conv_transpose1d padding='valid' is the same as no padding
+        x = torch.rand(1, 1, 10, device=device, dtype=dtype)
+        y = torch.rand(1, 1, 4, device=device, dtype=dtype)
+        expect = F.conv_transpose1d(x, y)
+        actual = F.conv_transpose1d(x, y, padding="valid")
+        self.assertEqual(expect, actual)
+
+    @dtypes(torch.float, torch.cfloat)
+    @dtypesIfMPS(
+        *([torch.float] if MACOS_VERSION < 14.0 else [torch.float, torch.cfloat])
+    )  # Complex not supported on MacOS13
+    def test_conv_transpose2d_valid_padding(self, device, dtype):
+        # Test F.conv_transpose2d padding='valid' is the same as no padding
+        x = torch.rand(1, 1, 1, 10, device=device, dtype=dtype)
+        y = torch.rand(1, 1, 1, 4, device=device, dtype=dtype)
+        expect = F.conv_transpose2d(x, y)
+        actual = F.conv_transpose2d(x, y, padding="valid")
+        self.assertEqual(expect, actual)
+
+    @dtypes(torch.float, torch.cfloat)
+    def test_conv_transpose3d_valid_padding(self, device, dtype):
+        # Test F.conv_transpose3d padding='valid' is the same as no padding
+        x = torch.rand(1, 1, 1, 1, 10, dtype=dtype, device=device)
+        y = torch.rand(1, 1, 1, 1, 4, dtype=dtype, device=device)
+        expect = F.conv_transpose3d(x, y)
+        actual = F.conv_transpose3d(x, y, padding="valid")
+        self.assertEqual(expect, actual)
+
+    @dtypes(torch.float, torch.cfloat)
+    @dtypesIfMPS(torch.float)
+    def test_conv_transpose1d_same_padding_backward(self, device, dtype):
+        # Test F.conv_transpose1d gradients work with padding='same'
+        x = torch.rand(1, 1, 12, dtype=dtype, device=device, requires_grad=True)
+        y = torch.rand(1, 1, 4, dtype=dtype, device=device, requires_grad=True)
+
+        # Symmetric padding
+        z = F.conv_transpose1d(x, y, padding=3, dilation=2)
+        z.sum().abs().backward()
+        gx_expect, gy_expect = x.grad, y.grad
+        x.grad, y.grad = None, None
+
+        z = F.conv_transpose1d(x, y, padding="same", dilation=2)
+        z.sum().abs().backward()
+        self.assertEqual(gx_expect, x.grad)
+        self.assertEqual(gy_expect, y.grad)
+        x.grad, y.grad = None, None
+
+        # Asymmetric padding
+        z = F.conv_transpose1d(x, y, padding=1)[..., 1:]
+        z.sum().abs().backward()
+        gx_expect, gy_expect = x.grad, y.grad
+        x.grad, y.grad = None, None
+
+        z = F.conv_transpose1d(x, y, padding="same")
+        z.sum().abs().backward()
+        self.assertEqual(gx_expect, x.grad)
+        self.assertEqual(gy_expect, y.grad)
+
+    @dtypes(torch.float, torch.cfloat)
+    @dtypesIfMPS(
+        *([torch.float] if MACOS_VERSION < 14.0 else [torch.float, torch.cfloat])
+    )  # Complex not supported on MacOS13
+    @tf32_on_and_off(0.001)
+    def test_conv_transpose2d_same_padding_backward(self, device, dtype):
+        # Test F.conv_transpose2d gradients work with padding='same'
+        x = torch.rand(1, 1, 10, 11, device=device, dtype=dtype, requires_grad=True)
+        y = torch.rand(1, 1, 4, 5, device=device, dtype=dtype, requires_grad=True)
+
+        # Symmetric padding
+        z = F.conv_transpose2d(x, y, padding=(3, 4), dilation=2)
+        z.sum().abs().backward()
+        gx_expect, gy_expect = x.grad, y.grad
+        x.grad, y.grad = None, None
+
+        z = F.conv_transpose2d(x, y, padding="same", dilation=2)
+        z.sum().abs().backward()
+        self.assertEqual(gx_expect, x.grad)
+        self.assertEqual(gy_expect, y.grad)
+        x.grad, y.grad = None, None
+
+        # Asymmetric padding
+        y = torch.rand(1, 1, 4, 4, device=device, dtype=dtype, requires_grad=True)
+        z = F.conv_transpose2d(x, y, padding=1)[..., 1:, 1:]
+        z.sum().abs().backward()
+        gx_expect, gy_expect = x.grad, y.grad
+        x.grad, y.grad = None, None
+
+        z = F.conv_transpose2d(x, y, padding="same")
+        z.sum().abs().backward()
+        self.assertEqual(gx_expect, x.grad)
+        self.assertEqual(gy_expect, y.grad)
+
+    @dtypes(torch.double, torch.cdouble)
+    @dtypesIfMPS(
+        torch.float, torch.cfloat
+    )  # Double, complex double not supported on MPS
+    @expectedFailureMPS  # https://github.com/pytorch/pytorch/issues/107214
+    @skipIfTorchDynamo("Doesn't work for complex128. Similar to conv3d")
+    def test_conv_transpose3d_same_padding_backward(self, device, dtype):
+        check_forward_ad = torch.device(device).type != "xla"
+
+        # Test F.conv_transpose3d gradients work with padding='same'
+        x = torch.rand(1, 1, 1, 11, 12, dtype=dtype, device=device, requires_grad=True)
+        y = torch.rand(1, 1, 1, 2, 5, dtype=dtype, device=device, requires_grad=True)
+
+        # Symmetric padding
+        z = F.conv_transpose3d(x, y, padding=(0, 1, 4), dilation=2)
+        z.sum().abs().backward()
+        gx_expect, gy_expect = x.grad, y.grad
+        x.grad, y.grad = None, None
+
+        z = F.conv_transpose3d(x, y, padding="same", dilation=2)
+        z.sum().abs().backward()
+        self.assertEqual(gx_expect, x.grad)
+        self.assertEqual(gy_expect, y.grad)
+        x.grad, y.grad = None, None
+
+        gradcheck(
+            lambda x, y: F.conv_transpose3d(x, y, padding="same", dilation=2),
+            (x, y),
+            check_forward_ad=check_forward_ad,
+            nondet_tol=1e-5,
+        )
+        if torch.device(device).type != "cuda":
+            gradgradcheck(
+                lambda x, y: F.conv_transpose3d(x, y, padding="same", dilation=2),
+                (x, y),
+                check_fwd_over_rev=True,
+            )
+
+        # Asymmetric padding
+        y = torch.rand(1, 1, 1, 4, 8, dtype=dtype, device=device, requires_grad=True)
+        z = F.conv_transpose3d(x, y, padding=(0, 1, 3))[..., 1:, 1:]
+        z.sum().abs().backward()
+        gx_expect, gy_expect = x.grad, y.grad
+        x.grad, y.grad = None, None
+
+        z = F.conv_transpose3d(x, y, padding="same")
+        z.sum().abs().backward()
+        self.assertEqual(gx_expect, x.grad)
+        self.assertEqual(gy_expect, y.grad)
+
+        gradcheck(
+            lambda x, y: F.conv_transpose3d(x, y, padding="same"),
+            (x, y),
+            check_forward_ad=check_forward_ad,
+            nondet_tol=1e-5,
+        )
+        if torch.device(device).type != "cuda":
+            gradgradcheck(
+                lambda x, y: F.conv_transpose3d(x, y, padding="same"),
+                (x, y),
+                check_fwd_over_rev=True,
+            )
+
+    @dtypes(torch.float, torch.cfloat)
+    @dtypesIfMPS(
+        *([torch.float] if MACOS_VERSION < 14.0 else [torch.float, torch.cfloat])
+    )  # Complex not supported on MacOS13
+    def test_conv_transpose1d_valid_padding_backward(self, device, dtype):
+        # Test F.conv_transpose1d gradients work with padding='valid'
+        x = torch.rand(1, 1, 10, dtype=dtype, device=device, requires_grad=True)
+        y = torch.rand(1, 1, 4, dtype=dtype, device=device, requires_grad=True)
+        F.conv_transpose1d(x, y, padding=0).sum().abs().backward()
+        gx_expect, gy_expect = x.grad, y.grad
+        x.grad, y.grad = None, None
+
+        F.conv_transpose1d(x, y, padding="valid").sum().abs().backward()
+        gx_actual, gy_actual = x.grad, y.grad
+        self.assertEqual(gx_expect, gx_actual)
+        self.assertEqual(gy_expect, gy_actual)
+
+    @dtypes(torch.float, torch.complex64)
+    @dtypesIfMPS(
+        *([torch.float] if MACOS_VERSION < 14.0 else [torch.float, torch.cfloat])
+    )  # Complex not supported on MacOS13
+    def test_conv_transpose2d_valid_padding_backward(self, device, dtype):
+        # Test F.conv_transpose2d gradients work with padding='valid'
+        x = torch.rand(1, 1, 1, 10, device=device, dtype=dtype, requires_grad=True)
+        y = torch.rand(1, 1, 1, 4, device=device, dtype=dtype, requires_grad=True)
+        F.conv_transpose2d(x, y, padding=0).sum().abs().backward()
+        gx_expect, gy_expect = x.grad, y.grad
+        x.grad, y.grad = None, None
+
+        F.conv_transpose2d(x, y, padding="valid").sum().abs().backward()
+        gx_actual, gy_actual = x.grad, y.grad
+        self.assertEqual(gx_expect, gx_actual)
+        self.assertEqual(gy_expect, gy_actual)
+
+    @dtypes(torch.double, torch.cdouble)
+    @dtypesIfMPS(
+        torch.float, torch.cfloat
+    )  # Double, complex double not supported on MPS
+    @expectedFailureMPS  # https://github.com/pytorch/pytorch/issues/107214
+    @skipIfTorchDynamo("Doesn't work for complex128. Similar to conv3d")
+    def test_conv_transpose3d_valid_padding_backward(self, device, dtype):
+        check_forward_ad = torch.device(device).type != "xla"
+
+        # Test F.conv_transpose3d gradients work with padding='valid'
+        x = torch.rand(1, 1, 1, 1, 10, dtype=dtype, device=device, requires_grad=True)
+        y = torch.rand(1, 1, 1, 1, 4, dtype=dtype, device=device, requires_grad=True)
+        F.conv_transpose3d(x, y, padding=0).sum().abs().backward()
+        gx_expect, gy_expect = x.grad, y.grad
+        x.grad, y.grad = None, None
+
+        F.conv_transpose3d(x, y, padding="valid").sum().abs().backward()
+        gx_actual, gy_actual = x.grad, y.grad
+        self.assertEqual(gx_expect, gx_actual)
+        self.assertEqual(gy_expect, gy_actual)
+
+        gradcheck(
+            lambda x, y: F.conv_transpose3d(x, y, padding="valid"),
+            (x, y),
+            check_forward_ad=check_forward_ad,
+            nondet_tol=1e-5,
+        )
+        gradgradcheck(
+            lambda x, y: F.conv_transpose3d(x, y, padding="valid"),
+            (x, y),
+            check_fwd_over_rev=check_forward_ad,
+            nondet_tol=1e-5,
+        )
+
+    @dtypes(torch.double, torch.cdouble)
+    @dtypesIfMPS(
+        torch.float, torch.cfloat
+    )  # Double, complex double not supported on MPS
+    @parametrize_test(
+        arg_str="N",
+        arg_values=[
+            subtest(arg_values=(1), name="conv_transpose1d"),
+            subtest(arg_values=(2), name="conv_transpose2d"),
+            subtest(arg_values=(3), name="conv_transpose3d"),
+        ],
+    )
+    def test_conv_transposeNd_same_padding_incompatible_with_output_padding(
+        self, device, dtype, N
+    ):
+        conv_transposeNd = getattr(F, f"conv_transpose{N}d")
+        if N == 1:
+            x = torch.rand(1, 1, 10, device=device, dtype=dtype, requires_grad=True)
+            y = torch.rand(1, 1, 4, device=device, dtype=dtype, requires_grad=True)
+            output_paddings = [(1,)]
+        elif N == 2:
+            x = torch.rand(1, 1, 2, 10, device=device, dtype=dtype, requires_grad=True)
+            y = torch.rand(1, 1, 4, 3, device=device, dtype=dtype, requires_grad=True)
+            output_paddings = [(1, 1), (1, 0), (0, 1)]
+        elif N == 3:
+            x = torch.rand(
+                1, 1, 2, 2, 10, device=device, dtype=dtype, requires_grad=True
+            )
+            y = torch.rand(
+                1, 1, 4, 3, 4, device=device, dtype=dtype, requires_grad=True
+            )
+            # fmt: off
+            output_paddings = [
+                (1, 1, 1), (1, 1, 0), (1, 0, 1), (1, 0, 0),
+                (0, 1, 1), (0, 1, 0), (0, 0, 1),
+            ]
+            # fmt: on
+        else:
+            raise ValueError(f"Test for {N=} undefined")
+
+        # test int
+        with self.assertRaisesRegex(
+            RuntimeError, "^padding='same' only supports output_padding=0$"
+        ):
+            conv_transposeNd(x, y, padding="same", output_padding=1)
+
+        # test tuple
+        for output_padding in output_paddings:
+            with self.assertRaisesRegex(
+                RuntimeError, "^padding='same' only supports output_padding=0$"
+            ):
+                conv_transposeNd(x, y, padding="same", output_padding=output_padding)
 
     @parametrize_test(
         arg_str="N",
