@@ -24,6 +24,7 @@ import torch.distributed as dist
 from torch.distributed import HashStore, Store
 from torch.distributed.elastic.rendezvous import (
     RendezvousClosedError,
+    RendezvousConnectionError,
     RendezvousError,
     RendezvousInfo,
     RendezvousParameters,
@@ -55,6 +56,7 @@ from torch.distributed.elastic.rendezvous.dynamic_rendezvous import (
 
 TEST_PORT = 54321
 TEST_ADDR = "host"
+REVERSE_DNS_ADDR = "1.0.0.127.in-addr.arpa"
 
 
 class CustomAssertMixin:
@@ -1185,7 +1187,7 @@ class DynamicRendezvousHandlerTest(TestCase):
             "_create_tcp_store_server",
             return_value=self._tcp_store_mock,
         )
-        patcher.start()
+        self._mock_create_tcp_store_server = patcher.start()
         self.addCleanup(patcher.stop)
 
     def _create_handler(self) -> DynamicRendezvousHandler:
@@ -1248,6 +1250,36 @@ class DynamicRendezvousHandlerTest(TestCase):
             self.assertEqual(rdzv_info.bootstrap_store_info.master_addr, TEST_ADDR)
             self.assertEqual(rdzv_info.bootstrap_store_info.master_port, TEST_PORT)
             self.assertNotEqual(handler._shared_tcp_store_server, handler._store)
+
+    def test_next_rendezvous_falls_back_to_loopback_for_single_node_reverse_dns_addr(
+        self,
+    ) -> None:
+        self._node = _NodeDesc(REVERSE_DNS_ADDR, 1, 1)
+        handler = self._create_handler()
+
+        expected_store_info = RendezvousStoreInfo("127.0.0.1", TEST_PORT)
+        with patch.object(
+            RendezvousStoreInfo, "build", return_value=expected_store_info
+        ) as build_mock:
+            rdzv_info = handler.next_rendezvous()
+
+        self.assertEqual(rdzv_info.bootstrap_store_info.master_addr, "127.0.0.1")
+        self.assertEqual(rdzv_info.bootstrap_store_info.master_port, TEST_PORT)
+        self._mock_create_tcp_store_server.assert_called_once_with("127.0.0.1", 0)
+        self.assertEqual(build_mock.call_args.kwargs["local_addr"], "127.0.0.1")
+
+    def test_next_rendezvous_raises_for_multi_node_reverse_dns_addr(self) -> None:
+        self._node = _NodeDesc(REVERSE_DNS_ADDR, 1, 1)
+        self._max_nodes = 2
+        handler = self._create_handler()
+
+        with self.assertRaisesRegex(
+            RendezvousConnectionError,
+            r"reverse-DNS name",
+        ):
+            handler.next_rendezvous()
+
+        self._mock_create_tcp_store_server.assert_not_called()
 
     @patch("torch.distributed.elastic.rendezvous.dynamic_rendezvous._delay")
     def test_next_rendezvous_skews_the_first_join_attempt(self, mock_delay) -> None:

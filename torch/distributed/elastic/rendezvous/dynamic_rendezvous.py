@@ -26,6 +26,7 @@ from torch.distributed.elastic.events import construct_and_record_rdzv_event, No
 
 from .api import (
     RendezvousClosedError,
+    RendezvousConnectionError,
     RendezvousError,
     RendezvousGracefulExitError,
     RendezvousHandler,
@@ -53,6 +54,11 @@ def get_method_name(depth=2):
     if len(inspect.stack()) > depth:
         return inspect.stack()[depth].function
     return "no_method_name"
+
+
+def _is_reverse_dns_hostname(hostname: str) -> bool:
+    normalized = hostname.rstrip(".").lower()
+    return normalized.endswith(".ip6.arpa") or normalized.endswith(".in-addr.arpa")
 
 
 Token = Any
@@ -1007,6 +1013,7 @@ class DynamicRendezvousHandler(RendezvousHandler):
     _op_executor: _RendezvousOpExecutor
     _heartbeat_lock: threading.Lock
     _keep_alive_timer: _PeriodicTimer | None
+    _bootstrap_addr: str | None
 
     @classmethod
     def from_backend(
@@ -1105,6 +1112,7 @@ class DynamicRendezvousHandler(RendezvousHandler):
         self._shared_tcp_store_server: dist.Store | None = None
 
         self._bootstrap_store_info: RendezvousStoreInfo | None = None
+        self._bootstrap_addr: str | None = None
 
     def _record(
         self,
@@ -1130,6 +1138,30 @@ class DynamicRendezvousHandler(RendezvousHandler):
             is_master=True,
             multi_tenant=True,
         )
+
+    def _get_bootstrap_addr(self) -> str:
+        if self._bootstrap_addr is not None:
+            return self._bootstrap_addr
+
+        addr = self._this_node.addr
+        if _is_reverse_dns_hostname(addr):
+            if self._settings.max_nodes == 1:
+                self._bootstrap_addr = "127.0.0.1"
+                logger.warning(
+                    "Rendezvous local_addr '%s' looks like a reverse-DNS name; "
+                    "using 127.0.0.1 for single-node rendezvous. "
+                    "Pass --local-addr to override.",
+                    addr,
+                )
+                return self._bootstrap_addr
+
+            raise RendezvousConnectionError(
+                f"The rendezvous local_addr '{addr}' looks like a reverse-DNS name. "
+                "Pass a routable address with --local-addr."
+            )
+
+        self._bootstrap_addr = addr
+        return self._bootstrap_addr
 
     @property
     def settings(self) -> RendezvousSettings:
@@ -1190,10 +1222,12 @@ class DynamicRendezvousHandler(RendezvousHandler):
         self._record(message=msg, rank=rank)
         logger.info(msg)
 
+        bootstrap_addr = self._get_bootstrap_addr()
+
         # opt-out option of TCPStore sharing
         if os.getenv("TORCH_DISABLE_SHARE_RDZV_TCP_STORE", "0") == "1":
             bootstrap_store_info = RendezvousStoreInfo.build(
-                rank, store, local_addr=self._this_node.addr
+                rank, store, local_addr=bootstrap_addr
             )
             return RendezvousInfo(
                 store,
@@ -1209,13 +1243,13 @@ class DynamicRendezvousHandler(RendezvousHandler):
             server_port = 0
             if rank == 0:
                 self._shared_tcp_store_server = self._create_tcp_store_server(
-                    self._this_node.addr, server_port
+                    bootstrap_addr, server_port
                 )
                 server_port = self._shared_tcp_store_server.port
             self._bootstrap_store_info = RendezvousStoreInfo.build(
                 rank,
                 store,
-                local_addr=self._this_node.addr,
+                local_addr=bootstrap_addr,
                 server_port=server_port,  # For non-0 rank, this is a no-op
             )
 
