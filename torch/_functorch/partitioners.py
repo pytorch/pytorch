@@ -68,7 +68,13 @@ from ._aot_autograd.descriptors import (
 )
 from ._aot_autograd.functional_utils import _is_functional_graph
 from ._aot_autograd.logging_utils import get_aot_graph_name
-from ._aot_autograd.utils import get_cuda_generator_meta_val
+from ._aot_autograd.utils import (
+    _is_bwd_seed_offset,
+    _is_fwd_seed_offset,
+    _is_primal,
+    _is_tangent,
+    get_cuda_generator_meta_val,
+)
 from .compile_utils import fx_graph_cse, get_aten_target, raise_getitems
 
 
@@ -201,6 +207,56 @@ def is_not_collective(node: fx.Node) -> bool:
 InvalidNode = InvalidNodeBase()
 
 
+def _is_copy_node_bw_only(node: fx.Node) -> fx.Node | None:
+    """Check if node is a view/reshape of a higher-order op output that aliases an input.
+
+    Returns the original input node from the higher-order op's kwargs if the pattern
+    matches, None otherwise.
+    """
+    if node.target not in (torch.ops.aten.view.default, torch.ops.aten.reshape.default):
+        return None
+    source = node.args[0]
+    if not isinstance(source, fx.Node) or source.target != operator.getitem:
+        return None
+    ho_result = source.args[0]
+    key = source.args[1]
+    if not isinstance(ho_result, fx.Node) or ho_result.op != "call_function":
+        return None
+    if "kwargs" not in ho_result.kwargs:
+        return None
+    kwargs = ho_result.kwargs["kwargs"]
+    # pyrefly: ignore [not-iterable, unsupported-operation]
+    if key not in kwargs:
+        return None
+    # pyrefly: ignore [bad-index, unsupported-operation]
+    original_input = kwargs[key]
+    if isinstance(original_input, fx.Node):
+        return original_input
+    return None
+
+
+def _find_input_for_invalid_output(
+    node: fx.Node,
+    env: dict[fx.Node, Any],
+    inputs_set: OrderedSet[fx.Node],
+) -> fx.Node | None:
+    """Try to find a valid input replacement for an invalid forward output.
+
+    This handles cases where a forward output depends on backward nodes but
+    semantically aliases an input. For example, a view of a getitem from a
+    triton kernel that mutates a buffer in backward.
+    """
+    original_input = _is_copy_node_bw_only(node)
+    if (
+        original_input is not None
+        and original_input in inputs_set
+        and original_input in env
+        and not isinstance(env[original_input], InvalidNodeBase)
+    ):
+        return env[original_input]
+    return None
+
+
 def _extract_graph_with_inputs_outputs(
     joint_graph: fx.Graph,
     inputs: list[fx.Node],
@@ -273,11 +329,34 @@ def _extract_graph_with_inputs_outputs(
         elif node.op == "output":
             pass
     output_values = []
-    for x in outputs:
+    inputs_set = OrderedSet(inputs)
+    for x, x_desc in zip(outputs, outputs_descs):
         if isinstance(x, fx.Node):
             if x not in env:
                 raise RuntimeError(f"Node {x} couldn't be found in env")
             if isinstance(env[x], InvalidNodeBase):
+                # For forward outputs that are invalid (depend on backward), try
+                # to find a valid replacement.
+                replacement = None
+                # For copy_ nodes that are backward-only, use the destination
+                # (first arg) which is the original input.
+                if (
+                    x.target is torch.ops.aten.copy_.default
+                    and _must_be_in_backward(x)
+                    and len(x.args) >= 1
+                    and isinstance(x.args[0], fx.Node)
+                    and x.args[0] in env
+                    and not isinstance(env[x.args[0]], InvalidNodeBase)
+                ):
+                    replacement = env[x.args[0]]
+                # For view/reshape outputs that trace back to a getitem of a
+                # higher-order op that mutates an input, find that input.
+                # This handles custom_function_view outputs from triton kernels.
+                if replacement is None:
+                    replacement = _find_input_for_invalid_output(x, env, inputs_set)
+                if replacement is not None:
+                    output_values.append(replacement)
+                    continue
                 raise AssertionError(f"Node {x} was invalid, but is output")
             output_values.append(env[x])
         else:
@@ -290,35 +369,10 @@ def _extract_graph_with_inputs_outputs(
     return new_graph
 
 
-def _is_primal(node: fx.Node) -> bool:
-    return (
-        node.op == "placeholder"
-        and "tangents" not in str(node.target)
-        and not _is_bwd_seed_offset(node)
-        and not _is_fwd_seed_offset(node)
-    )
-
-
-def _is_tangent(node: fx.Node) -> bool:
-    return node.op == "placeholder" and "tangents" in str(node.target)
-
-
 def is_non_builtin_to_include(node: fx.Node) -> bool:
     return config.is_non_builtin_to_include and (
         (isinstance(node.target, torch._ops.OpOverload) and not is_builtin(node.target))
         or node.target == torch.ops.higher_order.triton_kernel_wrapper_functional
-    )
-
-
-def _is_bwd_seed_offset(node: fx.Node) -> bool:
-    return node.op == "placeholder" and (
-        "bwd_seed" in str(node.target) or "bwd_base_offset" in str(node.target)
-    )
-
-
-def _is_fwd_seed_offset(node: fx.Node) -> bool:
-    return node.op == "placeholder" and (
-        "fwd_seed" in str(node.target) or "fwd_base_offset" in str(node.target)
     )
 
 

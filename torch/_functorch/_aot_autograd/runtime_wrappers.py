@@ -398,8 +398,13 @@ class _AnalyzeCustomOpInputOutputMode(TorchDispatchMode):
         )
 
         # Defer this to subclass torchdispatch modes (probably shouldn't have fake tensor here tho)
-        if not all(type(x) in HANDLED_TYPES for x in flat_tensor_args):
-            return NotImplemented
+        # For Parameters, we need to check the underlying tensor type, not the Parameter itself
+        for tensor in flat_tensor_args:
+            underlying_tensor = tensor
+            if isinstance(tensor, torch.nn.Parameter):
+                underlying_tensor = tensor.data
+            if type(underlying_tensor) not in HANDLED_TYPES:
+                return NotImplemented
 
         res = func(*args, **kwargs)
         # Only check aliasing for custom ops (non-aten/prim/prims/_c10d_functional/c10d)
