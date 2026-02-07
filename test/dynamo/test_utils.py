@@ -212,7 +212,6 @@ class TestUtils(TestCase):
         fn(x)
         self.assertEqual(traced_code_lists, [])
 
-
     def test_reinplace_counters_use_trigger_name_not_enum_value(self):
         """Test that ReinplaceCounters uses trigger.name in dictionary keys instead of the enum value"""
         from torch._dynamo.utils import ReinplaceCounters, ReInplaceTrigger
