@@ -10,7 +10,7 @@ from typing import Any
 
 import torch
 from torch import Tensor
-from torch._environment import is_fbcode
+from torch._environment import is_fbcode, is_prod
 from torch._utils import _LazySeedTracker
 from torch.types import Device
 
@@ -111,7 +111,7 @@ def _lazy_init() -> None:
 
         # Install the C++ resource manager to enable Buck resource lookup from Python.
         # This must be called before _mtia_init() which may access Buck resources.
-        if is_fbcode():
+        if is_fbcode() and is_prod():
             try:
                 from libfb.py.cxx_resources import cxx_resource_manager
 
