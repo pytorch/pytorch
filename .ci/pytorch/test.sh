@@ -1305,7 +1305,15 @@ test_libtorch_agnostic_targetting() {
     mkdir -p "$WHEEL_DIR"
 
     local cleanup_items=("$WHEEL_DIR")
-    trap 'rm -rf "${cleanup_items[@]}"' EXIT
+    local ext_dirs_to_clean=()
+
+    cleanup_libtorch_agnostic() {
+        rm -rf "${cleanup_items[@]}"
+        for ext_dir in "${ext_dirs_to_clean[@]}"; do
+            rm -rf "${ext_dir}/build" "${ext_dir}/dist" "${ext_dir}"/*.egg-info "${ext_dir}/install"
+        done
+    }
+    trap cleanup_libtorch_agnostic EXIT
 
     # Helper: Parse version "X.Y.Z" into {prefix}_major and {prefix}_minor
     parse_version() {
@@ -1354,7 +1362,7 @@ test_libtorch_agnostic_targetting() {
         "$VENV_UV" pip install --python "$VENV_PY" expecttest numpy unittest-xml-reporting
     }
 
-    CURRENT_VERSION=$(python -I -c "import torch; print(torch.__version__.split('+')[0].split('a')[0].split('b')[0].split('rc')[0])")
+    CURRENT_VERSION=$(python -c "import torch; print(torch.__version__.split('+')[0].split('a')[0].split('b')[0].split('rc')[0])")
     local CURRENT_major CURRENT_minor
     parse_version "$CURRENT_VERSION" "CURRENT"
     echo "Current: ${CURRENT_major}.${CURRENT_minor}, CUDA: $([[ "$BUILD_ENVIRONMENT" =~ cuda ]] && echo yes || echo no)"
@@ -1368,6 +1376,8 @@ test_libtorch_agnostic_targetting() {
     for ((m = MIN_MINOR; m < CURRENT_minor; m++)); do
         ext_path="test/cpp_extensions/libtorch_agn_${CURRENT_major}_${m}_extension"
         [[ -d "$ext_path" ]] || { echo "ERROR: Missing ${ext_path}"; return 1; }
+
+        ext_dirs_to_clean+=("${REPO_DIR}/${ext_path}")
 
         echo "Building ${ext_path}..."
         pushd "$ext_path" > /dev/null
@@ -1408,7 +1418,9 @@ test_libtorch_agnostic_targetting() {
         if [[ -n "$OLD_LD" ]]; then export LD_LIBRARY_PATH="$OLD_LD"; else unset LD_LIBRARY_PATH; fi
     done
 
-    [[ "$TESTS_FAILED" -eq 0 ]] || return 1
+    [[ "$TESTS_FAILED" -eq 0 ]] || { cleanup_libtorch_agnostic; trap - EXIT; return 1; }
+    cleanup_libtorch_agnostic
+    trap - EXIT
     assert_git_not_dirty
 }
 
