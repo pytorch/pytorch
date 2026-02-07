@@ -79,6 +79,9 @@ class LaunchConfig:
                            When enabled, LOCAL_RANK is set to 0 for all workers and
                            CUDA_VISIBLE_DEVICES is adjusted so each worker accesses its
                            assigned GPU at device index 0.
+        shutdown_timeout: Time in seconds to wait for graceful shutdown of workers before
+                        sending SIGKILL. Can also be set via TORCH_ELASTIC_SHUTDOWN_TIMEOUT
+                        environment variable. Defaults to 30 seconds.
 
 
     .. note::
@@ -109,6 +112,7 @@ class LaunchConfig:
     duplicate_stdout_filters: list[str] | None = None
     duplicate_stderr_filters: list[str] | None = None
     virtual_local_rank: bool = False
+    shutdown_timeout: int | None = None
 
     def __post_init__(self):
         default_timeout = 900
@@ -129,6 +133,16 @@ class LaunchConfig:
         ):
             self.numa_options = get_default_numa_options()
             logger.info("Using default numa options = %r", self.numa_options)
+
+        # Set shutdown_timeout from environment variable if not explicitly set
+        if self.shutdown_timeout is None:
+            self.shutdown_timeout = int(
+                os.environ.get("TORCH_ELASTIC_SHUTDOWN_TIMEOUT", "30")
+            )
+        elif self.shutdown_timeout < 0:
+            raise ValueError(
+                f"shutdown_timeout must be non-negative, got {self.shutdown_timeout}"
+            )
 
 
 class elastic_launch:
@@ -299,6 +313,7 @@ def launch_agent(
         logs_specs=config.logs_specs,  # type: ignore[arg-type]
         start_method=config.start_method,
         log_line_prefix_template=config.log_line_prefix_template,
+        shutdown_timeout=config.shutdown_timeout,  # type: ignore[arg-type]
     )
 
     shutdown_rdzv = True
