@@ -255,7 +255,7 @@ def tf32_off():
 
 
 def tf32_on(self, tf32_precision=1e-5):
-    return tf32(True, test_self=self, tf32_precision=tf32_precision, math_sdp_precision=None)
+    return tf32(True, test_self=self, precision=tf32_precision, math_sdp_precision=None)
 
 
 # This is a wrapper that wraps a test to run this test twice, one with
