@@ -818,6 +818,22 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_cpu_out(const Tensor& self, con
   const Tensor& running_var = running_var_opt.value_or(Tensor());
 
   checkBackend("batch_norm_cpu_out", {self, weight, bias, running_mean, running_var}, Backend::CPU);
+
+  // Validate tensor dimensions
+  auto num_features = self.sym_size(1);
+  if (running_mean.defined()) {
+    check_dims_match_num_input_features("running_mean", num_features, running_mean.sym_numel());
+  }
+  if (running_var.defined()) {
+    check_dims_match_num_input_features("running_var", num_features, running_var.sym_numel());
+  }
+  if (weight.defined()) {
+    check_dims_match_num_input_features("weight", num_features, weight.sym_numel());
+  }
+  if (bias.defined()) {
+    check_dims_match_num_input_features("bias", num_features, bias.sym_numel());
+  }
+
   // Resize out
   at::native::resize_output(out, self.sizes());
 
@@ -861,6 +877,21 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cpu(const Tensor& self, const std:
   const Tensor& running_var = running_var_opt.value_or(Tensor());
 
   checkBackend("batch_norm_cpu", {self, weight, bias, running_mean, running_var}, Backend::CPU);
+
+  // Validate tensor dimensions
+  auto num_features = self.sym_size(1);
+  if (running_mean.defined()) {
+    check_dims_match_num_input_features("running_mean", num_features, running_mean.sym_numel());
+  }
+  if (running_var.defined()) {
+    check_dims_match_num_input_features("running_var", num_features, running_var.sym_numel());
+  }
+  if (weight.defined()) {
+    check_dims_match_num_input_features("weight", num_features, weight.sym_numel());
+  }
+  if (bias.defined()) {
+    check_dims_match_num_input_features("bias", num_features, bias.sym_numel());
+  }
 
   // Prepare output tensor
   const bool all_contiguous = is_contiguous(self)
