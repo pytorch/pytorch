@@ -11,6 +11,7 @@ import torch.distributed.tensor._api as dtensor
 import torch.distributed.tensor._random as random
 from torch._library.utils import fill_defaults
 from torch._logging import LazyString
+from torch._prims.rng_prims import run_dtensor_rng_op
 from torch.distributed._functional_collectives import _are_we_tracing
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
@@ -298,7 +299,10 @@ class OpDispatcher:
                 if not random._rng_tracker and is_rng_supported_mesh(mesh):
                     # Default to `OffsetBasedRNGTracker` if the parallelism API
                     # did not already construct one
-                    random._rng_tracker = random.OffsetBasedRNGTracker(mesh)
+                    run_state_sync = not _are_we_tracing()
+                    random._rng_tracker = random.OffsetBasedRNGTracker(
+                        mesh, run_state_sync
+                    )
 
                 first_arg, first_local_arg = (
                     cast(dtensor.DTensor, args[0]),
@@ -312,17 +316,36 @@ class OpDispatcher:
                 assert maybe_user_generator is None or isinstance(
                     maybe_user_generator, torch.Generator
                 )
-                # maybe_user_generator = None
-                rng_context = (
-                    random._rng_tracker._distribute_region(
-                        first_arg._spec, generator=maybe_user_generator
-                    )
-                    if random._rng_tracker and not first_local_arg.is_meta
-                    else contextlib.nullcontext()
-                )
-                # For DTensor random operator, run it within a RNGTracker context to
-                # ensure the random number generator is properly distributed.
-                with rng_context:
+
+                if (
+                    random._rng_tracker
+                    and not first_local_arg.is_meta
+                    and random._rng_tracker.distribute_region_enabled
+                ):
+                    if (
+                        maybe_user_generator is not None
+                        or first_local_arg.device.type != "cuda"
+                    ):
+                        # User provided a generator or non-CUDA device, use context manager
+                        with random._rng_tracker._distribute_region(
+                            first_arg._spec, generator=maybe_user_generator
+                        ):
+                            local_results = op_call(
+                                *local_tensor_args, **op_info.local_kwargs
+                            )
+                    else:
+                        # CUDA device without user generator, use HOP for traceability
+                        assert isinstance(
+                            random._rng_tracker, random.OffsetBasedRNGTracker
+                        )
+                        local_results = run_dtensor_rng_op(
+                            first_arg._spec,
+                            op_call,
+                            *local_tensor_args,
+                            **op_info.local_kwargs,
+                        )
+                else:
+                    # No rng_tracker, meta tensor, or distribute_region disabled
                     local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
             else:
                 # normal case, run local sharded op computation

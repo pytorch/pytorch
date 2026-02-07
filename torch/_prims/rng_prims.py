@@ -394,5 +394,96 @@ def register_graphsafe_run_with_rng_state_op():
 graphsafe_run_with_rng_state = register_graphsafe_run_with_rng_state_op()
 
 
+def register_run_dtensor_rng_op():
+    """
+    Register a higher-order operator for DTensor distributed random operations.
+    Takes a DTensorSpec, op, and args. Internally computes the shard-specific
+    start RNG state and the synchronized end RNG state, then runs the op.
+    """
+
+    class RunDTensorRngOp(HigherOrderOperator):
+        def __init__(self):
+            super().__init__("run_dtensor_rng_op", cacheable=True)
+
+        def __call__(self, dtensor_spec, op, *args, **kwargs):
+            # pyrefly: ignore [missing-attribute]
+            return super().__call__(dtensor_spec, op, *args, **kwargs)
+
+    run_dtensor_rng_op = RunDTensorRngOp()
+
+    run_dtensor_rng_op.py_impl(DispatchKey.Autograd)(
+        autograd_not_implemented(run_dtensor_rng_op, deferred_error=True)
+    )
+
+    @run_dtensor_rng_op.py_impl(DispatchKey.CUDA)
+    def impl_cuda(dtensor_spec, op, *args, **kwargs):
+        import torch.distributed.tensor._random as random
+
+        start_state, end_state = (
+            random._rng_tracker._compute_start_end_rng_states(  # pyrefly: ignore[missing-attribute]
+                dtensor_spec
+            )
+        )
+
+        device = (
+            args[0].device
+            if args and hasattr(args[0], "device")
+            else torch.cuda.current_device()
+        )
+        with torch.random.fork_rng(devices=[device], device_type="cuda"):
+            torch.cuda.set_rng_state(start_state.cpu())
+            out = op(*args, **kwargs)
+
+        torch.cuda.set_rng_state(end_state.cpu())
+        return out
+
+    @run_dtensor_rng_op.py_impl(DispatchKey.BackendSelect)
+    def impl_backend_select(dtensor_spec, op, *args, **kwargs):
+        device = get_device(args, kwargs)
+        if device != "cuda":
+            raise RuntimeError(
+                f"run_dtensor_rng_op only supports CUDA device, got {device}. "
+                f"This operator is designed for distributed random operations on CUDA."
+            )
+        return impl_cuda(dtensor_spec, op, *args, **kwargs)
+
+    @run_dtensor_rng_op.py_impl(FakeTensorMode)
+    def impl_fake_tensor_mode(mode, dtensor_spec, op, *args, **kwargs):
+        with mode:
+            return op(*args, **kwargs)
+
+    @run_dtensor_rng_op.py_impl(ProxyTorchDispatchMode)
+    def impl_proxy_dispatch_mode(mode, dtensor_spec, op, *args, **kwargs):
+        with disable_proxy_modes_tracing():
+            out = run_dtensor_rng_op(dtensor_spec, op, *args, **kwargs)
+        proxy_args = pytree.tree_map(
+            mode.tracer.unwrap_proxy, (dtensor_spec, op, *args)
+        )
+        proxy_kwargs = pytree.tree_map(mode.tracer.unwrap_proxy, kwargs)
+        out_proxy = mode.tracer.create_proxy(
+            "call_function", run_dtensor_rng_op, proxy_args, proxy_kwargs
+        )
+        return track_tensor_tree(out, out_proxy, constant=None, tracer=mode.tracer)
+
+    @run_dtensor_rng_op.py_functionalize_impl
+    def impl_functional(ctx, dtensor_spec, op, *args, **kwargs):
+        unwrapped_args = ctx.unwrap_tensors(args)
+        unwrapped_kwargs = ctx.unwrap_tensors(kwargs)
+
+        with ctx.redispatch_to_next():
+            out = run_dtensor_rng_op(
+                dtensor_spec,
+                op,
+                *unwrapped_args,
+                **unwrapped_kwargs,
+            )
+            return ctx.wrap_tensors(out)
+
+    return run_dtensor_rng_op
+
+
+run_dtensor_rng_op = register_run_dtensor_rng_op()
+
+
 def register_rng_prims():
     register_philox_rand()
