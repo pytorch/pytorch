@@ -47,6 +47,9 @@ struct SDPALogicalParams {
   logical_tensor attention{};
   std::optional<logical_tensor> logsumexp;
 
+  bool is_causal;
+  bool compute_logsumexp;
+
   SDPALogicalParams(
       const at::Tensor& query_,
       const at::Tensor& key_,
@@ -61,8 +64,9 @@ struct SDPALogicalParams {
       int num_head_kv,
       int head_dim_qk,
       int head_dim_v,
-      bool is_causal,
-      bool compute_logsumexp) {
+      bool is_causal_,
+      bool compute_logsumexp_)
+      : is_causal(is_causal_), compute_logsumexp(compute_logsumexp_) {
     const data_type dtype = to_logical_tensor_data_type(query_.scalar_type());
     TORCH_INTERNAL_ASSERT(
         (dtype != data_type::undef),
@@ -108,8 +112,12 @@ struct SDPALogicalParams {
       reshaped_value = value_.unsqueeze(2);
       reshaped_attention = attention_.view(
           {batch_size, group_num, group_size, seq_len_q, head_dim_v});
+      if (compute_logsumexp) {
+        reshaped_logsumexp = reshaped_logsumexp.view(
+            {batch_size, group_num, group_size, seq_len_q, 1});
+      }
       if (attn_mask_.has_value() && attn_mask_.value().dim() == 4) {
-        reshaped_attn_mask = attn_mask_.value().unsqueeze(2);
+        reshaped_attn_mask = reshaped_attn_mask.unsqueeze(2);
       }
     }
 
@@ -177,12 +185,11 @@ struct SDPALogicalParams {
   }
 };
 
-partition create_sdpa_graph_partition(
-    bool is_causal,
-    bool compute_logsumexp,
-    data_type dtype,
-    const SDPALogicalParams& params) {
+partition create_sdpa_graph_partition(const SDPALogicalParams& params) {
   // graph building and partitioning
+  bool is_causal = params.is_causal;
+  bool compute_logsumexp = params.compute_logsumexp;
+  data_type dtype = params.query.get_data_type();
 
   size_t lt_id = static_cast<size_t>(SDPALogicalParams::TensorID::end);
   size_t op_id = 0;
@@ -317,10 +324,7 @@ partition create_sdpa_graph_partition(
   return partitions[0];
 }
 
-partition& find_or_create_graph_partition(
-    bool is_causal,
-    bool compute_logsumexp,
-    const SDPALogicalParams& params) {
+partition& find_or_create_graph_partition(const SDPALogicalParams& params) {
   thread_local PartitionCache cache;
   const data_type dtype = params.query.get_data_type();
 
@@ -340,16 +344,15 @@ partition& find_or_create_graph_partition(
   int pos = 8;
   // attn_mask
   patternID.set(pos++, params.attn_mask.has_value());
-  patternID.set(pos++, is_causal);
+  patternID.set(pos++, params.is_causal);
   // compute_logsumexp
-  patternID.set(pos++, compute_logsumexp);
+  patternID.set(pos++, params.compute_logsumexp);
 
   auto partition_ = cache.find_partition(patternID);
   if (!partition_.has_value()) {
     // partition cache no hit
     // graph building and partitioning
-    partition sdp_partition = create_sdpa_graph_partition(
-        is_causal, compute_logsumexp, dtype, params);
+    partition sdp_partition = create_sdpa_graph_partition(params);
     partition_ = cache.insert_partition_cache(patternID, sdp_partition);
   }
   return *partition_;
@@ -388,6 +391,9 @@ struct SDPABackwardLogicalParams {
   logical_tensor grad_key{};
   logical_tensor grad_value{};
 
+  bool is_causal;
+  bool is_gqa;
+
   SDPABackwardLogicalParams(
       const at::Tensor& grad_out_,
       const at::Tensor& query_,
@@ -406,7 +412,8 @@ struct SDPABackwardLogicalParams {
       int seq_len_kv,
       int head_dim_qk,
       int head_dim_v,
-      bool is_causal) {
+      bool is_causal_)
+      : is_causal(is_causal_), is_gqa(num_head_q != num_head_kv) {
     const data_type dtype = to_logical_tensor_data_type(query_.scalar_type());
     TORCH_INTERNAL_ASSERT(
         (dtype != data_type::undef),
@@ -460,7 +467,32 @@ struct SDPABackwardLogicalParams {
       at::native::onednn::undo_broadcast(reshaped_attn_mask);
     }
 
-    // TODO: Support GQA in backward pass once OneDNN supports it.
+    if (is_gqa) { // Check whether the attention is a
+                  // Grouped-Query Attention (GQA)
+      int group_num = num_head_kv;
+      int group_size = num_head_q / num_head_kv;
+      // oneDNN requires the shape of the query tensor to be represented as
+      // [batch_size, num_head_q / num_head_kv, num_head_kv, seq_len_q,
+      // head_dim_qk]. Please refer to
+      // https://uxlfoundation.github.io/oneDNN/dev_guide_graph_gqa.html#gqa-pattern
+      reshaped_query = query_.view(
+          {batch_size, group_num, group_size, seq_len_q, head_dim_qk});
+      reshaped_grad_query = grad_query_.view(
+          {batch_size, group_num, group_size, seq_len_q, head_dim_qk});
+      reshaped_key = key_.unsqueeze(2);
+      reshaped_grad_key = grad_key_.unsqueeze(2);
+      reshaped_value = value_.unsqueeze(2);
+      reshaped_grad_value = grad_value_.unsqueeze(2);
+      reshaped_out =
+          out_.view({batch_size, group_num, group_size, seq_len_q, head_dim_v});
+      reshaped_grad_out = grad_out_.view(
+          {batch_size, group_num, group_size, seq_len_q, head_dim_v});
+      reshaped_logsumexp = reshaped_logsumexp.view(
+          {batch_size, group_num, group_size, seq_len_q, 1});
+      if (attn_mask_.has_value() && attn_mask_.value().dim() == 4) {
+        reshaped_attn_mask = reshaped_attn_mask.unsqueeze(2);
+      }
+    }
 
 #define LOGIC_TENSOR_DESC(name, dtype)     \
   name = {                                 \
@@ -520,10 +552,12 @@ struct SDPABackwardLogicalParams {
 };
 
 partition create_sdpa_backward_graph_partition(
-    bool is_causal,
-    data_type dtype,
     const SDPABackwardLogicalParams& params) {
   // graph building and partitioning
+  bool is_causal = params.is_causal;
+  bool is_gqa = params.is_gqa;
+  data_type dtype = params.query.get_data_type();
+
   size_t lt_id = static_cast<size_t>(SDPABackwardLogicalParams::TensorID::end);
   size_t op_id = 0;
 
@@ -631,21 +665,28 @@ partition create_sdpa_backward_graph_partition(
   }
 
   // grad_value = prob^T * grad_out
-  // TODO: handle GQA headnum because (batch_size, num_head_kv, seq_len_kv,
-  // head_dim_v) != (batch_size, num_head_q, seqlen_kv, seq_len_q) *
-  // (batch_size, num_head_q, seqlen_q, head_dim_v)
+  logical_tensor intermediate_grad_value{lt_id++, dtype};
   op matmul_grad_value{
       op_id++,
       op::kind::MatMul,
       {prob_casted, params.grad_out},
-      {params.grad_value},
+      {is_gqa ? intermediate_grad_value : params.grad_value},
       "matmul_grad_value"};
   matmul_grad_value.set_attr<bool>(op::attr::transpose_a, true);
 
+  // prob^T * grad_out has shape (batch_size, num_head_q, seq_len_kv,
+  // head_dim_v), which doesn't match the shape of grad_value
+  // (batch_size, num_head_kv, seq_len_kv, head_dim_v) if gqa.
+  // Need to do a reduction.
+  op reduce_dv = op(op_id++, op::kind::ReduceSum, "reduce_dv");
+  if (is_gqa) {
+    reduce_dv.set_attr<std::vector<int64_t>>(op::attr::axes, {2});
+    reduce_dv.set_attr<bool>(op::attr::keep_dims, true);
+    reduce_dv.add_inputs({intermediate_grad_value});
+    reduce_dv.add_outputs({params.grad_value});
+  }
+
   // grad_prop = grad_out * value^T
-  // TODO: handle GQA headnum because (batch_size, num_head_q, seq_len_q,
-  // seq_len_kv) != (batch_size, num_head_q, seq_len_q, head_dim_v) *
-  // (batch_size, num_head_kv, head_dim_v, seq_len_kv)
   logical_tensor grad_prop{lt_id++, sdpa_intermediate_dtype};
   op matmul_grad_prop{
       op_id++,
@@ -688,9 +729,6 @@ partition create_sdpa_backward_graph_partition(
   }
 
   // grad_query = grad_scaled_score_cast * key
-  // TODO: handle GQA headnum because (batch_size, num_head_q, seq_len_q,
-  // head_dim_qk) != (batch_size, num_head_q, seq_len_q, seq_len_kv) *
-  // (batch_size, num_head_kv, seq_len_kv, head_dim_qk)
   op matmul_grad_query{
       op_id++,
       op::kind::MatMul,
@@ -699,13 +737,23 @@ partition create_sdpa_backward_graph_partition(
       "matmul_grad_query"};
 
   // grad_key = grad_scaled_score_cast^T * query
+  logical_tensor intermediate_grad_key{lt_id++, dtype};
   op matmul_grad_key{
       op_id++,
       op::kind::MatMul,
       {grad_scaled_score_cast, params.query},
-      {params.grad_key},
+      {is_gqa ? intermediate_grad_key : params.grad_key},
       "matmul_grad_key"};
   matmul_grad_key.set_attr<bool>(op::attr::transpose_a, true);
+
+  // same as grad_value, need to do a reduction if gqa
+  op reduce_dk = op(op_id++, op::kind::ReduceSum, "reduce_dk");
+  if (is_gqa) {
+    reduce_dk.set_attr<std::vector<int64_t>>(op::attr::axes, {2});
+    reduce_dk.set_attr<bool>(op::attr::keep_dims, true);
+    reduce_dk.add_inputs({intermediate_grad_key});
+    reduce_dk.add_outputs({params.grad_key});
+  }
 
   constexpr auto ekind = dnnl::engine::kind::gpu;
   dnnl::graph::graph g(ekind);
@@ -719,6 +767,10 @@ partition create_sdpa_backward_graph_partition(
     g.add_op(mask_gen_idx_col.value());
     g.add_op(mask_gt.value());
     g.add_op(mask_select.value());
+  }
+  if (is_gqa) {
+    g.add_op(reduce_dv);
+    g.add_op(reduce_dk);
   }
   g.add_op(subtract);
   g.add_op(exp);
@@ -741,7 +793,6 @@ partition create_sdpa_backward_graph_partition(
 }
 
 partition& find_or_create_backward_graph_partition(
-    bool is_causal,
     const SDPABackwardLogicalParams& params) {
   thread_local PartitionCache cache;
   const data_type dtype = params.query.get_data_type();
@@ -763,14 +814,15 @@ partition& find_or_create_backward_graph_partition(
   int pos = 8;
   // attn_mask
   patternID.set(pos++, params.attn_mask.has_value());
-  patternID.set(pos++, is_causal);
+  patternID.set(pos++, params.is_causal);
+  patternID.set(pos++, params.is_gqa);
 
   auto partition_ = cache.find_partition(patternID);
   if (!partition_.has_value()) {
     // partition cache no hit
     // graph building and partitioning
     partition sdpa_backward_partition =
-        create_sdpa_backward_graph_partition(is_causal, dtype, params);
+        create_sdpa_backward_graph_partition(params);
     partition_ =
         cache.insert_partition_cache(patternID, sdpa_backward_partition);
   }
@@ -838,8 +890,8 @@ void sdpa(
       head_dim_v,
       is_causal,
       compute_logsumexp);
-  auto& partition = sdpa_forward::find_or_create_graph_partition(
-      is_causal, compute_logsumexp, logical_params);
+  auto& partition =
+      sdpa_forward::find_or_create_graph_partition(logical_params);
   l_inputs = std::move(logical_params.get_input());
   l_outputs = std::move(logical_params.get_output());
   compiled_partition = partition.compile(l_inputs, l_outputs, eng);
@@ -940,8 +992,8 @@ void sdpa_backward(
       head_dim_qk,
       head_dim_v,
       is_causal);
-  auto& partition = sdpa_backward::find_or_create_backward_graph_partition(
-      is_causal, logical_params);
+  auto& partition =
+      sdpa_backward::find_or_create_backward_graph_partition(logical_params);
   l_inputs = std::move(logical_params.get_input());
   l_outputs = std::move(logical_params.get_output());
   compiled_partition = partition.compile(l_inputs, l_outputs, eng);
