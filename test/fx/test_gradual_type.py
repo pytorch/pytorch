@@ -1119,7 +1119,11 @@ class TypeCheckerTest(TestCase):
         g = GraphTypeChecker({}, gm_static_with_types)
         g.type_check()
         for n1, n2 in zip(gm_static_with_types.graph.nodes, gm_run.graph.nodes):
-            assert n1.type == TensorType(n2.meta["tensor_meta"].shape)
+            expected_type = TensorType(n2.meta["tensor_meta"].shape)
+            if n1.type != expected_type:
+                raise AssertionError(
+                    f"Expected n1.type == {expected_type}, got {n1.type}"
+                )
 
         # apply shape inference to graph and check
         # that the batch size is equal across all layers
@@ -1128,9 +1132,15 @@ class TypeCheckerTest(TestCase):
         batch_sizes = set()
         gm_static.graph.eliminate_dead_code()
         for n in gm_static.graph.nodes:
-            assert isinstance(n.type, TensorType)
+            if not isinstance(n.type, TensorType):
+                raise AssertionError(
+                    f"Expected n.type to be TensorType, got {type(n.type)}"
+                )
             batch_sizes.add(n.type.__args__[0])
-        assert len(batch_sizes) == 1
+        if len(batch_sizes) != 1:
+            raise AssertionError(
+                f"Expected len(batch_sizes) == 1, got {len(batch_sizes)}"
+            )
 
     def test_type_check_batch_norm_symbolic(self):
         class BasicBlock(torch.nn.Module):
@@ -1164,7 +1174,9 @@ class TypeCheckerTest(TestCase):
         )
 
         for n in graph.nodes:
-            assert n.type == next(my_types)
+            expected = next(my_types)
+            if n.type != expected:
+                raise AssertionError(f"Expected n.type == {expected}, got {n.type}")
 
     def test_symbolic_add_with_broadcast(self):
         class M(torch.nn.Module):
@@ -1179,7 +1191,11 @@ class TypeCheckerTest(TestCase):
         r = Refine(symbolic_traced)
         r.refine()
 
-        assert r.constraints == [Equality(1, 1), Equality(2, 2), Equality(3, 3)]
+        expected_constraints = [Equality(1, 1), Equality(2, 2), Equality(3, 3)]
+        if r.constraints != expected_constraints:
+            raise AssertionError(
+                f"Expected r.constraints == {expected_constraints}, got {r.constraints}"
+            )
         # note that there is no equality constraint between dyn and 4 because
         # dyn could be 4 or 1
 
@@ -1194,7 +1210,9 @@ class TypeCheckerTest(TestCase):
         expected_iter = iter(expected_ph_types)
 
         for n in symbolic_traced.graph.nodes:
-            assert n.type == next(expected_iter)
+            expected = next(expected_iter)
+            if n.type != expected:
+                raise AssertionError(f"Expected n.type == {expected}, got {n.type}")
 
     def test_symbolic_add_with_broadcast_2(self):
         class M(torch.nn.Module):
@@ -1218,7 +1236,9 @@ class TypeCheckerTest(TestCase):
         expected_iter = iter(expected_ph_types)
 
         for n in symbolic_traced.graph.nodes:
-            assert n.type == next(expected_iter)
+            expected = next(expected_iter)
+            if n.type != expected:
+                raise AssertionError(f"Expected n.type == {expected}, got {n.type}")
 
     def test_type_check_conv2D_types(self):
         class BasicBlock(torch.nn.Module):
@@ -1244,8 +1264,16 @@ class TypeCheckerTest(TestCase):
 
         for n in traced.graph.nodes:
             if n.op == "call_module":
-                assert isinstance(n.type.__args__[2], sympy.floor)
-                assert isinstance(n.type.__args__[3], sympy.floor)
+                if not isinstance(n.type.__args__[2], sympy.floor):
+                    raise AssertionError(
+                        f"Expected n.type.__args__[2] to be sympy.floor, "
+                        f"got {type(n.type.__args__[2])}"
+                    )
+                if not isinstance(n.type.__args__[3], sympy.floor):
+                    raise AssertionError(
+                        f"Expected n.type.__args__[3] to be sympy.floor, "
+                        f"got {type(n.type.__args__[3])}"
+                    )
 
     def test_type_check_symbolic_inferenceconv2D_maxpool2d_flatten(self):
         class BasicBlock(torch.nn.Module):
@@ -1277,7 +1305,7 @@ class TypeCheckerTest(TestCase):
 
         for n in traced.graph.nodes:
             if n.target == "conv1":
-                assert n.type == TensorType(
+                expected = TensorType(
                     (
                         4,
                         6,
@@ -1285,9 +1313,11 @@ class TypeCheckerTest(TestCase):
                         sympy.floor(sympy.symbols("~1") - 4),
                     )
                 )
+                if n.type != expected:
+                    raise AssertionError(f"Expected n.type == {expected}, got {n.type}")
 
             elif n.target == "conv2":
-                assert n.type == TensorType(
+                expected = TensorType(
                     (
                         4,
                         16,
@@ -1295,6 +1325,8 @@ class TypeCheckerTest(TestCase):
                         sympy.floor(sympy.symbols("~5") - 4),
                     )
                 )
+                if n.type != expected:
+                    raise AssertionError(f"Expected n.type == {expected}, got {n.type}")
 
 
 if __name__ == "__main__":

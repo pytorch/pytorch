@@ -350,7 +350,6 @@ keep-runtime-typing = true
 "test/distributed/**" = ["S101"]
 "test/dynamo/**" = ["S101"]
 "test/functorch/**" = ["S101"]
-"test/fx/**" = ["S101"]
 "test/inductor/**" = ["S101"]
 "test/onnx/**" = ["S101"]
 "test/quantization/**" = ["S101"]
