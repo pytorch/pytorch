@@ -17,6 +17,13 @@ namespace at {
 class Context;
 }
 
+struct mtiaDeviceProp {
+  char name[256];
+  uint64_t total_memory;
+  uint32_t max_grid_height;
+  uint32_t max_grid_width;
+};
+
 namespace at {
 constexpr const char* MTIA_HELP =
     "The MTIA backend requires MTIA extension for PyTorch;"
@@ -114,7 +121,7 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
     return nullptr;
   }
 
-  virtual PyObject* getDeviceProperties(DeviceIndex device) const {
+  virtual mtiaDeviceProp* getDeviceProperties(DeviceIndex device) const {
     FAIL_MTIAHOOKS_FUNC(__func__);
     return nullptr;
   }
