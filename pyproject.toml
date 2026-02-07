@@ -357,15 +357,8 @@ keep-runtime-typing = true
 "test/quantization/**" = ["S101"]
 "test/xpu/**" = ["S101"]
 # S101 migration: top-level test files still needing migration
-"test/test_autograd.py" = ["S101"]
-"test/test_custom_ops.py" = ["S101"]
 "test/test_fx.py" = ["S101"]
-"test/test_fx_experimental.py" = ["S101"]
-"test/test_mps.py" = ["S101"]
 "test/test_nestedtensor.py" = ["S101"]
-"test/test_proxy_tensor.py" = ["S101"]
-"test/test_torch.py" = ["S101"]
-"test/test_transformers.py" = ["S101"]
 # torch/ folders still needing S101 migration
 "torch/_dynamo/**" = ["S101"]
 "torch/_inductor/**" = ["S101"]
