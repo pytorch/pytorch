@@ -1121,6 +1121,12 @@ class build_ext(setuptools.command.build_ext.build_ext):
             "torch/csrc/stable/",
             "torch/csrc/inductor/aoti_torch/c/",
             "torch/csrc/inductor/aoti_torch/generated/",
+            # Also skip headers from fmt library. Projects like TorchCodec rely
+            # on it. It's safe because pytorch only relies on
+            # fmt::fmt-header-only.
+            "fmt/",
+            # Same for pybind, and it's header-only by definition.
+            "pybind11/",
         ]
 
         # Marker to detect if a header is already wrapped
