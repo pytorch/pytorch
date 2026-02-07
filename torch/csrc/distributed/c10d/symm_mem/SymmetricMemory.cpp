@@ -557,6 +557,15 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
   m.def(
       "_rendezvous(Tensor tensor, str? group_name=None) -> __torch__.torch.classes.c10d.SymmetricMemory");
   m.def("_barrier(__torch__.torch.classes.c10d.SymmetricMemory symm) -> ()");
+
+  // One-sided communication APIs.
+  // The op defined here is backend-specific. Backend dispatching is handled in
+  // torch/distributed/_symmetric_memory/__init__.py by looking at runtime
+  // backend setting.
+  m.def(
+      "nccl_put_signal(Tensor src, __torch__.torch.classes.c10d.SymmetricMemory hdl, int peer) -> ()");
+  m.def(
+      "nccl_wait_signal(__torch__.torch.classes.c10d.SymmetricMemory hdl, int peer) -> ()");
 }
 
 c10::intrusive_ptr<SymmetricMemory> rendezvous_op(
