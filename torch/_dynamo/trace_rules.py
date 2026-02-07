@@ -3821,6 +3821,50 @@ def _force_inline() -> Iterator[None]:
         _force_inline_flag = old_val
 
 
+def _module_has_disabled_hooks(module: Any) -> bool:
+    """Check if a module has hooks decorated with @torch._dynamo.disable."""
+    for hooks_dict in (
+        getattr(module, "_forward_pre_hooks", {}),
+        getattr(module, "_forward_hooks", {}),
+    ):
+        for hook in hooks_dict.values():
+            if getattr(hook, "_torchdynamo_disable", False):
+                return True
+    return False
+
+
+def _should_trace_inbuilt_forward(code: types.CodeType) -> bool:
+    """
+    Check if an inbuilt nn.Module.forward should be traced despite being in skipfiles.
+
+    This enables Dynamo to capture operations after a graph break caused by
+    @torch._dynamo.disable hooks in _call_impl.
+
+    Returns True if:
+    - The code is an inbuilt nn.Module.forward
+    - We're not currently compiling (i.e., in eager fallback)
+    - The caller is _call_impl with a module that has disabled hooks
+    """
+    if not is_inbuilt_nn_module_forward(code):
+        return False
+    if torch.compiler.is_compiling():
+        return False
+
+    # Walk up the stack to find _call_impl (uses sys._getframe since the
+    # Dynamo _PyInterpreterFrame doesn't have the full frame chain)
+    import sys
+
+    frame: types.FrameType | None = sys._getframe(1)
+    for _ in range(10):
+        if frame is None:
+            break
+        if frame.f_code.co_name == "_call_impl":
+            module = frame.f_locals.get("self")
+            return module is not None and _module_has_disabled_hooks(module)
+        frame = frame.f_back
+    return False
+
+
 def check_verbose(obj: Any, is_inlined_call: bool = False) -> SkipResult:
     if _force_inline_flag:
         return SkipResult(
@@ -3830,13 +3874,16 @@ def check_verbose(obj: Any, is_inlined_call: bool = False) -> SkipResult:
 
     # For eval frame callback (not inlined calls), allow tracing nn.Module.forward
     # methods even if they're in skipfiles. This enables Dynamo to capture
-    # operations after a frame skip (e.g., when FSDP hooks cause graph breaks).
-    if not is_inlined_call and isinstance(obj, types.CodeType):
-        if is_inbuilt_nn_module_forward(obj):
-            return SkipResult(
-                False,
-                "inbuilt nn.Module.forward allowed for eval frame tracing",
-            )
+    # operations after a frame skip caused by @torch._dynamo.disable hooks.
+    if (
+        not is_inlined_call
+        and isinstance(obj, types.CodeType)
+        and _should_trace_inbuilt_forward(obj)
+    ):
+        return SkipResult(
+            False,
+            "inbuilt nn.Module.forward allowed after disabled hook graph break",
+        )
 
     if isinstance(
         obj,
