@@ -245,7 +245,10 @@ class autocast:
                 f"User specified an unsupported autocast device_type '{self.device}'"
             )
 
-        device_supported_dtypes = [torch.bfloat16, torch.float16]
+        if (self.device == "xpu"):
+            device_supported_dtypes = [torch.float32, torch.bfloat16, torch.float16]
+        else:
+            device_supported_dtypes = [torch.bfloat16, torch.float16]
 
         self.custom_backend_name = torch._C._get_privateuse1_backend_name()
         if self.device == self.custom_backend_name:
