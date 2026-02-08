@@ -13,6 +13,7 @@ from sympy import Expr
 from torch import SymInt
 from torch.fx.experimental.symbolic_shapes import (
     free_symbols,
+    GuardOnDataDependentSymNode,
     has_free_unbacked_symbols,
     ShapeEnv,
 )
@@ -509,8 +510,8 @@ class SizeVarAllocator:
         if isinstance(right, Expr):
             right = sympy_subs(right, self.inv_precomputed_replacements)  # type: ignore[arg-type]
         try:
-            lv = self.size_hint_or_throw(left)
-            rv = self.size_hint_or_throw(right)
+            lv = self.guarding_hint_or_throw(left)
+            rv = self.guarding_hint_or_throw(right)
         except TypeError:  # unbacked symints
             if left == right or self.statically_known_leq(left, right):
                 return left
@@ -547,7 +548,7 @@ class SizeVarAllocator:
         """
         if isinstance(expr, int):
             return expr
-        val = self.size_hint_or_throw(expr)
+        val = self.guarding_hint_or_throw(expr)
         self.check_equals(expr, sympy.Integer(val))
         return int(val)
 
@@ -653,14 +654,46 @@ class SizeVarAllocator:
             log.debug("failed on: %s", out)
             raise
 
-    def size_hint_or_throw(self, expr: Union[Expr, int]) -> int:
-        # Like size_hint but there's no fallback for unbacked symints, so it throws.
-        out = self.symbolic_hint(expr)
-        try:
-            return int(out)
-        except Exception:
-            log.debug("failed on: %s", out, exc_info=True)
-            raise
+    def guarding_hint_or_throw(self, expr: Union[Expr, int]) -> int:
+        """
+        Return a concrete integer hint for an expression that is safe to use for guarding.
+
+        This method evaluates the expression using only backed-symbols hints. Unlike
+        optimization_hint(), this method does NOT use heuristics or fallback values
+        for unbacked symbols.
+
+        Use this method when you need a hint value that will be used for guarding decision.
+
+        Args:
+            expr: A sympy expression or integer to evaluate.
+
+        Returns:
+            The concrete integer value of the expression based on backed symbol hints.
+
+        Raises:
+            GuardOnDataDependentSymNode: If the expression contains unbacked symbols
+            (data-dependent values) that cannot be resolved to concrete values.
+
+        See Also:
+            optimization_hint: For cases where fallback/heuristic values are acceptable
+                for unbacked symbols.
+        """
+        simplified = self.simplify(expr)
+        result = self._maybe_realize_expr(simplified, fallback=None)
+
+        if result is not None:
+            return result
+
+        # apply replacements
+        expr = self.simplify(expr)
+        expr = self.remove_precomputed_replacements(expr)
+        expr = sympy_subs(expr, self.backed_var_to_val)
+
+        if has_free_unbacked_symbols(expr):
+            raise GuardOnDataDependentSymNode(expr)
+        result = self._maybe_realize_expr(expr, None)
+        assert result is not None, result
+        return result
 
     def _maybe_realize_expr(self, expr: Expr, fallback: Optional[int]) -> Optional[int]:
         """
@@ -696,6 +729,9 @@ class SizeVarAllocator:
     ) -> int:
         """
         Return a concrete integer hint for an expression.
+
+        This function should be used for non-guarding based optimizations. If you
+        want a hint that you can guard on, use the guarding_hint API instead.
 
         This function will hint unbacked symbols using user provided optimization
         hints. If not provided, fallback will be used along with some heuristics
@@ -842,12 +878,11 @@ class SizeVarAllocator:
             for x in exprs
         )
 
-    def size_hints_or_throw(
+    def guarding_hints_or_throw(
         self,
         exprs: Iterable[Union[Expr, int]],
     ) -> tuple[int, ...]:
-        # Like size_hints but there's no fallback for unbacked symints, so it throws.
-        return tuple(self.size_hint_or_throw(x) for x in exprs)
+        return tuple(self.guarding_hint_or_throw(x) for x in exprs)
 
     def _lru_cache(self, fn, maxsize=None):
         """
@@ -1116,7 +1151,7 @@ class SizeVarAllocator:
         result = []
         for s in self.stride_vars(index, vars, support_vars):
             try:
-                result.append(self.size_hint_or_throw(s))
+                result.append(self.guarding_hint_or_throw(s))
             except TypeError:
                 result.append(0)
         return result
