@@ -36,7 +36,6 @@ jobs:
           cache: pip
 
       - name: Run tests
-        continue-on-error: true
         run: |
           set -ex
           python3 -m venv /tmp/venv
@@ -62,7 +61,6 @@ jobs:
           python-version: '3.10'
           cache: 'pip'
       - name: Run tests
-        continue-on-error: true
         run: |
           set -ex
           python3 -m venv /tmp/venv
