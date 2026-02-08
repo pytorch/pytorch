@@ -254,19 +254,17 @@ class FSDPState(_State):
                 param_to_fsdp_param[param]._param_fqn = param_name
         for module_name, module in root_module.named_modules():
             if module in module_to_fsdp_param_groups:
-                # Use "<root>" for the root module which has empty module_name
-                effective_name = module_name if module_name else "<root>"
                 # Set FQN for all param groups associated with this module
                 for fsdp_param_group in module_to_fsdp_param_groups[module]:
                     module_fqn = fsdp_param_group._module_fqn
                     if module_fqn is None:
-                        fsdp_param_group._module_fqn = effective_name
+                        fsdp_param_group._module_fqn = module_name
                     else:
                         if not isinstance(module_fqn, str):
                             raise AssertionError(
                                 f"Expected module_fqn to be str, got {type(module_fqn)}: {module_fqn}"
                             )
-                        module_fqn += f", {effective_name}"
+                        module_fqn += f", {module_name}"
                         fsdp_param_group._module_fqn = module_fqn
 
     @disable_if_config_true
