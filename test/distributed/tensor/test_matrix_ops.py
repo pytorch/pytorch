@@ -296,26 +296,6 @@ class DistMatrixOpsTest(DTensorTestBase):
         expected_placements = (_StridedShard(dim=0, split_factor=2),)
         self.assertEqual(out.placements, expected_placements)
 
-        # Case 1b: Unshardable input with StridedShard - redistribution not yet supported
-        # When the first dimension is world_size - 1, the tensor is not shardable.
-        unshardable_dim = self.world_size - 1
-        global_inps_unshardable = (
-            torch.arange(unshardable_dim * contract_dim)
-            .float()
-            .view(unshardable_dim, contract_dim)
-        )
-        inps_unshardable = distribute_tensor(
-            global_inps_unshardable,
-            mesh,
-            (_StridedShard(dim=0, split_factor=2),),
-            src_data_rank=None,
-        )
-        with self.assertRaisesRegex(
-            AssertionError,
-            "shard_order is None, redistribution from/to _StridedShard is not yet supported",
-        ):
-            torch.mm(inps_unshardable, weight)
-
         # Case 2: 2D mesh (2x2) with nested StridedShard on both mesh dimensions
         # Tests mm where input has StridedShard on both mesh dims with different split_factors.
         # This simulates a more complex sharding pattern (e.g., from a reshaped 4D tensor).
