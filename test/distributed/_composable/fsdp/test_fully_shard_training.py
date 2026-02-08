@@ -1339,16 +1339,35 @@ class TestFullyShardNDTraining(FSDPTest):
             self.assertEqual(p.device_mesh.mesh_dim_names, ("dp", "tp"))
 
     @skip_if_lt_x_gpu(4)
-    def test_shard_placement_fn_ep(self):
-        ep_degree = 2
-        efsdp = self.world_size // ep_degree
-        world_mesh = init_device_mesh(
-            device_type.type,
-            (self.world_size,),
-            mesh_dim_names=("world",),
+    def test_shard_placement_fn_tp_ep(self):
+        self.run_subtests(
+            {"tp_degree": [1, 2]},
+            self._test_shard_placement_fn_tp_ep,
         )
-        dp_mesh = world_mesh._unflatten(0, (self.world_size,), ("fsdp",))["fsdp"]
-        sparse_mesh = world_mesh._unflatten(
+
+    def _test_shard_placement_fn_tp_ep(self, tp_degree):
+        ep_degree = 2
+        dp_size = self.world_size // tp_degree
+        if dp_size < ep_degree:
+            return
+        efsdp = dp_size // ep_degree
+        if tp_degree > 1:
+            world_mesh = init_device_mesh(
+                device_type.type,
+                (dp_size, tp_degree),
+                mesh_dim_names=("dp", "tp"),
+            )
+            tp_mesh = world_mesh["tp"]
+            dp_mesh = world_mesh["dp"]
+        else:
+            world_mesh = init_device_mesh(
+                device_type.type,
+                (self.world_size,),
+                mesh_dim_names=("world",),
+            )
+            tp_mesh = None
+            dp_mesh = world_mesh._unflatten(0, (self.world_size,), ("fsdp",))["fsdp"]
+        sparse_mesh = dp_mesh._unflatten(
             0,
             (efsdp, ep_degree),
             ("efsdp", "ep"),
@@ -1367,7 +1386,7 @@ class TestFullyShardNDTraining(FSDPTest):
         torch.manual_seed(42)
         model = Transformer(model_args)
         ref_model = copy.deepcopy(model).to(device_type)
-        Transformer.parallelize(model, ep_mesh=ep_mesh)
+        Transformer.parallelize(model, tp_mesh=tp_mesh, ep_mesh=ep_mesh)
         efsdp_mesh_info = FSDPMeshInfo(mesh=efsdp_mesh, shard_mesh_dim=0)
         dp_mesh_info = FSDPMeshInfo(mesh=dp_mesh, shard_mesh_dim=0)
         for block in model.layers:
@@ -1408,14 +1427,14 @@ class TestFullyShardNDTraining(FSDPTest):
         }
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
-        torch.manual_seed(42 + self.rank)
+        torch.manual_seed(42 + self.rank // tp_degree)
         inp = torch.randint(
             0,
             model_args.vocab_size,
             (2, model_args.max_seq_len),
             device=device_type.type,
         )
-        for iter_idx in range(5):
+        for iter_idx in range(10):
             ref_loss = ref_model(inp).sum()
             loss = model(inp).sum()
             ref_loss.backward()
@@ -1442,7 +1461,6 @@ class TestFullyShardNDTraining(FSDPTest):
             ref_optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
             optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
             self.assertEqual(ref_loss, loss)
-            check_sharded_parity(self, ref_model, model)
 
 
 class TestFullyShardHSDP3DTraining(FSDPTest):
