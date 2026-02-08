@@ -4978,6 +4978,70 @@ class TestAttnBias(NNTestCase):
         with self.assertRaisesRegex(ValueError, "CausalBias should not be used with causal=True"):
             scaled_dot_product_attention(query, key, value, attn_mask=attn_bias, is_causal=True, dropout_p=0.0)
 
+
+class TestSDPAWithWeights(NNTestCase):
+    def test_output_matches_sdpa(self, device):
+        from torch.nn.attention import scaled_dot_product_attention_with_weights
+
+        B, H, L, D = 2, 4, 8, 16
+        query = torch.randn(B, H, L, D, device=device)
+        key = torch.randn(B, H, L, D, device=device)
+        value = torch.randn(B, H, L, D, device=device)
+
+        output_with_weights, attn_weights = scaled_dot_product_attention_with_weights(
+            query, key, value
+        )
+        output_sdpa = scaled_dot_product_attention(query, key, value)
+
+        torch.testing.assert_close(output_with_weights, output_sdpa, rtol=1e-5, atol=1e-5)
+
+    def test_attention_weights_shape(self, device):
+        from torch.nn.attention import scaled_dot_product_attention_with_weights
+
+        B, H, L, S, D = 2, 4, 8, 12, 16
+        query = torch.randn(B, H, L, D, device=device)
+        key = torch.randn(B, H, S, D, device=device)
+        value = torch.randn(B, H, S, D, device=device)
+
+        output, attn_weights = scaled_dot_product_attention_with_weights(
+            query, key, value
+        )
+
+        self.assertEqual(output.shape, (B, H, L, D))
+        self.assertEqual(attn_weights.shape, (B, H, L, S))
+
+    def test_attention_weights_sum_to_one(self, device):
+        from torch.nn.attention import scaled_dot_product_attention_with_weights
+
+        B, H, L, D = 2, 4, 8, 16
+        query = torch.randn(B, H, L, D, device=device)
+        key = torch.randn(B, H, L, D, device=device)
+        value = torch.randn(B, H, L, D, device=device)
+
+        _, attn_weights = scaled_dot_product_attention_with_weights(
+            query, key, value
+        )
+
+        weight_sums = attn_weights.sum(dim=-1)
+        torch.testing.assert_close(weight_sums, torch.ones_like(weight_sums), rtol=1e-5, atol=1e-5)
+
+    def test_causal_mask(self, device):
+        from torch.nn.attention import scaled_dot_product_attention_with_weights
+
+        B, H, L, D = 1, 1, 4, 8
+        query = torch.randn(B, H, L, D, device=device)
+        key = torch.randn(B, H, L, D, device=device)
+        value = torch.randn(B, H, L, D, device=device)
+
+        _, attn_weights = scaled_dot_product_attention_with_weights(
+            query, key, value, is_causal=True
+        )
+
+        upper_tri = torch.triu(torch.ones(L, L, device=device), diagonal=1)
+        masked_weights = attn_weights[0, 0] * upper_tri
+        self.assertTrue(torch.allclose(masked_weights, torch.zeros_like(masked_weights), atol=1e-6))
+
+
 if NOTEST_CPU:
     device_types = ("cuda", "mps", "mtia")
 else:
@@ -4993,6 +5057,7 @@ instantiate_device_type_tests(TestSDPACudaOnly, globals(), only_for=("cuda"))
 instantiate_device_type_tests(TestSDPACpuOnly, globals(), only_for=("cpu"))
 instantiate_device_type_tests(TestAttnBias, globals(), only_for=device_types, allow_xpu=True)
 instantiate_device_type_tests(TestSDPAXpuOnly, globals(), only_for="xpu", allow_xpu=True)
+instantiate_device_type_tests(TestSDPAWithWeights, globals(), only_for=device_types, allow_mps=True)
 
 if __name__ == '__main__':
     run_tests()

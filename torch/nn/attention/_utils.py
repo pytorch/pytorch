@@ -6,7 +6,7 @@ import math
 import torch
 
 
-__all__: list[str] = []
+__all__: list[str] = ["scaled_dot_product_attention_with_weights"]
 
 
 def _input_requires_grad(*tensors: torch.Tensor) -> bool:
@@ -59,3 +59,50 @@ def _validate_sdpa_input(
             f"Expected query, key, and value to all be  at least 2 dimensional, but got query.dim: "
             f"{query.dim()}, key.dim: {key.dim()} and value.dim: {value.dim()} instead."
         )
+
+
+def scaled_dot_product_attention_with_weights(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    attn_mask: torch.Tensor | None = None,
+    dropout_p: float = 0.0,
+    is_causal: bool = False,
+    scale: float | None = None,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    effective_scale = scale if scale is not None else 1.0 / math.sqrt(query.shape[-1])
+
+    sdpa_mask = None
+    if attn_mask is not None:
+        if attn_mask.dtype == torch.bool:
+            sdpa_mask = torch.where(
+                attn_mask,
+                torch.zeros(1, dtype=query.dtype, device=query.device),
+                torch.full((1,), float("-inf"), dtype=query.dtype, device=query.device),
+            )
+        else:
+            sdpa_mask = attn_mask
+
+    output = torch.nn.functional.scaled_dot_product_attention(
+        query,
+        key,
+        value,
+        attn_mask=sdpa_mask,
+        dropout_p=dropout_p,
+        is_causal=is_causal,
+        scale=effective_scale,
+    )
+
+    attn_weights = torch.matmul(query, key.transpose(-1, -2)) * effective_scale
+    if is_causal:
+        L, S = query.shape[-2], key.shape[-2]
+        causal_mask = torch.tril(torch.ones(L, S, dtype=torch.bool, device=query.device))
+        attn_weights = attn_weights.masked_fill(~causal_mask, float("-inf"))
+    elif attn_mask is not None:
+        if attn_mask.dtype == torch.bool:
+            attn_weights = attn_weights.masked_fill(~attn_mask, float("-inf"))
+        else:
+            attn_weights = attn_weights + attn_mask
+    attn_weights = torch.nn.functional.softmax(attn_weights, dim=-1)
+
+    return output, attn_weights

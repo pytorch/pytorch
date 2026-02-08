@@ -24,6 +24,7 @@ __all__: list[str] = [
     "list_flash_attention_impls",
     "current_flash_attention_impl",
     "restore_flash_attention_impl",
+    "scaled_dot_product_attention_with_weights",
 ]
 
 
@@ -195,3 +196,5 @@ restore_flash_attention_impl.__module__ = __name__
 
 # Import built-in implementations to trigger self-registration
 from . import _fa3, _fa4  # noqa: F401  # noqa: F401
+
+from ._utils import scaled_dot_product_attention_with_weights
