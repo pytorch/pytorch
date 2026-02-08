@@ -203,7 +203,7 @@ static std::string_view padding_mode_string(padding_mode m) {
   TORCH_CHECK(false, "Invalid padding mode (", static_cast<int64_t>(m), ")");
 }
 
-
+// value is Scalar (not double) so int64 tensors can be padded with int fill value (Fixes #170536)
 Tensor _pad_enum_symint(const Tensor &self, c10::SymIntArrayRef pad, int64_t mode_int, std::optional<c10::Scalar> value) {
   const auto input_dim = self.dim();
   TORCH_CHECK(pad.size() % 2 == 0, "Padding length must be divisible by 2");
