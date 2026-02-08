@@ -1,6 +1,5 @@
 /**
  * Performance benchmark for RestrictPtrTraits migration
- * See: https://github.com/pytorch/pytorch/issues/76632
  *
  * This benchmark compares:
  * - OLD: PackedTensorAccessor with RestrictPtrTraits (broken - __restrict__ ignored)
@@ -19,10 +18,6 @@
 
 using namespace at;
 
-// ============================================================================
-// OLD kernel: Uses PackedTensorAccessor with RestrictPtrTraits
-// The __restrict__ on member pointer is IGNORED by nvcc
-// ============================================================================
 template <typename index_t>
 __global__ void embedding_bag_kernel_old(
     const PackedTensorAccessor64<uint8_t, 2, RestrictPtrTraits> weight,
@@ -58,7 +53,6 @@ __global__ void embedding_bag_kernel_old(
     return;
   }
 
-  // Each thread handles some dimensions
   for (int32_t d = threadIdx.x; d < D; d += blockDim.x) {
     float accumulator = 0.0f;
 
@@ -71,7 +65,6 @@ __global__ void embedding_bag_kernel_old(
       float scale = *reinterpret_cast<const float*>(&row_ptr[D_bytes - 8]);
       float bias = *reinterpret_cast<const float*>(&row_ptr[D_bytes - 4]);
 
-      // Dequantize: val = weight_byte * scale + bias
       float val = static_cast<float>(weight[idx][d]) * scale + bias;
       accumulator += val * sample_weight;
     }
@@ -80,10 +73,6 @@ __global__ void embedding_bag_kernel_old(
   }
 }
 
-// ============================================================================
-// NEW kernel: Uses separate __restrict__ pointers with metadata
-// The __restrict__ on kernel arguments IS recognized by nvcc
-// ============================================================================
 template <typename index_t>
 __global__ void embedding_bag_kernel_new(
     const uint8_t* __restrict__ weight_data,
@@ -126,7 +115,6 @@ __global__ void embedding_bag_kernel_new(
     return;
   }
 
-  // Each thread handles some dimensions
   for (int32_t d = threadIdx.x; d < D; d += blockDim.x) {
     float accumulator = 0.0f;
 
@@ -142,7 +130,6 @@ __global__ void embedding_bag_kernel_new(
       float scale = *reinterpret_cast<const float*>(&row_ptr[D_bytes - 8]);
       float bias = *reinterpret_cast<const float*>(&row_ptr[D_bytes - 4]);
 
-      // Dequantize: val = weight_byte * scale + bias
       float val = static_cast<float>(weight_data[packed_accessor_offset(weight_meta, idx, static_cast<int64_t>(d))]) * scale + bias;
       accumulator += val * sample_weight;
     }
@@ -151,7 +138,6 @@ __global__ void embedding_bag_kernel_new(
   }
 }
 
-// Benchmark helper using CUDA events
 float benchmark_kernel(
     std::function<void(cudaStream_t)> kernel_launch,
     cudaStream_t stream,
@@ -187,11 +173,11 @@ TEST(RestrictMigrationBenchmark, EmbeddingBagKernel) {
   if (!at::cuda::is_available()) return;
 
   // Realistic embedding bag dimensions
-  const int64_t num_embeddings = 100000;  // vocabulary size
-  const int64_t embedding_dim = 128;       // D (output dimension)
-  const int64_t D_bytes = embedding_dim + 8;  // +8 for scale/bias (fp32)
-  const int64_t batch_size = 512;         // B
-  const int64_t avg_bag_size = 20;        // average indices per bag
+  const int64_t num_embeddings = 100000;
+  const int64_t embedding_dim = 128;
+  const int64_t D_bytes = embedding_dim + 8;
+  const int64_t batch_size = 512;
+  const int64_t avg_bag_size = 20;
 
   std::cout << "\n=== Embedding Bag Kernel Benchmark ===" << std::endl;
   std::cout << "num_embeddings=" << num_embeddings
@@ -199,10 +185,8 @@ TEST(RestrictMigrationBenchmark, EmbeddingBagKernel) {
             << ", batch_size=" << batch_size
             << ", avg_bag_size=" << avg_bag_size << std::endl;
 
-  // Create quantized weight tensor [num_embeddings, D_bytes]
   auto weight = at::randint(0, 256, {num_embeddings, D_bytes}, at::CUDA(at::kByte));
 
-  // Initialize scale and bias in the last 8 bytes of each row
   auto weight_cpu = weight.cpu();
   auto weight_accessor = weight_cpu.accessor<uint8_t, 2>();
   for (int64_t i = 0; i < num_embeddings; ++i) {
@@ -213,21 +197,17 @@ TEST(RestrictMigrationBenchmark, EmbeddingBagKernel) {
   }
   weight = weight_cpu.cuda();
 
-  // Create indices - random indices for each bag
   const int64_t total_indices = batch_size * avg_bag_size;
   auto indices = at::randint(0, num_embeddings, {total_indices}, at::CUDA(at::kInt));
 
-  // Create offsets - evenly spaced bags
   std::vector<int32_t> offsets_vec(batch_size + 1);
   for (int64_t i = 0; i <= batch_size; ++i) {
     offsets_vec[i] = static_cast<int32_t>(i * avg_bag_size);
   }
   auto offsets = at::from_blob(offsets_vec.data(), {batch_size + 1}, at::kInt).clone().cuda();
 
-  // Create per-sample weights
   auto per_sample_weights = at::rand({total_indices}, at::CUDA(at::kFloat));
 
-  // Create output tensors
   auto output_old = at::empty({batch_size, embedding_dim}, at::CUDA(at::kFloat));
   auto output_new = at::empty({batch_size, embedding_dim}, at::CUDA(at::kFloat));
 
@@ -250,14 +230,12 @@ TEST(RestrictMigrationBenchmark, EmbeddingBagKernel) {
   auto output_new_meta = make_packed_accessor_metadata(
       output_new.packed_accessor32<float, 2, RestrictPtrTraits>());
 
-  // Benchmark OLD kernel (RestrictPtrTraits - broken)
   float time_old = benchmark_kernel([&](cudaStream_t s) {
     embedding_bag_kernel_old<int32_t><<<batch_size, block_size, 0, s>>>(
         weight_acc, indices_acc, offsets_acc, per_sample_weights_acc,
         output_old_acc, true);
   }, stream);
 
-  // Benchmark NEW kernel (metadata + __restrict__ - working)
   float time_new = benchmark_kernel([&](cudaStream_t s) {
     embedding_bag_kernel_new<int32_t><<<batch_size, block_size, 0, s>>>(
         weight.data_ptr<uint8_t>(), weight_meta,
@@ -268,11 +246,9 @@ TEST(RestrictMigrationBenchmark, EmbeddingBagKernel) {
         true);
   }, stream);
 
-  // Verify correctness
   ASSERT_TRUE(output_old.allclose(output_new, 1e-3, 1e-3))
       << "Output mismatch between old and new kernels";
 
-  // Print results
   std::cout << "\nResults:" << std::endl;
   std::cout << "  OLD (RestrictPtrTraits in accessor): " << time_old << " ms" << std::endl;
   std::cout << "  NEW (metadata + __restrict__ ptr):   " << time_new << " ms" << std::endl;
@@ -300,10 +276,8 @@ TEST(RestrictMigrationBenchmark, EmbeddingBagVaryingBagSize) {
 
   std::cout << "\n=== Embedding Bag with Varying Bag Sizes ===" << std::endl;
 
-  // Create weight tensor
   auto weight = at::randint(0, 256, {num_embeddings, D_bytes}, at::CUDA(at::kByte));
 
-  // Initialize scale and bias in the last 8 bytes of each row
   auto weight_cpu = weight.cpu();
   auto weight_accessor = weight_cpu.accessor<uint8_t, 2>();
   for (int64_t i = 0; i < num_embeddings; ++i) {
@@ -314,12 +288,10 @@ TEST(RestrictMigrationBenchmark, EmbeddingBagVaryingBagSize) {
   }
   weight = weight_cpu.cuda();
 
-  // Create varying bag sizes (some small, some large)
   std::vector<int32_t> offsets_vec;
   offsets_vec.push_back(0);
   int32_t current_offset = 0;
   for (int64_t i = 0; i < batch_size; ++i) {
-    // Varying bag size: 5 to 50 indices per bag
     int32_t bag_size = 5 + (i % 46);
     current_offset += bag_size;
     offsets_vec.push_back(current_offset);
