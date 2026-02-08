@@ -281,7 +281,28 @@ void prepareTrace(
     k_activities.insert(kXpuTypes.begin(), kXpuTypes.end());
   }
   if (activities.count(torch::autograd::profiler::ActivityType::MTIA)) {
-    k_activities.insert(kMtiaTypes.begin(), kMtiaTypes.end());
+    if (config.custom_profiler_config.empty()) {
+      k_activities.insert(kMtiaTypes.begin(), kMtiaTypes.end());
+    } else {
+      if (config.custom_profiler_config.find("disable_runtime_events") ==
+          std::string::npos) {
+        k_activities.insert(libkineto::ActivityType::MTIA_RUNTIME);
+      } else {
+        LOG(INFO) << "Disabling MTIA runtime events";
+      }
+      if (config.custom_profiler_config.find("disable_ccp_events") ==
+          std::string::npos) {
+        k_activities.insert(libkineto::ActivityType::MTIA_CCP_EVENTS);
+      } else {
+        LOG(INFO) << "Disabling MTIA CCP events";
+      }
+      if (config.custom_profiler_config.find("disable_insight_events") ==
+          std::string::npos) {
+        k_activities.insert(libkineto::ActivityType::MTIA_INSIGHT);
+      } else {
+        LOG(INFO) << "Disabling MTIA insight events";
+      }
+    }
   }
   if (activities.count(torch::autograd::profiler::ActivityType::HPU)) {
     k_activities.insert(hpuTypes.begin(), hpuTypes.end());
