@@ -4172,6 +4172,12 @@ class TestSparse(TestSparseBase):
             # some normal cases
             yield (make_diags((1, 5)), make_offsets([0]), (5, 5))
             yield (make_diags((3, 3)), make_offsets([-1, 0, 1]), (4, 4))
+            # zero-dimension shapes (regression test for issue #171505)
+            yield (make_diags((1, 3)), make_offsets([0]), (0, 4))
+            yield (make_diags((1, 3)), make_offsets([0]), (4, 0))
+            yield (make_diags((1, 3)), make_offsets([0]), (0, 0))
+            yield (make_diags((1, 3)), make_offsets([0]), (0, 4), torch.sparse_csr)
+            yield (make_diags((1, 3)), make_offsets([0]), (0, 4), torch.sparse_csc)
             # non-contiguous diags
             yield (make_diags((5, 4), noncontiguous=True), make_offsets([-1, 1, 0, 2, -2]), (5, 5))
             # non-contiguous offsets

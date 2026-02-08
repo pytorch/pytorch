@@ -121,7 +121,8 @@ def _build_test(
             raise ValueError("Missing tags in configs")
 
         op = bench_op()
-        assert op is not None, "Can't create test"
+        if op is None:
+            raise AssertionError("Can't create test: bench_op() returned None")
         # op_name_function is a dictionary which has op_name and op_function.
         # an example of op_name_function is:
         # {'op_name' : 'abs', 'op_function' : torch.abs}
@@ -308,9 +309,10 @@ class BenchmarkRunner:
                 if c in open_to_close:
                     curr_brackets.append(c)
                 elif c in open_to_close.values():
-                    assert curr_brackets and open_to_close[curr_brackets[-1]] == c, (
-                        "ERROR: not able to parse the string!"
-                    )
+                    if not curr_brackets or open_to_close[curr_brackets[-1]] != c:
+                        raise AssertionError(
+                            f"ERROR: not able to parse the string! Mismatched bracket '{c}'"
+                        )
                     curr_brackets.pop()
                 elif c == "," and (not curr_brackets):
                     break_idxs.append(i)

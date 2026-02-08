@@ -108,8 +108,10 @@ try:
 
             # The assumption here is that the LHS and RHS must be dimensions
             elif constraint.op == op_neq:
-                assert is_dim(constraint.lhs)
-                assert is_dim(constraint.rhs)
+                if not is_dim(constraint.lhs):
+                    raise AssertionError("Expected lhs to be a dimension")
+                if not is_dim(constraint.rhs):
+                    raise AssertionError("Expected rhs to be a dimension")
                 lhs, counter = transform_dimension(
                     constraint.lhs, counter, dimension_dict
                 )
@@ -168,7 +170,8 @@ try:
                 # if the dimensions are not dyn, this will come into effect
                 # there would have been another constraint specifying if a given dimension
                 # is dyn or not
-                assert is_dim(constraint.lhs) and is_dim(constraint.rhs)
+                if not (is_dim(constraint.lhs) and is_dim(constraint.rhs)):
+                    raise AssertionError("Expected both lhs and rhs to be dimensions")
                 lhs, counter = transform_algebraic_expression(
                     constraint.lhs, counter, dimension_dict
                 )
@@ -178,7 +181,8 @@ try:
                 return lhs <= rhs, counter
 
             elif constraint.op == op_gt:
-                assert is_dim(constraint.lhs) and is_dim(constraint.rhs)
+                if not (is_dim(constraint.lhs) and is_dim(constraint.rhs)):
+                    raise AssertionError("Expected both lhs and rhs to be dimensions")
                 lhs, counter = transform_algebraic_expression(
                     constraint.lhs, counter, dimension_dict
                 )
@@ -188,7 +192,8 @@ try:
                 return lhs > rhs, counter
 
             elif constraint.op == op_lt:
-                assert is_dim(constraint.lhs) and is_dim(constraint.rhs)
+                if not (is_dim(constraint.lhs) and is_dim(constraint.rhs)):
+                    raise AssertionError("Expected both lhs and rhs to be dimensions")
                 lhs, counter = transform_algebraic_expression(
                     constraint.lhs, counter, dimension_dict
                 )
@@ -217,7 +222,8 @@ try:
                 transformed, counter = transform_dimension(t, counter, dimension_dict)
                 res.append(transformed)
 
-            assert len(res) <= 4
+            if len(res) > 4:
+                raise AssertionError(f"Expected res length <= 4, got {len(res)}")
             if len(tensor.__args__) == 1:
                 return tensor_type.tensor1(res[0]), counter
             elif len(tensor.__args__) == 2:
@@ -270,7 +276,8 @@ try:
         Returns: the transformed expression
 
         """
-        assert is_algebraic_expression(expr) or is_dim(expr)
+        if not (is_algebraic_expression(expr) or is_dim(expr)):
+            raise AssertionError("Expected algebraic expression or dimension")
 
         if is_dim(expr):
             transformed, counter = transform_dimension(expr, counter, dimension_dict)
@@ -279,7 +286,8 @@ try:
         elif isinstance(expr, Prod):
             dims = []
             for dim in expr.products:
-                assert is_dim(dim)
+                if not is_dim(dim):
+                    raise AssertionError("Expected dimension in Prod")
                 d, counter = transform_dimension(dim, counter, dimension_dict)
                 dims.append(d.arg(1))
             return z3.Product(dims), counter
@@ -386,8 +394,10 @@ try:
         # we make sure the constraint is of the form:
         # c = b where b is a boolean expression
         # and we consider b (constraint.rhs) for transformation
-        assert isinstance(condition_constraint.lhs, BVar)
-        assert is_bool_expr(condition_constraint.rhs)
+        if not isinstance(condition_constraint.lhs, BVar):
+            raise AssertionError(f"Expected BVar, got {type(condition_constraint.lhs)}")
+        if not is_bool_expr(condition_constraint.rhs):
+            raise AssertionError("Expected bool expression for rhs")
         condition_constraint_rhs = condition_constraint.rhs
 
         # transform the condition constraint

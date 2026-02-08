@@ -3,6 +3,7 @@
 import sys
 from collections.abc import Callable
 from typing import Optional, Union
+from typing_extensions import TypeAliasType
 
 import torch
 from torch import Tensor
@@ -21,15 +22,9 @@ from .stubs import *  # noqa: F403
 
 
 # ensure __module__ is set correctly for public APIs
-if sys.version_info < (3, 12):
-    ObserverOrFakeQuantize = Union[ObserverBase, FakeQuantizeBase]
-    ObserverOrFakeQuantize.__module__ = "torch.ao.quantization"
-else:
-    from typing import TypeAliasType
-
-    ObserverOrFakeQuantize = TypeAliasType(
-        "ObserverOrFakeQuantize", ObserverBase | FakeQuantizeBase
-    )
+ObserverOrFakeQuantize = TypeAliasType(
+    "ObserverOrFakeQuantize", ObserverBase | FakeQuantizeBase
+)
 
 
 __all__ = [

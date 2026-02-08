@@ -1151,7 +1151,6 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> tuple[str, list[int], int
             raise AssertionError(
                 "Only 1D mesh is supported, pass in (DeviceMesh, int) together if mesh > 1D"
             )
-        # TODO: it should run collective in the whole mesh instead of dim 0
         pg = group.get_group()
         rankset = dist.get_process_group_ranks(pg)
         group_size = len(rankset)
@@ -1384,7 +1383,7 @@ def _broadcast_meta(self, *args):
 
 
 def _all_reduce_meta(self, *args):
-    return torch.empty_like(self)
+    return torch.empty_like(self, memory_format=torch.contiguous_format)
 
 
 def _wait_tensor_meta(self, *args):

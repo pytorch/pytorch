@@ -29,6 +29,7 @@ from ._fsdp_collectives import (
 )
 from ._fsdp_common import (
     compiled_autograd_enabled,
+    DataParallelMeshInfo,
     DDPMeshInfo,
     FSDPMeshInfo,
     HSDPMeshInfo,
@@ -127,7 +128,7 @@ class FSDPParamGroup:
         self,
         params: list[nn.Parameter],
         modules: tuple[nn.Module, ...],
-        mesh_info: FSDPMeshInfo,
+        mesh_info: DataParallelMeshInfo,
         post_forward_mesh_info: FSDPMeshInfo | None,
         device: torch.device,
         shard_placement_fn: Callable[[nn.Parameter], Shard | None] | None,

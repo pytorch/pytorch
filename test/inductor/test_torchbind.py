@@ -218,6 +218,7 @@ class TestTorchbind(TestCase):
                                 ],
                                 "metadata": {},
                                 "is_hop_single_tensor_return": None,
+                                "name": None,
                             },
                         },
                         {
@@ -244,6 +245,7 @@ class TestTorchbind(TestCase):
                                 "outputs": [{"as_tensor": {"name": "buf6"}}],
                                 "metadata": {},
                                 "is_hop_single_tensor_return": None,
+                                "name": None,
                             },
                         },
                         {
@@ -275,6 +277,7 @@ class TestTorchbind(TestCase):
                                 "outputs": [{"as_tensor": {"name": "buf8"}}],
                                 "metadata": {},
                                 "is_hop_single_tensor_return": None,
+                                "name": None,
                             },
                         },
                     ]

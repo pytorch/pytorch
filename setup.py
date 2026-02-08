@@ -58,8 +58,8 @@
 #   USE_FBGEMM=0
 #     disables the FBGEMM build
 #
-#   USE_FBGEMM_GENAI=0
-#     disables the FBGEMM GenAI build
+#   USE_MSLK=0
+#     disables the MSLK build
 #
 #   USE_KINETO=0
 #     disables usage of libkineto library for profiling
@@ -828,7 +828,7 @@ def get_latest_nightly_version(variant: str = "cpu") -> str:
 def download_and_extract_nightly_wheel(version: str) -> None:
     """Download and extract nightly PyTorch wheel for USE_NIGHTLY=VERSION builds."""
 
-    # Extract variant from version (e.g., cpu, cu121, cu118, rocm5.7)
+    # Extract variant from version (e.g., cpu, cu121, cu118, rocm6.2)
     variant = extract_variant_from_version(version)
     nightly_index_url = f"https://download.pytorch.org/whl/nightly/{variant}/"
 

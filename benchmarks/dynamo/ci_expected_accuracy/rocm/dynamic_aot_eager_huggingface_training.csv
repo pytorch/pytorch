@@ -2,7 +2,7 @@ name,accuracy,graph_breaks
 
 
 
-AlbertForMaskedLM,eager_fail_to_run,0
+AlbertForMaskedLM,pass,4
 
 
 

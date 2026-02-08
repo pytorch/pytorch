@@ -38,9 +38,10 @@ class EffectHolder:
         namespace, opname = torch._library.utils.parse_namespace(self.qualname)
         split = opname.split(".")
         if len(split) > 1:
-            assert len(split) == 2, (
-                f"Tried to split {opname} based on '.' but found more than 1 '.'"
-            )
+            if len(split) != 2:
+                raise AssertionError(
+                    f"Tried to split {opname} based on '.' but found more than 1 '.'"
+                )
             opname, overload = split
         else:
             overload = ""

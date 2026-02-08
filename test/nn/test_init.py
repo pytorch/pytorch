@@ -117,7 +117,8 @@ class TestNNInit(TestCase):
             a = self._random_float(-3, 3)
             b = a + self._random_float(1, 5)
             init.uniform_(input_tensor, a=a, b=b)
-            assert self._is_uniform(input_tensor, a, b)
+            if not self._is_uniform(input_tensor, a, b):
+                raise AssertionError("Expected uniform distribution")
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
     @skipIfTorchDynamo("scipy.kstest is failing under dynamo")
@@ -128,7 +129,8 @@ class TestNNInit(TestCase):
             std = self._random_float(1, 5)
             init.normal_(input_tensor, mean=mean, std=std)
 
-            assert self._is_normal(input_tensor, mean, std)
+            if not self._is_normal(input_tensor, mean, std):
+                raise AssertionError("Expected normal distribution")
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
     @skipIfTorchDynamo("scipy.kstest is failing under dynamo")
@@ -141,7 +143,8 @@ class TestNNInit(TestCase):
             b = self._random_float(mean, mean + 2 * std)
             init.trunc_normal_(input_tensor, mean=mean, std=std, a=a, b=b)
 
-            assert self._is_trunc_normal(input_tensor, mean, std, a, b)
+            if not self._is_trunc_normal(input_tensor, mean, std, a, b):
+                raise AssertionError("Expected truncated normal distribution")
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
     @skipIfTorchDynamo("scipy.kstest is failing under dynamo")
@@ -156,7 +159,8 @@ class TestNNInit(TestCase):
         init.trunc_normal_(ref)
 
         self.assertEqual(input_tensor, ref)
-        assert self._is_trunc_normal(input_tensor, mean=0, std=1, a=0, b=1)
+        if not self._is_trunc_normal(input_tensor, mean=0, std=1, a=0, b=1):
+            raise AssertionError("Expected truncated normal distribution")
 
     def test_constant(self):
         for dims in [1, 2, 4]:
@@ -184,9 +188,15 @@ class TestNNInit(TestCase):
         for i in range(input_tensor.size(0)):
             for j in range(input_tensor.size(1)):
                 if i == j:
-                    assert input_tensor[i][j] == 1
+                    if input_tensor[i][j] != 1:
+                        raise AssertionError(
+                            f"Expected 1 at [{i}][{j}], got {input_tensor[i][j]}"
+                        )
                 else:
-                    assert input_tensor[i][j] == 0
+                    if input_tensor[i][j] != 0:
+                        raise AssertionError(
+                            f"Expected 0 at [{i}][{j}], got {input_tensor[i][j]}"
+                        )
 
     def test_eye_only_works_on_2d_inputs(self):
         for dims in [1, 3]:
@@ -210,7 +220,10 @@ class TestNNInit(TestCase):
                 c_out, c_in = input_tensor.size(0) // groups, input_tensor.size(1)
                 min_d = min(c_out, c_in)
                 # Check number of nonzeros is equivalent to smallest dim (for each group)
-                assert torch.nonzero(input_tensor).size(0) == min_d * groups
+                if torch.nonzero(input_tensor).size(0) != min_d * groups:
+                    raise AssertionError(
+                        f"Expected {min_d * groups} nonzeros, got {torch.nonzero(input_tensor).size(0)}"
+                    )
                 # Check sum of values (can have precision issues, hence assertEqual) is also equivalent
                 self.assertEqual(input_tensor.sum(), min_d * groups)
 
@@ -242,12 +255,13 @@ class TestNNInit(TestCase):
                     output_tensor[:, eff_out_c * g : eff_out_c * g + in_c, :],
                 )
                 # Assert extra outputs are 0
-                assert (
+                if (
                     torch.nonzero(
                         output_tensor[:, eff_out_c * g + in_c : eff_out_c * (g + 1), :]
                     ).numel()
-                    == 0
-                )
+                    != 0
+                ):
+                    raise AssertionError("Expected extra outputs to be 0")
 
             # Test 2D
             input_var = torch.randn(batch, in_c, size, size)
@@ -266,14 +280,15 @@ class TestNNInit(TestCase):
                     output_tensor[:, eff_out_c * g : eff_out_c * g + in_c, :, :],
                 )
                 # Assert extra outputs are 0
-                assert (
+                if (
                     torch.nonzero(
                         output_tensor[
                             :, eff_out_c * g + in_c : eff_out_c * (g + 1), :, :
                         ]
                     ).numel()
-                    == 0
-                )
+                    != 0
+                ):
+                    raise AssertionError("Expected extra outputs to be 0")
 
             # Test 3D
             input_var = torch.randn(batch, in_c, size, size, size)
@@ -291,14 +306,15 @@ class TestNNInit(TestCase):
                     output_tensor[:, eff_out_c * g : eff_out_c * g + in_c, :, :, :],
                 )
                 # Assert extra outputs are 0
-                assert (
+                if (
                     torch.nonzero(
                         output_tensor[
                             :, eff_out_c * g + in_c : eff_out_c * (g + 1), :, :, :
                         ]
                     ).numel()
-                    == 0
-                )
+                    != 0
+                ):
+                    raise AssertionError("Expected extra outputs to be 0")
 
     def test_dirac_only_works_on_3_4_5d_inputs(self):
         for dims in [1, 2, 6]:
@@ -342,7 +358,8 @@ class TestNNInit(TestCase):
 
                 expected_std = gain * math.sqrt(2.0 / (fan_in + fan_out))
                 bounds = expected_std * math.sqrt(3)
-                assert self._is_uniform(input_tensor, -bounds, bounds)
+                if not self._is_uniform(input_tensor, -bounds, bounds):
+                    raise AssertionError("Expected uniform distribution")
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
     @skipIfTorchDynamo("scipy.kstest is failing under dynamo")
@@ -367,7 +384,8 @@ class TestNNInit(TestCase):
                     fan_out *= input_tensor[0, 0].numel()
 
                 expected_std = gain * math.sqrt(2.0 / (fan_in + fan_out))
-                assert self._is_normal(input_tensor, 0, expected_std)
+                if not self._is_normal(input_tensor, 0, expected_std):
+                    raise AssertionError("Expected normal distribution")
 
     def test_kaiming_uniform_errors_on_inputs_smaller_than_2d(self):
         for dims in [0, 1]:
@@ -424,7 +442,8 @@ class TestNNInit(TestCase):
 
                     expected_std = math.sqrt(2.0 / ((1 + a**2) * n))
                     bounds = expected_std * math.sqrt(3.0)
-                    assert self._is_uniform(input_tensor, -bounds, bounds)
+                    if not self._is_uniform(input_tensor, -bounds, bounds):
+                        raise AssertionError("Expected uniform distribution")
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
     @skipIfTorchDynamo("scipy.kstest is failing under dynamo")
@@ -454,7 +473,8 @@ class TestNNInit(TestCase):
                         n = fan_out
 
                     expected_std = math.sqrt(2.0 / ((1 + a**2) * n))
-                    assert self._is_normal(input_tensor, 0, expected_std)
+                    if not self._is_normal(input_tensor, 0, expected_std):
+                        raise AssertionError("Expected normal distribution")
 
     def test_sparse_only_works_on_2d_inputs(self):
         for dims in [1, 3]:
@@ -480,9 +500,13 @@ class TestNNInit(TestCase):
 
             for col_idx in range(input_tensor.size(1)):
                 column = input_tensor[:, col_idx]
-                assert column[column == 0].nelement() >= math.ceil(sparsity * rows)
+                if column[column == 0].nelement() < math.ceil(sparsity * rows):
+                    raise AssertionError("Expected more zero elements for sparsity")
 
-            assert self._is_normal(input_tensor[input_tensor != 0], 0, std)
+            if not self._is_normal(input_tensor[input_tensor != 0], 0, std):
+                raise AssertionError(
+                    "Expected normal distribution for non-zero elements"
+                )
 
     @skipIfNoLapack
     def test_orthogonal(self):

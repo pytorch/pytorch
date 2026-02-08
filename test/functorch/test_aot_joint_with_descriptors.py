@@ -1143,6 +1143,120 @@ class inner_f(torch.nn.Module):
 ('call_function', 't_9', {'test': 1})""",
         )
 
+    def test_annotate_invoke_subgraph_simple(self):
+        class Bar(nn.Module):
+            @torch.compiler.nested_compile_region
+            def forward(self, x):
+                with fx_traceback.annotate({"mod_name": "bar"}):
+                    y = x.sin()
+                    return y * 1
+
+        class MyMod(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bar = Bar()
+
+            def forward(self, x):
+                with fx_traceback.annotate({"mod_name": "my_mod"}):
+                    z = self.bar(x)
+                return z - 1
+
+        inputs = (torch.randn(4, 3, requires_grad=True),)
+        model = MyMod()
+
+        # invoke_subgraph doesn't seem to work with with_export=False, no subgraph created
+        graph_module = graph_capture(model, inputs, with_export=True)
+
+        # Check seq_nr ordering for top-level graph
+        top_level_groups = fx_traceback._get_ordered_seq_nr_groups(graph_module)
+        self.assertEqual(
+            top_level_groups,
+            [
+                ["getitem", "getitem_1", "invoke_subgraph", "invoke_subgraph_1"],
+                ["sub"],
+            ],
+        )
+
+        # Check seq_nr ordering for repeated_subgraph0 (forward subgraph)
+        subgraph0_groups = fx_traceback._get_ordered_seq_nr_groups(
+            graph_module.repeated_subgraph0
+        )
+        self.assertEqual(subgraph0_groups, [["sin"], ["mul"]])
+
+        # Check seq_nr ordering for repeated_subgraph1 (backward/joint subgraph)
+        # Note that the backward graph of the invoke_subgraph here is the joint graph! It's a separately
+        # traced joint graph, so the seq_nr will not match the forward invoke_subgraph node's subgraph seq_nr.
+        subgraph1_groups = fx_traceback._get_ordered_seq_nr_groups(
+            graph_module.repeated_subgraph1
+        )
+        self.assertEqual(subgraph1_groups, [["cos", "mul_2", "sin"], ["mul", "mul_1"]])
+
+        # The annotation is not checked here because we used ignore_comments = True.
+        # The comments here are helpful for human to read and understand the unit test.
+        self.assertExpectedInline(
+            normalize_gm(graph_module.print_readable(print_output=False)),
+            """\
+class inner_f(torch.nn.Module):
+    def forward(self, primals, tangents):
+        primals_1: "f32[4, 3]"; tangents_1: "f32[4, 3]";
+
+        primals_1, tangents_1, = fx_pytree.tree_flatten_spec([primals, tangents], self._in_spec)
+        # Annotation: {'mod_name': 'my_mod', 'seq_nr': 11} File: test_aot_joint_with_descriptors.py:1161 in forward, code: z = self.bar(x)
+        repeated_subgraph0 = self.repeated_subgraph0
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'fw_subgraph_0', primals_1);  repeated_subgraph0 = None
+        getitem: "f32[4, 3]" = invoke_subgraph[0];  invoke_subgraph = None
+
+        # Annotation: {'seq_nr': 12} File: test_aot_joint_with_descriptors.py:1162 in forward, code: return z - 1
+        sub: "f32[4, 3]" = torch.ops.aten.sub.Tensor(getitem, 1);  getitem = None
+
+        # Annotation: {'mod_name': 'my_mod', 'seq_nr': 11} File: test_aot_joint_with_descriptors.py:1161 in forward, code: z = self.bar(x)
+        repeated_subgraph1 = self.repeated_subgraph1
+        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph1, 'bw_subgraph_0_0', primals_1, tangents_1);  repeated_subgraph1 = primals_1 = tangents_1 = None
+        getitem_1: "f32[4, 3]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
+        return pytree.tree_unflatten([sub, getitem_1], self._out_spec)
+
+    class repeated_subgraph0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[4, 3]"):
+            # Annotation: {'mod_name': 'bar', 'seq_nr': -1} File: test_aot_joint_with_descriptors.py:1151 in forward, code: y = x.sin()
+            sin: "f32[4, 3]" = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
+
+            # Annotation: {'mod_name': 'bar', 'seq_nr': 0} File: test_aot_joint_with_descriptors.py:1152 in forward, code: return y * 1
+            mul: "f32[4, 3]" = torch.ops.aten.mul.Tensor(sin, 1);  sin = None
+            return (mul,)
+
+    class repeated_subgraph1(torch.nn.Module):
+        def forward(self, arg0_1: "f32[4, 3]", arg1_1: "f32[4, 3]"):
+            # Annotation: {'mod_name': 'bar', 'seq_nr': 13} File: test_aot_joint_with_descriptors.py:1151 in forward, code: y = x.sin()
+            sin: "f32[4, 3]" = torch.ops.aten.sin.default(arg0_1)
+
+            # Annotation: {'mod_name': 'bar', 'seq_nr': 14} File: test_aot_joint_with_descriptors.py:1152 in forward, code: return y * 1
+            mul: "f32[4, 3]" = torch.ops.aten.mul.Tensor(sin, 1);  sin = None
+            mul_1: "f32[4, 3]" = torch.ops.aten.mul.Tensor(arg1_1, 1);  arg1_1 = None
+
+            # Annotation: {'mod_name': 'bar', 'seq_nr': 13} File: test_aot_joint_with_descriptors.py:1151 in forward, code: y = x.sin()
+            cos: "f32[4, 3]" = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
+            mul_2: "f32[4, 3]" = torch.ops.aten.mul.Tensor(mul_1, cos);  mul_1 = cos = None
+            return (mul_2, mul)
+""",  # noqa: B950
+            ignore_comments=True,
+            ignore_empty_lines=True,
+        )
+
+        custom_metadata = fx_traceback._get_custom_metadata(graph_module)
+        # TODO (shangdiy): need to remove the annotation the forward subggraph's placeholders and output.
+        self.assertExpectedInline(
+            str(custom_metadata),
+            """\
+('get_attr', 'repeated_subgraph0', {'mod_name': 'my_mod'})
+[('placeholder', 'arg0_1', {'mod_name': 'my_mod'}), ('call_function', 'sin', {'mod_name': 'bar'}), ('call_function', 'mul', {'mod_name': 'bar'}), ('output', 'output', {'mod_name': 'my_mod'})]
+('call_function', 'invoke_subgraph', {'mod_name': 'my_mod'})
+('call_function', 'getitem', {'mod_name': 'my_mod'})
+('get_attr', 'repeated_subgraph1', {'mod_name': 'my_mod'})
+[('placeholder', 'arg0_1', {'mod_name': 'my_mod'}), ('placeholder', 'arg1_1', {'mod_name': 'my_mod'}), ('call_function', 'sin', {'mod_name': 'bar'}), ('call_function', 'mul', {'mod_name': 'bar'}), ('call_function', 'mul_1', {'mod_name': 'bar'}), ('call_function', 'cos', {'mod_name': 'bar'}), ('call_function', 'mul_2', {'mod_name': 'bar'}), ('output', 'output', {'mod_name': 'my_mod'})]
+('call_function', 'invoke_subgraph_1', {'mod_name': 'my_mod'})
+('call_function', 'getitem_1', {'mod_name': 'my_mod'})""",  # noqa: B950
+        )
+
 
 if __name__ == "__main__":
     run_tests()

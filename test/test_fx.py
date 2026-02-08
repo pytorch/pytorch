@@ -58,6 +58,7 @@ from fx.test_gradual_type import (  # noqa: F401  # noqa: F401
     TypeCheckerTest,
 )
 from fx.test_matcher_utils import TestMatcher  # noqa: F401
+from fx.test_opaque_infrastructure import TestOpaqueInfrastructure  # noqa: F401
 from fx.test_pass_infra import TestPassManager  # noqa: F401
 from fx.test_source_matcher_utils import TestSourceMatcher  # noqa: F401
 from fx.test_subgraph_rewriter import TestSubgraphRewriter  # noqa: F401
@@ -72,7 +73,6 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     run_tests,
     skipIfTorchDynamo,
-    skipIfRocm,
 )
 from torch.testing._internal.jit_utils import JitTestCase
 
@@ -1352,6 +1352,52 @@ class TestFX(JitTestCase):
         gm.graph.lint()
         text = gm.print_readable(False)
         assert 2 == text.count("_torch__ops_aten_aten_relu_")
+
+    def test_print_readable_no_trailing_whitespace_with_inner_graph(self):
+        # When a GraphModule has a child GraphModule (e.g., from invoke_subgraph),
+        # print_readable() should not produce lines with trailing whitespace.
+
+        # Create an inner GraphModule
+        class InnerModule(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        inner_gm = torch.fx.symbolic_trace(InnerModule())
+
+        # Create an outer module that has the inner GraphModule as a submodule
+        class OuterModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.subgraph_0 = inner_gm
+
+            def forward(self, x):
+                return x * 2
+
+        outer = OuterModule()
+
+        # Create a graph that references the submodule
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        subgraph_result = graph.call_module("subgraph_0", (x,))
+        mul_result = graph.call_function(torch.mul, (subgraph_result, 2))
+        graph.output(mul_result)
+
+        # Create the outer GraphModule with this graph
+        outer_gm = torch.fx.GraphModule(outer, graph)
+
+        # Verify that subgraph_0 is a GraphModule with a graph attribute
+        self.assertTrue(hasattr(outer_gm.subgraph_0, "graph"))
+
+        # Get the print_readable output
+        output = outer_gm.print_readable(print_output=False)
+
+        # Check for trailing whitespace on any line
+        for i, line in enumerate(output.split("\n")):
+            self.assertEqual(
+                line,
+                line.rstrip(),
+                f"Line {i + 1} has trailing whitespace: {repr(line)}",
+            )
 
     def test_script_tensor_constant(self):
         # TorchScript seems to ignore attributes that start with `__`.
@@ -4275,7 +4321,6 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
         torch.fx.proxy.TracerBase.check_mutable_operations = orig_tracer_mutable_flag
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
-    @skipIfRocm
     @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)
     def test_profiler_stack_trace_augmentation(self):
         """
@@ -4314,24 +4359,36 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
 
         actual_traces = _enrich_profiler_traces(prof)
 
-        self.assertExpectedInline(actual_traces, """\
+        # Handle platform-specific event names
+        if torch.version.hip:
+            actual_traces = '\n'.join(
+                line for line in actual_traces.split('\n')
+                if 'hipGetDeviceProperties' not in line
+            )
+            kernel_event = "hipExtModuleLaunchKernel"
+            kernel_event_relu = "hipLaunchKernel"
+        else:
+            kernel_event = "cudaLaunchKernel"
+            kernel_event_relu = "cudaLaunchKernel"
+
+        expected = f"""\
 event=aten::t node=t stack_trace=x = self.linear1(x)
 event=aten::transpose node=t stack_trace=x = self.linear1(x)
 event=aten::as_strided node=t stack_trace=x = self.linear1(x)
 event=aten::addmm node=addmm stack_trace=x = self.linear1(x)
-event=cudaLaunchKernel node=addmm stack_trace=x = self.linear1(x)
+event={kernel_event} node=addmm stack_trace=x = self.linear1(x)
 event=aten::relu node=relu stack_trace=x = self.relu(x)
 event=aten::clamp_min node=relu stack_trace=x = self.relu(x)
-event=cudaLaunchKernel node=relu stack_trace=x = self.relu(x)
+event={kernel_event_relu} node=relu stack_trace=x = self.relu(x)
 event=aten::t node=t_1 stack_trace=x = self.linear2(x)
 event=aten::transpose node=t_1 stack_trace=x = self.linear2(x)
 event=aten::as_strided node=t_1 stack_trace=x = self.linear2(x)
 event=aten::addmm node=addmm_1 stack_trace=x = self.linear2(x)
-event=cudaLaunchKernel node=addmm_1 stack_trace=x = self.linear2(x)"""
-            )
+event={kernel_event} node=addmm_1 stack_trace=x = self.linear2(x)"""
+
+        self.assertExpectedInline(actual_traces, expected)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
-    @skipIfRocm
     @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)
     def test_profiler_multiple_modules(self):
         """
@@ -4367,15 +4424,15 @@ event=cudaLaunchKernel node=addmm_1 stack_trace=x = self.linear2(x)"""
             result_b = compiled_b(torch.randn(1, 3, 8, 8, device="cuda"))
 
         actual_traces = _enrich_profiler_traces(prof)
-        self.assertExpectedInline(actual_traces, """\
+        kernel_event = "hipLaunchKernel" if torch.version.hip else "cudaLaunchKernel"
+        self.assertExpectedInline(actual_traces, f"""\
 event=aten::add node=add stack_trace=return x + 1
-event=cudaLaunchKernel node=add stack_trace=return x + 1
+event={kernel_event} node=add stack_trace=return x + 1
 event=aten::sub node=sub stack_trace=return x - 1
-event=cudaLaunchKernel node=sub stack_trace=return x - 1"""
+event={kernel_event} node=sub stack_trace=return x - 1"""
             )
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
-    @skipIfRocm
     @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)
     def test_profiler_nested_graph_modules(self):
         """
@@ -4412,14 +4469,84 @@ event=cudaLaunchKernel node=sub stack_trace=return x - 1"""
             result = compiled_model(torch.randn(10, 10, device="cuda"), torch.randn(10, 10, device="cuda"))
 
         actual_traces = _enrich_profiler_traces(prof)
-        self.assertExpectedInline(actual_traces, """\
+        kernel_event = "hipLaunchKernel" if torch.version.hip else "cudaLaunchKernel"
+        self.assertExpectedInline(actual_traces, f"""\
 event=aten::mul node=mul stack_trace=m = torch.mul(x, y)
-event=cudaLaunchKernel node=mul stack_trace=m = torch.mul(x, y)
+event={kernel_event} node=mul stack_trace=m = torch.mul(x, y)
 event=aten::sin node=sin stack_trace=s = m.sin()
-event=cudaLaunchKernel node=sin stack_trace=s = m.sin()
+event={kernel_event} node=sin stack_trace=s = m.sin()
 event=aten::add node=add stack_trace=a = s + self.c
-event=cudaLaunchKernel node=add stack_trace=a = s + self.c"""
+event={kernel_event} node=add stack_trace=a = s + self.c"""
             )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    def test_graph_module_with_hop_serialization(self):
+        """
+        Test that a GraphModule containing HigherOrderOperators that don't take
+        callable arguments can be serialized and deserialized via __reduce__.
+
+        HOPs like triton_kernel_wrapper_functional don't take function arguments,
+        so they can be symbolically traced during deserialization without needing
+        special handling.
+        """
+        from torch._higher_order_ops.triton_kernel_wrap import (
+            kernel_side_table,
+            triton_kernel_wrapper_functional,
+        )
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+        from torch.testing._internal.triton_utils import mul2_kernel
+
+        kernel_side_table.reset_table()
+
+        def f(x, output):
+            out = triton_kernel_wrapper_functional(
+                kernel_idx=kernel_side_table.add_kernel(mul2_kernel),
+                constant_args_idx=kernel_side_table.add_constant_args(
+                    {"n_elements": output.numel(), "BLOCK_SIZE": 16}
+                ),
+                grid=[(x.numel(),)],
+                tma_descriptor_metadata={},
+                kwargs={
+                    "in_ptr0": x,
+                    "out_ptr": output,
+                },
+                tensors_to_clone=["in_ptr0", "out_ptr"],
+            )
+            return out["out_ptr"]
+
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+        with fake_mode:
+            t1 = torch.randn(5)
+            t2 = torch.randn(5)
+        gm = make_fx(f, tracing_mode="fake")(t1, t2)
+
+        self.assertTrue(
+            any(
+                node.target == torch.ops.higher_order.triton_kernel_wrapper_functional
+                for node in gm.graph.nodes
+                if node.op == "call_function"
+            ),
+            "Graph should contain triton_kernel_wrapper_functional",
+        )
+
+        from torch._functorch._aot_autograd.aot_autograd_result import (
+            SerializedGraphModule,
+        )
+
+        serialized = SerializedGraphModule(gm)
+        deserialized = serialized.deserialize()
+
+        self.assertIsInstance(deserialized, torch.fx.GraphModule)
+        self.assertTrue(
+            any(
+                node.target == torch.ops.higher_order.triton_kernel_wrapper_functional
+                for node in deserialized.graph.nodes
+                if node.op == "call_function"
+            ),
+            "Deserialized graph should contain triton_kernel_wrapper_functional",
+        )
 
 
 def run_getitem_target():

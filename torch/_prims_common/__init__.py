@@ -23,7 +23,7 @@ from typing import (
 from typing_extensions import deprecated
 
 import torch
-from torch import sym_float, sym_int, sym_max
+from torch import sym_float, sym_int, sym_max, sym_min
 
 
 if TYPE_CHECKING:
@@ -521,7 +521,7 @@ def _is_non_overlapping_and_dense_or_false(sizes, strides) -> bool:
     return check_contiguous_sizes_strides(sizes, strides, false_if_dde=True)
 
 
-def is_non_overlapping_and_dense(a: Tensor) -> bool:
+def is_non_overlapping_and_dense_or_false(a: Tensor) -> bool:
     """
     True when a tensor is non-overlapping and dense.
 
@@ -688,6 +688,13 @@ def compute_elementwise_output_strides(*tensors) -> tuple[int, ...]:
         return ()
     if ndim == 1:
         return (1,)
+
+    if len(tensors) == 1:
+        if torch._prims_common.is_non_overlapping_and_dense_or_false(tensors[0]):
+            return tensors[0].stride()
+        else:
+            empty_like_tensor = torch.empty_like(tensors[0])
+            return empty_like_tensor.stride()
 
     logical_to_physical_perm, _ = compute_elementwise_output_logical_to_physical_perm(
         *tensors, _skip_checks=True
@@ -1334,7 +1341,6 @@ def get_higher_dtype(
 
         raise RuntimeError("Unexpected type given to _extract_dtype!")
 
-    # pyrefly: ignore [bad-argument-type]
     a, b = _extract_dtype(a), _extract_dtype(b)
 
     if a is b:
@@ -1701,10 +1707,8 @@ def elementwise_dtypes(
 
         # Prefers dtype of tensors with one or more dimensions
         if one_plus_dim_tensor_dtype is not None:
-            # pyrefly: ignore [bad-return]
             return one_plus_dim_tensor_dtype
 
-        # pyrefly: ignore [bad-return]
         return zero_dim_tensor_dtype
 
     if highest_type is float:
@@ -1809,7 +1813,8 @@ def make_contiguous_strides_for(
     else:
         if len(shape) < 2:
             return result
-        return result[:-2] + (1, max(shape[-2], 1))
+        # Use sym_max to handle unbacked symbolic dimensions
+        return result[:-2] + (1, sym_max(shape[-2], 1))
 
 
 def make_channels_last_1d_strides_for(
@@ -2053,11 +2058,9 @@ def are_strides_like_channels_last_or_false(
         if d == 0 and min == strides[1]:
             return False
         min = strides[d]
-        # Assume stride is not 1, the consequence is min could be larger than needed,
-        # which would result in returning False for this function but not vice versa,
-        # so it's ok.
-        if guard_or_true(strides[d] > 1):
-            min *= shape[d]
+        # Only multiply by shape[d] when size >= 1, matching C++ logic
+        # shape[d]!=0 hence we know its >=1 here
+        min *= shape[d]
     return True
 
 

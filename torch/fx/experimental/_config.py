@@ -108,5 +108,12 @@ enrich_profiler_metadata: bool = Config(  # type: ignore[var-annotated]
     env_name_default="TORCH_ENRICH_RPOFILER_STACK_TRACE",
 )
 
+# When True, log a warning instead of raising PendingUnbackedSymbolNotFound exception
+# when pending unbacked symbols are not found in returned outputs.
+# The worst that can happen is an error somewhere else in the stack where we expect
+# to locate an unbacked binding. Or a runtime assertion not being lowered in the output
+# code.
+soft_pending_unbacked_not_found_error = False
+
 
 install_config_module(sys.modules[__name__])

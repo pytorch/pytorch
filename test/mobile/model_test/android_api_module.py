@@ -98,9 +98,12 @@ class AndroidAPIModule(torch.jit.ScriptModule):
     @torch.jit.script_method
     def testNonContiguous(self):
         x = torch.tensor([100, 200, 300])[::2]
-        assert not x.is_contiguous()
-        assert x[0] == 100
-        assert x[1] == 300
+        if x.is_contiguous():
+            raise AssertionError("Expected tensor to be non-contiguous")
+        if x[0] != 100:
+            raise AssertionError(f"Expected x[0] == 100, got {x[0]}")
+        if x[1] != 300:
+            raise AssertionError(f"Expected x[1] == 300, got {x[1]}")
         return x
 
     @torch.jit.script_method

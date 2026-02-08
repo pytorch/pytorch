@@ -244,14 +244,14 @@ void map_block(
   desc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
   C10_CUDA_DRIVER_CHECK(driver_api->cuMemSetAccess_(*dev_ptr, size, &desc, 1));
 #elif defined(USE_ROCM)
-  C10_HIP_CHECK(hipMemAddressReserve(ptr, size, 0ULL, 0, 0ULL));
-  C10_HIP_CHECK(hipMemMap(
+  C10_CUDA_CHECK(hipMemAddressReserve(ptr, size, 0ULL, 0, 0ULL));
+  C10_CUDA_CHECK(hipMemMap(
       *ptr,
       size,
       0,
       reinterpret_cast<hipMemGenericAllocationHandle_t>(handle),
       0ULL));
-  C10_HIP_CHECK(hipMemMap(
+  C10_CUDA_CHECK(hipMemMap(
       *ptr,
       size,
       0,
@@ -263,7 +263,7 @@ void map_block(
   // NOLINTNEXTLINE(bugprone-signed-char-misuse)
   desc.location.id = static_cast<int>(device_idx);
   desc.flags = hipMemAccessFlagsProtReadWrite;
-  C10_HIP_CHECK(hipMemSetAccess(*ptr, size, &desc, 1));
+  C10_CUDA_CHECK(hipMemSetAccess(*ptr, size, &desc, 1));
 #else
   TORCH_CHECK(
       false, "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");

@@ -18,6 +18,10 @@
         "Linux": {
             "download_url": "https://oss-clang-format.s3.us-east-2.amazonaws.com/linux64/19.1.4/clang-format",
             "hash": "bfa9ef6eccb372f79ffcb6196af966fd84519ea9567f5ae7b6ad30208cd82109"
+        },
+        "Linux-aarch64": {
+            "download_url": "https://oss-clang-format.s3.us-east-2.amazonaws.com/linux-aarch64/19.1.4/clang-format",
+            "hash": "9cfa17f68100f4cbb3ba6180df9db6d0a32b3a8b45e122aa20e2dda1feaf9902"
         }
     },
     "clang-tidy": {
@@ -32,6 +36,10 @@
         "Linux": {
             "download_url": "https://oss-clang-format.s3.us-east-2.amazonaws.com/linux64/19.1.4/clang-tidy",
             "hash": "5637bd0fca665d2797926fedf53ca5ad4655bb9dbed1e1c8654c8e032ce1e7a8"
+        },
+        "Linux-aarch64": {
+            "download_url": "https://oss-clang-format.s3.us-east-2.amazonaws.com/linux-aarch64/19.1.4/clang-tidy",
+            "hash": "cd6708ca9731002abd8ecc1b616716d8a21cf682a3cb931dd3265c3f3f600d30"
         }
     },
     "actionlint": {
@@ -46,6 +54,10 @@
         "Linux": {
             "download_url": "https://oss-clang-format.s3.us-east-2.amazonaws.com/actionlint/1.7.7/Linux_x86_64/actionlint",
             "hash": "9f7dedb4e23f89f2922073d1a6720405b7b520d4f5832ebb96f0d55a2958886c"
+        },
+        "Linux-aarch64": {
+            "download_url": "https://oss-clang-format.s3.us-east-2.amazonaws.com/actionlint/1.7.7/Linux_arm64/actionlint",
+            "hash": "446687e63fac45472b0a66bae28975c28678af062670af119c11a7087baf35cc"
         }
     },
     "bazel": {

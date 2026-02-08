@@ -14,6 +14,7 @@ from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor.comm_analysis import estimate_fx_collective_memory_footprint
 from torch._inductor.fx_passes.bucketing import _schedulable_wait_node, is_wait_tensor
 from torch._inductor.fx_passes.memory_estimator import MemoryTracker
+from torch._logging import trace_structured
 from torch.fx.operator_schemas import normalize_function
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import _disable_current_modes
@@ -24,6 +25,59 @@ log = logging.getLogger(__name__)
 from torch._inductor.fx_passes.bucketing import bucket_key
 
 from ..pattern_matcher import stable_topological_sort
+
+
+def make_all_device_put_sync(gm: torch.fx.GraphModule) -> int:
+    """
+    Convert all non_blocking=True device_put operations to non_blocking=False.
+
+    Only performs the conversion if at least one non_blocking=True device_put
+    exists in the graph.
+
+    Returns:
+        The number of device_put operations converted to sync.
+    """
+    g = gm.graph
+    device_put_nodes = list(
+        g.find_nodes(op="call_function", target=torch.ops.prims.device_put.default)
+    )
+
+    # Check if any non_blocking=True device_put exists
+    has_async_device_put = False
+    for n in device_put_nodes:
+        opt_args_kwargs = normalize_function(
+            n.target,
+            args=n.args,
+            kwargs=n.kwargs,
+            normalize_to_only_use_kwargs=True,
+        )
+        if opt_args_kwargs is not None:
+            _, kwargs = opt_args_kwargs
+            if kwargs.get("non_blocking", False):
+                has_async_device_put = True
+                break
+
+    if not has_async_device_put:
+        return 0
+
+    # Convert all non_blocking=True to non_blocking=False
+    count = 0
+    for n in device_put_nodes:
+        opt_args_kwargs = normalize_function(
+            n.target,
+            args=n.args,
+            kwargs=n.kwargs,
+            normalize_to_only_use_kwargs=True,
+        )
+        if opt_args_kwargs is not None:
+            _, kwargs = opt_args_kwargs
+            if kwargs.get("non_blocking", False):
+                kwargs["non_blocking"] = False
+                n.args = n.args[0], kwargs["device"], kwargs["non_blocking"]
+                n.kwargs = {}
+                count += 1
+
+    return count
 
 
 def estimate_runtime_analytical(n: torch.fx.Node) -> float:
@@ -321,6 +375,18 @@ class OverlapScheduler:
         self.collective_estimator = collective_estimator
         self.log_final_collectives_estimations = log_final_collectives_estimations
         self.bucket_exposed_first = bucket_exposed_first
+
+        # Make all to(device) non_blocking=False,
+        # They can be implicitly depending by user logic on other to(device) non_blocking=True.
+        # OverlapScheduler can put reads of non_blocking device_put before blocking one.
+        # This results in dirty reads.
+        num_device_put_converted = make_all_device_put_sync(gm)
+        if num_device_put_converted > 0:
+            log.warning(
+                "overlap_scheduling converted %d device_put operations from "
+                "non_blocking=True to non_blocking=False. This may affect performance.",
+                num_device_put_converted,
+            )
 
         # Build and collapse fusion regions FIRST so all subsequent operations
         # work on the collapsed graph where fused ops are atomic units
@@ -710,6 +776,20 @@ class OverlapScheduler:
                 world_size,
                 "fx_collectives_node_runtime_estimation",
             )
+        else:
+            # No benchmarking - log analytical estimations for all collectives
+            from torch._inductor.fx_passes.node_runtime_estimation import (
+                _log_collective_benchmarks,
+            )
+
+            all_collective_nodes = [
+                info.start_node for info in self.collective_info.values()
+            ]
+            if all_collective_nodes:
+                _log_collective_benchmarks(
+                    all_collective_nodes,
+                    artifact_name="fx_collectives_analytical_estimation",
+                )
 
         log.info("Overlap scheduling: Runtime estimations aligned")
 
@@ -1402,7 +1482,18 @@ def schedule_overlap_bucketing(
             Uses minimum of absolute and ratio limits when both are specified.
         enable_fusion_regions: Enable fusion region detection and cost estimation for fusible ops.
     """
-    return OverlapScheduler(
+    if not any(is_wait_tensor(n) for n in gm.graph.nodes):
+        return gm
+
+    trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": "overlap_scheduling_graph_before",
+            "encoding": "string",
+        },
+        payload_fn=lambda: gm.print_readable(False),
+    )
+    ret = OverlapScheduler(
         gm,
         compute_overlap_multipler=compute_overlap_multipler,
         max_in_flight_gb=max_in_flight_gb,
@@ -1418,6 +1509,15 @@ def schedule_overlap_bucketing(
         bucket_exposed_first=bucket_exposed_first,
         enable_fusion_regions=enable_fusion_regions,
     ).run()
+    trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": "overlap_scheduling_graph_after",
+            "encoding": "string",
+        },
+        payload_fn=lambda: ret.print_readable(False),
+    )
+    return ret
 
 
 def schedule_overlap_bucketing_from_inductor_configs(
@@ -1428,6 +1528,9 @@ def schedule_overlap_bucketing_from_inductor_configs(
     Reads configuration from torch._inductor.config.aten_distributed_optimizations
     and calls schedule_overlap_bucketing with those settings.
     """
+    if not any(is_wait_tensor(n) for n in gm.graph.nodes):
+        return gm
+
     from torch._inductor import config
 
     dist_opts = config.aten_distributed_optimizations

@@ -17,7 +17,7 @@ from collections.abc import Callable, Sequence
 from typing import Any, TYPE_CHECKING
 
 import torch
-from torch.onnx._internal._lazy_import import onnx, onnxscript_apis, onnxscript_ir as ir
+from torch.onnx._internal._lazy_import import onnx, onnx_ir as ir, onnxscript_apis
 from torch.onnx._internal.exporter import _dynamic_shapes, _ir_passes
 from torch.utils import _pytree
 
@@ -244,7 +244,8 @@ ONNXProgram(
         if self._inference_session is None:
             self.initialize_inference_session()
 
-        assert self._inference_session is not None
+        if self._inference_session is None:
+            raise AssertionError("_inference_session must be non-None")
 
         ort_input = {
             k.name: _to_ort_value(v)
@@ -272,7 +273,8 @@ ONNXProgram(
             for k, v in zip(self.model.graph.inputs, flatten_args)
         }
         outputs = evaluator.run(None, ref_input)  # type: ignore[arg-type]
-        assert isinstance(outputs, Sequence)
+        if not isinstance(outputs, Sequence):
+            raise AssertionError(f"Expected Sequence, got {type(outputs)}")
         return tuple(_from_numpy_array(output) for output in outputs)
 
     def compute_values(

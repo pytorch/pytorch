@@ -186,6 +186,10 @@ void nccl_wait_for_signal(at::Tensor& sigpad, int64_t signal) {
   c10::cuda::CUDAGuard guard(sigpad.device());
   auto stream = at::cuda::getCurrentCUDAStream();
   auto symm_mem = c10d::symmetric_memory::rendezvous(sigpad, "0");
+
+  // Always use device-side kernel because this function waits for a SPECIFIC signal value.
+  // ncclWaitSignal only synchronizes on a channel without checking values, so it's not
+  // suitable for this API which expects to wait for signal pad to reach a specific value.
   int cur_rank = symm_mem->get_rank();
   nccl_wait_for_signal_kernel<<<1, THREADS_PER_BLOCK, 0, stream>>>(
     symm_mem->get_signal_pad_ptrs_dev(),
@@ -204,18 +208,23 @@ void nccl_put_with_signal(at::Tensor& tensor, int64_t signal, int64_t peer) {
       "put op currently supports contiguous tensors only");
   // TODO: rendezvous should remember the group name
   auto symm_mem = c10d::symmetric_memory::rendezvous(tensor, "0");
+  c10::cuda::CUDAGuard guard(tensor.device());
+  auto stream = at::cuda::getCurrentCUDAStream();
+
+  // Always use device-side kernel because this function writes a SPECIFIC signal value.
+  // ncclPutSignal expects a channel index (0-7) for the signal parameter, not a signal value,
+  // so it's not suitable for this API which needs to write specific values to the signal pad.
   int threads = THREADS_PER_BLOCK;
   int blocks = (tensor.numel() + threads - 1) / threads;
-  c10::cuda::CUDAGuard guard(tensor.device());
   auto opts = at::TensorOptions()
     .dtype(at::kInt)
-    .device(tensor.device());  // e.g. at::kCUDA, specific index
+    .device(tensor.device());
   at::Tensor blocks_done = at::zeros({1}, opts);
   unsigned int* blocks_done_dev =
     reinterpret_cast<unsigned int*>(blocks_done.data_ptr<int>());
   size_t nbytes = tensor.numel() * c10::elementSize(tensor.scalar_type());
 
-  lsa_put_signal_kernel<<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+  lsa_put_signal_kernel<<<blocks, threads, 0, stream>>>(
     symm_mem->get_buffer_ptrs_dev(),
     symm_mem->get_signal_pad_ptrs_dev(),
     peer,

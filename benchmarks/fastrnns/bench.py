@@ -63,7 +63,8 @@ class Event:
         self.time = time.perf_counter()
 
     def elapsed_time(self, end_event):
-        assert isinstance(end_event, Event)
+        if not isinstance(end_event, Event):
+            raise AssertionError(f"Expected Event, but got {type(end_event)}")
         return end_event.time - self.time
 
 
@@ -117,7 +118,8 @@ def trainbench(
         if modeldef.backward is not None:
             with torch.no_grad():
                 for param in modeldef.params:
-                    assert param.grad is not None
+                    if param.grad is None:
+                        raise AssertionError("Parameter gradient must not be None")
                     param.grad.zero_()
 
         if device == "cuda":

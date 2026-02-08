@@ -1,19 +1,22 @@
-# mypy: allow-untyped-defs
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
 #
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+from __future__ import annotations
+
 import copy
-from collections.abc import Callable, Iterable, Sequence
-from typing import Any, NoReturn, Union
+from typing import Any, NoReturn, TYPE_CHECKING
 
 import torch
 import torch.nn as nn
 from torch import Tensor
 from torch.nn.utils._named_member_accessor import NamedMemberAccessor
 
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable, Sequence
 
 # Utilities to make nn.Module "functional"
 # In particular the goal is to be able to provide a function that takes as input
@@ -31,8 +34,8 @@ def raise_parameter_tying_error() -> NoReturn:
 
 
 def create_names_map(
-    named_params: Union[dict[str, Tensor], Iterable[tuple[str, Tensor]]],
-    tied_named_params: Union[dict[str, Tensor], Iterable[tuple[str, Tensor]]],
+    named_params: dict[str, Tensor] | Iterable[tuple[str, Tensor]],
+    tied_named_params: dict[str, Tensor] | Iterable[tuple[str, Tensor]],
 ) -> dict[str, list[str]]:
     """
     named_params is a dictionary of tensors: {'A': A, 'B': B}
@@ -42,22 +45,25 @@ def create_names_map(
     This function creates a mapping from the names in named_params to the
     names in tied_named_params: {'A': ['A'], 'B': ['B', 'B_tied']}.
     """
-    # pyrefly: ignore [no-matching-overload]
-    named_params = dict(named_params)
-    # pyrefly: ignore [no-matching-overload]
-    tied_named_params = dict(tied_named_params)
+    named_params_dict = dict(named_params)
+    tied_named_params_dict = dict(tied_named_params)
 
-    tensors_dict_keys = set(named_params.keys())
-    tied_tensors_dict_keys = set(tied_named_params.keys())
-    assert tensors_dict_keys.issubset(tied_tensors_dict_keys)
+    tensors_dict_keys = set(named_params_dict.keys())
+    tied_tensors_dict_keys = set(tied_named_params_dict.keys())
+    if not tensors_dict_keys.issubset(tied_tensors_dict_keys):
+        raise AssertionError(
+            f"tensors_dict_keys {tensors_dict_keys} is not a subset of "
+            f"tied_tensors_dict_keys {tied_tensors_dict_keys}"
+        )
 
     tensor_to_mapping: dict[Tensor, tuple[str, list[str]]] = {}
-    for key, tensor in named_params.items():
-        # pyrefly: ignore [unsupported-operation]
+    for key, tensor in named_params_dict.items():
         tensor_to_mapping[tensor] = (key, [])
-    for key, tensor in tied_named_params.items():
-        assert tensor in tensor_to_mapping
-        # pyrefly: ignore [bad-argument-type]
+    for key, tensor in tied_named_params_dict.items():
+        if tensor not in tensor_to_mapping:
+            raise AssertionError(
+                f"tensor for key '{key}' not found in tensor_to_mapping"
+            )
         tensor_to_mapping[tensor][1].append(key)
     return dict(tensor_to_mapping.values())
 
@@ -160,15 +166,23 @@ def load_state(
     load_state takes `weights` and `buffers` and assigns them to the model.
     This is the inverse operation of `make_functional_deprecated_v1`.
     """
-    assert len(weight_names) == len(weights)
+    if len(weight_names) != len(weights):
+        raise AssertionError(
+            f"len(weight_names)={len(weight_names)} != len(weights)={len(weights)}"
+        )
     load_weights(model, weight_names, weights)
     if len(buffers) > 0:
-        assert len(buffer_names) == len(buffers)
+        if len(buffer_names) != len(buffers):
+            raise AssertionError(
+                f"len(buffer_names)={len(buffer_names)} != len(buffers)={len(buffers)}"
+            )
         load_buffers(model, buffer_names, buffers)
     return model
 
 
-def make_functional_deprecated_v1(model: nn.Module):
+def make_functional_deprecated_v1(
+    model: nn.Module,
+) -> tuple[tuple[Tensor, ...], Callable[..., Any], tuple[str, ...]]:
     """make_functional_deprecated_v1(model) -> weights, func, weight_names
 
     Given an nn.Module, make_functional_deprecated_v1 extracts the state (weights)
@@ -202,7 +216,7 @@ def make_functional_deprecated_v1(model: nn.Module):
         )
     weights, descriptors, _ = extract_weights(model)
 
-    def fun(weights, data):
+    def fun(weights: tuple[Tensor, ...], data: tuple[Any, ...]) -> Any:
         mutable_model = copy.deepcopy(model)
         load_weights(mutable_model, descriptors, weights)
         return mutable_model(*data)
@@ -210,7 +224,15 @@ def make_functional_deprecated_v1(model: nn.Module):
     return weights, fun, descriptors
 
 
-def make_functional_with_buffers_deprecated_v1(model: nn.Module):
+def make_functional_with_buffers_deprecated_v1(
+    model: nn.Module,
+) -> tuple[
+    tuple[Tensor, ...],
+    tuple[Tensor, ...],
+    Callable[..., Any],
+    tuple[str, ...],
+    tuple[str, ...],
+]:
     """make_functional_with_buffers_deprecated_v1(model) -> weights, buffers, func, weight_names, buffer_names
 
     Given an nn.Module, make_functional_with_buffers_deprecated_v1 extracts the state (weights and buffers)
@@ -238,7 +260,11 @@ def make_functional_with_buffers_deprecated_v1(model: nn.Module):
     weights, weight_descriptors, _ = extract_weights(model)
     buffers, buf_descriptors, _ = extract_buffers(model)
 
-    def fun(weights, buffers, data):
+    def fun(
+        weights: tuple[Tensor, ...],
+        buffers: tuple[Tensor, ...],
+        data: tuple[Any, ...],
+    ) -> Any:
         mutable_model = copy.deepcopy(model)
         load_weights(mutable_model, weight_descriptors, weights)
         load_buffers(mutable_model, buf_descriptors, buffers)
@@ -271,7 +297,7 @@ class FunctionalModuleWithBuffers(nn.Module):
     @staticmethod
     def _create_from(
         model: nn.Module, disable_autograd_tracking: bool = False
-    ) -> tuple["FunctionalModuleWithBuffers", tuple[Tensor, ...], tuple[Tensor, ...]]:
+    ) -> tuple[FunctionalModuleWithBuffers, tuple[Tensor, ...], tuple[Tensor, ...]]:
         # TODO: We don't need to copy the model to create a stateless copy
         model_copy = copy.deepcopy(model)
         params, param_names, param_names_map = extract_weights(model_copy)
@@ -288,7 +314,11 @@ class FunctionalModuleWithBuffers(nn.Module):
         )
 
     def forward(
-        self, params: Iterable[Tensor], buffers: Iterable[Tensor], *args, **kwargs
+        self,
+        params: Iterable[Tensor],
+        buffers: Iterable[Tensor],
+        *args: Any,
+        **kwargs: Any,
     ) -> Any:
         # Temporarily load the state back onto self.stateless_model
         old_state = _swap_state(
@@ -322,7 +352,7 @@ class FunctionalModule(nn.Module):
     @staticmethod
     def _create_from(
         model: nn.Module, disable_autograd_tracking: bool = False
-    ) -> tuple["FunctionalModule", tuple[Tensor, ...]]:
+    ) -> tuple[FunctionalModule, tuple[Tensor, ...]]:
         # TODO: We don't need to copy the model to create a stateless copy
         model_copy = copy.deepcopy(model)
         params, param_names, names_map = extract_weights(model_copy)
@@ -331,7 +361,7 @@ class FunctionalModule(nn.Module):
                 param.requires_grad_(False)
         return FunctionalModule(model_copy, param_names, names_map), params
 
-    def forward(self, params: Iterable[Tensor], *args, **kwargs) -> Any:
+    def forward(self, params: Iterable[Tensor], *args: Any, **kwargs: Any) -> Any:
         # Temporarily load the state back onto self.stateless_model
         old_state = _swap_state(self.stateless_model, self.names_map, params)
         try:
@@ -550,10 +580,12 @@ def combine_state_for_ensemble(
 
 def functional_init(
     model_class: type[nn.Module],
-    ensemble_shape: Union[tuple[()], tuple[int, ...]] = (),
+    ensemble_shape: tuple[()] | tuple[int, ...] = (),
     device: torch.types.Device = "cpu",
-):
-    def wrapped(*args, **kwargs):
+) -> Callable[..., tuple[tuple[Tensor, ...], Callable[..., Any], tuple[str, ...]]]:
+    def wrapped(
+        *args: Any, **kwargs: Any
+    ) -> tuple[tuple[Tensor, ...], Callable[..., Any], tuple[str, ...]]:
         if len(ensemble_shape) >= 2:
             raise ValueError("NYI: ensemble_shape with more than 1 element")
         if len(ensemble_shape) == 0:
@@ -577,10 +609,31 @@ def functional_init(
 
 def functional_init_with_buffers(
     model_class: type[nn.Module],
-    ensemble_shape: Union[tuple[()], tuple[int, ...]] = (),
+    ensemble_shape: tuple[()] | tuple[int, ...] = (),
     device: torch.types.Device = "cpu",
-):
-    def wrapped(*args, **kwargs):
+) -> Callable[
+    ...,
+    tuple[
+        tuple[Tensor, ...],
+        tuple[Tensor, ...],
+        Callable[..., Any],
+        tuple[str, ...],
+        tuple[str, ...],
+    ]
+    | tuple[tuple[Tensor, ...], Callable[..., Any], tuple[str, ...]],
+]:
+    def wrapped(
+        *args: Any, **kwargs: Any
+    ) -> (
+        tuple[
+            tuple[Tensor, ...],
+            tuple[Tensor, ...],
+            Callable[..., Any],
+            tuple[str, ...],
+            tuple[str, ...],
+        ]
+        | tuple[tuple[Tensor, ...], Callable[..., Any], tuple[str, ...]]
+    ):
         if len(ensemble_shape) >= 2:
             raise ValueError("NYI: ensemble_shape with more than 1 element")
         if len(ensemble_shape) == 0:

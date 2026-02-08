@@ -13,7 +13,7 @@ using c10::Dict;
 using c10::IValue;
 using torch::jit::Pickler;
 
-using c10::cuda::CUDACachingAllocator::SegmentInfo;
+using c10::CachingDeviceAllocator::SegmentInfo;
 
 namespace {
 
@@ -120,16 +120,6 @@ std::shared_ptr<c10::GatheredContext> gather_with_cpp() {
   return CapturedTraceback::gather(true, true, true);
 }
 
-CapturedTraceback* getFromContext(
-    const std::shared_ptr<c10::GatheredContext>& x) {
-  if (CapturedTraceback* sc = dynamic_cast<CapturedTraceback*>(x.get())) {
-    return sc;
-  }
-  TORCH_CHECK(
-      false,
-      "attempting to gather stack context from the wrong StackContext type.");
-}
-
 #define ADD_CALLBACK(callbackType) at::add##callbackType##Callback
 at::CallbackHandle _initRecordAnnotations(bool useGlobalCallback) {
   auto addCallback =
@@ -211,18 +201,18 @@ void _record_memory_history(
     bool compileContext,
     bool globalRecordAnnotations,
     const std::vector<std::string>& skip_actions) {
-  c10::cuda::CUDACachingAllocator::CreateContextFn recorder = gather;
+  c10::CachingDeviceAllocator::CreateContextFn recorder = gather;
   if (enabled && record_cpp_context &&
       (trace_alloc_record_context || record_context)) {
     recorder = gather_with_cpp;
     // warm up C++ stack unwinding
     unwind::unwind();
   }
-  auto when = c10::cuda::CUDACachingAllocator::RecordContext::NEVER;
+  auto when = c10::CachingDeviceAllocator::RecordContext::NEVER;
   if (trace_alloc_record_context) {
-    when = c10::cuda::CUDACachingAllocator::RecordContext::ALLOC;
+    when = c10::CachingDeviceAllocator::RecordContext::ALLOC;
   } else if (record_context) {
-    when = c10::cuda::CUDACachingAllocator::RecordContext::STATE;
+    when = c10::CachingDeviceAllocator::RecordContext::STATE;
   }
   at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
 
@@ -268,21 +258,21 @@ void _record_memory_history(
   checkOptionIn(
       stacks, {"python", "all"}, "expected stacks to be 'python', or 'all'");
 
-  c10::cuda::CUDACachingAllocator::CreateContextFn recorder = gather;
+  c10::CachingDeviceAllocator::CreateContextFn recorder = gather;
   if (enabled && context && stacks == "all") {
     recorder = gather_with_cpp;
     // warm up C++ stack unwinding
     unwind::unwind();
   }
   max_entries = (enabled && *enabled == "all") ? max_entries : 1;
-  auto when = c10::cuda::CUDACachingAllocator::RecordContext::NEVER;
+  auto when = c10::CachingDeviceAllocator::RecordContext::NEVER;
   if (context) {
     if (context == "all") {
-      when = c10::cuda::CUDACachingAllocator::RecordContext::ALL;
+      when = c10::CachingDeviceAllocator::RecordContext::ALL;
     } else if (context == "alloc") {
-      when = c10::cuda::CUDACachingAllocator::RecordContext::ALLOC;
+      when = c10::CachingDeviceAllocator::RecordContext::ALLOC;
     } else if (context == "state") {
-      when = c10::cuda::CUDACachingAllocator::RecordContext::STATE;
+      when = c10::CachingDeviceAllocator::RecordContext::STATE;
     }
   }
   at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
@@ -333,7 +323,7 @@ std::string _memory_snapshot_pickled() {
   auto add_frame_key = [&](const c10::Dict<IValue, IValue>& d,
                            const std::shared_ptr<c10::GatheredContext>& ctx) {
     if (ctx) {
-      frame_tracebacks.push_back(getFromContext(ctx));
+      frame_tracebacks.push_back(getCapturedTracebackFromContext(ctx));
       frame_dict.push_back(d);
     } else {
       d.insert(frames_s, empty_frames);
@@ -443,7 +433,7 @@ std::string _memory_snapshot_pickled() {
       trace_entry.insert(compile_contexts_s, te.compile_context_);
       trace_entry.insert(user_metadata_s, te.user_metadata_);
       if (te.context_) {
-        auto sc = getFromContext(te.context_);
+        auto sc = getCapturedTracebackFromContext(te.context_);
         frame_tracebacks.push_back(sc);
         frame_dict.push_back(trace_entry);
       }

@@ -87,13 +87,15 @@ class _FunctionalizeSideEffectfulOpsPass(_ExportPassBaseDeprecatedDoNotUse):
             kwargs={**kwargs, "dep_token": self._dep_token},
             meta=meta,
         )
-        assert self._next_dep_token_index is not None
+        if self._next_dep_token_index is None:
+            raise AssertionError("_next_dep_token_index must not be None")
         self._dep_token.node.name = f"dep_token{self._next_dep_token_index}"
         self._next_dep_token_index += 1
 
         return self._dep_token
 
     def output(self, results: list[Argument], meta: NodeMetadata) -> ProxyValue:
-        assert self._dep_token is not None
+        if self._dep_token is None:
+            raise AssertionError("_dep_token must not be None")
 
         return super().output(results=(*results, self._dep_token), meta=meta)  # type: ignore[arg-type]

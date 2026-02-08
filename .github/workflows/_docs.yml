@@ -204,6 +204,14 @@ jobs:
           path: cppdocs/
           s3-prefix: pytorch/pytorch/${{ github.event.pull_request.number }}/cppdocs
 
+      - name: Upload C++ Docs Preview (nightly dry-run)
+        if: ${{ !inputs.push && github.event_name != 'pull_request' && matrix.docs_type == 'cpp' && steps.build-docs.outcome == 'success' }}
+        run: |
+          # Use aws s3 cp --recursive for fast parallel uploads instead of uploading files one by one
+          aws s3 cp cppdocs/ s3://doc-previews/pytorch/pytorch/nightly-${{ github.sha }}/cppdocs --recursive --quiet
+          echo "C++ docs preview available at:"
+          echo "https://docs-preview.pytorch.org/pytorch/pytorch/nightly-${{ github.sha }}/cppdocs/index.html"
+
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
         if: always()

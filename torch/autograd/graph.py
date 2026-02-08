@@ -77,6 +77,10 @@ class Node(abc.ABC):
         r"""Return the metadata."""
         raise NotImplementedError
 
+    @abc.abstractmethod
+    def _sequence_nr(self) -> int:
+        raise NotImplementedError
+
     @property
     @abc.abstractmethod
     def _input_metadata(self) -> list[Any]:

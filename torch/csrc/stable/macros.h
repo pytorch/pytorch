@@ -3,6 +3,8 @@
 #include <stdexcept>
 #include <string>
 
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+
 // Users of this macro are expected to include cuda_runtime.h
 #define STD_CUDA_CHECK(EXPR)                      \
   do {                                            \
@@ -24,3 +26,5 @@
 
 // Users of this macro are expected to include cuda_runtime.h
 #define STD_CUDA_KERNEL_LAUNCH_CHECK() STD_CUDA_CHECK(cudaGetLastError())
+
+#endif

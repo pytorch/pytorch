@@ -47,7 +47,6 @@ class NCCLCopyEngineCollectives(MultiProcContinuousTest):
         # initialize NCCL communicator.
         dist.all_reduce(torch.ones(1, device=self.device))
         group_name = dist.group.WORLD.group_name
-        symm_mem.enable_symm_mem_for_group(group_name)
 
         # Prepare a profiler
         prof = torch.profiler.profile(

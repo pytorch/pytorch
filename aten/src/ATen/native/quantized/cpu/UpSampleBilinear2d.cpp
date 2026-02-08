@@ -6,6 +6,7 @@
 #include <ATen/native/quantized/AffineQuantizer.h>
 #include <ATen/native/quantized/cpu/QuantizedOps.h>
 #include <ATen/native/cpu/utils.h>
+#include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -146,24 +147,19 @@ Tensor upsample_bilinear2d_quantized_cpu(
     bool align_corners,
     std::optional<double> scales_h,
     std::optional<double> scales_w) {
-  TORCH_CHECK(
-      output_size.size() == 2,
-      "It is expected output_size equals to 2, but got size ",
-      output_size.size());
+  auto full_output_size = native::upsample_2d_common_check(input.sizes(), output_size);
 
   TORCH_CHECK(
-      input.dim() == 4,
+      input.numel() != 0 || c10::multiply_integers(input.sizes().begin() + 1, input.sizes().end()),
       "Non-empty 4D data tensor expected but got a tensor with sizes ",
       input.sizes());
 
-  int64_t output_height = output_size[0];
-  int64_t output_width = output_size[1];
-
-  int64_t nbatch = input.size(0);
-  int64_t channels = input.size(1);
+  int64_t nbatch = full_output_size[0];
+  int64_t channels = full_output_size[1];
+  int64_t output_height = full_output_size[2];
+  int64_t output_width = full_output_size[3];
   int64_t input_height = input.size(2);
   int64_t input_width = input.size(3);
-  AT_ASSERT(input_width > 0 && output_width > 0);
 
   if (input.is_contiguous(c10::MemoryFormat::ChannelsLast)) {
     Tensor output = at::_empty_affine_quantized(

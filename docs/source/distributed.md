@@ -152,6 +152,77 @@ You can tune NCCL communicators even further using `torch.distributed.ProcessGro
 and `torch.distributed.ProcessGroupNCCL.Options`. Learn more about them using `help`
 (e.g. `help(torch.distributed.ProcessGroupNCCL.NCCLConfig)`) in the interpreter.
 
+### Copy Engine Collectives
+
+:::{note}
+Copy Engine Collectives require NCCL 2.28 or later, and GPUs with peer-to-peer (P2P) access.
+:::
+
+Copy Engine (CE) Collectives are an optimization for NCCL collective operations that offload
+data movement to the GPU's copy engines (DMA engines) instead of using CUDA streaming
+multiprocessors (SMs). This frees up SMs for compute work, enabling better overlap of
+communication and computation during distributed training.
+
+To use CE collectives, you need to:
+
+1. Configure the NCCL process group with the zero-CTA policy
+2. Set up symmetric memory with the NCCL backend
+3. Allocate tensors using symmetric memory
+4. Register the tensors with symmetric memory via rendezvous
+
+Once set up, standard collective functions like {func}`all_gather_into_tensor` and
+{func}`all_to_all_single` will automatically use the copy engines when operating
+on symmetric memory tensors.
+
+**Example**
+
+```
+import torch
+import torch.distributed as dist
+import torch.distributed._symmetric_memory as symm_mem
+
+# Initialize process group with zero-CTA policy for CE collectives
+opts = dist.ProcessGroupNCCL.Options()
+opts.config.cta_policy = dist.ProcessGroupNCCL.NCCL_CTA_POLICY_ZERO
+device = torch.device("cuda", rank)
+dist.init_process_group(backend="nccl", pg_options=opts, device_id=device)
+
+# Set up symmetric memory with NCCL backend
+symm_mem.set_backend("NCCL")
+group_name = dist.group.WORLD.group_name
+
+# Allocate tensors using symmetric memory
+numel = 1024 * 1024
+inp = symm_mem.empty(numel, device=device)
+out = symm_mem.empty(numel * world_size, device=device)
+
+# Register tensors for symmetric memory operations
+symm_mem.rendezvous(inp, group=group_name)
+symm_mem.rendezvous(out, group=group_name)
+
+# Perform collective operation using copy engines
+# This now runs on DMA engines instead of SMs
+work = dist.all_gather_into_tensor(out, inp, async_op=True)
+work.wait()
+```
+
+**Benefits**
+
+- **SM offloading**: Communication runs on copy engines, leaving SMs free for computation
+- **Better overlap**: Enables more efficient computation/communication overlap
+- **Transparent API**: Uses the same collective API, just with symmetric memory tensors
+
+**Requirements and Limitations**
+
+- NCCL version 2.28 or later
+- GPUs must have peer-to-peer (P2P) access enabled
+- Tensors must be allocated using {func}`torch.distributed._symmetric_memory` and rendezvoused
+- The NCCL process group must be configured with `NCCL_CTA_POLICY_ZERO` or the
+environment variable `NCCL_CTA_POLICY` be set to 2
+- As of NCCL 2.28, CE collectives cannot run with the default stream, so you
+would need to use the `async_op=True` flag to activate the internal stream of
+`ProcessGroupNCCL` or create a side stream yourself
+
 (distributed-basics)=
 
 ## Basics

@@ -87,6 +87,33 @@ ENV PYTORCH_VERSION ${PYTORCH_VERSION}
 WORKDIR /workspace
 
 FROM official as dev
+ARG CUDA_VERSION
+ARG BUILD_TYPE
+
+# Install CUDA toolkit for devel images
+# Only runs when building devel-image target (BUILD_TYPE != official)
+RUN if [ "${BUILD_TYPE}" = "dev" ] && [ -n "${CUDA_VERSION}" ]; then \
+    apt-get update && apt-get install -y --no-install-recommends \
+        wget gnupg2 ca-certificates && \
+    # Add NVIDIA repository
+    NVARCH=$(uname -m | sed 's/x86_64/x86_64/' | sed 's/aarch64/sbsa/') && \
+    wget -qO - https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/${NVARCH}/3bf863cc.pub | apt-key add - && \
+    echo "deb https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/${NVARCH} /" > /etc/apt/sources.list.d/cuda.list && \
+    # Install CUDA toolkit
+    CUDA_PKG_VERSION=$(echo ${CUDA_VERSION} | cut -d'.' -f1,2 | tr '.' '-') && \
+    apt-get update && apt-get install -y --no-install-recommends \
+        cuda-toolkit-${CUDA_PKG_VERSION} && \
+    apt-get clean && rm -rf /var/lib/apt/lists/* && \
+    # Configure LD
+    echo "/usr/local/cuda/lib64" >> /etc/ld.so.conf.d/cuda.conf && \
+    ldconfig; \
+fi
+
+# Set CUDA environment (always set, needed even if CUDA already in base)
+ENV PATH=/usr/local/cuda/bin:${PATH}
+ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64:${LD_LIBRARY_PATH}
+ENV CUDA_HOME=/usr/local/cuda
+
 # Should override the already installed version from the official-image stage
 COPY --from=python-deps /usr/local/lib/python3.12 /usr/local/lib/python3.12
 COPY --from=python-deps /usr/local/bin /usr/local/bin

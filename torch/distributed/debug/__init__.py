@@ -1,6 +1,7 @@
 import logging
 import multiprocessing
 import socket
+from typing import Literal
 
 # import for registration side effect
 import torch.distributed.debug._handlers  # noqa: F401
@@ -19,7 +20,11 @@ _WORKER_SERVER: _WorkerServer | None = None
 _DEBUG_SERVER_PROC: multiprocessing.Process | None = None
 
 
-def start_debug_server(port: int = 25999, worker_port: int = 0) -> None:
+def start_debug_server(
+    port: int = 25999,
+    worker_port: int = 0,
+    start_method: Literal["fork", "spawn", "forkserver"] | None = None,
+) -> None:
     """
     Start the debug server stack on all workers. The frontend debug server is
     only started on rank0 while the per rank worker servers are started on all
@@ -45,6 +50,10 @@ def start_debug_server(port: int = 25999, worker_port: int = 0) -> None:
         port (int): The port to start the frontend debug server on.
         worker_port (int): The port to start the worker server on. Defaults to 0, which
             will cause the worker server to bind to an ephemeral port.
+        start_method (str | None): The multiprocessing start method to use for the
+            frontend server process. One of "fork", "spawn", or "forkserver".
+            If None, uses the default start method. Using "spawn" is recommended
+            when using CUDA or when fork safety is a concern.
     """
     global _WORKER_SERVER, _DEBUG_SERVER_PROC
 
@@ -63,9 +72,14 @@ def start_debug_server(port: int = 25999, worker_port: int = 0) -> None:
     from torch.distributed.debug._frontend import main
 
     if RANK == 0:
-        _DEBUG_SERVER_PROC = multiprocessing.Process(
-            target=main, args=(port,), daemon=True
-        )
+        if start_method is not None:
+            ctx = multiprocessing.get_context(start_method)
+            # pyre-ignore[16]: BaseContext has Process attribute at runtime
+            _DEBUG_SERVER_PROC = ctx.Process(target=main, args=(port,), daemon=True)
+        else:
+            _DEBUG_SERVER_PROC = multiprocessing.Process(
+                target=main, args=(port,), daemon=True
+            )
         _DEBUG_SERVER_PROC.start()
 
 

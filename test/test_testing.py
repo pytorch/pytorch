@@ -313,15 +313,17 @@ class TestThatContainsCUDAAssertFailure(TestCase):
 if __name__ == '__main__':
     run_tests()
 """)
-        # CUDA says "device-side assert triggered", ROCm says "unspecified launch failure"
+        # CUDA says "device-side assert triggered"
+        # ROCm says "unspecified launch failure" or HSA_STATUS_ERROR_EXCEPTION
         has_cuda_assert = 'CUDA error: device-side assert triggered' in stderr
-        has_hip_assert = 'HIP error' in stderr and 'launch failure' in stderr
+        has_hip_assert = 'launch failure' in stderr or 'HSA_STATUS_ERROR_EXCEPTION' in stderr
         self.assertTrue(
             has_cuda_assert or has_hip_assert,
             f"Expected device assert error in stderr, got: {stderr}",
         )
-        # should run only 1 test because it throws unrecoverable error.
-        self.assertIn('errors=1', stderr)
+        if torch.version.cuda:
+            # should run only 1 test because it throws unrecoverable error.
+            self.assertIn('errors=1', stderr)
 
 
     @onlyCUDA
@@ -358,15 +360,17 @@ instantiate_device_type_tests(
 if __name__ == '__main__':
     run_tests()
 """)
-        # CUDA says "device-side assert triggered", ROCm says "unspecified launch failure"
+        # CUDA says "device-side assert triggered"
+        # ROCm says "unspecified launch failure" or HSA_STATUS_ERROR_EXCEPTION
         has_cuda_assert = 'CUDA error: device-side assert triggered' in stderr
-        has_hip_assert = 'HIP error' in stderr and 'launch failure' in stderr
+        has_hip_assert = 'launch failure' in stderr or 'HSA_STATUS_ERROR_EXCEPTION' in stderr
         self.assertTrue(
             has_cuda_assert or has_hip_assert,
             f"Expected device assert error in stderr, got: {stderr}",
         )
-        # should run only 1 test because it throws unrecoverable error.
-        self.assertIn('errors=1', stderr)
+        if torch.version.cuda:
+            # should run only 1 test because it throws unrecoverable error.
+            self.assertIn('errors=1', stderr)
 
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support device side asserts")

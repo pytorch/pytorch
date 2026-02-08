@@ -742,21 +742,43 @@ Tensor instance_norm(
   shape[1] = b * c;
   shape[0] = SymInt(1);
 
+  // handle mixed dtype for running stats (match weight dtype when defined)
+  const auto stats_dtype = weight.defined() ? weight.scalar_type() : input.scalar_type();
+  const bool mixed_dtype_stats = running_mean.defined() &&
+                                 running_mean.scalar_type() != stats_dtype;
+
   Tensor weight_ = repeat_if_defined(weight, b);
   Tensor bias_ = repeat_if_defined(bias, b);
-  Tensor running_mean_ = repeat_if_defined(running_mean, b);
-  Tensor running_var_ = repeat_if_defined(running_var, b);
+  Tensor running_mean_ = repeat_if_defined(
+      mixed_dtype_stats ? running_mean.to(stats_dtype) : running_mean, b);
+  Tensor running_var_ = repeat_if_defined(
+      mixed_dtype_stats ? running_var.to(stats_dtype) : running_var, b);
 
   auto input_reshaped = input.contiguous().view_symint(shape);
   auto out = at::batch_norm(input_reshaped, weight_, bias_, running_mean_, running_var_,
                             use_input_stats, momentum, eps, cudnn_enabled);
 
   // we alias running_mean and running_var because they are const but we want to modify their data
-  if (running_mean.defined()) {
-    at::alias(running_mean).copy_(running_mean_.view_symint({ b, c }).mean(0, false));
-  }
-  if (running_var.defined()) {
-    at::alias(running_var).copy_(running_var_.view_symint({ std::move(b), std::move(c) }).mean(0, false));
+  // only update running stats when in training mode (use_input_stats=True)
+  if (use_input_stats) {
+    if (running_mean.defined()) {
+      auto running_mean_alias = at::alias(running_mean);
+      auto updated_mean = running_mean_.view_symint({ b, c }).mean(0, false);
+      if (mixed_dtype_stats) {
+        running_mean_alias.copy_(updated_mean.to(running_mean.scalar_type()));
+      } else {
+        running_mean_alias.copy_(updated_mean);
+      }
+    }
+    if (running_var.defined()) {
+      auto running_var_alias = at::alias(running_var);
+      auto updated_var = running_var_.view_symint({ std::move(b), std::move(c) }).mean(0, false);
+      if (mixed_dtype_stats) {
+        running_var_alias.copy_(updated_var.to(running_var.scalar_type()));
+      } else {
+        running_var_alias.copy_(updated_var);
+      }
+    }
   }
 
   return out.view_symint(input.sym_sizes());

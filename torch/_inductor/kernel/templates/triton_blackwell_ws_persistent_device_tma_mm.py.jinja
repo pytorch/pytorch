@@ -67,35 +67,17 @@
         )
         offs_cm = pid_m * BLOCK_M
         offs_cn = pid_n * BLOCK_N
-        {%- if EPILOGUE_SUBTILE %}
-        tl.static_assert(BLOCK_N % 2 == 0)
-        acc = tl.reshape(accumulator, (BLOCK_M, 2, BLOCK_N // 2))
-        acc = tl.permute(acc, (0, 2, 1))
-        acc0, acc1 = tl.split(acc)
-        {{store_output(
-            ("offs_cm", "offs_cn"),
-            "acc0",
-            indent_width=8,
-            val_shape=("BLOCK_M", "BLOCK_N // 2"),
-            block_indexing=True
-        )}}
-        offs_cn2 = offs_cn + BLOCK_N // 2
-        {{store_output(
-            ("offs_cm", "offs_cn2"),
-            "acc1",
-            indent_width=8,
-            val_shape=("BLOCK_M", "BLOCK_N // 2"),
-            block_indexing=True
-        )}}
-        {%- else %}
-        {{store_output(
-            ("offs_cm", "offs_cn"),
-            "accumulator",
-            indent_width=8,
-            val_shape=("BLOCK_M", "BLOCK_N"),
-            block_indexing=True
-        )}}
-        {%- endif %}
+        subtiles = _subtile_accumulator(accumulator, BLOCK_M, BLOCK_N, EPILOGUE_SUBTILE)
+        for i in tl.static_range(EPILOGUE_SUBTILE):
+            subtile = subtiles[i]
+            offs_cn_i = offs_cn + i * (BLOCK_N // EPILOGUE_SUBTILE)
+            {{store_output(
+                ("offs_cm", "offs_cn_i"),
+                "subtile",
+                indent_width=12,
+                val_shape=("BLOCK_M", "BLOCK_N // EPILOGUE_SUBTILE"),
+                block_indexing=True
+            )}}
 
 @triton.jit
 def _compute_pid(tile_id, num_pid_in_group, grid_m, GROUP_M: tl.constexpr, NUM_SMS: tl.constexpr):
@@ -105,3 +87,43 @@ def _compute_pid(tile_id, num_pid_in_group, grid_m, GROUP_M: tl.constexpr, NUM_S
     pid_m = first_pid_m + (tile_id % GROUP_M)
     pid_n = (tile_id % num_pid_in_group) // GROUP_M
     return pid_m, pid_n
+
+
+@triton.jit
+def _subtile_accumulator(
+    acc,
+    BLOCK_M: tl.constexpr,
+    BLOCK_N: tl.constexpr,
+    SUBTILE_FACTOR: tl.constexpr,
+):
+    """
+    Recursively split an accumulator into SUBTILE_FACTOR pieces using
+    reshape + permute + split operations.
+
+    Args:
+        acc: The accumulator tensor of shape (BLOCK_M, BLOCK_N)
+        BLOCK_M: The M dimension size (constexpr)
+        BLOCK_N: The N dimension size (constexpr)
+        SUBTILE_FACTOR: Must be a power of 2. The number of pieces to split into (constexpr)
+
+    Returns:
+        A tuple of SUBTILE_FACTOR tensors, each of shape (BLOCK_M, BLOCK_N // SUBTILE_FACTOR)
+    """
+    # SUBTILE_FACTOR must be a power of 2
+    tl.static_assert(SUBTILE_FACTOR > 0, "SUBTILE_FACTOR must be positive")
+    tl.static_assert((SUBTILE_FACTOR & (SUBTILE_FACTOR - 1)) == 0, "SUBTILE_FACTOR must be a power of 2")
+
+    if SUBTILE_FACTOR == 1:
+        # Base case: no subtiling needed, return the input as a single-element tuple
+        return (acc,)
+    else:
+        # Recursive case: split into 2 halves, then recursively split each half
+        tl.static_assert(BLOCK_N % 2 == 0)
+        acc = tl.reshape(acc, (BLOCK_M, 2, BLOCK_N // 2))
+        acc = tl.permute(acc, (0, 2, 1))
+        left, right = tl.split(acc)
+        # Recursively split each half
+        left_subtiles = _subtile_accumulator(left, BLOCK_M, BLOCK_N // 2, SUBTILE_FACTOR // 2)
+        right_subtiles = _subtile_accumulator(right, BLOCK_M, BLOCK_N // 2, SUBTILE_FACTOR // 2)
+        # Concatenate the tuples
+        return left_subtiles + right_subtiles

@@ -217,7 +217,10 @@ class TestSetOps(TestCase):
         # in ediff1d following fix for gh-11490
         actual = np.ediff1d(ary=ary, to_end=append, to_begin=prepend)
         assert_equal(actual, expected)
-        assert actual.dtype == expected.dtype
+        if actual.dtype != expected.dtype:
+            raise AssertionError(
+                f"Expected actual.dtype == {expected.dtype}, got {actual.dtype}"
+            )
 
     @skipIf(True, reason="NP_VER: fails with NumPy 1.22.x")
     @parametrize("kind", [None, "sort", "table"])

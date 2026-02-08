@@ -360,6 +360,9 @@ def _compute_placement_transition_cost(
         # ban shard -> partial as it does not make sense to perform
         # this redistribute
         return float("inf"), comm_bytes_gb
+    elif current_placement.is_partial() and target_placement.is_partial():
+        # we already handled the == case at the top, and we ban converting between partial types.
+        return float("inf"), comm_bytes_gb
     elif current_placement.is_replicate() and target_placement.is_shard():
         comm_bytes_gb /= num_devices_on_mesh_dim
         return 0.0, comm_bytes_gb
@@ -451,6 +454,11 @@ def redistribute_cost(
         current_spec.placements == target_spec.placements
         and current_spec.shard_order == target_spec.shard_order
     ):
+        return 0.0
+
+    # For sub-meshes, ranks not participating in the mesh should not compute
+    # redistribution costs. Return 0 since they won't actually participate.
+    if not current_spec.mesh._is_current_rank_part_of_mesh():
         return 0.0
 
     mesh_topo = MeshTopoInfo.build_from_mesh(current_spec.mesh)

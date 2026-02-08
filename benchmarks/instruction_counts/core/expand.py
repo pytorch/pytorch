@@ -48,7 +48,8 @@ def _generate_torchscript_file(model_src: str, name: str) -> Optional[str]:
     `model_src` must contain `jit_model = ...`, which `materialize` will supply.
     """
     # Double check.
-    assert "jit_model = " in model_src, f"Missing jit_model definition:\n{model_src}"
+    if "jit_model = " not in model_src:
+        raise AssertionError(f"Missing jit_model definition:\n{model_src}")
 
     # `torch.utils.benchmark.Timer` will automatically import torch, so we
     # need to match that convention.
@@ -71,18 +72,21 @@ def _generate_torchscript_file(model_src: str, name: str) -> Optional[str]:
     module_spec = importlib.util.spec_from_file_location(
         f"torchscript__{name}", module_path
     )
-    assert module_spec is not None
+    if module_spec is None:
+        raise AssertionError(f"Failed to create module spec for {module_path}")
     module = importlib.util.module_from_spec(module_spec)
     loader = module_spec.loader
-    assert loader is not None
+    if loader is None:
+        raise AssertionError(f"Module spec has no loader for {module_path}")
 
     loader.exec_module(module)
 
     # And again, the type checker has no way of knowing that this line is valid.
     jit_model = module.jit_model  # type: ignore[attr-defined]
-    assert isinstance(jit_model, (torch.jit.ScriptFunction, torch.jit.ScriptModule)), (
-        f"Expected ScriptFunction or ScriptModule, got: {type(jit_model)}"
-    )
+    if not isinstance(jit_model, (torch.jit.ScriptFunction, torch.jit.ScriptModule)):
+        raise AssertionError(
+            f"Expected ScriptFunction or ScriptModule, got: {type(jit_model)}"
+        )
     jit_model.save(artifact_path)  # type: ignore[call-arg]
 
     # Cleanup now that we have the actual serialized model.
@@ -107,8 +111,12 @@ def _get_stmt(
         stmts = (benchmark.py_fwd_stmt, benchmark.cpp_fwd_stmt)
 
     else:
-        assert runtime == RuntimeMode.JIT
-        assert benchmark.signature_args is not None
+        if runtime != RuntimeMode.JIT:
+            raise AssertionError(f"Expected RuntimeMode.JIT, but got {runtime}")
+        if benchmark.signature_args is None:
+            raise AssertionError(
+                "benchmark.signature_args must not be None for JIT mode"
+            )
         stmts = GroupedBenchmark._make_model_invocation(
             benchmark.signature_args, benchmark.signature_output, RuntimeMode.JIT
         )
@@ -116,7 +124,10 @@ def _get_stmt(
     stmt = stmts[0 if is_python else 1]
 
     if autograd == AutogradMode.FORWARD_BACKWARD and stmt is not None:
-        assert benchmark.signature_output is not None
+        if benchmark.signature_output is None:
+            raise AssertionError(
+                "benchmark.signature_output must not be None for FORWARD_BACKWARD mode"
+            )
         backward = (
             f"{benchmark.signature_output}"
             # In C++ we have to get the Tensor out of the IValue to call `.backward()`
@@ -151,20 +162,24 @@ def _get_setup(
         setup = benchmark.setup.py_setup
         model_setup = benchmark.py_model_setup
     else:
-        assert language == Language.CPP
+        if language != Language.CPP:
+            raise AssertionError(f"Expected Language.CPP, but got {language}")
         setup = benchmark.setup.cpp_setup
         model_setup = benchmark.cpp_model_setup
 
     if runtime == RuntimeMode.EAGER:
         return "\n".join([setup, model_setup or ""])
 
-    assert runtime == RuntimeMode.JIT
-    assert model_path is not None
+    if runtime != RuntimeMode.JIT:
+        raise AssertionError(f"Expected RuntimeMode.JIT, but got {runtime}")
+    if model_path is None:
+        raise AssertionError("model_path must not be None for JIT mode")
 
     # We template `"{model_path}"`, so quotes would break model loading. The
     # model path is generated within the benchmark, so this is just an
     # abundance of caution rather than something that is expected in practice.
-    assert '"' not in model_path
+    if '"' in model_path:
+        raise AssertionError(f"model_path contains quotes: {model_path}")
 
     # `stmt` may contain newlines, so we can't use f-strings. Instead we need
     # to generate templates so that dedent works properly.
@@ -180,7 +195,8 @@ def _get_setup(
         )
 
     else:
-        assert language == Language.CPP
+        if language != Language.CPP:
+            raise AssertionError(f"Expected Language.CPP, but got {language}")
         setup_template = textwrap.dedent(
             f"""
             const std::string fpath = "{model_path}";
@@ -215,7 +231,8 @@ def materialize(benchmarks: FlatIntermediateDefinition) -> FlatDefinition:
             results.append((label, auto_labels, args))
 
         else:
-            assert isinstance(args, GroupedBenchmark)
+            if not isinstance(args, GroupedBenchmark):
+                raise AssertionError(f"Expected GroupedBenchmark, but got {type(args)}")
 
             model_path: Optional[str] = None
             if args.py_model_setup and args.torchscript:

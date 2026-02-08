@@ -50,10 +50,10 @@ runs:
         fi
 
     - name: Install uv
-      uses: astral-sh/setup-uv@374b9305c53f17cee51e793c1234cdb1897489d5 # v7
+      uses: pytorch/test-infra/.github/actions/setup-uv@main
       if: ${{ steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false' }}
       with:
-        python-version: 3.12
+        python-version: "3.12"
 
     - name: Install pip
       shell: bash

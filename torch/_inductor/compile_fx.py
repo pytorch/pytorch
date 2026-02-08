@@ -315,7 +315,7 @@ def _step_logger() -> Callable[..., None]:
 def _warn_tf32_disabled() -> None:
     if (
         torch.cuda.is_available()
-        and not torch.backends.cuda.matmul.allow_tf32
+        and torch.backends.cuda.matmul.fp32_precision != "tf32"
         and torch.cuda.get_device_capability() >= (8, 0)
     ):
         warnings.warn(
@@ -850,7 +850,11 @@ def _compile_fx_inner(
     # may not be valid for use after they are run/autotuned
     torch._inductor.async_compile.CompiledTritonKernels.cache_clear()
 
-    if dynamo_utils.count_calls(gm.graph) == 0 and not aot_mode:
+    if (
+        dynamo_utils.count_calls(gm.graph) == 0
+        and not aot_mode
+        and not torch._functorch.config.bundled_autograd_cache
+    ):
         # trigger the real recompilation for _LazyGraphModule before returning
         # the forward method.
         from torch._dynamo.utils import CompileEventLogLevel
@@ -864,6 +868,7 @@ def _compile_fx_inner(
             log_level=CompileEventLogLevel.PT2_COMPILE,
         )
 
+        # pyrefly: ignore[bad-return]
         return make_boxed_func(gm.forward)
 
     static_input_idxs: Sequence[int] = graph_kwargs.setdefault("static_input_idxs", ())
@@ -1150,7 +1155,6 @@ def _compile_fx_inner(
         )
         log.info("-" * 130)
         for row in mm_table_data:
-            # pyrefly: ignore [not-iterable]
             log.info("{:<30} | {:<20} | {:<20} | {:<20} | {:<20} | {:<20}".format(*row))  # noqa: G001
             log.info("-" * 130)
 
@@ -1713,7 +1717,6 @@ class _InProcessFxCompile(FxCompile):
                             )
 
                     return CompiledFxGraph(
-                        # pyrefly: ignore [bad-argument-type]
                         compiled_fn,
                         graph,
                         gm,
@@ -2217,6 +2220,7 @@ def partition_fn(
                 joint_inputs,
                 compiler="inductor",
                 static_lifetime_input_indices=static_lifetime_input_indices,
+                # pyrefly: ignore[bad-argument-type]
                 **kwargs,
             )
     else:
@@ -2768,7 +2772,7 @@ def _compile_fx_main(
                     trace_joint=False,
                     decompositions=decompositions,
                 )
-
+                assert isinstance(gm, GraphModule)
                 from torch._export.utils import _detect_fake_mode_from_gm
 
                 fake_mode = _detect_fake_mode_from_gm(gm)  # type: ignore[assignment]

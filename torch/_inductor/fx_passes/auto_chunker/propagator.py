@@ -474,7 +474,7 @@ def propagate_general_copy_metadata(
         ):
             return PropagateStatus.FAIL
 
-        # apply any to a list to avoid short-curcuit
+        # apply any to a list to avoid short-circuit
         changed = any(  # noqa: C419
             [  # noqa: C419
                 copy_chunking_meta(node, meta)
@@ -606,16 +606,14 @@ def propagate_permute(permute_node: Node) -> _HandlerRetType:
             return PropagateStatus.FAIL
 
         orig_chunk_dim = output_meta.chunk_dim
-        # pyrefly: ignore[bad-index, unsupported-operation]
+
         new_chunk_dim = order[orig_chunk_dim]
 
         # sanity check
         if input_meta is not None:
             assert input_meta.chunk_dim == new_chunk_dim
         return _bool_to_status(
-            set_chunking_meta(
-                input_node, meta=output_meta, chunk_dim=new_chunk_dim
-            )  # pyrefly: ignore[bad-argument-type]
+            set_chunking_meta(input_node, meta=output_meta, chunk_dim=new_chunk_dim)
         )
 
     return propagate_fwd(), propagate_bwd()

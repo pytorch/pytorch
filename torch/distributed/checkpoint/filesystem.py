@@ -130,7 +130,8 @@ class _SerialCpuLoader(_TensorLoader):
         for _, obj in self.items:
             tensor = self.resolve_fun(obj).detach()
             tensor = tensor.cpu()
-            if tensor.storage().size() != tensor.numel():
+            if tensor.untyped_storage().size() != tensor.nbytes:
+                # creates a new tensor with minimal storage while preserving memory format.
                 tensor = tensor.clone()
             yield (
                 tensor,
@@ -189,7 +190,7 @@ class _OverlappingCpuLoader(_TensorLoader):
                         tensor.untyped_storage().size()
                         != tensor.numel() * tensor.itemsize
                     ):
-                        # this forces the tensor to be both contiguous and with minimal storage
+                        # creates a new tensor with minimal storage while preserving memory format.
                         tensor = tensor.clone()
 
                 self.current_items.append(

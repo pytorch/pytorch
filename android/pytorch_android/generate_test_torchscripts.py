@@ -112,9 +112,12 @@ class Test(torch.jit.ScriptModule):
     @torch.jit.script_method
     def testNonContiguous(self):
         x = torch.tensor([100, 200, 300])[::2]
-        assert not x.is_contiguous()
-        assert x[0] == 100
-        assert x[1] == 300
+        if x.is_contiguous():
+            raise AssertionError("expected non-contiguous tensor")
+        if x[0] != 100:
+            raise AssertionError("expected x[0] == 100")
+        if x[1] != 300:
+            raise AssertionError("expected x[1] == 300")
         return x
 
     @torch.jit.script_method

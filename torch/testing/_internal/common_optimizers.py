@@ -1333,7 +1333,8 @@ def _get_device_type(device: Union[str, torch.device]) -> str:
     # Returns the device type as a string, e.g., "cpu" or "cuda"
     if isinstance(device, torch.device):
         device = str(device.type)
-    assert isinstance(device, str)
+    if not isinstance(device, str):
+        raise AssertionError(f"Expected device to be a str, got {type(device)}")
     return device.split(":")[0]
 
 
@@ -1351,9 +1352,10 @@ def _get_optim_inputs_including_global_cliquey_kwargs(
     trivial. That said, we sometimes want to test for all possible configs on an
     optimizer including all supported flags, so this helper returns all optim inputs.
     """
-    assert all(x in ["foreach", "fused", "differentiable"] for x in skip), (
-        "skip must be a subset of ['foreach', 'fused', 'differentiable']"
-    )
+    if not all(x in ["foreach", "fused", "differentiable"] for x in skip):
+        raise AssertionError(
+            "skip must be a subset of ['foreach', 'fused', 'differentiable']"
+        )
 
     optim_inputs = optim_info.optim_inputs_func(device)
 
@@ -1702,17 +1704,6 @@ optim_db: list[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_fused_matches_forloop",
             ),
-            DecorateInfo(
-                # Note on tolerances:
-                # Tracking through #127000
-                toleranceOverride(
-                    {
-                        torch.float32: tol(atol=3e-5, rtol=1.3e-06),
-                    }
-                ),
-                "TestCudaOptims",
-                "test_grad_scaling_autocast_fused_optimizers",
-            ),
         ),
         skips=(
             DecorateInfo(
@@ -1808,20 +1799,6 @@ optim_db: list[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_fused_matches_forloop",
-            ),
-            # Note on tolerances:
-            # Tracking through #127000
-            DecorateInfo(
-                toleranceOverride(
-                    {
-                        torch.float32: tol(
-                            atol=3e-5,
-                            rtol=1.3e-06,
-                        )
-                    }
-                ),
-                "TestCudaOptims",
-                "test_grad_scaling_autocast_fused_optimizers",
             ),
         ),
         skips=(
@@ -2284,7 +2261,7 @@ class TensorTracker:
         self.tensors.append(tensor.detach().clone())
 
     # pops from beginning, like a queue and not a stack!
-    def pop_check_set(self, tensor_to_set, testcase):
+    def pop_check_set(self, tensor_to_set, testcase, override_assert_eq_kwargs=None):
         """
         Pop the first element in the tensor tracker, assert equality between the popped tensor and
         the input tensor, and then set the input tensor to have the same values as the popped tensor
@@ -2294,7 +2271,12 @@ class TensorTracker:
         ref = self.tensors.pop(0)
 
         testcase.assertTrue(isinstance(ref, Tensor), f"{type(ref)=}")
-        testcase.assertEqual(tensor_to_set, ref, **self.assert_eq_kwargs)
+        assert_eq_kwargs = (
+            override_assert_eq_kwargs
+            if override_assert_eq_kwargs is not None
+            else self.assert_eq_kwargs
+        )
+        testcase.assertEqual(tensor_to_set, ref, **assert_eq_kwargs)
 
         with torch.no_grad():
             tensor_to_set.copy_(ref)

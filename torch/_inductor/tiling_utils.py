@@ -7,7 +7,6 @@ from typing import Literal, Optional, overload, TYPE_CHECKING, TypeVar, Union
 import sympy
 
 import torch
-from torch._inductor import config
 from torch._inductor.dependencies import index_vars_no_squeeze
 from torch._inductor.utils import sympy_product, sympy_subs
 from torch.utils._ordered_set import OrderedSet
@@ -634,25 +633,21 @@ def get_score(
             var_sizes.append(v_size)
     from .virtualized import V
 
-    return V.graph.sizevars.atomically_apply_size_hint(
-        sympy_product(var_sizes), fallback=config.unbacked_symint_fallback
-    )
+    return V.graph.sizevars.optimization_hint(sympy_product(var_sizes))
 
 
 def try_get_buf_size(buf_name: str) -> Optional[int]:
     buf = V.graph.try_get_buffer(buf_name)
     if not buf:
         return None
-    return V.graph.sizevars.atomically_apply_size_hint(
-        sympy_product(buf.get_size()), fallback=config.unbacked_symint_fallback
-    )
+    return V.graph.sizevars.optimization_hint(sympy_product(buf.get_size()))
 
 
 def get_hint(v: Union[sympy.Expr, int]) -> int:
     if isinstance(v, int):
         return v
     else:
-        return V.graph.sizevars.size_hint(v, fallback=config.unbacked_symint_fallback)
+        return V.graph.sizevars.optimization_hint(v)
 
 
 @dataclasses.dataclass(frozen=True)

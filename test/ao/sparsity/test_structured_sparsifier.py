@@ -91,8 +91,10 @@ class TestSaliencyPruner(TestCase):
         expected = torch.Tensor([[3, 3, 3, 3], [4, 4, 4, 4]])
         pruned = pruned_model.linear1.weight
 
-        assert expected.shape == pruned.shape
-        assert torch.isclose(expected, pruned, rtol=1e-05, atol=1e-07).all()
+        if expected.shape != pruned.shape:
+            raise AssertionError(f"Expected shape {expected.shape}, got {pruned.shape}")
+        if not torch.isclose(expected, pruned, rtol=1e-05, atol=1e-07).all():
+            raise AssertionError("Expected and pruned tensors are not close")
 
     def test_lstm_saliency_pruner_update_mask(self):
         model = LSTMLinearModel(
@@ -133,32 +135,51 @@ class TestSaliencyPruner(TestCase):
         # make sure lowest saliency rows are pruned
         expected = torch.Tensor([[2, 2], [2, 2], [-2, -2], [-2, -2]])
         pruned = model.lstm.weight_ih_l0
-        assert expected.shape == pruned.shape
-        assert torch.isclose(expected, pruned, rtol=1e-05, atol=1e-07).all()
+        if expected.shape != pruned.shape:
+            raise AssertionError(f"Expected shape {expected.shape}, got {pruned.shape}")
+        if not torch.isclose(expected, pruned, rtol=1e-05, atol=1e-07).all():
+            raise AssertionError("Expected and pruned tensors are not close")
 
         expected = torch.Tensor([[2], [2], [-2], [-2]])
         pruned = model.lstm.weight_hh_l0
-        assert expected.shape == pruned.shape
-        assert torch.isclose(expected, pruned, rtol=1e-05, atol=1e-07).all()
+        if expected.shape != pruned.shape:
+            raise AssertionError(f"Expected shape {expected.shape}, got {pruned.shape}")
+        if not torch.isclose(expected, pruned, rtol=1e-05, atol=1e-07).all():
+            raise AssertionError("Expected and pruned tensors are not close")
 
         expected = torch.Tensor([2, 2, -2, -2])
         for pruned in [model.lstm.bias_ih_l0, model.lstm.bias_hh_l0]:
-            assert expected.shape == pruned.shape
-            assert torch.isclose(expected, pruned, rtol=1e-05, atol=1e-07).all()
+            if expected.shape != pruned.shape:
+                raise AssertionError(
+                    f"Expected shape {expected.shape}, got {pruned.shape}"
+                )
+            if not torch.isclose(expected, pruned, rtol=1e-05, atol=1e-07).all():
+                raise AssertionError("Expected and pruned tensors are not close")
 
 
 class TestBaseStructuredSparsifier(TestCase):
     def _check_pruner_prepared(self, model, pruner, device):
         for config in pruner.groups:
             module = config["module"]
-            assert module.weight.device.type == device.type
+            if module.weight.device.type != device.type:
+                raise AssertionError(
+                    f"Expected device {device.type}, got {module.weight.device.type}"
+                )
             # Check mask exists
-            assert config["tensor_fqn"] in pruner.state
+            if config["tensor_fqn"] not in pruner.state:
+                raise AssertionError("Expected tensor_fqn in pruner.state")
             # Check parametrization exists and is correct
-            assert parametrize.is_parametrized(module)
-            assert hasattr(module, "parametrizations")
+            if not parametrize.is_parametrized(module):
+                raise AssertionError("Expected module to be parametrized")
+            if not hasattr(module, "parametrizations"):
+                raise AssertionError(
+                    "Expected module to have parametrizations attribute"
+                )
             # Assume that this is the 1st/only parametrization
-            assert type(module.parametrizations.weight[0]) is FakeStructuredSparsity
+            if type(module.parametrizations.weight[0]) is not FakeStructuredSparsity:
+                raise AssertionError(
+                    f"Expected FakeStructuredSparsity, got {type(module.parametrizations.weight[0])}"
+                )
 
     def _check_pruner_valid_before_step(self, model, pruner, device):
         for config in pruner.groups:
@@ -169,8 +190,14 @@ class TestBaseStructuredSparsifier(TestCase):
                 module = config["module"]
                 modules.append(module)
             for module in modules:
-                assert module.weight.device.type == device.type
-                assert module.parametrizations.weight[0].mask.dtype == torch.bool
+                if module.weight.device.type != device.type:
+                    raise AssertionError(
+                        f"Expected device {device.type}, got {module.weight.device.type}"
+                    )
+                if module.parametrizations.weight[0].mask.dtype != torch.bool:
+                    raise AssertionError(
+                        f"Expected mask dtype torch.bool, got {module.parametrizations.weight[0].mask.dtype}"
+                    )
 
     def _check_pruner_valid_after_step(self, model, pruner, mask, device):
         for config in pruner.groups:
@@ -181,12 +208,17 @@ class TestBaseStructuredSparsifier(TestCase):
                 module = config["module"]
                 modules.append(module)
             for module in modules:
-                assert module.weight.device.type == device.type
+                if module.weight.device.type != device.type:
+                    raise AssertionError(
+                        f"Expected device {device.type}, got {module.weight.device.type}"
+                    )
                 total = module.parametrizations.weight[0].mask.numel()
-                assert (
-                    module.parametrizations.weight[0].mask.count_nonzero()
-                    == total - mask
-                )
+                actual_nonzero = module.parametrizations.weight[0].mask.count_nonzero()
+                expected_nonzero = total - mask
+                if actual_nonzero != expected_nonzero:
+                    raise AssertionError(
+                        f"Expected {expected_nonzero} nonzero elements, got {actual_nonzero}"
+                    )
 
     def _test_constructor_on_device(self, model, device):
         self.assertRaisesRegex(
@@ -200,17 +232,29 @@ class TestBaseStructuredSparsifier(TestCase):
         pruner.enable_mask_update = True
         for g in pruner.groups:
             module = g["module"]
-            assert module.weight.device.type == device.type
-        assert len(pruner.groups) == 5
+            if module.weight.device.type != device.type:
+                raise AssertionError(
+                    f"Expected device {device.type}, got {module.weight.device.type}"
+                )
+        if len(pruner.groups) != 5:
+            raise AssertionError(f"Expected 5 groups, got {len(pruner.groups)}")
         pruner.step()
         # Can instantiate the model with configs
         model2 = copy.deepcopy(model).to(device)
         pruner = SimplePruner({"test": 3})
         pruner.prepare(model2, [{"tensor_fqn": "seq.0.weight"}])
-        assert len(pruner.groups) == 1
-        assert pruner.groups[0]["module_fqn"] == "seq.0"
-        assert "test" in pruner.groups[0]
-        assert pruner.groups[0]["test"] == 3
+        if len(pruner.groups) != 1:
+            raise AssertionError(f"Expected 1 group, got {len(pruner.groups)}")
+        if pruner.groups[0]["module_fqn"] != "seq.0":
+            raise AssertionError(
+                f"Expected module_fqn 'seq.0', got {pruner.groups[0]['module_fqn']}"
+            )
+        if "test" not in pruner.groups[0]:
+            raise AssertionError("Expected 'test' key in pruner.groups[0]")
+        if pruner.groups[0]["test"] != 3:
+            raise AssertionError(
+                f"Expected test value 3, got {pruner.groups[0]['test']}"
+            )
 
     def test_constructor(self):
         model = SimpleLinear()
@@ -223,7 +267,8 @@ class TestBaseStructuredSparsifier(TestCase):
         pruner = SimplePruner(None)
         pruner.prepare(model, None)
         self._check_pruner_prepared(model, pruner, device)
-        assert model(x).shape == (128, 10)
+        if model(x).shape != (128, 10):
+            raise AssertionError(f"Expected shape (128, 10), got {model(x).shape}")
 
     def test_prepare_linear(self):
         models = [
@@ -241,7 +286,10 @@ class TestBaseStructuredSparsifier(TestCase):
         pruner = SimplePruner(None)
         pruner.prepare(model, config)
         self._check_pruner_prepared(model, pruner, device)
-        assert model(x).shape == expected_shape
+        if model(x).shape != expected_shape:
+            raise AssertionError(
+                f"Expected shape {expected_shape}, got {model(x).shape}"
+            )
 
     def test_prepare_conv2d(self):
         models = [
@@ -295,7 +343,10 @@ class TestBaseStructuredSparsifier(TestCase):
         self._check_pruner_valid_before_step(model, pruner, device)
         pruner.step()
         self._check_pruner_valid_after_step(model, pruner, 1, device)
-        assert model(x).shape == expected_shape
+        if model(x).shape != expected_shape:
+            raise AssertionError(
+                f"Expected shape {expected_shape}, got {model(x).shape}"
+            )
 
     @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     def test_step_conv2d(self):
@@ -323,8 +374,12 @@ class TestBaseStructuredSparsifier(TestCase):
     def _check_pruner_pruned(self, model, pruner, device):
         for config in pruner.groups:
             module = config["module"]
-            assert not hasattr(module, "parametrizations")
-            assert not hasattr(module, "mask")
+            if hasattr(module, "parametrizations"):
+                raise AssertionError(
+                    "Module should not have parametrizations after pruning"
+                )
+            if hasattr(module, "mask"):
+                raise AssertionError("Module should not have mask after pruning")
 
     def _test_linear_on_device(
         self, model, config, expected_shape, device, also_prune_bias
@@ -341,7 +396,8 @@ class TestBaseStructuredSparsifier(TestCase):
 
         y_expected = model(x)
 
-        assert y_expected.shape == (128, 10)
+        if y_expected.shape != (128, 10):
+            raise AssertionError(f"Expected shape (128, 10), got {y_expected.shape}")
         self._check_pruner_prepared(model, pruner, device)
 
         # Pruning step
@@ -349,11 +405,18 @@ class TestBaseStructuredSparsifier(TestCase):
         y_pruned = pruned(x)
         num_pruned_params = sum(p.numel() for p in pruned.parameters())
 
-        assert y_pruned.shape == expected_shape
+        if y_pruned.shape != expected_shape:
+            raise AssertionError(
+                f"Expected shape {expected_shape}, got {y_pruned.shape}"
+            )
         self._check_pruner_pruned(model, pruner, device)
         if y_pruned.shape == y_expected.shape:
-            assert torch.isclose(y_expected, y_pruned, rtol=1e-05, atol=1e-07).all()
-            assert num_pruned_params < num_original_params
+            if not torch.isclose(y_expected, y_pruned, rtol=1e-05, atol=1e-07).all():
+                raise AssertionError("Expected and pruned outputs are not close")
+            if num_pruned_params >= num_original_params:
+                raise AssertionError(
+                    f"Expected pruned params ({num_pruned_params}) < original ({num_original_params})"
+                )
 
     def test_prune_linear_linear(self):
         r"""test pruning linear-> linear modules"""
@@ -477,7 +540,10 @@ class TestBaseStructuredSparsifier(TestCase):
         pruner.step()
 
         y_expected = model(x)
-        assert y_expected.shape == expected_shape
+        if y_expected.shape != expected_shape:
+            raise AssertionError(
+                f"Expected shape {expected_shape}, got {y_expected.shape}"
+            )
 
         self._check_pruner_prepared(model, pruner, device)
 
@@ -486,18 +552,20 @@ class TestBaseStructuredSparsifier(TestCase):
         y_pruned = pruned(x)
         num_pruned_params = sum(p.numel() for p in pruned.parameters())
 
-        assert y_pruned.shape == expected_shape
+        if y_pruned.shape != expected_shape:
+            raise AssertionError(
+                f"Expected shape {expected_shape}, got {y_pruned.shape}"
+            )
         self._check_pruner_pruned(model, pruner, device)
         if y_pruned.shape == y_expected.shape:
             # TODO This rtol is a little high, need to double check if something specific is causing this to fail
-            assert torch.isclose(
-                y_expected,
-                y_pruned,
-                rtol=1e-3,
-                atol=1e-3,
-            ).all(), f"fail for {type(model)}"
+            if not torch.isclose(y_expected, y_pruned, rtol=1e-3, atol=1e-3).all():
+                raise AssertionError(f"fail for {type(model)}")
             # only time this should be equal is when all layers have padding and we can't prune
-            assert num_pruned_params <= num_original_params
+            if num_pruned_params > num_original_params:
+                raise AssertionError(
+                    f"Expected pruned params ({num_pruned_params}) <= original ({num_original_params})"
+                )
 
     def test_prune_conv2d_conv2d(self):
         configs, shapes = [], []
@@ -769,15 +837,20 @@ class TestBaseStructuredSparsifier(TestCase):
 
         expected_params = dict(model.named_parameters())
         for name, param in model.named_parameters():
-            assert name in expected_params
+            if name not in expected_params:
+                raise AssertionError(f"Expected parameter '{name}' in expected_params")
             # We cannot compare y_expected == y_pruned, as the 0 elements mess up the numerics
             # Instead we check that the weights of the new LSTM are a subset of the weights of
             # the old LSTM
-            assert rows_are_subset(param, expected_params[name])
+            if not rows_are_subset(param, expected_params[name]):
+                raise AssertionError(f"Parameter '{name}' rows are not a subset")
             del expected_params[name]
 
         # assert we haven't deleted any keys
-        assert len(expected_params) == 0
+        if len(expected_params) != 0:
+            raise AssertionError(
+                f"Expected all params deleted, but {len(expected_params)} remain"
+            )
 
     def test_prune_lstm_linear_single_layer(self):
         """
@@ -812,12 +885,16 @@ class TestBaseStructuredSparsifier(TestCase):
         # zeros vs. missing elements yield different numerical results.
         # Instead that we check that the pruned elements are the first half of the results
         # since we are using a BottomHalfLSTMPruner
-        assert torch.isclose(
+        if not torch.isclose(
             lstm_out_expected[:, : c // 2], lstm_out_pruned, rtol=1e-05, atol=1e-07
-        ).all()
+        ).all():
+            raise AssertionError("LSTM outputs are not close")
         # also check that output of linear is the same shape, this means we've resized
         # linear columns correctly.
-        assert out_expected.shape == out_pruned.shape
+        if out_expected.shape != out_pruned.shape:
+            raise AssertionError(
+                f"Expected shape {out_expected.shape}, got {out_pruned.shape}"
+            )
 
     def test_prune_lstm_layernorm_linear_multiple_layer(self):
         """
@@ -852,15 +929,20 @@ class TestBaseStructuredSparsifier(TestCase):
 
         expected_params = dict(model.named_parameters())
         for name, param in model.named_parameters():
-            assert name in expected_params
+            if name not in expected_params:
+                raise AssertionError(f"Expected parameter '{name}' in expected_params")
             # We cannot compare y_expected == y_pruned, as the 0 elements mess up the numerics
             # Instead we check that the weights of the new LSTM are a subset of the weights of
             # the old LSTM
-            assert rows_are_subset(param, expected_params[name])
+            if not rows_are_subset(param, expected_params[name]):
+                raise AssertionError(f"Parameter '{name}' rows are not a subset")
             del expected_params[name]
 
         # assert we haven't deleted any keys
-        assert len(expected_params) == 0
+        if len(expected_params) != 0:
+            raise AssertionError(
+                f"Expected all params deleted, but {len(expected_params)} remain"
+            )
 
     def test_prune_lstm_layernorm_linear_single_layer(self):
         """
@@ -895,12 +977,16 @@ class TestBaseStructuredSparsifier(TestCase):
         # zeros vs. missing elements yield different numerical results.
         # Instead that we check that the pruned elements are the first half of the results
         # since we are using a BottomHalfLSTMPruner
-        assert torch.isclose(
+        if not torch.isclose(
             lstm_out_expected[:, : c // 2], lstm_out_pruned, rtol=1e-05, atol=1e-07
-        ).all()
+        ).all():
+            raise AssertionError("LSTM outputs are not close")
         # also check that output of linear is the same shape, this means we've resized
         # linear columns correctly.
-        assert out_expected.shape == out_pruned.shape
+        if out_expected.shape != out_pruned.shape:
+            raise AssertionError(
+                f"Expected shape {out_expected.shape}, got {out_pruned.shape}"
+            )
 
 
 class TestFPGMPruner(TestCase):
@@ -999,9 +1085,10 @@ class TestFPGMPruner(TestCase):
             flattened_filters, flattened_filters, p=2
         )
         expected_dist_conv1 = torch.sum(torch.abs(expected_dist_matrix_conv1), 1)
-        assert torch.isclose(
+        if not torch.isclose(
             dist_conv1, expected_dist_conv1, rtol=1e-05, atol=1e-07
-        ).all()
+        ).all():
+            raise AssertionError("Distance computation does not match expected")
 
     def _test_update_mask_on_single_layer(self, expected_conv1, device):
         """Test that pruning is conducted based on the pair-wise distance measurement instead of absolute norm value"""
@@ -1013,10 +1100,11 @@ class TestFPGMPruner(TestCase):
         pruner.prepare(model, config)
         pruner.enable_mask_update = True
         pruner.step()
-        assert (
+        if (
             pruner.groups[0]["module"].parametrizations.weight[0].mask[-1].item()
-            is not False
-        ), "do not prune the least-norm filter"
+            is False
+        ):
+            raise AssertionError("do not prune the least-norm filter")
 
         # fusion step
         pruned_model = pruner.prune()
@@ -1024,18 +1112,21 @@ class TestFPGMPruner(TestCase):
         pruned_y = pruned_model(x)
         # assert shapes
         expected_conv1 = expected_conv1.to(device)
-        assert pruned_y.shape == (1, 4, 32, 32)
-        assert pruned_model.conv2d1.weight.shape == expected_conv1.shape
-        assert pruned_model.conv2d2.weight.shape == (
-            4,
-            2,
-            3,
-            3,
-        ), "conv2d2 should have input channel pruned"
+        if pruned_y.shape != (1, 4, 32, 32):
+            raise AssertionError(f"Expected shape (1, 4, 32, 32), got {pruned_y.shape}")
+        if pruned_model.conv2d1.weight.shape != expected_conv1.shape:
+            raise AssertionError(
+                f"Expected conv2d1 shape {expected_conv1.shape}, got {pruned_model.conv2d1.weight.shape}"
+            )
+        if pruned_model.conv2d2.weight.shape != (4, 2, 3, 3):
+            raise AssertionError(
+                f"conv2d2 should have input channel pruned, got {pruned_model.conv2d2.weight.shape}"
+            )
         # assert value
-        assert torch.isclose(
+        if not torch.isclose(
             pruned_model.conv2d1.weight, expected_conv1, rtol=1e-05, atol=1e-07
-        ).all()
+        ).all():
+            raise AssertionError("conv2d1 weight does not match expected")
 
     def _test_update_mask_on_multiple_layer(
         self, expected_conv1, expected_conv2, device
@@ -1055,9 +1146,8 @@ class TestFPGMPruner(TestCase):
         mask1 = pruner.groups[0]["module"].parametrizations.weight[0].mask[-1]
         mask2 = pruner.groups[0]["module"].parametrizations.weight[0].mask[-2]
         # Check if either of the least-norm filters is not pruned
-        assert mask1.item() is not False or mask2.item() is not False, (
-            "Do not prune all least-norm filters"
-        )
+        if not (mask1.item() is not False or mask2.item() is not False):
+            raise AssertionError("Do not prune all least-norm filters")
 
         # fusion step
         pruned_model = pruner.prune()
@@ -1065,16 +1155,25 @@ class TestFPGMPruner(TestCase):
         # assert shapes
         expected_conv1 = expected_conv1.to(device)
         expected_conv2 = expected_conv2.to(device)
-        assert pruned_y.shape == (1, 2, 32, 32)
-        assert pruned_model.conv2d1.weight.shape == expected_conv1.shape
-        assert pruned_model.conv2d2.weight.shape == expected_conv2.shape
+        if pruned_y.shape != (1, 2, 32, 32):
+            raise AssertionError(f"Expected shape (1, 2, 32, 32), got {pruned_y.shape}")
+        if pruned_model.conv2d1.weight.shape != expected_conv1.shape:
+            raise AssertionError(
+                f"Expected conv2d1 shape {expected_conv1.shape}, got {pruned_model.conv2d1.weight.shape}"
+            )
+        if pruned_model.conv2d2.weight.shape != expected_conv2.shape:
+            raise AssertionError(
+                f"Expected conv2d2 shape {expected_conv2.shape}, got {pruned_model.conv2d2.weight.shape}"
+            )
         # assert values
-        assert torch.isclose(
+        if not torch.isclose(
             pruned_model.conv2d1.weight, expected_conv1, rtol=1e-05, atol=1e-07
-        ).all()
-        assert torch.isclose(
+        ).all():
+            raise AssertionError("conv2d1 weight does not match expected")
+        if not torch.isclose(
             pruned_model.conv2d2.weight, expected_conv2, rtol=1e-05, atol=1e-07
-        ).all()
+        ).all():
+            raise AssertionError("conv2d2 weight does not match expected")
 
     def test_update_mask(self):
         weights = torch.tensor([3.0, 0.1])

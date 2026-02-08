@@ -75,7 +75,8 @@ def aot_eager_regional_inductor(
     if serialize:
 
         def regional_inductor_pickle(gm, *example_args):
-            result = regional_inductor_fn(gm, *example_args)
+            with torch._functorch.config.patch(force_autograd_cache=True):
+                result = regional_inductor_fn(gm, *example_args)
             serialized = GraphPickler.dumps(result)
 
             fake_mode = detect_fake_mode(example_args)
@@ -85,8 +86,12 @@ def aot_eager_regional_inductor(
             context = torch._guards.TracingContext(fake_mode)
             with torch._guards.tracing(context):
                 result = GraphPickler.loads(serialized, fake_mode)
-                assert isinstance(result, torch.fx.GraphModule)
-                result.recompile()
+                if isinstance(result, torch.fx.GraphModule):
+                    result.recompile()
+                elif isinstance(result, RegionalOutputCode):
+                    result._graph_module.recompile()
+                else:
+                    raise RuntimeError(f"Unexpected type: {type(result)}")
                 return result
 
         return aot_autograd(
@@ -1375,7 +1380,10 @@ class TestRegionalOutputCode(torch._inductor.test_case.TestCase):
         y = torch.randn(10, requires_grad=True)
 
         # Compile with regional inductor
-        with torch.fx.traceback.preserve_node_meta(enable=False):
+        with (
+            torch.fx.traceback.preserve_node_meta(enable=False),
+            torch._functorch.config.patch(force_autograd_cache=True),
+        ):
             from torch._subclasses.fake_tensor import FakeTensorMode
             from torch.fx.experimental.proxy_tensor import make_fx
 
@@ -1386,10 +1394,10 @@ class TestRegionalOutputCode(torch._inductor.test_case.TestCase):
                 gm = make_fx(fn)(fake_x, fake_y)
 
             # Run regional_inductor on the graph
-            result_gm = regional_inductor(gm, fake_x, fake_y)
+            output_code = regional_inductor(gm, fake_x, fake_y)
 
         # Create RegionalOutputCode
-        output_code = RegionalOutputCode(result_gm)
+        self.assertIsInstance(output_code, RegionalOutputCode)
 
         # Test that we can call it
         self.assertIsNotNone(output_code._graph_module)
@@ -1437,12 +1445,15 @@ class TestRegionalOutputCode(torch._inductor.test_case.TestCase):
             fake_y = fake_mode.from_tensor(y)
 
             # Create forward graph
-            with torch.fx.traceback.preserve_node_meta(enable=False):
+            with (
+                torch.fx.traceback.preserve_node_meta(enable=False),
+                torch._functorch.config.patch(force_autograd_cache=True),
+            ):
                 gm = make_fx(fn)(fake_x, fake_y)
-                forward_gm = regional_inductor(gm, fake_x, fake_y)
+                fw_code = regional_inductor(gm, fake_x, fake_y)
 
         # Create forward output code
-        fw_code = RegionalOutputCode(forward_gm)
+        self.assertIsInstance(fw_code, RegionalOutputCode)
 
         # Verify it can be called
         with fake_mode:
@@ -1479,13 +1490,16 @@ class TestRegionalOutputCode(torch._inductor.test_case.TestCase):
         with fake_mode:
             fake_x = fake_mode.from_tensor(x)
 
-            with torch.fx.traceback.preserve_node_meta(enable=False):
+            with (
+                torch.fx.traceback.preserve_node_meta(enable=False),
+                torch._functorch.config.patch(force_autograd_cache=True),
+            ):
                 gm = make_fx(fn)(fake_x)
                 compiled_gm = regional_inductor(gm, fake_x)
 
         # Create forward using the generic BundledCompiledForward
-        fw_code = RegionalOutputCode(compiled_gm)
-        fw_compiled = BundledCompiledForward[RegionalOutputCode](result=fw_code)
+        self.assertIsInstance(compiled_gm, RegionalOutputCode)
+        fw_compiled = BundledCompiledForward[RegionalOutputCode](result=compiled_gm)
 
         # Test pre_save
         fw_compiled.pre_save()

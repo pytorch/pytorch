@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence, Set as AbstractSet
 
 
-perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
+cudagraphs_log = torch._logging.getArtifactLogger(__name__, "cudagraphs")
 static_inputs_log = torch._logging.getArtifactLogger(
     __name__, "cudagraph_static_inputs"
 )
@@ -29,14 +29,14 @@ OutputType = list[Optional[Union[int, torch.Tensor]]]
 ModelType = Callable[[list[InputType]], OutputType]
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class FunctionID:
     "Unique counter of a function wrapped in cudagraphify_impl"
 
     id: int
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class PlaceholderInfo:
     """
     A serializable version of torch.fx.Node that contains information
@@ -51,7 +51,7 @@ class PlaceholderInfo:
     mutating_use_stack_trace: Optional[str]
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class WrappedFunction:
     """
     Represents a function that you want to record for CUDA graph replay,
@@ -204,7 +204,7 @@ def check_lowering_disable_cudagraph(
 
 
 def log_cudagraph_skip_and_bump_counter(msg: str) -> None:
-    perf_hint_log.warning(msg)
+    cudagraphs_log.warning(msg)
     counters["inductor"]["cudagraph_skips"] += 1
 
     if torch._inductor.config.triton.cudagraph_or_error:
@@ -340,7 +340,7 @@ def maybe_warning_due_to_dynamic_shape(
         and num_cudagraphs
         > torch._inductor.config.triton.cudagraph_dynamic_shape_warn_limit
     ):
-        perf_hint_log.warning(warn_msg())
+        cudagraphs_log.warning(warn_msg())
         return True
 
     return False

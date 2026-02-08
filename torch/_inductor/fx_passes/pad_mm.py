@@ -348,7 +348,8 @@ def should_pad_bench_key(
     tf32_key = (
         None
         if mat1.dtype != torch.float32
-        else torch.backends.cuda.matmul.allow_tf32 or torch.backends.mkldnn.allow_tf32
+        else torch.backends.cuda.matmul.fp32_precision == "tf32"
+        or torch.backends.mkldnn.fp32_precision == "tf32"
     )
 
     def fmt_pad(name: str) -> str | None:

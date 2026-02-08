@@ -162,7 +162,8 @@ def convert_arg_type_and_name(
     elif isinstance(typ, ListType):
         # Need to explicitly pass the list as pointer + length
         c_types, names, aten_types, _ = convert_arg_type_and_name(typ.elem, name)
-        assert len(c_types) == 1, "ListType with unsupported element type " + repr(typ)
+        if len(c_types) != 1:
+            raise AssertionError(f"ListType with unsupported element type {repr(typ)}")
 
         # The list content should never be modified
         c_types[0] = f"const {c_types[0]}*"
@@ -175,7 +176,8 @@ def convert_arg_type_and_name(
         if atype == "bool":
             # no converter from std::vector<bool> to c10::ArrayRef<bool>
             # construct std::array<bool, N> instead
-            assert typ.size is not None
+            if typ.size is None:
+                raise AssertionError("bool ListType must have a size")
             callsite_exprs.append(f"pointer_to_list<{typ.size}>({name})")
         elif atype == "at::Tensor" and not is_write:
             callsite_exprs.append(
@@ -270,7 +272,8 @@ def gen_returns(schema: FunctionSchema) -> tuple[list[str], list[str]]:
     callsite_exprs: list[str] = []
     for idx, ret in enumerate(schema.returns):
         tmp = "tmp_result" if len(names) == 1 else f"std::get<{idx}>(tmp_result)"
-        assert isinstance(ret.type, BaseType)
+        if not isinstance(ret.type, BaseType):
+            raise AssertionError(f"Expected BaseType for return, got {type(ret.type)}")
         rval = convert_return(ret.type, tmp)
         if ret_pointer_can_be_null:
             callsite_exprs.append(f"if ({names[idx]}) {{ *{names[idx]} = {rval}; }}")
@@ -300,18 +303,18 @@ def gen_declaration_and_definition(
     # {"v2" : ["new_arg1"], "v3": ["new_arg2, new_arg3"]}.
     indexed_version_info: dict[int, list[str]] = {1: []}
     for ver_str, new_args in sorted(version_info.items()):
-        assert ver_str.startswith("v"), (
-            f"Version number for {base_name} is {ver_str}, not starting with 'v'"
-        )
+        if not ver_str.startswith("v"):
+            raise AssertionError(
+                f"Version number for {base_name} is {ver_str}, not starting with 'v'"
+            )
         try:
             ver_id = int(ver_str[1:])
         except ValueError as e:
             raise AssertionError(
                 f"Version number for {base_name} is {ver_str}, not a valid integer after 'v'"
             ) from e
-        assert ver_id not in indexed_version_info, (
-            f"{ver_str} for {base_name} has already been defined"
-        )
+        if ver_id in indexed_version_info:
+            raise AssertionError(f"{ver_str} for {base_name} has already been defined")
         indexed_version_info[ver_id] = new_args
 
     declarations: list[str] = []
@@ -386,7 +389,8 @@ def gen_static_dispatch_backend_call_signature(
         cpp_sig = cpp_sigs.symint_signature
     else:
         cpp_sig = cpp_sigs.signature
-    assert cpp_sig is not None
+    if cpp_sig is None:
+        raise AssertionError(f"No cpp signature found for {f.func.name}")
     return cpp_sig
 
 

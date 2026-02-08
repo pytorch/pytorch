@@ -49,7 +49,8 @@ def _warn_once(
 ) -> None:
     """Helper to ensure each warning is shown only once per process."""
     if warning_id not in _WARNINGS_SHOWN:
-        warnings.warn(message, category, stacklevel=2)
+        if not torch.compiler.is_compiling():
+            warnings.warn(message, category, stacklevel=2)
         _WARNINGS_SHOWN.add(warning_id)
 
 
@@ -1470,7 +1471,7 @@ def flex_attention(
 
     """
     # Some basic input validation
-    _validate_sdpa_input(query, key, value)
+    _validate_sdpa_input(query, key, value, allow_lowp_kv=True)
     _validate_embed_dim(query, key, value)
     _validate_device(query, key, value)
     query, key, value = _enforce_mem_layouts(query, key, value)

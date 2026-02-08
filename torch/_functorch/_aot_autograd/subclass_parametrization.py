@@ -43,7 +43,8 @@ class UnwrapTensorSubclass(torch.nn.Module):
         return _unwrap_tensor_subclasses(self.subclass_meta, todo, 0)[0]
 
     def right_inverse(self, tensor: torch.Tensor) -> list[torch.Tensor]:
-        assert type(tensor) is not torch.Tensor
+        if type(tensor) is torch.Tensor:
+            raise AssertionError("tensor must be a subclass, not torch.Tensor")
         plain_tensors: list[torch.Tensor] = []
 
         def _create_subclass_meta(tensor, idx, plain_tensor_container):  # type: ignore[no-untyped-def]

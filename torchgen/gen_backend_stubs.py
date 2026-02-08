@@ -55,7 +55,10 @@ def parse_backend_yaml(
 
     with open(backend_yaml_path) as f:
         yaml_values = yaml.load(f, Loader=YamlLoader)
-    assert isinstance(yaml_values, dict)
+    if not isinstance(yaml_values, dict):
+        raise AssertionError(
+            f"Expected yaml_values to be a dict, got {type(yaml_values)}"
+        )
 
     valid_keys = [
         "backend",
@@ -71,43 +74,50 @@ def parse_backend_yaml(
     ]
 
     backend = yaml_values.pop("backend", None)
-    assert backend is not None, 'You must provide a value for "backend"'
+    if backend is None:
+        raise AssertionError('You must provide a value for "backend"')
 
     class_name = yaml_values.pop("class_name", None)
 
     cpp_namespace = yaml_values.pop("cpp_namespace", None)
-    assert cpp_namespace is not None, 'You must provide a value for "cpp_namespace"'
+    if cpp_namespace is None:
+        raise AssertionError('You must provide a value for "cpp_namespace"')
 
     # Mostly just defaulting to false to stick with LazyTensor convention.
     use_out_as_primary = yaml_values.pop("use_out_as_primary", False)
-    assert isinstance(use_out_as_primary, bool), (
-        f"You must provide either True or False for use_out_as_primary. Provided: {use_out_as_primary}"
-    )
+    if not isinstance(use_out_as_primary, bool):
+        raise AssertionError(
+            f"You must provide either True or False for use_out_as_primary. Provided: {use_out_as_primary}"
+        )
 
     use_device_guard = yaml_values.pop("device_guard", False)
-    assert isinstance(use_device_guard, bool), (
-        f"You must provide either True or False for device_guard. Provided: {use_device_guard}"
-    )
+    if not isinstance(use_device_guard, bool):
+        raise AssertionError(
+            f"You must provide either True or False for device_guard. Provided: {use_device_guard}"
+        )
 
     supported = yaml_values.pop("supported", [])
     if supported is None:
         supported = []  # Allow an empty list of supported ops
-    assert isinstance(supported, list), (
-        f'expected "supported" to be a list, but got: {supported} (of type {type(supported)})'
-    )
+    if not isinstance(supported, list):
+        raise AssertionError(
+            f'expected "supported" to be a list, but got: {supported} (of type {type(supported)})'
+        )
 
     symint = yaml_values.pop("symint", [])
     if symint is None:
         symint = []  # Allow an empty list of symint ops
-    assert isinstance(symint, list), (
-        f'expected "symint" to be a list, but got: {supported} (of type {type(supported)})'
-    )
+    if not isinstance(symint, list):
+        raise AssertionError(
+            f'expected "symint" to be a list, but got: {symint} (of type {type(symint)})'
+        )
     symint_set = set(symint)
 
     supported_autograd = yaml_values.pop("autograd", [])
-    assert isinstance(supported_autograd, list), (
-        f'expected "autograd" to be a list, but got: {supported_autograd}'
-    )
+    if not isinstance(supported_autograd, list):
+        raise AssertionError(
+            f'expected "autograd" to be a list, but got: {supported_autograd}'
+        )
 
     # full_codegen is ignored by parse_backend_yaml, and re-parsed in gen_lazy_tensor.py
     full_codegen = yaml_values.pop("full_codegen", [])
@@ -119,10 +129,11 @@ def parse_backend_yaml(
     # ir_gen is ignored by parse_backend_yaml, and re-parsed in gen_lazy_tensor.py
     yaml_values.pop("ir_gen", {})
 
-    assert len(yaml_values.keys()) == 0, (
-        f"{backend_yaml_path} contains unexpected keys: {', '.join(yaml_values.keys())}. "
-        f"Only the following keys are supported: {', '.join(valid_keys)}"
-    )
+    if len(yaml_values.keys()) != 0:
+        raise AssertionError(
+            f"{backend_yaml_path} contains unexpected keys: {', '.join(yaml_values.keys())}. "
+            f"Only the following keys are supported: {', '.join(valid_keys)}"
+        )
 
     def create_backend_index(
         backend_ops: list[str],
@@ -135,9 +146,8 @@ def parse_backend_yaml(
         metadata: dict[OperatorName, BackendMetadata] = {}
         for op in backend_ops:
             op_name = OperatorName.parse(op)
-            assert op_name in native_functions_map, (
-                f"Found an invalid operator name: {op_name}"
-            )
+            if op_name not in native_functions_map:
+                raise AssertionError(f"Found an invalid operator name: {op_name}")
             # See Note [External Backends Follow Dispatcher API]
             kernel_name = dispatcher.name(native_functions_map[op_name].func)
             if op in symint_ops:
@@ -169,7 +179,8 @@ def parse_backend_yaml(
             use_out_as_primary=use_out_as_primary,
             use_device_guard=use_device_guard,
         )
-        assert backend_key not in backend_indices
+        if backend_key in backend_indices:
+            raise AssertionError(f"Duplicate backend key: {backend_key}")
         backend_indices[backend_key] = backend_idx
 
     autograd_key: DispatchKey | None = None
@@ -187,7 +198,8 @@ the behavior of autograd for some operators on your backend. However "Autograd{b
             use_out_as_primary=use_out_as_primary,
             use_device_guard=use_device_guard,
         )
-        assert autograd_key not in backend_indices
+        if autograd_key in backend_indices:
+            raise AssertionError(f"Duplicate autograd key: {autograd_key}")
         backend_indices[autograd_key] = autograd_idx
 
     for g in grouped_native_functions:
@@ -238,11 +250,14 @@ the behavior of autograd for some operators on your backend. However "Autograd{b
 
         forward_kernels = [f for f in forward_kernels if f is not None]
         backward_kernels = [f for f in backward_kernels if f is not None]
-        assert len(forward_kernels) == 0 or len(backward_kernels) == 0, (
-            f'Currently, all variants of an op must either be registered to a backend key, or to a backend\'s \
-autograd key. They cannot be mix and matched. If this is something you need, feel free to create an issue! \
-{forward_kernels[0].kernel} is listed under "supported", but {backward_kernels[0].kernel} is listed under "autograd".'
-        )
+        if not (len(forward_kernels) == 0 or len(backward_kernels) == 0):
+            raise AssertionError(
+                f"Currently, all variants of an op must either be registered to a backend key, "
+                f"or to a backend's autograd key. They cannot be mix and matched. "
+                f"If this is something you need, feel free to create an issue! "
+                f'{forward_kernels[0].kernel} is listed under "supported", '
+                f'but {backward_kernels[0].kernel} is listed under "autograd".'
+            )
 
     return ParsedExternalYaml(
         backend_key, autograd_key, class_name, cpp_namespace, backend_indices
@@ -330,7 +345,8 @@ but expected {expected_overload_count} kernel(s). The expected function schemas 
 {expected_schemas_str}
 
 """
-    assert missing_kernels_err_msg == "", missing_kernels_err_msg
+    if missing_kernels_err_msg != "":
+        raise AssertionError(missing_kernels_err_msg)
 
 
 def main() -> None:
@@ -367,7 +383,8 @@ def gen_dispatchkey_nativefunc_headers(
     autograd_dispatch_key: DispatchKey | None,
     backend_name: str = "",
 ) -> None:
-    assert class_name is not None
+    if class_name is None:
+        raise AssertionError("class_name must not be None")
     generated_comment = (
         "Autogenerated file by gen_backend_stubs.py. Do not edit directly!"
     )
@@ -437,7 +454,8 @@ def gen_dispatcher_registrations(
     else:
         external_backend_headers_str = "\n".join(f'#include "{h}"' for h in headers)
 
-    assert class_name is not None
+    if class_name is None:
+        raise AssertionError("class_name must not be None")
     backend_index = backend_indices[dispatch_key]
 
     dispatch_registrations_body = list(
@@ -573,7 +591,8 @@ def run(
         # the name of the class that all generated kernel definitions live under.
         # if not specified, its value is given as native_function_class_name.
         class_name = backend_indices[backend_key].native_function_class_name()
-    assert class_name is not None
+    if class_name is None:
+        raise AssertionError("class_name must not be None")
 
     if impl_path is not None:
         error_on_missing_kernels(

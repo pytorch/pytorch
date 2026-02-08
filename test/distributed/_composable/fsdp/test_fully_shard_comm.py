@@ -1587,7 +1587,6 @@ class TestFullyShardUnshardMultiThread(FSDPTestMultiThread):
     def world_size(self) -> int:
         return 2
 
-    @skip_if_lt_x_gpu(1)
     def test_unshard_no_param_group(self):
         # Check that we can call `unshard()` on a module with no parameter
         # group / no managed parameters without erroring
@@ -1598,7 +1597,6 @@ class TestFullyShardUnshardMultiThread(FSDPTestMultiThread):
         handle = model.unshard(async_op=True)
         handle.wait()
 
-    @skip_if_lt_x_gpu(1)
     def test_unshard_without_lazy_init(self):
         torch.manual_seed(42)
         model = MLP(4)

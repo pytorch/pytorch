@@ -171,7 +171,8 @@ def sample_inputs_sparse_reduction(
                 dtype=inp.dtype,
                 device=inp.device,
             )
-            assert not inp.is_coalesced()
+            if inp.is_coalesced():
+                raise AssertionError("Expected inp to not be coalesced")
             yield SampleInput(
                 inp.requires_grad_(requires_grad),
                 args=sample_input.args,
