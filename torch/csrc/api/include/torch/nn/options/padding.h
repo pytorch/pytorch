@@ -209,7 +209,7 @@ struct TORCH_API PadFuncOptions {
   TORCH_ARG(mode_t, mode) = torch::kConstant;
 
   /// fill value for "constant" padding. Default: 0
-  TORCH_ARG(c10::Scalar, value) = 0;
+  TORCH_ARG(double, value) = 0;
 };
 
 } // namespace functional

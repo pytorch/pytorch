@@ -12,10 +12,12 @@
 #include <ATen/ops/_pad_circular.h>
 #include <ATen/ops/_pad_circular_native.h>
 #include <ATen/ops/_pad_enum_native.h>
+#include <ATen/ops/_pad_enum_scalar_native.h>
 #include <ATen/ops/constant_pad_nd.h>
 #include <ATen/ops/constant_pad_nd_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/pad_native.h>
+#include <ATen/ops/pad_scalar_native.h>
 #include <ATen/ops/reflection_pad1d.h>
 #include <ATen/ops/reflection_pad2d.h>
 #include <ATen/ops/reflection_pad3d.h>
@@ -204,7 +206,12 @@ static std::string_view padding_mode_string(padding_mode m) {
 }
 
 
-Tensor _pad_enum_symint(const Tensor &self, c10::SymIntArrayRef pad, int64_t mode_int, std::optional<c10::Scalar> value) {
+namespace {
+Tensor _pad_enum_symint_impl(
+    const Tensor& self,
+    c10::SymIntArrayRef pad,
+    int64_t mode_int,
+    std::optional<c10::Scalar> value) {
   const auto input_dim = self.dim();
   TORCH_CHECK(pad.size() % 2 == 0, "Padding length must be divisible by 2");
   TORCH_CHECK(static_cast<int64_t>(pad.size()) <= input_dim * 2,
@@ -214,7 +221,7 @@ Tensor _pad_enum_symint(const Tensor &self, c10::SymIntArrayRef pad, int64_t mod
   if (mode == at::padding_mode::constant) {
     return at::constant_pad_nd_symint(self, pad, value.value_or(c10::Scalar(0)));
   }
-  TORCH_CHECK(!value.has_value() || value->toDouble() == 0,
+  TORCH_CHECK(!value.has_value() || value->equal(0),
               "Padding mode \"", padding_mode_string(mode),
               "\" doesn't take in value argument");
 
@@ -250,8 +257,19 @@ Tensor _pad_enum_symint(const Tensor &self, c10::SymIntArrayRef pad, int64_t mod
 
   C10_THROW_ERROR(NotImplementedError, error_msg.str());
 }
+} // namespace
 
-Tensor pad_symint(const Tensor &self, c10::SymIntArrayRef pad, std::string_view mode, std::optional<c10::Scalar> value) {
+Tensor _pad_enum_symint(const Tensor& self, c10::SymIntArrayRef pad, int64_t mode_int, std::optional<double> value) {
+  std::optional<c10::Scalar> scalar_value =
+      value.has_value() ? std::optional<c10::Scalar>(value.value()) : std::nullopt;
+  return _pad_enum_symint_impl(self, pad, mode_int, scalar_value);
+}
+
+Tensor _pad_enum_scalar_symint(const Tensor& self, c10::SymIntArrayRef pad, int64_t mode_int, std::optional<c10::Scalar> value) {
+  return _pad_enum_symint_impl(self, pad, mode_int, value);
+}
+
+Tensor pad_symint(const Tensor& self, c10::SymIntArrayRef pad, std::string_view mode, std::optional<double> value) {
   const auto mode_enum = [&] {
     if (mode == "reflect") {
       return at::padding_mode::reflect;
@@ -266,6 +284,23 @@ Tensor pad_symint(const Tensor &self, c10::SymIntArrayRef pad, std::string_view 
                     c10::str("Unrecognised padding mode ", mode));
   }();
   return at::native::_pad_enum_symint(self, pad, static_cast<int64_t>(mode_enum), value);
+}
+
+Tensor pad_scalar_symint(const Tensor& self, c10::SymIntArrayRef pad, std::string_view mode, std::optional<c10::Scalar> value) {
+  const auto mode_enum = [&] {
+    if (mode == "reflect") {
+      return at::padding_mode::reflect;
+    } else if (mode == "constant") {
+      return at::padding_mode::constant;
+    } else if (mode == "replicate") {
+      return at::padding_mode::replicate;
+    } else if (mode == "circular") {
+      return at::padding_mode::circular;
+    }
+    C10_THROW_ERROR(NotImplementedError,
+                    c10::str("Unrecognised padding mode ", mode));
+  }();
+  return at::native::_pad_enum_scalar_symint(self, pad, static_cast<int64_t>(mode_enum), value);
 }
 
 }  // namespace at::native

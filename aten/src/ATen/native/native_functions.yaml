@@ -12921,15 +12921,25 @@
   dispatch:
     CompositeImplicitAutograd: _pad_circular_symint
 
-- func: _pad_enum(Tensor self, SymInt[] pad, int mode, Scalar? value=None) -> Tensor
+- func: _pad_enum(Tensor self, SymInt[] pad, int mode, float? value=None) -> Tensor
   python_module: nn
   dispatch:
     CompositeImplicitAutograd: _pad_enum_symint
 
-- func: pad(Tensor self, SymInt[] pad, str mode="constant", Scalar? value=None) -> Tensor
+- func: _pad_enum_scalar(Tensor self, SymInt[] pad, int mode, Scalar? value=None) -> Tensor
+  python_module: nn
+  dispatch:
+    CompositeImplicitAutograd: _pad_enum_scalar_symint
+
+- func: pad(Tensor self, SymInt[] pad, str mode="constant", float? value=None) -> Tensor
   python_module: nn
   dispatch:
     CompositeImplicitAutograd: pad_symint
+
+- func: pad_scalar(Tensor self, SymInt[] pad, str mode="constant", Scalar? value=None) -> Tensor
+  python_module: nn
+  dispatch:
+    CompositeImplicitAutograd: pad_scalar_symint
 
 - func: upsample_linear1d.vec(Tensor input, SymInt[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
   python_module: nn
