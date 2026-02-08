@@ -90,7 +90,7 @@ microbench_unbacked_tolist_sum,pass,9
 
 
 
-mnasnet1_0,fail_accuracy,7
+mnasnet1_0,pass,0
 
 
 
