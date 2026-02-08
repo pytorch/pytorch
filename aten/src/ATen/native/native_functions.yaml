@@ -6344,7 +6344,7 @@
     MkldnnCPU: mkldnn_transpose_
   autogen: _mkldnn_transpose.out
 
-- func: one_hot(Tensor self, int num_classes=-1) -> Tensor
+- func: one_hot(Tensor self, int num_classes=-1, *, ScalarType? dtype=None) -> Tensor
   python_module: nn
   variants: function
   tags: dynamic_output_shape
