@@ -5,9 +5,12 @@ from collections.abc import Callable, Sequence
 from typing import Optional, Union
 
 import torch
+import torch.distributed._functional_collectives as funcol
+from torch._prims_common import make_contiguous_strides_for
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
+from torch.distributed._local_tensor import maybe_run_for_local_tensor
 from torch.distributed.tensor import DeviceMesh, DTensor
-from torch.distributed.tensor.placement_types import Placement
+from torch.distributed.tensor.placement_types import Placement, Shard
 
 
 try:
@@ -31,6 +34,8 @@ def local_map(
     device_mesh: DeviceMesh | None = None,
     *,
     redistribute_inputs: bool = False,
+    allow_uneven_sharding: bool = False,
+    out_shapes: Sequence[torch.Size] | None = None,
 ):
     """
     :meth:`local_map` is an experimental API that allows users to pass :class:`DTensor` s
@@ -86,6 +91,19 @@ def local_map(
             their placements are different from the required input placements. If this
             value is ``False`` and some :class:`DTensor` input has a different placement,
             an exception will be raised. Default: False.
+        allow_uneven_sharding (bool, optional):
+            whether to compute global shapes via all-gather. When ``False`` (default), :meth:`local_map`
+            assumes even sharding and computes global shapes locally without communication. This is
+            fast but will produce incorrect results if outputs are unevenly sharded. When ``True``,
+            :meth:`local_map` computes global shapes via all-gather of local shard sizes, correctly
+            handling both even and uneven sharding at the cost of additional communication overhead.
+            For zero-overhead handling of uneven sharding, use ``out_shapes`` instead. Default: False.
+        out_shapes (Sequence[torch.Size], optional):
+            the global shapes of output :class:`DTensor` s. If provided, these shapes will be used
+            directly without any communication, enabling zero-overhead handling of uneven sharding.
+            This should be a sequence matching the flattened outputs, with ``None`` for non-Tensor
+            outputs. When ``out_shapes`` is provided, it takes precedence over ``allow_uneven_sharding``.
+            Default: None.
 
     Returns:
         A ``Callable`` that applies ``func`` to each local shard of the input :class:`DTensor`
@@ -143,6 +161,8 @@ def local_map(
                 in_grad_placements=in_grad_placements,
                 device_mesh=device_mesh,
                 redistribute_inputs=redistribute_inputs,
+                allow_uneven_sharding=allow_uneven_sharding,
+                out_shapes=out_shapes,
             )
 
         return decorated
@@ -155,7 +175,111 @@ def local_map(
         in_grad_placements,
         device_mesh,
         redistribute_inputs,
+        allow_uneven_sharding,
+        out_shapes,
     )
+
+
+def _infer_global_shape_local_even_sharding(
+    local_tensor: torch.Tensor,
+    device_mesh: DeviceMesh,
+    placements: Sequence[Placement],
+) -> tuple[torch.Size, tuple[int, ...]]:
+    """
+    Infer global shape locally assuming even sharding (no communication).
+
+    This is the fast path that assumes even sharding and computes the global
+    size by multiplying local size by mesh size. Will produce incorrect results
+    if sharding is actually uneven.
+
+    Args:
+        local_tensor: The local tensor on this rank
+        device_mesh: The device mesh
+        placements: The placements describing how the tensor is distributed
+
+    Returns:
+        A tuple of (global_shape, global_stride)
+    """
+    local_shape = list(local_tensor.shape)
+    global_shape = list(local_shape)
+
+    for mesh_dim, placement in enumerate(placements):
+        if not isinstance(placement, Shard):
+            continue
+
+        shard_dim = placement.dim
+        local_size = local_shape[shard_dim]
+        mesh_size = device_mesh.size(mesh_dim)
+        global_shape[shard_dim] = local_size * mesh_size
+
+    global_shape = torch.Size(global_shape)
+    return global_shape, make_contiguous_strides_for(global_shape)
+
+
+def _allgather_global_shape_uneven_sharding(
+    local_tensor: torch.Tensor,
+    device_mesh: DeviceMesh,
+    placements: Sequence[Placement],
+) -> tuple[torch.Size, tuple[int, ...]]:
+    """
+    Compute global shape via all-gather, supporting uneven sharding.
+
+    For each Shard placement, this function gathers local sizes from all ranks
+    along the mesh dimension and sums them to get the global size. This adds
+    communication overhead but correctly handles uneven sharding.
+
+    Args:
+        local_tensor: The local tensor on this rank
+        device_mesh: The device mesh
+        placements: The placements describing how the tensor is distributed
+
+    Returns:
+        A tuple of (global_shape, global_stride)
+    """
+    local_shape = local_tensor.shape
+    global_shape = list(local_shape)
+
+    has_shard = any(isinstance(p, Shard) for p in placements)
+
+    if not has_shard:
+        return torch.Size(global_shape), local_tensor.stride()
+
+    for mesh_dim, placement in enumerate(placements):
+        if not isinstance(placement, Shard):
+            continue
+
+        shard_dim = placement.dim
+
+        @maybe_run_for_local_tensor
+        def _create_size_tensor(size):
+            return torch.tensor([size], device=device_mesh.device_type)
+
+        local_size_tensor = _create_size_tensor(local_shape[shard_dim])
+
+        mesh_size = device_mesh.size(mesh_dim)
+        gathered_sizes = [
+            torch.empty_like(local_size_tensor, device=local_size_tensor.device)
+            for _ in range(mesh_size)
+        ]
+
+        funcol.all_gather_inplace(
+            gathered_sizes,
+            local_size_tensor,
+            (device_mesh, mesh_dim),
+        )
+
+        @maybe_run_for_local_tensor
+        def _sum_sizes(gathered_sizes):
+            total = 0
+            for size_tensor in gathered_sizes:
+                total += size_tensor.item()
+            return total
+
+        global_size = _sum_sizes(gathered_sizes)
+        global_shape[shard_dim] = global_size
+
+    global_shape = torch.Size(global_shape)
+    return global_shape, make_contiguous_strides_for(global_shape)
 
 
 def _local_map_wrapped(
@@ -165,6 +289,8 @@ def _local_map_wrapped(
     in_grad_placements: InputPlacements,
     device_mesh: DeviceMesh | None,
     redistribute_inputs: bool,
+    allow_uneven_sharding: bool,
+    out_shapes: Sequence[torch.Size] | None,
     *args,
     **kwargs,
 ):
@@ -181,9 +307,9 @@ def _local_map_wrapped(
     seen_dtensor_arg = False
     for idx, arg in enumerate(flat_args):
         if isinstance(arg, DTensor):
-            # TODO: the current code doesn't consider the uneven sharding case
-            # Need to think about what the consequence is when the input DTensor
-            # is uneven sharded.
+            # Note: Uneven sharding is supported - when outputs are sharded,
+            # we compute the global shape/stride via all-gather to handle
+            # cases where local shards have different sizes.
             if device_mesh is None:  # infer device mesh from the DTensor arg
                 device_mesh = arg.device_mesh
 
@@ -245,6 +371,9 @@ def _local_map_wrapped(
 
     if seen_dtensor_arg:
         # process output to be DTensor if we've seen DTensor inputs
+        assert device_mesh is not None, (
+            "device_mesh must be set when DTensor args are present"
+        )
         flat_out, out_spec = pytree.tree_flatten(out)
 
         flat_dist_out = []
@@ -256,16 +385,60 @@ def _local_map_wrapped(
             f" received {len(out_placements_tuple)} out_placements but"
             f" {len(flat_out)} is expected!"
         )
-        for out, spec in zip(flat_out, out_placements_tuple):
+        # pyrefly: ignore [bad-argument-type]
+        for out_idx, (out, spec) in enumerate(zip(flat_out, out_placements_tuple)):
             if isinstance(out, torch.Tensor):
                 assert not isinstance(out, DTensor), (
                     f"torch.Tensor output expected but received {type(out)}: {out}"
                 )
 
-                flat_dist_out.append(
-                    # pyrefly: ignore [bad-argument-type]
-                    DTensor.from_local(out, device_mesh, spec, run_check=False)
-                )
+                if spec is not None and any(isinstance(p, Shard) for p in spec):
+                    if out_shapes is not None and out_idx < len(out_shapes):
+                        # user provided shape - use it directly (zero overhead)
+                        provided_shape = out_shapes[out_idx]
+                        if provided_shape is not None:
+                            global_shape = provided_shape
+                            global_stride = make_contiguous_strides_for(provided_shape)
+                        else:
+                            raise RuntimeError(
+                                f"out_shapes[{out_idx}] is None for a tensor output. "
+                                "Please provide a valid shape."
+                            )
+                    elif allow_uneven_sharding:
+                        # all-gather to compute global shape (handles both even and uneven)
+                        global_shape, global_stride = (
+                            _allgather_global_shape_uneven_sharding(
+                                out,
+                                device_mesh,
+                                spec,
+                            )
+                        )
+                    else:
+                        # Default: assume even sharding, compute without communication
+                        global_shape, global_stride = (
+                            _infer_global_shape_local_even_sharding(
+                                out,
+                                device_mesh,
+                                spec,
+                            )
+                        )
+
+                    flat_dist_out.append(
+                        # pyrefly: ignore [bad-argument-type]
+                        DTensor.from_local(
+                            out,
+                            device_mesh,
+                            spec,
+                            run_check=False,
+                            shape=global_shape,
+                            stride=global_stride,
+                        )
+                    )
+                else:
+                    flat_dist_out.append(
+                        # pyrefly: ignore [bad-argument-type]
+                        DTensor.from_local(out, device_mesh, spec, run_check=False)
+                    )
             else:
                 assert spec is None, (
                     f"Non-tensor output {out} expects None placements but received {spec}!"
