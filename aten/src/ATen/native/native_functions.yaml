@@ -13862,7 +13862,8 @@
   variants: function
   dispatch:
     Meta: _special_betainc_partials_meta
-    CompositeExplicitAutogradNonFunctional: _special_betainc_partials
+    CPU: _special_betainc_partials
+    CUDA: _special_betainc_partials_cuda
   tags: pointwise
 
 
@@ -13871,7 +13872,8 @@
   variants: function
   dispatch:
     Meta: _special_betaincinv_partials_meta
-    CompositeExplicitAutogradNonFunctional: _special_betaincinv_partials
+    CPU: _special_betaincinv_partials
+    CUDA: _special_betaincinv_partials_cuda
   tags: pointwise
 
 - func: special_i0(Tensor self) -> Tensor
