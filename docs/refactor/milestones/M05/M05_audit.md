@@ -1,51 +1,56 @@
 # M05 Audit — CI Workflow Linting & Structural Guardrails
 
 **Milestone:** M05  
-**Date:** 2026-02-08  
-**Auditor:** AI Agent (Cursor)  
-**Change Class:** Verification-Only  
-**Status:** Complete
+**Mode:** VERIFICATION AUDIT  
+**Range:** 347616148d5...7c7bcaa4bb1  
+**CI Status:** Local Execution (Fork PR awaiting approval)  
+**Refactor Posture:** Verification-Only (No behavioral changes)  
+**Audit Verdict:** 🟢 PASS — Clean Baseline Established
 
 ---
 
-## Executive Summary
+## 1. Executive Summary
 
-Actionlint structural validation was executed against all 144 GitHub Actions workflow files in the PyTorch repository. **Zero structural errors were found.** This establishes a clean baseline for INV-070 (CI Structural Validity).
+### Wins
+- ✅ Actionlint workflow added for ongoing structural validation
+- ✅ 144 workflow files scanned with 0 errors
+- ✅ Clean baseline established for INV-070
+- ✅ Regression detection infrastructure in place
 
----
+### Risks
+- ⚠️ Upstream PR (#174557) awaiting maintainer approval
+- ⚠️ Non-blocking mode only (no enforcement yet)
 
-## Scope of Audit
-
-### Files Scanned
-- **Directory:** `.github/workflows/`
-- **Total Files:** 144 YAML workflow files
-- **Tool:** actionlint v1.7.7
-
-### Rules Applied
-| Rule | Status | Notes |
-|------|--------|-------|
-| YAML syntax | ✅ Enabled | Core structural validation |
-| Job/step references | ✅ Enabled | needs, outputs, job IDs |
-| Expression validation | ✅ Enabled | ${{ }} syntax checking |
-| Action inputs | ✅ Enabled | Required/optional params |
-| Deprecated syntax | ✅ Enabled | set-output, save-state, etc. |
-| Shellcheck | ❌ Disabled | Per M05 locked answer (scope limitation) |
-| Pyflakes | ❌ Disabled | Not in PATH |
+### Most Important Next Action
+- Proceed to M06 (Action Pinning) to continue CI hardening arc
 
 ---
 
-## Findings Summary
+## 2. Verification Method
 
-### Actionlint Results
+### Why Local Execution
 
-| Severity | Count | Description |
-|----------|-------|-------------|
-| **P0 (Critical)** | 0 | Invalid YAML, unreachable jobs, broken needs/outputs |
-| **P1 (Concerning)** | 0 | Ambiguous conditions, unused outputs, suspicious matrices |
-| **P2 (Informational)** | 0 | Cosmetic warnings, non-idiomatic patterns |
-| **Total Errors** | **0** | All 144 workflows passed structural validation |
+Fork PRs to `pytorch/pytorch` require maintainer approval before workflows execute. This is standard GitHub security for first-time contributors.
 
-### Execution Details
+**Verification strategy:**
+1. Downloaded actionlint v1.7.7 for Windows
+2. Executed against all 144 workflow files locally
+3. Captured output and documented findings
+
+### Tool Configuration
+
+| Setting | Value | Reason |
+|---------|-------|--------|
+| Actionlint version | v1.7.7 | Latest stable |
+| Shellcheck | Disabled | Per locked scope (focus on structure) |
+| Pyflakes | Disabled | Not in PATH |
+| Output mode | Stdout | Per locked scope (no SARIF) |
+
+---
+
+## 3. Actionlint Results
+
+### Execution Summary
 
 ```
 actionlint v1.7.7
@@ -55,56 +60,44 @@ Found 0 errors in 144 files
 Execution time: ~500ms
 ```
 
+### Findings by Severity
+
+| Severity | Count | Description |
+|----------|-------|-------------|
+| **P0 (Critical)** | 0 | Invalid YAML, unreachable jobs, broken needs/outputs |
+| **P1 (Concerning)** | 0 | Ambiguous conditions, unused outputs, suspicious matrices |
+| **P2 (Informational)** | 0 | Cosmetic warnings, non-idiomatic patterns |
+| **Total Errors** | **0** | All 144 workflows passed structural validation |
+
 ---
 
-## Analysis
+## 4. Structural Validation Details
+
+### Rules Applied
+
+| Rule | Status | Coverage |
+|------|--------|----------|
+| YAML syntax | ✅ Enabled | All files |
+| Job/step references | ✅ Enabled | `needs`, outputs, job IDs |
+| Expression validation | ✅ Enabled | `${{ }}` syntax |
+| Action inputs | ✅ Enabled | Required/optional params |
+| Deprecated syntax | ✅ Enabled | set-output, save-state, etc. |
+| Shellcheck | ❌ Disabled | Per M05 scope |
+| Pyflakes | ❌ Disabled | Not in PATH |
 
 ### Positive Findings
 
-1. **All workflows are syntactically valid** — No malformed YAML detected
-2. **Job dependencies are correct** — All `needs:` references resolve properly
-3. **Expression syntax is valid** — No broken `${{ }}` expressions
-4. **No deprecated syntax detected** — Workflows use current GitHub Actions patterns
+1. **All workflows syntactically valid** — No malformed YAML
+2. **Job dependencies correct** — All `needs:` references resolve
+3. **Expressions valid** — No broken `${{ }}` syntax
+4. **No deprecated syntax** — Current GitHub Actions patterns used
 5. **No unreachable jobs** — All jobs have valid execution paths
 
-### Observations
-
-1. **PyTorch CI is well-maintained** — The zero-error result indicates existing code review and linting practices are effective
-2. **Shellcheck was disabled** — This was intentional per M05 scope. Inline bash scripts were not validated.
-3. **Pyflakes was disabled** — Python expressions in workflows were not validated.
-4. **Scale** — 144 workflows is substantial; clean results at this scale are notable
-
-### Coverage Gaps (Documented, Not Addressed)
-
-| Gap | Description | Candidate Milestone |
-|-----|-------------|---------------------|
-| Shellcheck | Inline bash scripts not linted | Future (M05+ candidate) |
-| Pyflakes | Python expressions not validated | Future |
-| Semantic analysis | Logic correctness not verified | Out of scope for static linting |
-| Action pinning | SHA pinning not enforced | M06 |
-
 ---
 
-## Invariant Verification
+## 5. Workflow Inventory Analysis
 
-### INV-070 — CI Structural Validity
-
-**Definition:** All CI workflows must be syntactically valid and analyzable by static tooling.
-
-**Status:** ✅ **VERIFIED**
-
-**Evidence:**
-- actionlint v1.7.7 executed against 144 workflows
-- 0 errors reported
-- All workflows parse correctly and have valid structure
-
-**Mode:** Observational (non-blocking CI job added)
-
----
-
-## Workflow Inventory
-
-### By Category (from M03 audit)
+### By Category (from M03 baseline)
 
 | Category | Count | Actionlint Status |
 |----------|-------|-------------------|
@@ -117,49 +110,138 @@ Execution time: ~500ms
 | Refactor program (smoke, actionlint) | 2 | ✅ Clean |
 | Other | ~17 | ✅ Clean |
 
----
+### New Workflow Added
 
-## Deliverables Produced
-
-| Artifact | Status |
-|----------|--------|
-| `.github/workflows/refactor-actionlint.yml` | ✅ Created |
-| Local actionlint execution | ✅ Complete |
-| Findings classification (this document) | ✅ Complete |
-| CI workflow created | ✅ PR #174557 |
+| Workflow | Lines | Purpose |
+|----------|-------|---------|
+| `refactor-actionlint.yml` | 37 | Non-blocking structural validation |
 
 ---
 
-## Recommendations
+## 6. Quality Gates Evaluation
 
-### Immediate (No action required in M05)
-1. **Maintain current state** — Zero errors is the target state
-2. **Monitor future PRs** — The actionlint workflow will catch regressions
-
-### Future Milestones
-1. **M06:** Action pinning (SHA pinning for supply chain security)
-2. **Future:** Consider shellcheck integration as separate milestone
-3. **Future:** Consider SARIF output for Security tab integration
-
----
-
-## Non-Goals (Honored)
-
-- ❌ No workflow fixes applied
-- ❌ No SARIF/Security tab integration
-- ❌ No shellcheck validation
-- ❌ No action pinning (deferred to M06)
-- ❌ No enforcement (continue-on-error: true)
+| Gate | Status | Evidence |
+|------|--------|----------|
+| **Invariants** | ✅ PASS | INV-070 established; INV-060 protected |
+| **CI Stability** | ✅ PASS | Non-blocking mode; no required checks affected |
+| **Tests** | ✅ N/A | No test files modified |
+| **Coverage** | ✅ N/A | No production code modified |
+| **Compatibility** | ✅ PASS | New workflow only; no existing changes |
+| **Workflows** | ✅ PASS | 1 new workflow added; 0 modified |
+| **Security** | ✅ PASS | No secrets; read-only validation |
+| **DX/Docs** | ✅ PASS | Audit and summary created |
 
 ---
 
-## Conclusion
+## 7. Refactor Guardrail Compliance
 
-M05 establishes **INV-070 (CI Structural Validity)** with a clean baseline. The actionlint workflow provides ongoing structural validation for all future workflow changes. The zero-error result confirms PyTorch's existing CI practices are structurally sound.
+| Guardrail | Status | Notes |
+|-----------|--------|-------|
+| Invariant declaration | ✅ PASS | INV-070 introduced |
+| Baseline discipline | ✅ PASS | Changes from M04 baseline |
+| Consumer contract protection | ✅ N/A | No contracts modified |
+| Extraction/split safety | ✅ N/A | No extraction performed |
+| No silent CI weakening | ✅ PASS | New verification added, nothing weakened |
 
 ---
 
-**Audit Complete:** 2026-02-08  
-**Auditor:** AI Agent (Cursor)  
-**Approved:** Pending M05 closeout
+## 8. Coverage Gaps (Documented)
 
+| Gap | Description | Candidate Milestone |
+|-----|-------------|---------------------|
+| Shellcheck | Inline bash scripts not linted | Future |
+| Pyflakes | Python expressions not validated | Future |
+| Semantic analysis | Logic correctness not verified | Out of scope |
+| Action pinning | SHA pinning not enforced | M06 |
+| Enforcement mode | Non-blocking only | Future |
+
+---
+
+## 9. Issues (None)
+
+No issues encountered. Actionlint executed cleanly.
+
+---
+
+## 10. Invariant Verification
+
+### INV-060 — CI Critical Path Integrity
+
+**Status:** ✅ Protected
+
+**Evidence:** No existing workflows modified. New workflow is non-blocking.
+
+### INV-070 — CI Structural Validity (Introduced)
+
+**Definition:** All CI workflows must be syntactically valid and analyzable by static tooling.
+
+**Status:** ✅ VERIFIED
+
+**Evidence:**
+- actionlint v1.7.7 executed against 144 workflows
+- 0 errors reported
+- All workflows parse correctly and have valid structure
+
+**Mode:** Observational (non-blocking CI job)
+
+---
+
+## 11. Conclusion
+
+**Audit Verdict:** 🟢 PASS
+
+M05 executed to specification:
+- Actionlint workflow created with correct configuration
+- 144 workflow files validated with 0 errors
+- Clean baseline established for INV-070
+- Non-blocking mode preserves CI stability
+- Scope limitations honored (no shellcheck, no SARIF)
+
+**Recommendation:** Milestone complete. Proceed to M06.
+
+---
+
+## Machine-Readable Appendix
+
+```json
+{
+  "milestone": "M05",
+  "mode": "verification",
+  "posture": "verification-only",
+  "merge_commit": "7c7bcaa4bb1",
+  "range": "347616148d5...7c7bcaa4bb1",
+  "verdict": "green",
+  "actionlint": {
+    "version": "1.7.7",
+    "files_scanned": 144,
+    "errors_found": 0,
+    "shellcheck": false,
+    "pyflakes": false
+  },
+  "quality_gates": {
+    "invariants": "pass",
+    "compatibility": "pass",
+    "ci": "pass",
+    "tests": "n/a",
+    "coverage": "n/a",
+    "security": "pass",
+    "dx_docs": "pass",
+    "guardrails": "pass"
+  },
+  "invariants": {
+    "INV-060": "protected",
+    "INV-070": "introduced"
+  },
+  "issues": [],
+  "deferred": [
+    "shellcheck",
+    "sarif",
+    "enforcement",
+    "pyflakes"
+  ]
+}
+```
+
+---
+
+**End of M05 Audit**
