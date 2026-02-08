@@ -431,7 +431,7 @@ jobs:
           name: manywheel-py3_10-rocm7_1
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -547,7 +547,7 @@ jobs:
           name: manywheel-py3_10-rocm7_2
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -663,7 +663,7 @@ jobs:
           name: manywheel-py3_10-xpu
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -1098,7 +1098,7 @@ jobs:
           name: manywheel-py3_11-rocm7_1
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -1214,7 +1214,7 @@ jobs:
           name: manywheel-py3_11-rocm7_2
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -1330,7 +1330,7 @@ jobs:
           name: manywheel-py3_11-xpu
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -1765,7 +1765,7 @@ jobs:
           name: manywheel-py3_12-rocm7_1
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -1881,7 +1881,7 @@ jobs:
           name: manywheel-py3_12-rocm7_2
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -1997,7 +1997,7 @@ jobs:
           name: manywheel-py3_12-xpu
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -2432,7 +2432,7 @@ jobs:
           name: manywheel-py3_13-rocm7_1
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -2548,7 +2548,7 @@ jobs:
           name: manywheel-py3_13-rocm7_2
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -2664,7 +2664,7 @@ jobs:
           name: manywheel-py3_13-xpu
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -3099,7 +3099,7 @@ jobs:
           name: manywheel-py3_13t-rocm7_1
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -3215,7 +3215,7 @@ jobs:
           name: manywheel-py3_13t-rocm7_2
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -3331,7 +3331,7 @@ jobs:
           name: manywheel-py3_13t-xpu
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -3766,7 +3766,7 @@ jobs:
           name: manywheel-py3_14-rocm7_1
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -3882,7 +3882,7 @@ jobs:
           name: manywheel-py3_14-rocm7_2
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -3998,7 +3998,7 @@ jobs:
           name: manywheel-py3_14-xpu
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -4433,7 +4433,7 @@ jobs:
           name: manywheel-py3_14t-rocm7_1
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -4549,7 +4549,7 @@ jobs:
           name: manywheel-py3_14t-rocm7_2
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -4665,7 +4665,7 @@ jobs:
           name: manywheel-py3_14t-xpu
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive

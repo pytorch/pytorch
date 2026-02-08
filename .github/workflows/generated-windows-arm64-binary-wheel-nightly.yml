@@ -79,7 +79,7 @@ jobs:
           git config --system --get core.longpaths || echo "core.longpaths is not set, setting it now"
           git config --system core.longpaths true
       - name: Git checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
           path: "pytorch"
           submodules: recursive
@@ -147,7 +147,7 @@ jobs:
           git config --system --get core.longpaths || echo "core.longpaths is not set, setting it now"
           git config --system core.longpaths true
       - name: Git checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
           path: "pytorch"
           submodules: recursive
@@ -226,7 +226,7 @@ jobs:
           git config --system --get core.longpaths || echo "core.longpaths is not set, setting it now"
           git config --system core.longpaths true
       - name: Git checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
           path: "pytorch"
           submodules: recursive
@@ -294,7 +294,7 @@ jobs:
           git config --system --get core.longpaths || echo "core.longpaths is not set, setting it now"
           git config --system core.longpaths true
       - name: Git checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
           path: "pytorch"
           submodules: recursive
@@ -373,7 +373,7 @@ jobs:
           git config --system --get core.longpaths || echo "core.longpaths is not set, setting it now"
           git config --system core.longpaths true
       - name: Git checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
           path: "pytorch"
           submodules: recursive
@@ -441,7 +441,7 @@ jobs:
           git config --system --get core.longpaths || echo "core.longpaths is not set, setting it now"
           git config --system core.longpaths true
       - name: Git checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
           path: "pytorch"
           submodules: recursive

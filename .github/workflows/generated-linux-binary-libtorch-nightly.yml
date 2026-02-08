@@ -444,7 +444,7 @@ jobs:
           name: libtorch-rocm7_1-shared-with-deps-release
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -563,7 +563,7 @@ jobs:
           name: libtorch-rocm7_2-shared-with-deps-release
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive

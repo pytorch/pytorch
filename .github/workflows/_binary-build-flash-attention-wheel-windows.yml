@@ -62,7 +62,7 @@ jobs:
           submodules: false
 
       - name: Checkout Flash-Attention
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
           repository: Dao-AILab/flash-attention
           ref: bc0e4ac01484ffb61ddc694724826bec4d9cf1c2
