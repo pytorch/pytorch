@@ -133,15 +133,30 @@ Documentation updated:
 **Status:** Complete  
 **Outcome:** Branch pushed to origin/m01-import-smoke-test
 
-### 2026-02-08T08:10:00Z - Create PR
+### 2026-02-08T08:10:00Z - Create PR (Upstream - Unintended)
 **Tool:** run_terminal_cmd (gh pr create)  
 **Purpose:** Open pull request  
+**Status:** Corrected  
+**Outcome:** PR #174544 created at https://github.com/pytorch/pytorch/pull/174544  
+**Issue:** gh defaulted to cross-repo PR against upstream pytorch/pytorch
+
+### 2026-02-08T08:15:00Z - Close Upstream PR
+**Tool:** run_terminal_cmd (gh pr close)  
+**Purpose:** Close unintended upstream PR  
 **Status:** Complete  
-**Outcome:** PR #174544 created at https://github.com/pytorch/pytorch/pull/174544
+**Outcome:** Upstream PR #174544 closed with apology comment  
+**Note:** Upstream PR created unintentionally via gh default; closed without merge. Fork-only PR used for M01 evidence.
+
+### 2026-02-08T08:20:00Z - Create Fork-Only PR
+**Tool:** run_terminal_cmd (gh pr create --repo m-cahill/pytorch)  
+**Purpose:** Open pull request within fork  
+**Status:** Complete  
+**Outcome:** PR #1 created at https://github.com/m-cahill/pytorch/pull/1
 
 ---
 
 ## Current Status
 
-**PR Created:** https://github.com/pytorch/pytorch/pull/174544  
-**Awaiting:** CI results
+**Fork PR:** https://github.com/m-cahill/pytorch/pull/1  
+**Upstream PR:** Closed (was #174544)  
+**Awaiting:** Fork CI results
