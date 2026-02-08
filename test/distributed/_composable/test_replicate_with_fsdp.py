@@ -2,7 +2,6 @@
 
 import copy
 import functools
-import os
 from copy import deepcopy
 
 import torch
@@ -19,7 +18,7 @@ from torch.distributed.fsdp import fully_shard
 from torch.distributed.fsdp._fully_shard._fsdp_init import _get_managed_modules
 from torch.distributed.tensor import Replicate, Shard
 from torch.testing._internal.common_distributed import (
-    MultiProcessTestCase,
+    MultiProcContinuousTest,
     run_subtests,
     skip_if_lt_x_gpu,
 )
@@ -42,10 +41,22 @@ class Net(nn.Module):
         return self.fc3(self.fc2(self.fc1(x)))
 
 
-class ReplicateTest(MultiProcessTestCase):
-    @property
-    def world_size(self) -> int:
-        return 4
+class ReplicateTest(MultiProcContinuousTest):
+    world_size = 4
+
+    @classmethod
+    def backend_str(cls) -> str:
+        return "nccl"
+
+    @classmethod
+    def device_type(cls) -> str:
+        return "cuda"
+
+    @classmethod
+    def _init_pg(cls, rank, world_size, rdvz_file):
+        if torch.accelerator.is_available():
+            torch.accelerator.set_device_index(rank)
+        super()._init_pg(rank, world_size, rdvz_file)
 
     def init_replicate_tp_mesh(self) -> DeviceMesh:
         # Prefer to test with >=4 GPUs, but for 2 GPUs, use 2-way TP
@@ -56,34 +67,11 @@ class ReplicateTest(MultiProcessTestCase):
             mesh_dim_names=("replicate", "shard", "tp"),
         )
 
-    def setUp(self) -> None:
-        super().setUp()
-        self._spawn_processes()
-
-    def tearDown(self):
-        super().tearDown()
-        try:
-            os.remove(self.file_name)
-        except OSError:
-            pass
-
-    def _init_pg(self):
-        # Set the device explicitly before initializing the process group
-
-        torch.cuda.set_device(self.rank % self.world_size)
-        dist.init_process_group(
-            backend="nccl",
-            rank=self.rank,
-            world_size=self.world_size,
-            store=dist.FileStore(self.file_name, self.world_size),
-        )
-
     @skip_if_lt_x_gpu(4)
     def test_replicate_transformer(self):
         """
         This tests that replicate works on a transformer model with fully_shard and replicate layers
         """
-        self._init_pg()
         run_subtests(
             self,
             {
@@ -161,7 +149,6 @@ class ReplicateTest(MultiProcessTestCase):
                 14. resid_dropout
 
         """
-        self._init_pg()
 
         model_args = ModelArgs()
         model_args.n_layers = 3
@@ -204,8 +191,6 @@ class ReplicateTest(MultiProcessTestCase):
         This tests that a user can pass in a device mesh to replicate a module
         """
 
-        self._init_pg()
-
         device = torch.device(f"cuda:{self.rank % torch.cuda.device_count()}")
         model = Net().to(device)
         replicate_model = deepcopy(model)
@@ -231,7 +216,6 @@ class ReplicateTest(MultiProcessTestCase):
         """
         Tests that replicate_model has the same behavior as original model when training
         """
-        self._init_pg()
 
         device = torch.device(f"cuda:{self.rank % torch.cuda.device_count()}")
         model = Net().to(device)
@@ -278,7 +262,6 @@ class ReplicateTest(MultiProcessTestCase):
         """
         Verifies when a device mesh is passed in, the model has the same behavior as the original model when training
         """
-        self._init_pg()
         global_mesh = self.init_replicate_tp_mesh()
         run_subtests(
             self,
