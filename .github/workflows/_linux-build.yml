@@ -395,6 +395,7 @@ jobs:
       - name: Stop monitoring script
         if: ${{ always() && steps.monitor-script.outputs.monitor-script-pid }}
         shell: bash
+        # M08: Telemetry collection - failure to stop monitor must not block build
         continue-on-error: true
         env:
           MONITOR_SCRIPT_PID: ${{ steps.monitor-script.outputs.monitor-script-pid }}
@@ -428,6 +429,7 @@ jobs:
       - name: copy logs
         shell: bash
         if: ${{ always() && steps.build.outcome != 'skipped' && !inputs.disable-monitor && inputs.build-environment != 'linux-s390x-binary-manywheel'}}
+        # M08: Log collection is best-effort; missing logs must not fail build
         continue-on-error: true
         run: |
           rm -f ./usage_logs
@@ -453,6 +455,7 @@ jobs:
 
       - name: Upload utilization stats
         if: ${{ always() && steps.build.outcome != 'skipped' && !inputs.disable-monitor && inputs.build-environment != 'linux-s390x-binary-manywheel' }}
+        # M08: Telemetry upload is informational; failure must not block build
         continue-on-error: true
         uses: ./.github/actions/upload-utilization-stats
         with:
