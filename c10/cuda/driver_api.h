@@ -103,7 +103,7 @@
   _(nvmlDeviceGetComputeRunningProcesses) \
   _(nvmlSystemGetCudaDriverVersion_v2)
 
-#if defined(CUDA_VERSION) && (CUDA_VERSION >= 12040)
+#if defined(CUDA_VERSION)
 #define C10_NVML_DRIVER_API_OPTIONAL(_) _(nvmlDeviceGetGpuFabricInfoV)
 #else
 #define C10_NVML_DRIVER_API_OPTIONAL(_)
