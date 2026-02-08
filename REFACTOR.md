@@ -682,18 +682,63 @@ Fork CI is guarded by `github.repository_owner == 'pytorch'`. Verification was p
 
 ---
 
-### M05 — CI Workflow Linting & Structural Guardrails 🔵 NEXT
+### M05 — CI Workflow Linting & Structural Guardrails ✅ COMPLETE
 
-**Status:** Ready to Start  
-**Priority:** P1  
-**Blockers:** None (M04 complete)
+**Status:** 🔒 Closed and Locked  
+**Date:** 2026-02-08  
+**Effort:** 2 hours  
+**Change Class:** Verification-Only  
+**Merge:** PR #174557 (pending)
 
 **Intent:**
-Add `actionlint` and structural validation to catch workflow anti-patterns early.
+Add `actionlint` as a non-blocking CI workflow to detect workflow anti-patterns before they ship, establishing an early warning system for CI integrity.
+
+**Deliverables:**
+- ✅ `.github/workflows/refactor-actionlint.yml` — actionlint CI workflow
+- ✅ `M05_audit.md` — Findings classification (0 errors in 144 files)
+- ✅ `M05_summary.md` — Executive summary
+
+**Invariant Introduced:**
+- **INV-070** — CI Structural Validity: All CI workflows must be syntactically valid and analyzable by static tooling.
+
+**Key Finding:**
+- **Zero actionlint errors** across 144 workflow files
+- PyTorch's existing CI workflows are structurally clean
+- Clean baseline established for INV-070
+
+**Non-Goals (Honored):**
+- ❌ No workflow fixes
+- ❌ No SARIF/Security tab integration
+- ❌ No shellcheck (scope limitation)
+- ❌ No action pinning (M06)
+- ❌ No enforcement (observational only)
+
+**Verification:**
+- ✅ actionlint v1.7.7 executed locally
+- ✅ 144 workflows scanned, 0 errors found
+- ✅ No existing workflows modified
+- ✅ CI workflow added (non-blocking)
+
+**Closeout Artifacts:**
+- [`docs/refactor/milestones/M05/M05_plan.md`](docs/refactor/milestones/M05/M05_plan.md)
+- [`docs/refactor/milestones/M05/M05_toolcalls.md`](docs/refactor/milestones/M05/M05_toolcalls.md)
+- [`docs/refactor/milestones/M05/M05_audit.md`](docs/refactor/milestones/M05/M05_audit.md)
+- [`docs/refactor/milestones/M05/M05_summary.md`](docs/refactor/milestones/M05/M05_summary.md)
 
 ---
 
-### M06-M10 — CI Health (Planned)
+### M06 — Action Pinning & Supply-Chain Hardening 🔵 NEXT
+
+**Status:** Ready to Start  
+**Priority:** P1  
+**Blockers:** None (M05 complete)
+
+**Intent:**
+Pin all GitHub Actions to full SHA for supply-chain security.
+
+---
+
+### M07-M10 — CI Health (Planned)
 
 See [`docs/refactor/audit/REFACTOR_PHASE_MAP.md`](docs/refactor/audit/REFACTOR_PHASE_MAP.md) for full Phase 1 plan.
 
@@ -711,7 +756,7 @@ From baseline audit, top risks requiring mitigation:
 |----|------|---------|--------|-----------|
 | **I01** | No Working Build Environment | P0 | 🟡 Mitigated | M01 (static checks) |
 | **I02** | Empty REFACTOR.md | P0 | ✅ Resolved | M00-M02 |
-| **I03** | 130+ CI Workflows (Maintenance) | P1 | 🔵 Active | M03-M05 |
+| **I03** | 130+ CI Workflows (Maintenance) | P1 | ✅ Mitigated | M03-M05 (audit + linting) |
 | **I04** | Mixed Action Pinning | P1 | 🔵 Active | M06-M07 |
 | **I05** | Third-Party Supply Chain Risk | P1 | 🔵 Active | M08-M10 |
 | **I06** | Implicit Distributed Protocol | P2 | 🔵 Active | M11-M12 |
@@ -732,15 +777,15 @@ From baseline audit, top risks requiring mitigation:
 | Phase | Milestones | Complete | In Progress | Planned |
 |-------|-----------|----------|-------------|---------|
 | **Phase 0** | M00-M02 | 3 (M00, M01, M02) | 0 | 0 |
-| **Phase 1** | M03-M10 | 2 (M03, M04) | 0 | 6 |
+| **Phase 1** | M03-M10 | 3 (M03, M04, M05) | 0 | 5 |
 | **Phase 2** | M11-M14 | 0 | 0 | 4 |
 | **Phase 3** | M15-M19 | 0 | 0 | 5 |
 | **Phase 4** | M20+ | 0 | 0 | TBD |
 
-**Program Progress:** 5/22 milestones complete (23%)  
+**Program Progress:** 6/22 milestones complete (27%)  
 **Phase 0:** ✅ Complete  
-**Phase 1:** 🔄 In Progress (2/8)  
-**Estimated Remaining:** ~160 hours (M05-M19)
+**Phase 1:** 🔄 In Progress (3/8)  
+**Estimated Remaining:** ~155 hours (M06-M19)
 
 ---
 
@@ -752,8 +797,9 @@ From baseline audit, top risks requiring mitigation:
 | 2026-02-08 | M02 (Phase 0 Complete) | 8/10 | 7/10 | 8/10 | 6/10 | Established |
 | 2026-02-08 | M03 (CI Audit Complete) | 8/10 | 7/10 | 7/10* | 6/10 | Maintained |
 | 2026-02-08 | M04 (Silent Failures Fixed) | 8/10 | 7/10 | 7.5/10 | 6/10 | Maintained |
+| 2026-02-08 | M05 (Actionlint Added) | 8/10 | 7/10 | 7.5/10 | 6/10 | Maintained |
 
-*CI score improving: 5 silent failure risks removed in M04. Full recovery to 8/10 expected after M05-M06 (linting + action pinning).
+*CI score maintained: Actionlint confirms clean baseline (0 errors in 144 files). Full recovery to 8/10 expected after M06 (action pinning).
 
 **Targets (Post-Phase 3):**
 - Architecture: Maintain 8/10
@@ -785,11 +831,11 @@ For program-level recovery, consult: [`docs/refactor/toolcalls.md`](docs/refacto
 
 ## Document Version
 
-**Last Updated:** 2026-02-08 (M04 closeout)  
-**Next Update:** M05 completion  
+**Last Updated:** 2026-02-08 (M05 closeout)  
+**Next Update:** M06 completion  
 **Baseline Locked:** Commit c5f1d40  
 **Phase 0:** ✅ Complete  
-**Phase 1:** 🔄 In Progress (2/8 milestones)
+**Phase 1:** 🔄 In Progress (3/8 milestones)
 
 ---
 
