@@ -54,6 +54,7 @@ from torch.utils._typing_utils import not_none
 from .c10d_logger import _exception_logger, _time_logger
 from .constants import default_pg_nccl_timeout, default_pg_timeout
 from .rendezvous import register_rendezvous_handler, rendezvous  # noqa: F401
+from ._protocol_version import get_protocol_version
 
 
 __all__ = [
@@ -944,6 +945,87 @@ def _device_capability(group: ProcessGroup | None = None) -> list[str]:
     return [device.type for device in group._device_types]
 
 
+# M11: Protocol version key prefix for store-based version exchange
+_PROTOCOL_VERSION_STORE_PREFIX = "torch.distributed.protocol_version"
+
+
+def _check_protocol_version(
+    rank: int,
+    store: Store,
+    world_size: int,
+    backend: str,
+    timeout: timedelta,
+) -> None:
+    """
+    Check that all ranks have the same distributed protocol version.
+
+    This is a guardrail to detect cross-version incompatibilities early during
+    init_process_group, before backend initialization proceeds.
+
+    M11: Protocol version guardrail requires rendezvous Store; MPI path is
+    currently excluded because it does not use a store for rendezvous.
+
+    Args:
+        rank: The rank of the current process.
+        store: The rendezvous store for key-value exchange.
+        world_size: The total number of processes.
+        backend: The backend name (for error messages).
+        timeout: Timeout for store operations.
+
+    Raises:
+        RuntimeError: If protocol versions do not match across ranks.
+    """
+    local_version = get_protocol_version()
+    version_key = f"{_PROTOCOL_VERSION_STORE_PREFIX}.{rank}"
+
+    # Each rank publishes its protocol version to the store
+    store.set(version_key, str(local_version))
+    logger.debug(
+        "Rank %s: Published protocol version %s to store key %s",
+        rank,
+        local_version,
+        version_key,
+    )
+
+    # Rank 0 gathers all versions and validates
+    if rank == 0:
+        remote_versions: set[int] = set()
+        for r in range(world_size):
+            key = f"{_PROTOCOL_VERSION_STORE_PREFIX}.{r}"
+            try:
+                store.wait([key], timeout)
+                value = store.get(key)
+                remote_versions.add(int(value.decode("utf-8")))
+            except Exception as e:
+                raise RuntimeError(
+                    f"Failed to retrieve protocol version from rank {r}: {e}"
+                ) from e
+
+        # Check for mismatch
+        if len(remote_versions) > 1:
+            raise RuntimeError(
+                f"Distributed protocol version mismatch: local={local_version} "
+                f"remote={remote_versions} backend={backend}. "
+                f"All ranks must use the same distributed protocol version."
+            )
+
+        # Signal all ranks that version check passed
+        ok_key = f"{_PROTOCOL_VERSION_STORE_PREFIX}.ok"
+        store.set(ok_key, "1")
+        logger.debug("Rank 0: Protocol version check passed (version=%s)", local_version)
+    else:
+        # Non-rank-0 processes wait for the OK signal from rank 0
+        ok_key = f"{_PROTOCOL_VERSION_STORE_PREFIX}.ok"
+        try:
+            store.wait([ok_key], timeout)
+        except Exception as e:
+            raise RuntimeError(
+                f"Rank {rank}: Protocol version check failed or timed out waiting "
+                f"for rank 0 validation: {e}"
+            ) from e
+        logger.debug("Rank %s: Protocol version check passed", rank)
+
+
 @_time_logger
 def _store_based_barrier(
     rank,
@@ -1812,6 +1894,11 @@ def init_process_group(
             # Use a PrefixStore to avoid accidental overrides of keys used by
             # different systems (e.g. RPC) in case the store is multi-tenant.
             store = PrefixStore("default_pg", store)
+
+        # M11: Protocol version guardrail - check all ranks have matching versions
+        # before proceeding with backend initialization. This catches cross-version
+        # incompatibilities early with a clear error message.
+        _check_protocol_version(rank, store, world_size, str(backend), timeout)
 
         default_pg, _ = _new_process_group_helper(
             world_size,
