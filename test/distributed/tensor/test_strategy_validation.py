@@ -482,6 +482,37 @@ class TestValidateCombination(TestCase):
             )
         self.assertFalse(is_valid)
 
+    def test_nan_output_valid_when_both_nan(self):
+        """Test that NaN outputs are considered valid when both ground truth and sharded match.
+
+        igamma with negative inputs produces NaN. When sharding produces the same
+        NaN pattern, the rule should be valid (NaN == NaN for validation purposes).
+        """
+        # igamma(negative, negative) produces NaN
+        a = torch.tensor([-1.0, -2.0, -3.0, -4.0, -5.0, -6.0, -7.0, -8.0])
+        x = torch.tensor(-1.0)
+        sample = SampleInput(a, args=(x,))
+        tensors = extract_tensors_from_sample(sample)
+        ground_truth = torch.igamma(a, x)
+        self.assertTrue(ground_truth.isnan().all(), "Expected all NaN ground truth")
+
+        combo = PlacementCombination(
+            input_placements=(Shard(0), Replicate()), output_placement=Shard(0)
+        )
+
+        with LocalTensorMode(frozenset(range(self.world_size))):
+            mesh = init_device_mesh("cpu", (self.world_size,))
+            is_valid, msg = validate_combination(
+                torch.igamma,
+                sample,
+                tensors,
+                combo,
+                ground_truth,
+                self.world_size,
+                mesh,
+            )
+        self.assertTrue(is_valid, f"NaN outputs should match: {msg}")
+
     def test_exhaustive_binary_op_rules(self):
         """
         Exhaustively test all placement combinations for binary ops.
