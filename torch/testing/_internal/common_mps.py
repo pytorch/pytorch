@@ -43,6 +43,7 @@ if torch.backends.mps.is_available():
             "acos",
             "atan",
             "baddbmm",
+            "block_diag",
             "broadcast_tensors",
             "broadcast_to",
             "chalf",
@@ -827,10 +828,6 @@ if torch.backends.mps.is_available():
             # Unsupported
             # This doesn't work on M1, but is partially working on M2 with the exception of torch.float16
             "nn.functional.conv3d": None,
-            # The CPU impl of grid_sampler_3d does not use opmath_t, so it has a
-            # large amount of error compared with the MPS impl for half
-            # precision types. So we have to skip these for now.
-            "grid_sampler_3d": [torch.float16, torch.bfloat16],
         }
 
         def addDecorator(op: OpInfo, d: DecorateInfo) -> None:
@@ -927,7 +924,6 @@ if torch.backends.mps.is_available():
             "cdist": None,
             "masked.scatter": [torch.float16, torch.float32],
             "grid_sampler_3d": None,
-            "index_fill": [torch.float16, torch.float32],  # missing `aten::_unique`.
             "igamma": None,  # currently not supported for any device
             "igammac": None,  # currently not supported for any device
             "linalg.solve": [torch.float16, torch.float32],  # missing `aten::lu_solve`.
