@@ -60,6 +60,7 @@ from .variables import (
     BuiltinVariable,
     FunctionalCallVariable,
     FunctorchHigherOrderVariable,
+    InspectSignatureVariable,
     LocalGeneratorFunctionVariable,
     LocalGeneratorObjectVariable,
     NestedUserFunctionVariable,
@@ -388,6 +389,7 @@ manual_torch_name_rule_map: dict[
     "torch.utils._pytree._get_node_type": PyTreeGetNodeTypeFunctionVariable,
     "torch.utils._pytree.tree_is_leaf": PyTreeTreeIsLeafFunctionVariable,
     "torch._utils_internal.justknobs_check": UserFunctionVariable,
+    "inspect.signature": InspectSignatureVariable,
 }
 
 
