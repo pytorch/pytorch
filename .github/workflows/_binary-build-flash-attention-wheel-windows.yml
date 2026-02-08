@@ -62,7 +62,7 @@ jobs:
           submodules: false
 
       - name: Checkout Flash-Attention
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
           repository: Dao-AILab/flash-attention
           ref: bc0e4ac01484ffb61ddc694724826bec4d9cf1c2
@@ -79,7 +79,7 @@ jobs:
           echo "${CUDA_PATH}/bin" >> "${GITHUB_PATH}"
           echo "Using CUDA ${CUDA_VER_SHORT} at ${CUDA_PATH}"
       - name: Setup MSVC
-        uses: ilammy/msvc-dev-cmd@v1
+        uses: ilammy/msvc-dev-cmd@dd5e2fa0a7de1e7929605d9ecc020e749d9856a3 # v1
 
       - name: Remove link.exe conflict
         shell: bash

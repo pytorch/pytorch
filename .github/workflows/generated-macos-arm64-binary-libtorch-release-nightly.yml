@@ -61,13 +61,13 @@ jobs:
           # shellcheck disable=SC2129
           echo "MAC_PACKAGE_WORK_DIR=${RUNNER_TEMP}" >> "${GITHUB_ENV}"
       - name: Setup Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
           # .4 version is min minor for 3.10, and also no-gil version of 3.13 needs at least 3.13.3
           python-version: "3.10.4"
           freethreaded: false
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
@@ -97,7 +97,7 @@ jobs:
           export TORCH_PACKAGE_NAME
           "${PYTORCH_ROOT}/.ci/wheel/install_libomp.sh"
           "${PYTORCH_ROOT}/.ci/wheel/build_wheel.sh"
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         if: always()
         with:
           name: libtorch-cpu-shared-with-deps-release
