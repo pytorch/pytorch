@@ -1,0 +1,68 @@
+# M08 Tool Calls Log
+
+**Milestone:** M08 — CI Truthfulness & Silent-Failure Elimination  
+**Started:** 2026-02-08  
+**Base Branch:** main  
+**Target Branch:** m08-ci-truthfulness  
+**Starting Commit:** 17f7cbf7190
+
+---
+
+## Tool Call Log
+
+### Entry 001
+- **Timestamp:** 2026-02-08T20:55:00Z
+- **Tool:** grep
+- **Purpose:** Inventory all `continue-on-error` occurrences across all GitHub workflows
+- **Files:** `.github/workflows/*.yml`
+- **Status:** Starting
+
+### Entry 002
+- **Timestamp:** 2026-02-08T20:55:00Z
+- **Tool:** grep
+- **Purpose:** Inventory all `if: always()` occurrences across all GitHub workflows
+- **Files:** `.github/workflows/*.yml`
+- **Status:** Starting
+
+### Entry 003
+- **Timestamp:** 2026-02-08T20:55:00Z
+- **Tool:** grep
+- **Purpose:** Inventory shell suppression patterns (`|| true`, `set +e`) across all GitHub workflows
+- **Files:** `.github/workflows/*.yml`
+- **Status:** Complete
+
+### Entry 004
+- **Timestamp:** 2026-02-08T21:00:00Z
+- **Tool:** read_file
+- **Purpose:** Verify M04 fixes are still in place (target_determination.yml, llm_td_retrieval.yml, tools-unit-tests.yml, scorecards.yml, trunk.yml)
+- **Files:** Multiple M04-affected workflows
+- **Status:** Complete - All M04 fixes verified intact
+
+### Entry 005
+- **Timestamp:** 2026-02-08T21:05:00Z
+- **Tool:** read_file
+- **Purpose:** Examine reusable workflows (_linux-test.yml, _linux-build.yml) to understand continue-on-error context
+- **Files:** Reusable workflow files
+- **Status:** Complete
+
+### Entry 006
+- **Timestamp:** 2026-02-08T21:10:00Z
+- **Tool:** write
+- **Purpose:** Create M08 findings document with full classification
+- **Files:** `docs/refactor/milestones/M08/M08_findings.md`
+- **Status:** Complete
+
+### Entry 007
+- **Timestamp:** 2026-02-08T21:15:00Z
+- **Tool:** search_replace
+- **Purpose:** Add M08 inline justification comments to workflow files
+- **Files:** `_linux-build.yml`, `_win-build.yml`, `lint-autoformat.yml`, `_linux-test-stable-fa3.yml`, `_binary-upload.yml`, `_binary-test-linux.yml`
+- **Status:** Complete - 9 comments added across 6 files
+
+### Entry 008
+- **Timestamp:** 2026-02-08T21:20:00Z
+- **Tool:** search_replace
+- **Purpose:** Add CI Truthfulness Policy to REFACTOR.md
+- **Files:** `REFACTOR.md`
+- **Status:** Starting
+

@@ -136,6 +136,7 @@ jobs:
 
       - name: Download pytest cache
         uses: ./.github/actions/pytest-cache-download
+        # M08: Cache download is best-effort; cache miss must not fail build
         continue-on-error: true
         with:
           cache_dir: .pytest_cache

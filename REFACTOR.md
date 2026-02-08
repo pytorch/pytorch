@@ -233,6 +233,71 @@ CI weakening requires explicit approval and documented justification.
 
 ---
 
+## CI Truthfulness Policy (M08)
+
+This policy governs the use of silent-failure patterns in GitHub Actions workflows. Established in M08 to prevent CI from providing false confidence signals.
+
+### Principle
+
+> **If CI is green, it must mean all correctness-critical steps succeeded.**
+> 
+> Silent failures that mask real problems undermine the entire CI system's value as a trust signal.
+
+### Prohibited Patterns in Required Jobs
+
+The following patterns are **prohibited by default** in any step that affects CI signal integrity:
+
+1. **`continue-on-error: true`** on correctness-critical steps
+2. **`if: always()`** on steps that could mask failures
+3. **Shell suppression** (`|| true`, `set +e`) in build or test commands
+
+### Allowed Exceptions
+
+Silent-failure patterns are **acceptable** only when:
+
+1. **Explicitly justified** — A comment explains why failure is acceptable
+2. **Locally documented** — The justification is inline in the workflow file
+3. **Non-impacting** — Failure does not affect CI signal accuracy
+
+#### Typical Acceptable Uses
+
+| Pattern | Acceptable Context | Example |
+|---------|-------------------|---------|
+| `continue-on-error: true` | Cache/artifact download | Cache miss should not fail build |
+| `continue-on-error: true` | Telemetry/monitoring upload | Metrics collection is informational |
+| `continue-on-error: true` | SSH debug setup | Developer convenience must not block tests |
+| `if: always()` | Cleanup/teardown steps | Resources must be released even on failure |
+| `if: always()` | Artifact upload (post-test) | Logs needed for debugging failures |
+| `|| true` | Idempotent cleanup commands | `docker stop`, `rm`, `git tag -d` |
+
+### Documentation Requirement
+
+Every `continue-on-error: true` in non-generated workflow files must have an inline comment explaining:
+
+1. **What** the step does
+2. **Why** failure is acceptable
+3. **Impact** (or lack thereof) on CI signal
+
+**Format:**
+```yaml
+# M08: [Brief justification why failure is acceptable]
+continue-on-error: true
+```
+
+### Enforcement
+
+- **New `continue-on-error` additions** require inline justification (enforced by review)
+- **Generated workflows** (e.g., `generated-*.yml`) follow generator patterns; modifications go to the generator
+- **Violations discovered** should be fixed or justified, not silently deferred
+
+### Related Invariants
+
+- **INV-060** — CI Critical Path Integrity
+- **INV-070** — CI Structural Validity
+- **INV-080** — Action Immutability
+
+---
+
 ## Invariant Handling
 
 Invariants are properties that must remain true across all refactoring work.
@@ -802,6 +867,7 @@ From baseline audit, top risks requiring mitigation:
 |----|-------------|------------|-------------|---------------|
 | **M04-V01** | Upstream CI execution verification for M04 changes | M04 | Upstream PR | TD failure propagates; tools-unit-tests fails on pytest failure; scorecards runs cleanly |
 | **M06-V01** | PyTorch-owned `@main` actions not pinned (20 refs) | M06 | Future (requires policy) | PyTorch establishes release tagging for internal actions |
+| **M07-V01** | Dependabot runtime behavior unobservable locally | M07 | Post-merge | Dependabot opens at least one action update PR, OR shows as enabled in GitHub Security/Insights UI |
 
 ---
 
@@ -810,15 +876,15 @@ From baseline audit, top risks requiring mitigation:
 | Phase | Milestones | Complete | In Progress | Planned |
 |-------|-----------|----------|-------------|---------|
 | **Phase 0** | M00-M02 | 3 (M00, M01, M02) | 0 | 0 |
-| **Phase 1** | M03-M10 | 4 (M03, M04, M05, M06) | 0 | 4 |
+| **Phase 1** | M03-M10 | 5 (M03, M04, M05, M06, M07) | 1 (M08) | 2 |
 | **Phase 2** | M11-M14 | 0 | 0 | 4 |
 | **Phase 3** | M15-M19 | 0 | 0 | 5 |
 | **Phase 4** | M20+ | 0 | 0 | TBD |
 
-**Program Progress:** 7/22 milestones complete (32%)  
+**Program Progress:** 8/22 milestones complete (36%)  
 **Phase 0:** ✅ Complete  
-**Phase 1:** 🔄 In Progress (4/8)  
-**Estimated Remaining:** ~150 hours (M07-M19)
+**Phase 1:** 🔄 In Progress (5/8 complete, M08 in progress)  
+**Estimated Remaining:** ~140 hours (M08-M19)
 
 ---
 
@@ -832,8 +898,9 @@ From baseline audit, top risks requiring mitigation:
 | 2026-02-08 | M04 (Silent Failures Fixed) | 8/10 | 7/10 | 7.5/10 | 6/10 | Maintained |
 | 2026-02-08 | M05 (Actionlint Added) | 8/10 | 7/10 | 7.5/10 | 6/10 | Maintained |
 | 2026-02-08 | M06 (Action Pinning) | 8/10 | 7/10 | 8/10 | 6.5/10 | Maintained |
+| 2026-02-08 | M07 (Dependabot Actions) | 8/10 | 7/10 | 8/10 | 6.5/10 | Maintained |
 
-*CI score improved: All external actions pinned to SHA. Security improved with INV-080 established.
+*CI score maintained: Dependabot enables sustainable maintenance of pinned actions. Security unchanged (INV-090 observational).
 
 **Targets (Post-Phase 3):**
 - Architecture: Maintain 8/10
@@ -865,11 +932,11 @@ For program-level recovery, consult: [`docs/refactor/toolcalls.md`](docs/refacto
 
 ## Document Version
 
-**Last Updated:** 2026-02-08 (M06 closeout)  
-**Next Update:** M07 completion  
+**Last Updated:** 2026-02-08 (M08 in progress)  
+**Next Update:** M08 completion  
 **Baseline Locked:** Commit c5f1d40  
 **Phase 0:** ✅ Complete  
-**Phase 1:** 🔄 In Progress (3/8 milestones)
+**Phase 1:** 🔄 In Progress (5/8 milestones complete)
 
 ---
 

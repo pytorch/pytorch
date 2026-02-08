@@ -18,6 +18,7 @@ jobs:
           submodules: true
           fetch-depth: 0
       - name: Run lintrunner (nonretryable)
+        # M08: Autoformat is best-effort; lint failures should not block suggestion workflow
         continue-on-error: true
         run: |
           set -ex
@@ -27,11 +28,13 @@ jobs:
           bash .github/scripts/lintrunner.sh
       - name: Check for changes
         id: git-check
+        # M08: git diff exit code used for control flow, not error detection
         continue-on-error: true
         run: |
           git diff --exit-code || echo "changes=true" >> "$GITHUB_OUTPUT"
       - name: Suggest changes
         if: steps.git-check.outputs.changes == 'true'
+        # M08: Suggestion posting is best-effort; API failures must not fail workflow
         continue-on-error: true
         uses: parkerbxyz/suggest-changes@a2ec1653b0c4cc8287d682f0066dba4a173cc7f3 # v1.0.8
         with:

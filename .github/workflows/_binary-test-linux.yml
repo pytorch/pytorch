@@ -126,6 +126,7 @@ jobs:
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
         if: inputs.build_environment != 'linux-s390x-binary-manywheel'
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        # M08: SSH access is debug convenience; setup failure must not block tests
         continue-on-error: true
         with:
           github-secret: ${{ secrets.github-token }}
