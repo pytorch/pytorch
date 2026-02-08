@@ -31,7 +31,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     foreach_reduce,
 )
 from torch.distributed.fsdp._fully_shard._fsdp_common import (
-    FSDPMeshInfo,
+    HSDPMeshInfo,
     ShardPlacementResult,
 )
 from torch.distributed.tensor import DTensor, init_device_mesh, Shard
@@ -1338,7 +1338,7 @@ class TestFullyShardNDTraining(FSDPTest):
             self.assertEqual(len(p.placements), 2)
             self.assertEqual(p.device_mesh.mesh_dim_names, ("dp", "tp"))
 
-    @skip_if_lt_x_gpu(4)
+    @skip_if_lt_x_gpu(8)
     def test_shard_placement_fn_tp_ep(self):
         self.run_subtests(
             {"tp_degree": [1, 2]},
@@ -1347,33 +1347,38 @@ class TestFullyShardNDTraining(FSDPTest):
 
     def _test_shard_placement_fn_tp_ep(self, tp_degree):
         ep_degree = 2
+        dp_replicate = 2
         dp_size = self.world_size // tp_degree
-        if dp_size < ep_degree:
+        dp_shard_size = dp_size // dp_replicate
+        if dp_shard_size < ep_degree:
             return
-        efsdp = dp_size // ep_degree
+        efsdp = dp_shard_size // ep_degree
         if tp_degree > 1:
             world_mesh = init_device_mesh(
                 device_type.type,
-                (dp_size, tp_degree),
-                mesh_dim_names=("dp", "tp"),
+                (dp_replicate, dp_shard_size, tp_degree),
+                mesh_dim_names=("dp_replicate", "dp_shard", "tp"),
             )
             tp_mesh = world_mesh["tp"]
-            dp_mesh = world_mesh["dp"]
+            dp_mesh = world_mesh["dp_replicate", "dp_shard"]
         else:
-            world_mesh = init_device_mesh(
+            dp_mesh = init_device_mesh(
                 device_type.type,
-                (self.world_size,),
-                mesh_dim_names=("world",),
+                (dp_replicate, dp_shard_size),
+                mesh_dim_names=("dp_replicate", "dp_shard"),
             )
             tp_mesh = None
-            dp_mesh = world_mesh._unflatten(0, (self.world_size,), ("fsdp",))["fsdp"]
-        sparse_mesh = dp_mesh._unflatten(
+        dp_shard_mesh = dp_mesh["dp_shard"]
+        sparse_mesh = dp_shard_mesh._unflatten(
             0,
             (efsdp, ep_degree),
             ("efsdp", "ep"),
         )
         ep_mesh = sparse_mesh["ep"]
         efsdp_mesh = sparse_mesh["efsdp"]
+        # For expert params: 2D HSDP mesh (dp_replicate, efsdp)
+        full_sparse = dp_mesh._unflatten(1, (efsdp, ep_degree), ("efsdp", "ep"))
+        expert_hsdp_mesh = full_sparse["dp_replicate", "efsdp"]
         model_args = ModelArgs(
             n_layers=2,
             vocab_size=256,
@@ -1387,8 +1392,12 @@ class TestFullyShardNDTraining(FSDPTest):
         model = Transformer(model_args)
         ref_model = copy.deepcopy(model).to(device_type)
         Transformer.parallelize(model, tp_mesh=tp_mesh, ep_mesh=ep_mesh)
-        efsdp_mesh_info = FSDPMeshInfo(mesh=efsdp_mesh, shard_mesh_dim=0)
-        dp_mesh_info = FSDPMeshInfo(mesh=dp_mesh, shard_mesh_dim=0)
+        efsdp_mesh_info = HSDPMeshInfo(
+            mesh=expert_hsdp_mesh, shard_mesh_dim=1, replicate_mesh_dim=0
+        )
+        dp_mesh_info = HSDPMeshInfo(
+            mesh=dp_mesh, shard_mesh_dim=1, replicate_mesh_dim=0
+        )
         for block in model.layers:
             expert_params = set(block.expert_layer.experts.parameters())
 
@@ -1434,16 +1443,16 @@ class TestFullyShardNDTraining(FSDPTest):
             (2, model_args.max_seq_len),
             device=device_type.type,
         )
+        dp_replicate_group = dp_mesh["dp_replicate"].get_group()
         for iter_idx in range(10):
             ref_loss = ref_model(inp).sum()
             loss = model(inp).sum()
             ref_loss.backward()
             loss.backward()
-            # Match gradient reduction semantics of EP + FSDP:
-            # - Non-expert params: FSDP averages across dp_mesh (all ranks)
-            # - Expert params: EP all-gather causes grads to accumulate
-            #   contributions from all EP ranks (SUM), then FSDP averages
-            #   across efsdp_mesh
+            # Match gradient reduction semantics of EP + HSDP:
+            # - Non-expert params: AVG across all dp ranks (world)
+            # - Expert params: SUM across EP ranks, AVG across efsdp,
+            #   AVG across dp_replicate
             for param in ref_model.parameters():
                 if param.grad is None:
                     continue
@@ -1453,6 +1462,9 @@ class TestFullyShardNDTraining(FSDPTest):
                     )
                     dist.all_reduce(
                         param.grad, op=dist.ReduceOp.AVG, group=efsdp_mesh.get_group()
+                    )
+                    dist.all_reduce(
+                        param.grad, op=dist.ReduceOp.AVG, group=dp_replicate_group
                     )
                 else:
                     dist.all_reduce(param.grad, op=dist.ReduceOp.AVG)
