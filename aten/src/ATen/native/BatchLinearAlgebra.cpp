@@ -14,6 +14,7 @@
 
 #include <c10/util/irange.h>
 
+#include <limits>
 #include <utility>
 #include <vector>
 
@@ -811,6 +812,35 @@ TORCH_META_FUNC(_linalg_eigh)(const Tensor& A,
                               bool compute_v) {
   at::native::squareCheckInputs(A, "linalg.eigh");
   at::native::checkUplo(uplo);
+
+#if AT_BUILD_WITH_LAPACK()
+  if (A.device().type() == at::kCPU) {
+    const auto n = static_cast<long double>(A.size(-1));
+    const auto lapack_int_max = static_cast<long double>(std::numeric_limits<int>::max());
+
+    const auto lwork_min = [&]() {
+      if (A.is_complex()) {
+        return compute_v ? (n * n + 2 * n) : (n + 1);
+      }
+      return compute_v ? (2 * n * n + 6 * n + 1) : (2 * n + 1);
+    }();
+
+    // Complex eigh/eigvalsh uses lrwork in addition to lwork. For real input,
+    // liwork is the additional workspace, and it is always much smaller.
+    const auto aux_work_min = [&]() {
+      if (A.is_complex()) {
+        return compute_v ? (2 * n * n + 5 * n + 1) : n;
+      }
+      return compute_v ? (5 * n + 3) : 1;
+    }();
+
+    TORCH_CHECK(
+        lwork_min <= lapack_int_max && aux_work_min <= lapack_int_max,
+        "linalg.eigh: The algorithm failed because the input matrix is too large for the LAPACK "
+        "32-bit integer interface used by this PyTorch build. Consider using a smaller matrix or "
+        "a LAPACK build with 64-bit integer support.");
+  }
+#endif
 
   auto shape = A.sizes().vec();
   if (compute_v) {
