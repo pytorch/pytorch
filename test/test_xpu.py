@@ -2035,7 +2035,7 @@ class TestCachingHostAllocatorXpuGraph(TestCase):
             with torch.xpu.graph(graph):
                 data = torch.empty(8, pin_memory=True)
                 data2 = torch.empty(8, pin_memory=True)
-            assert data.data_ptr() != data2.data_ptr()
+            self.assertNotEqual(data.data_ptr(), data2.data_ptr())
             del data2
 
     @parametrize("use_xpu_host_register", [True, False])
@@ -2049,7 +2049,7 @@ class TestCachingHostAllocatorXpuGraph(TestCase):
                 data_ptr = data.data_ptr()
                 del data
                 data2 = torch.randn(8).pin_memory()
-                assert data2.data_ptr() == data_ptr
+                self.assertEqual(data2.data_ptr(), data_ptr)
 
     @parametrize("use_xpu_host_register", [True, False])
     def test_pin_memory_use(self, use_xpu_host_register):
@@ -2063,7 +2063,7 @@ class TestCachingHostAllocatorXpuGraph(TestCase):
                 old_data_ptr = data.data_ptr()
                 del data
                 data2 = torch.randn(8).pin_memory()
-            assert data2.data_ptr() != old_data_ptr
+            self.assertNotEqual(data2.data_ptr(), old_data_ptr)
 
     @parametrize("use_xpu_host_register", [True, False])
     @parametrize("use_background_threads", [True, False])
@@ -2103,9 +2103,9 @@ class TestCachingHostAllocatorXpuGraph(TestCase):
                     del data2
 
             if delete_memory and not use_memory:
-                assert new_data_ptr == old_data_ptr
+                self.assertEqual(new_data_ptr, old_data_ptr)
             else:
-                assert new_data_ptr != old_data_ptr
+                self.assertNotEqual(new_data_ptr, old_data_ptr)
 
 
 @unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
