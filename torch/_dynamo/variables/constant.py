@@ -8,7 +8,9 @@ maintaining type safety through the compilation process.
 
 import enum
 import operator
-from typing import Any, Literal, Optional, TYPE_CHECKING, Union
+from collections.abc import Sequence
+from typing import Any, Literal, Optional, overload, TYPE_CHECKING, Union
+from typing_extensions import override
 
 import torch
 from torch._dynamo.source import AttrSource, GetItemSource
@@ -21,12 +23,15 @@ from ..utils import (
     istype,
     np,
     raise_args_mismatch,
+    raise_on_overridden_hash,
 )
 from .base import ValueMutationNew, VariableTracker
 
 
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
+
+    from .functions import UserFunctionVariable
 
 
 class ConstantVariable(VariableTracker):
@@ -37,6 +42,15 @@ class ConstantVariable(VariableTracker):
     The create() method intelligently constructs appropriate variable types for
     nested collections.
     """
+
+    @overload
+    @staticmethod
+    def create(value: bool) -> "ConstantVariable": ...
+
+    # TODO: Refactor to make these return ConstantVariable
+    @overload
+    @staticmethod
+    def create(value: Any, **kwargs: Any) -> VariableTracker: ...
 
     @staticmethod
     def create(value: Any, **kwargs: Any) -> VariableTracker:
@@ -53,10 +67,10 @@ class ConstantVariable(VariableTracker):
         # Routing for supported collection literals.
         if isinstance(value, set):
             items = [ConstantVariable.create(x) for x in value]
-            return variables.SetVariable(items, **kwargs)
+            return variables.SetVariable(items, **kwargs)  # type: ignore[arg-type]
         elif isinstance(value, frozenset):
             items = [ConstantVariable.create(x) for x in value]
-            return variables.FrozensetVariable(items, **kwargs)
+            return variables.FrozensetVariable(items, **kwargs)  # type: ignore[arg-type]
         elif isinstance(value, slice):
             slice_args = (value.start, value.stop, value.step)
             slice_args_vars = tuple(ConstantVariable.create(arg) for arg in slice_args)
@@ -102,6 +116,15 @@ its type to `common_constant_types`.
 
     def is_python_constant(self) -> Literal[True]:
         return True
+
+    def is_symnode_like(self) -> bool:
+        return isinstance(self.value, (int, bool))
+
+    def is_constant_match(self, *values: Any) -> bool:
+        return self.value in values
+
+    def is_constant_none(self) -> bool:
+        return self.value is None
 
     @property
     def items(self) -> list[VariableTracker]:
@@ -198,7 +221,7 @@ its type to `common_constant_types`.
                 return ConstantVariable.create(method(*const_args, **const_kwargs))
             except Exception as e:
                 raise_observed_exception(type(e), tx)
-        elif isinstance(self.value, (float, int)):
+        elif isinstance(self.value, (float, int)) and hasattr(self.value, name):
             if not (args or kwargs):
                 try:
                     return ConstantVariable.create(getattr(self.value, name)())
@@ -241,8 +264,11 @@ its type to `common_constant_types`.
                 raise_observed_exception(type(e), tx)
 
         if name == "__len__" and not (args or kwargs):
-            # pyrefly: ignore [bad-argument-type]
-            return ConstantVariable.create(len(self.value))
+            try:
+                # pyrefly: ignore [bad-argument-type]
+                return ConstantVariable.create(len(self.value))
+            except TypeError as e:
+                raise_observed_exception(type(e), tx, args=list(e.args))
         elif name == "__round__" and len(args) == 1 and args[0].is_python_constant():
             try:
                 return ConstantVariable.create(
@@ -257,7 +283,7 @@ its type to `common_constant_types`.
             assert not kwargs
             search = args[0].as_python_constant()
             try:
-                # pyrefly: ignore [unsupported-operation]
+                # pyrefly: ignore [not-iterable, unsupported-operation]
                 result = search in self.value
                 return ConstantVariable.create(result)
             except TypeError as e:
@@ -266,11 +292,81 @@ its type to `common_constant_types`.
                 )
         return super().call_method(tx, name, args, kwargs)
 
+    def call_tree_map(
+        self,
+        tx: "InstructionTranslator",
+        tree_map_fn: "UserFunctionVariable",
+        map_fn: VariableTracker,
+        rest: Sequence[VariableTracker],
+        tree_map_kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if self.value is None:
+            none_is_leaf_var = tree_map_kwargs.get("none_is_leaf")
+            if none_is_leaf_var is not None:
+                try:
+                    none_is_leaf = bool(none_is_leaf_var.as_python_constant())
+                except NotImplementedError:
+                    return self._tree_map_fallback(
+                        tx,
+                        tree_map_fn,
+                        map_fn,
+                        rest,
+                        tree_map_kwargs,
+                    )
+            else:
+                tree_map_module = getattr(
+                    getattr(tree_map_fn, "fn", None), "__module__", ""
+                )
+                # torch.utils._pytree and torch.utils._cxx_pytree treat None as a leaf
+                # by default, while optree keeps it as an internal node unless
+                # none_is_leaf=True is provided.
+                none_is_leaf = not tree_map_module.startswith("optree")
+            if none_is_leaf:
+                return map_fn.call_function(tx, [self, *rest], {})
+            else:
+                for other in rest:
+                    if not other.is_constant_none():
+                        return self._tree_map_fallback(
+                            tx,
+                            tree_map_fn,
+                            map_fn,
+                            rest,
+                            tree_map_kwargs,
+                        )
+                return self.clone()
+        if isinstance(self.value, (int, float, bool, complex, str, bytes, torch.dtype)):
+            return map_fn.call_function(tx, [self, *rest], {})
+        return super().call_tree_map(
+            tx,
+            tree_map_fn,
+            map_fn,
+            rest,
+            tree_map_kwargs,
+        )
+
+    @override
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
-    ) -> VariableTracker:
+    ) -> "ConstantVariable":
         result = hasattr(self.value, name)
         return variables.ConstantVariable.create(result)
+
+    def is_python_hashable(self) -> Literal[True]:
+        return True
+
+    def get_python_hash(self) -> int:
+        return hash(self.value)
+
+    def is_python_equal(self, other: object) -> bool:
+        # Could be an EnumVariable as well
+        from .tensor import SymNodeVariable
+
+        if isinstance(other, SymNodeVariable):
+            return self.as_python_constant() == other.evaluate_expr()
+        return (
+            isinstance(other, VariableTracker)
+            and self.as_python_constant() == other.as_python_constant()
+        )
 
 
 class EnumVariable(VariableTracker):
@@ -288,7 +384,7 @@ class EnumVariable(VariableTracker):
     def create(
         cls, cls_type: Any, value_vt: VariableTracker, options: Any
     ) -> "EnumVariable":
-        if isinstance(value_vt, variables.ConstantVariable):
+        if value_vt.is_python_constant():
             for member in list(cls_type):
                 if member.value == value_vt.as_python_constant():
                     return cls(member, **options)
@@ -320,3 +416,16 @@ class EnumVariable(VariableTracker):
         member = getattr(self.value, name)
         source = self.source and AttrSource(self.source, name)
         return VariableTracker.build(tx, member, source=source)
+
+    def is_python_hashable(self) -> Literal[True]:
+        raise_on_overridden_hash(self.value, self)
+        return True
+
+    def get_python_hash(self) -> int:
+        return hash(self.as_python_constant())
+
+    def is_python_equal(self, other: object) -> bool:
+        return (
+            isinstance(other, VariableTracker)
+            and self.as_python_constant() == other.as_python_constant()
+        )

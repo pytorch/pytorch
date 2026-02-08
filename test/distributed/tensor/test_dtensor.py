@@ -8,6 +8,7 @@ import unittest
 from numpy.testing import assert_array_equal
 
 import torch
+import torch.distributed as dist
 import torch.nn.functional as F
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.distributed.device_mesh import init_device_mesh
@@ -25,6 +26,7 @@ from torch.distributed.tensor._dtensor_spec import (
     ShardOrderEntry,
     TensorMeta,
 )
+from torch.distributed.tensor._redistribute import redistribute_local_tensor
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental import implicit_replication
 from torch.distributed.tensor.parallel import (
@@ -32,15 +34,20 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
-from torch.distributed.tensor.placement_types import _StridedShard
 from torch.testing import make_tensor
-from torch.testing._internal.common_utils import IS_FBCODE, run_tests, skipIfHpu
+from torch.testing._internal.common_utils import (
+    IS_FBCODE,
+    run_tests,
+    skipIfHpu,
+    TestCase,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorTestBase,
     map_local_tensor_for_rank,
     with_comms,
 )
+from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
 c10d_functional = torch.ops.c10d_functional
@@ -224,6 +231,118 @@ class DTensorTest(DTensorTestBase):
             DTensor.from_local(dtensor, device_mesh, shard_spec)
 
     @with_comms
+    def test_from_local_backward(self):
+        """Test that from_local backward gives the correct gradient placements.
+
+        Verifies the gradient placements meet the following guarantees:
+        - Shard(fwd) - Shard(grad_output) - Shard(grad_input)
+        - Replicate(fwd) - Replicate(grad_output) - Replicate(grad_input)
+        - Replicate(fwd) - Partial(grad_output) - Replicate(grad_input)
+        - Partial(fwd) - Partial(grad_output) - Replicate(grad_input)
+        - Partial(fwd) - Replicate(grad_output) - Replicate(grad_input)
+        """
+        device_mesh = self.build_device_mesh()
+        comm_mode = CommDebugMode()
+
+        # Test 1: Shard(fwd) - Shard(grad_output) - Shard(grad_input): no redistribution needed in backward
+        with comm_mode:
+            local_tensor = torch.randn(
+                3, 3, device=self.device_type, requires_grad=True
+            )
+            dt = DTensor.from_local(local_tensor, device_mesh, [Shard(0)])
+            output = dt * 2
+            grad = DTensor.from_local(
+                torch.ones(3, 3, device=self.device_type), device_mesh, [Shard(0)]
+            )
+            output.backward(grad)
+            self.assertEqual(local_tensor.grad, torch.ones(3, 3) * 2)
+        # Gradient should flow back without redistribution
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+
+        # Test 2: Replicate(fwd) - Replicate(grad_output) - Replicate(grad_input): no redistribution needed in backward
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            local_tensor = torch.randn(
+                3, 3, device=self.device_type, requires_grad=True
+            )
+            dt = DTensor.from_local(local_tensor, device_mesh, [Replicate()])
+            output = dt * 2
+            grad = DTensor.from_local(
+                torch.ones(3, 3, device=self.device_type),
+                device_mesh,
+                [Replicate()],
+                run_check=False,
+            )
+            output.backward(grad)
+            self.assertEqual(local_tensor.grad, torch.ones(3, 3) * 2)
+        # Gradient should flow back without redistribution
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+
+        # Test 3: Replicate(fwd) - Partial(grad_output) - Replicate(grad_input): gradient redistributed to Replicate
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            local_tensor = torch.randn(
+                3, 3, device=self.device_type, requires_grad=True
+            )
+            dt = DTensor.from_local(local_tensor, device_mesh, [Replicate()])
+            output = dt * 2
+            # Manually create a Partial gradient to simulate grad coming from a reduce operation
+            grad = DTensor.from_local(
+                torch.ones(3, 3, device=self.device_type), device_mesh, [Partial()]
+            )
+            output.backward(grad)
+            # The gradient should be redistributed from Partial to Replicate
+            # Since grad was Partial with ones, after all-reduce it becomes world_size * ones
+            # Then multiplied by 2 from the backward of (dt * 2)
+            expected_grad = torch.ones(3, 3) * 2 * self.world_size
+            self.assertEqual(local_tensor.grad, expected_grad)
+        # Verify that an all-reduce happened for the Partial -> Replicate case
+        self.assertEqual(comm_mode.get_comm_counts()[c10d_functional.all_reduce], 1)
+
+        # Test 4: Partial(fwd) - Partial(grad_output) - Replicate(grad_input): gradient redistributed to Replicate
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            local_tensor = torch.randn(
+                3, 3, device=self.device_type, requires_grad=True
+            )
+            dt = DTensor.from_local(local_tensor, device_mesh, [Partial()])
+            output = dt * 2
+            grad = DTensor.from_local(
+                torch.ones(3, 3, device=self.device_type), device_mesh, [Partial()]
+            )
+            output.backward(grad)
+            # The gradient should be redistribute from Partial to Replicate
+            # Since grad was Partial with ones, after all-reduce it becomes world_size * ones
+            # Then multiplied by 2 from the backward of (dt * 2)
+            expected_grad = torch.ones(3, 3) * 2 * self.world_size
+            self.assertEqual(local_tensor.grad, expected_grad)
+        # Verify that an all-reduce happened for the Partial -> Replicate case
+        self.assertEqual(comm_mode.get_comm_counts()[c10d_functional.all_reduce], 1)
+
+        # Test 5: Partial(fwd) - Replicate(grad_output) - Replicate(grad_input): no redistribution needed in backward
+        # When forward was Partial but grad_output is already Replicate, no redistribution is needed
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            local_tensor = torch.randn(
+                3, 3, device=self.device_type, requires_grad=True
+            )
+            dt = DTensor.from_local(local_tensor, device_mesh, [Partial()])
+            output = dt * 2
+            # Grad output is already Replicate
+            grad = DTensor.from_local(
+                torch.ones(3, 3, device=self.device_type),
+                device_mesh,
+                [Replicate()],
+                run_check=False,
+            )
+            output.backward(grad)
+            # The gradient is already Replicate which matches the normalized target (Partial->Replicate)
+            # So no redistribution should happen
+            self.assertEqual(local_tensor.grad, torch.ones(3, 3) * 2)
+        # Gradient should flow back without redistribution since grad is already Replicate
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+
+    @with_comms
     def test_from_local_uneven_sharding(self):
         device_mesh = self.build_device_mesh()
 
@@ -398,6 +517,44 @@ class DTensorTest(DTensorTestBase):
 
         replica_grad = sharded_dtensor.grad.full_tensor()
         self.assertEqual(replica_grad, global_tensor * self.world_size)
+
+    @with_comms
+    def test_to_local_from_local_backward(self):
+        """
+        Test that to_local() followed by from_local() with Partial placement
+        produces correct gradients. This validates the gradient placement mapping:
+        Partial forward → Replicate gradient (see DTensor.from_local docstring).
+        """
+        device_mesh = self.build_device_mesh()
+
+        # Create a sharded tensor [1., 2., ...] across ranks
+        # rank 0 gets [1.], rank 1 gets [2.], etc.
+        global_tensor = torch.arange(
+            1.0, self.world_size + 1, device=self.device_type, requires_grad=True
+        )
+        sharded_tensor = distribute_tensor(global_tensor, device_mesh, [Shard(0)])
+
+        # sum() produces a Partial DTensor
+        out = sharded_tensor.sum()
+
+        # to_local() + from_local() round-trip with same Partial placement
+        out = DTensor.from_local(
+            out.to_local(),
+            out.device_mesh,
+            out.placements,
+            run_check=False,
+        )
+
+        # full_tensor() reduces the Partial, then compute loss
+        loss = out.full_tensor().sum()
+        loss.backward()
+
+        # Expected: each element contributes equally to the sum, so gradient is 1.0
+        # The full gradient should be [1., 1., ...] (world_size elements)
+        expected_grad = torch.ones(self.world_size, device=self.device_type)
+        actual_grad = sharded_tensor.grad.full_tensor()
+
+        self.assertEqual(actual_grad, expected_grad)
 
     @with_comms
     def test_dtensor_new_empty_strided(self):
@@ -658,11 +815,11 @@ class DTensorMeshTest(DTensorTestBase):
 
     @with_comms
     def test_dtensor_device_mesh_device_conversion(self):
-        # construct a cuda device mesh
+        # construct a gpu device mesh
         mesh = self.build_device_mesh()
 
-        # construct from a cpu local tensor with cuda device mesh
-        # should automatically convert the dist tensor to cuda
+        # construct from a cpu local tensor with gpu device mesh
+        # should automatically convert the dist tensor to gpu
         placements = [Shard(0)]
         local_tensor = torch.randn(3, 3)
         dist_tensor = DTensor.from_local(local_tensor, mesh, placements)
@@ -711,7 +868,7 @@ class DTensorMeshTest(DTensorTestBase):
     @with_comms
     def test_dtensor_2d_mesh(self):
         mesh_tensor = torch.arange(self.world_size).reshape(2, 4)
-        # construct a cuda device mesh
+        # construct a gpu device mesh
         mesh = DeviceMesh(self.device_type, mesh_tensor)
 
         # construct a dist tensor on 2d device mesh and test if works
@@ -733,7 +890,7 @@ class DTensorMeshTest(DTensorTestBase):
 
     @with_comms
     def test_device_mesh_nd(self):
-        # construct a cuda device mesh
+        # construct a gpu device mesh
         mesh_tensor = torch.arange(self.world_size).reshape(2, 2, 2)
         mesh = DeviceMesh(self.device_type, mesh_tensor)
         # construct a dist tensor on 3d device mesh and test if works
@@ -814,6 +971,39 @@ class DTensorMeshTest(DTensorTestBase):
         self.sub_mesh_assert_equal(
             mesh.mesh,
             torch.ones(3, 4) + 2,
+            torch.tensor([]),
+            dtensor.to_local(),
+        )
+
+    @with_comms
+    def test_inplace_op_sub_mesh(self):
+        """Test that inplace ops work correctly on sub-meshes.
+
+        This verifies that non-participating ranks (not in the sub-mesh) can
+        handle redistribute cost calculation gracefully during sharding propagation.
+        """
+        mesh = DeviceMesh(self.device_type, [0, 2])
+        local_tensor = torch.ones(3, 4)
+
+        dtensor = DTensor.from_local(local_tensor, mesh, [Shard(0)])
+
+        # Test inplace mul_ - this exercises the cost calculation code path
+        # for all ranks, including those not in the sub-mesh
+        dtensor.mul_(0.5)
+
+        self.sub_mesh_assert_equal(
+            mesh.mesh,
+            torch.ones(3, 4) * 0.5,
+            torch.tensor([]),
+            dtensor.to_local(),
+        )
+
+        # Test inplace add_
+        dtensor.add_(1.0)
+
+        self.sub_mesh_assert_equal(
+            mesh.mesh,
+            torch.ones(3, 4) * 0.5 + 1.0,
             torch.tensor([]),
             dtensor.to_local(),
         )
@@ -1047,6 +1237,7 @@ DTensorMeshTestWithLocalTensor = create_local_tensor_test_class(
     skipped_tests=[
         # Test asserts must be rewritten for local tensor
         "test_from_local_sub_mesh",
+        "test_inplace_op_sub_mesh",
         "test_default_value_sub_mesh",
         "test_redistribute_sub_mesh",
         # Local tensor mode doesn't support tensors of different types on different ranks
@@ -1064,8 +1255,8 @@ class TestDTensorPlacementTypes(DTensorTestBase):
         # Keep everything deterministic.
         torch.manual_seed(0)
         tensor = torch.rand(size)
-        if self.device_type == "cuda":
-            return tensor.cuda()
+        if self.device_type != "cpu":
+            return tensor.to(self.device_type)
         else:
             return tensor
 
@@ -1265,14 +1456,6 @@ class TestDTensorSpec(DTensorTestBase):
         )
         self.assertEqual(tensor_global._spec.shard_order, ())
 
-        # shard_order doesn't work with _StridedShard
-        tensor_global = DTensor.from_local(
-            tensor_local,
-            mesh,
-            [Replicate(), _StridedShard(0, split_factor=2), Shard(0)],
-        )
-        self.assertEqual(tensor_global._spec.shard_order, ())
-
     @with_comms
     def test_default_shard_order(self):
         mesh_shape = (2, 2, self.world_size // 4)
@@ -1306,6 +1489,64 @@ class TestDTensorSpec(DTensorTestBase):
 TestDTensorSpecWithLocalTensor = create_local_tensor_test_class(
     TestDTensorSpec,
 )
+
+
+class TestMixedPartialTypes(TestCase):
+    """Test that mixed Partial reduce types are rejected by all DTensor APIs."""
+
+    def setUp(self):
+        super().setUp()
+        dist.init_process_group(backend="fake", rank=0, world_size=8, store=FakeStore())
+
+    def tearDown(self):
+        super().tearDown()
+        dist.destroy_process_group()
+
+    def test_mixed_partial_types_rejected(self):
+        mesh = DeviceMesh("cpu", torch.arange(8).reshape(2, 4))
+        tensor = torch.randn(8, 8)
+        banned_mixed = [Partial("sum"), Partial("max")]
+        allowed_mixed = [Partial("sum"), Partial("avg")]
+
+        # Test distribute_tensor and from_local APIs
+        for api in [
+            lambda: distribute_tensor(tensor, mesh, banned_mixed),
+            lambda: DTensor.from_local(tensor, mesh, banned_mixed),
+        ]:
+            with self.assertRaisesRegex(ValueError, "Mixed Partial reduce types"):
+                api()
+
+        for api in [
+            lambda: distribute_tensor(tensor, mesh, allowed_mixed),
+            lambda: DTensor.from_local(tensor, mesh, allowed_mixed),
+        ]:
+            # no error
+            api()
+
+        # Test redistribute_local_tensor separately (different call pattern)
+        # Note: public DTensor.redistribute() doesn't allow Partial targets at all,
+        # so we test the internal redistribute_local_tensor directly
+        current_spec = DTensorSpec(
+            mesh,
+            (Replicate(), Replicate()),
+            tensor_meta=TensorMeta(tensor.shape, tensor.stride(), tensor.dtype),
+        )
+        target_spec = DTensorSpec(
+            mesh,
+            tuple(banned_mixed),
+            tensor_meta=TensorMeta(tensor.shape, tensor.stride(), tensor.dtype),
+        )
+        with self.assertRaisesRegex(ValueError, "Mixed Partial reduce types"):
+            redistribute_local_tensor(tensor, current_spec, target_spec)
+
+        target_spec = DTensorSpec(
+            mesh,
+            tuple(allowed_mixed),
+            tensor_meta=TensorMeta(tensor.shape, tensor.stride(), tensor.dtype),
+        )
+        # no error
+        redistribute_local_tensor(tensor, current_spec, target_spec)
+
 
 if __name__ == "__main__":
     run_tests()

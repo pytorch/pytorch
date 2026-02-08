@@ -341,7 +341,7 @@ class _AllGather(Function):
 
     @staticmethod
     def backward(ctx, *grad_outputs):
-        if dist.get_backend(group=ctx.group) is dist.Backend.NCCL:
+        if dist.get_backend(group=ctx.group) in (dist.Backend.NCCL, dist.Backend.XCCL):
             rank = dist.get_rank(group=ctx.group)
             gx = torch.empty_like(grad_outputs[rank])
             gx = _Reduce_Scatter.apply(ReduceOp.SUM, ctx.group, gx, *grad_outputs)
@@ -365,7 +365,7 @@ class _AllGatherBase(Function):
     @staticmethod
     # pyrefly: ignore [bad-override]
     def backward(ctx, grad_output):
-        if dist.get_backend(group=ctx.group) is dist.Backend.NCCL:
+        if dist.get_backend(group=ctx.group) in (dist.Backend.NCCL, dist.Backend.XCCL):
             world_size = dist.get_world_size(group=ctx.group)
             out_size = list(grad_output.size())
             if out_size[0] % world_size != 0:

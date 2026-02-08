@@ -922,7 +922,7 @@ class TestEinsum(TestCase):
         tp = np.tensordot(A, B, axes=(0, 0))
         assert_equal(es, tp)
         # The following is the original test case from the bug report,
-        # made repeatable by changing random arrays to aranges.
+        # made repeatable by changing random arrays to aranges.  # codespell:ignore aranges
         A = np.arange(3 * 3).reshape(3, 3).astype(np.float64)
         B = np.arange(3 * 3 * 64 * 64).reshape(3, 3, 64, 64).astype(np.float32)
         es = np.einsum("cl, cpxy->lpxy", A, B)
@@ -984,7 +984,8 @@ class TestEinsum(TestCase):
 
         # contig -> scalar:
         res = np.einsum("i->", arr)
-        assert res == arr.sum()
+        if res != arr.sum():
+            raise AssertionError(f"Expected res == arr.sum(), got {res} vs {arr.sum()}")
         # contig, contig -> contig:
         res = np.einsum("i,i->i", arr, arr)
         assert_array_equal(res, arr * arr)
@@ -992,7 +993,12 @@ class TestEinsum(TestCase):
         res = np.einsum("i,i->i", arr.repeat(2)[::2], arr.repeat(2)[::2])
         assert_array_equal(res, arr * arr)
         # contig + contig -> scalar
-        assert np.einsum("i,i->", arr, arr) == (arr * arr).sum()
+        einsum_result = np.einsum("i,i->", arr, arr)
+        expected = (arr * arr).sum()
+        if einsum_result != expected:
+            raise AssertionError(
+                f"Expected einsum result == {expected}, got {einsum_result}"
+            )
         # contig + scalar -> contig (with out)
         out = np.ones(7, dtype=dtype)
         res = np.einsum("i,->i", arr, dtype.type(2), out=out)
@@ -1003,11 +1009,15 @@ class TestEinsum(TestCase):
         # scalar + contig -> scalar
         res = np.einsum(",i->", scalar, arr)
         # Use einsum to compare to not have difference due to sum round-offs:
-        assert res == np.einsum("i->", scalar * arr)
+        expected = np.einsum("i->", scalar * arr)
+        if res != expected:
+            raise AssertionError(f"Expected res == {expected}, got {res}")
         # contig + scalar -> scalar
         res = np.einsum("i,->", arr, scalar)
         # Use einsum to compare to not have difference due to sum round-offs:
-        assert res == np.einsum("i->", scalar * arr)
+        expected = np.einsum("i->", scalar * arr)
+        if res != expected:
+            raise AssertionError(f"Expected res == {expected}, got {res}")
         # contig + contig + contig -> scalar
 
         if dtype in ["e", "B", "b"]:
@@ -1034,7 +1044,8 @@ class TestEinsum(TestCase):
     def test_out_is_res(self):
         a = np.arange(9).reshape(3, 3)
         res = np.einsum("...ij,...jk->...ik", a, a, out=a)
-        assert res is a
+        if res is not a:
+            raise AssertionError("Expected res is a")
 
     def optimize_compare(self, subscripts, operands=None):
         # Tests all paths of the optimization function against
@@ -1092,7 +1103,7 @@ class TestEinsum(TestCase):
         self.optimize_compare("ab,cd,de->abcde")
         self.optimize_compare("ab,cd,de->be")
         self.optimize_compare("ab,bcd,cd->abcd")
-        self.optimize_compare("ab,bcd,cd->abd")
+        self.optimize_compare("ab,bcd,cd->abd")  # codespell:ignore
 
     def test_edge_cases(self):
         # Difficult edge cases for optimization
@@ -1105,7 +1116,7 @@ class TestEinsum(TestCase):
         self.optimize_compare("ed,fcd,ff,bcf->be")
         self.optimize_compare("baa,dcf,af,cde->be")
         self.optimize_compare("bd,db,eac->ace")
-        self.optimize_compare("fff,fae,bef,def->abd")
+        self.optimize_compare("fff,fae,bef,def->abd")  # codespell:ignore
         self.optimize_compare("efc,dbc,acf,fd->abe")
         self.optimize_compare("ba,ac,da->bcd")
 

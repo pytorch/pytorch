@@ -4,6 +4,7 @@
 
 import sys
 from itertools import product
+from unittest import skipIf
 
 import numpy as np
 
@@ -32,6 +33,11 @@ class TestNumPyInterop(TestCase):
         self.assertWarns(UserWarning, lambda: torch.from_numpy(arr))
 
     @onlyCPU
+    @skipIf(
+        sys.version_info[:2] == (3, 14)
+        and np.lib.NumpyVersion(np.__version__) < "2.4.0",
+        "Broken in older numpy versions, see https://github.com/numpy/numpy/issues/30265",
+    )
     def test_numpy_unresizable(self, device) -> None:
         x = np.zeros((2, 2))
         y = torch.from_numpy(x)  # noqa: F841
@@ -301,12 +307,18 @@ class TestNumPyInterop(TestCase):
         # This used to leak memory as the `from_numpy` call raised an exception and didn't decref the temporary
         # object. See https://github.com/pytorch/pytorch/issues/121138
         x = np.array(b"value")
+        initial_refcount = sys.getrefcount(x)
         for _ in range(1000):
             try:
                 torch.from_numpy(x)
             except TypeError:
                 pass
-        self.assertTrue(sys.getrefcount(x) == 2)
+        final_refcount = sys.getrefcount(x)
+        self.assertEqual(
+            final_refcount,
+            initial_refcount,
+            f"Memory leak detected: refcount increased from {initial_refcount} to {final_refcount}",
+        )
 
     @skipIfTorchDynamo("No need to test invalid dtypes that should fail by design.")
     @onlyCPU
@@ -682,6 +694,16 @@ class TestNumPyInterop(TestCase):
             torch._dynamo.exc.Unsupported, "ndarray.astype\\(object\\)"
         ):
             f(xs)
+
+    def test_copy_mode(self):
+        def f(x):
+            return np.array(x, copy=np._CopyMode.IF_NEEDED)
+
+        opt_f = torch.compile(backend="eager", fullgraph=True)(f)
+        x = np.array([1, 2, 3])
+        # Should run without throwing an exception
+        y = opt_f(x)
+        self.assertEqual(y, f(x))
 
 
 instantiate_device_type_tests(TestNumPyInterop, globals())

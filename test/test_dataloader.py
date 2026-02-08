@@ -430,6 +430,13 @@ class TestTensorDataset(TestCase):
             self.assertEqual(t2[i], source[i][2])
             self.assertEqual(t3[i], source[i][3])
 
+    def test_size_mismatch(self):
+        tensor1 = torch.randn(10, 5)
+        tensor2 = torch.randn(10, 3)
+        tensor3 = torch.randn(20, 7)
+        with self.assertRaisesRegex(AssertionError, "Size mismatch between tensors"):
+            TensorDataset(tensor1, tensor2, tensor3)
+
 
 @unittest.skipIf(
     TEST_WITH_TSAN,
@@ -681,12 +688,14 @@ class ErrorTrackingProcess(mp.Process):
             raise
 
     def print_traces_of_all_threads(self):
-        assert self.is_alive(), (
-            "can only use print_traces_of_all_threads if the process is alive"
-        )
-        assert not self.disable_stderr, (
-            "do not disable stderr if you use print_traces_of_all_threads"
-        )
+        if not self.is_alive():
+            raise AssertionError(
+                "can only use print_traces_of_all_threads if the process is alive"
+            )
+        if self.disable_stderr:
+            raise AssertionError(
+                "do not disable stderr if you use print_traces_of_all_threads"
+            )
         # On platforms without `SIGUSR1`, `set_faulthander_if_available` sets
         # `faulthandler.enable()`, and `print_traces_of_all_threads` may kill
         # the process. So let's poll the exception first
@@ -763,7 +772,8 @@ class WorkerSpecificIterableDataset(IterableDataset):
 
     def __iter__(self):
         worker_info = torch.utils.data.get_worker_info()
-        assert worker_info is not None
+        if worker_info is None:
+            raise AssertionError("Expected worker_info to be available")
         return iter(range(self.sizes_for_all_workers[worker_info.id]))
 
     def __len__(self):
@@ -776,7 +786,11 @@ class WorkerSpecificIterableDataset(IterableDataset):
 # This can be used to ensure that each worker at least processes one data.
 class SynchronizedDataset(Dataset):
     def __init__(self, size, batch_size, num_workers):
-        assert size >= num_workers * batch_size
+        if size < num_workers * batch_size:
+            raise AssertionError(
+                f"Expected size >= num_workers * batch_size, got size={size}, "
+                f"num_workers={num_workers}, batch_size={batch_size}"
+            )
         self.count = mp.Value("i", 0, lock=True)
         self.barrier = mp.Semaphore(0)
         self.num_workers = num_workers
@@ -854,7 +868,8 @@ def _test_large_sampler_indices(persistent_workers):
     it = iter(dataloader)
 
     for x in it:
-        assert x.numel() == 0
+        if x.numel() != 0:
+            raise AssertionError(f"Expected empty tensor, got numel={x.numel()}")
         raise RuntimeError("My Error")
 
 
@@ -959,7 +974,8 @@ def _test_proper_exit(
     num_workers = 2 if use_workers else 0
 
     if exit_method == "worker_error" or exit_method == "worker_kill":
-        assert use_workers is True
+        if use_workers is not True:
+            raise AssertionError("Expected use_workers=True for worker exit methods")
 
     if exit_method == "worker_error":
         worker_error_event = mp.Event()
@@ -987,14 +1003,22 @@ def _test_proper_exit(
         # 2 is the magical per-worker prefetch number...
         # FIXME: change this after the number becomes configurable.
         if is_iterable_dataset:
-            assert len(ds) * num_workers > (error_it + 2 + 1)
+            if len(ds) * num_workers <= (error_it + 2 + 1):
+                raise AssertionError(
+                    "Expected iterable dataset size to exceed error threshold"
+                )
         else:
-            assert len(loader) > (error_it + 2 + 1) * num_workers
+            if len(loader) <= (error_it + 2 + 1) * num_workers:
+                raise AssertionError("Expected loader length to exceed error threshold")
     else:
         if is_iterable_dataset:
-            assert len(ds) > error_it + 1
+            if len(ds) <= error_it + 1:
+                raise AssertionError(
+                    "Expected iterable dataset length to exceed error threshold"
+                )
         else:
-            assert len(loader) > error_it + 1
+            if len(loader) <= error_it + 1:
+                raise AssertionError("Expected loader length to exceed error threshold")
 
     it = iter(loader)
     if use_workers:
@@ -1004,7 +1028,8 @@ def _test_proper_exit(
         psutil_p = psutil.Process(pid)
         psutil_p.kill()
         psutil_p.wait(JOIN_TIMEOUT)
-        assert not psutil_p.is_running()
+        if psutil_p.is_running():
+            raise AssertionError("Expected process to be terminated")
 
     for i, _ in enumerate(it):
         if i == 0:
@@ -1016,7 +1041,8 @@ def _test_proper_exit(
             # ensure that the workers are still alive
             if use_workers:
                 for w in workers:
-                    assert w.is_alive()
+                    if not w.is_alive():
+                        raise AssertionError("Expected worker process to be alive")
             if worker_error_event is not None:
                 worker_error_event.set()
 
@@ -1046,37 +1072,44 @@ class TestWorkerInfoDataset(SynchronizedDataset):
 # See _test_get_worker_info below for usage.
 def _test_worker_info_init_fn(worker_id):
     worker_info = torch.utils.data.get_worker_info()
-    assert worker_id == worker_info.id, (
-        "worker_init_fn and worker_info should have consistent id"
-    )
-    assert worker_id < worker_info.num_workers, (
-        "worker_init_fn and worker_info should have valid id"
-    )
-    assert worker_info.seed == torch.initial_seed(), (
-        "worker_init_fn and worker_info should have consistent seed"
-    )
+    if worker_id != worker_info.id:
+        raise AssertionError("worker_init_fn and worker_info should have consistent id")
+    if worker_id >= worker_info.num_workers:
+        raise AssertionError("worker_init_fn and worker_info should have valid id")
+    if worker_info.seed != torch.initial_seed():
+        raise AssertionError(
+            "worker_init_fn and worker_info should have consistent seed"
+        )
     dataset = worker_info.dataset
-    assert isinstance(dataset, TestWorkerInfoDataset), (
-        "worker_info should have correct dataset copy"
-    )
-    assert not hasattr(dataset, "value"), "worker_info should have correct dataset copy"
+    if not isinstance(dataset, TestWorkerInfoDataset):
+        raise AssertionError("worker_info should have correct dataset copy")
+    if hasattr(dataset, "value"):
+        raise AssertionError("worker_info should have correct dataset copy")
     # test that WorkerInfo attributes are read-only
     try:
         worker_info.id = 3999
     except RuntimeError as e:
-        assert str(e) == "Cannot assign attributes to WorkerInfo objects"
+        if str(e) != "Cannot assign attributes to WorkerInfo objects":
+            raise AssertionError(
+                "Expected RuntimeError for WorkerInfo attribute assignment"
+            ) from None
     try:
         worker_info.a = 3
     except RuntimeError as e:
-        assert str(e) == "Cannot assign attributes to WorkerInfo objects"
+        if str(e) != "Cannot assign attributes to WorkerInfo objects":
+            raise AssertionError(
+                "Expected RuntimeError for WorkerInfo attribute assignment"
+            ) from None
     for k in ["id", "num_workers", "seed", "dataset"]:
-        assert f"{k}=" in repr(worker_info)
+        if f"{k}=" not in repr(worker_info):
+            raise AssertionError(f"Expected {k} in worker_info repr")
     dataset.value = [worker_id, os.getpid()]
 
 
 def _test_get_worker_info():
     # get_worker_info returns None in main proc
-    assert torch.utils.data.get_worker_info() is None
+    if torch.utils.data.get_worker_info() is not None:
+        raise AssertionError("Expected get_worker_info() to return None in main proc")
     num_workers = 2
     batch_size = 2
     dataset = TestWorkerInfoDataset(6, batch_size, num_workers)
@@ -1095,11 +1128,16 @@ def _test_get_worker_info():
     for d in data:
         # each `d` is a [worker_id, worker_pid] pair, which is set in
         # _test_worker_info_init_fn
-        assert d[1] == worker_pids[d[0]]
+        if d[1] != worker_pids[d[0]]:
+            raise AssertionError(f"Expected worker pid {worker_pids[d[0]]}, got {d[1]}")
     # get_worker_info returns None in main proc after data loading
-    assert torch.utils.data.get_worker_info() is None
+    if torch.utils.data.get_worker_info() is not None:
+        raise AssertionError(
+            "Expected get_worker_info() to return None after data loading"
+        )
     # main proc dataset was never assigned this attribute
-    assert not hasattr(dataset, "value")
+    if hasattr(dataset, "value"):
+        raise AssertionError("Expected main dataset to not have 'value' attribute")
     try:
         _ = dataset[0]
     except AttributeError:
@@ -1128,7 +1166,10 @@ class BulkLoadingDataset(Dataset):
         self.length = length
 
     def __getitem__(self, indices):
-        assert isinstance(indices, (list, tuple))
+        if not isinstance(indices, (list, tuple)):
+            raise AssertionError(
+                f"Expected indices to be list or tuple, got {type(indices)}"
+            )
         return torch.as_tensor(indices)
 
     def __len__(self):
@@ -1154,7 +1195,8 @@ class TestMultiEpochDataset(IterableDataset):
 
     def __iter__(self):
         worker_info = torch.utils.data.get_worker_info()
-        assert worker_info is not None
+        if worker_info is None:
+            raise AssertionError("Expected worker_info to be available")
         worker_id = worker_info.id
         for _ in range(self.length // worker_info.num_workers):
             yield worker_id
@@ -1651,7 +1693,8 @@ except RuntimeError as e:
                 # auto-batching
                 # this IterableDataset isn't configured for each worker, so for
                 # the equality test below to be valid, we cannot have more than 1 workers.
-                assert num_workers in [0, 1], "invalid test"
+                if num_workers not in [0, 1]:
+                    raise AssertionError("invalid test")
                 fetched = coll_ty(
                     self._get_data_loader(
                         dataset, batch_size=2, num_workers=num_workers
@@ -1682,7 +1725,8 @@ except RuntimeError as e:
                 operator.iadd, (list(range(s)) for s in sizes_for_all_workers), []
             )
         )
-        assert len(sizes_for_all_workers) == num_workers, "invalid test case"
+        if len(sizes_for_all_workers) != num_workers:
+            raise AssertionError("invalid test case")
         for prefetch_factor in [2, 3, 4]:
             dataset = WorkerSpecificIterableDataset(sizes_for_all_workers)
             dataloader = self._get_data_loader(
@@ -1757,7 +1801,8 @@ except RuntimeError as e:
                 operator.iadd, (list(range(s)) for s in sizes_for_all_workers), []
             )
         )
-        assert len(sizes_for_all_workers) == num_workers, "invalid test case"
+        if len(sizes_for_all_workers) != num_workers:
+            raise AssertionError("invalid test case")
         for prefetch_factor in [2, 3, 4]:
             dataset = WorkerSpecificIterableDataset(sizes_for_all_workers)
             # worker 0 should return 0 batches
@@ -1810,7 +1855,8 @@ except RuntimeError as e:
                 operator.iadd, (list(range(s)) for s in sizes_for_all_workers), []
             )
         )
-        assert len(sizes_for_all_workers) == num_workers, "invalid test case"
+        if len(sizes_for_all_workers) != num_workers:
+            raise AssertionError("invalid test case")
         for prefetch_factor in [2, 3, 4]:
             dataset = WorkerSpecificIterableDataset(sizes_for_all_workers)
             # worker 0 should return 0 batches
@@ -2022,6 +2068,26 @@ except RuntimeError as e:
         for batch in dataloader:
             self.assertEqual(12345, batch[0])
             self.assertEqual(12345, batch[1])
+
+    @unittest.skipIf(
+        IS_WINDOWS or IS_MACOS,
+        "`ValueError: cannot find context for 'forkserver'` in Windows",
+    )
+    def test_worker_init_fn_forkserver(self):
+        def local_init_fn(worker_id):
+            torch.manual_seed(12345)
+
+        import multiprocessing as py_mp
+
+        py_mp.set_start_method("forkserver", force=True)
+
+        dataset = SeedDataset(4)
+        dataloader = self._get_data_loader(
+            dataset, batch_size=2, num_workers=2, worker_init_fn=local_init_fn
+        )
+        with self.assertWarnsRegex(UserWarning, "Got pickle error when"):
+            with self.assertRaises(Exception):
+                next(iter(dataloader))
 
     def test_get_worker_info(self):
         p = ErrorTrackingProcess(target=_test_get_worker_info)
@@ -2466,6 +2532,113 @@ except RuntimeError as e:
             )
         )
 
+    def test_subset_custom_getitem(self):
+        """
+        Regression test for issue #163184 where DataLoader ignores custom
+        transformations in Subset subclasses that override __getitem__.
+        """
+
+        class SimpleDataset(Dataset):
+            def __init__(self):
+                self.data = torch.arange(20)
+
+            def __len__(self):
+                return 20
+
+            def __getitem__(self, idx):
+                return self.data[idx]
+
+        class TransformSubset(Subset):
+            def __getitem__(self, idx):
+                # transform: multiply by 2
+                original_idx = self.indices[idx]
+                value = self.dataset[original_idx]
+                return value * 2
+
+            def __getitems__(self, indices):
+                return [self.__getitem__(idx) for idx in indices]
+
+        dataset = SimpleDataset()
+        subset = TransformSubset(dataset, [0, 1, 2, 3])
+
+        self.assertEqual(subset[0].item(), 0)
+        self.assertEqual(subset[1].item(), 2)
+        self.assertEqual(subset[2].item(), 4)
+
+        loader = self._get_data_loader(subset, batch_size=2, shuffle=False)
+        batches = list(loader)
+
+        self.assertTrue(torch.equal(batches[0], torch.tensor([0, 2])))
+        self.assertTrue(torch.equal(batches[1], torch.tensor([4, 6])))
+
+    def test_subset_custom_getitem_with_tuple_data(self):
+        """Test Subset custom __getitem__ with tuple data (like the original issue)."""
+
+        class TupleDataset(Dataset):
+            def __init__(self):
+                self.a = torch.arange(10)
+                self.b = torch.arange(100, 110)
+
+            def __len__(self):
+                return 10
+
+            def __getitem__(self, idx):
+                return self.a[idx], self.b[idx]
+
+        class SumSubset(Subset):
+            """Subset that returns sum instead of tuple"""
+
+            def __getitem__(self, idx):
+                original_idx = self.indices[idx]
+                a, b = self.dataset[original_idx]
+                return a + b
+
+            def __getitems__(self, indices):
+                return [self.__getitem__(idx) for idx in indices]
+
+        dataset = TupleDataset()
+        subset = SumSubset(dataset, [0, 1, 2, 3])
+
+        self.assertEqual(subset[0].item(), 100)
+        self.assertEqual(subset[1].item(), 102)
+
+        loader = self._get_data_loader(subset, batch_size=2, shuffle=False)
+        batches = list(loader)
+
+        self.assertTrue(torch.equal(batches[0], torch.tensor([100, 102])))
+        self.assertTrue(torch.equal(batches[1], torch.tensor([104, 106])))
+
+    def test_subset_override_getitem_requires_getitems(self):
+        """
+        Test that subclassing Subset and overriding only __getitem__ without
+        __getitems__ raises a NotImplementedError at instantiation time.
+        """
+
+        class SimpleDataset(Dataset):
+            def __init__(self):
+                self.data = torch.arange(10)
+
+            def __len__(self):
+                return 10
+
+            def __getitem__(self, idx):
+                return self.data[idx]
+
+        class IncompleteSubset(Subset):
+            def __getitem__(self, idx):
+                original_idx = self.indices[idx]
+                return self.dataset[original_idx] * 2
+
+        dataset = SimpleDataset()
+
+        with self.assertRaises(NotImplementedError) as cm:
+            subset = IncompleteSubset(dataset, [0, 1, 2, 3])
+
+        error_message = str(cm.exception)
+        self.assertIn("IncompleteSubset", error_message)
+        self.assertIn("__getitem__", error_message)
+        self.assertIn("__getitems__", error_message)
+
     @unittest.skipIf(IS_WINDOWS, "FIXME: stuck test")
     def test_partial_workers(self):
         r"""Check that workers exit even if the iterator is not exhausted."""
@@ -2486,7 +2659,8 @@ except RuntimeError as e:
             for i, _ in enumerate(loader):
                 if i == 10:
                     break
-            assert i == 10
+            if i != 10:
+                raise AssertionError(f"Expected to stop at i=10, got i={i}")
             del loader
             for w in workers:
                 w.join(JOIN_TIMEOUT)
@@ -3217,7 +3391,8 @@ class DummyDataset(torch.utils.data.Dataset):
         # dataset through the dataloader lifetime
         # so the attributes will remain the same as the
         # first time the workers where spawned (dataloader iteration)
-        assert self.start == 0
+        if self.start != 0:
+            raise AssertionError(f"Expected start=0, got {self.start}")
         return self.data[idx]
 
 
@@ -3508,7 +3683,7 @@ class TestIndividualWorkerQueue(TestCase):
             batch_size=batch_size,
             shuffle=False,
             num_workers=num_workers,
-            timeout=5,
+            timeout=JOIN_TIMEOUT,
             worker_init_fn=self.dataset.worker_init_fn,
         )
         current_worker_idx = 0
@@ -3526,33 +3701,31 @@ class TestIndividualWorkerQueue(TestCase):
         "Flaky on Windows and MacOS https://github.com/pytorch/pytorch/issues/68643",
     )
     def test_ind_worker_queue(self):
-        max_num_workers = None
-        if hasattr(os, "sched_getaffinity"):
-            try:
-                max_num_workers = len(os.sched_getaffinity(0))
-            except Exception:
-                pass
-        if max_num_workers is None:
-            cpu_count = os.cpu_count()
-            if cpu_count is not None:
-                # Use half number of CPUs
-                max_num_workers = cpu_count // 2
-
-        if max_num_workers is None:
-            max_num_workers = 1
-
-        for batch_size in (8, 16, 32, 64):
-            for num_workers in range(min(6, max_num_workers)):
+        for batch_size in (8, 32, 64):
+            for num_workers in range(1, 6):
                 self._run_ind_worker_queue_test(
-                    batch_size=batch_size, num_workers=num_workers + 1
+                    batch_size=batch_size, num_workers=num_workers
                 )
 
 
 class SetAffinityDataset(IterableDataset):
+    def __init__(self, expected_affinity=None):
+        self.expected_affinity = expected_affinity
+
     def __iter__(self):
-        torch.randperm(1)
-        after = os.sched_getaffinity(0)
-        return iter(after)
+        affinity_mask = os.sched_getaffinity(0)
+        return iter(affinity_mask)
+
+
+def _worker_set_affinity_init(worker_id):
+    worker_info = torch.utils.data.get_worker_info()
+    if worker_info is not None:
+        dataset = worker_info.dataset
+        if (
+            isinstance(dataset, SetAffinityDataset)
+            and dataset.expected_affinity is not None
+        ):
+            os.sched_setaffinity(0, [dataset.expected_affinity])
 
 
 @unittest.skipIf(
@@ -3567,14 +3740,14 @@ class TestSetAffinity(TestCase):
         # Choose any
         expected_affinity = list(old_affinity)[-1]
 
-        def worker_set_affinity(_):
-            os.sched_setaffinity(0, [expected_affinity])
-
-        dataset = SetAffinityDataset()
-
+        # Pass expected affinity through the dataset
+        dataset = SetAffinityDataset(expected_affinity=expected_affinity)
         dataloader = torch.utils.data.DataLoader(
-            dataset, num_workers=2, worker_init_fn=worker_set_affinity
+            dataset,
+            num_workers=2,
+            worker_init_fn=_worker_set_affinity_init,
         )
+
         for sample in dataloader:
             self.assertEqual(sample, [expected_affinity])
 

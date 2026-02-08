@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import copy
-from typing import Any, cast, Optional
+from typing import Any, cast
 
 import torch
 import torch.distributed as dist
@@ -297,7 +297,7 @@ def _pre_load_state_dict(
 
 def _all_gather_dtensor(
     tensor: DTensor,
-    parent_mesh: Optional[DeviceMesh],
+    parent_mesh: DeviceMesh | None,
 ) -> torch.Tensor:
     """All gather a DTensor in its FSDP dimension and return the local tensor."""
     assert parent_mesh == tensor.device_mesh
@@ -336,7 +336,7 @@ class DTensorExtensions(FSDPExtensions):
     def pre_flatten_transform(
         self,
         tensor: torch.Tensor,
-    ) -> tuple[torch.Tensor, Optional[Any]]:
+    ) -> tuple[torch.Tensor, Any | None]:
         return _flatten_tensor(tensor)
 
     def post_unflatten_transform(
@@ -365,7 +365,7 @@ class DTensorExtensions(FSDPExtensions):
         world_size: int,
         num_devices_per_node: int,
         pg: dist.ProcessGroup,
-        device: Optional[torch.device] = None,
+        device: torch.device | None = None,
     ) -> torch.Tensor:
         return _chunk_tensor(tensor, rank, world_size, num_devices_per_node, pg)
 
@@ -386,6 +386,6 @@ class DTensorExtensions(FSDPExtensions):
     def all_gather_dtensor(
         self,
         tensor: DTensor,
-        parent_mesh: Optional[DeviceMesh],
+        parent_mesh: DeviceMesh | None,
     ) -> torch.Tensor:
         return _all_gather_dtensor(tensor, parent_mesh)

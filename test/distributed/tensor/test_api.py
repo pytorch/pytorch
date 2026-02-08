@@ -79,7 +79,13 @@ class DTensorAPITest(DTensorTestBase):
         dist_tensor = distribute_tensor(tensor_to_shard, device_mesh, shard_minus_spec)
         self.assertEqual(dist_tensor.placements[0].dim, 1)
 
-        placement_combs = [[Shard(0)], [Shard(1)], [Replicate()]]
+        placement_combs = [
+            [Shard(0)],
+            [Shard(1)],
+            [Replicate()],
+            [Partial(reduce_op="sum")],
+            [Partial(reduce_op="avg")],
+        ]
 
         if not self.is_local_tensor_enabled:
             # test src_data_rank == 1
@@ -124,6 +130,10 @@ class DTensorAPITest(DTensorTestBase):
         with self.assertRaisesRegex(ValueError, "must have the same length"):
             shard_spec = [Shard(0)]
             distribute_tensor(tensor_to_distribute, device_mesh, shard_spec)
+
+        with self.assertRaisesRegex(ValueError, "conversion is not supported"):
+            new_spec = [Replicate(), Partial(reduce_op="prod")]
+            distribute_tensor(tensor_to_distribute, device_mesh, new_spec)
 
         with self.assertRaisesRegex(RuntimeError, "distribute leaf tensor"):
             shard_spec = [Shard(0)]
@@ -276,6 +286,37 @@ class DTensorAPITest(DTensorTestBase):
         param_grad = next(iter(replica_model.parameters())).grad
         self.assertTrue(isinstance(param_grad, DTensor))
         self.assertTrue(isinstance(param_grad.placements[0], Replicate))
+
+    @with_comms
+    def test_distribute_module_preserves_requires_grad(self):
+        device_mesh = self.build_device_mesh()
+
+        class ModelWithFrozenParam(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.frozen = nn.Parameter(torch.randn(10, 10), requires_grad=False)
+                self.trainable = nn.Parameter(torch.randn(10, 10), requires_grad=True)
+
+            def forward(self, x):
+                return x + self.frozen + self.trainable
+
+        model = ModelWithFrozenParam().to(self.device_type)
+
+        distributed_model = distribute_module(model, device_mesh)
+
+        self.assertFalse(distributed_model.frozen.requires_grad)
+        self.assertTrue(distributed_model.trainable.requires_grad)
+
+        x = DTensor.from_local(
+            torch.randn(10, 10, device=self.device_type),
+            device_mesh,
+            [Replicate()],
+        )
+        output = distributed_model(x)
+        output.sum().backward()
+
+        self.assertIsNone(distributed_model.frozen.grad)
+        self.assertIsNotNone(distributed_model.trainable.grad)
 
     @with_comms
     def test_distribute_module_input_fn_output_fn_warning(self):

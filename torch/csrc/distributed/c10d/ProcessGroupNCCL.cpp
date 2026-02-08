@@ -3,6 +3,7 @@
 #include <nlohmann/json.hpp>
 #include <exception>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <sstream>
 #include <stdexcept>
@@ -287,10 +288,10 @@ static std::mutex ncclCommMemPoolMapMutex;
 std::atomic<bool> ProcessGroupNCCL::shouldDump_(false);
 
 static void cacheAllocatorRegisterHook(
-    const c10::cuda::CUDACachingAllocator::TraceEntry& te) {
+    const c10::CachingDeviceAllocator::TraceEntry& te) {
   // Register after SEGMENT_ALLOC
   if (te.action_ !=
-      c10::cuda::CUDACachingAllocator::TraceEntry::Action::SEGMENT_ALLOC) {
+      c10::CachingDeviceAllocator::TraceEntry::Action::SEGMENT_ALLOC) {
     return;
   }
 
@@ -320,10 +321,10 @@ static void cacheAllocatorRegisterHook(
 }
 
 static void cacheAllocatorDeregisterHook(
-    const c10::cuda::CUDACachingAllocator::TraceEntry& te) {
+    const c10::CachingDeviceAllocator::TraceEntry& te) {
   // deregister before SEGMENT_FREE
   if (te.action_ !=
-      c10::cuda::CUDACachingAllocator::TraceEntry::Action::SEGMENT_FREE) {
+      c10::CachingDeviceAllocator::TraceEntry::Action::SEGMENT_FREE) {
     return;
   }
 
@@ -910,6 +911,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       getCvarInt(TORCH_NCCL_ASYNC_ERROR_HANDLING, 3 /*SkipCleanUp*/));
   enableNanCheck_ = getCvarBool(TORCH_NCCL_NAN_CHECK, false);
   cudaEventCacheEnabled_.store(getCvarBool(TORCH_NCCL_CUDA_EVENT_CACHE, true));
+  // NOTE: This default value (2000) is duplicated in FlightRecorder.hpp.
+  // Keep in sync. See FlightRecorder.hpp for details.
   traceBufferSize_ = getCvarInt(TORCH_NCCL_TRACE_BUFFER_SIZE, 2000);
   enableCollectiveHashDebug_ = (dist_debug_level_ >= DebugLevel::Detail);
   // store_ usually is wrapped with PrefixStore and the prefix is different
@@ -992,19 +995,21 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << ", SPLIT_COLOR: " << options_->split_color
             << ", PG Name: " << options_->group_name;
 
-  LOG(INFO) << logPrefix() << "ProcessGroupNCCL environments: "
-            << "NCCL version: " << ncclVersion
-            << ", TORCH_NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
-            << ", TORCH_NCCL_ENABLE_TIMING: " << enableTiming_.load()
-            << ", TORCH_NCCL_BLOCKING_WAIT: " << blockingWait_
-            << ", TORCH_DISTRIBUTED_DEBUG: " << torch_distributed_debug
+  if (local_id_ == 0) {
+    LOG(INFO) << logPrefix() << "ProcessGroupNCCL environments: "
+              << "NCCL version: " << ncclVersion
+              << ", TORCH_NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
+              << ", TORCH_NCCL_ENABLE_TIMING: " << enableTiming_.load()
+              << ", TORCH_NCCL_BLOCKING_WAIT: " << blockingWait_
+              << ", TORCH_DISTRIBUTED_DEBUG: " << torch_distributed_debug
 #ifdef NCCL_HAS_COMM_REGISTER
-            << ", TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK: "
-            << shouldAllCommunicatorsRegisterAllTensors()
+              << ", TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK: "
+              << shouldAllCommunicatorsRegisterAllTensors()
 #endif // NCCL_HAS_COMM_REGISTER
-            << ", TORCH_NCCL_TRACE_BUFFER_SIZE: " << traceBufferSize_
-            << ", TORCH_NCCL_NAN_CHECK: " << enableNanCheck_
-            << ", TORCH_NCCL_CUDA_EVENT_CACHE: " << cudaEventCacheEnabled_;
+              << ", TORCH_NCCL_TRACE_BUFFER_SIZE: " << traceBufferSize_
+              << ", TORCH_NCCL_NAN_CHECK: " << enableNanCheck_
+              << ", TORCH_NCCL_CUDA_EVENT_CACHE: " << cudaEventCacheEnabled_;
+  }
 
   getGlobalRankStartAndStride(
       options_->global_ranks_in_group,
@@ -1104,7 +1109,8 @@ ErrorType ProcessGroupNCCL::getError() {
   return error_;
 }
 
-void ProcessGroupNCCL::registerMemPool(c10::cuda::MemPool* pool, bool symm) {
+void ProcessGroupNCCL::registerMemPool(at::cuda::MemPool* pool, bool symm) {
+  using c10::cuda::CUDACachingAllocator::SegmentInfo;
   const auto key = std::to_string(pool->device());
   LOG(INFO) << logPrefix()
             << "Performing NCCL user buffer registration for all buffers in "
@@ -1125,7 +1131,16 @@ void ProcessGroupNCCL::registerMemPool(c10::cuda::MemPool* pool, bool symm) {
   // register future segments allocated in this pool (this call is idempotent).
   attachAllocatorHooks();
   auto snapshot = c10::cuda::CUDACachingAllocator::snapshot(pool->id());
+  std::sort(
+      snapshot.segments.begin(),
+      snapshot.segments.end(),
+      [](const SegmentInfo& a, const SegmentInfo& b) {
+        return a.registration_counter < b.registration_counter;
+      });
   for (const auto& segmentInfo : snapshot.segments) {
+    TORCH_INTERNAL_ASSERT(
+        segmentInfo.registration_counter >= 0,
+        "SegmentInfo has uninitialized registration counter");
     TORCH_INTERNAL_ASSERT(
         segmentInfo.device == pool->device(),
         "Mismatch between CUDA memory segment device and pool's device");
@@ -1138,7 +1153,7 @@ void ProcessGroupNCCL::registerMemPool(c10::cuda::MemPool* pool, bool symm) {
   }
 }
 
-void ProcessGroupNCCL::deregisterMemPool(c10::cuda::MemPool* pool) {
+void ProcessGroupNCCL::deregisterMemPool(at::cuda::MemPool* pool) {
   const auto key = std::to_string(pool->device());
   LOG(INFO) << logPrefix()
             << "Performing NCCL user buffer deregistration for all buffers in "
@@ -1293,10 +1308,17 @@ c10::intrusive_ptr<Backend> ProcessGroupNCCL::split(
   ncclOpts->split_from =
       c10::intrusive_ptr<ProcessGroupNCCL>::unsafe_reclaim_from_nonowning(this);
   ncclOpts->global_ranks_in_group = std::move(globalRanksInGroup);
-  auto color = genNcclSplitColor(ranks);
-  ncclOpts->split_color = color;
+  // We use the lowest rank in the group as the split_color as each rank can
+  // only participate in one group.
+  // This value must be non-negative int32 and all ranks are.
+  ncclOpts->split_color = *std::min_element(ranks.cbegin(), ranks.cend());
   auto pg = c10::make_intrusive<ProcessGroupNCCL>(
       store->clone(), groupRank, ranks.size(), ncclOpts);
+#ifdef NCCL_COMM_DESCRIPTION
+  // We need to set the desc here so that when eager init the nccl, we can
+  // propagate desc to the nccl comm.
+  pg->setGroupDesc(ncclOpts->group_desc);
+#endif // NCCL_COMM_DESCRIPTION
   pg->eagerConnectSingleDevice(device);
   return c10::static_intrusive_pointer_cast<Backend>(pg);
 }
@@ -1699,16 +1721,18 @@ ProcessGroupNCCL::HeartbeatMonitor::HeartbeatMonitor(ProcessGroupNCCL* pg) {
       getCvarBool(TORCH_NCCL_ENABLE_MONITORING, true);
 
   // print out ENV settings for the heartbeat monitor thread.
-  LOG(INFO)
-      << pg_->logPrefix() << "HeartbeatMonitor environments: "
-      << "TORCH_NCCL_ENABLE_MONITORING (Whether to kill program when no watchdog heartbeat detected): "
-      << watchdogHeartbeatMonitorEnabled_
-      << ", TORCH_NCCL_DUMP_ON_TIMEOUT: " << dumpOnTimeoutOrEx_
-      << ", TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC: " << waitTimeoutDumpInMilSec_
-      << ", TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC: " << heartbeatTimeoutInSec_
-      << ", TORCH_NCCL_COORD_CHECK_MILSEC: " << coordCheckIntervalMilSec_
-      << ", TORCH_NCCL_LOG_CPP_STACK_ON_UNCLEAN_SHUTDOWN: "
-      << logCppStackOnUncleanShutdown_;
+  if (pg_->getUid() == 0) {
+    LOG(INFO)
+        << pg_->logPrefix() << "HeartbeatMonitor environments: "
+        << "TORCH_NCCL_ENABLE_MONITORING (Whether to kill program when no watchdog heartbeat detected): "
+        << watchdogHeartbeatMonitorEnabled_
+        << ", TORCH_NCCL_DUMP_ON_TIMEOUT: " << dumpOnTimeoutOrEx_
+        << ", TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC: " << waitTimeoutDumpInMilSec_
+        << ", TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC: " << heartbeatTimeoutInSec_
+        << ", TORCH_NCCL_COORD_CHECK_MILSEC: " << coordCheckIntervalMilSec_
+        << ", TORCH_NCCL_LOG_CPP_STACK_ON_UNCLEAN_SHUTDOWN: "
+        << logCppStackOnUncleanShutdown_;
+  }
 }
 
 void ProcessGroupNCCL::HeartbeatMonitor::stop() {
@@ -2016,7 +2040,7 @@ void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
           << pg_->logPrefix()
           << "ProcessGroupNCCL monitor thread is disabled, but would have terminated the process"
           << "after attempting to dump debug info, due to " << exitReason
-          << ".";
+          << '.';
     }
   }
 }
@@ -2030,10 +2054,12 @@ ProcessGroupNCCL::Watchdog::Watchdog(ProcessGroupNCCL* pg) {
       (pg_->dist_debug_level_ >= DebugLevel::Detail);
 
   // print out ENV settings for the watchdog thread.
-  LOG(INFO) << pg_->logPrefix() << "PGNCCL Watchdog environments: "
-            << "TORCH_NCCL_RETHROW_CUDA_ERRORS: " << rethrowCUDAErrors_
-            << ", TORCH_NCCL_PROPAGATE_ERROR: " << propagatePgError_
-            << ", TORCH_NCCL_DESYNC_DEBUG: " << desyncDebug_;
+  if (pg_->getUid() == 0) {
+    LOG(INFO) << pg_->logPrefix() << "PGNCCL Watchdog environments: "
+              << "TORCH_NCCL_RETHROW_CUDA_ERRORS: " << rethrowCUDAErrors_
+              << ", TORCH_NCCL_PROPAGATE_ERROR: " << propagatePgError_
+              << ", TORCH_NCCL_DESYNC_DEBUG: " << desyncDebug_;
+  }
 
   // Enable Desync Debugger per user setting
   if (desyncDebug_) {
@@ -2092,9 +2118,9 @@ void ProcessGroupNCCL::Watchdog::run() {
           e.what());
       LOG(ERROR) << exitMsg;
       if (C10_LIKELY(rethrowCUDAErrors_) ||
-          !(std::string(e.what()).find("CUDA Error"))) {
-        // TODO(whc) clean up the rethrow - why is it stored in a class var and
-        // rethrown?
+          std::string(e.what()).find("CUDA Error") != std::string::npos) {
+        // TODO(whc) clean up the rethrow - why is it stored in a class var
+        // and rethrown?
         watchDogException_ =
             std::make_exception_ptr(C10_BUILD_ERROR(DistBackendError, exitMsg));
         std::rethrow_exception(watchDogException_);
@@ -3753,7 +3779,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
 #else
   C10D_NCCL_CHECK_TIMEOUT(
       fn(inputs[0], outputs[0], comm, ncclStream),
-      comm,
+      ncclComm,
       ncclComm->getNcclCommFailureReason());
 #endif // NCCL_HAS_COMM_NONBLOCKING
 
@@ -3925,7 +3951,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
 #else
       C10D_NCCL_CHECK_TIMEOUT(
           fn(inputs[i], outputs[i], comm, ncclStream),
-          comm,
+          ncclComm,
           ncclComm->getNcclCommFailureReason());
 #endif // NCCL_HAS_COMM_NONBLOCKING
     }
@@ -4937,6 +4963,14 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter(
             at::Tensor& output,
             ncclComm_t comm,
             at::cuda::CUDAStream& stream) {
+          // TODO: remove once upstream NCCL is fixed
+          // https://github.com/pytorch/pytorch/issues/168092
+          if (this->getSize() == 1) {
+            at::cuda::CUDAStreamGuard guard(stream);
+            output.flatten().copy_(input.flatten(), true);
+            return ncclSuccess;
+          }
+
           const auto ncclDataType = getNcclDataType(input.scalar_type());
           const auto ncclReduceOp =
               getNcclReduceOp(opts.reduceOp, input, ncclDataType, comm);
@@ -5045,6 +5079,14 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_reduce_scatter_base(
           at::Tensor& output,
           ncclComm_t comm,
           at::cuda::CUDAStream& stream) {
+        // TODO: remove once upstream NCCL is fixed
+        // https://github.com/pytorch/pytorch/issues/168092
+        if (this->getSize() == 1) {
+          at::cuda::CUDAStreamGuard guard(stream);
+          output.flatten().copy_(input.flatten(), true);
+          return ncclSuccess;
+        }
+
         auto ncclDataType = getNcclDataType(input.scalar_type());
         auto ncclReduceOp =
             getNcclReduceOp(opts.reduceOp, input, ncclDataType, comm);
@@ -5096,6 +5138,14 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter_tensor_coalesced(
           at::Tensor& output,
           ncclComm_t comm,
           at::cuda::CUDAStream& stream) {
+        // TODO: remove once upstream NCCL is fixed
+        // https://github.com/pytorch/pytorch/issues/168092
+        if (this->getSize() == 1) {
+          at::cuda::CUDAStreamGuard guard(stream);
+          output.flatten().copy_(input.flatten(), true);
+          return ncclSuccess;
+        }
+
         auto ncclDataType = getNcclDataType(input.scalar_type());
         auto ncclReduceOp =
             getNcclReduceOp(opts.reduceOp, input, ncclDataType, comm);
@@ -5822,11 +5872,10 @@ at::Tensor ProcessGroupNCCL::allocateTensor(
   // Create memory pool
   if (!memPool_) {
     // Needs a CUDAAllocator
-    auto allocator =
-        reinterpret_cast<c10::cuda::CUDACachingAllocator::CUDAAllocator*>(
-            getMemAllocator().get());
+    auto allocator = std::static_pointer_cast<
+        c10::cuda::CUDACachingAllocator::CUDAAllocator>(getMemAllocator());
     // Pool is created
-    memPool_ = std::make_unique<c10::cuda::MemPool>(allocator);
+    memPool_ = std::make_unique<at::cuda::MemPool>(std::move(allocator));
     // Register so that we call ncclCommRegister on all new allocations
     registerMemPool(memPool_.get(), /*symmetric*/ false);
     LOG(INFO) << logPrefix() << "Created memory pool";

@@ -310,7 +310,7 @@ class TestHistogram(TestCase):
         )
 
         # these should not crash
-        np.histogram([np.array(0.5) for i in range(10)] + [0.500000000000001])
+        np.histogram([np.array(0.5) for i in range(10)] + [0.500000000000002])
         np.histogram([np.array(0.5) for i in range(10)] + [0.5])
 
     @xpassIfTorchDynamo_np  # (reason="bins='auto'")
@@ -351,7 +351,7 @@ class TestHistogram(TestCase):
         self.do_signed_overflow_bounds(np.short)
         self.do_signed_overflow_bounds(np.intc)
 
-    @xfail  # (reason="int->float conversin loses precision")
+    @xfail  # (reason="int->float conversion loses precision")
     def test_signed_overflow_bounds_2(self):
         self.do_signed_overflow_bounds(np.int_)
         self.do_signed_overflow_bounds(np.longlong)
@@ -814,7 +814,8 @@ class TestHistogramdd(TestCase):
             h1, e1 = histogramdd(r, b, weights=np.ones(10))
             assert_equal(H, h1)
             for edge, e in zip(edges, e1):
-                assert (edge == e).all()
+                if not (edge == e).all():
+                    raise AssertionError("Expected all edges to be equal")
 
     def test_weights(self):
         v = np.random.rand(100, 2)
@@ -995,7 +996,8 @@ class TestHistogramdd(TestCase):
             ]
         )
         H, edges = histogramdd(x, (2, 3, 3))
-        assert all(type(e) is np.ndarray for e in edges)
+        if not all(type(e) is np.ndarray for e in edges):
+            raise AssertionError("Expected all edges to be np.ndarray")
 
 
 if __name__ == "__main__":

@@ -567,7 +567,8 @@ def no_batch_dim_reference_fn(m, p, *args, **kwargs):
     is_criterion = get_and_pop('is_criterion', False)
 
     if kwargs_to_batchify is not None:
-        assert isinstance(kwargs_to_batchify, dict)
+        if not isinstance(kwargs_to_batchify, dict):
+            raise AssertionError(f"Expected kwargs_to_batchify to be a dict, got {type(kwargs_to_batchify)}")
         for k, v in kwargs.items():
             if k in kwargs_to_batchify and v is not None:
                 bdim = kwargs_to_batchify[k]
@@ -1769,6 +1770,32 @@ def module_inputs_torch_nn_GroupNorm(module_info, device, dtype, requires_grad, 
     ]
 
 
+def module_error_inputs_torch_nn_GroupNorm(module_info, device, dtype, requires_grad, training, **kwargs):
+    """
+    Error inputs for GroupNorm that test error messages include actual values.
+    """
+    return [
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=FunctionInput(3, 10),  # num_groups=3, num_channels=10
+                forward_input=FunctionInput(),  # Not needed for construction error
+            ),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=ValueError,
+            error_regex=r"num_channels \(10\) must be divisible by num_groups \(3\)"
+        ),
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=FunctionInput(5, 13),  # num_groups=5, num_channels=13
+                forward_input=FunctionInput(),  # Not needed for construction error
+            ),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=ValueError,
+            error_regex=r"num_channels \(13\) must be divisible by num_groups \(5\)"
+        ),
+    ]
+
+
 def module_inputs_torch_nn_Hardshrink(module_info, device, dtype, requires_grad, training, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -2510,7 +2537,8 @@ def module_inputs_torch_nn_TransformerEncoderLayer(module_info, device, dtype, r
     # since the fast path requires no_grad mode, we run the fast path in .eval()
     # and no_grad() in the reference_fn and verify that against the results in train mode.
     def fast_path_reference_fn(module, parameters, *args, **kwargs):
-        assert module.training
+        if not module.training:
+            raise AssertionError("Expected module.training to be True")
         module.train(False)
         with torch.no_grad():
             output = module(*args, **kwargs)
@@ -3211,6 +3239,28 @@ rnn_gru_lstm_module_info_decorators = (
 
 # Start of module error inputs functions.
 
+def module_error_inputs_torch_nn_NLLLoss(module_info, device, dtype, requires_grad, training, **kwargs):
+    """
+    Error inputs for NLLLoss that test weight dtype must match input dtype.
+    Regression test for device parity between CPU and CUDA with empty tensors.
+    """
+    input_t = torch.tensor([], device=device, dtype=dtype).reshape((0, 0))
+    weight_dtype = torch.float32 if dtype == torch.float16 else torch.float16
+    weight_t = torch.tensor([], device=device, dtype=weight_dtype)
+    target_t = torch.tensor([], device=device, dtype=torch.long)
+
+    return [
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=FunctionInput(weight=weight_t),
+                forward_input=FunctionInput(input_t, target_t),
+            ),
+            error_on=ModuleErrorEnum.FORWARD_ERROR,
+            error_type=RuntimeError,
+            error_regex=r"expected scalar type \w+ but found \w+"
+        ),
+    ]
+
 def module_error_inputs_torch_nn_RNN_GRU_Cell(module_info, device, dtype, requires_grad, training, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     samples = [
@@ -3315,6 +3365,16 @@ def module_error_inputs_torch_nn_LSTMCell(module_info, device, dtype, requires_g
 
 
 def module_error_inputs_torch_nn_RNN_GRU(module_info, device, dtype, requires_grad, training, **kwargs):
+    # use float64 for dtype mismatch test if current dtype is float32, otherwise use float32
+    # MPS doesn't support float64, so use float16 instead
+    # Extract device type from device string (e.g., 'mps:0' -> 'mps')
+    device_type = device.split(':')[0] if isinstance(device, str) else device.type
+    if dtype == torch.float32:
+        mismatched_dtype = torch.float16 if device_type == 'mps' else torch.float64
+    else:
+        mismatched_dtype = torch.float32
+    make_input = partial(make_tensor, device=device, dtype=mismatched_dtype, requires_grad=requires_grad)
+
     samples = [
         ErrorModuleInput(
             ModuleInput(constructor_input=FunctionInput(10, 0, 1)),
@@ -3327,6 +3387,88 @@ def module_error_inputs_torch_nn_RNN_GRU(module_info, device, dtype, requires_gr
             error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
             error_type=ValueError,
             error_regex="num_layers must be greater than zero"
+        ),
+        # Test dtype mismatch error message
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=FunctionInput(3, 5, dtype=dtype, device=device),
+                forward_input=FunctionInput(make_input((2, 4, 3))),
+            ),
+            error_on=ModuleErrorEnum.FORWARD_ERROR,
+            error_type=ValueError,
+            error_regex=(r"RNN input dtype .* does not match weight dtype .* "
+                         r"Convert input: input\.to\(.*\), or convert model: model\.to\(.*\)")
+        ),
+        # Test bias parameter type validation
+        ErrorModuleInput(
+            ModuleInput(constructor_input=FunctionInput(3, 5, bias=0)),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=TypeError,
+            error_regex="bias should be of type bool, got: int"
+        ),
+        ErrorModuleInput(
+            ModuleInput(constructor_input=FunctionInput(3, 5, bias=1)),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=TypeError,
+            error_regex="bias should be of type bool, got: int"
+        ),
+        ErrorModuleInput(
+            ModuleInput(constructor_input=FunctionInput(3, 5, bias="True")),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=TypeError,
+            error_regex="bias should be of type bool, got: str"
+        ),
+        # Test batch_first parameter type validation
+        ErrorModuleInput(
+            ModuleInput(constructor_input=FunctionInput(3, 5, batch_first=0)),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=TypeError,
+            error_regex="batch_first should be of type bool, got: int"
+        ),
+        ErrorModuleInput(
+            ModuleInput(constructor_input=FunctionInput(3, 5, batch_first=1)),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=TypeError,
+            error_regex="batch_first should be of type bool, got: int"
+        ),
+        ErrorModuleInput(
+            ModuleInput(constructor_input=FunctionInput(3, 5, batch_first="False")),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=TypeError,
+            error_regex="batch_first should be of type bool, got: str"
+        ),
+        # Test input_size parameter type validation
+        ErrorModuleInput(
+            ModuleInput(constructor_input=FunctionInput(3.0, 5)),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=TypeError,
+            error_regex="input_size should be of type int, got: float"
+        ),
+        ErrorModuleInput(
+            ModuleInput(constructor_input=FunctionInput("10", 5)),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=TypeError,
+            error_regex="input_size should be of type int, got: str"
+        ),
+        # Test input_size parameter value validation
+        ErrorModuleInput(
+            ModuleInput(constructor_input=FunctionInput(0, 5)),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=ValueError,
+            error_regex="input_size must be greater than zero"
+        ),
+        ErrorModuleInput(
+            ModuleInput(constructor_input=FunctionInput(-1, 5)),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=ValueError,
+            error_regex="input_size must be greater than zero"
+        ),
+        # Test hidden_size parameter type validation
+        ErrorModuleInput(
+            ModuleInput(constructor_input=FunctionInput(3, 5.0)),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=TypeError,
+            error_regex="hidden_size should be of type int, got: float"
         ),
     ]
     return samples
@@ -3610,6 +3752,8 @@ module_db: list[ModuleInfo] = [
                    # Not implemented for chalf on CPU
                    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_cpu_gpu_parity',
                                 dtypes=(torch.chalf,), device_type='cuda'),
+                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_cpu_gpu_parity',
+                                dtypes=(torch.chalf,), device_type='xpu'),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -3874,6 +4018,7 @@ module_db: list[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.NLLLoss,
                module_inputs_func=module_inputs_torch_nn_NLLLoss,
+               module_error_inputs_func=module_error_inputs_torch_nn_NLLLoss,
                skips=(
                    # No channels_last support for loss functions.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
@@ -3931,7 +4076,9 @@ module_db: list[ModuleInfo] = [
                    DecorateInfo(toleranceOverride({torch.float16: tol(atol=3e-2, rtol=1e-3)}), "TestModule",
                                 "test_forward", dtypes=[torch.float16], device_type='cpu'),
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_cpu_gpu_parity", dtypes=[torch.float16],
-                                device_type='cuda'),),
+                                device_type='cuda'),
+                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_cpu_gpu_parity", dtypes=[torch.float16],
+                                device_type='xpu'),),
                ),
     ModuleInfo(torch.nn.CTCLoss,
                module_inputs_func=module_inputs_torch_nn_CTCLoss,
@@ -3958,6 +4105,7 @@ module_db: list[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.GroupNorm,
                module_inputs_func=module_inputs_torch_nn_GroupNorm,
+               module_error_inputs_func=module_error_inputs_torch_nn_GroupNorm,
                dtypes=get_all_fp_dtypes(include_bfloat16=True, include_half=True),
                skips=(
                    # Tracking at https://github.com/pytorch/pytorch/issues/98089
@@ -3967,6 +4115,7 @@ module_db: list[ModuleInfo] = [
                    # No channels_last support for GroupNorm currently.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format', device_type='cuda'),
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format', device_type='mps'),
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format', device_type='xpu'),
                    DecorateInfo(unittest.skip("Skipped!"), "TestModule", "test_grad",
                                 active_if=TEST_WITH_ROCM, device_type='cuda'),)
                ),
@@ -4086,6 +4235,7 @@ module_db: list[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.Embedding,
                module_inputs_func=module_inputs_torch_nn_Embedding,
+               gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
                decorators=[
                    DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-4)}),
                                 'TestModule', 'test_non_contiguous_tensors',
@@ -4266,7 +4416,9 @@ module_db: list[ModuleInfo] = [
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format',
                                 device_type='cuda'),
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format',
-                                device_type='mps'),)
+                                device_type='mps'),
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format',
+                                device_type='xpu'),)
                ),
     ModuleInfo(torch.nn.ReflectionPad3d,
                module_inputs_func=module_inputs_torch_nn_ReflectionPad3d,
@@ -4275,7 +4427,9 @@ module_db: list[ModuleInfo] = [
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format',
                                 device_type='cuda'),
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format',
-                                device_type='mps'),)
+                                device_type='mps'),
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format',
+                                device_type='xpu'),)
                ),
     ModuleInfo(torch.nn.ReplicationPad1d,
                module_inputs_func=module_inputs_torch_nn_ReplicationPad1d,
@@ -4287,7 +4441,9 @@ module_db: list[ModuleInfo] = [
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format',
                                 device_type='cuda'),
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format',
-                                device_type='mps'),)
+                                device_type='mps'),
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format',
+                                device_type='xpu'),)
                ),
     ModuleInfo(torch.nn.ReplicationPad3d,
                module_inputs_func=module_inputs_torch_nn_ReplicationPad3d,
@@ -4296,7 +4452,9 @@ module_db: list[ModuleInfo] = [
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format',
                                 device_type='cuda'),
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format',
-                                device_type='mps'),)
+                                device_type='mps'),
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format',
+                                device_type='xpu'),)
                ),
     ModuleInfo(torch.nn.SELU,
                module_inputs_func=module_inputs_torch_nn_SELU,

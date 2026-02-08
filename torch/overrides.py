@@ -25,11 +25,12 @@ import __future__  # noqa: F404
 import collections
 import contextlib
 import functools
+import sys
 import types
 import warnings
 from collections.abc import Callable, Iterable
 from functools import wraps
-from typing import Any, Optional, TypeVar
+from typing import Any, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -119,7 +120,7 @@ def get_ignored_functions() -> set[Callable]:
     False
     """
     Tensor = torch.Tensor
-    return {
+    functions = {
         torch.typename,
         torch.is_tensor,
         torch.is_storage,
@@ -192,6 +193,7 @@ def get_ignored_functions() -> set[Callable]:
         torch.cudnn_convolution_add_relu,
         torch.cudnn_grid_sampler,
         torch.cudnn_is_acceptable,
+        torch.miopen_ctc_loss,
         torch.empty,
         torch.empty_permuted,
         torch.empty_strided,
@@ -252,6 +254,7 @@ def get_ignored_functions() -> set[Callable]:
         torch.nn.functional.has_torch_function_unary,
         torch.nn.functional.has_torch_function_variadic,
         torch.nn.functional.handle_torch_function,
+        torch.nn.functional.grouped_mm,
         torch.nn.functional.scaled_grouped_mm,
         torch.nn.functional.scaled_mm,
         torch.nn.functional.sigmoid,
@@ -383,6 +386,11 @@ def get_ignored_functions() -> set[Callable]:
         Tensor._use_count,
     }
 
+    if sys.version_info >= (3, 14):
+        functions.add(Tensor.__annotate__)
+
+    return functions
+
 
 @functools.cache
 def get_default_nowrap_functions() -> set[Callable]:
@@ -457,7 +465,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.addr: lambda input, vec1, vec2, beta=1, alpha=1, out=None: -1,
         torch.affine_grid_generator: lambda theta, size, align_corners: -1,
         torch.all: lambda input, dim=None: -1,
-        torch.allclose: lambda input, other, trol=1e-05, atol=1e-08, equal_nan=False: -1,
+        torch.allclose: lambda input, other, rtol=1e-05, atol=1e-08, equal_nan=False: -1,
         torch.alpha_dropout: lambda input, p, train, inplace=False: -1,
         torch.amax: lambda input, dim=None: -1,
         torch.amin: lambda input, dim=None: -1,
@@ -734,7 +742,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.linalg.ldl_factor_ex: lambda input, hermitian=False, check_errors=False, out=None: -1,
         torch.linalg.ldl_factor: lambda input, hermitian=False, out=None: -1,
         torch.linalg.ldl_solve: lambda LD, pivots, B, hermitian=False, out=None: -1,
-        torch.layer_norm: lambda input, normalized_shape, weight=None, bias=None, esp=1e-05, cudnn_enabled=True: -1,
+        torch.layer_norm: lambda input, normalized_shape, weight=None, bias=None, eps=1e-05, cudnn_enabled=True: -1,
         torch.lcm: lambda input, other, out=None: -1,
         torch.ldexp: lambda input, other, out=None: -1,
         torch.le: lambda input, other, out=None: -1,
@@ -1602,7 +1610,7 @@ def wrap_torch_function(dispatcher: Callable):
 
 def _get_overloaded_args(
     relevant_args: Iterable[Any],
-    get_type_fn: Optional[Callable[[Any], type]] = None,
+    get_type_fn: Callable[[Any], type] | None = None,
 ) -> list[Any]:
     """Returns a list of arguments on which to call __torch_function__.
 
@@ -1874,9 +1882,8 @@ def _get_overridable_functions() -> tuple[
                         "{}.{} is in the tuple returned by torch._overrides.get_ignored_functions "
                         "but still has an explicit override"
                     )
-                    assert func.__get__ not in get_testing_overrides(), msg.format(
-                        namespace, func.__name__
-                    )
+                    if func.__get__ in get_testing_overrides():
+                        raise AssertionError(msg.format(namespace, func.__name__))
                     continue
                 else:
                     overridable_funcs[func].append(func.__get__)
@@ -1896,9 +1903,8 @@ def _get_overridable_functions() -> tuple[
                     "{}.{} is in the tuple returned by torch._overrides.get_ignored_functions "
                     "but still has an explicit override"
                 )
-                assert func not in get_testing_overrides(), msg.format(
-                    namespace, func.__name__
-                )
+                if func in get_testing_overrides():
+                    raise AssertionError(msg.format(namespace, func.__name__))
                 continue
             overridable_funcs[namespace].append(func)
     return overridable_funcs, index

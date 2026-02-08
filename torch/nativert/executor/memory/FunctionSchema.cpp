@@ -11,8 +11,8 @@ bool FunctionSchema::alias(size_t input_idx, size_t output_idx) const {
     }
   }
 
-  VLOG(1) << "checking aliasing spec for " << c10_fn_schema_.name() << " "
-          << (c10_fn_schema_.is_varret() ? "varret" : "non-varret") << " "
+  VLOG(1) << "checking aliasing spec for " << c10_fn_schema_.name() << ' '
+          << (c10_fn_schema_.is_varret() ? "varret" : "non-varret") << ' '
           << (c10_fn_schema_.is_vararg() ? "vararg" : "non-vararg");
 
   if (!aliasing_spec_.empty()) {

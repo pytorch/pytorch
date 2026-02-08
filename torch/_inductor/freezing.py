@@ -220,7 +220,9 @@ def enforce_output_layout(gm: torch.fx.GraphModule):
         for n in out_list:
             if not isinstance(
                 n.meta["val"], torch.Tensor
-            ) or not torch._prims_common.is_non_overlapping_and_dense(n.meta["val"]):
+            ) or not torch._prims_common.is_non_overlapping_and_dense_or_false(
+                n.meta["val"]
+            ):
                 continue
 
             # add a node to enforce eager layout

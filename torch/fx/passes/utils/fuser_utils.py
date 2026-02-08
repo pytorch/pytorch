@@ -7,7 +7,7 @@ from torch.fx._compatibility import compatibility
 from torch.fx.graph import Graph
 from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node
-from torch.fx.passes.tools_common import legalize_graph, NodeList, NodeSet
+from torch.fx.passes.tools_common import legalize_graph, NodeList, NodeSet  # noqa: F401
 from torch.fx.passes.utils import lift_subgraph_as_module  # type: ignore[attr-defined]
 
 
@@ -35,9 +35,10 @@ def topo_sort(nodes: NodeList) -> NodeList:
                 if indegree_map[n] == 0:
                     candidates.put(n)
 
-    assert len(nodes) == len(sorted_nodes), (
-        "topological sorted nodes doesn't have same length as input nodes"
-    )
+    if len(nodes) != len(sorted_nodes):
+        raise AssertionError(
+            "topological sorted nodes doesn't have same length as input nodes"
+        )
 
     return sorted_nodes
 
@@ -126,16 +127,20 @@ def fuse_as_graphmodule(
     # assumption: nodes are already sorted in topo order
 
     for node in nodes:
-        assert node.graph.owning_module is gm, (
-            f"{node} doesn't belong to passed in graph module {gm._get_name()}"
-        )
-        assert not node._erased, f"{node} has been removed from owning graph"
-        assert node in gm.graph._find_nodes_lookup_table, (
-            f"{node} is not found in graph module {gm._get_name()}"
-        )
+        if node.graph.owning_module is not gm:
+            raise AssertionError(
+                f"{node} doesn't belong to passed in graph module {gm._get_name()}"
+            )
+        if node._erased:
+            raise AssertionError(f"{node} has been removed from owning graph")
+        if node not in gm.graph._find_nodes_lookup_table:
+            raise AssertionError(
+                f"{node} is not found in graph module {gm._get_name()}"
+            )
 
     # validates partition doesn't introduce dependency circles in the graph
-    assert validate_partition(nodes), "Invalid partition, found dependency cycles"
+    if not validate_partition(nodes):
+        raise AssertionError("Invalid partition, found dependency cycles")
 
     # if no dict of partition nodes is provided, reconstruct it by nodes list to reduce lookup time
     if partition_lookup_table is None:
@@ -226,11 +231,12 @@ def insert_subgm(
                 return node
         return None
 
-    last_input_node: Node | None = last_node(orig_inputs)
-    assert last_input_node is not None
+    last_output_node: Node | None = last_node(orig_outputs)
+    if last_output_node is None:
+        raise AssertionError("last_output_node is None")
 
     # Create a call_module node in main graph.
-    with gm.graph.inserting_after(last_input_node):
+    with gm.graph.inserting_after(last_output_node):
         module_node = gm.graph.call_module(
             submodule_name, args=orig_inputs, kwargs=None
         )
@@ -283,7 +289,7 @@ def fuse_by_partitions(
 
         erase_nodes(gm, sorted_nodes)
 
-    legalize_graph(gm, stable_topo_sort=True)
+    torch.fx.passes.tools_common.stable_topological_sort(gm)
     gm.graph.lint()
 
     return gm

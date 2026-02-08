@@ -1,5 +1,10 @@
 # Owner(s): ["module: inductor"]
 import contextlib
+import os
+import pathlib
+import subprocess
+import sys
+import tempfile
 import unittest
 
 import torch
@@ -10,12 +15,17 @@ from torch._inductor.utils import fresh_cache
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
-    HAS_CUDA_AND_TRITON,
+    HAS_GPU_AND_TRITON,
     IS_BIG_GPU,
+    IS_FBCODE,
 )
+
+
+REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 
 
 @instantiate_parametrized_tests
@@ -38,6 +48,7 @@ class DeterministicTest(TestCase):
         finally:
             torch.use_deterministic_algorithms(old_val, warn_only=True)
 
+    @skipIfXpu(msg="pad_mm is not enabled for XPU.")
     @parametrize("deterministic", [False, True])
     def test_mm_padding(self, deterministic):
         with inductor_config.patch(deterministic=deterministic):
@@ -104,7 +115,63 @@ class DeterministicTest(TestCase):
             else:
                 self.assertTrue(counters["inductor"]["coordesc_tuning_bench"] > 0)
 
+    @unittest.skipIf(IS_FBCODE, "Skipping run2run determinism test in fbcode")
+    @parametrize("model_name", ["GoogleFnet", "BertForMaskedLM", "DistillGPT2"])
+    @parametrize("training_or_inference", ["training", "inference"])
+    @parametrize("precision", ["float32", "bfloat16", "float16", "amp"])
+    def test_run2run_determinism(self, model_name, training_or_inference, precision):
+        """
+        Test run2run determinism for a few huggingface models.
+
+        The test assumes benchmarks/dynamo/huggingface.py can be found from
+        the current working directory.
+        """
+
+        def _setup_env(env):
+            env["TORCHINDUCTOR_FORCE_DISABLE_CACHES"] = "1"  # disable autotune cache
+            env["TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE"] = "0"
+            env["TORCHINDUCTOR_FX_GRAPH_CACHE"] = "0"
+            if enable_determinism:
+                env["TORCHINDUCTOR_DETERMINISTIC"] = "1"
+
+        # set to false if you want to check how the test fails without
+        # the deterministic mode
+        enable_determinism = True
+        with tempfile.TemporaryDirectory() as tmpdir:
+            saved_pkl = os.path.join(tmpdir, "saved.pkl")
+            cmd = (
+                f"{sys.executable} {REPO_ROOT}/benchmarks/dynamo/huggingface.py --backend inductor"
+                + f" --{precision} --accuracy --only {model_name} --{training_or_inference}"
+                + f" --disable-cudagraphs --save-model-outputs-to={saved_pkl}"
+            )
+            print("Command", cmd)
+            env = os.environ.copy()
+            _setup_env(env)
+            out = subprocess.run(cmd.split(), capture_output=True, env=env)
+
+            # We don't check the accuracy against eager here because some
+            # of the combination between model and precision can not
+            # pass that accuracy test. But it's still valuable to make
+            # sure we generate bitwise equivalent result from run to run.
+            # self.assertTrue("pass" in out.stdout.decode())
+
+            cmd = (
+                f"{sys.executable} {REPO_ROOT}/benchmarks/dynamo/huggingface.py --backend inductor"
+                + f" --{precision} --accuracy --only {model_name} --{training_or_inference}"
+                + f" --disable-cudagraphs --compare-model-outputs-with={saved_pkl}"
+            )
+            print("Command", cmd)
+
+            # distort benchmarking results
+            env["TORCHINDUCTOR_DISTORT_BENCHMARKING_RESULT"] = "inverse"
+            out = subprocess.run(cmd.split(), capture_output=True, env=env)
+            self.assertTrue(
+                "The result is bitwise equivalent to the previously saved result"
+                in out.stdout.decode(),
+                f"stdout: {out.stdout.decode()}, stderr: {out.stderr.decode()}",
+            )
+
 
 if __name__ == "__main__":
-    if HAS_CUDA_AND_TRITON:
+    if HAS_GPU_AND_TRITON:
         run_tests()

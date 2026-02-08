@@ -31,7 +31,9 @@ from torch.testing._internal.common_device_type import (
     onlyOn,
     OpDTypes,
     ops,
+    skipCUDAIfNotRocm,
     skipMeta,
+    skipMPS,
     skipXPU,
 )
 from torch.testing._internal.common_dtype import (
@@ -59,13 +61,13 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     is_iterable_of_tensors,
     IS_SANDCASTLE,
+    MACOS_VERSION,
     noncontiguous_like,
     parametrize,
     run_tests,
     set_default_dtype,
     skipIfTorchDynamo,
     skipIfTorchInductor,
-    slowTest,
     suppress_warnings,
     TEST_WITH_ROCM,
     TEST_WITH_TORCHDYNAMO,
@@ -77,6 +79,16 @@ from torch.testing._internal.inductor_utils import maybe_skip_size_asserts
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map
 
+
+# If env var PYTORCH_TEST_OPS_ONLY_MPS is set, add 'mps' to the PYTORCH_TESTING_DEVICE_ONLY_FOR env var
+# so that only MPS tests (and any others in PYTORCH_TESTING_DEVICE_ONLY_FOR) are run.
+if os.getenv("PYTORCH_TEST_OPS_ONLY_MPS"):
+    key = "PYTORCH_TESTING_DEVICE_ONLY_FOR"
+    value = os.environ.get(key)
+    devices = value.split(",") if value else []
+    if "mps" not in devices:
+        devices.append("mps")
+        os.environ[key] = ",".join(devices)
 
 assert torch.get_default_dtype() == torch.float32
 
@@ -486,7 +498,7 @@ class TestCommon(TestCase):
     # Tests that the cpu and gpu results are consistent
     @onlyOn(["cuda", "xpu"])
     @suppress_warnings
-    @slowTest
+    @skipCUDAIfNotRocm
     @ops(_ops_and_refs_with_no_numpy_ref, dtypes=OpDTypes.any_common_cpu_cuda_one)
     def test_compare_cpu(self, device, dtype, op):
         def to_cpu(arg):
@@ -509,9 +521,10 @@ class TestCommon(TestCase):
             cuda_results = sample.output_process_fn_grad(cuda_results)
             cpu_results = cpu_sample.output_process_fn_grad(cpu_results)
 
-            # Lower tolerance because we are running this as a `@slowTest`
-            # Don't want the periodic tests to fail frequently
-            self.assertEqual(cuda_results, cpu_results, atol=1e-3, rtol=1e-3)
+            atol, rtol = 0, 0
+            if dtype.is_floating_point or dtype.is_complex:
+                atol, rtol = 1e-3, 1e-3
+            self.assertEqual(cuda_results, cpu_results, atol=atol, rtol=rtol)
 
     # Tests that experimental Python References can propagate shape, dtype,
     # and device metadata properly.
@@ -739,8 +752,6 @@ class TestCommon(TestCase):
         # In this test, refs call into the torch namespace (after the initial invocation)
         # For example, a ref with torch.foo in it will call torch.foo instead of refs.foo
         # Direct calls to refs and prims are not translated
-        if TEST_WITH_ROCM and op.name == "_refs.fft.ihfftn" and dtype == torch.float16:
-            self.skipTest("Skipped on ROCm")
         if op.full_name == "_refs.div.floor_rounding" and dtype == torch.bfloat16:
             self.skipTest(
                 "Skipped _refs.div.floor_rounding with bfloat16"
@@ -753,12 +764,6 @@ class TestCommon(TestCase):
     @parametrize("executor", ["aten"])
     @skipIfTorchInductor("Takes too long for inductor")
     def test_python_ref_executor(self, device, dtype, op, executor):
-        if (
-            TEST_WITH_ROCM
-            and (op.name == "_refs.fft.ihfftn" or op.name == "_refs.fft.ihfft2")
-            and dtype == torch.float16
-        ):
-            self.skipTest("Skipped on ROCm")
         from copy import copy
 
         from torch._prims.executor import make_traced
@@ -1567,6 +1572,7 @@ class TestCommon(TestCase):
             self.assertEqual(actual, expected, exact_dtype=False)
 
     @skipXPU
+    @skipMPS
     @ops(op_db, allowed_dtypes=(torch.bool,))
     def test_non_standard_bool_values(self, device, dtype, op):
         # Test boolean values other than 0x00 and 0x01 (gh-54789)
@@ -3002,7 +3008,7 @@ class TestForwardADWithScalars(TestCase):
         if torch.float not in op.supported_backward_dtypes(device):
             raise unittest.SkipTest("Does not support autograd")
 
-        # skip if operator doesnt support forward AD
+        # skip if operator doesn't support forward AD
         if not op.supports_forward_ad:
             raise unittest.SkipTest("Does not support forward_ad")
 
@@ -3029,7 +3035,9 @@ class TestForwardADWithScalars(TestCase):
                 )
 
 
-instantiate_device_type_tests(TestCommon, globals(), allow_xpu=True)
+instantiate_device_type_tests(
+    TestCommon, globals(), allow_xpu=True, allow_mps=MACOS_VERSION >= 15.0
+)
 instantiate_device_type_tests(TestCompositeCompliance, globals())
 instantiate_device_type_tests(TestMathBits, globals())
 instantiate_device_type_tests(TestRefsOpsInfo, globals(), only_for="cpu")

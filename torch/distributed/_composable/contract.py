@@ -3,7 +3,7 @@ import uuid
 from collections import OrderedDict
 from collections.abc import Callable
 from functools import wraps
-from typing import Concatenate, Generic, Optional, Protocol
+from typing import Concatenate, Generic, Protocol
 from typing_extensions import ParamSpec, TypeVar
 
 import torch
@@ -234,7 +234,6 @@ def contract(
             # TODO: verify that installed distributed paradigms are compatible with
             # each other.
 
-            # pyrefly: ignore [bad-return]
             return updated
 
         def get_state(module: nn.Module) -> _State:
@@ -250,7 +249,7 @@ def contract(
     return inner  # type: ignore[return-value]
 
 
-def _get_registry(module: nn.Module) -> Optional[dict[str, RegistryItem]]:
+def _get_registry(module: nn.Module) -> dict[str, RegistryItem] | None:
     r"""
     Get an ``OrderedDict`` of composable APIs that have been applied to the
     ``module``, indexed by the API name. If no API has been applied, then this

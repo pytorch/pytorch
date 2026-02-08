@@ -75,6 +75,10 @@ case ${image} in
         DOCKERFILE_SUFFIX="_cuda_aarch64"
         ;;
     manylinux2_28-builder:rocm*)
+        # we want the patch version of 7.1 instead
+        if [[ "$GPU_ARCH_VERSION" == *"7.1"* ]]; then
+            GPU_ARCH_VERSION="${GPU_ARCH_VERSION}.1"
+        fi
         # we want the patch version of 7.0 instead
         if [[ "$GPU_ARCH_VERSION" == *"7.0"* ]]; then
             GPU_ARCH_VERSION="${GPU_ARCH_VERSION}.2"

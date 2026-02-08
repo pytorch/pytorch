@@ -27,7 +27,7 @@ void dump(const onnx::TensorProto& tensor, std::ostream& stream) {
   for (const auto i : c10::irange(tensor.dims_size())) {
     stream << tensor.dims(i) << (i == tensor.dims_size() - 1 ? "" : " ");
   }
-  stream << "]";
+  stream << ']';
 }
 
 void dump(const onnx::TensorShapeProto& shape, std::ostream& stream) {
@@ -36,7 +36,7 @@ void dump(const onnx::TensorShapeProto& shape, std::ostream& stream) {
     if (dim.has_dim_value()) {
       stream << dim.dim_value();
     } else {
-      stream << "?";
+      stream << '?';
     }
     stream << (i == shape.dim_size() - 1 ? "" : " ");
   }
@@ -67,7 +67,7 @@ void dump(const onnx::TypeProto_Optional& optional_type, std::ostream& stream) {
   } else {
     stream << "None";
   }
-  stream << ">";
+  stream << '>';
 }
 
 void dump(const onnx::TypeProto_Sequence& sequence_type, std::ostream& stream) {
@@ -77,7 +77,7 @@ void dump(const onnx::TypeProto_Sequence& sequence_type, std::ostream& stream) {
   } else {
     stream << "None";
   }
-  stream << ">";
+  stream << '>';
 }
 
 void dump(const onnx::TypeProto& type, std::ostream& stream) {
@@ -95,7 +95,7 @@ void dump(const onnx::TypeProto& type, std::ostream& stream) {
 void dump(const onnx::ValueInfoProto& value_info, std::ostream& stream) {
   stream << "{name: \"" << value_info.name() << "\", type:";
   dump(value_info.type(), stream);
-  stream << "}";
+  stream << '}';
 }
 
 void dump(const onnx::GraphProto& graph, std::ostream& stream, size_t indent);
@@ -123,36 +123,36 @@ void dump(
     for (const auto i : c10::irange(attr.floats_size())) {
       stream << attr.floats(i) << (i == attr.floats_size() - 1 ? "" : " ");
     }
-    stream << "]";
+    stream << ']';
   } else if (attr.ints_size()) {
     stream << "ints, values: [";
     for (const auto i : c10::irange(attr.ints_size())) {
       stream << attr.ints(i) << (i == attr.ints_size() - 1 ? "" : " ");
     }
-    stream << "]";
+    stream << ']';
   } else if (attr.strings_size()) {
     stream << "strings, values: [";
     for (const auto i : c10::irange(attr.strings_size())) {
       stream << "'" << attr.strings(i) << "'"
              << (i == attr.strings_size() - 1 ? "" : " ");
     }
-    stream << "]";
+    stream << ']';
   } else if (attr.tensors_size()) {
     stream << "tensors, values: [";
     for (auto& t : attr.tensors()) {
       dump(t, stream);
     }
-    stream << "]";
+    stream << ']';
   } else if (attr.graphs_size()) {
     stream << "graphs, values: [";
     for (auto& g : attr.graphs()) {
       dump(g, stream, indent + 1);
     }
-    stream << "]";
+    stream << ']';
   } else {
     stream << "UNKNOWN";
   }
-  stream << "}";
+  stream << '}';
 }
 
 void dump(const onnx::NodeProto& node, std::ostream& stream, size_t indent) {
@@ -174,31 +174,31 @@ void dump(const onnx::NodeProto& node, std::ostream& stream, size_t indent) {
 
 void dump(const onnx::GraphProto& graph, std::ostream& stream, size_t indent) {
   stream << idt(indent) << "GraphProto {" << nlidt(indent + 1) << "name: \""
-         << graph.name() << "\"" << nlidt(indent + 1) << "inputs: [";
+         << graph.name() << '"' << nlidt(indent + 1) << "inputs: [";
   for (const auto i : c10::irange(graph.input_size())) {
     dump(graph.input(i), stream);
     stream << (i == graph.input_size() - 1 ? "" : ",");
   }
-  stream << "]" << nlidt(indent + 1) << "outputs: [";
+  stream << ']' << nlidt(indent + 1) << "outputs: [";
   for (const auto i : c10::irange(graph.output_size())) {
     dump(graph.output(i), stream);
     stream << (i == graph.output_size() - 1 ? "" : ",");
   }
-  stream << "]" << nlidt(indent + 1) << "value_infos: [";
+  stream << ']' << nlidt(indent + 1) << "value_infos: [";
   for (const auto i : c10::irange(graph.value_info_size())) {
     dump(graph.value_info(i), stream);
     stream << (i == graph.value_info_size() - 1 ? "" : ",");
   }
-  stream << "]" << nlidt(indent + 1) << "initializers: [";
+  stream << ']' << nlidt(indent + 1) << "initializers: [";
   for (const auto i : c10::irange(graph.initializer_size())) {
     dump(graph.initializer(i), stream);
     stream << (i == graph.initializer_size() - 1 ? "" : ",");
   }
-  stream << "]" << nlidt(indent + 1) << "nodes: [" << nlidt(indent + 2);
+  stream << ']' << nlidt(indent + 1) << "nodes: [" << nlidt(indent + 2);
   for (const auto i : c10::irange(graph.node_size())) {
     dump(graph.node(i), stream, indent + 2);
     if (i != graph.node_size() - 1) {
-      stream << "," << nlidt(indent + 2);
+      stream << ',' << nlidt(indent + 2);
     }
   }
   stream << nlidt(indent + 1) << "]\n" << idt(indent) << "}\n";
@@ -208,14 +208,14 @@ void dump(
     const onnx::OperatorSetIdProto& operator_set_id,
     std::ostream& stream) {
   stream << "OperatorSetIdProto { domain: " << operator_set_id.domain()
-         << ", version: " << operator_set_id.version() << "}";
+         << ", version: " << operator_set_id.version() << '}';
 }
 
 void dump(const onnx::ModelProto& model, std::ostream& stream, size_t indent) {
   stream << idt(indent) << "ModelProto {" << nlidt(indent + 1)
-         << "producer_name: \"" << model.producer_name() << "\""
-         << nlidt(indent + 1) << "domain: \"" << model.domain() << "\""
-         << nlidt(indent + 1) << "doc_string: \"" << model.doc_string() << "\"";
+         << "producer_name: \"" << model.producer_name() << '"'
+         << nlidt(indent + 1) << "domain: \"" << model.domain() << '"'
+         << nlidt(indent + 1) << "doc_string: \"" << model.doc_string() << '"';
   if (model.has_graph()) {
     stream << nlidt(indent + 1) << "graph:\n";
     dump(model.graph(), stream, indent + 2);

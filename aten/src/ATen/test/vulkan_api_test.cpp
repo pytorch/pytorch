@@ -129,14 +129,14 @@ void showRtol(const at::Tensor& a, const at::Tensor& b) {
   std::cout << "Max Diff allowed: " << maxDiff << std::endl;
   if (diff.sizes().size() == 2) {
     for (const auto y : c10::irange(diff.sizes()[0])) {
-      std::cout << y << ":";
+      std::cout << y << ':';
       for (const auto x : c10::irange(diff.sizes()[1])) {
         float diff_xy = diff[y][x].item<float>();
         if (diff_xy > maxDiff) {
           std::cout << std::setw(5) << x;
         }
         else {
-          std::cout << std::setw(5) << " ";
+          std::cout << std::setw(5) << ' ';
         }
       }
       std::cout << std::endl;
@@ -3276,7 +3276,7 @@ TEST_F(VulkanAPITest, masked_fill_invalidinputs_exceptions) {
 
 void print_shape(const std::vector<int64_t>& shape) {
   for (const auto& num : shape) {
-    std::cout << num << " ";
+    std::cout << num << ' ';
   }
 }
 
@@ -3367,7 +3367,7 @@ void test_masked_fill_scalar(
             print_shape(tmp_curr_input_shape);
             std::cout << "], and mask of shape [";
             print_shape(tmp_curr_mask_shape);
-            std::cout << "]" << std::endl;
+            std::cout << ']' << std::endl;
           }
 
           ASSERT_TRUE(check);
@@ -4473,7 +4473,7 @@ TEST_F(VulkanAPITest, sigmoid_) {
 }
 
 TEST_F(VulkanAPITest, DISABLED_log_softmax_underflow_exception) {
-  // We apply softmax and log in a sequence to the tesnor [20, 0].
+  // We apply softmax and log in a sequence to the tensor [20, 0].
   // The output of softmax on CPU is [1.0000e+00, 2.0612e-09]; while
   // the output on Vulkan is [1, 0] since 2.0612e-09 is smaller than
   // the smallest represetable positive 5.96e−8. We expect to see nan
@@ -4542,9 +4542,9 @@ void test_softmax(const at::IntArrayRef shape, bool log_softmax = false) {
     if (!check) {
       std::cout << "Softmax test failed on axis " << dim << "for tensor dims {";
       for (uint32_t place = 0; place < shape.size() - 1; place++) {
-        std::cout << shape[place] << " ";
+        std::cout << shape[place] << ' ';
       }
-      std::cout << shape.back() << "}" << std::endl;
+      std::cout << shape.back() << '}' << std::endl;
       showRtol(out_cpu, out_vulkan.cpu());
     }
     ASSERT_TRUE(check);

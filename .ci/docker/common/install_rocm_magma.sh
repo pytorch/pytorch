@@ -12,8 +12,8 @@ function do_install() {
 
     rocm_version_nodot=${rocm_version//./}
 
-    # post merge of https://github.com/icl-utk-edu/magma/pull/65
-    MAGMA_VERSION=c0792ae825fb36872784892ea643dd6f3456bc5f
+    # https://github.com/icl-utk-edu/magma/pull/77
+    MAGMA_VERSION=a68b9257ac435afa1ebdfb8f50d67668950aef61
     magma_archive="magma-rocm${rocm_version_nodot}-${MAGMA_VERSION}-1.tar.bz2"
 
     rocm_dir="/opt/rocm"

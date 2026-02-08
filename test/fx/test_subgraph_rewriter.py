@@ -782,7 +782,7 @@ class TestSubgraphRewriter(JitTestCase):
 
         found_repalcement_node = False
         for node in traced.graph.nodes:
-            if node.target == wrapped_gemm_bias_mul:
+            if node.target is wrapped_gemm_bias_mul:
                 found_repalcement_node = True
                 break
 
@@ -847,7 +847,7 @@ class TestSubgraphRewriter(JitTestCase):
 
         repalcement_node_found = 0
         for node in traced.graph.nodes:
-            if node.target == wrapped_gemm_bias_mul_with_c:
+            if node.target is wrapped_gemm_bias_mul_with_c:
                 repalcement_node_found += 1
 
         self.assertEqual(repalcement_node_found, 2)

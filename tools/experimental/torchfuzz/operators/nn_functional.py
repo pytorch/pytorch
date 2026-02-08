@@ -2,7 +2,6 @@
 
 import math
 import random
-from typing import Optional
 
 import torch
 
@@ -27,7 +26,7 @@ class EmbeddingOperator(Operator):
         super().__init__("torch.nn.functional.embedding")
 
     @property
-    def torch_op_name(self) -> Optional[str]:
+    def torch_op_name(self) -> str | None:
         """Return the torch operation name."""
         return "torch.nn.functional.embedding"
 
@@ -109,7 +108,7 @@ class LinearOperator(Operator):
         super().__init__("torch.nn.functional.linear")
 
     @property
-    def torch_op_name(self) -> Optional[str]:
+    def torch_op_name(self) -> str | None:
         """Return the torch operation name."""
         return "torch.nn.functional.linear"
 
@@ -207,7 +206,7 @@ class ReLUOperator(Operator):
         super().__init__("torch.nn.functional.relu")
 
     @property
-    def torch_op_name(self) -> Optional[str]:
+    def torch_op_name(self) -> str | None:
         """Return the torch operation name."""
         return "torch.nn.functional.relu"
 
@@ -250,7 +249,7 @@ class SoftmaxOperator(Operator):
         super().__init__("torch.nn.functional.softmax")
 
     @property
-    def torch_op_name(self) -> Optional[str]:
+    def torch_op_name(self) -> str | None:
         """Return the torch operation name."""
         return "torch.nn.functional.softmax"
 
@@ -297,7 +296,7 @@ class DropoutOperator(Operator):
         super().__init__("torch.nn.functional.dropout")
 
     @property
-    def torch_op_name(self) -> Optional[str]:
+    def torch_op_name(self) -> str | None:
         """Return the torch operation name."""
         return "torch.nn.functional.dropout"
 
@@ -341,7 +340,7 @@ class LayerNormOperator(Operator):
         super().__init__("torch.nn.functional.layer_norm")
 
     @property
-    def torch_op_name(self) -> Optional[str]:
+    def torch_op_name(self) -> str | None:
         """Return the torch operation name."""
         return "torch.nn.functional.layer_norm"
 
@@ -438,7 +437,7 @@ class RMSNormOperator(Operator):
         self.weight = 5.0
 
     @property
-    def torch_op_name(self) -> Optional[str]:
+    def torch_op_name(self) -> str | None:
         """Return the torch operation name."""
         return "torch.nn.functional.rms_norm"
 
@@ -512,7 +511,7 @@ class GELUOperator(Operator):
         super().__init__("torch.nn.functional.gelu")
 
     @property
-    def torch_op_name(self) -> Optional[str]:
+    def torch_op_name(self) -> str | None:
         """Return the torch operation name."""
         return "torch.nn.functional.gelu"
 
@@ -554,7 +553,7 @@ class SigmoidOperator(Operator):
         super().__init__("torch.sigmoid")
 
     @property
-    def torch_op_name(self) -> Optional[str]:
+    def torch_op_name(self) -> str | None:
         """Return the torch operation name."""
         return "torch.sigmoid"
 
@@ -596,7 +595,7 @@ class TanhOperator(Operator):
         super().__init__("torch.tanh")
 
     @property
-    def torch_op_name(self) -> Optional[str]:
+    def torch_op_name(self) -> str | None:
         """Return the torch operation name."""
         return "torch.tanh"
 
@@ -638,7 +637,7 @@ class BatchNormOperator(Operator):
         super().__init__("torch.nn.functional.batch_norm")
 
     @property
-    def torch_op_name(self) -> Optional[str]:
+    def torch_op_name(self) -> str | None:
         """Return the torch operation name."""
         return "torch.nn.functional.batch_norm"
 
@@ -742,7 +741,7 @@ class GroupNormOperator(Operator):
         super().__init__("torch.nn.functional.group_norm")
 
     @property
-    def torch_op_name(self) -> Optional[str]:
+    def torch_op_name(self) -> str | None:
         """Return the torch operation name."""
         return "torch.nn.functional.group_norm"
 
@@ -846,7 +845,7 @@ class LeakyReLUOperator(Operator):
         super().__init__("torch.nn.functional.leaky_relu")
 
     @property
-    def torch_op_name(self) -> Optional[str]:
+    def torch_op_name(self) -> str | None:
         """Return the torch operation name."""
         return "torch.nn.functional.leaky_relu"
 
@@ -888,7 +887,7 @@ class ELUOperator(Operator):
         super().__init__("torch.nn.functional.elu")
 
     @property
-    def torch_op_name(self) -> Optional[str]:
+    def torch_op_name(self) -> str | None:
         """Return the torch operation name."""
         return "torch.nn.functional.elu"
 
@@ -930,7 +929,7 @@ class SiLUOperator(Operator):
         super().__init__("torch.nn.functional.silu")
 
     @property
-    def torch_op_name(self) -> Optional[str]:
+    def torch_op_name(self) -> str | None:
         """Return the torch operation name."""
         return "torch.nn.functional.silu"
 
@@ -972,7 +971,7 @@ class ScaledDotProductAttentionOperator(Operator):
         super().__init__("torch.nn.functional.scaled_dot_product_attention")
 
     @property
-    def torch_op_name(self) -> Optional[str]:
+    def torch_op_name(self) -> str | None:
         """Return the torch operation name."""
         return "torch.nn.functional.scaled_dot_product_attention"
 
@@ -1038,7 +1037,7 @@ class MultiHeadAttentionForwardOperator(Operator):
         super().__init__("torch.nn.functional.multi_head_attention_forward")
 
     @property
-    def torch_op_name(self) -> Optional[str]:
+    def torch_op_name(self) -> str | None:
         """Return the torch operation name."""
         return "torch.nn.functional.multi_head_attention_forward"
 

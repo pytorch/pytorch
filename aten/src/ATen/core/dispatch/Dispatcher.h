@@ -222,7 +222,8 @@ class TORCH_API Dispatcher final {
     return backendFallbackKernels_[dispatch_ix].kernel.isValid();
   }
 
-  // Used by torchdeploy/multipy for multiple interpreters racing.
+  // Used by torchdeploy/multipy for multiple  // codespell:ignore: multipy
+  // interpreters racing.
   void waitForDef(const FunctionSchema& schema);
   void waitForImpl(
       const OperatorName& op_name,
@@ -414,7 +415,7 @@ class TORCH_API Dispatcher final {
   std::unique_ptr<detail::RegistrationListenerList> listeners_;
 
   // This condition variable gets notified whenever we add a new def/impl to the
-  // dispatch table.  This is primarily used by multipy/torchdeploy, when
+  // dispatch table.  This is primarily used by multiply/torchdeploy, when
   // we have multiple interpreters trying to register to the dispatch table.
   // In this situation, whenever the non-primary interpreter would have tried
   // to register to the dispatch table, instead it will check to see if the

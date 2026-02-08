@@ -185,10 +185,12 @@ def _fa4_run_forward(
     window_size_left: int | None,
     window_size_right: int | None,
     seqused_k: torch.Tensor | None,
+    out: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     if _FA4_MODULE_PATH is None:
         raise RuntimeError("FA4 not registered")
     module = _fa4_import_module(_FA4_MODULE_PATH)
+
     kwargs: dict[str, Any] = {
         "softmax_scale": scale,
         "causal": is_causal,
@@ -199,6 +201,8 @@ def _fa4_run_forward(
         "cu_seqlens_k": cu_seq_k,
         "seqused_k": seqused_k.contiguous() if seqused_k is not None else None,
     }
+    if out is not None:
+        kwargs["out"] = out
     out, lse = module._flash_attn_fwd(query, key, value, **kwargs)
     return out, lse.contiguous()
 
@@ -214,6 +218,7 @@ def _fa4_run_backward(
     cu_seq_k: torch.Tensor | None,
     scale: float | None,
     is_causal: bool,
+    deterministic: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     if _FA4_MODULE_PATH is None:
         raise RuntimeError("FA4 not registered")
@@ -229,6 +234,7 @@ def _fa4_run_backward(
         causal=is_causal,
         cu_seqlens_q=cu_seq_q,
         cu_seqlens_k=cu_seq_k,
+        deterministic=deterministic,
     )
     return dq, dk, dv
 
@@ -250,6 +256,7 @@ def _fa4_flash_attention_forward_impl(
     window_size_right: int | None = None,
     seqused_k: torch.Tensor | None = None,
     alibi_slopes: torch.Tensor | None = None,
+    out: torch.Tensor | None = None,
 ):
     error = _fa4_forward_support_error(
         query,
@@ -274,6 +281,7 @@ def _fa4_flash_attention_forward_impl(
         window_size_left,
         window_size_right,
         seqused_k,
+        out,
     )
     rng_state = torch.zeros((2,), dtype=torch.uint64, device=query.device)
     philox_offset = torch.zeros((), dtype=torch.uint64, device=query.device)
@@ -315,6 +323,7 @@ def _fa4_flash_attention_backward_impl(
     )
     if error is not None:
         raise RuntimeError(f"FA4 flash_attention backward unsupported: {error}")
+    deterministic = torch.are_deterministic_algorithms_enabled()
     dq, dk, dv = _fa4_run_backward(
         grad_out,
         query,
@@ -326,6 +335,7 @@ def _fa4_flash_attention_backward_impl(
         cum_seq_k,
         scale,
         is_causal,
+        deterministic,
     )
     return dq, dk, dv
 
@@ -354,9 +364,15 @@ def _fa4_scaled_dot_product_flash_attention_forward_impl(
         raise RuntimeError(f"FA4 SDPA forward unsupported: {error}")
     q, k, v = _transpose_dense(query, key, value)
 
+    # Pre-allocate output with query's strides (BHSD layout), then create
+    # a BSHD view for the kernel. This ensures the returned output has
+    # the same memory layout as the input query.
+    out_bhsd = torch.empty_like(query)
+    out_bshd = out_bhsd.transpose(1, 2)
+
     max_q_flash = q.size(1)
     max_k_flash = k.size(1)
-    out, lse, rng_state, philox_offset, debug_mask = _fa4_flash_attention_forward_impl(
+    _, lse, rng_state, philox_offset, debug_mask = _fa4_flash_attention_forward_impl(
         q,
         k,
         v,
@@ -368,12 +384,12 @@ def _fa4_scaled_dot_product_flash_attention_forward_impl(
         is_causal,
         return_debug_mask,
         scale=scale,
+        out=out_bshd,
     )
-    (out,) = _transpose_dense(out)
     max_q = query.size(2)
     max_k = key.size(2)
     return (
-        out,
+        out_bhsd,
         lse,
         None,
         None,

@@ -125,6 +125,17 @@ AttentionType = Literal[
 ]
 DtypeString = Literal["bfloat16", "float16", "float32"]
 SpeedupType = Literal["fwd", "bwd"]
+# Operator Name mapping
+backend_to_operator_name = {
+    "math": "math attention kernel",
+    "efficient": "efficient attention kernel",
+    "cudnn": "cudnn attention kernel",
+    "fav2": "flash attention 2 kernel",
+    "fav3": "flash attention 3 kernel",
+    "fakv": "flash attention kv cache kernel",
+    "og-eager": "eager attention kernel",
+    "flex": "flex attention kernel",
+}
 
 
 def benchmark_torch_function_in_microseconds(func: Callable, *args, **kwargs) -> float:
@@ -136,7 +147,7 @@ def benchmark_torch_function_in_microseconds(func: Callable, *args, **kwargs) ->
 
 @dataclass(frozen=True)
 class ExperimentConfig:
-    shape: tuple[int]  # [B, Hq, M, Hkv, N, D]
+    shape: tuple[int, ...]  # [B, Hq, M, Hkv, N, D]
     attn_type: str
     dtype: torch.dtype
     calculate_bwd_time: bool
@@ -145,9 +156,10 @@ class ExperimentConfig:
     max_autotune: bool
 
     def __post_init__(self):
-        assert len(self.shape) == 6, (
-            "Shape must be of length 6"
-        )  # [B, Hq, M, Hkv, N, D]
+        if len(self.shape) != 6:
+            raise AssertionError(
+                f"Shape must be of length 6 [B, Hq, M, Hkv, N, D], got {len(self.shape)}"
+            )
 
     def asdict(self):
         # Convert the dataclass instance to a dictionary
@@ -201,7 +213,10 @@ def generate_inputs(
     q_shape = (batch_size, q_sequence_length, q_heads * head_dim)
     kv_shape = (batch_size, kv_sequence_length, kv_heads * head_dim)
 
-    assert q_heads % kv_heads == 0
+    if q_heads % kv_heads != 0:
+        raise AssertionError(
+            f"q_heads ({q_heads}) must be divisible by kv_heads ({kv_heads})"
+        )
 
     make_q = partial(
         torch.rand, q_shape, device=device, dtype=dtype, requires_grad=requires_grad
@@ -246,7 +261,7 @@ def generate_inputs(
 
 
 def generate_jagged_inputs(
-    shape: tuple[int],
+    shape: tuple[int, ...],
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
@@ -400,7 +415,8 @@ def run_single_backend_FA(
     mask_kwargs,
     backend: str,
 ) -> ExperimentResults:
-    assert backend in ["fav3", "fakv"]
+    if backend not in ["fav3", "fakv"]:
+        raise AssertionError(f"backend must be 'fav3' or 'fakv', got {backend}")
     # Generate callable for specific backend.
     if backend in ["fav3"]:
         FA = generate_FA_callable(
@@ -554,7 +570,8 @@ def calculate_speedup(
     if type == "fwd":
         return baseline_results.fwd_time / results.fwd_time
     elif type == "bwd":
-        assert results.bwd_time is not None
+        if results.bwd_time is None:
+            raise AssertionError("results.bwd_time must not be None for bwd speedup")
         return baseline_results.bwd_time / results.bwd_time
     else:
         raise ValueError(f"Invalid type {type}")
@@ -709,7 +726,7 @@ softcap_value = 50
 dropout_p = 0.0
 
 
-def generate_score_mod(attn_type: str, shape: tuple[int]) -> Callable | None:
+def generate_score_mod(attn_type: str, shape: tuple[int, ...]) -> Callable | None:
     B, Hq, M, Hkv, N, D = shape
     is_decoding = M == 1
     from attn_gym.mods import generate_alibi_bias, generate_tanh_softcap
@@ -751,7 +768,7 @@ sliding_window_size = 512
 prefix_length = 512
 
 
-def generate_block_mask(attn_type: str, shape: tuple[int]):
+def generate_block_mask(attn_type: str, shape: tuple[int, ...]):
     B, Hq, M, Hkv, N, D = shape
     is_decoding = M == 1
 
@@ -784,7 +801,10 @@ def generate_block_mask(attn_type: str, shape: tuple[int]):
 
     mask_mod_kwargs = {}
 
-    assert attn_type != "document_mask" or not is_decoding
+    if attn_type == "document_mask" and is_decoding:
+        raise AssertionError(
+            "document_mask attention type is not supported in decoding mode"
+        )
     if attn_type == "document_mask":
         random.seed(0)
         lengths = generate_random_lengths(N * B, B)
@@ -826,7 +846,7 @@ def generate_block_mask(attn_type: str, shape: tuple[int]):
     return block_mask, mask_mod_kwargs
 
 
-def get_kernel_options(attn_type: str, shape: tuple[int]):
+def get_kernel_options(attn_type: str, shape: tuple[int, ...]):
     B, Hq, M, Hkv, N, D = shape
     is_decoding = M == 1
     kernel_opt_training_dict = {
@@ -913,7 +933,7 @@ def get_backend_context(backend: str):
 
 
 def generate_FA_callable(
-    attn_type: str, shape: tuple[int], dtype: torch.dtype, backend: str, **kwargs
+    attn_type: str, shape: tuple[int, ...], dtype: torch.dtype, backend: str, **kwargs
 ) -> Callable | None:
     if dtype not in [torch.float16, torch.bfloat16]:
         return None
@@ -972,7 +992,7 @@ def generate_FA_callable(
 
 
 def generate_FD_callable(
-    attn_type: str, shape: tuple[int], dtype: torch.dtype
+    attn_type: str, shape: tuple[int, ...], dtype: torch.dtype
 ) -> Callable | None:
     if dtype not in [torch.float16, torch.bfloat16]:
         return None
@@ -986,7 +1006,8 @@ def generate_FD_callable(
 
     B, Hq, M, Hkv, N, D = shape
 
-    assert M == 1
+    if M != 1:
+        raise AssertionError(f"M must be 1 for FD callable, got {M}")
 
     def flash_attn_with_kvcache_renamed(q, k, v, **kwargs):
         return flash_attn_with_kvcache(q, k_cache=k, v_cache=v, **kwargs)
@@ -1019,7 +1040,10 @@ def generate_FD_callable(
 
 
 def generate_attn_mask_linear_score_mod(
-    shape: tuple[int], block_mask: BlockMask, score_mod: Callable, dtype: torch.dtype
+    shape: tuple[int, ...],
+    block_mask: BlockMask,
+    score_mod: Callable,
+    dtype: torch.dtype,
 ):
     B, Hq, M, N = shape
     if block_mask is None and score_mod is None:
@@ -1044,7 +1068,7 @@ def generate_attn_mask_linear_score_mod(
 
 def generate_eager_sdpa(
     attn_type: str,
-    shape: tuple[int],
+    shape: tuple[int, ...],
     dtype: torch.dtype,
     block_mask: BlockMask,
     score_mod: Callable | None = None,
@@ -1125,7 +1149,8 @@ def generate_experiment_configs(
     backends: list[str],
     max_autotune: bool,
 ) -> list[ExperimentConfig]:
-    assert not (calculate_bwd and decoding), "Decoding does not support backward"
+    if calculate_bwd and decoding:
+        raise AssertionError("Decoding does not support backward")
 
     if decoding:
         q_kv_seq_lens = [(1, i) for i in seq_lens]  # only testing query length == 1
@@ -1157,7 +1182,10 @@ def generate_experiment_configs(
             if bsz <= 0:
                 continue
 
-        assert q_heads % kv_heads == 0
+        if q_heads % kv_heads != 0:
+            raise AssertionError(
+                f"q_heads ({q_heads}) must be divisible by kv_heads ({kv_heads})"
+            )
 
         all_configs.append(
             ExperimentConfig(
@@ -1265,12 +1293,14 @@ def _output_json_for_dashboard(
                 model: ModelInfo
                 metric: MetricInfo
 
+            operator_name = backend_to_operator_name.get(backend, backend)
+
             # Benchmark extra info
             benchmark_extra_info = {
                 "input_config": input_config,
                 "device": device,
                 "arch": device_arch,
-                "operator_name": backend,
+                "operator_name": operator_name,
                 "attn_type": config.attn_type,
                 "shape": str(config.shape),
                 "max_autotune": config.max_autotune,
@@ -1288,7 +1318,7 @@ def _output_json_for_dashboard(
                     type="attention-benchmark",
                     origins=["pytorch"],
                     extra_info={
-                        "operator_name": backend,
+                        "operator_name": operator_name,
                         "attn_type": config.attn_type,
                     },
                 ),
@@ -1315,7 +1345,7 @@ def _output_json_for_dashboard(
                         type="attention-benchmark",
                         origins=["pytorch"],
                         extra_info={
-                            "operator_name": backend,
+                            "operator_name": operator_name,
                         },
                     ),
                     metric=MetricInfo(
@@ -1341,7 +1371,7 @@ def _output_json_for_dashboard(
                         type="attention-benchmark",
                         origins=["pytorch"],
                         extra_info={
-                            "operator_name": backend,
+                            "operator_name": operator_name,
                         },
                     ),
                     metric=MetricInfo(
@@ -1371,7 +1401,7 @@ def _output_json_for_dashboard(
                         type="attention-benchmark",
                         origins=["pytorch"],
                         extra_info={
-                            "operator_name": backend,
+                            "operator_name": operator_name,
                         },
                     ),
                     metric=MetricInfo(

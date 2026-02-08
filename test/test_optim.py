@@ -1993,7 +1993,7 @@ class TestOptimRenewed(TestCase):
 
     @optims(optim_db, dtypes=[torch.float32])
     def test_step_post_hook(self, device, dtype, optim_info):
-        def post_hook(opt: Optimizer, args: tuple[Any], kwargs: dict[Any, Any]):
+        def post_hook(opt: Optimizer, args: tuple[Any, ...], kwargs: dict[Any, Any]):
             nonlocal data
             data += 2
 
@@ -2025,7 +2025,7 @@ class TestOptimRenewed(TestCase):
 
     @optims(optim_db, dtypes=[torch.float32])
     def test_step_pre_hook(self, device, dtype, optim_info):
-        def pre_hook(opt: Optimizer, args: tuple[Any], kwargs: dict[Any, Any]):
+        def pre_hook(opt: Optimizer, args: tuple[Any, ...], kwargs: dict[Any, Any]):
             nonlocal data
             data += 2
 
@@ -2058,19 +2058,27 @@ class TestOptimRenewed(TestCase):
 
     @optims(optim_db, dtypes=[torch.float32])
     def test_step_all_hooks(self, device, dtype, optim_info):
-        def global_pre_hook(opt: Optimizer, args: tuple[Any], kwargs: dict[Any, Any]):
+        def global_pre_hook(
+            opt: Optimizer, args: tuple[Any, ...], kwargs: dict[Any, Any]
+        ):
             nonlocal data
             data.append(0)
 
-        def global_post_hook(opt: Optimizer, args: tuple[Any], kwargs: dict[Any, Any]):
+        def global_post_hook(
+            opt: Optimizer, args: tuple[Any, ...], kwargs: dict[Any, Any]
+        ):
             nonlocal data
             data.append(5)
 
-        def local_pre_hook(opt: Optimizer, args: tuple[Any], kwargs: dict[Any, Any]):
+        def local_pre_hook(
+            opt: Optimizer, args: tuple[Any, ...], kwargs: dict[Any, Any]
+        ):
             nonlocal data
             data.append(1)
 
-        def local_post_hook(opt: Optimizer, args: tuple[Any], kwargs: dict[Any, Any]):
+        def local_post_hook(
+            opt: Optimizer, args: tuple[Any, ...], kwargs: dict[Any, Any]
+        ):
             nonlocal data
             data.append(2)
 

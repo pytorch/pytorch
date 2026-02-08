@@ -15,6 +15,7 @@ import functools
 import inspect
 import os
 import re
+import sys
 import warnings
 from collections.abc import Callable
 from enum import Enum
@@ -278,7 +279,8 @@ def verify(model, args, loss_fn=torch.sum, devices=None):
 
     with torch.random.fork_rng(devices, _caller="torch.jit.verify"):
         uncompiled_outs, uncompiled_grads = run_fwd_bwd(args, force_trace=True)
-        assert model.has_trace_for(*args)
+        if not model.has_trace_for(*args):
+            raise AssertionError("Model should have trace for the given args")
 
     if is_module:
         model.load_state_dict(saved_state)  # type: ignore[possibly-undefined]
@@ -336,7 +338,7 @@ def _check_trace(
 
         if is_trace_module:
             copied_dict = {}
-            # pyrefly: ignore [missing-attribute]
+
             for name, data in inputs.items():
                 copied_dict[name] = _clone_inputs(data)
             check_mod = torch.jit.trace_module(
@@ -544,9 +546,14 @@ def _check_trace(
                         elif getattr(orig, "is_nested", None) or getattr(
                             ref, "is_nested", None
                         ):
-                            assert getattr(orig, "is_nested", None) == getattr(
+                            if getattr(orig, "is_nested", None) != getattr(
                                 ref, "is_nested", None
-                            )
+                            ):
+                                raise AssertionError(
+                                    f"Nested tensor mismatch: orig.is_nested="
+                                    f"{getattr(orig, 'is_nested', None)}, "
+                                    f"ref.is_nested={getattr(ref, 'is_nested', None)}"
+                                )
                             for t_orig, t_ref in zip(orig.unbind(), ref.unbind()):
                                 torch.testing.assert_close(
                                     t_orig.double(),
@@ -989,6 +996,17 @@ def trace(
         module = torch.jit.trace(n, example_forward_input)
 
     """
+    if sys.version_info >= (3, 14):
+        warnings.warn(
+            "`torch.jit.trace` is not supported in Python 3.14+ and may break. "
+            "Please switch to `torch.compile` or `torch.export`.",
+            DeprecationWarning,
+        )
+    else:
+        warnings.warn(
+            "`torch.jit.trace` is deprecated. Please switch to `torch.compile` or `torch.export`.",
+            DeprecationWarning,
+        )
     if not _enabled:
         return func
     if optimize is not None:
@@ -1117,6 +1135,17 @@ def trace_module(
         module = torch.jit.trace_module(n, inputs)
 
     """
+    if sys.version_info >= (3, 14):
+        warnings.warn(
+            "`torch.jit.trace_method` is not supported in Python 3.14+ and may break. "
+            "Please switch to `torch.compile` or `torch.export`.",
+            DeprecationWarning,
+        )
+    else:
+        warnings.warn(
+            "`torch.jit.trace_method` is deprecated. Please switch to `torch.compile` or `torch.export`.",
+            DeprecationWarning,
+        )
     if not _enabled:
         return mod
     if optimize is not None:
@@ -1246,7 +1275,8 @@ class TracedModule(ScriptModule):
     def __init__(self, orig, id_set=None, _compilation_unit=None):
         # XXX: orig can be a nn.Module or a function!
         super().__init__()
-        assert isinstance(orig, torch.nn.Module)
+        if not isinstance(orig, torch.nn.Module):
+            raise AssertionError(f"Expected nn.Module, got {type(orig)}")
 
         # Copy a subset of `orig` to a temporary nn.Module.
         # This is a way to customize what will actually get compiled by create_script_module

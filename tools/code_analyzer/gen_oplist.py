@@ -135,11 +135,13 @@ def main(argv: list[Any]) -> None:
     if os.path.isfile(options.model_file_list_path):
         print("Processing model file: ", options.model_file_list_path)
         model_dicts = []
-        model_dict = yaml.safe_load(open(options.model_file_list_path))
+        with open(options.model_file_list_path) as model_file:
+            model_dict = yaml.safe_load(model_file)
         model_dicts.append(model_dict)
     else:
         print("Processing model directory: ", options.model_file_list_path)
-        assert options.model_file_list_path[0] == "@"
+        if options.model_file_list_path[0] != "@":
+            raise AssertionError("model_file_list_path must start with '@'")
         model_file_list_path = options.model_file_list_path[1:]
 
         model_dicts = []

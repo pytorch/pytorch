@@ -118,11 +118,17 @@ def from_dlpack(
         tensor([-9, -1,  2,  3])
 
     """
+
     if hasattr(ext_tensor, '__dlpack__'):
         # Only populate kwargs if any of the optional arguments are, in fact, not None. Otherwise,
         # leave them out, since we might end up falling back to no-extra-kwargs __dlpack__ call.
         kwargs: dict[str, Any] = {}
         kwargs["max_version"] = (1, 0)
+
+        # Track copy request for potential manual handling
+        requested_copy = copy
+        producer_handled_copy = True
+        cross_device_transfer = False  # Will be set to True if device transfer is needed
 
         if copy is not None:
             kwargs["copy"] = copy
@@ -130,14 +136,33 @@ def from_dlpack(
         # Parse the device parameter.
         # At this moment, it can either be a torch.device or a str representing
         # a torch.device, e.g. "cpu", "cuda", etc.
+        # Get source device first (we need it to detect cross-device transfers)
+        ext_device = ext_tensor.__dlpack_device__()
+
         if device is not None:
             if isinstance(device, str):
                 device = torch.device(device)
             if not isinstance(device, torch.device):
                 raise AssertionError(f"from_dlpack: unsupported device type: {type(device)}")
-            kwargs["dl_device"] = torch._C._torchDeviceToDLDevice(device)
 
-        ext_device = ext_tensor.__dlpack_device__()
+            # Convert target device to DLPack format
+            target_dl_device = torch._C._torchDeviceToDLDevice(device)
+
+            # Detect cross-device transfer by comparing source and target devices
+            # E.g. CPU->CUDA, cuda:0->cuda:1, etc.
+            cross_device_transfer = (ext_device != target_dl_device)
+
+            # Only pass dl_device to producer if NOT cross-device transfer
+            if not cross_device_transfer:
+                kwargs["dl_device"] = target_dl_device
+
+            # Cross-device transfer always requires a copy
+            if cross_device_transfer and copy is False:
+                raise ValueError(
+                    f"cannot move DLPack tensor from device {ext_device} to {target_dl_device} "
+                    "without copying. Set copy=None or copy=True."
+                )
+
         # ext_device is either CUDA or ROCm, we need to pass the current
         # stream
         if ext_device[0] in (DLDeviceType.kDLCUDA, DLDeviceType.kDLROCM):
@@ -153,13 +178,48 @@ def from_dlpack(
             stream_ptr = 1 if is_cuda and stream.cuda_stream == 0 else stream.cuda_stream
             kwargs["stream"] = stream_ptr
 
+        # Try different parameter combinations until one works
+        dlpack = None
+
+        # Attempt 1: Try with all the parameters
         try:
-            # Try running __dlpack__ while specifying `max_version` argument.
             dlpack = ext_tensor.__dlpack__(**kwargs)
         except TypeError:
-            # If that doesn't work, try removing the `max_version` argument.
-            kwargs.pop("max_version")
+            pass
+
+        # Attempt 2: Remove max_version
+        if dlpack is None:
+            kwargs.pop("max_version", None)
+            try:
+                dlpack = ext_tensor.__dlpack__(**kwargs)
+            except TypeError:
+                pass
+
+        # Attempt 3: Remove copy
+        if dlpack is None:
+            kwargs.pop("copy", None)
+            producer_handled_copy = False
+            try:
+                dlpack = ext_tensor.__dlpack__(**kwargs)
+            except TypeError:
+                pass
+
+        # Attempt 4: Remove dl_device
+        if dlpack is None:
+            kwargs.pop("dl_device", None)
             dlpack = ext_tensor.__dlpack__(**kwargs)
+
+        tensor = torch._C._from_dlpack(dlpack)
+
+        # Manual copy if producer didn't handle it (cross-device already copies via .to())
+        if requested_copy is True and not producer_handled_copy and not cross_device_transfer:
+            tensor = tensor.clone()
+
+        # Handle cross-device transfer by moving tensor to target device
+        if cross_device_transfer:
+            tensor = tensor.to(device)
+
+        return tensor
 
     else:
         if device is not None or copy is not None:
@@ -168,4 +228,4 @@ def from_dlpack(
             )
         # Old versions just call the converter
         dlpack = ext_tensor
-    return torch._C._from_dlpack(dlpack)
+        return torch._C._from_dlpack(dlpack)

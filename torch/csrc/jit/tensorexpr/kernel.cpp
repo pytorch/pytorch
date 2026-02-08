@@ -795,7 +795,7 @@ static void parallelizeOuterLoops(LoopNest& l, const Bufs& bufs) {
 StmtPtr TensorExprKernel::transformLoops(BackendType backendType, StmtPtr st) {
   torch::jit::tensorexpr::LoopNest l(std::move(st), bufOutputs_);
   LoopNest::sanitizeNames(l.root_stmt());
-  GRAPH_DEBUG("Original Stmt:\n", std::to_string(l.root_stmt()), "\n");
+  GRAPH_DEBUG("Original Stmt:\n", std::to_string(l.root_stmt()), '\n');
   int64_t random_tr_seed = randomTransformsRequested();
   if (random_tr_seed) {
     if (random_tr_seed == -1)
@@ -939,7 +939,7 @@ StmtPtr TensorExprKernel::transformLoops(BackendType backendType, StmtPtr st) {
   StmtPtr stmt = l.root_stmt();
   // Arithmetic Simplification.
   stmt = IRSimplifier::simplify(stmt);
-  GRAPH_DEBUG("Final Stmt:\n", std::to_string(stmt), "\n");
+  GRAPH_DEBUG("Final Stmt:\n", std::to_string(stmt), '\n');
   return stmt;
 }
 

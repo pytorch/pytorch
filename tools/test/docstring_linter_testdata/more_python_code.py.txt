@@ -30,3 +30,11 @@ class LintInitInit:
         # Lots of lines!
         # Lots of lines!
         pass
+
+
+def f1() -> None: ...
+def f2(s: str) -> None: ...
+
+
+class TinyInterface:
+    def __init__(self) -> None: ...

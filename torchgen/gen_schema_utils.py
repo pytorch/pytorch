@@ -1,4 +1,4 @@
-from typing import Any, Optional, Union
+from typing import Any
 
 from torchgen.model import (
     Annotation,
@@ -29,7 +29,7 @@ class TypeGen:
     }
 
     @staticmethod
-    def from_example(obj: Any) -> Union[BaseType, ListType, CustomClassType]:
+    def from_example(obj: Any) -> BaseType | ListType | CustomClassType:
         import torch
 
         if isinstance(obj, torch.fx.GraphModule):
@@ -43,7 +43,8 @@ class TypeGen:
         elif isinstance(obj, torch.ScriptObject):
             return CustomClassType(obj._type().name())  # type: ignore[attr-defined]
         elif isinstance(obj, (list, tuple)):
-            assert len(obj) > 0
+            if len(obj) == 0:
+                raise AssertionError("list/tuple must be non-empty")
             all_base_tys = [TypeGen.from_example(x) for x in obj]
             if len(set(all_base_tys)) > 1:
                 raise RuntimeError(
@@ -61,7 +62,7 @@ class TypeGen:
 class ReturnGen:
     @staticmethod
     def from_example(
-        name: Optional[str], obj: Any, annotation: Optional[Annotation]
+        name: str | None, obj: Any, annotation: Annotation | None
     ) -> Return:
         return Return(name, TypeGen.from_example(obj), annotation)
 
@@ -69,7 +70,7 @@ class ReturnGen:
 class ArgumentGen:
     @staticmethod
     def from_example(
-        name: str, obj: Any, default: Optional[str], annotation: Optional[Annotation]
+        name: str, obj: Any, default: str | None, annotation: Annotation | None
     ) -> Argument:
         return Argument(
             name, TypeGen.from_example(obj), default=default, annotation=annotation

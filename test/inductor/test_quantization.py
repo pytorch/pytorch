@@ -66,7 +66,7 @@ class TestQuantization(TestCase):
     def compare_dict_tensors(self, ref_dict, res_dict, rtol=1e-3, atol=1e-3):
         if len(set(ref_dict.keys())) != len(set(res_dict.keys())):
             return False
-        for key1 in ref_dict.keys():
+        for key1 in ref_dict:
             key2 = "_orig_mod." + key1
             assert key2 in res_dict, f"{key1} does not exist in traced module"
             # if both of them are None, continue

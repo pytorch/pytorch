@@ -8,6 +8,12 @@
 #include <torch/csrc/stable/library.h>
 #include <torch/library.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty_strided.h>
+#include <ATen/ops/from_blob.h>
+#endif // AT_PER_OPERATOR_HEADERS
 #include <ATen/Parallel.h>
 #include <torch/csrc/shim_conversion_utils.h>
 #include <torch/csrc/stable/c/shim.h>
@@ -145,6 +151,10 @@ static StableIValue from_ivalue(
           list_pointer_to_list_handle(stableivalue_list.release()),
           extension_build_version);
     }
+    case c10::TypeKind::StringType: {
+      return torch::stable::detail::_from(
+          ivalue.toStringRef(), extension_build_version);
+    }
     default: {
       TORCH_CHECK(
           false,
@@ -250,6 +260,10 @@ static c10::IValue to_ivalue(
       }
       TORCH_ERROR_CODE_CHECK(torch_delete_list(list_handle));
       return ivalue_list;
+    }
+    case c10::TypeKind::StringType: {
+      return c10::IValue(torch::stable::detail::_to<std::string>(
+          stable_ivalue, extension_build_version));
     }
     default: {
       TORCH_CHECK(
@@ -559,4 +573,105 @@ AOTI_TORCH_EXPORT AOTITorchError
 torch_get_num_threads(uint32_t* out_num_threads) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
       { *out_num_threads = static_cast<uint32_t>(at::get_num_threads()); });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_get_const_data_ptr(AtenTensorHandle tensor, const void** ret_data_ptr) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* t =
+        torch::aot_inductor::tensor_handle_to_tensor_pointer(tensor);
+    *ret_data_ptr = t->const_data_ptr();
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_get_mutable_data_ptr(AtenTensorHandle tensor, void** ret_data_ptr) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* t =
+        torch::aot_inductor::tensor_handle_to_tensor_pointer(tensor);
+    *ret_data_ptr = t->mutable_data_ptr();
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_new_string_handle(const char* data, size_t length, StringHandle* handle) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    auto str_ptr = new std::string(data, length);
+    *handle = reinterpret_cast<StringHandle>(str_ptr);
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError torch_delete_string(StringHandle handle) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    auto str_ptr = reinterpret_cast<std::string*>(handle);
+    delete str_ptr;
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_string_length(StringHandle handle, size_t* length) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    auto str_ptr = reinterpret_cast<std::string*>(handle);
+    *length = str_ptr->length();
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_string_c_str(StringHandle handle, const char** data) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    auto str_ptr = reinterpret_cast<std::string*>(handle);
+    *data = str_ptr->c_str();
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_set_requires_grad(AtenTensorHandle tensor, bool requires_grad) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* t =
+        torch::aot_inductor::tensor_handle_to_tensor_pointer(tensor);
+    t->set_requires_grad(requires_grad);
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError torch_from_blob(
+    void* data,
+    int64_t ndim,
+    const int64_t* sizes_ptr,
+    const int64_t* strides_ptr,
+    int64_t storage_offset,
+    int32_t dtype,
+    int32_t device_type,
+    int32_t device_index,
+    AtenTensorHandle* ret_new_tensor,
+    int32_t layout,
+    const uint8_t* opaque_metadata,
+    int64_t opaque_metadata_size,
+    void (*deleter)(void*)) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    c10::IntArrayRef sizes(sizes_ptr, ndim);
+    c10::IntArrayRef strides(strides_ptr, ndim);
+    c10::Device device(static_cast<c10::DeviceType>(device_type), device_index);
+    c10::TensorOptions options = c10::TensorOptions().device(device).dtype(
+        static_cast<c10::ScalarType>(dtype));
+    at::Tensor tensor;
+    if (data != nullptr) {
+      if (deleter != nullptr) {
+        tensor = at::for_blob(data, sizes)
+                     .strides(strides)
+                     .storage_offset(storage_offset)
+                     .deleter(deleter)
+                     .options(options)
+                     .make_tensor();
+      } else {
+        tensor = at::for_blob(data, sizes)
+                     .strides(strides)
+                     .storage_offset(storage_offset)
+                     .options(options)
+                     .make_tensor();
+      }
+    } else {
+      tensor = at::empty_strided(sizes, strides, options);
+    }
+    *ret_new_tensor = torch::aot_inductor::new_tensor_handle(std::move(tensor));
+  });
 }

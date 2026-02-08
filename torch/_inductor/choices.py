@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import typing
 from typing import Any, Optional, TYPE_CHECKING, Union
 
@@ -50,6 +51,35 @@ class Sortable(typing.Protocol):
     """Anything that can be used as a list.sort() key (int/tuple/etc)"""
 
     def __lt__(self, other: typing.Self) -> bool: ...
+
+
+@dataclasses.dataclass
+class FusionScore:
+    template_score: int
+    node_type_score: bool
+    memory_score: int
+    proximity_score: int
+
+    def __lt__(self, other):
+        """
+        node_type_score has higher priority than memory_score unless
+        the memory_score differs too much
+        """
+        threshold = 16
+        if self.template_score != other.template_score:
+            return self.template_score < other.template_score
+
+        if (
+            max(self.memory_score, other.memory_score)
+            > min(self.memory_score, other.memory_score) * threshold
+        ):
+            return self.memory_score < other.memory_score
+
+        return (self.node_type_score, self.memory_score, self.proximity_score) < (
+            other.node_type_score,
+            other.memory_score,
+            other.proximity_score,
+        )
 
 
 class InductorChoices:
@@ -313,7 +343,7 @@ class InductorChoices:
         ):
             return False
 
-        xhint = V.graph.sizevars.size_hint(features.numel, fallback=2)
+        xhint = V.graph.sizevars.optimization_hint(features.numel, fallback=2)
         if xhint <= 8:
             threshold = 32768 * xhint
         elif xhint <= 16:
@@ -321,6 +351,8 @@ class InductorChoices:
         else:
             return False
         # TODO(jansel): should this default on for dynamic shapes?
+        # TODO(laith) What if hint(features.reduction_numel) >= threshold ?
+        # shall we compare hints instead
         return V.graph.sizevars.statically_known_geq(
             features.reduction_numel, threshold
         )
@@ -349,7 +381,7 @@ class InductorChoices:
             if not all(
                 (
                     (isinstance(bound, int) or bound.is_constant())
-                    and bound != torch.utils._sympy.numbers.IntInfinity()
+                    and not torch.utils._sympy.numbers.is_infinite(bound)
                 )
                 for bound in (lower, upper)
             ):
@@ -368,12 +400,11 @@ class InductorChoices:
 
         if cooperative_reduction:
             # The RSPLIT of cooperative reductions means each thread block is operating on fewer elements
-            try:
-                threshold *= 32 // min(
-                    V.graph.sizevars.size_hint_or_throw(features.numel), 32
-                )
-            except ValueError:
-                pass  # unbacked symint
+            # The default fallback will be used if optimizations hint is not provided. The default fallback
+            # is >> 32.
+            threshold *= 32 // min(
+                V.graph.sizevars.optimization_hint(features.numel), 32
+            )
 
         # If multi_kernel is enabled, we do more aggressive persistent reduction.
         # This may result in some persistent reductions slower than the
@@ -398,13 +429,19 @@ class InductorChoices:
         so we will do the reduction in two phases."""
         props = DeviceProperties.create(device)
         num_sm = props.multi_processor_count
-        min_elements_per_thread = 32
+        warp_size = props.warp_size if props.warp_size is not None else 32
+        max_threads_per_sm = (
+            props.max_threads_per_multi_processor
+            if props.max_threads_per_multi_processor is not None
+            else 2048
+        )
+        min_elements_per_thread = warp_size
         max_elements_per_thread = 512
-        threads_per_sm = 2048
+        threads_per_sm = max_threads_per_sm
         min_elements_per_device = min_elements_per_thread * num_sm * threads_per_sm
         max_elements_per_device = max_elements_per_thread * num_sm * threads_per_sm
         num_warps = 8
-        num_threads = 32 * num_warps
+        num_threads = warp_size * num_warps
 
         if inner_reduction:
             # do heuristics that's close to eager mode for split inner reduction
@@ -488,9 +525,7 @@ class InductorChoices:
             - config.triton.tiling_prevents_reduction_fusion
             - config.aggressive_fusion (will cause this function to be called more times)
         """
-        if (
-            shared_data_score == 0 and not MixOrderReduction.can_fuse(node1, node2)
-        ) and (
+        if shared_data_score == 0 and (
             not config.aggressive_fusion or node1.is_reduction() or node2.is_reduction()
         ):
             if is_metric_table_enabled("fusion_failure_due_to_indexing_mismatch"):
@@ -499,6 +534,7 @@ class InductorChoices:
                 )
                 if len(common_buf_names) > 0:
                     get_metric_table("fusion_failure_due_to_indexing_mismatch").add_row(
+                        # pyrefly: ignore [bad-argument-type]
                         lambda: {
                             "pre_grad_graph_id": V.graph.graph_id,
                             "post_grad_graph_id": V.graph.post_grad_graph_id,
@@ -561,9 +597,11 @@ class InductorChoices:
         shared_data_score: int,
     ) -> bool:
         """Hook for heuristics to prevent horizontal (consumer/consumer) fusions"""
-        if (
-            shared_data_score < config.score_fusion_memory_threshold
-        ) and not MixOrderReduction.can_fuse(node1, node2):
+        if MixOrderReduction.can_fuse(node1, node2):
+            # For mix order reduction, we disregard shared data or
+            # distance.
+            return True
+        if shared_data_score < config.score_fusion_memory_threshold:
             WhyNoFuse(node1, node2)("score_fusion_memory_threshold")
             return False
         if scheduler.are_long_distant_nodes(node1, node2):
@@ -589,7 +627,13 @@ class InductorChoices:
         - Estimate of the saved memory operations
         - Fusions closer together in original graph order
         """
-        memory_score = scheduler.score_fusion_memory(node1, node2)
+
+        memory_score, is_mix_order_reduction = typing.cast(
+            tuple[int, bool],
+            scheduler.score_fusion_memory(
+                node1, node2, return_is_mix_order_reduction=True
+            ),
+        )
         proximity_score = -max(
             abs(node1.min_order - node2.max_order),
             abs(node2.min_order - node1.max_order),
@@ -604,10 +648,11 @@ class InductorChoices:
                 and memory_score > 0
             )
 
-        # pyrefly: ignore [bad-return]
-        return (
+        type_score = node1.is_reduction() == node2.is_reduction() and memory_score > 0
+
+        return FusionScore(
             template_score,
-            node1.is_reduction() == node2.is_reduction() and memory_score > 0,
+            type_score,
             memory_score,
             proximity_score,
         )

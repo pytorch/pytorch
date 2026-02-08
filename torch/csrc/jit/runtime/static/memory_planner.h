@@ -81,13 +81,13 @@ class ManagedStorages {
 
  private:
   // We will use placement-new to add new storages to this buffer
-  at::StorageImpl* storages_;
+  at::StorageImpl* storages_{nullptr};
 
   // Current number of storages that have been placed into the storage buffer
-  size_t size_;
+  size_t size_{0};
 
   // Total allocated capacity of the storage buffer
-  size_t capacity_;
+  size_t capacity_{0};
 };
 
 TORCH_API std::vector<StorageGroup> assignStorageToManagedTensors(

@@ -5,7 +5,6 @@
 #include <ATen/TensorMeta.h>
 #include <ATen/native/Padding.h>
 #include <c10/util/irange.h>
-#include <algorithm>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -253,7 +252,7 @@ void replication_pad3d_backward_out_cpu_template(
   at::native::padding::check_valid_input<3>(input, paddingSize);
 
   TORCH_CHECK(ichannel == gradOutput.size(dimc),
-      "gradOutput width unexpected. Expected: ", ichannel, ", Got: ",
+      "gradOutput channel unexpected. Expected: ", ichannel, ", Got: ",
       gradOutput.size(dimc));
   TORCH_CHECK(owidth == gradOutput.size(dimw),
       "gradOutput width unexpected. Expected: ", owidth, ", Got: ",

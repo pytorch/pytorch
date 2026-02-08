@@ -61,13 +61,18 @@ Tensor view_as_real(const Tensor& self) {
   return _view_as_real_physical(self);
 }
 
-inline SymDimVector computeStrideForViewAsComplex(SymIntArrayRef oldstride) {
+inline SymDimVector computeStrideForViewAsComplex(
+    SymIntArrayRef oldstride,
+    SymIntArrayRef oldsizes) {
   const auto dim = oldstride.size();
   TORCH_CHECK(dim > 0 && oldstride[dim - 1] == 1, "Tensor must have a last dimension with stride 1");
 
   SymDimVector res(dim - 1);
   for (const auto i : c10::irange(res.size())) {
-    TORCH_CHECK(oldstride[i] % 2 == 0, "Tensor must have a stride divisible by 2 for all but last dimension");
+    // Skip divisibility check for singleton dimensions
+    if (oldsizes[i] != 1) {
+      TORCH_CHECK(oldstride[i] % 2 == 0, "Tensor must have a stride divisible by 2 for all but last dimension");
+    }
     res[i] = oldstride[i] / 2;
   }
   return res;
@@ -85,7 +90,7 @@ Tensor view_as_complex(const Tensor& self) {
   TORCH_CHECK(old_sizes[old_sizes.size()-1] == 2, "Tensor must have a last dimension of size 2");
   SymDimVector new_sizes(old_sizes.begin(), old_sizes.end() - 1);
 
-  const auto new_strides = computeStrideForViewAsComplex(self.sym_strides());
+  const auto new_strides = computeStrideForViewAsComplex(self.sym_strides(), self.sym_sizes());
   const auto complex_type = c10::toComplexType(self.scalar_type());
 
   TORCH_CHECK(self.sym_storage_offset() % 2 == 0, "Tensor must have a storage_offset divisible by 2");

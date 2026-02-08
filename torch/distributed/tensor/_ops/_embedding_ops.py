@@ -15,7 +15,7 @@ from torch.distributed.tensor._ops.utils import (
     register_op_strategy,
 )
 from torch.distributed.tensor.placement_types import (
-    MaskPartial,
+    _MaskPartial,
     Partial,
     Replicate,
     Shard,
@@ -51,7 +51,7 @@ def embedding_strategy(op_schema: OpSchema) -> StrategyType:
     single_mesh_dim_strategies.append(colwise_sharding)
 
     # rowwise sharding, output is embedding partial, weight shard on dim 0, input accepts embedding partial
-    embedding_partial_placement = MaskPartial(offset_shape=weight_shape, offset_dim=0)
+    embedding_partial_placement = _MaskPartial(offset_shape=weight_shape, offset_dim=0)
 
     # NOTE we want to reuse the same mask partial placement so that we can reuse the same mask that generates
     # from the input indices and use it for output reduction
