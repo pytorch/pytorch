@@ -1,8 +1,9 @@
 # Owner(s): ["module: intel"]
+# ruff: noqa: F841
 
 import collections
-import ctypes
 import contextlib
+import ctypes
 import gc
 import json
 import random
@@ -14,7 +15,6 @@ import threading
 import time
 import unittest
 import warnings
-from copy import deepcopy
 
 import torch
 import torch.xpu._gpu_trace as gpu_trace
@@ -32,12 +32,12 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     IS_WINDOWS,
     IS_X86,
+    parametrize,
     run_tests,
     serialTest,
     suppress_warnings,
     TEST_XPU,
     TestCase,
-    parametrize,
 )
 from torch.utils.checkpoint import checkpoint_sequential
 
@@ -1597,7 +1597,6 @@ if __name__ == "__main__":
             self.assertEqual(b.sum().item(), size * 3070)
             self.assertEqual(c.sum().item(), size * 442)
 
-
             if share_mem != "Don't share":
                 self.assertEqual(
                     reserved_no_sharing  # noqa: F821
@@ -1997,6 +1996,7 @@ with torch.xpu.graph(g):
                 .strip()
             )
 
+
 @contextlib.contextmanager
 def caching_host_allocator_use_host_register(use_xpu_host_register: bool):
     if use_xpu_host_register:
@@ -2011,6 +2011,7 @@ def caching_host_allocator_use_host_register(use_xpu_host_register: bool):
                 "pinned_use_xpu_host_register:False"
             )
 
+
 @contextlib.contextmanager
 def caching_host_allocator_use_background_threads(use_background_threads: bool):
     if use_background_threads:
@@ -2022,6 +2023,7 @@ def caching_host_allocator_use_background_threads(use_background_threads: bool):
             torch._C._accelerator_setAllocatorSettings(
                 "pinned_use_background_threads:False"
             )
+
 
 @unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
 class TestCachingHostAllocatorXpuGraph(TestCase):
@@ -2104,6 +2106,7 @@ class TestCachingHostAllocatorXpuGraph(TestCase):
                 assert new_data_ptr == old_data_ptr
             else:
                 assert new_data_ptr != old_data_ptr
+
 
 @unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
 class TestXpuOps(TestCase):
