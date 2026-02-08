@@ -3382,8 +3382,11 @@ def _unwrap(x):
 def tensor(data, *, dtype=None, device=None, layout=None, pin_memory=False):
     assert_nyi(layout in (None, torch.strided), f"layout={layout}")
     assert_nyi(not pin_memory, "pin_memory")
-    if isinstance(_unwrap(data), int):
+    unwrapped_data = _unwrap(data)
+    if isinstance(unwrapped_data, int):
         dtype = dtype or torch.int64
+    elif isinstance(unwrapped_data, sympy.logic.boolalg.Boolean):
+        dtype = dtype or torch.bool
     else:
         dtype = dtype or torch.get_default_dtype()
 
@@ -3780,6 +3783,8 @@ def embedding(weight, indices, padding_idx=-1, scale_grad_by_freq=False, sparse=
     def fn(idx):
         assert len(idx) == len(new_size), f"{idx} != {new_size}"
         var_index = indices_loader(idx[:indices_ndim])
+        # Handle negative indices by wrapping
+        var_index = ops.mod(ops.add(var_index, weight_size[0]), weight_size[0])
         weight_idx = [ops.indirect_indexing(var_index, weight_size[0])] + [
             *idx[indices_ndim:]
         ]

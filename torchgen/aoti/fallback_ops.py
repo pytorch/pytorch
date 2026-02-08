@@ -104,6 +104,8 @@ inductor_fallback_ops: dict[str, dict[str, list[str]]] = {
     "aten.gcd.default": {},
     "aten.geqrf.default": {},
     "aten.grid_sampler_2d_backward.default": {},
+    "aten.grid_sampler_3d.default": {},
+    "aten.grid_sampler_3d_backward.default": {},
     "aten.hann_window.default": {},
     "aten.histc.default": {},
     "aten.histogram.bin_ct": {},

@@ -2735,6 +2735,8 @@ class CppVecKernel(CppKernel):
         if dtype == torch.bool:
             # TODO: should we consider load mask here?
             line = f"{self._get_mask_type()}::from({loadbuf}, {cexpr_index(self.num_elems)})"
+            if load_mask_str:
+                line = f"({line} & {load_mask_str})"
         else:
             line = (
                 f"{load_mask_str}.template loadu<{cpp_type},{num_vectors}>({loadbuf})"

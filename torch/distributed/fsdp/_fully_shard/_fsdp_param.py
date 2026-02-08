@@ -145,6 +145,34 @@ def copy__functionalize(tensor, data):
 torch.fx.node.has_side_effect(torch.ops.fsdp.copy_.default)
 
 
+lib.define("set_(Tensor(a!) tensor, Tensor data) -> ()")
+
+
+@torch.library.impl(lib, "set_", "Meta")
+@torch.library.impl(lib, "set_", "CUDA")
+@torch.library.impl(lib, "set_", "XPU")
+@torch.library.impl(lib, "set_", "HPU")
+@torch.library.impl(lib, "set_", "CPU")
+@torch.library.impl(lib, "set_", "MTIA")
+def set_(tensor, data):
+    tensor.set_(data)
+
+
+@torch.library.impl(lib, "set_", "Functionalize")
+def set__functionalize(tensor, data):
+    torch._sync(tensor)
+    torch._sync(data)
+    tensor_inner = torch._from_functional_tensor(tensor)
+    data_inner = torch._from_functional_tensor(data)
+    with torch._C._ExcludeDispatchKeyGuard(
+        torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
+    ):
+        torch.ops.fsdp.set_.default(tensor_inner, data_inner)
+
+
+torch.fx.node.has_side_effect(torch.ops.fsdp.set_.default)
+
+
 class ShardedState(Enum):
     """
     - ``SHARDED``: The sharded parameter is registered to the module. It is the
