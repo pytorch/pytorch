@@ -15,6 +15,7 @@ from torch._dynamo.test_case import CPythonTestCase
 from torch.testing._internal.common_utils import (
     run_tests,
     xfailIfTorchDynamo,
+    TEST_WITH_TORCHDYNAMO,
 )
 
 # ======= END DYNAMO PATCH =======
@@ -48,8 +49,11 @@ import functools
 
 py_functools = import_helper.import_fresh_module('functools',
                                                  blocked=['_functools'])
-c_functools = import_helper.import_fresh_module('functools',
-                                                fresh=['_functools'])
+if TEST_WITH_TORCHDYNAMO:
+    c_functools = False
+else:
+    c_functools = import_helper.import_fresh_module('functools',
+                                                    fresh=['_functools'])
 
 decimal = import_helper.import_fresh_module('decimal', fresh=['_decimal'])
 

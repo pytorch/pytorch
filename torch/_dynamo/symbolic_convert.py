@@ -4247,7 +4247,7 @@ class InstructionTranslatorBase(
         elif inst.argval == 7:
             # INTRINSIC_TYPEVAR
             v = self.pop().as_python_constant()
-            tv = VariableTracker.build(self, TypeVar(v))
+            tv = variables.TypingVariable(TypeVar(v))
             self.push(tv)
         else:
             unimplemented(
