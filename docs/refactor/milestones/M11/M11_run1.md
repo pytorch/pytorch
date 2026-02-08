@@ -188,6 +188,10 @@ Full failure analysis will be performed in `M11_run2.md` once CI workflows are a
 
 ## Step 6 — Verdict
 
+**Administrative Blockers Are Non-Technical**
+
+This run failure does not reflect code correctness, test coverage, or refactor safety. No CI signals were executed. The blockers are purely administrative (CLA signature + fork PR approval) and do not indicate any technical issue with the implementation.
+
 **Verdict:**
 CI analysis is **BLOCKED** pending two external actions: (1) CLA signature via EasyCLA, and (2) maintainer approval for fork PR workflow execution. The implementation appears structurally correct — Python syntax is valid, no linter errors detected locally, and the change scope is limited to the declared target surface. No evidence of behavioral regression or invariant violation can be assessed until CI completes.
 
