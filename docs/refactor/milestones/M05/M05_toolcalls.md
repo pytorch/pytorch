@@ -1,10 +1,22 @@
 # M05 Tool Calls Log
 
-## Session: (Pending)
+## Session: 2026-02-08
 
 ---
 
-*No tool calls yet. M05 execution not started.*
+### TC-001 | 2026-02-08
+- **Tool:** write
+- **Purpose:** Create refactor-actionlint.yml workflow with raven-actions/actionlint@v2
+- **Files:** `.github/workflows/refactor-actionlint.yml`
+- **Status:** Complete
+
+---
+
+### TC-002 | 2026-02-08
+- **Tool:** run_terminal_cmd
+- **Purpose:** Check current git branch and status
+- **Files:** N/A
+- **Status:** Executing
 
 ---
 

@@ -1,0 +1,37 @@
+name: Refactor Actionlint
+
+# Purpose: Structural validation for GitHub Actions workflows
+# Scope: M05 milestone - validates INV-070 (CI Structural Validity)
+# Mode: Non-blocking, observational only
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  actionlint:
+    name: Lint GitHub Actions Workflows
+    runs-on: ubuntu-latest
+    # Non-blocking: findings are informational, not enforcement
+    continue-on-error: true
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run actionlint
+        uses: raven-actions/actionlint@v2
+        with:
+          # Disable shellcheck to focus on workflow structure (M05 scope)
+          shellcheck: false
+          # Fail on error but job continues due to continue-on-error above
+          fail-on-error: true
+
+      - name: Report completion
+        if: always()
+        run: |
+          echo "[M05] Actionlint workflow validation complete"
+          echo "This workflow validates INV-070 (CI Structural Validity)"
+          echo "Findings are observational only - see M05_audit.md for classification"
+
