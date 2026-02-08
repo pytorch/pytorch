@@ -38,7 +38,7 @@ jobs:
           fetch-depth: 1
 
       - name: Configure AWS credentials via OIDC
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4
         with:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_claude_code
           aws-region: us-east-1
