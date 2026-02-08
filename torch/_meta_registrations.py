@@ -1554,6 +1554,25 @@ def _linalg_svd_meta(
     return U, S, V
 
 
+@register_meta([aten.linalg_pinv.atol_rtol_tensor])
+@out_wrapper()
+def linalg_pinv_meta(
+    self: Tensor,
+    *,
+    atol: Tensor | None = None,
+    rtol: Tensor | None = None,
+    hermitian: bool = False,
+) -> Tensor:
+    checkIsMatrix(self, "linalg.pinv")
+    checkFloatingOrComplex(self, "linalg.pinv")
+
+    # output shape is the transpose of input shape
+    output_shape = list(self.shape)
+    output_shape[-2], output_shape[-1] = output_shape[-1], output_shape[-2]
+
+    return self.new_empty(output_shape)
+
+
 def _linalg_broadcast_batch_dims(
     arg1: Tensor,
     arg2: Tensor,

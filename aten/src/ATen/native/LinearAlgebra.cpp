@@ -539,6 +539,9 @@ Tensor linalg_pinv(
     auto [U, S, V] = input.svd();
     Tensor max_val = at::narrow(S, /*dim=*/-1, /*start=*/0, /*length=*/1);  // singular values are sorted in descending order
     Tensor tol = at::max(atol.unsqueeze(-1), rtol.unsqueeze(-1) * max_val);
+    while (tol.dim() > S.dim() && tol.size(0) == 1) {
+      tol = tol.squeeze(0);
+    }
     Tensor S_pseudoinv = at::where(S > tol, S.reciprocal(), at::zeros({}, S.options())).to(input.dtype());
     // computes V @ diag(S_pseudoinv) @ U.conj().T
     return at::matmul(V * S_pseudoinv.unsqueeze(-2), U.mH());
@@ -549,6 +552,9 @@ Tensor linalg_pinv(
     // eigenvalues are sorted in ascending order starting with negative values, we need a maximum value of abs(eigenvalues)
     Tensor max_val = S_abs.amax(/*dim=*/-1, /*keepdim=*/true);
     Tensor tol = at::max(atol.unsqueeze(-1), rtol.unsqueeze(-1) * max_val);
+    while (tol.dim() > S.dim() && tol.size(0) == 1) {
+      tol = tol.squeeze(0);
+    }
     Tensor S_pseudoinv = at::where(S_abs > tol, S.reciprocal(), at::zeros({}, S.options())).to(input.dtype());
     // computes U @ diag(S_pseudoinv) @ U.conj().T
     return at::matmul(U * S_pseudoinv.unsqueeze(-2), U.mH());
