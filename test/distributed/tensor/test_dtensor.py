@@ -825,6 +825,7 @@ class DTensorTest(DTensorTestBase):
         self.assertEqual(out_t.placements, (Shard(1),))
         self.assertEqual(out_t.full_tensor(), dt.full_tensor().T)
 
+
 DTensorTestWithLocalTensor = create_local_tensor_test_class(
     DTensorTest,
     skipped_tests=[
