@@ -2320,8 +2320,34 @@ Examples::
 """,
 )
 
+def _solve_triangular_impl(A, B, *, upper, left=True, unitriangular=False, out=None):
+    """Internal implementation with device checking for solve_triangular.
+    
+    Fixes #142048: Adds device compatibility check to prevent SIGSEGV crash
+    when tensors are on different devices.
+    """
+    # Device check to prevent crash (Issue #142048)
+    if A.device != B.device:
+        raise RuntimeError(
+            f"Expected all tensors to be on the same device, but found at least two devices, "
+            f"{A.device} and {B.device}! "
+            f"(when checking arguments for solve_triangular)"
+        )
+    
+    # Check output tensor if provided
+    if out is not None and out.device != A.device:
+        raise RuntimeError(
+            f"Expected all tensors to be on the same device, but found at least two devices, "
+            f"{A.device} and {out.device}! "
+            f"(when checking output tensor for solve_triangular)"
+        )
+    
+    # Call the actual C++ implementation
+    return _linalg.linalg_solve_triangular(A, B, upper=upper, left=left, unitriangular=unitriangular, out=out)
+
+
 solve_triangular = _add_docstr(
-    _linalg.linalg_solve_triangular,
+    _solve_triangular_impl,
     r"""
 linalg.solve_triangular(A, B, *, upper, left=True, unitriangular=False, out=None) -> Tensor
 
@@ -2399,6 +2425,7 @@ Examples::
     https://en.wikipedia.org/wiki/Invertible_matrix#The_invertible_matrix_theorem
 """,
 )
+
 
 lu_factor = _add_docstr(
     _linalg.linalg_lu_factor,
