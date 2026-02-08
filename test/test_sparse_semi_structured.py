@@ -1285,6 +1285,13 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         # PyTorch CUDA 12.4+ using cuSPARSELt v0.6.2+
         assert torch.backends.cusparselt.version() >= 602
 
+    @inference_dtypes
+    def test_cslt_sparse_tensor_clone(self, device, dtype):
+        A = rand_sparse_semi_structured_mask(256, 128, dtype=dtype)
+        A_clone = A.clone()
+        B = torch.ones((128, 256), device=device).to(dtype)
+        torch.testing.assert_equal(torch.mm(A, B), torch.mm(A_clone, B))
+
 if len(SEMI_STRUCTURED_SUPPORTED_BACKENDS) > 0:
     instantiate_device_type_tests(TestSparseSemiStructured, globals(), only_for="cuda")
 if "cutlass" in SEMI_STRUCTURED_SUPPORTED_BACKENDS:
