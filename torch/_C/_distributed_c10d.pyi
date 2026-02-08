@@ -172,6 +172,7 @@ class ReduceOptions:
 class AllgatherOptions:
     timeout: timedelta
     asyncOp: bool
+    profilingName: str
 
 class GatherOptions:
     rootRank: int
@@ -655,6 +656,9 @@ class ProcessGroupGloo(Backend):
 class _ProcessGroupWrapper(Backend):
     def __init__(self, pg: Backend, gloo_pg: ProcessGroupGloo) -> None: ...
     wrapped_pg: Backend
+    @property
+    def options(self) -> Backend.Options: ...
+    def get_error(self) -> ErrorType: ...
 
 class ErrorType(Enum):
     SUCCESS = ...

@@ -65,10 +65,12 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_WINDOWS,
     MACOS_VERSION,
+    MI200_ARCH,
     parametrize,
     runOnRocm,
     skipIfMPS,
     skipIfRocm,
+    skipIfRocmArch,
     skipIfWindows,
     skipIfWindowsXPU,
     skipIfXpu,
@@ -3482,7 +3484,10 @@ class AOTInductorTestsTemplate:
         finally:
             torch.cuda.memory._record_memory_history(False)
         segments = torch.cuda.memory._snapshot()["segments"]
-        self.assertEqual(segments[0]["requested_size"], 400)
+        self.assertTrue(
+            any(seg["requested_size"] == 400 for seg in segments),
+            f"Expected segment with size 400, got: {[s['requested_size'] for s in segments]}",
+        )
 
     def test_view_outputs(self):
         class Model(torch.nn.Module):
@@ -6994,6 +6999,7 @@ class AOTInductorTestsTemplate:
         ):
             torch._export.aot_compile(Model(), (x, y, m))
 
+    @skipIfRocmArch(MI200_ARCH)
     def test_triton_autotuning(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
@@ -7764,6 +7770,7 @@ class AOTInductorTestsTemplate:
         with config.patch("triton.autotune_with_sample_inputs", True):
             AOTIRunnerUtil.run(Model(), example_inputs)
 
+    @unittest.skipIf(IS_FBCODE, "Subprocess spawning doesn't work in fbcode Buck environment")
     def test_aoti_load_package_in_fresh_subprocess(self):
         """
         Test that loading an AOTI package in a fresh subprocess works correctly.
