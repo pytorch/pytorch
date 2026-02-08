@@ -8,9 +8,8 @@ from torch.autograd.grad_mode import inference_mode
 
 class Benchmark(BenchmarkBase):
     def __init__(self, requires_grad, inference_mode, backward, dynamic):
-        assert not (inference_mode and backward), (
-            "inference_mode and backward cannot be both True"
-        )
+        if inference_mode and backward:
+            raise AssertionError("inference_mode and backward cannot be both True")
 
         self._requires_grad = requires_grad
         self._inference_mode = inference_mode
