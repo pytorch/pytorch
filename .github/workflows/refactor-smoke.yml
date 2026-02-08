@@ -36,7 +36,7 @@ jobs:
 
       - name: Run test suite
         run: |
-          python -m pytest test/test_import_smoke_static.py -v --tb=short
+          python -m unittest test.test_import_smoke_static -v
 
       - name: Report results
         if: always()
