@@ -91,6 +91,24 @@ log = logging.getLogger(__name__)
 pexpr = PythonPrinter().doprint
 
 
+# FP8 dtypes that do not support isnan/isinf directly
+_FP8_DTYPE_NAMES = (
+    "torch.float8_e4m3fn",
+    "torch.float8_e4m3fnuz",
+    "torch.float8_e5m2",
+    "torch.float8_e5m2fnuz",
+    "torch.float8_e8m0fnu",
+)
+_FP8_DTYPE_TUPLE_STR = f"({', '.join(_FP8_DTYPE_NAMES)})"
+
+
+def _nan_check_expr(name: str) -> str:
+    """Return an expression that upcasts FP8 tensors to float before isnan/isinf checks."""
+    return (
+        f"{name}.float() if {name}.dtype in {_FP8_DTYPE_TUPLE_STR} else {name}"
+    )
+
+
 ReuseKey = tuple[torch.device, torch.dtype, str, bool]
 CommBufferReuseKey = tuple[torch.device, torch.dtype, str, "ir.CommBufferType", str]
 BufferLike = Union[ir.Buffer, WorkspaceArg]
@@ -1428,9 +1446,11 @@ class PythonWrapperCodegen(CodeGen):
             if isinstance(buf, (sympy.Expr, ir.TorchBindObject)):
                 continue
 
-            line = f"assert not {name}.isnan().any().item()"
+            # FP8 dtypes do not support isnan/isinf directly; upcast to float first
+            check_expr = _nan_check_expr(name)
+            line = f"assert not ({check_expr}).isnan().any().item()"
             self.prefix.writeline(line)
-            line = f"assert not {name}.isinf().any().item()"
+            line = f"assert not ({check_expr}).isinf().any().item()"
             self.prefix.writeline(line)
 
     def write_async_compile_wait(self) -> None:
@@ -1583,8 +1603,12 @@ class PythonWrapperCodegen(CodeGen):
                 self.wrapper_call.do_indent()
                 self.wrapper_call.writeline("if isinstance(var, torch.Tensor):")
                 self.wrapper_call.do_indent()
-                self.wrapper_call.writeline("assert not var.isnan().any().item()")
-                self.wrapper_call.writeline("assert not var.isinf().any().item()")
+                # FP8 dtypes do not support isnan/isinf directly; upcast to float first
+                self.wrapper_call.writeline(
+                    f"var_check = {_nan_check_expr('var')}"
+                )
+                self.wrapper_call.writeline("assert not var_check.isnan().any().item()")
+                self.wrapper_call.writeline("assert not var_check.isinf().any().item()")
                 self.wrapper_call.do_unindent(2)
 
             self.wrapper_call.writeline("return (" + ", ".join(output_refs) + ", )")

@@ -105,7 +105,7 @@ from .triton_utils import (
     should_unwrap_unspec_arg,
     signature_to_meta,
 )
-from .wrapper import SymbolicCallArg
+from .wrapper import _nan_check_expr, SymbolicCallArg
 
 
 if TYPE_CHECKING:
@@ -5751,9 +5751,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         f'AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_check_inf_and_nan("{arg}", {arg}));'
                     )
                 else:
-                    line = f"assert not {arg}.isnan().any().item()"
+                    # FP8 dtypes do not support isnan/isinf directly; upcast to float first
+                    fp8_check = _nan_check_expr(arg)
+                    line = f"assert not ({fp8_check}).isnan().any().item()"
                     wrapper.writeline(line)
-                    line = f"assert not {arg}.isinf().any().item()"
+                    line = f"assert not ({fp8_check}).isinf().any().item()"
                     wrapper.writeline(line)
 
     def create_cse_var(self, *args, **kwargs) -> TritonCSEVariable:
