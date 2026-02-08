@@ -601,6 +601,7 @@ class OpDispatcher:
                 local_kwargs[k] = v._local_tensor
                 kwargs_schema[k] = v._spec
                 if compute_mesh is None:
+                    # record the first compute device mesh from kwargs
                     compute_mesh = v.device_mesh
             elif isinstance(v, torch.Tensor):
                 compute_mesh = compute_mesh or try_find_mesh_from_args(
