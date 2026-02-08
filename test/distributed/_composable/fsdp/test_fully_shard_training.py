@@ -912,108 +912,6 @@ class TestFullyShardShardPlacementFnMultiProcess(FSDPTest):
             full_param = param.full_tensor()
             self.assertEqual(full_param, ref_param)
 
-    @skip_if_lt_x_gpu(4)
-    def test_shard_placement_fn_mixed_mesh_info(self):
-        """
-        Tests shard_placement_fn with EP + FSDP: expert params are routed to
-        efsdp_mesh while non-expert params use the full dp_mesh, mirroring
-        the pattern in standalone_deepseek_moe.py.
-        """
-        ep_degree = self.world_size
-        efsdp = self.world_size // ep_degree  # = 1
-
-        world_mesh = init_device_mesh(
-            device_type.type,
-            (self.world_size,),
-            mesh_dim_names=("world",),
-        )
-        dp_mesh = world_mesh._unflatten(0, (self.world_size,), ("fsdp",))["fsdp"]
-        sparse_mesh = world_mesh._unflatten(
-            0,
-            (efsdp, ep_degree),
-            ("efsdp", "ep"),
-            backend_override={"efsdp": "fake"},
-        )
-        ep_mesh = sparse_mesh["ep"]
-        efsdp_mesh = sparse_mesh["efsdp"]
-
-        model_args = ModelArgs(
-            n_layers=2,
-            vocab_size=256,
-            max_seq_len=32,
-            dim=64,
-            n_heads=4,
-            dropout_p=0.0,
-            num_experts=8,
-        )
-        torch.manual_seed(42)
-        model = Transformer(model_args)
-        ref_model = copy.deepcopy(model).to(device_type)
-
-        Transformer.parallelize(model, ep_mesh=ep_mesh)
-
-        efsdp_mesh_info = FSDPMeshInfo(mesh=efsdp_mesh, shard_mesh_dim=0)
-        dp_mesh_info = FSDPMeshInfo(mesh=dp_mesh, shard_mesh_dim=0)
-
-        fully_shard(model.tok_embeddings, mesh=dp_mesh)
-        for block in model.layers:
-            expert_params = set(block.expert_layer.experts.parameters())
-
-            def _shard_placement_fn(
-                param,
-                _expert_params=expert_params,
-                _efsdp_mesh_info=efsdp_mesh_info,
-                _dp_mesh_info=dp_mesh_info,
-            ):
-                if param in _expert_params:
-                    return ShardPlacementResult(
-                        placement=Shard(0),
-                        mesh_info=_efsdp_mesh_info,
-                    )
-                return ShardPlacementResult(
-                    placement=Shard(0),
-                    mesh_info=_dp_mesh_info,
-                )
-
-            fully_shard(
-                block,
-                mesh=dp_mesh,
-                shard_placement_fn=_shard_placement_fn,
-            )
-
-            state = block._get_fsdp_state()
-            self.assertEqual(len(state._fsdp_param_groups), 2)
-
-        fully_shard([model.norm, model.output], mesh=dp_mesh)
-        fully_shard(model, mesh=dp_mesh)
-
-        # Verify sharded parameters match reference model
-        for (name, param), (_, ref_param) in zip(
-            model.named_parameters(), ref_model.named_parameters()
-        ):
-            full_param = param.full_tensor()
-            self.assertEqual(full_param, ref_param)
-
-        # Verify first forward loss matches reference
-        torch.manual_seed(42 + self.rank)
-        inp = torch.randint(
-            0,
-            model_args.vocab_size,
-            (2, model_args.max_seq_len),
-            device=device_type.type,
-        )
-        ref_loss = ref_model(inp).sum()
-        loss = model(inp).sum()
-        self.assertEqual(ref_loss, loss)
-
-        # Run training iterations to verify stability
-        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
-        for _ in range(5):
-            loss = model(inp).sum()
-            loss.backward()
-            optim.step()
-            optim.zero_grad()
-
 
 class TestFullyShardShardPlacementFnMultiThread(FSDPTestMultiThread):
     @property
@@ -1439,6 +1337,112 @@ class TestFullyShardNDTraining(FSDPTest):
             self.assertEqual(p.device_mesh.ndim, 2)
             self.assertEqual(len(p.placements), 2)
             self.assertEqual(p.device_mesh.mesh_dim_names, ("dp", "tp"))
+
+    @skip_if_lt_x_gpu(4)
+    def test_shard_placement_fn_ep(self):
+        ep_degree = 2
+        efsdp = self.world_size // ep_degree
+        world_mesh = init_device_mesh(
+            device_type.type,
+            (self.world_size,),
+            mesh_dim_names=("world",),
+        )
+        dp_mesh = world_mesh._unflatten(0, (self.world_size,), ("fsdp",))["fsdp"]
+        sparse_mesh = world_mesh._unflatten(
+            0,
+            (efsdp, ep_degree),
+            ("efsdp", "ep"),
+        )
+        ep_mesh = sparse_mesh["ep"]
+        efsdp_mesh = sparse_mesh["efsdp"]
+        model_args = ModelArgs(
+            n_layers=2,
+            vocab_size=256,
+            max_seq_len=32,
+            dim=64,
+            n_heads=4,
+            dropout_p=0.0,
+            num_experts=8,
+        )
+        torch.manual_seed(42)
+        model = Transformer(model_args)
+        ref_model = copy.deepcopy(model).to(device_type)
+        Transformer.parallelize(model, ep_mesh=ep_mesh)
+        efsdp_mesh_info = FSDPMeshInfo(mesh=efsdp_mesh, shard_mesh_dim=0)
+        dp_mesh_info = FSDPMeshInfo(mesh=dp_mesh, shard_mesh_dim=0)
+        for block in model.layers:
+            expert_params = set(block.expert_layer.experts.parameters())
+
+            def _shard_placement_fn(
+                param,
+                _expert_params=expert_params,
+                _efsdp_mesh_info=efsdp_mesh_info,
+                _dp_mesh_info=dp_mesh_info,
+            ):
+                if param in _expert_params:
+                    return ShardPlacementResult(
+                        placement=Shard(0),
+                        mesh_info=_efsdp_mesh_info,
+                    )
+                return ShardPlacementResult(
+                    placement=Shard(0),
+                    mesh_info=_dp_mesh_info,
+                )
+
+            fully_shard(
+                block,
+                mesh=dp_mesh,
+                shard_placement_fn=_shard_placement_fn,
+            )
+        # Group tok_embeddings, norm, and output together since
+        # output.weight is tied to tok_embeddings.weight
+        fully_shard([model.tok_embeddings, model.norm, model.output], mesh=dp_mesh)
+        fully_shard(model, mesh=dp_mesh)
+        for (name, param), (_, ref_param) in zip(
+            model.named_parameters(), ref_model.named_parameters()
+        ):
+            full_param = param.full_tensor()
+            self.assertEqual(full_param, ref_param)
+        ref_expert_params = {
+            p for b in ref_model.layers for p in b.expert_layer.experts.parameters()
+        }
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
+        torch.manual_seed(42 + self.rank)
+        inp = torch.randint(
+            0,
+            model_args.vocab_size,
+            (2, model_args.max_seq_len),
+            device=device_type.type,
+        )
+        for iter_idx in range(5):
+            ref_loss = ref_model(inp).sum()
+            loss = model(inp).sum()
+            ref_loss.backward()
+            loss.backward()
+            # Match gradient reduction semantics of EP + FSDP:
+            # - Non-expert params: FSDP averages across dp_mesh (all ranks)
+            # - Expert params: EP all-gather causes grads to accumulate
+            #   contributions from all EP ranks (SUM), then FSDP averages
+            #   across efsdp_mesh
+            for param in ref_model.parameters():
+                if param.grad is None:
+                    continue
+                if param in ref_expert_params:
+                    dist.all_reduce(
+                        param.grad, op=dist.ReduceOp.SUM, group=ep_mesh.get_group()
+                    )
+                    dist.all_reduce(
+                        param.grad, op=dist.ReduceOp.AVG, group=efsdp_mesh.get_group()
+                    )
+                else:
+                    dist.all_reduce(param.grad, op=dist.ReduceOp.AVG)
+            ref_optim.step()
+            optim.step()
+            ref_optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
+            optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
+            self.assertEqual(ref_loss, loss)
+            check_sharded_parity(self, ref_model, model)
 
 
 class TestFullyShardHSDP3DTraining(FSDPTest):
