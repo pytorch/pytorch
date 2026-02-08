@@ -110,7 +110,7 @@ void sort_cuda_kernel(
 
   if (indices.strides() != self_.strides()) {
     indices_tmp = c10::MaybeOwned<Tensor>::owned(
-        at::empty_strided(self_.sizes(), self_.strides(), self_.options().dtype(kLong)));
+        at::empty_strided(self_.sizes(), self_.strides(), self_.options().dtype(indices.scalar_type())));
   } else {
     indices_tmp = c10::MaybeOwned<Tensor>::borrowed(indices);
   }

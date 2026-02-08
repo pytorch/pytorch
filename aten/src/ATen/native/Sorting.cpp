@@ -17,6 +17,7 @@
 #include <ATen/native/Sorting.h>
 #include <ATen/native/SortingUtils.h>
 #include <ATen/native/ReduceOpsUtils.h>
+#include <ATen/native/cuda/Sort.h>
 #include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -68,8 +69,13 @@ TORCH_META_FUNC(topk)
   if (!topKSize.empty()) {
     topKSize[dim] = k;
   }
+
+  const auto indices_dtype = maybe_get_output(1).defined()
+      ? maybe_get_output(1).scalar_type()
+      : at::kLong; // for down-up cast if functional op is used.
+
   set_output_raw_strided(0, topKSize, {}, self.options());
-  set_output_raw_strided(1, topKSize, {}, self.options().dtype(at::kLong));
+  set_output_raw_strided(1, topKSize, {}, self.options().dtype(indices_dtype));
 }
 
 TORCH_META_FUNC2(sort, stable)
@@ -85,8 +91,12 @@ TORCH_META_FUNC2(sort, stable)
       ? self.strides().vec()
       : at::infer_dense_strides(self.sizes(), self.strides());
 
+  const auto indices_dtype = maybe_get_output(1).defined()
+      ? maybe_get_output(1).scalar_type()
+      : at::kLong; // for down-up cast if functional op is used.
+
   set_output_raw_strided(0, self.sizes(), strides, self.options(), {});
-  set_output_raw_strided(1, self.sizes(), strides, self.options().dtype(kLong), {});
+  set_output_raw_strided(1, self.sizes(), strides, self.options().dtype(indices_dtype), {});
 }
 
 } // namespace at::meta
@@ -100,7 +110,7 @@ void _fill_indices(const TensorBase &indices, int64_t dim) {
   auto ndim = indices.dim();
   assert(0 <= dim && dim < ndim);
   auto dim_size = indices.size(dim);
-  auto idx_dim = at::arange(0, dim_size, indices.options().dtype(at::kLong));
+  auto idx_dim = at::arange(0, dim_size, indices.options());
   auto idx_dim_sizes = std::vector<int64_t>(ndim, 1);
   auto idx_dim_strides = std::vector<int64_t>(ndim, 0);
   idx_dim_sizes[dim] = dim_size;
@@ -951,7 +961,35 @@ TORCH_IMPL_FUNC(sort_stable_out)
     indices.zero_();
   } else {
     dim = maybe_wrap_dim(dim, self.dim());
-    sort_stub(self.device().type(), self, values, indices, dim, descending, stable.value_or(false));
+
+    c10::MaybeOwned<Tensor> indices_tmp;
+    auto tocast_dtype = at::kLong; // kLong is used as default, if functional op is used.
+
+    const auto sort_size = self.dim() > 0 ? self.size(dim) : 1;
+    if (should_use_small_sort(self, dim)) { // SortInplace in cuda: no benefits of down-upcast
+      tocast_dtype = at::kLong;  // use existing logic
+    } else if (sort_size - 1 <= std::numeric_limits<uint16_t>::max()) {
+      tocast_dtype = at::kUInt16;
+    } else if (sort_size - 1 <= std::numeric_limits<int32_t>::max()) {
+      tocast_dtype = at::kInt;
+    }
+
+    if (indices.scalar_type() != kLong) {
+      // indices.scalar_type():= {kChar, kByte, kShort, kUInt16, kInt}
+      // use the indices_dtype w/o down upcast in case of out-variant op with indices.
+      indices_tmp = c10::MaybeOwned<Tensor>::borrowed(indices);
+    } else { // indices.scalar_type():= { kLong }
+      if (tocast_dtype == at::kLong)
+        indices_tmp = c10::MaybeOwned<Tensor>::borrowed(indices);
+      else // If tocast_dtype isn't kLong, down-upcast is done automatically.
+        indices_tmp = c10::MaybeOwned<Tensor>::owned(indices.to(tocast_dtype));
+    }
+
+    sort_stub(self.device().type(), self, values, *indices_tmp, dim, descending, stable.value_or(false));
+
+    if (!indices_tmp->is_same(indices)) {
+      indices.copy_(*indices_tmp);
+    }
   }
 }
 
