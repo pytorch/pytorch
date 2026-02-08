@@ -96,6 +96,7 @@ from torch.testing._internal.common_utils import (
     IS_X86,
     MACOS_VERSION,
     MI200_ARCH,
+    NAVI_ARCH,
     parametrize,
     serialTest,
     skipIfMPS,
@@ -14833,6 +14834,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         msg="Profile not enabled on XPU CI, "
         "https://github.com/intel/torch-xpu-ops/issues/2334"
     )
+    @skipIfRocmArch(NAVI_ARCH)
     @requires_gpu_and_triton
     @parametrize("use_cat", [True, False])
     def test_copy_non_blocking_is_pinned(self, use_cat):
