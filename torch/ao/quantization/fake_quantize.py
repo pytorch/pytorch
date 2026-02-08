@@ -153,7 +153,8 @@ class FakeQuantize(FakeQuantizeBase):
 
         observer (module): Module for observing statistics on input tensors and calculating scale
           and zero-point.
-        observer_kwargs (optional): Arguments for the observer module
+        observer_kwargs (optional): Arguments for the observer module. Can include ``power_of_2_scale=True``
+          to enable power-of-2 scale optimization for hardware efficiency.
 
     Attributes:
         activation_post_process (Module): User provided module that collects statistics on the input tensor and
