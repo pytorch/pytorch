@@ -112,9 +112,13 @@ def _lazy_init() -> None:
         # Install the C++ resource manager to enable Buck resource lookup from Python.
         # This must be called before _mtia_init() which may access Buck resources.
         if is_fbcode():
-            from libfb.py.cxx_resources import cxx_resource_manager
+            try:
+                from libfb.py.cxx_resources import cxx_resource_manager
 
-            cxx_resource_manager.install()
+                cxx_resource_manager.install()
+            except ModuleNotFoundError:
+                # cxx_resource_manager is not available in all build configurations
+                pass
 
         torch._C._mtia_init()
         # Some of the queued calls may reentrantly call _lazy_init();
