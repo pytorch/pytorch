@@ -14,6 +14,7 @@ from torch.distributed.tensor import (
     Replicate,
     Shard,
 )
+from torch.distributed.tensor._dtensor_spec import TensorMeta
 from torch.distributed.tensor._sharding_prop import ShardingPropagator
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -810,6 +811,63 @@ class DistTensorOpsTest(DTensorTestBase):
         # by now we should have cache hit
         self.assertEqual(hits, 1)
         self.assertEqual(misses, 2)
+
+    @with_comms
+    def test_single_dim_strategy_dtype_cache_key(self):
+        """Test that schema_info from single-dim strategy affects cache key.
+
+        When @register_single_dim_strategy specifies static_kwargkey=["dtype"],
+        the C++ dispatch path should include dtype in the cache key. This ensures
+        calls with different dtypes don't return the same cached result.
+        """
+        from unittest.mock import patch
+
+        from torch.distributed.tensor._op_schema import RuntimeSchemaInfo
+        from torch.distributed.tensor._ops.single_dim_strategy import (
+            _ShardingPlaceholder,
+        )
+        from torch.distributed.tensor.debug import _clear_sharding_prop_cache
+
+        call_count = [0]
+
+        def to_copy_single_dim_strategy(op, args_schema, kwargs_schema):
+            call_count[0] += 1
+            self_meta = args_schema[0]
+            assert isinstance(self_meta, TensorMeta)
+            single_dim_strategies = []
+            for dim in range(len(self_meta.shape)):
+                single_dim_strategies.append(
+                    [_ShardingPlaceholder(dim), _ShardingPlaceholder(dim)]
+                )
+            return single_dim_strategies
+
+        _clear_sharding_prop_cache()
+        mesh = self.build_device_mesh()
+        shard_spec = [Shard(0)]
+        local_tensor = torch.randn(2, 8, dtype=torch.float32)
+        sharded_dtensor = DTensor.from_local(local_tensor, mesh, shard_spec)
+
+        propagator = DTensor._op_dispatcher.sharding_propagator
+        op = torch.ops.aten._to_copy.default
+        schema_info = RuntimeSchemaInfo(static_kwargkey=["dtype"])
+
+        with (
+            patch.dict(
+                propagator.op_single_dim_strategy_funcs,
+                {op: to_copy_single_dim_strategy},
+            ),
+            patch.dict(
+                propagator.op_to_schema_info_for_single_dim_strategy, {op: schema_info}
+            ),
+            patch.dict(propagator.op_strategy_funcs, clear=True),
+            patch.dict(propagator.op_to_schema_info, clear=True),
+        ):
+            call_count[0] = 0
+            sharded_dtensor.to(torch.int32)
+            sharded_dtensor.to(torch.float64)
+
+            # With dtype in cache key, strategy should be called twice (different dtypes)
+            self.assertEqual(call_count[0], 2)
 
     @with_comms
     def test_slice(self):
