@@ -112,7 +112,7 @@ jobs:
 
           # shellcheck disable=SC2086
           python "${PYTORCH_ROOT}/.ci/pytorch/smoke_test/smoke_test.py" --package torchonly ${SMOKE_TEST_PARAMS}
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         if: always()
         with:
           name: wheel-py3_10-cpu
@@ -222,7 +222,7 @@ jobs:
 
           # shellcheck disable=SC2086
           python "${PYTORCH_ROOT}/.ci/pytorch/smoke_test/smoke_test.py" --package torchonly ${SMOKE_TEST_PARAMS}
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         if: always()
         with:
           name: wheel-py3_11-cpu
@@ -332,7 +332,7 @@ jobs:
 
           # shellcheck disable=SC2086
           python "${PYTORCH_ROOT}/.ci/pytorch/smoke_test/smoke_test.py" --package torchonly ${SMOKE_TEST_PARAMS}
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         if: always()
         with:
           name: wheel-py3_12-cpu
@@ -442,7 +442,7 @@ jobs:
 
           # shellcheck disable=SC2086
           python "${PYTORCH_ROOT}/.ci/pytorch/smoke_test/smoke_test.py" --package torchonly ${SMOKE_TEST_PARAMS}
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         if: always()
         with:
           name: wheel-py3_13-cpu
@@ -552,7 +552,7 @@ jobs:
 
           # shellcheck disable=SC2086
           python "${PYTORCH_ROOT}/.ci/pytorch/smoke_test/smoke_test.py" --package torchonly ${SMOKE_TEST_PARAMS}
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         if: always()
         with:
           name: wheel-py3_13t-cpu
@@ -662,7 +662,7 @@ jobs:
 
           # shellcheck disable=SC2086
           python "${PYTORCH_ROOT}/.ci/pytorch/smoke_test/smoke_test.py" --package torchonly ${SMOKE_TEST_PARAMS}
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         if: always()
         with:
           name: wheel-py3_14-cpu
@@ -772,7 +772,7 @@ jobs:
 
           # shellcheck disable=SC2086
           python "${PYTORCH_ROOT}/.ci/pytorch/smoke_test/smoke_test.py" --package torchonly ${SMOKE_TEST_PARAMS}
-      - uses: actions/upload-artifact@v4.4.0
+      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         if: always()
         with:
           name: wheel-py3_14t-cpu

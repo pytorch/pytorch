@@ -113,7 +113,7 @@ jobs:
           powershell -ExecutionPolicy Bypass -File ".ci/pytorch/win-arm64-build.ps1"
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4.4.0
+        uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         if: always()
         with:
           name: torch-wheel-win-arm64-py3-12
