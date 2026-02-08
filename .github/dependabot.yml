@@ -22,3 +22,24 @@ updates:
       - "module: ci"
       - "module: inductor"
       - "ciflow/inductor"
+
+  # M07: Keep GitHub Actions pinned SHAs up to date (see M06 action pinning)
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    target-branch: "main"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "[Dependabot] Update"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "open source"
+      - "topic: not user facing"
+      - "module: ci"
+      - "refactor-program"
+    # Ignore PyTorch-owned reusable workflows (M06-B deferral: internal @main actions)
+    ignore:
+      - dependency-name: "pytorch/pytorch"
+      - dependency-name: "pytorch/test-infra"

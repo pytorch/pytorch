@@ -770,7 +770,48 @@ Fork CI is guarded. Verification via static analysis and SHA cross-validation.
 
 ---
 
-### M07-M10 — CI Health (Planned)
+### M07 — Add Dependabot for GitHub Actions Updates ✅ COMPLETE
+
+**Status:** 🔒 Closed and Locked  
+**Date:** 2026-02-08  
+**Effort:** 1 hour  
+**Change Class:** Verification / Maintenance Automation (config-only)  
+**Merge:** Pending approval
+
+**Intent:**
+Enable Dependabot version updates for the `github-actions` ecosystem so pinned actions from M06 can be updated through reviewable PRs (automation for maintaining the pins).
+
+**Deliverables:**
+- ✅ `.github/dependabot.yml` updated with `github-actions` ecosystem entry
+- ✅ Weekly schedule, 5 PR limit, matching label style
+- ✅ M06-B deferral honored via ignore rules (pytorch/pytorch, pytorch/test-infra)
+- ✅ Existing pip/transformers config preserved
+
+**Invariant Introduced:**
+- **INV-090** — Action Update Channel Exists: "There is a repo-native automated mechanism that proposes updates to GitHub Actions dependencies via PRs." (Observational until runtime verified)
+
+**Evidence Constraint:**
+Dependabot runtime behavior unobservable locally. Structural validation complete; runtime verification deferred as M07-V01.
+
+**Non-Goals (Honored):**
+- ❌ No action upgrades by hand
+- ❌ No workflow logic changes
+- ❌ No pin-format changes
+
+**Verification:**
+- ✅ YAML syntax validated
+- ✅ Structure verified (2 ecosystems: pip, github-actions)
+- ✅ Existing config preserved
+
+**Closeout Artifacts:**
+- [`docs/refactor/milestones/M07/M07_plan.md`](docs/refactor/milestones/M07/M07_plan.md)
+- [`docs/refactor/milestones/M07/M07_toolcalls.md`](docs/refactor/milestones/M07/M07_toolcalls.md)
+- [`docs/refactor/milestones/M07/M07_audit.md`](docs/refactor/milestones/M07/M07_audit.md)
+- [`docs/refactor/milestones/M07/M07_summary.md`](docs/refactor/milestones/M07/M07_summary.md)
+
+---
+
+### M08-M10 — CI Health (Planned)
 
 See [`docs/refactor/audit/REFACTOR_PHASE_MAP.md`](docs/refactor/audit/REFACTOR_PHASE_MAP.md) for full Phase 1 plan.
 
@@ -802,6 +843,7 @@ From baseline audit, top risks requiring mitigation:
 |----|-------------|------------|-------------|---------------|
 | **M04-V01** | Upstream CI execution verification for M04 changes | M04 | Upstream PR | TD failure propagates; tools-unit-tests fails on pytest failure; scorecards runs cleanly |
 | **M06-V01** | PyTorch-owned `@main` actions not pinned (20 refs) | M06 | Future (requires policy) | PyTorch establishes release tagging for internal actions |
+| **M07-V01** | Dependabot runtime behavior unobservable locally | M07 | Post-merge | Dependabot opens at least one action update PR, OR shows as enabled in GitHub Security/Insights UI |
 
 ---
 
@@ -810,15 +852,15 @@ From baseline audit, top risks requiring mitigation:
 | Phase | Milestones | Complete | In Progress | Planned |
 |-------|-----------|----------|-------------|---------|
 | **Phase 0** | M00-M02 | 3 (M00, M01, M02) | 0 | 0 |
-| **Phase 1** | M03-M10 | 4 (M03, M04, M05, M06) | 0 | 4 |
+| **Phase 1** | M03-M10 | 5 (M03, M04, M05, M06, M07) | 0 | 3 |
 | **Phase 2** | M11-M14 | 0 | 0 | 4 |
 | **Phase 3** | M15-M19 | 0 | 0 | 5 |
 | **Phase 4** | M20+ | 0 | 0 | TBD |
 
-**Program Progress:** 7/22 milestones complete (32%)  
+**Program Progress:** 8/22 milestones complete (36%)  
 **Phase 0:** ✅ Complete  
-**Phase 1:** 🔄 In Progress (4/8)  
-**Estimated Remaining:** ~150 hours (M07-M19)
+**Phase 1:** 🔄 In Progress (5/8)  
+**Estimated Remaining:** ~140 hours (M08-M19)
 
 ---
 
@@ -832,8 +874,9 @@ From baseline audit, top risks requiring mitigation:
 | 2026-02-08 | M04 (Silent Failures Fixed) | 8/10 | 7/10 | 7.5/10 | 6/10 | Maintained |
 | 2026-02-08 | M05 (Actionlint Added) | 8/10 | 7/10 | 7.5/10 | 6/10 | Maintained |
 | 2026-02-08 | M06 (Action Pinning) | 8/10 | 7/10 | 8/10 | 6.5/10 | Maintained |
+| 2026-02-08 | M07 (Dependabot Actions) | 8/10 | 7/10 | 8/10 | 6.5/10 | Maintained |
 
-*CI score improved: All external actions pinned to SHA. Security improved with INV-080 established.
+*CI score maintained: Dependabot enables sustainable maintenance of pinned actions. Security unchanged (INV-090 observational).
 
 **Targets (Post-Phase 3):**
 - Architecture: Maintain 8/10
@@ -865,11 +908,11 @@ For program-level recovery, consult: [`docs/refactor/toolcalls.md`](docs/refacto
 
 ## Document Version
 
-**Last Updated:** 2026-02-08 (M06 closeout)  
-**Next Update:** M07 completion  
+**Last Updated:** 2026-02-08 (M07 closeout)  
+**Next Update:** M08 completion  
 **Baseline Locked:** Commit c5f1d40  
 **Phase 0:** ✅ Complete  
-**Phase 1:** 🔄 In Progress (3/8 milestones)
+**Phase 1:** 🔄 In Progress (5/8 milestones)
 
 ---
 
