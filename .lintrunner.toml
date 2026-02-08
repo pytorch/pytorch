@@ -32,26 +32,12 @@ exclude_patterns = [
     'tools/test/test_selective_build.py',
 ]
 command = [
-    'python3',
+    'uv',
+    'run',
+    '--script',
     'tools/linter/adapters/flake8_linter.py',
     '--',
     '@{{PATHSFILE}}'
-]
-init_command = [
-    'python3',
-    'tools/linter/adapters/pip_init.py',
-    '--dry-run={{DRYRUN}}',
-    'flake8==7.3.0',
-    'flake8-bugbear==24.12.12',
-    'flake8-comprehensions==3.16.0',
-    'flake8-executable==2.1.3',
-    'flake8-logging-format==2024.24.12',
-    'flake8-pyi==25.5.0',
-    'flake8-simplify==0.22.0',
-    'mccabe==0.7.0',
-    'pycodestyle==2.14.0',
-    'pyflakes==3.4.0',
-    'torchfix==0.4.0 ; python_version >= "3.10" and python_version < "3.13"',
 ]
 
 
@@ -134,33 +120,11 @@ include_patterns = [
 ]
 exclude_patterns = []
 command = [
-    'python3',
+    'uv',
+    'run',
+    '--script',
     'tools/linter/adapters/pyrefly_linter.py',
     '--config=pyrefly.toml',
-]
-init_command = [
-    'python3',
-    'tools/linter/adapters/pip_init.py',
-    '--dry-run={{DRYRUN}}',
-    'numpy==1.26.4 ; python_version >= "3.10" and python_version <= "3.11"',
-    'numpy==2.1.0 ; python_version >= "3.12" and python_version <= "3.13"',
-    'numpy==2.3.4 ; python_version >= "3.14"',
-    'expecttest==0.3.0',
-    'pyrefly==0.44.1',
-    'sympy==1.13.3',
-    'types-requests==2.27.25',
-    'types-pyyaml==6.0.2',
-    'types-tabulate==0.8.8',
-    'types-protobuf==5.29.1.20250403',
-    'types-setuptools==79.0.0.20250422',
-    'types-jinja2==2.11.9',
-    'types-colorama==0.4.6',
-    'filelock==3.18.0',
-    'junitparser==2.1.1',
-    'rich==14.1.0',
-    'optree==0.17.0',
-    'types-openpyxl==3.1.5.20250919',
-    'types-python-dateutil==2.9.0.20251008'
 ]
 
 [[linter]]
@@ -384,15 +348,11 @@ command = [
 code = 'NATIVEFUNCTIONS'
 include_patterns=['aten/src/ATen/native/native_functions.yaml']
 command = [
-    'python3',
+    'uv',
+    'run',
+    '--script',
     'tools/linter/adapters/nativefunctions_linter.py',
     '--native-functions-yml=aten/src/ATen/native/native_functions.yaml',
-]
-init_command = [
-    'python3',
-    'tools/linter/adapters/pip_init.py',
-    '--dry-run={{DRYRUN}}',
-    'ruamel.yaml==0.18.10',
 ]
 is_formatter = true
 
@@ -400,16 +360,12 @@ is_formatter = true
 code = 'GHA'
 include_patterns=['.github/workflows/**/*.yml']
 command = [
-    'python3',
+    'uv',
+    'run',
+    '--script',
     'tools/linter/adapters/gha_linter.py',
     '--',
     '@{{PATHSFILE}}'
-]
-init_command = [
-    'python3',
-    'tools/linter/adapters/pip_init.py',
-    '--dry-run={{DRYRUN}}',
-    'ruamel.yaml==0.18.10',
 ]
 
 [[linter]]
@@ -880,17 +836,13 @@ exclude_patterns = [
     '**/fb/**',
 ]
 command = [
-    'python3',
+    'uv',
+    'run',
+    '--script',
     'tools/linter/adapters/cmake_linter.py',
     '--config=.cmakelintrc',
     '--',
     '@{{PATHSFILE}}',
-]
-init_command = [
-    'python3',
-    'tools/linter/adapters/pip_init.py',
-    '--dry-run={{DRYRUN}}',
-    'cmakelint==1.4.1',
 ]
 
 [[linter]]
@@ -902,16 +854,12 @@ exclude_patterns = [
     '**/fb/**',
 ]
 command = [
-    'python3',
+    'uv',
+    'run',
+    '--script',
     'tools/linter/adapters/shellcheck_linter.py',
     '--',
     '@{{PATHSFILE}}',
-]
-init_command = [
-    'python3',
-    'tools/linter/adapters/pip_init.py',
-    '--dry-run={{DRYRUN}}',
-    'shellcheck-py==0.7.2.1',
 ]
 
 [[linter]]
@@ -1024,7 +972,9 @@ exclude_patterns = [
     'test/test_hub.py',
 ]
 command = [
-    'python3',
+    'uv',
+    'run',
+    '--script',
     'tools/linter/adapters/test_has_main_linter.py',
     '--',
     '@{{PATHSFILE}}',
@@ -1108,16 +1058,12 @@ include_patterns = [
     '.github/workflows/*.yaml',
 ]
 command = [
-    'python3',
+    'uv',
+    'run',
+    '--script',
     'tools/linter/adapters/workflow_consistency_linter.py',
     '--',
     '@{{PATHSFILE}}'
-]
-init_command = [
-    'python3',
-    'tools/linter/adapters/pip_init.py',
-    '--dry-run={{DRYRUN}}',
-    'pyyaml==6.0.2',
 ]
 
 [[linter]]
@@ -1130,22 +1076,20 @@ exclude_patterns = [
     '**/fb/**',
 ]
 command = [
-    'python3',
+    'uv',
+    'run',
+    '--script',
     'tools/linter/adapters/no_workflows_on_fork.py',
     '--',
     '@{{PATHSFILE}}',
-]
-init_command = [
-    'python3',
-    'tools/linter/adapters/pip_init.py',
-    '--dry-run={{DRYRUN}}',
-    'pyyaml==6.0.2',
 ]
 
 [[linter]]
 code = 'CODESPELL'
 command = [
-    'python3',
+    'uv',
+    'run',
+    '--script',
     'tools/linter/adapters/codespell_linter.py',
     '--',
     '@{{PATHSFILE}}'
@@ -1166,12 +1110,6 @@ exclude_patterns = [
     'torch/_inductor/autoheuristic/artifacts/**',
     'torch/utils/model_dump/preact.mjs',
 ]
-init_command = [
-    'python3',
-    'tools/linter/adapters/pip_init.py',
-    '--dry-run={{DRYRUN}}',
-    'codespell[toml]==2.4.1',
-]
 is_formatter = true
 
 # usort + ruff-format
@@ -1182,7 +1120,9 @@ include_patterns = [
     '**/*.pyi',
 ]
 command = [
-    'python3',
+    'uv',
+    'run',
+    '--script',
     'tools/linter/adapters/pyfmt_linter.py',
     '--',
     '@{{PATHSFILE}}'
@@ -1447,20 +1387,14 @@ exclude_patterns = [
     'torch/utils/viz/__init__.py',
     'torch/utils/viz/_cycles.py',
 ]
-init_command = [
-    'python3',
-    'tools/linter/adapters/pip_init.py',
-    '--dry-run={{DRYRUN}}',
-    'usort==1.1.3',
-    'isort==6.0.1',
-    'ruff==0.14.4',  # sync with RUFF
-]
 is_formatter = true
 
 [[linter]]
 code = 'PYPROJECT'
 command = [
-    'python3',
+    'uv',
+    'run',
+    '--script',
     'tools/linter/adapters/pyproject_linter.py',
     '--',
     '@{{PATHSFILE}}'
@@ -1468,18 +1402,13 @@ command = [
 include_patterns = [
     "**/pyproject.toml",
 ]
-init_command = [
-    'python3',
-    'tools/linter/adapters/pip_init.py',
-    '--dry-run={{DRYRUN}}',
-    'packaging==25.0',
-    'tomli==2.2.1 ; python_version < "3.11"',
-]
 
 [[linter]]
 code = 'CMAKE_MINIMUM_REQUIRED'
 command = [
-    'python3',
+    'uv',
+    'run',
+    '--script',
     'tools/linter/adapters/cmake_minimum_required_linter.py',
     '--',
     '@{{PATHSFILE}}'
@@ -1492,13 +1421,6 @@ include_patterns = [
     "**/*.cmake.in",
     "**/*requirements*.txt",
     "**/*requirements*.in",
-]
-init_command = [
-    'python3',
-    'tools/linter/adapters/pip_init.py',
-    '--dry-run={{DRYRUN}}',
-    'packaging==25.0',
-    'tomli==2.2.1 ; python_version < "3.11"',
 ]
 
 [[linter]]
@@ -1577,18 +1499,14 @@ exclude_patterns = [
     '**/fb/**',
 ]
 command = [
-    'python3',
+    'uv',
+    'run',
+    '--script',
     'tools/linter/adapters/ruff_linter.py',
     '--config=pyproject.toml',
     '--show-disable',
     '--',
     '@{{PATHSFILE}}'
-]
-init_command = [
-    'python3',
-    'tools/linter/adapters/pip_init.py',
-    '--dry-run={{DRYRUN}}',
-    'ruff==0.14.4',  # sync with PYFMT
 ]
 is_formatter = true
 

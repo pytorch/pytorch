@@ -55,11 +55,16 @@ def transpose_strategy(op_schema: OpSchema) -> OpStrategy:
     transpose_strategies = []
     for input_strategy in self_strategy.strategies:
         input_spec = input_strategy.output_spec
-        # follow the input spec but transpose the Shard placements
-        output_placements = [
-            Shard(1 - p.dim) if isinstance(p, Shard) else p
-            for p in input_spec.placements
-        ]
+        ndim = input_spec.ndim
+        # t() on 1D tensor is a no-op, preserve placements
+        # t() on 2D tensor swaps dims 0 and 1
+        if ndim <= 1:
+            output_placements = list(input_spec.placements)
+        else:
+            output_placements = [
+                Shard(1 - p.dim) if isinstance(p, Shard) else p
+                for p in input_spec.placements
+            ]
         transpose_strategy = OpSpec(
             output_specs=DTensorSpec(
                 mesh=input_strategy.mesh,
@@ -409,7 +414,7 @@ def gen_single_dim_einsum_strategies(
     return strategies_over_one_mesh_dim
 
 
-@register_single_dim_strategy(aten.mm.default)
+@register_single_dim_strategy(aten.mm.default, allow_unbacked_sharding=True)
 def mm_single_dim_strategy(
     op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
 ) -> list[list[Placement | _ShardingPlaceholder]]:
@@ -422,7 +427,7 @@ def addmm_strategy(op_schema: OpSchema) -> OpStrategy:
     return _addmm_like_strategy("mk,kn->mn", mesh, op_schema)
 
 
-@register_single_dim_strategy(aten.addmm.default)
+@register_single_dim_strategy(aten.addmm.default, allow_unbacked_sharding=True)
 def addmm_single_dim_strategy(
     op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
 ) -> list[list[Placement | _ShardingPlaceholder]]:
@@ -437,7 +442,7 @@ def bmm_strategy(op_schema: OpSchema) -> OpStrategy:
     return _mm_like_strategy("bmk,bkn->bmn", mesh, op_schema)
 
 
-@register_single_dim_strategy(aten.bmm.default)
+@register_single_dim_strategy(aten.bmm.default, allow_unbacked_sharding=True)
 def bmm_single_dim_strategy(
     op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
 ) -> list[list[Placement | _ShardingPlaceholder]]:
@@ -450,7 +455,7 @@ def baddbmm_strategy(op_schema: OpSchema) -> OpStrategy:
     return _addmm_like_strategy("bmk,bkn->bmn", mesh, op_schema)
 
 
-@register_single_dim_strategy(aten.baddbmm.default)
+@register_single_dim_strategy(aten.baddbmm.default, allow_unbacked_sharding=True)
 def baddbmm_single_dim_strategy(
     op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
 ) -> list[list[Placement | _ShardingPlaceholder]]:
@@ -1218,7 +1223,8 @@ def grouped_mm_strategy(op_schema: OpSchema) -> OpStrategy:
         )
 
     def valid_grouped_mm_strides(
-        input_specs: list[DTensorSpec], output_specs: tuple[DTensorSpec | None, ...]
+        input_specs: list[DTensorSpec],
+        output_specs: DTensorSpec | tuple[DTensorSpec | None, ...],
     ) -> bool:
         # 1. compute the local-tensor shape/strides given this sharding proposal
         # 2. apply the logic from the groped_mm meta function

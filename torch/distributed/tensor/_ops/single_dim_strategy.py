@@ -2,6 +2,7 @@
 import functools
 import logging
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field
 from typing import Any, cast, Optional, TypeAlias, TypeVar, Union
 
 import torch
@@ -56,10 +57,17 @@ _ExpandedSingleDimStrategyFunc: TypeAlias = Callable[
 ]
 
 
+@dataclass
+class _SingleDimStrategyInfo:
+    func: _SingleDimStrategyFunc
+    allow_unbacked_sharding: bool | None = field(default=None)
+
+
 def _insert_single_dim_replication_strategy(
     single_dim_strategies_with_placeholders: list[
         list[Placement | _ShardingPlaceholder]
     ],
+    num_outputs: int,
     num_input_tensors: int,
 ) -> list[list[Placement | _ShardingPlaceholder]]:
     """
@@ -68,7 +76,7 @@ def _insert_single_dim_replication_strategy(
     for strategy in single_dim_strategies_with_placeholders:
         assert not all(isinstance(p, Replicate) for p in strategy)
     single_dim_strategies_with_placeholders.insert(
-        0, [Replicate()] * (1 + num_input_tensors)
+        0, [Replicate()] * (num_outputs + num_input_tensors)
     )
     return single_dim_strategies_with_placeholders
 
@@ -170,8 +178,8 @@ def _get_num_tensor_inputs(op_schema: OpSchema) -> int:
 def _expand_single_dim_strategy_to_mesh(
     mesh: DeviceMesh,
     op_schema: OpSchema,
-    single_dim_strategy: _SingleDimStrategyFunc,
-    output_tensor_meta: TensorMeta | Sequence[TensorMeta | None],
+    strategy_info: _SingleDimStrategyInfo,
+    output_tensor_meta: TensorMeta | Sequence[TensorMeta | None] | None,
 ) -> _ExpandedSingleDimStrategyFunc:
     """
     Expands the single_mesh_dim impl across all mesh dims, and expands ShardingPlacholder into all
@@ -191,7 +199,7 @@ def _expand_single_dim_strategy_to_mesh(
 
     def _create_expanded_strategy_impl(
         op_schema: OpSchema,
-        output_tensor_meta: TensorMeta | Sequence[TensorMeta | None],
+        output_tensor_meta: TensorMeta | Sequence[TensorMeta | None] | None,
     ) -> Callable[[OpOverload, ArgsType, KwargsType], StrategyType]:
         def expanded_strategy(
             op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
@@ -206,6 +214,14 @@ def _expand_single_dim_strategy_to_mesh(
             unique_input_placements = _get_unique_placements(op_schema)
             num_inputs = _get_num_tensor_inputs(op_schema)
 
+            # Compute num_outputs from output_tensor_meta
+            if output_tensor_meta is None:
+                num_outputs = 0
+            elif isinstance(output_tensor_meta, TensorMeta):
+                num_outputs = 1
+            else:
+                num_outputs = len(output_tensor_meta)
+
             # Note: Trees vs Flat Lists
             # -------------------------
             # op_schema.args_schema may contain a TupleStrategy with child strategies for List[Tensor] inputs.
@@ -215,11 +231,11 @@ def _expand_single_dim_strategy_to_mesh(
             # structure here.  I'm following the convention in the current DTensor sharding strategies for now.
             # Inside expanded_strategy, we need to carefully align the OpStrategies / Specs from op_schema which are _not_
             # flattened, with the flat Placement list returned from single_dim strategy.
-            strategies_over_one_mesh_dim = single_dim_strategy(
+            strategies_over_one_mesh_dim = strategy_info.func(
                 op, args_schema, kwargs_schema
             )
             strategies_over_one_mesh_dim = _insert_single_dim_replication_strategy(
-                strategies_over_one_mesh_dim, num_inputs
+                strategies_over_one_mesh_dim, num_outputs, num_inputs
             )
             expanded_strategies_over_one_mesh_dim = (
                 _fill_single_dim_strategy_placeholders(
@@ -227,16 +243,19 @@ def _expand_single_dim_strategy_to_mesh(
                 )
             )
 
-            # Note: expand_to_full_mesh_op_strategy uses allow_unbacked_sharding=True
-            # to include strategies as candidates even when tensor shapes are symbolic.
-            # This is correct for strategy enumeration: we optimistically include
-            # strategies that might be valid, and let runtime handle edge cases
-            # (e.g., zero-size shards when actual shape < num_shards).
+            # Detect inplace ops by checking if the base op name ends with '_'
+            op_name = op.name()
+            base_name = op_name.split("::")[1].split(".")[0]
+            is_inplace = base_name.endswith("_")
+
             return expand_to_full_mesh_op_strategy(
                 mesh,
                 op_schema,
                 cast(list[PlacementList], expanded_strategies_over_one_mesh_dim),
                 output_tensor_meta=output_tensor_meta,
+                inplace_op=is_inplace,
+                input_index=num_outputs,
+                allow_unbacked_sharding=strategy_info.allow_unbacked_sharding,
             )
 
         return expanded_strategy
@@ -248,7 +267,7 @@ def _expand_single_dim_strategy_to_mesh(
 
     def _create_expanded_strategy(
         op_schema: OpSchema,
-        output_tensor_meta: TensorMeta | Sequence[TensorMeta | None],
+        output_tensor_meta: TensorMeta | Sequence[TensorMeta | None] | None,
     ) -> Callable[[OpOverload, ArgsType, KwargsType], StrategyType]:
         # Try to use cache, but fall back to uncached version if hashing fails
         # (e.g., when TensorMeta contains SymInts from dynamic shapes)
@@ -348,6 +367,7 @@ def _expand_single_dim_strategy_to_mesh(
 def register_single_dim_strategy(
     op: Union[torch._ops.OpOverload, list[torch._ops.OpOverload]],
     schema_info: Optional[RuntimeSchemaInfo] = None,
+    allow_unbacked_sharding: bool | None = None,
 ) -> Callable[[_SingleDimStrategyFunc], _SingleDimStrategyFunc]:
     """
     Registers a single_dim_strategy function for the given op.
@@ -381,9 +401,22 @@ def register_single_dim_strategy(
     arg_names_that_require_specializing_cache_strategy = [
         "memory_format",
     ]
-    return _get_registration_wrapper(
+    registration_wrapper = _get_registration_wrapper(
         DTensor._op_dispatcher.sharding_propagator.register_single_dim_op_strategy,
         op,
         schema_info,
         arg_names_that_require_specializing_cache_strategy,
     )
+
+    # Wrap impl in _SingleDimStrategyInfo here rather than adding a generic
+    # transform hook to _get_registration_wrapper, so that single-dim-strategy
+    # concerns stay in this module and the shared registration util stays simple.
+    def wrapper(impl):
+        info = _SingleDimStrategyInfo(
+            func=impl,
+            allow_unbacked_sharding=allow_unbacked_sharding,
+        )
+        registration_wrapper(info)
+        return impl
+
+    return wrapper

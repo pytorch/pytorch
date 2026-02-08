@@ -875,6 +875,15 @@ class CompileContext:
         return TraceId(self.compile_id, self.attempt)
 
 
+@dataclass
+class InlinedCodeCache:
+    """Cache for code-object-derived data used during inlining."""
+
+    instructions: list[Any]
+    indexof: dict[Any, int]
+    code_options: dict[str, Any]
+
+
 class TracingContext:
     """
     Provides the currently installed TracingContext, or None.
@@ -901,6 +910,8 @@ class TracingContext:
         self.global_context = GlobalContext()
         self.previously_inlined_functions: dict[Any, Any] = dict()
         self.previously_cleaned_instructions: dict[Any, Any] = dict()
+        # Combined cache for inlined code data (instructions, indexof, code_options)
+        self.inlined_code_cache: dict[Any, InlinedCodeCache] = dict()
         self.fake_mode: FakeTensorMode | None = fake_mode
         self.frame_summary_stack: list[traceback.FrameSummary] = []
         # This is morally part of frame_summary_stack, but it is kept separate
@@ -952,6 +963,7 @@ class TracingContext:
         self.global_context.global_state = {}
         self.previously_inlined_functions.clear()
         self.previously_cleaned_instructions.clear()
+        self.inlined_code_cache.clear()
 
     @staticmethod
     @contextmanager
