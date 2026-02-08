@@ -2,6 +2,7 @@
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/Types.hpp>
 #include <torch/library.h>
+#include <string_view>
 
 namespace c10d {
 namespace {
@@ -28,7 +29,7 @@ TORCH_LIBRARY(c10d, m) {
   m.def(
       "allgather_(Tensor[][] output_tensors, Tensor[] input_tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, bool async_op=True, int timeout=-1) -> (Tensor[][], __torch__.torch.classes.c10d.Work)");
   m.def(
-      "_allgather_base_(Tensor output_tensor, Tensor input_tensor, __torch__.torch.classes.c10d.ProcessGroup process_group, bool async_op=True, int timeout=-1) -> (Tensor, __torch__.torch.classes.c10d.Work)");
+      "_allgather_base_(Tensor output_tensor, Tensor input_tensor, __torch__.torch.classes.c10d.ProcessGroup process_group, bool async_op=True, int timeout=-1, str profiling_name=\"\") -> (Tensor, __torch__.torch.classes.c10d.Work)");
   m.def(
       "allgather_coalesced_(Tensor[][] output_lists, Tensor[] input_list, __torch__.torch.classes.c10d.ProcessGroup process_group, bool async_op=True) -> __torch__.torch.classes.c10d.Work");
   m.def(
@@ -241,21 +242,22 @@ IMPL_ALLGATHER(CPU)
 IMPL_ALLGATHER(CUDA)
 IMPL_ALLGATHER(PrivateUse1)
 
-#define IMPL__ALLGATHER_BASE(DEV)                                          \
-  std::tuple<at::Tensor, c10::intrusive_ptr<Work>> _allgather_base_##DEV(  \
-      at::Tensor& output_tensor,                                           \
-      at::Tensor& input_tensor,                                            \
-      const c10::intrusive_ptr<ProcessGroup>& process_group,               \
-      bool asyncOp,                                                        \
-      int64_t timeout) {                                                   \
-    auto work = process_group->getBackend(c10::DeviceType::DEV)            \
-                    ->_allgather_base(                                     \
-                        output_tensor,                                     \
-                        input_tensor,                                      \
-                        AllgatherOptions{                                  \
-                            std::chrono::milliseconds(timeout), asyncOp}); \
-    return std::tuple<at::Tensor, c10::intrusive_ptr<Work>>(               \
-        output_tensor, work);                                              \
+#define IMPL__ALLGATHER_BASE(DEV)                                         \
+  std::tuple<at::Tensor, c10::intrusive_ptr<Work>> _allgather_base_##DEV( \
+      at::Tensor& output_tensor,                                          \
+      at::Tensor& input_tensor,                                           \
+      const c10::intrusive_ptr<ProcessGroup>& process_group,              \
+      bool asyncOp,                                                       \
+      int64_t timeout,                                                    \
+      std::string_view profilingName) {                                   \
+    AllgatherOptions opts;                                                \
+    opts.timeout = std::chrono::milliseconds(timeout);                    \
+    opts.asyncOp = asyncOp;                                               \
+    opts.profilingName = std::string(profilingName);                      \
+    auto work = process_group->getBackend(c10::DeviceType::DEV)           \
+                    ->_allgather_base(output_tensor, input_tensor, opts); \
+    return std::tuple<at::Tensor, c10::intrusive_ptr<Work>>(              \
+        output_tensor, work);                                             \
   }
 
 IMPL__ALLGATHER_BASE(CPU)
