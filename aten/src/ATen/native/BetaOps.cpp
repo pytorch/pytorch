@@ -934,7 +934,7 @@ static inline std::tuple<Tensor, Tensor, Tensor> _betainc_partials(
       std::move(grad_a), std::move(grad_b), std::move(grad_x));
 }
 
-std::tuple<Tensor, Tensor, Tensor> _special_betainc_partials(
+TORCH_API std::tuple<Tensor, Tensor, Tensor> _special_betainc_partials(
     const Tensor& a,
     const Tensor& b,
     const Tensor& x) {
@@ -978,7 +978,7 @@ static inline std::tuple<Tensor, Tensor, Tensor> _betaincinv_partials(
   return std::make_tuple(std::move(g_a), std::move(g_b), std::move(g_y));
 }
 
-std::tuple<Tensor, Tensor, Tensor> _special_betaincinv_partials(
+TORCH_API std::tuple<Tensor, Tensor, Tensor> _special_betaincinv_partials(
     const Tensor& a,
     const Tensor& b,
     const Tensor& y) {
