@@ -788,6 +788,43 @@ class DTensorTest(DTensorTestBase):
         local_tensor = sharded_tensor.to_local()
         self.assertEqual(local_tensor.item(), self.rank)
 
+    @with_comms
+    def test_ops_zero_size_shards(self):
+        # Adding this test to ensure sharding works when tensor size < mesh size.
+        # Tests pointwise & reduction with world size = 4, tensor dim size = 2,
+        # ranks 2 & 3 have empty local shards.
+        mesh = self.build_device_mesh()
+
+        full_tensor = torch.randn(2, 8, device=self.device_type)
+        dt = distribute_tensor(full_tensor, mesh, [Shard(0)])
+
+        # Verify expected local shard sizes
+        if not self.is_local_tensor_enabled:
+            if self.rank < 2:
+                self.assertEqual(dt._local_tensor.shape, (1, 8))
+            else:
+                self.assertEqual(dt._local_tensor.shape, (0, 8))
+
+        # Test add
+        out_add = dt + dt
+        self.assertEqual(out_add.placements, (Shard(0),))
+        self.assertEqual(out_add.full_tensor(), dt.full_tensor() + dt.full_tensor())
+
+        # Test mul
+        out_mul = dt * 2
+        self.assertEqual(out_mul.placements, (Shard(0),))
+        self.assertEqual(out_mul.full_tensor(), dt.full_tensor() * 2)
+
+        # Test sum
+        out_sum = dt.sum()
+        self.assertEqual(out_sum.placements, (Partial(),))
+        self.assertEqual(out_sum.full_tensor(), dt.full_tensor().sum())
+
+        # Test transpose
+        out_t = dt.T
+        self.assertEqual(out_t.placements, (Shard(1),))
+        self.assertEqual(out_t.full_tensor(), dt.full_tensor().T)
+
 
 DTensorTestWithLocalTensor = create_local_tensor_test_class(
     DTensorTest,
