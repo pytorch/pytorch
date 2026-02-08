@@ -85,14 +85,12 @@ class DefaultAllGather(DefaultAllocMixin, AllGather):
         input_tensor: torch.Tensor,
         group: dist.ProcessGroup,
         async_op: bool = False,
-        profiling_name: str = "",
     ) -> dist.Work | None:
         return dist.all_gather_into_tensor(
             output_tensor,
             input_tensor,
             group=group,
             async_op=async_op,
-            profiling_name=profiling_name,
         )
 
 
@@ -106,14 +104,12 @@ class ProcessGroupAllocAllGather(ProcessGroupAllocMixin, AllGather):
         input_tensor: torch.Tensor,
         group: dist.ProcessGroup,
         async_op: bool = False,
-        profiling_name: str = "",
     ) -> dist.Work | None:
         return dist.all_gather_into_tensor(
             output_tensor,
             input_tensor,
             group=group,
             async_op=async_op,
-            profiling_name=profiling_name,
         )
 
 
@@ -246,60 +242,43 @@ def foreach_all_gather(
     all_gather_stream: torch.Stream,
     device: torch.device,
     all_gather_comm: AllGather,
-    module_fqn: str | None = None,
-    mesh_dim_names: tuple[str, ...] | None = None,
 ) -> AllGatherResult | None:
     world_size, rank = group.size(), group.rank()
     device_handle = _get_device_handle(device.type)
-
-    def _with_fqn(label: str) -> str:
-        parts = []
-        if module_fqn:
-            parts.append(module_fqn)
-        if mesh_dim_names:
-            parts.append(f"mesh=[{','.join(mesh_dim_names)}]")
-        if parts:
-            return f"{label} ({', '.join(parts)})"
-        return label
-
     with device_handle.stream(all_gather_copy_in_stream):
-        with torch.profiler.record_function(_with_fqn("FSDP::all_gather_copy_in")):
-            param_all_gather_inputs = _get_param_all_gather_inputs(fsdp_params)
-            (
-                param_all_gather_input_dtypes,
-                param_all_gather_input_numels,
-                dtype,
-            ) = _get_all_gather_input_metadatas(param_all_gather_inputs)
-            if dtype == torch.uint8:
-                all_gather_inputs = [
-                    t.view(torch.uint8) for ts in param_all_gather_inputs for t in ts
-                ]
-            else:
-                all_gather_inputs = [*chain.from_iterable(param_all_gather_inputs)]
-            inp_split_sizes = [t.numel() for t in all_gather_inputs]
-            all_gather_input_numel = sum(inp_split_sizes)
-            all_gather_output = all_gather_comm.allocate(
-                (all_gather_input_numel * world_size,), dtype=dtype, device=device
-            )
-            all_gather_input, all_gather_output = torch.ops.fsdp.all_gather_copy_in(
-                all_gather_inputs,
-                all_gather_output,
-                inp_split_sizes,
-                all_gather_input_numel,
-                rank,
-            )
-            del param_all_gather_inputs
+        param_all_gather_inputs = _get_param_all_gather_inputs(fsdp_params)
+        (
+            param_all_gather_input_dtypes,
+            param_all_gather_input_numels,
+            dtype,
+        ) = _get_all_gather_input_metadatas(param_all_gather_inputs)
+        if dtype == torch.uint8:
+            all_gather_inputs = [
+                t.view(torch.uint8) for ts in param_all_gather_inputs for t in ts
+            ]
+        else:
+            all_gather_inputs = [*chain.from_iterable(param_all_gather_inputs)]
+        inp_split_sizes = [t.numel() for t in all_gather_inputs]
+        all_gather_input_numel = sum(inp_split_sizes)
+        all_gather_output = all_gather_comm.allocate(
+            (all_gather_input_numel * world_size,), dtype=dtype, device=device
+        )
+        all_gather_input, all_gather_output = torch.ops.fsdp.all_gather_copy_in(
+            all_gather_inputs,
+            all_gather_output,
+            inp_split_sizes,
+            all_gather_input_numel,
+            rank,
+        )
+        del param_all_gather_inputs
     all_gather_stream.wait_stream(all_gather_copy_in_stream)
     with device_handle.stream(all_gather_stream):
-        profiling_name = _with_fqn("FSDP::all_gather_comm")
-        with torch.profiler.record_function(profiling_name):
-            all_gather_work = all_gather_comm(
-                output_tensor=all_gather_output,
-                input_tensor=all_gather_input,
-                group=group,
-                async_op=async_op,
-                profiling_name=profiling_name,
-            )
+        all_gather_work = all_gather_comm(
+            output_tensor=all_gather_output,
+            input_tensor=all_gather_input,
+            group=group,
+            async_op=async_op,
+        )
         all_gather_event = all_gather_stream.record_event()
         return AllGatherResult(
             all_gather_output,

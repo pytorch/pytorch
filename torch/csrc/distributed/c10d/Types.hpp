@@ -141,7 +141,6 @@ struct ReduceOptions {
 struct AllgatherOptions {
   std::chrono::milliseconds timeout = kUnsetTimeout;
   bool asyncOp = true;
-  std::string profilingName = "";
 };
 
 struct GatherOptions {
