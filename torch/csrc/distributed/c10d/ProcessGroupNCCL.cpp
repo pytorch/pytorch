@@ -5792,8 +5792,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_allgather_base(
       },
       OpType::_ALLGATHER_BASE,
       opts.asyncOp,
-      opts.profilingName.empty() ? "nccl:_all_gather_base"
-                                 : opts.profilingName.c_str());
+      "nccl:_all_gather_base");
 }
 
 // Create a memory allocator for NCCL. This allocator is used to allocate memory

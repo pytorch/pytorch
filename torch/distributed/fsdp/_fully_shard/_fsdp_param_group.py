@@ -338,9 +338,6 @@ class FSDPParamGroup:
             return
 
         with record_function(self._with_fqn("FSDP::all_gather")):
-            mesh_dim_names = None
-            if self.mesh_info and self.mesh_info.mesh.mesh_dim_names:
-                mesh_dim_names = self.mesh_info.mesh.mesh_dim_names
             self._all_gather_result = foreach_all_gather(
                 self.fsdp_params,
                 self._all_gather_process_group,
@@ -348,8 +345,6 @@ class FSDPParamGroup:
                 *self.comm_ctx.get_all_gather_streams(async_op, self._training_state),
                 self.device,
                 self._all_gather_comm,
-                self._module_fqn,
-                mesh_dim_names,
             )
 
     def wait_for_unshard(self):
