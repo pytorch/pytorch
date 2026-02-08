@@ -727,14 +727,46 @@ Add `actionlint` as a non-blocking CI workflow to detect workflow anti-patterns 
 
 ---
 
-### M06 — Action Pinning & Supply-Chain Hardening 🔵 NEXT
+### M06 — Action Pinning & Supply-Chain Hardening ✅ COMPLETE
 
-**Status:** Ready to Start  
-**Priority:** P1  
-**Blockers:** None (M05 complete)
+**Status:** 🔒 Closed and Locked  
+**Date:** 2026-02-08  
+**Effort:** 3 hours  
+**Change Class:** CI Configuration (Behavior-Preserving)  
+**Merge:** Pending approval
 
 **Intent:**
-Pin all GitHub Actions to full SHA for supply-chain security.
+Harden CI supply chain by pinning all external third-party GitHub Actions to immutable commit SHAs, eliminating mutable version tag references.
+
+**Deliverables:**
+- ✅ 13 external actions pinned to SHA (7 atomic commits)
+- ✅ 52 workflow files updated
+- ✅ ~300 `uses:` statements converted from tag to SHA
+- ✅ Original versions preserved as comments (`# v4`)
+- ✅ M06-B (20 PyTorch-owned `@main` actions) explicitly deferred
+
+**Invariant Introduced:**
+- **INV-080** — Action Immutability: All GitHub Actions on the CI critical path must be referenced by immutable commit SHA.
+
+**Evidence Constraint:**
+Fork CI is guarded. Verification via static analysis and SHA cross-validation.
+
+**Non-Goals (Honored):**
+- ❌ No action version upgrades
+- ❌ No YAML restructuring
+- ❌ No workflow logic changes
+
+**Verification:**
+- ✅ All 13 external actions pinned
+- ✅ SHA format validated (40-char hex)
+- ✅ 6 of 13 cross-validated with existing pinned instances
+- ✅ One commit per action family
+
+**Closeout Artifacts:**
+- [`docs/refactor/milestones/M06/M06_plan.md`](docs/refactor/milestones/M06/M06_plan.md)
+- [`docs/refactor/milestones/M06/M06_toolcalls.md`](docs/refactor/milestones/M06/M06_toolcalls.md)
+- [`docs/refactor/milestones/M06/M06_audit.md`](docs/refactor/milestones/M06/M06_audit.md)
+- [`docs/refactor/milestones/M06/M06_summary.md`](docs/refactor/milestones/M06/M06_summary.md)
 
 ---
 
@@ -757,7 +789,7 @@ From baseline audit, top risks requiring mitigation:
 | **I01** | No Working Build Environment | P0 | 🟡 Mitigated | M01 (static checks) |
 | **I02** | Empty REFACTOR.md | P0 | ✅ Resolved | M00-M02 |
 | **I03** | 130+ CI Workflows (Maintenance) | P1 | ✅ Mitigated | M03-M05 (audit + linting) |
-| **I04** | Mixed Action Pinning | P1 | 🔵 Active | M06-M07 |
+| **I04** | Mixed Action Pinning | P1 | ✅ Mitigated (external) | M06 (internal deferred to M06-V01) |
 | **I05** | Third-Party Supply Chain Risk | P1 | 🔵 Active | M08-M10 |
 | **I06** | Implicit Distributed Protocol | P2 | 🔵 Active | M11-M12 |
 | **I07** | No Pre-Commit Hooks | P2 | 🔵 Active | M13-M14 |
@@ -769,6 +801,7 @@ From baseline audit, top risks requiring mitigation:
 | ID | Description | Discovered | Deferred To | Exit Criteria |
 |----|-------------|------------|-------------|---------------|
 | **M04-V01** | Upstream CI execution verification for M04 changes | M04 | Upstream PR | TD failure propagates; tools-unit-tests fails on pytest failure; scorecards runs cleanly |
+| **M06-V01** | PyTorch-owned `@main` actions not pinned (20 refs) | M06 | Future (requires policy) | PyTorch establishes release tagging for internal actions |
 
 ---
 
@@ -777,15 +810,15 @@ From baseline audit, top risks requiring mitigation:
 | Phase | Milestones | Complete | In Progress | Planned |
 |-------|-----------|----------|-------------|---------|
 | **Phase 0** | M00-M02 | 3 (M00, M01, M02) | 0 | 0 |
-| **Phase 1** | M03-M10 | 3 (M03, M04, M05) | 0 | 5 |
+| **Phase 1** | M03-M10 | 4 (M03, M04, M05, M06) | 0 | 4 |
 | **Phase 2** | M11-M14 | 0 | 0 | 4 |
 | **Phase 3** | M15-M19 | 0 | 0 | 5 |
 | **Phase 4** | M20+ | 0 | 0 | TBD |
 
-**Program Progress:** 6/22 milestones complete (27%)  
+**Program Progress:** 7/22 milestones complete (32%)  
 **Phase 0:** ✅ Complete  
-**Phase 1:** 🔄 In Progress (3/8)  
-**Estimated Remaining:** ~155 hours (M06-M19)
+**Phase 1:** 🔄 In Progress (4/8)  
+**Estimated Remaining:** ~150 hours (M07-M19)
 
 ---
 
@@ -798,8 +831,9 @@ From baseline audit, top risks requiring mitigation:
 | 2026-02-08 | M03 (CI Audit Complete) | 8/10 | 7/10 | 7/10* | 6/10 | Maintained |
 | 2026-02-08 | M04 (Silent Failures Fixed) | 8/10 | 7/10 | 7.5/10 | 6/10 | Maintained |
 | 2026-02-08 | M05 (Actionlint Added) | 8/10 | 7/10 | 7.5/10 | 6/10 | Maintained |
+| 2026-02-08 | M06 (Action Pinning) | 8/10 | 7/10 | 8/10 | 6.5/10 | Maintained |
 
-*CI score maintained: Actionlint confirms clean baseline (0 errors in 144 files). Full recovery to 8/10 expected after M06 (action pinning).
+*CI score improved: All external actions pinned to SHA. Security improved with INV-080 established.
 
 **Targets (Post-Phase 3):**
 - Architecture: Maintain 8/10
@@ -831,8 +865,8 @@ For program-level recovery, consult: [`docs/refactor/toolcalls.md`](docs/refacto
 
 ## Document Version
 
-**Last Updated:** 2026-02-08 (M05 closeout)  
-**Next Update:** M06 completion  
+**Last Updated:** 2026-02-08 (M06 closeout)  
+**Next Update:** M07 completion  
 **Baseline Locked:** Commit c5f1d40  
 **Phase 0:** ✅ Complete  
 **Phase 1:** 🔄 In Progress (3/8 milestones)
