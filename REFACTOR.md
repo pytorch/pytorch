@@ -947,15 +947,17 @@ From baseline audit, top risks requiring mitigation:
 | Phase | Milestones | Complete | In Progress | Planned |
 |-------|-----------|----------|-------------|---------|
 | **Phase 0** | M00-M02 | 3 (M00, M01, M02) | 0 | 0 |
-| **Phase 1** | M03-M10 | 6 (M03, M04, M05, M06, M07, M08) | 0 | 2 |
-| **Phase 2** | M11-M14 | 0 | 0 | 4 |
+| **Phase 1** | M03-M10 | 8 (M03-M10) | 0 | 0 |
+| **Phase 2** | M11-M14 | 0 | 1 (M11) | 3 |
 | **Phase 3** | M15-M19 | 0 | 0 | 5 |
 | **Phase 4** | M20+ | 0 | 0 | TBD |
 
-**Program Progress:** 9/22 milestones complete (41%)  
+**Program Progress:** 11/22 milestones complete (50%)  
 **Phase 0:** ✅ Complete  
-**Phase 1:** 🔄 In Progress (6/8 complete)  
-**Estimated Remaining:** ~130 hours (M09-M19)
+**Phase 1:** ✅ Complete  
+**Phase 2:** 🔄 In Progress  
+**M11:** Implementation complete; CI pending external approval (CLA + maintainer)  
+**Estimated Remaining:** ~100 hours (M11-M19)
 
 ---
 
@@ -1004,11 +1006,12 @@ For program-level recovery, consult: [`docs/refactor/toolcalls.md`](docs/refacto
 
 ## Document Version
 
-**Last Updated:** 2026-02-08 (M08 closeout)  
-**Next Update:** M09 completion  
+**Last Updated:** 2026-02-08 (M11 implementation complete, awaiting CI)  
+**Next Update:** M11 CI completion  
 **Baseline Locked:** Commit c5f1d40  
 **Phase 0:** ✅ Complete  
-**Phase 1:** 🔄 In Progress (6/8 milestones complete)
+**Phase 1:** ✅ Complete (8/8 milestones)  
+**Phase 2:** 🔄 In Progress (M11 awaiting external CI approval)
 
 ---
 
