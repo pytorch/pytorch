@@ -970,7 +970,11 @@ class TestQuerySingleDimStrategyKwargs(TestCase):
         def alpha_aware_add_strategy(op, args_schema, kwargs_schema):
             alpha = kwargs_schema.get("alpha", 1)
             rules = [
-                [_ShardingPlaceholder(0), _ShardingPlaceholder(0), _ShardingPlaceholder(0)],
+                [
+                    _ShardingPlaceholder(0),
+                    _ShardingPlaceholder(0),
+                    _ShardingPlaceholder(0),
+                ],
                 [Partial("sum"), Partial("sum"), Partial("sum")],
             ]
             if alpha < 0:
