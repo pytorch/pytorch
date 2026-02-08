@@ -1,0 +1,46 @@
+name: Refactor Smoke Test
+
+# Purpose: Fast pre-check for Python import graph integrity (no C++ build required)
+# Scope: M01 milestone - validates INV-050 (Import Path Stability)
+# Runtime: <30 seconds
+
+on:
+  pull_request:
+    paths:
+      - 'torch/**/*.py'
+      - 'tools/refactor/**'
+      - 'test/test_import_smoke_static.py'
+      - '.github/workflows/refactor-smoke.yml'
+  workflow_dispatch:
+
+jobs:
+  import-smoke-check:
+    name: Static Import Graph Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run static import smoke test
+        run: |
+          python -m tools.refactor.import_smoke_static \
+            --targets torch,torch.nn,torch.optim,torch.utils,torch.autograd \
+            --repo-root .
+
+      - name: Run test suite
+        run: |
+          python -m pytest test/test_import_smoke_static.py -v --tb=short
+
+      - name: Report results
+        if: always()
+        run: |
+          echo "[OK] Import smoke test completed"
+          echo "This workflow validates INV-050 (Import Path Stability)"
+
