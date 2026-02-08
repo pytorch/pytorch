@@ -27,7 +27,6 @@ from .eval_frame import (
     RunOnlyContext,
     skip_code,
 )
-from .exc import IncorrectUsage
 from .external_utils import (
     get_nonrecursive_disable_wrapper,
     wrap_dunder_call_ctx_manager,
@@ -556,7 +555,7 @@ def _disallow_in_graph_helper(throw_if_not_allowed: bool) -> Callable[..., Any]:
             != variables.TorchInGraphFunctionVariable
             and trace_rules.lookup(fn) != variables.TorchInGraphFunctionVariable
         ):
-            raise IncorrectUsage(
+            raise RuntimeError(
                 "disallow_in_graph is expected to be used on an already allowed callable (like torch.* ops). "
                 "Allowed callables means callables that TorchDynamo puts as-is in the extracted graph."
             )

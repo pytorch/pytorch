@@ -10,7 +10,7 @@ import torch
 import torch._dynamo.config as config
 import torch._dynamo.testing
 from torch._dynamo.decorators import leaf_function
-from torch._dynamo.exc import IncorrectUsage, Unsupported
+from torch._dynamo.exc import Unsupported
 from torch._dynamo.testing import normalize_gm
 from torch._dynamo.utils import counters
 from torch.testing._internal.common_utils import (
@@ -251,7 +251,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
         self.assertEqual(cnts.frame_count, 3)
 
     def test_incorrect_usage_disallow_in_graph(self):
-        with self.assertRaises(IncorrectUsage):
+        with self.assertRaisesRegex(RuntimeError, "disallow_in_graph is expected"):
 
             @torch._dynamo.disallow_in_graph
             def fn1(x):
