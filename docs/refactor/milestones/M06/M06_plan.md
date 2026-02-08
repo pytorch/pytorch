@@ -1,14 +1,24 @@
+Perfect — M06 is a *meaty* one, and it’s exactly where this program starts paying real security dividends.
+
+Below is a **clean, governance-aligned M06 plan** you can hand directly to Cursor. It assumes **action pinning & supply-chain hardening**, stays tightly scoped, and fits seamlessly after M05.
+
+---
+
 # M06_plan — Action Pinning & Supply-Chain Hardening
 
 ## Intent / Target
 
-Harden the GitHub Actions supply chain by **auditing and documenting action pinning practices** across all 144 CI workflows. M06 establishes visibility into which actions use floating tags (`@v1`, `@main`, `@master`) versus commit SHA pinning, quantifying supply-chain risk exposure.
+**M06 hardens the PyTorch CI supply chain** by pinning all GitHub Actions used in `.github/workflows/` to **full commit SHAs**, eliminating mutable references (`@v1`, `@v2`, `@main`, `@latest`) on the CI critical path.
 
-**What remains unsafe without M06:**
+> **What remains unsafe without this milestone?**
+> Any third-party action referenced by tag can change behavior without notice, introducing:
+>
+> * Silent CI behavior changes
+> * Supply-chain compromise risk
+> * Non-reproducible CI results
+> * Undetectable regressions in correctness or security
 
-Any GitHub Action can push a malicious update to a version tag. Workflows using `uses: actions/checkout@v4` trust the current state of that tag, which can change without notice. SHA pinning (`uses: actions/checkout@b4ffde65f46...`) locks to an immutable commit.
-
-Without M06, we have no inventory of pinning practices and no baseline to measure improvement.
+M06 converts CI from *implicitly trusted* to *explicitly verified*.
 
 ---
 
@@ -16,81 +26,121 @@ Without M06, we have no inventory of pinning practices and no baseline to measur
 
 ### In Scope
 
-* Audit all `uses:` directives across 144 workflow files
-* Classify each action by pinning strategy:
-  - **SHA-pinned** (40-char commit hash)
-  - **Tag-pinned** (`@v1`, `@v4.1.0`)
-  - **Branch-pinned** (`@main`, `@master`)
-* Generate inventory with blast radius assessment
-* Document supply-chain risk exposure
-* **Optionally:** Add non-blocking pinning check workflow
+* Inventory **all `uses:` statements** in `.github/workflows/**`
+* Identify **unpinned or weakly pinned actions**:
 
-### Out of Scope
+  * `@v1`, `@v2`, `@v3`
+  * `@main`, `@master`, `@latest`
+* Pin each action to a **full 40-char commit SHA**
+* Preserve the original version tag **as a comment** for maintainability
+* Update **only workflow files**
+* Add documentation and audit artifacts
 
-* ❌ No automatic SHA pinning (too many actions)
-* ❌ No action upgrades
-* ❌ No workflow modifications (except new validation workflow)
-* ❌ No blocking CI enforcement
-* ❌ No Dependabot configuration changes
-* ❌ No third-party action removal
+### Out of Scope (Hard)
+
+* ❌ No action upgrades or version changes
+* ❌ No YAML restructuring
+* ❌ No logic changes
+* ❌ No new workflows
+* ❌ No removal of actions
+* ❌ No dependency policy enforcement
+* ❌ No SBOM generation (M08)
+* ❌ No signing / provenance (future milestone)
+
+---
+
+## Change Class
+
+**CI Configuration — Behavior-Preserving**
+
+This is a **mechanical refactor**:
+
+* Identical action code
+* Identical behavior
+* Identical inputs/outputs
+* Reduced mutability risk
 
 ---
 
 ## Invariants
 
-### Existing Invariants (Protected)
+### Existing Invariants (Must Hold)
 
 * **INV-060** — CI Critical Path Integrity
 * **INV-070** — CI Structural Validity
 
-### New Invariant (Proposed)
+### New Invariant Introduced
 
-* **INV-080** — Action Pinning Visibility
-  *All GitHub Actions usage must be inventoried with pinning strategy documented.*
+* **INV-080 — Action Immutability**
 
-This invariant is **observational only** in M06 (audit, no enforcement).
+  > All GitHub Actions on the CI critical path must be referenced by immutable commit SHA.
 
 ---
 
 ## Verification Plan
 
-### Primary Verification
+Because fork CI is guarded, verification relies on **static proof + structural checks**.
 
-* Script extracts all `uses:` directives from workflow files
-* Each action classified by pinning type
-* Inventory generated with counts and percentages
-* Risk assessment documented
-
-### Evidence Produced
-
-* Action inventory table (by workflow and action)
-* Pinning summary statistics
-* Blast radius assessment for unpinned actions
-* Recommendations for M07+ prioritization
-
-### Fork Constraint Handling
-
-* Analysis is static (no CI execution required)
-* All verification can be performed locally
+| Verification         | Method                                |
+| -------------------- | ------------------------------------- |
+| No behavioral change | Diff-based semantic proof             |
+| All actions pinned   | Scripted inventory before/after       |
+| YAML validity        | actionlint (already present from M05) |
+| No new workflows     | File diff check                       |
+| Rollback safety      | One-commit-per-group strategy         |
 
 ---
 
 ## Implementation Steps
 
-1. Create branch: `m06-action-pinning-audit`
-2. Write analysis script:
-   * Extract all `uses:` directives
-   * Parse action references (owner/repo@ref)
-   * Classify pinning type (SHA, tag, branch)
-3. Run analysis against `.github/workflows/`
-4. Generate inventory table
-5. Document findings in `M06_audit.md`
-6. Assess blast radius for high-risk actions
-7. **(Optional)** Create non-blocking validation workflow
-8. Create closeout artifacts
-9. Update REFACTOR.md
+> **Cursor must log all tool calls before execution.**
 
-Each step must be independently reversible.
+1. **Inventory Actions**
+
+   * Scan `.github/workflows/**/*.yml`
+   * Produce table: `{workflow, job, step, action, ref}`
+
+2. **Classify References**
+
+   * Strong: already pinned to SHA
+   * Weak: version tag (`@v2`)
+   * Unsafe: floating (`@main`, `@latest`)
+
+3. **Resolve SHAs**
+
+   * For each unpinned action:
+
+     * Resolve tag → exact commit SHA
+     * Record mapping in notes
+
+4. **Apply Pins**
+
+   * Replace:
+
+     ```yaml
+     uses: org/action@v2
+     ```
+
+     with:
+
+     ```yaml
+     uses: org/action@<full-sha> # v2
+     ```
+   * No other line changes
+
+5. **Granular Commits**
+
+   * One commit per **action family** (e.g., checkout, setup-python, upload-artifact)
+   * Enables safe rollback
+
+6. **Run actionlint**
+
+   * Ensure structural validity unchanged
+
+7. **Document Evidence Constraints**
+
+   * Fork CI guarded
+   * Upstream verification deferred
 
 ---
 
@@ -98,106 +148,75 @@ Each step must be independently reversible.
 
 ### Risks
 
-* Large number of unpinned actions (expected based on PyTorch scale)
-* Noise from internal/PyTorch-owned actions
-* Complexity of action reference parsing
-
-### Mitigation
-
-* Audit-only mode (no enforcement)
-* Separate internal vs external actions
-* Clear documentation of findings
+| Risk                | Mitigation                            |
+| ------------------- | ------------------------------------- |
+| Incorrect SHA       | Cross-check tag → commit mapping      |
+| Missed action       | Automated inventory                   |
+| Merge conflicts     | Granular commits                      |
+| Maintainer pushback | Clear audit trail, no behavior change |
 
 ### Rollback
 
-* Documentation-only milestone; no rollback needed
-* Optional validation workflow is single-file revert
+* `git revert <commit>` per action family
+* Zero state coupling between commits
 
 ---
 
 ## Deliverables
 
-* `tools/refactor/action_pinning_audit.py` — Analysis script
-* `docs/refactor/milestones/M06/M06_audit.md` — Full inventory and risk assessment
-* `docs/refactor/milestones/M06/M06_summary.md` — Executive summary
-* `docs/refactor/milestones/M06/M06_toolcalls.md` — Tool invocation log
-* **(Optional)** `.github/workflows/refactor-pinning-check.yml` — Non-blocking validation
-* REFACTOR.md updated with M06 entry
+### Code / Config
+
+* Modified `.github/workflows/*.yml` (pinning only)
+
+### Documentation
+
+* `docs/refactor/milestones/M06/M06_plan.md`
+* `docs/refactor/milestones/M06/M06_toolcalls.md`
+* `docs/refactor/milestones/M06/M06_audit.md`
+* `docs/refactor/milestones/M06/M06_summary.md`
+* `REFACTOR.md` updated with M06 entry
 
 ---
 
 ## Definition of Done
 
-* ✅ All 144 workflow files analyzed
-* ✅ All `uses:` directives inventoried
-* ✅ Pinning classification complete (SHA/tag/branch)
-* ✅ Blast radius assessed for high-risk actions
-* ✅ Findings documented in M06_audit.md
-* ✅ REFACTOR.md updated
-* ✅ Toolcalls logged
+* [ ] All `uses:` entries pinned to full SHA
+* [ ] Original tags preserved as comments
+* [ ] No new workflows added
+* [ ] No workflow logic changed
+* [ ] actionlint passes (no new errors)
+* [ ] Fork CI constraints documented
+* [ ] Audit & summary complete
+* [ ] REFACTOR.md updated
+* [ ] Explicit closeout approval obtained
 
 ---
 
-## Notes for Cursor
+## Expected Impact
 
-* This is primarily a **documentation/audit** milestone
-* Focus on generating accurate inventory
-* Distinguish between PyTorch-owned actions and external actions
-* External actions with branch pinning are highest risk
-* Don't attempt to fix pinning in M06 (defer to M07)
-
----
-
-## Milestone Classification
-
-* **Change Class:** Documentation-Only (audit) or Verification-Only (if adding check workflow)
-* **Risk Level:** Low
-* **Expected Effort:** ~4-6 hours
-* **Phase:** Phase 1 — CI Health & Guardrails
+| Area               | Before    | After           |
+| ------------------ | --------- | --------------- |
+| CI Reproducibility | ❌ Mutable | ✅ Deterministic |
+| Supply-Chain Risk  | 🔴 P1     | 🟡 Reduced      |
+| Auditability       | Medium    | High            |
+| Maintainer Trust   | Neutral   | Improved        |
 
 ---
 
-## Context: Supply Chain Risk
+## Authorized Next Step
 
-### Why This Matters
+Once M06 is complete, the program can safely proceed to:
 
-In 2024, the `actions/checkout` maintainers could push arbitrary code to the `@v4` tag. Any workflow using `@v4` would immediately execute that code. With 144 workflows, exposure is multiplicative.
-
-### Pinning Hierarchy
-
-| Type | Example | Risk | Immutability |
-|------|---------|------|--------------|
-| SHA | `@b4ffde65f46...` | 🟢 Low | Immutable |
-| Full version tag | `@v4.1.0` | 🟡 Medium | Usually immutable |
-| Major version tag | `@v4` | 🟠 Medium-High | Mutable |
-| Branch | `@main`, `@master` | 🔴 High | Always mutable |
-
-### Expected Findings
-
-Based on typical large repositories:
-* Most actions use major version tags (`@v4`)
-* Some PyTorch-internal actions may use branches
-* Very few actions are SHA-pinned
-* External actions with branch pinning are critical findings
+**M07 — Third-Party Action Risk Classification**
+or
+**M08 — Dependency & SBOM Baseline**
 
 ---
 
-## Questions to Lock Before Execution
+If you want, next we can:
 
-1. **Should we add a non-blocking validation workflow?**
-   - Option (a): Audit only (no new workflow)
-   - Option (b): Add `refactor-pinning-check.yml` (non-blocking)
+* Pre-compute an **action inventory script** for Cursor
+* Decide **commit grouping strategy** (by vendor vs by usage)
+* Or sanity-check how many actions we expect to pin (ballpark: ~40–60)
 
-2. **How should we categorize PyTorch-owned actions?**
-   - Option (a): Same risk assessment as external
-   - Option (b): Lower risk (PyTorch controls the source)
-
-3. **Output format for inventory?**
-   - Option (a): Markdown tables in M06_audit.md
-   - Option (b): JSON + Markdown summary
-   - Option (c): Both
-
----
-
-**End of M06 Plan**
-
+Just say the word.
