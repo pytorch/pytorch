@@ -134,8 +134,31 @@
   - docs/refactor/milestones/M04/M04_audit.md (created)
   - docs/refactor/milestones/M04/M04_summary.md (created)
   - docs/refactor/milestones/M04/M04_toolcalls.md (updated)
-- **Commit:** f16e15b4dce "docs(M04): Add audit, summary, and evidence constraint documentation"
+- **Commit:** df86ba6bc62 "docs(M04): Add audit, summary, and evidence constraint documentation"
 - **Status:** Complete — Pushed to PR
+
+### Entry 013 — Merge PR #2
+- **Timestamp:** 2026-02-08T08:45:00Z
+- **Tool:** run_terminal_cmd (gh pr merge)
+- **Purpose:** Merge M04 PR to main
+- **Result:** PR #2 merged → commit 760d459c4fb
+- **Status:** Complete
+
+### Entry 014 — REFACTOR.md Update
+- **Timestamp:** 2026-02-08T08:46:00Z
+- **Tool:** search_replace (x5)
+- **Purpose:** Update REFACTOR.md with M04 completion, M04-V01 deferral, score trend
+- **Files:** REFACTOR.md
+- **Status:** Complete
+
+---
+
+## M04 Closeout
+
+**Milestone Status:** 🔒 CLOSED AND LOCKED  
+**Merge Commit:** 760d459c4fb  
+**PR:** https://github.com/m-cahill/pytorch/pull/2 (merged)  
+**Date:** 2026-02-08
 
 ---
 

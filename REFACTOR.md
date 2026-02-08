@@ -638,27 +638,62 @@ Perform a systematic audit of PyTorch's 142 CI workflows to identify silent fail
 
 ---
 
-### M04 — Fix Silent Failures (High-Priority) 🔵 NEXT
+### M04 — Fix High-Priority CI Silent Failures ✅ COMPLETE
 
-**Status:** Ready to Start  
-**Priority:** P1  
-**Effort:** 6 hours  
-**Blockers:** None (M03 complete)
+**Status:** 🔒 Closed and Locked  
+**Date:** 2026-02-08  
+**Effort:** 2 hours  
+**Change Class:** CI Configuration (Behavior-Preserving)  
+**Merge:** PR #2 → `760d459c4fb`
 
 **Intent:**
-Address the 4 high-severity silent failure risks identified in M03. Surgical, targeted fixes only.
+Address the 5 high-severity silent failure risks identified in M03. Surgical, targeted fixes only.
 
-**Scope (from M03 Risk Register):**
-1. Remove `continue-on-error: true` from TD step in `target_determination.yml`
-2. Remove job-level `continue-on-error` from `llm_td_retrieval.yml`
-3. Remove or relocate `if: false` disabled jobs (`trunk.yml`, `scorecards.yml`)
-4. Remove `continue-on-error` from test steps in `tools-unit-tests.yml`
+**Deliverables:**
+- ✅ `target_determination.yml` — Remove `continue-on-error` from Do TD step (M03-R01)
+- ✅ `llm_td_retrieval.yml` — Remove job-level `continue-on-error` (M03-R02)
+- ✅ `trunk.yml` — Remove disabled executorch jobs (M03-R03)
+- ✅ `tools-unit-tests.yml` — Remove `continue-on-error` from test steps (M03-R04)
+- ✅ `scorecards.yml` — Re-enable OSSF security scoring for upstream (M03-R05)
 
-**See:** [`docs/refactor/milestones/M03/M03_audit.md`](docs/refactor/milestones/M03/M03_audit.md) — Risk Register
+**Invariant Introduced:**
+- **INV-060** — CI Critical Path Integrity: If a correctness-critical step fails, CI must fail visibly.
+
+**Evidence Constraint:**
+Fork CI is guarded by `github.repository_owner == 'pytorch'`. Verification was performed via diff-based semantic proof. Upstream CI verification deferred as M04-V01.
+
+**Non-Goals (Honored):**
+- ❌ No new CI jobs
+- ❌ No workflow re-architecture
+- ❌ No action pinning (M06)
+- ❌ No YAML linting (M05)
+
+**Verification:**
+- ✅ One commit per risk ID (granular rollback)
+- ✅ Only 5 workflow files modified
+- ✅ Semantic proof documented in M04_audit.md
+- ✅ No scope creep
+
+**Closeout Artifacts:**
+- [`docs/refactor/milestones/M04/M04_plan.md`](docs/refactor/milestones/M04/M04_plan.md)
+- [`docs/refactor/milestones/M04/M04_toolcalls.md`](docs/refactor/milestones/M04/M04_toolcalls.md)
+- [`docs/refactor/milestones/M04/M04_audit.md`](docs/refactor/milestones/M04/M04_audit.md)
+- [`docs/refactor/milestones/M04/M04_summary.md`](docs/refactor/milestones/M04/M04_summary.md)
 
 ---
 
-### M05-M10 — CI Health (Planned)
+### M05 — CI Workflow Linting & Structural Guardrails 🔵 NEXT
+
+**Status:** Ready to Start  
+**Priority:** P1  
+**Blockers:** None (M04 complete)
+
+**Intent:**
+Add `actionlint` and structural validation to catch workflow anti-patterns early.
+
+---
+
+### M06-M10 — CI Health (Planned)
 
 See [`docs/refactor/audit/REFACTOR_PHASE_MAP.md`](docs/refactor/audit/REFACTOR_PHASE_MAP.md) for full Phase 1 plan.
 
@@ -684,20 +719,28 @@ From baseline audit, top risks requiring mitigation:
 
 ---
 
+## Deferred Verification
+
+| ID | Description | Discovered | Deferred To | Exit Criteria |
+|----|-------------|------------|-------------|---------------|
+| **M04-V01** | Upstream CI execution verification for M04 changes | M04 | Upstream PR | TD failure propagates; tools-unit-tests fails on pytest failure; scorecards runs cleanly |
+
+---
+
 ## Milestone Progress
 
 | Phase | Milestones | Complete | In Progress | Planned |
 |-------|-----------|----------|-------------|---------|
 | **Phase 0** | M00-M02 | 3 (M00, M01, M02) | 0 | 0 |
-| **Phase 1** | M03-M10 | 1 (M03) | 0 | 7 |
+| **Phase 1** | M03-M10 | 2 (M03, M04) | 0 | 6 |
 | **Phase 2** | M11-M14 | 0 | 0 | 4 |
 | **Phase 3** | M15-M19 | 0 | 0 | 5 |
 | **Phase 4** | M20+ | 0 | 0 | TBD |
 
-**Program Progress:** 4/22 milestones complete (18%)  
+**Program Progress:** 5/22 milestones complete (23%)  
 **Phase 0:** ✅ Complete  
-**Phase 1:** 🔄 In Progress (1/8)  
-**Estimated Remaining:** ~166 hours (M04-M19)
+**Phase 1:** 🔄 In Progress (2/8)  
+**Estimated Remaining:** ~160 hours (M05-M19)
 
 ---
 
@@ -708,8 +751,9 @@ From baseline audit, top risks requiring mitigation:
 | 2026-02-08 | M00 (Baseline) | 8/10 | 7/10 | 8/10 | 6/10 | N/A |
 | 2026-02-08 | M02 (Phase 0 Complete) | 8/10 | 7/10 | 8/10 | 6/10 | Established |
 | 2026-02-08 | M03 (CI Audit Complete) | 8/10 | 7/10 | 7/10* | 6/10 | Maintained |
+| 2026-02-08 | M04 (Silent Failures Fixed) | 8/10 | 7/10 | 7.5/10 | 6/10 | Maintained |
 
-*CI score adjusted to 7/10 to reflect identified silent failure risks (will improve after M04-M06).
+*CI score improving: 5 silent failure risks removed in M04. Full recovery to 8/10 expected after M05-M06 (linting + action pinning).
 
 **Targets (Post-Phase 3):**
 - Architecture: Maintain 8/10
@@ -741,11 +785,11 @@ For program-level recovery, consult: [`docs/refactor/toolcalls.md`](docs/refacto
 
 ## Document Version
 
-**Last Updated:** 2026-02-08 (M03 closeout)  
-**Next Update:** M04 completion  
+**Last Updated:** 2026-02-08 (M04 closeout)  
+**Next Update:** M05 completion  
 **Baseline Locked:** Commit c5f1d40  
 **Phase 0:** ✅ Complete  
-**Phase 1:** 🔄 In Progress
+**Phase 1:** 🔄 In Progress (2/8 milestones)
 
 ---
 
