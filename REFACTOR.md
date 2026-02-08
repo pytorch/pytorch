@@ -142,54 +142,47 @@ Establish an authoritative, evidence-based baseline for the PyTorch refactoring 
 
 ### Phase 1: CI Health & Guardrails (Planned)
 
-#### M01 — Import Smoke Test 🟡 IN PROGRESS
+#### M01 — Import Smoke Test ✅ CLOSED
 
-**Status:** Implementation Complete (pending PR)  
-**Priority:** P0 (Critical)  
+**Status:** Complete  
+**Date:** 2026-02-08  
 **Effort:** 4 hours  
-**Branch:** `m01-import-smoke-test`
+**Merge:** PR #1 → `d72fd100459`
 
-**Intent:**
-Create static import-graph checker that validates Python import integrity without requiring a C++ build. Establishes minimal "truth surface" for all future refactor validation.
+**Outcome:**
+Created static import-graph checker (`tools/refactor/import_smoke_static.py`) that validates Python import integrity without C++ build. First executable verification surface for the refactoring program.
 
-**Scope:**
-- ✅ Created `tools/refactor/import_smoke_static.py` — Static AST-based import analyzer
-- ✅ Created `test/test_import_smoke_static.py` — Test suite (8 tests)
-- ✅ Created `.github/workflows/refactor-smoke.yml` — Isolated CI workflow
-- ✅ Allowlist for compiled/generated/optional modules
+**Deliverables:**
+- `tools/refactor/import_smoke_static.py` — Static AST-based import analyzer
+- `test/test_import_smoke_static.py` — Test suite (8 tests)
+- `.github/workflows/refactor-smoke.yml` — Isolated CI workflow
 
-**Locked Targets (M01):**
-- `torch`
-- `torch.nn`
-- `torch.optim`
-- `torch.utils`
-- `torch.autograd`
+**Invariant Verified:**
+- INV-050: Import Path Stability (2,372 files, 21,254 imports, 0 unresolved)
 
-**Invariants Protected:**
-- INV-050: Import Path Stability
+**CI Progression:**
+- Run 1: FAILED (pytest not installed) → Fixed: use stdlib unittest
+- Run 2: FAILED (test/ not a package) → Fixed: run file directly
+- Run 3: SUCCESS
 
-**Verification Results:**
-```
-Files scanned:       2,372
-Total imports found: 21,254
-Unresolved imports:  0
-Tests:               8/8 passed
-```
-
-**See:** [`docs/refactor/milestones/M01/M01_plan.md`](docs/refactor/milestones/M01/M01_plan.md)
+**Closeout Artifacts:**
+- [`M01_summary.md`](docs/refactor/milestones/M01/M01_summary.md)
+- [`M01_audit.md`](docs/refactor/milestones/M01/M01_audit.md)
+- [`M01_run1.md`](docs/refactor/milestones/M01/M01_run1.md)
 
 ---
 
-#### M02 — Populate REFACTOR.md 🔵 PLANNED
+#### M02 — Populate REFACTOR.md 🔵 NEXT
 
-**Status:** Blocked by M01  
+**Status:** Ready to Start  
 **Priority:** P0 (Critical)  
 **Effort:** 2 hours  
+**Blockers:** None (M01 complete)
 
 **Intent:**
-Activate governance by populating this document with architectural principles, deprecation policy, and milestone tracking.
+Expand governance by adding architectural principles, deprecation policy, and milestone tracking enhancements.
 
-**Note:** Initial population complete with M00 entry. M02 will add architectural principles and expand governance sections.
+**Note:** Initial population complete with M00/M01 entries. M02 will formalize governance sections.
 
 **See:** [`docs/refactor/audit/NEXT_ACTIONS.md`](docs/refactor/audit/NEXT_ACTIONS.md) — Action 2
 
@@ -246,14 +239,14 @@ From baseline audit, top risks requiring mitigation:
 
 | Phase | Milestones | Complete | In Progress | Planned |
 |-------|-----------|----------|-------------|---------|
-| **Phase 0** | M00-M02 | 1 (M00) | 0 | 1 (M01) |
+| **Phase 0** | M00-M02 | 2 (M00, M01) | 0 | 0 |
 | **Phase 1** | M03-M10 | 0 | 0 | 8 |
 | **Phase 2** | M11-M14 | 0 | 0 | 4 |
 | **Phase 3** | M15-M19 | 0 | 0 | 5 |
 | **Phase 4** | M23-M30 | 0 | 0 | TBD |
 
-**Program Progress:** 1/22 milestones complete (5%)  
-**Estimated Remaining:** ~204 hours (M01-M19)
+**Program Progress:** 2/22 milestones complete (9%)  
+**Estimated Remaining:** ~200 hours (M02-M19)
 
 ---
 
@@ -294,8 +287,8 @@ For milestone-specific recovery, consult: `docs/refactor/milestones/MNN/MNN_tool
 
 ## Document Version
 
-**Last Updated:** 2026-02-08 (M00 closeout)  
-**Next Update:** M01 completion  
+**Last Updated:** 2026-02-08 (M01 closeout)  
+**Next Update:** M02 completion  
 **Baseline Locked:** Commit c5f1d40
 
 ---
