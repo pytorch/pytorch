@@ -202,7 +202,12 @@ class Experts(nn.Module):
         self.num_experts = num_experts
         self.w1 = nn.Parameter(torch.empty(num_experts, hidden_dim, dim))
         self.w2 = nn.Parameter(torch.empty(num_experts, dim, hidden_dim))
+        self.reset_parameters()
         self.gelu = nn.GELU()
+
+    def reset_parameters(self):
+        nn.init.normal_(self.w1, std=0.02)
+        nn.init.normal_(self.w2, std=0.02)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if isinstance(self.w1, DTensor):
@@ -400,23 +405,6 @@ class Transformer(nn.Module):
         h = self.norm(h)
         output = self.output(h).float()
         return output
-
-    def init_weights(self):
-        for module in self.modules():
-            if isinstance(module, nn.Linear):
-                nn.init.normal_(module.weight, std=0.02)
-                if module.bias is not None:
-                    nn.init.zeros_(module.bias)
-            elif isinstance(module, nn.Embedding):
-                nn.init.normal_(module.weight, std=0.02)
-            elif isinstance(module, nn.LayerNorm):
-                nn.init.ones_(module.weight)
-                nn.init.zeros_(module.bias)
-            elif isinstance(module, Experts):
-                nn.init.normal_(module.w1, std=0.02)
-                nn.init.normal_(module.w2, std=0.02)
-        if self.model_args.weight_tying:
-            self.output.weight = self.tok_embeddings.weight
 
     @staticmethod
     def parallelize(

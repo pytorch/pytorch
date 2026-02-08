@@ -946,8 +946,10 @@ class TestFullyShardShardPlacementFnMultiProcess(FSDPTest):
             dropout_p=0.0,
             num_experts=8,
         )
-        with torch.device("meta"):
-            model = Transformer(model_args)
+        torch.manual_seed(42)
+        model = Transformer(model_args)
+        ref_model = copy.deepcopy(model).to(device_type)
+
         Transformer.parallelize(model, ep_mesh=ep_mesh)
 
         efsdp_mesh_info = FSDPMeshInfo(mesh=efsdp_mesh, shard_mesh_dim=0)
@@ -985,11 +987,14 @@ class TestFullyShardShardPlacementFnMultiProcess(FSDPTest):
         fully_shard([model.norm, model.output], mesh=dp_mesh)
         fully_shard(model, mesh=dp_mesh)
 
-        model.to_empty(device=device_type.type)
-        with torch.no_grad():
-            model.init_weights()
+        # Verify sharded parameters match reference model
+        for (name, param), (_, ref_param) in zip(
+            model.named_parameters(), ref_model.named_parameters()
+        ):
+            full_param = param.full_tensor()
+            self.assertEqual(full_param, ref_param)
 
-        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+        # Verify first forward loss matches reference
         torch.manual_seed(42 + self.rank)
         inp = torch.randint(
             0,
@@ -997,6 +1002,12 @@ class TestFullyShardShardPlacementFnMultiProcess(FSDPTest):
             (2, model_args.max_seq_len),
             device=device_type.type,
         )
+        ref_loss = ref_model(inp).sum()
+        loss = model(inp).sum()
+        self.assertEqual(ref_loss, loss)
+
+        # Run training iterations to verify stability
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
         for _ in range(5):
             loss = model(inp).sum()
             loss.backward()
