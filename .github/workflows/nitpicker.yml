@@ -20,7 +20,7 @@ jobs:
     steps:
     - name: Checkout PyTorch
       uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
-    - uses: ethanis/nitpicker@v1
+    - uses: ethanis/nitpicker@cc4e964fc9dcbfbb46b3534dd299ee229396f259 # v1
       with:
         nitpicks: '.github/nitpicks.yml'
         token: "${{ secrets.GITHUB_TOKEN }}"

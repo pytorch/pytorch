@@ -21,7 +21,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
 
       - name: Run actionlint
-        uses: raven-actions/actionlint@v2
+        uses: raven-actions/actionlint@01fce4f43a270a612932cb1c64d40505a029f821 # v2
         with:
           # Disable shellcheck to focus on workflow structure (M05 scope)
           shellcheck: false
