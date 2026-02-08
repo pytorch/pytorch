@@ -17,7 +17,7 @@ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     DEVICEInitMode,
     FSDPInitMode,
-    FSDPTest,
+    FSDPTestContinuous,
     TransformerWithSharedParams,
 )
 from torch.testing._internal.common_utils import (
@@ -78,7 +78,7 @@ class _GradAccConfigs:
         return "[" + ",".join(config.__repr__() for config in self.configs) + "]"
 
 
-class TestGradAcc(FSDPTest):
+class TestGradAcc(FSDPTestContinuous):
     """Tests ``FullyShardedDataParallel``'s gradient accumulation via both its
     ``no_sync()`` context manager and without the context manager."""
 

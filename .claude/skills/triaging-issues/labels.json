@@ -1,7 +1,7 @@
 {
   "description": "Labels suitable for issue triage. Excludes CI triggers, test configs, release notes, deprecated, and PR-only labels.",
   "repo": "pytorch/pytorch",
-  "count": 305,
+  "count": 304,
   "labels": [
     {
       "name": "actionable",
@@ -114,10 +114,6 @@
     {
       "name": "module: arm",
       "description": "Related to ARM architectures builds of PyTorch. Includes Apple M1"
-    },
-    {
-      "name": "module: assert failure",
-      "description": "The issue involves an assert failure"
     },
     {
       "name": "module: autograd",
