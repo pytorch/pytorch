@@ -399,7 +399,7 @@ struct HeaderOnlyIndexBoundsCheck {
 // RestrictPtrTraits Workaround
 // ============================================================================
 // NVIDIA's nvcc does not recognize __restrict__ on member pointers in structs
-// passed to kernels. This means RestrictPtrTraits has no effect when 
+// passed to kernels. This means RestrictPtrTraits has no effect when
 // using PackedTensorAccessor.
 //
 // The workaround is to decouple the pointer from the accessor metadata:
