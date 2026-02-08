@@ -22,6 +22,7 @@ from torch._subclasses.fake_tensor import FakeTensor
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import py_sym_types
+from torch.fx.traceback import ANNOTATION_META_KEYS
 
 
 _T = TypeVar("_T")
@@ -633,10 +634,11 @@ def _copy_metadata_to_bw_nodes_in_subgraph(
         if fwd_node is not None:
             node.meta["fwd_nn_module_stack"] = fwd_node.meta.get("nn_module_stack")
             node.meta["fwd_source_fn_stack"] = fwd_node.meta.get("source_fn_stack")
-            # TODO: better to change to a specific field of custom?
-            custom = fwd_node.meta.get("custom")
-            if custom is not None:
-                node.meta["custom"] = copy.deepcopy(custom)
+            # Copy annotation metadata keys
+            for key in ANNOTATION_META_KEYS:
+                value = fwd_node.meta.get(key)
+                if value is not None:
+                    node.meta[key] = copy.deepcopy(value)
 
 
 def copy_fwd_metadata_to_bw_nodes(fx_g: torch.fx.GraphModule) -> None:
