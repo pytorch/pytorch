@@ -1,0 +1,186 @@
+# REFACTOR WORKFLOW RULES
+# These rules are mandatory for all code generation and refactoring.
+
+# 1. REFACTOR.md is the source of truth.
+#    - Always read REFACTOR.md before writing or modifying any code.
+#    - After completing a major feature or milestone, update REFACTOR.md immediately.
+
+# 2. Schema and migrations.
+#    - Document the full database schema in REFACTOR.md.
+#    - Add all new migrations to the same file.
+#    - Keep schema documentation accurate, complete, and synchronized with code.
+
+# 3. Modularity and structure.
+#    - All changes must by default preserve or improve modularity.
+#    - Code should remain organized into focused, coherent modules.
+#    - Avoid unnecessary coupling or cross‑module leakage.
+
+# 4. Documentation and clarity.
+#    - Every suggestion must by default reinforce clear documentation and thorough commenting.
+#    - Write code that future developers can understand without guesswork.
+#    - Prefer explicitness over cleverness.
+
+# 5. General discipline.
+#    - Follow established patterns unless there is a documented reason to deviate.
+#    - Maintain consistency with the architectural intent of REFACTOR and RediAI v3.
+
+
+# Tool Logging Rule
+Whenever you invoke a tool (run, fix, apply_patch, search, test, etc.), append a short entry to `docs/refactor/milestones/MNN/MNN_toolcalls.md` **BEFORE** running the tool for the milestone describing:
+- the tool name
+- the purpose of the call
+- the files involved
+- the timestamp
+
+# Recovery Rule
+**Before** performing any action, check `docs/refactor/milestones/MNN/MNN_toolcalls.md` for the milestone for the most recent entry.
+Restate:
+- what you were doing
+- what step was next
+- whether the previous tool call completed
+Wait for confirmation before continuing.
+
+# Windows PowerShell Pipeline Safety (CRITICAL)
+When using PowerShell on Windows, NEVER use `Select-Object -First` or `-Last`
+directly on a pipeline fed by an external command (gh, git, pytest, docker, etc.).
+
+This causes early pipeline termination, sets exit code -1, and crashes Cursor
+due to invalid int32 serialization (exit code becomes 4294967295).
+
+**Approved patterns:**
+1. Pipe through `Out-String` before truncation:
+   `gh run view ID --log | Out-String | Select-Object -First 50`
+
+2. Capture output to a variable first, then truncate:
+   `$output = gh run view ID --log 2>&1; $output | Select-Object -First 50`
+
+3. Prefer structured outputs (`--json`) or downloaded artifacts over raw streams
+
+4. Use `--log-failed` instead of `--log` when only failures matter
+
+**Rule of thumb:** Never truncate a live pipeline; only truncate materialized output.
+
+---
+
+
+# Milestone Workflow Process
+
+This workflow governs collaboration between you (AI agent) and external AI agents who ground the project. Each milestone follows these phases:
+
+* * *
+
+## Phase 0: Initialization & Recovery
+
+**Before ANY action:**
+
+1. Check `docs/refactor/milestones/MNN/MNN_toolcalls.md` for the current milestone
+2. If resuming, restate: what you were doing, what step was next, whether the previous tool call completed
+3. Wait for confirmation before continuing
+
+**Log every tool call BEFORE execution** with: timestamp, tool name, purpose, files/target, status
+
+* * *
+
+## Phase 1: Plan Review
+
+1. Read `docs/refactor/milestones/MNN/MNN_plan.md`
+2. Read referenced prompts for audit/summary generation
+3. Identify the milestone's **single objective** and **definition of done**
+
+* * *
+
+## Phase 2: Clarifying Questions
+
+1. Ask clarifying questions **before** beginning implementation
+2. **STOP and wait** for responses
+3. Do NOT proceed until you receive **locked answers**
+
+* * *
+
+## Phase 3: Implementation
+
+1. Create working branch (e.g., `mNN-issue-name`)
+2. Implement the minimal fix required — no scope creep
+3. Commit with descriptive message referencing milestone
+4. **Create PR to main** — do NOT push directly to main
+5. Wait for required CI checks to complete
+
+* * *
+
+## Phase 4: CI Monitoring & Analysis
+
+1. Monitor workflow runs after PR creation/merge
+2. Create analysis document: `MNN_run1.md`
+  * Subsequent runs increment: `MNN_run2.md`, `MNN_run3.md`, etc.
+3. Use `docs/refactor/prompts/RefactorWorklowPrompt.md ` for analysis format
+4. **STOP and wait** for confirmation before implementing any CI fixes
+5. If fixes are approved, repeat phases 3-4
+
+* * *
+
+## Phase 5: Governance Updates
+
+After CI is **confirmed green**, update:
+
+* [ ] `REFACTOR.md` — add milestone to table
+
+* * *
+
+## Phase 6: Audit & Summary Generation
+
+Generate using the specified prompts:
+
+* **Audit**: `MNN_audit.md` using `docs/refactor/prompts/RefactorMilestoneAuditPrompt.md`
+* **Summary**: `MNN_summary.md` using `docs/refactor/prompts/RefactorSummaryPrompt.md`
+
+* * *
+
+## Phase 7: Closeout
+
+**CRITICAL GATES:**
+
+1. ⛔ **DO NOT merge** without express permission
+2. ⛔ **DO NOT push** after CI is verified green without permission
+3. ⛔ **DO NOT close out** without express permission
+
+**Closeout sequence (only after permission):**
+
+1. Ensure all docs committed
+2. Create new branch for next milestone (e.g., `mNN+1-next`)
+3. Commit all pending governance updates to new branch
+4. Report: branch name, commit hash, files changed, ready status
+5. Generate the next milestone folder and seed it with an empty milestone plan file and toolcalls (ie. create MNN+1/MNN+1_plan.md MNN+1_toolcalls.md). Initialize toolcalls.md with a header.
+
+* * *
+
+## Permission Gates Summary
+
+| Action | Permission Required |
+| --- | --- |
+| Begin implementation | After locked answers received |
+| Implement CI fixes | Explicit approval of proposed fix |
+| Merge PR to main | Express permission |
+| Final push after green CI | Express permission |
+| Closeout milestone | Express permission |
+
+* * *
+
+## File Naming Conventions
+
+/docs/refactor/milestones/MNN/
+├── MNN_plan.md # Detailed plan (provided)
+├── MNN_toolcalls.md # milestone tool calls
+├── MNN_run1.md # CI analysis run 1
+├── MNN_run2.md # CI analysis run 2 (if needed)
+├── MNN_audit.md # Milestone audit
+└── MNN_summary.md # Milestone summary
+
+* * *
+
+## Recovery Protocol
+
+If session is interrupted:
+
+1. Read `docs/refactor/milestones/MNN/MNN_toolcalls.md` for last recorded action
+2. Report: last action, next planned action, completion status
+3. Wait for user confirmation before resuming
