@@ -580,6 +580,8 @@ aten::_sparse_sum_backward
 aten::_sparse_sum_backward.out
 aten::_spdiags
 aten::_spdiags.out
+aten::_special_betainc_partials
+aten::_special_betaincinv_partials
 aten::_spsolve
 aten::_stack
 aten::_stack.out
@@ -1247,6 +1249,12 @@ aten::special_bessel_y0
 aten::special_bessel_y0.out
 aten::special_bessel_y1
 aten::special_bessel_y1.out
+aten::special_betainc
+aten::special_betainc.out
+aten::special_betaincinv
+aten::special_betaincinv.out
+aten::special_betaln
+aten::special_betaln.out
 aten::special_chebyshev_polynomial_t
 aten::special_chebyshev_polynomial_t.n_scalar
 aten::special_chebyshev_polynomial_t.n_scalar_out
