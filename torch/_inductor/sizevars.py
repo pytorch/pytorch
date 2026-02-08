@@ -592,6 +592,34 @@ class SizeVarAllocator:
 
         return sympy_subs(expr, self.backed_var_to_val)
 
+    def to_symint_or_int(self, expr: Union[Expr, int]) -> Union[SymInt, int]:
+        """Convert a sympy expression to SymInt, or return int as is."""
+        if isinstance(expr, int):
+            return expr
+
+        from torch.fx.experimental.sym_node import SymNode
+
+        expr = self.simplify(expr)
+        if isinstance(expr, (int, sympy.Integer)):
+            return int(expr)
+
+        # Remove precomputed replacements to get canonical form
+        # (consistent with symbolic_hint behavior)
+        expr = self.remove_precomputed_replacements(expr)
+
+        try:
+            hint = self.size_hint(expr)
+        except Exception:
+            hint = None
+        node = SymNode(expr, self.shape_env, int, hint)
+        return SymInt(node)
+
+    def to_symints_or_ints(
+        self, exprs: Sequence[Union[Expr, int]]
+    ) -> list[Union[SymInt, int]]:
+        """Convert a sequence of sympy expressions to SymInts, or return ints as is."""
+        return [self.to_symint_or_int(e) for e in exprs]
+
     def size_hint(
         self,
         expr: Union[Expr, int],
@@ -630,15 +658,11 @@ class SizeVarAllocator:
         """
         Return a concrete integer hint for an expression that is safe to use for guarding.
 
-        This method evaluates the expression using only backed symbol hints (values
-        that were captured during tracing and can be used to generate guards). Unlike
+        This method evaluates the expression using only backed-symbols hints. Unlike
         optimization_hint(), this method does NOT use heuristics or fallback values
         for unbacked symbols.
 
-        Use this method when:
-        - You need a hint value that corresponds to actual traced values
-        - The result will be used for guarding decisions
-        - Data-dependent values should cause an error rather than use a fallback
+        Use this method when you need a hint value that will be used for guarding decision.
 
         Args:
             expr: A sympy expression or integer to evaluate.
@@ -648,7 +672,7 @@ class SizeVarAllocator:
 
         Raises:
             GuardOnDataDependentSymNode: If the expression contains unbacked symbols
-                (data-dependent values) that cannot be resolved to concrete values.
+            (data-dependent values) that cannot be resolved to concrete values.
 
         See Also:
             optimization_hint: For cases where fallback/heuristic values are acceptable
@@ -705,6 +729,9 @@ class SizeVarAllocator:
     ) -> int:
         """
         Return a concrete integer hint for an expression.
+
+        This function should be used for non-guarding based optimizations. If you
+        want a hint that you can guard on, use the guarding_hint API instead.
 
         This function will hint unbacked symbols using user provided optimization
         hints. If not provided, fallback will be used along with some heuristics
@@ -975,8 +1002,8 @@ class SizeVarAllocator:
                 }
                 # Each node is its own leader/parent initially
                 self.leader = list(range(len(self.expressions)))
-                # Track rank for union-by-rank
-                self.rank = [1] * len(self.expressions)
+                # Track size for union-by-size
+                self.size = [1] * len(self.expressions)
 
                 # Takes each edge from the undirected graph and starts merging them.
                 self._build_canonical_expr_mapping()
@@ -998,7 +1025,7 @@ class SizeVarAllocator:
                     return False  # already connected
                 leader, other = self.choose_leader(rootA, rootB)
                 self.leader[other] = leader
-                self.rank[leader] += self.rank[other]
+                self.size[leader] += self.size[other]
                 return True
 
             def find_expr(self, expr: Expr):
@@ -1014,12 +1041,13 @@ class SizeVarAllocator:
             def choose_leader(self, a: int, b: int):
                 """
                 The leader will become the canonical expression.
+                Returns a (leader, follower) tuple.
 
                 Here are the heuristics used for choosing a leader:
                 1. Backed expression or constants preferred over unbacked expr
                 2. Simpler sub-expr when one contains the other
                 3. Higher frequency across equalities from deferred runtime assertions
-                4. Rank/size of the set
+                4. Size of the set
                 5. Fallback to sympy.Basic.compare
                 """
 
@@ -1049,10 +1077,10 @@ class SizeVarAllocator:
                     if degrees_lhs != degrees_rhs:
                         return degrees_lhs > degrees_rhs
 
-                    # Try to apply union-by-rank optimization to flatten the
+                    # Try to apply union-by-size optimization to flatten the
                     # leader trees.
-                    if self.rank[x] != self.rank[y]:
-                        return self.rank[x] > self.rank[y]
+                    if self.size[x] != self.size[y]:
+                        return self.size[x] > self.size[y]
 
                     # Fallback to sympy.Basic.compare for a deterministic ordering.
                     return lhs.compare(rhs) == -1

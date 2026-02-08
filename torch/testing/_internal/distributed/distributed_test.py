@@ -207,7 +207,10 @@ def get_profiling_event(event_name, profiler, dedup_gpu_user_annotation=False):
         for event in event_list
         if (
             (event.name.endswith(event_name) or event.name.startswith(event_name))
-            and (not dedup_gpu_user_annotation or event.device_type != DeviceType.CUDA)
+            and (
+                not dedup_gpu_user_annotation
+                or event.device_type not in [DeviceType.CUDA, DeviceType.XPU]
+            )
         )
     ]
 
