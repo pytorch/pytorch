@@ -313,9 +313,27 @@ class TestInputPlacements(TestCase):
     def test_get_1d_output_placements_scalar(self):
         t = torch.tensor(1.0)
         placements = get_1d_output_placements_for_tensor(t)
-        # Should have only Replicate (no Shard or Partial for scalars)
-        self.assertEqual(len(placements), 1)
+        # Scalars should have Replicate + 4 Partial (sum, avg, min, max)
+        self.assertEqual(len(placements), 5)
         self.assertIsInstance(placements[0], Replicate)
+        partial_ops = {p.reduce_op for p in placements if isinstance(p, Partial)}
+        self.assertEqual(partial_ops, {"sum", "avg", "min", "max"})
+
+    def test_get_1d_output_placements_integer_scalar(self):
+        t = torch.tensor(1)
+        placements = get_1d_output_placements_for_tensor(t)
+        # Integer scalars should have Replicate + 2 Partial (min, max only)
+        self.assertEqual(len(placements), 3)
+        partial_ops = {p.reduce_op for p in placements if isinstance(p, Partial)}
+        self.assertEqual(partial_ops, {"min", "max"})
+
+    def test_get_1d_input_placements_scalar_with_partial(self):
+        t = torch.tensor(1.0)
+        placements = get_1d_input_placements_for_tensor(t, include_partial=True)
+        # Scalars should have Replicate + 4 Partial
+        self.assertEqual(len(placements), 5)
+        partial_ops = {p.reduce_op for p in placements if isinstance(p, Partial)}
+        self.assertEqual(partial_ops, {"sum", "avg", "min", "max"})
 
 
 class TestExtractTensors(TestCase):
