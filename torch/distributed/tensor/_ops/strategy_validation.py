@@ -472,12 +472,6 @@ def validate_combination(
             device = tensors[0][1].device.type if tensors else "cpu"
             mesh = init_device_mesh(device, (world_size,))
 
-        # All-zero ground truth makes validation uninformative: zeros are
-        # invariant under all reduce operations, so every placement trivially
-        # matches and we can't distinguish valid from invalid rules.
-        if ground_truth.numel() > 0 and (ground_truth == 0).all():
-            return False, "all-zero ground truth"
-
         local_tensors = []
         for tensor_idx, ((name, tensor), placement) in enumerate(
             zip(tensors, combination.input_placements)
@@ -803,6 +797,13 @@ def compare_operator(
                     ground_truth = op(*sample.input, *sample.args, **sample.kwargs)
 
                 if not isinstance(ground_truth, torch.Tensor):
+                    continue
+
+                # Skip samples with all-zero output: zeros are invariant under
+                # all reduce ops (sum, max, min), making every placement trivially
+                # match. This produces hundreds of false positive "valid" rules.
+                if ground_truth.numel() > 0 and (ground_truth == 0).all():
+                    total_samples -= 1
                     continue
             except Exception:
                 continue
