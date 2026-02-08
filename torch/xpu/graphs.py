@@ -13,6 +13,7 @@ from .._utils import _dummy_type
 
 
 __all__ = [
+    "is_current_stream_capturing",
     "graph_pool_handle",
     "XPUGraph",
     "graph",
@@ -24,8 +25,18 @@ if not hasattr(torch._C, "_XpuStreamBase"):
     torch._C.__dict__["_XPUGraph"] = _dummy_type("_XPUGraph")
     torch._C.__dict__["_xpu_graph_pool_handle"] = _dummy_type("_xpu_graph_pool_handle")
 
-from torch._C import _xpu_graph_pool_handle, _XPUGraph
+from torch._C import (  # noqa: F401
+    _xpu_isCurrentStreamCapturing,
+    _XPUGraph,
+    _xpu_graph_pool_handle,
+)
 
+def is_current_stream_capturing() -> bool:
+    r"""Return True if XPU graph capture is underway on the current XPU stream, False otherwise.
+
+    If a XPU context does not exist on the current device, returns False without initializing the context.
+    """
+    return _xpu_isCurrentStreamCapturing()
 
 def graph_pool_handle() -> _POOL_HANDLE:
     r"""Return an opaque token representing the id of a graph memory pool."""
