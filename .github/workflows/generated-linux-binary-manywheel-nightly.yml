@@ -425,7 +425,7 @@ jobs:
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@65a9edc5881444af0b9093a5e628f2fe47ea3b2e # v4.1.7
         name: Download Build Artifacts
         with:
           name: manywheel-py3_10-rocm7_1
@@ -541,7 +541,7 @@ jobs:
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@65a9edc5881444af0b9093a5e628f2fe47ea3b2e # v4.1.7
         name: Download Build Artifacts
         with:
           name: manywheel-py3_10-rocm7_2
@@ -657,7 +657,7 @@ jobs:
         uses: pytorch/pytorch/.github/actions/setup-xpu@main
       - name: Login to ECR
         uses: pytorch/pytorch/.github/actions/ecr-login@main
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@65a9edc5881444af0b9093a5e628f2fe47ea3b2e # v4.1.7
         name: Download Build Artifacts
         with:
           name: manywheel-py3_10-xpu
@@ -1092,7 +1092,7 @@ jobs:
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@65a9edc5881444af0b9093a5e628f2fe47ea3b2e # v4.1.7
         name: Download Build Artifacts
         with:
           name: manywheel-py3_11-rocm7_1
@@ -1208,7 +1208,7 @@ jobs:
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@65a9edc5881444af0b9093a5e628f2fe47ea3b2e # v4.1.7
         name: Download Build Artifacts
         with:
           name: manywheel-py3_11-rocm7_2
@@ -1324,7 +1324,7 @@ jobs:
         uses: pytorch/pytorch/.github/actions/setup-xpu@main
       - name: Login to ECR
         uses: pytorch/pytorch/.github/actions/ecr-login@main
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@65a9edc5881444af0b9093a5e628f2fe47ea3b2e # v4.1.7
         name: Download Build Artifacts
         with:
           name: manywheel-py3_11-xpu
@@ -1759,7 +1759,7 @@ jobs:
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@65a9edc5881444af0b9093a5e628f2fe47ea3b2e # v4.1.7
         name: Download Build Artifacts
         with:
           name: manywheel-py3_12-rocm7_1
@@ -1875,7 +1875,7 @@ jobs:
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@65a9edc5881444af0b9093a5e628f2fe47ea3b2e # v4.1.7
         name: Download Build Artifacts
         with:
           name: manywheel-py3_12-rocm7_2
@@ -1991,7 +1991,7 @@ jobs:
         uses: pytorch/pytorch/.github/actions/setup-xpu@main
       - name: Login to ECR
         uses: pytorch/pytorch/.github/actions/ecr-login@main
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@65a9edc5881444af0b9093a5e628f2fe47ea3b2e # v4.1.7
         name: Download Build Artifacts
         with:
           name: manywheel-py3_12-xpu
@@ -2426,7 +2426,7 @@ jobs:
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@65a9edc5881444af0b9093a5e628f2fe47ea3b2e # v4.1.7
         name: Download Build Artifacts
         with:
           name: manywheel-py3_13-rocm7_1
@@ -2542,7 +2542,7 @@ jobs:
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@65a9edc5881444af0b9093a5e628f2fe47ea3b2e # v4.1.7
         name: Download Build Artifacts
         with:
           name: manywheel-py3_13-rocm7_2
@@ -2658,7 +2658,7 @@ jobs:
         uses: pytorch/pytorch/.github/actions/setup-xpu@main
       - name: Login to ECR
         uses: pytorch/pytorch/.github/actions/ecr-login@main
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@65a9edc5881444af0b9093a5e628f2fe47ea3b2e # v4.1.7
         name: Download Build Artifacts
         with:
           name: manywheel-py3_13-xpu
@@ -3093,7 +3093,7 @@ jobs:
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@65a9edc5881444af0b9093a5e628f2fe47ea3b2e # v4.1.7
         name: Download Build Artifacts
         with:
           name: manywheel-py3_13t-rocm7_1
@@ -3209,7 +3209,7 @@ jobs:
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@65a9edc5881444af0b9093a5e628f2fe47ea3b2e # v4.1.7
         name: Download Build Artifacts
         with:
           name: manywheel-py3_13t-rocm7_2
@@ -3325,7 +3325,7 @@ jobs:
         uses: pytorch/pytorch/.github/actions/setup-xpu@main
       - name: Login to ECR
         uses: pytorch/pytorch/.github/actions/ecr-login@main
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@65a9edc5881444af0b9093a5e628f2fe47ea3b2e # v4.1.7
         name: Download Build Artifacts
         with:
           name: manywheel-py3_13t-xpu
@@ -3760,7 +3760,7 @@ jobs:
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@65a9edc5881444af0b9093a5e628f2fe47ea3b2e # v4.1.7
         name: Download Build Artifacts
         with:
           name: manywheel-py3_14-rocm7_1
@@ -3876,7 +3876,7 @@ jobs:
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@65a9edc5881444af0b9093a5e628f2fe47ea3b2e # v4.1.7
         name: Download Build Artifacts
         with:
           name: manywheel-py3_14-rocm7_2
@@ -3992,7 +3992,7 @@ jobs:
         uses: pytorch/pytorch/.github/actions/setup-xpu@main
       - name: Login to ECR
         uses: pytorch/pytorch/.github/actions/ecr-login@main
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@65a9edc5881444af0b9093a5e628f2fe47ea3b2e # v4.1.7
         name: Download Build Artifacts
         with:
           name: manywheel-py3_14-xpu
@@ -4427,7 +4427,7 @@ jobs:
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@65a9edc5881444af0b9093a5e628f2fe47ea3b2e # v4.1.7
         name: Download Build Artifacts
         with:
           name: manywheel-py3_14t-rocm7_1
@@ -4543,7 +4543,7 @@ jobs:
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@65a9edc5881444af0b9093a5e628f2fe47ea3b2e # v4.1.7
         name: Download Build Artifacts
         with:
           name: manywheel-py3_14t-rocm7_2
@@ -4659,7 +4659,7 @@ jobs:
         uses: pytorch/pytorch/.github/actions/setup-xpu@main
       - name: Login to ECR
         uses: pytorch/pytorch/.github/actions/ecr-login@main
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@65a9edc5881444af0b9093a5e628f2fe47ea3b2e # v4.1.7
         name: Download Build Artifacts
         with:
           name: manywheel-py3_14t-xpu
