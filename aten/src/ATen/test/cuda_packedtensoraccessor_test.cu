@@ -46,7 +46,7 @@ TEST(PackedtensoraccessorTest, PackedtensoraccessorTestCUDA) {
   ASSERT_TRUE(res.allclose(expected));
 }
 
-// Test the new metadata-based approach for RestrictPtrTraits workaround
+// Test the metadata-based approach for RestrictPtrTraits workaround
 __global__ void test_metadata_accessor_kernel(
     float* __restrict__ res_data,
     const float* __restrict__ t1_data,
@@ -84,6 +84,7 @@ __global__ void test_offset_accessor_kernel(
   }
 }
 
+// Verify metadata + __restrict__ pointer approach computes correct matrix-vector product
 TEST(PackedtensoraccessorTest, MetadataAccessorTestCUDA) {
   if (!at::cuda::is_available()) return;
   manual_seed(456);
@@ -92,19 +93,16 @@ TEST(PackedtensoraccessorTest, MetadataAccessorTestCUDA) {
   Tensor t2 = rand({4}, CUDA(kFloat));
   Tensor res = empty({4}, CUDA(kFloat));
 
-  // Create accessors to extract metadata
   auto t1a = t1.packed_accessor64<float, 2, RestrictPtrTraits>();
   auto t2a = t2.packed_accessor64<float, 1, RestrictPtrTraits>();
   auto resa = res.packed_accessor64<float, 1, RestrictPtrTraits>();
 
-  // Extract metadata using the new API
   auto t1_meta = make_packed_accessor_metadata(t1a);
   auto t2_meta = make_packed_accessor_metadata(t2a);
   auto res_meta = make_packed_accessor_metadata(resa);
 
   auto stream = at::cuda::getCurrentCUDAStream();
 
-  // Test with packed_accessor_get
   test_metadata_accessor_kernel<<<1, 1, 0, stream>>>(
       res.data_ptr<float>(),
       t1.data_ptr<float>(),
@@ -116,7 +114,6 @@ TEST(PackedtensoraccessorTest, MetadataAccessorTestCUDA) {
   auto expected = mv(t1, t2);
   ASSERT_TRUE(res.allclose(expected));
 
-  // Reset and test with packed_accessor_offset
   res.zero_();
   test_offset_accessor_kernel<<<1, 1, 0, stream>>>(
       res.data_ptr<float>(),
@@ -133,19 +130,16 @@ TEST(PackedtensoraccessorTest, MetadataAccessorTestCUDA) {
 TEST(PackedtensoraccessorTest, MetadataValuesTestCUDA) {
   if (!at::cuda::is_available()) return;
 
-  // Create a strided tensor to test non-trivial strides
   Tensor t = rand({8, 6, 4}, CUDA(kFloat));
-  Tensor t_strided = t.transpose(0, 1);  // Now shape [6, 8, 4] with non-contiguous strides
+  Tensor t_strided = t.transpose(0, 1);
 
   auto acc = t_strided.packed_accessor64<float, 3, RestrictPtrTraits>();
   auto meta = make_packed_accessor_metadata(acc);
 
-  // Verify sizes match
   ASSERT_EQ(meta.size(0), acc.size(0));
   ASSERT_EQ(meta.size(1), acc.size(1));
   ASSERT_EQ(meta.size(2), acc.size(2));
 
-  // Verify strides match
   ASSERT_EQ(meta.stride(0), acc.stride(0));
   ASSERT_EQ(meta.stride(1), acc.stride(1));
   ASSERT_EQ(meta.stride(2), acc.stride(2));

@@ -399,27 +399,13 @@ struct HeaderOnlyIndexBoundsCheck {
 // RestrictPtrTraits Workaround
 // ============================================================================
 // NVIDIA's nvcc does not recognize __restrict__ on member pointers in structs
-// passed to kernels (see https://github.com/pytorch/pytorch/issues/76632).
-// This means RestrictPtrTraits has no effect when using PackedTensorAccessor.
+// passed to kernels. This means RestrictPtrTraits has no effect when 
+// using PackedTensorAccessor.
 //
 // The workaround is to decouple the pointer from the accessor metadata:
 //   1. Pass the data pointer as a separate __restrict__ kernel argument
 //   2. Pass the metadata (sizes/strides) in a PackedTensorAccessorMetadata
 //   3. Use packed_accessor_index() to compute offsets
-//
-// Example usage in CUDA kernel:
-//   __global__ void kernel(
-//       float* __restrict__ data,
-//       PackedTensorAccessorMetadata<3, int32_t> meta) {
-//     // Access element at [i][j][k]:
-//     int64_t offset = packed_accessor_offset(meta, i, j, k);
-//     data[offset] = ...;
-//   }
-//
-// On host, create metadata from an existing accessor:
-//   auto accessor = tensor.packed_accessor32<float, 3>();
-//   auto meta = make_packed_accessor_metadata(accessor);
-//   kernel<<<...>>>(tensor.data_ptr<float>(), meta);
 // ============================================================================
 
 /// Holds only the sizes and strides for a packed tensor accessor.
@@ -509,7 +495,6 @@ C10_HOST_DEVICE index_t packed_accessor_offset_impl(
 } // namespace detail
 
 /// Compute the linear offset for given indices using accessor metadata.
-/// Usage: packed_accessor_offset(meta, i, j, k) for a 3D accessor
 template <size_t N, typename index_t, typename... Indices>
 C10_HOST_DEVICE index_t packed_accessor_offset(
     const PackedTensorAccessorMetadata<N, index_t>& meta,
@@ -531,7 +516,6 @@ C10_HOST_DEVICE T& packed_accessor_get(
   return data[packed_accessor_offset(meta, indices...)];
 }
 
-/// Const version of packed_accessor_get.
 template <typename T, size_t N, typename index_t, typename... Indices>
 C10_HOST_DEVICE const T& packed_accessor_get(
     const T* data,

@@ -72,7 +72,6 @@ list(APPEND ATen_CUDA_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_integer_divider_test.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_optional_test.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_packedtensoraccessor_test.cu
-  ${CMAKE_CURRENT_SOURCE_DIR}/cuda_restrict_benchmark.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_restrict_migration_benchmark.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_reportMemoryUsage_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_allocatorTraceTracker_test.cpp
