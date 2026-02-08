@@ -1136,14 +1136,7 @@ def check_sharded_parity(
     replicated_module: nn.Module,
     sharded_module: nn.Module,
     prefixes_to_ignore: tuple[str, ...] = (),
-    atol: float | None = None,
-    rtol: float | None = None,
 ):
-    tol_kwargs: dict[str, float] = {}
-    if atol is not None:
-        tol_kwargs["atol"] = atol
-    if rtol is not None:
-        tol_kwargs["rtol"] = rtol
     for (replicated_name, replicated_param), (sharded_name, sharded_param) in zip(
         replicated_module.named_parameters(),
         sharded_module.named_parameters(),
@@ -1157,23 +1150,22 @@ def check_sharded_parity(
         if not isinstance(sharded_param, DTensor):
             raise AssertionError("Expected sharded_param to be a DTensor")  # mypy
         mesh, placements = sharded_param.device_mesh, sharded_param.placements
+        if tuple(placements) == (Shard(0), Shard(0)):
+            raise AssertionError(
+                "FSDP's (Shard(0), Shard(0)) layout differs from distribute_tensor(), "
+                "so we cannot check for equality using it"
+            )
         sharded_ref_param = distribute_tensor(replicated_param, mesh, placements)
-        cls.assertEqual(
-            sharded_param.to_local(), sharded_ref_param.to_local(), **tol_kwargs
-        )
+        cls.assertEqual(sharded_param.to_local(), sharded_ref_param.to_local())
         if replicated_param.grad is None:
             cls.assertIsNone(sharded_param.grad)
             continue
         cls.assertIsNotNone(sharded_param.grad)
+        sharded_ref_grad = distribute_tensor(replicated_param.grad, mesh, placements)
         cls.assertIsInstance(sharded_param.grad, DTensor)
         if not isinstance(sharded_param.grad, DTensor):
             raise AssertionError("Expected sharded_param.grad to be a DTensor")  # mypy
-        sharded_ref_grad = distribute_tensor(replicated_param.grad, mesh, placements)
-        cls.assertEqual(
-            sharded_param.grad.to_local(),
-            sharded_ref_grad.to_local(),
-            **tol_kwargs,
-        )
+        cls.assertEqual(sharded_param.grad.to_local(), sharded_ref_grad.to_local())
 
 
 @unittest.skipIf(TEST_XPU, "not-support-multithread")
