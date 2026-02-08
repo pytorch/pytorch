@@ -951,9 +951,46 @@ Establish baseline visibility into PyTorch's third-party and vendored dependenci
 
 ---
 
-### M10 — (Planned)
+### M10 — Third-Party Risk & License Classification ✅ COMPLETE
 
-See [`docs/refactor/audit/REFACTOR_PHASE_MAP.md`](docs/refactor/audit/REFACTOR_PHASE_MAP.md) for full Phase 1 plan.
+**Status:** 🔒 Closed and Locked  
+**Date:** 2026-02-08  
+**Effort:** 2 hours  
+**Change Class:** Pure Analysis + Documentation
+
+**Intent:**
+Convert M09 SBOM baseline into actionable risk intelligence by classifying all 42 third-party components across license, provenance, ownership, and risk dimensions.
+
+**Deliverables:**
+- ✅ `docs/refactor/sbom/M10_RISK_MATRIX.md` — Component-level risk classification
+- ✅ `M10_audit.md` — Compliance verification
+- ✅ `M10_summary.md` — Milestone summary
+
+**Key Findings:**
+- 32 components (76%) classified as Low risk (permissive, high provenance)
+- 3 components classified as High risk (mslk, aiter: unknown license; valgrind-headers: GPL)
+- 1 component classified as Medium risk (concurrentqueue: dual-license)
+- 4 components classified as Informational (dev/test-only)
+
+**Outcome:**
+SBOM baseline analyzed and risk-classified. Supply chain understanding established.
+
+**Non-Goals (Honored):**
+- ❌ No license remediation
+- ❌ No dependency upgrades
+- ❌ No CVE scanning
+- ❌ No CI enforcement changes
+- ❌ No external repository fetching
+
+**Closeout Artifacts:**
+- [`docs/refactor/milestones/M10/M10_plan.md`](docs/refactor/milestones/M10/M10_plan.md)
+- [`docs/refactor/milestones/M10/M10_toolcalls.md`](docs/refactor/milestones/M10/M10_toolcalls.md)
+- [`docs/refactor/milestones/M10/M10_audit.md`](docs/refactor/milestones/M10/M10_audit.md)
+- [`docs/refactor/milestones/M10/M10_summary.md`](docs/refactor/milestones/M10/M10_summary.md)
+
+---
+
+**Phase 1 Complete.** See [`docs/refactor/audit/REFACTOR_PHASE_MAP.md`](docs/refactor/audit/REFACTOR_PHASE_MAP.md) for Phase 2 planning.
 
 ---
 
@@ -971,7 +1008,7 @@ From baseline audit, top risks requiring mitigation:
 | **I02** | Empty REFACTOR.md | P0 | ✅ Resolved | M00-M02 |
 | **I03** | 130+ CI Workflows (Maintenance) | P1 | ✅ Mitigated | M03-M05 (audit + linting) |
 | **I04** | Mixed Action Pinning | P1 | ✅ Mitigated (external) | M06 (internal deferred to M06-V01) |
-| **I05** | Third-Party Supply Chain Risk | P1 | 🟡 Visibility Established | M09 (SBOM baseline), M10 (planned) |
+| **I05** | Third-Party Supply Chain Risk | P1 | ✅ Risk-Classified | M09 (SBOM baseline), M10 (risk matrix) |
 | **I06** | Implicit Distributed Protocol | P2 | 🔵 Active | M11-M12 |
 | **I07** | No Pre-Commit Hooks | P2 | 🔵 Active | M13-M14 |
 
@@ -992,15 +1029,15 @@ From baseline audit, top risks requiring mitigation:
 | Phase | Milestones | Complete | In Progress | Planned |
 |-------|-----------|----------|-------------|---------|
 | **Phase 0** | M00-M02 | 3 (M00, M01, M02) | 0 | 0 |
-| **Phase 1** | M03-M10 | 7 (M03, M04, M05, M06, M07, M08, M09) | 0 | 1 |
+| **Phase 1** | M03-M10 | 8 (M03, M04, M05, M06, M07, M08, M09, M10) | 0 | 0 |
 | **Phase 2** | M11-M14 | 0 | 0 | 4 |
 | **Phase 3** | M15-M19 | 0 | 0 | 5 |
 | **Phase 4** | M20+ | 0 | 0 | TBD |
 
-**Program Progress:** 10/22 milestones complete (45%)  
+**Program Progress:** 11/22 milestones complete (50%)  
 **Phase 0:** ✅ Complete  
-**Phase 1:** 🔄 In Progress (7/8 complete)  
-**Estimated Remaining:** ~120 hours (M10-M19)
+**Phase 1:** ✅ Complete  
+**Estimated Remaining:** ~100 hours (M11-M19)
 
 ---
 
@@ -1017,8 +1054,9 @@ From baseline audit, top risks requiring mitigation:
 | 2026-02-08 | M07 (Dependabot Actions) | 8/10 | 7/10 | 8/10 | 6.5/10 | Maintained |
 | 2026-02-08 | M08 (CI Truthfulness) | 8/10 | 7/10 | 8.5/10 | 6.5/10 | Maintained |
 | 2026-02-08 | M09 (SBOM Baseline) | 8/10 | 7/10 | 8.5/10 | 7/10 | Maintained |
+| 2026-02-08 | M10 (Risk Matrix) | 8/10 | 7/10 | 8.5/10 | 7/10 | Maintained |
 
-*Security score improved: SBOM baseline establishes first machine-readable dependency inventory. Supply chain visibility now auditable.
+*Phase 1 Complete: Supply chain now has visibility (M09) and risk classification (M10). Security score at target 7/10.
 
 **Targets (Post-Phase 3):**
 - Architecture: Maintain 8/10
@@ -1050,11 +1088,11 @@ For program-level recovery, consult: [`docs/refactor/toolcalls.md`](docs/refacto
 
 ## Document Version
 
-**Last Updated:** 2026-02-08 (M09 closeout)  
-**Next Update:** M10 completion  
+**Last Updated:** 2026-02-08 (M10 closeout — Phase 1 Complete)  
+**Next Update:** M11 planning  
 **Baseline Locked:** Commit c5f1d40  
 **Phase 0:** ✅ Complete  
-**Phase 1:** 🔄 In Progress (7/8 milestones complete)
+**Phase 1:** ✅ Complete (8/8 milestones)
 
 ---
 
