@@ -62,6 +62,11 @@ class _SingleDimStrategyInfo:
     func: _SingleDimStrategyFunc
     allow_unbacked_sharding: bool | None = field(default=None)
 
+    # Delegate to func so this can be used interchangeably with a raw
+    # _SingleDimStrategyFunc (e.g. in tests that call strategy functions directly).
+    def __call__(self, *args, **kwargs):
+        return self.func(*args, **kwargs)
+
 
 def _insert_single_dim_replication_strategy(
     single_dim_strategies_with_placeholders: list[

@@ -1167,7 +1167,7 @@ class TestSingleDimStrategies(DTensorOpTestBase):
         strategies = pytree.tree_map_only(
             _ShardingPlaceholder,
             lambda s: Shard(s.dim),
-            single_dim_strats[aten_op].func(aten_op, args_meta, kwargs_meta),
+            single_dim_strats[aten_op](aten_op, args_meta, kwargs_meta),
         )
         # TODO(pianpwk): handle multi-output once that lands for single-dim
         for output_placement, *input_placements in strategies:
