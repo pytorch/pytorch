@@ -835,7 +835,78 @@ Fork CI is guarded. Verification via static analysis and SHA cross-validation.
 
 ---
 
-### M07-M10 — CI Health (Planned)
+### M07 — Add Dependabot for GitHub Actions Updates ✅ COMPLETE
+
+**Status:** 🔒 Closed and Locked  
+**Date:** 2026-02-08  
+**Effort:** 1 hour  
+**Change Class:** Verification / Maintenance Automation (config-only)  
+**Merge:** e4c526820ee
+
+**Intent:**
+Enable Dependabot version updates for the `github-actions` ecosystem so pinned actions from M06 can be updated through reviewable PRs.
+
+**Deliverables:**
+- ✅ `.github/dependabot.yml` updated with `github-actions` ecosystem entry
+- ✅ Weekly schedule, 5 PR limit, matching label style
+- ✅ M06-B deferral honored via ignore rules (pytorch/pytorch, pytorch/test-infra)
+- ✅ Existing pip/transformers config preserved
+
+**Invariant Introduced:**
+- **INV-090** — Action Update Channel Exists: Automated mechanism proposes updates to GitHub Actions dependencies via PRs.
+
+**Closeout Artifacts:**
+- [`docs/refactor/milestones/M07/M07_plan.md`](docs/refactor/milestones/M07/M07_plan.md)
+- [`docs/refactor/milestones/M07/M07_toolcalls.md`](docs/refactor/milestones/M07/M07_toolcalls.md)
+- [`docs/refactor/milestones/M07/M07_audit.md`](docs/refactor/milestones/M07/M07_audit.md)
+- [`docs/refactor/milestones/M07/M07_summary.md`](docs/refactor/milestones/M07/M07_summary.md)
+
+---
+
+### M08 — CI Truthfulness & Silent-Failure Elimination ✅ COMPLETE
+
+**Status:** 🔒 Closed and Locked  
+**Date:** 2026-02-08  
+**Effort:** 2 hours  
+**Change Class:** CI Configuration (Behavior-Preserving)  
+**Merge:** e4c526820ee
+
+**Intent:**
+Perform comprehensive sweep of all 143 CI workflows to prove CI truthfulness — that green CI means all correctness-critical steps succeeded.
+
+**Deliverables:**
+- ✅ 143 workflow files scanned
+- ✅ ~500 silent-failure patterns classified
+- ✅ M04 fixes verified intact (5/5)
+- ✅ 9 inline justification comments added to 6 workflow files
+- ✅ CI Truthfulness Policy added to REFACTOR.md
+
+**Key Finding:**
+PyTorch CI is fundamentally healthy. 95%+ of `continue-on-error` patterns are intentional (cleanup, telemetry, cache).
+
+**Invariant Introduced:**
+- **CI Truthfulness Policy** — Documentation-first guardrail requiring inline justification for all `continue-on-error` patterns.
+
+**Non-Goals (Honored):**
+- ❌ No patterns removed (documentation only)
+- ❌ No new workflows
+- ❌ No test/product code changes
+
+**Verification:**
+- ✅ Comprehensive pattern classification in M08_findings.md
+- ✅ M04 fixes verified intact
+- ✅ CI passed
+
+**Closeout Artifacts:**
+- [`docs/refactor/milestones/M08/M08_plan.md`](docs/refactor/milestones/M08/M08_plan.md)
+- [`docs/refactor/milestones/M08/M08_toolcalls.md`](docs/refactor/milestones/M08/M08_toolcalls.md)
+- [`docs/refactor/milestones/M08/M08_findings.md`](docs/refactor/milestones/M08/M08_findings.md)
+- [`docs/refactor/milestones/M08/M08_audit.md`](docs/refactor/milestones/M08/M08_audit.md)
+- [`docs/refactor/milestones/M08/M08_summary.md`](docs/refactor/milestones/M08/M08_summary.md)
+
+---
+
+### M09-M10 — CI Health (Planned)
 
 See [`docs/refactor/audit/REFACTOR_PHASE_MAP.md`](docs/refactor/audit/REFACTOR_PHASE_MAP.md) for full Phase 1 plan.
 
@@ -876,15 +947,15 @@ From baseline audit, top risks requiring mitigation:
 | Phase | Milestones | Complete | In Progress | Planned |
 |-------|-----------|----------|-------------|---------|
 | **Phase 0** | M00-M02 | 3 (M00, M01, M02) | 0 | 0 |
-| **Phase 1** | M03-M10 | 5 (M03, M04, M05, M06, M07) | 1 (M08) | 2 |
+| **Phase 1** | M03-M10 | 6 (M03, M04, M05, M06, M07, M08) | 0 | 2 |
 | **Phase 2** | M11-M14 | 0 | 0 | 4 |
 | **Phase 3** | M15-M19 | 0 | 0 | 5 |
 | **Phase 4** | M20+ | 0 | 0 | TBD |
 
-**Program Progress:** 8/22 milestones complete (36%)  
+**Program Progress:** 9/22 milestones complete (41%)  
 **Phase 0:** ✅ Complete  
-**Phase 1:** 🔄 In Progress (5/8 complete, M08 in progress)  
-**Estimated Remaining:** ~140 hours (M08-M19)
+**Phase 1:** 🔄 In Progress (6/8 complete)  
+**Estimated Remaining:** ~130 hours (M09-M19)
 
 ---
 
@@ -899,8 +970,9 @@ From baseline audit, top risks requiring mitigation:
 | 2026-02-08 | M05 (Actionlint Added) | 8/10 | 7/10 | 7.5/10 | 6/10 | Maintained |
 | 2026-02-08 | M06 (Action Pinning) | 8/10 | 7/10 | 8/10 | 6.5/10 | Maintained |
 | 2026-02-08 | M07 (Dependabot Actions) | 8/10 | 7/10 | 8/10 | 6.5/10 | Maintained |
+| 2026-02-08 | M08 (CI Truthfulness) | 8/10 | 7/10 | 8.5/10 | 6.5/10 | Maintained |
 
-*CI score maintained: Dependabot enables sustainable maintenance of pinned actions. Security unchanged (INV-090 observational).
+*CI score improved: CI Truthfulness Policy established. All silent-failure patterns classified and documented.
 
 **Targets (Post-Phase 3):**
 - Architecture: Maintain 8/10
@@ -932,11 +1004,11 @@ For program-level recovery, consult: [`docs/refactor/toolcalls.md`](docs/refacto
 
 ## Document Version
 
-**Last Updated:** 2026-02-08 (M08 in progress)  
-**Next Update:** M08 completion  
+**Last Updated:** 2026-02-08 (M08 closeout)  
+**Next Update:** M09 completion  
 **Baseline Locked:** Commit c5f1d40  
 **Phase 0:** ✅ Complete  
-**Phase 1:** 🔄 In Progress (5/8 milestones complete)
+**Phase 1:** 🔄 In Progress (6/8 milestones complete)
 
 ---
 

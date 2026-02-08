@@ -100,5 +100,26 @@
 - **Tool:** git commit/push
 - **Purpose:** Commit closeout documents
 - **Files:** M08_audit.md, M08_summary.md, M08_toolcalls.md
+- **Status:** Complete
+
+### Entry 014
+- **Timestamp:** 2026-02-08T21:35:00Z
+- **Tool:** git merge
+- **Purpose:** Merge m08-ci-truthfulness branch to main
+- **Files:** N/A
+- **Status:** Complete - Merge commit e4c526820ee
+
+### Entry 015
+- **Timestamp:** 2026-02-08T21:36:00Z
+- **Tool:** search_replace
+- **Purpose:** Update REFACTOR.md with M08 closeout entry
+- **Files:** REFACTOR.md
+- **Status:** Complete
+
+### Entry 016
+- **Timestamp:** 2026-02-08T21:38:00Z
+- **Tool:** write
+- **Purpose:** Create M09 milestone folder and seed files
+- **Files:** `docs/refactor/milestones/M09/M09_plan.md`, `M09_toolcalls.md`
 - **Status:** Starting
 
