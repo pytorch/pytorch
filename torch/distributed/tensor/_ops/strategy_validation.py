@@ -376,28 +376,29 @@ def _create_partial_input(
     """
     reduce_op = placement.reduce_op
 
-    if reduce_op == "sum":
+    if reduce_op in ("sum", "avg"):
         base_ratio = 0.6 + 0.1 * (tensor_idx % 3)
+
+        # Add a sign-varying offset so local values have mixed signs.
+        # Pure proportional splits (tensor * ratio) preserve sign patterns,
+        # causing non-linear ops like abs to falsely validate P(sum)->P(sum).
+        flat = tensor.flatten()
+        offset_mag = flat.abs() + 1.0
+        signs = torch.ones_like(flat)
+        signs[
+            (torch.arange(flat.numel(), device=tensor.device) + tensor_idx) % 2 == 0
+        ] = -1.0
+        offset = (offset_mag * signs).reshape(tensor.shape)
+
+        scale = world_size if reduce_op == "avg" else 1
         local_tensors = {}
         for r in range(world_size):
             if r == 0:
-                local_tensors[r] = tensor.clone() * base_ratio
+                local_tensors[r] = tensor.clone() * base_ratio * scale + offset
             else:
                 local_tensors[r] = tensor.clone() * (
                     (1 - base_ratio) / (world_size - 1)
-                )
-        return LocalTensor(local_tensors)
-
-    elif reduce_op == "avg":
-        base_ratio = 0.6 + 0.1 * (tensor_idx % 3)
-        local_tensors = {}
-        for r in range(world_size):
-            if r == 0:
-                local_tensors[r] = tensor.clone() * base_ratio * world_size
-            else:
-                local_tensors[r] = (
-                    tensor.clone() * ((1 - base_ratio) / (world_size - 1)) * world_size
-                )
+                ) * scale - offset / (world_size - 1)
         return LocalTensor(local_tensors)
 
     elif reduce_op == "min":
