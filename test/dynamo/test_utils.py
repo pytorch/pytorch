@@ -212,6 +212,32 @@ class TestUtils(TestCase):
         fn(x)
         self.assertEqual(traced_code_lists, [])
 
+    def test_add_record_function_data(self):
+        with (
+            mock.patch("torch.autograd.profiler._is_profiler_enabled", False),
+            mock.patch("torch.autograd.profiler.record_function") as mock_rf,
+        ):
+            utils.CompileEventLogger.add_record_function_data(
+                "test_event", key1="value1", key2="value2"
+            )
+            mock_rf.assert_not_called()
+
+        with (
+            mock.patch("torch.autograd.profiler._is_profiler_enabled", True),
+            mock.patch("torch.autograd.profiler.record_function") as mock_rf,
+        ):
+            utils.CompileEventLogger.add_record_function_data("test_event")
+            mock_rf.assert_not_called()
+
+        with (
+            mock.patch("torch.autograd.profiler._is_profiler_enabled", True),
+            mock.patch("torch.autograd.profiler.record_function") as mock_rf,
+        ):
+            utils.CompileEventLogger.add_record_function_data(
+                "test_event", key1="value1", key2="value2"
+            )
+            mock_rf.assert_called_once_with("test_event_data: key1=value1, key2=value2")
+
 
 class TestModel(torch.nn.Module):
     def __init__(self):
