@@ -1,14 +1,20 @@
-# M09_plan — SBOM Generation for Vendored Dependencies
+Got it — thanks for the correction.
+We’ll treat this as **one complete milestone**, not a split. The accidental “A” goes away.
+
+Below is the **regenerated, authoritative plan for the full milestone**, named **M09**, suitable to hand directly to Cursor.
+
+---
+
+# **M09_plan — Third-Party Supply Chain Inventory & SBOM Baseline**
 
 ## 1. Intent / Target
 
-**Primary objective:**
-Generate a Software Bill of Materials (SBOM) for PyTorch's vendored dependencies in `third_party/` to establish supply chain visibility.
+Establish a **baseline, auditable understanding of third-party and vendored dependencies** in the repository by producing a **machine-readable SBOM** and a **human-readable third-party inventory**.
 
-This milestone addresses **I05 (Third-Party Supply Chain Risk)** from the baseline audit.
+This milestone is about **visibility and traceability**, not remediation or enforcement.
 
-> **What would remain unsafe without this work?**  
-> Without an SBOM, there is no machine-readable inventory of vendored dependencies. Security scanning, license compliance, and vulnerability tracking require manual inspection of 30+ vendored projects.
+> **What remains unsafe without this work?**
+> Without a baseline inventory, third-party risk is implicit and unbounded. Security posture, licensing exposure, and provenance cannot be reasoned about, audited, or compared across time.
 
 ---
 
@@ -16,123 +22,199 @@ This milestone addresses **I05 (Third-Party Supply Chain Risk)** from the baseli
 
 ### In Scope
 
-* Generate SBOM in CycloneDX or SPDX format
-* Document vendored dependencies in `third_party/`
-* Create human-readable version summary
-* Add CI workflow for SBOM generation (if feasible)
+**Third-party and vendored code discovery**, including but not limited to:
 
-### Out of Scope
+* `third_party/`
+* Vendored or embedded libraries under:
 
-* No dependency upgrades
-* No removal of vendored code
-* No changes to build system
-* No pip/conda SBOM (different ecosystem)
-* No action pinning work (M06/M07 complete)
+  * `aten/`
+  * `c10/`
+  * `torch/csrc/`
+* Generated vendored artifacts **only as inventory items** (not modification targets)
 
----
+**Artifacts to be produced:**
 
-## 3. Invariants
+* A **machine-readable SBOM**:
 
-| Invariant | Verification Method |
-|-----------|---------------------|
-| No product code changes | Diff limited to docs + CI |
-| No build system changes | No CMake/setup.py modifications |
-| Existing CI unaffected | SBOM generation is additive |
+  * CycloneDX JSON (preferred), or
+  * SPDX JSON (acceptable)
+* A **human-readable inventory document** mapping:
 
----
+  * component → location
+  * version / commit (if known)
+  * license (if detectable)
+  * provenance notes
+* Explicit documentation of **unknowns and evidence gaps**
 
-## 4. Verification Plan
+### Explicitly Out of Scope
 
-**Success criteria:**
-
-* SBOM file validates against schema
-* All `third_party/` subdirectories represented
-* Version information captured where available
-* CI workflow runs successfully (if added)
-
----
-
-## 5. Implementation Steps
-
-1. **Inventory `third_party/`**
-   * List all vendored dependencies
-   * Identify version sources (CMakeLists.txt, README, etc.)
-
-2. **Select SBOM tool**
-   * Options: `syft`, `cyclonedx-cli`, manual generation
-   * Constraint: Must run in CI (per AGENTS.md, no local installs)
-
-3. **Generate SBOM**
-   * CycloneDX JSON preferred
-   * Include: name, version, license, source URL
-
-4. **Create human-readable summary**
-   * `THIRD_PARTY_VERSIONS.md` in docs/refactor/
-
-5. **Add CI workflow (optional)**
-   * Generate SBOM on schedule or release tags
-   * Upload as artifact
-
-6. **Update governance docs**
-   * Record in REFACTOR.md
+* ❌ Dependency upgrades
+* ❌ License remediation or normalization
+* ❌ CVE scanning or vulnerability scoring
+* ❌ Runtime dependency resolution
+* ❌ Python `pip` / Conda environment SBOM
+* ❌ CI enforcement or blocking rules
+* ❌ Generator refactors for vendored files
 
 ---
 
-## 6. Risk & Rollback
+## 3. Refactor / Change Classification
+
+**Documentation + Verification Artifact**
+
+* No runtime behavior changes
+* No CI semantics changes
+* No build or test logic changes
+* Low blast radius, fully reversible
+
+---
+
+## 4. Invariants (Must Hold)
+
+| Invariant             | Requirement                         |
+| --------------------- | ----------------------------------- |
+| Behavior preservation | No runtime behavior changes         |
+| CI integrity          | Required checks unchanged           |
+| Action immutability   | No action pinning changes           |
+| Audit integrity       | Prior milestone artifacts untouched |
+
+If any invariant is at risk, stop and surface it immediately.
+
+---
+
+## 5. Verification Plan
+
+Verification is **artifact-based**, not execution-based.
+
+### Required Evidence
+
+* SBOM file exists and validates against its schema
+* Inventory document matches observed repository contents
+* No inferred data presented as fact
+* All ambiguity explicitly labeled
+
+### Spot Checks
+
+* Randomly sample 5–10 vendored components
+* Confirm paths and metadata align with repo contents
+* Ensure “unknown” is used instead of guessing
+
+---
+
+## 6. Implementation Steps (Ordered, Small, Reversible)
+
+### Step 1 — Identify Third-Party Surfaces
+
+* Enumerate directories containing vendored or embedded code
+* Produce a table with:
+
+  * path
+  * classification (vendored / mirrored / generated)
+  * suspected upstream (if known)
+
+### Step 2 — Tooling Decision (Documented)
+
+* Prefer filesystem-based SBOM generation using:
+
+  * `syft` **if available**, otherwise
+  * a **manual structured inventory**
+* Do **not** install new tools unless explicitly permitted
+* If tooling is unavailable, document the limitation and proceed manually
+
+### Step 3 — Generate SBOM
+
+* Generate an SBOM covering **only in-scope paths**
+* Output location:
+
+  ```
+  docs/refactor/sbom/M09_sbom.json
+  ```
+
+### Step 4 — Human-Readable Inventory
+
+Create:
+
+```
+docs/refactor/sbom/M09_THIRD_PARTY.md
+```
+
+For each component, include:
+
+* Name
+* Repo path(s)
+* Version / commit (or `UNKNOWN`)
+* License (if detectable)
+* Provenance notes
+* Confidence level (explicit or implied)
+
+### Step 5 — Evidence Gaps & Ambiguity
+
+Explicitly document:
+
+* Components with no version metadata
+* Copied code without upstream reference
+* Generated artifacts where the generator is the true dependency
+* Anything that cannot be proven from repository state alone
+
+---
+
+## 7. Risk & Rollback Plan
 
 ### Risks
 
-* Incomplete version detection for some vendored deps
-* SBOM tool may not recognize custom vendoring structure
-
-### Mitigation
-
-* Manual entries for undetected dependencies
-* Document gaps explicitly
+| Risk            | Mitigation                         |
+| --------------- | ---------------------------------- |
+| False precision | Use `UNKNOWN` rather than guessing |
+| Scope creep     | Limit strictly to vendored code    |
+| Tooling limits  | Manual inventory fallback          |
 
 ### Rollback
 
-* Delete SBOM file and workflow
-* No other changes to revert
+* Remove `docs/refactor/sbom/`
+* No other files affected
+* No CI or runtime impact
 
 ---
 
-## 7. Deliverables
+## 8. Deliverables
 
-* `docs/refactor/SBOM.json` (or similar)
-* `docs/refactor/THIRD_PARTY_VERSIONS.md`
-* CI workflow (optional): `.github/workflows/sbom.yml`
-* M09 summary + audit artifacts
-
----
-
-## 8. Milestone Classification
-
-* **Type:** Supply Chain / Documentation
-* **Posture:** Additive (no behavior changes)
-* **Expected Size:** Medium
-* **Blast Radius:** None (documentation only)
-* **Audit Mode:** DELTA AUDIT
+| Artifact                                        | Purpose                  |
+| ----------------------------------------------- | ------------------------ |
+| `docs/refactor/sbom/M09_sbom.json`              | Machine-readable SBOM    |
+| `docs/refactor/sbom/M09_THIRD_PARTY.md`         | Human-readable inventory |
+| `docs/refactor/milestones/M09/M09_plan.md`      | Milestone plan           |
+| `docs/refactor/milestones/M09/M09_toolcalls.md` | Tool log                 |
+| `docs/refactor/milestones/M09/M09_audit.md`     | Audit report             |
+| `docs/refactor/milestones/M09/M09_summary.md`   | Milestone summary        |
 
 ---
 
-## 9. Dependencies
+## 9. Definition of Done
 
-* M08 complete (CI truthfulness established)
-* No blocking dependencies on M06/M07
+M09 is complete when:
 
----
-
-## 10. Definition of Done
-
-- [ ] SBOM file created and validated
-- [ ] Human-readable version summary created
-- [ ] CI workflow added (or documented as deferred)
-- [ ] REFACTOR.md updated
-- [ ] M09_audit.md created
-- [ ] M09_summary.md created
+* [ ] SBOM artifact exists and validates
+* [ ] Third-party inventory is readable and reviewable
+* [ ] Unknowns are explicitly documented
+* [ ] No CI, build, or runtime files modified
+* [ ] Audit confirms scope discipline
+* [ ] REFACTOR.md updated with M09 status
 
 ---
 
-**End of M09 Plan**
+## 10. Notes for Cursor (Explicit Guidance)
 
+* Operate **observationally**, not inferentially
+* Do not normalize or “clean up” dependencies
+* Unknowns are acceptable; undocumented assumptions are not
+* Prefer fewer, accurate entries over speculative completeness
+* Stop and ask if classification is ambiguous
+
+---
+
+If you want next:
+
+* I can draft the **M09 audit acceptance checklist** (what must be true to close), or
+* Map **M10** now that Phase 1 supply-chain visibility is almost complete.
+
+But this plan is now **clean, unsplit, and ready for handoff**.

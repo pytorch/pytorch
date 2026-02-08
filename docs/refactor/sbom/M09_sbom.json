@@ -1,0 +1,1306 @@
+{
+  "$schema": "http://cyclonedx.org/schema/bom-1.5.schema.json",
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "serialNumber": "urn:uuid:m09-pytorch-sbom-2026-02-08",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2026-02-08T21:40:00Z",
+    "tools": [
+      {
+        "vendor": "PyTorch Refactoring Program",
+        "name": "Manual Inventory",
+        "version": "M09"
+      }
+    ],
+    "component": {
+      "type": "application",
+      "name": "pytorch",
+      "version": "UNKNOWN",
+      "description": "PyTorch deep learning framework - third-party component inventory",
+      "purl": "pkg:github/pytorch/pytorch"
+    },
+    "properties": [
+      {
+        "name": "refactor:milestone",
+        "value": "M09"
+      },
+      {
+        "name": "refactor:baseline-commit",
+        "value": "5933293e0b31455a7d62839273c694f42df92aea"
+      },
+      {
+        "name": "refactor:scope",
+        "value": "third_party/ + embedded libraries in aten/, c10/"
+      }
+    ]
+  },
+  "components": [
+    {
+      "type": "library",
+      "name": "pybind11",
+      "version": "UNKNOWN",
+      "description": "Python bindings for C++",
+      "purl": "pkg:github/pybind/pybind11@f5fbe867d2d26e4a0a9177a51f6e568868ad3dc8",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/pybind/pybind11.git"
+        }
+      ],
+      "properties": [
+        {
+          "name": "refactor:path",
+          "value": "third_party/pybind11"
+        },
+        {
+          "name": "refactor:type",
+          "value": "submodule"
+        },
+        {
+          "name": "refactor:commit",
+          "value": "f5fbe867d2d26e4a0a9177a51f6e568868ad3dc8"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "googletest",
+      "version": "UNKNOWN",
+      "description": "Google Testing and Mocking Framework",
+      "purl": "pkg:github/google/googletest@52eb8108c5bdec04579160ae17225d66034bd723",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/google/googletest.git"
+        }
+      ],
+      "properties": [
+        {
+          "name": "refactor:path",
+          "value": "third_party/googletest"
+        },
+        {
+          "name": "refactor:type",
+          "value": "submodule"
+        },
+        {
+          "name": "refactor:commit",
+          "value": "52eb8108c5bdec04579160ae17225d66034bd723"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "benchmark",
+      "version": "UNKNOWN",
+      "description": "Google microbenchmarking library",
+      "purl": "pkg:github/google/benchmark@299e5928955cc62af9968370293b916f5130916f",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/google/benchmark.git"
+        }
+      ],
+      "properties": [
+        {
+          "name": "refactor:path",
+          "value": "third_party/benchmark"
+        },
+        {
+          "name": "refactor:type",
+          "value": "submodule"
+        },
+        {
+          "name": "refactor:commit",
+          "value": "299e5928955cc62af9968370293b916f5130916f"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "protobuf",
+      "version": "UNKNOWN",
+      "description": "Protocol Buffers - Google's data interchange format",
+      "purl": "pkg:github/protocolbuffers/protobuf@d1eca4e4b421cd2997495c4b4e65cea6be4e9b8a",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/protocolbuffers/protobuf.git"
+        }
+      ],
+      "properties": [
+        {
+          "name": "refactor:path",
+          "value": "third_party/protobuf"
+        },
+        {
+          "name": "refactor:type",
+          "value": "submodule"
+        },
+        {
+          "name": "refactor:commit",
+          "value": "d1eca4e4b421cd2997495c4b4e65cea6be4e9b8a"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "NNPACK",
+      "version": "UNKNOWN",
+      "description": "Acceleration package for neural network computations",
+      "purl": "pkg:github/Maratyszcza/NNPACK@c07e3a0400713d546e0dea2d5466dd22ea389c73",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/Maratyszcza/NNPACK.git"
+        }
+      ],
+      "properties": [
+        {
+          "name": "refactor:path",
+          "value": "third_party/NNPACK"
+        },
+        {
+          "name": "refactor:type",
+          "value": "submodule"
+        },
+        {
+          "name": "refactor:commit",
+          "value": "c07e3a0400713d546e0dea2d5466dd22ea389c73"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "gloo",
+      "version": "UNKNOWN",
+      "description": "Collective communications library",
+      "purl": "pkg:github/pytorch/gloo@3135b0b41b67dde590eef0938a0bf3d6238df5f7",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/pytorch/gloo"
+        }
+      ],
+      "properties": [
+        {
+          "name": "refactor:path",
+          "value": "third_party/gloo"
+        },
+        {
+          "name": "refactor:type",
+          "value": "submodule"
+        },
+        {
+          "name": "refactor:commit",
+          "value": "3135b0b41b67dde590eef0938a0bf3d6238df5f7"
+        },
+        {
+          "name": "refactor:owner",
+          "value": "pytorch"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "pthreadpool",
+      "version": "UNKNOWN",
+      "description": "Portable thread pool implementation",
+      "purl": "pkg:github/Maratyszcza/pthreadpool@4fe0e1e183925bf8cfa6aae24237e724a96479b8",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/Maratyszcza/pthreadpool.git"
+        }
+      ],
+      "properties": [
+        {
+          "name": "refactor:path",
+          "value": "third_party/pthreadpool"
+        },
+        {
+          "name": "refactor:type",
+          "value": "submodule"
+        },
+        {
+          "name": "refactor:commit",
+          "value": "4fe0e1e183925bf8cfa6aae24237e724a96479b8"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "FXdiv",
+      "version": "UNKNOWN",
+      "description": "Header-only library for division via fixed-point multiplication",
+      "purl": "pkg:github/Maratyszcza/FXdiv@b408327ac2a15ec3e43352421954f5b1967701d1",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/Maratyszcza/FXdiv.git"
+        }
+      ],
+      "properties": [
+        {
+          "name": "refactor:path",
+          "value": "third_party/FXdiv"
+        },
+        {
+          "name": "refactor:type",
+          "value": "submodule"
+        },
+        {
+          "name": "refactor:commit",
+          "value": "b408327ac2a15ec3e43352421954f5b1967701d1"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "FP16",
+      "version": "UNKNOWN",
+      "description": "Half-precision floating-point conversion library",
+      "purl": "pkg:github/Maratyszcza/FP16@4dfe081cf6bcd15db339cf2680b9281b8451eeb3",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/Maratyszcza/FP16.git"
+        }
+      ],
+      "properties": [
+        {
+          "name": "refactor:path",
+          "value": "third_party/FP16"
+        },
+        {
+          "name": "refactor:type",
+          "value": "submodule"
+        },
+        {
+          "name": "refactor:commit",
+          "value": "4dfe081cf6bcd15db339cf2680b9281b8451eeb3"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "psimd",
+      "version": "UNKNOWN",
+      "description": "Portable 128-bit SIMD intrinsics",
+      "purl": "pkg:github/Maratyszcza/psimd@072586a71b55b7f8c584153d223e95687148a900",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/Maratyszcza/psimd.git"
+        }
+      ],
+      "properties": [
+        {
+          "name": "refactor:path",
+          "value": "third_party/psimd"
+        },
+        {
+          "name": "refactor:type",
+          "value": "submodule"
+        },
+        {
+          "name": "refactor:commit",
+          "value": "072586a71b55b7f8c584153d223e95687148a900"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "cpuinfo",
+      "version": "UNKNOWN",
+      "description": "CPU INFOrmation library",
+      "purl": "pkg:github/pytorch/cpuinfo@f858c30bcb16f8effd5ff46996f0514539e17abc",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/pytorch/cpuinfo.git"
+        }
+      ],
+      "properties": [
+        {
+          "name": "refactor:path",
+          "value": "third_party/cpuinfo"
+        },
+        {
+          "name": "refactor:type",
+          "value": "submodule"
+        },
+        {
+          "name": "refactor:commit",
+          "value": "f858c30bcb16f8effd5ff46996f0514539e17abc"
+        },
+        {
+          "name": "refactor:owner",
+          "value": "pytorch"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "python-peachpy",
+      "version": "UNKNOWN",
+      "description": "Portable Efficient Assembly Code-generator in Higher-level Python",
+      "purl": "pkg:github/malfet/PeachPy@f45429b087dd7d5bc78bb40dc7cf06425c252d67",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/malfet/PeachPy.git"
+        }
+      ],
+      "properties": [
+        {
+          "name": "refactor:path",
+          "value": "third_party/python-peachpy"
+        },
+        {
+          "name": "refactor:type",
+          "value": "submodule"
+        },
+        {
+          "name": "refactor:commit",
+          "value": "f45429b087dd7d5bc78bb40dc7cf06425c252d67"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "onnx",
+      "version": "UNKNOWN",
+      "description": "Open Neural Network Exchange",
+      "purl": "pkg:github/onnx/onnx@e709452ef2bbc1d113faf678c24e6d3467696e83",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/onnx/onnx.git"
+        }
+      ],
+      "properties": [
+        {
+          "name": "refactor:path",
+          "value": "third_party/onnx"
+        },
+        {
+          "name": "refactor:type",
+          "value": "submodule"
+        },
+        {
+          "name": "refactor:commit",
+          "value": "e709452ef2bbc1d113faf678c24e6d3467696e83"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "sleef",
+      "version": "UNKNOWN",
+      "description": "SIMD Library for Evaluating Elementary Functions",
+      "purl": "pkg:github/shibatch/sleef@5a1d179df9cf652951b59010a2d2075372d67f68",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/shibatch/sleef"
+        }
+      ],
+      "properties": [
+        {
+          "name": "refactor:path",
+          "value": "third_party/sleef"
+        },
+        {
+          "name": "refactor:type",
+          "value": "submodule"
+        },
+        {
+          "name": "refactor:commit",
+          "value": "5a1d179df9cf652951b59010a2d2075372d67f68"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "ideep",
+      "version": "UNKNOWN",
+      "description": "Intel Deep Learning Extension Pack",
+      "purl": "pkg:github/intel/ideep@8e7ddd65df95f13e41f0a40c820c5f35ae4a0ea3",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/intel/ideep"
+        }
+      ],
+      "properties": [
+        {
+          "name": "refactor:path",
+          "value": "third_party/ideep"
+        },
+        {
+          "name": "refactor:type",
+          "value": "submodule"
+        },
+        {
+          "name": "refactor:commit",
+          "value": "8e7ddd65df95f13e41f0a40c820c5f35ae4a0ea3"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "gemmlowp",
+      "version": "UNKNOWN",
+      "description": "Low-precision matrix multiplication library",
+      "purl": "pkg:github/google/gemmlowp@3fb5c176c17c765a3492cd2f0321b0dab712f350",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/google/gemmlowp.git"
+        }
+      ],
+      "properties": [
+        {
+          "name": "refactor:path",
+          "value": "third_party/gemmlowp/gemmlowp"
+        },
+        {
+          "name": "refactor:type",
+          "value": "submodule"
+        },
+        {
+          "name": "refactor:commit",
+          "value": "3fb5c176c17c765a3492cd2f0321b0dab712f350"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "fbgemm",
+      "version": "UNKNOWN",
+      "description": "Facebook General Matrix Multiplication",
+      "purl": "pkg:github/pytorch/fbgemm@c246916f9e3804eacc3c95058e51cce02ae00fff",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/pytorch/fbgemm"
+        }
+      ],
+      "properties": [
+        {
+          "name": "refactor:path",
+          "value": "third_party/fbgemm"
+        },
+        {
+          "name": "refactor:type",
+          "value": "submodule"
+        },
+        {
+          "name": "refactor:commit",
+          "value": "c246916f9e3804eacc3c95058e51cce02ae00fff"
+        },
+        {
+          "name": "refactor:owner",
+          "value": "pytorch"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "fbjni",
+      "version": "UNKNOWN",
+      "description": "Facebook JNI helpers for Android",
+      "purl": "pkg:github/facebookincubator/fbjni@7e1e1fe3858c63c251c637ae41a20de425dde96f",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/facebookincubator/fbjni.git"
+        }
+      ],
+      "properties": [
+        {
+          "name": "refactor:path",
+          "value": "android/libs/fbjni"
+        },
+        {
+          "name": "refactor:type",
+          "value": "submodule"
+        },
+        {
+          "name": "refactor:commit",
+          "value": "7e1e1fe3858c63c251c637ae41a20de425dde96f"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "XNNPACK",
+      "version": "UNKNOWN",
+      "description": "High-efficiency floating-point neural network inference operators",
+      "purl": "pkg:github/google/XNNPACK@51a0103656eff6fc9bfd39a4597923c4b542c883",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/google/XNNPACK.git"
+        }
+      ],
+      "properties": [
+        {
+          "name": "refactor:path",
+          "value": "third_party/XNNPACK"
+        },
+        {
+          "name": "refactor:type",
+          "value": "submodule"
+        },
+        {
+          "name": "refactor:commit",
+          "value": "51a0103656eff6fc9bfd39a4597923c4b542c883"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "fmt",
+      "version": "UNKNOWN",
+      "description": "Modern formatting library for C++",
+      "purl": "pkg:github/fmtlib/fmt@407c905e45ad75fc29bf0f9bb7c5c2fd3475976f",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/fmtlib/fmt.git"
+        }
+      ],
+      "properties": [
+        {
+          "name": "refactor:path",
+          "value": "third_party/fmt"
+        },
+        {
+          "name": "refactor:type",
+          "value": "submodule"
+        },
+        {
+          "name": "refactor:commit",
+          "value": "407c905e45ad75fc29bf0f9bb7c5c2fd3475976f"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "tensorpipe",
+      "version": "UNKNOWN",
+      "description": "Tensor-aware point-to-point communication primitive",
+      "purl": "pkg:github/pytorch/tensorpipe@2b4cd91092d335a697416b2a3cb398283246849d",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/pytorch/tensorpipe.git"
+        }
+      ],
+      "properties": [
+        {
+          "name": "refactor:path",
+          "value": "third_party/tensorpipe"
+        },
+        {
+          "name": "refactor:type",
+          "value": "submodule"
+        },
+        {
+          "name": "refactor:commit",
+          "value": "2b4cd91092d335a697416b2a3cb398283246849d"
+        },
+        {
+          "name": "refactor:owner",
+          "value": "pytorch"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "cudnn_frontend",
+      "version": "UNKNOWN",
+      "description": "NVIDIA cuDNN Frontend API",
+      "purl": "pkg:github/NVIDIA/cudnn-frontend@b8c0656e6f6c84fc194f4d57329b55d609eff596",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/NVIDIA/cudnn-frontend.git"
+        }
+      ],
+      "properties": [
+        {
+          "name": "refactor:path",
+          "value": "third_party/cudnn_frontend"
+        },
+        {
+          "name": "refactor:type",
+          "value": "submodule"
+        },
+        {
+          "name": "refactor:commit",
+          "value": "b8c0656e6f6c84fc194f4d57329b55d609eff596"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "kineto",
+      "version": "UNKNOWN",
+      "description": "PyTorch Profiler library",
+      "purl": "pkg:github/pytorch/kineto@5fa388fd70969c3b6a4453033dab0095c565876f",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/pytorch/kineto"
+        }
+      ],
+      "properties": [
+        {
+          "name": "refactor:path",
+          "value": "third_party/kineto"
+        },
+        {
+          "name": "refactor:type",
+          "value": "submodule"
+        },
+        {
+          "name": "refactor:commit",
+          "value": "5fa388fd70969c3b6a4453033dab0095c565876f"
+        },
+        {
+          "name": "refactor:owner",
+          "value": "pytorch"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "pocketfft",
+      "version": "UNKNOWN",
+      "description": "Portable FFT library",
+      "purl": "pkg:github/mreineck/pocketfft@0fa0ef591e38c2758e3184c6c23e497b9f732ffa",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/mreineck/pocketfft"
+        }
+      ],
+      "properties": [
+        {
+          "name": "refactor:path",
+          "value": "third_party/pocketfft"
+        },
+        {
+          "name": "refactor:type",
+          "value": "submodule"
+        },
+        {
+          "name": "refactor:commit",
+          "value": "0fa0ef591e38c2758e3184c6c23e497b9f732ffa"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "ittapi",
+      "version": "UNKNOWN",
+      "description": "Intel Instrumentation and Tracing Technology API",
+      "purl": "pkg:github/intel/ittapi@0c57540822deb5dae43bef6c1cc9b3be4772a033",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/intel/ittapi.git"
+        }
+      ],
+      "properties": [
+        {
+          "name": "refactor:path",
+          "value": "third_party/ittapi"
+        },
+        {
+          "name": "refactor:type",
+          "value": "submodule"
+        },
+        {
+          "name": "refactor:commit",
+          "value": "0c57540822deb5dae43bef6c1cc9b3be4772a033"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "flatbuffers",
+      "version": "UNKNOWN",
+      "description": "Memory efficient serialization library",
+      "purl": "pkg:github/google/flatbuffers@a2cd1ea3b6d3fee220106b5fed3f7ce8da9eb757",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/google/flatbuffers.git"
+        }
+      ],
+      "properties": [
+        {
+          "name": "refactor:path",
+          "value": "third_party/flatbuffers"
+        },
+        {
+          "name": "refactor:type",
+          "value": "submodule"
+        },
+        {
+          "name": "refactor:commit",
+          "value": "a2cd1ea3b6d3fee220106b5fed3f7ce8da9eb757"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "nlohmann_json",
+      "version": "UNKNOWN",
+      "description": "JSON for Modern C++",
+      "purl": "pkg:github/nlohmann/json@55f93686c01528224f448c19128836e7df245f72",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/nlohmann/json.git"
+        }
+      ],
+      "properties": [
+        {
+          "name": "refactor:path",
+          "value": "third_party/nlohmann"
+        },
+        {
+          "name": "refactor:type",
+          "value": "submodule"
+        },
+        {
+          "name": "refactor:commit",
+          "value": "55f93686c01528224f448c19128836e7df245f72"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "VulkanMemoryAllocator",
+      "version": "UNKNOWN",
+      "description": "Easy to integrate Vulkan memory allocation library",
+      "purl": "pkg:github/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator@1d8f600fd424278486eade7ed3e877c99f0846b1",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git"
+        }
+      ],
+      "properties": [
+        {
+          "name": "refactor:path",
+          "value": "third_party/VulkanMemoryAllocator"
+        },
+        {
+          "name": "refactor:type",
+          "value": "submodule"
+        },
+        {
+          "name": "refactor:commit",
+          "value": "1d8f600fd424278486eade7ed3e877c99f0846b1"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "cutlass",
+      "version": "UNKNOWN",
+      "description": "CUDA Templates for Linear Algebra Subroutines",
+      "purl": "pkg:github/NVIDIA/cutlass@0d2b201e8c1c4a03efa6e9c468161916e2334725",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/NVIDIA/cutlass.git"
+        }
+      ],
+      "properties": [
+        {
+          "name": "refactor:path",
+          "value": "third_party/cutlass"
+        },
+        {
+          "name": "refactor:type",
+          "value": "submodule"
+        },
+        {
+          "name": "refactor:commit",
+          "value": "0d2b201e8c1c4a03efa6e9c468161916e2334725"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "mimalloc",
+      "version": "UNKNOWN",
+      "description": "Microsoft compact general purpose allocator",
+      "purl": "pkg:github/microsoft/mimalloc@048d969a1c5ee2fb89c226298f41ea38445546ef",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/microsoft/mimalloc.git"
+        }
+      ],
+      "properties": [
+        {
+          "name": "refactor:path",
+          "value": "third_party/mimalloc"
+        },
+        {
+          "name": "refactor:type",
+          "value": "submodule"
+        },
+        {
+          "name": "refactor:commit",
+          "value": "048d969a1c5ee2fb89c226298f41ea38445546ef"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "cpp-httplib",
+      "version": "v0.15.3",
+      "description": "C++ HTTP/HTTPS server and client library",
+      "purl": "pkg:github/yhirose/cpp-httplib@bd95e67c234930cd6d6bb11309588c5462c63cec",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/yhirose/cpp-httplib.git"
+        }
+      ],
+      "properties": [
+        {
+          "name": "refactor:path",
+          "value": "third_party/cpp-httplib"
+        },
+        {
+          "name": "refactor:type",
+          "value": "submodule"
+        },
+        {
+          "name": "refactor:commit",
+          "value": "bd95e67c234930cd6d6bb11309588c5462c63cec"
+        },
+        {
+          "name": "refactor:branch",
+          "value": "v0.15.3"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "NVTX",
+      "version": "UNKNOWN",
+      "description": "NVIDIA Tools Extension Library",
+      "purl": "pkg:github/NVIDIA/NVTX@3ebbc93ded7285963bff932c678fa367eb393ba6",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/NVIDIA/NVTX.git"
+        }
+      ],
+      "properties": [
+        {
+          "name": "refactor:path",
+          "value": "third_party/NVTX"
+        },
+        {
+          "name": "refactor:type",
+          "value": "submodule"
+        },
+        {
+          "name": "refactor:commit",
+          "value": "3ebbc93ded7285963bff932c678fa367eb393ba6"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "composable_kernel",
+      "version": "UNKNOWN",
+      "description": "ROCm Composable Kernel library",
+      "purl": "pkg:github/ROCm/composable_kernel@fcc9372c009c8e0a23fece77b582da83b04a654f",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/ROCm/composable_kernel.git"
+        }
+      ],
+      "properties": [
+        {
+          "name": "refactor:path",
+          "value": "third_party/composable_kernel"
+        },
+        {
+          "name": "refactor:type",
+          "value": "submodule"
+        },
+        {
+          "name": "refactor:commit",
+          "value": "fcc9372c009c8e0a23fece77b582da83b04a654f"
+        },
+        {
+          "name": "refactor:branch",
+          "value": "develop"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "kleidiai",
+      "version": "UNKNOWN",
+      "description": "ARM KleidiAI library",
+      "purl": "pkg:github/ARM-software/kleidiai@d7770c89632329a9914ef1a90289917597639cbe",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/ARM-software/kleidiai.git"
+        }
+      ],
+      "properties": [
+        {
+          "name": "refactor:path",
+          "value": "third_party/kleidiai"
+        },
+        {
+          "name": "refactor:type",
+          "value": "submodule"
+        },
+        {
+          "name": "refactor:commit",
+          "value": "d7770c89632329a9914ef1a90289917597639cbe"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "flash-attention",
+      "version": "UNKNOWN",
+      "description": "Fast and memory-efficient exact attention",
+      "purl": "pkg:github/Dao-AILab/flash-attention@e2743ab5b3803bb672b16437ba98a3b1d4576c50",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/Dao-AILab/flash-attention.git"
+        }
+      ],
+      "properties": [
+        {
+          "name": "refactor:path",
+          "value": "third_party/flash-attention"
+        },
+        {
+          "name": "refactor:type",
+          "value": "submodule"
+        },
+        {
+          "name": "refactor:commit",
+          "value": "e2743ab5b3803bb672b16437ba98a3b1d4576c50"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "aiter",
+      "version": "UNKNOWN",
+      "description": "ROCm AIter library",
+      "purl": "pkg:github/ROCm/aiter@9a469a608b2c10b7157df573a38d31e5bf4038b4",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/ROCm/aiter.git"
+        }
+      ],
+      "properties": [
+        {
+          "name": "refactor:path",
+          "value": "third_party/aiter"
+        },
+        {
+          "name": "refactor:type",
+          "value": "submodule"
+        },
+        {
+          "name": "refactor:commit",
+          "value": "9a469a608b2c10b7157df573a38d31e5bf4038b4"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "mslk",
+      "version": "UNKNOWN",
+      "description": "Meta MSLK library",
+      "purl": "pkg:github/meta-pytorch/MSLK@3d332d1c0c0ac7765852c97b3979c9ef913e037f",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/meta-pytorch/MSLK.git"
+        }
+      ],
+      "properties": [
+        {
+          "name": "refactor:path",
+          "value": "third_party/mslk"
+        },
+        {
+          "name": "refactor:type",
+          "value": "submodule"
+        },
+        {
+          "name": "refactor:commit",
+          "value": "3d332d1c0c0ac7765852c97b3979c9ef913e037f"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "miniz",
+      "version": "3.0.2",
+      "description": "Single C source file zlib-replacement library",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/richgel999/miniz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "refactor:path",
+          "value": "third_party/miniz-3.0.2"
+        },
+        {
+          "name": "refactor:type",
+          "value": "bundled"
+        },
+        {
+          "name": "refactor:license-file",
+          "value": "third_party/miniz-3.0.2/LICENSE"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "concurrentqueue",
+      "version": "UNKNOWN",
+      "description": "Fast multi-producer, multi-consumer lock-free concurrent queue",
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-2-Clause"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/cameron314/concurrentqueue"
+        }
+      ],
+      "properties": [
+        {
+          "name": "refactor:path",
+          "value": "third_party/concurrentqueue"
+        },
+        {
+          "name": "refactor:type",
+          "value": "vendored"
+        },
+        {
+          "name": "refactor:commit",
+          "value": "24b78782bd6ca5a5853ef46917708806112dc142"
+        },
+        {
+          "name": "refactor:license-file",
+          "value": "third_party/concurrentqueue/moodycamel/LICENSE.md"
+        },
+        {
+          "name": "refactor:note",
+          "value": "Partial copy - excludes test/ directory to avoid license issues"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "valgrind-headers",
+      "version": "UNKNOWN",
+      "description": "Valgrind header files for instrumentation",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://sourceware.org/git/?p=valgrind.git"
+        }
+      ],
+      "properties": [
+        {
+          "name": "refactor:path",
+          "value": "third_party/valgrind-headers"
+        },
+        {
+          "name": "refactor:type",
+          "value": "vendored"
+        },
+        {
+          "name": "refactor:note",
+          "value": "Two headers only: callgrind.h, valgrind.h - downloaded from Valgrind git HEAD"
+        },
+        {
+          "name": "refactor:version",
+          "value": "UNKNOWN - fetched from HEAD"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "QNNPACK",
+      "version": "UNKNOWN",
+      "description": "Quantized Neural Networks PACKage - embedded in ATen",
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-3-Clause"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/pytorch/QNNPACK"
+        }
+      ],
+      "properties": [
+        {
+          "name": "refactor:path",
+          "value": "aten/src/ATen/native/quantized/cpu/qnnpack"
+        },
+        {
+          "name": "refactor:type",
+          "value": "embedded"
+        },
+        {
+          "name": "refactor:license-file",
+          "value": "aten/src/ATen/native/quantized/cpu/qnnpack/LICENSE"
+        },
+        {
+          "name": "refactor:note",
+          "value": "Originally a Facebook library, now maintained inline with PyTorch"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "clog",
+      "version": "UNKNOWN",
+      "description": "C-style logging library - embedded in QNNPACK",
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-2-Clause"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "refactor:path",
+          "value": "aten/src/ATen/native/quantized/cpu/qnnpack/deps/clog"
+        },
+        {
+          "name": "refactor:type",
+          "value": "embedded"
+        },
+        {
+          "name": "refactor:license-file",
+          "value": "aten/src/ATen/native/quantized/cpu/qnnpack/deps/clog/LICENSE"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "protobuf-int128",
+      "version": "UNKNOWN",
+      "description": "uint128 implementation ported from Protocol Buffers",
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-3-Clause"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/protocolbuffers/protobuf"
+        }
+      ],
+      "properties": [
+        {
+          "name": "refactor:path",
+          "value": "c10/util/int128.h, c10/util/int128.cpp"
+        },
+        {
+          "name": "refactor:type",
+          "value": "ported"
+        },
+        {
+          "name": "refactor:source-commit",
+          "value": "1e88936fce10cf773cb72b44c6a7f48b38c7578b"
+        },
+        {
+          "name": "refactor:note",
+          "value": "Inline license header in source files"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "boost-hash",
+      "version": "UNKNOWN",
+      "description": "hash_combine and SHA1 implementation from Boost",
+      "licenses": [
+        {
+          "license": {
+            "id": "BSL-1.0"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://www.boost.org/"
+        }
+      ],
+      "properties": [
+        {
+          "name": "refactor:path",
+          "value": "c10/util/hash.h"
+        },
+        {
+          "name": "refactor:type",
+          "value": "ported"
+        },
+        {
+          "name": "refactor:note",
+          "value": "Inline license header in source file"
+        }
+      ]
+    }
+  ]
+}
+
