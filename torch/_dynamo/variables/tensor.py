@@ -230,6 +230,31 @@ class TensorVariable(VariableTracker):
         for k, v in specialized_props.items():
             setattr(self, k, v)
 
+    def _get_fake_version(self) -> int | None:
+        """Get the current version of self's fake tensor, or None if unavailable."""
+        self_fake = self.proxy.node.meta.get("example_value")
+        return self_fake._version if self_fake is not None else None
+
+    def _sync_if_inplace_mutation(
+        self,
+        tx: "InstructionTranslator",
+        version_before: int | None,
+        has_tensor_arg: bool,
+    ) -> None:
+        """
+        Sync attributes if self was mutated by an inplace operation.
+
+        See Note [Inplace ops and VariableTracker metadata]
+        """
+        version_after = self._get_fake_version()
+        if (
+            version_before is not None
+            and version_after is not None
+            and version_after > version_before
+            and has_tensor_arg
+        ):
+            self.synchronize_attributes(tx)
+
     def debug_repr(self) -> str:
         # TODO: strip off fake tensor from repr here
         return repr(self.proxy.node.meta["example_value"])
@@ -807,14 +832,27 @@ class TensorVariable(VariableTracker):
 
         from .builder import wrap_fx_proxy
 
-        return wrap_fx_proxy(
-            tx,
-            tx.output.create_proxy(
-                "call_method",
-                name,
-                *proxy_args_kwargs([self, *args], kwargs),
-            ),
+        proxy = tx.output.create_proxy(
+            "call_method",
+            name,
+            *proxy_args_kwargs([self, *args], kwargs),
         )
+
+        # [Note: Inplace ops and VariableTracker metadata]
+        # For inplace operations, we need to propagate tensor metadata from the
+        # arguments to self. For example:
+        #   x.add_(y) where y.requires_grad=True => x.requires_grad becomes True
+        # We detect inplace ops by checking if self's fake tensor version changes
+        # after wrap_fx_proxy (which runs get_fake_value internally).
+        # We only synchronize when there's a tensor argument, since that's when
+        # metadata propagation is relevant.
+        version_before = self._get_fake_version()
+        result = wrap_fx_proxy(tx, proxy)
+        self._sync_if_inplace_mutation(
+            tx, version_before, any(arg.is_tensor() for arg in args)
+        )
+
+        return result
 
     def method_size(
         self, tx: "InstructionTranslator", *args: Any, **kwargs: Any
@@ -1391,35 +1429,21 @@ class TensorVariable(VariableTracker):
             *proxy_args_kwargs([self, key, value], {}),
         )
 
-        if value.is_tensor():
-            # [Note: Tensor.__setitem__ and VariableTracker metadata]
-            # At this point, we proxied a node representing `self[key] = value` into the graph.
-            # When executed, this node will mutate `self`'s tensor metadata, so it's important
-            # even during tracing to propagate. For example:
-            #   value.requires_grad is True => self.requires_grad becomes True
-            #   value.requires_grad is True => self.has_grad_fn becomes True
+        # See Note [Inplace ops and VariableTracker metadata]
+        # __setitem__ is always an inplace operation. We need to run fake execution
+        # and propagate metadata if self was mutated.
+        # The context managers handle saved tensor hooks and unbacked symbols.
+        version_before = self._get_fake_version()
 
-            # Not sure if __setitem__ can ever save activations, disabling just in case
+        with (
+            torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing(),
+            tx.fake_mode.shape_env.ignore_fresh_unbacked_symbols()
+            if tx.fake_mode and tx.fake_mode.shape_env
+            else nullcontext(),
+        ):
+            get_fake_value(proxy.node, tx, allow_non_graph_fake=False)
 
-            # Ignore fresh unbacked symbols that could arise from the internal indexing (selection),
-            # that happen in code like t[idx] += 1 when idx is unbacked. Namely the selection
-            # during 'setitem'.
-            # When the selection happens if idx is unbacked we allocate a new unbacked symbol for the
-            # storage offset in select_meta, but the output of the operation 'setitem' does not depend
-            # on the selection.
-            with (
-                torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing(),
-                tx.fake_mode.shape_env.ignore_fresh_unbacked_symbols()
-                if tx.fake_mode and tx.fake_mode.shape_env
-                else nullcontext(),
-            ):
-                get_fake_value(proxy.node, tx, allow_non_graph_fake=False)
-
-            vt = value
-            if isinstance(vt, variables.lazy.LazyVariableTracker):
-                vt = variables.lazy.LazyVariableTracker.realize_all(vt)
-
-            self.synchronize_attributes(tx, type(vt))
+        self._sync_if_inplace_mutation(tx, version_before, value.is_tensor())
 
         if config.use_graph_deduplication or config.track_nodes_for_deduplication:
             tx.output.region_tracker.add_node_mutation(proxy.node, 0)
@@ -1584,6 +1608,14 @@ class TensorVariable(VariableTracker):
         # rewrite non-primitive args/kwargs to be included in the on-the-fly prim function
         # and rewrite args to have only proxyable args, then insert call_function
 
+        # custom grad_placements do not work with  as_python_constant,
+        # to support them we need to handle UserDefinedObject
+        def extract_python_value(vt: VariableTracker) -> Any:
+            if isinstance(vt, variables.UserDefinedObjectVariable):
+                return vt.value
+
+            return vt.as_python_constant()
+
         grad_placements_vt = kwargs.get(
             "grad_placements", ConstantVariable.create(None)
         )
@@ -1596,8 +1628,8 @@ class TensorVariable(VariableTracker):
         if kwargs.get("grad_placements") is not None:
             kwargs["grad_placements"] = grad_placements_vt
 
-        args_as_value = [x.as_python_constant() for x in args]
-        kwargs_as_value = {k: v.as_python_constant() for k, v in kwargs.items()}
+        args_as_value = [extract_python_value(x) for x in args]
+        kwargs_as_value = {k: extract_python_value(v) for k, v in kwargs.items()}
 
         def to_local_fn_with_prim_types(x: Any) -> Any:
             return x.to_local(*args_as_value, **kwargs_as_value)

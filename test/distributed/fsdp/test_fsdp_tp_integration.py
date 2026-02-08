@@ -26,7 +26,7 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTest
+from torch.testing._internal.common_fsdp import FSDPTestContinuous
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     run_tests,
@@ -85,7 +85,7 @@ def distribute_rmsnorm(module, device_mesh):
     )
 
 
-class TestTPFSDPIntegration(FSDPTest):
+class TestTPFSDPIntegration(FSDPTestContinuous):
     def _get_params_and_sharding_info(
         self,
         model: SimpleModel,
