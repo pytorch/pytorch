@@ -906,7 +906,52 @@ PyTorch CI is fundamentally healthy. 95%+ of `continue-on-error` patterns are in
 
 ---
 
-### M09-M10 — CI Health (Planned)
+### M09 — Third-Party Supply Chain Inventory & SBOM Baseline ✅ COMPLETE
+
+**Status:** 🔒 Closed and Locked  
+**Date:** 2026-02-08  
+**Effort:** 2 hours  
+**Change Class:** Documentation + Verification Artifact  
+**Merge:** PR #174574 (pending)
+
+**Intent:**
+Establish baseline visibility into PyTorch's third-party and vendored dependencies by producing a machine-readable SBOM and human-readable inventory.
+
+**Deliverables:**
+- ✅ `docs/refactor/sbom/M09_sbom.json` — CycloneDX 1.5 SBOM (42 components)
+- ✅ `docs/refactor/sbom/M09_THIRD_PARTY.md` — Human-readable inventory
+- ✅ `M09_audit.md` — Compliance verification
+- ✅ `M09_summary.md` — Milestone summary
+
+**Inventory Coverage:**
+- 35 git submodules with pinned commit SHAs
+- 3 bundled/vendored components (miniz, concurrentqueue, valgrind-headers)
+- 2 embedded libraries (QNNPACK, clog)
+- 2 ported code instances (protobuf int128, Boost hash)
+
+**Key Findings:**
+- 6 PyTorch-owned components identified (gloo, cpuinfo, fbgemm, tensorpipe, kineto, QNNPACK)
+- 2 components with unknown licenses (mslk, aiter) — deferred for future verification
+- Evidence gaps explicitly documented
+
+**Non-Goals (Honored):**
+- ❌ No CVE scanning or vulnerability analysis
+- ❌ No license remediation
+- ❌ No dependency upgrades
+- ❌ No CI, runtime, or behavioral changes
+
+**Invariant Introduced:**
+- Supply chain visibility baseline established (prerequisite for future security work)
+
+**Closeout Artifacts:**
+- [`docs/refactor/milestones/M09/M09_plan.md`](docs/refactor/milestones/M09/M09_plan.md)
+- [`docs/refactor/milestones/M09/M09_toolcalls.md`](docs/refactor/milestones/M09/M09_toolcalls.md)
+- [`docs/refactor/milestones/M09/M09_audit.md`](docs/refactor/milestones/M09/M09_audit.md)
+- [`docs/refactor/milestones/M09/M09_summary.md`](docs/refactor/milestones/M09/M09_summary.md)
+
+---
+
+### M10 — (Planned)
 
 See [`docs/refactor/audit/REFACTOR_PHASE_MAP.md`](docs/refactor/audit/REFACTOR_PHASE_MAP.md) for full Phase 1 plan.
 
@@ -926,7 +971,7 @@ From baseline audit, top risks requiring mitigation:
 | **I02** | Empty REFACTOR.md | P0 | ✅ Resolved | M00-M02 |
 | **I03** | 130+ CI Workflows (Maintenance) | P1 | ✅ Mitigated | M03-M05 (audit + linting) |
 | **I04** | Mixed Action Pinning | P1 | ✅ Mitigated (external) | M06 (internal deferred to M06-V01) |
-| **I05** | Third-Party Supply Chain Risk | P1 | 🔵 Active | M08-M10 |
+| **I05** | Third-Party Supply Chain Risk | P1 | 🟡 Visibility Established | M09 (SBOM baseline), M10 (planned) |
 | **I06** | Implicit Distributed Protocol | P2 | 🔵 Active | M11-M12 |
 | **I07** | No Pre-Commit Hooks | P2 | 🔵 Active | M13-M14 |
 
@@ -947,15 +992,15 @@ From baseline audit, top risks requiring mitigation:
 | Phase | Milestones | Complete | In Progress | Planned |
 |-------|-----------|----------|-------------|---------|
 | **Phase 0** | M00-M02 | 3 (M00, M01, M02) | 0 | 0 |
-| **Phase 1** | M03-M10 | 6 (M03, M04, M05, M06, M07, M08) | 0 | 2 |
+| **Phase 1** | M03-M10 | 7 (M03, M04, M05, M06, M07, M08, M09) | 0 | 1 |
 | **Phase 2** | M11-M14 | 0 | 0 | 4 |
 | **Phase 3** | M15-M19 | 0 | 0 | 5 |
 | **Phase 4** | M20+ | 0 | 0 | TBD |
 
-**Program Progress:** 9/22 milestones complete (41%)  
+**Program Progress:** 10/22 milestones complete (45%)  
 **Phase 0:** ✅ Complete  
-**Phase 1:** 🔄 In Progress (6/8 complete)  
-**Estimated Remaining:** ~130 hours (M09-M19)
+**Phase 1:** 🔄 In Progress (7/8 complete)  
+**Estimated Remaining:** ~120 hours (M10-M19)
 
 ---
 
@@ -971,8 +1016,9 @@ From baseline audit, top risks requiring mitigation:
 | 2026-02-08 | M06 (Action Pinning) | 8/10 | 7/10 | 8/10 | 6.5/10 | Maintained |
 | 2026-02-08 | M07 (Dependabot Actions) | 8/10 | 7/10 | 8/10 | 6.5/10 | Maintained |
 | 2026-02-08 | M08 (CI Truthfulness) | 8/10 | 7/10 | 8.5/10 | 6.5/10 | Maintained |
+| 2026-02-08 | M09 (SBOM Baseline) | 8/10 | 7/10 | 8.5/10 | 7/10 | Maintained |
 
-*CI score improved: CI Truthfulness Policy established. All silent-failure patterns classified and documented.
+*Security score improved: SBOM baseline establishes first machine-readable dependency inventory. Supply chain visibility now auditable.
 
 **Targets (Post-Phase 3):**
 - Architecture: Maintain 8/10
@@ -1004,11 +1050,11 @@ For program-level recovery, consult: [`docs/refactor/toolcalls.md`](docs/refacto
 
 ## Document Version
 
-**Last Updated:** 2026-02-08 (M08 closeout)  
-**Next Update:** M09 completion  
+**Last Updated:** 2026-02-08 (M09 closeout)  
+**Next Update:** M10 completion  
 **Baseline Locked:** Commit c5f1d40  
 **Phase 0:** ✅ Complete  
-**Phase 1:** 🔄 In Progress (6/8 milestones complete)
+**Phase 1:** 🔄 In Progress (7/8 milestones complete)
 
 ---
 
