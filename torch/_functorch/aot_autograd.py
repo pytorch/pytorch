@@ -934,6 +934,7 @@ def prepare_aot_module_simplified(
     disable_functionalization: bool = False,
     _record_nn_module_stack: bool = False,
     _disable_torch_fn_metadata_mode: bool = False,
+    is_export: bool = False,
 ) -> tuple[
     Any,
     list[torch.nn.Parameter | Tensor],
@@ -1040,7 +1041,7 @@ def prepare_aot_module_simplified(
         # pyrefly: ignore[bad-argument-type]
         aot_autograd_arg_pos_to_source=aot_autograd_arg_pos_to_source,
         static_input_indices=static_input_indices,
-        is_export=False,
+        is_export=is_export,
         no_tangents=False,
         cache_info=None,
         ignore_shape_env=ignore_shape_env,
@@ -1332,6 +1333,7 @@ def aot_export_joint_with_descriptors(
         disable_functionalization=disable_functionalization,
         _record_nn_module_stack=_record_nn_module_stack,
         _disable_torch_fn_metadata_mode=_disable_torch_fn_metadata_mode,
+        is_export=True,
     )
 
     # TODO: Maybe this should be in create_aot_state?  Not sure, that would
