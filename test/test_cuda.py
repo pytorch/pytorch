@@ -1451,46 +1451,37 @@ except RuntimeError as e:
         self._spawn_test_multinomial_invalid_probs_cuda([1.0, -inf, 1.0])
         self._spawn_test_multinomial_invalid_probs_cuda([1.0, 1.0, nan])
 
-    @staticmethod
-    def _mute_init():
-        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stderr.fileno())
-
-    def _spawn_method(self, method, arg):
-        ctx = torch.multiprocessing.get_context("spawn")
-        with ctx.Pool(1, initializer=self._mute_init) as pool:
-            errors = pool.map(method, [arg])
-            for e in errors:
-                # CUDA raises cudaErrorAssert (710) with "device-side assert triggered"
-                # ROCm with TORCH_USE_HIP_DSA raises a proper device-side assertion
-                # ROCm without TORCH_USE_HIP_DSA raises hipErrorLaunchFailure (719)
-                # which still catches the error but with less specific messaging
-                is_cuda_assert = "device-side assert triggered" in str(e)
-                is_hip_assert = "hipErrorLaunchFailure" in str(
-                    e
-                ) or "unspecified launch failure" in str(e)
-                if not (is_cuda_assert or is_hip_assert):
-                    self.fail(e)
-                if e.error_code not in (710, 719):
-                    self.fail(e)
-
-    @staticmethod
-    def _test_index_bounds_cuda(idx):
-        x = torch.arange(10, device="cuda")
-        try:
-            y = x[torch.tensor([idx])]
-            return f"x[torch.tensor([{idx})]={y}"
-        except RuntimeError as err:
-            return err
-
     @slowTest
     def test_index_out_of_bounds_exception_cuda(self):
-        test_method = TestCuda._test_index_bounds_cuda
-        # Test in-bound access works fine
-        self.assertEqual(
-            test_method(1), "x[torch.tensor([1)]=tensor([1], device='cuda:0')"
-        )
         # Test that indexing out of bounds causes assert
-        self._spawn_method(test_method, 11)
+        stderr = TestCase.runWithPytorchAPIUsageStderr("""\
+#!/usr/bin/env python3
+
+import torch
+from torch.testing._internal.common_utils import (TestCase, run_tests, slowTest)
+
+class TestThatContainsCUDAAssertFailure(TestCase):
+
+    @slowTest
+    def test_index_bounds_cuda(self):
+        x = torch.arange(10, device="cuda")
+        y = x[torch.tensor([11])].cpu()
+
+if __name__ == '__main__':
+    run_tests()
+""")
+        # CUDA raises cudaErrorAssert (710) with "device-side assert triggered"
+        # ROCm with TORCH_USE_HIP_DSA raises a proper device-side assertion
+        # ROCm without TORCH_USE_HIP_DSA raises hipErrorLaunchFailure (719)
+        # which still catches the error but with less specific messaging
+        is_cuda_assert = "device-side assert triggered" in stderr
+        is_hip_assert = "hipErrorLaunchFailure" in stderr
+        is_hip_assert = is_hip_assert or "unspecified launch failure" in stderr
+        is_hip_assert = is_hip_assert or "HSA_STATUS_ERROR_EXCEPTION" in stderr
+        self.assertTrue(
+            is_cuda_assert or is_hip_assert,
+            f"Expected device assert error in stderr, got: {stderr}",
+        )
 
     @slowTest
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
@@ -5071,12 +5062,14 @@ def get_all_cudagraph_segments():
     return [segment for segment in segments if segment["segment_pool_id"] != (0, 0)]
 
 
-def cudagraphify(fn, inputs, pool=None):
+def cudagraphify(fn, inputs, pool=None, stream=None):
     if not TEST_CUDA_GRAPH:
         raise unittest.SkipTest("cuda graph test is skipped")
 
     torch.cuda.synchronize()
-    stream = torch.cuda.Stream()
+    if stream is None:
+        stream = torch.cuda.Stream()
+
     stream.wait_stream(torch.cuda.current_stream())
     with torch.cuda.stream(stream):
         fn(*inputs)
@@ -5479,6 +5472,83 @@ class TestBlockStateAbsorption(TestCase):
         torch.cuda.empty_cache()
 
         self.assertEqual(len(get_cudagraph_segments(pool)), 0)
+
+    @unittest.skipIf(not EXPANDABLE_SEGMENTS, "requires expandable_segments")
+    def test_expandable_segment_checkpoint_growth(self):
+        # Test restoring checkpoint when expandable segment has grown.
+        # Captures graph1 (small), checkpoints, then captures graph2 (larger)
+        # which grows the segment. Restoring to the smaller checkpoint should
+        # handle the extra mapped memory correctly.
+        pool_id = torch.cuda.graph_pool_handle()
+        stream = torch.cuda.Stream()
+        device = torch.cuda.current_device()
+
+        def get_large_mapped_blocks():
+            # memory_snapshot only includes mapped blocks
+            snapshot_segments = torch.cuda.memory_snapshot()
+            res = []
+            for segment in snapshot_segments:
+                if segment["segment_type"] != "large":
+                    continue
+                blocks = segment["blocks"]
+                for block in blocks:
+                    res.append((block["size"], block["state"]))
+            return res
+
+        with torch.cuda.stream(stream):
+            g = torch.cuda.CUDAGraph()
+            g.capture_begin(pool=pool_id)
+            g.capture_end()
+        original_state = torch._C._cuda_getCheckpointState(device, pool_id)
+
+        # 2MB allocation
+        def small_fn():
+            return (torch.empty(2 * 1024 * 1024, device="cuda", dtype=torch.int8),)
+
+        graph1, out1 = cudagraphify(small_fn, [], pool=pool_id, stream=stream)
+
+        large_mapped_blocks = get_large_mapped_blocks()
+        # small_fn allocates 2 MB, which leads to a 20 MB segment in large blocks. This becomes a 2 MB (or 2097152 bytes)
+        # active allocated block and a 18 MB (or 18874368 bytes) inactive block.
+        self.assertEqual(
+            large_mapped_blocks, [(2097152, "active_allocated"), (18874368, "inactive")]
+        )
+
+        small_state = torch._C._cuda_getCheckpointState(device, pool_id)
+        out1_metadata = [tensor_metadata(t) for t in out1]
+        del out1
+
+        self.setCheckpointPoolState(device, original_state, [], [])
+
+        # 32MB allocation
+        def large_fn():
+            return (torch.empty(32 * 1024 * 1024, device="cuda", dtype=torch.int8),)
+
+        graph2, out2 = cudagraphify(large_fn, [], pool=pool_id, stream=stream)
+
+        large_mapped_blocks = get_large_mapped_blocks()
+        # large_fn allocates 32 MB, which leads to a 40 MB segment in large blocks. This becomes a 32 MB (or 33554432 bytes)
+        # active allocated block and a 8 MB (or 8388608 bytes) inactive block.
+        self.assertEqual(
+            large_mapped_blocks, [(33554432, "active_allocated"), (8388608, "inactive")]
+        )
+
+        self.setCheckpointPoolState(device, original_state, out2, [])
+
+        graph1.replay()
+        reconstructed = [reconstruct_from_tensor_metadata(m) for m in out1_metadata]
+        out1_storage = [o.untyped_storage()._cdata for o in reconstructed]
+        torch._C._cuda_setCheckpointPoolState(device, small_state, [], out1_storage)
+
+        large_mapped_blocks = get_large_mapped_blocks()
+        # private memory pool never decreases size so we still have 40 MB segment. When we set checkpoint pool state for
+        # small_state, we allocate a 2 MB (or 2097152 bytes) active block and a 18 MB (or 18874368 bytes) inactive block.
+        # Since the total segment size is 40 MB, we still have a 20 MB inactive block. These two inactive blocks
+        # automatically merge into a single 38 MB (or 39845888 bytes) inactive block. As a result, we have a 2 MB active
+        # block and a 38 MB inactive block in the memory snapshot.
+        self.assertEqual(
+            large_mapped_blocks, [(2097152, "active_allocated"), (39845888, "inactive")]
+        )
 
     def test_no_triton_on_import(self):
         """Test that Triton is not imported on first GPU use"""

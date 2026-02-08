@@ -655,6 +655,8 @@ class OutputGraph(OutputGraphCommon):
         # Cached variable trackers. This makes symbolic analysis of LOAD_GLOBAL
         # and LOAD_ATTR for same python objects free.
         self.variable_tracker_cache: dict[Source, VariableTracker] = {}
+        # Cache for inspect.signature results: function -> VariableTracker
+        self.signature_cache: dict[Any, VariableTracker] = {}
         self.unique_var_id = itertools.count()
         self.code_options: dict[str, Any] = dict(code_options)
         self.output_instructions: list[Instruction] = []
@@ -2906,6 +2908,7 @@ class OutputGraph(OutputGraphCommon):
         self.input_name_to_proxy.clear()
         self.side_effects.clear()
         self.variable_tracker_cache.clear()
+        self.signature_cache.clear()
         self.register_finalizer_fns.clear()
         self.dynamo_flat_name_to_original_fqn.clear()
         self.tracing_context.clear()
