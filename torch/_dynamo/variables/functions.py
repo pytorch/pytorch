@@ -361,6 +361,16 @@ class BaseUserFunctionVariable(VariableTracker):
     def get_name(self) -> str:
         return self.get_code().co_name
 
+    def get_qualname(self) -> str:
+        return self.get_code().co_qualname
+
+    def get_doc(self) -> str | None:
+        # stored in code.co_consts[0]
+        return self.get_code().co_consts[0]
+
+    def get_module(self) -> str:
+        return self.get_globals()["__name__"]
+
     def get_globals(self) -> dict[str, Any]:
         raise NotImplementedError
 
@@ -1566,6 +1576,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         # This is present when this function is created by
         # `functools.wrap(wrapped_fn)(this_fn)`.
         wrapped_fn: VariableTracker | None = None,
+        generic_dict_vt: VariableTracker | None = None,
         **kwargs: Any,
     ) -> None:
         if kwargs.get("mutation_type") is None:
@@ -1582,6 +1593,19 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         self.annotations = annotations
         self.closure = closure
         self.wrapped_fn: VariableTracker | None = wrapped_fn
+        self.dict_vt: VariableTracker | None = generic_dict_vt
+
+    def _get___dict__(
+        self, tx: "InstructionTranslator"
+    ) -> "variables.DunderDictVariable":
+        if self.dict_vt is None:
+            self.dict_vt = variables.DunderDictVariable(
+                self,
+                side_effects=tx.output.side_effects,
+                mutation_type=ValueMutationNew(),
+                source=AttrSource(self.source, "__dict__") if self.source else None,
+            )
+        return self.dict_vt
 
     def self_args(self) -> list[VariableTracker]:
         return []
@@ -1680,14 +1704,54 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             func.__annotations__ = annotations
         return func
 
-    def call_setattr(
-        self,
-        tx: "InstructionTranslator",
-        name_var: VariableTracker,
-        val: VariableTracker,
-    ) -> VariableTracker:
-        tx.output.side_effects.store_attr(self, name_var.value, val)  # type: ignore[attr-defined]
-        return ConstantVariable(None)
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+        __dict__ = self._get___dict__(tx)
+
+        # Some dunder attributes (__name__, __doc__, etc) are stored in the C
+        # field slot. I guess it won't be too bad if we store them in the
+        # __dict__ field.
+
+        # annotations should be stored in the __dict__ field
+        if name == "__annotations__":
+            if not self.annotations:
+                self.annotations = variables.ConstDictVariable(
+                    {},
+                    source=AttrSource(self.source, "__annotations__")
+                    if self.source
+                    else None,
+                    mutation_type=ValueMutationNew(),
+                )
+            return self.annotations
+        elif name == "__dict__":
+            return self._get___dict__(tx)
+        elif name == "__type_params__":
+            return __dict__.getitem_or_default(
+                tx,
+                name,
+                lambda: variables.TupleVariable(
+                    [],
+                    source=AttrSource(self.source, "__type_params__")
+                    if self.source
+                    else None,
+                ),
+            )
+        elif name in ("__name__", "__qualname__", "__doc__", "__module__"):
+            val = getattr(self, f"get_{name[2:-2]}")()
+            return __dict__.getitem_or_default(
+                tx,
+                name,
+                lambda: ConstantVariable.create(
+                    val, source=AttrSource(self.source, name) if self.source else None
+                ),
+            )
+        else:
+            if name in __dict__:
+                return __dict__[name]
+            else:
+                # should `var_getattr` raise AttributeError if not found?
+                # I'm wondering if this method is a helper that it is faster
+                # than going through BuiltinVariable(getattr).call_function(...)
+                raise_observed_exception(AttributeError, tx)
 
     def call_method(
         self,
@@ -1697,7 +1761,11 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if name == "__setattr__":
-            return self.call_setattr(tx, *args)
+            return self._get___dict__(tx).call_method(
+                tx, "__setitem__", list(args), kwargs
+            )
+        elif name == "__delattr__":
+            return self._get___dict__(tx).call_method(tx, "__delitem__", list(args), {})
         return super().call_method(tx, name, list(args), kwargs)
 
     def has_closure(self) -> bool:
@@ -1720,6 +1788,9 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             return variables.ConstantVariable.create(hasattr(self, "code"))
         if name == "__defaults__":
             return variables.ConstantVariable.create(hasattr(self, "defaults"))
+        vt = ConstantVariable.create(name)
+        if vt in self._get___dict__(tx):
+            return ConstantVariable.create(True)
         return super().call_obj_hasattr(tx, name)
 
     def has_self(self) -> bool:

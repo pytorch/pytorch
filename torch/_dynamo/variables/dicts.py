@@ -22,7 +22,7 @@ import collections
 import functools
 import operator
 import types
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from typing import Any, Literal, Optional, TYPE_CHECKING, Union
 
 from torch.utils._ordered_set import OrderedSet
@@ -47,6 +47,7 @@ from .constant import ConstantVariable
 
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
+    from torch._dynamo.side_effects import SideEffects
     from torch._dynamo.symbolic_convert import InstructionTranslator
     from torch._dynamo.variables.builtin import BuiltinVariable
 
@@ -1773,3 +1774,86 @@ class DictItemsVariable(DictViewVariable):
         Dictionary item views are not hashable in Python.
         """
         return False
+
+
+kV = Union[ConstDictVariable._HashableTracker, str]
+
+
+class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
+    """
+    A proxy dict that allows us to track mutations to the dict using side
+    effects table as storage.
+    """
+
+    def __init__(self, item: VariableTracker, side_effects: "SideEffects") -> None:
+        self.item = item
+        self.side_effects = side_effects
+
+    def _maybe_unwrap_key(self, key: kV) -> str:
+        Hasher = ConstDictVariable._HashableTracker
+        return key.vt.as_python_constant() if istype(key, Hasher) else key
+
+    def __getitem__(self, key: kV) -> VariableTracker:
+        name = self._maybe_unwrap_key(key)
+        return self.side_effects.load_attr(self.item, name)
+
+    def __setitem__(self, key: kV, value: VariableTracker) -> None:
+        # Find a way to not hash the key using _HashableTracker
+        name = self._maybe_unwrap_key(key)
+        assert istype(name, str)
+        self.side_effects.store_attr(self.item, name, value)
+
+    def __delitem__(self, key: kV) -> None:
+        name = self._maybe_unwrap_key(key)
+        self.side_effects.store_attr(self.item, name, variables.DeletedVariable())
+
+    def __contains__(self, key: kV) -> bool:  # type: ignore[bad-override]
+        name = self._maybe_unwrap_key(key)
+        return name in self.side_effects.store_attr_mutations.get(self.item, {})
+
+    def __len__(self) -> int:
+        return len(self.side_effects.store_attr_mutations.get(self.item, {}))
+
+    def __iter__(self) -> Iterator[ConstDictVariable._HashableTracker]:
+        Hasher = ConstDictVariable._HashableTracker
+        d = self.side_effects.store_attr_mutations.get(self.item, {})
+        for k, v in d.items():
+            if isinstance(v, variables.DeletedVariable):
+                continue
+            yield Hasher(ConstantVariable.create(k))
+
+
+class DunderDictVariable(ConstDictVariable):
+    """represents object.__dict__"""
+
+    def __init__(
+        self,
+        vt: "variables.NestedUserFunctionVariable",
+        side_effects: "SideEffects",
+        **kwargs: Any,
+    ) -> None:
+        super().__init__({}, **kwargs)
+        self.items = SideEffectsProxyDict(vt, side_effects)
+
+    # Is it bad to implement dunder methods for VariableTrackers?
+    def __getitem__(self, name: str) -> VariableTracker:  #
+        return self.items[name]
+
+    def __contains__(
+        self, name: str
+    ) -> bool:  # pyrefly: ignore[bad-param-name-override]
+        return name in self.items
+
+    def getitem_or_default(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        default: Callable,
+    ) -> VariableTracker:
+        if name in self.items:
+            return self.items[name]
+        else:
+            value = default()
+            vt = ConstantVariable.create(name)
+            self.call_method(tx, "__setitem__", [vt, value], {})
+            return value
