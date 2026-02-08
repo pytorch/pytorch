@@ -82,6 +82,9 @@ jobs:
       CUDA_VERSION: ${{ matrix.cuda_version }}
       CUDA_SHORT: ${{ matrix.cuda_short }}
       TORCH_CUDA_ARCH_LIST: ${{ matrix.torch_cuda_arch_list }}
+      # building against Python 3.10 and torch 2.10
+      PYTHON_VERSION: "3.10"
+      TORCH_VERSION: "2.10.0"
     steps:
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
@@ -114,15 +117,16 @@ jobs:
             -w /pytorch \
             "${DOCKER_IMAGE}"
           )
-          PYTHON_EXECUTABLE=/opt/python/cp310-cp310/bin/python
+          PYTHON_EXECUTABLE=/opt/python/cp${PYTHON_VERSION//./}-cp${PYTHON_VERSION//./}/bin/python
           docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}" -m pip install \
-            torch==2.10.0 --extra-index-url "https://download.pytorch.org/whl/cu${CUDA_SHORT}"
+            torch==${TORCH_VERSION} --extra-index-url "https://download.pytorch.org/whl/cu${CUDA_SHORT}"
           docker exec -t \
             -e CUDA_VERSION="${CUDA_VERSION}" \
             -e CUDA_SHORT="${CUDA_SHORT}" \
             -e TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST}" \
             -e FA_FINAL_PACKAGE_DIR="/artifacts" \
             -e MANYLINUX_PLAT="${{ matrix.manylinux_plat }}" \
+            -e PYTHON_VERSION="${PYTHON_VERSION}" \
             -e PYTHON_EXECUTABLE="${PYTHON_EXECUTABLE}" \
             -e MAX_JOBS="${{ matrix.max_jobs }}" \
             -e NVCC_THREADS="${{ matrix.nvcc_threads }}" \
