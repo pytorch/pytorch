@@ -16,6 +16,7 @@ from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._nonlinear_redux import (
     argminmax_handler,
+    layer_norm_handler,
     minmax_dim_handler,
 )
 from torch.distributed.tensor._op_schema import (
@@ -163,6 +164,7 @@ class OpDispatcher:
             aten.argmax.default: argminmax_handler,
             aten.max.dim: minmax_dim_handler,
             aten.min.dim: minmax_dim_handler,
+            aten.native_layer_norm.default: layer_norm_handler,
         }
 
     # ********************************************************************************************

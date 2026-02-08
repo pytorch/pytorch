@@ -295,3 +295,94 @@ def minmax_dim_handler(
         ),
         output_sharding.output_spec,
     )
+
+
+def layer_norm_handler(
+    op_call: torch._ops.OpOverload,
+    args: tuple[object, ...],
+    kwargs: dict[str, object],
+) -> object:
+    """
+    Custom handler for native_layer_norm that decomposes the operation.
+
+    When input is sharded on normalized dimensions, instead of forcing
+    redistribution to Replicate, we decompose into:
+    1. Compute local sum(x) and sum(x²) → Partial("sum")
+    2. All-reduce to get global sums
+    3. Compute mean and variance from global sums
+    4. Normalize locally (input stays sharded)
+    5. Apply weight/bias element-wise
+
+    This reduces communication from O(tensor_size) to O(outer_dims_size).
+    """
+    input_tensor = args[0]
+    if not isinstance(input_tensor, dtensor.DTensor):
+        return op_call(*args, **kwargs)
+
+    normalized_shape = args[1]
+    weight = args[2] if len(args) > 2 else None
+    bias = args[3] if len(args) > 3 else None
+    eps = args[4] if len(args) > 4 else 1e-5
+
+    if not isinstance(normalized_shape, (list, tuple)):
+        normalized_shape = [normalized_shape]
+
+    axis = input_tensor.ndim - len(normalized_shape)
+    reduction_dims = list(range(axis, input_tensor.ndim))
+
+    # check if input is sharded on normalized dimensions
+    needs_decomposition = any(
+        isinstance(p, Shard) and p.dim >= axis for p in input_tensor.placements
+    )
+
+    if not needs_decomposition:
+        # use normal dispatch path
+        op_info = dtensor.DTensor._op_dispatcher.unwrap_to_op_info(
+            op_call, args, kwargs
+        )
+        dtensor.DTensor._op_dispatcher.sharding_propagator.propagate(op_info)
+        output_sharding = op_info.output_sharding
+        assert output_sharding is not None
+
+        if output_sharding.needs_redistribute:
+            assert output_sharding.redistribute_schema is not None
+            dtensor.DTensor._op_dispatcher.redistribute_local_args(
+                op_info,
+                output_sharding.redistribute_schema,
+                output_sharding.use_val_from_redistribute_schema,
+            )
+
+        local_results = op_call(*op_info.local_args, **op_info.local_kwargs)
+        return dtensor.DTensor._op_dispatcher.wrap(
+            local_results, output_sharding.output_spec
+        )
+
+    # decompose layer_norm for sharded normalized dims
+    N = reduce(operator.mul, normalized_shape, 1)
+
+    # compute local sums (these will have Partial placement)
+    sum_x = input_tensor.sum(dim=reduction_dims, keepdim=True)
+    sum_x2 = (input_tensor * input_tensor).sum(dim=reduction_dims, keepdim=True)
+
+    # all-reduce to get global sums
+    # stack to do a single all-reduce, then unstack
+    stacked = cast(dtensor.DTensor, torch.stack([sum_x, sum_x2], dim=0))
+    new_placements = tuple(
+        Replicate() if p.is_partial() else p for p in stacked.placements
+    )
+    stacked = stacked.redistribute(placements=new_placements)
+    sum_x = stacked[0]
+    sum_x2 = stacked[1]
+
+    mean = sum_x / N
+    var = sum_x2 / N - mean * mean
+    rstd = torch.rsqrt(var + eps)
+
+    out = (input_tensor - mean) * rstd
+
+    if weight is not None:
+        out = out * weight
+    if bias is not None:
+        out = out + bias
+
+    return out, mean, rstd
