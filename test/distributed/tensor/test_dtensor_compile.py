@@ -576,32 +576,94 @@ def forward(self, b_parametrizations_buffer_original0, x):
     def test_dtensor_matmul_zero_size_shards(self):
         from torch.distributed.tensor import randn as d_randn
 
-        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
-
         dist.destroy_process_group()
         dist.init_process_group("fake", store=FakeStore(), rank=0, world_size=4)
         device_mesh = init_device_mesh(self.device_type, (2, 2))
 
-        # create DTensors with unbacked outer/inner sizes
+        # Placements that shard on the contracting/output dims so that
+        # zero-size local shards can arise at runtime.
         px, py = (Replicate(), Shard(1)), (Replicate(), Shard(0))
-        x_dt = d_randn(64, 64, device_mesh=device_mesh, placements=px)
-        y_dt = d_randn(64, 64, device_mesh=device_mesh, placements=py)
-        for i in range(2):
-            torch._dynamo.decorators.mark_unbacked(x_dt, i)
-            torch._dynamo.decorators.mark_unbacked(y_dt, i)
+        # batched variants: shard the non-batch dims the same way
+        bpx, bpy = (Replicate(), Shard(2)), (Replicate(), Shard(1))
 
-        # full-graph capture
-        fn = torch.compile(torch.mm, backend=cnt, fullgraph=True)
-        fn(x_dt, y_dt)
+        def _run(torch_fn, make_args, unbacked_dims=None):
+            """Compile once on large tensors, then re-run on small/zero-size."""
+            torch._dynamo.reset()
+            cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+            fn = torch.compile(torch_fn, backend=cnt, fullgraph=True)
 
-        # check zero-size shards
-        for m in [3, 0]:  # n, k = 0 cause recompiles on strides
-            dx = d_randn(m, 1, device_mesh=device_mesh, placements=px)
-            dy = d_randn(1, 1, device_mesh=device_mesh, placements=py)
-            c_out, eager_out = fn(dx, dy), torch.mm(dx, dy)
-            self.assertEqual(tuple(c_out.shape), (m, 1))
-            self.assertEqual(cnt.frame_count, 1)
-            self.assertEqual(c_out.shape, eager_out.shape)
+            # initial compile with large shapes
+            args0 = make_args(64)
+            for arg_idx, a in enumerate(args0):
+                if unbacked_dims is not None:
+                    for i in unbacked_dims.get(arg_idx, []):
+                        torch._dynamo.decorators.mark_unbacked(a, i)
+                else:
+                    for i in range(a.dim()):
+                        torch._dynamo.decorators.mark_unbacked(a, i)
+            fn(*args0)
+
+            # re-run with m=3 which produces zero-size local shards
+            # (3 < world_size=4), verifying no recompilation
+            for m in [3]:
+                args = make_args(m)
+                c_out = fn(*args)
+                eager_out = torch_fn(*args)
+                self.assertEqual(c_out.shape, eager_out.shape)
+                self.assertEqual(cnt.frame_count, 1)
+
+        # mm: (m,k) @ (k,n) -> (m,n)
+        _run(
+            torch.mm,
+            lambda m: (
+                d_randn(m, 64, device_mesh=device_mesh, placements=px),
+                d_randn(64, 64, device_mesh=device_mesh, placements=py),
+            ),
+        )
+
+        # addmm: bias(n) + (m,k) @ (k,n) -> (m,n)
+        # Only mark mat1 dim 0 (m) as unbacked; bias dims must be backed
+        # because sharding prop checks bias_shape == 1 for broadcast.
+        _run(
+            torch.addmm,
+            lambda m: (
+                d_randn(
+                    64, device_mesh=device_mesh, placements=(Replicate(), Replicate())
+                ),
+                d_randn(m, 64, device_mesh=device_mesh, placements=px),
+                d_randn(64, 64, device_mesh=device_mesh, placements=py),
+            ),
+            unbacked_dims={1: [0]},
+        )
+
+        # bmm: (b,m,k) @ (b,k,n) -> (b,m,n)
+        _run(
+            torch.bmm,
+            lambda m: (
+                d_randn(2, m, 64, device_mesh=device_mesh, placements=bpx),
+                d_randn(2, 64, 64, device_mesh=device_mesh, placements=bpy),
+            ),
+            unbacked_dims={0: [1]},
+        )
+
+        # baddbmm: bias(b,1,n) + (b,m,k) @ (b,k,n) -> (b,m,n)
+        # Use bias with m=1 (broadcast) so the bias shape doesn't change
+        # across m values, avoiding recompilation and unbacked broadcast guards.
+        _run(
+            torch.baddbmm,
+            lambda m: (
+                d_randn(
+                    2,
+                    1,
+                    64,
+                    device_mesh=device_mesh,
+                    placements=(Replicate(), Replicate()),
+                ),
+                d_randn(2, m, 64, device_mesh=device_mesh, placements=bpx),
+                d_randn(2, 64, 64, device_mesh=device_mesh, placements=bpy),
+            ),
+            unbacked_dims={1: [1]},
+        )
 
     def test_dtensor_requires_grad_recompile(self):
         cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
