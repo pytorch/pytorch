@@ -4,7 +4,7 @@ import importlib
 import math
 import warnings
 from collections.abc import Callable
-from typing import Any as _Any, Optional, TYPE_CHECKING
+from typing import Any as _Any, Optional, Union, TYPE_CHECKING
 
 import torch
 from torch import _VF, sym_int as _sym_int, Tensor
@@ -5350,7 +5350,7 @@ def pad(
     input: Tensor,
     pad: list[int],
     mode: str = "constant",
-    value: Optional[float] = None,
+    value: Optional[Union[float, int]] = None,
 ) -> Tensor:
     r"""
     pad(input, pad, mode="constant", value=None) -> Tensor

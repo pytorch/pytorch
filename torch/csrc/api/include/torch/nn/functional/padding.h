@@ -11,7 +11,7 @@ inline Tensor pad(
     const Tensor& input,
     IntArrayRef pad,
     PadFuncOptions::mode_t mode,
-    double value) {
+    c10::Scalar value) {
   const auto mode_enum = [&] {
     if (std::holds_alternative<enumtype::kConstant>(mode)) {
       return at::padding_mode::constant;
@@ -25,8 +25,8 @@ inline Tensor pad(
     TORCH_CHECK(false, "Unrecognised padding mode");
   }();
 
-  std::optional<double> fill_value;
-  if (value != 0.0) {
+  std::optional<c10::Scalar> fill_value;
+  if (!value.equal(0)) {
     fill_value = value;
   }
   return at::_pad_enum(input, pad, static_cast<int64_t>(mode_enum), fill_value);

@@ -7691,6 +7691,25 @@ class TestConstantPadNd(TestCase):
         nhwc_padded = torch.constant_pad_nd(nhwc_tensor, [1, 2], 0.5)
         self.assertTrue(nhwc_padded.is_contiguous(memory_format=torch.channels_last))
 
+    def test_constant_pad_nd_int_value(self):
+        # F.pad with int value on int64 tensor (fixes #170536)
+        x = torch.tensor([[1, 2], [3, 4]], dtype=torch.int64)
+        fill = torch.iinfo(torch.long).max
+        out = F.pad(x, (1, 1, 1, 1), mode="constant", value=fill)
+        self.assertEqual(out.dtype, torch.int64)
+        # Padded regions must have the int fill value, not a double-converted value
+        self.assertEqual(out[0, 0], fill)
+        self.assertEqual(out[0, 1], fill)
+        self.assertEqual(out[0, 3], fill)
+        self.assertEqual(out[2, 0], fill)
+        self.assertEqual(out[1, 0], fill)
+        self.assertEqual(out[1, 3], fill)
+        # Original region unchanged
+        self.assertEqual(out[1, 1], 1)
+        self.assertEqual(out[1, 2], 2)
+        self.assertEqual(out[2, 1], 3)
+        self.assertEqual(out[2, 2], 4)
+
 
 class TestAddRelu(TestCase):
     def test_add_relu(self):
