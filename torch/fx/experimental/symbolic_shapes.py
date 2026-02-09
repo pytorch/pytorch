@@ -6536,43 +6536,61 @@ class ShapeEnv:
 
         return tuple(equiv.items())
 
-    def _is_nonneg_term(self, expr: sympy.Expr) -> bool:
-        """Check if a single term is known to be non-negative."""
-        if expr.is_symbol:
-            vr = self.var_to_range.get(expr)
-            return vr is not None and vr.lower >= 0
-        if expr.is_number:
-            return expr >= 0
-        return False
-
-    def _is_sum_of_nonneg_terms(self, expr: sympy.Expr) -> bool:
+    def _maybe_fast_eval_comparison(self, expr: sympy.Basic) -> Optional[sympy.Basic]:
         """
-        Check if expr is a sum of terms that are all known to be non-negative.
-        Terms can be symbols with non-negative ranges or non-negative constants.
-        This is used to fast-path comparisons like `sum >= 0` which are trivially true.
-        """
-        if not expr.is_Add:
-            return self._is_nonneg_term(expr)
-        return all(self._is_nonneg_term(arg) for arg in expr.args)
-
-    def _maybe_fast_eval_comparison(
-        self, expr: sympy.Basic, fallback_value: Optional[bool] = None
-    ) -> Optional[sympy.Basic]:
-        """
-        Try to quickly evaluate trivially true/false comparisons without expensive simplification.
+        Try to quickly evaluate trivially true/false comparisons using only
+        value range analysis, without expensive sympy simplification.
         Returns sympy.true/sympy.false if decidable, None otherwise.
         """
-        # Check for sum_of_nonneg >= 0 pattern
-        if isinstance(expr, sympy.GreaterThan):  # lhs >= rhs
-            lhs, rhs = expr.args
-            if rhs == 0 and self._is_sum_of_nonneg_terms(lhs):
-                return sympy.true
-        elif isinstance(expr, sympy.Le):  # lhs <= rhs
-            lhs, rhs = expr.args
-            if lhs == 0 and self._is_sum_of_nonneg_terms(rhs):
-                return sympy.true
+        if len(expr.args) != 2:
+            return None
+
+        lhs, rhs = expr.args
+        diff = lhs - rhs
+        bounds = self._bound_sympy_no_tracing_context(diff)
+
+        if isinstance(expr, (sympy.Ge, sympy.Le, sympy.Gt, sympy.Lt)):
+            # Normalize <= and < to check -diff (i.e., rhs - lhs)
+            if isinstance(expr, (sympy.Le, sympy.Lt)):
+                bounds = ValueRanges(-bounds.upper, -bounds.lower)
+
+            # Strict comparisons use > 0 / <= 0, non-strict use >= 0 / < 0
+            if isinstance(expr, (sympy.Gt, sympy.Lt)):
+                if bounds.lower > 0:
+                    return sympy.true
+                if bounds.upper <= 0:
+                    return sympy.false
+            else:  # Ge, Le
+                if bounds.lower >= 0:
+                    return sympy.true
+                if bounds.upper < 0:
+                    return sympy.false
+
+        elif isinstance(expr, (sympy.Eq, sympy.Ne)):
+            # lhs == rhs iff diff == 0; lhs != rhs iff diff != 0
+            zero_not_in_range = bounds.lower > 0 or bounds.upper < 0
+            zero_is_only_value = bounds.lower == 0 and bounds.upper == 0
+
+            if isinstance(expr, sympy.Eq):
+                if zero_not_in_range:
+                    return sympy.false
+                if zero_is_only_value:
+                    return sympy.true
+            else:  # Ne
+                if zero_not_in_range:
+                    return sympy.true
+                if zero_is_only_value:
+                    return sympy.false
 
         return None
+
+    def _bound_sympy_no_tracing_context(self, expr: sympy.Expr) -> ValueRanges:
+        """
+        Compute value range bounds for expr using only var_to_range,
+        without looking up tracing context (faster than bound_sympy).
+        """
+        var_to_range = {x: self.var_to_range.get(x) for x in expr.free_symbols}
+        return bound_sympy(expr, var_to_range)
 
     @_lru_cache
     def _maybe_evaluate_static(
