@@ -14,7 +14,7 @@ from torch.utils._ordered_set import OrderedSet
 from ...._dynamo.utils import counters
 from ... import config
 from ...codecache import code_hash, get_path
-from ...ir import Buffer, ComputedBuffer, CUTLASSTemplateBuffer, Pointwise
+from ...ir import Buffer, ComputedBuffer, CUDATemplateBuffer, Pointwise
 from ...scheduler import (
     BaseSchedulerNode,
     BaseScheduling,
@@ -55,7 +55,7 @@ class CUDACPPScheduling(BaseScheduling):
     @staticmethod
     def is_cuda_cpp_template(node: BaseSchedulerNode) -> bool:
         return isinstance(node, SchedulerNode) and isinstance(
-            node.node, CUTLASSTemplateBuffer
+            node.node, CUDATemplateBuffer
         )
 
     def is_cuda_cpp_fused_template(self, node: BaseSchedulerNode) -> bool:
@@ -67,7 +67,7 @@ class CUDACPPScheduling(BaseScheduling):
         if self.is_cuda_cpp_template(node1) and isinstance(node2, BaseSchedulerNode):
             assert node1.node, "node1.node should not be None"
             return self._can_fuse_epilogue_impl(
-                cast(CUTLASSTemplateBuffer, node1.node),
+                cast(CUDATemplateBuffer, node1.node),
                 [],
                 node2,  # type: ignore[arg-type]
             )
@@ -134,12 +134,12 @@ class CUDACPPScheduling(BaseScheduling):
         """
         counters["inductor"]["cuda_epilogue_fusion_counter"] += len(epilogue_nodes)
         assert self.is_cuda_cpp_template(template_node), (
-            "Template node passed to CUDAScheduler.codegen_template must be a SchedulerNode that wraps a CUTLASSTemplateBuffer"
+            "Template node passed to CUDAScheduler.codegen_template must be a SchedulerNode that wraps a CUDATemplateBuffer"
         )
         template_node = cast(SchedulerNode, template_node)
         _, (_numel, rnumel) = template_node.group
         assert rnumel == 1
-        ctb: CUTLASSTemplateBuffer = cast(CUTLASSTemplateBuffer, template_node.node)
+        ctb: CUDATemplateBuffer = cast(CUDATemplateBuffer, template_node.node)
         epilogue_ir_nodes: list[Buffer] = [n.node for n in epilogue_nodes]  # type: ignore[misc]
         assert all(isinstance(n, ComputedBuffer) for n in epilogue_ir_nodes), (
             "Epilogue nodes must all be instances of ir.ComputedBuffer"
@@ -197,7 +197,7 @@ class CUDACPPScheduling(BaseScheduling):
 
     def _can_fuse_epilogue_impl(
         self,
-        cuda_template_buffer: CUTLASSTemplateBuffer,
+        cuda_template_buffer: CUDATemplateBuffer,
         existing_epilogue_nodes: list[BaseSchedulerNode],
         node_to_fuse: BaseSchedulerNode,
     ) -> bool:
@@ -206,7 +206,7 @@ class CUDACPPScheduling(BaseScheduling):
         support fusion with Pointwise operations, wrapped in (named) ComputedBuffer nodes.
 
         Args:
-            cuda_template_buffer : A CUTLASSTemplateBuffer object representing the CUDA template and it's result buffer
+            cuda_template_buffer : A CUDATemplateBuffer object representing the CUDA template and it's result buffer
             existing_epilogue_nodes : List[SchedulerNode]: The list of already fused epilogue nodes.
             node_to_fuse: The SchedulerNode node to be checked if it can be fused with the epilogue.
         Returns:
@@ -217,7 +217,7 @@ class CUDACPPScheduling(BaseScheduling):
 
         scheduler_nodes_to_fuse = node_to_fuse.get_nodes()
 
-        assert isinstance(cuda_template_buffer, CUTLASSTemplateBuffer)
+        assert isinstance(cuda_template_buffer, CUDATemplateBuffer)
 
         # Checks on constituent nodes
         for s_node in scheduler_nodes_to_fuse:
