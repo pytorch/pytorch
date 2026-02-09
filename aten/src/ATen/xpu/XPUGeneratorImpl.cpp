@@ -245,6 +245,20 @@ void XPUGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
   this->set_philox_offset_per_thread(philox_offset);
 }
 
+void XPUGeneratorImpl::graphsafe_set_state(
+    const c10::intrusive_ptr<GeneratorImpl>& gen) {
+  c10::intrusive_ptr<XPUGeneratorImpl> xpu_gen =
+      dynamic_intrusive_pointer_cast<XPUGeneratorImpl>(gen);
+  TORCH_CHECK(xpu_gen, "Expected a XPU Generator");
+  state_ = xpu_gen->state_;
+}
+
+c10::intrusive_ptr<c10::GeneratorImpl> XPUGeneratorImpl::graphsafe_get_state()
+    const {
+  auto gen = make_intrusive<XPUGeneratorImpl>(device().index(), state_);
+  return gen;
+}
+
 void XPUGeneratorImpl::set_philox_offset_per_thread(uint64_t offset) {
   TORCH_CHECK(offset % 4 == 0, "offset must be a multiple of 4");
   if (C10_LIKELY(
