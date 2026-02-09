@@ -906,9 +906,106 @@ PyTorch CI is fundamentally healthy. 95%+ of `continue-on-error` patterns are in
 
 ---
 
-### M09-M10 — CI Health (Planned)
+### M09 — Third-Party Supply Chain Inventory & SBOM Baseline ✅ COMPLETE
 
-See [`docs/refactor/audit/REFACTOR_PHASE_MAP.md`](docs/refactor/audit/REFACTOR_PHASE_MAP.md) for full Phase 1 plan.
+**Status:** 🔒 Closed and Locked  
+**Date:** 2026-02-08  
+**Effort:** 3 hours  
+**Change Class:** Documentation-Only (Inventory + SBOM Generation)
+
+**Intent:**
+Establish a baseline, auditable understanding of third-party and vendored dependencies in the PyTorch repository through machine-readable SBOM and human-readable inventory.
+
+**Deliverables:**
+- ✅ `docs/refactor/sbom/M09_sbom.json` — CycloneDX 1.5 SBOM (42 components)
+- ✅ `docs/refactor/sbom/M09_THIRD_PARTY.md` — Human-readable inventory with provenance
+- ✅ 35 git submodules inventoried with pinned commit SHAs
+- ✅ 3 bundled/vendored libraries documented
+- ✅ 2 embedded libraries identified (QNNPACK, clog)
+- ✅ Evidence gaps explicitly documented
+
+**Key Findings:**
+- **42 total third-party components** identified and cataloged
+- **35 git submodules** all have pinned commit SHAs
+- **6 PyTorch-owned components** identified (gloo, cpuinfo, fbgemm, tensorpipe, kineto, QNNPACK)
+- **QNNPACK** fully embedded in `aten/src/ATen/native/quantized/cpu/qnnpack/`
+- **2 unknown licenses** (mslk, aiter) require upstream verification
+
+**Non-Goals (Honored):**
+- ❌ No license remediation
+- ❌ No dependency upgrades
+- ❌ No CVE scanning
+- ❌ No CI enforcement
+- ❌ No transitive dependency scanning
+
+**Verification:**
+- ✅ 42 components cataloged in SBOM
+- ✅ CycloneDX 1.5 schema structure validated
+- ✅ 35 submodules cross-referenced with `.gitmodules` and `git submodule status`
+- ✅ Evidence gaps explicitly documented
+- ✅ No runtime, CI, or build code modified
+
+**Closeout Artifacts:**
+- [`docs/refactor/milestones/M09/M09_plan.md`](docs/refactor/milestones/M09/M09_plan.md)
+- [`docs/refactor/milestones/M09/M09_toolcalls.md`](docs/refactor/milestones/M09/M09_toolcalls.md)
+- [`docs/refactor/milestones/M09/M09_audit.md`](docs/refactor/milestones/M09/M09_audit.md)
+- [`docs/refactor/milestones/M09/M09_summary.md`](docs/refactor/milestones/M09/M09_summary.md)
+- [`docs/refactor/sbom/M09_sbom.json`](docs/refactor/sbom/M09_sbom.json)
+- [`docs/refactor/sbom/M09_THIRD_PARTY.md`](docs/refactor/sbom/M09_THIRD_PARTY.md)
+
+---
+
+### M10 — Third-Party Risk & License Classification ✅ COMPLETE
+
+**Status:** 🔒 Closed and Locked  
+**Date:** 2026-02-08  
+**Effort:** 2 hours  
+**Change Class:** Documentation-Only (Analysis)
+
+**Intent:**
+Convert M09 SBOM baseline into actionable risk intelligence by classifying all 42 third-party components across four axes: license, provenance, ownership, and risk tier.
+
+**Deliverables:**
+- ✅ `docs/refactor/sbom/M10_RISK_MATRIX.md` — Complete risk classification (42 components)
+- ✅ Deterministic risk tier assignments using locked framework
+- ✅ Evidence citations for every classification
+- ✅ Follow-up item registry with scoped recommendations
+
+**Key Findings:**
+- **PyTorch third-party supply chain is fundamentally healthy:** 76% Low risk (permissive license, high provenance)
+- **3 High-risk components** identified: mslk, aiter (unknown licenses), valgrind-headers (GPL-2.0+)
+- **37 permissive licenses** (MIT, BSD, Apache-2.0, BSL-1.0)
+- **35 git submodules** provide strong provenance via pinned SHAs
+- **6 PyTorch-owned components** all use permissive BSD licenses
+
+**Risk Distribution:**
+- High: 3 (7%) — Requires attention
+- Medium: 1 (2%) — Monitor
+- Low: 32 (76%) — No action
+- Informational: 4 (10%) — Dev/test only
+- **Total: 42 components**
+
+**Non-Goals (Honored):**
+- ❌ No license remediation
+- ❌ No dependency upgrades
+- ❌ No CVE/vulnerability scanning
+- ❌ No CI enforcement changes
+- ❌ No SBOM regeneration
+- ❌ No legal interpretation of GPL exceptions
+
+**Verification:**
+- ✅ All 42 components from M09 classified
+- ✅ Risk framework applied deterministically
+- ✅ All classifications cite M09 evidence
+- ✅ M09 SBOM artifacts unchanged (read-only)
+- ✅ No code, CI, or runtime files modified
+
+**Closeout Artifacts:**
+- [`docs/refactor/milestones/M10/M10_plan.md`](docs/refactor/milestones/M10/M10_plan.md)
+- [`docs/refactor/milestones/M10/M10_toolcalls.md`](docs/refactor/milestones/M10/M10_toolcalls.md)
+- [`docs/refactor/milestones/M10/M10_audit.md`](docs/refactor/milestones/M10/M10_audit.md)
+- [`docs/refactor/milestones/M10/M10_summary.md`](docs/refactor/milestones/M10/M10_summary.md)
+- [`docs/refactor/sbom/M10_RISK_MATRIX.md`](docs/refactor/sbom/M10_RISK_MATRIX.md)
 
 ---
 
