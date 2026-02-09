@@ -74,8 +74,8 @@ from torch._C._dynamo.eval_frame import NULL_STACK_VALUE  # noqa: F401
 
 
 @dataclass
-class DebuggerState:
-    """State for a code object being debugged."""
+class CodeInfo:
+    """Per-code-object data shared across all frames executing the same code."""
 
     code: types.CodeType
     instructions: list[Instruction]
@@ -84,32 +84,71 @@ class DebuggerState:
     index_width: int
     offset_width: int
     breakpoints: set[int] = field(default_factory=set)
-    step_mode: bool = True
-    verbose_mode: bool = (
-        False  # Print each instruction before executing (for segfault debugging)
-    )
-    current_frame: types.FrameType | None = None
+
+
+@dataclass
+class DebuggerState:
+    """Per-frame debugging state."""
+
+    code_info: CodeInfo
+    frame: types.FrameType
     current_offset: int = -1  # -1 indicates first instruction not yet seen
     current_stack_depth: int = 0  # Tracked dynamically
     first_instruction_seen: bool = False
+    step_mode: bool = True
+    step_count: int = 0  # Remaining steps for "s [n]" command (0 = prompt each time)
     user_locals: dict[str, Any] = field(
         default_factory=dict
     )  # User-defined variables from debugger
     last_command: str = "s"  # Last command for repeat on empty input
-    step_count: int = 0  # Remaining steps for "s [n]" command (0 = prompt each time)
     list_index: int | None = (
         None  # Current position for 'l' command (None = use current)
     )
+
+    @property
+    def code(self) -> types.CodeType:
+        return self.code_info.code
+
+    @property
+    def instructions(self) -> list[Instruction]:
+        return self.code_info.instructions
+
+    @property
+    def offset_to_inst(self) -> dict[int, Instruction]:
+        return self.code_info.offset_to_inst
+
+    @property
+    def offset_to_index(self) -> dict[int, int]:
+        return self.code_info.offset_to_index
+
+    @property
+    def index_width(self) -> int:
+        return self.code_info.index_width
+
+    @property
+    def offset_width(self) -> int:
+        return self.code_info.offset_width
+
+    @property
+    def breakpoints(self) -> set[int]:
+        return self.code_info.breakpoints
 
 
 class _DebugContext:
     """Internal debug context that manages the debugging session."""
 
     def __init__(self) -> None:
-        self._code_states: dict[types.CodeType, DebuggerState] = {}
+        self._code_info: dict[types.CodeType, CodeInfo] = {}
+        self._frame_states: dict[types.FrameType, DebuggerState] = {}
         self._active = False
         self._tracked_codes: set[types.CodeType] = set()
         self._old_trace: Callable[..., Any] | None = None
+        self._return_from_frame: types.FrameType | None = None
+        self._stop_after_return: bool = False
+        self._next_in_frame: types.FrameType | None = None
+        self._next_count: int = 0
+        self._verbose: bool = False
+        self._stop_at_new_code: bool = True
         if _HAS_SYS_MONITORING:
             self._tool_id = sys.monitoring.DEBUGGER_ID
 
@@ -123,24 +162,23 @@ class _DebugContext:
         Returns:
             List of instructions, or empty list if the code is not tracked.
         """
-        if not self._code_states:
+        if not self._code_info:
             return []
         if code is None:
-            # Return instructions from the most recently tracked code
-            state = next(reversed(self._code_states.values()))
+            info = next(reversed(self._code_info.values()))
         else:
-            state = self._code_states.get(code)
-            if state is None:
+            info = self._code_info.get(code)
+            if info is None:
                 return []
-        return state.instructions
+        return info.instructions
 
     def get_tracked_codes(self) -> list[types.CodeType]:
         """Get all code objects that have been tracked by the debugger."""
-        return list(self._code_states.keys())
+        return list(self._code_info.keys())
 
-    def _get_or_create_state(self, code: types.CodeType) -> DebuggerState:
-        """Get or create debugger state for a code object."""
-        if code not in self._code_states:
+    def _get_or_create_code_info(self, code: types.CodeType) -> CodeInfo:
+        """Get or create CodeInfo for a code object."""
+        if code not in self._code_info:
             # Use dis.get_instructions directly to preserve original offsets.
             # cleaned_instructions strips EXTENDED_ARG and recalculates offsets,
             # which would cause mismatches with offsets reported by callbacks.
@@ -166,7 +204,7 @@ class _DebugContext:
                 default=0,
             )
 
-            self._code_states[code] = DebuggerState(
+            self._code_info[code] = CodeInfo(
                 code=code,
                 instructions=instructions,
                 offset_to_inst=offset_to_inst,
@@ -174,7 +212,16 @@ class _DebugContext:
                 index_width=max(1, len(str(max_index))),
                 offset_width=max(1, len(str(max_offset))),
             )
-        return self._code_states[code]
+        return self._code_info[code]
+
+    def _get_or_create_frame_state(
+        self, code: types.CodeType, frame: types.FrameType
+    ) -> DebuggerState:
+        """Get or create per-frame DebuggerState."""
+        if frame not in self._frame_states:
+            code_info = self._get_or_create_code_info(code)
+            self._frame_states[frame] = DebuggerState(code_info=code_info, frame=frame)
+        return self._frame_states[frame]
 
     def _find_frame_for_code(self, code: types.CodeType) -> types.FrameType | None:
         """Walk the stack to find the frame executing the given code."""
@@ -184,6 +231,24 @@ class _DebugContext:
                 return f
             f = f.f_back
         return None
+
+    def _build_tracked_frame_stack(self, state: DebuggerState) -> list[DebuggerState]:
+        """Build list of tracked ancestor frames, outermost-first.
+
+        Walks f_back from the current execution frame to find all ancestor
+        frames whose code is tracked by the debugger. Returns the corresponding
+        DebuggerState objects with the execution state (state) last.
+        """
+        ancestors: list[DebuggerState] = []
+        f: types.FrameType | None = state.frame.f_back
+        while f is not None:
+            ancestor_state = self._frame_states.get(f)
+            if ancestor_state is not None:
+                ancestors.append(ancestor_state)
+            f = f.f_back
+        ancestors.reverse()
+        ancestors.append(state)
+        return ancestors
 
     def _format_instruction(
         self, state: DebuggerState, offset: int, mark_current: bool = True
@@ -225,15 +290,11 @@ class _DebugContext:
 
     def _print_stack(self, state: DebuggerState) -> None:
         """Print the current value stack."""
-        if state.current_frame is None:
-            print("\nStack: (no frame available)")
-            return
-
         from torch._C._dynamo.eval_frame import _get_frame_value_stack_with_depth
 
         depth = state.current_stack_depth
         try:
-            stack = _get_frame_value_stack_with_depth(state.current_frame, depth)
+            stack = _get_frame_value_stack_with_depth(state.frame, depth)
         except Exception as e:
             print(f"\nStack: (error reading stack: {e})")
             return
@@ -251,12 +312,8 @@ class _DebugContext:
 
     def _print_locals(self, state: DebuggerState) -> None:
         """Print local variables."""
-        if state.current_frame is None:
-            print("\nLocals: (no frame available)")
-            return
-
         print("\nLocals:")
-        locals_dict = state.current_frame.f_locals
+        locals_dict = state.frame.f_locals
         if not locals_dict:
             print("  (none)")
         else:
@@ -266,12 +323,8 @@ class _DebugContext:
 
     def _print_globals(self, state: DebuggerState, pattern: str | None = None) -> None:
         """Print global variables."""
-        if state.current_frame is None:
-            print("\nGlobals: (no frame available)")
-            return
-
         print("\nGlobals:")
-        for name, value in state.current_frame.f_globals.items():
+        for name, value in state.frame.f_globals.items():
             if pattern and pattern not in name:
                 continue
             if name.startswith("__") and name.endswith("__"):
@@ -293,14 +346,17 @@ class _DebugContext:
     def _print_help(self) -> None:
         """Print help message."""
         print("\nCommands:")
-        print("  s [n]       - Step n instructions (default 1)")
-        print(
-            "  c, cont     - Continue until breakpoint, exception, or next Dynamo code"
-        )
+        print("  s [n]       - Step n instructions (default 1), stepping into calls")
+        print("  n [n]       - Step n instructions (default 1), stepping over calls")
+        print("  c, cont     - Continue until breakpoint or exception")
+        print("  r           - Continue until current function's return instruction")
         print(
             "  v, verbose  - Toggle verbose mode (print each instruction before executing)"
         )
         print("                Use with 'c' to find segfaults - last printed = culprit")
+        print("  u [count]   - Move up the call stack (toward caller) for inspection")
+        print("  d [count]   - Move down the call stack (toward callee)")
+        print("  bt, w       - Print tracked frame backtrace")
         print("  p <expr>    - Print expression")
         print("  l [first[, last]]  - List instructions (like pdb)")
         print("  l .         - List around current instruction")
@@ -320,28 +376,28 @@ class _DebugContext:
 
     def _get_stack_for_eval(self, state: DebuggerState) -> list[Any]:
         """Get the current stack for use in expression evaluation."""
-        if state.current_frame is None:
-            return []
         from torch._C._dynamo.eval_frame import _get_frame_value_stack_with_depth
 
         depth = state.current_stack_depth
         try:
-            return _get_frame_value_stack_with_depth(state.current_frame, depth)
+            return _get_frame_value_stack_with_depth(state.frame, depth)
         except Exception:
             return []
 
     def _build_eval_locals(self, state: DebuggerState) -> dict[str, Any]:
         """Build locals dict for expression evaluation, including user-defined variables."""
-        frame_locals = state.current_frame.f_locals if state.current_frame else {}
-        # Start with frame locals, overlay with user-defined variables
-        eval_locals = dict(frame_locals)
+        eval_locals = dict(state.frame.f_locals)
         eval_locals.update(state.user_locals)
         eval_locals["__stack__"] = self._get_stack_for_eval(state)
         return eval_locals
 
     def _interactive_prompt(self, state: DebuggerState) -> None:
         """Interactive prompt during debugging."""
-        self._print_context(state)
+        frame_stack = self._build_tracked_frame_stack(state)
+        view_index = len(frame_stack) - 1
+        view_state = frame_stack[view_index]
+
+        self._print_context(view_state)
 
         while True:
             try:
@@ -359,8 +415,9 @@ class _DebugContext:
             action = parts[0].lower()
             arg = parts[1] if len(parts) > 1 else ""
 
-            if action in ("s", "step", "n", "next"):
+            if action in ("s", "step"):
                 state.step_mode = True
+                self._stop_at_new_code = True
                 # Parse optional count argument (e.g., "s 3" to step 3 times)
                 if arg:
                     try:
@@ -375,13 +432,81 @@ class _DebugContext:
                     state.step_count = 0
                 return
 
-            elif action in ("c", "cont", "continue"):
+            elif action in ("n", "next"):
+                self._next_in_frame = view_state.frame
+                if arg:
+                    try:
+                        count = int(arg)
+                        self._next_count = count - 1
+                    except ValueError:
+                        print(f"Invalid count: {arg}")
+                        continue
+                else:
+                    self._next_count = 0
                 state.step_mode = False
+                self._stop_at_new_code = False
                 return
 
+            elif action in ("c", "cont", "continue"):
+                state.step_mode = False
+                self._stop_at_new_code = False
+                self._stop_after_return = False
+                return
+
+            elif action in ("r", "return"):
+                self._return_from_frame = state.frame
+                state.step_mode = False
+                self._stop_at_new_code = False
+                return
+
+            elif action in ("u", "up"):
+                count = 1
+                if arg:
+                    try:
+                        count = int(arg)
+                    except ValueError:
+                        print(f"Invalid count: {arg}")
+                        continue
+                new_index = view_index - count
+                if new_index < 0:
+                    new_index = 0
+                    print("Oldest tracked frame")
+                view_index = new_index
+                view_state = frame_stack[view_index]
+                print(f"> {view_state.code.co_name}")
+                self._print_context(view_state)
+
+            elif action in ("d", "down"):
+                count = 1
+                if arg:
+                    try:
+                        count = int(arg)
+                    except ValueError:
+                        print(f"Invalid count: {arg}")
+                        continue
+                max_index = len(frame_stack) - 1
+                new_index = view_index + count
+                if new_index > max_index:
+                    new_index = max_index
+                    print("Newest tracked frame")
+                view_index = new_index
+                view_state = frame_stack[view_index]
+                print(f"> {view_state.code.co_name}")
+                self._print_context(view_state)
+
+            elif action in ("bt", "w", "where"):
+                for i, fs in enumerate(frame_stack):
+                    marker = ">" if i == view_index else " "
+                    idx = fs.offset_to_index.get(fs.current_offset, -1)
+                    inst = fs.offset_to_inst.get(fs.current_offset)
+                    inst_str = inst.opname if inst else "<unknown>"
+                    print(
+                        f"  {marker} [{i}] {fs.code.co_name} instruction {idx} ({inst_str})"
+                    )
+
             elif action in ("v", "verbose"):
-                state.verbose_mode = not state.verbose_mode
-                status = "enabled" if state.verbose_mode else "disabled"
+                self._verbose = not self._verbose
+                status = "enabled" if self._verbose else "disabled"
                 print(f"Verbose mode {status}.")
 
             elif action in ("l", "list"):
@@ -396,7 +521,7 @@ class _DebugContext:
 
                 if arg == ".":
                     # Reset to current instruction
-                    state.list_index = None
+                    view_state.list_index = None
                 elif arg:
                     # Check for range syntax: "first, last" or "first,last"
                     if "," in arg:
@@ -424,38 +549,40 @@ class _DebugContext:
                             continue
 
                 if start is None:
-                    if state.list_index is None:
+                    if view_state.list_index is None:
                         # Center on current instruction
-                        current_idx = state.offset_to_index.get(state.current_offset, 0)
+                        current_idx = view_state.offset_to_index.get(
+                            view_state.current_offset, 0
+                        )
                         start = max(0, current_idx - num_lines // 2)
                     else:
-                        start = state.list_index
+                        start = view_state.list_index
                     end = start + num_lines
 
                 assert end is not None
-                end = min(len(state.instructions), end)
-                if start >= len(state.instructions):
+                end = min(len(view_state.instructions), end)
+                if start >= len(view_state.instructions):
                     print("(End of bytecode)")
                 else:
-                    print(self._format_header(state))
+                    print(self._format_header(view_state))
                     for i in range(start, end):
-                        inst = state.instructions[i]
+                        inst = view_state.instructions[i]
                         if inst.offset is not None:
-                            print(self._format_instruction(state, inst.offset))
+                            print(self._format_instruction(view_state, inst.offset))
                     print()
-                    state.list_index = end
+                    view_state.list_index = end
 
             elif action == "ll":
-                self._disassemble(state)
+                self._disassemble(view_state)
 
             elif action == "locals":
-                self._print_locals(state)
+                self._print_locals(view_state)
 
             elif action == "globals":
-                self._print_globals(state, arg if arg else None)
+                self._print_globals(view_state, arg if arg else None)
 
             elif action == "stack":
-                self._print_stack(state)
+                self._print_stack(view_state)
 
             elif action == "b":
                 if arg:
@@ -507,10 +634,8 @@ class _DebugContext:
             elif action == "p":
                 if arg:
                     try:
-                        frame_globals = (
-                            state.current_frame.f_globals if state.current_frame else {}
-                        )
-                        eval_locals = self._build_eval_locals(state)
+                        frame_globals = view_state.frame.f_globals
+                        eval_locals = self._build_eval_locals(view_state)
                         result = eval(arg, frame_globals, eval_locals)
                         print(f"{arg} = {result!r}")
                     except Exception as e:
@@ -527,10 +652,8 @@ class _DebugContext:
 
             else:
                 # Try to execute as Python code (like pdb)
-                frame_globals = (
-                    state.current_frame.f_globals if state.current_frame else {}
-                )
-                eval_locals = self._build_eval_locals(state)
+                frame_globals = view_state.frame.f_globals
+                eval_locals = self._build_eval_locals(view_state)
 
                 try:
                     # First try as expression (eval)
@@ -546,12 +669,12 @@ class _DebugContext:
                         # Capture any new or modified variables into user_locals
                         for key in eval_locals:
                             is_new = key not in keys_before
-                            is_user_var = key in state.user_locals
+                            is_user_var = key in view_state.user_locals
                             is_modified = id(eval_locals[key]) != ids_before.get(key)
                             if (
                                 is_new or is_user_var or is_modified
                             ) and key != "__stack__":
-                                state.user_locals[key] = eval_locals[key]
+                                view_state.user_locals[key] = eval_locals[key]
                     except Exception as e:
                         print(f"*** {type(e).__name__}: {e}")
                 except Exception as e:
@@ -561,7 +684,10 @@ class _DebugContext:
         self, code: types.CodeType, offset: int, frame: types.FrameType | None = None
     ) -> None:
         """Common instruction handling logic for both tracing backends."""
-        state = self._get_or_create_state(code)
+        if frame is None:
+            frame = self._find_frame_for_code(code)
+            assert frame is not None
+        state = self._get_or_create_frame_state(code, frame)
 
         # Update stack depth based on the previous instruction's effect.
         # The callback is called BEFORE instruction at 'offset' executes,
@@ -591,18 +717,40 @@ class _DebugContext:
 
         state.current_offset = offset
         state.list_index = None  # Reset list position when stepping
-        state.current_frame = (
-            frame if frame is not None else self._find_frame_for_code(code)
-        )
 
-        # First instruction - print header
+        # After 'r' command completes, resume stepping at the next instruction
+        if self._stop_after_return:
+            self._stop_after_return = False
+            state.step_mode = True
+            state.step_count = 0
+            self._stop_at_new_code = True
+
+        # After 'n', resume stepping when we reach that frame
+        if self._next_in_frame is not None and frame is self._next_in_frame:
+            if self._next_count > 0:
+                # More steps remaining — re-arm for the next instruction in this frame
+                self._next_count -= 1
+            else:
+                self._next_in_frame = None
+                state.step_mode = True
+                state.step_count = 0
+                self._stop_at_new_code = True
+            if _HAS_SYS_MONITORING:
+                sys.monitoring.restart_events()
+
+        # First instruction - print header and enter step mode (unless suppressed)
         if not state.first_instruction_seen:
             state.first_instruction_seen = True
-            print(f"\n=== Entering Dynamo-generated code: {code.co_name} ===")
-            self._print_help()
+            if not self._stop_at_new_code:
+                state.step_mode = False
+            if state.step_mode:
+                print(f"\n=== Entering Dynamo-generated code: {code.co_name} ===")
+                self._print_help()
+            elif self._verbose:
+                print(f"\n=== Entering Dynamo-generated code: {code.co_name} ===")
 
         # Verbose mode: print each instruction before executing (for segfault debugging)
-        if state.verbose_mode:
+        if self._verbose:
             inst = state.offset_to_inst.get(offset)
             if inst:
                 idx = state.offset_to_index.get(offset, -1)
@@ -621,38 +769,102 @@ class _DebugContext:
         current_index = state.offset_to_index.get(offset, -1)
         hit_breakpoint = current_index in state.breakpoints
 
+        # 'r' command: stop at RETURN_VALUE/RETURN_CONST in the target frame
+        # so the user can inspect the return value on the stack before returning.
+        hit_return_target = False
+        if self._return_from_frame is not None and frame is self._return_from_frame:
+            if inst is not None and inst.opname in ("RETURN_VALUE", "RETURN_CONST"):
+                self._return_from_frame = None
+                # After stepping past the return, stop in the caller
+                self._stop_after_return = True
+                hit_return_target = True
+
         # Check if we should stop
         # If step_count > 0, we're in the middle of "N s" and should continue
         if state.step_count > 0:
             state.step_count -= 1
-            # But still stop for breakpoints
-            if hit_breakpoint or hit_breakpoint_marker:
+            # But still stop for breakpoints and return targets
+            if hit_breakpoint or hit_breakpoint_marker or hit_return_target:
                 state.step_count = 0  # Cancel remaining steps
             else:
                 return  # Continue without prompting
 
-        should_stop = state.step_mode or hit_breakpoint or hit_breakpoint_marker
+        should_stop = (
+            state.step_mode
+            or hit_breakpoint
+            or hit_breakpoint_marker
+            or hit_return_target
+        )
         if should_stop:
             if hit_breakpoint:
                 print(f"Breakpoint hit at instruction {current_index}")
             elif hit_breakpoint_marker:
                 print("Breakpoint hit (programmatic)")
+            elif hit_return_target:
+                print(f"About to return from {code.co_name}")
             self._interactive_prompt(state)
 
-    def _handle_return(self, code: types.CodeType, retval: object) -> None:
+    def _handle_return(
+        self, code: types.CodeType, retval: object, frame: types.FrameType | None = None
+    ) -> None:
         """Common return handling logic."""
         print(f"\n=== {code.co_name} returned: {retval!r} ===")
+
+        # For sys.monitoring, we don't get the frame directly, but since
+        # the frame that's currently returning is the one whose PY_RETURN just
+        # fired, code identity is sufficient to match.
+        if self._return_from_frame is not None and (
+            frame is self._return_from_frame
+            or (frame is None and code is self._return_from_frame.f_code)
+        ):
+            self._return_from_frame = None
+            self._stop_after_return = True
+            if _HAS_SYS_MONITORING:
+                sys.monitoring.restart_events()
+        if self._next_in_frame is not None and (
+            frame is self._next_in_frame
+            or (frame is None and code is self._next_in_frame.f_code)
+        ):
+            self._next_in_frame = None
+            self._stop_after_return = True
+            if _HAS_SYS_MONITORING:
+                sys.monitoring.restart_events()
+
+        # Clean up frame state to avoid holding dead frame references
+        if frame is not None:
+            self._frame_states.pop(frame, None)
+        else:
+            # sys.monitoring path: find and remove matching frame state by code
+            for f, s in list(self._frame_states.items()):
+                if s.code is code:
+                    self._frame_states.pop(f, None)
+                    break
 
     def _handle_exception(
         self, code: types.CodeType, offset: int, exception: BaseException
     ) -> None:
         """Common exception handling logic."""
-        state = self._code_states.get(code)
+        frame = self._find_frame_for_code(code)
+        if frame is None:
+            return
+        state = self._frame_states.get(frame)
         if state is None:
             return
 
+        # If we're waiting for this frame to return, the return was interrupted
+        if self._return_from_frame is not None and (
+            frame is self._return_from_frame or code is self._return_from_frame.f_code
+        ):
+            self._return_from_frame = None
+
+        # If we're waiting for next-in-frame, the execution was interrupted
+        if self._next_in_frame is not None and (
+            frame is self._next_in_frame or code is self._next_in_frame.f_code
+        ):
+            self._next_in_frame = None
+            self._stop_at_new_code = True
+
         state.current_offset = offset
-        state.current_frame = self._find_frame_for_code(code)
 
         inst = state.offset_to_inst.get(offset)
         inst_str = inst.opname if inst else "<unknown>"
@@ -682,8 +894,8 @@ class _DebugContext:
             )
         # For settrace, we enable opcode tracing when we see the frame
 
-        # Pre-create state for this code
-        self._get_or_create_state(code)
+        # Pre-create code info for this code
+        self._get_or_create_code_info(code)
 
     def _monitoring_return_callback(
         self, code: types.CodeType, instruction_offset: int, retval: object
@@ -735,7 +947,7 @@ class _DebugContext:
             return self._settrace_callback
 
         elif event == "return":
-            self._handle_return(code, arg)
+            self._handle_return(code, arg, frame)
             return self._settrace_callback
 
         elif event == "exception":
@@ -756,7 +968,8 @@ class _DebugContext:
         from torch._C._dynamo.eval_frame import set_bytecode_debugger_callback
 
         self._active = True
-        self._code_states.clear()
+        self._code_info.clear()
+        self._frame_states.clear()
         self._tracked_codes.clear()
 
         if _HAS_SYS_MONITORING:
