@@ -184,8 +184,9 @@ class TestMatmulCuda(InductorTestCase):
     @onlyCUDA
     @dtypes(torch.cfloat, torch.cdouble)
     @parametrize("backend", ["cublas", "cublaslt"])
-    def test_matrix_l2_norm_def(self, dtype, backend):
-        # Testing X -> trace(X @ X.mH / X.mH @ X), the root cause of
+    def test_mm_with_mH_args(self, dtype, backend):
+        # Testing mm with mH-transformed arguments.
+        # The root cause of:
         # https://github.com/pytorch/pytorch/issues/174382
         val = 3 + 4j
         x = torch.zeros(2, 3, dtype=dtype, device="cuda")
