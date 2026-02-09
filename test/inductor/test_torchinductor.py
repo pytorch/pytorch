@@ -15562,6 +15562,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             "coordinate_descent_tuning": True,
         }
     )
+    @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
     def test_pdl_template_and_delay(self):
         def fn(a, b):
             a = (a / (a**2).sum(-1, keepdim=True)) ** 2  # first kernel
