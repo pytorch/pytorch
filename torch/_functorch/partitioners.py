@@ -207,19 +207,16 @@ def is_not_collective(node: fx.Node) -> bool:
 InvalidNode = InvalidNodeBase()
 
 
-def _is_copy_node_bw_only(node: fx.Node) -> fx.Node | None:
-    """Check if node is a view/reshape of a higher-order op output that aliases an input.
+def _get_ho_op_original_input(getitem_node: fx.Node) -> fx.Node | None:
+    """Given a getitem node, check if it extracts from a higher-order op
+    that has kwargs mapping the key back to an original input.
 
-    Returns the original input node from the higher-order op's kwargs if the pattern
-    matches, None otherwise.
+    Returns the original input node if found, None otherwise.
     """
-    if node.target not in (torch.ops.aten.view.default, torch.ops.aten.reshape.default):
+    if getitem_node.target != operator.getitem:
         return None
-    source = node.args[0]
-    if not isinstance(source, fx.Node) or source.target != operator.getitem:
-        return None
-    ho_result = source.args[0]
-    key = source.args[1]
+    ho_result = getitem_node.args[0]
+    key = getitem_node.args[1]
     if not isinstance(ho_result, fx.Node) or ho_result.op != "call_function":
         return None
     if "kwargs" not in ho_result.kwargs:
@@ -235,21 +232,44 @@ def _is_copy_node_bw_only(node: fx.Node) -> fx.Node | None:
     return None
 
 
+def _is_copy_node_bw_only(node: fx.Node) -> fx.Node | None:
+    """Check if node is a view/reshape of a higher-order op output that aliases an input.
+
+    Returns the original input node from the higher-order op's kwargs if the pattern
+    matches, None otherwise.
+    """
+    if node.target not in (torch.ops.aten.view.default, torch.ops.aten.reshape.default):
+        return None
+    source = node.args[0]
+    if not isinstance(source, fx.Node):
+        return None
+    return _get_ho_op_original_input(source)
+
+
 def _find_input_for_invalid_output(
     node: fx.Node,
     env: dict[fx.Node, Any],
-    inputs_set: OrderedSet[fx.Node],
 ) -> fx.Node | None:
     """Try to find a valid input replacement for an invalid forward output.
 
     This handles cases where a forward output depends on backward nodes but
     semantically aliases an input. For example, a view of a getitem from a
-    triton kernel that mutates a buffer in backward.
+    triton kernel that mutates a buffer in backward, or a direct getitem from
+    such a higher-order op. The original input may be a primal or a valid
+    intermediate node already present in the forward graph.
     """
+    # Pattern 1: view/reshape(getitem(ho_op, key)) -> ho_op.kwargs["kwargs"][key]
     original_input = _is_copy_node_bw_only(node)
     if (
         original_input is not None
-        and original_input in inputs_set
+        and original_input in env
+        and not isinstance(env[original_input], InvalidNodeBase)
+    ):
+        return env[original_input]
+    # Pattern 2: getitem(ho_op, key) -> ho_op.kwargs["kwargs"][key]
+    original_input = _get_ho_op_original_input(node)
+    if (
+        original_input is not None
         and original_input in env
         and not isinstance(env[original_input], InvalidNodeBase)
     ):
@@ -329,7 +349,6 @@ def _extract_graph_with_inputs_outputs(
         elif node.op == "output":
             pass
     output_values = []
-    inputs_set = OrderedSet(inputs)
     for x, x_desc in zip(outputs, outputs_descs):
         if isinstance(x, fx.Node):
             if x not in env:
@@ -353,7 +372,7 @@ def _extract_graph_with_inputs_outputs(
                 # higher-order op that mutates an input, find that input.
                 # This handles custom_function_view outputs from triton kernels.
                 if replacement is None:
-                    replacement = _find_input_for_invalid_output(x, env, inputs_set)
+                    replacement = _find_input_for_invalid_output(x, env)
                 if replacement is not None:
                     output_values.append(replacement)
                     continue
