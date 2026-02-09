@@ -195,6 +195,163 @@ class TestDecomposeFunctionalToOut(TestCase):
         torch.testing.assert_close(divided, x / 2.0)
 
 
+class TestReinplace(TestCase):
+    """Tests for the reinplace optimization in decompose_functional_to_out."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.lib = torch.library.Library("test_reinplace", "FRAGMENT")
+
+        # Single output op: out = x + 1 (same shape/dtype → x is reinplace candidate)
+        cls.lib.define("add_one(Tensor x) -> Tensor")
+
+        @torch.library.impl("test_reinplace::add_one", "CompositeExplicitAutograd")
+        def add_one_impl(x: Tensor) -> Tensor:
+            return x + 1
+
+        @torch.library.impl("test_reinplace::add_one", "Meta")
+        def add_one_meta(x: Tensor) -> Tensor:
+            return torch.empty_like(x)
+
+        cls.lib.define("add_one.out(Tensor x, Tensor! out) -> ()")
+
+        @torch.library.impl(
+            "test_reinplace::add_one.out", "CompositeExplicitAutograd"
+        )
+        def add_one_out_impl(x: Tensor, out: Tensor) -> None:
+            out.copy_(x + 1)
+
+        @torch.library.impl("test_reinplace::add_one.out", "Meta")
+        def add_one_out_meta(x: Tensor, out: Tensor) -> None:
+            pass
+
+    def test_reinplace_fires_when_input_not_used_downstream(self):
+        """
+        When the input to the custom op is an intermediate node with no
+        downstream uses, reinplace should reuse its buffer.
+
+        We chain two custom ops: add_one(add_one(x)).
+        The inner add_one produces an intermediate that is ONLY used by
+        the outer add_one. After transformation, the outer add_one should
+        reinplace into the inner's output buffer.
+        """
+        from torch._inductor.fx_passes.decompose_functional_to_out import (
+            decompose_functional_to_out,
+        )
+        from torch.export import export
+
+        class TestModule(torch.nn.Module):
+            def forward(self, x):
+                tmp = torch.ops.test_reinplace.add_one(x)
+                return torch.ops.test_reinplace.add_one(tmp)
+
+        x = torch.randn(4, 4)
+        exported = export(TestModule(), (x,))
+        graph = exported.graph_module.graph
+
+        modified = decompose_functional_to_out(graph)
+        self.assertTrue(modified)
+
+        # Count torch.empty allocations. With two add_one ops:
+        # - First add_one(x): x is placeholder → cannot reinplace → allocates empty
+        # - Second add_one(tmp): tmp is the first empty node → not placeholder,
+        #   no downstream uses → CAN reinplace → no allocation needed
+        # So we should see exactly 1 torch.empty, not 2.
+        empty_count = sum(
+            1 for n in graph.nodes
+            if n.op == "call_function" and n.target == torch.empty
+        )
+        self.assertEqual(
+            empty_count, 1,
+            f"Expected 1 torch.empty (reinplace should eliminate the second), got {empty_count}",
+        )
+
+        # Both out variants should exist
+        out_count = sum(
+            1
+            for n in graph.nodes
+            if n.op == "call_function"
+            and n.target == torch.ops.test_reinplace.add_one.out
+        )
+        self.assertEqual(out_count, 2)
+
+        # Verify correctness
+        exported.graph_module.recompile()
+        result = exported.graph_module(x)
+        if isinstance(result, tuple):
+            result = result[0]
+        torch.testing.assert_close(result, x + 2)
+
+    def test_reinplace_skipped_when_input_used_downstream(self):
+        """
+        When the input x is used after the op, reinplace must NOT fire —
+        overwriting x would corrupt the downstream use.
+
+        Graph: x → add_one(x) → result; x is also used in x + result
+        """
+        from torch._inductor.fx_passes.decompose_functional_to_out import (
+            decompose_functional_to_out,
+        )
+        from torch.export import export
+
+        class TestModule(torch.nn.Module):
+            def forward(self, x):
+                result = torch.ops.test_reinplace.add_one(x)
+                return result + x  # x is used downstream
+
+        x = torch.randn(4, 4)
+        exported = export(TestModule(), (x,))
+        graph = exported.graph_module.graph
+
+        modified = decompose_functional_to_out(graph)
+        self.assertTrue(modified)
+
+        # Reinplace should NOT fire: torch.empty must be allocated
+        has_empty = any(
+            n.target == torch.empty for n in graph.nodes if n.op == "call_function"
+        )
+        self.assertTrue(has_empty, "Should allocate torch.empty when input is used downstream")
+
+        # Verify correctness
+        exported.graph_module.recompile()
+        result = exported.graph_module(x)
+        if isinstance(result, tuple):
+            result = result[0]
+        torch.testing.assert_close(result, (x + 1) + x)
+
+    def test_reinplace_skipped_for_placeholder(self):
+        """
+        Graph inputs (placeholders) must not be reinplaced — the caller
+        still expects the original data.
+        """
+        from torch._inductor.fx_passes.decompose_functional_to_out import (
+            decompose_functional_to_out,
+        )
+        from torch.export import export
+
+        class TestModule(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.test_reinplace.add_one(x)
+
+        x = torch.randn(4, 4)
+        exported = export(TestModule(), (x,))
+        graph = exported.graph_module.graph
+
+        # The only input arg to add_one is x, which is a placeholder.
+        # _can_reuse_input rejects placeholders, so torch.empty must be used.
+        # However, the exported graph may introduce intermediate nodes
+        # between the placeholder and the op. Check correctness regardless.
+        modified = decompose_functional_to_out(graph)
+        self.assertTrue(modified)
+
+        # Verify correctness
+        exported.graph_module.recompile()
+        result = exported.graph_module(x)
+        if isinstance(result, tuple):
+            result = result[0]
+        torch.testing.assert_close(result, x + 1)
+
+
 class TestNativeQuantizeOp(TestCase):
     """
     Tests with real native PyTorch quantization op.
