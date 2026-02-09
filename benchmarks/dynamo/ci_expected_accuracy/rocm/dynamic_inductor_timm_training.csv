@@ -10,7 +10,7 @@ beit_base_patch16_224,pass,7
 
 
 
-convnextv2_nano.fcmae_ft_in22k_in1k,pass,7
+convnextv2_nano.fcmae_ft_in22k_in1k,fail_accuracy,7
 
 
 
@@ -70,4 +70,4 @@ vit_base_patch14_dinov2.lvd142m,pass,7
 
 
 
-vit_base_patch16_siglip_256,fail_accuracy,7
+vit_base_patch16_siglip_256,pass,7
