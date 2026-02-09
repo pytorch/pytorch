@@ -20,11 +20,11 @@ from torch.types import Device
 
 from ._utils import _get_device_index
 from .graphs import (
-    XPUGraph,
     graph,
     graph_pool_handle,
     is_current_stream_capturing,
     make_graphed_callables,
+    XPUGraph,
 )
 from .streams import Event, Stream
 

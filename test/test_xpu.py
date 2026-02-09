@@ -15,6 +15,7 @@ import threading
 import time
 import unittest
 import warnings
+from copy import deepcopy
 
 import torch
 import torch.xpu._gpu_trace as gpu_trace
