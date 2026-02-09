@@ -529,10 +529,21 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
         fall through to the default __reduce_ex__ which includes non-deterministic
         storage addresses. This method catches those cases using isinstance checks.
         """
+        from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
         # Handle tensor subclasses that aren't exactly torch.Tensor
         # dispatch_table already handles torch.Tensor exactly
         if isinstance(obj, torch.Tensor) and type(obj) is not torch.Tensor:
-            return self._reduce_tensor_subclass(obj)
+            if hasattr(obj, "_stable_hash_for_caching"):
+                return (_ident, (obj._stable_hash_for_caching(),))
+            if is_traceable_wrapper_subclass(obj):
+                warn_once(
+                    f"{type(obj).__name__} does not implement _stable_hash_for_caching. "
+                    "For PT2-compatible tensor subclasses, it is recommended to implement "
+                    "_stable_hash_for_caching(self) -> str for stable AOT autograd caching."
+                )
+                return (_ident, (self._default_stable_hash_for_caching(obj),))
+            return self._reduce_tensor(obj)
         # Return NotImplemented to fall back to default behavior
         return NotImplemented
 
@@ -550,28 +561,6 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
     # a default implementation here that uses __tensor_flatten__ to recursively
     # hash inner tensors and metadata.
 
-    def _reduce_tensor_subclass(self, tensor: torch.Tensor) -> Any:
-        """
-        Reduce a tensor subclass to a stable key for caching.
-        """
-        from torch.utils._python_dispatch import is_traceable_wrapper_subclass
-
-        if not is_traceable_wrapper_subclass(tensor):
-            return self._reduce_tensor(tensor)
-
-        if hasattr(tensor, "_stable_hash_for_caching"):
-            return (_ident, (tensor._stable_hash_for_caching(),))
-
-        # Warn once about missing _stable_hash_for_caching
-        warn_once(
-            f"{type(tensor).__name__} does not implement _stable_hash_for_caching. "
-            "Using default implementation based on __tensor_flatten__. "
-            "Consider implementing _stable_hash_for_caching(self) -> str for optimal caching."
-        )
-
-        # Default implementation for traceable wrapper subclasses
-        return (_ident, (self._default_stable_hash_for_caching(tensor),))
-
     def _get_stable_hash(self, tensor: torch.Tensor) -> str:
         """
         Get stable hash for a tensor, dispatching to custom or default implementation.
@@ -585,7 +574,7 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
         else:
             # Regular tensor
             metadata = extract_tensor_metadata_for_cache_key(tensor)
-            return hashlib.blake2b(repr(metadata).encode(), digest_size=16).hexdigest()
+            return hashlib.blake2b(pickle.dumps(metadata), digest_size=16).hexdigest()
 
     def _default_stable_hash_for_caching(self, tensor: torch.Tensor) -> str:
         """
@@ -599,17 +588,15 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
             inner_tensor = getattr(tensor, name)
             inner_hashes[name] = self._get_stable_hash(inner_tensor)
 
-        cache_data = repr(
+        cache_data = pickle.dumps(
             (
                 tensor.shape,
-                tensor.dtype,
-                tensor.device,
                 tensor.requires_grad,
                 subclass_metadata,
                 inner_hashes,
             )
         )
-        return hashlib.blake2b(cache_data.encode(), digest_size=16).hexdigest()
+        return hashlib.blake2b(cache_data, digest_size=16).hexdigest()
 
     def _reduce_aot_config(
         self, aot_config: AOTConfig
