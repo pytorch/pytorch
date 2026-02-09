@@ -4940,6 +4940,110 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         expected = torch.fft.fft(x)
         self.assertTrue(torch.allclose(result, expected))
 
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_inductor_issue_164428(self):
+        torch.manual_seed(6804)
+
+        def fuzzed_program(arg_0, arg_1, arg_2, sentinel):
+            var_node_4 = arg_0
+            var_node_5 = torch.full((7, 1, 32), -1.195053522845565, dtype=torch.float64)
+            var_node_3 = torch.div(var_node_4, var_node_5)
+            var_node_2 = torch.flatten(var_node_3)
+            var_node_8 = torch.full((2,), -0.8316502130341195, dtype=torch.float64)
+            var_node_9 = arg_1
+            var_node_7 = torch.matmul(
+                var_node_8.to(torch.float64), var_node_9.to(torch.float64)
+            )
+            var_node_10 = arg_2
+            var_node_6 = torch.sub(var_node_7, var_node_10)
+            var_node_1 = torch.sub(var_node_2, var_node_6)
+            var_node_0 = var_node_1.contiguous().view([16, 14])
+            result = var_node_0 * sentinel
+            if result.is_complex():
+                result = result.real
+            return result
+
+        sentinel = torch.tensor(1.0, requires_grad=True)
+
+        arg_0 = torch.as_strided(
+            torch.randn(7).to(torch.float64), (7, 1, 32), (1, 1, 0)
+        )
+        arg_1 = torch.as_strided(torch.randn(448).to(torch.float64), (2, 224), (224, 1))
+        arg_2 = torch.as_strided(torch.randn(224).to(torch.float64), (224,), (1,))
+
+        args = (arg_0, arg_1, arg_2) + (sentinel,)
+        result_original = fuzzed_program(*args)
+        compiled_program = torch.compile(fuzzed_program, fullgraph=True, dynamic=True)
+        result_compiled = compiled_program(*args)
+        self.assertTrue(torch.allclose(result_compiled, result_original))
+
+    def test_inductor_view_issue_172693(self):
+        class MinimalBugModule(torch.nn.Module):
+            def __init__(self, num_heads: int = 8):
+                super().__init__()
+                self.num_heads = num_heads
+
+            def forward(self, key):
+                reshaped_key = key.reshape(key.shape[0], self.num_heads, -1)
+                torch._dynamo.graph_break()
+                return reshaped_key + 1
+
+        num_heads = 8
+
+        bug_module = MinimalBugModule(num_heads=num_heads)
+
+        key = torch.empty_strided((2, 16, 9), (288, 9, 1)).normal_()
+
+        with torch.inference_mode():
+            eager_result = bug_module(key)
+            bug_module.compile(dynamic=True)
+            compiled_result = bug_module(key)
+
+        self.assertEqual(compiled_result, eager_result)
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_view_as_complex_unbacked_no_dde(self):
+        """
+        Test that view_as_complex does not raise GuardOnDataDependentSymNode
+        when operating on tensors with unbacked dimensions.
+        """
+
+        def func(x):
+            return torch.view_as_complex(x)
+
+        # Create a tensor with shape [..., 2] where batch dim is unbacked
+        x = torch.rand(4, 8, 2)
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+
+        torch._dynamo.reset()
+        # This should not raise GuardOnDataDependentSymNode
+        compiled_func = torch.compile(func, fullgraph=True, backend="eager")
+        result = compiled_func(x)
+        expected = torch.view_as_complex(x)
+        self.assertTrue(
+            torch.allclose(torch.view_as_real(result), torch.view_as_real(expected))
+        )
+
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_view_as_real_backward_unbacked_no_dde(self):
+        """
+        Test that view_as_real backward (which calls view_as_complex) does not
+        raise GuardOnDataDependentSymNode when operating on tensors with
+        unbacked dimensions.
+        """
+
+        def func(x):
+            y = torch.view_as_real(x)
+            return y.sum()
+
+        x = torch.rand(4, 8, dtype=torch.complex64, requires_grad=True)
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+
+        torch._dynamo.reset()
+        # This should not raise GuardOnDataDependentSymNode during backward
+        compiled_func = torch.compile(func, fullgraph=True, backend="eager")
+        result = compiled_func(x)
+        result.backward()
+
 
 instantiate_parametrized_tests(TestUnbacked)
 

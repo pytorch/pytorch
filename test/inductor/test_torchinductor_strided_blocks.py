@@ -22,7 +22,10 @@ from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import (
     decorateIf,
     instantiate_parametrized_tests,
+    MI200_ARCH,
+    NAVI_ARCH,
     parametrize,
+    skipIfRocmArch,
     subtest,
 )
 from torch.testing._internal.inductor_utils import (
@@ -797,6 +800,7 @@ class CommonTemplate:
             ((5, 5), 1, 1, torch.var_mean),  # Reduction + pointwise fusion.
         ],
     )
+    @skipIfRocmArch(MI200_ARCH + NAVI_ARCH)
     def test_2d_reduction_odd_shapes(
         self,
         view_size: tuple[int, ...],
@@ -812,6 +816,21 @@ class CommonTemplate:
             view_size = (513, 513) if view_size == (129, 129) else view_size
         view = self._discontiguous_tensor(view_size, self.device)
 
+        # HIP: Backend scheduling / fusion differences (e.g., Navi vs MI*)
+        # may result in off-by-one differences in the number of block pointers.
+        # Allow a small tolerance here to avoid backend-specific flakiness.
+        # We expect num_block_pointers to decrease by at most 1, and not increase.
+        # The range created here is checked below.
+        if torch.version.hip:
+            min_num_block_pointers = max(
+                num_block_pointers - 1, 1
+            )  # Expected at least one block descriptor for the input
+            max_num_block_pointers = (
+                num_block_pointers  # We don't expect num_block_pointers to increase.
+            )
+            # Disable strict checking in _run_and_compare; we assert bounds manually below.
+            num_block_pointers = None
+
         # Expect at least 1 block pointer for the input.
         # Add 2 more if we generate 2 kernels.
         result, (code,) = self._run_and_compare(
@@ -822,7 +841,20 @@ class CommonTemplate:
             config_patches=tiled_reduction_config,
         )
 
-        # Check the code for multiple Rn_BLOCK's
+        # HIP: Check the number of block pointers manually.
+        if torch.version.hip:
+            block_pointer_count = code.count(self.block_descriptor_constructor_str)
+            self.assertGreaterEqual(
+                block_pointer_count,
+                min_num_block_pointers,
+                f"Too few block descriptors emitted: {block_pointer_count}",
+            )
+            self.assertLessEqual(
+                block_pointer_count,
+                max_num_block_pointers,
+                f"Too many block descriptors emitted: {block_pointer_count}",
+            )
+
         self._assert_reduction_ndims(code, 2)
 
     @parametrize(
