@@ -2474,6 +2474,25 @@ class TestVmapOperators(Namespace.TestVmapBase):
             with self.assertRaisesRegex(RuntimeError, msg):
                 vmap(f)(torch.randn(3, 3))
 
+    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
+    def test_vmap_compile_add(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            return vmap(torch.add, in_dims=1, out_dims=1)(x, x)
+
+        x = torch.randn(4, 8)
+        self.assertEqual(f(x), x + x)
+
+    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
+    def test_vmap_compile_movedim_outdim(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            return vmap(torch.add, in_dims=2, out_dims=1)(x, x)
+
+        x = torch.randn(2, 3, 4)
+        expected = (x + x).movedim(2, 1)
+        self.assertEqual(f(x), expected)
+
     def test_unsqueeze(self):
         op = torch.unsqueeze
         test = self._vmap_view_test
