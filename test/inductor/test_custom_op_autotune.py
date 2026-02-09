@@ -15,8 +15,8 @@ from torch._inductor.kernel.custom_op import (
 )
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.inductor_utils import (
-    HAS_CUDA_AND_TRITON,
-    HAS_XPU_AND_TRITON,
+    GPU_TYPE,
+    HAS_GPU,
 )
 
 
@@ -29,9 +29,7 @@ class TestCustomOpAutoTune(TestCase):
     def setUp(self) -> None:
         """Set up test environment with appropriate device and dtype."""
         super().setUp()
-        self.device = (
-            "cuda" if HAS_CUDA_AND_TRITON else "xpu" if HAS_XPU_AND_TRITON else "cpu"
-        )
+        self.device = GPU_TYPE if HAS_GPU else "cpu"
         self.dtype = (
             torch.float16
             if self.device == "cuda" or self.device == "xpu"
