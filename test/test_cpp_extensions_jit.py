@@ -865,7 +865,8 @@ class TestCppExtensionJIT(common.TestCase):
         # Try calling zero_grad()
         net.zero_grad()
         for p in net.parameters():
-            assert p.grad is None, "zero_grad defaults to setting grads to None"
+            if p.grad is not None:
+                raise AssertionError("zero_grad defaults to setting grads to None")
 
         # Test train(), eval(), training (a property)
         self.assertTrue(net.training)
