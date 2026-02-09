@@ -1281,7 +1281,9 @@ freezing_discard_parameters: bool = False
 # decompose some memory bound matmul/bmm to mul
 decompose_mem_bound_mm: bool = False
 
-# Decompose functional custom ops to their out variants for CUDAGraph compatibility
+# Transform functional custom ops to their out variants.
+# This enables memory planning with pre-allocated output buffers and
+# normalizes user-defined ops (functional or out style) to out variants.
 decompose_functional_to_out: bool = False
 
 # Wrap compiled regions in inductor_compiled_code HOP to make them visible to

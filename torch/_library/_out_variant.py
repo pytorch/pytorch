@@ -1,14 +1,6 @@
 from __future__ import annotations
 
-import logging
-from typing import TYPE_CHECKING
-
 import torch
-
-if TYPE_CHECKING:
-    pass
-
-log = logging.getLogger(__name__)
 
 
 def get_out_arg_count(out_op: torch._ops.OpOverload) -> int:
