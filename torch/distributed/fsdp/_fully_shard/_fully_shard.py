@@ -474,6 +474,12 @@ class FSDPModule:
             comm (AllGather): Custom all-gather communication.
         """
         state = self._get_fsdp_state()
+        if len(state._fsdp_param_groups) > 1:
+            raise ValueError(
+                "set_custom_all_gather is not supported with multiple param "
+                "groups (from per-param mesh via shard_placement_fn). "
+                "The custom comm would be ambiguous across groups with different meshes."
+            )
         for fsdp_param_group in state._fsdp_param_groups:
             fsdp_param_group._all_gather_comm = comm
 
@@ -487,6 +493,12 @@ class FSDPModule:
             comm (ReduceScatter): Custom reduce_scatter communication.
         """
         state = self._get_fsdp_state()
+        if len(state._fsdp_param_groups) > 1:
+            raise ValueError(
+                "set_custom_reduce_scatter is not supported with multiple param "
+                "groups (from per-param mesh via shard_placement_fn). "
+                "The custom comm would be ambiguous across groups with different meshes."
+            )
         for fsdp_param_group in state._fsdp_param_groups:
             fsdp_param_group._reduce_scatter_comm = comm
 

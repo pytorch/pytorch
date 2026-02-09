@@ -147,7 +147,6 @@ class FSDPParamGroup:
             FSDPParam(
                 param,
                 module_info,
-                mesh_info,
                 post_forward_mesh_info,
                 device,
                 param_to_shard_result[param],
