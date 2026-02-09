@@ -396,7 +396,7 @@ class InputObserverInfo:
                 should be treated as a dynamic batch dimension. If ``None`` or empty,
                 no additional batch dimensions are marked as dynamic.
             return_flat: Tells the function to return a flat tuple instead of
-                nested structured.
+                nested structured. This option is used internally to infer arguments.
         """
         self.align_inputs_none_values()
         assert self._best_candidate is not None  # noqa: S101
