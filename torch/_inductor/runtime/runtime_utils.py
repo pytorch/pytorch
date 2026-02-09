@@ -4,6 +4,8 @@ import functools
 import operator
 from typing import Any, TYPE_CHECKING
 
+import sympy
+
 import torch
 
 # NOTE: other files rely on the imports below
@@ -36,15 +38,11 @@ def is_power_of_2(n: int) -> bool:
 
 def next_power_of_2(n: int) -> int:
     """Return the smallest power of 2 greater than or equal to n"""
-    n -= 1
-    n |= n >> 1
-    n |= n >> 2
-    n |= n >> 4
-    n |= n >> 8
-    n |= n >> 16
-    n |= n >> 32
-    n += 1
-    return n
+    if isinstance(n, sympy.Integer):
+        n = int(n)
+    if n <= 0:
+        return 1
+    return 1 << (n - 1).bit_length()
 
 
 def last_power_of_2(n: int) -> int:
@@ -246,3 +244,44 @@ def torch_dtype_to_jax(dtype: torch.dtype) -> str:
     if dtype_name == "bool":
         dtype_name = "bool_"
     return f"jnp.{dtype_name}"
+
+
+def pallas_partial_reduce(reduce_fn: Any, v: Any, pw_numel: int, red_numel: int) -> Any:
+    """
+    Helper for partial reductions in Pallas kernels.
+
+    Reorders axes and reduces, returning result with keepdims-style shape
+    for proper in-kernel broadcasting.
+
+    Args:
+        reduce_fn: The reduction function to apply (e.g., jnp.sum, jnp.max)
+        v: The input array to reduce
+        pw_numel: The number of pointwise elements
+        red_numel: The number of reduction elements
+
+    Returns:
+        Reduced array with keepdims-style shape
+    """
+    import jax.numpy as jnp  # pyrefly: ignore [import-error, missing-import]
+
+    shape = tuple(v.shape)
+    # Find contiguous axes whose product = red_numel (search from right)
+    red_axes = None
+    for i in range(len(shape) - 1, -1, -1):
+        prod = 1
+        for j in range(i, -1, -1):
+            prod *= shape[j]
+            if prod == red_numel:
+                red_axes = list(range(j, i + 1))
+                break
+        if red_axes is not None:
+            break
+    if red_axes is None:
+        red_axes = [len(shape) - 1]
+    # Build output shape with 1s for reduced dimensions (keepdims style)
+    out_shape = tuple(1 if i in red_axes else s for i, s in enumerate(shape))
+    # Move pointwise axes to front, reduction axes to back
+    pw_axes = [i for i in range(len(shape)) if i not in red_axes]
+    reordered = jnp.moveaxis(v, pw_axes, list(range(len(pw_axes))))
+    result = reduce_fn(reordered.reshape(pw_numel, red_numel), axis=-1)
+    return result.reshape(out_shape)

@@ -22,10 +22,12 @@ from typing import Optional
 import torch.utils.cpp_extension
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
+    isRocmArchAnyOf,
     TEST_WITH_ROCM,
     skipIfRocm,
     skipIfRocmArch,
     MI300_ARCH,
+    MI350_ARCH,
     skipIfTorchDynamo,
     TEST_FAIRSEQ,
     run_tests,
@@ -1947,6 +1949,34 @@ class TestSDPAFailureModes(NNTestCase):
                                                           attn_bias=None, compute_log_sumexp=True,
                                                           dropout_p=0.01)
 
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support Efficient Attention")
+    def test_mem_eff_attention_backward_requires_bias_when_bias_grad(self):
+        q = torch.rand(2, 8, 256, 64, device="cuda", dtype=torch.float16, requires_grad=True)
+        k = torch.rand(2, 8, 256, 64, device="cuda", dtype=torch.float16, requires_grad=True)
+        v = torch.rand(2, 8, 256, 64, device="cuda", dtype=torch.float16, requires_grad=True)
+        out, lse, philox_seed, philox_offset = torch.ops.aten._scaled_dot_product_efficient_attention.default(
+            q, k, v, None, True
+        )
+        grad_out = torch.rand_like(out)
+        error_str = "bias_requires_grad is true but no bias was provided"
+        with self.assertRaisesRegex(RuntimeError, error_str):
+            torch.ops.aten._scaled_dot_product_efficient_attention_backward.default(
+                grad_out,
+                q,
+                k,
+                v,
+                None,
+                out,
+                lse,
+                philox_seed,
+                philox_offset,
+                0.0,
+                (True, True, True, True),
+                False,
+                scale=None,
+            )
+
     @largeTensorTest("15GB", "cuda")
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support Efficient Attention")
@@ -2685,9 +2715,43 @@ class TestSDPACudaOnly(NNTestCase):
                     attn_mask=None, dropout_p=0.0, is_causal=False)
             self.assertEqual(actual.contiguous(), math_ref.contiguous().to(dtype), atol=1e-3, rtol=1e-2)
 
-        # head_dim=256 support on SM 9.0 requires cuDNN >= 9.10.0 (91000) per sdp_utils.cpp:495
+        # head_dim=256 support on SM 9.0 requires cuDNN >= 9.10.0 (91000) per sdp_utils.cpp:509
         cudnn_version = torch.backends.cudnn.version() if torch.backends.cudnn.is_available() else 0
         if torch.cuda.get_device_capability() == (9, 0) and cudnn_version >= 91000:
+            test()
+        else:
+            with self.assertRaisesRegex(RuntimeError, "No available kernel."):
+                test()
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
+    def test_cudnn_attention_d192_heuristic(self, device):
+        dtype = torch.bfloat16
+        make_tensor = partial(torch.rand, device=device, dtype=dtype, requires_grad=True)
+        batch, num_heads, head_dim_k, head_dim_v = 32, 16, 192, 128
+        seq_len = 640
+        q_shape = SdpaShape(batch, num_heads, seq_len, head_dim_k)
+        k_shape = SdpaShape(batch, num_heads, seq_len, head_dim_k)
+        v_shape = SdpaShape(batch, num_heads, seq_len, head_dim_v)
+        query, key, value = make_tensor(q_shape), make_tensor(k_shape), make_tensor(v_shape)
+
+        def test():
+            with sdpa_kernel(backends=[SDPBackend.CUDNN_ATTENTION], set_priority=True):
+                actual = torch.nn.functional.scaled_dot_product_attention(
+                    query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False)
+                actual.backward(torch.randn_like(actual))
+            with sdpa_kernel(backends=[SDPBackend.MATH]):
+                math_ref = torch.nn.functional.scaled_dot_product_attention(
+                    query.contiguous().to(torch.float32),
+                    key.contiguous().to(torch.float32),
+                    value.contiguous().to(torch.float32),
+                    attn_mask=None, dropout_p=0.0, is_causal=False)
+            self.assertEqual(actual.contiguous(), math_ref.contiguous().to(dtype), atol=1e-3, rtol=1e-2)
+
+        # head_dim=192 support on SM 9.0 (Hopper) and SM 10.x (Blackwell) requires cuDNN >= 9.11.0 (91100)
+        # This is a special case for DeepSeek model dimensions
+        cudnn_version = torch.backends.cudnn.version() if torch.backends.cudnn.is_available() else 0
+        device_capability = torch.cuda.get_device_capability()
+        if (device_capability == (9, 0) or device_capability[0] == 10) and cudnn_version >= 91100:
             test()
         else:
             with self.assertRaisesRegex(RuntimeError, "No available kernel."):
@@ -3269,7 +3333,7 @@ class TestSDPACudaOnly(NNTestCase):
         prefer_cudnn = "TORCH_CUDNN_SDPA_PREFERRED" not in os.environ or bool(os.environ["TORCH_CUDNN_SDPA_PREFERRED"])
         # cuDNN prioritization requires cuDNN >= 9.9.0 (90900) per sdp_utils.cpp:83
         cudnn_version = torch.backends.cudnn.version() if torch.backends.cudnn.is_available() else 0
-        is_hopper_or_newer = device_capability and (device_capability == (9, 0) or device_capability == (10, 0))
+        is_hopper_or_newer = device_capability and (device_capability[0] == 9 or device_capability[0] == 10)
         prefer_cudnn = prefer_cudnn and is_hopper_or_newer and cudnn_version >= 90900
 
         # cuDNN is enabled by default on SM 9.0/10.0 with cuDNN >= 9.9.0 (per #162073)
@@ -3704,6 +3768,24 @@ class TestSDPACudaOnly(NNTestCase):
             self.skipTest("CK does not support tensor format dropout masks")
         if TEST_WITH_CK and head_dim > 128:
             self.skipTest("CK does not support head dims over 128")
+
+        base_condition = (
+            TEST_WITH_ROCM and isRocmArchAnyOf(MI350_ARCH)
+            and dtype == torch.float16 and scale is None and batch_size == 8
+            and seq_len_q == 2048 and is_causal is False
+        )
+
+        # (seq_len_k, head_dim, enable_gqa) rows that should be skipped
+        skip_cases = {
+            (2048, 256, False),
+            (2048, 203, False),
+            (127, 256, False),
+            (579, 256, True),
+            (2048, 256, True),
+        }
+
+        if base_condition and (seq_len_k, head_dim, enable_gqa) in skip_cases:
+            self.skipTest("Accuracy issues on gfx950")
 
         scale = scale if scale is None else (1 / head_dim)
         num_heads_q = num_heads_kv = 4
@@ -4142,7 +4224,7 @@ class TestSDPACudaOnly(NNTestCase):
     @parametrize("batch_size", [8, 32])
     @parametrize("max_seq_len_q", [32, 256])
     @parametrize("max_seq_len_kv", [32, 256])
-    @parametrize("head_dim", [8, 64])
+    @parametrize("head_dim", [8, 40, 64, 160])
     @parametrize("dropout_p", [0.0, 0.1])
     @parametrize("dtype", [torch.float16])
     @parametrize("scale", [None, "l1"])
@@ -4641,7 +4723,7 @@ class TestSDPAXpuOnly(NNTestCase):
     @parametrize("n_head", [[3, 1], [4, 2], [10, 2]])
     @parametrize("q_size", [1, 32, 77, 128, 144, 512, 576])
     @parametrize("kv_size", [1, 32, 77, 128, 144, 512, 576])
-    @parametrize("head_dim", [64, 96, 128, 192])
+    @parametrize("head_dim", [64, 96, 128, 160, 192])
     @parametrize("mask_type", [None, "causal"])
     @parametrize("train", [True, False])
     @parametrize("layout", ["bshd", "bhsd"])
@@ -4897,9 +4979,9 @@ class TestAttnBias(NNTestCase):
             scaled_dot_product_attention(query, key, value, attn_mask=attn_bias, is_causal=True, dropout_p=0.0)
 
 if NOTEST_CPU:
-    device_types = ("cuda", "mps")
+    device_types = ("cuda", "mps", "mtia")
 else:
-    device_types = ("cpu", "cuda", "mps")
+    device_types = ("cpu", "cuda", "mps", "mtia")
 
 if TEST_XPU:
     device_types += ("xpu", )
