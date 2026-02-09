@@ -3550,6 +3550,25 @@ def rnn_relu_input(
     return out, torch.stack(final_hiddens, 0)
 
 
+def _check_batch_sizes(batch_sizes: torch.Tensor) -> None:
+    """Validate batch_sizes tensor for packed RNN sequences.
+
+    Args:
+        batch_sizes: Tensor containing batch sizes for packed sequence.
+
+    Raises:
+        RuntimeError: If batch_sizes is not 1D or not on CPU.
+    """
+    torch._check(
+        batch_sizes.dim() == 1,
+        lambda: "batch_sizes tensor should be 1D",
+    )
+    torch._check(
+        batch_sizes.device.type == "cpu",
+        lambda: f"batch_sizes tensor should be on CPU, but got {batch_sizes.device}",
+    )
+
+
 @register_decomposition(aten.rnn_relu.data)
 @aten.rnn_relu.data.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten.rnn_relu.data.py_impl(DispatchKey.Autograd)
@@ -3564,6 +3583,7 @@ def rnn_relu_data(
     train,
     bidirectional,
 ):
+    _check_batch_sizes(batch_sizes)
     hidden = hx.unbind(0)
     params = gather_params(params, has_biases, False)
     out, final_hiddens = _rnn_helper(
@@ -3599,6 +3619,7 @@ def rnn_tanh_data(
     train,
     bidirectional,
 ):
+    _check_batch_sizes(batch_sizes)
     hidden = hx.unbind(0)
     params = gather_params(params, has_biases, False)
     out, final_hiddens = _rnn_helper(
@@ -3824,6 +3845,7 @@ def lstm_data_impl(
     train,
     bidirectional,
 ):
+    _check_batch_sizes(batch_sizes)
     if len(hx) != 2:
         raise AssertionError(f"lstm expects two hidden states, got {len(hx)}")
     params = gather_params(params, has_biases, hx[0].size(2) != hx[1].size(2))
@@ -3876,6 +3898,7 @@ def gru_impl_data(
     train,
     bidirectional,
 ):
+    _check_batch_sizes(batch_sizes)
     params = gather_params(params, has_biases, False)
     out, final_hiddens = _rnn_helper(
         data,

@@ -696,6 +696,187 @@ class TestDecomp(TestCase):
             # they're checking aten decomps at the torch_dispatch level
             self.assertEqual(decomp_out, non_decomp_out)
 
+    @onlyCUDA
+    def test_rnn_packed_batch_sizes_device_validation(self, device):
+        """Test that RNN packed sequence ops validate batch_sizes is on CPU.
+
+        Regression test for https://github.com/pytorch/pytorch/issues/171284
+        """
+        input_size = 8
+        hidden_size = 16
+        num_layers = 4
+        num_directions = 2  # bidirectional
+
+        # batch_sizes must be on CPU, putting it on CUDA should raise an error
+        batch_sizes = torch.tensor(
+            [6, 6, 6, 5, 5, 4, 4, 3, 2, 2, 1, 1],
+            device=device,  # Wrong: should be CPU
+            dtype=torch.int64,
+        )
+
+        data = torch.randn(
+            batch_sizes.sum().item(),
+            input_size,
+            device=device,
+        )
+
+        max_batch = batch_sizes.max().item()
+
+        # GRU hidden state
+        hx_gru = torch.randn(
+            num_layers * num_directions,
+            max_batch,
+            hidden_size,
+            device=device,
+        )
+
+        # GRU params (no biases)
+        params_gru = []
+        for layer in range(num_layers):
+            for direction in range(num_directions):
+                layer_input_size = (
+                    input_size if layer == 0 else hidden_size * num_directions
+                )
+                params_gru.append(
+                    torch.randn(3 * hidden_size, layer_input_size, device=device)
+                )
+                params_gru.append(
+                    torch.randn(3 * hidden_size, hidden_size, device=device)
+                )
+
+        # Test GRU with batch_sizes on wrong device
+        with self.assertRaisesRegex(RuntimeError, "batch_sizes tensor should be on CPU"):
+            torch.ops.aten.gru.data(
+                data,
+                batch_sizes,
+                hx_gru,
+                params_gru,
+                False,  # has_biases
+                num_layers,
+                0.0,  # dropout
+                False,  # train
+                True,  # bidirectional
+            )
+
+        # LSTM hidden states
+        hx_lstm = [
+            torch.randn(num_layers * num_directions, max_batch, hidden_size, device=device),
+            torch.randn(num_layers * num_directions, max_batch, hidden_size, device=device),
+        ]
+
+        # LSTM params
+        params_lstm = []
+        for layer in range(num_layers):
+            for direction in range(num_directions):
+                layer_input_size = (
+                    input_size if layer == 0 else hidden_size * num_directions
+                )
+                params_lstm.append(
+                    torch.randn(4 * hidden_size, layer_input_size, device=device)
+                )
+                params_lstm.append(
+                    torch.randn(4 * hidden_size, hidden_size, device=device)
+                )
+
+        # Test LSTM with batch_sizes on wrong device
+        with self.assertRaisesRegex(RuntimeError, "batch_sizes tensor should be on CPU"):
+            torch.ops.aten.lstm.data(
+                data,
+                batch_sizes,
+                hx_lstm,
+                params_lstm,
+                False,  # has_biases
+                num_layers,
+                0.0,  # dropout
+                False,  # train
+                True,  # bidirectional
+            )
+
+        # RNN hidden state
+        hx_rnn = torch.randn(
+            num_layers * num_directions,
+            max_batch,
+            hidden_size,
+            device=device,
+        )
+
+        # RNN params
+        params_rnn = []
+        for layer in range(num_layers):
+            for direction in range(num_directions):
+                layer_input_size = (
+                    input_size if layer == 0 else hidden_size * num_directions
+                )
+                params_rnn.append(
+                    torch.randn(hidden_size, layer_input_size, device=device)
+                )
+                params_rnn.append(
+                    torch.randn(hidden_size, hidden_size, device=device)
+                )
+
+        # Test RNN tanh with batch_sizes on wrong device
+        with self.assertRaisesRegex(RuntimeError, "batch_sizes tensor should be on CPU"):
+            torch.ops.aten.rnn_tanh.data(
+                data,
+                batch_sizes,
+                hx_rnn,
+                params_rnn,
+                False,  # has_biases
+                num_layers,
+                0.0,  # dropout
+                False,  # train
+                True,  # bidirectional
+            )
+
+        # Test RNN relu with batch_sizes on wrong device
+        with self.assertRaisesRegex(RuntimeError, "batch_sizes tensor should be on CPU"):
+            torch.ops.aten.rnn_relu.data(
+                data,
+                batch_sizes,
+                hx_rnn,
+                params_rnn,
+                False,  # has_biases
+                num_layers,
+                0.0,  # dropout
+                False,  # train
+                True,  # bidirectional
+            )
+
+    def test_rnn_packed_batch_sizes_dim_validation(self, device):
+        """Test that RNN packed sequence ops validate batch_sizes is 1D."""
+        input_size = 8
+        hidden_size = 16
+        num_layers = 2
+
+        # batch_sizes must be 1D, making it 2D should raise an error
+        batch_sizes = torch.tensor(
+            [[6, 5, 4], [3, 2, 1]],
+            device="cpu",
+            dtype=torch.int64,
+        )
+
+        data = torch.randn(21, input_size, device=device)  # sum of batch_sizes
+        hx = torch.randn(num_layers, 6, hidden_size, device=device)
+
+        params = []
+        for layer in range(num_layers):
+            layer_input_size = input_size if layer == 0 else hidden_size
+            params.append(torch.randn(3 * hidden_size, layer_input_size, device=device))
+            params.append(torch.randn(3 * hidden_size, hidden_size, device=device))
+
+        with self.assertRaisesRegex(RuntimeError, "batch_sizes tensor should be 1D"):
+            torch.ops.aten.gru.data(
+                data,
+                batch_sizes,
+                hx,
+                params,
+                False,
+                num_layers,
+                0.0,
+                False,
+                False,
+            )
+
     def test_batch_norm_unflatten_weight_bias(self, device):
         # https://github.com/pytorch/pytorch/issues/100970
         shape = (1, 3, 2, 2)
