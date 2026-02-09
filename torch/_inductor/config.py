@@ -876,9 +876,9 @@ compute_all_bounds = False
 
 # enable the combo kernel that combines data-independent kernels (additional
 # to foreach kernels) into a single one (Experimental)
-combo_kernels = False
+combo_kernels = True
 # benchmark combo kernels and only allow ones with perf gains
-benchmark_combo_kernel = False
+benchmark_combo_kernel = True
 # combo_kernel autotuning options: 0 - disable, 1 - enable except for foreach,
 # 2 - enable for all
 combo_kernels_autotune = 1
@@ -892,7 +892,7 @@ combo_kernel_max_num_args = 250
 # When True, each combo sub-kernel gets its own block sizes (XBLOCK_0, YBLOCK_0, etc.)
 # allowing different sub-kernels to use different tile sizes based on their heuristics.
 # When False, all sub-kernels share block sizes (XBLOCK, YBLOCK, etc.)
-combo_kernel_per_subkernel_blocks = False
+combo_kernel_per_subkernel_blocks = True
 
 # constant folding on the joint graph
 joint_graph_constant_folding = True
