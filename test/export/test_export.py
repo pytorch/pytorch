@@ -18389,6 +18389,25 @@ def forward(self, x, y):
             self.assertEqual(eager_result, export_result)
             self.assertEqual(export_result.dtype, expected_dtype)
 
+    def test_mixed_named_and_unnamed_kwargs(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, **kwargs):
+                return x + kwargs["y"]
+
+        kwargs = dict(x=torch.randn((5, 6)), y=torch.randn((1, 6)))
+        model = Model()
+        expected = model(**kwargs)
+        ep = torch.export.export(
+            model,
+            (),
+            kwargs=kwargs,
+            dynamic_shapes={
+                "x": {0: torch.export.Dim.DYNAMIC, 1: torch.export.Dim.DYNAMIC},
+                "kwargs": {"y": {1: torch.export.Dim.DYNAMIC}},
+            },
+        )
+        self.assertEqual(expected, ep.module()(**kwargs))
+
 
 if __name__ == "__main__":
     run_tests()
