@@ -964,25 +964,40 @@ class BlockMask:
         )
         return BlockMask(*mapped_attributes)
 
+    @staticmethod
+    def _wrap_context_value(attr, value):
+        if attr == "mask_mod":
+            return _MaskModWrapper(value)
+        return value
+
+    @staticmethod
+    def _unwrap_context_value(attr, value):
+        if attr == "mask_mod":
+            if not isinstance(value, _MaskModWrapper):
+                raise AssertionError(f"Expected _MaskModWrapper, got {type(value)}")
+            return value.fn
+        return value
+
     def _flatten(self):
         """Flatten BlockMask into a list of tensors and context.
 
         Wraps mask_mod in _MaskModWrapper for value-based comparison in TreeSpec.
         """
         tensors = tuple(getattr(self, attr) for attr in self._TENSOR_ATTRS)
-        context = (self.seq_lengths, self.BLOCK_SIZE, _MaskModWrapper(self.mask_mod))
+        context = tuple(
+            self._wrap_context_value(attr, getattr(self, attr))
+            for attr in self._CONTEXT_ATTRS
+        )
         return tensors, context
 
     @classmethod
     def _unflatten(cls, tensors, context):
         """Unflatten tensors and context back into a BlockMask."""
-        seq_lengths, block_size, mask_mod_wrapper = context
         kwargs = {
-            "seq_lengths": seq_lengths,
-            "BLOCK_SIZE": block_size,
-            "mask_mod": mask_mod_wrapper.fn,
-            **dict(zip(cls._TENSOR_ATTRS, tensors)),
+            attr: cls._unwrap_context_value(attr, val)
+            for attr, val in zip(cls._CONTEXT_ATTRS, context)
         }
+        kwargs.update(zip(cls._TENSOR_ATTRS, tensors))
         # pyrefly: ignore [bad-argument-type]
         return cls(**kwargs)
 
@@ -994,10 +1009,9 @@ class BlockMask:
         tensors = tuple(
             (GetAttrKey(attr), getattr(self, attr)) for attr in self._TENSOR_ATTRS
         )
-        context = (
-            (GetAttrKey("seq_lengths"), self.seq_lengths),
-            (GetAttrKey("BLOCK_SIZE"), self.BLOCK_SIZE),
-            (GetAttrKey("mask_mod"), _MaskModWrapper(self.mask_mod)),
+        context = tuple(
+            (GetAttrKey(attr), self._wrap_context_value(attr, getattr(self, attr)))
+            for attr in self._CONTEXT_ATTRS
         )
         return tensors, context
 
