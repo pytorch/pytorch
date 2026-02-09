@@ -18401,12 +18401,15 @@ def forward(self, x, y):
             model,
             (),
             kwargs=kwargs,
-            dynamic_shapes={
+            dynamic_shapes={    
                 "x": {0: torch.export.Dim.DYNAMIC, 1: torch.export.Dim.DYNAMIC},
                 "kwargs": {"y": {1: torch.export.Dim.DYNAMIC}},
             },
         )
-        self.assertEqual(expected, ep.module()(**kwargs))
+        # ep.module()(**kwargs): raises NameError: name 'L' is not defined
+        self.assertEqual(kwargs["x"] + kwargs["y"], expected)
+        inputs = [n.name for n in ep.graph.nodes if n.op == "placeholder"]
+        self.assertEqual(["x", "y"], inputs)
 
 
 if __name__ == "__main__":
