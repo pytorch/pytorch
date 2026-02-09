@@ -2,13 +2,13 @@
 
 namespace c10d {
 
-const std::chrono::milliseconds& Store::getTimeout() const noexcept {
-  return timeout_;
+std::chrono::milliseconds Store::getTimeout() const noexcept {
+  return timeout_.load();
 }
 
 // Set timeout function
 void Store::setTimeout(const std::chrono::milliseconds& timeout) {
-  timeout_ = timeout;
+  timeout_.store(timeout);
 }
 
 void Store::set(const std::string& key, const std::string& value) {

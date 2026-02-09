@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cstdint>
 #include <string>
+#include <atomic>
 #include <vector>
 
 #include <c10/macros/Macros.h>
@@ -72,7 +73,7 @@ class TORCH_API Store : public torch::CustomClassHolder {
       const std::vector<std::string>& keys,
       const std::chrono::milliseconds& timeout) = 0;
 
-  virtual const std::chrono::milliseconds& getTimeout() const noexcept;
+  virtual std::chrono::milliseconds getTimeout() const noexcept;
 
   virtual void setTimeout(const std::chrono::milliseconds& timeout);
 
@@ -120,7 +121,7 @@ class TORCH_API Store : public torch::CustomClassHolder {
   }
 
  protected:
-  std::chrono::milliseconds timeout_;
+  std::atomic<std::chrono::milliseconds> timeout_;
 };
 
 /*
