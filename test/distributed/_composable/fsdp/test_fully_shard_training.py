@@ -1346,13 +1346,19 @@ class TestFullyShardNDTraining(FSDPTest):
             self._test_shard_placement_fn_tp_ep,
         )
 
-    def _test_shard_placement_fn_tp_ep(self, tp_degree, dp_replicate):
-        ep_degree = 2
+    def _init_ep_meshes(self, tp_degree, dp_replicate, ep_degree):
+        """Build the TP, DP, EP, and EFSDP meshes and mesh infos.
+
+        Returns (tp_mesh, dp_mesh, ep_mesh, efsdp_mesh, dp_mesh_info,
+        efsdp_mesh_info) or None if the configuration is not valid.
+        """
         dp_size = self.world_size // tp_degree
         dp_shard_size = dp_size // dp_replicate
         if dp_shard_size < ep_degree:
-            return
+            return None
         efsdp = dp_shard_size // ep_degree
+
+        # Build tp_mesh and dp_mesh
         if dp_replicate > 1 and tp_degree > 1:
             world_mesh = init_device_mesh(
                 device_type.type,
@@ -1384,6 +1390,8 @@ class TestFullyShardNDTraining(FSDPTest):
             )
             tp_mesh = None
             dp_mesh = world_mesh._unflatten(0, (self.world_size,), ("fsdp",))["fsdp"]
+
+        # Build ep/efsdp meshes and FSDP mesh infos
         if dp_replicate > 1:
             dp_shard_mesh = dp_mesh["dp_shard"]
             sparse_mesh = dp_shard_mesh._unflatten(
@@ -1401,8 +1409,17 @@ class TestFullyShardNDTraining(FSDPTest):
             sparse_mesh = dp_mesh._unflatten(0, (efsdp, ep_degree), ("efsdp", "ep"))
             efsdp_mesh_info = FSDPMeshInfo(mesh=sparse_mesh["efsdp"], shard_mesh_dim=0)
             dp_mesh_info = FSDPMeshInfo(mesh=dp_mesh, shard_mesh_dim=0)
+
         ep_mesh = sparse_mesh["ep"]
         efsdp_mesh = sparse_mesh["efsdp"]
+        return tp_mesh, dp_mesh, ep_mesh, efsdp_mesh, dp_mesh_info, efsdp_mesh_info
+
+    def _test_shard_placement_fn_tp_ep(self, tp_degree, dp_replicate):
+        ep_degree = 2
+        result = self._init_ep_meshes(tp_degree, dp_replicate, ep_degree)
+        if result is None:
+            return
+        tp_mesh, dp_mesh, ep_mesh, efsdp_mesh, dp_mesh_info, efsdp_mesh_info = result
         model_args = ModelArgs(
             n_layers=2,
             vocab_size=256,
