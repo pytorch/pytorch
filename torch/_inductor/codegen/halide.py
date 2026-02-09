@@ -1589,14 +1589,14 @@ class HalideKernel(SIMDKernel):
             # This causes crashes if our estimate is greater than the vector length
             # https://github.com/halide/Halide/issues/3103
             if isinstance(arg, SizeArg):
-                hint = V.graph.sizevars.size_hint(arg.expr, fallback=1)
+                hint = V.graph.sizevars.optimization_hint(arg.expr)
                 code.writeline(f"{arg.name}.set_estimate({hint})")
             else:
                 dims = self.buffer_dimensions[arg.name]
                 range_hints = []
                 for i, dim in enumerate(dims):
                     hint = self._autoscheduler_workarounds(
-                        V.graph.sizevars.size_hint(dim.size, fallback=1), dims
+                        V.graph.sizevars.optimization_hint(dim.size), dims
                     )
                     # pyrefly: ignore [bad-argument-type]
                     range_hints.append(f"hl.Range(0, {hint})")
