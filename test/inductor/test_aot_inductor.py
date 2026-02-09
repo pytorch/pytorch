@@ -6833,6 +6833,22 @@ class AOTInductorTestsTemplate:
         self.check_model(Model(), example_inputs)
 
     @skipIfMPS
+    @parametrize("input_dtype", [torch.float16, torch.bfloat16])
+    def test_mm_out_dtype(self, input_dtype):
+        if self.device not in ("cuda", "xpu"):
+            raise unittest.SkipTest("out_dtype is only supported on CUDA or XPU")
+
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.mm(x, y, out_dtype=torch.float32)
+
+        example_inputs = (
+            torch.randn(64, 32, device=self.device, dtype=input_dtype),
+            torch.randn(32, 64, device=self.device, dtype=input_dtype),
+        )
+        self.check_model(Model(), example_inputs)
+
+    @skipIfMPS
     @parametrize("m", [32])
     @parametrize("n", [64])
     @parametrize("q_group", [32, 64])
@@ -7026,7 +7042,7 @@ class AOTInductorTestsTemplate:
                 out = torch.empty((_M, N), device=x.device, dtype=torch.float32)
                 grid = lambda META: (  # noqa: E731
                     triton.cdiv(
-                        4096 * 2048, META["BLOCK_SIZE_M"] * META["BLOCK_SIZE_N"]
+                        4096 * 2046, META["BLOCK_SIZE_M"] * META["BLOCK_SIZE_N"]
                     ),
                 )
                 strange_config_matmul_kernel[grid](
@@ -7044,14 +7060,14 @@ class AOTInductorTestsTemplate:
         m = torch.tensor([4096], dtype=torch.int32, device=self.device)
 
         with config.patch("triton.autotune_with_sample_inputs", True):
-            # ROCm: Use dynamic grid checking (portable across different configs)
             if torch.version.hip:
+                # ROCm: Use dynamic grid checking (portable across different configs)
                 # Compile and get the generated code
                 _, src_code = run_and_get_cpp_code(
                     torch._export.aot_compile, Model(), (x, y, m)
                 )
                 actual_grid, expected_grids = get_triton_grid_info(
-                    strange_config_matmul_kernel, 4096 * 2048, src_code
+                    strange_config_matmul_kernel, 4096 * 2046, src_code
                 )
                 self.assertTrue(
                     actual_grid is not None, "Could not find grid_0 in generated code"
@@ -7096,7 +7112,7 @@ class AOTInductorTestsTemplate:
                 out = torch.empty((_M, N), device=x.device, dtype=torch.float32)
                 grid = lambda META: (  # noqa: E731
                     triton.cdiv(
-                        4096 * 2048, META["BLOCK_SIZE_M"] * META["BLOCK_SIZE_N"]
+                        4096 * 2046, META["BLOCK_SIZE_M"] * META["BLOCK_SIZE_N"]
                     ),
                 )
                 strange_config_matmul_kernel[grid](
@@ -7121,7 +7137,7 @@ class AOTInductorTestsTemplate:
                     torch._export.aot_compile, Model(), (x, y, m)
                 )
                 actual_grid, expected_grids = get_triton_grid_info(
-                    strange_config_matmul_kernel, 4096 * 2048, src_code
+                    strange_config_matmul_kernel, 4096 * 2046, src_code
                 )
                 self.assertTrue(
                     actual_grid is not None, "Could not find grid_0 in generated code"
@@ -7825,7 +7841,9 @@ class AOTInductorTestsTemplate:
         with config.patch("triton.autotune_with_sample_inputs", True):
             AOTIRunnerUtil.run(Model(), example_inputs)
 
-    @unittest.skipIf(IS_FBCODE, "Subprocess spawning doesn't work in fbcode Buck environment")
+    @unittest.skipIf(
+        IS_FBCODE, "Subprocess spawning doesn't work in fbcode Buck environment"
+    )
     def test_aoti_load_package_in_fresh_subprocess(self):
         """
         Test that loading an AOTI package in a fresh subprocess works correctly.

@@ -444,7 +444,7 @@ def vector_norm_strategy(op_schema: OpSchema) -> OpStrategy:
         input_strategy,
         reduce_dims,
         keep_dim=cast(bool, keepdim),
-        reduction_linear=True,
+        reduction_linear=norm_type != 0,  # norm 0 should not propagate
         reduction_op=_get_norm_reduction_op(norm_type),
     )
 
@@ -470,7 +470,7 @@ def foreach_norm_strategy(op_schema: OpSchema) -> TupleStrategy:
         output_strategy = common_reduction_strategy(
             op_strategy,
             reduce_dims,
-            reduction_linear=True,
+            reduction_linear=norm_type != 0,  # norm 0 should not propagate
             reduction_op=_get_norm_reduction_op(norm_type),
         )
         output_tuple_strategy_children.append(output_strategy)
