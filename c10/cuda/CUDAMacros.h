@@ -15,7 +15,7 @@
 // we build.
 
 #ifdef _WIN32
-#if defined(C10_CUDA_BUILD_SHARED_LIBS) || defined(C10_HIP_BUILD_SHARED_LIBS)
+#if defined(C10_CUDA_BUILD_SHARED_LIBS)
 #define C10_CUDA_EXPORT __declspec(dllexport)
 #define C10_CUDA_IMPORT __declspec(dllimport)
 #else
@@ -32,7 +32,7 @@
 #endif // _WIN32
 
 // This one is being used by libc10_cuda.so
-#if defined(C10_CUDA_BUILD_MAIN_LIB) || defined(C10_HIP_BUILD_MAIN_LIB)
+#if defined(C10_CUDA_BUILD_MAIN_LIB)
 #define C10_CUDA_API C10_CUDA_EXPORT
 #else
 #define C10_CUDA_API C10_CUDA_IMPORT
