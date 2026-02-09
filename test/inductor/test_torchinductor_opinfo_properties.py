@@ -459,6 +459,7 @@ ROCM_XFAIL_EXCLUSIONS = {
     "batch_invariance": {
         "inductor_default": {
             "div": {fp32},
+            "exp": {fp32},
         },
     },
 }
