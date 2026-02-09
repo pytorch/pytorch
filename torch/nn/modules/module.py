@@ -1925,7 +1925,7 @@ class Module:
             slots.extend(getattr(cls, "__slots__", []))
         for slot in slots:
             if slot != "__dict__" and slot != "__weakref__" and hasattr(self, slot):
-                state[slot] = getattr(self, slot)
+                state[slot] = object.__getattribute__(self, slot)
 
         return state
 
@@ -1934,12 +1934,8 @@ class Module:
         for cls in type(self).__mro__:
             slots.update(getattr(cls, "__slots__", []))
         for slot in slots:
-            if slot in state and slot != "__dict__" and slot != "__weakref__":
-                try:
-                    setattr(self, slot, state.pop(slot))
-                except AttributeError:
-                    # Slot might be read-only or have other restrictions
-                    pass
+            if slot in state:
+                object.__setattr__(self, slot, state.pop(slot))
 
         self.__dict__.update(state)
 
