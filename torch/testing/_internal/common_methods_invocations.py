@@ -11763,6 +11763,13 @@ foreach_reduce_op_db: list[ForeachFuncInfo] = [
                 device_type="xpu",
                 dtypes=integral_types_and(torch.bool),
             ),
+             DecorateInfo(
+                unittest.skip("failed on xpu"),
+                "TestForeach",
+                "test_foreach_norm_empty_tensor_inf_error",
+                device_type="xpu",
+                dtypes=floating_types_and(torch.bfloat16, torch.half),
+            ),
         ),
     ),
 ]

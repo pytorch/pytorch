@@ -15,6 +15,7 @@ from torch.testing._comparison import default_tolerances
 from torch.testing._internal.common_cuda import _get_torch_cuda_version
 from torch.testing._internal.common_device_type import (
     dtypes,
+    dtypesIfXPU,
     instantiate_device_type_tests,
     largeTensorTest,
     onlyCUDA,
@@ -1444,6 +1445,7 @@ class TestForeach(TestCase):
 
     @onlyOn(["cuda", "xpu"])
     @dtypes(*floating_types_and(torch.half, torch.bfloat16))
+    @dtypesIfXPU(torch.half, torch.bfloat16)
     def test_addcmul_alpha_one_fma_parity(self, device, dtype):
         # Test that addcmul with alpha=1 produces bitwise identical results
         # to add with alpha=scalar_val (when tensor1 is a 0D tensor with that value).
