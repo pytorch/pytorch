@@ -13,12 +13,12 @@ Tensor my_sum_out(
   return sum_out(out, self, dim, keepdim, dtype);
 }
 
-STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agn_2_10, m) {
+STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
   m.def("my_sum_out(Tensor(a!) out, Tensor self, int[]? dim=None, bool keepdim=False, ScalarType? dtype=None) -> Tensor(a!)");
 }
 
 STABLE_TORCH_LIBRARY_IMPL(
-    libtorch_agn_2_10,
+    STABLE_LIB_NAME,
     CompositeExplicitAutograd,
     m) {
   m.impl("my_sum_out", TORCH_BOX(&my_sum_out));
