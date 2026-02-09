@@ -389,6 +389,14 @@ jobs:
             export HF_DATASETS_OFFLINE=0
           fi
 
+          # If TIMM pretrained model weights haven't been cached yet, enable
+          # online mode so they can be downloaded and cached for future runs.
+          # TIMM uses huggingface_hub which stores models under hub/models--timm--*.
+          if [[ "${TEST_CONFIG}" == *timm* ]] && ! ls "${HF_CACHE}"/hub/models--timm--* &>/dev/null; then
+            export TRANSFORMERS_OFFLINE=0
+            export HF_DATASETS_OFFLINE=0
+          fi
+
           # detached container should get cleaned up by teardown_ec2_linux
           # TODO: Stop building test binaries as part of the build phase
           # Used for GPU_FLAG, SHM_OPTS, JENKINS_USER and DOCKER_SHELL_CMD since that doesn't play nice
