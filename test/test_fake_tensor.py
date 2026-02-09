@@ -1358,7 +1358,7 @@ class FakeTensorOpInfoTest(TestCase):
 
 make_propagate_real_tensors_cls(FakeTensorOpInfoTest)
 instantiate_device_type_tests(
-    FakeTensorOpInfoTest, globals(), only_for=("cpu", device_type), allow_xpu=True
+    FakeTensorOpInfoTest, globals(), only_for=("cpu", device_type)
 )
 instantiate_device_type_tests(
     PropagateRealTensorsFakeTensorOpInfoTest,  # noqa: F821
