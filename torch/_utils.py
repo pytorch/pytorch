@@ -1176,9 +1176,12 @@ def _maybe_view_chunk_cat(
     # Optimization: Can use view instead of split+cat when:
     # 1. res.shape[0] == group_size (invariant after all_gather)
     # 2. All dims between 0 and gather_dim (exclusive) have size 1
+    from torch.distributed._functional_collectives import _chunk_or_narrow_cat
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
     numel_between = math.prod(shape[1:gather_dim]) if gather_dim > 1 else 1
 
-    if shape[0] == group_size and numel_between == 1:
+    if guard_or_false(shape[0] == group_size) and numel_between == 1:
         # View optimization: reshape to collapse dim 0 into gather_dim
         final_shape = (
             [1]  # Dim 0 becomes 1
@@ -1191,7 +1194,7 @@ def _maybe_view_chunk_cat(
         # General case: fall back to split + cat
         # This is better than torch.flatten as cat can be vectorized, whereas
         # the contiguous kernel is always bad.
-        return torch.cat(torch.chunk(res, group_size, dim=0), dim=gather_dim)
+        return _chunk_or_narrow_cat(res, group_size, narrow_dim=0, cat_dim=gather_dim)
 
 
 class _Frame(TypedDict):
