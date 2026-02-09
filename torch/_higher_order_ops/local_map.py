@@ -477,12 +477,8 @@ class LocalMapAutogradOp(torch.autograd.Function):
         saved_activations = fw_outs_with_saved_activations[num_fw_outs:]
         save_values_for_backward(ctx, saved_activations)
 
-        # Force memory_format path (not exact size/stride) because local_map forward
-        # operates on local shapes but backward receives global-shaped tangents.
-        # TODO(ivankobzarev): Support exact size/stride by converting between local/global shapes.
         ctx.expected_tangent_metadata = {
-            i: MemoryFormatMeta.from_tensor(fw_outs[i], force_use_memory_format=True)
-            for i in filtered_grads_idx
+            i: MemoryFormatMeta.from_tensor(fw_outs[i]) for i in filtered_grads_idx
         }
         return fw_outs
 

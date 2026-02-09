@@ -2,27 +2,22 @@
 
 set -ex -o pipefail
 
-SOURCE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null && pwd )"
-PYTORCH_ROOT="${PYTORCH_ROOT:-$(cd "$SOURCE_DIR/../.." && pwd)}"
+PYTORCH_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 source "${PYTORCH_ROOT}/.ci/pytorch/common_utils.sh"
 FLASH_ATTENTION_DIR="${PYTORCH_ROOT}/third_party/flash-attention"
 FLASH_ATTENTION_HOPPER_DIR="${FLASH_ATTENTION_DIR}/hopper"
 
-if [[ -z "$FA_FINAL_PACKAGE_DIR" ]]; then
-    fatal "FA_FINAL_PACKAGE_DIR must be set"
-fi
-
-if [[ -z "$WHEEL_PLAT" ]]; then
-    fatal "WHEEL_PLAT must be set"
-fi
-
-if [[ ! -d "$FLASH_ATTENTION_HOPPER_DIR" ]]; then
-    fatal "flash attn directory not found $FLASH_ATTENTION_HOPPER_DIR"
-fi
+[[ -z "$FA_FINAL_PACKAGE_DIR" ]] && fatal "FA_FINAL_PACKAGE_DIR must be set"
+[[ -z "$MANYLINUX_PLAT" ]] && fatal "MANYLINUX_PLAT must be set"
+[[ -z "$CUDA_VERSION" ]] && fatal "CUDA_VERSION must be set"
+[[ -z "$CUDA_SHORT" ]] && fatal "CUDA_SHORT must be set"
+[[ ! -d "$FLASH_ATTENTION_HOPPER_DIR" ]] && fatal "flash attn directory not found $FLASH_ATTENTION_HOPPER_DIR"
 
 PYTHON="${PYTHON_EXECUTABLE:-python}"
 
+# for ARM builds we need GLIBC 2.29+ so we use upstream linux image
+# need to install dependencies
 if [[ "$(uname -m)" == "aarch64" ]]; then
     if command -v dnf &> /dev/null; then
         dnf install -y \
@@ -32,22 +27,14 @@ if [[ "$(uname -m)" == "aarch64" ]]; then
             xz \
             bzip2 \
             gcc-toolset-13-gcc \
-            gcc-toolset-13-gcc-c++ \
-            || true
-        if [[ -d "/opt/rh/gcc-toolset-13" ]]; then
-            export PATH=/opt/rh/gcc-toolset-13/root/usr/bin:$PATH
-            export LD_LIBRARY_PATH=/opt/rh/gcc-toolset-13/root/usr/lib64:/opt/rh/gcc-toolset-13/root/usr/lib:${LD_LIBRARY_PATH:-}
-        fi
+            gcc-toolset-13-gcc-c++
+        export PATH=/opt/rh/gcc-toolset-13/root/usr/bin:$PATH
+        export LD_LIBRARY_PATH=/opt/rh/gcc-toolset-13/root/usr/lib64:/opt/rh/gcc-toolset-13/root/usr/lib:${LD_LIBRARY_PATH:-}
     fi
 
     source "${PYTORCH_ROOT}/.ci/docker/common/install_cuda.sh"
-    if [[ "${CUDA_VERSION:-12.6}" == "13.0" ]]; then
-        echo "installing CUDA 13.0.0 for ARM"
-        install_cuda 13.0.2 cuda_13.0.2_580.95.05_linux
-    else
-        echo "installing CUDA 12.6.3 for ARM"
-        install_cuda 12.6.3 cuda_12.6.3_560.35.05_linux
-    fi
+    [[ -z "$CUDA_INSTALLER_NAME" ]] && fatal "CUDA_INSTALLER_NAME must be set for aarch64 builds"
+    install_cuda "$CUDA_VERSION" "$CUDA_INSTALLER_NAME"
 
     export CUDA_HOME=/usr/local/cuda
     export PATH=/usr/local/cuda/bin:$PATH
@@ -60,7 +47,6 @@ echo "installing dependencies"
 "$PYTHON" -m pip install einops packaging ninja numpy wheel setuptools
 
 export PATH="$(dirname "$PYTHON"):$PATH"
-echo "ninja location: $(which ninja)"
 
 export FLASH_ATTENTION_FORCE_BUILD="${FLASH_ATTENTION_FORCE_BUILD:-TRUE}"
 
@@ -95,29 +81,23 @@ pushd "$FLASH_ATTENTION_HOPPER_DIR"
 git config --global --add safe.directory '*'
 git submodule update --init ../csrc/cutlass
 
-if [[ "${CUDA_VERSION:-12.6}" == 13.* ]]; then
+if [[ "${CUDA_VERSION}" == 13.* ]]; then
     CCCL_INCLUDE="/usr/local/cuda/include/cccl"
-    if [[ -d "${CCCL_INCLUDE}" ]]; then
-        echo "Adding CCCL include path: ${CCCL_INCLUDE}"
-        export CPLUS_INCLUDE_PATH="${CCCL_INCLUDE}${CPLUS_INCLUDE_PATH:+:$CPLUS_INCLUDE_PATH}"
-        export C_INCLUDE_PATH="${CCCL_INCLUDE}${C_INCLUDE_PATH:+:$C_INCLUDE_PATH}"
-    else
-        echo "WARNING: CCCL include directory not found at ${CCCL_INCLUDE}"
-    fi
+    [[ ! -d "${CCCL_INCLUDE}" ]] && fatal "CCCL include directory not found at ${CCCL_INCLUDE}"
+    echo "Adding CCCL include path: ${CCCL_INCLUDE}"
+    export CPLUS_INCLUDE_PATH="${CCCL_INCLUDE}${CPLUS_INCLUDE_PATH:+:$CPLUS_INCLUDE_PATH}"
+    export C_INCLUDE_PATH="${CCCL_INCLUDE}${C_INCLUDE_PATH:+:$C_INCLUDE_PATH}"
 fi
 
-sed -i 's/bare_metal_version != Version("12.8")/bare_metal_version >= Version("12.3") and bare_metal_version < Version("13.0") and bare_metal_version != Version("12.8")/' \
-    "$FLASH_ATTENTION_HOPPER_DIR/setup.py"
-
-BUILD_DATE=$(date +%Y%m%d)
-if [[ "${WHEEL_PLAT}" == "aarch64" ]]; then
-    ARCH_TAG="arm"
-    MANYLINUX_PLAT="manylinux_2_34_aarch64"
-else
-    ARCH_TAG="x86"
-    MANYLINUX_PLAT="manylinux_2_28_x86_64"
+if [[ "${FA_TEST_BUILD}" == "true" ]]; then
+    BUILD_DATE=$(date +%Y%m%d)
+    export FLASH_ATTN_LOCAL_VERSION="${BUILD_DATE}.cu${CUDA_SHORT}"
 fi
-export FLASH_ATTN_LOCAL_VERSION="${BUILD_DATE}.cu${CUDA_SHORT}.${ARCH_TAG}"
+
+# stable ABI wheel requires torch>=2.9.0
+# since Python 3.9 support was dropped in torch 2.9.0, we need to use Python 3.10+
+sed -i 's/python_requires=">=3.8"/python_requires=">=3.10"/' setup.py
+sed -i 's/"torch",/"torch>=2.9.0",/' setup.py
 
 "$PYTHON" setup.py bdist_wheel \
     -d "$FA_FINAL_PACKAGE_DIR" \
