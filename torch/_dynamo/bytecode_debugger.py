@@ -29,11 +29,13 @@ import sys
 import types
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any, cast, Self, TYPE_CHECKING
+from typing import Any, cast, TYPE_CHECKING
 
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator
+
+    from typing_extensions import Self
 
 from .bytecode_transformation import convert_instruction, Instruction, instruction_size
 
@@ -94,7 +96,7 @@ class DebuggerState:
         default_factory=dict
     )  # User-defined variables from debugger
     last_command: str = "s"  # Last command for repeat on empty input
-    step_count: int = 0  # Remaining steps for "N s" command (0 = prompt each time)
+    step_count: int = 0  # Remaining steps for "s [n]" command (0 = prompt each time)
     list_index: int | None = (
         None  # Current position for 'l' command (None = use current)
     )
