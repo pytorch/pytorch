@@ -523,7 +523,8 @@ def true_divide(g: jit_utils.GraphContext, self, other):
     # Casts both inputs to the default scalar type
     scalar_type = torch.get_default_dtype()
     onnx_scalar_type = _C_onnx.TensorProtoDataType.FLOAT
-    assert scalar_type is torch.float or scalar_type is torch.double
+    if scalar_type is not torch.float and scalar_type is not torch.double:
+        raise AssertionError(f"Expected float or double, got {scalar_type}")
     if torch.get_default_dtype() is torch.double:
         onnx_scalar_type = _C_onnx.TensorProtoDataType.DOUBLE
 
@@ -564,14 +565,16 @@ def cat(g: jit_utils.GraphContext, tensor_list, dim):
         ):
             continue
         nonempty_tensors.append(t)
-    assert len(nonempty_tensors) > 0
-    assert all(
+    if len(nonempty_tensors) == 0:
+        raise AssertionError("nonempty_tensors must not be empty")
+    if not all(
         symbolic_helper._get_tensor_rank(nonempty_tensors[0]) is None
         or symbolic_helper._get_tensor_rank(t) is None
         or symbolic_helper._get_tensor_rank(t)
         == symbolic_helper._get_tensor_rank(nonempty_tensors[0])
         for t in nonempty_tensors
-    )
+    ):
+        raise AssertionError("All tensors must have the same rank")
     tensor_list.node().removeAllInputs()
     for t in nonempty_tensors:
         tensor_list.node().addInput(t)
@@ -780,7 +783,8 @@ def sign(g: jit_utils.GraphContext, self):
 
 @symbolic_helper.quantized_args(True)
 def _slice(g: jit_utils.GraphContext, input, axes, starts, ends):
-    assert len(starts) == len(ends)
+    if len(starts) != len(ends):
+        raise AssertionError(f"len(starts)={len(starts)} != len(ends)={len(ends)}")
     if len(starts) == 1 and starts[0] == 0 and ends[0] == _constants.INT64_MAX:
         return input
     return g.op("Slice", input, axes_i=axes, starts_i=starts, ends_i=ends)
@@ -838,7 +842,8 @@ def t(g: jit_utils.GraphContext, self):
 @symbolic_helper.quantized_args(True)
 def numpy_T(g: jit_utils.GraphContext, input):
     ndim = symbolic_helper._get_tensor_rank(input)
-    assert ndim is not None
+    if ndim is None:
+        raise AssertionError("ndim must be non-None")
     perm = list(reversed(range(ndim)))
     return g.op("Transpose", input, perm_i=perm)
 
@@ -1208,9 +1213,10 @@ def prelu(g: jit_utils.GraphContext, self, weight):
             weight_rank = 0
 
     if self_rank is not None and weight_rank is not None:
-        assert self_rank >= weight_rank, (
-            f"rank(x) should be >= rank(slope) but got {self_rank} < {weight_rank}"
-        )
+        if self_rank < weight_rank:
+            raise AssertionError(
+                f"rank(x) should be >= rank(slope) but got {self_rank} < {weight_rank}"
+            )
     return g.op("PRelu", self, weight)
 
 
@@ -1283,7 +1289,8 @@ def leaky_relu(
 def glu(g: jit_utils.GraphContext, input, dim):
     dim_size = symbolic_helper._get_tensor_dim_size(input, dim)
     if dim_size is not None:
-        assert dim_size % 2 == 0
+        if dim_size % 2 != 0:
+            raise AssertionError(f"dim_size must be even, got {dim_size}")
 
     first, second = g.op("Split", input, axis_i=dim, outputs=2)
     return g.op("Mul", first, g.op("Sigmoid", second))
@@ -1564,7 +1571,8 @@ def _avg_pool(name, tuple_fn):
         padding = symbolic_helper._avgpool_helper(
             tuple_fn, padding, kernel_size, stride, divisor_override, name
         )
-        assert isinstance(padding, tuple)
+        if not isinstance(padding, tuple):
+            raise AssertionError(f"Expected padding to be tuple, got {type(padding)}")
         adjusted_padding = padding
         # Although onnx::AvgPool provides count_include_pad,
         # The corner case of Average Pooling with ceil_mode on
@@ -1775,7 +1783,8 @@ def constant_pad_nd(g: jit_utils.GraphContext, input, padding, value):
 
 def _pad_circular(g: jit_utils.GraphContext, input: _C.Value, pad: _C.Value):
     padding = _convert_padding_node(pad)
-    assert len(padding) % 2 == 0
+    if len(padding) % 2 != 0:
+        raise AssertionError(f"padding length must be even, got {len(padding)}")
     ndim = len(padding) // 2
 
     cur = input
@@ -2321,8 +2330,12 @@ def _convolution(
         # ONNX supports both output_shape and output_padding. they are equivalent expressive.
         # output_padding is more straightforward, so we use it here.
         # output_shape = stride * (input_shape - 1) + output_padding + kernel_shape - padding * 2
-        assert transposed
-        assert len(stride) == len(output_padding)
+        if not transposed:
+            raise AssertionError("output_padding requires transposed=True")
+        if len(stride) != len(output_padding):
+            raise AssertionError(
+                f"len(stride)={len(stride)} != len(output_padding)={len(output_padding)}"
+            )
         kwargs["output_padding_i"] = output_padding
 
     n = g.op("ConvTranspose" if transposed else "Conv", *args, **kwargs)
@@ -3006,7 +3019,8 @@ def bucketize(
     # Unsqueeze step is performed to respect ONNX's numpy style broadcasting for comparison ops
     # https://github.com/onnx/onnx/blob/main/docs/Broadcasting.md
     tensor_rank = symbolic_helper._get_tensor_rank(self)
-    assert tensor_rank is not None
+    if tensor_rank is None:
+        raise AssertionError("tensor_rank must be non-None")
     unsqueeze_axes = list(range(1, tensor_rank + 1))
     expanded_boundaries = expand(
         g,
@@ -4027,9 +4041,8 @@ def repeat_interleave(
                 "Unsupported for cases with dynamic repeats",
                 self,
             )
-        assert repeats_sizes[0] == input_sizes[dim], (
-            "repeats must have the same size as input along dim"
-        )
+        if repeats_sizes[0] != input_sizes[dim]:
+            raise AssertionError("repeats must have the same size as input along dim")
         reps = repeats_sizes[0]
     else:
         raise errors.SymbolicValueError("repeats must be 0-dim or 1-dim tensor", self)
@@ -4245,7 +4258,11 @@ def _generic_rnn(
         1 + bidirectional
     ):
         return symbolic_helper._unimplemented("LSTM", "LSTMs with projections", input)
-    assert len(all_weights) == num_layers * weights_per_layer * (1 + bidirectional)
+    expected_weights = num_layers * weights_per_layer * (1 + bidirectional)
+    if len(all_weights) != expected_weights:
+        raise AssertionError(
+            f"Expected {expected_weights} weights, got {len(all_weights)}"
+        )
     layer_weights = [
         all_weights[i : i + weights_per_layer]
         for i in range(0, len(all_weights), weights_per_layer)
@@ -5656,7 +5673,10 @@ def group_norm(
 ):
     channel_size = symbolic_helper._get_tensor_dim_size(input, 1)
     if channel_size is not None:
-        assert channel_size % num_groups == 0
+        if channel_size % num_groups != 0:
+            raise AssertionError(
+                f"channel_size ({channel_size}) must be divisible by num_groups ({num_groups})"
+            )
     input_rank = symbolic_helper._get_tensor_rank(input)
     if input_rank is None:
         return symbolic_helper._unimplemented("group_norm", "unknown input rank", input)
@@ -5977,13 +5997,17 @@ def movedim(g: jit_utils.GraphContext, self, source, destination):
     source = source.view(-1)
     destination = destination.view(-1)
 
-    assert source.size() == destination.size()
+    if source.size() != destination.size():
+        raise AssertionError(
+            f"source.size()={source.size()} != destination.size()={destination.size()}"
+        )
 
     if (source == destination).all():
         return self
 
     self_rank = symbolic_helper._get_tensor_rank(self)
-    assert self_rank is not None
+    if self_rank is None:
+        raise AssertionError("self_rank must be non-None")
 
     perm = list(range(self_rank))
 
@@ -6087,7 +6111,8 @@ def index_add(g: jit_utils.GraphContext, self, dim, index, other, alpha=None):
 @_onnx_symbolic("aten::roll")
 @symbolic_helper.parse_args("v", "is", "is")
 def roll(g: jit_utils.GraphContext, self, shifts, dims):
-    assert len(shifts) == len(dims)
+    if len(shifts) != len(dims):
+        raise AssertionError(f"len(shifts)={len(shifts)} != len(dims)={len(dims)}")
 
     result = self
     for i in range(len(shifts)):
@@ -6153,7 +6178,8 @@ def cdist(
     ):
         return _euclidean_dist(g, x1, x2)
     rank = symbolic_helper._get_tensor_rank(x1)
-    assert rank is not None
+    if rank is None:
+        raise AssertionError("rank must be non-None")
     broadcasted_x1 = symbolic_helper._unsqueeze_helper(g, x1, [rank - 1])
     broadcasted_x2 = symbolic_helper._unsqueeze_helper(g, x2, [rank - 2])
     return pairwise_distance(
@@ -6166,7 +6192,8 @@ def _euclidean_dist(g: jit_utils.GraphContext, x1, x2):
     # using matrix multiplication to accelerate the calculation of
     # the euclidean distance
     rank = symbolic_helper._get_tensor_rank(x1)
-    assert rank is not None
+    if rank is None:
+        raise AssertionError("rank must be non-None")
     x1_norm = symbolic_helper._reducesum_helper(
         g,
         # pyrefly: ignore [no-matching-overload]
