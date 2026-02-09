@@ -14,7 +14,7 @@ import operator
 
 import torch
 import torch._dynamo.testing
-import torch._inductor.test_case
+import torch._dynamo.test_case
 from torch._dynamo.testing import skipIfNotPy312
 
 
@@ -24,7 +24,7 @@ def count_op(graph, op):
 
 
 @skipIfNotPy312
-class ComprehensionTests(torch._inductor.test_case.TestCase):
+class ComprehensionTests(torch._dynamo.test_case.TestCase):
     def test_list_comprehension_graph_break(self):
         """Test that list comprehension with graph break creates 2 graphs."""
 
@@ -774,7 +774,7 @@ class ComprehensionTests(torch._inductor.test_case.TestCase):
 
 
 @skipIfNotPy312
-class NestedGraphBreakTests(torch._inductor.test_case.TestCase):
+class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
     @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_nested_function_calls_with_comprehension_graph_break_nested_graph_breaks_true(
         self,
