@@ -5348,6 +5348,68 @@ if sys.version_info >= (3, 11):
     ]
 
 
+@contextlib.contextmanager
+def profile_inline_call(
+    output: OutputGraph,
+    code: types.CodeType,
+    get_inline_depth: Callable[[], int],
+) -> Generator[None, None, None]:
+    """
+    Context manager for profiling inline calls.
+
+    Args:
+        output: The OutputGraph containing profiler_state
+        code: The code object being inlined (for timing metadata)
+        get_inline_depth: Callable that returns inline_depth (called after work completes)
+
+    Yields:
+        None (profiling happens around the with block)
+    """
+    if not config.dynamo_profiler:
+        yield
+        return
+
+    if output.profiler_state is None:
+        output.profiler_state = DynamoProfilerState()
+
+    caller_info = output.profiler_state.get_current_caller()
+    call_stack = output.profiler_state.get_call_stack()
+
+    output.profiler_state.push(
+        code.co_name, code.co_filename, code.co_firstlineno, time.time_ns()
+    )
+
+    trace_success = False
+    try:
+        yield
+        trace_success = True
+    finally:
+        stack_entry = output.profiler_state.pop()
+        trace_end_ns = time.time_ns()
+
+        if trace_success and stack_entry is not None:
+            inline_depth = get_inline_depth()
+            cumtime_ns = trace_end_ns - stack_entry.start_time_ns
+            tottime_ns = cumtime_ns - stack_entry.child_time_ns
+
+            timing = FunctionTraceTiming(
+                func_name=stack_entry.func_name,
+                filename=stack_entry.filename,
+                firstlineno=stack_entry.firstlineno,
+                cumtime_ns=cumtime_ns,
+                tottime_ns=tottime_ns,
+                bytecode_count=len(code.co_code),
+                inline_depth=inline_depth,
+                caller_func_name=caller_info[0] if caller_info else None,
+                caller_filename=caller_info[1] if caller_info else None,
+                caller_firstlineno=caller_info[2] if caller_info else None,
+                is_primitive_call=stack_entry.is_primitive_call,
+                call_stack=call_stack,
+            )
+            output.profiler_state.record_timing(timing)
+            output.profiler_state.add_child_time(cumtime_ns)
+
+
 class InliningInstructionTranslator(InstructionTranslatorBase):
     """Trace and inline a called method"""
 
@@ -5363,64 +5425,12 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        # Fast path: skip all timing overhead if profiler is disabled
-        if not config.dynamo_profiler:
+        tracer = None
+        with profile_inline_call(
+            parent.output, func.get_code(), lambda: parent.inline_depth + 1
+        ):
             tracer = cls.build_inline_tracer(parent, func, args, kwargs)
             return tracer.inline_call_()
-
-        # Profiler enabled: collect timing data
-        # Ensure profiler state is initialized
-        output = parent.output
-        if output.profiler_state is None:
-            output.profiler_state = DynamoProfilerState()
-
-        code = func.get_code()
-
-        # Get caller info and full call stack before we push ourselves
-        caller_info = output.profiler_state.get_current_caller()
-        call_stack = output.profiler_state.get_call_stack()
-
-        # Push ourselves onto the timing stack BEFORE building the tracer
-        # so that build_inline_tracer overhead is included in this function's time
-        output.profiler_state.push(
-            code.co_name, code.co_filename, code.co_firstlineno, time.time_ns()
-        )
-
-        tracer = None
-        trace_success = False
-        try:
-            tracer = cls.build_inline_tracer(parent, func, args, kwargs)
-            result = tracer.inline_call_()
-            trace_success = True
-            return result
-        finally:
-            # Pop ourselves from the timing stack
-            stack_entry = output.profiler_state.pop()
-            trace_end_ns = time.time_ns()
-
-            # Record timing for successful traces
-            if trace_success and stack_entry is not None and tracer is not None:
-                cumtime_ns = trace_end_ns - stack_entry.start_time_ns
-                tottime_ns = cumtime_ns - stack_entry.child_time_ns
-
-                timing = FunctionTraceTiming(
-                    func_name=stack_entry.func_name,
-                    filename=stack_entry.filename,
-                    firstlineno=stack_entry.firstlineno,
-                    cumtime_ns=cumtime_ns,
-                    tottime_ns=tottime_ns,
-                    bytecode_count=len(code.co_code),
-                    inline_depth=tracer.inline_depth,
-                    caller_func_name=caller_info[0] if caller_info else None,
-                    caller_filename=caller_info[1] if caller_info else None,
-                    caller_firstlineno=caller_info[2] if caller_info else None,
-                    is_primitive_call=stack_entry.is_primitive_call,
-                    call_stack=call_stack,
-                )
-                output.profiler_state.record_timing(timing)
-
-                # Add our cumtime to the parent's child_time accumulator
-                output.profiler_state.add_child_time(cumtime_ns)
 
     @staticmethod
     def check_inlineable(
@@ -5888,6 +5898,10 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         self.generated_items = []
         self.generator_exhausted = False
         self.is_generator_from_ctx_manager = False
+
+    def inline_call_(self) -> VariableTracker:
+        with profile_inline_call(self.output, self.f_code, lambda: self.inline_depth):
+            return super().inline_call_()
 
     def should_compile_partial_graph(self) -> bool:
         # resuming on graph break on inlined generator not supported
