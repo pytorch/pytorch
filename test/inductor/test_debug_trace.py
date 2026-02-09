@@ -28,7 +28,8 @@ except unittest.SkipTest:
 
 
 def filesize(filename: Path):
-    assert filename.exists(), f"{filename} is missing"
+    if not filename.exists():
+        raise AssertionError(f"{filename} is missing")
     return os.stat(filename).st_size
 
 
@@ -70,7 +71,8 @@ class TestDebugTrace(test_torchinductor.TestCase):
                 break
         self.assertTrue(m, "debug trace file path not found in logs")
         # For type checking, have to ensure it's not none.
-        assert m is not None
+        if m is None:
+            raise AssertionError
         filename = Path(m.group(1))
         self.assertTrue(filename.is_dir())
         self.assertGreater(filesize(filename / "fx_graph_readable.py"), 512)
