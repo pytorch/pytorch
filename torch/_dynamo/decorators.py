@@ -259,6 +259,80 @@ def nonstrict_trace(traceable_fn: Callable[_P, _R]) -> Callable[_P, _R]:
     return wrapped
 
 
+def _invoke_leaf_function_python(
+    real_impl: Callable[..., Any],
+    fake_impl: Callable[..., Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+) -> Any:
+    """Call invoke_leaf_function HOP directly from Python.
+
+    This enables @leaf_function to work with make_fx
+    without relying on Dynamo to intercept the call.
+    """
+    import contextlib
+
+    import torch.utils._pytree as pytree
+    from torch._higher_order_ops.flat_apply import func_to_graphable
+    from torch._higher_order_ops.invoke_leaf_function import (
+        invoke_leaf_function,
+        LeafModuleState,
+    )
+    from torch.nn.utils.stateless import _reparametrize_module
+
+    captured_modules: list[torch.nn.Module] = []
+
+    def replace_module(mod: torch.nn.Module) -> LeafModuleState:
+        idx = len(captured_modules)
+        captured_modules.append(mod)
+        return LeafModuleState(
+            idx,
+            dict(mod.named_parameters()),
+            dict(mod.named_buffers()),
+        )
+
+    is_module = lambda x: isinstance(x, torch.nn.Module)
+    processed = pytree.tree_map_only(
+        torch.nn.Module,
+        replace_module,
+        (args, kwargs),
+        is_leaf=is_module,
+    )
+    flat_args, input_spec = pytree.tree_flatten(processed)
+
+    def _make_wrapper(impl: Callable[..., Any]) -> Callable[..., Any]:
+        def wrapper(*flat_args: Any) -> Any:
+            inner_args, inner_kwargs = pytree.tree_unflatten(flat_args, input_spec)
+            if not captured_modules:
+                return impl(*inner_args, **inner_kwargs)
+            with contextlib.ExitStack() as stack:
+
+                def restore(state: LeafModuleState) -> torch.nn.Module:
+                    mod = captured_modules[state.nn_module_index]
+                    stack.enter_context(
+                        _reparametrize_module(
+                            mod,
+                            {**state.named_parameters, **state.named_buffers},
+                        )
+                    )
+                    return mod
+
+                restored_args, restored_kwargs = pytree.tree_map_only(
+                    LeafModuleState,
+                    restore,
+                    (inner_args, inner_kwargs),
+                    is_leaf=lambda x: isinstance(x, LeafModuleState),
+                )
+                return impl(*restored_args, **restored_kwargs)
+
+        return wrapper
+
+    _, real_fn_spec = func_to_graphable(_make_wrapper(real_impl))
+    _, fake_fn_spec = func_to_graphable(_make_wrapper(fake_impl))
+
+    return invoke_leaf_function(real_fn_spec, fake_fn_spec, *flat_args)
+
+
 def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
     """
     Decorator to mark a function as a leaf function for :func:`torch.compile`.
@@ -520,6 +594,12 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
 
     @functools.wraps(fn)
     def inner(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+        if inner._torchdynamo_leaf_fake_fn is not None:  # type: ignore[attr-defined]
+            from torch._guards import detect_fake_mode
+            from torch.fx.experimental.proxy_tensor import get_proxy_mode
+
+            if get_proxy_mode() is not None or detect_fake_mode(args) is not None:
+                return _invoke_leaf_function_python(fn, inner._torchdynamo_leaf_fake_fn, args, kwargs)  # type: ignore[attr-defined]
         return fn(*args, **kwargs)
 
     inner._torchdynamo_leaf_real_fn = fn  # type: ignore[attr-defined]
