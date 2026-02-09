@@ -809,15 +809,8 @@ class FSDPParamGroup:
         return self.mesh_info.replicate_process_group
 
     def _with_fqn(self, label: str) -> str:
-        parts = []
         if self._module_fqn:
-            parts.append(self._module_fqn)
-        # Add mesh dim names to distinguish param groups with different meshes
-        if self.mesh_info and self.mesh_info.mesh.mesh_dim_names:
-            mesh_dims = ",".join(self.mesh_info.mesh.mesh_dim_names)
-            parts.append(f"mesh=[{mesh_dims}]")
-        if parts:
-            return f"{label} ({', '.join(parts)})"
+            return f"{label} ({self._module_fqn})"
         return label
 
     def __repr__(self):
