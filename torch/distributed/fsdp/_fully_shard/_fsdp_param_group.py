@@ -150,7 +150,7 @@ class FSDPParamGroup:
                 mesh_info,
                 post_forward_mesh_info,
                 device,
-                param_to_shard_result.get(param),
+                param_to_shard_result[param],
                 mp_policy,
                 offload_policy,
             )

@@ -228,7 +228,7 @@ class FSDPParam:
         mesh_info: DataParallelMeshInfo,
         post_forward_mesh_info: FSDPMeshInfo | None,
         device: torch.device,
-        shard_result: ShardPlacementResult | None,
+        shard_result: ShardPlacementResult,
         mp_policy: MixedPrecisionPolicy,
         offload_policy: OffloadPolicy,
     ):
@@ -242,12 +242,8 @@ class FSDPParam:
             self.offload_to_cpu and cast(CPUOffloadPolicy, offload_policy).pin_memory
         )
         self.grad_offload_event: torch.Event | None = None
-        if shard_result is not None:
-            self.mesh_info = shard_result.mesh_info
-            fsdp_placement = shard_result.placement
-        else:
-            self.mesh_info = cast(FSDPMeshInfo, mesh_info)
-            fsdp_placement = None
+        self.mesh_info = shard_result.mesh_info
+        fsdp_placement = shard_result.placement
         self._init_sharded_param(param, device, fsdp_placement)
         if self.post_forward_mesh_info:
             self._init_sharded_post_forward_param_metadata(param)
