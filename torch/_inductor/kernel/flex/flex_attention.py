@@ -55,6 +55,7 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
+prims = torch.ops.prims
 Expr = sympy.Expr
 
 
@@ -779,6 +780,15 @@ def flex_attention_backward(*args, **kwargs):
                 "Deterministic backward for flex_attention with block_mask using the FLASH backend "
                 "is not yet implemented. Running non-deterministic backward.",
             )
+        # TODO: Implement dLSE support in flash-attention backward by folding
+        # grad_logsumexp into the dPsum preprocess step.
+        if grad_logsumexp is not None:
+            raise NotImplementedError(
+                "FLASH backend backward does not support differentiating through "
+                "logsumexp (dLSE). This happens when the loss depends on the LSE "
+                "output of flex_attention. "
+                "Use BACKEND='TRITON' or avoid differentiating through logsumexp."
+            )
         score_is_trivial = is_trivial_score_graph(fw_graph.graph_module)
         return create_flex_flash_attention_backward_kernel(
             query,
@@ -817,6 +827,7 @@ def flex_attention_backward(*args, **kwargs):
     # Create delta which will is needed for the bwd's kernel
     mul_delta = lowerings[aten.mul](out, grad_out)
     delta = lowerings[aten.sum](mul_delta, axis=-1)
+    delta = lowerings[prims.convert_element_type](delta, torch.float32)
     if grad_logsumexp is not None:
         grad_lse_exp2 = lowerings[aten.mul](grad_logsumexp, 1 / math.log(2))
         grad_lse_exp2 = ExternKernel.require_contiguous(grad_lse_exp2)
