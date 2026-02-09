@@ -612,6 +612,25 @@ struct AutocastState {
     return true;
   }
 
+  std::string reason(const AutocastState& o) const {
+    std::ostringstream os;
+    for (size_t i = 0; i < DEVICES.size(); i++) {
+      if (enabled[i] == false && o.enabled[i] == false) {
+        continue;
+      }
+      if (enabled[i] != o.enabled[i]) {
+        os << "autocast(" << DEVICES[i] << ")_enabled ";
+      }
+      if (enabled[i] && o.enabled[i] && dtype[i] != o.dtype[i]) {
+        os << "autocast(" << DEVICES[i] << ")_dtype ";
+      }
+    }
+    if (cache_enabled != o.cache_enabled) {
+      os << "autocast_cache_enabled ";
+    }
+    return os.str();
+  }
+
   template <typename T>
   friend void to_json(T& json_j, const AutocastState& json_t) {
     json_j["enabled"] = json_t.enabled;
@@ -679,8 +698,9 @@ struct GlobalStateGuard {
     auto& ctx = at::globalContext();
     if (_grad_mode != at::GradMode::is_enabled())
       os << "grad_mode ";
-    if (!(_autocast_state == AutocastState()))
-      os << "autocast ";
+    AutocastState current_autocast;
+    if (!(_autocast_state == current_autocast))
+      os << _autocast_state.reason(current_autocast);
     if (_torch_function != torch::torch_function_enabled())
       os << "torch_function ";
     if (_deterministic_algorithms != ctx.deterministicAlgorithms())

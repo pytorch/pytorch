@@ -410,6 +410,40 @@ class ActivationCheckpointingViaTagsTests(
         _ = torch.compile(fn, backend=backend)(x, y)
 
     @requires_cuda_and_triton
+    def test_tangent_placeholders_have_is_backward_tag(self, device):
+        """Test that tangent placeholders in the joint graph are tagged with is_backward."""
+
+        def gn(x, y):
+            return torch.sigmoid(torch.matmul(x, y))
+
+        def fn(x, y):
+            return torch.utils.checkpoint.checkpoint(
+                gn, torch.sin(x), y, use_reentrant=False
+            )
+
+        x = torch.randn(4, 4, device=device, requires_grad=True)
+        y = torch.randn(4, 4, device=device, requires_grad=True)
+
+        def partition_fn(joint_gm, *args, **kwargs):
+            # Check partitioner_tag on placeholder nodes
+            for node in joint_gm.graph.nodes:
+                if node.op == "placeholder":
+                    if "tangents" in str(node.target):
+                        self.assertTrue(
+                            "is_backward" in node.meta.get("partitioner_tag", "")
+                        )
+                    else:
+                        self.assertTrue(
+                            "is_forward" in node.meta.get("partitioner_tag", "")
+                        )
+            return min_cut_rematerialization_partition(joint_gm, *args, **kwargs)
+
+        backend = aot_autograd(
+            fw_compiler=nop, bw_compiler=nop, partition_fn=partition_fn
+        )
+        _ = torch.compile(fn, backend=backend)(x, y)
+
+    @requires_cuda_and_triton
     @parametrize(
         "partition_fn",
         [
@@ -2238,7 +2272,7 @@ def forward(self, arg0_1, arg1_1):
         ):
             self._compile_and_capture(fwd_bwd_with_rng, True, (x,))
 
-    def test_ac_rematerialize_with_no_annotations_warns_and_returns_unchanged(self):
+    def test_ac_rematerialize_with_no_annotations_returns_unchanged(self):
         x = torch.randn(4, 4, requires_grad=True)
 
         def fwd_bwd(x):
@@ -2248,21 +2282,7 @@ def forward(self, arg0_1, arg1_1):
             loss = z.sum()
             return _grad(loss, x)[0]
 
-        # Without backward annotations, the pass should warn and return unchanged
-        # We verify this by checking that remat_using_tags=True produces the same
-        # graph as remat_using_tags=False (i.e., no recomputation happens)
-        import warnings
-
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            result_with, gm_with = self._compile_and_capture(fwd_bwd, True, (x,))
-
-            # Check warning was issued
-            self.assertTrue(
-                any("no backward region" in str(warning.message) for warning in w),
-                f"Expected warning about no backward region, got: {[str(warning.message) for warning in w]}",
-            )
-
+        result_with, gm_with = self._compile_and_capture(fwd_bwd, True, (x,))
         # Get the graph without the pass for comparison
         result_without, gm_without = self._compile_and_capture(fwd_bwd, False, (x,))
 

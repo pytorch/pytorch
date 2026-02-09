@@ -314,9 +314,7 @@ pointwise_ops = [
     aten.nan_to_num.out,
     aten.nan_to_num_.default,
     aten.ne.Scalar,
-    aten.neg.default,
     aten.neg.out,
-    aten.neg_.default,
     aten.nextafter.default,
     aten.nextafter.out,
     aten.nextafter_.default,
@@ -432,6 +430,9 @@ linear_pointwise_ops = {
     aten.mul_.Scalar: 0,
     aten.mul.Tensor: 2,
     aten.mul_.Tensor: 2,
+    # neg is linear: -(A1 + A2) = -A1 + -A2
+    aten.neg.default: 0,
+    aten.neg_.default: 0,
 }
 
 # Ops that preserve specific Partial types through the operation.
