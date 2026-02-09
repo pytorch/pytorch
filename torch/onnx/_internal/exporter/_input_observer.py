@@ -527,7 +527,7 @@ class InputObserverInfo:
         return {**dict(zip(pos_names, ds_args)), **ds_kwargs}
 
     def infer_arguments(
-        self, index_or_candidate: InputCandidate | int | None = None, flat: bool = False
+        self, index_or_candidate: InputCandidate | int | None = None, /, flat: bool = False
     ) -> list[torch.Tensor | None] | tuple[torch.Tensor, ...] | dict[str, torch.Tensor]:
         """Infers arguments based on the collected tensors."""
         # This is already checked by _build_inputs_completed_with_none_values
