@@ -1,10 +1,6 @@
 from __future__ import annotations
 
-import logging
-
 import torch
-
-log = logging.getLogger(__name__)
 
 
 def get_out_arg_count(out_op: torch._ops.OpOverload) -> int:
