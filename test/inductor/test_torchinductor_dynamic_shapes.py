@@ -209,6 +209,61 @@ class TestInductorDynamic(TestCase):
                 self.assertEqual(fn(x), fn_c(x))
                 self.assertEqual(fn(y), fn_c(y))
 
+    def test_constant_fold_uniform_value_self_referential_shape(self, device):
+        """
+        Test that constant_fold_uniform_value correctly handles the case where
+        a tensor's shape depends on a sym_size computed from the tensor itself.
+
+        This is a regression test for a bug where creating a replacement full()
+        node with a shape that includes a sym_size_int derived from the original
+        tensor would create a circular dependency in the graph, causing
+        stable_topological_sort to fail with an assertion error.
+        """
+        torch._dynamo.config.capture_scalar_outputs = True
+        torch._dynamo.config.capture_dynamic_output_shape_ops = True
+
+        def fn(arg0, arg1):
+            t0 = arg0
+            t1 = t0.clone()
+            t1.zero_()
+            t2 = t1.reshape((109, 115, 96))
+            t3 = arg1
+            t4 = t3.contiguous()
+            t5 = torch.nn.functional.relu(t4)
+            t6 = t2.clone()
+            t6.fill_(t5.item())
+            return t6
+
+        arg0 = torch.rand(
+            [401120, 3], dtype=torch.float32, device=device, requires_grad=True
+        )
+        arg1 = torch.rand([], dtype=torch.float32, device=device, requires_grad=True)
+
+        # Test eager mode
+        out_eager = fn(arg0, arg1)
+        out_eager.sum().backward()
+
+        # Reset grads
+        arg0 = torch.rand(
+            [401120, 3], dtype=torch.float32, device=device, requires_grad=True
+        )
+        arg1 = torch.rand([], dtype=torch.float32, device=device, requires_grad=True)
+
+        # Test compiled mode - this would fail before the fix with:
+        # AssertionError in stable_topological_sort due to circular dependency
+        compiled_fn = torch.compile(fn, fullgraph=True, dynamic=True)
+        out_compiled = compiled_fn(arg0, arg1)
+        out_compiled.sum().backward()
+
+        # Verify outputs match
+        arg0_test = torch.rand(
+            [401120, 3], dtype=torch.float32, device=device, requires_grad=False
+        )
+        arg1_test = torch.rand(
+            [], dtype=torch.float32, device=device, requires_grad=False
+        )
+        self.assertEqual(fn(arg0_test, arg1_test), compiled_fn(arg0_test, arg1_test))
+
     def test_arange_dynamic(self, device):
         def fn(a):
             batch_size = a.numel()
