@@ -390,6 +390,21 @@ struct igammac_functor {
   }
 };
 
+struct gcd_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b) {
+    // Euclidean algorithm for GCD
+    T x = a < 0 ? -a : a;
+    T y = b < 0 ? -b : b;
+    while (x != 0) {
+      T c = x;
+      x = y % x;
+      y = c;
+    }
+    return y;
+  }
+};
+
 #define REGISTER_INTEGER_BINARY_OP(NAME)  \
   REGISTER_BINARY_OP(NAME, long, long);   \
   REGISTER_BINARY_OP(NAME, int, int);     \
@@ -474,6 +489,7 @@ REGISTER_OPMATH_FLOAT_BINARY_OP(fmod);
 REGISTER_INTEGER_BINARY_OP(fmod);
 REGISTER_OPMATH_FLOAT_BINARY_OP(igamma);
 REGISTER_OPMATH_FLOAT_BINARY_OP(igammac);
+REGISTER_INTEGER_BINARY_OP(gcd);
 REGISTER_BINARY_ALPHA_OP(add_alpha, long, long, long);
 REGISTER_BINARY_ALPHA_OP(add_alpha, int, int, int);
 REGISTER_BINARY_ALPHA_OP(add_alpha, float, float, float);

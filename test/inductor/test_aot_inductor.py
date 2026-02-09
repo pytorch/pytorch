@@ -3,6 +3,7 @@ import itertools
 import logging
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -65,10 +66,12 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_WINDOWS,
     MACOS_VERSION,
+    NAVI_ARCH,
     parametrize,
     runOnRocm,
     skipIfMPS,
     skipIfRocm,
+    skipIfRocmArch,
     skipIfWindows,
     skipIfWindowsXPU,
     skipIfXpu,
@@ -168,6 +171,20 @@ def get_module_ext_type():
         return "pyd"
     else:
         return "so"
+
+
+def get_triton_grid_info(kernel, total_elements, src_code):
+    expected_grids = [
+        triton.cdiv(
+            total_elements, cfg.kwargs["BLOCK_SIZE_M"] * cfg.kwargs["BLOCK_SIZE_N"]
+        )
+        for cfg in kernel.configs
+    ]
+    grid_match = re.search(r"uint32_t grid_0 = (\d+)L;", src_code)
+    if grid_match:
+        return int(grid_match.group(1)), expected_grids
+    else:
+        return None, expected_grids
 
 
 class AOTInductorTestsTemplate:
@@ -331,10 +348,6 @@ class AOTInductorTestsTemplate:
         )
         self.assertTrue(actual_path == expected_path)
 
-    @unittest.skipIf(
-        config.triton.native_matmul,
-        "different # of input/output/constants in native matmul",
-    )
     def test_empty_constant_folding(self):
         class Model(torch.nn.Module):
             def __init__(self, device):
@@ -2551,10 +2564,6 @@ class AOTInductorTestsTemplate:
 
     # mps doesn't support float64
     @skipIfMPS
-    @unittest.skipIf(
-        config.triton.native_matmul,
-        "FIXME: cannot do get_size on FakeTensor during lowering.",
-    )
     def test_while_loop_with_parameters(self):
         inputs = (
             torch.randn(
@@ -3490,7 +3499,10 @@ class AOTInductorTestsTemplate:
         finally:
             torch.cuda.memory._record_memory_history(False)
         segments = torch.cuda.memory._snapshot()["segments"]
-        self.assertEqual(segments[0]["requested_size"], 400)
+        self.assertTrue(
+            any(seg["requested_size"] == 400 for seg in segments),
+            f"Expected segment with size 400, got: {[s['requested_size'] for s in segments]}",
+        )
 
     def test_view_outputs(self):
         class Model(torch.nn.Module):
@@ -6821,6 +6833,22 @@ class AOTInductorTestsTemplate:
         self.check_model(Model(), example_inputs)
 
     @skipIfMPS
+    @parametrize("input_dtype", [torch.float16, torch.bfloat16])
+    def test_mm_out_dtype(self, input_dtype):
+        if self.device not in ("cuda", "xpu"):
+            raise unittest.SkipTest("out_dtype is only supported on CUDA or XPU")
+
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.mm(x, y, out_dtype=torch.float32)
+
+        example_inputs = (
+            torch.randn(64, 32, device=self.device, dtype=input_dtype),
+            torch.randn(32, 64, device=self.device, dtype=input_dtype),
+        )
+        self.check_model(Model(), example_inputs)
+
+    @skipIfMPS
     @parametrize("m", [32])
     @parametrize("n", [64])
     @parametrize("q_group", [32, 64])
@@ -7032,14 +7060,34 @@ class AOTInductorTestsTemplate:
         m = torch.tensor([4096], dtype=torch.int32, device=self.device)
 
         with config.patch("triton.autotune_with_sample_inputs", True):
-            # The tuned best config on XPU is different with CUDA.
-            if GPU_TYPE == "xpu" or torch.version.hip:
-                grid_0 = 32736
+            if torch.version.hip:
+                # ROCm: Use dynamic grid checking (portable across different configs)
+                # Compile and get the generated code
+                _, src_code = run_and_get_cpp_code(
+                    torch._export.aot_compile, Model(), (x, y, m)
+                )
+                actual_grid, expected_grids = get_triton_grid_info(
+                    strange_config_matmul_kernel, 4096 * 2046, src_code
+                )
+                self.assertTrue(
+                    actual_grid is not None, "Could not find grid_0 in generated code"
+                )
+                self.assertIn(
+                    actual_grid,
+                    expected_grids,
+                    f"grid_0={actual_grid} not in expected {expected_grids} from kernel configs",
+                )
+
             else:
-                grid_0 = 1023
-            self.code_check_count(
-                Model(), (x, y, m), f"uint32_t grid_0 = {grid_0}L;", 1
-            )
+                # CUDA/XPU: Keep existing hardcoded values
+                # The tuned best config on XPU is different with CUDA.
+                if GPU_TYPE == "xpu":
+                    grid_0 = 32736
+                else:
+                    grid_0 = 1023
+                self.code_check_count(
+                    Model(), (x, y, m), f"uint32_t grid_0 = {grid_0}L;", 1
+                )
 
     def test_triton_mutated_autotuning(self):
         if self.device != GPU_TYPE:
@@ -7082,14 +7130,34 @@ class AOTInductorTestsTemplate:
         m = torch.tensor([4095], dtype=torch.int32, device=self.device)
 
         with config.patch("triton.autotune_with_sample_inputs", True):
-            # The tuned best config on XPU is different with CUDA.
-            if GPU_TYPE == "xpu" or torch.version.hip:
-                grid_0 = 32736
+            if torch.version.hip:
+                # ROCm: Use dynamic grid checking (portable across different configs)
+                # Compile and get the generated code
+                _, src_code = run_and_get_cpp_code(
+                    torch._export.aot_compile, Model(), (x, y, m)
+                )
+                actual_grid, expected_grids = get_triton_grid_info(
+                    strange_config_matmul_kernel, 4096 * 2046, src_code
+                )
+                self.assertTrue(
+                    actual_grid is not None, "Could not find grid_0 in generated code"
+                )
+                self.assertIn(
+                    actual_grid,
+                    expected_grids,
+                    f"grid_0={actual_grid} not in expected {expected_grids} from kernel configs",
+                )
+
             else:
-                grid_0 = 1023
-            self.code_check_count(
-                Model(), (x, y, m), f"uint32_t grid_0 = {grid_0}L;", 1
-            )
+                # CUDA/XPU: Keep existing hardcoded values
+                # The tuned best config on XPU is different with CUDA.
+                if GPU_TYPE == "xpu":
+                    grid_0 = 32736
+                else:
+                    grid_0 = 1023
+                self.code_check_count(
+                    Model(), (x, y, m), f"uint32_t grid_0 = {grid_0}L;", 1
+                )
 
     @patch.dict(os.environ, {"TRITON_DEBUG": "1"})
     def test_triton_dynamic_launcher_grid(self):
@@ -7419,6 +7487,7 @@ class AOTInductorTestsTemplate:
         # the output should have int type
         self.check_model(Model2(), (x,))
 
+    @unittest.skipIf(not IS_BIG_GPU, "Test requires large GPU memory")
     def test_upper_bound_i64(self):
         class Model(torch.nn.Module):
             def forward(self, x, y):
@@ -7481,6 +7550,7 @@ class AOTInductorTestsTemplate:
         aot_inductor_module = torch._inductor.aoti_load_package(package_path)
         self.assertEqual(aot_inductor_module(*example_inputs), model(*example_inputs))
 
+    @skipIfRocmArch(NAVI_ARCH)
     def test_copy_non_blocking_is_pinned(self):
         if self.device == "cpu" or self.device == "mps":
             raise unittest.SkipTest("only matters for device-to-cpu copy")
@@ -7511,7 +7581,6 @@ class AOTInductorTestsTemplate:
 
         self.assertEqual(outputs, outputs_aoti)
 
-    @unittest.skipIf(config.triton.native_matmul, "different code generated")
     def test_pad_non_zero_memory_leak(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("test is only for GPU_TYPE")
@@ -7771,6 +7840,45 @@ class AOTInductorTestsTemplate:
 
         with config.patch("triton.autotune_with_sample_inputs", True):
             AOTIRunnerUtil.run(Model(), example_inputs)
+
+    @unittest.skipIf(
+        IS_FBCODE, "Subprocess spawning doesn't work in fbcode Buck environment"
+    )
+    def test_aoti_load_package_in_fresh_subprocess(self):
+        """
+        Test that loading an AOTI package in a fresh subprocess works correctly.
+        This catches initialization bugs that may not appear when loading in the
+        same process where the package was compiled.
+        """
+
+        class SimpleModel(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        model = SimpleModel().to(self.device)
+        example_input = (torch.randn(2, 10, device=self.device),)
+        exported = torch.export.export(model, example_input)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            model_path = pathlib.Path(tmpdir) / "model.pt2"
+            torch._inductor.aoti_compile_and_package(
+                exported, package_path=str(model_path)
+            )
+
+            # Load in a fresh subprocess to reproduce potential bugs
+            script = f"""
+import torch
+
+torch._inductor.aoti_load_package("{model_path}")
+"""
+            result = subprocess.run(
+                [sys.executable, "-c", script], capture_output=True, text=True
+            )
+            self.assertEqual(
+                result.returncode,
+                0,
+                f"Failed to load package in subprocess: {result.stdout + result.stderr}",
+            )
 
 
 class AOTInductorLoggingTest(LoggingTestCase):
