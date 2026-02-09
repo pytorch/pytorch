@@ -415,6 +415,13 @@ def _init_param_group(
         if key not in pg_to_group:
             pg_to_group[key] = (param_mesh_info, [param])
         else:
+            existing_mesh_info = pg_to_group[key][0]
+            if existing_mesh_info is not param_mesh_info:
+                raise ValueError(
+                    f"Params sharing the same process group must use the same "
+                    f"FSDPMeshInfo object, but got different objects: "
+                    f"{existing_mesh_info} vs {param_mesh_info}"
+                )
             pg_to_group[key][1].append(param)
 
     # Create a FSDPParamGroup per process group

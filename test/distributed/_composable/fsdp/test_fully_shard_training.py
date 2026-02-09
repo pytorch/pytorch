@@ -1342,11 +1342,15 @@ class TestFullyShardNDTraining(FSDPTest):
     @skip_if_lt_x_gpu(8)
     def test_shard_placement_fn_tp_ep(self):
         self.run_subtests(
-            {"tp_degree": [1, 2], "dp_replicate": [1, 2]},
+            {
+                "tp_degree": [1, 2],
+                "dp_replicate": [1, 2],
+                "reshard_non_layer_modules": [True, 2],
+            },
             self._test_shard_placement_fn_tp_ep,
         )
 
-    def _init_ep_meshes(self, tp_degree, dp_replicate, ep_degree):
+    def _init_parallel_meshes(self, tp_degree, dp_replicate, ep_degree):
         """Build the TP, DP, EP, and EFSDP meshes and mesh infos.
 
         Returns (tp_mesh, dp_mesh, ep_mesh, efsdp_mesh, dp_mesh_info,
@@ -1414,12 +1418,22 @@ class TestFullyShardNDTraining(FSDPTest):
         efsdp_mesh = sparse_mesh["efsdp"]
         return tp_mesh, dp_mesh, ep_mesh, efsdp_mesh, dp_mesh_info, efsdp_mesh_info
 
-    def _test_shard_placement_fn_tp_ep(self, tp_degree, dp_replicate):
+    def _test_shard_placement_fn_tp_ep(
+        self, tp_degree, dp_replicate, reshard_non_layer_modules
+    ):
         ep_degree = 2
-        result = self._init_ep_meshes(tp_degree, dp_replicate, ep_degree)
+        result = self._init_parallel_meshes(tp_degree, dp_replicate, ep_degree)
         if result is None:
             return
         tp_mesh, dp_mesh, ep_mesh, efsdp_mesh, dp_mesh_info, efsdp_mesh_info = result
+        # reshard_root as int must be a factor of every group's
+        # shard mesh size; skip configs where it is not.
+        if isinstance(reshard_non_layer_modules, int) and not isinstance(
+            reshard_non_layer_modules, bool
+        ):
+            for mi in (dp_mesh_info, efsdp_mesh_info):
+                if mi.shard_mesh_size % reshard_non_layer_modules != 0:
+                    return
         model_args = ModelArgs(
             n_layers=2,
             vocab_size=256,
@@ -1452,6 +1466,8 @@ class TestFullyShardNDTraining(FSDPTest):
                     mesh_info=_dp_mesh_info,
                 )
 
+            # Blocks always have DTensor expert params (from EP), so int
+            # reshard is not supported; do not pass reshard_after_forward.
             fully_shard(
                 block,
                 mesh=dp_mesh,
@@ -1459,8 +1475,18 @@ class TestFullyShardNDTraining(FSDPTest):
             )
         # Group tok_embeddings, norm, and output together since
         # output.weight is tied to tok_embeddings.weight
-        fully_shard([model.tok_embeddings, model.norm, model.output], mesh=dp_mesh)
-        fully_shard(model, mesh=dp_mesh)
+        # These modules have no DTensor params when tp_degree == 1.
+        # With TP, root params are DTensors and int reshard is unsupported.
+        if tp_mesh is not None:
+            reshard_non_layer_modules = True
+        fully_shard(
+            [model.tok_embeddings, model.norm, model.output],
+            mesh=dp_mesh,
+            reshard_after_forward=reshard_non_layer_modules,
+        )
+        fully_shard(
+            model, mesh=dp_mesh, reshard_after_forward=reshard_non_layer_modules
+        )
         for (name, param), (_, ref_param) in zip(
             model.named_parameters(), ref_model.named_parameters()
         ):

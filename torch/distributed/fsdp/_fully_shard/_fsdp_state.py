@@ -105,9 +105,10 @@ class FSDPState(_State):
         ``_fsdp_param_groups`` instead.
         """
         if len(self._fsdp_param_groups) > 1:
+            group_fqns = [g._module_fqn for g in self._fsdp_param_groups]
             raise AssertionError(
                 f"Expected at most 1 param group for backward compatibility, "
-                f"but got {len(self._fsdp_param_groups)}. "
+                f"but got {len(self._fsdp_param_groups)} (fqns: {group_fqns}). "
                 f"Use `_fsdp_param_groups` (plural) to access all param groups "
                 f"when using per-param mesh via shard_placement_fn returning "
                 f"ShardPlacementResult."
