@@ -167,15 +167,17 @@ jobs:
         uses: ./.github/actions/teardown-xpu
     {%- else %}
     runs-on: linux.rocm.gpu.gfx942.1
+    env:
+      PYTORCH_ROOT: ""
     timeout-minutes: !{{ common.timeout_minutes }}
     !{{ upload.binary_env(config) }}
     permissions:
       id-token: write
       contents: read
     steps:
-      !{{ common.checkout(deep_clone=False, directory="pytorch") }}
+      !{{ common.checkout(deep_clone=False) }}
       - name: Setup ROCm
-        uses: ./pytorch/.github/actions/setup-rocm
+        uses: ./.github/actions/setup-rocm
       - uses: !{{ common.download_artifact_action }}
         name: Download Build Artifacts
         with:
@@ -206,7 +208,7 @@ jobs:
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
-        uses: ./pytorch/.github/actions/test-pytorch-binary
+        uses: ./.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
