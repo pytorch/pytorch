@@ -1281,9 +1281,6 @@ freezing_discard_parameters: bool = False
 # decompose some memory bound matmul/bmm to mul
 decompose_mem_bound_mm: bool = False
 
-# Decompose functional custom ops to their out variants for CUDAGraph compatibility
-decompose_functional_to_out: bool = False
-
 # Wrap compiled regions in inductor_compiled_code HOP to make them visible to
 # TorchDispatchModes like DebugMode and Selective Activation Checkpointing.
 wrap_inductor_compiled_regions: bool = False
