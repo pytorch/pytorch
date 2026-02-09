@@ -5,23 +5,15 @@ from __future__ import annotations
 
 import functools
 from contextlib import contextmanager
-from dataclasses import dataclass, field
 from typing import Any, cast, NoReturn, overload, TYPE_CHECKING
 from typing_extensions import deprecated
 
 import torch
-import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._composable import contract
 
 from ._fsdp_api import AllGather, MixedPrecisionPolicy, OffloadPolicy, ReduceScatter
-from ._fsdp_common import (
-    FSDPMeshInfo,
-    HSDPMeshInfo,
-    resolve_shard_placement,
-    ShardPlacementFnResult,
-    ShardPlacementResult,
-)
+from ._fsdp_common import FSDPMeshInfo, ShardPlacementFnResult
 from ._fsdp_init import (
     _apply_to_module,
     _get_device_from_mesh,
@@ -29,10 +21,10 @@ from ._fsdp_init import (
     _get_modules_and_states,
     _get_post_forward_mesh_info,
     _init_default_mesh,
+    _init_param_group,
     _validate_mesh,
     _validate_module,
 )
-from ._fsdp_param_group import FSDPParamGroup
 from ._fsdp_state import _get_module_fsdp_state, FSDPState
 
 
@@ -40,6 +32,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator
 
     from torch.distributed.tensor import DeviceMesh
+
+    from ._fsdp_param_group import FSDPParamGroup
 
 __all__ = [
     "fully_shard",
@@ -53,14 +47,6 @@ __all__ = [
 
 
 cls_to_fsdp_cls: dict[type, type] = {}
-
-
-@dataclass
-class _ParamGroupInfo:
-    """Info for a group of params that share the same mesh for sharding."""
-
-    params: list[nn.Parameter] = field(default_factory=list)
-    mesh_info: FSDPMeshInfo | None = None
 
 
 def get_cls_to_fsdp_cls() -> dict[type, type]:
@@ -227,57 +213,20 @@ def fully_shard(
     state = fully_shard.state(modules[0])  # type: ignore[attr-defined]
     state.init(modules, device, mp_policy, auto_reshard_after_forward)
 
-    if params:
-        # Group params by their mesh_info (using process groups as key).
-        # This allows supporting different meshes for different params,
-        # e.g., expert params using ep_mesh vs regular params using fsdp_cp_mesh.
-        # For HSDP, we also key by replicate_process_group to avoid grouping
-        # FSDPMeshInfo params with HSDPMeshInfo params that share the same
-        # shard_process_group but require different gradient reduction behavior.
-        pg_to_group_info: dict[
-            tuple[dist.ProcessGroup, dist.ProcessGroup | None], _ParamGroupInfo
-        ] = {}
-        # Resolve shard_placement_fn once per param and cache the results
-        # to avoid calling the user function again in FSDPParam.__init__.
-        param_to_shard_result: dict[nn.Parameter, ShardPlacementResult] = {}
-        for param in params:
-            shard_result = resolve_shard_placement(
-                shard_placement_fn(param) if shard_placement_fn else None, mesh_info
-            )
-            param_to_shard_result[param] = shard_result
-            param_mesh_info = shard_result.mesh_info
-            shard_pg = param_mesh_info.shard_process_group
-            # Use replicate_process_group for HSDP to distinguish from FSDP
-            replicate_pg: dist.ProcessGroup | None = None
-            if isinstance(param_mesh_info, HSDPMeshInfo):
-                replicate_pg = param_mesh_info.replicate_process_group
-            key = (shard_pg, replicate_pg)
-            if key not in pg_to_group_info:
-                pg_to_group_info[key] = _ParamGroupInfo(
-                    params=[param], mesh_info=param_mesh_info
-                )
-            else:
-                pg_to_group_info[key].params.append(param)
-
-        # Create a separate FSDPParamGroup for each process group
-        state._fsdp_param_groups = []
-        for group_info in pg_to_group_info.values():
-            group_mesh_info = cast(FSDPMeshInfo, group_info.mesh_info)
-            group_post_forward_mesh_info = _get_post_forward_mesh_info(
-                reshard_after_forward if not auto_reshard_after_forward else True,  # type: ignore[arg-type]
-                group_mesh_info,
-            )
-            param_group = FSDPParamGroup(
-                group_info.params,
-                modules,
-                group_mesh_info,
-                group_post_forward_mesh_info,
-                device,
-                param_to_shard_result,
-                mp_policy,
-                offload_policy,
-            )
-            state._fsdp_param_groups.append(param_group)
+    _init_param_group(
+        state,
+        params,
+        modules,
+        mesh_info,
+        None,  # post_forward_mesh_info (computed per-group from reshard_after_forward)
+        device,
+        shard_placement_fn,
+        mp_policy,
+        offload_policy,
+        reshard_after_forward=reshard_after_forward
+        if not auto_reshard_after_forward
+        else True,  # type: ignore[arg-type]
+    )
 
     # For Dynamo
     for managed_module in managed_modules:

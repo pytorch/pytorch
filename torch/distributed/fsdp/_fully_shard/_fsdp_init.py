@@ -360,11 +360,20 @@ def _init_param_group(
     shard_placement_fn: "Callable[[nn.Parameter], Any] | None",
     mp_policy: "MixedPrecisionPolicy",
     offload_policy: "OffloadPolicy",
+    reshard_after_forward: "bool | int | None" = None,
 ) -> None:
     """
-    Initialize the FSDP param group for the given state if there are params.
+    Initialize FSDP param groups for the given state.
 
-    This is shared between fully_shard and replicate.
+    Params are grouped by their process group (derived from ``mesh_info`` via
+    ``shard_placement_fn``). Each group becomes a separate ``FSDPParamGroup``.
+    When ``shard_placement_fn`` is ``None`` or returns the same mesh for all
+    params, this creates a single group.
+
+    Args:
+        reshard_after_forward: When provided, per-group ``post_forward_mesh_info``
+            is computed via ``_get_post_forward_mesh_info``. When ``None``,
+            ``post_forward_mesh_info`` is used directly for all groups.
     """
     # Import here to avoid circular imports
     from ._fsdp_common import (
@@ -374,19 +383,54 @@ def _init_param_group(
     )
     from ._fsdp_param_group import FSDPParamGroup
 
-    if params:
-        param_to_shard_result: dict[nn.Parameter, ShardPlacementResult] = {}
-        for param in params:
-            param_to_shard_result[param] = resolve_shard_placement(
-                shard_placement_fn(param) if shard_placement_fn else None,
-                cast(FSDPMeshInfo, mesh_info),
+    if not params:
+        return
+
+    # Resolve shard placement once per param and cache the results
+    # to avoid calling the user function again in FSDPParam.__init__.
+    param_to_shard_result: dict[nn.Parameter, ShardPlacementResult] = {}
+    default_mesh_info = cast(FSDPMeshInfo, mesh_info)
+    for param in params:
+        param_to_shard_result[param] = resolve_shard_placement(
+            shard_placement_fn(param) if shard_placement_fn else None,
+            default_mesh_info,
+        )
+
+    # Group params by their process group to support per-param mesh,
+    # e.g., expert params using ep_mesh vs regular params using dp_mesh.
+    # For HSDP, also key by replicate_process_group to avoid grouping
+    # FSDPMeshInfo params with HSDPMeshInfo params that share the same
+    # shard_process_group but require different gradient reduction behavior.
+    pg_to_group: dict[
+        tuple[dist.ProcessGroup, dist.ProcessGroup | None],
+        tuple[FSDPMeshInfo, list[nn.Parameter]],
+    ] = {}
+    for param in params:
+        param_mesh_info = param_to_shard_result[param].mesh_info
+        shard_pg = param_mesh_info.shard_process_group
+        replicate_pg: dist.ProcessGroup | None = None
+        if isinstance(param_mesh_info, HSDPMeshInfo):
+            replicate_pg = param_mesh_info.replicate_process_group
+        key = (shard_pg, replicate_pg)
+        if key not in pg_to_group:
+            pg_to_group[key] = (param_mesh_info, [param])
+        else:
+            pg_to_group[key][1].append(param)
+
+    # Create a FSDPParamGroup per process group
+    for group_mesh_info, group_params in pg_to_group.values():
+        if reshard_after_forward is not None:
+            group_post_forward = _get_post_forward_mesh_info(
+                reshard_after_forward, group_mesh_info
             )
+        else:
+            group_post_forward = post_forward_mesh_info
         state._fsdp_param_groups.append(
             FSDPParamGroup(
-                params,
+                group_params,
                 modules,
-                mesh_info,
-                post_forward_mesh_info,
+                group_mesh_info,
+                group_post_forward,
                 device,
                 param_to_shard_result,
                 mp_policy,
