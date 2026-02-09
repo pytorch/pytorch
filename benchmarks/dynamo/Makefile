@@ -30,10 +30,12 @@ build-deps: clone-deps
 	uv pip install numpy scipy ninja pyyaml six mkl mkl-include setuptools wheel cmake \
 		typing-extensions requests protobuf numba cython scikit-learn librosa
 	(cd ../../../torchvision && uv pip install -e . --no-build-isolation)
-	(cd ../../../torchdata && uv pip install -e .)
+	(cd ../../../torchdata && uv pip install -e . --no-build-isolation)
 	(cd ../../../torchaudio && uv pip install -e . --no-build-isolation)
-	(cd ../../../FBGEMM/fbgemm_gpu && uv pip install -r requirements.txt && uv pip install -e . --no-build-isolation)
-	(cd ../../../torchrec && uv pip install -e .)
+	@if command -v nvcc; then \
+	(cd ../../../FBGEMM/fbgemm_gpu && uv pip install -r requirements.txt && uv pip install -e . --no-build-isolation) \
+	fi
+	(cd ../../../torchrec && uv pip install -e . --no-deps)
 	(cd ../../../detectron2 && uv pip install -e . --no-build-isolation)
 	(cd ../../../torchbenchmark && python install.py --continue_on_fail $(if $(TORCHBENCH_MODELS),models $(TORCHBENCH_MODELS)))
 	uv pip uninstall torchrec-nightly fbgemm-gpu-nightly
