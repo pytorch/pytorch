@@ -232,6 +232,12 @@ disable = os.environ.get("TORCH_COMPILE_DISABLE", "0") == "1"
 # [@compile_ignored: runtime_behaviour] Get a cprofile trace of Dynamo
 cprofile = os.environ.get("TORCH_COMPILE_CPROFILE", False)
 
+# Enable Dynamo profiler. When enabled, prints pstats output showing
+# time spent tracing each user function. Set to True to enable, or set to a
+# file path to save the .prof file for snakeviz.
+# [@compile_ignored: runtime_behaviour]
+dynamo_profiler: bool | str = os.environ.get("TORCH_COMPILE_DYNAMO_PROFILER", False)
+
 # Legacy config, does nothing now!
 skipfiles_inline_module_allowlist: dict[Any, Any] = {}
 """Allowlist of inline modules to skip during compilation.
@@ -518,6 +524,12 @@ inline_inbuilt_nn_modules = Config(  # type: ignore[var-annotated]
 # Resume tracing in nested frames if a nested graph break occurs
 # Old behavior is to bubble up the graph break to the top level frame.
 nested_graph_breaks = False
+
+# If True, error if Dynamo attempts to trace more code while running compiled code in fullgraph=True.
+# If Dynamo determines that it should skip tracing the code (either at the C/C++ or Python level),
+# no error will be raised.
+# Set to false if force falling back to eager is desired.
+error_on_dynamo_callback_in_fullgraph_compiled_code = False
 
 # Install "free" tensor variables (globals, non-locals, nn module attributes)
 # as graph attributes.  This is useful for export, as it
@@ -828,6 +840,15 @@ _custom_ops_profile: Optional[Any] = None
 # Experimental flag to enable regional compile on invoke_subgraph HOP.
 # For testing only!
 enable_invoke_subgraph_regional_compile: bool = False
+
+# Clear WeakIdRef entries from TracingContext.tensor_to_context and
+# MetaTensorDescriber.lookup_tensor at the end of compile. These weakrefs
+# can block torch.utils.swap_tensors from working after compile.
+# - None (default): clear for registered backends (inductor, eager, etc.),
+#   don't clear for custom backends (to support standalone_compile, etc.)
+# - True: always clear regardless of backend
+# - False: never clear regardless of backend
+invalidate_compile_context_weakrefs: Optional[bool] = None
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
