@@ -462,9 +462,7 @@ def significant_strides_equal(
 
         if not V.graph.sizevars.statically_known_equals(
             s1, s2
-        ) and V.graph.sizevars.replace_backed_symbols_with_hints(
-            s1
-        ) != V.graph.sizevars.replace_backed_symbols_with_hints(s2):
+        ) and V.graph.sizevars.symbolic_hint(s1) != V.graph.sizevars.symbolic_hint(s2):
             return False
 
     return True
@@ -1300,12 +1298,8 @@ class Reduction(Loops):
         reduction_numel: Expr,
         input_node: Optional[IRNode] = None,
     ) -> tuple[ReductionHint, _IntLike]:
-        reduction_numel_hint = V.graph.sizevars.replace_backed_symbols_with_hints(
-            reduction_numel
-        )
-        numel_hint = V.graph.sizevars.replace_backed_symbols_with_hints(
-            sympy_product(ranges)
-        )
+        reduction_numel_hint = V.graph.sizevars.symbolic_hint(reduction_numel)
+        numel_hint = V.graph.sizevars.symbolic_hint(sympy_product(ranges))
 
         should_split = reduction_type == "scan" or (
             not V.graph.has_feature(device, BackendFeature.REDUCE_TO_SINGLE_ELEMENT)
@@ -1358,10 +1352,8 @@ class Reduction(Loops):
                         new_reduction_ranges,
                     ) = extract_input_node_reduction_ranges(input_node)
                 if new_ranges is not None and new_reduction_ranges is not None:
-                    extracted_numel_hint = (
-                        V.graph.sizevars.replace_backed_symbols_with_hints(
-                            sympy_product(new_ranges + new_reduction_ranges)
-                        )
+                    extracted_numel_hint = V.graph.sizevars.symbolic_hint(
+                        sympy_product(new_ranges + new_reduction_ranges)
                     )
                     if reduction_numel_hint == extracted_numel_hint:
                         log.debug(
@@ -1583,7 +1575,7 @@ class Reduction(Loops):
 
         if (
             isinstance(reduction_numel, Integer)
-            and V.graph.sizevars.guarding_hint_or_throw(reduction_numel)
+            and V.graph.sizevars.size_hint_or_throw(reduction_numel)
             < config.unroll_reductions_threshold
             and (sympy_product(ranges) != 1 or is_gpu(device.type))
             and reduction_type != "dot"
@@ -1925,7 +1917,7 @@ class Reduction(Loops):
         ) -> OpsValue:
             return intermediate_loader([*index, *reduction_index])
 
-        numel_hint = V.graph.sizevars.optimization_hint(sympy_product(original_ranges))
+        numel_hint = V.graph.sizevars.size_hint(sympy_product(original_ranges))
         reduction_hint = cls._multilayer_second_step_hint(
             split, numel_hint, reduction_hint
         )
@@ -4139,7 +4131,7 @@ class FlexibleLayout(Layout):
         the fill order should be [1, 3, 2, 0]
         """
         assert len(sizes) == len(stride)
-        stride = V.graph.sizevars.guarding_hints_or_throw(stride)
+        stride = [V.graph.sizevars.size_hint_or_throw(x) for x in stride]
         fill_order = sorted(range(len(stride)), key=stride.__getitem__)
         return FlexibleLayout.fill_ordered(sizes, fill_order)
 
@@ -6391,7 +6383,7 @@ class ExternKernel(InputsKernel):
                         want_contiguous=False,
                         stride_order=(
                             get_stride_order(
-                                V.graph.sizevars.guarding_hints_or_throw(
+                                V.graph.sizevars.size_hints_or_throw(
                                     x.get_layout().stride
                                 )
                             )

@@ -725,8 +725,8 @@ class EfficientPeakEstimate:
         )
 
     def _get_size(self, node: BufferLike) -> int:
-        return V.graph.sizevars.optimization_hint(
-            V.graph.get_allocation_storage_size(node)
+        return V.graph.sizevars.size_hint(
+            V.graph.get_allocation_storage_size(node), fallback=0
         ) * get_dtype_size(node.get_dtype())
 
     def peak_between(self, line_a: FreeIfNotReusedLine, line_b: AllocateLine):
@@ -786,8 +786,8 @@ class AllocateLine(MemoryPlanningLine):
         key = buffer_reuse_key(self.node)
         if config.allow_buffer_reuse and key in state:
             free_line = state.pop(key)
-            size = V.graph.sizevars.optimization_hint(
-                V.graph.get_allocation_storage_size(self.node)
+            size = V.graph.sizevars.size_hint(
+                V.graph.get_allocation_storage_size(self.node), fallback=0
             ) * get_dtype_size(self.node.get_dtype())
             if self.should_reuse_buffer(free_line, size):
                 free_line.is_reused = True
@@ -2334,7 +2334,7 @@ class PythonWrapperCodegen(CodeGen):
                         for x in value.get_size()
                     ]
                     stride = [
-                        V.graph.sizevars.optimization_hint(x)
+                        V.graph.sizevars.size_hint(x, fallback=42)
                         for x in value.get_stride()
                     ]
                     add_fake_input(
