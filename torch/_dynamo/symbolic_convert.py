@@ -226,6 +226,8 @@ ExceptionVals: TypeAlias = Union[
     UserDefinedExceptionObjectVariable,
 ]
 
+_CACHED_NOP = create_instruction("NOP")
+
 
 @functools.cache
 def _import_module(name: str) -> types.ModuleType:
@@ -4958,7 +4960,7 @@ class InstructionTranslatorBase(
         self.stack: list[VariableTracker] = []
         self.instruction_pointer = 0
         self.start_point = None
-        self.current_instruction = create_instruction("NOP")
+        self.current_instruction = _CACHED_NOP
         self.current_instruction_push = True
         self.block_stack = []
         # states before SETUP_WITH for checkpointing and fallback
@@ -5621,15 +5623,38 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 func,
             )
         else:
-            tracer = InliningInstructionTranslator(
-                parent,
-                code,
-                sub_locals,
-                parent.symbolic_globals,
-                parent.symbolic_torch_function_state,
-                parent.symbolic_stream_state,
-                func,
+            f_globals = func.get_globals()
+            cached_tracer = (
+                tracing_ctx.inlined_translator_cache.get(code)
+                if tracing_ctx
+                else None
             )
+            if (
+                cached_tracer is not None
+                and not cached_tracer._in_use
+                and cached_tracer.f_globals is f_globals
+            ):
+                cached_tracer.reinit(
+                    parent,
+                    sub_locals,
+                    parent.symbolic_globals,
+                    parent.symbolic_torch_function_state,
+                    parent.symbolic_stream_state,
+                    func,
+                )
+                tracer = cached_tracer
+            else:
+                tracer = InliningInstructionTranslator(
+                    parent,
+                    code,
+                    sub_locals,
+                    parent.symbolic_globals,
+                    parent.symbolic_torch_function_state,
+                    parent.symbolic_stream_state,
+                    func,
+                )
+                if tracing_ctx and code not in tracing_ctx.inlined_translator_cache:
+                    tracing_ctx.inlined_translator_cache[code] = tracer
         return tracer
 
     def inline_call_(self) -> VariableTracker:
@@ -5664,6 +5689,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             # while the inlined tx's error_on_graph_break was set to False.
             parent.error_on_graph_break = self.error_on_graph_break
             parent.is_child_tracer_active = False
+            self._in_use = False
 
         if self.output.should_exit:
             # graph break
@@ -5770,6 +5796,65 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         self.symbolic_result = None
         self.nn_module_stack = parent.nn_module_stack.copy()
         self.one_graph = parent.one_graph
+        self._in_use = True
+
+    def reinit(
+        self,
+        parent: InstructionTranslatorBase,
+        symbolic_locals: dict[str, VariableTracker],
+        symbolic_globals: dict[str, VariableTracker],
+        symbolic_torch_function_state: SymbolicTorchFunctionState,
+        symbolic_stream_state: SymbolicStreamState,
+        funcvar: BaseUserFunctionVariable | LocalGeneratorObjectVariable,
+    ) -> None:
+        self._in_use = True
+
+        # Dynamic fields from parent
+        self.parent = parent
+        self.output = parent.output
+        self.funcvar = funcvar
+        self.symbolic_locals = symbolic_locals
+        self.symbolic_globals = symbolic_globals
+        self.symbolic_torch_function_state = symbolic_torch_function_state
+        self.symbolic_stream_state = symbolic_stream_state
+        self.speculation_log = parent.speculation_log
+        self.exn_vt_stack = parent.exn_vt_stack
+        self.distributed_state = parent.distributed_state
+        self.inline_depth = parent.inline_depth + 1
+        self.nn_module_stack = parent.nn_module_stack.copy()
+        self.num_calls = parent.num_calls
+        self.export = parent.export
+        self.one_graph = parent.one_graph
+        self.package = parent.package
+        self.symbolic_result = None
+
+        # Clear mutable containers
+        self.stack.clear()
+        self.block_stack.clear()
+        self.active_generic_context_managers.clear()
+        self.prefix_insts.clear()
+        self.debug_locals.clear()
+        self.latest_bytecode_queue.clear()
+        self.f_locals = {}
+        for i in range(len(self._constants_cache)):
+            self._constants_cache[i] = None
+
+        # Reset scalars
+        self.instruction_pointer = 0
+        self.start_point = None
+        self.current_instruction = _CACHED_NOP
+        self.current_instruction_push = True
+        self.lineno = -1
+        self.kw_names = None
+        self.accept_prefix_inst = True
+        self._comprehension_depth = 0
+        self.post_prune_cell_and_freevars = None
+        self.error_on_graph_break = False
+        self.current_speculation = None
+        self.strict_checks_fn = None
+        self.has_no_inlined_calls = True
+        self.is_child_tracer_active = False
+        self.inconsistent_side_effects = False
 
     @property
     def fake_mode(self) -> Optional[FakeTensorMode]:
