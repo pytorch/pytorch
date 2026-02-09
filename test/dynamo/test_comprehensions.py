@@ -13,8 +13,8 @@ skipped (not the entire frame), resulting in multiple graphs being created.
 import operator
 
 import torch
-import torch._dynamo.testing
 import torch._dynamo.test_case
+import torch._dynamo.testing
 from torch._dynamo.testing import skipIfNotPy312
 
 
@@ -1868,6 +1868,120 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(4)
 
         self.assertEqual(compiled(x), outer(x))
+        self.assertEqual(len(backend.graphs), 2)
+        self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
+        self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_nested_comprehension_nonlocal_int_mutation(self):
+        """Nonlocal int mutation around a comprehension graph break."""
+
+        def f1(x):
+            cell = 1
+
+            def f2(x):
+                b = x + 1  # noqa: F841
+                nonlocal cell
+                cell = cell + 1
+                [torch._dynamo.graph_break() or i for i in range(2)]
+                cell += 1
+                return x + cell
+
+            result = f2(x)
+            self.assertEqual(cell, 3)
+            return result
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(f1, backend=backend)
+        x = torch.randn(4)
+
+        self.assertEqual(compiled(x), f1(x))
+        self.assertEqual(len(backend.graphs), 2)
+        self.assertEqual(count_op(backend.graphs[0], operator.add), 1)
+        self.assertEqual(count_op(backend.graphs[1], operator.add), 1)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_nested_comprehension_nonlocal_tensor_mutation(self):
+        """Nonlocal tensor mutation around a comprehension graph break."""
+
+        def f1(x):
+            cell = torch.ones(4)
+
+            def f2(x):
+                b = x + 1  # noqa: F841
+                nonlocal cell
+                cell += 1
+                [torch._dynamo.graph_break() or i for i in range(2)]
+                cell = cell + 1
+                return x + cell
+
+            result = f2(x)
+            self.assertEqual(cell, torch.full((4,), 3, dtype=torch.float32))
+            return result
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(f1, backend=backend)
+        x = torch.randn(4)
+
+        self.assertEqual(compiled(x), f1(x))
+        self.assertEqual(len(backend.graphs), 2)
+        self.assertEqual(count_op(backend.graphs[0], operator.add), 1)
+        self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_nested_comprehension_nonlocal_different_varnames(self):
+        """Inner function uses different variable names than root function."""
+
+        def f1(x):
+            cell = 1
+
+            def f2(y):
+                a = x + 1
+                b = y + 2
+                nonlocal cell
+                cell = cell + (b - y).sum()
+                [torch._dynamo.graph_break() or i for i in range(2)]
+                cell += 1
+                return x + a
+
+            result = f2(x)
+            self.assertEqual(cell, 10)
+            return result
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(f1, backend=backend)
+        x = torch.randn(4)
+
+        self.assertEqual(compiled(x), f1(x))
+        self.assertEqual(len(backend.graphs), 2)
+        self.assertEqual(count_op(backend.graphs[0], operator.add), 3)
+        self.assertEqual(count_op(backend.graphs[1], operator.add), 1)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_nested_comprehension_nonlocal_tensor_different_varnames(self):
+        """Inner function uses different variable names than root function (tensor variant)."""
+
+        def f1(x):
+            cell = torch.ones(4)
+
+            def f2(y):
+                a = y + 1  # noqa: F841
+                b = x + 2
+                nonlocal cell
+                cell += 1
+                [torch._dynamo.graph_break() or i for i in range(2)]
+                cell = cell + 1
+                return b + cell
+
+            result = f2(x)
+            self.assertEqual(cell, torch.full((4,), 3, dtype=torch.float32))
+            return result
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(f1, backend=backend)
+        x = torch.randn(4)
+
+        self.assertEqual(compiled(x), f1(x))
         self.assertEqual(len(backend.graphs), 2)
         self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
         self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
