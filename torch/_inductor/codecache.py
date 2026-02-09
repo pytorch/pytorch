@@ -1726,7 +1726,7 @@ class CudaKernelParamCache:
         if config.aot_inductor.emit_multi_arch_kernel:
             bin_type_to_ext = {
                 "cubin": ".fatbin",
-                "spv": f".{XPU_KERNEL_FORMAT}",
+                XPU_KERNEL_FORMAT: ".spv",
                 "hsaco": ".hsaco",
             }
             assert bin_type in bin_type_to_ext, (
