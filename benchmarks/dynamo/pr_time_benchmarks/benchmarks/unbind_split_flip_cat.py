@@ -9,7 +9,7 @@ import torch.export
 class UnbindSplitFlipCatModel(torch.nn.Module):
     """Model that performs unbind, split_with_sizes, flip, and cat operations."""
 
-    def __init__(self, num_iterations: int = 40, batch_size: int = 264):
+    def __init__(self, num_iterations: int = 40, batch_size: int = 128):
         super().__init__()
         self.num_iterations = num_iterations
         self.batch_size = batch_size
@@ -52,7 +52,7 @@ class UnbindSplitFlipCatModel(torch.nn.Module):
 class Benchmark(BenchmarkBase):
     """Benchmark for unbind/split/flip/cat pattern with torch.export."""
 
-    def __init__(self, num_iterations: int = 40, batch_size: int = 32):
+    def __init__(self, num_iterations: int = 40, batch_size: int = 128):
         self.num_iterations = num_iterations
         self.batch_size = batch_size
         super().__init__(
