@@ -32,7 +32,7 @@
 #endif // _WIN32
 
 // This one is being used by libc10_cuda.so
-#if defined(C10_CUDA_BUILD_MAIN_LIB)
+#ifdef C10_CUDA_BUILD_MAIN_LIB
 #define C10_CUDA_API C10_CUDA_EXPORT
 #else
 #define C10_CUDA_API C10_CUDA_IMPORT
