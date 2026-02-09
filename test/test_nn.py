@@ -80,34 +80,6 @@ if TEST_NUMPY:
 # update test/run_test.py to list it, otherwise it will NOT be run in
 # CI.
 
-
-# Helper classes for testing __slots__ pickling (must be at module level for pickle)
-class _ModuleWithSlots(nn.Module):
-    __slots__ = ['slot_attr', 'another_slot']
-
-    def __init__(self):
-        super().__init__()
-        self.slot_attr = "slot_value"
-        self.another_slot = 42
-        self.regular_attr = "regular_value"
-
-
-class _ParentModuleWithSlots(nn.Module):
-    __slots__ = ['parent_slot']
-
-    def __init__(self):
-        super().__init__()
-        self.parent_slot = "parent_value"
-
-
-class _ChildModuleWithSlots(_ParentModuleWithSlots):
-    __slots__ = ['child_slot']
-
-    def __init__(self):
-        super().__init__()
-        self.child_slot = "child_value"
-
-
 class TestNN(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
@@ -7642,6 +7614,15 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
     def test_pickle_module_with_slots(self):
         # Test that pickling works for subclasses that define __slots__
+        class _ModuleWithSlots(nn.Module):
+            __slots__ = ['slot_attr', 'another_slot']
+
+            def __init__(self):
+                super().__init__()
+                self.slot_attr = "slot_value"
+                self.another_slot = 42
+                self.regular_attr = "regular_value"
+
         m = _ModuleWithSlots()
         m_loaded = pickle.loads(pickle.dumps(m))
 
@@ -7652,6 +7633,21 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
     def test_pickle_module_with_slots_inheritance(self):
         # Verify pickling preserves __slots__ attributes from both parent
         # and child classes.
+        class _ParentModuleWithSlots(nn.Module):
+            __slots__ = ['parent_slot']
+
+            def __init__(self):
+                super().__init__()
+                self.parent_slot = "parent_value"
+
+
+        class _ChildModuleWithSlots(_ParentModuleWithSlots):
+            __slots__ = ['child_slot']
+
+            def __init__(self):
+                super().__init__()
+                self.child_slot = "child_value"
+        
         m = _ChildModuleWithSlots()
         m_loaded = pickle.loads(pickle.dumps(m))
 
