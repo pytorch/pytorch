@@ -347,6 +347,12 @@ class InvokeLeafFunction(HigherOrderOperator):
 
 invoke_leaf_function = InvokeLeafFunction()
 
+# Leaf functions are opaque and may have side effects (logging, printing, etc.).
+# Mark as side-effectful to prevent dead code elimination when outputs are unused.
+from torch.fx.node import has_side_effect
+
+has_side_effect(invoke_leaf_function)
+
 
 # NOTE: [Autograd support for invoke_leaf_function]
 #

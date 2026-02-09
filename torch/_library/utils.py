@@ -631,6 +631,11 @@ def is_impure(
             if args and len(args) > 0:
                 return args[0] in _side_effectful_functions
 
+        # TODO: should remove this after the effect_token PR lands
+        # https://github.com/pytorch/pytorch/pull/174122
+        if op in _side_effectful_functions:
+            return True
+
         if _get_effect(op) is not None:
             return True
 
