@@ -243,15 +243,14 @@ def _is_copy_node_bw_only(node: fx.Node) -> fx.Node | None:
 def _find_input_for_invalid_output(
     node: fx.Node,
     env: dict[fx.Node, Any],
-    inputs_set: OrderedSet[fx.Node],
 ) -> fx.Node | None:
     """Try to find a valid input replacement for an invalid forward output.
 
     This handles cases where a forward output depends on backward nodes but
     semantically aliases an input. For example, a view of a getitem from a
     triton kernel that mutates a buffer in backward, or a direct getitem from
-    such a higher-order op. The original input may be a primal (in inputs_set)
-    or a valid intermediate node already present in the forward graph.
+    such a higher-order op. The original input may be a primal or a valid
+    intermediate node already present in the forward graph.
     """
     # Pattern 1: view/reshape(getitem(ho_op, key)) -> ho_op.kwargs["kwargs"][key]
     original_input = _is_copy_node_bw_only(node)
@@ -344,7 +343,6 @@ def _extract_graph_with_inputs_outputs(
         elif node.op == "output":
             pass
     output_values = []
-    inputs_set = OrderedSet(inputs)
     for x, x_desc in zip(outputs, outputs_descs):
         if isinstance(x, fx.Node):
             if x not in env:
@@ -368,7 +366,7 @@ def _extract_graph_with_inputs_outputs(
                 # higher-order op that mutates an input, find that input.
                 # This handles custom_function_view outputs from triton kernels.
                 if replacement is None:
-                    replacement = _find_input_for_invalid_output(x, env, inputs_set)
+                    replacement = _find_input_for_invalid_output(x, env)
                 if replacement is not None:
                     output_values.append(replacement)
                     continue
