@@ -7599,7 +7599,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(len(w), 0)
 
     def test_pickle_module_without_slots(self):
-        # Test that pickling works for base nn.Module (no 
+        # Test that pickling works for base nn.Module (no
         # __slots__ defined)
         # https://github.com/pytorch/pytorch/issues/66813
         m = nn.Linear(10, 10)
