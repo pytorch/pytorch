@@ -21150,7 +21150,6 @@ op_db: list[OpInfo] = [
            autodiff_nonfusible_nodes=[],  # aliases inputs, shouldn't be fused
            sample_inputs_func=sample_unsqueeze,
            skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestDTensorOps', 'test_dtensor_op_db'),
                DecorateInfo(
                    unittest.expectedFailure,
                    'TestJit',
