@@ -185,7 +185,7 @@ def requires_gpu_with_enough_memory(min_mem_required):
         elif torch.cuda.is_available():
             total_memory = torch.cuda.get_device_properties().total_memory
         if (
-            not torch.accelerator.is_available()
+            not (torch.cuda.is_available() or torch.xpu.is_available())
             or total_memory < min_mem_required
         ):
             return unittest.skip(
