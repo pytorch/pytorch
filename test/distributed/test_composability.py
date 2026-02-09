@@ -120,7 +120,11 @@ class ComposabilityTest(MultiProcContinuousTest):
     ):
         # divide the model (e.g. 8 layers) by the number of stages
         layers_per_stage = total_layers // num_stages
-        assert layers_per_stage * num_stages == total_layers
+        if layers_per_stage * num_stages != total_layers:
+            raise AssertionError(
+                f"layers_per_stage * num_stages != total_layers: "
+                f"{layers_per_stage * num_stages} vs {total_layers}"
+            )
         # return offset so validation code can match partial layer back to orig model
         offset = stage_idx * layers_per_stage
         partial_model = nn.Sequential(
@@ -352,7 +356,8 @@ class ComposabilityTest(MultiProcContinuousTest):
             pipeline_schedule.step(target=target_local)
         for m in partial_models:
             for p in m.parameters():
-                assert p.grad is not None
+                if p.grad is None:
+                    raise AssertionError("Expected p.grad to not be None")
                 # introduce a race condition for FSDP's reduce-scatter which could corrupt gradients if pipelining
                 # does not properly synchronize with FSDP
                 p.grad.div_(2.0)

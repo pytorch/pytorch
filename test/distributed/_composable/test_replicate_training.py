@@ -78,13 +78,12 @@ class TestReplicateForwardInputs(FSDPTestMultiThread):
             def forward(self, x: torch.Tensor, ys: tuple[torch.Tensor, ...]):
                 # Check that Replicate moved the inputs to GPU, including recursing
                 # into the tuple data structure
-                assert x.device == device, f"Expects {device} but got {x.device}"
-                assert ys[0].device == device, (
-                    f"Expects {device} but got {ys[0].device}"
-                )
-                assert ys[1].device == device, (
-                    f"Expects {device} but got {ys[1].device}"
-                )
+                if not (x.device == device):
+                    raise AssertionError(f"Expects {device} but got {x.device}")
+                if not (ys[0].device == device):
+                    raise AssertionError(f"Expects {device} but got {ys[0].device}")
+                if not (ys[1].device == device):
+                    raise AssertionError(f"Expects {device} but got {ys[1].device}")
                 y = ys[0] + ys[1]
                 return x + y + 1
 
@@ -369,7 +368,8 @@ class TestReplicate1DTrainingCore(FSDPTest):
             in (2, 3)
         ):
             return
-        assert test_device_type in ("cuda", "hpu", "xpu", "cpu"), f"{test_device_type}"
+        if test_device_type not in ("cuda", "hpu", "xpu", "cpu"):
+            raise AssertionError(f"Unexpected device type: {test_device_type}")
         torch.manual_seed(42)
         vocab_size = 1024
         model_args = ModelArgs(
@@ -677,7 +677,8 @@ class TestReplicateTrainingCompose(FSDPTest):
         module_grouping: str,
         test_device_type: str,
     ):
-        assert checkpoint_impl in ("composable", "utils", "wrapper")
+        if checkpoint_impl not in ("composable", "utils", "wrapper"):
+            raise AssertionError(f"Unexpected checkpoint_impl: {checkpoint_impl}")
         testing_compile = (
             replicate is not torch.distributed._composable.replicate_with_fsdp
         )
@@ -724,7 +725,10 @@ class TestReplicateTrainingCompose(FSDPTest):
             "mesh": device_mesh,
         }
         if module_grouping == "mem_eff":
-            assert model_args.n_layers == 3
+            if not (model_args.n_layers == 3):
+                raise AssertionError(
+                    f"Expected n_layers == 3, got {model_args.n_layers}"
+                )
             replicate(model.layers[0], **fsdp_kwargs)
             replicate([model.layers[1], model.layers[2]], **fsdp_kwargs)
             replicate([model.tok_embeddings, model.pos_embeddings], **fsdp_kwargs)
