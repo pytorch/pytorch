@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import inspect
 import itertools
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import auto, Enum
 from typing import Any, cast
@@ -27,8 +27,7 @@ from ._fsdp_common import (
     DataParallelMeshInfo,
     FSDPMeshInfo,
     HSDPMeshInfo,
-    resolve_shard_placement,
-    ShardPlacementFnResult,
+    ShardPlacementResult,
 )
 
 
@@ -229,7 +228,7 @@ class FSDPParam:
         mesh_info: DataParallelMeshInfo,
         post_forward_mesh_info: FSDPMeshInfo | None,
         device: torch.device,
-        shard_placement_fn: Callable[[nn.Parameter], ShardPlacementFnResult] | None,
+        shard_result: ShardPlacementResult | None,
         mp_policy: MixedPrecisionPolicy,
         offload_policy: OffloadPolicy,
     ):
@@ -243,13 +242,13 @@ class FSDPParam:
             self.offload_to_cpu and cast(CPUOffloadPolicy, offload_policy).pin_memory
         )
         self.grad_offload_event: torch.Event | None = None
-        # Resolve shard_placement_fn result to get both placement and mesh_info
-        shard_result = resolve_shard_placement(
-            shard_placement_fn(param) if shard_placement_fn else None,
-            cast(FSDPMeshInfo, mesh_info),
-        )
-        self.mesh_info = shard_result.mesh_info
-        self._init_sharded_param(param, device, shard_result.placement)
+        if shard_result is not None:
+            self.mesh_info = shard_result.mesh_info
+            fsdp_placement = shard_result.placement
+        else:
+            self.mesh_info = cast(FSDPMeshInfo, mesh_info)
+            fsdp_placement = None
+        self._init_sharded_param(param, device, fsdp_placement)
         if self.post_forward_mesh_info:
             self._init_sharded_post_forward_param_metadata(param)
         self._init_extensions()

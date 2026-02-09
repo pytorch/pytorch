@@ -20,6 +20,7 @@ from ._fsdp_common import (
     HSDPMeshInfo,
     resolve_shard_placement,
     ShardPlacementFnResult,
+    ShardPlacementResult,
 )
 from ._fsdp_init import (
     _apply_to_module,
@@ -236,11 +237,14 @@ def fully_shard(
         pg_to_group_info: dict[
             tuple[dist.ProcessGroup, dist.ProcessGroup | None], _ParamGroupInfo
         ] = {}
+        # Resolve shard_placement_fn once per param and cache the results
+        # to avoid calling the user function again in FSDPParam.__init__.
+        param_to_shard_result: dict[nn.Parameter, ShardPlacementResult] = {}
         for param in params:
-            # Pre-call shard_placement_fn to determine this param's mesh_info
             shard_result = resolve_shard_placement(
                 shard_placement_fn(param) if shard_placement_fn else None, mesh_info
             )
+            param_to_shard_result[param] = shard_result
             param_mesh_info = shard_result.mesh_info
             shard_pg = param_mesh_info.shard_process_group
             # Use replicate_process_group for HSDP to distinguish from FSDP
@@ -269,7 +273,7 @@ def fully_shard(
                 group_mesh_info,
                 group_post_forward_mesh_info,
                 device,
-                shard_placement_fn,
+                param_to_shard_result,
                 mp_policy,
                 offload_policy,
             )

@@ -133,7 +133,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             mesh_info,
             post_forward_mesh_info,
             self.device,
-            None,  # shard_placement_fn
+            {},  # param_to_shard_result
             MixedPrecisionPolicy(),
             OffloadPolicy(),
         )

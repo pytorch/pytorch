@@ -1,6 +1,6 @@
 import itertools
 import logging
-from typing import TYPE_CHECKING
+from typing import cast, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
@@ -367,9 +367,20 @@ def _init_param_group(
     This is shared between fully_shard and replicate.
     """
     # Import here to avoid circular imports
+    from ._fsdp_common import (
+        FSDPMeshInfo,
+        resolve_shard_placement,
+        ShardPlacementResult,
+    )
     from ._fsdp_param_group import FSDPParamGroup
 
     if params:
+        param_to_shard_result: dict[nn.Parameter, ShardPlacementResult] = {}
+        for param in params:
+            param_to_shard_result[param] = resolve_shard_placement(
+                shard_placement_fn(param) if shard_placement_fn else None,
+                cast(FSDPMeshInfo, mesh_info),
+            )
         state._fsdp_param_groups.append(
             FSDPParamGroup(
                 params,
@@ -377,7 +388,7 @@ def _init_param_group(
                 mesh_info,
                 post_forward_mesh_info,
                 device,
-                shard_placement_fn,
+                param_to_shard_result,
                 mp_policy,
                 offload_policy,
             )

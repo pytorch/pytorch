@@ -1,8 +1,9 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import contextlib
 import logging
-from collections.abc import Callable
-from typing import Any, cast, NamedTuple
+from typing import Any, cast, NamedTuple, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
@@ -33,10 +34,14 @@ from ._fsdp_common import (
     FSDPMeshInfo,
     HSDPMeshInfo,
     is_bw,
-    ShardPlacementFnResult,
+    ShardPlacementResult,
     TrainingState,
 )
 from ._fsdp_param import alloc_storage, FSDPParam, ParamModuleInfo, ShardedState
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 logger = logging.getLogger("torch.distributed.fsdp.fully_shard")
@@ -131,7 +136,7 @@ class FSDPParamGroup:
         mesh_info: DataParallelMeshInfo,
         post_forward_mesh_info: FSDPMeshInfo | None,
         device: torch.device,
-        shard_placement_fn: Callable[[nn.Parameter], ShardPlacementFnResult] | None,
+        param_to_shard_result: dict[nn.Parameter, ShardPlacementResult],
         mp_policy: MixedPrecisionPolicy,
         offload_policy: OffloadPolicy,
     ):
@@ -145,7 +150,7 @@ class FSDPParamGroup:
                 mesh_info,
                 post_forward_mesh_info,
                 device,
-                shard_placement_fn,
+                param_to_shard_result.get(param),
                 mp_policy,
                 offload_policy,
             )
@@ -648,7 +653,7 @@ class FSDPParamGroup:
 
     @staticmethod
     def _prefetch_unshard(
-        target_fsdp_param_group: "FSDPParamGroup", pass_type: str
+        target_fsdp_param_group: FSDPParamGroup, pass_type: str
     ) -> None:
         if pass_type == "backward":
             training_state = TrainingState.PRE_BACKWARD
