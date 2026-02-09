@@ -2790,7 +2790,7 @@ def _classify_kernel_operation(
     """
     Classify the operation type for logging and filtering purposes.
     Returns one of: "mm", "conv", "flex", or "other"
-    
+
     This is more robust than simple string matching as it:
     1. Checks template types from choices
     2. Uses input shape patterns
@@ -2802,38 +2802,51 @@ def _classify_kernel_operation(
             if isinstance(choice, TritonTemplateCaller):
                 # Extract template name (e.g., "mm" from "mm_1", "convolution2d" from "convolution2d_3")
                 template_name = choice.name.rsplit("_", 1)[0]
-                
+
                 # Check known template patterns
-                if template_name in ("mm", "bmm", "mm_persistent_tma", "grouped_mm", 
-                                    "scaled_grouped_mm", "mm_plus_mm",
-                                    "blackwell_ws_persistent_device_tma",
-                                    "scaled_mm_device_tma_main_loop_scaling"):
+                if template_name in (
+                    "mm",
+                    "bmm",
+                    "mm_persistent_tma",
+                    "grouped_mm",
+                    "scaled_grouped_mm",
+                    "mm_plus_mm",
+                    "blackwell_ws_persistent_device_tma",
+                    "scaled_mm_device_tma_main_loop_scaling",
+                ):
                     return "mm"
                 elif template_name in ("convolution2d", "convolution3d"):
                     return "conv"
                 elif template_name.startswith("flex_"):
                     return "flex"
-                    
+
             elif isinstance(choice, ExternKernelChoice):
                 # Check extern kernel names
                 choice_name = choice.name
-                if choice_name in ("mm", "bmm", "addmm", "baddbmm", "_int_mm", "_scaled_mm"):
+                if choice_name in (
+                    "mm",
+                    "bmm",
+                    "addmm",
+                    "baddbmm",
+                    "_int_mm",
+                    "_scaled_mm",
+                ):
                     return "mm"
                 elif "conv" in choice_name:
                     return "conv"
-    
+
     # Second, use input shape heuristics for additional validation
     if len(input_nodes) >= 2:
         try:
             input_0_shape = input_nodes[0].get_size()
             input_1_shape = input_nodes[1].get_size()
-            
+
             # Matrix multiplication patterns
             if len(input_0_shape) == 2 and len(input_1_shape) == 2:
                 return "mm"
             elif len(input_0_shape) == 3 and len(input_1_shape) == 3:
                 return "mm"  # bmm
-                
+
             # Convolution patterns: input NCHW/NCDHW, weight OIHW/OIDHW
             elif len(input_0_shape) in (4, 5) and len(input_1_shape) in (4, 5):
                 # Could be conv or flex_attention, prefer template name if available
@@ -2845,19 +2858,25 @@ def _classify_kernel_operation(
                             return "conv"
                     except (IndexError, TypeError):
                         pass
-                        
+
         except (ValueError, IndexError, AttributeError):
             pass
-    
+
     # Last resort: exact name matching (not substring to avoid false positives)
     name_lower = name.lower()
     if name_lower in ("mm", "bmm", "addmm", "baddbmm"):
         return "mm"
-    elif name_lower in ("convolution", "convolution2d", "convolution3d", "conv2d", "conv3d"):
+    elif name_lower in (
+        "convolution",
+        "convolution2d",
+        "convolution3d",
+        "conv2d",
+        "conv3d",
+    ):
         return "conv"
     elif name_lower.startswith("flex_"):
         return "flex"
-    
+
     return "other"
 
 
@@ -4245,32 +4264,32 @@ class AlgorithmSelectorCache(PersistentCache):
         mm_filename = get_mm_log_filename()
         if not mm_filename:
             return
-        
+
         # Classify operation to ensure it's actually an MM operation
         choices_list = list(timings.keys())
         operation_type = _classify_kernel_operation(name, choices_list, input_nodes)
         if operation_type != "mm":
             return
-        
+
         if len(input_nodes) < 2:
             return
-        
+
         M, K = input_nodes[-2].get_size()[:2]
         N = input_nodes[-1].get_size()[-1]
-        
+
         def get_choice_info(choice):
             if isinstance(choice, ExternKernelCaller):
                 return {"type": "cublas", "time": timings[choice]}
-            
+
             if isinstance(choice, TritonTemplateCaller):
                 info = choice.info_dict()
                 tile = info["tile_shape"]
-                
+
                 tile_vals = eval(tile)  # type: ignore[arg-type]
                 BLOCK_M = tile_vals[0]
                 BLOCK_K = tile_vals[1]
                 BLOCK_N = tile_vals[2]
-                
+
                 return {
                     "type": "triton",
                     "time": timings[choice],
@@ -4284,12 +4303,12 @@ class AlgorithmSelectorCache(PersistentCache):
                     "kpack": info.get("kpack", 2),
                 }
             return None
-        
+
         out_dict = {
             str((M, K, N)): [get_choice_info(choice) for choice in timings],
             "kernel_type": name,
         }
-        
+
         append_to_log(mm_filename, out_dict)
 
     @staticmethod
@@ -4300,43 +4319,44 @@ class AlgorithmSelectorCache(PersistentCache):
         conv_filename = get_conv_log_filename()
         if not conv_filename:
             return
-        
+
         # Classify operation to ensure it's actually a conv operation
         choices_list = list(timings.keys())
         operation_type = _classify_kernel_operation(name, choices_list, input_nodes)
         if operation_type != "conv":
             return
-        
+
         if len(input_nodes) < 2:
             return
-        
+
         x_size = input_nodes[0].get_size()
         w_size = input_nodes[1].get_size()
-        
+
         def get_conv_choice_info(choice):
             if choice not in timings:
                 return None
             info = choice.info_dict()
-            
+
             # Start with timing and backend type
             result = {
                 "time": timings[choice],
                 "backend": info.get("backend", "unknown"),
             }
-            
+
             # Add all parameters from info_dict
             for key, value in info.items():
                 if key != "backend":  # Already added
                     # Convert non-serializable types to strings
                     try:
                         import json
+
                         json.dumps(value)  # Test if serializable
                         result[key] = value
                     except (TypeError, ValueError):
                         result[key] = str(value)
-            
+
             return result
-        
+
         out_dict = {
             "input_shape": str(x_size),
             "weight_shape": str(w_size),
@@ -4347,7 +4367,7 @@ class AlgorithmSelectorCache(PersistentCache):
             ],
             "kernel_type": name,
         }
-        
+
         append_to_log(conv_filename, out_dict)
 
     @staticmethod
