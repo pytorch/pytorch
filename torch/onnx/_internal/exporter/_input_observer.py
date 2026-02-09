@@ -122,7 +122,6 @@ class InputCandidate:
         self.args = args
         self.kwargs = kwargs
         self.flat_list, self.spec = torch.utils._pytree.tree_flatten((args, kwargs))
-        self.n_tensors = sum(t is not None for t in self.flat_list)
         self._position_to_args_kwargs: list[int | str] | None = None
         self._n_tensors_for_args_kwargs: dict[int | str, int] | None = None
         self.cst_kwargs = cst_kwargs.copy()
@@ -391,7 +390,7 @@ class InputObserverInfo:
         set of inputs referenced by their name (str) or their position (int).
 
         Args:
-            set_batch_dimension_for (set[int | str] | None): Set of input identifiers,
+            set_batch_dimension_for (set[int | str] | bool | None): Set of input identifiers,
                 by name (``str``) or position (``int``), for which the first dimension
                 should be treated as a dynamic batch dimension. If ``None`` or empty,
                 no additional batch dimensions are marked as dynamic.
@@ -527,7 +526,10 @@ class InputObserverInfo:
         return {**dict(zip(pos_names, ds_args)), **ds_kwargs}
 
     def infer_arguments(
-        self, index_or_candidate: InputCandidate | int | None = None, /, flat: bool = False
+        self,
+        index_or_candidate: InputCandidate | int | None = None,
+        /,
+        flat: bool = False,
     ) -> list[torch.Tensor | None] | tuple[torch.Tensor, ...] | dict[str, torch.Tensor]:
         """Infers arguments based on the collected tensors."""
         # This is already checked by _build_inputs_completed_with_none_values
@@ -758,7 +760,7 @@ class InputObserver:
         set of inputs referenced by their name (str) or their position (int).
 
         Args:
-            set_batch_dimension_for (set[int | str] | None): A set of input
+            set_batch_dimension_for (set[int | str] | bool | None): A set of input
                 identifiers (by position as ``int`` or by name as ``str``) for
                 which the first dimension should be treated as a dynamic batch
                 dimension. If ``None``, no dimensions are explicitly marked as
@@ -830,9 +832,7 @@ class InputObserver:
                 self.info._captured_inputs,
                 self.info.signature_names,
             )
-        return self.info.infer_arguments(
-            index_or_candidate=index_or_candidate, flat=flat
-        )
+        return self.info.infer_arguments(index_or_candidate, flat=flat)
 
     def check_discrepancies(
         self,
@@ -889,9 +889,7 @@ class InputObserver:
                     f"tensors but the model expects {len(input_names)}."
                 )
             n_none = sum(t is None for t in inputs.aligned_flat_list)
-            n_empty = sum(
-                t is None or t.numel() == 0 for t in inputs.aligned_flat_list
-            )
+            n_empty = sum(t is None or t.numel() == 0 for t in inputs.aligned_flat_list)
 
             feeds = dict(zip(input_names, self.info.infer_arguments(inputs, flat=True)))
 
