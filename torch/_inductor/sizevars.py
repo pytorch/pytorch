@@ -1150,10 +1150,7 @@ class SizeVarAllocator:
                 index = sympy_subs(index, {v: 0})  # type: ignore[dict-item]
         result = []
         for s in self.stride_vars(index, vars, support_vars):
-            try:
-                result.append(self.guarding_hint_or_throw(s))
-            except TypeError:
-                result.append(0)
+            result.append(self.optimization_hint(s, fallback=0))
         return result
 
     def stride_order(self, index: Expr, vars: list[sympy.Symbol]) -> list[int]:
