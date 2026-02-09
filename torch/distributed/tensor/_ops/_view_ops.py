@@ -82,7 +82,9 @@ class NewDim(DimSpec):
 
     @classmethod
     def new(cls, size: int) -> DimSpec:
-        return Singleton() if size == 1 else NewDim(size)
+        from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+        return Singleton() if guard_or_false(size == 1) else NewDim(size)
 
 
 @dataclass
@@ -94,7 +96,9 @@ class Repeat(DimSpec):
 
     @classmethod
     def new(cls, dim: DimSpec, times: int) -> DimSpec:
-        if times == 1:
+        from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+        if guard_or_false(times == 1):
             return dim
         elif isinstance(dim, Singleton):
             # repeating a singleton is the same as broadcasting it
@@ -141,6 +145,8 @@ class Split(DimSpec):
 
     @classmethod
     def new(cls, dim: DimSpec, group_shape: tuple[int, ...], idx: int) -> DimSpec:
+        from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_or_true
+
         if not len(group_shape) > 0:
             raise AssertionError(
                 f"Expected group_shape length > 0, got {len(group_shape)}"
@@ -150,13 +156,15 @@ class Split(DimSpec):
             if not idx == 0:
                 raise AssertionError(f"Expected idx == 0, got {idx}")
             return dim
-        elif group_shape[idx] == 1:
+        elif guard_or_false(group_shape[idx] == 1):
             return Singleton()
         else:
             # remove singletons from group
             # group_mapping = [(new_index, (shape, old_index)) ...]
             group_mapping = list(
-                enumerate((s, i) for i, s in enumerate(group_shape) if s != 1)
+                enumerate(
+                    (s, i) for i, s in enumerate(group_shape) if guard_or_true(s != 1)
+                )
             )
             new_group_shape = tuple(m[1][0] for m in group_mapping)
             new_idx = next(filter(lambda x: x[1][1] == idx, group_mapping))[0]
@@ -185,6 +193,8 @@ def dim_atleast_3d(ndim: int) -> DimMap:
 
 def expand(input_shape: Shape, shape: Shape) -> DimMap:
     """Implement broadcast on multiple dimensions."""
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
     if not len(shape) >= len(input_shape):
         raise AssertionError(
             f"Expected len(shape) >= len(input_shape), got {len(shape)} < {len(input_shape)}"
@@ -203,21 +213,29 @@ def expand(input_shape: Shape, shape: Shape) -> DimMap:
             if not isinstance(p, InputDim):
                 raise AssertionError(f"DimSpec not supported in expand: {p}")
             actual_s = input_shape[p.input_dim]
-            if not (actual_s == 1 or desired_s == -1 or desired_s == actual_s):
+            if not (
+                guard_or_false(actual_s == 1)
+                or guard_or_false(desired_s == -1)
+                or guard_or_false(desired_s == actual_s)
+            ):
                 raise AssertionError(
                     f"Expected actual_s == 1 or desired_s == -1 or "
                     f"desired_s == actual_s, got actual_s={actual_s}, desired_s={desired_s}"
                 )
         mapping.append(
             p
-            if desired_s in (1, -1) or desired_s == actual_s
+            if (
+                guard_or_false(desired_s == 1)
+                or guard_or_false(desired_s == -1)
+                or guard_or_false(desired_s == actual_s)
+            )
             else Broadcast.new(p, desired_s)
         )
     return tuple(mapping)
 
 
 def normalize_sizes(sizes: Shape | tuple[Shape]) -> Shape:
-    if isinstance(sizes[0], int):
+    if isinstance(sizes[0], (int, torch.SymInt)):
         return cast(Shape, sizes)
     elif len(sizes) == 1:
         return sizes[0]
@@ -297,21 +315,46 @@ def infer_size(total_size: int, sizes: Shape) -> Shape:
 
     Infer the size of this dimension given the total_size.
     """
-    infers = [i for i, s in enumerate(sizes) if s == -1]
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    infers = [i for i, s in enumerate(sizes) if guard_or_false(s == -1)]
     size = prod(sizes)
     if not len(infers) <= 1:
         raise AssertionError("can only infer one size")
     if infers:
         size = -size
         missing_size = total_size // size
-        if not total_size % size == 0:
-            raise AssertionError(
-                f"size inferred for -1 is not integral {sizes} should have {total_size} elements."
-            )
-        return tuple(s if s != -1 else missing_size for s in sizes)
-    if not size == total_size:
-        raise AssertionError(f"sizes do not match {total_size} vs {size}")
+        torch._check(
+            total_size % size == 0,
+            lambda: f"size inferred for -1 is not integral {sizes} should have {total_size} elements.",
+        )
+        return tuple(s if not guard_or_false(s == -1) else missing_size for s in sizes)
+    torch._check(
+        size == total_size,
+        lambda: f"sizes do not match {total_size} vs {size}",
+    )
     return sizes
+
+
+def _partial_fallback_view_groups(
+    resolved: list[DimSpec],
+    from_size: Shape,
+    to_size: Shape,
+    from_idx: int,
+    to_idx: int,
+    from_group_dim: list[int],
+    to_group_shape: list,
+) -> DimMap:
+    """Flatten-then-split fallback for remaining dims when symbolic comparisons are unresolvable."""
+    remaining_from = list(from_group_dim) + list(range(from_idx, len(from_size)))
+    remaining_to = list(to_group_shape) + list(to_size[to_idx:])
+    if remaining_to:
+        flattened = Flatten.new(tuple(InputDim(fi) for fi in remaining_from))
+        resolved += [
+            Split.new(flattened, tuple(remaining_to), i)
+            for i in range(len(remaining_to))
+        ]
+    return tuple(resolved)
 
 
 def view_groups(from_size: Shape, to_size: Shape) -> DimMap:
@@ -343,18 +386,22 @@ def view_groups(from_size: Shape, to_size: Shape) -> DimMap:
     - in the above, input is flattened into a single dimension and then split
       into two separate dimensions with different sizes from the input.
     """
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_or_true
+
     from_nelem = prod(from_size)
     to_size = infer_size(from_nelem, normalize_sizes(to_size))
 
-    if not from_nelem == prod(to_size):
-        raise AssertionError("Total view shape does not add up")
+    torch._check(
+        from_nelem == prod(to_size),
+        lambda: "Total view shape does not add up",
+    )
 
     from_idx = 0
     to_idx = 0
     from_len = len(from_size)
     to_len = len(to_size)
 
-    result_pp = []
+    result_pp: list[DimSpec] = []
 
     while from_idx < from_len or to_idx < to_len:
         from_group_dim, to_group_shape = [], []
@@ -374,23 +421,43 @@ def view_groups(from_size: Shape, to_size: Shape) -> DimMap:
             to_idx += 1
 
         # if any of the groups is singleton, great, we need to backtrack though
-        if f == 1 and t != 1:
+        if guard_or_false(f == 1) and guard_or_true(t != 1):
             # produces ([1], [])
             to_idx -= 1
             to_group_shape = []
-        elif f != 1 and t == 1:
+        elif guard_or_true(f != 1) and guard_or_false(t == 1):
             # produces ([], [1])
             from_idx -= 1
             from_group_dim = []
         else:
             # produces ([1], [1]),  ([2], [2]), ([2,3], [6])
-            while f != t:
-                if f < t:
+            while guard_or_true(f != t):
+                if guard_or_true(f < t):
+                    if from_idx >= from_len:
+                        return _partial_fallback_view_groups(
+                            result_pp,
+                            from_size,
+                            to_size,
+                            from_idx,
+                            to_idx,
+                            from_group_dim,
+                            to_group_shape,
+                        )
                     nf = from_size[from_idx]
                     from_group_dim.append(from_idx)
                     from_idx += 1
                     f *= nf
                 else:
+                    if to_idx >= to_len:
+                        return _partial_fallback_view_groups(
+                            result_pp,
+                            from_size,
+                            to_size,
+                            from_idx,
+                            to_idx,
+                            from_group_dim,
+                            to_group_shape,
+                        )
                     nt = to_size[to_idx]
                     to_group_shape.append(nt)
                     to_idx += 1
@@ -398,7 +465,11 @@ def view_groups(from_size: Shape, to_size: Shape) -> DimMap:
 
         if len(to_group_shape) > 0:
             flattened = Flatten.new(
-                tuple(InputDim(fi) for fi in from_group_dim if from_size[fi] >= 1)
+                tuple(
+                    InputDim(fi)
+                    for fi in from_group_dim
+                    if guard_or_true(from_size[fi] >= 1)
+                )
             )
             result_pp += [
                 Split.new(flattened, tuple(to_group_shape), i)
@@ -433,10 +504,13 @@ def dim_squeeze(shape: Shape, dim: int | None = None) -> DimMap:
     # equals size of the mesh. For example squeeze(DTensor(tensor(4), Shard[0])) could
     # end up as squeeze(tensor(1)) if we have 4 devices; this would lead to
     # removal of a dimension that is not actually a singleton.
+    from torch.fx.experimental.symbolic_shapes import guard_or_true
+
     return tuple(
         InputDim(i)
         for i, s in enumerate(shape)
-        if s > 1 or (dim is not None and i != normalize_dim(dim, len(shape)))
+        if guard_or_true(s > 1)
+        or (dim is not None and i != normalize_dim(dim, len(shape)))
     )
 
 
@@ -560,6 +634,8 @@ def propagate_shape_and_sharding(
     # 3 requires that info, to decide whether we can error out. Maybe we can refactor
     # to make this function purely "theoretical".
     def get_in_dim_to_shard(cmd: DimSpec) -> InputDim | None:
+        from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_or_true
+
         if isinstance(cmd, InputDim):
             return cmd
         elif isinstance(cmd, Flatten):
@@ -586,7 +662,7 @@ def propagate_shape_and_sharding(
                         )
                     tensor_dim_size = global_input_shape[shard_placement.dim]
                     mesh_dim_size = mesh_sizes[shard_mesh_dim]
-                    if tensor_dim_size % mesh_dim_size != 0:
+                    if guard_or_true(tensor_dim_size % mesh_dim_size != 0):
                         can_shard_dim = False
                         if strict_view:
                             raise RuntimeError(
@@ -616,7 +692,8 @@ def propagate_shape_and_sharding(
 
                 # 1. is this dimension shardable on each individual mesh dim?
                 shardable_dims[in_dim.input_dim] = [
-                    out_size % mesh_dim_size == 0 for mesh_dim_size in mesh_sizes
+                    guard_or_false(out_size % mesh_dim_size == 0)
+                    for mesh_dim_size in mesh_sizes
                 ]
 
                 shard_mesh_dim, _ = maybe_get_shard_mesh_dim_and_placement(in_dim)
@@ -632,7 +709,7 @@ def propagate_shape_and_sharding(
                 for size, shard in zip(mesh_sizes, input_src_placements):
                     if isinstance(shard, Shard | _StridedShard) and shard.dim == in_dim:
                         submesh_size *= size
-                if not out_size % submesh_size == 0:
+                if not guard_or_false(out_size % submesh_size == 0):
                     raise AssertionError(
                         f"Resulting dimension size {out_size} is not divisible by its mesh dimension {submesh_size}."
                     )
