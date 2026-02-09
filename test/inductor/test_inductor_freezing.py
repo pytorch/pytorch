@@ -17,7 +17,12 @@ from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import override_lowering, run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater, tf32_on_and_off
-from torch.testing._internal.common_utils import IS_FBCODE, TEST_WITH_SLOW_GRADCHECK
+from torch.testing._internal.common_utils import (
+    IS_FBCODE,
+    MI200_ARCH,
+    skipIfRocmArch,
+    TEST_WITH_SLOW_GRADCHECK,
+)
 
 
 # Make the helper files in test/ importable
@@ -742,6 +747,7 @@ class OptimizeForInferenceTemplate(TestCase):
         self.assertEqual(eager, compiled)
         self.assertTrue(weight_ref() is None)
 
+    @skipIfRocmArch(MI200_ARCH)
     def test_conv_with_as_strided(self):
         class Model(nn.Module):
             def __init__(self, groups):

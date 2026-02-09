@@ -81,7 +81,12 @@ def patches(fn):
 class TestSelectAlgorithmGpu(BaseTestSelectAlgorithm):
     common = check_model
 
-    @inductor_config.patch({"freezing": True})
+    @inductor_config.patch(
+        {
+            "freezing": True,
+            "shape_padding": False,
+        }
+    )
     @patches
     @torch.no_grad
     @dtypes(torch.bfloat16)
@@ -132,6 +137,7 @@ class TestSelectAlgorithmGpu(BaseTestSelectAlgorithm):
         w = torch.rand((out_features, in_features), dtype=dtype, device=device)
         w_int8pack, w_scales = _convert_weight_to_int8pack(w)
         w_scales = w_scales.to(device)
+        
         mod = M(w_int8pack).eval()
         self.common(mod, (x, w_scales))
         self.assertEqual(counters["inductor"]["woq_matcher_count"], 1)
