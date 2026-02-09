@@ -1345,7 +1345,7 @@ class TestFullyShardNDTraining(FSDPTest):
             {
                 "tp_degree": [1, 2],
                 "dp_replicate": [1, 2],
-                "reshard_non_layer_modules": [True, 2],
+                "reshard_non_layer_modules": [False, True, 2],
             },
             self._test_shard_placement_fn_tp_ep,
         )

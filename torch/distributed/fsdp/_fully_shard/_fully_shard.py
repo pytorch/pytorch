@@ -305,13 +305,11 @@ class FSDPModule:
             before pre-forward.
         """
         state = self._get_fsdp_state()
-        # For unshard, we handle all param groups and return a composite handle
-        handles = []
         for fsdp_param_group in state._fsdp_param_groups:
             fsdp_param_group.lazy_init()
             fsdp_param_group.unshard(async_op=async_op)
-            handles.append(fsdp_param_group)
-        handle = _UnshardHandleImpl(handles if handles else None)
+        groups = state._fsdp_param_groups
+        handle = _UnshardHandleImpl(groups if groups else None)
         if async_op:
             return handle
         handle.wait()
@@ -510,6 +508,12 @@ class FSDPModule:
                 all-reduce stream used by the native HSDP all-reduce.
         """
         state = self._get_fsdp_state()
+        if len(state._fsdp_param_groups) > 1:
+            raise ValueError(
+                "set_all_reduce_hook is not supported with multiple param "
+                "groups (from per-param mesh via shard_placement_fn). "
+                "The hook would be ambiguous across groups with different meshes."
+            )
         for fsdp_param_group in state._fsdp_param_groups:
             fsdp_param_group._all_reduce_hook = hook
             if stream is not None:
