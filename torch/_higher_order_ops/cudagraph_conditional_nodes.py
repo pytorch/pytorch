@@ -1,14 +1,11 @@
 # mypy: allow-untyped-defs
 from collections.abc import Generator
 from contextlib import contextmanager
-from typing import Any, cast
+from typing import Any
 
 import torch
 import torch.utils._pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
-
-
-# TODO: Move this into torch/cuda/graphs.py
 
 
 class CUDAGraphCaptureControlFlowOpDispatchMode(TorchDispatchMode):
@@ -72,20 +69,13 @@ class ControlFlowOpWarmupDispatchMode(TorchDispatchMode):
 
         # Warm up both sides of this torch.cond()
         if func is torch.ops.higher_order.cond:
-            pred, true_fn, false_fn, operands = cast(tuple[Any, Any, Any, Any], args)
             if torch.cuda.is_current_stream_capturing():
                 # This is a call to torch.cond() nested within either
                 # another torch.cond() function.
                 with self:
-                    # We re-enter the mode in case of nested calls
-                    if_else_node(*args)
+                    # We re-enter the mode in case of nested calls to torch.cond()
+                    return if_else_node(*args)
             else:
-                # TODO: What is this good for? It matters only if I
-                # have another stream capture on this thread, which I
-                # shouldn't have
-                # torch.cuda.graphs.thread_cuda_stream_capture_mode(
-                #     torch.cuda.cudart().cudaStreamCaptureMode.Relaxed
-                # ),
                 with (
                     torch.cuda.graph(
                         torch.cuda.CUDAGraph(),
@@ -97,8 +87,9 @@ class ControlFlowOpWarmupDispatchMode(TorchDispatchMode):
                 ):
                     if_else_node(*args)
 
-        # Eagerly execute original function after warmup
-        return func(*args, **kwargs)
+                return func(*args, **kwargs)
+        else:
+            return func(*args, **kwargs)
 
 
 def _is_boolean_scalar_cuda_tensor(pred: Any) -> bool:

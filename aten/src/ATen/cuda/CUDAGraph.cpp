@@ -413,15 +413,42 @@ void CUDAGraph::begin_capture_to_if_node(
   set_conditional_handle(handle, scalar_cuda_pred_tensor);
 
   const cudaGraphNode_t* dependencies{};
+  const cudaGraphEdgeData* dependency_edges{};
   size_t num_dependencies = 0;
+#if CUDA_VERSION >= 13000
   AT_CUDA_CHECK(cudaStreamGetCaptureInfo(
       getCurrentCUDAStream(),
       &status,
       nullptr,
       &currently_capturing_graph,
       &dependencies,
+      &dependency_edges,
       &num_dependencies));
+#else
+  AT_CUDA_CHECK(cudaStreamGetCaptureInfo_v3(
+      getCurrentCUDAStream(),
+      &status,
+      nullptr,
+      &currently_capturing_graph,
+      &dependencies,
+      &dependency_edges,
+      &num_dependencies
+  ));
+#endif
   TORCH_CHECK(status == cudaStreamCaptureStatusActive);
+  if (num_dependencies > 0) {
+    const auto* dependency_edges_bytes =
+        reinterpret_cast<const unsigned char*>(dependency_edges);
+    bool dependency_edges_zero_initialized = true;
+    for (size_t i = 0; i < num_dependencies * sizeof(cudaGraphEdgeData); ++i) {
+      if (dependency_edges_bytes[i] != 0) {
+        dependency_edges_zero_initialized = false;
+        break;
+      }
+    }
+    TORCH_CHECK(
+        dependency_edges_zero_initialized,"Your kernel before inserting a cuda graph node has edge data. We are not sure how edge data should be handled with conditional nodes right now, so please file a bug if you see this.");
+  }
 
   cudaGraphNodeParams params{};
   params.type = cudaGraphNodeTypeConditional;
@@ -430,17 +457,33 @@ void CUDAGraph::begin_capture_to_if_node(
   params.conditional.size = 1;
 
   cudaGraphNode_t cond_node{};
+#if CUDA_VERSION >= 13000
   AT_CUDA_CHECK(cudaGraphAddNode(
       &cond_node,
       currently_capturing_graph,
       dependencies,
+      nullptr,
       num_dependencies,
       &params));
-
+#else
+  AT_CUDA_CHECK(cudaGraphAddNode_v2(
+      &cond_node,
+      currently_capturing_graph,
+      dependencies,
+      nullptr,
+      num_dependencies,
+      &params));
+#endif
   cudaGraph_t if_node_child_graph = params.conditional.phGraph_out[0];
 
+  // update this
+#if CUDA_VERSION >= 13000
   AT_CUDA_CHECK(cudaStreamUpdateCaptureDependencies(
-      getCurrentCUDAStream(), &cond_node, 1, cudaStreamSetCaptureDependencies));
+getCurrentCUDAStream(), &cond_node, nullptr, 1, cudaStreamSetCaptureDependencies));
+#else
+  AT_CUDA_CHECK(cudaStreamUpdateCaptureDependencies_v2(
+getCurrentCUDAStream(), &cond_node, nullptr, 1, cudaStreamSetCaptureDependencies));
+#endif
 
   UniquePtrExternalCudaStream child_stream = create_external_stream();
   conditional_graph_capture_streams_ids_.push(0);
@@ -450,6 +493,7 @@ void CUDAGraph::begin_capture_to_if_node(
   AT_CUDA_CHECK(cudaStreamBeginCaptureToGraph(
       *child_stream, if_node_child_graph, nullptr, nullptr, 0, capture_mode_));
 
+  // maybe update this as well?
   AT_CUDA_CHECK(cudaStreamGetCaptureInfo(
       *child_stream, &status, &conditional_graph_capture_streams_ids_.top()));
   TORCH_INTERNAL_ASSERT(
@@ -495,14 +539,6 @@ void CUDAGraph::end_capture_to_conditional_node() {
   conditional_node_streams_.pop();
   conditional_graph_capture_streams_ids_.pop();
 
-  // c10::cuda::CUDACachingAllocator::endAllocateToPool(capture_dev_, mempool_id_);
-  // if (conditional_graph_capture_streams_ids_.empty()) {
-  //   c10::cuda::CUDACachingAllocator::beginAllocateToPool(
-  //       capture_dev_, mempool_id_, create_allocate_filter());
-  // } else {
-  //   c10::cuda::CUDACachingAllocator::beginAllocateToPool(
-  //       capture_dev_, mempool_id_, create_child_allocate_filter());
-  // }
 #else // !defined(USE_ROCM) && (defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
   AT_ERROR(
       __func__,

@@ -5511,9 +5511,9 @@ def forward(self, L_pred_ : torch.Tensor, L_x_ : torch.Tensor):
 
         x = torch.randn(4)
 
-        # _check_compile_cudagraph(self, f, [x.cuda(), torch.tensor(True).cuda()])
-        # _check_compile_cudagraph(self, f, [x.cuda(), torch.tensor(False).cuda()])
-        for backend in ["eager_no_compile"]:  # , "eager", "aot_eager"]:
+        _check_compile_cudagraph(self, f, [x.cuda(), torch.tensor(True).cuda()])
+        _check_compile_cudagraph(self, f, [x.cuda(), torch.tensor(False).cuda()])
+        for backend in ["eager_no_compile", "eager", "aot_eager"]:
             _check_compile_aot_eager_with_cudagraph(
                 self,
                 f,
@@ -5949,12 +5949,13 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1, arg7_1
                 f,
                 [x.cuda(), torch.tensor(True).cuda(), torch.tensor(True).cuda()],
             )
-            _check_compile_aot_eager_with_cudagraph(
-                self,
-                f,
-                [x.cuda(), torch.tensor(True).cuda(), torch.tensor(True).cuda()],
-                "aot_eager",
-            )
+            for backend in ["eager_no_compile", "eager", "aot_eager"]:
+                _check_compile_aot_eager_with_cudagraph(
+                    self,
+                    f,
+                    [x.cuda(), torch.tensor(True).cuda(), torch.tensor(True).cuda()],
+                    backend,
+                )
 
     def test_cond_functionalized(self):
         def true_fn(x):
