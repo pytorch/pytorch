@@ -31,7 +31,8 @@ class Pattern:
         self.name = "Please specify a name for pattern"
         self.description = "Please specify a description for pattern"
         self.url = ""
-        assert prof.profiler is not None and prof.profiler.kineto_results is not None
+        if prof.profiler is None or prof.profiler.kineto_results is None:
+            raise AssertionError("profiler and kineto_results must not be None")
         self.event_tree = prof.profiler.kineto_results.experimental_event_tree()
         self.tid_root: dict[int, list[_ProfilerEvent]] = {}
         for event in self.event_tree:
@@ -74,7 +75,8 @@ class Pattern:
                 time_ns //= 1000
             return f"{time_ns:.2f} s"
 
-        assert hasattr(self, "benchmark"), "Please implement benchmark()"
+        if not hasattr(self, "benchmark"):
+            raise AssertionError("Please implement benchmark()")
         shapes_factor_map = self.benchmark(events)  # type: ignore[attr-defined]
         original_time = sum(event.duration_time_ns for event in events)
         new_time = sum(
@@ -321,7 +323,10 @@ class FP32MatMulPattern(Pattern):
         # If we saw this pattern once, we don't need to match it again
         if event.tag != _EventType.TorchOp:
             return False
-        assert isinstance(event.extra_fields, _ExtraFields_TorchOp)
+        if not isinstance(event.extra_fields, _ExtraFields_TorchOp):
+            raise AssertionError(
+                f"expected _ExtraFields_TorchOp, got {type(event.extra_fields).__name__}"
+            )
         if event.name == "aten::mm":
             if event.extra_fields.allow_tf32_cublas is False:
                 return True
@@ -588,9 +593,13 @@ class MatMulDimInFP16Pattern(Pattern):
 def source_code_location(event: _ProfilerEvent | None) -> str:
     while event:
         if event.tag == _EventType.PyCall or event.tag == _EventType.PyCCall:
-            assert isinstance(
+            if not isinstance(
                 event.extra_fields, (_ExtraFields_PyCall, _ExtraFields_PyCCall)
-            )
+            ):
+                raise AssertionError(
+                    f"expected _ExtraFields_PyCall or _ExtraFields_PyCCall, "
+                    f"got {type(event.extra_fields).__name__}"
+                )
             if not event.extra_fields.caller.file_name.startswith("torch" + os.sep):
                 return f"{event.extra_fields.caller.file_name}:{event.extra_fields.caller.line_number}"
         event = event.parent
@@ -598,12 +607,18 @@ def source_code_location(event: _ProfilerEvent | None) -> str:
 
 
 def input_shapes(event: _ProfilerEvent):
-    assert isinstance(event.extra_fields, _ExtraFields_TorchOp)
+    if not isinstance(event.extra_fields, _ExtraFields_TorchOp):
+        raise AssertionError(
+            f"expected _ExtraFields_TorchOp, got {type(event.extra_fields).__name__}"
+        )
     return tuple(tuple(getattr(i, "sizes", ())) for i in event.extra_fields.inputs)
 
 
 def input_dtypes(event: _ProfilerEvent):
-    assert isinstance(event.extra_fields, _ExtraFields_TorchOp)
+    if not isinstance(event.extra_fields, _ExtraFields_TorchOp):
+        raise AssertionError(
+            f"expected _ExtraFields_TorchOp, got {type(event.extra_fields).__name__}"
+        )
     return tuple(getattr(i, "dtype", None) for i in event.extra_fields.inputs)
 
 

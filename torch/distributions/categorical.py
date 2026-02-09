@@ -69,7 +69,8 @@ class Categorical(Distribution):
             # pyrefly: ignore [read-only]
             self.probs = probs / probs.sum(-1, keepdim=True)
         else:
-            assert logits is not None  # helps mypy
+            if logits is None:
+                raise AssertionError("logits is unexpectedly None")
             if logits.dim() < 1:
                 raise ValueError("`logits` parameter must be at least one-dimensional.")
             # Normalize
