@@ -53,7 +53,8 @@ def transform_file_name(
         from package.oss.utils import get_pytorch_folder  # type: ignore[import]
 
         pytorch_foler = get_pytorch_folder()
-        assert file_path.startswith(pytorch_foler)
+        if not file_path.startswith(pytorch_foler):
+            raise AssertionError(f"file_path must start with {pytorch_foler}")
         file_path = file_path[len(pytorch_foler) + 1 :]
     return file_path
 
