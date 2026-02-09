@@ -23,7 +23,8 @@ class TestOpCoverage(TestCase):
         args = (torch.randn(8, 50),)
         kwargs = {}
         graphs = get_inductor_decomp_graphs(model, args, kwargs)
-        assert len(graphs) == 2, "Expect fwd + bwd graphs"
+        if len(graphs) != 2:
+            raise AssertionError(f"Expect fwd + bwd graphs, got {len(graphs)}")
         self.assertIsInstance(graphs[0], torch.fx.GraphModule)
         self.assertIsInstance(graphs[1], torch.fx.GraphModule)
 
