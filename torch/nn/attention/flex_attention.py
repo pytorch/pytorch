@@ -427,6 +427,49 @@ def _adjust_num_blocks_and_indices(
     return num_blocks, indices
 
 
+class _MaskModWrapper:
+    """Wraps a mask_mod function with value-based equality.
+
+    BlockMask stores an arbitrary callable (mask_mod) in its pytree context.
+    The default __eq__ for functions uses identity comparison, which is too
+    strict when the same closure is recreated (e.g., defined inside forward()).
+    This wrapper compares functions by their code object instead.
+    """
+
+    __slots__ = ("fn",)
+
+    def __init__(self, fn: _mask_mod_signature | None = None) -> None:
+        self.fn = fn
+
+    def __call__(self, *args, **kwargs):
+        if self.fn is None:
+            raise RuntimeError("Cannot call _MaskModWrapper with fn=None")
+        return self.fn(*args, **kwargs)
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, _MaskModWrapper):
+            return False
+        if self.fn is other.fn:
+            return True
+        if (
+            inspect.isfunction(self.fn)
+            and inspect.isfunction(other.fn)
+            and self.fn.__code__ == other.fn.__code__
+        ):
+            return True
+        return False
+
+    def __hash__(self) -> int:
+        if self.fn is None:
+            return hash(None)
+        if inspect.isfunction(self.fn):
+            return hash(self.fn.__code__)
+        return hash(self.fn)
+
+    def __repr__(self) -> str:
+        return f"_MaskModWrapper({self.fn})"
+
+
 class BlockMask:
     r"""
     BlockMask is our format for representing a block-sparse attention mask.
@@ -922,28 +965,39 @@ class BlockMask:
         return BlockMask(*mapped_attributes)
 
     def _flatten(self):
-        """Flatten BlockMask into a list of tensors and context."""
+        """Flatten BlockMask into a list of tensors and context.
+
+        Wraps mask_mod in _MaskModWrapper for value-based comparison in TreeSpec.
+        """
         tensors = tuple(getattr(self, attr) for attr in self._TENSOR_ATTRS)
-        context = tuple(getattr(self, attr) for attr in self._CONTEXT_ATTRS)
+        context = (self.seq_lengths, self.BLOCK_SIZE, _MaskModWrapper(self.mask_mod))
         return tensors, context
 
     @classmethod
     def _unflatten(cls, tensors, context):
         """Unflatten tensors and context back into a BlockMask."""
+        seq_lengths, block_size, mask_mod_wrapper = context
         kwargs = {
-            **dict(zip(cls._CONTEXT_ATTRS, context)),
+            "seq_lengths": seq_lengths,
+            "BLOCK_SIZE": block_size,
+            "mask_mod": mask_mod_wrapper.fn,
             **dict(zip(cls._TENSOR_ATTRS, tensors)),
         }
         # pyrefly: ignore [bad-argument-type]
         return cls(**kwargs)
 
     def _flatten_with_keys(self):
-        """Flatten BlockMask with keys for better tracing."""
+        """Flatten BlockMask with keys for better tracing.
+
+        Wraps mask_mod in _MaskModWrapper for value-based comparison in TreeSpec.
+        """
         tensors = tuple(
             (GetAttrKey(attr), getattr(self, attr)) for attr in self._TENSOR_ATTRS
         )
-        context = tuple(
-            (GetAttrKey(attr), getattr(self, attr)) for attr in self._CONTEXT_ATTRS
+        context = (
+            (GetAttrKey("seq_lengths"), self.seq_lengths),
+            (GetAttrKey("BLOCK_SIZE"), self.BLOCK_SIZE),
+            (GetAttrKey("mask_mod"), _MaskModWrapper(self.mask_mod)),
         )
         return tensors, context
 
