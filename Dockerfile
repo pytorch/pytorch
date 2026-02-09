@@ -30,7 +30,7 @@ RUN mkdir /opt/ccache && ccache --set-config=cache_dir=/opt/ccache
 FROM dev-base as python-deps
 COPY requirements.txt requirements-build.txt .
 # Install Python packages to system Python
-RUN pip3 install --upgrade --ignore-installed pip setuptools wheel && \
+RUN pip3 install --upgrade --ignore-installed pip "setuptools<82" wheel && \
     pip3 install cmake pyyaml numpy ipython -r requirements.txt
 
 FROM dev-base as submodule-update
