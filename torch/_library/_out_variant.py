@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import dataclasses
 import logging
 
 import torch
-from torchgen.model import FunctionSchema, SchemaKind
 
 log = logging.getLogger(__name__)
 
@@ -12,33 +10,23 @@ log = logging.getLogger(__name__)
 def get_out_arg_count(out_op: torch._ops.OpOverload) -> int:
     """Get the number of out arguments for an out variant op.
 
-    Out arguments are mutable tensor arguments that appear at the end of
-    the argument list in the out variant's schema.
+    Out arguments are mutable tensor arguments (with is_write=True).
+    Supports both:
+    - Standard format: Tensor(a!) out (kwarg-only, with alias)
+    - vLLM format: Tensor! result (positional, without alias)
     """
-    native_schema = _pybind_schema_to_native_schema(out_op._schema)
-    if native_schema is None:
-        return 0
-
-    if native_schema.kind() != SchemaKind.out:
-        return 0
-
-    return len(native_schema.arguments.out)
+    return len(_get_mutable_tensor_args(out_op._schema))
 
 
 def get_out_arg_names(out_op: torch._ops.OpOverload) -> list[str]:
     """Get the names of out arguments for an out variant op.
 
-    Out arguments are keyword-only mutable tensor arguments in the schema.
-    Returns an empty list if the op is not an out variant.
+    Out arguments are mutable tensor arguments (with is_write=True).
+    Supports both:
+    - Standard format: Tensor(a!) out (kwarg-only, with alias)
+    - vLLM format: Tensor! result (positional, without alias)
     """
-    native_schema = _pybind_schema_to_native_schema(out_op._schema)
-    if native_schema is None:
-        return []
-
-    if native_schema.kind() != SchemaKind.out:
-        return []
-
-    return [arg.name for arg in native_schema.arguments.out]
+    return [arg.name for arg in _get_mutable_tensor_args(out_op._schema)]
 
 
 def to_out_variant(op: torch._ops.OpOverload) -> torch._ops.OpOverload | None:
@@ -46,52 +34,74 @@ def to_out_variant(op: torch._ops.OpOverload) -> torch._ops.OpOverload | None:
     Given a functional operator overload, return its corresponding out variant.
 
     Uses signature matching to find the correct out variant among all overloads.
+    The out variant must have the same non-mutable arguments as the functional op.
     """
-    native_schema = _pybind_schema_to_native_schema(op._schema)
-    if native_schema is None:
-        return None
+    schema = op._schema
 
-    # Only convert functional ops
-    if native_schema.kind() != SchemaKind.functional:
+    # Only convert functional ops (no mutable args)
+    if _get_mutable_tensor_args(schema):
         return None
-
-    # Get the normalized signature for matching
-    signature = dataclasses.replace(native_schema.signature(), returns=())
 
     # Get the op packet to access all overloads
     namespace = op.namespace
-    op_name = op._schema.name.split("::")[1]
+    op_name = schema.name.split("::")[1]
     torch_packet = getattr(getattr(torch.ops, namespace), op_name)
 
+    # Get non-mutable args signature for matching
+    func_args = _get_non_mutable_args_signature(schema)
+
     # Search through all overloads for matching out variant
-    overload_names = torch._C._jit_get_operation(op._schema.name)[1]
+    overload_names = torch._C._jit_get_operation(schema.name)[1]
     for overload_name in overload_names:
         candidate = getattr(torch_packet, overload_name)
-        candidate_native_schema = _pybind_schema_to_native_schema(candidate._schema)
-        if candidate_native_schema is None:
+        candidate_schema = candidate._schema
+
+        # Must have mutable args to be an out variant
+        if not _get_mutable_tensor_args(candidate_schema):
             continue
 
-        if candidate_native_schema.kind() != SchemaKind.out:
-            continue
-
-        candidate_signature = dataclasses.replace(
-            candidate_native_schema.signature(), returns=()
-        )
-        if candidate_signature == signature:
+        # Non-mutable args must match
+        candidate_args = _get_non_mutable_args_signature(candidate_schema)
+        if candidate_args == func_args:
             return candidate
 
     return None
 
 
-def _pybind_schema_to_native_schema(
+def _get_mutable_tensor_args(
     schema: torch._C.FunctionSchema,
-) -> FunctionSchema | None:
-    """Convert a pybind FunctionSchema to a torchgen FunctionSchema."""
-    try:
-        return FunctionSchema.parse(str(schema))
-    except Exception:
-        log.debug("Failed to parse schema: %s", schema)
-        return None
+) -> list[torch._C.Argument]:
+    """Get all mutable tensor arguments from a schema.
+
+    Uses pybind API directly to support both:
+    - Tensor(a!) format (with alias annotation)
+    - Tensor! format (without alias annotation, used by vLLM)
+
+    Both formats have arg.alias_info.is_write = True
+    """
+    mutable_args = []
+    for arg in schema.arguments:
+        if arg.alias_info is not None and arg.alias_info.is_write:
+            # Check if it's a tensor type
+            type_str = str(arg.type)
+            if "Tensor" in type_str:
+                mutable_args.append(arg)
+    return mutable_args
+
+
+def _get_non_mutable_args_signature(
+    schema: torch._C.FunctionSchema,
+) -> list[tuple[str, str]]:
+    """Get a signature of non-mutable arguments for matching.
+
+    Returns a list of (name, type_str) tuples for non-mutable args.
+    """
+    result = []
+    for arg in schema.arguments:
+        is_mutable = arg.alias_info is not None and arg.alias_info.is_write
+        if not is_mutable:
+            result.append((arg.name, str(arg.type)))
+    return result
 
 
 def check_out_variant(functional_op, expected_out_op):
