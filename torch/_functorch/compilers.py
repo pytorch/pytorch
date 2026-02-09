@@ -157,7 +157,8 @@ class DebugInterpreter(fx.Interpreter):
             if not isinstance(ni, SymInt):
                 return ni
             r = sympy.expand(ni.node.expr.xreplace(self.symbol_mapping))
-            assert r.is_number, r
+            if not r.is_number:
+                raise AssertionError(f"expected r to be a number, got {r}")
             return int(r)
 
         def subst_symint_tuple(nis: tuple[IntLikeType, ...]) -> tuple[int, ...]:
@@ -174,15 +175,19 @@ class DebugInterpreter(fx.Interpreter):
             return True
 
         def check(nv: torch.Tensor, rv: torch.Tensor, desc: Callable[[], str]) -> None:
-            assert callable(desc)
-            assert nv.dtype == rv.dtype, f"{desc()}: {nv.dtype} != {rv.dtype}"
-            assert subst_symint_tuple(nv.size()) == rv.size(), (
-                f"{desc()}: {nv.size()} aka {subst_symint_tuple(nv.size())} != {rv.size()}"
-            )
+            if not callable(desc):
+                raise AssertionError(f"expected desc to be callable, got {type(desc)}")
+            if nv.dtype != rv.dtype:
+                raise AssertionError(f"{desc()}: {nv.dtype} != {rv.dtype}")
+            if subst_symint_tuple(nv.size()) != rv.size():
+                raise AssertionError(
+                    f"{desc()}: {nv.size()} aka {subst_symint_tuple(nv.size())} != {rv.size()}"
+                )
             same_strides = check_significant_strides(nv, rv)
-            assert same_strides, (
-                f"{desc()}: {nv.stride()} aka {subst_symint_tuple(nv.stride())} != {rv.stride()}"
-            )
+            if not same_strides:
+                raise AssertionError(
+                    f"{desc()}: {nv.stride()} aka {subst_symint_tuple(nv.stride())} != {rv.stride()}"
+                )
 
         r = super().run_node(n)
         if "val" in n.meta:
@@ -194,7 +199,8 @@ class DebugInterpreter(fx.Interpreter):
             # figure out what's actually going on here, the error itself is
             # harmless enough as we only getitem out the outputs.
             # assert n_spec == r_spec, f"{n_spec} != {r_spec}"
-            assert len(n_vals) == len(r_vals), f"{len(n_vals)} != {len(r_vals)}"
+            if len(n_vals) != len(r_vals):
+                raise AssertionError(f"{len(n_vals)} != {len(r_vals)}")
             for i, nv, rv in zip(range(len(n_vals)), n_vals, r_vals):
                 if not isinstance(rv, torch.Tensor):
                     continue
@@ -370,7 +376,7 @@ def _save_fx_default(
     current_name: str,
     folder_name: str,
     dump_example_input: bool,
-    gm: nn.Module,
+    gm: torch.fx.GraphModule,
     example_inputs: list[torch.Tensor],
 ) -> nn.Module:
     """
@@ -460,6 +466,7 @@ def _save_fx_default(
         graph_saver_helper(gm, joint_args, "joint")
         return default_partition(gm, joint_args)  # pyrefly: ignore[missing-argument]
 
+    # pyrefly: ignore[bad-return]
     return aot_module_simplified(
         gm,
         example_inputs,
