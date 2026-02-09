@@ -247,6 +247,11 @@ class DefaultStager(AsyncStager):
             self._staging_stream.synchronize() if self._staging_stream else torch.accelerator.synchronize()
         else:
             state_dict = self._state_dict_stager.stage(state_dict, non_blocking=False)
+
+        # release reference cycle to prevent memory leaks in async_save
+        # created by _deepcopy_dispatch that capture self
+        self._state_dict_stager.close()
+
         return state_dict
 
     def close(self) -> None:
@@ -265,6 +270,7 @@ class DefaultStager(AsyncStager):
         """
         if self._staging_executor:
             self._staging_executor.shutdown(wait=True)
+        self._state_dict_stager.close()
 
     def synchronize_staging(self) -> None:
         """

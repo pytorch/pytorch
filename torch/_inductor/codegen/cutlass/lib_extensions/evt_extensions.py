@@ -237,7 +237,7 @@ non-contiguous layout, received stride: {stride} and shape: {shape}"
         size_hint_fn: Callable[[Union[Expr, int]], int],
         arg_renames: EVTArgRenames,
     ) -> str:
-        from ..cuda_template import CUTLASSTemplate
+        from ..template import CUTLASSTemplate
 
         # Today, arguments are either a pointer to the
         # node's memory, a stride tuple, the datatype
