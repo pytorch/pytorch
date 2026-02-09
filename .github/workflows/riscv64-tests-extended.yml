@@ -1,9 +1,9 @@
-name: riscv64
+name: riscv64-tests-extended
 
 on:
   push:
     tags:
-      - ciflow/riscv64/*
+      - ciflow/riscv64-extended/*
   workflow_dispatch:
 
 concurrency:
@@ -13,9 +13,9 @@ concurrency:
 permissions: read-all
 
 jobs:
-  pytorch-linux-noble-riscv64-py3_12-gcc14-cross-build:
+  riscv64-py3_12-gcc14-build:
     if: github.repository_owner == 'pytorch'
-    name: pytorch-linux-noble-riscv64-py3.12-gcc14-cross-build
+    name: riscv64-py3.12-gcc14-build
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-noble-riscv64-py3.12-gcc14
@@ -27,20 +27,21 @@ jobs:
           { config: "default", shard: 2, num_shards: 3, runner: "RISCV64" },
           { config: "default", shard: 3, num_shards: 3, runner: "RISCV64" },
           { config: "openreg", shard: 1, num_shards: 1, runner: "RISCV64" },
+          { config: "slow", shard: 1, num_shards: 1, runner: "RISCV64" },
         ]}
     secrets: inherit
 
-  pytorch-linux-noble-riscv64-py3_12-gcc14-test:
+  riscv64-py3_12-gcc14-test:
     if: github.repository_owner == 'pytorch'
-    name: pytorch-linux-noble-riscv64-py3.12-gcc14-test
+    name: riscv64-py3.12-gcc14-test
     uses: ./.github/workflows/_linux-test.yml
-    needs: pytorch-linux-noble-riscv64-py3_12-gcc14-cross-build
+    needs: riscv64-py3_12-gcc14-build
     permissions:
       id-token: write
       contents: read
     with:
-      build-environment: ${{ needs.pytorch-linux-noble-riscv64-py3_12-gcc14-cross-build.outputs.build-environment }}
-      docker-image: ${{ needs.pytorch-linux-noble-riscv64-py3_12-gcc14-cross-build.outputs.docker-image }}
-      test-matrix: ${{ needs.pytorch-linux-noble-riscv64-py3_12-gcc14-cross-build.outputs.test-matrix }}
-      timeout-minutes: 720
+      build-environment: ${{ needs.riscv64-py3_12-gcc14-build.outputs.build-environment }}
+      docker-image: ${{ needs.riscv64-py3_12-gcc14-build.outputs.docker-image }}
+      test-matrix: ${{ needs.riscv64-py3_12-gcc14-build.outputs.test-matrix }}
+      timeout-minutes: 780
     secrets: inherit
