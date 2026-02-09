@@ -17,7 +17,7 @@ requirements:
   build:
     - cmake
     - pyyaml
-    - setuptools
+    - setuptools <82
     - python
     - mkl # [not osx]
   run:
