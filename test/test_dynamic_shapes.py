@@ -5000,6 +5000,7 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
             compiled_result = bug_module(key)
 
         self.assertEqual(compiled_result, eager_result)
+
     @skipIfTorchDynamo("mark_unbacked is not traceable")
     def test_view_as_complex_unbacked_no_dde(self):
         """
