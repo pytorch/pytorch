@@ -9458,7 +9458,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         if self.device != "cpu":
             raise unittest.SkipTest("pin_memory is not supported on non-CPU devices")
 
-        failing_constructors = [torch.rand, torch.ones, torch.zeros]
+        failing_constructors = [torch.rand,]
 
         def fn():
             return constructor([1, 128, 128], pin_memory=True, device=self.device)
