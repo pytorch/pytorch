@@ -413,7 +413,7 @@ class AOTInductorTestsTemplate:
         self.assertEqual(len(inps), 0)
         self.assertTrue(sentinel_seen)
 
-    @skipIfXpu(msg="compile error - xpu-ops:2609")
+    @skipIfXpu(msg="compile error - torch-xpu-ops:2609")
     @unittest.skipIf(IS_FBCODE, "unable to find library -laoti_custom_ops")
     def test_custom_op_square(self) -> None:
         class Model(torch.nn.Module):

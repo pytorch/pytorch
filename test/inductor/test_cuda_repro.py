@@ -887,7 +887,7 @@ class CudaReproTests(TestCase):
         b = torch.rand(3, device=device_type)
         x = torch.rand(3, device=device_type)
 
-        def reset_memory_history(value: bool):
+        def restore_memory_history(value: bool):
             if torch.xpu.is_available():
                 torch.xpu._record_memory_history(value)
             else:
@@ -895,10 +895,10 @@ class CudaReproTests(TestCase):
 
         try:
             torch.accelerator.memory.empty_cache()
-            reset_memory_history(True)
+            restore_memory_history(True)
             r = fn(x, w, b)
         finally:
-            reset_memory_history(False)
+            restore_memory_history(False)
         snapshot = str(torch.accelerator.memory._snapshot())
         self.assertTrue("called_inside_compile" in snapshot)
 
