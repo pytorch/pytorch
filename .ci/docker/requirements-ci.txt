@@ -141,8 +141,8 @@ numpy==1.26.2; python_version == "3.11" or python_version == "3.12"
 numpy==2.1.2; python_version >= "3.13" and python_version < "3.14"
 numpy==2.3.4; python_version >= "3.14"
 
-pandas==2.0.3; python_version < "3.13"
-pandas==2.2.3; python_version >= "3.13" and python_version < "3.14"
+pandas==2.0.3; python_version < "3.12"
+pandas==2.2.3; python_version >= "3.12" and python_version < "3.14"
 pandas==2.3.3; python_version >= "3.14"
 
 #onnxruntime
