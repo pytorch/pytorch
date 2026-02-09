@@ -1271,8 +1271,6 @@ class SizeVariable(TupleVariable):
         return torch.Size
 
     def as_proxy(self) -> Any:
-        from torch._subclasses.fake_tensor import FakeTensor
-
         if self.proxy is not None:
             return self.proxy
 
@@ -1308,20 +1306,15 @@ class SizeVariable(TupleVariable):
             return torch.Size(proxies)
 
         proxy = tracer.create_proxy("call_function", torch.Size, (proxies,), {})
-
-        proxy_values = []
-        for p in proxies:
-            if isinstance(p, int):
-                proxy_values.append(p)
-            else:
-                example_value = p.node.meta["example_value"]
-                if isinstance(
-                    example_value, FakeTensor
-                ) and example_value.size() == torch.Size([]):
-                    continue
-                proxy_values.append(example_value)
-
-        set_example_value(proxy.node, torch.Size(proxy_values))
+        set_example_value(
+            proxy.node,
+            torch.Size(
+                [
+                    p.node.meta["example_value"] if not isinstance(p, int) else p
+                    for p in proxies
+                ]
+            ),
+        )
         return proxy
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
