@@ -174,15 +174,19 @@ def parse_native_yaml_struct(
     path: str = "<stdin>",
     skip_native_fns_gen: bool = False,
 ) -> ParsedYaml:
-    assert isinstance(es, list)
+    if not isinstance(es, list):
+        raise AssertionError(f"Expected 'es' to be a list, but got {type(es)}")
     rs: list[NativeFunction] = []
     bs: dict[DispatchKey, dict[OperatorName, BackendMetadata]] = defaultdict(dict)
     for e in es:
-        assert isinstance(e, dict), f"expected to be dict: {e}"
-        assert isinstance(e.get("__line__"), int), e
+        if not isinstance(e, dict):
+            raise AssertionError(f"Expected to be dict: {e}")
+        if not isinstance(e.get("__line__"), int):
+            raise AssertionError(f"Expected '__line__' to be int: {e}")
         loc = Location(path, e["__line__"])
         funcs = e.get("func")
-        assert funcs is not None, f"missed 'func' in {e}"
+        if funcs is None:
+            raise AssertionError(f"Missed 'func' in {e}")
         with context(lambda: f"in {loc}:\n  {funcs}"):
             func, m = NativeFunction.from_yaml(e, loc, valid_tags, ignore_keys)
             rs.append(func)
@@ -216,10 +220,12 @@ def parse_native_yaml_struct(
 
 
 def parse_tags_yaml_struct(es: object, path: str = "<stdin>") -> set[str]:
-    assert isinstance(es, list)
+    if not isinstance(es, list):
+        raise AssertionError(f"Expected 'es' to be a list, but got {type(es)}")
     rs: set[str] = set()
     for e in es:
-        assert isinstance(e.get("__line__"), int), e
+        if not isinstance(e.get("__line__"), int):
+            raise AssertionError(f"Expected '__line__' to be int: {e}")
         loc = Location(path, e["__line__"])
         tags = e.get("tag")
         with context(lambda: f"in {loc}:\n  {tags}"):
@@ -227,7 +233,8 @@ def parse_tags_yaml_struct(es: object, path: str = "<stdin>") -> set[str]:
             name = e_i.pop("tag")
             desc = e_i.pop("desc", "")
             # ensure that each tag has a non-empty description
-            assert desc != ""
+            if desc == "":
+                raise AssertionError(f"Tag '{name}' must have a non-empty description")
             rs.add(name)
     return rs
 
@@ -284,15 +291,17 @@ def error_check_native_functions(funcs: Sequence[NativeFunction]) -> None:
     for f in funcs:
         if f.structured_delegate is not None:
             delegate_func = func_map.get(f.structured_delegate)
-            assert delegate_func is not None, (
-                f"{f.func.name} is marked as a structured_delegate pointing to "
-                f"{f.structured_delegate}, but {f.structured_delegate} is missing."
-            )
-            assert delegate_func.structured, (
-                f"{f.func.name} is marked as a structured_delegate pointing to "
-                f"{f.structured_delegate}, but {f.structured_delegate} is not marked as structured. "
-                f"Consider adding 'structured=True' to the delegated operator"
-            )
+            if delegate_func is None:
+                raise AssertionError(
+                    f"{f.func.name} is marked as a structured_delegate pointing to "
+                    f"{f.structured_delegate}, but {f.structured_delegate} is missing."
+                )
+            if not delegate_func.structured:
+                raise AssertionError(
+                    f"{f.func.name} is marked as a structured_delegate pointing to "
+                    f"{f.structured_delegate}, but {f.structured_delegate} is not marked as structured. "
+                    f"Consider adding 'structured=True' to the delegated operator"
+                )
 
         # Check for reserved Python keywords
         PYTHON_RESERVED_KEYWORDS = set(keyword.kwlist)
@@ -322,17 +331,19 @@ def error_check_native_functions(funcs: Sequence[NativeFunction]) -> None:
             and str(f.func.name.name) != "set_"
         ):
             base_name = f.func.name.name
-            assert base_name.inplace, (
-                f"{f.func.name} is marked with tag: inplace_view, but it doesn't follow the naming "
-                "convention for inplace ops - the codegen expects the base name to have a trailing underscore. "
-            )
+            if not base_name.inplace:
+                raise AssertionError(
+                    f"{f.func.name} is marked with tag: inplace_view, but it doesn't follow the naming "
+                    "convention for inplace ops - the codegen expects the base name to have a trailing underscore."
+                )
             out_of_place_base_name = BaseOperatorName(
                 base_name.base, False, base_name.dunder_method
             )
-            assert len(base_func_map[out_of_place_base_name]) > 0, (
-                f"{f.func.name} is marked with tag: inplace_view. The codegen expects there to be a corresponding "
-                f"out-of-place view op with the name '{base_name}' and matching schema, but it didn't find one. "
-            )
+            if len(base_func_map[out_of_place_base_name]) == 0:
+                raise AssertionError(
+                    f"{f.func.name} is marked with tag: inplace_view. The codegen expects there to be a corresponding "
+                    f"out-of-place view op with the name '{base_name}' and matching schema, but it didn't find one."
+                )
 
 
 def cpp_string(s: str) -> str:
@@ -484,7 +495,8 @@ def generate_static_dispatch_fallback_call(
         cpp_sig = cpp_sigs.symint_signature
     else:
         cpp_sig = cpp_sigs.signature
-    assert cpp_sig is not None
+    if cpp_sig is None:
+        raise AssertionError("Expected cpp_sig to be non-None")
     name = cpp_sig.name()
     exprs = translate_args(sig, cpp_sig)
     ns = DEFAULT_KERNEL_NAMESPACE.replace("::native", "")
@@ -753,8 +765,10 @@ class ComputeTensorMethod:
         if Variant.method not in f.variants:
             return None
 
-        assert not f.func.is_out_fn()
-        assert f.func.arguments.self_arg is not None
+        if f.func.is_out_fn():
+            raise AssertionError(f"Method variant cannot be an out function: {f.func}")
+        if f.func.arguments.self_arg is None:
+            raise AssertionError(f"Method variant must have self_arg: {f.func}")
 
         sig_group = CppSignatureGroup.from_native_function(
             f, method=True, fallback_binding=f.manual_cpp_binding
@@ -998,14 +1012,20 @@ class ComputeBackendSelect:
             # The first case could probably be improved though- it calls computeDispatchKeySet(),
             # which looks at TLS dispatch keys- there should not be any by the time we reach backend select.
             if native_tensor_args:
-                assert f.func.arguments.has_tensor_arg()
+                if not f.func.arguments.has_tensor_arg():
+                    raise AssertionError(
+                        f"Expected function to have tensor args: {f.func}"
+                    )
                 tensor_args = ", ".join(a.name for a in native_tensor_args)
                 compute_dk = f"""\
 DispatchKeySet _dk_set = c10::DispatchKeySet({dispatch_key}) | c10::detail::multi_dispatch_key_set({tensor_args});
 DispatchKeySet _dk_mask = c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, DispatchKey::BackendSelect);
 DispatchKeySet _dk = c10::impl::computeDispatchKeySet(_dk_set, _dk_mask);"""
             else:
-                assert not f.func.arguments.has_tensor_arg()
+                if f.func.arguments.has_tensor_arg():
+                    raise AssertionError(
+                        f"Expected function to not have tensor args: {f.func}"
+                    )
                 compute_dk = (
                     f"DispatchKeySet _dk = c10::DispatchKeySet({dispatch_key});"
                 )
@@ -1366,14 +1386,14 @@ def get_custom_build_selector(
     provided_op_registration_allowlist: list[str] | None,
     op_selection_yaml_path: str | None,
 ) -> SelectiveBuilder:
-    assert not (
+    if (
         provided_op_registration_allowlist is not None
         and op_selection_yaml_path is not None
-    ), (
-        "Both provided_op_registration_allowlist and "
-        + "op_selection_yaml_path can NOT be provided at the "
-        + "same time."
-    )
+    ):
+        raise AssertionError(
+            "Both provided_op_registration_allowlist and op_selection_yaml_path "
+            "can NOT be provided at the same time."
+        )
 
     op_registration_allowlist: set[str] | None = None
     if provided_op_registration_allowlist is not None:
@@ -1429,12 +1449,16 @@ def get_grouped_by_view_native_functions(
         # view_copy op (SchemaKind.functional)
         if view_kind == ViewSchemaKind.non_aliasing:
             kind = f.func.kind()
-            assert kind not in grouped_by_views[schema]
+            if kind in grouped_by_views[schema]:
+                raise AssertionError(
+                    f"Duplicate schema kind {kind} in {grouped_by_views[schema].keys()}"
+                )
             grouped_by_views[schema][kind] = f
         else:
-            assert view_kind not in grouped_by_views[schema], (
-                f"{view_kind} already in {grouped_by_views[schema].keys()}"
-            )
+            if view_kind in grouped_by_views[schema]:
+                raise AssertionError(
+                    f"{view_kind} already in {grouped_by_views[schema].keys()}"
+                )
             grouped_by_views[schema][view_kind] = f
 
     return list(concatMap(maybe_create_view_group, grouped_by_views.values()))
@@ -1450,7 +1474,11 @@ def get_grouped_native_functions(
         if r is None:
             # Invariant: any NativeFunctions that are code-generated
             # should have been grouped into NativeFunctionsGroup objects
-            assert not any("generated" in f.tags for f in d.values())
+            if any("generated" in f.tags for f in d.values()):
+                raise AssertionError(
+                    "Generated NativeFunctions should have been grouped into "
+                    f"NativeFunctionsGroup objects: {list(d.values())}"
+                )
             return list(d.values())
         else:
             return [r]
@@ -1482,9 +1510,11 @@ def get_ns_grouped_kernels(
                 native_function_namespaces.add(namespace)
             else:
                 namespace = DEFAULT_KERNEL_NAMESPACE
-            assert len(native_function_namespaces) <= 1, (
-                f"Codegen only supports one namespace per operator, got {native_function_namespaces} from {dispatch_keys}"
-            )
+            if len(native_function_namespaces) > 1:
+                raise AssertionError(
+                    f"Codegen only supports one namespace per operator, "
+                    f"got {native_function_namespaces} from {dispatch_keys}"
+                )
             ns_grouped_kernels[namespace].extend(
                 native_function_decl_gen(f, backend_idx)
             )
@@ -1547,11 +1577,15 @@ def get_kernel_namespace(
     *, f: NativeFunction | NativeFunctionsGroup, backend_idx: BackendIndex
 ) -> str:
     backend_metadata = backend_idx.get_kernel(f)
-    assert not backend_metadata or "::native" in backend_metadata.cpp_namespace, (
-        f"The kernel for function {f.func.name if isinstance(f, NativeFunction) else f.functional.func.name} "
-        f"with dispatch key {backend_idx.dispatch_key}"
-        f" has a namespace {backend_metadata.cpp_namespace} and it's not ending with '::native'."
-    )
+    if backend_metadata and "::native" not in backend_metadata.cpp_namespace:
+        func_name = (
+            f.func.name if isinstance(f, NativeFunction) else f.functional.func.name
+        )
+        raise AssertionError(
+            f"The kernel for function {func_name} "
+            f"with dispatch key {backend_idx.dispatch_key} "
+            f"has a namespace {backend_metadata.cpp_namespace} and it's not ending with '::native'."
+        )
     return (
         backend_metadata.cpp_namespace if backend_metadata else DEFAULT_KERNEL_NAMESPACE
     )
@@ -2354,7 +2388,8 @@ def gen_source_files(
                 continue
             name = g.functional.func.name.name
             if dispatch_key is DispatchKey.CPU:
-                assert fm is cpu_fm
+                if fm is not cpu_fm:
+                    raise AssertionError("Expected fm to be cpu_fm for DispatchKey.CPU")
                 fm.write_with_template(
                     f"UfuncCPU_{name}.cpp",
                     "UfuncCPU.cpp",

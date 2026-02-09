@@ -340,11 +340,13 @@ jobs:
           # from HF when the PR has a special ci-refresh-hf-cache label. This label is
           # automatically added to the vLLM pinned commit hash update, which effectively
           # refreshes the cache daily
-          TRANSFORMERS_OFFLINE: ${{ contains(github.event.pull_request.labels.*.name, 'ci-refresh-hf-cache') && '0' || '1' }}
-          HF_DATASETS_OFFLINE: ${{ contains(github.event.pull_request.labels.*.name, 'ci-refresh-hf-cache') && '0' || '1' }}
+          TRANSFORMERS_OFFLINE: ${{ contains(steps.keep-going.outputs.labels, 'ci-refresh-hf-cache') && '0' || '1' }}
+          HF_DATASETS_OFFLINE: ${{ contains(steps.keep-going.outputs.labels, 'ci-refresh-hf-cache') && '0' || '1' }}
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
           SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
           ARTIFACTS_FILE_SUFFIX: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
+          TORCH_TPU: ${{ steps.check-tpu.outputs.has_tpu == 'true' && '1' || '' }}
+          TORCH_TPU_TEXT_FILE: /var/lib/jenkins/workspace/.github/ci_commit_pins/torch_tpu.txt
         run: |
           set -x
 
@@ -385,13 +387,6 @@ jobs:
 
             # When there is no cache directory, e.g. benchmark, the job has no
             # way but to reach out to HF if needed
-            export TRANSFORMERS_OFFLINE=0
-            export HF_DATASETS_OFFLINE=0
-          fi
-
-          if [[ "${TEST_CONFIG}" != *vllm* ]]; then
-            # Only use offline mode in vLLM jobs for now. If this works out, we can
-            # enable this for all CI jobs including LF fleet
             export TRANSFORMERS_OFFLINE=0
             export HF_DATASETS_OFFLINE=0
           fi
@@ -447,6 +442,8 @@ jobs:
             -e SCRIBE_GRAPHQL_ACCESS_TOKEN \
             -e DASHBOARD_TAG \
             -e ARTIFACTS_FILE_SUFFIX \
+            -e TORCH_TPU \
+            -e TORCH_TPU_TEXT_FILE \
             ${TPU_DOCKER_FLAGS:-} \
             --memory="${TOTAL_AVAILABLE_MEMORY_IN_GB%.*}g" \
             --memory-swap="${TOTAL_MEMORY_WITH_SWAP}g" \
@@ -476,7 +473,7 @@ jobs:
               (sleep 300 && python3 -m pip install -r .ci/docker/requirements-ci.txt)"
           fi
 
-          docker exec -t "${container_name}" sh -c "python3 -m pip install $(echo dist/*.whl)[opt-einsum] && ${TEST_COMMAND}"
+          docker exec -t "${container_name}" sh -c "python3 -m pip install $(echo dist/*.whl)[opt-einsum] && (if [ -n \"\$TORCH_TPU\" ] && [ -f .ci/docker/common/install_torch_tpu.sh ]; then bash .ci/docker/common/install_torch_tpu.sh; fi) && ${TEST_COMMAND}"
 
       - name: Upload pytest cache if tests failed
         uses: ./.github/actions/pytest-cache-upload

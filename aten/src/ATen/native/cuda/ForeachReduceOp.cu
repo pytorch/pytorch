@@ -22,6 +22,7 @@
 #include <ATen/ops/_foreach_powsum_native.h>
 
 #include <ATen/ops/empty_native.h>
+#include <ATen/ops/full.h>
 #include <ATen/ops/zeros.h>
 #endif
 
@@ -155,8 +156,9 @@ std::vector<Tensor> foreach_tensor_max_cuda(TensorList tensors) {
     }
   }
   const auto options = tensors[0].options();
-  auto output_per_tensor = at::zeros(
-      {static_cast<int64_t>(ntensors) * max_chunks_per_tensor}, options);
+
+  // Initialize output_per_tensor with lowest value
+  Tensor output_per_tensor;
 
   std::vector<at::Tensor> vec_res;
   vec_res.reserve(ntensors);
@@ -179,6 +181,12 @@ std::vector<Tensor> foreach_tensor_max_cuda(TensorList tensors) {
       tensor_lists[0][0].scalar_type(),
       "foreach_tensor_max_cuda_scalar_type",
       [&]() {
+        // Initialize intermediate buffer with lowest()
+        output_per_tensor = at::full(
+            {static_cast<int64_t>(ntensors) * max_chunks_per_tensor},
+            std::numeric_limits<scalar_t>::lowest(),
+            options);
+
         multi_tensor_apply<1>(
             tensor_lists,
             LpMaxFunctor<scalar_t>(),
@@ -577,12 +585,29 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
     }
   }();
   check_foreach_api_restrictions(tensors);
-  const bool has_int_or_complex =
-      std::any_of(tensors.begin(), tensors.end(), [](const auto& t) {
-        const auto scalar_type = t.scalar_type();
-        return at::isIntegralType(scalar_type, /*includeBool*/ true) ||
-            at::isComplexType(scalar_type);
-      });
+  // If the tensor is empty and norm == infty, we cannot compute the norm
+  // because the operation does not have an identity. Also populate the
+  // has_int_or_complex flag.
+  bool has_int_or_complex = false;
+  if (p == std::numeric_limits<double>::infinity()) {
+    for (const auto& t : tensors) {
+      TORCH_SYM_CHECK(
+          t.sym_numel().sym_gt(0),
+          "_foreach_norm cannot compute the infinity norm on an empty tensor because the operation does not have an identity");
+      const auto scalar_type = t.scalar_type();
+      if (at::isIntegralType(scalar_type, /*includeBool*/ true) ||
+          at::isComplexType(scalar_type)) {
+        has_int_or_complex = true;
+      }
+    }
+  } else {
+    has_int_or_complex =
+        std::any_of(tensors.begin(), tensors.end(), [](const auto& t) {
+          const auto scalar_type = t.scalar_type();
+          return at::isIntegralType(scalar_type, /*includeBool*/ true) ||
+              at::isComplexType(scalar_type);
+        });
+  }
   if (!can_use_fast_route(tensors) || has_int_or_complex ||
       !(p == static_cast<double>(1) || p == static_cast<double>(2) ||
         p == std::numeric_limits<double>::infinity())) {

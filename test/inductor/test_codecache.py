@@ -489,7 +489,12 @@ class TestFxGraphCache(TestCase):
 
         if device == GPU_TYPE and not HAS_GPU:
             raise unittest.SkipTest(f"requires {GPU_TYPE}")
-        if device == "cuda" and dtype == torch.bfloat16 and not SM80OrLater:
+        if (
+            device == "cuda"
+            and torch.version.hip is None
+            and dtype == torch.bfloat16
+            and not SM80OrLater
+        ):
             raise unittest.SkipTest("requires SM80 or later")
         if use_static_triton_launcher and not (
             device in STATIC_LAUNCHER_DEVICES and bundle_triton
@@ -497,8 +502,6 @@ class TestFxGraphCache(TestCase):
             raise unittest.SkipTest(
                 "Static cuda launcher requires cuda and triton bundling"
             )
-        if use_static_triton_launcher and TEST_WITH_ROCM:
-            raise unittest.SkipTest("Static cuda launcher doesn't work with ROCM")
 
         def fn(x, y):
             return (x * 2, y @ y)
@@ -1943,6 +1946,35 @@ class TestStandaloneCompile(TestCase):
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @functorch_config.patch({"enable_autograd_cache": True})
+    def test_is_saveable(self) -> None:
+        mod = torch.nn.Linear(1, 3)
+        x = torch.randn(4, 1)
+
+        @torch._dynamo.allow_in_graph
+        def uncacheable(x):
+            return x.sin()
+
+        def f(x):
+            with torch.no_grad():
+                result = mod(x)
+                return uncacheable(result)
+
+        with fresh_cache():
+            gm, args, kwargs = self.capture(f)(x)
+            assert not kwargs
+
+            compiled_artifact = torch._inductor.standalone_compile(gm, args)
+
+            self.assertFalse(compiled_artifact.is_saveable())
+
+            with tempfile.TemporaryDirectory() as temp_dir:
+                path = os.path.join(temp_dir, "new_dir")
+                with self.assertRaisesRegex(RuntimeError, "not serializable"):
+                    compiled_artifact.save(path=path, format="unpacked")
+
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    @functorch_config.patch({"enable_autograd_cache": True})
     @parametrize("dynamic", (False, True))
     @parametrize("is_aot", (False, True))
     def test_call_in_backend(self, dynamic: bool, is_aot: bool) -> None:
@@ -2849,6 +2881,44 @@ class TestFxGraphCacheHashing(TestCase):
             FxGraphCachePickler(gm).dumps(
                 torch.fx.experimental._backward_state.BackwardState()
             )
+
+    def test_bypass_on_runtime_error(self):
+        """
+        Test that RuntimeError raised by pybind11 during pickling (e.g., from
+        OpOverload._op which is a C++ function pointer) is caught and converted
+        to BypassFxGraphCache.
+        """
+
+        class Pybind11LikeUnpickleableObject:
+            """An object that raises RuntimeError like pybind11 does when pickled."""
+
+            def __reduce__(self):
+                raise RuntimeError(
+                    "<pybind11_builtins.pybind11_object> is not pickleable."
+                )
+
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        pickler = FxGraphCachePickler(gm)
+
+        with self.assertRaises(BypassFxGraphCache):
+            pickler.dumps(Pybind11LikeUnpickleableObject())
+
+    def test_non_pybind11_runtime_error_propagates(self):
+        """
+        Test that RuntimeErrors not matching pybind11 pickle pattern propagate up.
+        """
+
+        class OtherRuntimeErrorObject:
+            """An object that raises a non-pybind11 RuntimeError when pickled."""
+
+            def __reduce__(self):
+                raise RuntimeError("Some other runtime error")
+
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        pickler = FxGraphCachePickler(gm)
+
+        with self.assertRaises(RuntimeError):
+            pickler.dumps(OtherRuntimeErrorObject())
 
     def test_stable_strings(self):
         """
