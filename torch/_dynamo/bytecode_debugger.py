@@ -29,11 +29,13 @@ import sys
 import types
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any, cast, Self, TYPE_CHECKING
+from typing import Any, cast, TYPE_CHECKING
 
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator
+
+    from typing_extensions import Self
 
 from .bytecode_transformation import cleaned_instructions, Instruction
 
