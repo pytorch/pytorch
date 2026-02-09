@@ -1920,9 +1920,27 @@ class Module:
     def __getstate__(self):
         state = self.__dict__.copy()
         state.pop("_compiled_call_impl", None)
+        slots = []
+        for cls in type(self).__mro__:
+            slots.extend(getattr(cls, "__slots__", []))
+        for slot in slots:
+            if slot != "__dict__" and slot != "__weakref__" and hasattr(self, slot):
+                state[slot] = getattr(self, slot)
+
         return state
 
     def __setstate__(self, state):
+        slots = set()
+        for cls in type(self).__mro__:
+            slots.update(getattr(cls, "__slots__", []))
+        for slot in slots:
+            if slot in state and slot != "__dict__" and slot != "__weakref__":
+                try:
+                    setattr(self, slot, state.pop(slot))
+                except AttributeError:
+                    # Slot might be read-only or have other restrictions
+                    pass
+
         self.__dict__.update(state)
 
         # Support loading old checkpoints that don't have the following attrs:

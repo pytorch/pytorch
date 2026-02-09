@@ -80,6 +80,34 @@ if TEST_NUMPY:
 # update test/run_test.py to list it, otherwise it will NOT be run in
 # CI.
 
+
+# Helper classes for testing __slots__ pickling (must be at module level for pickle)
+class _ModuleWithSlots(nn.Module):
+    __slots__ = ['slot_attr', 'another_slot']
+
+    def __init__(self):
+        super().__init__()
+        self.slot_attr = "slot_value"
+        self.another_slot = 42
+        self.regular_attr = "regular_value"
+
+
+class _ParentModuleWithSlots(nn.Module):
+    __slots__ = ['parent_slot']
+
+    def __init__(self):
+        super().__init__()
+        self.parent_slot = "parent_value"
+
+
+class _ChildModuleWithSlots(_ParentModuleWithSlots):
+    __slots__ = ['child_slot']
+
+    def __init__(self):
+        super().__init__()
+        self.child_slot = "child_value"
+
+
 class TestNN(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
@@ -7597,6 +7625,38 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         with warnings.catch_warnings(record=True) as w:
             pickle.loads(pickle.dumps(torch.nn.Linear(10, 10)))
         self.assertEqual(len(w), 0)
+
+    def test_pickle_module_without_slots(self):
+        # Test that pickling works for base nn.Module (no 
+        # __slots__ defined)
+        # https://github.com/pytorch/pytorch/issues/66813
+        m = nn.Linear(10, 10)
+        m.custom_attr = "test_value"
+        m_loaded = pickle.loads(pickle.dumps(m))
+        self.assertEqual(m_loaded.custom_attr, "test_value")
+        self.assertEqual(m_loaded.in_features, 10)
+        self.assertEqual(m_loaded.out_features, 10)
+        # Verify the module still works
+        x = torch.randn(2, 10)
+        self.assertEqual(m(x).shape, m_loaded(x).shape)
+
+    def test_pickle_module_with_slots(self):
+        # Test that pickling works for subclasses that define __slots__
+        m = _ModuleWithSlots()
+        m_loaded = pickle.loads(pickle.dumps(m))
+
+        self.assertEqual(m_loaded.slot_attr, "slot_value")
+        self.assertEqual(m_loaded.another_slot, 42)
+        self.assertEqual(m_loaded.regular_attr, "regular_value")
+
+    def test_pickle_module_with_slots_inheritance(self):
+        # Verify pickling preserves __slots__ attributes from both parent
+        # and child classes.
+        m = _ChildModuleWithSlots()
+        m_loaded = pickle.loads(pickle.dumps(m))
+
+        self.assertEqual(m_loaded.parent_slot, "parent_value")
+        self.assertEqual(m_loaded.child_slot, "child_value")
 
     def test_rnn_cell_gate_weights_size(self):
         def test_rnn_cell(cell_fn, gate_count):
