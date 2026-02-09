@@ -406,8 +406,6 @@ jobs:
       - manywheel-py3_10-rocm7_1-build
       - get-label-type
     runs-on: linux.rocm.gpu.gfx942.1
-    env:
-      PYTORCH_ROOT: ""
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
@@ -437,14 +435,20 @@ jobs:
           git clean -fxd
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
+        env:
+          PYTORCH_ROOT: ""
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
           name: manywheel-py3_10-rocm7_1
           path: "${{ runner.temp }}/artifacts/"
+        env:
+          PYTORCH_ROOT: ""
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+        env:
+          PYTORCH_ROOT: ""
       - name: configure aws credentials
         id: aws_creds
         if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
@@ -453,6 +457,8 @@ jobs:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
           role-duration-seconds: 18000
+        env:
+          PYTORCH_ROOT: ""
       - name: Calculate docker image
         id: calculate-docker-image
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
@@ -462,16 +468,23 @@ jobs:
           custom-tag-prefix: rocm7.1
           docker-build-dir: .ci/docker
           working-directory: pytorch
+        env:
+          PYTORCH_ROOT: ""
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
+        env:
+          PYTORCH_ROOT: ""
       - name: Test Pytorch binary
         uses: ./.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
+          PYTORCH_ROOT: ""
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
+        env:
+          PYTORCH_ROOT: ""
   manywheel-py3_10-rocm7_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -522,8 +535,6 @@ jobs:
       - manywheel-py3_10-rocm7_2-build
       - get-label-type
     runs-on: linux.rocm.gpu.gfx942.1
-    env:
-      PYTORCH_ROOT: ""
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
@@ -553,14 +564,20 @@ jobs:
           git clean -fxd
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
+        env:
+          PYTORCH_ROOT: ""
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
           name: manywheel-py3_10-rocm7_2
           path: "${{ runner.temp }}/artifacts/"
+        env:
+          PYTORCH_ROOT: ""
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+        env:
+          PYTORCH_ROOT: ""
       - name: configure aws credentials
         id: aws_creds
         if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
@@ -569,6 +586,8 @@ jobs:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
           role-duration-seconds: 18000
+        env:
+          PYTORCH_ROOT: ""
       - name: Calculate docker image
         id: calculate-docker-image
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
@@ -578,16 +597,23 @@ jobs:
           custom-tag-prefix: rocm7.2
           docker-build-dir: .ci/docker
           working-directory: pytorch
+        env:
+          PYTORCH_ROOT: ""
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
+        env:
+          PYTORCH_ROOT: ""
       - name: Test Pytorch binary
         uses: ./.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
+          PYTORCH_ROOT: ""
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
+        env:
+          PYTORCH_ROOT: ""
   manywheel-py3_10-rocm7_2-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -1073,8 +1099,6 @@ jobs:
       - manywheel-py3_11-rocm7_1-build
       - get-label-type
     runs-on: linux.rocm.gpu.gfx942.1
-    env:
-      PYTORCH_ROOT: ""
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
@@ -1104,14 +1128,20 @@ jobs:
           git clean -fxd
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
+        env:
+          PYTORCH_ROOT: ""
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
           name: manywheel-py3_11-rocm7_1
           path: "${{ runner.temp }}/artifacts/"
+        env:
+          PYTORCH_ROOT: ""
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+        env:
+          PYTORCH_ROOT: ""
       - name: configure aws credentials
         id: aws_creds
         if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
@@ -1120,6 +1150,8 @@ jobs:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
           role-duration-seconds: 18000
+        env:
+          PYTORCH_ROOT: ""
       - name: Calculate docker image
         id: calculate-docker-image
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
@@ -1129,16 +1161,23 @@ jobs:
           custom-tag-prefix: rocm7.1
           docker-build-dir: .ci/docker
           working-directory: pytorch
+        env:
+          PYTORCH_ROOT: ""
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
+        env:
+          PYTORCH_ROOT: ""
       - name: Test Pytorch binary
         uses: ./.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
+          PYTORCH_ROOT: ""
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
+        env:
+          PYTORCH_ROOT: ""
   manywheel-py3_11-rocm7_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -1189,8 +1228,6 @@ jobs:
       - manywheel-py3_11-rocm7_2-build
       - get-label-type
     runs-on: linux.rocm.gpu.gfx942.1
-    env:
-      PYTORCH_ROOT: ""
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
@@ -1220,14 +1257,20 @@ jobs:
           git clean -fxd
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
+        env:
+          PYTORCH_ROOT: ""
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
           name: manywheel-py3_11-rocm7_2
           path: "${{ runner.temp }}/artifacts/"
+        env:
+          PYTORCH_ROOT: ""
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+        env:
+          PYTORCH_ROOT: ""
       - name: configure aws credentials
         id: aws_creds
         if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
@@ -1236,6 +1279,8 @@ jobs:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
           role-duration-seconds: 18000
+        env:
+          PYTORCH_ROOT: ""
       - name: Calculate docker image
         id: calculate-docker-image
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
@@ -1245,16 +1290,23 @@ jobs:
           custom-tag-prefix: rocm7.2
           docker-build-dir: .ci/docker
           working-directory: pytorch
+        env:
+          PYTORCH_ROOT: ""
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
+        env:
+          PYTORCH_ROOT: ""
       - name: Test Pytorch binary
         uses: ./.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
+          PYTORCH_ROOT: ""
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
+        env:
+          PYTORCH_ROOT: ""
   manywheel-py3_11-rocm7_2-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -1740,8 +1792,6 @@ jobs:
       - manywheel-py3_12-rocm7_1-build
       - get-label-type
     runs-on: linux.rocm.gpu.gfx942.1
-    env:
-      PYTORCH_ROOT: ""
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
@@ -1771,14 +1821,20 @@ jobs:
           git clean -fxd
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
+        env:
+          PYTORCH_ROOT: ""
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
           name: manywheel-py3_12-rocm7_1
           path: "${{ runner.temp }}/artifacts/"
+        env:
+          PYTORCH_ROOT: ""
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+        env:
+          PYTORCH_ROOT: ""
       - name: configure aws credentials
         id: aws_creds
         if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
@@ -1787,6 +1843,8 @@ jobs:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
           role-duration-seconds: 18000
+        env:
+          PYTORCH_ROOT: ""
       - name: Calculate docker image
         id: calculate-docker-image
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
@@ -1796,16 +1854,23 @@ jobs:
           custom-tag-prefix: rocm7.1
           docker-build-dir: .ci/docker
           working-directory: pytorch
+        env:
+          PYTORCH_ROOT: ""
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
+        env:
+          PYTORCH_ROOT: ""
       - name: Test Pytorch binary
         uses: ./.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
+          PYTORCH_ROOT: ""
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
+        env:
+          PYTORCH_ROOT: ""
   manywheel-py3_12-rocm7_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -1856,8 +1921,6 @@ jobs:
       - manywheel-py3_12-rocm7_2-build
       - get-label-type
     runs-on: linux.rocm.gpu.gfx942.1
-    env:
-      PYTORCH_ROOT: ""
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
@@ -1887,14 +1950,20 @@ jobs:
           git clean -fxd
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
+        env:
+          PYTORCH_ROOT: ""
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
           name: manywheel-py3_12-rocm7_2
           path: "${{ runner.temp }}/artifacts/"
+        env:
+          PYTORCH_ROOT: ""
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+        env:
+          PYTORCH_ROOT: ""
       - name: configure aws credentials
         id: aws_creds
         if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
@@ -1903,6 +1972,8 @@ jobs:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
           role-duration-seconds: 18000
+        env:
+          PYTORCH_ROOT: ""
       - name: Calculate docker image
         id: calculate-docker-image
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
@@ -1912,16 +1983,23 @@ jobs:
           custom-tag-prefix: rocm7.2
           docker-build-dir: .ci/docker
           working-directory: pytorch
+        env:
+          PYTORCH_ROOT: ""
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
+        env:
+          PYTORCH_ROOT: ""
       - name: Test Pytorch binary
         uses: ./.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
+          PYTORCH_ROOT: ""
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
+        env:
+          PYTORCH_ROOT: ""
   manywheel-py3_12-rocm7_2-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -2407,8 +2485,6 @@ jobs:
       - manywheel-py3_13-rocm7_1-build
       - get-label-type
     runs-on: linux.rocm.gpu.gfx942.1
-    env:
-      PYTORCH_ROOT: ""
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
@@ -2438,14 +2514,20 @@ jobs:
           git clean -fxd
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
+        env:
+          PYTORCH_ROOT: ""
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
           name: manywheel-py3_13-rocm7_1
           path: "${{ runner.temp }}/artifacts/"
+        env:
+          PYTORCH_ROOT: ""
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+        env:
+          PYTORCH_ROOT: ""
       - name: configure aws credentials
         id: aws_creds
         if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
@@ -2454,6 +2536,8 @@ jobs:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
           role-duration-seconds: 18000
+        env:
+          PYTORCH_ROOT: ""
       - name: Calculate docker image
         id: calculate-docker-image
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
@@ -2463,16 +2547,23 @@ jobs:
           custom-tag-prefix: rocm7.1
           docker-build-dir: .ci/docker
           working-directory: pytorch
+        env:
+          PYTORCH_ROOT: ""
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
+        env:
+          PYTORCH_ROOT: ""
       - name: Test Pytorch binary
         uses: ./.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
+          PYTORCH_ROOT: ""
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
+        env:
+          PYTORCH_ROOT: ""
   manywheel-py3_13-rocm7_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -2523,8 +2614,6 @@ jobs:
       - manywheel-py3_13-rocm7_2-build
       - get-label-type
     runs-on: linux.rocm.gpu.gfx942.1
-    env:
-      PYTORCH_ROOT: ""
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
@@ -2554,14 +2643,20 @@ jobs:
           git clean -fxd
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
+        env:
+          PYTORCH_ROOT: ""
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
           name: manywheel-py3_13-rocm7_2
           path: "${{ runner.temp }}/artifacts/"
+        env:
+          PYTORCH_ROOT: ""
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+        env:
+          PYTORCH_ROOT: ""
       - name: configure aws credentials
         id: aws_creds
         if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
@@ -2570,6 +2665,8 @@ jobs:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
           role-duration-seconds: 18000
+        env:
+          PYTORCH_ROOT: ""
       - name: Calculate docker image
         id: calculate-docker-image
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
@@ -2579,16 +2676,23 @@ jobs:
           custom-tag-prefix: rocm7.2
           docker-build-dir: .ci/docker
           working-directory: pytorch
+        env:
+          PYTORCH_ROOT: ""
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
+        env:
+          PYTORCH_ROOT: ""
       - name: Test Pytorch binary
         uses: ./.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
+          PYTORCH_ROOT: ""
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
+        env:
+          PYTORCH_ROOT: ""
   manywheel-py3_13-rocm7_2-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -3074,8 +3178,6 @@ jobs:
       - manywheel-py3_13t-rocm7_1-build
       - get-label-type
     runs-on: linux.rocm.gpu.gfx942.1
-    env:
-      PYTORCH_ROOT: ""
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
@@ -3105,14 +3207,20 @@ jobs:
           git clean -fxd
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
+        env:
+          PYTORCH_ROOT: ""
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
           name: manywheel-py3_13t-rocm7_1
           path: "${{ runner.temp }}/artifacts/"
+        env:
+          PYTORCH_ROOT: ""
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+        env:
+          PYTORCH_ROOT: ""
       - name: configure aws credentials
         id: aws_creds
         if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
@@ -3121,6 +3229,8 @@ jobs:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
           role-duration-seconds: 18000
+        env:
+          PYTORCH_ROOT: ""
       - name: Calculate docker image
         id: calculate-docker-image
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
@@ -3130,16 +3240,23 @@ jobs:
           custom-tag-prefix: rocm7.1
           docker-build-dir: .ci/docker
           working-directory: pytorch
+        env:
+          PYTORCH_ROOT: ""
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
+        env:
+          PYTORCH_ROOT: ""
       - name: Test Pytorch binary
         uses: ./.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
+          PYTORCH_ROOT: ""
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
+        env:
+          PYTORCH_ROOT: ""
   manywheel-py3_13t-rocm7_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -3190,8 +3307,6 @@ jobs:
       - manywheel-py3_13t-rocm7_2-build
       - get-label-type
     runs-on: linux.rocm.gpu.gfx942.1
-    env:
-      PYTORCH_ROOT: ""
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
@@ -3221,14 +3336,20 @@ jobs:
           git clean -fxd
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
+        env:
+          PYTORCH_ROOT: ""
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
           name: manywheel-py3_13t-rocm7_2
           path: "${{ runner.temp }}/artifacts/"
+        env:
+          PYTORCH_ROOT: ""
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+        env:
+          PYTORCH_ROOT: ""
       - name: configure aws credentials
         id: aws_creds
         if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
@@ -3237,6 +3358,8 @@ jobs:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
           role-duration-seconds: 18000
+        env:
+          PYTORCH_ROOT: ""
       - name: Calculate docker image
         id: calculate-docker-image
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
@@ -3246,16 +3369,23 @@ jobs:
           custom-tag-prefix: rocm7.2
           docker-build-dir: .ci/docker
           working-directory: pytorch
+        env:
+          PYTORCH_ROOT: ""
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
+        env:
+          PYTORCH_ROOT: ""
       - name: Test Pytorch binary
         uses: ./.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
+          PYTORCH_ROOT: ""
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
+        env:
+          PYTORCH_ROOT: ""
   manywheel-py3_13t-rocm7_2-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -3741,8 +3871,6 @@ jobs:
       - manywheel-py3_14-rocm7_1-build
       - get-label-type
     runs-on: linux.rocm.gpu.gfx942.1
-    env:
-      PYTORCH_ROOT: ""
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
@@ -3772,14 +3900,20 @@ jobs:
           git clean -fxd
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
+        env:
+          PYTORCH_ROOT: ""
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
           name: manywheel-py3_14-rocm7_1
           path: "${{ runner.temp }}/artifacts/"
+        env:
+          PYTORCH_ROOT: ""
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+        env:
+          PYTORCH_ROOT: ""
       - name: configure aws credentials
         id: aws_creds
         if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
@@ -3788,6 +3922,8 @@ jobs:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
           role-duration-seconds: 18000
+        env:
+          PYTORCH_ROOT: ""
       - name: Calculate docker image
         id: calculate-docker-image
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
@@ -3797,16 +3933,23 @@ jobs:
           custom-tag-prefix: rocm7.1
           docker-build-dir: .ci/docker
           working-directory: pytorch
+        env:
+          PYTORCH_ROOT: ""
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
+        env:
+          PYTORCH_ROOT: ""
       - name: Test Pytorch binary
         uses: ./.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
+          PYTORCH_ROOT: ""
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
+        env:
+          PYTORCH_ROOT: ""
   manywheel-py3_14-rocm7_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -3857,8 +4000,6 @@ jobs:
       - manywheel-py3_14-rocm7_2-build
       - get-label-type
     runs-on: linux.rocm.gpu.gfx942.1
-    env:
-      PYTORCH_ROOT: ""
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
@@ -3888,14 +4029,20 @@ jobs:
           git clean -fxd
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
+        env:
+          PYTORCH_ROOT: ""
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
           name: manywheel-py3_14-rocm7_2
           path: "${{ runner.temp }}/artifacts/"
+        env:
+          PYTORCH_ROOT: ""
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+        env:
+          PYTORCH_ROOT: ""
       - name: configure aws credentials
         id: aws_creds
         if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
@@ -3904,6 +4051,8 @@ jobs:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
           role-duration-seconds: 18000
+        env:
+          PYTORCH_ROOT: ""
       - name: Calculate docker image
         id: calculate-docker-image
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
@@ -3913,16 +4062,23 @@ jobs:
           custom-tag-prefix: rocm7.2
           docker-build-dir: .ci/docker
           working-directory: pytorch
+        env:
+          PYTORCH_ROOT: ""
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
+        env:
+          PYTORCH_ROOT: ""
       - name: Test Pytorch binary
         uses: ./.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
+          PYTORCH_ROOT: ""
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
+        env:
+          PYTORCH_ROOT: ""
   manywheel-py3_14-rocm7_2-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -4408,8 +4564,6 @@ jobs:
       - manywheel-py3_14t-rocm7_1-build
       - get-label-type
     runs-on: linux.rocm.gpu.gfx942.1
-    env:
-      PYTORCH_ROOT: ""
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
@@ -4439,14 +4593,20 @@ jobs:
           git clean -fxd
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
+        env:
+          PYTORCH_ROOT: ""
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
           name: manywheel-py3_14t-rocm7_1
           path: "${{ runner.temp }}/artifacts/"
+        env:
+          PYTORCH_ROOT: ""
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+        env:
+          PYTORCH_ROOT: ""
       - name: configure aws credentials
         id: aws_creds
         if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
@@ -4455,6 +4615,8 @@ jobs:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
           role-duration-seconds: 18000
+        env:
+          PYTORCH_ROOT: ""
       - name: Calculate docker image
         id: calculate-docker-image
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
@@ -4464,16 +4626,23 @@ jobs:
           custom-tag-prefix: rocm7.1
           docker-build-dir: .ci/docker
           working-directory: pytorch
+        env:
+          PYTORCH_ROOT: ""
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
+        env:
+          PYTORCH_ROOT: ""
       - name: Test Pytorch binary
         uses: ./.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
+          PYTORCH_ROOT: ""
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
+        env:
+          PYTORCH_ROOT: ""
   manywheel-py3_14t-rocm7_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -4524,8 +4693,6 @@ jobs:
       - manywheel-py3_14t-rocm7_2-build
       - get-label-type
     runs-on: linux.rocm.gpu.gfx942.1
-    env:
-      PYTORCH_ROOT: ""
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
@@ -4555,14 +4722,20 @@ jobs:
           git clean -fxd
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
+        env:
+          PYTORCH_ROOT: ""
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
           name: manywheel-py3_14t-rocm7_2
           path: "${{ runner.temp }}/artifacts/"
+        env:
+          PYTORCH_ROOT: ""
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+        env:
+          PYTORCH_ROOT: ""
       - name: configure aws credentials
         id: aws_creds
         if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
@@ -4571,6 +4744,8 @@ jobs:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
           role-duration-seconds: 18000
+        env:
+          PYTORCH_ROOT: ""
       - name: Calculate docker image
         id: calculate-docker-image
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
@@ -4580,16 +4755,23 @@ jobs:
           custom-tag-prefix: rocm7.2
           docker-build-dir: .ci/docker
           working-directory: pytorch
+        env:
+          PYTORCH_ROOT: ""
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
+        env:
+          PYTORCH_ROOT: ""
       - name: Test Pytorch binary
         uses: ./.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
+          PYTORCH_ROOT: ""
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
+        env:
+          PYTORCH_ROOT: ""
   manywheel-py3_14t-rocm7_2-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
