@@ -887,7 +887,7 @@ class CudaReproTests(TestCase):
         b = torch.rand(3, device=device_type)
         x = torch.rand(3, device=device_type)
 
-        def reset_memory_history(value: bool):
+        def record_memory_history(value: bool):
             if torch.xpu.is_available():
                 torch.xpu._record_memory_history(value)
             else:
@@ -895,10 +895,10 @@ class CudaReproTests(TestCase):
 
         try:
             torch.accelerator.memory.empty_cache()
-            reset_memory_history(True)
+            record_memory_history(True)
             r = fn(x, w, b)
         finally:
-            reset_memory_history(False)
+            record_memory_history(False)
         snapshot = str(torch.accelerator.memory._snapshot())
         self.assertTrue("called_inside_compile" in snapshot)
 
@@ -2606,7 +2606,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         self.assertEqual(eager_out, compile_out)
 
     @skipIfXpu(
-        msg="Explicit attn_mask should not be set when is_causal=True - xpu-ops: 2802"
+        msg="Explicit attn_mask should not be set when is_causal=True - torch-xpu-ops: 2802"
     )
     def test_qwen2_7b_sdpa_input_alignment_requires_recompile(self):
         # SDPA constraints ensures inputs have alignment (8).
@@ -2737,7 +2737,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
                 self.assertEqual(eager_div, compiled_div)
 
-    @skipIfXpu(msg="triton dependency - xpu-ops: 2554")
+    @skipIfXpu(msg="triton dependency - torch-xpu-ops: 2554")
     @config.patch({"eager_numerics.division_rounding": False})
     @xfailIfROCm
     def test_truediv_base_not_bitwise_equivalent(self):
@@ -2774,7 +2774,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
         self.assertTrue(compile_decimal > Decimal(0))
 
-    @skipIfXpu(msg="Decimal object comparison failed - xpu-ops: 2810")
+    @skipIfXpu(msg="Decimal object comparison failed - torch-xpu-ops: 2810")
     @skipIfRocm(msg="ROCm preserves subnormals by default")
     @config.patch({"eager_numerics.disable_ftz": False})
     def test_not_disabling_ftz_yields_zero(self):
