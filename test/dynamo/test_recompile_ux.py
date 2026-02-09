@@ -42,7 +42,8 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
         def compiler(gm, input):
             nonlocal attached
             f = gm.forward
-            assert not attached
+            if attached:
+                raise AssertionError("Expected not attached")
             # NB: making this a weakref.ref causes the cycle to no
             # longer be promptly GC'ed
             weakref.finalize(f, trigger)
