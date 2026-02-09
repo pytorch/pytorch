@@ -4,6 +4,8 @@ import functools
 import operator
 from typing import Any, TYPE_CHECKING
 
+import sympy
+
 import torch
 
 # NOTE: other files rely on the imports below
@@ -36,15 +38,11 @@ def is_power_of_2(n: int) -> bool:
 
 def next_power_of_2(n: int) -> int:
     """Return the smallest power of 2 greater than or equal to n"""
-    n -= 1
-    n |= n >> 1
-    n |= n >> 2
-    n |= n >> 4
-    n |= n >> 8
-    n |= n >> 16
-    n |= n >> 32
-    n += 1
-    return n
+    if isinstance(n, sympy.Integer):
+        n = int(n)
+    if n <= 0:
+        return 1
+    return 1 << (n - 1).bit_length()
 
 
 def last_power_of_2(n: int) -> int:

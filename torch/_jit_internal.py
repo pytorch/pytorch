@@ -585,7 +585,14 @@ def createResolutionCallbackForClassMethods(cls: type) -> Callable[[str], Any]:
     # Skip built-ins, as they do not have global scope nor type hints
     # Needed to support `enum.Enum` derived classes in Python-3.11
     # That adds `_new_member_` property which is an alias to `__new__`
-    fns = [fn for fn in fns if not inspect.isbuiltin(fn) and hasattr(fn, "__globals__")]
+    # Skip __annotate__ added by PEP 649 for deferred annotation evaluation
+    fns = [
+        fn
+        for fn in fns
+        if not inspect.isbuiltin(fn)
+        and hasattr(fn, "__globals__")
+        and fn.__name__ != "__annotate__"
+    ]
     captures = {}
 
     for fn in fns:
