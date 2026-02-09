@@ -96,6 +96,7 @@ from torch.testing._internal.common_utils import (
     IS_X86,
     MACOS_VERSION,
     MI200_ARCH,
+    NAVI_ARCH,
     parametrize,
     serialTest,
     skipIfMPS,
@@ -660,7 +661,6 @@ def check_model(
     torch._dynamo.reset()
 
 
-@skipIfRocmArch(MI200_ARCH)
 @torch._inductor.config.patch("triton.cudagraphs", False)
 def check_model_gpu(
     self: TestCase,
@@ -11976,6 +11976,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             (torch.randn(32), torch.randn(32)),
         )
 
+    @skipIfRocmArch(MI200_ARCH)
     def test_conv_with_as_strided(self):
         class Model(nn.Module):
             def __init__(self) -> None:
@@ -14833,6 +14834,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         msg="Profile not enabled on XPU CI, "
         "https://github.com/intel/torch-xpu-ops/issues/2334"
     )
+    @skipIfRocmArch(NAVI_ARCH)
     @requires_gpu_and_triton
     @parametrize("use_cat", [True, False])
     def test_copy_non_blocking_is_pinned(self, use_cat):

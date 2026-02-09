@@ -11,10 +11,10 @@ uint64_t get_any_data_ptr(Tensor t, bool mutable_) {
   }
 }
 
-STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agn_2_10, m) {
+STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
   m.def("get_any_data_ptr(Tensor t, bool mutable_) -> int");
 }
 
-STABLE_TORCH_LIBRARY_IMPL(libtorch_agn_2_10, CompositeExplicitAutograd, m) {
+STABLE_TORCH_LIBRARY_IMPL(STABLE_LIB_NAME, CompositeExplicitAutograd, m) {
   m.impl("get_any_data_ptr", TORCH_BOX(&get_any_data_ptr));
 }
