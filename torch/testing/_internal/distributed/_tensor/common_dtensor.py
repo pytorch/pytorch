@@ -138,7 +138,10 @@ class ModelArgs:
 class Attention(nn.Module):
     def __init__(self, args: ModelArgs):
         super().__init__()
-        assert args.dim % args.n_heads == 0
+        if args.dim % args.n_heads != 0:
+            raise AssertionError(
+                f"Expected args.dim % args.n_heads == 0, got {args.dim} % {args.n_heads}"
+            )
         self.head_dim = args.dim // args.n_heads
         self.n_heads = args.n_heads
         self.dropout_p = args.dropout_p
@@ -206,8 +209,10 @@ class TransformerBlock(nn.Module):
 class Transformer(nn.Module):
     def __init__(self, args: ModelArgs):
         super().__init__()
-        assert args.vocab_size is not None
-        assert args.max_seq_len is not None
+        if args.vocab_size is None:
+            raise AssertionError("Expected args.vocab_size to not be None")
+        if args.max_seq_len is None:
+            raise AssertionError("Expected args.max_seq_len to not be None")
         self.model_args = args
         self.max_seq_len = args.max_seq_len
         self.tok_embeddings = nn.Embedding(args.vocab_size, args.dim)
@@ -224,7 +229,10 @@ class Transformer(nn.Module):
 
     def forward(self, tokens):
         _bsz, seq_len = tokens.size()
-        assert seq_len <= self.max_seq_len
+        if seq_len > self.max_seq_len:
+            raise AssertionError(
+                f"Expected seq_len <= max_seq_len, got {seq_len} > {self.max_seq_len}"
+            )
         h = self.tok_embeddings(tokens)
         pos = torch.arange(0, seq_len, device=tokens.device)
         p = self.pos_embeddings(pos)  # positional embeddings of shape (seq_len, dim)
@@ -246,7 +254,8 @@ class Transformer(nn.Module):
         use_seq_parallel: bool,
         local_output_for_attn: bool = False,
     ) -> nn.Module:
-        assert isinstance(module, Transformer), f"Requires Transformer but got {module}"
+        if not isinstance(module, Transformer):
+            raise AssertionError(f"Requires Transformer but got {module}")
         # Parallelize the root submodules.
         if use_seq_parallel:
             root_plan = {
@@ -363,6 +372,15 @@ class DTensorContinuousTestBase(MultiProcContinuousTest):
     def backend_str(cls) -> str:
         backend = dist.get_default_backend_for_device(DEVICE_TYPE)
         return backend
+
+    @classmethod
+    def _init_pg(cls, rank, world_size, rdvz_file):
+        # Set device before initializing process group to ensure
+        # each rank is bound to the correct GPU
+        if torch.accelerator.is_available():
+            torch.accelerator.set_device_index(rank)
+        # Call parent's _init_pg to do the actual process group initialization
+        super()._init_pg(rank, world_size, rdvz_file)
 
 
 class DTensorTestBase(MultiProcessTestCase):
@@ -573,12 +591,14 @@ class DTensorConverter:
         mesh: DeviceMesh,
         args: tuple[object, ...],
         kwargs: dict[str, object],
+        replicate_only: bool = False,
     ) -> None:
         self.hit = 0
         self.miss = 0
         self.mesh = mesh
         self.args = args
         self.kwargs = kwargs
+        self.replicate_only = replicate_only
         flatten_args, flatten_args_spec = tree_flatten(args)
         flatten_kwargs, flatten_kwargs_spec = tree_flatten(kwargs)
 
@@ -630,6 +650,10 @@ class DTensorConverter:
         )
 
     def gen_sharding_choices_for_arg(self, arg: torch.Tensor) -> Sequence[Placement]:
+        # If replicate_only is set, only use Replicate placement
+        if self.replicate_only:
+            return [Replicate()]
+
         mesh_size = self.mesh.size()
         sharding_choices: list[Placement] = [Replicate()]
         # c10d collective does not support bool tensor
@@ -1017,7 +1041,11 @@ def generate_shard_orders(mesh, tensor_rank):
                     range(tensor_rank), len(splitted_list)
                 ):
                     shard_order = {}
-                    assert len(tensor_dims) == len(splitted_list)
+                    if len(tensor_dims) != len(splitted_list):
+                        raise AssertionError(
+                            f"Expected len(tensor_dims) == len(splitted_list), "
+                            f"got {len(tensor_dims)} != {len(splitted_list)}"
+                        )
                     for tensor_dim, mesh_dims in zip(tensor_dims, splitted_list):
                         shard_order[tensor_dim] = device_order[
                             mesh_dims[0] : mesh_dims[-1] + 1
