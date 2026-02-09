@@ -124,25 +124,25 @@
         desc_q = tl.make_tensor_descriptor(
             base=Q2,
             shape=(Q_LEN, QK_HEAD_DIM),
-            strides=(stride_qm, stride_qd),
+            strides=(stride_qm, 1),
             block_shape=[BLOCK_M2, QK_HEAD_DIM_ROUNDED],
         )
         desc_do = tl.make_tensor_descriptor(
             base=DO2,
             shape=(Q_LEN, V_HEAD_DIM),
-            strides=(stride_dom, stride_dod),
+            strides=(stride_dom, 1),
             block_shape=[BLOCK_M2, V_HEAD_DIM_ROUNDED],
         )
         desc_k_dq = tl.make_tensor_descriptor(
             base=K,
             shape=(KV_LEN, QK_HEAD_DIM),
-            strides=(stride_kn, stride_kd),
+            strides=(stride_kn, 1),
             block_shape=[BLOCK_N2, QK_HEAD_DIM_ROUNDED],
         )
         desc_v_dq = tl.make_tensor_descriptor(
             base=V,
             shape=(KV_LEN, V_HEAD_DIM),
-            strides=(stride_vn, stride_vd),
+            strides=(stride_vn, 1),
             block_shape=[BLOCK_N2, V_HEAD_DIM_ROUNDED],
         )
         q = tl.load_tensor_descriptor(
@@ -235,13 +235,13 @@
         desc_k_dkdv = tl.make_tensor_descriptor(
             base=K,
             shape=(KV_LEN, QK_HEAD_DIM),
-            strides=(stride_kn, stride_kd),
+            strides=(stride_kn, 1),
             block_shape=[BLOCK_N1, QK_HEAD_DIM_ROUNDED],
         )
         desc_v_dkdv = tl.make_tensor_descriptor(
             base=V,
             shape=(KV_LEN, V_HEAD_DIM),
-            strides=(stride_vn, stride_vd),
+            strides=(stride_vn, 1),
             block_shape=[BLOCK_N1, V_HEAD_DIM_ROUNDED],
         )
         k = tl.load_tensor_descriptor(
@@ -295,13 +295,13 @@
             desc_q = tl.make_tensor_descriptor(
                 base=Q1,
                 shape=(Q_LEN, QK_HEAD_DIM),
-                strides=(stride_qm, stride_qd),
+                strides=(stride_qm, 1),
                 block_shape=[BLOCK_M1, QK_HEAD_DIM_ROUNDED],
             )
             desc_do = tl.make_tensor_descriptor(
                 base=DO1,
                 shape=(Q_LEN, V_HEAD_DIM),
-                strides=(stride_dom, stride_dod),
+                strides=(stride_dom, 1),
                 block_shape=[BLOCK_M1, V_HEAD_DIM_ROUNDED],
             )
             {%- endif %}
