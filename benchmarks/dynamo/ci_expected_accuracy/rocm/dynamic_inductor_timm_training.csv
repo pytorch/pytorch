@@ -70,4 +70,4 @@ vit_base_patch14_dinov2.lvd142m,pass,7
 
 
 
-vit_base_patch16_siglip_256,pass,7
+vit_base_patch16_siglip_256,fail_accuracy,7
