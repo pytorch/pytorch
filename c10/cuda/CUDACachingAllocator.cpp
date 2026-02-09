@@ -3594,7 +3594,7 @@ class DeviceCachingAllocator {
 
         CUDAEventPool::Event event = std::move(e->first);
 
-        event->synchronize();
+        C10_CUDA_CHECK(cudaEventSynchronize(*event));
 
         block->event_count--;
         if (block->event_count == 0) {
@@ -3642,7 +3642,7 @@ class DeviceCachingAllocator {
       C10_CUDA_CHECK(c10::cuda::SetDevice(stream.device_index()));
 
       CUDAEventPool::Event event = create_event_internal(stream.device_index());
-      event->record(stream);
+      C10_CUDA_CHECK(cudaEventRecord(*event, stream.stream()));
 
       block->event_count++;
       cuda_events[stream].emplace_back(std::move(event), block);
