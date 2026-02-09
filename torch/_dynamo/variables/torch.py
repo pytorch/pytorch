@@ -2437,15 +2437,22 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             flat_apply,
             func_to_graphable,
             is_graphable_type,
+            is_valid_output,
+            to_graphable,
         )
-        from torch._higher_order_ops.invoke_leaf_function import make_function_wrapper
         from torch._subclasses.fake_tensor import fake_tensor_tls
         from torch.utils._pytree import tree_flatten
 
         from .base import AsPythonConstantNotImplementedError
-        from .builder import wrap_fx_proxy
+        from .builder import SourcelessBuilder, wrap_fx_proxy
         from .higher_order_ops import _make_inlined
 
+        # 1. Convert `args, kwargs` into pytree-flattened proxy forms.
+        #
+        # Rather than reconstructing `args, kwargs` into python objects and
+        # then tree_flatten them, we just let Dynamo symbolically interpret
+        # `tree_flatten((args, kwargs))`. This saves us from having to
+        # worry about the reconstruction logic, side effects, and guards.
         args_with_states, kwargs_with_states = self._extract_nn_module_states(
             tx, args, kwargs
         )
@@ -2481,6 +2488,10 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             flat_arg_vt.as_proxy() for flat_arg_vt in flat_args_vts.items
         ]
 
+        # The downstream `flat_apply` call requires the input spec; however,
+        # the spec not a graphable type, so we still have to reconstruct it
+        # into a python object, and store it as a constant attribute on the
+        # fx graph.
         try:
             input_spec = input_spec_vt.as_python_constant()
         except AsPythonConstantNotImplementedError as e:
@@ -2538,30 +2549,26 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 fake_tensor_tls.allow_non_fake_inputs_override = old_val
             return res
 
-        captured_out_spec_holder: list[TreeSpec | None] = [None]
-        # pyrefly: ignore[unbound-name]
-        flat_apply_capture = make_function_wrapper(
-            patched_fn,
-            captured_out_spec_holder,
-        )
+        # `flat_apply` wants a TreeSpec for the function input.
+        _, f_spec = func_to_graphable(patched_fn)
 
-        # Pack the wrapper function as a graphable TreeSpec
-        _, f_spec = func_to_graphable(flat_apply_capture)
-
-        # TreeSpec isn't graphable, so we register it as an attribute on the graph module.
+        # TreeSpec isn't graphable, so we register the function and input
+        # specs as attributes on the graph module.
         f_spec_proxy = tx.output.register_static_attr_and_return_proxy(
-            fn.__name__ + "_f_spec",
-            f_spec,
+            f"{fn.__name__}_spec", f_spec
         )
-        f_spec_proxy.node.type = type(f_spec)
-
         input_spec_proxy = tx.output.register_static_attr_and_return_proxy(
             fn.__name__ + "_input_spec",
-            input_spec,  # pyrefly: ignore[unbound-name]
+            # pyrefly: ignore [unbound-name]
+            input_spec,
         )
-        input_spec_proxy.node.type = type(input_spec)  # pyrefly: ignore[unbound-name]
-
+        f_spec_proxy.node.type = type(f_spec)
+        # pyrefly: ignore [unbound-name]
+        input_spec_proxy.node.type = type(input_spec)
         all_args = (f_spec_proxy, input_spec_proxy, *proxified_flat_args)
+
+        # 2. Create a proxy call to `flat_apply`, then fake-tensor propagate
+        # the call and wrap output into a VariableTracker.
 
         # What's going on here? The output of the nonstrict-traced function must
         # be something we can put into the graph. This means it has to be Tuple,
@@ -2570,8 +2577,29 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 
         # To handle PyTree-able outputs we flatten the output to a flattened
         # list of graph types and then trace the unflattening into the graph.
+        captured_spec: TreeSpec | None = None
 
-        proxy = tx.output.create_proxy("call_function", flat_apply, all_args, {})
+        def flat_apply_capture(*args: Any) -> list[object]:
+            nonlocal captured_spec
+            out = flat_apply(*args, checked_output=False)
+            # Output is handled similar to flat_apply input but reverse by
+            # tree_flattening the output and trace the unflattening. Note that
+            # wrapped functions must return the same pytree structure every time
+            # they're called.
+            flat_out, spec = to_graphable(out)
+            if captured_spec is None:
+                captured_spec = spec
+            else:
+                assert captured_spec == spec, (
+                    "Error: nonstrict-traced functions must return the same "
+                    f"output shape every time. got {spec!r} vs but expected {captured_spec!r}"
+                )
+            assert is_valid_output(flat_out)
+            return flat_out
+
+        proxy = tx.output.create_proxy(
+            "call_function", flat_apply_capture, all_args, {}
+        )
 
         # Instead of calling tree_unflatten at runtime, symbolically trace it
         # just like we did for tree_flatten on inputs. This lets Dynamo
@@ -2598,9 +2626,16 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             # pyrefly error: why doesn't it recognize unimplemented() as NoReturn?
             raise AssertionError("unreachable")  # noqa: B904
 
-        assert captured_out_spec_holder[0] is not None
-        out_spec_vt = VariableTracker.build(tx, captured_out_spec_holder[0])
-        return _make_inlined(tx, _pytree.tree_unflatten)(proxy_list_vt, out_spec_vt)
+        assert captured_spec is not None
+        out_spec_vt = VariableTracker.build(tx, captured_spec)
+
+        # Reuse the same pattern used above for tree_flatten: call the python
+        # function through Dynamo so it symbolically interprets it.
+        out_vt = SourcelessBuilder.create(tx, _pytree.tree_unflatten).call_function(
+            tx, [proxy_list_vt, out_spec_vt], {}
+        )
+
+        return out_vt
 
     def _extract_nn_module_states(
         self,
@@ -2687,10 +2722,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
     ) -> VariableTracker:
         import torch.utils._pytree as pytree
         from torch._higher_order_ops.flat_apply import func_to_graphable
-        from torch._higher_order_ops.invoke_leaf_function import (
-            invoke_leaf_function,
-            make_function_wrapper,
-        )
+        from torch._higher_order_ops.invoke_leaf_function import invoke_leaf_function
 
         from .builder import wrap_fx_proxy
         from .higher_order_ops import _make_inlined
@@ -2706,6 +2738,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 "decorator. See the leaf_function docstring for details."
             )
 
+        captured_out_spec: pytree.TreeSpec | None = None
         args_with_states, kwargs_with_states = self._extract_nn_module_states(
             tx, args, kwargs
         )
@@ -2717,9 +2750,36 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         ]
         input_spec = input_spec_var.as_python_constant()
 
-        captured_out_spec_holder: list[pytree.TreeSpec | None] = [None]
-        wrapped_real_impl = make_function_wrapper(real_impl, captured_out_spec_holder)
-        wrapped_fake_impl = make_function_wrapper(fake_impl, captured_out_spec_holder)
+        # Wrap user fn to support nn.Module inputs and pytree inputs/outputs.
+        # The wrapped function:
+        # 1. Takes unflattened args/kwargs with nn.Module restored from LeafModuleState
+        # 2. Calls the original fn with args/kwargs
+        # 3. Flattens the output and captures/verifies the output spec
+        def make_leaf_function_wrapper(
+            fn: Callable[..., Any],
+        ) -> Callable[..., tuple[Any, ...]]:
+            def wrapper(*args: Any, **kwargs: Any) -> tuple[Any, ...]:
+                nonlocal captured_out_spec
+
+                out = fn(*args, **kwargs)
+
+                flat_out, out_spec = pytree.tree_flatten(out)
+                if captured_out_spec is None:
+                    captured_out_spec = out_spec
+                elif captured_out_spec != out_spec:
+                    raise AssertionError(
+                        f"leaf_function output structure mismatch: "
+                        f"expected {captured_out_spec}, got {out_spec}. "
+                        f"This can happen if the real function and fake function return "
+                        f"different pytree structures (e.g., dict vs tuple, different number "
+                        f"of elements). Ensure both functions return the same structure."
+                    )
+                return tuple(flat_out)
+
+            return wrapper
+
+        wrapped_real_impl = make_leaf_function_wrapper(real_impl)
+        wrapped_fake_impl = make_leaf_function_wrapper(fake_impl)
 
         _, real_impl_spec = func_to_graphable(wrapped_real_impl)
         _, fake_impl_spec = func_to_graphable(wrapped_fake_impl)
@@ -2745,11 +2805,11 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 
         flat_output_vt = wrap_fx_proxy(tx, result_proxy)
 
-        assert captured_out_spec_holder[0] is not None, (
+        assert captured_out_spec is not None, (
             "Output spec was not captured during fake tensor propagation. "
             "This should not happen - please report a bug."
         )
-        out_spec_vt = VariableTracker.build(tx, captured_out_spec_holder[0])
+        out_spec_vt = VariableTracker.build(tx, captured_out_spec)
         return _make_inlined(tx, _pytree.tree_unflatten)(flat_output_vt, out_spec_vt)
 
     def _call_ntuple(
