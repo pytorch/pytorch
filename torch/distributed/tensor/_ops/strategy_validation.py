@@ -207,6 +207,25 @@ def normalize_combo_key(
     return (normalized_inputs, normalized_output)
 
 
+def _extract_rules_from_op_strategy(op_strategy, input_shapes, output_shape):
+    """Extract normalized sharding rules from an OpStrategy."""
+    from torch.distributed.tensor._op_schema import OpStrategy
+
+    rules = set()
+    if not isinstance(op_strategy, OpStrategy):
+        return rules
+    for spec in op_strategy.strategies:
+        output_plc = spec.output_spec.placements[0]
+        input_plcs = tuple(s.placements[0] for s in spec.input_specs)
+        rule_key = (tuple(str(p) for p in input_plcs), str(output_plc))
+        normalized_rule = normalize_combo_key(rule_key, input_shapes, output_shape)
+        if not is_fully_replicated(
+            tuple(parse_placement(p) or Replicate() for p in normalized_rule[0])
+        ):
+            rules.add(normalized_rule)
+    return rules
+
+
 def placements_equivalent(p1, p2, shape: tuple[int, ...]) -> bool:
     """
     Check if two placements are equivalent for a given tensor shape.
@@ -1010,33 +1029,58 @@ def compare_operator(
                     # Call strategy function
                     strategy_func = propagator.op_strategy_funcs[aten_op]
                     output_strategy = strategy_func(op_schema)
-
-                    if isinstance(output_strategy, OpStrategy):
-                        for spec in output_strategy.strategies:
-                            output_plc = spec.output_spec.placements[0]
-                            input_plcs = tuple(
-                                s.placements[0] for s in spec.input_specs
-                            )
-
-                            rule_key = (
-                                tuple(str(p) for p in input_plcs),
-                                str(output_plc),
-                            )
-                            # Normalize to deduplicate equivalent rules
-                            normalized_rule = normalize_combo_key(
-                                rule_key, input_shapes, output_shape
-                            )
-                            # Skip fully replicated (trivially valid)
-                            if not is_fully_replicated(
-                                tuple(
-                                    parse_placement(p) or Replicate()
-                                    for p in normalized_rule[0]
-                                )
-                            ):
-                                dtensor_rules.add(normalized_rule)
+                    dtensor_rules |= _extract_rules_from_op_strategy(
+                        output_strategy, input_shapes, output_shape
+                    )
                 except Exception as e:
                     if verbose:
                         print(f"        Error querying op_strategy: {e}")
+
+            elif aten_op:
+                # Try decomposition-based strategy propagation
+                try:
+                    from torch.distributed.tensor._decompositions import (
+                        DecompShardingStrategy,
+                    )
+                except ImportError:
+                    DecompShardingStrategy = None  # type: ignore[assignment, misc]
+                if DecompShardingStrategy is not None and DecompShardingStrategy.has_decomp(aten_op):
+                    from torch.distributed.tensor._dtensor_spec import TensorMeta
+                    from torch.distributed.tensor._op_schema import (
+                        DTensorSpec,
+                        OpSchema,
+                    )
+
+                    try:
+                        mesh = init_device_mesh("cpu", (world_size,))
+                        args_schema = []
+                        for i, (_, t) in enumerate(tensors):
+                            # First tensor gets Shard(0) to seed candidate
+                            # placement generation in _get_candidate_placements
+                            plc = Shard(0) if i == 0 else Replicate()
+                            spec = DTensorSpec(
+                                mesh=mesh,
+                                placements=(plc,),
+                                tensor_meta=TensorMeta(
+                                    shape=t.shape, stride=t.stride(), dtype=t.dtype
+                                ),
+                            )
+                            args_schema.append(spec)
+                        args_schema.extend(non_tensor_args)
+                        op_schema = OpSchema(
+                            aten_op, tuple(args_schema), non_tensor_kwargs
+                        )
+                        DecompShardingStrategy.ensure_schema_info(aten_op, propagator)
+                        output_strategy = DecompShardingStrategy.propagate_strategy(
+                            op_schema, propagator
+                        )
+                        if output_strategy is not None:
+                            dtensor_rules |= _extract_rules_from_op_strategy(
+                                output_strategy, input_shapes, output_shape
+                            )
+                    except Exception as e:
+                        if verbose:
+                            print(f"        Error querying decomp strategy: {e}")
             strategy_query_time += time.time() - strategy_start
 
             # Compute ground truth validation
