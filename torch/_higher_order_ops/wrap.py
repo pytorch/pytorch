@@ -165,7 +165,10 @@ class DynamoBypassingWrapper(HigherOrderOperator):
 
         is_compiling = isinstance(wrapper_fn_or_key, str)
         if is_compiling:
-            assert isinstance(inner_fn, torch.fx.GraphModule)
+            if not isinstance(inner_fn, torch.fx.GraphModule):
+                raise AssertionError(
+                    f"expected inner_fn to be torch.fx.GraphModule, got {type(inner_fn)}"
+                )
             wrapper_fn = inner_fn.meta[wrapper_fn_or_key]
         else:
             wrapper_fn = wrapper_fn_or_key
@@ -363,9 +366,10 @@ def proxy_mode_key(
     import torch.fx.traceback as fx_traceback
     from torch.fx import Interpreter
 
-    assert proxy_mode.pre_dispatch, (
-        "post-dispatch mode should have inlined in the Autograd key"
-    )
+    if not proxy_mode.pre_dispatch:
+        raise AssertionError(
+            "post-dispatch mode should have inlined in the Autograd key"
+        )
     example_out = tag_activation_checkpoint(gmod, *args, **kwargs)
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, args)  # type: ignore[union-attr]
     proxy_kwargs = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, kwargs)  # type: ignore[union-attr]
