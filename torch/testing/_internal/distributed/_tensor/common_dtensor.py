@@ -333,6 +333,71 @@ class ExpertParallel(ParallelStyle):
         )
 
 
+class ExpertParallelWithTP(ParallelStyle):
+    """Combined EP + TP for experts.
+
+    Applied to ExpertLayer. Distributes expert params on a 2D (ep, tp) mesh
+    with [Shard(0), Shard(1/2)]. Token dispatch/combine hooks are registered
+    on ExpertLayer (outer), TP reduction hook on Experts (inner), so forward
+    execution is: EP dispatch -> TP input -> forward -> TP reduce -> EP combine.
+    """
+
+    def __init__(
+        self,
+        ep_mesh: DeviceMesh,
+        tp_mesh: DeviceMesh,
+    ):
+        super().__init__()
+        self.ep_mesh = ep_mesh
+        self.tp_mesh = tp_mesh
+        self.ep_tp_mesh = DeviceMesh._concatenate([ep_mesh, tp_mesh])
+
+    def _apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module:
+        experts = module.experts  # type: ignore[attr-defined]
+
+        # Partition expert weights on 2D (ep, tp) mesh
+        for pn, p in experts.named_parameters(recurse=False):
+            if pn == "w1":
+                placements = [Shard(0), Shard(1)]
+            elif pn == "w2":
+                placements = [Shard(0), Shard(2)]
+            else:
+                continue
+            experts.register_parameter(
+                pn, nn.Parameter(distribute_tensor(p, self.ep_tp_mesh, placements))
+            )
+
+        # EP dispatch/combine hooks on ExpertLayer (outer module)
+        ep_mesh = self.ep_mesh
+
+        def ep_dispatch(mod, inputs):
+            (x,) = inputs
+            x = all_gather_tensor_autograd(x, gather_dim=0, group=ep_mesh.get_group())
+            return (torch.ops._c10d_functional.wait_tensor(x),)
+
+        def ep_combine(mod, inputs, output):
+            out = reduce_scatter_tensor_autograd(
+                output, "sum", scatter_dim=0, group=ep_mesh.get_group()
+            )
+            return torch.ops._c10d_functional.wait_tensor(out)
+
+        module.register_forward_pre_hook(ep_dispatch)
+        module.register_forward_hook(ep_combine)
+
+        # TP reduction hook on Experts (inner module)
+        tp_mesh = self.tp_mesh
+
+        def tp_reduce(mod, inputs, output):
+            return (
+                DTensor.from_local(output, tp_mesh, [Partial()])
+                .redistribute(tp_mesh, [Replicate()])
+                .to_local()
+            )
+
+        experts.register_forward_hook(tp_reduce)
+        return module
+
+
 class TransformerBlock(nn.Module):
     def __init__(self, args: ModelArgs):
         super().__init__()
@@ -493,11 +558,18 @@ class Transformer(nn.Module):
 
                 parallelize_module(layer, tp_mesh, layer_parallelize_plan)
 
-            # EP for experts (separate mesh from TP)
+            # EP (+ optional TP) for experts
             if ep_mesh is not None and layer.has_experts:
-                parallelize_module(
-                    layer.expert_layer.experts, ep_mesh, ExpertParallel()
-                )
+                if tp_mesh is not None:
+                    parallelize_module(
+                        layer.expert_layer,
+                        ep_mesh,
+                        ExpertParallelWithTP(ep_mesh, tp_mesh),
+                    )
+                else:
+                    parallelize_module(
+                        layer.expert_layer.experts, ep_mesh, ExpertParallel()
+                    )
 
         if tp_mesh is not None:
             # Parallelize the output submodule. If weight tying is enabled,

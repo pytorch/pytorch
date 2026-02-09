@@ -1416,7 +1416,15 @@ class TestFullyShardNDTraining(FSDPTest):
 
         ep_mesh = sparse_mesh["ep"]
         efsdp_mesh = sparse_mesh["efsdp"]
-        return tp_mesh, dp_mesh, ep_mesh, efsdp_mesh, dp_mesh_info, efsdp_mesh_info
+
+        return (
+            tp_mesh,
+            dp_mesh,
+            ep_mesh,
+            efsdp_mesh,
+            dp_mesh_info,
+            efsdp_mesh_info,
+        )
 
     def _test_shard_placement_fn_tp_ep(
         self, tp_degree, dp_replicate, reshard_non_layer_modules
@@ -1425,7 +1433,14 @@ class TestFullyShardNDTraining(FSDPTest):
         result = self._init_parallel_meshes(tp_degree, dp_replicate, ep_degree)
         if result is None:
             return
-        tp_mesh, dp_mesh, ep_mesh, efsdp_mesh, dp_mesh_info, efsdp_mesh_info = result
+        (
+            tp_mesh,
+            dp_mesh,
+            ep_mesh,
+            efsdp_mesh,
+            dp_mesh_info,
+            efsdp_mesh_info,
+        ) = result
         # reshard_root as int must be a factor of every group's
         # shard mesh size; skip configs where it is not.
         if isinstance(reshard_non_layer_modules, int) and not isinstance(
