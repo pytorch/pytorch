@@ -509,7 +509,6 @@ def fn(accum, bias):
             lambda x: x,  # static shapes
             device_type=GPU_TYPE,
         )
-        print("code:\n", code)
         if GPU_TYPE == "xpu":
             self.assertExpectedInline(
                 code,

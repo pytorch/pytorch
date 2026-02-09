@@ -23,7 +23,8 @@ def test_tril_matrix_to_vec(shape):
         actual = mat.tril(diag)
         vec = tril_matrix_to_vec(actual, diag)
         tril_mat = vec_to_tril_matrix(vec, diag)
-        assert torch.allclose(tril_mat, actual)
+        if not torch.allclose(tril_mat, actual):
+            raise AssertionError("Expected tril_mat and actual to be close")
 
 
 if __name__ == "__main__":
