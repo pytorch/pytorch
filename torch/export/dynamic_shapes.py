@@ -1088,8 +1088,6 @@ def _process_dynamic_shapes(
     """
     from torch._dynamo.exc import UserError, UserErrorType
 
-    print("********", dynamic_shapes, combined_args)
-
     if dynamic_shapes is None or len(dynamic_shapes) == 0:
         # we run with dynamic by default, so no need to produce constraints
         return []
