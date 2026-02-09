@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import logging
 import math
+import warnings
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, cast, Optional, TYPE_CHECKING, Union
@@ -289,6 +290,8 @@ def flex_attention(
             kv_indices,
             full_kv_num_blocks,
             full_kv_indices,
+            SPARSE_Q_BLOCK_SIZE,
+            SPARSE_KV_BLOCK_SIZE,
             mask_graph=mask_graph,
             subgraph=subgraph,
         )
@@ -771,6 +774,11 @@ def flex_attention_backward(*args, **kwargs):
                 "Deterministic backward for flex_attention with block_mask using the FLASH backend "
                 "is not yet implemented. The TRITON backend supports deterministic backward."
             )
+        if torch.is_deterministic_algorithms_warn_only_enabled() and needs_block_mask:
+            warnings.warn(
+                "Deterministic backward for flex_attention with block_mask using the FLASH backend "
+                "is not yet implemented. Running non-deterministic backward.",
+            )
         score_is_trivial = is_trivial_score_graph(fw_graph.graph_module)
         return create_flex_flash_attention_backward_kernel(
             query,
@@ -781,6 +789,8 @@ def flex_attention_backward(*args, **kwargs):
             grad_out,
             scale,
             kernel_options,
+            SPARSE_Q_BLOCK_SIZE,
+            SPARSE_KV_BLOCK_SIZE,
             fw_subgraph_buffer=None if score_is_trivial else fw_subgraph_buffer,
             joint_subgraph_buffer=None
             if score_is_trivial
