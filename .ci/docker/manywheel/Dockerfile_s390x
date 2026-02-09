@@ -128,7 +128,7 @@ RUN bash ./patch_libstdc.sh && rm patch_libstdc.sh
 # for some reason old version is getting pulled in otherwise.
 # packaging package is required for onnxruntime wheel build.
 RUN pip3 install flatbuffers && \
-  pip3 install cython 'pkgconfig>=1.5.5' 'setuptools>=77,<82' 'numpy<2.3.0' && \
+  pip3 install cython 'pkgconfig>=1.5.5' 'setuptools>=77' 'numpy<2.3.0' && \
   pip3 install --no-build-isolation h5py==3.11.0 && \
   pip3 install packaging && \
   git clone https://github.com/microsoft/onnxruntime && \

@@ -46,7 +46,7 @@ if [[ "$(uname -m)" == "aarch64" ]]; then
 fi
 
 echo "installing dependencies"
-"$PYTHON" -m pip install einops packaging ninja numpy wheel "setuptools<82"
+"$PYTHON" -m pip install einops packaging ninja numpy wheel setuptools
 
 export PATH="$(dirname "$PYTHON"):$PATH"
 
