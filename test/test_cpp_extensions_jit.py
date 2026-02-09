@@ -9,6 +9,7 @@ import shutil
 import string
 import subprocess
 import sys
+import sysconfig
 import tempfile
 import unittest
 import warnings
@@ -119,7 +120,7 @@ class TestCppExtensionJIT(common.TestCase):
         # 2 * sigmoid(0) = 2 * 0.5 = 1
         self.assertEqual(z, torch.ones_like(z))
 
-    def _test_jit_xpu_extension(self, extra_sycl_cflags):
+    def _test_jit_xpu_extension(self, extra_sycl_cflags=None, extra_ldflags=None):
         # randomizing extension name and names of extension methods
         # for the case when we test building few extensions in a row
         # using this function
@@ -139,7 +140,8 @@ class TestCppExtensionJIT(common.TestCase):
             module = torch.utils.cpp_extension.load(
                 name=name,
                 sources=[sycl_file],
-                extra_sycl_cflags=extra_sycl_cflags,
+                extra_sycl_cflags=extra_sycl_cflags if extra_sycl_cflags else [],
+                extra_ldflags=extra_ldflags if extra_ldflags else [],
                 verbose=True,
                 build_directory=temp_dir,
             )
@@ -164,7 +166,7 @@ class TestCppExtensionJIT(common.TestCase):
     @unittest.skipIf(not (TEST_XPU), "XPU not found")
     def test_jit_xpu_extension(self):
         # NOTE: this test can be affected by setting TORCH_XPU_ARCH_LIST
-        self._test_jit_xpu_extension(extra_sycl_cflags=[])
+        self._test_jit_xpu_extension()
 
     @unittest.skipIf(not (TEST_XPU), "XPU not found")
     def test_jit_xpu_archlists(self):
@@ -175,14 +177,12 @@ class TestCppExtensionJIT(common.TestCase):
             {
                 # Testing JIT compilation
                 "archlist": "",
-                "extra_sycl_cflags": [],
             },
             {
                 # Testing JIT + AOT (full torch AOT arch list)
                 # NOTE: default cpp extension AOT arch list might be reduced
                 # from the full list
                 "archlist": ",".join(torch.xpu.get_arch_list()),
-                "extra_sycl_cflags": [],
             },
             {
                 # Testing AOT (full torch AOT arch list)
@@ -193,14 +193,38 @@ class TestCppExtensionJIT(common.TestCase):
                 "extra_sycl_cflags": ["-fsycl-targets=spir64_gen"],
             },
         ]
+        if IS_LINUX:
+            # In the case of virtual environment python .so library will be located at LIBDIR
+            # returned by python sysconfig.
+            (libdir,) = sysconfig.get_config_vars("LIBDIR")
+            lib_python = (
+                f"-L{libdir} -lpython{sys.version_info.major}.{sys.version_info.minor}"
+            )
+            cases.append(
+                {
+                    # Testing that we link with all potentially required dependencies.
+                    # The goal is to check that all python side libraries (c10_xpu, torch_xpu) are
+                    # included. We can't do that without linking against really all required libraries
+                    # including python. So we add -lpythonX.Y to the link command line for the test
+                    # purposes. That's not required and actually is recommended against in real life
+                    # applications as this reduces compatibility with python versions.
+                    "extra_ldflags": ["-Wl,--no-undefined", lib_python],
+                }
+            )
         old_envvar = os.environ.get("TORCH_XPU_ARCH_LIST", None)
         try:
             for c in cases:
-                os.environ["TORCH_XPU_ARCH_LIST"] = c["archlist"]
-                self._test_jit_xpu_extension(extra_sycl_cflags=c["extra_sycl_cflags"])
+                if "archlist" in c:
+                    os.environ["TORCH_XPU_ARCH_LIST"] = c["archlist"]
+                extra_sycl_cflags = c.get("extra_sycl_cflags", [])
+                extra_ldflags = c.get("extra_ldflags", [])
+                self._test_jit_xpu_extension(
+                    extra_sycl_cflags=extra_sycl_cflags, extra_ldflags=extra_ldflags
+                )
         finally:
             if old_envvar is None:
-                os.environ.pop("TORCH_XPU_ARCH_LIST")
+                if "TORCH_XPU_ARCH_LIST" in os.environ:
+                    os.environ.pop("TORCH_XPU_ARCH_LIST")
             else:
                 os.environ["TORCH_XPU_ARCH_LIST"] = old_envvar
 
