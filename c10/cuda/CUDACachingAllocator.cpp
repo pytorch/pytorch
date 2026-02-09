@@ -2274,15 +2274,29 @@ class DeviceCachingAllocator {
     BlockPool& pool = *block->pool;
     const auto segment_len = segment.blocks.size();
 
+    auto is_unmapped_tail = [](Block* b) {
+      return b->next == nullptr && !b->mapped && !b->allocated;
+    };
+
     // allocate all blocks in the segment
     for (size_t i = 0; i < segment_len; ++i) {
-      // The last block in every expandable segment is the remaining amount of
-      // available unmapped virtual address space. We shouldn't change it but
-      // instead check it is correctly formed then skip over allocating it.
+      // Note [Last block when restoring checkpoint state]
+      // The last block in expandable segment is one of the following cases:
+      // - case 1: a unmapped tail containing the remaining amount of available
+      //      unmapped virtual address space.
+      // - case 2: segment has grown larger since we record the checkpoint.
+      //      After we allocate all blocks in checkpoint, there should still
+      //      be 1 block for extra mapped memory followed by another block
+      //      for the unmapped tail.
       if (i == segment_len - 1 && curr_block->expandable_segment_) {
-        TORCH_CHECK(curr_block->next == nullptr);
-        TORCH_CHECK(!curr_block->mapped);
-        TORCH_CHECK(curr_block->allocated == false);
+        bool valid_structure =
+            /* case 1*/ is_unmapped_tail(curr_block) ||
+            /* case 2*/
+            (curr_block->mapped && !curr_block->allocated && curr_block->next &&
+             is_unmapped_tail(curr_block->next));
+        TORCH_CHECK(
+            valid_structure,
+            "Invalid expandable segment structure during checkpoint restore");
         continue;
       }
 
@@ -2328,9 +2342,15 @@ class DeviceCachingAllocator {
 
     for (size_t i = 0; i < segment_len; ++i, curr_block = curr_block->next) {
       if (i == segment_len - 1 && curr_block->expandable_segment_) {
-        TORCH_CHECK(curr_block->next == nullptr);
-        TORCH_CHECK(!curr_block->mapped);
-        TORCH_CHECK(curr_block->allocated == false);
+        // See Note [Last block when restoring checkpoint state]
+        bool valid_structure =
+            /* case 1*/ is_unmapped_tail(curr_block) ||
+            /* case 2*/
+            (curr_block->mapped && !curr_block->allocated && curr_block->next &&
+             is_unmapped_tail(curr_block->next));
+        TORCH_CHECK(
+            valid_structure,
+            "Invalid expandable segment structure during checkpoint restore");
         continue;
       }
 
@@ -2346,7 +2366,15 @@ class DeviceCachingAllocator {
 
       TORCH_CHECK(curr_block->ptr == block_state.ptr);
       TORCH_CHECK(curr_block->allocated == block_state.allocated);
-      TORCH_CHECK(curr_block->size == block_state.size);
+
+      // See Note [Last block when restoring checkpoint state]
+      // The last mapped block (i == segment_len - 2) may merge with extra
+      // mapped memory from segment growth, making it larger than checkpoint
+      bool is_last_mapped =
+          (i == segment_len - 2) && curr_block->expandable_segment_;
+      TORCH_CHECK(
+          curr_block->size == block_state.size ||
+          (is_last_mapped && curr_block->size >= block_state.size));
     }
   }
 
@@ -4137,26 +4165,34 @@ class NativeCachingAllocator : public CUDAAllocator {
     device_allocator[block->device]->recordStream(block, stream);
   }
 
-  SnapshotInfo snapshot(MempoolId_t mempool_id) override {
-    // Set-up converter to convert timestamps from tsc to microseconds.
-    auto tsc_to_ns = clock_converter.makeConverter();
-    auto tsc_to_us = [=](approx_time_t t_approx) {
-      return tsc_to_ns(t_approx) / 1000;
-    };
-
+  SnapshotInfo snapshot(MempoolId_t mempool_id, bool include_traces) override {
     SnapshotInfo result;
 
-    // Get AnnotationEntry list and convert the timestamps.
-    annotation_buffer.getEntries(result.external_annotations);
-    for (auto& ae : result.external_annotations) {
-      ae.time_.t_ = tsc_to_us(ae.time_.approx_t_);
-    }
+    if (include_traces) {
+      // Set-up converter to convert timestamps from tsc to microseconds.
+      auto tsc_to_ns = clock_converter.makeConverter();
+      auto tsc_to_us = [=](approx_time_t t_approx) {
+        return tsc_to_ns(t_approx) / 1000;
+      };
 
-    // Get the device_traces' TraceEntry lists.
-    for (auto& da : device_allocator) {
-      result.device_traces.emplace_back(da->trace(tsc_to_us));
-      auto snap = da->snapshot(mempool_id);
-      result.segments.insert(result.segments.end(), snap.begin(), snap.end());
+      // Get AnnotationEntry list and convert the timestamps.
+      annotation_buffer.getEntries(result.external_annotations);
+      for (auto& ae : result.external_annotations) {
+        ae.time_.t_ = tsc_to_us(ae.time_.approx_t_);
+      }
+
+      // Get the device_traces' TraceEntry lists.
+      for (auto& da : device_allocator) {
+        result.device_traces.emplace_back(da->trace(tsc_to_us));
+        auto snap = da->snapshot(mempool_id);
+        result.segments.insert(result.segments.end(), snap.begin(), snap.end());
+      }
+    } else {
+      // Fast path: skip traces and annotations entirely
+      for (auto& da : device_allocator) {
+        auto snap = da->snapshot(mempool_id);
+        result.segments.insert(result.segments.end(), snap.begin(), snap.end());
+      }
     }
 
     auto& md = result.config_metadata;

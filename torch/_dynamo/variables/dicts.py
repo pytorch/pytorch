@@ -65,6 +65,8 @@ def was_instancecheck_override(obj: Any) -> bool:
 def raise_unhashable(
     arg: VariableTracker, tx: Optional["InstructionTranslator"] = None
 ) -> None:
+    from .builder import SourcelessBuilder
+
     if tx is None:
         from torch._dynamo.symbolic_convert import InstructionTranslator
 
@@ -78,8 +80,9 @@ def raise_unhashable(
         TypeError,
         tx,
         args=[
-            ConstantVariable(
-                f"unhashable type: {arg_type!r} and variable tracker = {type(arg.realize())}"
+            SourcelessBuilder.create(
+                tx,
+                f"unhashable type: {arg_type!r} and variable tracker = {type(arg.realize())}",
             )
         ],
     )
@@ -458,11 +461,12 @@ class ConstDictVariable(VariableTracker):
         # guard. But for all the other methods, we insert the DICT_KEYS_MATCH
         # guard to be conservative.
         from . import BuiltinVariable, ConstantVariable
+        from .builder import SourcelessBuilder
 
         Hashable = ConstDictVariable._HashableTracker
 
         if name == "__init__":
-            temp_dict_vt = variables.BuiltinVariable(dict).call_dict(
+            temp_dict_vt = SourcelessBuilder.create(tx, dict).call_dict(
                 tx, *args, **kwargs
             )
             tx.output.side_effects.mutation(self)
@@ -727,7 +731,7 @@ class ConstDictVariable(VariableTracker):
             if len(args) != 1:
                 raise_args_mismatch(tx, name, "1 args", f"{len(args)} args")
 
-            return variables.UserFunctionVariable(polyfills.dict___eq__).call_function(
+            return SourcelessBuilder.create(tx, polyfills.dict___eq__).call_function(
                 tx, [self, args[0]], {}
             )
         elif name == "__ne__":
@@ -756,36 +760,44 @@ class ConstDictVariable(VariableTracker):
             # defaultdict.
 
             # TODO(guilhermeleobas): this check should be on builtin.py::call_or_
-            if not istype(
-                other, (ConstDictVariable, variables.UserDefinedDictVariable)
+            if istype(
+                other,
+                (
+                    ConstDictVariable,
+                    variables.UserDefinedDictVariable,
+                    variables.DefaultDictVariable,
+                ),
             ):
+                # Always return the specialized dictionary, and in the case
+                # both are specialized, take the first to be the type of the
+                # new dictionary
+                if self.user_cls is not dict:
+                    user_cls = self.user_cls
+                    to_cpy = self
+                else:
+                    assert isinstance(other, ConstDictVariable)
+                    user_cls = other.user_cls
+                    to_cpy = other
+
+                to_cpy.install_dict_keys_match_guard()
+                new_dict_vt = to_cpy.clone(
+                    items=self.items.copy(),
+                    mutation_type=ValueMutationNew(),
+                    source=None,
+                    user_cls=user_cls,
+                )
+
+                # NB - Guard on all the keys of the other dict to ensure
+                # correctness.
+                args[0].install_dict_keys_match_guard()  # type: ignore[attr-defined]
+                new_dict_vt.items.update(args[0].items)  # type: ignore[attr-defined]
+                return new_dict_vt
+            else:
                 err_msg = (
                     f"unsupported operand type(s) for |: '{self.python_type().__name__}'"
                     f"and '{other.python_type().__name__}'"
                 )
                 raise_observed_exception(TypeError, tx, args=[err_msg])
-
-            # OrderedDict overloads __ror__
-            ts = {self.user_cls, other.user_cls}  # type: ignore[attr-defined]
-            user_cls = (
-                collections.OrderedDict
-                if any(issubclass(t, collections.OrderedDict) for t in ts)
-                else dict
-            )
-
-            self.install_dict_keys_match_guard()
-            new_dict_vt = self.clone(
-                items=self.items.copy(),
-                mutation_type=ValueMutationNew(),
-                source=None,
-                user_cls=user_cls,
-            )
-
-            # NB - Guard on all the keys of the other dict to ensure
-            # correctness.
-            args[0].install_dict_keys_match_guard()  # type: ignore[attr-defined]
-            new_dict_vt.items.update(args[0].items)  # type: ignore[attr-defined]
-            return new_dict_vt
         elif name == "__ior__":
             self.call_method(tx, "update", args, kwargs)
             return self
@@ -957,16 +969,14 @@ class DefaultDictVariable(ConstDictVariable):
 
     @staticmethod
     def is_supported_arg(arg: VariableTracker) -> bool:
-        if isinstance(arg, variables.BuiltinVariable):
-            return arg.fn in (list, tuple, dict, set)
-        else:
-            return isinstance(
-                arg,
-                (
-                    variables.functions.BaseUserFunctionVariable,
-                    variables.functions.PolyfilledFunctionVariable,
-                ),
-            )
+        return isinstance(
+            arg,
+            (
+                variables.BuiltinVariable,
+                variables.functions.BaseUserFunctionVariable,
+                variables.functions.PolyfilledFunctionVariable,
+            ),
+        ) or (isinstance(arg, variables.ConstantVariable) and arg.value is None)
 
     def call_method(
         self,
@@ -993,8 +1003,35 @@ class DefaultDictVariable(ConstDictVariable):
                         tx, "__setitem__", [args[0], default_var], kwargs
                     )
                     return default_var
+        elif name == "__setattr__" and self.is_mutable:
+            if len(args) != 2:
+                raise_args_mismatch(tx, name, "2 args", f"{len(args)} args")
+            # Setting a default factory must be a callable or None type
+            if (
+                istype(args[0], ConstantVariable) and args[0].value == "default_factory"
+            ) and self.is_supported_arg(args[1]):
+                tx.output.side_effects.mutation(self)
+                self.default_factory = args[1]
+                return ConstantVariable.create(None)
+            return super().call_method(tx, name, args, kwargs)
+        elif name == "__eq__":
+            if len(args) != 1:
+                raise_args_mismatch(tx, name, "1 args", f"{len(args)} args")
+
+            return variables.UserFunctionVariable(polyfills.dict___eq__).call_function(
+                tx, [self, args[0]], {}
+            )
         else:
             return super().call_method(tx, name, args, kwargs)
+
+    def var_getattr(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+    ) -> VariableTracker:
+        if name == "default_factory":
+            return self.default_factory
+        return super().var_getattr(tx, name)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         # emit `defaultdict(default_factory, new_dict)`
@@ -1096,6 +1133,7 @@ class SetVariable(ConstDictVariable):
     ) -> VariableTracker:
         # We forward the calls to the dictionary model
         from ..utils import check_constant_args
+        from .builder import SourcelessBuilder
 
         if (
             name
@@ -1113,7 +1151,9 @@ class SetVariable(ConstDictVariable):
             return self._fast_set_method(tx, getattr(py_type, name), args, kwargs)
 
         if name == "__init__":
-            temp_set_vt = variables.BuiltinVariable(set).call_set(tx, *args, **kwargs)
+            temp_set_vt = SourcelessBuilder.create(tx, set).call_set(
+                tx, *args, **kwargs
+            )
             tx.output.side_effects.mutation(self)
             self.items.clear()
             self.items.update(temp_set_vt.items)  # type: ignore[attr-defined]
@@ -1155,14 +1195,14 @@ class SetVariable(ConstDictVariable):
                     "1 args and 0 kwargs",
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
-            return variables.UserFunctionVariable(
-                polyfills.set_isdisjoint
-            ).call_function(tx, [self, args[0]], {})
+            return SourcelessBuilder.create(tx, polyfills.set_isdisjoint).call_function(
+                tx, [self, args[0]], {}
+            )
         elif name == "intersection":
             if kwargs:
                 raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
-            return variables.UserFunctionVariable(
-                polyfills.set_intersection
+            return SourcelessBuilder.create(
+                tx, polyfills.set_intersection
             ).call_function(
                 tx,
                 [self, *args],
@@ -1171,13 +1211,13 @@ class SetVariable(ConstDictVariable):
         elif name == "intersection_update":
             if kwargs:
                 raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
-            return variables.UserFunctionVariable(
-                polyfills.set_intersection_update
+            return SourcelessBuilder.create(
+                tx, polyfills.set_intersection_update
             ).call_function(tx, [self, *args], {})
         elif name == "union":
             if kwargs:
                 raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
-            return variables.UserFunctionVariable(polyfills.set_union).call_function(
+            return SourcelessBuilder.create(tx, polyfills.set_union).call_function(
                 tx,
                 [self, *args],
                 {"cls": self.python_type_var()},
@@ -1187,9 +1227,7 @@ class SetVariable(ConstDictVariable):
                 raise_args_mismatch(
                     tx, name, f"Expect: 0 kwargs, Actual: {len(kwargs)} kwargs"
                 )
-            return variables.UserFunctionVariable(
-                polyfills.set_difference
-            ).call_function(
+            return SourcelessBuilder.create(tx, polyfills.set_difference).call_function(
                 tx,
                 [self, *args],
                 {"cls": self.python_type_var()},
@@ -1197,8 +1235,8 @@ class SetVariable(ConstDictVariable):
         elif name == "difference_update":
             if kwargs:
                 raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
-            return variables.UserFunctionVariable(
-                polyfills.set_difference_update
+            return SourcelessBuilder.create(
+                tx, polyfills.set_difference_update
             ).call_function(tx, [self, *args], {})
         elif name == "symmetric_difference":
             if kwargs or len(args) != 1:
@@ -1208,8 +1246,8 @@ class SetVariable(ConstDictVariable):
                     "1 args and 0 kwargs",
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
-            return variables.UserFunctionVariable(
-                polyfills.set_symmetric_difference
+            return SourcelessBuilder.create(
+                tx, polyfills.set_symmetric_difference
             ).call_function(
                 tx,
                 [self, *args],
@@ -1223,13 +1261,13 @@ class SetVariable(ConstDictVariable):
                     "1 args and 0 kwargs",
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
-            return variables.UserFunctionVariable(
-                polyfills.set_symmetric_difference_update
+            return SourcelessBuilder.create(
+                tx, polyfills.set_symmetric_difference_update
             ).call_function(tx, [self, *args], {})
         elif name == "update" and self.is_mutable():
             if kwargs:
                 raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
-            return variables.UserFunctionVariable(polyfills.set_update).call_function(
+            return SourcelessBuilder.create(tx, polyfills.set_update).call_function(
                 tx, [self, *args], {}
             )
         elif name == "remove":
@@ -1265,8 +1303,8 @@ class SetVariable(ConstDictVariable):
             }
             other = args[0].realize()
             if not istype(other, SetVariable):
-                other = variables.BuiltinVariable(set).call_function(tx, [other], {})
-            return variables.BuiltinVariable(op.get(name)).call_function(
+                other = SourcelessBuilder.create(tx, set).call_function(tx, [other], {})
+            return SourcelessBuilder.create(tx, op.get(name)).call_function(
                 tx, [self, other], {}
             )
         elif name in ("__and__", "__or__", "__xor__", "__sub__"):
@@ -1599,6 +1637,8 @@ class DictViewVariable(VariableTracker):
             return ListIteratorVariable(
                 self.view_items_vt, mutation_type=ValueMutationNew()
             )
+        elif name == "__repr__":
+            return ConstantVariable.create(self.debug_repr())
         return super().call_method(tx, name, args, kwargs)
 
 
@@ -1616,6 +1656,16 @@ class DictKeysVariable(DictViewVariable):
 
     def python_type(self) -> type:
         return dict_keys
+
+    def debug_repr(self) -> str:
+        if not self.view_items:
+            return "dict_keys([])"
+        else:
+            return (
+                "dict_keys(["
+                + ",".join(f"{k.vt.debug_repr()}" for k in self.view_items)
+                + "])"
+            )
 
     def call_method(
         self,
@@ -1660,6 +1710,16 @@ class DictValuesVariable(DictViewVariable):
     def python_type(self) -> type:
         return dict_values
 
+    def debug_repr(self) -> str:
+        if not self.view_items:
+            return "dict_values([])"
+        else:
+            return (
+                "dict_values(["
+                + ",".join(f"{v.debug_repr()}" for v in self.view_items)
+                + "])"
+            )
+
 
 class DictItemsVariable(DictViewVariable):
     kv = "items"
@@ -1671,6 +1731,19 @@ class DictItemsVariable(DictViewVariable):
 
     def python_type(self) -> type:
         return dict_items
+
+    def debug_repr(self) -> str:
+        if not self.view_items:
+            return "dict_items([])"
+        else:
+            return (
+                "dict_items(["
+                + ",".join(
+                    f"({k.vt.debug_repr()}, {v.debug_repr()})"
+                    for k, v in self.view_items
+                )
+                + "])"
+            )
 
     def call_method(
         self,
