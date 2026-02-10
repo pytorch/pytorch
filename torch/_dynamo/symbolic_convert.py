@@ -4751,50 +4751,15 @@ class InstructionTranslatorBase(
                 )
             self.output.add_output_instructions(cg.get_instructions())
 
-        # --- Step 3: Load closure variables into local slots ---
+        # --- Step 3: Add the comprehension bytecode ---
 
-        vars_for_co_varnames = (
-            analysis.iterator_vars
-            + analysis.walrus_vars
-            + analysis.captured_vars
-            + ([analysis.result_var] if analysis.result_var else [])
-        )
-
-        for var_name in vars_for_co_varnames:
-            if var_name not in self.output.code_options["co_varnames"]:
-                self.output.code_options["co_varnames"] += (var_name,)
-
-        captured_closure_vars = {
-            var_name
-            for var_name in analysis.captured_vars
-            if var_name in self.cell_and_freevars()
-        }
-
-        # Load closure variables into local slots before copying comprehension bytecode.
-        # We convert LOAD_DEREF to LOAD_FAST in the copied bytecode, so we must first
-        # populate those local slots with the closure values.
-        if captured_closure_vars:
-            cg = PyCodegen(self)
-            for var_name in captured_closure_vars:
-                cg.extend_output(
-                    [
-                        create_instruction("LOAD_DEREF", argval=var_name),
-                        create_instruction("STORE_FAST", argval=var_name),
-                    ]
-                )
-            self.output.add_output_instructions(cg.get_instructions())
-
-        # --- Step 4: Add the comprehension bytecode ---
-
-        copied_insts = self._copy_comprehension_bytecode(
-            start_ip, analysis.end_ip, captured_closure_vars
-        )
+        copied_insts = self._copy_comprehension_bytecode(start_ip, analysis.end_ip)
         self.output.add_output_instructions(copied_insts)
 
         if analysis.result_on_stack:
             self.push(UnknownVariable())
 
-        # --- Step 5: Generate code to pass variables to resume function ---
+        # --- Step 4: Generate code to pass variables to resume function ---
 
         # Variables the comprehension creates that need to be passed to resume:
         # - result_var: variable the comprehension result is assigned to
@@ -4814,7 +4779,7 @@ class InstructionTranslatorBase(
             self._emit_extend_frame_values(resume_cg, frame_list_pos, vars_to_pass)
             self.output.add_output_instructions(resume_cg.get_instructions())
 
-        # --- Step 6: Create the resume function ---
+        # --- Step 5: Create the resume function ---
 
         resume_inst = self.instructions[analysis.end_ip]
         self.output.add_output_instructions(
@@ -4825,7 +4790,7 @@ class InstructionTranslatorBase(
 
     def _emit_extend_frame_values(
         self,
-        cg: "PyCodegen",
+        cg: PyCodegen,
         frame_values_depth: int,
         var_names: list[str],
     ) -> None:
@@ -4865,9 +4830,6 @@ class InstructionTranslatorBase(
         create_resume / ContinueExecutionCache.generate: the first two args
         are __nested_resume_fns and __nested_frame_values (ignored here),
         followed by stack items and live locals.
-
-        The function gets its own co_varnames so there's no name shadowing
-        with the root frame. It is skip_code'd so Dynamo won't trace it.
 
         Returns (code, name) where name is the global name for the function.
         """
