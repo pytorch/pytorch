@@ -1,22 +1,180 @@
 #include <ATen/cpu/Utils.h>
 #include <torch/csrc/cpu/Module.h>
 #include <torch/csrc/utils/pybind.h>
+#if !defined(__s390x__) && !defined(__powerpc__)
+#include <cpuinfo.h>
+#include <cassert>
+#endif
 
 namespace torch::cpu {
+
+static constexpr const char* get_cpu_architecture() {
+#if defined(__x86_64__) || defined(_M_X64)
+  return "x86_64";
+#elif defined(__aarch64__) || defined(_M_ARM64)
+  return "arm64";
+#elif defined(__powerpc64__) || defined(__PPC64__)
+  return "ppc64";
+#elif defined(__s390x__)
+  return "s390x";
+#elif defined(__riscv) && (__riscv_xlen == 64)
+  return "riscv64";
+#else
+  return "unknown";
+#endif
+}
+
+static py::dict get_cpu_capabilities() {
+  py::dict capabilities;
+
+  // Add architecture info
+  capabilities["architecture"] = get_cpu_architecture();
+
+#if !defined(__s390x__) && !defined(__powerpc__)
+  if (!cpuinfo_initialize()) {
+    return capabilities;
+  }
+
+  auto get_cache_size = [](int level) -> uint32_t {
+    const auto processors = cpuinfo_get_processors();
+    if (!processors) {
+      return 0;
+    }
+    const struct cpuinfo_cache* cache = nullptr;
+    switch (level) {
+      case 1:
+        cache = processors[0].cache.l1d;
+        break;
+      case 2:
+        cache = processors[0].cache.l2;
+        break;
+      default:
+        TORCH_CHECK(false, "Unsupported cache level");
+    }
+
+    return cache ? cache->size : 0;
+  };
+
+  // CPU name from package info
+  const auto packages = cpuinfo_get_packages();
+  if (packages && cpuinfo_get_packages_count() > 0) {
+    capabilities["cpu_name"] = packages[0].name;
+  }
+
+  // Core and processor counts
+  capabilities["num_sockets"] = cpuinfo_get_packages_count();
+  capabilities["num_physical_cores"] = cpuinfo_get_cores_count();
+  capabilities["num_logical_cores"] = cpuinfo_get_processors_count();
+
+  // Cache sizes (in bytes)
+  capabilities["l1d_cache_size"] = get_cache_size(1);
+  capabilities["l2_cache_size"] = get_cache_size(2);
+
+  // x86_64 specific capabilities
+#if defined(__x86_64__) || defined(_M_X64)
+  // SSE family
+  capabilities["sse"] = cpuinfo_has_x86_sse();
+  capabilities["sse2"] = cpuinfo_has_x86_sse2();
+  capabilities["sse3"] = cpuinfo_has_x86_sse3();
+  capabilities["ssse3"] = cpuinfo_has_x86_ssse3();
+  capabilities["sse4_1"] = cpuinfo_has_x86_sse4_1();
+  capabilities["sse4_2"] = cpuinfo_has_x86_sse4_2();
+  capabilities["sse4a"] = cpuinfo_has_x86_sse4a();
+
+  // AVX family
+  capabilities["avx"] = cpuinfo_has_x86_avx();
+  capabilities["avx2"] = cpuinfo_has_x86_avx2();
+  capabilities["avx_vnni"] = cpuinfo_has_x86_avxvnni();
+
+  // AVX-512 family
+  capabilities["avx512_f"] = cpuinfo_has_x86_avx512f();
+  capabilities["avx512_cd"] = cpuinfo_has_x86_avx512cd();
+  capabilities["avx512_dq"] = cpuinfo_has_x86_avx512dq();
+  capabilities["avx512_bw"] = cpuinfo_has_x86_avx512bw();
+  capabilities["avx512_vl"] = cpuinfo_has_x86_avx512vl();
+  capabilities["avx512_ifma"] = cpuinfo_has_x86_avx512ifma();
+  capabilities["avx512_vbmi"] = cpuinfo_has_x86_avx512vbmi();
+  capabilities["avx512_vbmi2"] = cpuinfo_has_x86_avx512vbmi2();
+  capabilities["avx512_bitalg"] = cpuinfo_has_x86_avx512bitalg();
+  capabilities["avx512_vpopcntdq"] = cpuinfo_has_x86_avx512vpopcntdq();
+  capabilities["avx512_vnni"] = cpuinfo_has_x86_avx512vnni();
+  capabilities["avx512_bf16"] = cpuinfo_has_x86_avx512bf16();
+  capabilities["avx512_fp16"] = cpuinfo_has_x86_avx512fp16();
+  capabilities["avx512_vp2intersect"] = cpuinfo_has_x86_avx512vp2intersect();
+  capabilities["avx512_4vnniw"] = cpuinfo_has_x86_avx512_4vnniw();
+  capabilities["avx512_4fmaps"] = cpuinfo_has_x86_avx512_4fmaps();
+
+  // AVX10 family
+  capabilities["avx10_1"] = cpuinfo_has_x86_avx10_1();
+  capabilities["avx10_2"] = cpuinfo_has_x86_avx10_2();
+
+  // AVX-VNNI-INT variants
+  capabilities["avx_vnni_int8"] = cpuinfo_has_x86_avx_vnni_int8();
+  capabilities["avx_vnni_int16"] = cpuinfo_has_x86_avx_vnni_int16();
+  capabilities["avx_ne_convert"] = cpuinfo_has_x86_avx_ne_convert();
+
+  // AMX (Advanced Matrix Extensions)
+  capabilities["amx_bf16"] = cpuinfo_has_x86_amx_bf16();
+  capabilities["amx_tile"] = cpuinfo_has_x86_amx_tile();
+  capabilities["amx_int8"] = cpuinfo_has_x86_amx_int8();
+  capabilities["amx_fp16"] = cpuinfo_has_x86_amx_fp16();
+
+  // FMA
+  capabilities["fma3"] = cpuinfo_has_x86_fma3();
+  capabilities["fma4"] = cpuinfo_has_x86_fma4();
+
+  // Other useful capabilities
+  capabilities["f16c"] = cpuinfo_has_x86_f16c();
+  capabilities["bmi"] = cpuinfo_has_x86_bmi();
+  capabilities["bmi2"] = cpuinfo_has_x86_bmi2();
+  capabilities["popcnt"] = cpuinfo_has_x86_popcnt();
+  capabilities["lzcnt"] = cpuinfo_has_x86_lzcnt();
+  capabilities["aes"] = cpuinfo_has_x86_aes();
+  capabilities["sha"] = cpuinfo_has_x86_sha();
+  capabilities["clflush"] = cpuinfo_isa.clflush;
+  capabilities["clflushopt"] = cpuinfo_isa.clflushopt;
+  capabilities["clwb"] = cpuinfo_has_x86_clwb();
+#endif
+
+  // ARM64 specific capabilities
+#if defined(__aarch64__) || defined(_M_ARM64)
+  capabilities["neon"] = cpuinfo_has_arm_neon();
+  capabilities["fp16_arith"] = cpuinfo_has_arm_fp16_arith();
+  capabilities["bf16"] = cpuinfo_has_arm_bf16();
+  capabilities["i8mm"] = cpuinfo_has_arm_i8mm();
+  capabilities["dot"] = cpuinfo_has_arm_neon_dot();
+  capabilities["sve"] = cpuinfo_has_arm_sve();
+  capabilities["sve2"] = cpuinfo_has_arm_sve2();
+  capabilities["sve_bf16"] = cpuinfo_has_arm_sve_bf16();
+  capabilities["sme"] = cpuinfo_has_arm_sme();
+  capabilities["sme2"] = cpuinfo_has_arm_sme2();
+  capabilities["atomics"] = cpuinfo_has_arm_atomics();
+  capabilities["fhm"] = cpuinfo_has_arm_fhm();
+  capabilities["rdm"] = cpuinfo_has_arm_neon_rdm();
+  capabilities["crc32"] = cpuinfo_has_arm_crc32();
+  capabilities["aes"] = cpuinfo_has_arm_aes();
+  capabilities["sha1"] = cpuinfo_has_arm_sha1();
+  capabilities["sha2"] = cpuinfo_has_arm_sha2();
+  capabilities["pmull"] = cpuinfo_has_arm_pmull();
+  if (cpuinfo_has_arm_sve()) {
+    capabilities["sve_max_length"] = cpuinfo_get_max_arm_sve_length();
+  }
+  if (cpuinfo_has_arm_sme()) {
+    capabilities["sme_max_length"] = cpuinfo_get_max_arm_sme_length();
+  }
+#endif
+
+#endif // !defined(__s390x__) && !defined(__powerpc__)
+
+  return capabilities;
+}
 
 void initModule(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
   auto cpu = m.def_submodule("_cpu", "cpu related pybind.");
-  cpu.def("_is_avx2_supported", at::cpu::is_avx2_supported);
-  cpu.def("_is_avx512_supported", at::cpu::is_avx512_supported);
-  cpu.def("_is_avx512_vnni_supported", at::cpu::is_avx512_vnni_supported);
-  cpu.def("_is_avx512_bf16_supported", at::cpu::is_avx512_bf16_supported);
-  cpu.def("_is_amx_tile_supported", at::cpu::is_amx_tile_supported);
-  cpu.def("_is_amx_fp16_supported", at::cpu::is_amx_fp16_supported);
   cpu.def("_init_amx", at::cpu::init_amx);
-  cpu.def("_L1d_cache_size", at::cpu::L1d_cache_size);
-  cpu.def("_L2_cache_size", at::cpu::L2_cache_size);
+  cpu.def("_get_cpu_capability", get_cpu_capabilities);
 }
 
 } // namespace torch::cpu

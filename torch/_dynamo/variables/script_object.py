@@ -20,7 +20,6 @@ by limiting operations to known-safe patterns and failing fast for unsafe usage.
 
 import functools
 import inspect
-import types
 from collections.abc import Callable, Iterable, Sequence
 from typing import Any, Optional, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
@@ -39,12 +38,7 @@ from torch.fx.proxy import Proxy
 
 from .. import graph_break_hints
 from ..eval_frame import skip_code
-from ..exc import (
-    raise_observed_exception,
-    unimplemented,
-    UnsafeScriptObjectError,
-    Unsupported,
-)
+from ..exc import unimplemented, UnsafeScriptObjectError, Unsupported
 from ..source import AttrSource
 from ..utils import proxy_args_kwargs
 from .base import VariableTracker
@@ -230,13 +224,6 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
                 name,
             )
             if member_type is None:
-                # Special case: __bool__ and __len__ are used for truthiness checks.
-                # If they're not registered and the real object doesn't have them,
-                # raise ObservedAttributeError so the caller can fall back to
-                # treating the object as truthy (Python default behavior
-                if name in ("__bool__", "__len__") and not hasattr(real_obj, name):
-                    raise_observed_exception(AttributeError, tx)
-
                 unimplemented(
                     gb_type="Attempted to access unregistered member on an OpaqueObject",
                     context=f"value={real_obj}, attr={name}",
@@ -248,9 +235,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
 
             if member_type == MemberType.USE_REAL:
                 value = getattr(real_obj, name)
-                if inspect.ismethod(value) or isinstance(
-                    value, types.MethodWrapperType
-                ):
+                if inspect.ismethod(value):
                     return LambdaVariable(
                         lambda *args, **kwargs: self.call_method(tx, name, args, kwargs)
                     )
@@ -259,10 +244,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
 
             elif member_type == MemberType.INLINED:
                 value = getattr(real_obj, name)
-                if (
-                    inspect.ismethod(value)
-                    or isinstance(value, types.MethodWrapperType)
-                ) and self.source is None:
+                if inspect.ismethod(value) and self.source is None:
                     # When we don't have a source, fall back to call_method
                     # which creates a proxy node.
                     return LambdaVariable(

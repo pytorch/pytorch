@@ -297,7 +297,7 @@ def generate_env_vars_string(*, stable_output: bool = False) -> str:
         return any(string in key for string in allow_list) and key not in skip_list
 
     config_lines = [
-        f"os.environ['{key}'] = '{value}'"
+        f"""os.environ['{key}'] = '{value.replace("'", '"')}'"""
         for key, value in os.environ.items()
         if filter(key)
     ]
