@@ -3835,6 +3835,7 @@ Tensor& linalg_solve_triangular_out(
     bool unitriangular,
     Tensor& out) {
   checkInputsSolver(A, B, left, "linalg.solve_triangular");
+  checkSameDevice("linalg.solve_triangular", B, A, "B");
   auto [B_, A_] = _linalg_broadcast_batch_dims(B, A, /*don't check errors*/nullptr);
 
   // We'll write F-contig / F-transpose for FORTRAN contiguous / FORTRAN transpose etc
