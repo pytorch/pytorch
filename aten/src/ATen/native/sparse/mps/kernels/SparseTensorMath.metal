@@ -285,14 +285,9 @@ kernel void spmm_addmm_coo(
 kernel void mark_segments(
     device const int64_t* indices [[buffer(0)]],
     device int*           mask    [[buffer(1)]],
-    constant uint&        nnz     [[buffer(2)]],
     uint                  tid     [[thread_position_in_grid]])
 {
-    if (tid == 0) {
-        mask[0] = 1;
-    } else {
-        mask[tid] = (indices[tid] != indices[tid - 1]) ? 1 : 0;
-    }
+    mask[tid] = (tid == 0 || indices[tid] != indices[tid - 1]) ? 1 : 0;
 }
 
 kernel void compute_offsets_and_counts(

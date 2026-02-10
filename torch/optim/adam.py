@@ -876,6 +876,7 @@ def _fused_adam(
             lr = lr_dict[device]
         torch._foreach_add_(device_state_steps, 1)
         func = torch._fused_adam_ if not decoupled_weight_decay else torch._fused_adamw_
+        # pyrefly: ignore [no-matching-overload]
         func(
             device_params,
             device_grads,

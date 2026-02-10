@@ -5,6 +5,7 @@ import contextlib
 import copy
 import functools
 import math
+import re
 import unittest  # noqa: F811
 from importlib import import_module
 
@@ -396,7 +397,45 @@ class ActivationCheckpointingViaTagsTests(
 
         def partition_fn(joint_gm, *args, **kwargs):
             gm_str = joint_gm.print_readable(print_output=False)
-            self.assertTrue("# ac_graph_id: 2 - PREFER_RECOMPUTE" in gm_str)
+            # Check for the pattern with any graph ID (the ID depends on test order)
+            self.assertTrue(
+                re.search(r"# ac_graph_id: \d+ - PREFER_RECOMPUTE", gm_str),
+                f"Expected ac_graph_id pattern not found in:\n{gm_str}",
+            )
+            return min_cut_rematerialization_partition(joint_gm, *args, **kwargs)
+
+        backend = aot_autograd(
+            fw_compiler=nop, bw_compiler=nop, partition_fn=partition_fn
+        )
+        _ = torch.compile(fn, backend=backend)(x, y)
+
+    @requires_cuda_and_triton
+    def test_tangent_placeholders_have_is_backward_tag(self, device):
+        """Test that tangent placeholders in the joint graph are tagged with is_backward."""
+
+        def gn(x, y):
+            return torch.sigmoid(torch.matmul(x, y))
+
+        def fn(x, y):
+            return torch.utils.checkpoint.checkpoint(
+                gn, torch.sin(x), y, use_reentrant=False
+            )
+
+        x = torch.randn(4, 4, device=device, requires_grad=True)
+        y = torch.randn(4, 4, device=device, requires_grad=True)
+
+        def partition_fn(joint_gm, *args, **kwargs):
+            # Check partitioner_tag on placeholder nodes
+            for node in joint_gm.graph.nodes:
+                if node.op == "placeholder":
+                    if "tangents" in str(node.target):
+                        self.assertTrue(
+                            "is_backward" in node.meta.get("partitioner_tag", "")
+                        )
+                    else:
+                        self.assertTrue(
+                            "is_forward" in node.meta.get("partitioner_tag", "")
+                        )
             return min_cut_rematerialization_partition(joint_gm, *args, **kwargs)
 
         backend = aot_autograd(
@@ -2028,7 +2067,7 @@ class GraphModule(torch.nn.Module):
     def test_frozen_dataclass_pytree_output(self):
         import dataclasses
 
-        from torch.utils._pytree import register_dataclass
+        from torch.utils import _pytree as pytree
 
         @dataclasses.dataclass(frozen=True)
         class InputNode:
@@ -2038,46 +2077,92 @@ class GraphModule(torch.nn.Module):
         class OutputNode:
             y: torch.Tensor
 
-        register_dataclass(InputNode)
-        register_dataclass(OutputNode)
+        pytree.register_dataclass(InputNode)
+        pytree.register_dataclass(OutputNode)
 
-        class TinyMLP(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.fc1 = nn.Linear(4, 8)
-                self.fc2 = nn.Linear(8, 4)
+        def cleanup():
+            # Clean up pytree registrations to avoid leaking state to other tests.
+            # We manually remove from the registries since _deregister_pytree_node
+            # has issues with classes registered without serialized_type_name.
+            for cls in [InputNode, OutputNode]:
+                pytree.SUPPORTED_NODES.pop(cls, None)
+                pytree.SUPPORTED_SERIALIZED_TYPES.pop(cls, None)
+                pytree.CONSTANT_NODES.discard(cls)
 
-            def forward(self, inp: InputNode) -> OutputNode:
-                h = self.fc1(inp.x)
-                h = torch.nn.functional.silu(h)
-                y = self.fc2(h)
-                return OutputNode(y=y)
+        try:
 
-        mlp = TinyMLP()
+            class TinyMLP(nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.fc1 = nn.Linear(4, 8)
+                    self.fc2 = nn.Linear(8, 4)
 
-        def checkpointed_forward(inp):
+                def forward(self, inp: InputNode) -> OutputNode:
+                    h = self.fc1(inp.x)
+                    h = torch.nn.functional.silu(h)
+                    y = self.fc2(h)
+                    return OutputNode(y=y)
+
+            mlp = TinyMLP()
+
+            def checkpointed_forward(inp):
+                return torch.utils.checkpoint.checkpoint(
+                    mlp.forward,
+                    inp,
+                    use_reentrant=False,
+                    preserve_rng_state=True,
+                )
+
+            input_eager = InputNode(x=torch.randn(2, 4, requires_grad=True))
+            torch.manual_seed(0)
+            output_eager = checkpointed_forward(input_eager)
+            output_eager.y.sum().backward()
+
+            input_compiled = InputNode(
+                x=input_eager.x.detach().clone().requires_grad_(True)
+            )
+            torch.manual_seed(0)
+            compiled_fn = torch.compile(checkpointed_forward, fullgraph=True)
+            output_compiled = compiled_fn(input_compiled)
+            output_compiled.y.sum().backward()
+
+            self.assertEqual(output_eager.y, output_compiled.y)
+            self.assertEqual(input_eager.x.grad, input_compiled.x.grad)
+        finally:
+            cleanup()
+
+    def test_checkpoint_with_record_function(self):
+        # Test that record_function ops are allowed inside checkpointed functions.
+        # record_function is technically "impure" but safe to duplicate during
+        # activation checkpointing recompute since it only sets up profiling spans.
+        # This test verifies:
+        # 1. No assertion error about impure ops in AC
+        # 2. Forward graph contains record_function ops
+        # 3. Code produces correct results
+        def gn(x, y):
+            with torch.profiler.record_function("matmul_region"):
+                return torch.sigmoid(torch.matmul(x, y))
+
+        def fn(x, y):
             return torch.utils.checkpoint.checkpoint(
-                mlp.forward,
-                inp,
-                use_reentrant=False,
-                preserve_rng_state=True,
+                gn, torch.sin(x), y, use_reentrant=False
             )
 
-        input_eager = InputNode(x=torch.randn(2, 4, requires_grad=True))
-        torch.manual_seed(0)
-        output_eager = checkpointed_forward(input_eager)
-        output_eager.y.sum().backward()
+        x = torch.randn(4, 4, requires_grad=True)
+        y = torch.randn(4, 4, requires_grad=True)
 
-        input_compiled = InputNode(
-            x=input_eager.x.detach().clone().requires_grad_(True)
+        # Verify record_function_enter_new appears in forward graph
+        fw_compiler = functools.partial(
+            count_ops, freq=1, op=torch.ops.profiler._record_function_enter_new.default
         )
-        torch.manual_seed(0)
-        compiled_fn = torch.compile(checkpointed_forward, fullgraph=True)
-        output_compiled = compiled_fn(input_compiled)
-        output_compiled.y.sum().backward()
-
-        self.assertEqual(output_eager.y, output_compiled.y)
-        self.assertEqual(input_eager.x.grad, input_compiled.x.grad)
+        backend = aot_autograd(
+            fw_compiler=fw_compiler,
+            bw_compiler=nop,
+            partition_fn=default_partition,
+        )
+        # Enable capture_profiler_record_function to trace record_function ops
+        with torch._dynamo.config.patch(capture_profiler_record_function=True):
+            self._validate(fn, backend, x, y)
 
 
 class RematerializeACNodesPassTests(torch._dynamo.test_case.TestCase):
@@ -2187,7 +2272,7 @@ def forward(self, arg0_1, arg1_1):
         ):
             self._compile_and_capture(fwd_bwd_with_rng, True, (x,))
 
-    def test_ac_rematerialize_with_no_annotations_warns_and_returns_unchanged(self):
+    def test_ac_rematerialize_with_no_annotations_returns_unchanged(self):
         x = torch.randn(4, 4, requires_grad=True)
 
         def fwd_bwd(x):
@@ -2197,21 +2282,7 @@ def forward(self, arg0_1, arg1_1):
             loss = z.sum()
             return _grad(loss, x)[0]
 
-        # Without backward annotations, the pass should warn and return unchanged
-        # We verify this by checking that remat_using_tags=True produces the same
-        # graph as remat_using_tags=False (i.e., no recomputation happens)
-        import warnings
-
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            result_with, gm_with = self._compile_and_capture(fwd_bwd, True, (x,))
-
-            # Check warning was issued
-            self.assertTrue(
-                any("no backward region" in str(warning.message) for warning in w),
-                f"Expected warning about no backward region, got: {[str(warning.message) for warning in w]}",
-            )
-
+        result_with, gm_with = self._compile_and_capture(fwd_bwd, True, (x,))
         # Get the graph without the pass for comparison
         result_without, gm_without = self._compile_and_capture(fwd_bwd, False, (x,))
 

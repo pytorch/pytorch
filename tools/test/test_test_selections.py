@@ -473,6 +473,7 @@ class TestCalculateShards(unittest.TestCase):
                     self.assertTrue(sharded_tests[0].time is None)
                 else:
                     # x.time is not None because of the above check
+                    # pyrefly: ignore [no-matching-overload]
                     self.assertAlmostEqual(
                         random_times[test],
                         sum(x.time for x in sharded_tests),  # type: ignore[misc]

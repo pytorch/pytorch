@@ -22,6 +22,9 @@ from torch.utils._config_module import Config, install_config_module
 _save_config_ignore = [
     # callable not serializable
     "joint_custom_pass",
+    # callable configs with uuid() for caching, or raw callables
+    "activation_memory_budget_runtime_estimator",
+    "activation_memory_budget_solver",
 ]
 
 
@@ -71,9 +74,29 @@ autograd_cache_allow_custom_autograd_functions: bool = Config(
 # need to add env vars or make it configurable
 bundled_autograd_cache: bool = False
 
+bypass_autograd_cache_key: bool = False
+
 # Whether or not to normalize placeholder names in graphs
 # from dynaom in AOTAutogradCache
 autograd_cache_normalize_inputs = not is_fbcode()
+
+# Enable debug mode at first invocation to check if custom ops are valid.
+# When enabled, this checks that custom operators don't violate aliasing constraints.
+#
+# check_custom_op_aliasing: Controls whether to run the custom op aliasing check at all.
+#   - When True: The check runs on first invocation of compiled functions.
+#   - When False: The check is skipped entirely.
+#
+# error_on_custom_op_aliasing: Controls behavior when a violation is detected.
+#   Only has effect when check_custom_op_aliasing is True.
+#   - When True: Raises RuntimeError on aliasing violations.
+#   - When False: Emits UserWarning on aliasing violations.
+#
+# Deprecated: Custom ops returning aliased outputs is deprecated and will
+# become an error in PyTorch 2.12. Currently error_on_custom_op_aliasing
+# is True only in CI.
+check_custom_op_aliasing = True
+error_on_custom_op_aliasing = bool(os.getenv("CI"))
 
 
 def remote_autograd_cache_default() -> Optional[bool]:
@@ -397,6 +420,8 @@ saved_tensors_hooks_filtering_mode = "donated"
 
 # This callback is invoked on the joint graph before partitioning
 joint_custom_pass: Callable = None  # type: ignore[assignment]
+
+force_autograd_cache = False
 
 # Note [Selective Decomposition]
 # This config allows selective decomposition of certain operators in the graph.

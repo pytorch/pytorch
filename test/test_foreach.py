@@ -38,6 +38,7 @@ from torch.testing._internal.common_utils import (
     gradcheck,
     parametrize,
     run_tests,
+    serialTest,
     skipIfTorchDynamo,
     TEST_WITH_ROCM,
     TestCase,
@@ -54,7 +55,8 @@ class RegularFuncWrapper:
 
     def __call__(self, inputs, scalars=None, **kwargs):
         if scalars is not None:
-            assert len(inputs) == 3
+            if len(inputs) != 3:
+                raise AssertionError(f"expected len(inputs) == 3, got {len(inputs)}")
             # We need to distribute each scalar to the regular func and it needs
             # special consideration as it is a keyword only argument to the
             # regular func. (Strangely, it is not a keyword only argument to the
@@ -96,13 +98,15 @@ class ForeachFuncWrapper:
             keys = tuple([e.key for e in p.key_averages()])
             mta_called = any("multi_tensor_apply_kernel" in k for k in keys)
 
-            assert mta_called == (expect_fastpath and (not zero_size)), (
-                f"{mta_called=}, {expect_fastpath=}, {zero_size=}, {self.func.__name__=}, {keys=}"
-            )
+            if mta_called != (expect_fastpath and (not zero_size)):
+                raise AssertionError(
+                    f"{mta_called=}, {expect_fastpath=}, {zero_size=}, {self.func.__name__=}, {keys=}"
+                )
         else:
             actual = self.func(*inputs, **kwargs)
         if self.is_inplace:
-            assert id(inputs[0]) == id(actual)
+            if id(inputs[0]) != id(actual):
+                raise AssertionError("expected inputs[0] is actual")
         return actual
 
 
@@ -370,8 +374,14 @@ class TestForeach(TestCase):
             noncontiguous=not is_fastpath,
             allow_higher_dtype_scalars=True,
         ):
-            assert isinstance(sample.args, tuple)
-            assert len(sample.args) == 2
+            if not isinstance(sample.args, tuple):
+                raise AssertionError(
+                    f"expected sample.args to be tuple, got {type(sample.args)}"
+                )
+            if len(sample.args) != 2:
+                raise AssertionError(
+                    f"expected len(sample.args) == 2, got {len(sample.args)}"
+                )
             inputs = [sample.input, *sample.args]
             kwargs = sample.kwargs.copy()
             disable_fastpath = sample.disable_fastpath and is_fastpath
@@ -1021,6 +1031,24 @@ class TestForeach(TestCase):
             )
         self.assertEqual(expect, actual, equal_nan=False)
 
+    @dtypes(*floating_types_and(torch.half, torch.bfloat16))
+    def test_foreach_max_with_different_tensor_sizes_and_negative_values(
+        self, device, dtype
+    ):
+        # Small tensor with all negative values
+        x = torch.rand(4, device=device, dtype=dtype) * (-5)
+        # Large tensor with positive values
+        y = torch.rand(1024, 1024, device=device, dtype=dtype)
+
+        result = torch._foreach_max([x, y])
+
+        # Verify x's max is the actual max of x (a negative number)
+        expected_x_max = x.max()
+        expected_y_max = y.max()
+
+        self.assertEqual(result[0], expected_x_max)
+        self.assertEqual(result[1], expected_y_max)
+
     @onlyCUDA
     @ops(foreach_reduce_op_db, allowed_dtypes=floating_types())
     @parametrize("use_cuda_graph", (False, True))
@@ -1108,6 +1136,37 @@ class TestForeach(TestCase):
                 inputs, self.is_cuda, not disable_fastpath, zero_size=False, **kwargs
             ),
         )
+
+    @ops(
+        [o for o in foreach_reduce_op_db if o.name == "_foreach_norm"],
+    )
+    def test_foreach_norm_empty_tensor_inf_error(self, device, dtype, op):
+        """Test that _foreach_norm errors on empty tensors with ord=infinity"""
+        import math
+
+        # Test with single empty tensor
+        empty_tensor = torch.empty(0, dtype=dtype, device=device)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "_foreach_norm cannot compute the infinity norm on an empty tensor because the operation does not have an identity",
+        ):
+            torch._foreach_norm([empty_tensor], ord=math.inf)
+
+        # Test with mixed empty and non-empty tensors
+        non_empty_tensor = make_tensor((4,), dtype=dtype, device=device)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "_foreach_norm cannot compute the infinity norm on an empty tensor because the operation does not have an identity",
+        ):
+            torch._foreach_norm([empty_tensor, non_empty_tensor], ord=math.inf)
+
+        # Test that L1 and L2 norms work with empty tensors (should return 0)
+        # Note: This only works for floating types, int/complex may error or go to slow path
+        if dtype.is_floating_point:
+            result_l1 = torch._foreach_norm([empty_tensor], ord=1)
+            result_l2 = torch._foreach_norm([empty_tensor], ord=2)
+            self.assertEqual(result_l1[0].item(), 0.0)
+            self.assertEqual(result_l2[0].item(), 0.0)
 
     @onlyCUDA
     @ops(
@@ -1282,6 +1341,87 @@ class TestForeach(TestCase):
         self.assertEqual(actual, [t.div(scalar_cpu_tensor) for t in tensors])
 
     @onlyCUDA
+    @dtypes(*floating_types_and(torch.half, torch.bfloat16))
+    def test_pointwise_op_with_0d_tensor1(self, device, dtype):
+        # Test that foreach_addcmul/addcdiv uses fast path when tensor1 is a list of 0D tensors
+        # This is a regression test for the optimization that allows 0D tensors in tensor1
+        # to use the fast CUDA kernel path instead of falling back to the slow path.
+        N = 5
+        # Create regular tensors for input and tensor2
+        inputs = [make_tensor((10, 10), dtype=dtype, device=device) for _ in range(N)]
+        tensor2s = [
+            make_tensor((10, 10), dtype=dtype, device=device, low=0.1) for _ in range(N)
+        ]
+        # Create 0D tensors for tensor1 (scalar tensors)
+        tensor1s_0d = [
+            torch.tensor(float(i + 1), dtype=dtype, device=device) for i in range(N)
+        ]
+
+        alpha = 0.5
+
+        # Test with 0D tensors in either tensor1 or tensor2 position
+        # For addcmul (commutative), both orderings should use the fast path
+        # For addcdiv (non-commutative), only 0D tensor1 uses the fast path
+        for swap_args in [False, True]:
+            if swap_args:
+                # 0D tensors in tensor2 position
+                t1_args, t2_args = tensor2s, tensor1s_0d
+            else:
+                # 0D tensors in tensor1 position
+                t1_args, t2_args = tensor1s_0d, tensor2s
+
+            # Test foreach_addcmul (commutative - both orderings use fast path)
+            foreach_addcmul = ForeachFuncWrapper(torch._foreach_addcmul)
+            actual_addcmul = foreach_addcmul(
+                [inputs, t1_args, t2_args],
+                is_cuda=True,
+                expect_fastpath=True,
+                value=alpha,
+            )
+            expected_addcmul = [
+                torch.addcmul(inp, t1, t2, value=alpha)
+                for inp, t1, t2 in zip(inputs, t1_args, t2_args)
+            ]
+            self.assertEqual(actual_addcmul, expected_addcmul)
+
+            # Test foreach_addcdiv (non-commutative - only 0D tensor1 uses fast path)
+            if not swap_args:
+                foreach_addcdiv = ForeachFuncWrapper(torch._foreach_addcdiv)
+                actual_addcdiv = foreach_addcdiv(
+                    [inputs, t1_args, t2_args],
+                    is_cuda=True,
+                    expect_fastpath=True,
+                    value=alpha,
+                )
+                expected_addcdiv = [
+                    torch.addcdiv(inp, t1, t2, value=alpha)
+                    for inp, t1, t2 in zip(inputs, t1_args, t2_args)
+                ]
+                self.assertEqual(actual_addcdiv, expected_addcdiv)
+
+            # Test inplace variants
+            inputs_copy = [t.clone() for t in inputs]
+            foreach_addcmul_inplace = ForeachFuncWrapper(torch._foreach_addcmul_)
+            foreach_addcmul_inplace(
+                [inputs_copy, t1_args, t2_args],
+                is_cuda=True,
+                expect_fastpath=True,
+                value=alpha,
+            )
+            self.assertEqual(inputs_copy, expected_addcmul)
+
+            if not swap_args:
+                inputs_copy = [t.clone() for t in inputs]
+                foreach_addcdiv_inplace = ForeachFuncWrapper(torch._foreach_addcdiv_)
+                foreach_addcdiv_inplace(
+                    [inputs_copy, t1_args, t2_args],
+                    is_cuda=True,
+                    expect_fastpath=True,
+                    value=alpha,
+                )
+                self.assertEqual(inputs_copy, expected_addcdiv)
+
+    @onlyCUDA
     def test_div_reciprocal(self):
         expect_m, expect_e = torch.frexp(
             torch.div(torch.tensor(0.1, device="cuda"), 10.0)
@@ -1291,6 +1431,91 @@ class TestForeach(TestCase):
         )
         self.assertEqual(expect_m, actual_m)
         self.assertEqual(expect_e, actual_e)
+
+    @onlyCUDA
+    @dtypes(*floating_types_and(torch.half, torch.bfloat16))
+    def test_addcmul_alpha_one_fma_parity(self, device, dtype):
+        # Test that addcmul with alpha=1 produces bitwise identical results
+        # to add with alpha=scalar_val (when tensor1 is a 0D tensor with that value).
+        # This verifies that the alpha=1 special case uses FMA correctly.
+        #
+        # The computation is: input + 1 * tensor1 * tensor2
+        # When alpha=1, this should match: input + tensor1 * tensor2
+        # And when tensor1 is a 0D tensor with value scalar_val, this should match:
+        # input.add(tensor2, alpha=scalar_val)
+        N = 5
+
+        # Test with various scalar values for tensor1
+        for scalar_val in [1.0, 2.0, 0.5, -1.0, 3.14159]:
+            # Create tensors - use same seed for reproducibility
+            inputs = [
+                make_tensor((10, 10), dtype=dtype, device=device) for _ in range(N)
+            ]
+            tensor2s = [
+                make_tensor((10, 10), dtype=dtype, device=device) for _ in range(N)
+            ]
+
+            # Create 0D tensors (scalars on GPU) for tensor1
+            tensor1s_0d = [
+                torch.tensor(scalar_val, dtype=dtype, device=device) for _ in range(N)
+            ]
+
+            # 1. Regular addcmul with alpha=1
+            regular_addcmul_results = [
+                torch.addcmul(inp, t1, t2, value=1.0)
+                for inp, t1, t2 in zip(inputs, tensor1s_0d, tensor2s)
+            ]
+
+            # 2. foreach_addcmul with alpha=1
+            foreach_addcmul_results = torch._foreach_addcmul(
+                inputs, tensor1s_0d, tensor2s, value=1.0
+            )
+
+            # 3. add with alpha=tensor1.item() - this is what FMA should match
+            # input + scalar_val * tensor2
+            # We use t1.item() to get the actual float32 value stored in the tensor,
+            # not the Python float64 scalar_val which may differ due to precision
+            add_alpha_results = [
+                inp.add(t2, alpha=t1.item())
+                for inp, t1, t2 in zip(inputs, tensor1s_0d, tensor2s)
+            ]
+
+            inp, t1, t2 = inputs[0], tensor1s_0d[0], tensor2s[0]
+
+            # Verify bitwise equality between regular addcmul and foreach_addcmul
+            self.assertEqual(
+                regular_addcmul_results,
+                foreach_addcmul_results,
+                atol=0,
+                rtol=0,
+            )
+
+            # Verify bitwise equality between addcmul (alpha=1) and add (alpha=scalar_val)
+            # This tests that the FMA optimization produces correct results
+            self.assertEqual(
+                regular_addcmul_results,
+                add_alpha_results,
+                atol=0,
+                rtol=0,
+            )
+
+        # Also test with non-0D tensor1 to ensure the regular path still works
+        inputs = [make_tensor((10, 10), dtype=dtype, device=device) for _ in range(N)]
+        tensor1s = [make_tensor((10, 10), dtype=dtype, device=device) for _ in range(N)]
+        tensor2s = [make_tensor((10, 10), dtype=dtype, device=device) for _ in range(N)]
+
+        regular_results = [
+            torch.addcmul(inp, t1, t2, value=1.0)
+            for inp, t1, t2 in zip(inputs, tensor1s, tensor2s)
+        ]
+        foreach_results = torch._foreach_addcmul(inputs, tensor1s, tensor2s, value=1.0)
+
+        self.assertEqual(
+            regular_results,
+            foreach_results,
+            atol=0,
+            rtol=0,
+        )
 
     @onlyCUDA
     def test_0dim_tensor_overload_exception(self):
@@ -1361,6 +1586,47 @@ class TestForeach(TestCase):
                     self.assertTrue(torch.equal(t, ref_t))
 
     @onlyCUDA
+    @ops(filter(lambda op: op.name == "_foreach_copy", foreach_binary_op_db))
+    def test_foreach_copy_with_mixed_dtypes_within_tensor(self, device, dtype, op):
+        foreach_copy_ = ForeachFuncWrapper(op.inplace_variant)
+
+        for sample in op.sample_inputs(
+            device, dtype, noncontiguous=False, allow_higher_dtype_scalars=True
+        ):
+            if len(sample.input) < 2:
+                continue
+
+            dtypes = [torch.float32, torch.bfloat16, torch.float16]
+            uniform_tensors = [t.clone() for t in sample.input]
+            mixed_tensors = [
+                t.clone().to(dtype)
+                for t, dtype in zip(sample.input, itertools.cycle(dtypes))
+            ]
+
+            uniform_dst = [torch.empty_like(t) for t in uniform_tensors]
+            out = foreach_copy_(
+                (uniform_dst, mixed_tensors), is_cuda=True, expect_fastpath=False
+            )
+            out_ref = [
+                torch.empty_like(t1).copy_(t2)
+                for t1, t2 in zip(uniform_tensors, mixed_tensors)
+            ]
+            for t, ref_t in zip(out, out_ref):
+                self.assertTrue(torch.equal(t, ref_t))
+
+            mixed_dst = [torch.empty_like(t) for t in mixed_tensors]
+            out = foreach_copy_(
+                (mixed_dst, uniform_tensors), is_cuda=True, expect_fastpath=False
+            )
+            out_ref = [
+                torch.empty_like(t1).copy_(t2)
+                for t1, t2 in zip(mixed_tensors, uniform_tensors)
+            ]
+            for t, ref_t in zip(out, out_ref):
+                self.assertTrue(torch.equal(t, ref_t))
+
+    @onlyCUDA
+    @serialTest()
     @largeTensorTest("40GB", device="cuda")
     def test_foreach_copy_with_multi_dtypes_large_input(self):
         # see https://github.com/pytorch/pytorch/issues/156261

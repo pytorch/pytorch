@@ -4,7 +4,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Any, cast, Optional, Union
+from typing import Any, cast
 from typing_extensions import deprecated, Protocol, runtime_checkable
 
 import torch
@@ -76,7 +76,7 @@ class AsyncStager(Protocol):
 
     def stage(
         self, state_dict: STATE_DICT_TYPE
-    ) -> Union[Future[STATE_DICT_TYPE], STATE_DICT_TYPE]:
+    ) -> Future[STATE_DICT_TYPE] | STATE_DICT_TYPE:
         """
         Returns a "staged" copy of `state_dict`. The expectation of the staged copy is that it is
         inoculated from any updates incurred after the stage call is complete.
@@ -198,13 +198,13 @@ class DefaultStager(AsyncStager):
                     "Non-blocking copy requires that the current accelerator is available."
                 )
 
-        self._staging_future: Optional[Future[STATE_DICT_TYPE]] = None
+        self._staging_future: Future[STATE_DICT_TYPE] | None = None
 
     def stage(
         self,
         state_dict: STATE_DICT_TYPE,
         **kwargs: Any,
-    ) -> Union[STATE_DICT_TYPE, Future[STATE_DICT_TYPE]]:
+    ) -> STATE_DICT_TYPE | Future[STATE_DICT_TYPE]:
         """
         This function is responsible for staging staging the state_dict.
         See class docstring for more details on staging.
@@ -247,6 +247,11 @@ class DefaultStager(AsyncStager):
             self._staging_stream.synchronize() if self._staging_stream else torch.accelerator.synchronize()
         else:
             state_dict = self._state_dict_stager.stage(state_dict, non_blocking=False)
+
+        # release reference cycle to prevent memory leaks in async_save
+        # created by _deepcopy_dispatch that capture self
+        self._state_dict_stager.close()
+
         return state_dict
 
     def close(self) -> None:
@@ -265,6 +270,7 @@ class DefaultStager(AsyncStager):
         """
         if self._staging_executor:
             self._staging_executor.shutdown(wait=True)
+        self._state_dict_stager.close()
 
     def synchronize_staging(self) -> None:
         """
@@ -305,7 +311,7 @@ class BlockingAsyncStager(AsyncStager):
         """
         self.cache_staged_state_dict = cache_staged_state_dict
         self.type_check = type_check
-        self.state_dict_cache: Optional[STATE_DICT_TYPE] = None
+        self.state_dict_cache: STATE_DICT_TYPE | None = None
 
     def stage(self, state_dict: STATE_DICT_TYPE) -> STATE_DICT_TYPE:
         """
@@ -351,7 +357,7 @@ class _ReplicationStager(AsyncStager):
         pg: ProcessGroup,
         timeout: timedelta = timedelta(minutes=30),
         device: torch.device = torch.device("cpu"),
-        storage_dir: Optional[str] = None,
+        storage_dir: str | None = None,
     ):
         self._pg = pg
         self._timeout = timeout
@@ -368,7 +374,7 @@ class _ReplicationStager(AsyncStager):
 
     def stage(
         self, state_dict: STATE_DICT_TYPE
-    ) -> Union[Future[STATE_DICT_TYPE], STATE_DICT_TYPE]:
+    ) -> Future[STATE_DICT_TYPE] | STATE_DICT_TYPE:
         """
         Stage the state_dict by replicating it across ranks. Returns a state_dict representing
         the received replica.

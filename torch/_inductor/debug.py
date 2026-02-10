@@ -12,6 +12,7 @@ import os.path
 import pickle
 import pstats
 import shutil
+import tempfile
 import traceback
 from collections.abc import Callable, Iterator, Sequence
 from typing import Any, IO, Optional, Union
@@ -97,7 +98,7 @@ def draw_buffers(
             dtype = node.data.dtype
 
         metadata = TensorMetadata(group, dtype, None, None, None, None, None)  # type: ignore[arg-type]
-        # pyrefly: ignore [missing-attribute]
+
         node.meta["tensor_meta"] = metadata
 
     if print_graph:
@@ -649,22 +650,14 @@ class DebugFormatter:
             try:
                 layout = node.get_output_spec()
                 if isinstance(layout, FixedLayout):
-                    offset = 0
-                    try:
-                        offset = int(layout.offset)
-                    except Exception:
-                        try:
-                            offset = V.graph.sizevars.size_hint(
-                                layout.offset, fallback=0
-                            )
-                        except Exception:
-                            pass
                     static_layout = FixedLayout(
                         layout.device,
                         dtype=layout.dtype,
-                        size=[*V.graph.sizevars.size_hints(layout.size)],
-                        stride=[*V.graph.sizevars.size_hints(layout.stride)],
-                        offset=offset,
+                        size=V.graph.sizevars.optimization_hints(layout.size),
+                        stride=V.graph.sizevars.optimization_hints(layout.stride),
+                        offset=V.graph.sizevars.optimization_hint(
+                            layout.offset, fallback=0
+                        ),
                     )
                     node_info["layout"] = str(static_layout)
                 else:
@@ -681,16 +674,20 @@ class DebugFormatter:
                 pass
             try:
                 node_info["stride"] = str(
-                    V.graph.sizevars.size_hints(node.get_stride())
+                    V.graph.sizevars.optimization_hints(node.get_stride())
                 )
             except Exception:
                 pass
             try:
-                node_info["size"] = str(V.graph.sizevars.size_hints(node.get_size()))  # type: ignore[arg-type]
+                node_info["size"] = str(
+                    V.graph.sizevars.optimization_hints(node.get_size())
+                )  # type: ignore[arg-type]
             except Exception:
                 pass
             try:
-                node_info["numel"] = str(V.graph.sizevars.size_hint(node.get_numel()))
+                node_info["numel"] = str(
+                    V.graph.sizevars.optimization_hint(node.get_numel())
+                )
             except Exception:
                 pass
             if hasattr(node, "data") and isinstance(node.data, ir.IRNode):
@@ -1190,7 +1187,7 @@ def save_args_for_compile_fx_inner(*args: Any, **kwargs: Any) -> None:
     with the saved arguments using load_args_and_run_compile_fx_inner.
     """
 
-    folder = "/tmp/inductor_saved_args"
+    folder = os.path.join(tempfile.gettempdir(), "inductor_saved_args")
     if not os.path.exists(folder):
         os.mkdir(folder)
 

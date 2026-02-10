@@ -57,7 +57,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [linux.rocm.gfx942.docker-cache, linux.rocm.mi250.docker-cache]
+        runner: [linux.rocm.mi250.docker-cache]
         docker-image: [
           "${{ needs.download-docker-builds-artifacts.outputs.pytorch-linux-jammy-rocm-n-py3 }}",
           "${{ needs.download-docker-builds-artifacts.outputs.pytorch-linux-noble-rocm-n-py3 }}"
@@ -69,6 +69,11 @@ jobs:
         run: |
           JSON_STRINGIFIED="${{ toJSON(needs.download-docker-builds-artifacts.outputs) }}"
           echo "Outputs of download-docker-builds-artifacts job: ${JSON_STRINGIFIED}"
+
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          no-sudo: true
 
       - name: Login to ECR
         uses: ./.github/actions/ecr-login

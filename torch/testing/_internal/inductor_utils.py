@@ -11,6 +11,7 @@ from subprocess import CalledProcessError
 
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
+import torch._inductor.config as config
 from torch._inductor.codecache import CppCodeCache
 from torch._inductor.codegen.common import (
     get_custom_backend_config_for_device,
@@ -22,7 +23,7 @@ from torch._inductor.codegen.common import (
 )
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 from torch._inductor.compile_fx import shape_env_from_inputs
-from torch._inductor.custom_graph_pass import CustomGraphModulePass
+from torch._inductor.custom_graph_pass import CustomGraphModulePass, CustomGraphPass
 from torch._inductor.graph import GraphLowering
 from torch._inductor.utils import (
     get_gpu_shared_memory,
@@ -47,6 +48,8 @@ from torch.testing._internal.common_utils import (
     LazyVal,
     TestCase,
 )
+
+from collections.abc import Callable
 
 log: logging.Logger = logging.getLogger(__name__)
 
@@ -438,3 +441,21 @@ def patch_inductor_backend(
             original_custom_pass,
             original_custom_backend_config,
         )
+
+def patch_custom_fallback_pass(predicate: Callable[[torch.fx.Node], bool]) -> contextlib.ContextDecorator:
+    """
+    Create a custom pass which falls back based on the provided predicate. For example,
+    we could provide a predicate which returns True for all aten.add.default nodes.
+    Returns a context activating the pass.
+    """
+    class Pass(CustomGraphPass):
+        def __call__(self, graph: torch.fx.Graph):
+            for node in graph.nodes:
+                if predicate(node):
+                    node.meta["should_fallback"] = True
+
+        def uuid(self):
+            return None
+
+
+    return config.patch(post_grad_custom_pre_pass=Pass())

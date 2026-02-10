@@ -11,7 +11,7 @@ on:
     - cron: 45 4,12 * * 0,6
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' && github.run_id }}
   cancel-in-progress: true
 
 
@@ -37,6 +37,7 @@ jobs:
     needs: get-default-label-prefix
     with:
       runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
+      runner: linux.4xlarge.memory
       build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm86
       docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11-inductor-benchmarks
       cuda-arch-list: '8.0;8.6'
@@ -87,6 +88,7 @@ jobs:
     needs: get-default-label-prefix
     with:
       runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
+      runner: linux.4xlarge.memory
       build-environment: linux-jammy-cuda13.0-py3.10-gcc11-sm86
       docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks
       cuda-arch-list: '8.0;8.6'
@@ -140,31 +142,31 @@ jobs:
       docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3-benchmarks
       test-matrix: |
         { include: [
-          { config: "dynamo_eager_torchbench", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx942.1" },
-          { config: "dynamo_eager_torchbench", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx942.1" },
-          { config: "dynamo_eager_huggingface", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx942.1" },
-          { config: "dynamo_eager_timm", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx942.1" },
-          { config: "dynamo_eager_timm", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx942.1" },
-          { config: "aot_eager_torchbench", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx942.1" },
-          { config: "aot_eager_torchbench", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx942.1" },
-          { config: "aot_eager_huggingface", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx942.1" },
-          { config: "aot_eager_timm", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx942.1" },
-          { config: "aot_eager_timm", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx942.1" },
-          { config: "dynamic_aot_eager_torchbench", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx942.1" },
-          { config: "dynamic_aot_eager_torchbench", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx942.1" },
-          { config: "dynamic_aot_eager_huggingface", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx942.1" },
-          { config: "dynamic_aot_eager_timm", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx942.1" },
-          { config: "dynamic_aot_eager_timm", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx942.1" },
-          { config: "dynamic_inductor_huggingface", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx942.1" },
-          { config: "dynamic_inductor_timm", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx942.1" },
-          { config: "dynamic_inductor_timm", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx942.1" },
-          { config: "dynamic_inductor_torchbench", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx942.1" },
-          { config: "dynamic_inductor_torchbench", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx942.1" },
-          { config: "aot_inductor_huggingface", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx942.1" },
-          { config: "aot_inductor_timm", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx942.1" },
-          { config: "aot_inductor_timm", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx942.1" },
-          { config: "aot_inductor_torchbench", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx942.1" },
-          { config: "aot_inductor_torchbench", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx942.1" },
+          { config: "dynamo_eager_torchbench", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "dynamo_eager_torchbench", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "dynamo_eager_huggingface", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "dynamo_eager_timm", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "dynamo_eager_timm", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "aot_eager_torchbench", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "aot_eager_torchbench", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "aot_eager_huggingface", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "aot_eager_timm", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "aot_eager_timm", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "dynamic_aot_eager_torchbench", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "dynamic_aot_eager_torchbench", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "dynamic_aot_eager_huggingface", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "dynamic_aot_eager_timm", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "dynamic_aot_eager_timm", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "dynamic_inductor_huggingface", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "dynamic_inductor_timm", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "dynamic_inductor_timm", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "dynamic_inductor_torchbench", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "dynamic_inductor_torchbench", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "aot_inductor_huggingface", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "aot_inductor_timm", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "aot_inductor_timm", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "aot_inductor_torchbench", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "aot_inductor_torchbench", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
         ]}
     secrets: inherit
 
@@ -188,6 +190,7 @@ jobs:
       - get-default-label-prefix
     with:
       runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
+      runner: linux.4xlarge.memory
       build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm80
       docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11-inductor-benchmarks
       cuda-arch-list: '8.0'
@@ -219,12 +222,16 @@ jobs:
       runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
       test-matrix: |
         { include: [
-          { config: "cpu_inductor_huggingface", shard: 1, num_shards: 1, runner: "linux.8xlarge.amx" },
-          { config: "cpu_inductor_timm", shard: 1, num_shards: 2, runner: "linux.8xlarge.amx" },
-          { config: "cpu_inductor_timm", shard: 2, num_shards: 2, runner: "linux.8xlarge.amx" },
+          { config: "inductor_avx2", shard: 1, num_shards: 2, runner: "linux.2xlarge.avx2" },
+          { config: "inductor_avx2", shard: 2, num_shards: 2, runner: "linux.2xlarge.avx2" },
           { config: "dynamic_cpu_inductor_huggingface", shard: 1, num_shards: 1, runner: "linux.8xlarge.amx" },
           { config: "dynamic_cpu_inductor_timm", shard: 1, num_shards: 2, runner: "linux.8xlarge.amx" },
           { config: "dynamic_cpu_inductor_timm", shard: 2, num_shards: 2, runner: "linux.8xlarge.amx" },
+          { config: "dynamic_cpu_inductor_huggingface", shard: 1, num_shards: 1, runner: "linux.8xlarge.amx" },
+          { config: "dynamic_cpu_inductor_timm", shard: 1, num_shards: 2, runner: "linux.8xlarge.amx" },
+          { config: "dynamic_cpu_inductor_timm", shard: 2, num_shards: 2, runner: "linux.8xlarge.amx" },
+          { config: "dynamic_cpu_inductor_torchbench", shard: 1, num_shards: 2, runner: "linux.8xlarge.amx" },
+          { config: "dynamic_cpu_inductor_torchbench", shard: 2, num_shards: 2, runner: "linux.8xlarge.amx" },
           { config: "cpu_inductor_freezing_avx2_huggingface", shard: 1, num_shards: 1, runner: "linux.10xlarge.avx2" },
           { config: "cpu_inductor_freezing_avx2_torchbench", shard: 1, num_shards: 2, runner: "linux.10xlarge.avx2" },
           { config: "cpu_inductor_freezing_avx2_torchbench", shard: 2, num_shards: 2, runner: "linux.10xlarge.avx2" },

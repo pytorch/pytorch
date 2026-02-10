@@ -7,7 +7,7 @@ import unittest
 from collections import defaultdict
 from unittest.mock import Mock, patch
 
-# pyrefly: ignore [import-error]
+# pyrefly: ignore [import-error, missing-import]
 from gen_operators_yaml import (
     fill_output,
     get_parser_options,
@@ -95,9 +95,10 @@ class GenOperatorsYAMLTest(unittest.TestCase):
         ]
 
         filtered_configs = list(filter(filter_func, config))
-        assert len(filtered_configs) == 2, (
-            f"Expected 2 elements in filtered_configs, but got {len(filtered_configs)}"
-        )
+        if len(filtered_configs) != 2:
+            raise AssertionError(
+                f"Expected 2 elements in filtered_configs, but got {len(filtered_configs)}"
+            )
 
     def test_verification_success(self) -> None:
         filter_func = make_filter_from_options(
