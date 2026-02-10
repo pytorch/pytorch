@@ -77,7 +77,6 @@ class BatcherIterDataPipe(IterDataPipe[DataChunk]):
                 yield self.wrapper_class(batch)
 
     def __len__(self) -> int:
-        # pyrefly: ignore [unsafe-overlap]
         if isinstance(self.datapipe, Sized):
             if self.drop_last:
                 return len(self.datapipe) // self.batch_size
