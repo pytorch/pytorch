@@ -48,8 +48,12 @@ jobs:
       sync-tag: rocm-build
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx1100" },
-          { config: "default", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx1100" },
+          { config: "default", shard: 1, num_shards: 6, runner: "linux.rocm.gpu.gfx1100" },
+          { config: "default", shard: 2, num_shards: 6, runner: "linux.rocm.gpu.gfx1100" },
+          { config: "default", shard: 3, num_shards: 6, runner: "linux.rocm.gpu.gfx1100" },
+          { config: "default", shard: 4, num_shards: 6, runner: "linux.rocm.gpu.gfx1100" },
+          { config: "default", shard: 5, num_shards: 6, runner: "linux.rocm.gpu.gfx1100" },
+          { config: "default", shard: 6, num_shards: 6, runner: "linux.rocm.gpu.gfx1100" },
         ]}
     secrets: inherit
 
