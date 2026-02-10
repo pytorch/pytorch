@@ -6878,6 +6878,30 @@ def scaled_grouped_mm(
     swizzle_a = expand_single_value(swizzle_a)
     swizzle_b = expand_single_value(swizzle_b)
 
+    if mat_a.dtype == torch.float8_e4m3fn:
+        try:
+            major, _ = torch.cuda.get_device_capability(mat_a.device)
+        except Exception:
+            major = -1
+        if major == 10 and mat_a.dim() == 2 and mat_b.dim() == 3:
+            from torch._cutedsl import scaled_grouped_mm_mxfp8
+
+            return scaled_grouped_mm_mxfp8(
+                mat_a,
+                mat_b,
+                scale_a,
+                scale_b,
+                scale_recipe_a,
+                scale_recipe_b,
+                swizzle_a,
+                swizzle_b,
+                offs,
+                output_dtype,
+                contraction_dim,
+                use_fast_accum,
+                bias=bias,
+            )
+
     # native_functions has restrictions on what can be defined
     # & passed through - std::optional<ArrayRef<Tensor>> for instance
     # *cannot* be passed, but an empty vector (list) can.
