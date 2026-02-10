@@ -1071,7 +1071,6 @@ class SetVariable(ConstDictVariable):
                 realized_items.append(item)
             else:
                 # VariableTracker - realize to install guards
-                # pyrefly: ignore [bad-argument-type]
                 realized_items.append(item.realize())
         # pyrefly: ignore[bad-assignment]
         items = dict.fromkeys(realized_items, SetVariable._default_value())
@@ -1423,7 +1422,6 @@ class OrderedSetClassVariable(VariableTracker):
             )
 
         if len(args) == 0:
-            # pyrefly: ignore [implicit-any]
             items = []
         else:
             items = args[0].force_unpack_var_sequence(tx)
