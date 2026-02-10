@@ -450,7 +450,7 @@ mha_varlen_fwd_aot(const at::Tensor &q,  // total_q x num_heads x head_size, tot
 #endif
 
   // SWA in AOTriton Kernels is treated as "Generalized Causal masks"
-  is_causal = is_causal || needs_swa;
+  is_causal = is_causal || uses_swa;
 
   auto [seed_t, offset_t, philox_state, use_philox_state] =
     prepare_philox_arguments(p_dropout, batch_size * num_heads * 32);
@@ -692,7 +692,8 @@ mha_bwd_aot(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x hea
     params.philox_seed_ptr =  mk_aoscalartensor(philox_seed);
     params.philox_offset1 = mk_aoscalartensor(philox_offset);
     params.philox_offset2 = 0;
-    params.causal_type = is_causal ? CausalType::WindowedAttention : CausalType::None;
+    // SWA in AOTriton Kernels is treated as "Generalized Causal masks"
+    params.causal_type = is_causal || uses_swa ? CausalType::WindowedAttention : CausalType::None;
     params.window_left = window_left;
     params.window_right = window_right;
     params.varlen_type = VarlenType::None;
@@ -945,7 +946,8 @@ mha_varlen_bwd_aot(const at::Tensor &dout,  // total_q x num_heads, x head_size
       params.philox_seed_ptr =  mk_aoscalartensor(philox_seed);
       params.philox_offset1 = mk_aoscalartensor(philox_offset);
       params.philox_offset2 = 0;
-      params.causal_type = is_causal ? CausalType::WindowedAttention : CausalType::None;
+      // SWA in AOTriton Kernels is treated as "Generalized Causal masks"
+      params.causal_type = is_causal || uses_swa ? CausalType::WindowedAttention : CausalType::None;
       params.varlen_type = VarlenType::CompactVarlen;
       params.window_left = window_left;
       params.window_right = window_right;

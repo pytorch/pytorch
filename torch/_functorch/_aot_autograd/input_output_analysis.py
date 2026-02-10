@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """
 This module is one of the analysis modules - it takes as input a function or graph
 and some preexisting properties, and returns some data that is useful for deciding
@@ -12,7 +11,7 @@ In particular, the following analyses are provided:
 
 import contextlib
 import itertools
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch
 import torch.utils._pytree as pytree
@@ -26,6 +25,7 @@ from torch.fx.experimental.symbolic_shapes import is_concrete_int
 from .collect_metadata_analysis import coerce_tangent_and_suggest_memory_format
 from .descriptors import AOTInput, InputMutationAOTOutput, TangentAOTInput
 from .schemas import (
+    AOTConfig,
     BackwardSignature,
     GraphSignature,
     InputAliasInfo,
@@ -45,9 +45,15 @@ def remove_dupe_metadata(
     keep_arg_mask: list[bool],
     add_dupe_map: list[int],
 ) -> ViewAndMutationMeta:
-    assert len(m.input_info) == len(keep_arg_mask)
+    if len(m.input_info) != len(keep_arg_mask):
+        raise AssertionError(
+            f"len(m.input_info)={len(m.input_info)} != len(keep_arg_mask)={len(keep_arg_mask)}"
+        )
     # Easy invariant: the first argument should never be a dupe (it will be kept)
-    assert len(keep_arg_mask) > 0 and keep_arg_mask[0]
+    if len(keep_arg_mask) == 0 or not keep_arg_mask[0]:
+        raise AssertionError(
+            "keep_arg_mask must be non-empty and keep_arg_mask[0] must be True"
+        )
 
     # Filter dupe'd mutated inputs out of traced_tangents
     num_data_mutations = len([x for x in m.input_info if x.mutates_data])
@@ -71,7 +77,8 @@ def remove_dupe_metadata(
         filtered_inp_traced_tangents_descs + other_traced_tangents_descs
     )
 
-    assert m.subclass_tangent_meta is not None
+    if m.subclass_tangent_meta is None:
+        raise AssertionError("m.subclass_tangent_meta must not be None")
     subclass_tangent_meta = [
         PlainTensorMeta(
             0, memory_format=MemoryFormatMeta(memory_format=torch.contiguous_format)
@@ -119,7 +126,7 @@ def create_synthetic_base_metadata(
     m: ViewAndMutationMeta,
     # Maps each outer argument idx to its inner idx (or, if this outer arg is generated from a
     # synthetic base, you get a tuple of (i, TensorMeta), telling you the base tensor idx, and view metadata)
-    synthetic_base_info: list[Union[int, tuple[int, torch.Tensor]]],
+    synthetic_base_info: list[int | tuple[int, torch.Tensor]],
     outer_args: list[Any],
     inner_args: list[Any],
     inner_args_desc: list[AOTInput],
@@ -146,7 +153,10 @@ def create_synthetic_base_metadata(
         # (aka if "a" and "b" are views, then a.is_leaf == b.is_leaf)
         any_leaf = any(m.input_info[x].is_leaf for x in outer_indices)
         all_leaf = all(m.input_info[x].is_leaf for x in outer_indices)
-        assert any_leaf == all_leaf
+        if any_leaf != all_leaf:
+            raise AssertionError(
+                f"any_leaf={any_leaf} != all_leaf={all_leaf} for outer_indices={outer_indices}"
+            )
 
         mutates_data = (
             True
@@ -274,8 +284,10 @@ def create_synthetic_base_metadata(
         inner_mutated_tangents_descs
         + m.traced_tangents_descs[len(inner_mutated_tangents) :]
     )
-    assert m.subclass_tangent_meta is not None
+    if m.subclass_tangent_meta is None:
+        raise AssertionError("m.subclass_tangent_meta must not be None")
     subclass_tangent_meta = [
+        # pyrefly: ignore[bad-argument-type]
         PlainTensorMeta(0, memory_format=x)
         for x in inner_mutated_tangents_memory_formats
     ] + m.subclass_tangent_meta[len(inner_mutated_tangents) :]
@@ -298,7 +310,9 @@ def create_synthetic_base_metadata(
     )
 
 
-def compute_overlapping_inputs(aot_config, fwd_inputs, aliased_input_indices):
+def compute_overlapping_inputs(
+    aot_config: AOTConfig, fwd_inputs: list[Any], aliased_input_indices: list[int]
+) -> set[int]:
     num_aliases = len(aliased_input_indices)
 
     shape_env = None
@@ -306,7 +320,8 @@ def compute_overlapping_inputs(aot_config, fwd_inputs, aliased_input_indices):
     tracing_context = torch._guards.TracingContext.try_get()
 
     if tracing_context is not None:
-        assert tracing_context.fake_mode is not None
+        if tracing_context.fake_mode is None:
+            raise AssertionError("tracing_context.fake_mode must not be None")
         shape_env = tracing_context.fake_mode.shape_env
 
         # Check whether we can actually get the dynamo sources from within AOTAutograd.
@@ -376,13 +391,16 @@ def compute_overlapping_inputs(aot_config, fwd_inputs, aliased_input_indices):
     return actual_aliased_indices
 
 
-def _graph_input_names(gm):
+def _graph_input_names(gm: torch.fx.GraphModule) -> list[str]:
     return [node.name for node in gm.graph.find_nodes(op="placeholder")]
 
 
-def _graph_output_names(gm):
+def _graph_output_names(gm: torch.fx.GraphModule) -> list[Any]:
     output_node = next(iter(reversed(gm.graph.nodes)))
-    assert output_node.op == "output" and len(output_node.args) == 1
+    if output_node.op != "output" or len(output_node.args) != 1:
+        raise AssertionError(
+            f"expected output node with 1 arg, got op={output_node.op}, args={len(output_node.args)}"
+        )
     return_args = output_node.args[0]
     return [getattr(return_arg, "name", None) for return_arg in return_args]
 
@@ -398,8 +416,8 @@ def create_graph_signature(
     param_names: list[str],
     buffer_names: list[str],
     trace_joint: bool,
-    num_user_fw_outs: Optional[int],
-    loss_index: Optional[int],
+    num_user_fw_outs: int | None,
+    loss_index: int | None,
 ) -> GraphSignature:
     # Retrieve graph input names
     graph_input_names = _graph_input_names(fx_g)
@@ -413,7 +431,10 @@ def create_graph_signature(
     num_user_args = len(graph_input_names) - num_params_buffers - num_tokens
 
     if trace_joint:
-        assert num_user_fw_outs is not None
+        if num_user_fw_outs is None:
+            raise AssertionError(
+                "num_user_fw_outs must not be None when trace_joint=True"
+            )
         num_fw_outs = num_user_fw_outs + fw_metadata.num_mutated_inp_runtime_indices
         backward_output_names = graph_output_names[num_fw_outs:]
 
@@ -432,11 +453,18 @@ def create_graph_signature(
             if user_input.requires_grad
         }
 
-        assert len(gradients_to_parameters) + len(gradients_to_user_inputs) == len(
+        if len(gradients_to_parameters) + len(gradients_to_user_inputs) != len(
             backward_output_names
-        )
+        ):
+            raise AssertionError(
+                f"len(gradients_to_parameters)={len(gradients_to_parameters)} + "
+                f"len(gradients_to_user_inputs)={len(gradients_to_user_inputs)} != "
+                f"len(backward_output_names)={len(backward_output_names)}"
+            )
 
         # Check that we have fully accounted for all graph outputs
+        if loss_index is None:
+            raise AssertionError("loss_index must not be None")
         backward_signature = BackwardSignature(
             gradients_to_parameters,
             gradients_to_user_inputs,
