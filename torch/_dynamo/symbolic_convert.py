@@ -73,7 +73,6 @@ from .bytecode_analysis import (
 )
 from .bytecode_transformation import (
     cleaned_instructions,
-    clear_instruction_args,
     create_binary_slice,
     create_call_function,
     create_call_function_ex,
@@ -4561,11 +4560,6 @@ class InstructionTranslatorBase(
                     if var_name not in defined_inside and var_name not in captured_vars:
                         captured_vars.append(var_name)
 
-            elif inst.opname == "LOAD_DEREF":
-                var_name = inst.argval
-                if var_name not in captured_vars:
-                    captured_vars.append(var_name)
-
         # Extract pre_store_ops: all opcodes from END_FOR+1 until first STORE_FAST
         pre_store_ops: list[str] = []
         scan_ip = end_for_ip + 1
@@ -4903,9 +4897,7 @@ class InstructionTranslatorBase(
                     )
                     nonnull_i += 1
 
-            comp_insts = self._copy_comprehension_bytecode(
-                start_ip, analysis.end_ip, captured_closure_vars=None
-            )
+            comp_insts = self._copy_comprehension_bytecode(start_ip, analysis.end_ip)
 
             # Epilogue: ensure result is on stack, pack walrus vars, return.
             epilogue: list[Instruction] = []
@@ -5121,13 +5113,11 @@ class InstructionTranslatorBase(
         self.instruction_pointer = None
 
     def _copy_comprehension_bytecode(
-        self, start_ip: int, end_ip: int, captured_closure_vars: set[str] | None = None
+        self,
+        start_ip: int,
+        end_ip: int,
     ) -> list[Instruction]:
-        """Copy comprehension bytecode instructions, updating jump targets.
-
-        Args:
-            captured_closure_vars: Variable names to convert from LOAD_DEREF to LOAD_FAST
-        """
+        """Copy comprehension bytecode instructions, updating jump targets."""
         inst_map: dict[Instruction, Instruction] = {}
         copied_insts: list[Instruction] = []
 
@@ -5138,23 +5128,9 @@ class InstructionTranslatorBase(
             inst_map[original_inst] = copied_inst
             copied_insts.append(copied_inst)
 
-        # Clear instruction args so fix_vars can recalculate them for the new context.
-        # This is needed because the copied bytecode has arg values that reference
-        # indices in the original function's co_varnames/co_consts, which may differ
-        # from the generated code's.
-        clear_instruction_args(copied_insts)
-
         for copied_inst in copied_insts:
             if copied_inst.target is not None and copied_inst.target in inst_map:
                 copied_inst.target = inst_map[copied_inst.target]
-
-            if (
-                captured_closure_vars
-                and copied_inst.opname == "LOAD_DEREF"
-                and copied_inst.argval in captured_closure_vars
-            ):
-                copied_inst.opname = "LOAD_FAST"
-                copied_inst.opcode = dis.opmap["LOAD_FAST"]
 
         return copied_insts
 
