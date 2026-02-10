@@ -619,6 +619,89 @@ class TestCustomOpAutoTune(TestCase):
 
         torch.testing.assert_close(result, test_x @ test_weight, rtol=1e-1, atol=1e-1)
 
+    @skipIfXpu
+    def test_config_patches_propagation(self):
+        """Test that config_patches propagate from registration to codegen."""
+        from torch._inductor.utils import run_and_get_code
+
+        test_op_name = f"test_lib::config_patches_{id(self)}"
+
+        def decomp_with_reduction(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            return (x.unsqueeze(2) * weight.unsqueeze(0)).sum(dim=1)
+
+        @torch.library.custom_op(test_op_name, mutates_args=())
+        def config_patches_op(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            return x @ weight
+
+        @config_patches_op.register_fake
+        def _(x: torch.Tensor, weight: torch.Tensor):
+            return torch.empty(x.shape[0], weight.shape[1], device=x.device, dtype=x.dtype)
+
+        register_custom_op_autotuning(
+            config_patches_op,
+            configs=[CustomOpConfig(decomp_with_reduction)],
+            name="config_patches_autotuned",
+            config_patches={"coordinate_descent_tuning": True},
+            input_gen_fns={
+                "x": lambda t: torch.randn_like(t, device=self.device) * 0.1,
+                "weight": lambda t: torch.randn_like(t, device=self.device) * 0.1,
+            },
+        )
+
+        test_x = torch.randn(4, 64, device=self.device, dtype=self.dtype)
+        test_weight = torch.randn(64, 32, device=self.device, dtype=self.dtype)
+
+        torch._dynamo.reset()
+        with config.patch(max_autotune=True, fx_graph_cache=False):
+            result, _ = run_and_get_code(
+                torch.compile(lambda x, w: config_patches_op(x, w)), test_x, test_weight
+            )
+
+        torch.testing.assert_close(result, test_x @ test_weight, rtol=1e-1, atol=1e-1)
+
+    @skipIfXpu
+    def test_benchmark_with_cudagraphs_subgraph(self):
+        """Test SubgraphChoiceCaller benchmarks with CUDA graphs when flag is set."""
+        if self.device != "cuda":
+            self.skipTest("CUDA graph test requires CUDA device")
+
+        test_op_name = f"test_lib::cudagraph_subgraph_{id(self)}"
+
+        def simple_decomp(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            return x + weight
+
+        @torch.library.custom_op(test_op_name, mutates_args=())
+        def cudagraph_test_op(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            return x + weight
+
+        @cudagraph_test_op.register_fake
+        def _(x: torch.Tensor, weight: torch.Tensor):
+            return torch.empty_like(x)
+
+        register_custom_op_autotuning(
+            cudagraph_test_op,
+            configs=[CustomOpConfig(simple_decomp)],
+            name="cudagraph_subgraph_autotuned",
+            benchmark_with_cudagraphs=True,
+            input_gen_fns={
+                "x": lambda t: torch.randn_like(t, device=self.device),
+                "weight": lambda t: torch.randn_like(t, device=self.device),
+            },
+        )
+
+        test_x = torch.randn(32, 64, device=self.device, dtype=self.dtype)
+        test_weight = torch.randn(32, 64, device=self.device, dtype=self.dtype)
+
+        @torch.compile
+        def test_model(x, weight):
+            return cudagraph_test_op(x, weight)
+
+        torch._dynamo.reset()
+        with config.patch(max_autotune=True, fx_graph_cache=False):
+            result = test_model(test_x, test_weight)
+
+        torch.testing.assert_close(result, test_x + test_weight, rtol=1e-5, atol=1e-5)
+
 
 if __name__ == "__main__":
     run_tests()

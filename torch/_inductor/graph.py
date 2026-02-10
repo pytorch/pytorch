@@ -11,7 +11,7 @@ import sys
 import time
 from collections import defaultdict
 from contextlib import contextmanager
-from typing import Any, NoReturn, Optional, TYPE_CHECKING, Union
+from typing import Any, Generator, NoReturn, Optional, TYPE_CHECKING, Union
 
 import sympy
 from sympy import Expr
@@ -470,6 +470,9 @@ class GraphLowering(torch.fx.Interpreter):
         self.name_to_buffer: dict[str, ir.Buffer] = {}
         self.name_to_users: defaultdict[str, list[ir.IRNode]] = defaultdict(list)
         self.name_to_op: dict[str, ir.Operation] = {}
+        # Config patches to apply to operations created in this context
+        # (e.g., coordinate_descent_tuning for decomposition ops)
+        self._current_config_patches: dict[str, Any] = {}
         self.creation_time = time.time()
         self.name = name  # type: ignore[assignment]
         self.cpp_wrapper = cpp_wrapper
@@ -846,6 +849,23 @@ class GraphLowering(torch.fx.Interpreter):
             return f"{self.name}_{name}"
         return name
 
+    @contextlib.contextmanager
+    def set_current_config_patches(
+        self, patches: dict[str, Any]
+    ) -> Generator[None, None, None]:
+        """Context manager to set config_patches for operations created in this scope.
+
+        Operations registered while this context is active will be tagged with
+        the given config_patches, allowing scoped config (e.g., coordinate_descent_tuning
+        only for decomposition ops).
+        """
+        old_patches = self._current_config_patches
+        self._current_config_patches = patches
+        try:
+            yield
+        finally:
+            self._current_config_patches = old_patches
+
     def make_subgraph(
         self,
         gm: torch.fx.GraphModule,
@@ -1027,6 +1047,9 @@ class GraphLowering(torch.fx.Interpreter):
         self.operations.append(op)
         self.name_to_op[name] = op
         op.operation_name = name
+        # Tag operation with current config_patches (e.g., for decomposition ops)
+        if self._current_config_patches:
+            op.set_config_patches(self._current_config_patches.copy())
         return name
 
     def register_buffer(self, buffer: ir.Buffer, *, set_name: bool = False) -> str:

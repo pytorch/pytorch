@@ -859,6 +859,7 @@ class IRNode:
 class Operation:
     def __post_init__(self) -> None:
         self.operation_name: Optional[str] = None
+        self._config_patches: dict[str, Any] = {}
 
     def get_device(self) -> Optional[torch.device]:
         raise NotImplementedError
@@ -874,6 +875,14 @@ class Operation:
     def get_operation_name(self) -> str:
         assert self.operation_name is not None
         return self.operation_name
+
+    def get_config_patches(self) -> dict[str, Any]:
+        """Get config patches for this operation (e.g., coordinate_descent_tuning)."""
+        return self._config_patches
+
+    def set_config_patches(self, patches: dict[str, Any]) -> None:
+        """Set config patches for this operation."""
+        self._config_patches = patches
 
     def is_extern(self) -> bool:
         return False
@@ -7014,6 +7023,7 @@ class SubgraphBuffer(ExternKernel):
         gm: torch.fx.GraphModule,
         example_inputs: list[Any],
         subgraph_name: str,
+        config_patches: dict[str, Any] | None = None,
     ):
         super().__init__(None, layout, input_nodes)
         self.gm = gm
@@ -7035,12 +7045,18 @@ class SubgraphBuffer(ExternKernel):
         import torch._inductor.config as inductor_config
 
         with V.set_graph_handler(self.subgraph):
-            # Don't bother autotuning on Triton here
-            with inductor_config.patch(
-                max_autotune=False,
-                max_autotune_gemm=False,
-                max_autotune_gemm_backends="ATEN",
-            ):
+            # Base config: don't autotune Triton, but allow other optimizations
+            base_patches = {
+                "max_autotune": False,
+                "max_autotune_gemm": False,
+                "max_autotune_gemm_backends": "ATEN",
+            }
+            # Merge with user config_patches (e.g., coordinate_descent_tuning)
+            merged_patches = {**base_patches, **(config_patches or {})}
+            # Tag operations created in subgraph with config_patches
+            # These will be applied during kernel codegen via SIMD scheduling
+            with inductor_config.patch(**merged_patches), \
+                 self.subgraph.set_current_config_patches(config_patches or {}):
                 self.subgraph.run(*self.example_inputs)
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
@@ -7051,6 +7067,10 @@ class SubgraphBuffer(ExternKernel):
 
         assert is_node_sequence(self.inputs)
         outer_inputs = [t.codegen_reference() for t in self.inputs]
+
+        # config_patches are applied via operation tagging - operations in the
+        # subgraph were tagged during __init__, and SIMD scheduling will apply
+        # the patches during kernel codegen
         wrapper.codegen_subgraph_with_flattened_outputs(
             CodegenGraph(self.subgraph),
             [*self.sym_inputs, *outer_inputs],

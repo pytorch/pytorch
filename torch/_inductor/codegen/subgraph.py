@@ -28,12 +28,22 @@ log = logging.getLogger(__name__)
 
 
 def inline_subgraph_to_ir_nodes(
-    gm: torch.fx.GraphModule, inputs: list[Any], name: str
+    gm: torch.fx.GraphModule,
+    inputs: list[Any],
+    name: str,
+    config_patches: dict[str, Any] | None = None,
 ) -> Any:
     """Inline a subgraph by converting its FX operations to individual IR nodes.
 
     This converts a subgraph to multiple ComputedBuffer nodes (fusable),
     enabling epilogue fusion with subsequent operations.
+
+    Args:
+        gm: The FX GraphModule to inline
+        inputs: Input tensors/IR nodes
+        name: Name for the inlined subgraph
+        config_patches: Optional config patches to tag operations with
+            (e.g., {"coordinate_descent_tuning": True} for decomposition ops)
 
     Returns:
         TensorBox containing the final operation result as individual IR nodes
@@ -44,7 +54,12 @@ def inline_subgraph_to_ir_nodes(
     original_module = V.graph.module
     try:
         V.graph.module = gm
-        return process_subgraph_nodes(gm, inputs)
+        # Tag operations created during inlining with config_patches
+        if config_patches:
+            with V.graph.set_current_config_patches(config_patches):
+                return process_subgraph_nodes(gm, inputs)
+        else:
+            return process_subgraph_nodes(gm, inputs)
     finally:
         V.graph.module = original_module
 
@@ -63,6 +78,8 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         description: str,
         make_fx_graph: Callable[..., Any],
         input_gen_fns: dict[int, Callable[[Any], torch.Tensor]] | None = None,
+        config_patches: dict[str, Any] | None = None,
+        benchmark_with_cudagraphs: bool = False,
     ) -> None:
         super().__init__(name, input_nodes, layout, description)
 
@@ -93,6 +110,12 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         self.decomposition_kwargs: dict[str, Any] = {}
         # Cache compiled module to avoid recompiling on every benchmark call
         self._compiled_module: Any = None
+        # Config patches to apply during subgraph compilation (e.g., coordinate_descent_tuning)
+        self._config_patches = config_patches or {}
+        # Whether to capture into CUDA graph before benchmarking
+        self._benchmark_with_cudagraphs = benchmark_with_cudagraphs
+        # Cached CUDA graph for benchmarking
+        self._cuda_graph: Any = None
 
     def _compute_sym_input_values(self) -> list[int]:
         """Extract concrete dimension values for sym_inputs from example_inputs.
@@ -157,12 +180,17 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
             bm_graph_lowering.graph_input_names.append(sym_inp.name)
 
         with V.set_graph_handler(bm_graph_lowering):
-            # Don't bother autotuning on Triton here
-            with config.patch(
-                max_autotune=False,
-                max_autotune_gemm=False,
-                max_autotune_gemm_backends="ATEN",
-            ):
+            # Base config: disable expensive autotuning but preserve coordinate descent
+            # for reduction kernels (e.g., batch1_decompose uses unsqueeze+mul+sum)
+            base_patches = {
+                "max_autotune": False,
+                "max_autotune_gemm": False,
+                "max_autotune_gemm_backends": "ATEN",
+                "coordinate_descent_tuning": config.coordinate_descent_tuning,
+            }
+            # Merge with custom config_patches (custom patches take precedence)
+            merged_patches = {**base_patches, **self._config_patches}
+            with config.patch(**merged_patches):
                 bm_graph_lowering.run(*self.example_inputs)
                 return bm_graph_lowering.compile_to_module()
 
@@ -173,11 +201,39 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
 
         bm_func = self._compiled_module.call
         sym_inputs = self.sym_input_values
+
+        if self._benchmark_with_cudagraphs:
+            return self._benchmark_with_cuda_graph(bm_func, sym_inputs, args)
+
         if config.profile_bandwidth_with_do_bench_using_profiling:
             return do_bench_using_profiling(lambda: bm_func([*sym_inputs, *args]))
         return benchmarker.benchmark(
             # Shallow clone args since bm_func may clear args
             lambda: bm_func([*sym_inputs, *args]),
+            device=benchmarker.infer_device(*sym_inputs, *args),
+        )
+
+    def _benchmark_with_cuda_graph(
+        self,
+        bm_func: Callable[..., Any],
+        sym_inputs: list[int],
+        args: tuple[Any, ...],
+    ) -> float:
+        """Benchmark using CUDA graph capture and replay."""
+        if self._cuda_graph is None:
+            # Warmup run before capture
+            bm_func([*sym_inputs, *args])
+
+            # Capture the CUDA graph
+            self._cuda_graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(self._cuda_graph):
+                bm_func([*sym_inputs, *args])
+
+        # Benchmark the graph replay
+        if config.profile_bandwidth_with_do_bench_using_profiling:
+            return do_bench_using_profiling(lambda: self._cuda_graph.replay())
+        return benchmarker.benchmark(
+            lambda: self._cuda_graph.replay(),
             device=benchmarker.infer_device(*sym_inputs, *args),
         )
 
@@ -206,6 +262,7 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
                 gm=self.gm,
                 example_inputs=self.example_inputs,
                 subgraph_name=self.name,
+                config_patches=self._config_patches,
             )
         )
 
@@ -252,6 +309,8 @@ class SubgraphTemplate(KernelTemplate):
         make_fx_graph: Callable[..., Any],
         description: str = "",
         input_gen_fns: dict[int, Callable[[Any], torch.Tensor]] | None = None,
+        config_patches: dict[str, Any] | None = None,
+        benchmark_with_cudagraphs: bool = False,
         **kwargs: Any,
     ) -> SubgraphChoiceCaller:
         """
@@ -264,6 +323,9 @@ class SubgraphTemplate(KernelTemplate):
             make_fx_graph: Callable that creates the FX graph for this subgraph
             description: Optional description of this choice
             input_gen_fns: Optional dict mapping input indices to tensor generators
+            config_patches: Optional config patches to apply during compilation
+                (e.g., {"coordinate_descent_tuning": True})
+            benchmark_with_cudagraphs: If True, capture into CUDA graph before benchmarking
             **kwargs: Additional keyword arguments
 
         Returns:
@@ -277,6 +339,8 @@ class SubgraphTemplate(KernelTemplate):
             description=description,
             make_fx_graph=make_fx_graph,
             input_gen_fns=input_gen_fns,
+            config_patches=config_patches,
+            benchmark_with_cudagraphs=benchmark_with_cudagraphs,
         )
 
     def generate_custom_op_choices(
@@ -287,6 +351,8 @@ class SubgraphTemplate(KernelTemplate):
         non_tensor_args: list[dict[str, Any]],
         default_impl: Callable[..., Any] | None = None,
         input_gen_fns: dict[int, Callable[[Any], torch.Tensor]] | None = None,
+        config_patches: dict[str, Any] | None = None,
+        benchmark_with_cudagraphs: bool = False,
     ) -> list[SubgraphChoiceCaller]:
         """
         Generate multiple SubgraphChoiceCaller instances for custom op autotuning.
@@ -301,6 +367,9 @@ class SubgraphTemplate(KernelTemplate):
             non_tensor_args: List of non-tensor kwargs only, one dict per corresponding decomposition.
             default_impl: Default implementation for layout inference
             input_gen_fns: Optional dict mapping input indices to tensor generators
+            config_patches: Optional config patches to apply during compilation
+                (e.g., {"coordinate_descent_tuning": True})
+            benchmark_with_cudagraphs: If True, capture into CUDA graph before benchmarking
 
         Returns:
             List of SubgraphChoiceCaller instances for autotuning
@@ -357,6 +426,8 @@ class SubgraphTemplate(KernelTemplate):
                 make_fx_graph=make_fx_graph,
                 description=f"CustomOp {decomp.__name__}",
                 input_gen_fns=input_gen_fns,
+                config_patches=config_patches,
+                benchmark_with_cudagraphs=benchmark_with_cudagraphs,
             )
             # Cache decomposition info for range-based dispatch
             choice.cache_decomposition(decomp, decomp_kwargs)
