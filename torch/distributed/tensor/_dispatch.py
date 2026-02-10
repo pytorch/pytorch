@@ -544,6 +544,12 @@ class OpDispatcher:
         runtime_schema_info = self.sharding_propagator.op_to_schema_info.get(
             op_call, None
         )
+        if runtime_schema_info is None:
+            runtime_schema_info = (
+                self.sharding_propagator.op_to_schema_info_for_single_dim_strategy.get(
+                    op_call, None
+                )
+            )
 
         # Auto-detect needs_pytree if any arg is a list/tuple containing tensors
         def _contains_tensor(arg: object) -> bool:
@@ -595,6 +601,7 @@ class OpDispatcher:
                 local_kwargs[k] = v._local_tensor
                 kwargs_schema[k] = v._spec
                 if compute_mesh is None:
+                    # record the first compute device mesh from kwargs
                     compute_mesh = v.device_mesh
             elif isinstance(v, torch.Tensor):
                 compute_mesh = compute_mesh or try_find_mesh_from_args(
