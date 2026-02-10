@@ -1,7 +1,7 @@
 {
   "description": "Labels suitable for issue triage. Excludes CI triggers, test configs, release notes, deprecated, and PR-only labels.",
   "repo": "pytorch/pytorch",
-  "count": 305,
+  "count": 304,
   "labels": [
     {
       "name": "actionable",
@@ -114,10 +114,6 @@
     {
       "name": "module: arm",
       "description": "Related to ARM architectures builds of PyTorch. Includes Apple M1"
-    },
-    {
-      "name": "module: assert failure",
-      "description": "The issue involves an assert failure"
     },
     {
       "name": "module: autograd",
@@ -353,7 +349,7 @@
     },
     {
       "name": "module: edge cases",
-      "description": "Adversarial inputs unlikely to occur in practice"
+      "description": "Adversarial inputs unlikely to occur in practice. Add when inputs are at dtype limits (torch.finfo.max/min), extreme tensor shapes, or unusual values that stress numerical limits."
     },
     {
       "name": "module: elastic",
@@ -1033,7 +1029,7 @@
     },
     {
       "name": "needs reproduction",
-      "description": "Ensure you have actionable steps to reproduce the issue. Someone else needs to confirm the repro."
+      "description": "Ensure you have actionable steps to reproduce the issue. Someone else needs to confirm the repro. Add when issue requires downloading external files (.zip, .pt, .pth, .pkl, .safetensors) or links to external storage (Google Drive, Dropbox) to reproduce."
     },
     {
       "name": "needs research",

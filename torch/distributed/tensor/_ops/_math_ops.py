@@ -260,13 +260,6 @@ def common_reduction_strategy(
                     break
 
         for p in op_spec.output_spec.placements:
-            # NormPartial(p) is compatible with NormReduction(p) of the same norm_type
-            if (
-                isinstance(p, _NormPartial)
-                and isinstance(reduction_op, NormReduction)
-                and p.norm_type == reduction_op.norm_type
-            ):
-                continue
             # when the partial reduction op matches the global reduction op,
             # we can delay redistribution (i.e max, max)
             if isinstance(p, Partial) and p.reduce_op != reduction_op:
@@ -369,9 +362,7 @@ def linear_reduction_strategy(op_schema: OpSchema) -> OpStrategy:
     )
 
 
-@register_op_strategy(
-    list(ARGMAX_ARGMIN_OPS.keys()), schema_info=RuntimeSchemaInfo(1)
-)
+@register_op_strategy(list(ARGMAX_ARGMIN_OPS.keys()), schema_info=RuntimeSchemaInfo(1))
 def argmax_argmin_strategy(op_schema: OpSchema) -> OpStrategy:
     """
     Strategy for argmax/argmin. These return indices, not values, so they cannot
