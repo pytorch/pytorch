@@ -3433,6 +3433,14 @@ class InstructionTranslatorBase(
         items = self.popn(inst.argval)
         self.push(SliceVariable(items, tx=self))  # type: ignore[arg-type]
 
+    def _can_speculate_comprehension_nested(self) -> bool:
+        """Check if comprehension speculation is allowed in nested context.
+
+        For the base class (non-inlined), this always returns False since
+        self.parent is None. Subclasses override to check nested conditions.
+        """
+        return False
+
     def _maybe_setup_comprehension_speculation(self, inst: Instruction) -> bool:
         """
         Handle comprehension start for Python 3.12+ BUILD_LIST/BUILD_MAP with argval 0.
@@ -3451,8 +3459,16 @@ class InstructionTranslatorBase(
             and not self.is_tracing_resume_prologue
             and not self.active_generic_context_managers
             and self.output.current_tracer.parent is None
-            and self.parent is None
         )
+
+        # For inlined functions, allow speculation if nested_graph_breaks is enabled
+        # and all parent frames can compile partial graphs.
+        # We don't use should_compile_partial_graph() directly because it includes
+        # an exception table entry check that isn't appropriate for comprehension
+        # speculation (the comprehension bytecode has its own exception handling
+        # that we'll copy to run in eager mode).
+        if can_speculate and self.parent is not None:
+            can_speculate = self._can_speculate_comprehension_nested()
         # Only set up speculation at depth 0 (outermost comprehension)
         if can_speculate and self._comprehension_depth == 0:
             speculation = self.speculate()
@@ -4658,7 +4674,9 @@ class InstructionTranslatorBase(
             )
             # Tensors/symnodes must already be in their correct slot
             if isinstance(var, (TensorVariable, SymNodeVariable)):
-                if not in_correct_slot:
+                # In nested context, tensor may be from parent frame argument
+                # compile_subgraph handles passing it through frame_list correctly
+                if self.parent is None and not in_correct_slot:
                     unimplemented(
                         gb_type="Comprehension with captured tensor not in local slot",
                         context="",
@@ -4695,6 +4713,12 @@ class InstructionTranslatorBase(
             self.output.add_output_instructions(cg.get_instructions())
 
         # --- Step 3: Add the comprehension bytecode ---
+
+        # Ensure iterator variables are in co_varnames for the generated code.
+        # The comprehension bytecode uses STORE_FAST for iterator cleanup.
+        for var_name in analysis.iterator_vars:
+            if var_name not in self.output.code_options["co_varnames"]:
+                self.output.code_options["co_varnames"] += (var_name,)
 
         copied_insts = self._copy_comprehension_bytecode(start_ip, analysis.end_ip)
         self.output.add_output_instructions(copied_insts)
@@ -5767,6 +5791,23 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
     def run_ctx_mgr(self) -> Any:
         return TracingContext.current_frame(self.parent.frame_summary())
+
+    def _can_speculate_comprehension_nested(self) -> bool:
+        """Check if comprehension speculation is allowed in this inlined context.
+
+        Checks that nested_graph_breaks is enabled, the function allows nested
+        graph breaks, and parent frames can compile partial graphs. Unlike
+        should_compile_partial_graph(), this skips the exception table entry
+        check for the current frame since comprehension bytecode has its own
+        exception handling that will be copied for eager execution.
+        """
+        if not config.nested_graph_breaks:
+            return False
+        if not self.funcvar.should_allow_nested_graph_breaks():
+            return False
+        if not self.parent.should_compile_partial_graph():
+            return False
+        return True
 
     def should_compile_partial_graph(self) -> bool:
         if config.nested_graph_breaks:
