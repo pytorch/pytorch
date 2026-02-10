@@ -54,6 +54,13 @@ def _maybe_convert_to_dtype(a: None, dtype: torch.dtype) -> None:
 def _maybe_convert_to_dtype(a, dtype):
     if isinstance(a, TensorLike):
         if a.dtype != dtype:
+            # Use prims.convert_element_type for meta tensors to preserve
+            # zero strides from broadcast tensors. The .to() method goes
+            # through C++ _to_copy which doesn't preserve zero strides.
+            if a.is_meta:
+                import torch._prims as prims
+
+                return prims.convert_element_type(a, dtype)
             return a.to(dtype)
         return a
     if isinstance(a, Number):

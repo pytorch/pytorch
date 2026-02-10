@@ -1999,8 +1999,12 @@ def _convert_element_type_meta(a: TensorLikeType, dtype: torch.dtype) -> TensorL
     if not isinstance(dtype, torch.dtype):
         raise AssertionError(f"dtype must be torch.dtype, got {type(dtype)}")
 
-    # dtype conversion preserves dense strides
-    if torch._prims_common.is_non_overlapping_and_dense_or_false(a):
+    # dtype conversion preserves strides for dense tensors and broadcast tensors
+    # (tensors with zero strides from expand). For other non-dense overlapping
+    # tensors, compute new contiguous strides.
+    if torch._prims_common.is_non_overlapping_and_dense_or_false(a) or any(
+        s == 0 for s in a.stride()
+    ):
         strides = a.stride()
     else:
         strides = utils.compute_elementwise_output_strides(a)
