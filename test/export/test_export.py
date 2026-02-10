@@ -15625,6 +15625,44 @@ graph():
             "torch.testing._internal.two_tensor.TwoTensor", 2, exactly=True
         ).run(gm_torch_ir.code)
 
+    def test_nonstrict_subclass_attr_access_in_torch_function(self):
+        class DummyTensor(torch.Tensor):
+            @staticmethod
+            def __new__(cls, inner: torch.Tensor):
+                return torch.Tensor._make_wrapper_subclass(cls, inner.shape)
+
+            def __init__(self, inner: torch.Tensor):
+                self.inner = inner
+
+            def __tensor_flatten__(self):
+                return ["inner"], None
+
+            @classmethod
+            def __tensor_unflatten__(
+                cls, tensor_data_dict, extra_metadata, outer_size=None, outer_stride=None
+            ):
+                return DummyTensor(tensor_data_dict["inner"])
+
+            @classmethod
+            def __torch_function__(cls, func, types, args, kwargs={}):
+                if func == torch.nn.functional.linear:
+                    return func(args[0], args[1].inner, **kwargs)
+                with torch._C.DisableTorchFunctionSubclass():
+                    return func(*args, **kwargs)
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args, kwargs):
+                if func == torch.ops.aten.detach.default:
+                    return DummyTensor(func(args[0].inner, **kwargs))
+                else:
+                    raise ValueError(f"unsupported op {func}")
+
+        m = torch.nn.Linear(32, 16, bias=False)
+        m.weight = torch.nn.Parameter(DummyTensor(m.weight))
+        inp = (torch.randn(32),)
+        ep = export(m, inp, strict=False)
+        self.assertEqual(ep.module()(*inp), m(*inp))
+
     def test_sym_float_operators(self):
         class Module(torch.nn.Module):
             def forward(self, x):
