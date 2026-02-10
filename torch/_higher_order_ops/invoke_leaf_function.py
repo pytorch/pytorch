@@ -8,15 +8,25 @@ import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey, DispatchKeySet
 from torch._higher_order_ops.utils import register_fake
+from torch._library.opaque_object import OpaqueBase, register_opaque_type
 from torch._ops import HigherOrderOperator
 from torch.autograd.graph import get_gradient_edge
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
 from torch.nn.utils.stateless import _reparametrize_module
 
-from .flat_apply import func_to_graphable
-
 
 _leaf_function_module_retriever: Callable[[int], Any] | None = None
+
+
+class _LeafCallable(OpaqueBase):
+    def __init__(self, fn: Callable) -> None:
+        self._fn = fn
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        return self._fn(*args, **kwargs)
+
+
+register_opaque_type(_LeafCallable, typ="reference")
 
 
 def set_leaf_function_module_retriever(retriever: Callable[[int], Any]) -> None:
@@ -55,8 +65,8 @@ class GradientInfo:
     device: torch.device
 
 
-def unwrap_fn_spec(fn_spec: pytree.TreeSpec) -> Callable:
-    return pytree.tree_unflatten((), fn_spec)
+def unwrap_fn_spec(fn_spec: _LeafCallable) -> Callable:
+    return fn_spec
 
 
 def _retrieve_module_by_index(nn_module_index: int) -> torch.nn.Module:
@@ -339,8 +349,8 @@ class InvokeLeafFunction(HigherOrderOperator):
 
     def __call__(self, real_fn_spec, fake_fn_spec, *flat_args):
         """
-        real_fn_spec: pytree.TreeSpec for the real function that's wrapped in dynamo
-        fake_fn_spec: pytree.TreeSpec for the fake function that's wrapped in dynamo
+        real_fn_spec: _LeafCallable wrapping the real function
+        fake_fn_spec: _LeafCallable wrapping the fake function
         """
         return super().__call__(real_fn_spec, fake_fn_spec, *flat_args)  # type: ignore[attr-defined]
 
@@ -350,12 +360,12 @@ invoke_leaf_function = InvokeLeafFunction()
 
 # NOTE: [Autograd support for invoke_leaf_function]
 #
-# The oveerall idea is that when the real forward executes, we are going to build an autograd graph
+# The overall idea is that when the real forward executes, we are going to build an autograd graph
 # and save it.  When the real backward executes, we are going to invoke the autograd graph.
 # We need to build these "real_forward" and "real_backward" functions from the "real_fn".
 #
 # Inputs:
-# real_fn_spec/fake_fn_spec are pytree.TreeSpecs that contain real_fn and fake_fn.
+# real_fn_spec/fake_fn_spec are _LeafCallable objects that wrap real_fn and fake_fn.
 # These functions were created in dynamo by wrapping the user's original leaf function and fake function:
 #   - They accept *flat_args (flattened LeafModuleState objects + other args)
 #   - They unflatten flat_args and convert LeafModuleState back to nn.Modules
@@ -429,7 +439,7 @@ class InvokeLeafFunctionAutogradOp(torch.autograd.Function):
                 for info in input_infos_for_fake
             )
 
-        _, new_real_fn_spec = func_to_graphable(real_forward)
+        new_real_fn_spec = _LeafCallable(real_forward)
 
         with torch._C._AutoDispatchBelowAutograd():
             fw_outputs = invoke_leaf_function(
@@ -444,8 +454,8 @@ class InvokeLeafFunctionAutogradOp(torch.autograd.Function):
     @staticmethod
     # pyrefly: ignore [bad-override]
     def backward(ctx, *grads):
-        _, real_bw_spec = func_to_graphable(ctx.real_backward)
-        _, fake_bw_spec = func_to_graphable(ctx.fake_backward)
+        real_bw_spec = _LeafCallable(ctx.real_backward)
+        fake_bw_spec = _LeafCallable(ctx.fake_backward)
         fw_grads = invoke_leaf_function(real_bw_spec, fake_bw_spec, *grads)
         return None, None, *fw_grads
 
