@@ -373,15 +373,9 @@ class ComboKernel(Kernel):
             and cumulative block counts for dispatch boundaries.
             """
             for i, sub_kernel in enumerate(kernel.sub_kernels):
-                xnumel, no_x_dim = (
-                    (kernel.x_numels_list[i], False)
-                    if isinstance(kernel.x_numels_list[i], str)
-                    and cast(str, kernel.x_numels_list[i])[0] != "-"
-                    or (
-                        isinstance(kernel.x_numels_list[i], int)
-                        and cast(int, kernel.x_numels_list[i]) > 0
-                    )
-                    else (kernel.min_x_blocks_list[i], True)
+                no_x_dim = sub_kernel.no_x_dim
+                xnumel = (
+                    kernel.min_x_blocks_list[i] if no_x_dim else kernel.x_numels_list[i]
                 )
                 x_blocks_str = (
                     f"tl.cdiv({xnumel}, XBLOCK_{i})" if not no_x_dim else f"{xnumel}"
