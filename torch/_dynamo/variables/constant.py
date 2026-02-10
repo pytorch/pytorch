@@ -369,6 +369,9 @@ its type to `common_constant_types`.
         )
 
 
+CONSTANT_VARIABLE_NONE = ConstantVariable(None)
+
+
 class EnumVariable(VariableTracker):
     """VariableTracker for enum.Enum and enum.IntEnum instances
 
