@@ -1986,6 +1986,48 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
         self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
 
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_nested_comprehension_captured_tensor(self):
+        """Comprehension in inlined function captures a tensor from the inlined function."""
+
+        def inner(x):
+            t = x + 2
+            result = [torch._dynamo.graph_break() or t.item() for i in range(2)]
+            return x + 3, result
+
+        def outer(x):
+            x = x + 1
+            return inner(x)
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(outer, backend=backend)
+        x = torch.tensor(1.0)
+
+        self.assertEqual(compiled(x), outer(x))
+        self.assertEqual(len(backend.graphs), 2)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_nested_comprehension_name_shadowing(self):
+        """Root and leaf frames have variables with the same name."""
+
+        def inner(x):
+            a = x + 2
+            result = [torch._dynamo.graph_break() or a.item() for i in range(2)]
+            b = x + 3
+            return b, result
+
+        def outer(x):
+            a = x + 1
+            r = inner(a)
+            return a + 4, r
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(outer, backend=backend)
+        x = torch.tensor(1.0)
+
+        self.assertEqual(compiled(x), outer(x))
+        self.assertEqual(len(backend.graphs), 2)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
