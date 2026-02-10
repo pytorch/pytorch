@@ -207,13 +207,10 @@ def _infer_global_shape_local_even_sharding(
         if not isinstance(placement, Shard):
             continue
 
-        shard_dim = placement.dim
-        local_size = local_shape[shard_dim]
-        mesh_size = device_mesh.size(mesh_dim)
-        global_shape[shard_dim] = local_size * mesh_size
+        global_shape[placement.dim] *= device_mesh.size(mesh_dim)
 
-    global_shape = torch.Size(global_shape)
-    return global_shape, make_contiguous_strides_for(global_shape)
+    global_shape_tuple = torch.Size(global_shape)
+    return global_shape_tuple, make_contiguous_strides_for(global_shape_tuple)
 
 
 def _allgather_global_shape_uneven_sharding(
@@ -227,6 +224,10 @@ def _allgather_global_shape_uneven_sharding(
     For each Shard placement, this function gathers local sizes from all ranks
     along the mesh dimension and sums them to get the global size. This adds
     communication overhead but correctly handles uneven sharding.
+
+    When the same tensor dim is sharded on multiple mesh dims, this function
+    processes them sequentially, using the accumulated size from previous
+    gathers as input to subsequent gathers.
 
     Args:
         local_tensor: The local tensor on this rank
@@ -244,42 +245,40 @@ def _allgather_global_shape_uneven_sharding(
     if not has_shard:
         return torch.Size(global_shape), local_tensor.stride()
 
+    @maybe_run_for_local_tensor
+    def _create_size_tensor(size: int) -> torch.Tensor:
+        return torch.tensor([size], device=device_mesh.device_type)
+
+    @maybe_run_for_local_tensor
+    def _sum_sizes(gathered_sizes: list[torch.Tensor]) -> int:
+        return int(torch.stack(gathered_sizes).sum())
+
     for mesh_dim, placement in enumerate(placements):
         if not isinstance(placement, Shard):
             continue
 
         shard_dim = placement.dim
 
-        @maybe_run_for_local_tensor
-        def _create_size_tensor(size):
-            return torch.tensor([size], device=device_mesh.device_type)
-
-        local_size_tensor = _create_size_tensor(local_shape[shard_dim])
+        # Use the current running size (starts as local, accumulates across mesh dims)
+        current_size = global_shape[shard_dim]
+        current_size_tensor = _create_size_tensor(current_size)
 
         mesh_size = device_mesh.size(mesh_dim)
         gathered_sizes = [
-            torch.empty_like(local_size_tensor, device=local_size_tensor.device)
+            torch.empty_like(current_size_tensor, device=current_size_tensor.device)
             for _ in range(mesh_size)
         ]
 
         funcol.all_gather_inplace(
             gathered_sizes,
-            local_size_tensor,
+            current_size_tensor,
             (device_mesh, mesh_dim),
         )
 
-        @maybe_run_for_local_tensor
-        def _sum_sizes(gathered_sizes):
-            total = 0
-            for size_tensor in gathered_sizes:
-                total += size_tensor.item()
-            return total
+        global_shape[shard_dim] = _sum_sizes(gathered_sizes)
 
-        global_size = _sum_sizes(gathered_sizes)
-        global_shape[shard_dim] = global_size
-
-    global_shape = torch.Size(global_shape)
-    return global_shape, make_contiguous_strides_for(global_shape)
+    global_shape_tuple = torch.Size(global_shape)
+    return global_shape_tuple, make_contiguous_strides_for(global_shape_tuple)
 
 
 def _local_map_wrapped(

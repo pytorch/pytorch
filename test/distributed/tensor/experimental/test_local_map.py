@@ -528,6 +528,73 @@ class TestLocalMap4GPU(DTensorTestBase):
         self.assertEqual(Y_dt.full_tensor().shape, Y.shape)
         self.assertEqual(Y_dt.full_tensor(), Y)
 
+    @skip_if_lt_x_gpu(4)
+    @with_comms
+    def test_local_map_same_dim_sharded_on_two_mesh_dims(self):
+        """
+        Test that even sharding works correctly when the same tensor dim
+        is sharded on 2 mesh dims.
+        """
+        device_mesh = init_device_mesh(device_type=self.device_type, mesh_shape=(2, 2))
+
+        # Global tensor size: 8x4, sharded on dim 0 across both mesh dims
+        # Each rank should have 8 / 2 / 2 = 2 rows
+        X = torch.randn(8, 4, device=self.device_type, requires_grad=False)
+        scalar = 2.0
+        Y = torch.mul(X, scalar)
+
+        # Shard dim 0 on both mesh dims
+        X_dt = distribute_tensor(X, device_mesh, [Shard(0), Shard(0)])
+
+        # Verify local shape is 2x4 (8 / 2 / 2 = 2)
+        self.assertEqual(X_dt.to_local().shape, (2, 4))
+
+        local_mul_forward = local_map(
+            mul_forward,
+            out_placements=[Shard(0), Shard(0)],
+            in_placements=([Shard(0), Shard(0)], None),
+            device_mesh=device_mesh,
+        )
+
+        Y_dt = local_mul_forward(X_dt, scalar)
+
+        # Verify global shape is correctly inferred as 8x4
+        self.assertEqual(Y_dt.shape, torch.Size([8, 4]))
+        self.assertEqual(Y_dt.full_tensor().shape, Y.shape)
+        self.assertEqual(Y_dt.full_tensor(), Y)
+
+    @skip_if_lt_x_gpu(4)
+    @with_comms
+    def test_local_map_uneven_sharding_same_dim_on_two_mesh_dims(self):
+        """
+        Test uneven sharding when the same tensor dim is sharded on 2 mesh dims.
+        """
+        device_mesh = init_device_mesh(device_type=self.device_type, mesh_shape=(2, 2))
+
+        # Global tensor size: 9x4, sharded on dim 0 across both mesh dims
+        # With uneven sharding, different ranks will have different local sizes
+        X = torch.randn(9, 4, device=self.device_type, requires_grad=False)
+        scalar = 2.0
+        Y = torch.mul(X, scalar)
+
+        # Shard dim 0 on both mesh dims
+        X_dt = distribute_tensor(X, device_mesh, [Shard(0), Shard(0)])
+
+        local_mul_forward = local_map(
+            mul_forward,
+            out_placements=[Shard(0), Shard(0)],
+            in_placements=([Shard(0), Shard(0)], None),
+            device_mesh=device_mesh,
+            allow_uneven_sharding=True,
+        )
+
+        Y_dt = local_mul_forward(X_dt, scalar)
+
+        # Verify global shape is correctly computed as 9x4
+        self.assertEqual(Y_dt.shape, torch.Size([9, 4]))
+        self.assertEqual(Y_dt.full_tensor().shape, Y.shape)
+        self.assertEqual(Y_dt.full_tensor(), Y)
+
 
 if __name__ == "__main__":
     run_tests()
