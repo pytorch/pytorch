@@ -96,10 +96,14 @@ def strip_redundant(labels: list[str]) -> tuple[list[str], list[str]]:
 def fetch_existing_labels(owner: str, repo: str, issue_number: int) -> list[str]:
     result = subprocess.run(
         [
-            "gh", "issue", "view",
+            "gh",
+            "issue",
+            "view",
             str(issue_number),
-            "--repo", f"{owner}/{repo}",
-            "--json", "labels",
+            "--repo",
+            f"{owner}/{repo}",
+            "--json",
+            "labels",
         ],
         capture_output=True,
         text=True,
@@ -118,13 +122,16 @@ def fetch_existing_labels(owner: str, repo: str, issue_number: int) -> list[str]
 def allow_with_updated_input(tool_input: dict, merged_labels: list[str]) -> None:
     updated = dict(tool_input)
     updated["labels"] = merged_labels
-    json.dump({
-        "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "permissionDecision": "allow",
-            "updatedInput": updated,
-        }
-    }, sys.stdout)
+    json.dump(
+        {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "allow",
+                "updatedInput": updated,
+            }
+        },
+        sys.stdout,
+    )
     sys.exit(0)
 
 
