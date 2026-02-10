@@ -109,6 +109,60 @@ def _(x):
     return torch.randn(i0)
 
 
+# Custom op to test ScalarType argument serialization
+@torch.library.custom_op("aoti_custom_ops::fn_with_dtype_arg", mutates_args={})
+def fn_with_dtype_arg(x: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
+    return torch.zeros_like(x, dtype=dtype)
+
+
+@fn_with_dtype_arg.register_fake
+def _(x, dtype):
+    return torch.zeros_like(x, dtype=dtype)
+
+
+# Custom ops to test MemoryFormat and Layout argument serialization
+# Using lower-level torch.library API since custom_op decorator doesn't support these types
+_memory_format_test_lib = torch.library.Library("aoti_custom_ops", "FRAGMENT")  # noqa: TOR901
+_memory_format_test_lib.define(
+    "fn_with_memory_format_arg(Tensor x, MemoryFormat memory_format) -> Tensor"
+)
+
+
+def _fn_with_memory_format_arg_impl(x, memory_format):
+    return x.contiguous(memory_format=memory_format)
+
+
+_memory_format_test_lib.impl(
+    "fn_with_memory_format_arg", _fn_with_memory_format_arg_impl, "CPU"
+)
+_memory_format_test_lib.impl(
+    "fn_with_memory_format_arg", _fn_with_memory_format_arg_impl, "CUDA"
+)
+
+
+@torch.library.register_fake("aoti_custom_ops::fn_with_memory_format_arg")
+def fn_with_memory_format_arg_abstract(x, memory_format):
+    return x.contiguous(memory_format=memory_format)
+
+
+_layout_test_lib = torch.library.Library("aoti_custom_ops", "FRAGMENT")  # noqa: TOR901
+_layout_test_lib.define("fn_with_layout_arg(Tensor x, Layout layout) -> Tensor")
+
+
+def _fn_with_layout_arg_impl(x, layout):
+    # Layout argument is received correctly if we get here without error
+    return x.clone()
+
+
+_layout_test_lib.impl("fn_with_layout_arg", _fn_with_layout_arg_impl, "CPU")
+_layout_test_lib.impl("fn_with_layout_arg", _fn_with_layout_arg_impl, "CUDA")
+
+
+@torch.library.register_fake("aoti_custom_ops::fn_with_layout_arg")
+def fn_with_layout_arg_abstract(x, layout):
+    return x.clone()
+
+
 class AOTInductorTestsTemplate:
     def test_custom_op_add(self) -> None:
         class M(torch.nn.Module):
@@ -412,6 +466,40 @@ class AOTInductorTestsTemplate:
 
         self.assertEqual(len(inps), 0)
         self.assertTrue(sentinel_seen)
+
+    def test_custom_op_with_dtype_arg_various_dtypes(self) -> None:
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                a = torch.ops.aoti_custom_ops.fn_with_dtype_arg(x, torch.float32)
+                b = torch.ops.aoti_custom_ops.fn_with_dtype_arg(x, torch.float64)
+                c = torch.ops.aoti_custom_ops.fn_with_dtype_arg(x, torch.int32)
+                d = torch.ops.aoti_custom_ops.fn_with_dtype_arg(x, torch.uint16)
+                e = torch.ops.aoti_custom_ops.fn_with_dtype_arg(x, torch.bfloat16)
+                return a, b, c, d, e
+
+        m = Model().to(device=self.device)
+        args = (torch.randn(2, 2, device=self.device),)
+        self.check_model(m, args)
+
+    def test_custom_op_with_memory_format_arg(self) -> None:
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.aoti_custom_ops.fn_with_memory_format_arg(
+                    x, torch.channels_last
+                )
+
+        m = Model().to(device=self.device)
+        args = (torch.randn(1, 3, 4, 4, device=self.device),)
+        self.check_model(m, args)
+
+    def test_custom_op_with_layout_arg(self) -> None:
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.aoti_custom_ops.fn_with_layout_arg(x, torch.strided)
+
+        m = Model().to(device=self.device)
+        args = (torch.randn(4, 4, device=self.device),)
+        self.check_model(m, args)
 
     @skipIfXpu
     @unittest.skipIf(IS_FBCODE, "unable to find library -laoti_custom_ops")
