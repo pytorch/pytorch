@@ -27,7 +27,8 @@ class _WithExport:
             verbose=False,
             **options,
         )
-        assert onnx_program is not None
+        if onnx_program is None:
+            raise AssertionError("Exported ONNX program is None")
         return onnx_program
 
 
@@ -940,6 +941,32 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
         self.assertIn("Unsqueeze", all_ops)
         self.assertIn("Expand", all_ops)
         self.assertIn("Reshape", all_ops)
+
+    def test_onnx_export_invoke_subgraph(self):
+        class InvokeSubgraphModel(torch.nn.Module):
+            def forward(self, x, y):
+                def inner_fn(a, b):
+                    return torch.mul(a, b) + a
+
+                return torch.compiler.nested_compile_region(inner_fn)(x, y)
+
+        x = torch.randn(8)
+        y = torch.randn(8)
+
+        onnx_program = self.export(InvokeSubgraphModel(), (x, y), optimize=False)
+
+        # TODO(justinchuby): Function preservation not implemented yet in ONNX exporter
+        # # Verify that the function is preserved in the ONNX graph
+        # # The function should appear in the model's functions list
+        # onnx_model = onnx_program.model
+        # self.assertGreater(
+        #     len(onnx_model.functions),
+        #     0,
+        #     "Expected at least one function in the ONNX model",
+        # )
+
+        # Verify the output is correct
+        onnx_testing.assert_onnx_program(onnx_program, args=(x, y))
 
 
 if __name__ == "__main__":

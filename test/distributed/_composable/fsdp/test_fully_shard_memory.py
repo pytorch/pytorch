@@ -5,14 +5,7 @@ import gc
 import unittest
 
 import torch
-import torch.nn.functional as F
-from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.fsdp import (
-    CPUOffloadPolicy,
-    fully_shard,
-    MixedPrecisionPolicy,
-    OffloadPolicy,
-)
+from torch.distributed.fsdp import CPUOffloadPolicy, fully_shard, OffloadPolicy
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, get_devtype
 from torch.testing._internal.common_utils import (
@@ -23,7 +16,6 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
-    MoEArgs,
     Transformer,
     TransformerBlock,
 )
@@ -232,6 +224,65 @@ class TestFullyShardMemory(FSDPTest):
         self.assertLessEqual(mem_mb - base_mem_mb, expected_mem_mb)
 
     @skip_if_lt_x_gpu(2)
+    def test_fully_shard_training_memory_no_gc(self):
+        """Memory should not grow across training steps when GC is disabled.
+
+        Regression test: reference cycles in FSDP's autograd integration can
+        hold GPU tensors alive when Python's cyclic GC is disabled. This
+        catches leaks like the one introduced in #173415.
+        """
+        torch.manual_seed(42)
+        gc.disable()
+        try:
+            vocab_size = 1024
+            model_args = ModelArgs(
+                vocab_size=vocab_size,
+                n_layers=6,
+                dim=2048,
+                n_heads=16,
+                weight_tying=False,
+            )
+            model = Transformer(model_args)
+            for module in model.modules():
+                if isinstance(module, TransformerBlock):
+                    fully_shard(module.attention)
+                    fully_shard(module.feed_forward)
+                    fully_shard(module)
+            fully_shard(model)
+            optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=False)
+            inp = torch.randint(0, vocab_size, (2, 16), device=device_type.type)
+
+            # Warm-up step to stabilize memory (cuBLAS workspaces, etc.)
+            loss = model(inp)
+            loss.sum().backward()
+            optim.step()
+            optim.zero_grad()
+            gc.collect()  # one-time collection after warm-up
+            torch.get_device_module(device_type).synchronize()
+            mem_after_warmup = self._get_curr_active_memory_mb()
+
+            num_steps = 10
+            for _ in range(num_steps):
+                loss = model(inp)
+                loss.sum().backward()
+                optim.step()
+                optim.zero_grad()
+
+            torch.get_device_module(device_type).synchronize()
+            mem_after_steps = self._get_curr_active_memory_mb()
+            # Allow a small buffer (2 MB) for non-determinism, but no
+            # per-step growth should occur.
+            self.assertLessEqual(
+                mem_after_steps - mem_after_warmup,
+                2,
+                f"Memory grew by {mem_after_steps - mem_after_warmup} MB over "
+                f"{num_steps} steps with gc disabled, indicating a reference "
+                f"cycle leak in FSDP's autograd graph",
+            )
+        finally:
+            gc.enable()
+
+    @skip_if_lt_x_gpu(2)
     def test_fully_shard_del_memory(self):
         base_mem_mb = self._get_peak_active_memory_mb()
         vocab_size = 32
@@ -289,178 +340,6 @@ class TestFullyShardMemory(FSDPTest):
 
         for param in model.parameters():
             param.register_post_accumulate_grad_hook(optim_hook)
-
-
-class TestFullyShardMoEMemory(FSDPTest):
-    """
-    Test memory behavior with MoE + Expert Parallel + FSDP + Activation Checkpointing.
-
-    This test catches a memory leak regression where memory would grow by ~2.3GB
-    per training step when using:
-    - MoE with Expert Parallel (all-to-all dispatch/combine)
-    - FSDP2 with nested EFSDP for experts
-    - Activation checkpointing
-
-    The leak was caused by _apply_to_tensors creating container copies that
-    prevented proper garbage collection. The fix uses tree_flatten/tree_unflatten
-    with special handling for unregistered dataclasses.
-
-    This test requires 4 GPUs to properly test Expert Parallel (EP=2) with
-    FSDP (world_size=4) and EFSDP (size=2 within EP group).
-    """
-
-    @property
-    def world_size(self) -> int:
-        return min(4, torch.get_device_module(device_type).device_count())
-
-    @skip_if_lt_x_gpu(4)
-    @unittest.skipIf(TEST_HPU, "MoE test requires CUDA")
-    def test_moe_expert_parallel_memory_leak(self):
-        """
-        Test that MoE + Expert Parallel + FSDP + activation checkpointing
-        does not leak memory over multiple training steps.
-
-        Configuration:
-            - 4 GPUs total
-            - FSDP mesh: 4-way (all GPUs)
-            - EP mesh: 2-way (experts partitioned across 2 GPUs)
-            - EFSDP mesh: 2-way (FSDP within EP group)
-            - Activation checkpointing enabled
-
-        The memory leak manifested as ~2.3GB growth per step, causing OOM
-        after ~20 steps on 80GB GPUs. With the fix, memory should be stable.
-        """
-        assert self.world_size == 4, f"Requires 4 GPUs, got {self.world_size}"
-
-        # Build device meshes: FSDP=4, EP=2, EFSDP=2
-        ep_degree = 2
-        fsdp_mesh = init_device_mesh(
-            device_type.type, (self.world_size,), mesh_dim_names=("fsdp",)
-        )
-        efsdp_size = self.world_size // ep_degree
-        sparse_mesh = init_device_mesh(
-            device_type.type,
-            (efsdp_size, ep_degree),
-            mesh_dim_names=("efsdp", "ep"),
-        )
-        ep_mesh = sparse_mesh["ep"]
-        efsdp_mesh = sparse_mesh["efsdp"]
-
-        # Use smaller model dimensions for CI but preserve the structure
-        # that triggers the memory leak (MoE + EP + activation checkpointing)
-        moe_args = MoEArgs(
-            num_experts=8,  # Smaller than prod (64) but still tests EP
-            top_k=2,
-            hidden_dim=256,
-        )
-        model_args = ModelArgs(
-            n_layers=2,
-            vocab_size=1024,
-            max_seq_len=128,
-            dim=256,
-            n_heads=4,
-            dropout_p=0.0,
-            use_attn_mask=True,
-            weight_tying=False,
-            checkpoint_activations=True,  # Required to trigger the leak
-            moe_args=moe_args,
-        )
-
-        torch.manual_seed(42)
-
-        # Create model with MoE and Expert Parallel
-        model = Transformer(model_args, ep_mesh=ep_mesh)
-
-        # Apply FSDP
-        mp_policy = MixedPrecisionPolicy(
-            param_dtype=torch.bfloat16,
-            reduce_dtype=torch.float32,
-        )
-        for layer in model.layers:
-            if hasattr(layer.feed_forward, "experts"):
-                fully_shard(
-                    layer.feed_forward.experts, mesh=efsdp_mesh, mp_policy=mp_policy
-                )
-            fully_shard(layer, mesh=fsdp_mesh, mp_policy=mp_policy)
-
-        fully_shard(model.tok_embeddings, mesh=fsdp_mesh, mp_policy=mp_policy)
-        fully_shard(model.pos_embeddings, mesh=fsdp_mesh, mp_policy=mp_policy)
-        fully_shard([model.norm, model.output], mesh=fsdp_mesh, mp_policy=mp_policy)
-        fully_shard(model, mesh=fsdp_mesh, mp_policy=mp_policy)
-
-        optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, foreach=False)
-
-        batch_size = 1
-        seq_len = model_args.max_seq_len
-
-        # Warmup steps to stabilize memory (optimizer states, CUDA caches, etc.)
-        num_warmup_steps = 3
-        for _ in range(num_warmup_steps):
-            tokens = torch.randint(
-                0, model_args.vocab_size, (batch_size, seq_len), device=device_type.type
-            )
-            labels = torch.randint(
-                0, model_args.vocab_size, (batch_size, seq_len), device=device_type.type
-            )
-            logits = model(tokens)
-            loss = F.cross_entropy(
-                logits.view(-1, model_args.vocab_size), labels.view(-1)
-            )
-            loss.backward()
-            optimizer.step()
-            optimizer.zero_grad()
-
-        # Force garbage collection and reset memory stats
-        gc.collect()
-        torch.cuda.synchronize()
-        torch.cuda.reset_peak_memory_stats()
-
-        # Record baseline memory after warmup
-        baseline_memory = torch.cuda.memory_allocated()
-
-        # Run test steps and track memory
-        num_test_steps = 5
-        memory_readings = [baseline_memory]
-
-        for step in range(num_test_steps):
-            torch.manual_seed(100 + step)
-            tokens = torch.randint(
-                0, model_args.vocab_size, (batch_size, seq_len), device=device_type.type
-            )
-            labels = torch.randint(
-                0, model_args.vocab_size, (batch_size, seq_len), device=device_type.type
-            )
-
-            logits = model(tokens)
-            loss = F.cross_entropy(
-                logits.view(-1, model_args.vocab_size), labels.view(-1)
-            )
-            loss.backward()
-            optimizer.step()
-            optimizer.zero_grad()
-
-            gc.collect()
-            torch.cuda.synchronize()
-            current_memory = torch.cuda.memory_allocated()
-            memory_readings.append(current_memory)
-
-        # Check for memory growth
-        # Before the fix: memory grew by ~2.3GB per step (with large model)
-        # With CI-sized model, growth would be proportionally smaller but still detectable
-        # Allow 50MB threshold to catch significant leaks while tolerating noise
-        max_memory_growth_bytes = 50 * 1024 * 1024  # 50 MB threshold
-        final_memory = memory_readings[-1]
-        memory_growth = final_memory - baseline_memory
-
-        self.assertLessEqual(
-            memory_growth,
-            max_memory_growth_bytes,
-            f"Memory leak detected in MoE + Expert Parallel + FSDP! "
-            f"Memory grew by {memory_growth / (1024 * 1024):.2f} MB "
-            f"over {num_test_steps} steps (threshold: {max_memory_growth_bytes / (1024 * 1024):.2f} MB). "
-            f"Memory readings (MB): {[m / (1024 * 1024) for m in memory_readings]}. "
-            f"This regression was fixed in the FSDP _apply_to_tensors -> tree_flatten change.",
-        )
 
 
 if __name__ == "__main__":

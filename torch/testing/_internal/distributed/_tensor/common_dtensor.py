@@ -38,7 +38,6 @@ from torch.distributed.tensor._redistribute import redistribute_local_tensor
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,
-    ParallelStyle,
     PrepareModuleInput,
     RowwiseParallel,
     SequenceParallel,
@@ -124,13 +123,6 @@ class MLPStacked(nn.Module):
 
 
 @dataclass
-class MoEArgs:
-    num_experts: int = 8
-    top_k: int = 2
-    hidden_dim: int | None = None  # If None, uses 4 * dim
-
-
-@dataclass
 class ModelArgs:
     n_layers: int = 2
     vocab_size: int = 8
@@ -141,7 +133,6 @@ class ModelArgs:
     use_attn_mask: bool = True
     weight_tying: bool = True
     checkpoint_activations: bool = False
-    moe_args: MoEArgs | None = None  # If set, use MoE instead of dense FFN
 
 
 class Attention(nn.Module):
@@ -197,396 +188,15 @@ class FeedForward(nn.Module):
         return self.resid_dropout(self.w2(self.gelu(self.w1(x))))
 
 
-# MoE Components for testing Expert Parallel
-def _run_experts_grouped_mm(
-    w1: torch.Tensor,
-    w2: torch.Tensor,
-    w3: torch.Tensor,
-    x: torch.Tensor,
-    num_tokens_per_expert: torch.Tensor,
-) -> torch.Tensor:
-    offsets = torch.cumsum(num_tokens_per_expert, dim=0, dtype=torch.int32)
-    h = F.silu(
-        torch._grouped_mm(x.bfloat16(), w1.bfloat16().transpose(-2, -1), offs=offsets)
-    )
-    h = h * torch._grouped_mm(
-        x.bfloat16(), w3.bfloat16().transpose(-2, -1), offs=offsets
-    )
-    out = torch._grouped_mm(h, w2.bfloat16().transpose(-2, -1), offs=offsets).type_as(x)
-    return out
-
-
-class GroupedExperts(nn.Module):
-    def __init__(self, dim: int, hidden_dim: int, num_experts: int):
-        super().__init__()
-        self.num_experts = num_experts
-        self.w1 = nn.Parameter(torch.empty(num_experts, hidden_dim, dim))
-        self.w2 = nn.Parameter(torch.empty(num_experts, dim, hidden_dim))
-        self.w3 = nn.Parameter(torch.empty(num_experts, hidden_dim, dim))
-
-    def forward(
-        self, x: torch.Tensor, num_tokens_per_expert: torch.Tensor
-    ) -> torch.Tensor:
-        if isinstance(self.w1, DTensor):
-            w1 = self.w1.to_local()
-            w2 = self.w2.to_local()
-            w3 = self.w3.to_local()
-        else:
-            w1, w2, w3 = self.w1, self.w2, self.w3
-        return _run_experts_grouped_mm(w1, w2, w3, x, num_tokens_per_expert)
-
-
-class TokenChoiceTopKRouter(nn.Module):
-    def __init__(self, dim: int, num_experts: int, top_k: int):
-        super().__init__()
-        self.gate = nn.Linear(dim, num_experts, bias=False)
-        self.num_experts = num_experts
-        self.top_k = top_k
-
-    def forward(
-        self, x: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        scores = self.gate(x)
-        scores = torch.sigmoid(scores.to(torch.float32))
-        _, selected_experts_indices = torch.topk(
-            scores, k=self.top_k, dim=-1, sorted=False
-        )
-        top_scores = scores.gather(dim=1, index=selected_experts_indices)
-        num_tokens_per_expert = torch.histc(
-            selected_experts_indices.view(-1),
-            bins=self.num_experts,
-            min=0,
-            max=self.num_experts,
-        )
-        return top_scores, selected_experts_indices, num_tokens_per_expert
-
-
-class TokenReorderer(nn.Module):
-    def __init__(self, num_experts: int, top_k: int):
-        super().__init__()
-        self.num_experts = num_experts
-        self.top_k = top_k
-
-    def forward(
-        self, top_scores: torch.Tensor, selected_experts_indices: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        num_tokens_per_expert = torch.histc(
-            selected_experts_indices.view(-1),
-            bins=self.num_experts,
-            min=0,
-            max=self.num_experts,
-        )
-        token_indices_experts_sorted = torch.argsort(
-            selected_experts_indices.view(-1), stable=True
-        )
-        top_scores_experts_sorted = top_scores.view(-1)[token_indices_experts_sorted]
-        return (
-            top_scores_experts_sorted,
-            token_indices_experts_sorted,
-            num_tokens_per_expert,
-        )
-
-
-class MoE(nn.Module):
-    def __init__(self, dim: int, hidden_dim: int, num_experts: int, top_k: int):
-        super().__init__()
-        self.experts = GroupedExperts(
-            dim=dim, hidden_dim=hidden_dim, num_experts=num_experts
-        )
-        self.router = TokenChoiceTopKRouter(
-            dim=dim, num_experts=num_experts, top_k=top_k
-        )
-        self.reorderer = TokenReorderer(num_experts=num_experts, top_k=top_k)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        bs, slen, dim = x.shape
-        x = x.view(-1, dim)
-
-        top_scores, selected_experts_indices, _ = self.router(x)
-        (
-            top_scores_experts_sorted,
-            token_indices_experts_sorted,
-            num_tokens_per_expert,
-        ) = self.reorderer(top_scores, selected_experts_indices)
-
-        routed_input = x[token_indices_experts_sorted // self.router.top_k]
-        routed_input = (
-            routed_input.to(torch.float32) * top_scores_experts_sorted.reshape(-1, 1)
-        ).to(x.dtype)
-
-        routed_output = self.experts(routed_input, num_tokens_per_expert)
-
-        routed_output_unsorted = torch.zeros(
-            (bs * slen * self.router.top_k, dim),
-            dtype=routed_output.dtype,
-            device=routed_output.device,
-        )
-        routed_output_unsorted[token_indices_experts_sorted] = routed_output
-        routed_output_unsorted = routed_output_unsorted.reshape(
-            -1, self.router.top_k, dim
-        )
-        out_experts = routed_output_unsorted.sum(dim=1)
-
-        return out_experts.reshape(bs, slen, dim)
-
-
-# Expert Parallel implementation for MoE testing
-# Triton kernel for token permutation
-try:
-    import triton
-    import triton.language as tl
-
-    @triton.jit
-    def _fill_indices_kernel(
-        tokens_per_expert_group_ptr,
-        start_index_values_ptr,
-        write_offsets_ptr,
-        output_ptr,
-        experts_per_rank: tl.constexpr,
-        num_ranks: tl.constexpr,
-        BLOCK_SIZE: tl.constexpr,
-    ):
-        pid = tl.program_id(axis=0)
-        num_programs = tl.num_programs(axis=0)
-
-        for expert_id in range(pid, experts_per_rank, num_programs):
-            write_offset = tl.load(write_offsets_ptr + expert_id)
-
-            for r in range(num_ranks):
-                i = r * experts_per_rank + expert_id
-                start_index = tl.load(start_index_values_ptr + i)
-                length = tl.load(tokens_per_expert_group_ptr + i)
-
-                offsets = tl.arange(0, BLOCK_SIZE)
-
-                for chunk_start in range(0, length, BLOCK_SIZE):
-                    chunk_offsets = chunk_start + offsets
-                    mask = chunk_offsets < length
-                    values = start_index + chunk_offsets
-                    dest_indices = write_offset + chunk_offsets
-                    tl.store(output_ptr + dest_indices, values, mask=mask)
-
-                write_offset += length
-
-    HAS_TRITON = True
-except ImportError:
-    HAS_TRITON = False
-
-TOKEN_GROUP_ALIGN_SIZE_M = 8
-
-
-def _round_up(x: int, y: int) -> int:
-    return ((x + y - 1) // y) * y
-
-
-def _fill_indices_wrapper(
-    tokens_per_expert_group: torch.Tensor,
-    start_index_values: torch.Tensor,
-    write_offsets: torch.Tensor,
-    experts_per_rank: int,
-    num_ranks: int,
-    max_len: int,
-    block_size: int = 128,
-    max_blocks: int = 1024,
-):
-    permuted_indices = torch.full(
-        (max_len,), -1, dtype=torch.int32, device=tokens_per_expert_group.device
-    )
-    num_blocks = min(experts_per_rank, max_blocks)
-    grid = (num_blocks,)
-
-    _fill_indices_kernel[grid](
-        tokens_per_expert_group,
-        start_index_values,
-        write_offsets,
-        permuted_indices,
-        experts_per_rank,
-        num_ranks,
-        BLOCK_SIZE=block_size,
-    )
-    return permuted_indices
-
-
-def _generate_permute_indices(
-    tokens_per_expert_group: torch.Tensor,
-    experts_per_rank: int,
-    num_ranks: int,
-    max_len: int,
-    alignment: int,
-):
-    start_index_values = (
-        torch.cumsum(tokens_per_expert_group, 0) - tokens_per_expert_group
-    )
-    total_tokens_per_expert = tokens_per_expert_group.view(num_ranks, -1).sum(0)
-    total_tokens_per_expert = torch.clamp_min(total_tokens_per_expert, alignment)
-    m_sizes = ((total_tokens_per_expert + alignment - 1) // alignment * alignment).to(
-        torch.int32
-    )
-    m_offsets = torch.cumsum(m_sizes, 0)
-    write_offsets = m_offsets - m_sizes
-
-    permuted_indices = _fill_indices_wrapper(
-        tokens_per_expert_group,
-        start_index_values,
-        write_offsets,
-        experts_per_rank,
-        num_ranks,
-        max_len,
-    )
-    return permuted_indices, m_sizes, m_offsets.to(torch.int32)
-
-
-def _permute_tokens(x, num_tokens_per_expert, ep_degree, num_local_experts):
-    x_padded_per_expert = x.shape[0] + num_local_experts * TOKEN_GROUP_ALIGN_SIZE_M
-    padded_max_len = _round_up(x_padded_per_expert, TOKEN_GROUP_ALIGN_SIZE_M)
-    with torch.no_grad():
-        permuted_indices, num_tokens_per_expert, _offsets = _generate_permute_indices(
-            num_tokens_per_expert,
-            num_local_experts,
-            ep_degree,
-            padded_max_len,
-            TOKEN_GROUP_ALIGN_SIZE_M,
-        )
-
-    x = torch.vstack((x, x.new_zeros(x.shape[-1])))
-    input_shape = x.shape
-    x = x[permuted_indices, :]
-    return input_shape, x, permuted_indices, num_tokens_per_expert
-
-
-def _unpermute_tokens(out, input_shape, permuted_indices):
-    out_unpermuted = out.new_empty(input_shape)
-    out_unpermuted[permuted_indices, :] = out
-    out = out_unpermuted[:-1]
-    return out
-
-
-class ExpertParallel(ParallelStyle):
-    """Expert Parallel: shards experts across EP mesh with all-to-all dispatch/combine."""
-
-    def __init__(self):
-        super().__init__()
-        self.input_splits = None
-        self.output_splits = None
-        self.input_shape = None
-        self.permuted_indices = None
-
-    def _partition_fn(self, name: str, mod: nn.Module, device_mesh: DeviceMesh) -> None:
-        for param_name, param in mod.named_parameters(recurse=False):
-            dist_param = nn.Parameter(distribute_tensor(param, device_mesh, [Shard(0)]))
-            mod.register_parameter(param_name, dist_param)
-
-    def _token_dispatch(
-        self, mod: nn.Module, inputs: tuple, device_mesh: DeviceMesh
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        from torch.distributed._functional_collectives import (
-            all_to_all_single,
-            all_to_all_single_autograd,
-        )
-
-        routed_input, num_tokens_per_expert = inputs
-        ep_degree = device_mesh.shape[0]
-        num_local_experts = num_tokens_per_expert.shape[0] // ep_degree
-
-        with torch.no_grad():
-            num_tokens_per_expert_group = all_to_all_single(
-                num_tokens_per_expert,
-                None,
-                None,
-                group=device_mesh.get_group(),
-            )
-            num_tokens_per_expert_group = torch.ops._c10d_functional.wait_tensor(
-                num_tokens_per_expert_group
-            )
-            input_splits = (
-                num_tokens_per_expert.view(ep_degree, -1)
-                .sum(dim=1)
-                .to(torch.device("cpu"), non_blocking=True)
-            )
-            output_splits = (
-                num_tokens_per_expert_group.view(ep_degree, -1)
-                .sum(dim=1)
-                .to(torch.device("cpu"), non_blocking=False)
-            )
-            self.input_splits = input_splits.tolist()
-            self.output_splits = output_splits.tolist()
-
-        routed_input = all_to_all_single_autograd(
-            routed_input,
-            self.output_splits,
-            self.input_splits,
-            device_mesh.get_group(),
-        )
-
-        (
-            self.input_shape,
-            routed_input,
-            self.permuted_indices,
-            num_tokens_per_expert_group,
-        ) = _permute_tokens(
-            routed_input, num_tokens_per_expert_group, ep_degree, num_local_experts
-        )
-
-        return routed_input, num_tokens_per_expert_group
-
-    def _token_combine(
-        self, mod: nn.Module, routed_output: torch.Tensor, device_mesh: DeviceMesh
-    ) -> torch.Tensor:
-        from torch.distributed._functional_collectives import all_to_all_single_autograd
-
-        routed_output = _unpermute_tokens(
-            routed_output, self.input_shape, self.permuted_indices
-        )
-        routed_output = all_to_all_single_autograd(
-            routed_output,
-            self.input_splits,
-            self.output_splits,
-            device_mesh.get_group(),
-        )
-        return routed_output
-
-    def _apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module:
-        from torch.distributed.tensor import distribute_module
-
-        return distribute_module(
-            module,
-            device_mesh,
-            partition_fn=self._partition_fn,
-            input_fn=self._token_dispatch,
-            output_fn=self._token_combine,
-        )
-
-
-def _apply_expert_parallel(experts: nn.Module, ep_mesh: DeviceMesh) -> nn.Module:
-    """Apply Expert Parallel to a GroupedExperts module."""
-    ep_style = ExpertParallel()
-    return ep_style._apply(experts, ep_mesh)
-
-
 class TransformerBlock(nn.Module):
-    def __init__(self, args: ModelArgs, ep_mesh: DeviceMesh | None = None):
+    def __init__(self, args: ModelArgs):
         super().__init__()
         self.attention_norm = nn.LayerNorm(args.dim)
         self.attention = Attention(args)
         self.ffn_norm = nn.LayerNorm(args.dim)
-
-        if args.moe_args is not None:
-            hidden_dim = args.moe_args.hidden_dim or 4 * args.dim
-            self.feed_forward: nn.Module = MoE(
-                dim=args.dim,
-                hidden_dim=hidden_dim,
-                num_experts=args.moe_args.num_experts,
-                top_k=args.moe_args.top_k,
-            )
-            if ep_mesh is not None:
-                # Apply Expert Parallel to shard experts across EP mesh
-                self.feed_forward.experts = _apply_expert_parallel(
-                    self.feed_forward.experts, ep_mesh
-                )
-        else:
-            self.feed_forward = FeedForward(
-                args.dim, hidden_dim=4 * args.dim, dropout_p=args.dropout_p
-            )
+        self.feed_forward = FeedForward(
+            args.dim, hidden_dim=4 * args.dim, dropout_p=args.dropout_p
+        )
 
     def forward(self, x):
         h = x + self.attention(self.attention_norm(x))
@@ -597,7 +207,7 @@ class TransformerBlock(nn.Module):
 # A toy transformer model, partly inspired by the nanoGPT model:
 # https://github.com/karpathy/nanoGPT.
 class Transformer(nn.Module):
-    def __init__(self, args: ModelArgs, ep_mesh: DeviceMesh | None = None):
+    def __init__(self, args: ModelArgs):
         super().__init__()
         if args.vocab_size is None:
             raise AssertionError("Expected args.vocab_size to not be None")
@@ -610,7 +220,7 @@ class Transformer(nn.Module):
         self.dropout = nn.Dropout(args.dropout_p)
         self.layers = nn.ModuleList()
         for _ in range(args.n_layers):
-            self.layers.append(TransformerBlock(args, ep_mesh=ep_mesh))
+            self.layers.append(TransformerBlock(args))
         self.norm = nn.LayerNorm(args.dim)
         self.output = nn.Linear(args.dim, args.vocab_size, bias=False)
         if args.weight_tying:
@@ -762,6 +372,15 @@ class DTensorContinuousTestBase(MultiProcContinuousTest):
     def backend_str(cls) -> str:
         backend = dist.get_default_backend_for_device(DEVICE_TYPE)
         return backend
+
+    @classmethod
+    def _init_pg(cls, rank, world_size, rdvz_file):
+        # Set device before initializing process group to ensure
+        # each rank is bound to the correct GPU
+        if torch.accelerator.is_available():
+            torch.accelerator.set_device_index(rank)
+        # Call parent's _init_pg to do the actual process group initialization
+        super()._init_pg(rank, world_size, rdvz_file)
 
 
 class DTensorTestBase(MultiProcessTestCase):

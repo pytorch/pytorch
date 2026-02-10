@@ -16,6 +16,7 @@ from torch.compiler import is_compiling
 from torch.utils._contextlib import _DecoratorContextManager
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
+from .._utils_internal import justknobs_check
 from . import trace_rules, variables
 from .comptime import comptime
 from .eval_frame import (
@@ -33,6 +34,8 @@ from .external_utils import (
 )
 from .utils import _get_error_on_graph_break, _set_error_on_graph_break, is_function
 
+
+justknobs_check._dynamo_marked_constant = True  # type: ignore[attr-defined]
 
 if TYPE_CHECKING:
     from types import FunctionType
@@ -1138,6 +1141,15 @@ def mark_static_address(t: Any, guard: bool = False) -> None:
 # we still need to be really careful about version matches.
 def _allow_in_graph_einops() -> None:
     import einops
+
+    if einops.__version__ >= "0.8.2":
+        if hasattr(einops, "einops") and hasattr(einops.einops, "get_backend"):
+            # trigger backend registration up front to avoid a later guard failure
+            # that would otherwise cause a recompilation
+            einops.rearrange(torch.randn(1), "i -> i")
+
+        # einops 0.8.2+ don't need explicit allow_in_graph calls
+        return
 
     try:
         # requires einops > 0.6.1, torch >= 2.0
