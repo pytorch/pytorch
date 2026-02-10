@@ -851,21 +851,6 @@ py::handle get_dtensor_class() {
   return get_dtensor_class_impl();
 }
 
-bool is_dtensor(PyObject* obj) {
-#ifdef USE_DISTRIBUTED
-  try {
-    py::handle dtensor_class = get_dtensor_class();
-    return (PyObject*)Py_TYPE(obj) == dtensor_class.ptr() ||
-        py::isinstance(py::handle(obj), dtensor_class);
-  } catch (const py::error_already_set&) {
-    // DTensor module not available or failed to import
-    return false;
-  }
-#else
-  return false;
-#endif
-}
-
 DEFINE_CACHING_PYTHON_IMPORT_GETTER(
     get_dtensor_spec_class,
     py::module::import("torch.distributed.tensor")
