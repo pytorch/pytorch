@@ -7976,18 +7976,40 @@ class ShapeEnv:
         if fast_result is not None:
             return bool(fast_result)
 
-        static_expr = self._maybe_evaluate_static(expr)
-        if static_expr is not None:
-            self.log.debug(
-                "runtime_assert %s == %s [statically known]", orig_expr, static_expr
-            )
-            # TODO: assert bool(static_expr)
-            return bool(static_expr)
+        # Skip _maybe_evaluate_static for single unbacked symbol >= 0 (or 0 <= symbol)
+        # when the symbol has unknown range [-int_oo, int_oo].
+        # This pattern is common during tracing and doesn't benefit from static evaluation
+        # since the symbol has no constraints.
+        # Note that the first time this is called value range will be updated and next time
+        # it's called (if any) we would call _maybe_evaluate_static and it would return True.
+        skip_static_eval = False
+        unbacked_sym = None
+        if isinstance(expr, sympy.GreaterThan) and expr.rhs == 0:
+            unbacked_sym = expr.lhs
+        elif isinstance(expr, sympy.LessThan) and expr.lhs == 0:
+            unbacked_sym = expr.rhs
+        if isinstance(unbacked_sym, sympy.Symbol) and symbol_is_type(
+            unbacked_sym, SymT.UNBACKED_INT
+        ):
+            vr = self.var_to_range[unbacked_sym]
+            if vr.lower == -int_oo and vr.upper == int_oo:
+                skip_static_eval = True
 
-        # Attempt to eliminate the unbacked SymInt
-        new_expr = self._maybe_evaluate_static(expr, unbacked_only=True)
-        if new_expr is None:
-            raise AssertionError("new_expr must not be None")
+        if skip_static_eval:
+            new_expr = expr
+        else:
+            static_expr = self._maybe_evaluate_static(expr)
+            if static_expr is not None:
+                self.log.debug(
+                    "runtime_assert %s == %s [statically known]", orig_expr, static_expr
+                )
+                # TODO: assert bool(static_expr)
+                return bool(static_expr)
+
+            # Attempt to eliminate the unbacked SymInt
+            new_expr = self._maybe_evaluate_static(expr, unbacked_only=True)
+            if new_expr is None:
+                raise AssertionError("new_expr must not be None")
         if (
             not self.prefer_deferred_runtime_asserts_over_guards
             and new_expr.free_symbols <= self.backed_var_to_val.keys()
