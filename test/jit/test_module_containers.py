@@ -279,42 +279,42 @@ class TestModuleContainers(JitTestCase):
                 self.moduledict = CustomModuleDict({"submod": self.submod})
 
             def forward(self, inputs):
-                assert self.modulelist[0] is self.submod, (
+                assert self.modulelist[0] is self.submod, (  # noqa: S101
                     "__getitem__ failing for ModuleList"
                 )
-                assert len(self.modulelist) == 1, "__len__ failing for ModuleList"
+                assert len(self.modulelist) == 1, "__len__ failing for ModuleList"  # noqa: S101
                 for module in self.modulelist:
-                    assert module is self.submod, "__iter__ failing for ModuleList"
+                    assert module is self.submod, "__iter__ failing for ModuleList"  # noqa: S101
 
-                assert self.sequential[0] is self.submod, (
+                assert self.sequential[0] is self.submod, (  # noqa: S101
                     "__getitem__ failing for Sequential"
                 )
-                assert len(self.sequential) == 1, "__len__ failing for Sequential"
+                assert len(self.sequential) == 1, "__len__ failing for Sequential"  # noqa: S101
                 for module in self.sequential:
-                    assert module is self.submod, "__iter__ failing for Sequential"
+                    assert module is self.submod, "__iter__ failing for Sequential"  # noqa: S101
 
-                assert self.moduledict["submod"] is self.submod, (
+                assert self.moduledict["submod"] is self.submod, (  # noqa: S101
                     "__getitem__ failing for ModuleDict"
                 )
-                assert len(self.moduledict) == 1, "__len__ failing for ModuleDict"
+                assert len(self.moduledict) == 1, "__len__ failing for ModuleDict"  # noqa: S101
 
                 # note: unable to index moduledict with a string variable currently
                 i = 0
                 for _ in self.moduledict:
                     i += 1
-                assert i == len(self.moduledict), "iteration failing for ModuleDict"
+                assert i == len(self.moduledict), "iteration failing for ModuleDict"  # noqa: S101
 
-                assert "submod" in self.moduledict, "__contains__ fails for ModuleDict"
+                assert "submod" in self.moduledict, "__contains__ fails for ModuleDict"  # noqa: S101
 
                 for key in self.moduledict:
-                    assert key == "submod", "keys() fails for ModuleDict"
+                    assert key == "submod", "keys() fails for ModuleDict"  # noqa: S101
 
                 for item in self.moduledict.items():
-                    assert item[0] == "submod", "items() fails for ModuleDict"
-                    assert item[1] is self.submod, "items() fails for ModuleDict"
+                    assert item[0] == "submod", "items() fails for ModuleDict"  # noqa: S101
+                    assert item[1] is self.submod, "items() fails for ModuleDict"  # noqa: S101
 
                 for value in self.moduledict.values():
-                    assert value is self.submod, "values() fails for ModuleDict"
+                    assert value is self.submod, "values() fails for ModuleDict"  # noqa: S101
 
                 return inputs
 
@@ -344,7 +344,7 @@ class TestModuleContainers(JitTestCase):
                 self.modulelist = CustomModuleList([self.submod])
 
             def forward(self, inputs):
-                assert len(self.modulelist) == 2, "__len__ failing for ModuleList"
+                assert len(self.modulelist) == 2, "__len__ failing for ModuleList"  # noqa: S101
                 return inputs
 
         m = MyModule()
@@ -362,8 +362,8 @@ class TestModuleContainers(JitTestCase):
                 )
 
             def forward(self, input):
-                assert self.moduledict["relu"] is self.relu
-                assert self.moduledict["tanh"] is self.tanh
+                assert self.moduledict["relu"] is self.relu  # noqa: S101
+                assert self.moduledict["tanh"] is self.tanh  # noqa: S101
                 return input
 
         m = MyModule()
@@ -376,7 +376,7 @@ class TestModuleContainers(JitTestCase):
                 self.moduledict = torch.nn.ModuleDict({"foo": None, "bar": None})
 
             def forward(self, input):
-                assert self.moduledict["blah"] == "blah", "this is a keyerror"
+                assert self.moduledict["blah"] == "blah", "this is a keyerror"  # noqa: S101
 
         with self.assertRaisesRegexWithHighlight(
             RuntimeError, "Key Error, blah", 'self.moduledict["blah"'
@@ -391,7 +391,7 @@ class TestModuleContainers(JitTestCase):
 
             def forward(self, input):
                 idx = "blah"
-                assert self.moduledict[idx] == "blah", "this is a string literal error"
+                assert self.moduledict[idx] == "blah", "this is a string literal error"  # noqa: S101
 
         with self.assertRaisesRegexWithHighlight(
             RuntimeError,
@@ -439,7 +439,7 @@ class TestModuleContainers(JitTestCase):
                 self.moduledict = CustomModuleDict()
 
             def forward(self, inputs):
-                assert "submod" not in self.moduledict, (
+                assert "submod" not in self.moduledict, (  # noqa: S101
                     "__contains__ fails for ModuleDict"
                 )
                 return inputs
