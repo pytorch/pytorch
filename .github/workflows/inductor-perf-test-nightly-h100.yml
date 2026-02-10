@@ -61,7 +61,6 @@ on:
     paths:
       - .github/workflows/inductor-perf-test-nightly-h100.yml
       - .ci/docker/ci_commit_pins/huggingface-requirements.txt
-      - .ci/docker/ci_commit_pins/timm.txt
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}

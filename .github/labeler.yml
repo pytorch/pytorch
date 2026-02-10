@@ -133,8 +133,6 @@
 
 "ci-refresh-hf-cache":
 - .github/ci_commit_pins/vllm.txt
-- .ci/docker/ci_commit_pins/huggingface-requirements.txt
-- .ci/docker/ci_commit_pins/timm.txt
 
 "ciflow/inductor-pallas":
 - torch/_inductor/codegen/pallas.py
