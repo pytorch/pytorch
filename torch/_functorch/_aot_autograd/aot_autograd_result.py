@@ -311,7 +311,6 @@ def serialize_graph_module(gm: torch.fx.GraphModule) -> SerializedGraphModule:
     # NOTE: mutates the graph module
     gm.meta = {}
     for node in gm.graph.nodes:
-        # pyrefly: ignore [implicit-any]
         node.meta = {}
     return SerializedGraphModule(gm)
 
@@ -386,7 +385,6 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
         args: list[torch.Tensor],
         aot_config: AOTConfig,
         fx_config: _CompileFxKwargs,
-        # pyrefly: ignore [implicit-any]
     ) -> Callable:
         """
         This function takes a result and carefully reconstructs the original callable
@@ -679,8 +677,6 @@ def deserialize_bundled_cache_entry(
 
 
 @dataclass
-# pyrefly: ignore [implicit-any]
 class BundledAOTAutogradCacheArtifact(BackendCacheArtifact[Callable]):
-    # pyrefly: ignore [implicit-any]
     def after_deserialization(self) -> Callable:
         return deserialize_bundled_cache_entry(self.content)
