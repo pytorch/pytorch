@@ -369,6 +369,7 @@ class BytecodeTracingTimings:
         """Flush accumulated timings to the bytecode_tracing chromium event
         and to compilation_time_metrics, then reset all counters."""
         chromium_log = get_chromium_event_logger()
+        # pyrefly: ignore [implicit-any]
         event_data = {}
         for f in dataclasses.fields(self):
             ns_val = getattr(self, f.name)
