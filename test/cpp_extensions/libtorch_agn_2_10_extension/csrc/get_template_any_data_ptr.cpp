@@ -19,16 +19,17 @@ uint64_t get_template_any_data_ptr(Tensor t, torch::headeronly::ScalarType dtype
     DEFINE_CASE(uint16_t, UInt16)
     DEFINE_CASE(uint32_t, UInt32)
     DEFINE_CASE(uint64_t, UInt64)
+    DEFINE_CASE(torch::headeronly::Float4_e2m1fn_x2, Float4_e2m1fn_x2)
   default:
       return 0;
   }
 #undef DEFINE_CASE
 }
 
-STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agn_2_10, m) {
+STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
   m.def("get_template_any_data_ptr(Tensor t, ScalarType dtype, bool mutable_) -> int");
 }
 
-STABLE_TORCH_LIBRARY_IMPL(libtorch_agn_2_10, CompositeExplicitAutograd, m) {
+STABLE_TORCH_LIBRARY_IMPL(STABLE_LIB_NAME, CompositeExplicitAutograd, m) {
   m.impl("get_template_any_data_ptr", TORCH_BOX(&get_template_any_data_ptr));
 }

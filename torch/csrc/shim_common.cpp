@@ -633,6 +633,17 @@ torch_set_requires_grad(AtenTensorHandle tensor, bool requires_grad) {
   });
 }
 
+// Most other dtypes defined in torch/csrc/inductor/aoti_torch/shim_common.cpp
+#define TORCH_DTYPE_IMPL(dtype, stype)                    \
+  AOTI_TORCH_EXPORT int32_t torch_dtype_##dtype() {       \
+    return (int32_t)torch::headeronly::ScalarType::stype; \
+  }
+
+TORCH_DTYPE_IMPL(float8_e8m0fnu, Float8_e8m0fnu)
+TORCH_DTYPE_IMPL(float4_e2m1fn_x2, Float4_e2m1fn_x2)
+
+#undef TORCH_DTYPE_IMPL
+
 AOTITorchError torch_from_blob(
     void* data,
     int64_t ndim,

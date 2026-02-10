@@ -256,6 +256,22 @@ def my_narrow(t, dim, start, length) -> Tensor:
     return torch.ops.libtorch_agn_2_9.my_narrow.default(t, dim, start, length)
 
 
+def my_narrow_symint(t, dim, start, length) -> Tensor:
+    """
+    Narrows and clones a tensor, with SymInt schema for start and length.
+    Used to test that SymInt arguments work through the stable ABI.
+    Returns a new tensor (clone of the narrowed view).
+    """
+    return torch.ops.libtorch_agn_2_9.my_narrow_symint.default(t, dim, start, length)
+
+
+@torch.library.register_fake("libtorch_agn_2_9::my_narrow_symint")
+def my_narrow_symint_fake(t, dim, start, length):
+    shape = list(t.shape)
+    shape[dim] = length
+    return torch.empty(shape, dtype=t.dtype, device=t.device)
+
+
 def my_copy_(dst, src, non_blocking) -> Tensor:
     """
     Returns tensor dst that is updated with src elements.
