@@ -2482,7 +2482,8 @@ class TestLinalg(TestCase):
         self.assertEqual(a.to(v.dtype) @ v, w * v, atol=1e-3, rtol=1e-3)
 
     @onlyCUDA
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoCusolver
+    @skipIf(TEST_WITH_ROCM and _get_magma_version() is None, "ROCm requires MAGMA for this test")
     @dtypes(torch.float32, torch.float64)
     def test_eig_cuda_complex_eigenvectors(self, device, dtype):
         """Test CUDA eigenvector decoding with known ground truth, including batching."""
