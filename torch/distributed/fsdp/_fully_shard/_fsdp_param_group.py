@@ -146,7 +146,7 @@ class FSDPParamGroup:
             FSDPParam(
                 param,
                 module_info,
-                mesh_info,  # pyrefly: ignore [bad-argument-type]
+                mesh_info,
                 post_forward_mesh_info,
                 device,
                 shard_placement_fn,

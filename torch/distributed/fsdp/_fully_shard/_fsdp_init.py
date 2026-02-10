@@ -355,11 +355,12 @@ def _init_param_group(
     params: list[nn.Parameter],
     modules: tuple[nn.Module, ...],
     mesh_info: DataParallelMeshInfo,
-    post_forward_mesh_info: "FSDPMeshInfo | bool | int | None",
+    post_forward_mesh_info: "FSDPMeshInfo | None",
     device: torch.device,
     shard_placement_fn: "Callable[[nn.Parameter], Any] | None",
     mp_policy: "MixedPrecisionPolicy",
     offload_policy: "OffloadPolicy",
+    reshard_after_forward: "bool | int | None" = None,
 ) -> None:
     """
     Initialize FSDP param groups for the given state.
@@ -368,10 +369,6 @@ def _init_param_group(
     ``shard_placement_fn``). Each group becomes a separate ``FSDPParamGroup``.
     When ``shard_placement_fn`` is ``None`` or returns the same mesh for all
     params, this creates a single group.
-
-    ``post_forward_mesh_info`` can be an ``FSDPMeshInfo`` (used directly for
-    all groups), a ``bool`` or ``int`` (resolved per-group via
-    ``_get_post_forward_mesh_info``), or ``None``.
     """
     # Import here to avoid circular imports
     from ._fsdp_common import (
@@ -424,12 +421,13 @@ def _init_param_group(
 
     # Create a FSDPParamGroup per process group
     for group_mesh_info, group_params in pg_to_group.values():
-        if isinstance(post_forward_mesh_info, (bool, int)):
+        group_post_forward = post_forward_mesh_info
+        if reshard_after_forward is not None and group_mesh_info is not cast(
+            FSDPMeshInfo, mesh_info
+        ):
             group_post_forward = _get_post_forward_mesh_info(
-                post_forward_mesh_info, group_mesh_info
+                reshard_after_forward, group_mesh_info
             )
-        else:
-            group_post_forward = post_forward_mesh_info
         state._fsdp_param_groups.append(
             FSDPParamGroup(
                 group_params,

@@ -24,6 +24,7 @@ from ._fsdp_common import (
     _raise_assert_with_print,
     _to_dtype_if_needed,
     compiled_autograd_enabled,
+    DataParallelMeshInfo,
     FSDPMeshInfo,
     HSDPMeshInfo,
     resolve_shard_placement,
@@ -225,7 +226,7 @@ class FSDPParam:
         self,
         param: nn.Parameter,
         module_info: ParamModuleInfo,
-        mesh_info: FSDPMeshInfo,
+        mesh_info: DataParallelMeshInfo,
         post_forward_mesh_info: FSDPMeshInfo | None,
         device: torch.device,
         shard_placement_fn: Callable[[nn.Parameter], ShardPlacementFnResult] | None,
@@ -263,11 +264,11 @@ class FSDPParam:
         param: nn.Parameter,
         device: torch.device,
         shard_placement_fn: Callable[[nn.Parameter], ShardPlacementFnResult] | None,
-        mesh_info: FSDPMeshInfo,
+        mesh_info: DataParallelMeshInfo,
     ):
         shard_result = resolve_shard_placement(
             shard_placement_fn(param) if callable(shard_placement_fn) else None,
-            mesh_info,
+            cast(FSDPMeshInfo, mesh_info),
         )
         self.mesh_info = shard_result.mesh_info
         fsdp_placement = shard_result.placement
