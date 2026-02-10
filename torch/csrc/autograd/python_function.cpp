@@ -453,8 +453,16 @@ PyObject* PyNode::to_py_args(
          !py_fn->materialize_non_diff_grads)) {
       input = THPVariable_Wrap(inputs[i]);
     } else {
-      input =
-          THPVariable_Wrap(zeros_without_gil(output_info[i], *device_guard));
+      if (output_info[i].has_template()) {
+        // DTensor case: use template to create zeros.
+        // Don't release GIL since new_zeros_symint on DTensor calls Python.
+        Variable zeros = output_info[i].zeros(*device_guard);
+        input = THPVariable_Wrap(zeros);
+      } else {
+        // NJT or plain tensor case: can release GIL
+        input =
+            THPVariable_Wrap(zeros_without_gil(output_info[i], *device_guard));
+      }
     }
     if (!input)
       throw_python_error();
@@ -785,42 +793,23 @@ static void _wrap_outputs(
                  0 &&
              isDifferentiableType(wrapped_output->scalar_type()));
         bool output_is_dtensor = is_dtensor(obj);
+        bool output_is_nested = wrapped_output->is_nested();
         bool use_zeros_like = is_differentiable && num_outputs > 1 &&
-            (wrapped_output->is_nested() || output_is_dtensor);
-        // Only warn if materialize_grads is true. If the user has already
-        // called ctx.set_materialize_grads(False), gradients won't be
-        // materialized anyway, so no need to warn.
-        if (use_zeros_like && output_is_dtensor && self->materialize_grads) {
-          // Strip "Backward" suffix from name for clearer user messaging.
-          // The autograd function's backward class is named "<Name>Backward",
-          // but users define "<Name>" in their code.
-          std::string node_name = cdata->name();
-          const std::string suffix = "Backward";
-          if (node_name.size() >= suffix.size() &&
-              node_name.compare(
-                  node_name.size() - suffix.size(), suffix.size(), suffix) ==
-                  0) {
-            node_name = node_name.substr(0, node_name.size() - suffix.size());
-          }
-          TORCH_WARN_ONCE(
-              "Autograd is calling zeros_like() on a DTensor to materialize "
-              "the gradient for an unused output in autograd.Function '",
-              node_name,
-              "'. This preserves the DTensor type but may have performance "
-              "implications. To avoid this:\n"
-              "(1) In eager mode (i.e., the function name is not "
-              "'CompiledFunction'): One of the "
-              "autograd.Function's outputs is unused. Call "
-              "ctx.set_materialize_grads(False) in forward() and handle None "
-              "gradients in backward(). Note that if the function name "
-              "is ApplyTemplate, turn off torch.compile and rerun to see "
-              "the actual name.\n"
-              "(2) In compile mode: One of the compiled region's outputs is "
-              "unused. Call detach() on unused outputs that are returned from "
-              "the compiled region, whether explicitly or implicitly (e.g., "
-              "saved as a global).");
+            (output_is_nested || output_is_dtensor);
+
+        // For DTensor outputs, store a tiny template tensor (scalar) that
+        // preserves the DTensor type/spec without holding the full tensor.
+        // This allows creating zeros via new_zeros_symint during backward
+        // while using minimal memory, compatible with activation checkpointing.
+        // NJT continues to use the_var since it needs zeros_like for structure.
+        self->output_info.emplace_back(
+            wrapped_output.value(),
+            use_zeros_like && output_is_nested);  // only NJT uses the_var
+
+        if (use_zeros_like && output_is_dtensor) {
+          // Store a scalar template that preserves DTensor type
+          self->output_info.back().save_template_for_zeros(wrapped_output.value());
         }
-        self->output_info.emplace_back(wrapped_output.value(), use_zeros_like);
       }
       PyTuple_SetItem(outputs, i, THPVariable_Wrap(wrapped_output.value()));
     }
