@@ -149,7 +149,6 @@ from .tensor import (
 from .torch import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
 from .user_defined import (
     FrozenDataClassVariable,
-    InspectVariable,
     MutableMappingVariable,
     RemovableHandleVariable,
     UserDefinedClassVariable,
@@ -187,7 +186,6 @@ __all__ = [
     "GetAttrVariable",
     "GradModeVariable",
     "InspectSignatureVariable",
-    "InspectVariable",
     "IteratorVariable",
     "ItertoolsVariable",
     "LambdaVariable",
