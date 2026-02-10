@@ -361,7 +361,7 @@ def _init_param_group(
     shard_placement_fn: "Callable[[nn.Parameter], ShardPlacementFnResult] | None",
     mp_policy: "MixedPrecisionPolicy",
     offload_policy: "OffloadPolicy",
-    reshard_after_forward: bool | int | None = None,
+    reshard_after_forward: bool | int = True,
 ) -> None:
     """
     Initialize FSDP param groups for the given state.
@@ -404,7 +404,7 @@ def _init_param_group(
     if not isinstance(mesh_info, FSDPMeshInfo):
         raise ValueError(
             "Per-param mesh via shard_placement_fn is not supported with "
-            f"{type(mesh_info).__name__}; it requires FSDPMeshInfo"
+            f"{type(mesh_info).__name__}; it requires FSDPMeshInfo (or subclass)"
         )
     pg_to_group: dict[
         tuple[dist.ProcessGroup, dist.ProcessGroup | None],
@@ -435,13 +435,6 @@ def _init_param_group(
     # Create a FSDPParamGroup per process group
     for group_mesh_info, group_params in pg_to_group.values():
         if group_mesh_info is not mesh_info:
-            # fully_shard always passes a non-None reshard_after_forward,
-            # but guard defensively for direct callers of _init_param_group.
-            if reshard_after_forward is None:
-                raise ValueError(
-                    "reshard_after_forward must be specified when "
-                    "shard_placement_fn returns a custom mesh"
-                )
             group_post_forward = _get_post_forward_mesh_info(
                 reshard_after_forward, group_mesh_info
             )

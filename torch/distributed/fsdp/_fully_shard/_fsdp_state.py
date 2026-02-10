@@ -211,7 +211,8 @@ class FSDPState(_State):
                         "the root module first"
                     )
                 state._is_root = False
-            self._state_ctx.all_states.append(state)
+            if state not in visited_states:
+                self._state_ctx.all_states.append(state)
             visited_states.add(state)
         # For the root, do not reshard after forward since for training,
         # the parameters would be freed and all-gathered immediately
@@ -242,14 +243,7 @@ class FSDPState(_State):
         param_to_fsdp_param: dict[nn.Parameter, FSDPParam] = {}
         # Build a mapping from module to all its FSDPParamGroups (not just one)
         module_to_fsdp_param_groups: dict[nn.Module, list[FSDPParamGroup]] = {}
-        # all_states may contain the same state multiple times when multiple
-        # modules share one FSDP state (multi-module fully_shard), so
-        # deduplicate to avoid appending the same param group repeatedly.
-        seen_states: set[FSDPState] = set()
         for state in self._state_ctx.all_states:
-            if state in seen_states:
-                continue
-            seen_states.add(state)
             for fsdp_param_group in state._fsdp_param_groups:
                 for fsdp_param in fsdp_param_group.fsdp_params:
                     param_to_fsdp_param[fsdp_param.sharded_param] = fsdp_param
