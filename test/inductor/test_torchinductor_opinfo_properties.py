@@ -59,6 +59,9 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import HAS_GPU
 
+import sys
+torch._dynamo.config.recompile_limit = sys.maxsize
+
 
 # LLM-useful op names to filter from unary_ufuncs
 LLM_UNARY_OP_NAMES = {
@@ -453,32 +456,11 @@ XFAIL_DICTS = {
     "binary_numerical": BINARY_NUMERICAL_XFAILS,
 }
 
-# Ops that should NOT be expected failures on ROCm (they work correctly there).
-# Structure: test_type -> backend -> op_name -> set of dtypes (or ALL)
-ROCM_XFAIL_EXCLUSIONS = {
-    "batch_invariance": {
-        "inductor_default": {
-            "div": {fp32},
-            "exp": {fp32},
-        },
-    },
-}
-
 
 def is_expected_failure(device_type, op_name, backend, test_type, dtype=None):
     """Check if a test is expected to fail."""
     xfails = XFAIL_DICTS.get(test_type, {}).get(backend, {}).get(op_name, set())
     is_xfail = dtype in xfails or ALL in xfails
-
-    # On ROCm, some ops work correctly and should not be xfails
-    if is_xfail and torch.version.hip is not None:
-        exclusions = (
-            ROCM_XFAIL_EXCLUSIONS.get(test_type, {})
-            .get(backend, {})
-            .get(op_name, set())
-        )
-        if dtype in exclusions or ALL in exclusions:
-            return False
 
     return is_xfail
 
