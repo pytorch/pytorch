@@ -104,34 +104,24 @@ def make_pallas(cls, _debug_cpu_to_tpu_pallas=False):
     return test_class
 
 
-def skip_if_tpu(fn):
-    @functools.wraps(fn)
-    def wrapper(self, *args, **kwargs):
-        if config._debug_cpu_to_tpu_pallas:
-            self.skipTest("Not yet working on TPU")
-        fn(self, *args, **kwargs)
+def _skip_if(condition_fn, reason):
+    def decorator(fn):
+        @functools.wraps(fn)
+        def wrapper(self, *args, **kwargs):
+            if condition_fn(self):
+                self.skipTest(reason)
+            fn(self, *args, **kwargs)
 
-    return wrapper
+        return wrapper
 
-
-def skip_if_cpu(fn):
-    @functools.wraps(fn)
-    def wrapper(self, *args, **kwargs):
-        if self.DEVICE == "cpu":
-            self.skipTest("Not yet working on CPU")
-        fn(self, *args, **kwargs)
-
-    return wrapper
+    return decorator
 
 
-def skip_if_cuda(fn):
-    @functools.wraps(fn)
-    def wrapper(self, *args, **kwargs):
-        if self.DEVICE == "cuda":
-            self.skipTest("Not yet working on GPU")
-        fn(self, *args, **kwargs)
-
-    return wrapper
+skip_if_tpu = _skip_if(
+    lambda self: config._debug_cpu_to_tpu_pallas, "Not yet working on TPU"
+)
+skip_if_cpu = _skip_if(lambda self: self.DEVICE == "cpu", "Not yet working on CPU")
+skip_if_cuda = _skip_if(lambda self: self.DEVICE == "cuda", "Not yet working on GPU")
 
 
 class PallasTestsMixin:
@@ -1036,7 +1026,6 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
-    @skip_if_tpu
     @skip_if_tpu
     def test_prod_reduction(self):
         """Test prod reduction."""

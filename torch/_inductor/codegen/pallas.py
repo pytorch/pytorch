@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
+import itertools
 import math
 import typing_extensions
 from typing import Any, Optional, TYPE_CHECKING, Union
@@ -426,9 +427,7 @@ class PallasKernelOverrides(OpOverrides):
     def clamp(x: str, min_val: str, max_val: str) -> str:
         return f"jnp.clip({x}, {min_val}, {max_val})"
 
-    @staticmethod
-    def clip(x: str, min_val: str, max_val: str) -> str:
-        return f"jnp.clip({x}, {min_val}, {max_val})"
+    clip = clamp
 
     # Sign operations
     @staticmethod
@@ -502,20 +501,14 @@ class PallasKernelOverrides(OpOverrides):
         # Handle x=0: j_0(0) = 1
         return f"jnp.where({x} == 0.0, 1.0, jnp.sin({x}) / {x})"
 
-    @staticmethod
-    def i0(x: str) -> str:
-        # Modified Bessel function I_0 (same as modified_bessel_i0)
-        return f"jax.lax.bessel_i0e({x}) * jnp.exp(jnp.abs({x}))"
+    i0 = modified_bessel_i0
 
     @staticmethod
     def i0e(x: str) -> str:
         # Exponentially scaled modified Bessel function I_0
         return f"jax.lax.bessel_i0e({x})"
 
-    @staticmethod
-    def i1(x: str) -> str:
-        # Modified Bessel function I_1 (same as modified_bessel_i1)
-        return f"jax.lax.bessel_i1e({x}) * jnp.exp(jnp.abs({x}))"
+    i1 = modified_bessel_i1
 
     @staticmethod
     def i1e(x: str) -> str:
@@ -533,15 +526,9 @@ class PallasKernelOverrides(OpOverrides):
         # Regularized upper incomplete gamma function Q(a, x)
         return f"jax.scipy.special.gammaincc({x}, {y})"
 
-    @staticmethod
-    def igamma(x: str, y: str) -> str:
-        # Regularized lower incomplete gamma function (alias for gammainc)
-        return f"jax.scipy.special.gammainc({x}, {y})"
+    igamma = gammainc
 
-    @staticmethod
-    def igammac(x: str, y: str) -> str:
-        # Regularized upper incomplete gamma function (alias for gammaincc)
-        return f"jax.scipy.special.gammaincc({x}, {y})"
+    igammac = gammaincc
 
     @staticmethod
     def polygamma(x: str, y: str) -> str:
@@ -638,63 +625,19 @@ class PallasKernelOverrides(OpOverrides):
 
     @staticmethod
     def shifted_chebyshev_polynomial_t(x: str, n: str) -> str:
-        # Shifted Chebyshev polynomial of the first kind T*_n(x) = T_n(2x - 1)
-        # T_n(y) where y = 2x - 1
-        # Use same formula as chebyshev_polynomial_t
-        y = f"(2 * {x} - 1)"
-        return (
-            f"jnp.where(jnp.abs({y}) <= 1, "
-            f"jnp.cos({n} * jnp.arccos(jnp.clip({y}, -1, 1))), "
-            f"jnp.where({y} > 1, "
-            f"jnp.cosh({n} * jnp.arccosh(jnp.maximum({y}, 1.0))), "
-            f"((-1.0) ** {n}) * jnp.cosh({n} * jnp.arccosh(jnp.maximum(-{y}, 1.0)))))"
-        )
+        return PallasKernelOverrides.chebyshev_polynomial_t(f"(2 * {x} - 1)", n)
 
     @staticmethod
     def shifted_chebyshev_polynomial_u(x: str, n: str) -> str:
-        # Shifted Chebyshev polynomial of the second kind U*_n(x) = U_n(2x - 1)
-        # Use same formula as chebyshev_polynomial_u
-        y = f"(2 * {x} - 1)"
-        return (
-            f"jnp.where(jnp.abs({y}) < 1, "
-            f"jnp.sin(({n} + 1) * jnp.arccos(jnp.clip({y}, -1, 1))) / "
-            f"jnp.sqrt(jnp.maximum(1 - ({y})**2, 1e-10)), "
-            f"jnp.where({y} >= 1, "
-            f"jnp.where({y} == 1, {n} + 1.0, "
-            f"jnp.sinh(({n} + 1) * jnp.arccosh(jnp.maximum({y}, 1.0))) / "
-            f"jnp.sqrt(jnp.maximum({y}**2 - 1, 1e-10))), "
-            f"jnp.where({y} == -1, ((-1.0) ** {n}) * ({n} + 1.0), "
-            f"((-1.0) ** {n}) * jnp.sinh(({n} + 1) * jnp.arccosh(jnp.maximum(-{y}, 1.0))) / "
-            f"jnp.sqrt(jnp.maximum({y}**2 - 1, 1e-10)))))"
-        )
+        return PallasKernelOverrides.chebyshev_polynomial_u(f"(2 * {x} - 1)", n)
 
     @staticmethod
     def shifted_chebyshev_polynomial_v(x: str, n: str) -> str:
-        # Shifted Chebyshev polynomial of the third kind V*_n(x) = V_n(2x - 1)
-        y = f"(2 * {x} - 1)"  # shifted variable
-        return (
-            f"jnp.where({n} == 0, jnp.ones_like({x}), "
-            f"jnp.where({n} == 1, 2*{y} - 1, "
-            f"jnp.where({n} == 2, 4*{y}**2 - 2*{y} - 1, "
-            f"jnp.where({n} == 3, 8*{y}**3 - 4*{y}**2 - 4*{y} + 1, "
-            f"jnp.where({n} == 4, 16*{y}**4 - 8*{y}**3 - 12*{y}**2 + 4*{y} + 1, "
-            f"jnp.where({n} == 5, 32*{y}**5 - 16*{y}**4 - 32*{y}**3 + 12*{y}**2 + 6*{y} - 1, "
-            f"jnp.zeros_like({x})))))))"
-        )
+        return PallasKernelOverrides.chebyshev_polynomial_v(f"(2 * {x} - 1)", n)
 
     @staticmethod
     def shifted_chebyshev_polynomial_w(x: str, n: str) -> str:
-        # Shifted Chebyshev polynomial of the fourth kind W*_n(x) = W_n(2x - 1)
-        y = f"(2 * {x} - 1)"  # shifted variable
-        return (
-            f"jnp.where({n} == 0, jnp.ones_like({x}), "
-            f"jnp.where({n} == 1, 2*{y} + 1, "
-            f"jnp.where({n} == 2, 4*{y}**2 + 2*{y} - 1, "
-            f"jnp.where({n} == 3, 8*{y}**3 + 4*{y}**2 - 4*{y} - 1, "
-            f"jnp.where({n} == 4, 16*{y}**4 + 8*{y}**3 - 12*{y}**2 - 4*{y} + 1, "
-            f"jnp.where({n} == 5, 32*{y}**5 + 16*{y}**4 - 32*{y}**3 - 12*{y}**2 + 6*{y} + 1, "
-            f"jnp.zeros_like({x})))))))"
-        )
+        return PallasKernelOverrides.chebyshev_polynomial_w(f"(2 * {x} - 1)", n)
 
     @staticmethod
     def hermite_polynomial_h(x: str, n: str) -> str:
@@ -1107,13 +1050,6 @@ class PallasKernel(SIMDKernel):
         # Mark this as requiring flatten access
         return index_str
 
-    def _generate_index_array(self, index: sympy.Expr) -> str:
-        """
-        Generate JAX code to compute an index array for complex indexing patterns.
-        Delegates to _generate_strided_index.
-        """
-        return self._generate_strided_index(index)
-
     def _get_iter_vars(self) -> OrderedSet:
         """Get the set of iteration variable symbols."""
         return OrderedSet(self.range_tree_nodes.keys())
@@ -1255,25 +1191,16 @@ class PallasKernel(SIMDKernel):
     def _has_column_major_output(self) -> bool:
         """Check if any output buffer has column-major stride layout."""
         output_buffers = getattr(self.args, "output_buffers", {})
-        for buf_name in output_buffers:
+        # Check both explicit output buffers and graph buffers (which may not
+        # be populated during load).
+        buf_names = itertools.chain(output_buffers, V.graph.name_to_buffer)
+        for buf_name in buf_names:
             out_buf = V.graph.get_buffer(buf_name)
             if out_buf is None:
                 continue
-            layout = getattr(out_buf, "get_layout", lambda: None)()
-            if layout is None:
-                continue
-            out_stride = getattr(layout, "stride", None)
-            if out_stride is None or len(out_stride) < 2:
-                continue
-            out_s0 = self._safe_int(out_stride[0])
-            out_s1 = self._safe_int(out_stride[1])
-            if out_s0 is not None and out_s1 is not None and out_s0 < out_s1:
-                return True
-
-        # Also check graph buffers (output_buffers may not be populated during load)
-        for buf_name in V.graph.name_to_buffer:
-            out_buf = V.graph.get_buffer(buf_name)
-            if out_buf is None or not isinstance(out_buf, ComputedBuffer):
+            if buf_name not in output_buffers and not isinstance(
+                out_buf, ComputedBuffer
+            ):
                 continue
             layout = getattr(out_buf, "get_layout", lambda: None)()
             if layout is None:
@@ -3138,6 +3065,27 @@ from torch._inductor.runtime.runtime_utils import pallas_partial_reduce, torch_d
             "return _final_results[0] if len(_final_results) == 1 else tuple(_final_results)"
         )
 
+    @staticmethod
+    def _emit_gpu_pad_inputs(
+        code: IndentedBuffer,
+        kernel_input_params: list[str],
+        indent: str,
+    ) -> None:
+        """Emit code to flatten and pad each input to a 128-aligned size."""
+        for i, param in enumerate(kernel_input_params):
+            code.writeline(f"{indent}_orig_size_{i} = {param}.size")
+            code.writeline(
+                f"{indent}_aligned_size_{i} = ((_orig_size_{i} + 127) // 128) * 128"
+            )
+            code.writeline(f"{indent}if _orig_size_{i} != _aligned_size_{i}:")
+            code.writeline(f"{indent}    _flat_{i} = {param}.flatten()")
+            code.writeline(
+                f"{indent}    _padded_{i} = jnp.pad(_flat_{i}, (0, _aligned_size_{i} - _orig_size_{i}))"
+            )
+            code.writeline(f"{indent}    _padded_inputs.append(_padded_{i})")
+            code.writeline(f"{indent}else:")
+            code.writeline(f"{indent}    _padded_inputs.append({param}.flatten())")
+
     def _codegen_jit_wrapper_legacy_gpu(
         self, ctx: _CodegenContext, kernel_arg: str
     ) -> None:
@@ -3166,19 +3114,7 @@ from torch._inductor.runtime.runtime_utils import pallas_partial_reduce, torch_d
         code.writeline("    # All tensors same size - safe to flatten and pad")
         code.writeline("    _orig_out_shapes = out_shapes")
         code.writeline("    _padded_inputs = []")
-        for i, param in enumerate(kernel_input_params):
-            code.writeline(f"    _orig_size_{i} = {param}.size")
-            code.writeline(
-                f"    _aligned_size_{i} = ((_orig_size_{i} + 127) // 128) * 128"
-            )
-            code.writeline(f"    if _orig_size_{i} != _aligned_size_{i}:")
-            code.writeline(f"        _flat_{i} = {param}.flatten()")
-            code.writeline(
-                f"        _padded_{i} = jnp.pad(_flat_{i}, (0, _aligned_size_{i} - _orig_size_{i}))"
-            )
-            code.writeline(f"        _padded_inputs.append(_padded_{i})")
-            code.writeline("    else:")
-            code.writeline(f"        _padded_inputs.append({param}.flatten())")
+        self._emit_gpu_pad_inputs(code, kernel_input_params, indent="    ")
 
         self._emit_gpu_align_call_unpad(code, kernel_arg, indent="    ")
 
@@ -3196,19 +3132,7 @@ from torch._inductor.runtime.runtime_utils import pallas_partial_reduce, torch_d
         )
         code.writeline("        _orig_out_shapes = out_shapes")
         code.writeline("        _padded_inputs = []")
-        for i, param in enumerate(kernel_input_params):
-            code.writeline(f"        _orig_size_{i} = {param}.size")
-            code.writeline(
-                f"        _aligned_size_{i} = ((_orig_size_{i} + 127) // 128) * 128"
-            )
-            code.writeline(f"        if _orig_size_{i} != _aligned_size_{i}:")
-            code.writeline(f"            _flat_{i} = {param}.flatten()")
-            code.writeline(
-                f"            _padded_{i} = jnp.pad(_flat_{i}, (0, _aligned_size_{i} - _orig_size_{i}))"
-            )
-            code.writeline(f"            _padded_inputs.append(_padded_{i})")
-            code.writeline("        else:")
-            code.writeline(f"            _padded_inputs.append({param}.flatten())")
+        self._emit_gpu_pad_inputs(code, kernel_input_params, indent="        ")
         code.writeline("        ")
         code.writeline("        # Scalar output - don't pad")
         code.writeline("        _aligned_out_specs = tuple(")
