@@ -7,6 +7,7 @@ from __future__ import annotations
 import base64
 import contextlib
 import functools
+import hashlib
 import json
 import logging
 import os
@@ -22,7 +23,12 @@ from typing_extensions import override
 import torch
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.trace_rules import torch_non_c_binding_in_graph_functions
-from torch._dynamo.utils import chromium_event_log_active, CompileEventLogger, counters
+from torch._dynamo.utils import (
+    chromium_event_log_active,
+    CompileEventLogger,
+    counters,
+    warn_once,
+)
 from torch._functorch import config
 from torch._inductor.codecache import (
     _ident,
@@ -512,6 +518,85 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
                 torch.Tensor: functools.partial(self._reduce_tensor),
             }
         )
+
+    # pyrefly: ignore [bad-override]
+    def reducer_override(self, obj: Any) -> Any:
+        """
+        Override to handle tensor subclasses (like DTensor) that aren't caught
+        by the dispatch_table's exact type matching.
+
+        The dispatch_table only matches exact types, so subclasses like DTensor
+        fall through to the default __reduce_ex__ which includes non-deterministic
+        storage addresses. This method catches those cases using isinstance checks.
+        """
+        from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
+        # Handle tensor subclasses that aren't exactly torch.Tensor
+        # dispatch_table already handles torch.Tensor exactly
+        if isinstance(obj, torch.Tensor) and type(obj) is not torch.Tensor:
+            if hasattr(obj, "_stable_hash_for_caching"):
+                return (_ident, (obj._stable_hash_for_caching(),))
+            if is_traceable_wrapper_subclass(obj):
+                warn_once(
+                    f"{type(obj).__name__} does not implement _stable_hash_for_caching. "
+                    "For PT2-compatible tensor subclasses, it is recommended to implement "
+                    "_stable_hash_for_caching(self) -> str for stable AOT autograd caching."
+                )
+                return (_ident, (self._default_stable_hash_for_caching(obj),))
+            return self._reduce_tensor(obj)
+        # Return NotImplemented to fall back to default behavior
+        return NotImplemented
+
+    # [NOTE] Tensor subclass stable hashing for AOT autograd cache
+    # Python's hash() varies with PYTHONHASHSEED, making cache keys unstable
+    # across processes. We use blake2b for cross-process determinism.
+    #
+    # EXTENSION POINT: Traceable wrapper subclasses can override cache key
+    # generation by implementing _stable_hash_for_caching(self) -> str.
+    # This method should return a deterministic string that uniquely identifies
+    # the tensor's metadata for caching purposes. See DTensor for an example.
+    #
+    # We can't define a default method on subclasses because there is no abstract
+    # base subclass, and we don't want to pollute torch.Tensor. Instead, we provide
+    # a default implementation here that uses __tensor_flatten__ to recursively
+    # hash inner tensors and metadata.
+
+    def _get_stable_hash(self, tensor: torch.Tensor) -> str:
+        """
+        Get stable hash for a tensor, dispatching to custom or default implementation.
+        """
+        from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
+        if hasattr(tensor, "_stable_hash_for_caching"):
+            return tensor._stable_hash_for_caching()
+        elif is_traceable_wrapper_subclass(tensor):
+            return self._default_stable_hash_for_caching(tensor)
+        else:
+            # Regular tensor
+            metadata = extract_tensor_metadata_for_cache_key(tensor)
+            return hashlib.blake2b(pickle.dumps(metadata), digest_size=16).hexdigest()
+
+    def _default_stable_hash_for_caching(self, tensor: torch.Tensor) -> str:
+        """
+        Default stable hash implementation for traceable wrapper subclasses.
+        """
+        inner_tensor_names, subclass_metadata = tensor.__tensor_flatten__()  # type: ignore[attr-defined]
+
+        # Recursively get hashes of inner tensors
+        inner_hashes = {}
+        for name in inner_tensor_names:
+            inner_tensor = getattr(tensor, name)
+            inner_hashes[name] = self._get_stable_hash(inner_tensor)
+
+        cache_data = pickle.dumps(
+            (
+                tensor.shape,
+                tensor.requires_grad,
+                subclass_metadata,
+                inner_hashes,
+            )
+        )
+        return hashlib.blake2b(cache_data, digest_size=16).hexdigest()
 
     def _reduce_aot_config(
         self, aot_config: AOTConfig
@@ -1043,11 +1128,74 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
         write_atomic(path, content)
 
     @staticmethod
+    def _find_unpicklable_field(
+        entry: GenericAOTAutogradResult[Any, Any],
+    ) -> Optional[str]:
+        """Find which field of entry is causing pickle to fail."""
+        fields = []
+        if hasattr(entry, "__dataclass_fields__"):
+            fields = list(entry.__dataclass_fields__.keys())
+        elif hasattr(entry, "__dict__"):
+            fields = list(entry.__dict__.keys())
+
+        for name in fields:
+            try:
+                pickle.dumps(getattr(entry, name))
+            except Exception:
+                return name
+        return None
+
+    @staticmethod
+    def _pickle_entry(
+        entry: GenericAOTAutogradResult[Any, Any], remote: bool
+    ) -> Optional[bytes]:
+        """Pickle entry, returning None on failure."""
+        try:
+            return pickle.dumps(entry)
+        except (pickle.PicklingError, TypeError, AttributeError) as e:
+            bad_field = AOTAutogradCache._find_unpicklable_field(entry)
+            error_str = str(e)
+            log.warning("AOTAutograd cache unable to serialize compiled graph: %s", e)  # noqa: G200
+            torch._logging.trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": "aotautograd_cache_pickle_failure",
+                    "encoding": "json",
+                },
+                payload_fn=lambda: json.dumps({"error": error_str, "field": bad_field}),
+            )
+            if remote:
+                log_cache_bypass(
+                    "bypass_aot_autograd", "Unable to serialize: " + str(e)
+                )
+            if config.strict_autograd_cache:
+                raise
+            return None
+
+    @staticmethod
+    def _handle_save_error(e: Exception, remote: bool, is_bypass: bool) -> None:
+        """Handle exceptions during save, re-raising if strict mode is enabled."""
+        if is_bypass:
+            counters["aot_autograd"]["autograd_cache_bypass"] += 1
+            log.info("Bypassing autograd cache due to: %s", e)  # noqa: G200
+            bypass_reason = str(e)
+        else:
+            log.warning("AOTAutograd cache unable to serialize compiled graph: %s", e)  # noqa: G200
+            bypass_reason = "Unable to serialize: " + str(e)
+        if remote:
+            log_cache_bypass("bypass_aot_autograd", bypass_reason)
+        if config.strict_autograd_cache:
+            raise e
+
+    @staticmethod
     def save(key: str, entry: GenericAOTAutogradResult[Any, Any], remote: bool) -> None:
         """Save a single entry into the cache."""
+        content: Optional[bytes] = None
         try:
             entry.pre_save()
-            content = pickle.dumps(entry)
+            content = AOTAutogradCache._pickle_entry(entry, remote)
+            if content is None:
+                return None
             CacheArtifactManager.record_artifact(
                 AOTAutogradCacheArtifact.type(), key, content
             )
@@ -1057,34 +1205,19 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
             ):
                 precompile_key = entry.sanitized_aot_config.precompile_backend_id
                 artifact = BundledAOTAutogradCacheArtifact(precompile_key, entry)
-                # Now that we're saving it, the precompile_backend_id field is no longer
-                # useful, remove it from the entry.
                 entry.sanitized_aot_config.precompile_backend_id = None
                 PrecompileContext.record_artifact(artifact)
             AOTAutogradCache._write_to_local_cache(key, content)
             counters["aot_autograd"]["autograd_cache_saved"] += 1
         except BypassAOTAutogradCache as e:
-            if config.strict_autograd_cache:
-                raise
-            counters["aot_autograd"]["autograd_cache_bypass"] += 1
-            log.info("Bypassing autograd cache due to: %s", e)  # noqa: G200
-            if remote:
-                log_cache_bypass("bypass_aot_autograd", str(e))
+            AOTAutogradCache._handle_save_error(e, remote, is_bypass=True)
             return None
         except Exception as e:
-            log.info("AOTAutograd cache unable to serialize compiled graph: %s", e)  # noqa: G200
-            if remote:
-                log_cache_bypass(
-                    "bypass_aot_autograd", "Unable to serialize: " + str(e)
-                )
-            if config.strict_autograd_cache:
-                raise
+            AOTAutogradCache._handle_save_error(e, remote, is_bypass=False)
             return None
 
         if remote:
-            remote_cache: Optional[RemoteCache[JsonDataTy]] = (
-                AOTAutogradCache.get_remote_cache()
-            )
+            remote_cache = AOTAutogradCache.get_remote_cache()
             if remote_cache is not None:
                 time_taken_ms = int(
                     (entry.forward_time_taken_ns + entry.backward_time_taken_ns) // 1e6

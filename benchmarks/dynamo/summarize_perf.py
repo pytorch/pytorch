@@ -84,7 +84,8 @@ def main(directory, amp, float32, perf_compare):
         if perf_compare:
             regex = r"training_(torchbench|huggingface|timm_models)\.csv"
             m = re.match(regex, k)
-            assert m is not None, k
+            if m is None:
+                raise AssertionError(f"Failed to match regex for key: {k}")
             compiler = "inductor"
             benchmark = m.group(1)
             dtype = "float32"
