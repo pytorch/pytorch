@@ -6089,7 +6089,7 @@ class Scheduler:
         candidate_symbols: OrderedSet[sympy.Symbol] = OrderedSet().union(
             *(get_scheduler_node_symbol_uses(node) for node in partition)
         )
-        candidate_symbols.union(
+        candidate_symbols.update(
             *(get_input_node_symbols(node) for _, node in input_nodes.items())
         )
 
