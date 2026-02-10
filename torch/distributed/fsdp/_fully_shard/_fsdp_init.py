@@ -439,7 +439,7 @@ def _init_param_group(
                 group_mesh_info,
                 group_post_forward,
                 device,
-                shard_placement_fn,
+                param_to_shard_result,
                 mp_policy,
                 offload_policy,
             )

@@ -137,46 +137,32 @@ class FSDPParamGroup:
         mesh_info: DataParallelMeshInfo,
         post_forward_mesh_info: FSDPMeshInfo | None,
         device: torch.device,
-        shard_placement_fn: Callable[[nn.Parameter], Any]
-        | dict[nn.Parameter, ShardPlacementResult]
-        | None,
+        param_to_shard_result: dict[nn.Parameter, ShardPlacementResult],
         mp_policy: MixedPrecisionPolicy,
         offload_policy: OffloadPolicy,
+        shard_placement_fn: Callable[[nn.Parameter], Any] | None = None,
     ):
         self.modules = modules  # permit ref cycle because 1:1 lifetime
         param_module_infos = _get_param_module_infos(params, modules)
 
         default_mesh_info = cast(FSDPMeshInfo, mesh_info)
-        if isinstance(shard_placement_fn, dict):
-            param_to_shard_result = shard_placement_fn
-            self.fsdp_params = [
-                FSDPParam(
-                    param,
-                    module_info,
-                    post_forward_mesh_info,
-                    device,
-                    param_to_shard_result[param],
-                    mp_policy,
-                    offload_policy,
+        self.fsdp_params = [
+            FSDPParam(
+                param,
+                module_info,
+                post_forward_mesh_info,
+                device,
+                resolve_shard_placement(
+                    shard_placement_fn(param) if shard_placement_fn else None,
+                    default_mesh_info,
                 )
-                for param, module_info in zip(params, param_module_infos)
-            ]
-        else:
-            self.fsdp_params = [
-                FSDPParam(
-                    param,
-                    module_info,
-                    post_forward_mesh_info,
-                    device,
-                    resolve_shard_placement(
-                        shard_placement_fn(param) if shard_placement_fn else None,
-                        default_mesh_info,
-                    ),
-                    mp_policy,
-                    offload_policy,
-                )
-                for param, module_info in zip(params, param_module_infos)
-            ]
+                if shard_placement_fn
+                else param_to_shard_result[param],
+                mp_policy,
+                offload_policy,
+            )
+            for param, module_info in zip(params, param_module_infos)
+        ]
         self.mesh_info = mesh_info
         self.post_forward_mesh_info = post_forward_mesh_info
         # pyrefly: ignore [read-only]
