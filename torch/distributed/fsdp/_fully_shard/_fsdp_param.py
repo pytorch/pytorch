@@ -242,13 +242,7 @@ class FSDPParam:
             self.offload_to_cpu and cast(CPUOffloadPolicy, offload_policy).pin_memory
         )
         self.grad_offload_event: torch.Event | None = None
-        shard_result = resolve_shard_placement(
-            shard_placement_fn(param) if callable(shard_placement_fn) else None,
-            mesh_info,
-        )
-        self.mesh_info = shard_result.mesh_info
-        fsdp_placement = shard_result.placement
-        self._init_sharded_param(param, device, fsdp_placement)
+        self._init_sharded_param(param, device, shard_placement_fn, mesh_info)
         if self.post_forward_mesh_info:
             self._init_sharded_post_forward_param_metadata(param)
         self._init_extensions()
@@ -268,8 +262,15 @@ class FSDPParam:
         self,
         param: nn.Parameter,
         device: torch.device,
-        fsdp_placement: Shard | None,
+        shard_placement_fn: Callable[[nn.Parameter], ShardPlacementFnResult] | None,
+        mesh_info: FSDPMeshInfo,
     ):
+        shard_result = resolve_shard_placement(
+            shard_placement_fn(param) if callable(shard_placement_fn) else None,
+            mesh_info,
+        )
+        self.mesh_info = shard_result.mesh_info
+        fsdp_placement = shard_result.placement
         if param.device != device and param.device.type != "meta":
             raise AssertionError(
                 f"Expects the parameter to already be moved to device {device} but got {param.device}"
