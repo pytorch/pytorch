@@ -399,8 +399,7 @@ disable_guess_zero_tangent_for_mutated_input_subclass = False
 # At runtime non contiguous tangents will be coerced to be contiguous.
 # This config changes this guess for tangents strides to be the same as outputs.
 # TODO(ivankobzarev): Remove this config once extra memory usage is investigated.
-guess_tangent_strides_as_outputs = not is_fbcode()
-
+guess_tangent_strides_as_outputs = False
 
 # This is a temporary config to ensure all ranks take the same decision in the partitioner
 # it will untimately be removed once we share size_hints across ranks through compiler collectives
