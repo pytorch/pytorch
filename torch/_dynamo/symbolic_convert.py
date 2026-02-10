@@ -4811,25 +4811,7 @@ class InstructionTranslatorBase(
             # Stack layout: [cells], [frame_list], *(extra values), (result if on stack)
             frame_list_pos = len(self.stack) - len(meta.stack_null_idxes) + 1
             resume_cg = PyCodegen(self)
-            resume_cg.extend_output(
-                [
-                    create_instruction("COPY", arg=frame_list_pos),
-                    resume_cg.create_load_const(0),
-                    resume_cg.create_binary_subscr(),
-                ]
-            )
-            for var_name in vars_to_pass:
-                resume_cg.extend_output(
-                    [
-                        create_instruction("LOAD_FAST", argval=var_name),
-                        create_instruction("LIST_APPEND", arg=1),
-                    ]
-                )
-            resume_cg.extend_output(
-                [
-                    create_instruction("POP_TOP"),
-                ]
-            )
+            self._emit_extend_frame_values(resume_cg, frame_list_pos, vars_to_pass)
             self.output.add_output_instructions(resume_cg.get_instructions())
 
         # --- Step 6: Create the resume function ---
@@ -4841,12 +4823,40 @@ class InstructionTranslatorBase(
 
         self.instruction_pointer = None
 
+    def _emit_extend_frame_values(
+        self,
+        cg: "PyCodegen",
+        frame_values_depth: int,
+        var_names: list[str],
+    ) -> None:
+        """Emit bytecode to append local vars to frame_values[0].
+
+        frame_values_depth is how deep frame_values sits below TOS
+        (i.e., the arg to COPY to reach it).
+        """
+        cg.extend_output(
+            [
+                create_instruction("COPY", arg=frame_values_depth),
+                cg.create_load_const(0),
+                cg.create_binary_subscr(),
+            ]
+        )
+        for var_name in var_names:
+            cg.extend_output(
+                [
+                    create_instruction("LOAD_FAST", argval=var_name),
+                    create_instruction("LIST_APPEND", arg=1),
+                ]
+            )
+        cg.extend_output([create_instruction("POP_TOP")])
+
     def _build_comprehension_fn(
         self,
         analysis: ComprehensionAnalysis,
         start_ip: int,
         stack_pops: int,
         stack_pops_null_mask: list[bool],
+        nonnull_count: int,
         meta: StackLocalsMetadata,
     ) -> tuple[types.CodeType, str]:
         """Build a synthetic function wrapping comprehension bytecode.
@@ -4864,9 +4874,6 @@ class InstructionTranslatorBase(
         from .bytecode_transformation import transform_code_object
         from .eval_frame import skip_code
         from .resume_execution import CO_VARARGS, CO_VARKEYWORDS
-
-        # Non-null stack_pops items are passed as args (same naming as resume fns)
-        nonnull_count = sum(1 for m in stack_pops_null_mask if not m)
 
         # Args follow frame_values layout: locals first, then stack_pops items
         # (appended to end of frame_values[0] by the caller).
@@ -4963,7 +4970,7 @@ class InstructionTranslatorBase(
         new_code, _ = transform_code_object(self.f_code, update)
         skip_code(new_code)
 
-        # Install as global (same pattern as create_resume)
+        # Install as global
         if new_code.co_freevars:
             self.output.install_global_unsafe(fn_name, new_code)
         else:
@@ -4984,13 +4991,13 @@ class InstructionTranslatorBase(
     ) -> None:
         """Handle comprehension graph break in a nested (inlined) context.
 
-        Follows the same pattern as step_graph_break's nested path:
-        builds a synthetic function wrapping the comprehension bytecode,
+        Builds a synthetic function wrapping the comprehension bytecode,
         calls it via codegen_call_resume, then chains into the resume
         function for the post-comprehension code.
         """
         from .variables.misc import UnknownVariable
 
+        assert config.nested_graph_breaks
         meta = all_stack_locals_metadata[0]
         cg = PyCodegen(self.output.root_tx)
 
@@ -5020,8 +5027,6 @@ class InstructionTranslatorBase(
 
         # --- Step 1: Pop stack_pops items from runtime stack ---
         # Process from TOS down. Store non-null items to temp vars.
-        # NULL values (from LOAD_FAST_AND_CLEAR) must be popped with STORE_FAST
-        # rather than POP_TOP, because POP_TOP calls Py_DECREF which segfaults on NULL.
         temp_names: list[str] = []
         for i in reversed(range(stack_pops)):
             if stack_pops_null_mask[i]:
@@ -5037,24 +5042,11 @@ class InstructionTranslatorBase(
         # Stack is now: cells, [frame_values], *(non-popped stack items)
 
         # --- Step 2: Append non-null stack_pops items to frame_values[0] ---
-        nstack_nonpopped = len(self.stack) - len(meta.stack_null_idxes)
+        # Number of stack items above [cells], [frame_values] that are real
+        # values (not NULL placeholders tracked in stack_null_idxes).
+        live_stack_depth = len(self.stack) - len(meta.stack_null_idxes)
         if temp_names:
-            frame_values_pos = nstack_nonpopped + 1
-            cg.extend_output(
-                [
-                    create_instruction("COPY", arg=frame_values_pos),
-                    cg.create_load_const(0),
-                    cg.create_binary_subscr(),
-                ]
-            )
-            for temp_name in temp_names:
-                cg.extend_output(
-                    [
-                        create_instruction("LOAD_FAST", argval=temp_name),
-                        create_instruction("LIST_APPEND", arg=1),
-                    ]
-                )
-            cg.extend_output([create_instruction("POP_TOP")])
+            self._emit_extend_frame_values(cg, live_stack_depth + 1, temp_names)
 
         # --- Step 3: Build comprehension function ---
         new_code, fn_name = self._build_comprehension_fn(
@@ -5062,18 +5054,18 @@ class InstructionTranslatorBase(
             start_ip,
             stack_pops,
             stack_pops_null_mask,
+            nonnull_count,
             meta,
         )
 
         # --- Step 4: Extract [cells[0]] and [frame_values[0]] ---
-        # Same pattern as step_graph_break lines 1618-1630
         cg.extend_output(
             [
-                *create_copy(nstack_nonpopped + 2),
+                *create_copy(live_stack_depth + 2),
                 cg.create_load_const(0),
                 cg.create_binary_subscr(),
                 create_instruction("BUILD_LIST", arg=1),
-                *create_copy(nstack_nonpopped + 2),
+                *create_copy(live_stack_depth + 2),
                 cg.create_load_const(0),
                 cg.create_binary_subscr(),
                 create_instruction("BUILD_LIST", arg=1),
@@ -5083,14 +5075,13 @@ class InstructionTranslatorBase(
         # Stack: cells, [frame_values], *(non-popped), [cells[0]], [frame_values[0]]
 
         # --- Step 5: Call comprehension function via codegen_call_resume ---
-        # Same pattern as step_graph_break line 1649
         self.codegen_call_resume([new_code], [fn_name], cg)
 
         # Stack: cells, [frame_values], *(non-popped), comp_result
 
         # --- Step 6: Remove appended stack_pops items from frame_values[0] ---
         if nonnull_count > 0:
-            frame_values_pos = nstack_nonpopped + 1 + 1  # +1 result, +1 frame_values
+            frame_values_pos = live_stack_depth + 1 + 1  # +1 result, +1 frame_values
             cg.extend_output(
                 [
                     create_instruction("COPY", arg=frame_values_pos),
@@ -5118,8 +5109,18 @@ class InstructionTranslatorBase(
                     ),
                 ]
             )
+
+        if analysis.result_on_stack:
+            self.push(UnknownVariable())
+        elif analysis.result_var:
+            cg.extend_output(
+                [create_instruction("STORE_FAST", argval=analysis.result_var)]
+            )
+        else:
+            cg.extend_output([create_instruction("POP_TOP")])
+
+        if analysis.walrus_vars:
             if analysis.result_on_stack:
-                self.push(UnknownVariable())
                 for var_name in analysis.walrus_vars:
                     cg.extend_output(
                         [
@@ -5127,29 +5128,11 @@ class InstructionTranslatorBase(
                             create_instruction("STORE_FAST", argval=var_name),
                         ]
                     )
-            elif analysis.result_var:
-                cg.extend_output(
-                    [create_instruction("STORE_FAST", argval=analysis.result_var)]
-                )
+            else:
                 for var_name in analysis.walrus_vars:
                     cg.extend_output(
                         [create_instruction("STORE_FAST", argval=var_name)]
                     )
-            else:
-                cg.extend_output([create_instruction("POP_TOP")])
-                for var_name in analysis.walrus_vars:
-                    cg.extend_output(
-                        [create_instruction("STORE_FAST", argval=var_name)]
-                    )
-        else:
-            if analysis.result_on_stack:
-                self.push(UnknownVariable())
-            elif analysis.result_var:
-                cg.extend_output(
-                    [create_instruction("STORE_FAST", argval=analysis.result_var)]
-                )
-            else:
-                cg.extend_output([create_instruction("POP_TOP")])
 
         # --- Step 8: Pass new vars to frame_values for resume function ---
         vars_to_pass = (
@@ -5162,21 +5145,7 @@ class InstructionTranslatorBase(
 
         if vars_to_pass:
             frame_list_pos = len(self.stack) - len(meta.stack_null_idxes) + 1
-            cg.extend_output(
-                [
-                    create_instruction("COPY", arg=frame_list_pos),
-                    cg.create_load_const(0),
-                    cg.create_binary_subscr(),
-                ]
-            )
-            for var_name in vars_to_pass:
-                cg.extend_output(
-                    [
-                        create_instruction("LOAD_FAST", argval=var_name),
-                        create_instruction("LIST_APPEND", arg=1),
-                    ]
-                )
-            cg.extend_output([create_instruction("POP_TOP")])
+            self._emit_extend_frame_values(cg, frame_list_pos, vars_to_pass)
 
         # Stack: cells, [frame_values], *(non-popped stack)
         self.output.add_output_instructions(cg.get_instructions())
