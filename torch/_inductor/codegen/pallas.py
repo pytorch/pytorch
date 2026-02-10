@@ -1050,7 +1050,6 @@ class PallasKernel(SIMDKernel):
         # Mark this as requiring flatten access
         return index_str
 
-
     def _get_iter_vars(self) -> OrderedSet:
         """Get the set of iteration variable symbols."""
         return OrderedSet(self.range_tree_nodes.keys())
@@ -1199,7 +1198,9 @@ class PallasKernel(SIMDKernel):
             out_buf = V.graph.get_buffer(buf_name)
             if out_buf is None:
                 continue
-            if buf_name not in output_buffers and not isinstance(out_buf, ComputedBuffer):
+            if buf_name not in output_buffers and not isinstance(
+                out_buf, ComputedBuffer
+            ):
                 continue
             layout = getattr(out_buf, "get_layout", lambda: None)()
             if layout is None:
@@ -2775,7 +2776,11 @@ import torch
 import jax
 import jax.numpy as jnp
 from jax.experimental import pallas as pl
-from torch._inductor.runtime.runtime_utils import pallas_gpu_align_output_specs, pallas_gpu_pad_inputs, pallas_gpu_unpad_results, pallas_partial_reduce, torch_dtype_to_jax_runtime
+from torch._inductor.runtime.runtime_utils import (
+    pallas_gpu_align_output_specs, pallas_gpu_pad_inputs,
+    pallas_gpu_unpad_results, pallas_partial_reduce,
+    torch_dtype_to_jax_runtime,
+)
 """ + (
             "\nfrom jax.experimental.pallas import mosaic_gpu as plgpu"
             if not ctx.interpret_is_cpu
@@ -3040,9 +3045,7 @@ from torch._inductor.runtime.runtime_utils import pallas_gpu_align_output_specs,
 
         code.writeline("")
         code.writeline("# Reshape results to original shapes")
-        code.writeline(
-            "return pallas_gpu_unpad_results(_result, _orig_out_shapes)"
-        )
+        code.writeline("return pallas_gpu_unpad_results(_result, _orig_out_shapes)")
 
     def _codegen_jit_wrapper_legacy_gpu(
         self, ctx: _CodegenContext, kernel_arg: str

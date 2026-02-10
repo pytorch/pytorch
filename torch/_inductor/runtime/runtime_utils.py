@@ -288,9 +288,7 @@ def pallas_partial_reduce(reduce_fn: Any, v: Any, pw_numel: int, red_numel: int)
     return result.reshape(out_shape)
 
 
-def pallas_gpu_pad_inputs(
-    inputs: list[Any], alignment: int = 128
-) -> list[Any]:
+def pallas_gpu_pad_inputs(inputs: list[Any], alignment: int = 128) -> list[Any]:
     """Flatten and pad each input JAX array to a multiple of alignment."""
     import jax.numpy as jnp  # pyrefly: ignore [import-error, missing-import]
 
