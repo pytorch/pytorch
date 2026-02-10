@@ -58,17 +58,22 @@ def _transform_node(
     out_op,
     num_outputs: int,
 ) -> bool:
-    """Transform a functional op node to its out variant."""
+    """Transform a functional op node to its out variant.
+
+    Tries to reuse an input buffer for each output (reinplace) before falling
+    back to allocating a fresh buffer via torch.empty. Reinplacing avoids the
+    allocation entirely when the input is not used after this node.
+
+    TODO(tianrengao): Phase 3 — replace _can_reuse_input with shared
+    ReinplaceAnalyzer extracted from reinplace.py for full edge-case coverage.
+    """
     from torch._library._out_variant import get_out_arg_names
 
-    # TODO(tianrengao): add reinplace logic
-    # Get output tensor info from fake tensor metadata
     output_tensors = _get_output_tensors(node)
     if output_tensors is None or len(output_tensors) != num_outputs:
         log.warning("Could not get output tensors for %s", node.target)
         return False
 
-    # Get out argument names from schema
     out_arg_names = get_out_arg_names(out_op)
     if len(out_arg_names) != num_outputs:
         log.warning(
@@ -79,32 +84,113 @@ def _transform_node(
         )
         return False
 
+    # Build node ordering once for reinplace safety checks
+    node_order = {n: i for i, n in enumerate(graph.nodes)}
+    # Track which inputs have already been reused to avoid double-mutation
+    reused_inputs: set[fx.Node] = set()
+
     with graph.inserting_before(node):
-        # Create allocation nodes for each output
         alloc_nodes: list[fx.Node] = []
         for fake_tensor in output_tensors:
-            alloc_node = graph.call_function(
-                torch.empty,
-                args=(tuple(fake_tensor.shape),),
-                kwargs={
-                    "dtype": fake_tensor.dtype,
-                    "device": fake_tensor.device,
-                },
-            )
-            # Propagate fake tensor metadata
-            alloc_node.meta["val"] = _create_fake_like(fake_tensor, node)
-            alloc_nodes.append(alloc_node)
+            # Try to reuse an input buffer instead of allocating
+            candidate = _find_matching_input(node, fake_tensor, reused_inputs)
+            if candidate is not None and _can_reuse_input(
+                node, candidate, node_order
+            ):
+                alloc_nodes.append(candidate)
+                reused_inputs.add(candidate)
+                log.debug(
+                    "Reinplacing output with input %s for %s",
+                    candidate,
+                    node.target,
+                )
+            else:
+                # Fallback: allocate fresh buffer
+                alloc_node = graph.call_function(
+                    torch.empty,
+                    args=(tuple(fake_tensor.shape),),
+                    kwargs={
+                        "dtype": fake_tensor.dtype,
+                        "device": fake_tensor.device,
+                    },
+                )
+                alloc_node.meta["val"] = _create_fake_like(fake_tensor, node)
+                alloc_nodes.append(alloc_node)
 
-        # Create out variant call: out_op(inputs..., *, out1=tensor1, out2=tensor2)
-        # Out args must be passed as kwargs (they are keyword-only in the schema)
+        # Create out variant call
         out_kwargs = dict(node.kwargs)
         out_kwargs.update(zip(out_arg_names, alloc_nodes))
         out_call = graph.call_function(out_op, args=node.args, kwargs=out_kwargs)
         out_call.meta["val"] = None
 
-    # Replace uses of original outputs with allocated buffers
     _replace_uses(graph, node, alloc_nodes)
     graph.erase_node(node)
+
+    return True
+
+
+def _find_matching_input(
+    node: fx.Node,
+    fake_tensor: torch.Tensor,
+    reused_inputs: set[fx.Node],
+) -> fx.Node | None:
+    """Find an input arg whose buffer matches the output's shape/dtype/device/strides.
+
+    Each input can only be reused once (tracked by reused_inputs) to prevent
+    double-mutation where the same buffer is used for multiple out args.
+    """
+    for arg in node.args:
+        if not isinstance(arg, fx.Node):
+            continue
+        if arg in reused_inputs:
+            continue
+        arg_val = arg.meta.get("val")
+        if arg_val is None or not isinstance(arg_val, torch.Tensor):
+            continue
+        if (
+            arg_val.shape == fake_tensor.shape
+            and arg_val.dtype == fake_tensor.dtype
+            and arg_val.device == fake_tensor.device
+            and arg_val.stride() == fake_tensor.stride()
+        ):
+            return arg
+    return None
+
+
+def _can_reuse_input(
+    node: fx.Node,
+    candidate: fx.Node,
+    node_order: dict[fx.Node, int],
+) -> bool:
+    """Check if candidate input buffer can be safely overwritten as an out buffer.
+
+    This is safe when:
+    1. candidate is not a graph input (placeholder/get_attr) — overwriting those
+       would require copy_ epilogue analysis (handled in Phase 3).
+    2. candidate has trackable storage.
+    3. candidate has no uses after the current node — otherwise overwriting it
+       would corrupt data that downstream nodes need.
+
+    This is a simplified version of reinplace.py's can_inplace(). It does not
+    handle view chains or overlapping storage. Phase 3 will replace this with
+    the shared ReinplaceAnalyzer for full coverage.
+    """
+    from torch._inductor.fx_utils import get_node_storage
+
+    # Don't overwrite graph inputs
+    if candidate.op in ("placeholder", "get_attr"):
+        return False
+
+    if get_node_storage(candidate) is None:
+        return False
+
+    # candidate must have no uses after node
+    node_pos = node_order[node]
+    for user in candidate.users:
+        if user is node:
+            continue
+        if node_order.get(user, 0) > node_pos:
+            return False
 
     return True
 
