@@ -3,6 +3,7 @@
 from . import (
     aten,
     base,
+    batch1_decompose,
     contiguous_mm,
     decompose_k,
     nv_universal_gemm,
