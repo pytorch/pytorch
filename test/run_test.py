@@ -1691,7 +1691,7 @@ def get_selected_tests(options) -> list[str]:
         options.exclude.extend(CPP_TESTS)
 
     if options.mps:
-        os.environ["PYTORCH_TEST_OPS_ONLY_MPS"] = "1"
+        os.environ["PYTORCH_TESTING_DEVICE_ONLY_FOR"] = "mps"
         selected_tests = [
             "test_ops",
             "test_mps",
@@ -1708,7 +1708,7 @@ def get_selected_tests(options) -> list[str]:
             "inductor/test_torchinductor_dynamic_shapes",
         ]
     else:
-        # Exclude all mps tests otherwise
+        # Exclude mps-only tests otherwise
         options.exclude.extend(["test_mps", "test_metal"])
 
     if options.xpu:
