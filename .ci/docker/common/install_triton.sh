@@ -21,7 +21,7 @@ elif [ -n "${TRITON_CPU}" ]; then
   TRITON_REPO="https://github.com/triton-lang/triton-cpu"
   TRITON_TEXT_FILE="triton-cpu"
 else
-  TRITON_REPO="https://github.com/triton-lang/triton"
+  TRITON_REPO="https://github.com/ROCm/triton"
   TRITON_TEXT_FILE="triton"
 fi
 
