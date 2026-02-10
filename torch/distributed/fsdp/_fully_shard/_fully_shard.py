@@ -312,8 +312,9 @@ class FSDPModule:
         for fsdp_param_group in state._fsdp_param_groups:
             fsdp_param_group.lazy_init()
             fsdp_param_group.unshard(async_op=async_op)
-        groups = state._fsdp_param_groups
-        handle = _UnshardHandleImpl(groups if groups else None)
+        handle = _UnshardHandleImpl(
+            list(state._fsdp_param_groups) if state._fsdp_param_groups else None
+        )
         if async_op:
             return handle
         handle.wait()
