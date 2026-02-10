@@ -1614,7 +1614,7 @@ class TypingVariable(VariableTracker):
             return TypingVariable(new_typing)
         elif name == "__eq__":
             if len(args) == 1 and not kwargs:
-                result = self.value == args[0].as_python_constant()
+                result = istype(args[0], TypingVariable) and self.value == args[0].value
                 return variables.ConstantVariable.create(result)
         unimplemented(
             gb_type="unsupported method call on `typing` variable",
