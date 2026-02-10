@@ -69,7 +69,6 @@ if use_buck:
     import libfb.py.build_info
 
 
-# pyrefly: ignore [implicit-any]
 extra_deps = []
 extra_imports = ""
 cur_target = ""
