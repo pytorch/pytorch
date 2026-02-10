@@ -34,6 +34,7 @@ To run a specific test:
     pytest test/inductor/test_torchinductor_opinfo_properties.py -k "silu and eager"
 """
 
+import sys
 import unittest
 
 import pytest
@@ -58,9 +59,6 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
 )
 from torch.testing._internal.inductor_utils import HAS_GPU
-
-import sys
-torch._dynamo.config.recompile_limit = sys.maxsize
 
 
 # LLM-useful op names to filter from unary_ufuncs
@@ -407,7 +405,6 @@ BATCH_INVARIANCE_XFAILS = {
     "inductor_default": {
         "matmul": {ALL},
         "nn.functional.linear": {ALL},
-        "div": {fp32},
         "pow": {fp32},
     },
     "inductor_numerics": {
@@ -486,6 +483,11 @@ class TestOpInfoProperties(TestCase):
     def setUp(self):
         super().setUp()
         torch._dynamo.reset()
+        patch = torch._dynamo.config.patch(
+            recompile_limit=sys.maxsize, accumulated_recompile_limit=sys.maxsize
+        )
+        patch.__enter__()
+        self.addCleanup(patch.__exit__, None, None, None)
 
     def tearDown(self):
         super().tearDown()
