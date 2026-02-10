@@ -1,3 +1,13 @@
+# Environment
+
+If any tool you're trying to use (pip, python, spin, etc) is missing, always stop and ask the user if an environment is needed. Do NOT try to find alternatives or install these tools.
+
+# Build
+
+Always ask for build configuration environment variables before running build.
+All build (both codegen, C++ and python) is done via `pip install -e . -v --no-build-isolation`.
+You should NEVER run any other command to build PyTorch.
+
 # Testing
 
 Use our test class and test runner:
@@ -14,6 +24,12 @@ if __name__ == "__main__":
 
 To test Tensor equality, use assertEqual.
 
+# Linting
+
+Only use commands provided via `spin` for linting.
+Use `spin help` to list available commands.
+Generally, use `spin lint` as to run the lint and `spin fixlint` to apply automatic fixes.
+
 # Commit messages
 
 Don't commit unless the user explicitly asks you to.
@@ -24,6 +40,26 @@ changes. Instead, if the PR is large, explain the order to review changes
 entirely.
 
 Disclose that the PR was authored with Claude.
+
+# Coding Style Guidelines
+
+Follow these rules for all code changes in this repository:
+
+- Minimize comments; be concise; code should be self-explanatory and self-documenting.
+- Comments should be useful, for example, comments that remind the reader about
+  some global context that is non-obvious and can't be inferred locally.
+- Don't make trivial (1-2 LOC) helper functions that are only used once unless
+  it significantly improves code readability.
+- Prefer clear abstractions. State management should be explicit.
+  For example, if managing state in a Python class: there should be a clear
+  class definition that has all of the members: don't dynamically `setattr`
+  a field on an object and then dynamically `getattr` the field on the object.
+- Match existing code style and architectural patterns.
+- Assume the reader has familiarity with PyTorch. They may not be the expert
+  on the code that is being read, but they should have some experience in the
+  area.
+
+If uncertain, choose the simpler, more concise implementation.
 
 # Dynamo Config
 

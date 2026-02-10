@@ -2,70 +2,54 @@
 from __future__ import annotations
 
 import logging
-from typing import overload
+from typing import overload, TYPE_CHECKING
 
 import torch
-import torch.distributed as dist
 import torch.nn as nn
-from torch.distributed._composable_state import _get_module_state, _insert_module_state
-from torch.distributed.device_mesh import _get_device_handle
+from torch.distributed._composable_state import _get_module_state
 from torch.distributed.fsdp._fully_shard._fsdp_api import (
     MixedPrecisionPolicy,
     OffloadPolicy,
 )
-from torch.distributed.fsdp._fully_shard._fsdp_common import (
-    DDPMeshInfo,
-    detect_compiled_autograd,
-)
+from torch.distributed.fsdp._fully_shard._fsdp_common import DDPMeshInfo
 from torch.distributed.fsdp._fully_shard._fsdp_init import (
+    _apply_to_module,
     _get_device_from_mesh,
-    _get_managed_states,
-    _init_default_fully_shard_mesh,
-    _move_states_to_device,
+    _get_modules_and_states,
+    _init_default_mesh,
+    _init_param_group,
+    _validate_module as _validate_module_common,
 )
-from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
-from torch.distributed.fsdp._fully_shard._fsdp_state import (
-    _register_group_forward_hooks,
-    FSDPState,
-)
+from torch.distributed.fsdp._fully_shard._fsdp_state import FSDPState, FSDPStateContext
 from torch.distributed.fsdp._fully_shard._fully_shard import (
     _unimplemented_deepcopy,
     FSDPModule,
 )
-from torch.distributed.tensor import DeviceMesh, init_device_mesh
-from torch.distributed.utils import _get_root_modules
 
 from .contract import _get_registry, contract
 
 
-cls_to_replicate_cls: dict[type, type] = {}
+if TYPE_CHECKING:
+    from torch.distributed.tensor import DeviceMesh
 
-_ROOT_MODULE_PREFIX = ""
+
+cls_to_replicate_cls: dict[type, type] = {}
 
 logger = logging.getLogger("torch.distributed._composable.replicate_with_fsdp")
 
 
-class _ReplicateStateContext:
-    """This has state shared across Replicate states."""
+class _ReplicateStateContext(FSDPStateContext["_ReplicateState"]):
+    """
+    State shared across Replicate states.
 
-    def __init__(self) -> None:
-        # All Replicate states in the root state's module tree
-        self.all_states: list[_ReplicateState] = []
-        # Iteration's forward root runs the once-per-forward logic; this root
-        # may not be the overall root set by lazy initialization in cases where
-        # only a submodule runs forward (e.g. encoder-only for eval)
-        self.iter_forward_root: _ReplicateState | None = None
-        # Final callback should only be queued once per backward
-        self.post_backward_final_callback_queued: bool = False
-        # Whether to finalize backward in this backward's final callback
-        self.is_last_backward: bool = True
-        # Optional user-provided event recorded after optimizer for the
-        # all-gather streams to wait on in the root pre-forward
-        self.post_optim_event: torch.Event | None = None
+    This is a typed subclass of FSDPStateContext parameterized with _ReplicateState,
+    providing correct type annotations (e.g., all_states: list[_ReplicateState]).
+    It also allows call sites to differentiate between Replicate and FSDP contexts
+    via isinstance checks if needed.
+    """
 
 
 def _get_module_replicate_state(module: nn.Module) -> _ReplicateState | None:
-    """Checks if module state is ReplicateState"""
     state = _get_module_state(module)
     if isinstance(state, _ReplicateState):
         return state
@@ -73,16 +57,15 @@ def _get_module_replicate_state(module: nn.Module) -> _ReplicateState | None:
 
 
 class _ReplicateState(FSDPState):
-    """
-    Replicate state functionality is adapted from FSDP state.
-    In the future, could experiment with inheriting from it instead.
-    """
+    _state_name: str = "Replicate"
 
     def __init__(self) -> None:
         super().__init__()
-        self._state_ctx = _ReplicateStateContext()  # type: ignore[assignment]
+        self._state_ctx = _ReplicateStateContext()
 
-    # Define a separate init since `__init__` is called in the contract
+    def _get_state_for_module(self, module: nn.Module) -> FSDPState | None:
+        return _get_module_replicate_state(module)
+
     def init(
         self,
         modules: tuple[nn.Module, ...],
@@ -90,137 +73,7 @@ class _ReplicateState(FSDPState):
         mp_policy: MixedPrecisionPolicy,
         auto_reshard_after_forward: bool = False,
     ) -> None:
-        for module in modules:
-            _insert_module_state(module, self)
-        self._modules = modules
-        # pyrefly: ignore [read-only]
-        self._device = device
-        self._device_handle = _get_device_handle(device.type)
-        self._mp_policy = mp_policy
-        self._auto_reshard_after_forward = auto_reshard_after_forward
-        if len(modules) == 1:
-            self._pre_forward_hook_handle = modules[0].register_forward_pre_hook(
-                self._pre_forward, prepend=True, with_kwargs=True
-            )
-            self._post_forward_hook_handle = modules[0].register_forward_hook(
-                self._post_forward, prepend=False
-            )
-        else:
-            hook_handle = _register_group_forward_hooks(
-                modules,
-                self._pre_forward,
-                self._post_forward,
-                self._modules_to_run_forward,
-            )
-            self._pre_forward_hook_handle = hook_handle
-            self._post_forward_hook_handle = hook_handle
-
-    def _lazy_init(self) -> None:
-        """
-        Lazy initialization represents when all modules' parallelisms have
-        finalized (e.g. Replicate has been applied to all desired modules). This
-        means that we can determine which state is the root, and we do so by
-        the 1st state to run forward.
-        """
-        if self._is_root is not None:
-            return  # no-op: already initialized
-        self._is_root = True
-        if len(self._modules) > 1:
-            raise RuntimeError(
-                f"Replicate requires a single root module but got {self._modules}"
-            )
-        detect_compiled_autograd()
-        root_module = self._modules[0]
-        visited_states: set[_ReplicateState] = set()
-        for module_name, module in root_module.named_modules():
-            if (state := _get_module_replicate_state(module)) is None:
-                continue
-            if module is not root_module:
-                if state not in visited_states and state._is_root is not None:
-                    raise RuntimeError(
-                        "Replicate state has already been lazily initialized for "
-                        f"{module_name}\nReplicate requires running forward through "
-                        "the root module first"
-                    )
-                state._is_root = False
-            self._state_ctx.all_states.append(state)
-            # pyrefly: ignore [bad-argument-type]
-            visited_states.add(state)
-        if self._fsdp_param_group and self._auto_reshard_after_forward:
-            # For the root, do not reshard after forward since for training,
-            # the parameters would be freed and all-gathered immediately
-            self._fsdp_param_group.post_forward_mesh_info = None
-        self._init_fqns()
-        self._init_shared_state()
-        # Run parameter group lazy inits after initializing FQNs for improved
-        # error messages
-        for state in self._state_ctx.all_states:  # type: ignore[assignment]
-            if state._fsdp_param_group:  # type: ignore[union-attr]
-                state._fsdp_param_group.lazy_init()  # type: ignore[union-attr]
-
-
-def replicate_impl(
-    module,
-    mesh: DeviceMesh,
-    *,
-    device_id: int | torch.device | None = None,
-    mp_policy: MixedPrecisionPolicy = MixedPrecisionPolicy(),
-    offload_policy: OffloadPolicy = OffloadPolicy(),
-    ignored_params: set[nn.Parameter] | None = None,
-):
-    torch._C._log_api_usage_once("torch.distributed._composable.replicate_with_fsdp")
-    if isinstance(module, (nn.ModuleList, nn.ModuleDict)):
-        raise ValueError(
-            f"replicate does not support containers that do not implement forward: {module}"
-        )
-
-    mesh = mesh or _init_default_fully_shard_mesh()
-    if mesh.ndim != 1:
-        raise ValueError(f"replicate expects a 1D DeviceMesh but got {mesh}")
-
-    else:
-        if mesh.mesh_dim_names is None:
-            raise AssertionError(
-                "Please init the 2D mesh for HSDP with mesh_dim_names specified"
-            )
-        mesh_info = DDPMeshInfo(mesh, replicate_mesh_dim=0)
-    device = _get_device_from_mesh(mesh)
-
-    post_forward_mesh_info = None
-
-    arg_module = module
-    modules = (
-        (module,) if isinstance(module, nn.Module) else tuple(_get_root_modules(module))
-    )
-    state = replicate.state(modules[0])  # type: ignore[attr-defined] # see [1]
-    state.init(modules, device, mp_policy)
-
-    managed_modules = _get_managed_modules(modules, ignored_params)
-    params, buffers = _get_managed_states(managed_modules, ignored_params)
-
-    _move_states_to_device(params, buffers, device)
-    if params:
-        state._fsdp_param_group = FSDPParamGroup(
-            params,
-            modules,
-            mesh_info,  # type: ignore[arg-type]
-            post_forward_mesh_info,
-            device,
-            None,
-            mp_policy,
-            offload_policy,
-        )
-
-    # Place Replicate leftmost for highest priority in the method resolution order
-    for module in modules:
-        cls = module.__class__
-        new_cls = cls_to_replicate_cls.get(cls)
-        if not new_cls:
-            dct = {"__deepcopy__": _unimplemented_deepcopy}
-            new_cls = type(f"Replicate{cls.__name__}", (ReplicateModule, cls), dct)
-            cls_to_replicate_cls[cls] = new_cls
-        module.__class__ = new_cls
-    return arg_module
+        super().init(modules, device, mp_policy, auto_reshard_after_forward)
 
 
 @overload
@@ -266,143 +119,71 @@ def replicate(
         >>> module = nn.Linear(3, 3)
         >>> replicate(module)
     """
+    torch._C._log_api_usage_once("torch.distributed._composable.replicate_with_fsdp")
+    _validate_module(module)
+    mesh = mesh or _init_default_mesh(mesh_dim_names=("replicate",))
+    _validate_mesh(mesh)
+    mesh_info = DDPMeshInfo(mesh, replicate_mesh_dim=0)
+    device = _get_device_from_mesh(mesh)
+    # managed_modules (3rd return) and buffers (5th return) are unused:
+    # - managed_modules: FSDP uses this to set Dynamo-specific attributes
+    #   (_is_fsdp_managed_module, _fsdp_use_orig_params), which replicate doesn't need
+    # - buffers: already moved to device by _get_modules_and_states; replicate
+    #   doesn't need to track them separately
+    arg_module, modules, _, params, _ = _get_modules_and_states(
+        module,
+        device,
+        ignored_params,
+        is_composable_fn=is_composable_with_replicate,
+        get_state_fn=_get_module_replicate_state,
+    )
+    state = replicate.state(modules[0])  # type: ignore[attr-defined]
+    state.init(modules, device, mp_policy)
 
+    _init_param_group(
+        state,
+        params,
+        modules,
+        mesh_info,
+        None,  # post_forward_mesh_info
+        device,
+        None,  # shard_placement_fn
+        mp_policy,
+        offload_policy,
+    )
+
+    # Place Replicate leftmost for highest priority in the method resolution order
+    _apply_to_module(
+        modules,
+        cls_to_replicate_cls,
+        ReplicateModule,
+        "Replicate",
+        _unimplemented_deepcopy,
+    )
+    return arg_module
+
+
+class ReplicateModule(FSDPModule):
+    # Index in MRO where the original class is found.
+    # For Replicate: [Replicate<Orig>, ReplicateModule, FSDPModule, Orig, ...] -> index 3
+    _orig_cls_mro_index: int = 3
+
+
+def is_composable_with_replicate(module: nn.Module) -> bool:
+    registry = _get_registry(module)
+    if registry is None:
+        return True
+    return "fully_shard" not in registry
+
+
+def _validate_module(module: nn.Module) -> None:
     if not is_composable_with_replicate(module):
         raise RuntimeError(
             "Cannot apply `replicate()` on a Module already managed by `fully_shard`"
         )
-
-    if mesh is None:
-        mesh = replicate_mesh()
-
-    return replicate_impl(
-        module,
-        mesh,
-        mp_policy=mp_policy,
-        offload_policy=offload_policy,
-        ignored_params=ignored_params,
-    )
+    _validate_module_common(module, "replicate")
 
 
-class ReplicateModule(FSDPModule):
-    def __new__(cls, *args, **kwargs):
-        """
-        Override ``__new__`` to remove the FSDP class and directly construct
-        the original class for cases like indexing into a container module.
-        """
-        # Use index 2 since 0 is the dynamically constructed `FSDP<...>` class
-        # and index 1 is the `FSDPModule` class itself
-        orig_cls = cls.__mro__[3]
-        self = orig_cls.__new__(orig_cls, *args, **kwargs)
-        self.__init__(*args, **kwargs)
-        return self
-
-
-def _get_managed_modules(
-    root_modules: tuple[nn.Module, ...],
-    ignored_params: set[nn.Parameter] | None = None,
-) -> list[nn.Module]:
-    modules: list[nn.Module] = []
-    root_modules_set = set(root_modules)
-    # Track visisted modules to avoid visiting shared modules multiple times
-    visited_modules: set[nn.Module] = set()
-
-    def dfs(module: nn.Module) -> None:
-        """
-        Runs a DFS to collect managed modules, not recursing into modules with
-        a non-composable API or ``replicate`` already applied.
-        """
-        if not is_composable_with_replicate(module):
-            return
-        elif (
-            module not in root_modules_set
-            and _get_module_replicate_state(module) is not None
-        ):
-            return  # nested `fully_shard` module
-        visited_modules.add(module)
-        for submodule in module.children():
-            if submodule not in visited_modules:
-                dfs(submodule)
-        modules.append(module)
-
-    for root_module in root_modules:
-        dfs(root_module)
-
-    if ignored_params is None:
-        return modules
-
-    adjusted_modules = _adjust_managed_modules(modules, ignored_params)
-    return adjusted_modules
-
-
-def is_composable_with_replicate(module: nn.Module) -> bool:
-    """Checks if replicate can be applied with module"""
-    registry = _get_registry(module)
-    if registry is None:
-        return True
-    # Registry keys by function name
-    return "fully_shard" not in registry
-
-
-def replicate_mesh():
-    """Creates a device mesh for replicate if the user doesn't provide one"""
-    if not dist.distributed_c10d.is_initialized():
-        dist.distributed_c10d.init_process_group()
-    default_pg = dist.distributed_c10d._get_default_group()
-    device = torch._C._get_accelerator()
-    mesh = init_device_mesh(
-        device.type,
-        mesh_shape=(default_pg.size(),),
-        mesh_dim_names=("replicate",),
-    )
-    return mesh
-
-
-def _adjust_managed_modules(
-    modules: list[nn.Module], ignored_params: set[nn.Parameter]
-) -> list[nn.Module]:
-    """
-    Adjust the given list of managed modules by removing those with all parameters ignored.
-    """
-    ignore_decision: dict[nn.Module, bool] = {}
-    new_modules = []
-    for module in modules:
-        ignored = _ignore_module(module, ignored_params, ignore_decision)
-        if not ignored:
-            new_modules.append(module)
-    return new_modules
-
-
-def _ignore_module(
-    module: nn.Module,
-    ignored_params: set[nn.Parameter],
-    ignore_decision: dict[nn.Module, bool],
-) -> bool:
-    """
-    Decide if it is safe to ignore a module for applying replicate.
-    """
-    if module in ignore_decision:
-        return ignore_decision[module]
-
-    if len(list(module.buffers(recurse=False))) > 0:
-        # Cannot ignore a module with any buffer
-        ignore_decision[module] = False
-        return False
-
-    for _, param in module.named_parameters(recurse=False):
-        if param not in ignored_params:
-            # at least one param is not ignored. So this module shouldn't be.
-            ignore_decision[module] = False
-            return False
-
-    # Need to consider descendants of module
-    for child in list(module.children()):
-        ignore_child = _ignore_module(child, ignored_params, ignore_decision)
-        if not ignore_child:
-            # Cannot ignore module if one of its children is not ignored
-            ignore_decision[module] = False
-            return False
-
-    # Safe to ignore module
-    ignore_decision[module] = True
-    return True
+def _validate_mesh(mesh: DeviceMesh) -> None:
+    if mesh.ndim != 1:
+        raise ValueError(f"replicate expects a 1D DeviceMesh but got {mesh}")
