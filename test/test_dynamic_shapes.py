@@ -3612,6 +3612,35 @@ class TestUnbacked(TestCase):
             ):
                 func_negative(x)
 
+    def test_unbacked_rms_norm(self):
+        def f4d(x):
+            return torch.rms_norm(x, [3, 4, 4], None, 1e-5)
+
+        def f5d(x):
+            return torch.rms_norm(x, [3, 4, 4, 4], None, 1e-5)
+
+        fn4d = torch.compile(backend="eager", fullgraph=True)(f4d)
+        fn5d = torch.compile(backend="eager", fullgraph=True)(f5d)
+
+        for unbacked_dim in [0, 2]:
+            # channels last 2d
+            x = torch.randn(8, 3, 4, 4).to(memory_format=torch.channels_last)
+            torch._dynamo.decorators.mark_unbacked(x, unbacked_dim)
+            ref, out = f4d(x), fn4d(x)
+            self.assertTrue(torch.equal(out, ref))
+
+            # channels last 3d
+            x = torch.randn(8, 3, 4, 4, 4).to(memory_format=torch.channels_last_3d)
+            torch._dynamo.decorators.mark_unbacked(x, unbacked_dim)
+            ref, out = f5d(x), fn5d(x)
+            self.assertTrue(torch.equal(out, ref))
+
+            # contiguous 4d
+            x = torch.randn(8, 3, 4, 4)
+            torch._dynamo.decorators.mark_unbacked(x, unbacked_dim)
+            ref, out = f4d(x), fn4d(x)
+            self.assertTrue(torch.equal(out, ref))
+
 
 class TestUbackedOps(TestCase):
     @fresh_cache()
@@ -5022,6 +5051,7 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
             compiled_result = bug_module(key)
 
         self.assertEqual(compiled_result, eager_result)
+
     @skipIfTorchDynamo("mark_unbacked is not traceable")
     def test_view_as_complex_unbacked_no_dde(self):
         """
