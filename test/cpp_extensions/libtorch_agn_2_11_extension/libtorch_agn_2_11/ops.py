@@ -57,6 +57,19 @@ def my_from_blob_with_cuda_deleter(numel: int, device) -> Tensor:
     )
 
 
+def my_layout(t: Tensor, layout: torch.layout) -> bool:
+    """
+    Checks whether a tensor has the given layout.
+
+    Args:
+        t: Tensor - the input tensor
+        layout: torch.layout - the layout to compare against
+
+    Returns: bool - True if the tensor's layout matches
+    """
+    return torch.ops.libtorch_agn_2_11.my_layout.default(t, layout)
+
+
 # =============================================================================
 # Proxy for inherited ops (from libtorch_agn_2_9 and libtorch_agn_2_10 csrc/)
 #

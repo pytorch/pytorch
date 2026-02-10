@@ -1791,6 +1791,32 @@ except RuntimeError as e:
             curr_mem = torch.cuda.memory_allocated(device)
             self.assertEqual(curr_mem, init_mem)
 
+    @skipIfTorchVersionLessThan(2, 11)
+    @onlyCPU
+    def test_my_layout(self, device):
+        """Test layout() method for various tensor layouts."""
+        import libtorch_agn_2_11 as libtorch_agnostic
+
+        # Test strided layout
+        t_strided = torch.randn(3, 4, device=device)
+        self.assertTrue(libtorch_agnostic.ops.my_layout(t_strided, torch.strided))
+        self.assertFalse(libtorch_agnostic.ops.my_layout(t_strided, torch.sparse_coo))
+
+        # Test sparse COO layout
+        indices = torch.tensor([[0, 1, 2], [0, 1, 2]])
+        values = torch.tensor([1.0, 2.0, 3.0])
+        t_sparse_coo = torch.sparse_coo_tensor(indices, values, (3, 3))
+        self.assertTrue(libtorch_agnostic.ops.my_layout(t_sparse_coo, torch.sparse_coo))
+        self.assertFalse(libtorch_agnostic.ops.my_layout(t_sparse_coo, torch.strided))
+
+        # Test sparse CSR layout
+        crow_indices = torch.tensor([0, 1, 2, 3])
+        col_indices = torch.tensor([0, 1, 2])
+        csr_values = torch.tensor([1.0, 2.0, 3.0])
+        t_sparse_csr = torch.sparse_csr_tensor(crow_indices, col_indices, csr_values)
+        self.assertTrue(libtorch_agnostic.ops.my_layout(t_sparse_csr, torch.sparse_csr))
+        self.assertFalse(libtorch_agnostic.ops.my_layout(t_sparse_csr, torch.strided))
+
 
 instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
 
