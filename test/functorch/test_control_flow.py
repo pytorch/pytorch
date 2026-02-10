@@ -61,7 +61,7 @@ def check_cudagraphs_not_skipped(test_case):
         )
 
 
-def _check_compile_cudagraph(test_case, fn, args):
+def _check_compile_cudagraph_backend(test_case, fn, args):
     # test cudagraphs backend
     cudagraphs_compiled_fn = torch.compile(fn, backend="cudagraphs")
     # We run 3 times.
@@ -84,7 +84,12 @@ def _check_compile_cudagraph(test_case, fn, args):
         test_case.assertEqual(eager_res, output)
 
 
-def _check_compile_aot_eager_with_cudagraph(test_case, fn, args, backend):
+def _check_compile_many_backends_with_cudagraph(test_case, fn, args):
+    for backend in ["eager_no_compile", "eager", "aot_eager"]:
+        _check_compile_any_backend_with_cudagraph(test_case, fn, args, backend)
+
+
+def _check_compile_any_backend_with_cudagraph(test_case, fn, args, backend):
     if backend == "eager_no_compile":
         compiled_fn = fn
     else:
@@ -107,14 +112,6 @@ def _check_compile_aot_eager_with_cudagraph(test_case, fn, args, backend):
     )
     for output in outputs:
         test_case.assertEqual(eager_res, output)
-
-
-# def _check_eager_with_cudagraph(test_case, fn, args):
-#     with ControlFlowOpWarmupDispatchMode():
-#         warmup_output = fn(*args)
-
-#     with torch.cuda.graph(graph), CUDAGraphCaptureControlFlowOpDispatchMode():
-#         captured_output = compiled_fn(*args)
 
 
 # TODO: pull these helpers from AOTAutograd later
@@ -5509,23 +5506,22 @@ def forward(self, L_pred_ : torch.Tensor, L_x_ : torch.Tensor):
         def f(x, y):
             return cond(y, true_fn, false_fn, [x])
 
-        x = torch.randn(4)
+        x = torch.randn(4).cuda()
+        true_pred = torch.tensor(True).cuda()
+        false_pred = torch.tensor(False).cuda()
 
-        _check_compile_cudagraph(self, f, [x.cuda(), torch.tensor(True).cuda()])
-        _check_compile_cudagraph(self, f, [x.cuda(), torch.tensor(False).cuda()])
-        for backend in ["eager_no_compile", "eager", "aot_eager"]:
-            _check_compile_aot_eager_with_cudagraph(
-                self,
-                f,
-                [x.cuda(), torch.tensor(True).cuda()],
-                backend,
-            )
-            _check_compile_aot_eager_with_cudagraph(
-                self,
-                f,
-                [x.cuda(), torch.tensor(False).cuda()],
-                backend,
-            )
+        _check_compile_cudagraph_backend(self, f, [x, true_pred])
+        _check_compile_cudagraph_backend(self, f, [x, false_pred])
+        _check_compile_many_backends_with_cudagraph(
+            self,
+            f,
+            [x, true_pred],
+        )
+        _check_compile_many_backends_with_cudagraph(
+            self,
+            f,
+            [x, false_pred],
+        )
 
     def test_while_loop_nested_traced(self):
         fn, inp = WHILE_LOOP_TESTS["nested"]
@@ -5943,19 +5939,20 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1, arg7_1
             f(x, torch.tensor(True), torch.tensor(True)),
         )
 
+        x_cuda = x.cuda()
+        true_pred = torch.tensor(True).cuda()
+
         if TEST_CUDA_GRAPH_CONDITIONAL_NODES:
-            _check_compile_cudagraph(
+            _check_compile_cudagraph_backend(
                 self,
                 f,
-                [x.cuda(), torch.tensor(True).cuda(), torch.tensor(True).cuda()],
+                [x_cuda, true_pred, true_pred],
             )
-            for backend in ["eager_no_compile", "eager", "aot_eager"]:
-                _check_compile_aot_eager_with_cudagraph(
-                    self,
-                    f,
-                    [x.cuda(), torch.tensor(True).cuda(), torch.tensor(True).cuda()],
-                    backend,
-                )
+            _check_compile_many_backends_with_cudagraph(
+                self,
+                f,
+                [x_cuda, true_pred, true_pred],
+            )
 
     def test_cond_functionalized(self):
         def true_fn(x):
@@ -5993,9 +5990,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1, arg7_1
 
         if TEST_CUDA_GRAPH_CONDITIONAL_NODES:
             pred = torch.tensor(example_inputs[0].shape[0] == 1, device="cuda")
-            _check_compile_cudagraph(self, f_, [torch.ones(4, 5).cuda(), pred])
-            _check_compile_aot_eager_with_cudagraph(
-                self, f_, [torch.ones(4, 5).cuda(), pred], "aot_eager"
+            _check_compile_cudagraph_backend(self, f_, [torch.ones(4, 5).cuda(), pred])
+            _check_compile_many_backends_with_cudagraph(
+                self, f_, [torch.ones(4, 5).cuda(), pred]
             )
 
     def test_cond_accepts_torch_function_as_inputs(self):
@@ -6532,16 +6529,15 @@ def forward(self, arg0_1):
         )
 
         if TEST_CUDA_GRAPH_CONDITIONAL_NODES:
-            _check_compile_cudagraph(
+            _check_compile_cudagraph_backend(
                 self,
                 f,
                 [x.cuda(), torch.tensor(False).cuda(), torch.tensor(False).cuda()],
             )
-            _check_compile_aot_eager_with_cudagraph(
+            _check_compile_many_backends_with_cudagraph(
                 self,
                 f,
                 [x.cuda(), torch.tensor(False).cuda(), torch.tensor(False).cuda()],
-                "aot_eager",
             )
 
     def test_raise_error_on_mismatch_type_size(self):
@@ -9853,8 +9849,8 @@ class TestControlFlowNN(TestCase):
         model = DynamicCondModel().cuda()
 
         x = torch.randn(16, device="cuda")
-        _check_compile_cudagraph(self, model, [x])
-        _check_compile_aot_eager_with_cudagraph(self, model, [x], "aot_eager")
+        _check_compile_cudagraph_backend(self, model, [x])
+        _check_compile_many_backends_with_cudagraph(self, model, [x])
 
 
 @unittest.skipIf(

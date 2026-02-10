@@ -436,19 +436,6 @@ void CUDAGraph::begin_capture_to_if_node(
   ));
 #endif
   TORCH_CHECK(status == cudaStreamCaptureStatusActive);
-  if (num_dependencies > 0) {
-    const auto* dependency_edges_bytes =
-        reinterpret_cast<const unsigned char*>(dependency_edges);
-    bool dependency_edges_zero_initialized = true;
-    for (size_t i = 0; i < num_dependencies * sizeof(cudaGraphEdgeData); ++i) {
-      if (dependency_edges_bytes[i] != 0) {
-        dependency_edges_zero_initialized = false;
-        break;
-      }
-    }
-    TORCH_CHECK(
-        dependency_edges_zero_initialized,"Your kernel before inserting a cuda graph node has edge data. We are not sure how edge data should be handled with conditional nodes right now, so please file a bug if you see this.");
-  }
 
   cudaGraphNodeParams params{};
   params.type = cudaGraphNodeTypeConditional;
@@ -462,7 +449,7 @@ void CUDAGraph::begin_capture_to_if_node(
       &cond_node,
       currently_capturing_graph,
       dependencies,
-      nullptr,
+      dependency_edges,
       num_dependencies,
       &params));
 #else
@@ -470,13 +457,12 @@ void CUDAGraph::begin_capture_to_if_node(
       &cond_node,
       currently_capturing_graph,
       dependencies,
-      nullptr,
+      dependency_edges,
       num_dependencies,
       &params));
 #endif
   cudaGraph_t if_node_child_graph = params.conditional.phGraph_out[0];
 
-  // update this
 #if CUDA_VERSION >= 13000
   AT_CUDA_CHECK(cudaStreamUpdateCaptureDependencies(
 getCurrentCUDAStream(), &cond_node, nullptr, 1, cudaStreamSetCaptureDependencies));
@@ -487,13 +473,11 @@ getCurrentCUDAStream(), &cond_node, nullptr, 1, cudaStreamSetCaptureDependencies
 
   UniquePtrExternalCudaStream child_stream = create_external_stream();
   conditional_graph_capture_streams_ids_.push(0);
-  // c10::cuda::CUDACachingAllocator::endAllocateToPool(capture_dev_, mempool_id_);
   c10::cuda::CUDACachingAllocator::beginAllocateToPool(
       capture_dev_, mempool_id_, create_child_allocate_filter());
   AT_CUDA_CHECK(cudaStreamBeginCaptureToGraph(
       *child_stream, if_node_child_graph, nullptr, nullptr, 0, capture_mode_));
 
-  // maybe update this as well?
   AT_CUDA_CHECK(cudaStreamGetCaptureInfo(
       *child_stream, &status, &conditional_graph_capture_streams_ids_.top()));
   TORCH_INTERNAL_ASSERT(
