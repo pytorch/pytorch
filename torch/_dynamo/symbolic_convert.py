@@ -137,7 +137,6 @@ from .utils import (
     get_instruction_source_311,
     get_metrics_context,
     graph_break_dup_warning_checker,
-    is_safe_constant,
     istype,
     LazyString,
     proxy_args_kwargs,
@@ -4678,6 +4677,7 @@ class InstructionTranslatorBase(
         # Record which stack_pops items are NULL before popn loses the info.
         # NULLs on the CPython stack can't be passed as function arguments.
         from .variables.misc import NullVariable
+
         stack_pops_null_mask = [
             isinstance(self.stack[len(self.stack) - stack_pops + i], NullVariable)
             for i in range(stack_pops)
@@ -4688,7 +4688,10 @@ class InstructionTranslatorBase(
 
         if self.parent is not None:
             self._handle_comprehension_graph_break_nested(
-                analysis, start_ip, stack_pops, all_stack_locals_metadata,
+                analysis,
+                start_ip,
+                stack_pops,
+                all_stack_locals_metadata,
                 stack_pops_null_mask,
             )
             return
@@ -4844,7 +4847,7 @@ class InstructionTranslatorBase(
         start_ip: int,
         stack_pops: int,
         stack_pops_null_mask: list[bool],
-        meta: "StackLocalsMetadata",
+        meta: StackLocalsMetadata,
     ) -> tuple[types.CodeType, str]:
         """Build a synthetic function wrapping comprehension bytecode.
 
@@ -4869,8 +4872,7 @@ class InstructionTranslatorBase(
         # (appended to end of frame_values[0] by the caller).
         # codegen_call_resume unpacks frame_values[0] as positional args.
         argnames = tuple(
-            k for k in meta.locals_names
-            if k not in self.cell_and_freevars()
+            k for k in meta.locals_names if k not in self.cell_and_freevars()
         )
         args = (
             ["__nested_resume_fns", "__nested_frame_values"]
@@ -4878,15 +4880,15 @@ class InstructionTranslatorBase(
             + [f"___stack{i}" for i in range(nonnull_count)]
         )
 
-        freevars = tuple(sorted(
-            list(self.f_code.co_cellvars or [])
-            + list(self.f_code.co_freevars or [])
-        ))
+        freevars = tuple(
+            sorted(
+                list(self.f_code.co_cellvars or [])
+                + list(self.f_code.co_freevars or [])
+            )
+        )
 
         lineno = self.lineno if self.lineno is not None else self.f_code.co_firstlineno
-        fn_name = unique_id(
-            f"__comprehension_{self.f_code.co_name}_at_{lineno}"
-        )
+        fn_name = unique_id(f"__comprehension_{self.f_code.co_name}_at_{lineno}")
 
         comprehension_body_vars = (
             analysis.iterator_vars
@@ -4908,8 +4910,7 @@ class InstructionTranslatorBase(
             code_options["co_posonlyargcount"] = 0
             code_options["co_kwonlyargcount"] = 0
             code_options["co_varnames"] = tuple(
-                args
-                + [v for v in comprehension_body_vars if v not in args]
+                args + [v for v in comprehension_body_vars if v not in args]
             )
             code_options["co_flags"] = code_options["co_flags"] & ~(
                 CO_VARARGS | CO_VARKEYWORDS
@@ -4917,9 +4918,7 @@ class InstructionTranslatorBase(
 
             prefix: list[Instruction] = []
             if freevars:
-                prefix.append(
-                    create_instruction("COPY_FREE_VARS", arg=len(freevars))
-                )
+                prefix.append(create_instruction("COPY_FREE_VARS", arg=len(freevars)))
             prefix.append(create_instruction("RESUME", arg=0))
 
             # Push stack_pops items onto operand stack so the comprehension
@@ -4931,9 +4930,7 @@ class InstructionTranslatorBase(
                     prefix.append(create_instruction("PUSH_NULL"))
                 else:
                     prefix.append(
-                        create_instruction(
-                            "LOAD_FAST", argval=f"___stack{nonnull_i}"
-                        )
+                        create_instruction("LOAD_FAST", argval=f"___stack{nonnull_i}")
                     )
                     nonnull_i += 1
 
@@ -4949,14 +4946,10 @@ class InstructionTranslatorBase(
                         create_instruction("LOAD_FAST", argval=analysis.result_var)
                     )
                 else:
-                    epilogue.append(
-                        create_instruction("LOAD_CONST", argval=None)
-                    )
+                    epilogue.append(create_instruction("LOAD_CONST", argval=None))
             if analysis.walrus_vars:
                 for var_name in analysis.walrus_vars:
-                    epilogue.append(
-                        create_instruction("LOAD_FAST", argval=var_name)
-                    )
+                    epilogue.append(create_instruction("LOAD_FAST", argval=var_name))
                 epilogue.append(
                     create_instruction(
                         "BUILD_TUPLE",
@@ -4986,7 +4979,7 @@ class InstructionTranslatorBase(
         analysis: ComprehensionAnalysis,
         start_ip: int,
         stack_pops: int,
-        all_stack_locals_metadata: list["StackLocalsMetadata"],
+        all_stack_locals_metadata: list[StackLocalsMetadata],
         stack_pops_null_mask: list[bool],
     ) -> None:
         """Handle comprehension graph break in a nested (inlined) context.
@@ -4996,7 +4989,6 @@ class InstructionTranslatorBase(
         calls it via codegen_call_resume, then chains into the resume
         function for the post-comprehension code.
         """
-        from .eval_frame import skip_code
         from .variables.misc import UnknownVariable
 
         meta = all_stack_locals_metadata[0]
@@ -5016,7 +5008,9 @@ class InstructionTranslatorBase(
         # Also add a dummy var for safely popping NULLs (POP_TOP on NULL segfaults
         # because Py_DECREF(NULL); STORE_FAST uses Py_XDECREF which is NULL-safe).
         null_sink_var = "___null_sink"
-        root_vars_needed = [null_sink_var] + [f"___comp_stack_{i}" for i in range(nonnull_count)]
+        root_vars_needed = [null_sink_var] + [
+            f"___comp_stack_{i}" for i in range(nonnull_count)
+        ]
         if analysis.result_var:
             root_vars_needed.append(analysis.result_var)
         root_vars_needed.extend(analysis.walrus_vars)
@@ -5037,9 +5031,7 @@ class InstructionTranslatorBase(
             else:
                 temp_name = f"___comp_stack_{len(temp_names)}"
                 temp_names.append(temp_name)
-                cg.extend_output(
-                    [create_instruction("STORE_FAST", argval=temp_name)]
-                )
+                cg.extend_output([create_instruction("STORE_FAST", argval=temp_name)])
         temp_names.reverse()
 
         # Stack is now: cells, [frame_values], *(non-popped stack items)
@@ -5066,7 +5058,11 @@ class InstructionTranslatorBase(
 
         # --- Step 3: Build comprehension function ---
         new_code, fn_name = self._build_comprehension_fn(
-            analysis, start_ip, stack_pops, stack_pops_null_mask, meta,
+            analysis,
+            start_ip,
+            stack_pops,
+            stack_pops_null_mask,
+            meta,
         )
 
         # --- Step 4: Extract [cells[0]] and [frame_values[0]] ---
