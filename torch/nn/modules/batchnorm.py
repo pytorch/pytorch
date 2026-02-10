@@ -236,14 +236,14 @@ class _LazyNormBase(LazyModuleMixin, _NormBase):
         self.affine = affine
         self.track_running_stats = track_running_stats
         if self.affine:
-            # pyrefly: ignore [unexpected-keyword]
+            # pyrefly: ignore [bad-argument-type]
             self.weight = UninitializedParameter(**factory_kwargs)
-            # pyrefly: ignore [unexpected-keyword]
+            # pyrefly: ignore [bad-argument-type]
             self.bias = UninitializedParameter(**factory_kwargs)
         if self.track_running_stats:
-            # pyrefly: ignore [unexpected-keyword]
+            # pyrefly: ignore [bad-argument-type]
             self.running_mean = UninitializedBuffer(**factory_kwargs)
-            # pyrefly: ignore [unexpected-keyword]
+            # pyrefly: ignore [bad-argument-type]
             self.running_var = UninitializedBuffer(**factory_kwargs)
             self.num_batches_tracked = torch.tensor(
                 0,
