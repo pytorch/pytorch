@@ -3248,6 +3248,10 @@
 
 # note(crcrpar): forward-mode AD is tricky for a simple string replace to handle:
 #   formula.replace("p", "ord") produces `norm_jvord(self_ord, self_t, ord, result)`
-- name: _foreach_norm.Scalar(Tensor[] self, Scalar ord=2, ScalarType? dtype=None, int[1]? dim=None, bool keepdim=False) -> Tensor[]
+- name: _foreach_norm.Scalar(Tensor[] self, Scalar ord=2, ScalarType? dtype=None) -> Tensor[]
   self: norm_backward(grads[i], self[i], ord, result[i])
   result: norm_jvp(self_p, self_t, ord, result[i])
+
+- name: _foreach_norm.dim(Tensor[] self, int[1] dim, bool keepdim=False, Scalar ord=2, ScalarType? dtype=None) -> Tensor[]
+  self: norm_backward(grads[i], self[i], ord, result[i], dim, keepdim)
+  result: norm_jvp(self_p, self_t, ord, result[i], dim, keepdim)

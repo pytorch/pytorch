@@ -573,13 +573,48 @@ struct ForeachNormDispatchName<false> {
   static constexpr const char* value = "foreach_tensor_powsum_cuda";
 };
 
-std::vector<Tensor> _foreach_norm_cuda_with_dim(
+std::vector<Tensor> foreach_tensor_norm_cuda(
     TensorList tensors,
-    double p,
-    std::optional<ScalarType> dtype,
-    int64_t reduce_dim,
-    int64_t tensors_dim,
-    bool keepdim) {
+    at::IntArrayRef dim,
+    bool keepdim,
+    const Scalar& ord,
+    std::optional<ScalarType> dtype) {
+  const auto p = [&]() -> double {
+    if (ord.isIntegral(false)) {
+      return ord.to<int64_t>();
+    } else if (ord.isFloatingPoint()) {
+      return ord.to<double>();
+    } else {
+      TORCH_CHECK(
+          false, "foreach_tensor_norm_cuda expects ord to be integer or float");
+    }
+  }();
+  check_foreach_api_restrictions(tensors);
+  const bool has_int_or_complex =
+      std::any_of(tensors.begin(), tensors.end(), [](const auto& t) {
+        const auto scalar_type = t.scalar_type();
+        return at::isIntegralType(scalar_type, /*includeBool*/ true) ||
+            at::isComplexType(scalar_type);
+      });
+  auto tensors_dim = tensors[0].dim();
+  const bool has_same_dim = std::all_of(
+      tensors.begin() + 1, tensors.end(), [tensors_dim](const auto& t) {
+        return t.dim() == tensors_dim;
+      });
+
+  const bool all_contiguous =
+      std::all_of(tensors.begin(), tensors.end(), [](const auto& t) {
+        return t.is_contiguous();
+      });
+  if (!can_use_fast_route(tensors) || !has_same_dim || !all_contiguous ||
+      has_int_or_complex ||
+      !(p == static_cast<double>(1) || p == static_cast<double>(2) ||
+        p == std::numeric_limits<double>::infinity())) {
+    return foreach_tensor_norm_slow(tensors, dim, keepdim, ord, dtype);
+  }
+  check_foreach_norm_dtype(
+      dtype, tensors[0].scalar_type(), "_foreach_tensor_norm_cuda");
+
   const size_t ntensors = tensors.size();
 
   const auto options = tensors[0].options();
@@ -589,6 +624,7 @@ std::vector<Tensor> _foreach_norm_cuda_with_dim(
   std::vector<at::Tensor> output_tensors;
   output_tensors.reserve(ntensors);
   const auto res_option = options.dtype(output_dtype);
+  int64_t reduce_dim = c10::maybe_wrap_dim(dim[0], tensors_dim);
   for (const auto t : c10::irange(ntensors)) {
     auto output_tensor_size = tensors[t].sizes().vec();
     if (keepdim) {
@@ -824,9 +860,7 @@ std::vector<Tensor> foreach_tensor_norm_cuda_internal(
 std::vector<Tensor> foreach_tensor_norm_cuda(
     TensorList tensors,
     const Scalar& ord,
-    std::optional<ScalarType> dtype,
-    at::OptionalIntArrayRef dim,
-    bool keepdim) {
+    std::optional<ScalarType> dtype) {
   const auto p = [&]() -> double {
     if (ord.isIntegral(false)) {
       return ord.to<int64_t>();
@@ -864,33 +898,10 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
   if (!can_use_fast_route(tensors) || has_int_or_complex ||
       !(p == static_cast<double>(1) || p == static_cast<double>(2) ||
         p == std::numeric_limits<double>::infinity())) {
-    return foreach_tensor_norm_slow(tensors, ord, dtype, dim, keepdim);
+    return foreach_tensor_norm_slow(tensors, ord, dtype);
   }
   check_foreach_norm_dtype(
       dtype, tensors[0].scalar_type(), "_foreach_tensor_norm_cuda");
-
-  if (dim.has_value()) {
-    auto tensors_dim = tensors[0].dim();
-    const bool has_same_dim = std::all_of(
-        tensors.begin() + 1, tensors.end(), [tensors_dim](const auto& t) {
-          return t.dim() == tensors_dim;
-        });
-
-    const bool all_contiguous =
-        std::all_of(tensors.begin(), tensors.end(), [](const auto& t) {
-          return t.is_contiguous();
-        });
-    
-    int64_t reduce_dim = c10::maybe_wrap_dim(dim.value()[0], tensors_dim);
-    // currently the fast path only supports row or column norms
-    if (!has_same_dim || !all_contiguous || reduce_dim < tensors_dim - 2 ||
-        dim.value().size() > 1) {
-      return foreach_tensor_norm_slow(tensors, ord, dtype, dim, keepdim);
-    }
-
-     return _foreach_norm_cuda_with_dim(
-        tensors, p, dtype, reduce_dim, tensors_dim, keepdim);
-  }
 
   return foreach_tensor_norm_cuda_internal<
       /*apply_root=*/true,
