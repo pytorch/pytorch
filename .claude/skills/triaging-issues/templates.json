@@ -1,0 +1,25 @@
+{
+  "description": "Standard response templates for issue triage actions",
+  "templates": {
+    "redirect_to_forum": {
+      "action": "Close issue and add comment",
+      "use_when": "Issue is a usage question, not a bug report or feature request",
+      "comment": "Thank you for your interest in PyTorch! This issue appears to be a usage question rather than a bug report or feature request.\n\nFor usage questions, please use the [PyTorch Discussion Forum](https://discuss.pytorch.org/) where you'll get help from both the community and PyTorch maintainers.\n\nClosing this issue, but feel free to reopen if you believe this is actually a bug or feature request."
+    },
+    "request_more_info": {
+      "action": "Add comment and stop",
+      "use_when": "Classification is unclear and more details are needed to decide between question vs bug/feature",
+      "comment": "Thanks for the report. To triage this, could you share:\n\n- A minimal repro (small script or steps)\n- Full error logs / stack trace\n- Output of `collect_env.py`\n\nOnce we have that, we can classify and route this properly."
+    },
+    "needs_reproduction": {
+      "action": "Edit issue to remove external links, add label 'needs reproduction', and comment",
+      "use_when": "Issue requires downloading external files (.zip, .pt, .pth, .pkl, .safetensors, .onnx, .bin) or links to external storage (Google Drive, Dropbox, OneDrive, Mega, WeTransfer, Hugging Face Hub model files) to reproduce",
+      "comment": "Thanks for the report! To help us investigate:\n\n1. Can you reproduce this without the external files? (e.g., using random weights or synthetic data)\n2. Are there any extreme or special values in the weights/inputs? (e.g., very large values, NaN, inf)\n\nA self-contained script that doesn't require downloading files helps maintainers reproduce and debug the issue faster."
+    },
+    "numerical_accuracy": {
+      "action": "Add comment when labeling with 'module: edge cases' or closing numerical accuracy issues",
+      "use_when": "Issue involves extremal values (near torch.finfo.max/min), numerical precision differences between backends, or expected floating point behavior",
+      "comment": "This appears to be related to numerical accuracy limitations in floating point computation. PyTorch documents expected behavior for extremal values and precision differences in the [Numerical Accuracy](https://docs.pytorch.org/docs/stable/notes/numerical_accuracy.html) documentation.\n\nKey points:\n- Floating point provides limited accuracy (~7 decimal digits for fp32, ~16 for fp64)\n- Results may differ between CPU and GPU backends\n- Extremal values (near dtype max/min) can cause overflow in intermediate computations\n\nIf you believe this is a bug beyond expected numerical behavior, please provide a reproducer with values well within the normal range."
+    }
+  }
+}

@@ -277,6 +277,19 @@ Membership Changes
    a new ``WorkerGroup`` is formed, and all workers are started with a new ``RANK`` and
    ``WORLD_SIZE``.
 
+NUMA Binding
+------------
+
+On multi-GPU systems with NUMA (Non-Uniform Memory Access) architecture, you can improve
+performance by binding worker processes to CPUs near their assigned GPUs. Use the
+``--numa-binding`` flag:
+
+::
+
+    torchrun --numa-binding=node --nproc-per-node=8 train.py
+
+See :ref:`numa-api` for more details.
+
 Important Notices
 -----------------
 
@@ -657,23 +670,8 @@ def get_args_parser() -> ArgumentParser:
         type=str,
         choices=[mode.value for mode in _AffinityMode],
         default=None,
-        help="""
-        If provided, we will affinitize the worker processes based on NUMA nodes
-        for better performance. (E.g., preferring to allocate memory locally and run on CPUs on the
-        same NUMA node.)
-
-        NOTE: This is currently only supported for GPUs, and we assume
-        that the LOCAL_RANK process corresponds to the GPU with index LOCAL_RANK. If this is not
-        accurate for your workload, this feature may be a pessimization.
-
-        Available options are:
-          - node: Processes are bound to cpu cores within a NUMA node. This is a good starting point,
-          but other options may perform even slightly better in some cases.
-          - socket: Processes are bound to cpu cores within a socket.
-          - exclusive: Processes are bound to exclusive sets of cpu cores within a NUMA node.
-          - core-complex: Processes are bound to cpu cores in a core-complex.
-          NOTE: The core-complex option might not achieve optimal performance on architectures
-          featuring a single L3 cache per socket.""",
+        help="Bind worker processes to CPUs near their assigned GPUs for better performance. "
+        "See torch/numa/binding.py for available modes and details.",
     )
 
     parser.add_argument(
@@ -810,6 +808,7 @@ def _get_logs_specs_class(logs_specs_name: str | None) -> type[LogsSpecs]:
         eps = metadata.entry_points()
         group = eps.select(group="torchrun.logs_specs")
         if group.select(name=logs_specs_name):
+            # pyrefly: ignore [bad-index]
             logs_specs_cls = group[logs_specs_name].load()
 
         if logs_specs_cls is None:
@@ -882,7 +881,7 @@ def config_from_args(args) -> tuple[LaunchConfig, Callable | str, list[str]]:
             ) from e
 
     logs_specs_cls: type[LogsSpecs] = _get_logs_specs_class(args.logs_specs)
-    # pyrefly: ignore [bad-instantiation]
+
     logs_specs = logs_specs_cls(
         log_dir=args.log_dir,
         redirects=Std.from_str(args.redirects),

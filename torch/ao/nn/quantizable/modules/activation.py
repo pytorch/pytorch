@@ -95,6 +95,7 @@ class MultiheadAttention(nn.MultiheadAttention):
             self.vdim, self.embed_dim, bias=bias, **factory_kwargs
         )
         # for the type: ignore, see https://github.com/pytorch/pytorch/issues/58969
+        # pyrefly: ignore [bad-assignment]
         self.out_proj = nn.Linear(
             self.embed_dim, self.embed_dim, bias=bias, **factory_kwargs
         )  # type: ignore[assignment]
@@ -115,8 +116,12 @@ class MultiheadAttention(nn.MultiheadAttention):
 
     @classmethod
     def from_float(cls, other):
-        assert type(other) is cls._FLOAT_MODULE
-        assert hasattr(other, "qconfig"), "The float module must have 'qconfig'"
+        if type(other) is not cls._FLOAT_MODULE:
+            raise AssertionError(
+                f"Expected type {cls._FLOAT_MODULE}, got {type(other)}"
+            )
+        if not hasattr(other, "qconfig"):
+            raise AssertionError("The float module must have 'qconfig'")
         # Setting the dropout to 0.0!
         observed = cls(
             other.embed_dim,
@@ -209,7 +214,10 @@ class MultiheadAttention(nn.MultiheadAttention):
             self.vdim,
             self.batch_first,
         )
-        assert fp._qkv_same_embed_dim == self._qkv_same_embed_dim
+        if fp._qkv_same_embed_dim != self._qkv_same_embed_dim:
+            raise AssertionError(
+                f"_qkv_same_embed_dim mismatch: {fp._qkv_same_embed_dim} != {self._qkv_same_embed_dim}"
+            )
         if self.bias_k is not None:
             fp.bias_k = nn.Parameter(self.bias_k.dequantize())
         if self.bias_v is not None:
@@ -237,7 +245,8 @@ class MultiheadAttention(nn.MultiheadAttention):
             fp.in_proj_weight[_start:_end, :] = wQ
             if fp.in_proj_bias is not None:
                 # pyrefly: ignore [bad-argument-type]
-                assert all(bQ == 0)
+                if not all(bQ == 0):
+                    raise AssertionError("Expected all bQ elements to be 0")
                 fp.in_proj_bias[_start:_end] = bQ
 
             _start = _end
@@ -245,14 +254,16 @@ class MultiheadAttention(nn.MultiheadAttention):
             fp.in_proj_weight[_start:_end, :] = wK
             if fp.in_proj_bias is not None:
                 # pyrefly: ignore [bad-argument-type]
-                assert all(bK == 0)
+                if not all(bK == 0):
+                    raise AssertionError("Expected all bK elements to be 0")
                 fp.in_proj_bias[_start:_end] = bK
 
             _start = _end
             fp.in_proj_weight[_start:, :] = wV
             if fp.in_proj_bias is not None:
                 # pyrefly: ignore [bad-argument-type]
-                assert all(bV == 0)
+                if not all(bV == 0):
+                    raise AssertionError("Expected all bV elements to be 0")
                 fp.in_proj_bias[_start:] = bV
         else:
             fp.q_proj_weight = nn.Parameter(wQ)
@@ -380,14 +391,19 @@ class MultiheadAttention(nn.MultiheadAttention):
             query, key, value = (x.transpose(0, 1) for x in (query, key, value))
 
         tgt_len, bsz, embed_dim_to_check = query.size()
-        assert self.embed_dim == embed_dim_to_check
+        if self.embed_dim != embed_dim_to_check:
+            raise AssertionError(
+                f"embed_dim mismatch: {self.embed_dim} != {embed_dim_to_check}"
+            )
         # allow MHA to have different sizes for the feature dimension
-        assert key.size(0) == value.size(0) and key.size(1) == value.size(1)
+        if key.size(0) != value.size(0) or key.size(1) != value.size(1):
+            raise AssertionError(
+                f"key and value size mismatch: key.size()={key.size()}, value.size()={value.size()}"
+            )
 
         head_dim = self.embed_dim // self.num_heads
-        assert head_dim * self.num_heads == self.embed_dim, (
-            "embed_dim must be divisible by num_heads"
-        )
+        if head_dim * self.num_heads != self.embed_dim:
+            raise AssertionError("embed_dim must be divisible by num_heads")
         scaling = float(head_dim) ** -0.5
 
         q = self.linear_Q(query)
@@ -404,9 +420,10 @@ class MultiheadAttention(nn.MultiheadAttention):
                     stacklevel=3,
                 )
                 attn_mask = attn_mask.to(torch.bool)
-            assert attn_mask.is_floating_point() or attn_mask.dtype == torch.bool, (
-                f"Only float and bool types are supported for attn_mask, not {attn_mask.dtype}"
-            )
+            if not attn_mask.is_floating_point() and attn_mask.dtype != torch.bool:
+                raise AssertionError(
+                    f"Only float and bool types are supported for attn_mask, not {attn_mask.dtype}"
+                )
 
             if attn_mask.dim() == 2:
                 attn_mask = attn_mask.unsqueeze(0)
@@ -435,12 +452,14 @@ class MultiheadAttention(nn.MultiheadAttention):
             key_padding_mask = key_padding_mask.to(torch.bool)
         if self.bias_k is not None and self.bias_v is not None:
             if static_k is None and static_v is None:
-                # Explicitly assert that bias_k and bias_v are not None
+                # Explicitly check that bias_k and bias_v are not None
                 # in a way that TorchScript can understand.
                 bias_k = self.bias_k
-                assert bias_k is not None
+                if bias_k is None:
+                    raise AssertionError("bias_k must not be None")
                 bias_v = self.bias_v
-                assert bias_v is not None
+                if bias_v is None:
+                    raise AssertionError("bias_v must not be None")
 
                 k = torch.cat([k, bias_k.repeat(1, bsz, 1)])
                 v = torch.cat([v, bias_v.repeat(1, bsz, 1)])
@@ -449,11 +468,19 @@ class MultiheadAttention(nn.MultiheadAttention):
                 if key_padding_mask is not None:
                     key_padding_mask = F.pad(key_padding_mask, (0, 1))
             else:
-                assert static_k is None, "bias cannot be added to static key."
-                assert static_v is None, "bias cannot be added to static value."
+                if static_k is not None:
+                    raise AssertionError("bias cannot be added to static key.")
+                if static_v is not None:
+                    raise AssertionError("bias cannot be added to static value.")
         else:
-            assert self.bias_k is None
-            assert self.bias_v is None
+            if self.bias_k is not None:
+                raise AssertionError(
+                    "self.bias_k must be None when self.bias_v is None"
+                )
+            if self.bias_v is not None:
+                raise AssertionError(
+                    "self.bias_v must be None when self.bias_k is None"
+                )
 
         q = q.contiguous().view(tgt_len, bsz * self.num_heads, head_dim).transpose(0, 1)
         if k is not None:
@@ -462,53 +489,64 @@ class MultiheadAttention(nn.MultiheadAttention):
             v = v.contiguous().view(-1, bsz * self.num_heads, head_dim).transpose(0, 1)
 
         if static_k is not None:
-            assert static_k.size(0) == bsz * self.num_heads
-            assert static_k.size(2) == head_dim
+            if static_k.size(0) != bsz * self.num_heads:
+                raise AssertionError(
+                    f"static_k.size(0) must be {bsz * self.num_heads}, got {static_k.size(0)}"
+                )
+            if static_k.size(2) != head_dim:
+                raise AssertionError(
+                    f"static_k.size(2) must be {head_dim}, got {static_k.size(2)}"
+                )
             k = static_k
 
         if static_v is not None:
-            assert static_v.size(0) == bsz * self.num_heads
-            assert static_v.size(2) == head_dim
+            if static_v.size(0) != bsz * self.num_heads:
+                raise AssertionError(
+                    f"static_v.size(0) must be {bsz * self.num_heads}, got {static_v.size(0)}"
+                )
+            if static_v.size(2) != head_dim:
+                raise AssertionError(
+                    f"static_v.size(2) must be {head_dim}, got {static_v.size(2)}"
+                )
             v = static_v
 
-        # pyrefly: ignore [missing-attribute]
         src_len = k.size(1)
 
         if key_padding_mask is not None:
-            assert key_padding_mask.size(0) == bsz
-            assert key_padding_mask.size(1) == src_len
+            if key_padding_mask.size(0) != bsz:
+                raise AssertionError(
+                    f"key_padding_mask.size(0) must be {bsz}, got {key_padding_mask.size(0)}"
+                )
+            if key_padding_mask.size(1) != src_len:
+                raise AssertionError(
+                    f"key_padding_mask.size(1) must be {src_len}, got {key_padding_mask.size(1)}"
+                )
 
         if self.add_zero_attn:
             src_len += 1
-            # pyrefly: ignore [missing-attribute]
+
             k_zeros = torch.zeros((k.size(0), 1) + k.size()[2:])
-            # pyrefly: ignore [missing-attribute]
+
             if k.is_quantized:
                 k_zeros = torch.quantize_per_tensor(
                     k_zeros,
-                    # pyrefly: ignore [missing-attribute]
                     k.q_scale(),
-                    # pyrefly: ignore [missing-attribute]
                     k.q_zero_point(),
-                    # pyrefly: ignore [missing-attribute]
                     k.dtype,
                 )
-            # pyrefly: ignore [no-matching-overload]
+
             k = torch.cat([k, k_zeros], dim=1)
-            # pyrefly: ignore [missing-attribute]
+
             v_zeros = torch.zeros((v.size(0), 1) + k.size()[2:])
-            # pyrefly: ignore [missing-attribute]
+
             if v.is_quantized:
                 v_zeros = torch.quantize_per_tensor(
                     v_zeros,
-                    # pyrefly: ignore [missing-attribute]
                     v.q_scale(),
-                    # pyrefly: ignore [missing-attribute]
                     v.q_zero_point(),
-                    # pyrefly: ignore [missing-attribute]
                     v.dtype,
                 )
-            # pyrefly: ignore [no-matching-overload]
+
             v = torch.cat([v, v_zeros], dim=1)
 
             if attn_mask is not None:
@@ -521,11 +559,12 @@ class MultiheadAttention(nn.MultiheadAttention):
         k = self.dequant_k(k)
         v = self.dequant_v(v)
         attn_output_weights = torch.bmm(q, k.transpose(1, 2))
-        assert list(attn_output_weights.size()) == [
-            bsz * self.num_heads,
-            tgt_len,
-            src_len,
-        ]
+        expected_size = [bsz * self.num_heads, tgt_len, src_len]
+        if list(attn_output_weights.size()) != expected_size:
+            raise AssertionError(
+                f"attn_output_weights size mismatch: expected {expected_size}, "
+                f"got {list(attn_output_weights.size())}"
+            )
 
         if attn_mask is not None:
             if attn_mask.dtype == torch.bool:
@@ -551,7 +590,12 @@ class MultiheadAttention(nn.MultiheadAttention):
         )
 
         attn_output = torch.bmm(attn_output_weights, v)
-        assert list(attn_output.size()) == [bsz * self.num_heads, tgt_len, head_dim]
+        expected_output_size = [bsz * self.num_heads, tgt_len, head_dim]
+        if list(attn_output.size()) != expected_output_size:
+            raise AssertionError(
+                f"attn_output size mismatch: expected {expected_output_size}, "
+                f"got {list(attn_output.size())}"
+            )
         if self.batch_first:
             attn_output = attn_output.view(bsz, tgt_len, self.embed_dim)
         else:

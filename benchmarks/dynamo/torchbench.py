@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import sys
+import tempfile
 import warnings
 from collections import namedtuple
 from os.path import abspath, exists
@@ -51,7 +52,7 @@ def _reassign_parameters(model):
 def setup_torchbench_cwd():
     original_dir = abspath(os.getcwd())
 
-    os.environ["KALDI_ROOT"] = "/tmp"  # avoids some spam
+    os.environ["KALDI_ROOT"] = tempfile.gettempdir()  # avoids some spam
     for torchbench_dir in (
         "./torchbenchmark",
         "../torchbenchmark",
@@ -356,7 +357,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         # See https://github.com/pytorch/benchmark/issues/1561
         if model_name == "maml_omniglot":
             batch_size = 5
-            assert example_inputs[0].shape[0] == batch_size
+            if example_inputs[0].shape[0] != batch_size:
+                raise AssertionError(
+                    f"Expected batch size {batch_size}, but got {example_inputs[0].shape[0]}"
+                )
         if model_name == "vision_maskrcnn":
             batch_size = 1
         # global current_name, current_device
@@ -418,6 +422,18 @@ class TorchBenchmarkRunner(BenchmarkRunner):
 
     def use_larger_multiplier_for_smaller_tensor(self, name):
         return name in self._require_larger_multiplier_for_smaller_tensor
+
+    def use_iou_for_bool_accuracy(self, name):
+        iou_models = self._tolerance.get("use_iou_for_bool_masks", [])
+        return name in iou_models
+
+    def get_iou_threshold(self, name):
+        iou_thresholds = self._tolerance.get("iou_thresholds", {})
+        return iou_thresholds.get(name, 0.99)
+
+    def get_accuracy_check_runs(self, name):
+        accuracy_check_runs = self._tolerance.get("accuracy_check_runs", {})
+        return accuracy_check_runs.get(name, 1)
 
     def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
         tolerance = 1e-4

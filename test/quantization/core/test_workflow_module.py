@@ -125,7 +125,7 @@ class TestObserver(QuantizationTestCase):
                 scale = torch.max(scale, eps)
                 if dtype in [torch.quint8, torch.uint8]:
                     zero_point = 128
-                if dtype in [torch.uint16]:
+                if dtype == torch.uint16:
                     zero_point = 2 ** 15
             else:
                 scale = torch.max((max_val_pos - min_val_neg) / float(quant_max - quant_min), eps)

@@ -1209,7 +1209,7 @@ if has_triton():
         def on_exit() -> None:
             logger.info("PTX files:")
             for kernel in triton_kernels:
-                with tempfile.NamedTemporaryFile(dir="/tmp", delete=False) as f:
+                with tempfile.NamedTemporaryFile(delete=False) as f:
                     f.write(kernel.asm["ptx"].encode("utf-8"))
                     logger.info(f"+- {kernel.name}: {f.name}")  # noqa: G004
 

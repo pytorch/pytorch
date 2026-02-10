@@ -12,6 +12,7 @@ import torch
 import torch._dynamo.config as config
 import torch._dynamo.test_case
 import torch._functorch.deprecated as deprecated_func
+from torch._dynamo.testing import CompileCounter
 from torch._dynamo.trace_rules import (
     LEGACY_MOD_INLINELIST,
     load_object,
@@ -525,6 +526,32 @@ class TestModuleSurviveSkipFiles(torch._dynamo.test_case.TestCase):
         self.assertTrue(
             frame_count_after > frame_count_before, "MLP did not survive skip files"
         )
+
+
+class SingleOpCompileTests(torch._dynamo.test_case.TestCase):
+    def test_top_level_torch_exp_compiles_through_dynamo(self):
+        x = torch.randn(4)
+
+        # Sanity: lambda version should go through Dynamo
+        lambda_counter = CompileCounter()
+        opt_lambda = torch.compile(lambda t: torch.exp(t), backend=lambda_counter)
+        y_lambda = opt_lambda(x)
+        self.assertEqual(
+            lambda_counter.frame_count,
+            1,
+            "Sanity check failed: lambda version did not compile through Dynamo exactly once.",
+        )
+        # Regression target: torch.compile(torch.exp)
+        top_level_counter = CompileCounter()
+        opt_exp = torch.compile(torch.exp, backend=top_level_counter)
+        y_exp = opt_exp(x)
+        self.assertEqual(
+            top_level_counter.frame_count,
+            1,
+            "Expected torch.compile(torch.exp) to compile through Dynamo exactly once.",
+        )
+        # Numerical results should match
+        self.assertTrue(torch.allclose(y_lambda, y_exp))
 
 
 if __name__ == "__main__":

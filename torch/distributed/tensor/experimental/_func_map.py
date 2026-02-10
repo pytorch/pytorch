@@ -263,6 +263,7 @@ def _local_map_wrapped(
                 )
 
                 flat_dist_out.append(
+                    # pyrefly: ignore [bad-argument-type]
                     DTensor.from_local(out, device_mesh, spec, run_check=False)
                 )
             else:

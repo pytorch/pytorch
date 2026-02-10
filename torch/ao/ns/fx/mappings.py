@@ -376,16 +376,19 @@ def get_base_name_to_sets_of_related_ops() -> dict[str, set[NSNodeTargetType]]:
         if config.fused_module is not None:
             # case 1: pattern fuses a pattern of ops into an op
             # example: nn.Conv1d, nn.ReLU fused into nni.ConvReLU1d
+            # pyrefly: ignore [bad-argument-type]
             new_connections.append((first_element, config.fused_module))
 
         if config.qat_module is not None:
             # case 2: pattern swaps a module into a QAT module
             # example: nni.ConvReLU1d swapped into nniqat.ConvReLU1d
+            # pyrefly: ignore [bad-argument-type]
             new_connections.append((first_element, config.qat_module))
 
         if config.reference_quantized_module is not None:
             # case 3: reference version of floating point module, such as
             # nn.Conv2d and nnqr.Conv2d
+            # pyrefly: ignore [bad-argument-type]
             new_connections.append((first_element, config.reference_quantized_module))
 
     #

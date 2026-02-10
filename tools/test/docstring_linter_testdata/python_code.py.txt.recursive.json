@@ -9,7 +9,7 @@
     "index": 0,
     "is_local": false,
     "is_method": false,
-    "line_count": 4,
+    "line_count": 3,
     "parent": null,
     "start_line": 1
   },
@@ -23,7 +23,7 @@
     "index": 1,
     "is_local": false,
     "is_method": false,
-    "line_count": 3,
+    "line_count": 2,
     "parent": null,
     "start_line": 6
   },
@@ -40,7 +40,7 @@
         "index": 3,
         "is_local": false,
         "is_method": true,
-        "line_count": 3,
+        "line_count": 2,
         "parent": 2,
         "start_line": 13
       }
@@ -52,7 +52,7 @@
     "index": 2,
     "is_local": false,
     "is_method": false,
-    "line_count": 6,
+    "line_count": 5,
     "parent": null,
     "start_line": 10
   },
@@ -69,7 +69,7 @@
         "index": 5,
         "is_local": false,
         "is_method": true,
-        "line_count": 3,
+        "line_count": 2,
         "parent": 4,
         "start_line": 20
       }
@@ -81,7 +81,7 @@
     "index": 4,
     "is_local": false,
     "is_method": false,
-    "line_count": 6,
+    "line_count": 5,
     "parent": null,
     "start_line": 17
   },
@@ -98,7 +98,7 @@
         "index": 7,
         "is_local": false,
         "is_method": true,
-        "line_count": 3,
+        "line_count": 2,
         "parent": 6,
         "start_line": 27
       }
@@ -110,7 +110,7 @@
     "index": 6,
     "is_local": false,
     "is_method": false,
-    "line_count": 6,
+    "line_count": 5,
     "parent": null,
     "start_line": 24
   },
@@ -127,7 +127,7 @@
         "index": 9,
         "is_local": false,
         "is_method": true,
-        "line_count": 3,
+        "line_count": 2,
         "parent": 8,
         "start_line": 34
       }
@@ -139,7 +139,7 @@
     "index": 8,
     "is_local": false,
     "is_method": false,
-    "line_count": 6,
+    "line_count": 5,
     "parent": null,
     "start_line": 31
   },
@@ -153,7 +153,7 @@
     "index": 10,
     "is_local": false,
     "is_method": false,
-    "line_count": 6,
+    "line_count": 5,
     "parent": null,
     "start_line": 38
   },
@@ -167,7 +167,7 @@
     "index": 11,
     "is_local": false,
     "is_method": false,
-    "line_count": 8,
+    "line_count": 7,
     "parent": null,
     "start_line": 45
   },
@@ -181,7 +181,7 @@
     "index": 12,
     "is_local": false,
     "is_method": false,
-    "line_count": 7,
+    "line_count": 6,
     "parent": null,
     "start_line": 54
   },
@@ -218,7 +218,7 @@
                 "index": 17,
                 "is_local": true,
                 "is_method": false,
-                "line_count": 3,
+                "line_count": 2,
                 "parent": 15,
                 "start_line": 80
               }
@@ -230,7 +230,7 @@
             "index": 15,
             "is_local": true,
             "is_method": false,
-            "line_count": 11,
+            "line_count": 10,
             "parent": 14,
             "start_line": 72
           },
@@ -258,7 +258,7 @@
             "index": 17,
             "is_local": true,
             "is_method": false,
-            "line_count": 3,
+            "line_count": 2,
             "parent": 15,
             "start_line": 80
           }
@@ -270,7 +270,7 @@
         "index": 14,
         "is_local": false,
         "is_method": true,
-        "line_count": 12,
+        "line_count": 11,
         "parent": 13,
         "start_line": 71
       },
@@ -301,7 +301,7 @@
             "index": 17,
             "is_local": true,
             "is_method": false,
-            "line_count": 3,
+            "line_count": 2,
             "parent": 15,
             "start_line": 80
           }
@@ -313,7 +313,7 @@
         "index": 15,
         "is_local": true,
         "is_method": false,
-        "line_count": 11,
+        "line_count": 10,
         "parent": 14,
         "start_line": 72
       },
@@ -341,7 +341,7 @@
         "index": 17,
         "is_local": true,
         "is_method": false,
-        "line_count": 3,
+        "line_count": 2,
         "parent": 15,
         "start_line": 80
       }
@@ -353,7 +353,7 @@
     "index": 13,
     "is_local": false,
     "is_method": false,
-    "line_count": 21,
+    "line_count": 20,
     "parent": null,
     "start_line": 62
   },
@@ -414,7 +414,7 @@
         "index": 22,
         "is_local": false,
         "is_method": true,
-        "line_count": 4,
+        "line_count": 2,
         "parent": 18,
         "start_line": 102
       }
@@ -428,7 +428,7 @@
     "index": 18,
     "is_local": false,
     "is_method": false,
-    "line_count": 21,
+    "line_count": 19,
     "parent": null,
     "start_line": 85
   },
@@ -442,7 +442,7 @@
     "index": 23,
     "is_local": false,
     "is_method": false,
-    "line_count": 5,
+    "line_count": 6,
     "parent": null,
     "start_line": 107
   }

@@ -372,13 +372,11 @@ def get_op_node_and_weight_eq_obs(
         equalization_node_name_to_qconfig: dict[str, Any] = (
             maybe_equalization_node_name_to_config  # type: ignore[assignment]
         )
-        if equalization_node_name_to_qconfig.get(op_node.name, None) is None:
+        if equalization_node_name_to_qconfig.get(op_node.name) is None:
             raise AssertionError(
                 f"No equalization qconfig found for op node {op_node.name}"
             )
-        weight_eq_obs = equalization_node_name_to_qconfig.get(  # type: ignore[union-attr]
-            op_node.name, None
-        ).weight()
+        weight_eq_obs = equalization_node_name_to_qconfig.get(op_node.name).weight()  # type: ignore[union-attr]
 
         if not isinstance(weight_eq_obs, _WeightEqualizationObserver):
             raise AssertionError(
@@ -485,7 +483,7 @@ def maybe_get_next_equalization_scale(
     In this case, the node given is linear1 and we want to locate the InputEqObs.
     """
     next_inp_eq_obs = maybe_get_next_input_eq_obs(node, modules)
-    # pyrefly: ignore [invalid-argument]
+
     if next_inp_eq_obs:
         if (
             next_inp_eq_obs.equalization_scale.nelement() == 1
@@ -858,7 +856,7 @@ def convert_eq_obs(
             inp_quant_obs_node.replace_input_with(prev_node, mul_node)
             remove_node(model, node, inp_quant_obs_node)
 
-        elif weight_eq_obs_dict.get(node.name, None) is not None:
+        elif weight_eq_obs_dict.get(node.name) is not None:
             weight_eq_obs = weight_eq_obs_dict.get(node.name)
             if not isinstance(weight_eq_obs, _WeightEqualizationObserver):
                 raise AssertionError(

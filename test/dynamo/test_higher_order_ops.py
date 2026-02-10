@@ -728,7 +728,7 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(3)
         arg_count = ifdynstaticdefault(4, 5)
         # when compiled with dynamic, we don't have upper bound runtime assertions for u0
-        expected_op_count = ifdynstaticdefault(10, 8)
+        expected_op_count = ifdynstaticdefault(9, 7)
         out_graph = self._test_wrap_simple(
             f,
             default_args_generator((x,)),
@@ -747,7 +747,6 @@ class GraphModule(torch.nn.Module):
 
         c: "i64[u0, 1]" = l_x_.nonzero()
         sym_size_int_1: "Sym(u0)" = torch.ops.aten.sym_size.int(c, 0)
-        _check_is_size = torch._check_is_size(sym_size_int_1);  _check_is_size = None
         ge: "Sym(u0 >= 0)" = sym_size_int_1 >= 0
         _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
 
@@ -782,7 +781,6 @@ class GraphModule(torch.nn.Module):
 
         c: "i64[u0, 1]" = l_x_.nonzero()
         sym_size_int_1: "Sym(u0)" = torch.ops.aten.sym_size.int(c, 0)
-        _check_is_size = torch._check_is_size(sym_size_int_1);  _check_is_size = None
         ge: "Sym(u0 >= 0)" = sym_size_int_1 >= 0
         _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
         le: "Sym(u0 <= 3)" = sym_size_int_1 <= 3
@@ -880,7 +878,7 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(3)
         arg_count = ifdynstaticdefault(4, 5)
         # when compiled with dynamic, we don't have upper bound runtime assertions for u0
-        expected_op_count = ifdynstaticdefault(10, 8)
+        expected_op_count = ifdynstaticdefault(9, 7)
         out_graph = self._test_wrap_simple(
             f,
             default_args_generator((x,)),
@@ -901,7 +899,6 @@ class GraphModule(torch.nn.Module):
 
         c: "i64[u0, 1]" = l_x_.nonzero()
         sym_size_int: "Sym(u0)" = torch.ops.aten.sym_size.int(c, 0)
-        _check_is_size = torch._check_is_size(sym_size_int);  _check_is_size = None
         ge: "Sym(u0 >= 0)" = sym_size_int >= 0
         _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
         le: "Sym(u0 <= 3)" = sym_size_int <= 3
@@ -951,7 +948,7 @@ class GraphModule(torch.nn.Module):
         y = torch.randn(3)
         arg_count = ifdynstaticdefault(5, 6)
         # when compiled with dynamic, we don't have upper bound runtime assertions for u0 and u1
-        expected_op_count = ifdynstaticdefault(17, 13)
+        expected_op_count = ifdynstaticdefault(15, 11)
         out_graph = self._test_wrap_simple(
             f,
             default_args_generator((x, y)),
@@ -971,7 +968,6 @@ class GraphModule(torch.nn.Module):
 
         c: "i64[u0, 1]" = l_x_.nonzero()
         sym_size_int_2: "Sym(u0)" = torch.ops.aten.sym_size.int(c, 0)
-        _check_is_size = torch._check_is_size(sym_size_int_2);  _check_is_size = None
         ge: "Sym(u0 >= 0)" = sym_size_int_2 >= 0
         _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
         le: "Sym(u0 <= 3)" = sym_size_int_2 <= 3
@@ -979,7 +975,6 @@ class GraphModule(torch.nn.Module):
 
         d: "i64[u1, 1]" = l_y_.nonzero();  l_y_ = None
         sym_size_int_3: "Sym(u1)" = torch.ops.aten.sym_size.int(d, 0)
-        _check_is_size_1 = torch._check_is_size(sym_size_int_3);  _check_is_size_1 = None
         ge_1: "Sym(u1 >= 0)" = sym_size_int_3 >= 0
         _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_default_2 = None
         le_1: "Sym(u1 <= 3)" = sym_size_int_3 <= 3
@@ -6306,6 +6301,25 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(len(counters["graph_break"]), 1)
         self.assertEqual(expected, got)
 
+    def test_vmap_scalar_tensor_indexing(self):
+        data = torch.arange(20).reshape(2, 10)
+        b_indices = torch.arange(2)
+        n_indices = torch.arange(10)
+
+        def vmap_index_fn(data_in, b_indices, n_indices):
+            def index_fn(b, n):
+                return data_in[b, n]
+
+            return torch.func.vmap(index_fn, in_dims=(None, 0))(b_indices, n_indices)
+
+        eager_result = vmap_index_fn(data, b_indices, n_indices)
+
+        compiled_result = torch.compile(vmap_index_fn, backend="eager", fullgraph=True)(
+            data, b_indices, n_indices
+        )
+
+        self.assertEqual(eager_result, compiled_result)
+
     def test_vmap(self):
         def fn(x):
             return torch.func.vmap(lambda x: x.sum(0) + x.sum(1))(x)
@@ -6399,9 +6413,9 @@ class GraphModule(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_x_: "f32[3, 3, 3]", L_y_: "f32[3, 3]"):
-        l_x_ = L_x_
+    def forward(self, L_y_: "f32[3, 3]", L_x_: "f32[3, 3, 3]"):
         l_y_ = L_y_
+        l_x_ = L_x_
 
         lazy_load_decompositions = torch._functorch.predispatch.lazy_load_decompositions();  lazy_load_decompositions = None
 
@@ -6573,9 +6587,9 @@ class GraphModule(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_y_: "f32[5, 3]", L_x_: "f32[2, 3]"):
-        l_y_ = L_y_
+    def forward(self, L_x_: "f32[2, 3]", L_y_: "f32[5, 3]"):
         l_x_ = L_x_
+        l_y_ = L_y_
 
         lazy_load_decompositions = torch._functorch.predispatch.lazy_load_decompositions();  lazy_load_decompositions = None
 

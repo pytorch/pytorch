@@ -1,5 +1,0 @@
-ERROR
-  File "/home/oulgen/py312/lib/python3.12/site-packages/jax/_src/numpy/ufuncs.py", line 1627, in arctan2
-    return lax.atan2(*promote_args_inexact("arctan2", x1, x2))
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-TypeError: atan2 got incompatible shapes for broadcasting: (4, 2), (5, 2).
