@@ -486,10 +486,12 @@ def vmapify_autograd_function(
                 inp.shape if isinstance(inp, torch.Tensor) else None for inp in inputs
             )
             if not hasattr(ctx, "_pt_input_shapes"):
+                # pyrefly: ignore [implicit-any]
                 ctx._pt_input_shapes = {}
             ctx._pt_input_shapes.update({key: input_shapes})
 
             if not hasattr(ctx, "_pt_saved_tensors_bdims_stack"):
+                # pyrefly: ignore [implicit-any]
                 ctx._pt_saved_tensors_bdims_stack = {}
             ctx._pt_saved_tensors_bdims_stack.update(
                 {key: (wrapped_ctx._pt_saved_tensors_bdims)}
@@ -504,6 +506,7 @@ def vmapify_autograd_function(
         )(inputs, outputs)
 
         if not hasattr(ctx, "_pt_out_dims"):
+            # pyrefly: ignore [implicit-any]
             ctx._pt_out_dims = {}
         ctx._pt_out_dims.update({key: out_dims})
 
