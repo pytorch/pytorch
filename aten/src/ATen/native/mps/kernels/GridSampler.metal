@@ -96,10 +96,7 @@ static int32_t pad_input_index(
 
 // Unnormalize grid coordinate from [-1, 1] to pixel space
 template <typename T>
-static opmath_t<T> grid_sampler_unnormalize(
-    opmath_t<T> coord,
-    int32_t size,
-    bool align_corners) {
+static T grid_sampler_unnormalize(T coord, int32_t size, bool align_corners) {
   if (align_corners) {
     return ((coord + 1) / 2) * (size - 1);
   } else {
@@ -129,12 +126,12 @@ static T reflect_coordinates(T in, int32_t twice_low, int32_t twice_high) {
 
 // Compute source index with padding mode
 template <typename T>
-static opmath_t<T> compute_source_index(
-    opmath_t<T> coord,
+static T compute_source_index(
+    T coord,
     int32_t size,
     GridSamplerPadding padding_mode,
     bool align_corners) {
-  coord = grid_sampler_unnormalize<T>(coord, size, align_corners);
+  coord = grid_sampler_unnormalize(coord, size, align_corners);
   if (padding_mode == GridSamplerPadding::Border) {
     coord = clip_coordinates(coord, size);
   } else if (padding_mode == GridSamplerPadding::Reflection) {
@@ -150,36 +147,31 @@ static opmath_t<T> compute_source_index(
 
 // Cubic convolution helper 1: for |x| < 1
 template <typename T>
-static opmath_t<T> cubic_convolution1(opmath_t<T> x, opmath_t<T> A) {
+static T cubic_convolution1(T x, T A) {
   return ((A + 2) * x - (A + 3)) * x * x + 1;
 }
 
 // Cubic convolution helper 2: for 1 <= |x| < 2
 template <typename T>
-static opmath_t<T> cubic_convolution2(opmath_t<T> x, opmath_t<T> A) {
+static T cubic_convolution2(T x, T A) {
   return ((A * x - 5 * A) * x + 8 * A) * x - 4 * A;
 }
 
 // Get cubic upsampling coefficients (Catmull-Rom spline with A=-0.75)
 template <typename T>
-static void get_cubic_coefficients(opmath_t<T> coeffs[4], opmath_t<T> t) {
-  opmath_t<T> A = static_cast<opmath_t<T>>(-0.75);
-  coeffs[0] = cubic_convolution2<T>(t + 1, A);
-  coeffs[1] = cubic_convolution1<T>(t, A);
-  coeffs[2] = cubic_convolution1<T>(1 - t, A);
-  coeffs[3] = cubic_convolution2<T>(2 - t, A);
+static void get_cubic_coefficients(T coeffs[4], T t) {
+  T A = static_cast<T>(-0.75);
+  coeffs[0] = cubic_convolution2(t + 1, A);
+  coeffs[1] = cubic_convolution1(t, A);
+  coeffs[2] = cubic_convolution1(1 - t, A);
+  coeffs[3] = cubic_convolution2(2 - t, A);
 }
 
 // 1D cubic interpolation
 template <typename T>
-static opmath_t<T> cubic_interp1d(
-    opmath_t<T> x0,
-    opmath_t<T> x1,
-    opmath_t<T> x2,
-    opmath_t<T> x3,
-    opmath_t<T> t) {
-  opmath_t<T> coeffs[4];
-  get_cubic_coefficients<T>(coeffs, t);
+static T cubic_interp1d(T x0, T x1, T x2, T x3, T t) {
+  T coeffs[4];
+  get_cubic_coefficients(coeffs, t);
   return x0 * coeffs[0] + x1 * coeffs[1] + x2 * coeffs[2] + x3 * coeffs[3];
 }
 
@@ -195,8 +187,8 @@ static T interpolate_bilinear_2d(
     int32_t inp_sW,
     GridSamplerPadding padding_mode,
     bool align_corners) {
-  ix = grid_sampler_unnormalize<T>(ix, inp_W, align_corners);
-  iy = grid_sampler_unnormalize<T>(iy, inp_H, align_corners);
+  ix = grid_sampler_unnormalize(ix, inp_W, align_corners);
+  iy = grid_sampler_unnormalize(iy, inp_H, align_corners);
 
   int32_t ix_nw = static_cast<int32_t>(floor(ix));
   int32_t iy_nw = static_cast<int32_t>(floor(iy));
@@ -264,16 +256,16 @@ static T interpolate_nearest_2d(
     bool align_corners) {
   // For Border and Reflection modes, apply padding to float coordinates
   // before rounding (matches CPU behavior)
-  ix = compute_source_index<T>(ix, inp_W, padding_mode, align_corners);
-  iy = compute_source_index<T>(iy, inp_H, padding_mode, align_corners);
+  ix = compute_source_index(ix, inp_W, padding_mode, align_corners);
+  iy = compute_source_index(iy, inp_H, padding_mode, align_corners);
 
   int32_t ix_nearest = static_cast<int32_t>(rint(ix));
   int32_t iy_nearest = static_cast<int32_t>(rint(iy));
 
   // For Zeros padding, check bounds after rounding
   if (padding_mode == GridSamplerPadding::Zeros) {
-    if (ix_nearest < 0 || ix_nearest >= inp_W ||
-        iy_nearest < 0 || iy_nearest >= inp_H) {
+    if (ix_nearest < 0 || ix_nearest >= inp_W || iy_nearest < 0 ||
+        iy_nearest >= inp_H) {
       return static_cast<T>(0);
     }
   }
@@ -313,8 +305,8 @@ static T interpolate_bicubic_2d(
     int32_t inp_sW,
     GridSamplerPadding padding_mode,
     bool align_corners) {
-  ix = grid_sampler_unnormalize<T>(ix, inp_W, align_corners);
-  iy = grid_sampler_unnormalize<T>(iy, inp_H, align_corners);
+  ix = grid_sampler_unnormalize(ix, inp_W, align_corners);
+  iy = grid_sampler_unnormalize(iy, inp_H, align_corners);
 
   opmath_t<T> ix_nw = floor(ix);
   opmath_t<T> iy_nw = floor(iy);
@@ -326,7 +318,7 @@ static T interpolate_bicubic_2d(
   int32_t iy_nw_i = static_cast<int32_t>(iy_nw);
 
   for (int32_t i = 0; i < 4; ++i) {
-    coefficients[i] = cubic_interp1d<T>(
+    coefficients[i] = cubic_interp1d(
         get_bicubic_value<T>(
             input,
             iy_nw_i - 1 + i,
@@ -370,7 +362,7 @@ static T interpolate_bicubic_2d(
         tx);
   }
 
-  return static_cast<T>(cubic_interp1d<T>(
+  return static_cast<T>(cubic_interp1d(
       coefficients[0], coefficients[1], coefficients[2], coefficients[3], ty));
 }
 
@@ -618,7 +610,7 @@ void grid_sampler_single_element(
       // Round to nearest even (banker's rounding) - matches CPU behavior
       // For halfway cases (scale == 0.5), pick the even-indexed neighbor
       if (scale == 0.5) {
-        // left_idx even -> pick left (scale=0), left_idx odd -> pick right (scale=1)
+        // if left_idx is even -> round to 0, if odd round to 1
         scale = (left_idx % 2 == 0) ? 0 : 1;
       } else {
         scale = (scale < 0.5) ? 0 : 1;
@@ -682,16 +674,14 @@ kernel void grid_sampler(
       align_corners);
 }
 
-#define REGISTER_GRID_SAMPLER_OP(DTYPE)                     \
+#define REGISTER_GRID_SAMPLER_OPS(DTYPE)                    \
   template [[host_name("grid_sampler_" #DTYPE)]]            \
   kernel void grid_sampler<DTYPE>(                          \
       device DTYPE * output [[buffer(0)]],                  \
       constant DTYPE * input [[buffer(1)]],                 \
       constant DTYPE * grid [[buffer(2)]],                  \
       constant GridSamplerParams<5> & params [[buffer(3)]], \
-      uint tid [[thread_position_in_grid]]);
-
-#define REGISTER_GRID_SAMPLER_2D_OP(DTYPE)                  \
+      uint tid [[thread_position_in_grid]]);                \
   template [[host_name("grid_sampler_2d_" #DTYPE)]]         \
   kernel void grid_sampler_2d<DTYPE>(                       \
       device DTYPE * output [[buffer(0)]],                  \
@@ -700,10 +690,6 @@ kernel void grid_sampler(
       constant GridSamplerParams<5> & params [[buffer(3)]], \
       uint tid [[thread_position_in_grid]]);
 
-REGISTER_GRID_SAMPLER_OP(float);
-REGISTER_GRID_SAMPLER_OP(half);
-REGISTER_GRID_SAMPLER_OP(bfloat);
-
-REGISTER_GRID_SAMPLER_2D_OP(float);
-REGISTER_GRID_SAMPLER_2D_OP(half);
-REGISTER_GRID_SAMPLER_2D_OP(bfloat);
+REGISTER_GRID_SAMPLER_OPS(float);
+REGISTER_GRID_SAMPLER_OPS(half);
+REGISTER_GRID_SAMPLER_OPS(bfloat);
