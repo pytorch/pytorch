@@ -13,6 +13,7 @@
 #include <c10/core/GradMode.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
+#include <c10/util/safe_numerics.h>
 #include <c10/macros/Macros.h>
 #include <algorithm>
 #include <limits>
@@ -705,6 +706,25 @@ static void check_shape_forward(const at::Tensor& input,
       TORCH_CHECK(false, "Calculated padded input size per channel: (", input_ss.str(), "). "
                "Kernel size: (", kernel_ss.str(), "). Kernel size can't be greater than actual input size");
     }
+
+    // Check for output size overflow using existing conv_output_size helper.
+    // With very large padding values, multiplying output dimensions can overflow.
+    {
+      auto output_size = conv_output_size(
+          at::symint::sizes<T>(input), weight_sizes, padding, params.stride, dilation);
+      std::vector<int64_t> output_sizes_i64;
+      output_sizes_i64.reserve(output_size.size());
+      for (const auto& s : output_size) {
+        output_sizes_i64.push_back(static_cast<int64_t>(s));
+      }
+      uint64_t numel = 0;
+      bool overflow = c10::safe_multiplies_u64(output_sizes_i64, &numel);
+      TORCH_CHECK(!overflow,
+                  "Convolution output size overflow: computed output dimensions ",
+                  output_size, " are too large. "
+                  "Input size: ", at::symint::sizes<T>(input), ", weight size: ", weight_sizes,
+                  ", padding: ", params.padding, ", stride: ", params.stride, ", dilation: ", params.dilation);
+    }
   } else { // transposed
     for (const auto i : c10::irange(2, k)) {
       TORCH_CHECK(padding[i-2] <= (std::numeric_limits<T>::max() - padding[i-2]),
@@ -719,6 +739,27 @@ static void check_shape_forward(const at::Tensor& input,
              "Given transposed=", transposed, ", weight of size ", weight_sizes,
              ", expected bias to be 1-dimensional with ", weight_sizes[1] * groups, " elements",
              ", but got bias of size ", at::symint::sizes<T>(bias), " instead");
+
+    // Check for output size overflow in transposed convolution using conv_input_size helper.
+    // conv_input_size computes the output of transposed conv given its input.
+    {
+      auto output_size = conv_input_size(
+          at::symint::sizes<T>(input), weight_sizes, padding,
+          params.output_padding, params.stride, dilation, groups);
+      std::vector<int64_t> output_sizes_i64;
+      output_sizes_i64.reserve(output_size.size());
+      for (const auto& s : output_size) {
+        output_sizes_i64.push_back(static_cast<int64_t>(s));
+      }
+      uint64_t numel = 0;
+      bool overflow = c10::safe_multiplies_u64(output_sizes_i64, &numel);
+      TORCH_CHECK(!overflow,
+                  "Transposed convolution output size overflow: computed output dimensions ",
+                  output_size, " are too large. "
+                  "Input size: ", at::symint::sizes<T>(input), ", weight size: ", weight_sizes,
+                  ", padding: ", params.padding, ", stride: ", params.stride,
+                  ", dilation: ", params.dilation, ", output_padding: ", params.output_padding);
+    }
   }
 }
 
