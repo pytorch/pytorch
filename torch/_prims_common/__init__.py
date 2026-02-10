@@ -23,7 +23,7 @@ from typing import (
 from typing_extensions import deprecated
 
 import torch
-from torch import sym_float, sym_int, sym_max
+from torch import sym_float, sym_int, sym_max, sym_min
 
 
 if TYPE_CHECKING:
@@ -1813,7 +1813,8 @@ def make_contiguous_strides_for(
     else:
         if len(shape) < 2:
             return result
-        return result[:-2] + (1, max(shape[-2], 1))
+        # Use sym_max to handle unbacked symbolic dimensions
+        return result[:-2] + (1, sym_max(shape[-2], 1))
 
 
 def make_channels_last_1d_strides_for(
