@@ -5939,10 +5939,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1, arg7_1
             f(x, torch.tensor(True), torch.tensor(True)),
         )
 
-        x_cuda = x.cuda()
-        true_pred = torch.tensor(True).cuda()
-
         if TEST_CUDA_GRAPH_CONDITIONAL_NODES:
+            x_cuda = x.cuda()
+            true_pred = torch.tensor(True).cuda()
+
             _check_compile_cudagraph_backend(
                 self,
                 f,
