@@ -196,7 +196,7 @@ class PallasKernelOverrides(OpOverrides):
 
     @staticmethod
     def rsqrt(x: str) -> str:
-        return f"(1.0 / jnp.sqrt({x}))"
+        return f"jax.lax.rsqrt({x})"
 
     @staticmethod
     def abs(x: str) -> str:
@@ -224,7 +224,7 @@ class PallasKernelOverrides(OpOverrides):
 
     @staticmethod
     def sigmoid(x: str) -> str:
-        return f"(1.0 / (1.0 + jnp.exp(-{x})))"
+        return f"jax.nn.sigmoid({x})"
 
     @staticmethod
     def relu(x: str) -> str:
@@ -1102,22 +1102,14 @@ class PallasKernel(SIMDKernel):
         2. Square buffers: index coefficient pattern indicates transposed access
            (first iteration var has larger coefficient than second)
         """
-        buf_obj = V.graph.get_buffer(name)
-        if buf_obj is None:
+        info = self._get_buffer_info(name)
+        if info is None:
             return False
 
-        buf_size = buf_obj.get_size()
+        _, buf_size, _, actual_strides, _ = info
 
         # Only handle 2D buffers
-        if len(buf_size) != 2:
-            return False
-
-        layout = getattr(buf_obj, "get_layout", lambda: None)()
-        if layout is None:
-            return False
-
-        buf_stride = getattr(layout, "stride", None)
-        if buf_stride is None or len(buf_stride) != 2:
+        if len(buf_size) != 2 or len(actual_strides) != 2:
             return False
 
         size0 = self._safe_int(buf_size[0])
@@ -1125,9 +1117,8 @@ class PallasKernel(SIMDKernel):
         if size0 is None or size1 is None or size0 <= 1 or size1 <= 1:
             return False
 
-        # Get buffer strides
-        s0 = self._safe_int(buf_stride[0])
-        s1 = self._safe_int(buf_stride[1])
+        s0 = actual_strides[0]
+        s1 = actual_strides[1]
         if s0 is None or s1 is None:
             return False
 
@@ -1146,31 +1137,10 @@ class PallasKernel(SIMDKernel):
         outer_var = var_items[1][0]
         index = V.graph.sizevars.simplify(index)
 
-        def get_coefficient(expr, var):
-            """Extract coefficient of var from expression."""
-            if expr == var:
-                return 1
-            if expr.is_Add:
-                for term in expr.args:
-                    coeff = get_coefficient(term, var)
-                    if coeff is not None:
-                        return coeff
-            if expr.is_Mul:
-                coeff = 1
-                has_var = False
-                for factor in expr.args:
-                    if factor == var:
-                        has_var = True
-                    elif factor.is_number:
-                        coeff *= int(factor)
-                if has_var:
-                    return coeff
-            return None
+        inner_coeff = self._get_index_coefficient(index, inner_var)
+        outer_coeff = self._get_index_coefficient(index, outer_var)
 
-        inner_coeff = get_coefficient(index, inner_var)
-        outer_coeff = get_coefficient(index, outer_var)
-
-        if inner_coeff is not None and outer_coeff is not None:
+        if inner_coeff != 0 and outer_coeff != 0:
             # Only transpose for standard row-major buffers (stride[0] = size[1], stride[1] = 1)
             is_standard_row_major = s0 == size1 and s1 == 1
             if not is_standard_row_major:
@@ -1284,9 +1254,10 @@ class PallasKernel(SIMDKernel):
         # Check all input buffers for contiguity, dtype, and shape consistency
         input_shapes: list[tuple] = []
         for name in self.args.input_buffers:
-            buf_obj, buf_size, buf_numel, actual_strides, is_contiguous = (
-                self._get_buffer_info(name)
-            )
+            info = self._get_buffer_info(name)
+            if info is None:
+                return False
+            buf_obj, buf_size, buf_numel, actual_strides, is_contiguous = info
             if not is_contiguous:
                 return False
 
@@ -1330,9 +1301,14 @@ class PallasKernel(SIMDKernel):
 
         return True
 
-    def _get_buffer_info(self, name: str) -> tuple[Any, Any, Any, list, bool]:
-        """Get buffer metadata (buf_obj, buf_size, buf_numel, actual_strides, is_contiguous)."""
+    def _get_buffer_info(self, name: str) -> Optional[tuple[Any, Any, Any, list, bool]]:
+        """Get buffer metadata (buf_obj, buf_size, buf_numel, actual_strides, is_contiguous).
+
+        Returns None if the buffer doesn't exist.
+        """
         buf_obj = V.graph.get_buffer(name)
+        if buf_obj is None:
+            return None
         buf_size = buf_obj.get_size()
         buf_numel = 1
         for s in buf_size:
@@ -1459,13 +1435,11 @@ class PallasKernel(SIMDKernel):
         if index_str != "..." or needs_flatten:
             return index_str, needs_flatten
 
-        buf = V.graph.get_buffer(name)
-        if buf is None:
+        info = self._get_buffer_info(name)
+        if info is None:
             return index_str, needs_flatten
 
-        buf_obj, buf_size, buf_numel, actual_strides, is_contiguous = (
-            self._get_buffer_info(name)
-        )
+        buf_obj, buf_size, buf_numel, actual_strides, is_contiguous = info
         output_numel, used_vars = self._compute_output_numel_from_index(index)
         all_iter_vars = self._get_iter_vars()
         coefficients = self._get_index_coefficients(index, used_vars)
@@ -1776,26 +1750,18 @@ class PallasKernel(SIMDKernel):
         if self.has_transposed_load:
             return False
 
-        buf = V.graph.get_buffer(name)
-        if buf is None:
+        info = self._get_buffer_info(name)
+        if info is None:
             return False
 
-        layout = getattr(buf, "get_layout", lambda: None)()
-        if layout is None:
-            return False
-
-        buf_stride = getattr(layout, "stride", None)
-        if buf_stride is None:
-            return False
-
-        buf_size = buf.get_size()
-        if len(buf_stride) != 2 or len(buf_size) != 2:
+        _, buf_size, _, actual_strides, _ = info
+        if len(actual_strides) != 2 or len(buf_size) != 2:
             return False
 
         size0 = self._safe_int(buf_size[0])
         size1 = self._safe_int(buf_size[1])
-        s0 = self._safe_int(buf_stride[0])
-        s1 = self._safe_int(buf_stride[1])
+        s0 = actual_strides[0]
+        s1 = actual_strides[1]
 
         # Check if output is column-major with valid dimensions
         if not (
@@ -1811,17 +1777,14 @@ class PallasKernel(SIMDKernel):
 
         # Check if any input is column-major (if so, no transpose needed)
         for inp_name in self.args.input_buffers:
-            inp_buf = V.graph.get_buffer(inp_name)
-            if inp_buf is None:
+            inp_info = self._get_buffer_info(inp_name)
+            if inp_info is None:
                 continue
-            inp_layout = getattr(inp_buf, "get_layout", lambda: None)()
-            if inp_layout is None:
+            _, _, _, inp_strides, _ = inp_info
+            if len(inp_strides) != 2:
                 continue
-            inp_stride = getattr(inp_layout, "stride", None)
-            if inp_stride is None or len(inp_stride) != 2:
-                continue
-            inp_s0 = self._safe_int(inp_stride[0])
-            inp_s1 = self._safe_int(inp_stride[1])
+            inp_s0 = inp_strides[0]
+            inp_s1 = inp_strides[1]
             if inp_s0 is not None and inp_s1 is not None and inp_s0 < inp_s1:
                 return False  # Input is also column-major
 
@@ -1829,26 +1792,28 @@ class PallasKernel(SIMDKernel):
 
     def _build_full_array_store_expr(
         self, out: str, value: CSEVariable, needs_transpose: bool
-    ) -> str:
+    ) -> list[str]:
         """
         Build store expression for full array assignment.
 
         Handles scalar broadcast, shape matching, and optional transpose.
+        Returns a list of lines to emit (variable assignment + store).
         """
+        lines = [f"_val = jnp.asarray({value})"]
         if needs_transpose:
-            return (
-                f"{out}[...] = ("
-                f"jnp.full({out}.shape, {value}) if jnp.asarray({value}).ndim == 0 "
-                f"else jnp.transpose(jnp.asarray({value})))"
+            lines.append(
+                f"{out}[...] = "
+                f"jnp.full({out}.shape, _val) if _val.ndim == 0 "
+                f"else jnp.transpose(_val)"
             )
         else:
-            return (
-                f"{out}[...] = ("
-                f"jnp.full({out}.shape, {value}) if jnp.asarray({value}).ndim == 0 "
-                f"else (jnp.broadcast_to(jnp.asarray({value}), {out}.shape) "
-                f"if jnp.asarray({value}).size != {out}.size "
-                f"else jnp.asarray({value}).reshape({out}.shape)))"
+            lines.append(
+                f"{out}[...] = "
+                f"jnp.full({out}.shape, _val) if _val.ndim == 0 "
+                f"else (_val.reshape({out}.shape) if _val.size == {out}.size "
+                f"else jnp.broadcast_to(_val, {out}.shape))"
             )
+        return lines
 
     def _build_store_expr(
         self,
@@ -1859,10 +1824,11 @@ class PallasKernel(SIMDKernel):
         index_str: str,
         needs_flatten: bool,
         mode: Any = None,
-    ) -> str:
+    ) -> list[str]:
         """
         Build the store expression based on indexing mode.
         mode can be None (set) or "atomic_add" (accumulate).
+        Returns a list of lines to emit.
         """
         if index_str == "...":
             # Full array store with shape matching
@@ -1872,10 +1838,10 @@ class PallasKernel(SIMDKernel):
         if needs_flatten:
             # Block variable indexing (e.g., im2col) - use flattened scatter
             scatter_op = "add" if mode == "atomic_add" else "set"
-            return (
+            return [
                 f"{out}[...] = {out}[...].flatten().at[({index_str}).flatten()].{scatter_op}("
                 f"jnp.asarray({value}).flatten()).reshape({out}.shape)"
-            )
+            ]
 
         # Direct indexed assignment
         has_indirect = self._has_indirect_vars(index)
@@ -1890,22 +1856,23 @@ class PallasKernel(SIMDKernel):
         if has_indirect:
             # Indirect indexed store (scatter): use .add() for atomic_add, .set() otherwise
             scatter_op = "add" if mode == "atomic_add" else "set"
+            lines = [f"_val = jnp.asarray({value})"]
             value_expr = (
-                f"(jnp.full({index_str}.shape, {value}) "
-                f"if jnp.asarray({value}).ndim == 0 else {value})"
+                f"(jnp.full({index_str}.shape, _val) if _val.ndim == 0 else {value})"
             )
             if mode == "atomic_add":
                 # For atomic_add, mark output as needing to be readable (for aliasing)
                 self.outputs_need_read.add(out)
                 alias_param = f"{out}_alias"
-                return (
+                lines.append(
                     f"{out}[...] = {alias_param}[...].flatten().at[({index_str}).flatten()].{scatter_op}("
                     f"{value_expr}.flatten()).reshape({out}.shape)"
                 )
             else:
-                return f"{out}[{index_str}] = {value_expr}"
+                lines.append(f"{out}[{index_str}] = {value_expr}")
+            return lines
 
-        return f"{out}[{index_str}] = {value}"
+        return [f"{out}[{index_str}] = {value}"]
 
     def _build_scatter_store_expr(
         self,
@@ -2052,21 +2019,12 @@ class PallasKernel(SIMDKernel):
 
         # Sort iteration variables by their coefficient (stride) in the index expression.
         # Variables with larger strides correspond to earlier output dimensions.
-        def get_coefficient(var):
-            """Extract the coefficient of a variable in the index expression."""
-            coeff = index.coeff(var)
-            if coeff == 0:
-                # Variable appears in a more complex form, try differentiation
-                coeff = sympy.diff(index, var)
-            # Convert to int if possible for sorting
-            try:
-                return int(coeff)
-            except (TypeError, ValueError):
-                # Symbolic coefficient - treat as outer dimension
-                return float("inf")
+        # Use inf default so symbolic coefficients sort as outermost dimensions.
+        def _coeff(var):
+            return self._get_index_coefficient(index, var, default=float("inf"))
 
-        used_iter_vars = sorted(used_iter_vars_set, key=get_coefficient, reverse=True)
-        iter_coeffs = [get_coefficient(var) for var in used_iter_vars]
+        used_iter_vars = sorted(used_iter_vars_set, key=_coeff, reverse=True)
+        iter_coeffs = [_coeff(var) for var in used_iter_vars]
 
         # Rename symbolic sizes to kernel parameter names
         index_str = self.kexpr(self.rename_indexing(index))
@@ -2074,7 +2032,7 @@ class PallasKernel(SIMDKernel):
         indirect_vars = [str(sym) for sym in indirect_var_syms]
 
         # Get coefficients for indirect vars to determine output ordering
-        indirect_coeffs = {str(s): get_coefficient(s) for s in indirect_var_syms}
+        indirect_coeffs = {str(s): _coeff(s) for s in indirect_var_syms}
 
         # Special case: reduction var + single indirect var = element-wise gather
         # Reduction vars (r prefix) iterate over the reduction dimension, and when paired
@@ -2160,9 +2118,9 @@ class PallasKernel(SIMDKernel):
         # Each component is (coeff, type, var) where type is 'iter' or 'indirect'
         all_components = []
         for var in used_iter_vars:
-            all_components.append((get_coefficient(var), "iter", var))
+            all_components.append((_coeff(var), "iter", var))
         for sym in indirect_var_syms:
-            all_components.append((get_coefficient(sym), "indirect", sym))
+            all_components.append((_coeff(sym), "indirect", sym))
         all_components.sort(key=lambda x: x[0], reverse=True)
 
         # Calculate trailing dims needed for each component
@@ -2179,7 +2137,7 @@ class PallasKernel(SIMDKernel):
                 range_size = range_entry.length
                 # Rename to use kernel parameter names for symbolic sizes
                 renamed_size = self.rename_indexing(range_size)
-                var_coeff = get_coefficient(var)
+                var_coeff = _coeff(var)
 
                 arange_expr = f"jnp.arange({self.kexpr(renamed_size)})"
 
@@ -2241,12 +2199,10 @@ class PallasKernel(SIMDKernel):
         is_scalar = buf is not None and len(buf.get_size()) == 0
 
         if is_scalar:
-            # For scalar outputs, use jnp.full to handle shape mismatch
-            store_expr = (
-                f"{out}[...] = ("
-                f"jnp.full({out}.shape, {value}) if jnp.asarray({value}).ndim == 0 "
-                f"else jnp.asarray({value}).reshape({out}.shape))"
-            )
+            store_lines = [
+                f"_val = jnp.asarray({value})",
+                f"{out}[...] = jnp.full({out}.shape, _val) if _val.ndim == 0 else _val.reshape({out}.shape)",
+            ]
         else:
             # Check for scatter pattern (indirect indexing for stores)
             scatter_info = self._detect_scatter_pattern(index, name)
@@ -2254,9 +2210,9 @@ class PallasKernel(SIMDKernel):
             if scatter_info is not None:
                 # Track iteration variables used in scatter index
                 self.used_iter_vars.update(self._get_used_iter_vars(index))
-                store_expr = self._build_scatter_store_expr(
-                    out, value, scatter_info, name, mode
-                )
+                store_lines = [
+                    self._build_scatter_store_expr(out, value, scatter_info, name, mode)
+                ]
             else:
                 # Get base index expression
                 index_str, needs_flatten = self._get_index_expr(index)
@@ -2267,15 +2223,19 @@ class PallasKernel(SIMDKernel):
                 )
 
                 # Build the store expression
-                store_expr = self._build_store_expr(
+                store_lines = self._build_store_expr(
                     out, name, index, value, index_str, needs_flatten, mode
                 )
 
-        self.stores.writeline(store_expr)
-        # Track which output param this store uses for filtering in codegen_kernel
-        self.store_with_output.append((out, store_expr))
+        for line in store_lines:
+            self.stores.writeline(line)
+            # Track which output param this store uses for filtering in codegen_kernel
+            self.store_with_output.append((out, line))
 
-    def _get_index_coefficient(self, index: sympy.Expr, var: sympy.Symbol) -> int:
+    @staticmethod
+    def _get_index_coefficient(
+        index: sympy.Expr, var: sympy.Symbol, default: int | float = 0
+    ) -> int | float:
         """Get integer coefficient of a variable in an index expression."""
         coeff = index.coeff(var)
         if coeff == 0:
@@ -2283,7 +2243,7 @@ class PallasKernel(SIMDKernel):
         try:
             return int(coeff)
         except (TypeError, ValueError):
-            return 0
+            return default
 
     def _detect_scatter_pattern(
         self, index: sympy.Expr, output_name: str = ""
@@ -2295,7 +2255,7 @@ class PallasKernel(SIMDKernel):
 
         indirect_sym = indirect_syms[0]
         indirect_var = str(indirect_sym)
-        indirect_coeff = self._get_index_coefficient(index, indirect_sym)
+        indirect_coeff: int = int(self._get_index_coefficient(index, indirect_sym))
         if indirect_coeff == 0:
             return None
 
@@ -2346,9 +2306,9 @@ class PallasKernel(SIMDKernel):
         used_iter_vars = self._get_used_iter_vars(index)
 
         # Collect (var_name, coefficient, length) for each variable
-        all_vars = []
+        all_vars: list[tuple[str, int, int]] = []
         for var in used_iter_vars:
-            coeff = self._get_index_coefficient(index, var)
+            coeff = int(self._get_index_coefficient(index, var))
             if coeff > 0 and var in self.range_tree_nodes:
                 length = self._safe_int(self.range_tree_nodes[var].length)
                 if length is None:
@@ -3182,16 +3142,16 @@ from torch._inductor.runtime.runtime_utils import (
                 + ", ".join([f"tuple({name}.shape)" for name in ctx.output_params])
                 + ",)"
             )
-            code.writeline(
-                "out_dtypes = ("
-                + ", ".join(
-                    [
-                        f"torch_dtype_to_jax_runtime({name}.dtype)"
-                        for name in ctx.output_params
-                    ]
-                )
-                + ",)"
-            )
+            dtype_exprs: list[str] = []
+            for name in ctx.output_params:
+                buf_name = ctx.output_buffer_lookup.get(name)
+                if buf_name is not None:
+                    dtype = V.graph.get_dtype(buf_name)
+                    if dtype is not None:
+                        dtype_exprs.append(torch_dtype_to_jax(dtype))
+                        continue
+                dtype_exprs.append(f"torch_dtype_to_jax_runtime({name}.dtype)")
+            code.writeline("out_dtypes = (" + ", ".join(dtype_exprs) + ",)")
             arg_name_map: dict[str, str] = {}
             for alias_name in ctx.alias_params:
                 arg_name_map[alias_name] = f"{alias_name}_jax"
