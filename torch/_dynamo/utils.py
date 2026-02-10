@@ -153,7 +153,6 @@ try:
     else:
         NP_SUPPORTED_MODULES = ()
 
-        # pyrefly: ignore [implicit-any]
         NP_TO_TNP_MODULE = {}
     from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
 except ImportError:
@@ -208,7 +207,7 @@ class ReinplaceCounters:
     @classmethod
     def add_missed_opportunities(cls, trigger: ReInplaceTrigger, count: int) -> None:
         if count != 0:
-            cls._values[f"missed_tensors_{trigger}"] += count
+            cls._values[f"missed_tensors_{trigger.name}"] += count
 
     @classmethod
     def clear(cls) -> None:
@@ -218,7 +217,7 @@ class ReinplaceCounters:
     def get_total_missed(cls) -> int:
         sum = 0
         for trigger in ReInplaceTrigger:
-            sum += cls._values.get(f"missed_tensors_{trigger}", 0)
+            sum += cls._values.get(f"missed_tensors_{trigger.name}", 0)
         return sum
 
     @classmethod
@@ -1993,7 +1992,6 @@ class ChromiumEventLogger:
             event_metadata = all_event_data[event_name]
             del all_event_data[event_name]
         else:
-            # pyrefly: ignore [implicit-any]
             event_metadata = {}
         # Add the passed in metadata
         event_metadata.update(metadata)
@@ -3558,6 +3556,18 @@ def get_fake_value(
     tx: InstructionTranslatorBase,
     allow_non_graph_fake: bool = False,
 ) -> Any:
+    _t0 = time.time_ns()
+    try:
+        return _get_fake_value_impl(node, tx, allow_non_graph_fake)
+    finally:
+        tx.output.bytecode_tracing_timings.get_fake_value_ns += time.time_ns() - _t0
+
+
+def _get_fake_value_impl(
+    node: torch.fx.Node,
+    tx: InstructionTranslatorBase,
+    allow_non_graph_fake: bool = False,
+) -> Any:
     """
     Run the computation represented by `node` using fake tensors and return the result.
 
@@ -3592,9 +3602,7 @@ def get_fake_value(
             id(arg): arg._version for arg in flat_args_kwargs if is_fake(arg)
         }
     else:
-        # pyrefly: ignore [implicit-any]
         flat_args_kwargs = []
-        # pyrefly: ignore [implicit-any]
         id_to_initial_version = {}
 
     nnmodule = None
