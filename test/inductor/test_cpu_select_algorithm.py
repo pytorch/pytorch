@@ -2028,7 +2028,8 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             def forward(self, x):
                 return self.mlp(x)
 
-        assert torch._inductor.config.freezing is False
+        if torch._inductor.config.freezing is not False:
+            raise AssertionError
 
         counters.clear()
         v = torch.randn(batch_size, in_features).to(dtype=dtype)
@@ -2269,7 +2270,8 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 )
                 return self.relu(tmp)
 
-        assert torch._inductor.config.freezing is False
+        if torch._inductor.config.freezing is not False:
+            raise AssertionError
 
         counters.clear()
         v = torch.randn(batch_size, in_features).to(dtype=dtype)
@@ -2573,7 +2575,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 super().__init__()
 
             def forward(self, x, w):
-                assert x.dim() == 2, f"Expected x to be 2D, got {x.dim()}D"
+                assert x.dim() == 2, f"Expected x to be 2D, got {x.dim()}D"  # noqa: S101
                 x_expanded = x.unsqueeze(0).expand(bs, -1, -1)
                 return x_expanded @ w
 
@@ -2837,7 +2839,8 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 exact_dtype=True,
             )
             # Check that only 2 kernels are in the generated code
-            assert code.count("AMXState amx_state") == 2
+            if code.count("AMXState amx_state") != 2:
+                raise AssertionError
 
 
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
