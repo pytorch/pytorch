@@ -133,7 +133,7 @@ class FSDPParamGroup:
         params: list[nn.Parameter],
         modules: tuple[nn.Module, ...],
         mesh_info: DataParallelMeshInfo,
-        post_forward_mesh_info: FSDPMeshInfo | None,
+        post_forward_mesh_info: FSDPMeshInfo | bool | int | None,
         device: torch.device,
         shard_placement_fn: Callable[[nn.Parameter], Any] | None,
         mp_policy: MixedPrecisionPolicy,
@@ -141,6 +141,13 @@ class FSDPParamGroup:
     ):
         self.modules = modules  # permit ref cycle because 1:1 lifetime
         param_module_infos = _get_param_module_infos(params, modules)
+
+        if isinstance(post_forward_mesh_info, (bool, int)):
+            from ._fsdp_init import _get_post_forward_mesh_info
+
+            post_forward_mesh_info = _get_post_forward_mesh_info(
+                post_forward_mesh_info, cast(FSDPMeshInfo, mesh_info)
+            )
 
         self.fsdp_params = [
             FSDPParam(

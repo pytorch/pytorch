@@ -424,18 +424,12 @@ def _init_param_group(
 
     # Create a FSDPParamGroup per process group
     for group_mesh_info, group_params in pg_to_group.values():
-        if isinstance(post_forward_mesh_info, (bool, int)):
-            group_post_forward = _get_post_forward_mesh_info(
-                post_forward_mesh_info, group_mesh_info
-            )
-        else:
-            group_post_forward = post_forward_mesh_info
         state._fsdp_param_groups.append(
             FSDPParamGroup(
                 group_params,
                 modules,
                 group_mesh_info,
-                group_post_forward,
+                post_forward_mesh_info,
                 device,
                 shard_placement_fn,
                 mp_policy,
