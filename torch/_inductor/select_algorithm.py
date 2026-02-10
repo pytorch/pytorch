@@ -75,6 +75,7 @@ from .exc import CUDACompileError
 from .fx_utils import count_flops_fx
 from .ir import ChoiceCaller, PrimitiveInfoType
 from .ops_handler import StoreMode
+from .runtime.benchmarking import benchmarker
 from .runtime.hints import DeviceProperties
 from .runtime.triton_compat import HAS_WARP_SPEC
 from .runtime.triton_heuristics import FixedGrid
@@ -2203,15 +2204,17 @@ class ExternKernelChoice:
         op_overload=None,
         use_fallback_kernel=False,
         kernel_creator=None,
+        _skip_registration=False,
     ) -> None:
         super().__init__()
         name = name or kernel.__name__
         assert callable(kernel)
-        assert not hasattr(extern_kernels, name), f"duplicate extern kernel: {name}"
+        if not _skip_registration:
+            assert not hasattr(extern_kernels, name), f"duplicate extern kernel: {name}"
+            setattr(extern_kernels, name, kernel)
         self.name = name
         self.cpp_kernel_name = cpp_kernel
         self.has_out_variant = has_out_variant
-        setattr(extern_kernels, name, kernel)
         self.op_overload = op_overload
         self.use_fallback_kernel = use_fallback_kernel
         self.kernel_creator = kernel_creator
@@ -2247,11 +2250,13 @@ class ExternKernelChoice:
         input_nodes,
         layout,
         ordered_kwargs_for_cpp_kernel=(),
+        benchmark_with_cudagraphs=False,
         **kwargs,
     ):
         self.ordered_kwargs_for_cpp_kernel = ordered_kwargs_for_cpp_kernel
         return ExternKernelCaller(
-            self, input_nodes, layout, kwargs, has_out_variant=self.has_out_variant
+            self, input_nodes, layout, kwargs, has_out_variant=self.has_out_variant,
+            benchmark_with_cudagraphs=benchmark_with_cudagraphs,
         )
 
     @property
@@ -2394,6 +2399,7 @@ class ExternKernelCaller(ChoiceCaller):
         kwargs=None,
         *,
         has_out_variant=True,
+        benchmark_with_cudagraphs=False,
     ) -> None:
         super().__init__(choice.name, input_nodes, layout, description="")
         self.choice = choice
@@ -2401,6 +2407,8 @@ class ExternKernelCaller(ChoiceCaller):
         self.has_out_variant = has_out_variant
         self.gm = choice.gm
         self.bmreq: Optional[BenchmarkRequest] = None
+        self._benchmark_with_cudagraphs = benchmark_with_cudagraphs
+        self._cuda_graph: Optional[torch.cuda.CUDAGraph] = None
 
         from torch._inductor.autotune_process import (
             ExternKernelBenchmarkRequest,
@@ -2452,8 +2460,33 @@ class ExternKernelCaller(ChoiceCaller):
         return f"ExternKernelCaller({self.choice.call_name()})"
 
     def benchmark(self, *args, out):
+        if self._benchmark_with_cudagraphs:
+            return self._benchmark_with_cuda_graph(*args, out=out)
         # pyrefly: ignore [missing-attribute]
         return self.bmreq.benchmark(*args, out=out)
+
+    def _benchmark_with_cuda_graph(self, *args, out):
+        """Benchmark using CUDA graph capture and replay for fair comparison."""
+        algo = self.to_callable()
+        if self.has_out_variant:
+            fn = lambda: algo(*args, out=out)
+        else:
+            fn = lambda: algo(*args)
+
+        if self._cuda_graph is None:
+            # Warmup
+            fn()
+            # Capture
+            self._cuda_graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(self._cuda_graph):
+                fn()
+
+        if config.profile_bandwidth_with_do_bench_using_profiling:
+            return do_bench_using_profiling(lambda: self._cuda_graph.replay())
+        return benchmarker.benchmark(
+            lambda: self._cuda_graph.replay(),
+            device=benchmarker.infer_device(*args),
+        )
 
     def benchmark_collective(self, *args, out):
         """
@@ -2834,6 +2867,7 @@ class AlgorithmSelectorCache(PersistentCache):
         best_config_future=None,
         return_choice=False,  # TODO: return_choice is temporary and will be refactored soon
         is_collective=False,
+        min_speedup_threshold: float = 1.0,  # Only pick non-fallback if faster by this ratio
     ):
         from .codegen.cutlass.cuda_kernel import CUDATemplateCaller
 
@@ -2863,10 +2897,17 @@ class AlgorithmSelectorCache(PersistentCache):
         if len(choices) == 1:
             if not isinstance(choices[0], CUDATemplateCaller):
                 # CUDATemplateCaller still needs to go through autotuning process to retrieve workspace size.
-                return choices[0].output_node()
+                node = choices[0].output_node()
+                if return_choice:
+                    return node, choices[0]
+                return node
 
         if config.deterministic:
-            return self.pick_deterministic_choice(choices).output_node()
+            choice = self.pick_deterministic_choice(choices)
+            node = choice.output_node()
+            if return_choice:
+                return node, choice
+            return node
 
         inputs_key = create_inputs_key(input_nodes)
 
@@ -2881,7 +2922,8 @@ class AlgorithmSelectorCache(PersistentCache):
             precompilation_timeout_seconds=precompilation_timeout_seconds,
         )
 
-        if return_multi_template and (config.max_autotune or config.max_autotune_gemm):
+        # Skip multi-template path when return_choice=True since caller needs immediate result
+        if return_multi_template and not return_choice and (config.max_autotune or config.max_autotune_gemm):
             if config.pipeline_max_autotune_gemm:
                 assert not config.benchmark_epilogue_fusion, (
                     "Benchmarking epilogues will cause gpu contention with pipelined autotuning"
@@ -3030,7 +3072,26 @@ class AlgorithmSelectorCache(PersistentCache):
             return node
 
         # if we got any timings at all, pick the best of those
-        choice = min(timings, key=timings.__getitem__)
+        best_choice = min(timings, key=timings.__getitem__)
+
+        # Apply min_speedup_threshold: only pick non-fallback if it beats fallback by threshold
+        if min_speedup_threshold > 1.0:
+            # Find the fallback (ExternKernelCaller) timing
+            fallback_choices = [c for c in timings if isinstance(c, ExternKernelCaller)]
+            if fallback_choices and not isinstance(best_choice, ExternKernelCaller):
+                fallback_time = min(timings[c] for c in fallback_choices)
+                best_time = timings[best_choice]
+                speedup = fallback_time / best_time if best_time > 0 else 0
+
+                if speedup < min_speedup_threshold:
+                    # Best choice doesn't beat fallback by enough, use fallback instead
+                    log.debug(
+                        "Best choice %s speedup %.2fx < threshold %.2fx, using fallback",
+                        best_choice.name, speedup, min_speedup_threshold
+                    )
+                    best_choice = min(fallback_choices, key=lambda c: timings[c])
+
+        choice = best_choice
         node = choice.output_node()
 
         log.debug("Autotuning selected choice: %s", node)

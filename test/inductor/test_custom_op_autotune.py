@@ -556,6 +556,69 @@ class TestCustomOpAutoTune(TestCase):
             print("[Dynamic] No dispatch logic found (unexpected for dynamic shapes)")
         self.assertTrue(dispatch_dynamic, "Dynamic shapes should have dispatch logic")
 
+    @skipIfXpu
+    def test_cuda_graph_benchmarking_extern_kernel(self):
+        """Test that ExternKernelCaller benchmarks with CUDA graphs when flag is set."""
+        if self.device != "cuda":
+            self.skipTest("CUDA graph test requires CUDA device")
+
+        from torch._inductor.select_algorithm import ExternKernelChoice
+        from torch._inductor.ir import FixedLayout
+
+        def simple_mm(a, b):
+            return torch.mm(a, b)
+
+        choice = ExternKernelChoice(simple_mm, "test_simple_mm_cuda_graph", _skip_registration=True)
+        a = torch.randn(32, 64, device=self.device, dtype=self.dtype)
+        b = torch.randn(64, 128, device=self.device, dtype=self.dtype)
+        layout = FixedLayout(device=torch.device(self.device), dtype=self.dtype, size=[32, 128])
+
+        caller_with = choice.bind(input_nodes=[a, b], layout=layout, benchmark_with_cudagraphs=True)
+        self.assertTrue(caller_with._benchmark_with_cudagraphs)
+
+        caller_without = choice.bind(input_nodes=[a, b], layout=layout, benchmark_with_cudagraphs=False)
+        self.assertFalse(caller_without._benchmark_with_cudagraphs)
+
+    @skipIfXpu
+    def test_min_speedup_threshold(self):
+        """Test that min_speedup_threshold causes fallback selection when speedup is insufficient."""
+        test_op_name = f"test_lib::min_speedup_{id(self)}"
+
+        def slow_decomposition(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            return (x @ weight) + 0 * 1
+
+        @torch.library.custom_op(test_op_name, mutates_args=())
+        def min_speedup_op(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            return x @ weight
+
+        @min_speedup_op.register_fake
+        def _(x: torch.Tensor, weight: torch.Tensor):
+            return torch.empty(x.shape[0], weight.shape[1], device=x.device, dtype=x.dtype)
+
+        register_custom_op_autotuning(
+            min_speedup_op,
+            configs=[CustomOpConfig(slow_decomposition)],
+            name="min_speedup_autotuned",
+            min_speedup_threshold=2.0,
+            input_gen_fns={
+                "x": lambda t: torch.randn_like(t, device=self.device) * 0.1,
+                "weight": lambda t: torch.randn_like(t, device=self.device) * 0.1,
+            },
+        )
+
+        test_x = torch.randn(64, 256, device=self.device, dtype=self.dtype)
+        test_weight = torch.randn(256, 128, device=self.device, dtype=self.dtype)
+
+        @torch.compile
+        def test_model(x, weight):
+            return min_speedup_op(x, weight)
+
+        torch._dynamo.reset()
+        with config.patch(max_autotune=True, fx_graph_cache=False):
+            result = test_model(test_x, test_weight)
+
+        torch.testing.assert_close(result, test_x @ test_weight, rtol=1e-1, atol=1e-1)
+
 
 if __name__ == "__main__":
     run_tests()
