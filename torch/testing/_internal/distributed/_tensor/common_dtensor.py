@@ -333,21 +333,6 @@ class ExpertParallel(ParallelStyle):
         )
 
 
-class _AllReduceInputGrad(torch.autograd.Function):
-    """Identity in forward, all-reduce(SUM) in backward."""
-
-    @staticmethod
-    def forward(ctx, x, group):
-        ctx.group = group
-        return x
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        grad_output = grad_output.contiguous()
-        dist.all_reduce(grad_output, op=dist.ReduceOp.SUM, group=ctx.group)
-        return grad_output, None
-
-
 class ExpertParallelWithTP(ParallelStyle):
     """Combined EP + TP for experts.
 
@@ -404,7 +389,11 @@ class ExpertParallelWithTP(ParallelStyle):
 
         def tp_allreduce_input_grad(mod, inputs):
             (x,) = inputs
-            return (_AllReduceInputGrad.apply(x, tp_mesh.get_group()),)
+            return (
+                DTensor.from_local(x, tp_mesh, [Replicate()]).to_local(
+                    grad_placements=[Partial()]
+                ),
+            )
 
         experts.register_forward_pre_hook(tp_allreduce_input_grad)
 

@@ -34,7 +34,7 @@ from ._fsdp_common import (
     FSDPMeshInfo,
     HSDPMeshInfo,
     is_bw,
-    ShardPlacementResult,
+    resolve_shard_placement,
     TrainingState,
 )
 from ._fsdp_param import alloc_storage, FSDPParam, ParamModuleInfo, ShardedState
@@ -136,20 +136,24 @@ class FSDPParamGroup:
         mesh_info: DataParallelMeshInfo,
         post_forward_mesh_info: FSDPMeshInfo | None,
         device: torch.device,
-        param_to_shard_result: dict[nn.Parameter, ShardPlacementResult],
+        shard_placement_fn: Callable[[nn.Parameter], Any] | None,
         mp_policy: MixedPrecisionPolicy,
         offload_policy: OffloadPolicy,
     ):
         self.modules = modules  # permit ref cycle because 1:1 lifetime
         param_module_infos = _get_param_module_infos(params, modules)
 
+        default_mesh_info = cast(FSDPMeshInfo, mesh_info)
         self.fsdp_params = [
             FSDPParam(
                 param,
                 module_info,
                 post_forward_mesh_info,
                 device,
-                param_to_shard_result[param],
+                resolve_shard_placement(
+                    shard_placement_fn(param) if shard_placement_fn else None,
+                    default_mesh_info,
+                ),
                 mp_policy,
                 offload_policy,
             )

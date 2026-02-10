@@ -1352,7 +1352,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
             None,  # mesh_info: FSDPMeshInfo,
             None,  # post_forward_mesh_info: Optional[FSDPMeshInfo],
             torch.device("cpu"),  # device: torch.device,
-            {},  # param_to_shard_result: dict[nn.Parameter, ShardPlacementResult],
+            None,  # shard_placement_fn: Callable[[nn.Parameter], Any] | None,
             None,  # mp_policy: MixedPrecisionPolicy,
             None,  # offload_policy: OffloadPolicy,
         )
