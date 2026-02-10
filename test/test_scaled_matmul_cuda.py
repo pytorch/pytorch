@@ -652,6 +652,8 @@ class TestFP8Matmul(TestCase):
             self.assertEqual(out_dtype, out_fp8.dtype)
         self.assertEqual(out_fp32, out_fp8.to(torch.float))
 
+    # Skip on XPU due to known oneDNN accuracy issue (#169772)
+    @skipXPU
     def test_float8_basics(self, device) -> None:
         if not _device_supports_scaled_mm_fp8(device):
             raise unittest.SkipTest(f8_msg)

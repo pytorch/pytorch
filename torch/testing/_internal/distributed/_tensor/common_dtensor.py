@@ -582,12 +582,14 @@ class DTensorConverter:
         mesh: DeviceMesh,
         args: tuple[object, ...],
         kwargs: dict[str, object],
+        replicate_only: bool = False,
     ) -> None:
         self.hit = 0
         self.miss = 0
         self.mesh = mesh
         self.args = args
         self.kwargs = kwargs
+        self.replicate_only = replicate_only
         flatten_args, flatten_args_spec = tree_flatten(args)
         flatten_kwargs, flatten_kwargs_spec = tree_flatten(kwargs)
 
@@ -639,6 +641,10 @@ class DTensorConverter:
         )
 
     def gen_sharding_choices_for_arg(self, arg: torch.Tensor) -> Sequence[Placement]:
+        # If replicate_only is set, only use Replicate placement
+        if self.replicate_only:
+            return [Replicate()]
+
         mesh_size = self.mesh.size()
         sharding_choices: list[Placement] = [Replicate()]
         # c10d collective does not support bool tensor
