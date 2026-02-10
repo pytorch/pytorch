@@ -42,7 +42,6 @@ class ConcaterMapDataPipe(MapDataPipe):
             raise ValueError("Expected at least one DataPipe, but got nothing")
         if not all(isinstance(dp, MapDataPipe) for dp in datapipes):
             raise TypeError("Expected all inputs to be `MapDataPipe`")
-        # pyrefly: ignore [unsafe-overlap]
         if not all(isinstance(dp, Sized) for dp in datapipes):
             raise TypeError("Expected all inputs to be `Sized`")
         self.datapipes = datapipes  # type: ignore[assignment]
@@ -90,7 +89,6 @@ class ZipperMapDataPipe(MapDataPipe[tuple[_T_co, ...]]):
             raise ValueError("Expected at least one DataPipe, but got nothing")
         if not all(isinstance(dp, MapDataPipe) for dp in datapipes):
             raise TypeError("Expected all inputs to be `MapDataPipe`")
-        # pyrefly: ignore [unsafe-overlap]
         if not all(isinstance(dp, Sized) for dp in datapipes):
             raise TypeError("Expected all inputs to be `Sized`")
         self.datapipes = datapipes
