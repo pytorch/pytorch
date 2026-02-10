@@ -1124,7 +1124,7 @@ class FakeTensorTest(TestCase):
                 fake_out.is_contiguous(),
                 f"FakeTensor upsample output should be contiguous, got strides {fake_out.stride()}",
             )
-            
+
     def test_export_numpy(self):
         class MyNumpyModel(torch.nn.Module):
             def forward(self, input):
