@@ -302,9 +302,39 @@ class TestLocalTensorRankWorld2(LocalTensorRankTest):
         expected = identical_local_tensors[self.rank] * 2.0
         self.assertEqual(result_mul._local_tensors[self.rank], expected)
 
-    # TODO: consider an op-info test; we don't actually need to cover all ops
-    # but it will help make sure views and more exotic things are done
-    # correctly (in standard subclass style)
+    def test_view_ops(self):
+        """Test that view operations work correctly on LocalTensor (standard subclass style)."""
+        device = torch.device("cpu")
+        base_tensor = torch.arange(8, device=device).reshape(2, 4).float()
+        local_tensors = {
+            0: base_tensor.clone(),
+            1: base_tensor.clone(),
+        }
+        lt = LocalTensor(local_tensors)
+
+        test_cases = [
+            (torch.flip, (lt,), {"dims": [1]}),
+            (torch.fliplr, (lt,), {}),
+            (torch.flipud, (lt,), {}),
+            (torch.flatten, (lt,), {}),
+            (torch.ravel, (lt,), {}),
+            (torch.reshape, (lt, (8,)), {}),
+            (torch.transpose, (lt, 0, 1), {}),
+            (torch.t, (lt,), {}),
+            (torch.squeeze, (lt,), {}),
+            (torch.unsqueeze, (lt, 0), {}),
+        ]
+
+        for op_func, args, kwargs in test_cases:
+            with self.subTest(op=op_func.__name__):
+                result = op_func(*args, **kwargs)
+                self.assertIsInstance(result, LocalTensor)
+
+                ref_args = tuple(
+                    local_tensors[self.rank] if a is lt else a for a in args
+                )
+                expected = op_func(*ref_args, **kwargs)
+                self.assertEqual(result._local_tensors[self.rank], expected)
 
     def test_mixed_operations_with_regular_tensors(self):
         """Test operations between LocalTensors and regular tensors."""

@@ -288,6 +288,9 @@ class PallasKernelOverrides(OpOverrides):
         """Convert a sympy expression to a JAX array indexing expression."""
         from ..utils import get_bounds_index_expr
 
+        # Track which iteration variables are used
+        V.kernel.used_iter_vars.update(V.kernel._get_used_iter_vars(expr))
+
         # Prepare and rename indexing to register size symbols as kernel args
         prepared = V.kernel.prepare_indexing(expr)
         renamed = V.kernel.rename_indexing(prepared)
@@ -905,6 +908,8 @@ class PallasKernel(SIMDKernel):
         # Track if any load in this kernel used transpose
         # Used to avoid double transpose (load + store)
         self.has_transposed_load = False
+        # Track which iteration variables are actually used in the kernel
+        self.used_iter_vars: OrderedSet[sympy.Symbol] = OrderedSet()
 
     def check_bounds(
         self, expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
@@ -969,6 +974,8 @@ class PallasKernel(SIMDKernel):
         # Check for ModularIndexing - this is NOT contiguous access
         # ModularIndexing is used for roll/wrap-around operations
         if index.has(ModularIndexing):
+            # Track which iteration variables are used before returning
+            self.used_iter_vars.update(self._get_used_iter_vars(index))
             # Generate actual index expression - iteration variables are already
             # defined as jnp.arange arrays, so we just convert to JAX code
             return self.kexpr(index)
@@ -977,6 +984,9 @@ class PallasKernel(SIMDKernel):
         index = V.graph.sizevars.simplify(index)
         # Find which iteration variable(s) are used
         used_vars = self._get_used_iter_vars(index)
+
+        # Track which iteration variables are used
+        self.used_iter_vars.update(used_vars)
 
         if len(used_vars) == 0:
             # No iteration variables, this is a constant index
@@ -1062,6 +1072,9 @@ class PallasKernel(SIMDKernel):
             raise Unsupported(
                 f"Pallas backend does not yet support mixed index pattern: {index}"
             )
+
+        # Track which iteration variables are used
+        self.used_iter_vars.update(used_vars)
 
         # Convert sympy expression to Python/JAX code string
         # The iteration variables are already defined as jnp.arange arrays
@@ -2080,6 +2093,9 @@ class PallasKernel(SIMDKernel):
         """
         used_iter_vars_set = self._get_used_iter_vars(index)
 
+        # Track which iteration variables are used
+        self.used_iter_vars.update(used_iter_vars_set)
+
         if len(used_iter_vars_set) == 0:
             return self.kexpr(index)
 
@@ -2285,6 +2301,8 @@ class PallasKernel(SIMDKernel):
             scatter_info = self._detect_scatter_pattern(index, name)
 
             if scatter_info is not None:
+                # Track iteration variables used in scatter index
+                self.used_iter_vars.update(self._get_used_iter_vars(index))
                 store_expr = self._build_scatter_store_expr(
                     out, value, scatter_info, name, mode
                 )
@@ -2552,7 +2570,7 @@ class PallasKernel(SIMDKernel):
                 # 4. Reshape output with 1s in reduced dims for proper broadcasting
                 reduction_op = reduction_ops[reduction_type]
                 # Use a helper to find reduction axes by product matching
-                reduction_expr = f"_pallas_partial_reduce({reduction_op}, {value}, {pointwise_numel}, {reduction_numel})"
+                reduction_expr = f"pallas_partial_reduce({reduction_op}, {value}, {pointwise_numel}, {reduction_numel})"
             elif is_symbolic_partial:
                 # Symbolic sizes: use axis-based reduction (axis=0 for outer reduction)
                 reduction_expr = f"{reduction_ops[reduction_type]}({value}, axis=0)"
@@ -2619,8 +2637,10 @@ class PallasKernel(SIMDKernel):
         }
 
         kernel_name = name or "<KERNEL_NAME>"
-        interpret_is_cpu = V.graph.get_current_device_or_throw().type == "cpu"
         is_tpu = torch._inductor.config._debug_cpu_to_tpu_pallas
+        interpret_is_cpu = (
+            V.graph.get_current_device_or_throw().type == "cpu" and not is_tpu
+        )
         if is_tpu:
             if not torch._inductor.config.pallas_take_first_jax_device_only:
                 raise RuntimeError(
@@ -2642,31 +2662,7 @@ import torch
 import jax
 import jax.numpy as jnp
 from jax.experimental import pallas as pl
-from torch._inductor.runtime.runtime_utils import torch_dtype_to_jax_runtime
-def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
-    # Helper for partial reductions: reorders axes and reduces
-    # Returns result with keepdims-style shape for proper in-kernel broadcasting
-    shape = tuple(v.shape)
-    # Find contiguous axes whose product = red_numel (search from right)
-    red_axes = None
-    for i in range(len(shape) - 1, -1, -1):
-        prod = 1
-        for j in range(i, -1, -1):
-            prod *= shape[j]
-            if prod == red_numel:
-                red_axes = list(range(j, i + 1))
-                break
-        if red_axes is not None:
-            break
-    if red_axes is None:
-        red_axes = [len(shape) - 1]
-    # Build output shape with 1s for reduced dimensions (keepdims style)
-    out_shape = tuple(1 if i in red_axes else s for i, s in enumerate(shape))
-    # Move pointwise axes to front, reduction axes to back
-    pw_axes = [i for i in range(len(shape)) if i not in red_axes]
-    reordered = jnp.moveaxis(v, pw_axes, list(range(len(pw_axes))))
-    result = reduce_fn(reordered.reshape(pw_numel, red_numel), axis=-1)
-    return result.reshape(out_shape)
+from torch._inductor.runtime.runtime_utils import pallas_partial_reduce, torch_dtype_to_jax_runtime
 """ + (
             "\nfrom jax.experimental.pallas import mosaic_gpu as plgpu"
             if not interpret_is_cpu
@@ -2676,18 +2672,7 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
 
         aliasable_flags: dict[str, bool] = {}
         for param in pure_out_params:
-            buffer_name = output_buffer_lookup.get(param)
-            is_contiguous = buffer_name is not None and self._buffer_is_contiguous(
-                buffer_name
-            )
-            # Enable aliasing if:
-            # 1. Not on CPU and buffer is contiguous (normal case), OR
-            # 2. Output needs to be readable (for scatter operations)
-            # outputs_need_read contains output parameter names (e.g., out_ptr0)
-            needs_read = param in self.outputs_need_read
-            aliasable_flags[param] = (
-                (not interpret_is_cpu) and is_contiguous
-            ) or needs_read
+            aliasable_flags[param] = True
         alias_params = [
             f"{param}_alias" for param in pure_out_params if aliasable_flags[param]
         ]
@@ -2703,7 +2688,7 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
         # because pallas_call returns a new array (doesn't mutate in-place)
         # For outputs that need read access (scatter), we enable aliasing to read
         # current values, but still need to copy back the result
-        if interpret_is_cpu:
+        if interpret_is_cpu or is_tpu:
             # Copy back all outputs on CPU
             copy_output_indices = list(range(len(output_params)))
         else:
@@ -2722,7 +2707,8 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
             # Generate iteration variables as jnp.arange arrays
             # These are used by index_expr operations like torch.arange
             # Skip on GPU - jnp.arange is not supported by Pallas Mosaic backend
-            if self.range_tree_nodes and not self.is_gpu:
+            # Only emit definitions for variables that are actually used
+            if self.range_tree_nodes and not self.is_gpu and self.used_iter_vars:
                 kernel_body.writeline("# Define iteration variables as JAX arrays")
 
                 # Find reshape target: N-D shape whose numel matches an iteration
@@ -2779,6 +2765,9 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
                 num_broadcast_dims = len(broadcast_vars)
 
                 for idx, (var_sym, entry) in enumerate(var_items):
+                    # Skip variables that are not actually used
+                    if var_sym not in self.used_iter_vars:
+                        continue
                     var_name = str(var_sym)
                     length = entry.length
                     # Rename symbolic lengths to use kernel parameter names
@@ -2912,6 +2901,7 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
                 if out_ptr in full_kernel_params:
                     code.writeline(store_line)
 
+        code.writeline("")
         jit_wrapper_name = f"{kernel_name}_jit_wrapper"
         donate_indices = []
         # Offset by 2 for (out_shapes, out_dtypes), plus size_var_params count
@@ -2937,9 +2927,18 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
         )
         code.writeline(f"def {jit_wrapper_name}({', '.join(wrapper_params)}):")
         with code.indent():
-            code.writeline("out_specs = tuple(")
+            code.writeline("out_shapes_pallas = tuple(")
             code.writeline("    jax.ShapeDtypeStruct(shape, dtype)")
             code.writeline("    for shape, dtype in zip(out_shapes, out_dtypes)")
+            code.writeline(")")
+            code.writeline("indexer = lambda n: lambda i: [i] * n")
+            code.writeline("out_specs_pallas = tuple(")
+            code.writeline("    pl.BlockSpec(shape, indexer(len(shape)))")
+            code.writeline("    for shape, dtype in zip(out_shapes, out_dtypes)")
+            code.writeline(")")
+            code.writeline("in_specs_pallas = tuple(")
+            code.writeline("    pl.BlockSpec(i.shape, indexer(len(i.shape)))")
+            code.writeline("    for i in [" + ", ".join(kernel_input_params) + "]")
             code.writeline(")")
 
             alias_pairs: list[tuple[int, int]] = []
@@ -3341,7 +3340,9 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
             else:
                 code.writeline("return pl.pallas_call(")
                 code.writeline("    " + kernel_arg)
-                code.writeline("    out_shape=out_specs,")
+                code.writeline("    out_shape=out_shapes_pallas,")
+                code.writeline("    out_specs=out_specs_pallas,")
+                code.writeline("    in_specs=in_specs_pallas,")
                 code.writeline(f"    interpret={interpret_literal},")
                 code.writeline("    grid=(1,),")
                 code.writeline(
@@ -3354,6 +3355,7 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
                     code.writeline(f"    {', '.join(kernel_input_params)},")
                 code.writeline(")")
 
+        code.writeline("")
         main_name = f"{kernel_name}_main"
         code.writeline(
             f"def {main_name}({', '.join(full_kernel_params)}, stream=None):"
@@ -3430,6 +3432,9 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
             # Add tensor args (with _jax suffix)
             wrapper_call_args.extend(arg_name_map[name] for name in kernel_input_params)
             code.writeline(f"res = {jit_wrapper_name}({', '.join(wrapper_call_args)})")
+            # Synchronize JAX computation to ensure results are visible to PyTorch
+            # This is needed because JAX and PyTorch use different CUDA streams
+            code.writeline("jax.block_until_ready(res)")
             if copy_output_indices:
                 code.writeline(
                     "result_values = res if isinstance(res, tuple) else (res,)"

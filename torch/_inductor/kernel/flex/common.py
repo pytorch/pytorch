@@ -252,7 +252,18 @@ def infer_dense_strides(
         The behavior of empty_like()
     """
     fill_order = get_fill_order(orig_strides, V.graph.sizevars.shape_env)
-    return construct_strides(size, fill_order)
+    strides = construct_strides(size, fill_order)
+
+    # Attention kernels require stride[-1]=1 for efficient memory access.
+    # Ensure this by moving last dim to front of fill_order if needed.
+    if strides[-1] != 1:
+        last_dim = len(size) - 1
+        fill_order = list(fill_order)
+        fill_order.remove(last_dim)
+        fill_order = [last_dim] + fill_order
+        strides = construct_strides(size, fill_order)
+
+    return strides
 
 
 def create_indices_fake(x) -> torch.Tensor:

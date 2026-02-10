@@ -286,6 +286,8 @@ class AutoHeuristicSelectAlgorithm(AutoHeuristic):
             name: str,
             input_nodes: list[Any],
             choices: list[ChoiceCaller],
+            profiled_time: Callable[[], dict[ChoiceCaller, float]],
+            precompile_times: dict[ChoiceCaller, float],
         ) -> None:
             current_inputs_key = create_inputs_key(input_nodes)
             if current_inputs_key != ah_inputs_key:

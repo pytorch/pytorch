@@ -45,6 +45,7 @@ from .ctx_manager import (
 from .dicts import (
     ConstDictVariable,
     DefaultDictVariable,
+    DictItemsVariable,
     DictKeySetVariable,
     FrozensetVariable,
     MappingProxyVariable,
@@ -61,6 +62,7 @@ from .functions import (
     FunctionDecoratedByContextlibContextManagerVariable,
     FunctoolsPartialVariable,
     FunctoolsWrapsVariable,
+    InspectSignatureVariable,
     LocalGeneratorFunctionVariable,
     LocalGeneratorObjectVariable,
     NestedUserFunctionVariable,
@@ -183,6 +185,7 @@ __all__ = [
     "FakeItemVariable",
     "GetAttrVariable",
     "GradModeVariable",
+    "InspectSignatureVariable",
     "IteratorVariable",
     "ItertoolsVariable",
     "LambdaVariable",
