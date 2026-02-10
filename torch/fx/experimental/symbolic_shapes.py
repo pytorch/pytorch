@@ -7774,7 +7774,7 @@ class ShapeEnv:
 
             expr = orig_expr
 
-            # Fast path: try to quickly evaluate trivially true/false comparisons
+            # Try to quickly evaluate trivially true/false comparisons
             # using var_to_range, before calling expensive _maybe_evaluate_static.
             fast_result = self._maybe_fast_eval_comparison(expr)
             if fast_result is not None:
@@ -7970,9 +7970,8 @@ class ShapeEnv:
         expr = orig_expr
 
         # TODO: split conjunctions and evaluate them separately
-
-        # Fast path: check for trivially true comparisons like 0 <= sum_of_nonneg_symbols
-        # This avoids expensive _maybe_evaluate_static for this common pattern.
+        # Try to quickly evaluate trivially true/false comparisons
+        # using var_to_range, before calling expensive _maybe_evaluate_static.
         fast_result = self._maybe_fast_eval_comparison(expr)
         if fast_result is not None:
             return bool(fast_result)
