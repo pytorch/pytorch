@@ -633,6 +633,23 @@ class TestInductorDynamic(TestCase):
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
     )
+    @torch._inductor.config.patch(emulate_precision_casts=True)
+    def test_embedding_backward_dynamic_shapes_large_grid(self, device):
+        """Test _check_max_grid_x uses num_blocks (not num_blocks * num_warps * warp_size)."""
+        from torch._inductor.runtime.triton_heuristics import _check_max_grid_x
+
+        # Large size that would trigger the buggy check but not the correct one
+        size_hints = {"x": 600_000_000}
+        x = 64
+        num_warps = 8
+
+        result_x, result_num_blocks = _check_max_grid_x(size_hints, x, num_warps)
+
+        self.assertEqual(result_x, 64, f"XBLOCK should remain 64 (got {result_x})")
+
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+    )
     @torch._inductor.config.patch(implicit_fallbacks=True)
     def test_dynamic_stride_nobreak(self, device):
         @torch.library.custom_op("test_dynamic_stride_nobreak::foo", mutates_args=())
