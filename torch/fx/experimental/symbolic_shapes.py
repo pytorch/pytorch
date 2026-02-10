@@ -7780,10 +7780,11 @@ class ShapeEnv:
                 return fast_result
 
             # Aggressive guard-free semantics: skip expensive static evaluation
-            # when we have a fallback value. This is safe because the fallback
+            # when we have a fallback value and no hint. This is safe because the fallback
             # represents a valid code path that could be taken anyway.
             if (
-                torch.fx.experimental._config.aggressive_guard_free_semantics
+                hint is None
+                and torch.fx.experimental._config.aggressive_guard_free_semantics
                 and fallback_value is not None
             ):
                 self._log_suppressed_dde(orig_expr, fallback_value)
