@@ -27,12 +27,15 @@ class DeviceInterface(device_interface.DeviceInterface):
         def record(self, stream) -> None:
             if not self.enable_timing:
                 return
-            assert self.recorded_time is None
+            if self.recorded_time is not None:
+                raise AssertionError
             self.recorded_time = time.perf_counter_ns()
 
         def elapsed_time(self, end_event: DeviceInterface.Event) -> float:
-            assert self.recorded_time
-            assert end_event.recorded_time
+            if not self.recorded_time:
+                raise AssertionError
+            if not end_event.recorded_time:
+                raise AssertionError
             # convert to ms
             return (end_event.recorded_time - self.recorded_time) / 1000000
 
@@ -80,16 +83,18 @@ class DeviceInterface(device_interface.DeviceInterface):
 
     @staticmethod
     def maybe_exchange_device(device: int) -> int:
-        assert device == 0, (
-            f"Only device index 0 is supported, tried to set index to {device}"
-        )
+        if device != 0:
+            raise AssertionError(
+                f"Only device index 0 is supported, tried to set index to {device}"
+            )
         return 0  # previous device is always 0
 
     @staticmethod
     def exchange_device(device: int) -> int:
-        assert device == 0, (
-            f"Only device index 0 is supported, tried to set index to {device}"
-        )
+        if device != 0:
+            raise AssertionError(
+                f"Only device index 0 is supported, tried to set index to {device}"
+            )
         return 0  # previous device is always 0
 
     @staticmethod

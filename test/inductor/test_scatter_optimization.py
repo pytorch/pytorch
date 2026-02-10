@@ -180,9 +180,8 @@ class TestScatterOpt(TestCase):
         ref_grad = ref_model.weight.grad
         opt_f(opt_model, x, label)
         act_grad = opt_model.weight.grad
-        assert torch.allclose(ref_grad, act_grad, atol=1e-3, rtol=1e-3), (
-            f"{ref_grad=}\n{act_grad=}"
-        )
+        if not torch.allclose(ref_grad, act_grad, atol=1e-3, rtol=1e-3):
+            raise AssertionError(f"{ref_grad=}\n{act_grad=}")
 
         self.check_metric()
 

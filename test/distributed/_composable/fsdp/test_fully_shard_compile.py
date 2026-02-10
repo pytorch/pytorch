@@ -225,11 +225,15 @@ class TestFullyShardCompile(FSDPTest):
                 and node.args[0].op == "placeholder"
             ):
                 unsharded_param_graph_inputs.add(node.args[0])
-        assert len(unsharded_param_graph_inputs) > 0
-        assert len(unsharded_param_graph_inputs) == len(list(model.parameters())), """\
+        if not (len(unsharded_param_graph_inputs) > 0):
+            raise AssertionError(
+                "Expected unsharded_param_graph_inputs to be non-empty"
+            )
+        if len(unsharded_param_graph_inputs) != len(list(model.parameters())):
+            raise AssertionError("""\
 Expected all model parameters to be wrapped by FSDP2 and
 have their unsharded version as graph input, but it's not true!
-"""
+""")
         no_aliased_unsharded_params_in_graph_inputs = True
         err_msg = ""
         for aliased_graph_inputs in storage_id_to_graph_inputs.values():
@@ -925,7 +929,12 @@ autograd.grad with compiled autograd
                             requires_grad_param_count += 1
                         else:
                             v.requires_grad_(False)
-                assert requires_grad_param_count == n_layers * len(requires_grad_params)
+                expected = n_layers * len(requires_grad_params)
+                if requires_grad_param_count != expected:
+                    raise AssertionError(
+                        f"Expected requires_grad_param_count == {expected}, "
+                        f"got {requires_grad_param_count}"
+                    )
             for _, mod in enumerate(model.layers):
                 fully_shard(mod, mesh=mesh, reshard_after_forward=True, **fsdp_config)
             model = fully_shard(

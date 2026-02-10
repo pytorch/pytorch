@@ -27,7 +27,10 @@ HIP_CODES = [
 
 class TestCppWrapperHipify(TestCase):
     def test_hipify_basic_declaration(self) -> None:
-        assert len(TEST_CODES) == len(HIP_CODES)
+        if len(TEST_CODES) != len(HIP_CODES):
+            raise AssertionError(
+                f"TEST_CODES length {len(TEST_CODES)} != HIP_CODES length {len(HIP_CODES)}"
+            )
         for i in range(len(TEST_CODES)):
             result = maybe_hipify_code_wrapper(TEST_CODES[i], True)
             expected = HIP_CODES[i]
@@ -118,7 +121,10 @@ class TestCppWrapperHipify(TestCase):
         self.assertEqual(result.rstrip(), expected.rstrip())
 
     def test_hipify_cross_platform(self) -> None:
-        assert len(TEST_CODES) == len(HIP_CODES)
+        if len(TEST_CODES) != len(HIP_CODES):
+            raise AssertionError(
+                f"TEST_CODES length {len(TEST_CODES)} != HIP_CODES length {len(HIP_CODES)}"
+            )
         for i in range(len(TEST_CODES)):
             hip_result = maybe_hipify_code_wrapper(TEST_CODES[i], True)
             result = maybe_hipify_code_wrapper(TEST_CODES[i])

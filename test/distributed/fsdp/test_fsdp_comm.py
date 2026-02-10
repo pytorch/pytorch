@@ -162,7 +162,7 @@ class TestCommunication(FSDPTestContinuous):
             # forward pass
             num_all_gathers = 0
         else:
-            assert 0, (
+            raise AssertionError(
                 f"Unsupported: add a branch for pass_type={pass_type} "
                 f"is_first_iter={is_first_iter} "
                 f"is_last_iter_no_sync={is_last_iter_no_sync} "
