@@ -6538,59 +6538,43 @@ class ShapeEnv:
 
     def _maybe_fast_eval_comparison(self, expr: sympy.Basic) -> Optional[sympy.Basic]:
         """
-        Try to quickly evaluate trivially true/false comparisons using only
-        value range analysis, without expensive sympy simplification.
-        Returns sympy.true/sympy.false if decidable, None otherwise.
+        Fast path for trivial comparisons: sum of non-negative terms >= 0.
+        Only checks that all symbols have lower bound >= 0 and appear with
+        positive coefficients, avoiding expensive bound_sympy tree walk.
+        Returns sympy.true if pattern matches, None otherwise.
         """
         if len(expr.args) != 2:
             return None
 
         lhs, rhs = expr.args
-        diff = lhs - rhs
-        bounds = self._bound_sympy_no_tracing_context(diff)
 
-        if isinstance(expr, (sympy.Ge, sympy.Le, sympy.Gt, sympy.Lt)):
-            # Normalize <= and < to check -diff (i.e., rhs - lhs)
-            if isinstance(expr, (sympy.Le, sympy.Lt)):
-                bounds = ValueRanges(-bounds.upper, -bounds.lower)
+        # Handle: sum >= 0 (Ge) or 0 <= sum (Le)
+        if isinstance(expr, sympy.Ge) and rhs == 0:
+            sum_expr = lhs
+        elif isinstance(expr, sympy.Le) and lhs == 0:
+            sum_expr = rhs
+        else:
+            return None
 
-            # Strict comparisons use > 0 / <= 0, non-strict use >= 0 / < 0
-            if isinstance(expr, (sympy.Gt, sympy.Lt)):
-                if bounds.lower > 0:
-                    return sympy.true
-                if bounds.upper <= 0:
-                    return sympy.false
-            else:  # Ge, Le
-                if bounds.lower >= 0:
-                    return sympy.true
-                if bounds.upper < 0:
-                    return sympy.false
+        # Get coefficients of each term in the sum
+        # as_coefficients_dict returns {term: coeff} for sum of terms
+        coeffs = sum_expr.as_coefficients_dict()
 
-        elif isinstance(expr, (sympy.Eq, sympy.Ne)):
-            # lhs == rhs iff diff == 0; lhs != rhs iff diff != 0
-            zero_not_in_range = bounds.lower > 0 or bounds.upper < 0
-            zero_is_only_value = bounds.lower == 0 and bounds.upper == 0
+        for term, coeff in coeffs.items():
+            if term == 1:
+                # Constant term - must be non-negative
+                if coeff < 0:
+                    return None
+            else:
+                # Symbol or expression - coeff must be positive and term non-negative
+                if coeff < 0:
+                    return None
+                for sym in term.free_symbols:
+                    vr = self.var_to_range.get(sym)
+                    if vr is None or vr.lower < 0:
+                        return None
 
-            if isinstance(expr, sympy.Eq):
-                if zero_not_in_range:
-                    return sympy.false
-                if zero_is_only_value:
-                    return sympy.true
-            else:  # Ne
-                if zero_not_in_range:
-                    return sympy.true
-                if zero_is_only_value:
-                    return sympy.false
-
-        return None
-
-    def _bound_sympy_no_tracing_context(self, expr: sympy.Expr) -> ValueRanges:
-        """
-        Compute value range bounds for expr using only var_to_range,
-        without looking up tracing context (faster than bound_sympy).
-        """
-        var_to_range = {x: self.var_to_range.get(x) for x in expr.free_symbols}
-        return bound_sympy(expr, var_to_range)
+        return sympy.true
 
     @_lru_cache
     def _maybe_evaluate_static(
@@ -7785,8 +7769,7 @@ class ShapeEnv:
 
             # Fast path: try to quickly evaluate trivially true/false comparisons
             # using var_to_range, before calling expensive _maybe_evaluate_static.
-            # If undecidable but fallback_value is provided, use it.
-            fast_result = self._maybe_fast_eval_comparison(expr, fallback_value)
+            fast_result = self._maybe_fast_eval_comparison(expr)
             if fast_result is not None:
                 return fast_result
 
