@@ -918,10 +918,9 @@ def _optimized_add(
         # Use _from_args directly to bypass _exec_constructor_postprocessors
         # which iterates over all args. This is safe because args are only
         # symbols or constants, which don't register postprocessors.
-        # Pass is_commutative=True to avoid fuzzy_and check over all args.
         if not isinstance(ordered_args, tuple):
             ordered_args = tuple(ordered_args)
-        result = sympy.Add._from_args(ordered_args, is_commutative=True)
+        result = sympy.Add._from_args(ordered_args)
         return (True, result)
 
     from torch.utils._sympy.functions import _is_symbols_binary_summation
