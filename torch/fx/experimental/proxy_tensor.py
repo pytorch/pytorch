@@ -1082,6 +1082,7 @@ def proxy_call(
     pre_dispatch: bool,
     args: tuple[object, ...],
     kwargs: dict[str, object],
+    types: tuple[type, ...] | None = None,
 ) -> object:
     unrecognized_types: list[type] = []
     flat_args_kwargs, spec = pytree.tree_flatten((args, kwargs))
@@ -1236,8 +1237,13 @@ def proxy_call(
         return False
 
     # Determine if we should attempt bypass
+    # Skip ops with multiple returns (structured return types) as they behave differently
+    schema = func._schema
+    has_multiple_returns = len(schema.returns) > 1
+
     can_bypass = (
         torch.Tag.data_dependent_output not in func.tags
+        and not has_multiple_returns
         and not _has_symbolic_ints(args)
         and not _has_symbolic_ints(kwargs)
     )
@@ -1248,18 +1254,14 @@ def proxy_call(
         if fake_mode is not None:
             try:
                 # Temporarily unset fake mode to avoid re-entry guard in __torch_dispatch__
-                torch._C._set_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE, None)
-                try:
-                    # Get types for __torch_dispatch__ call
-                    flat_args = pytree.arg_tree_leaves(args)
-                    types = tuple(type(arg) for arg in flat_args if isinstance(arg, Tensor))
+                with unset_fake_temporarily():
+                    # Use types passed from __torch_dispatch__ if available
+                    dispatch_types = types if types is not None else ()
                     with _enable_thunkify(proxy_mode.tracer):
-                        out = fake_mode.__torch_dispatch__(func, types, args, kwargs or {})
-                    if out is not NotImplemented:
-                        bypass_succeeded = True
-                finally:
-                    # Restore fake mode to dispatch stack
-                    torch._C._set_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE, fake_mode)
+                        out = fake_mode.__torch_dispatch__(
+                            func, dispatch_types, args, kwargs or {}
+                        )
+                    bypass_succeeded = True
             except Exception:
                 # Fall back to original path
                 bypass_succeeded = False
@@ -1305,6 +1307,7 @@ def proxy_call(
     # we can query it if we're asked to item() it at some later point
     if (
         func is torch.ops.aten.lift_fresh_copy.default
+        and out is not None
         and out.numel() <= CONSTANT_NUMEL_LIMIT
     ):
         with unset_fake_temporarily():
@@ -1839,7 +1842,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
             if func == prim.device.default:
                 return func(*args, **kwargs)
 
-            return proxy_call(self, func, self.pre_dispatch, args, kwargs)
+            return proxy_call(self, func, self.pre_dispatch, args, kwargs, types)
 
     def __enter__(self) -> Self:
         # Stash and store the previous proxy mode (there may or may not be one)
