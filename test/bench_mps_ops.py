@@ -165,9 +165,7 @@ def main() -> None:
         ):
             x = torch.testing.make_tensor((B, N, N), device="mps", dtype=dtype)
             y = torch.randint(0, B, (3,))
-            rc.append(
-                bench_binary_op(torch.Tensor.__getitem__, x, y, f"{B}x{N}x{N}")
-            )
+            rc.append(bench_binary_op(torch.Tensor.__getitem__, x, y, f"{B}x{N}x{N}"))
         Compare(rc).print()
 
     def bench_unary_ops():
