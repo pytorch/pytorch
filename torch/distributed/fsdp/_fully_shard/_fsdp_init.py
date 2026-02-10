@@ -360,7 +360,7 @@ def _init_param_group(
     shard_placement_fn: "Callable[[nn.Parameter], Any] | None",
     mp_policy: "MixedPrecisionPolicy",
     offload_policy: "OffloadPolicy",
-    reshard_after_forward: "bool | int | None" = None,
+    reshard_after_forward: bool | int | None = None,
 ) -> None:
     """
     Initialize FSDP param groups for the given state.
