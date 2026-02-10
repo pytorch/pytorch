@@ -1468,6 +1468,21 @@ static void registerCudaPluggableAllocator(PyObject* module) {
       });
 
   m.def(
+      "_cuda_getCaptureMempoolId",
+      [](c10::DeviceIndex device, int64_t stream_id) {
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
+        cudaStream_t stream = reinterpret_cast<cudaStream_t>(stream_id);
+        return c10::cuda::CUDACachingAllocator::getCaptureMempoolId(
+            device, stream);
+      });
+
+  m.def("_cuda_getBlockMempoolId", [](c10::DeviceIndex device, size_t ptr) {
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    return c10::cuda::CUDACachingAllocator::getBlockMempoolId(
+        device, reinterpret_cast<void*>(ptr));
+  });
+
+  m.def(
       "_cuda_checkPoolLiveAllocations",
       [](c10::DeviceIndex device,
          at::cuda::MempoolId_t mempool_id,

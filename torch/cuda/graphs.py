@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 import gc
+import textwrap
+import traceback
 import typing
+import weakref
 from collections.abc import Callable
 from typing import overload, TYPE_CHECKING, TypeAlias, Union
 from typing_extensions import ParamSpec, Self, TypeVar
@@ -14,8 +17,126 @@ from torch import Tensor
 if TYPE_CHECKING:
     # importing _POOL_HANDLE at runtime toplevel causes an import cycle
     from torch.cuda import _POOL_HANDLE
+    from torch.utils._python_dispatch import TorchDispatchMode
 
 from .._utils import _dummy_type
+
+
+class _TrackedTensorInfo:
+    __slots__ = (
+        "weakref",
+        "creation_traceback_py",
+        "creation_traceback_cpp",
+        "deletion_traceback_py",
+        "data_ptr",
+    )
+
+    def __init__(self, tensor: Tensor) -> None:
+        from torch.utils import get_cpp_backtrace
+
+        self.creation_traceback_py = "".join(traceback.format_stack()[:-3])
+        self.creation_traceback_cpp = get_cpp_backtrace()
+        self.deletion_traceback_py: str | None = None
+        self.data_ptr = tensor.data_ptr()
+
+        def on_release(_: weakref.ref[Tensor]) -> None:
+            try:
+                self.deletion_traceback_py = "".join(traceback.format_stack()[:-1])
+            except Exception:
+                pass  # don't raise under GC
+
+        self.weakref: weakref.ref[Tensor] = weakref.ref(tensor, on_release)
+
+    def is_alive(self) -> bool:
+        return self.weakref() is not None
+
+
+def _get_tensor_tracking_mode_class() -> type:
+    from torch.utils._python_dispatch import TorchDispatchMode
+    from torch.utils._pytree import tree_iter
+
+    class _TensorTrackingMode(TorchDispatchMode):
+        def __init__(self, cuda_graph: CUDAGraph) -> None:
+            self._graph = cuda_graph
+            self._capture_mempool_id: tuple[int, int] | None = None
+
+        def _get_capture_mempool_id(self) -> tuple[int, int]:
+            if self._capture_mempool_id is None:
+                device = torch.cuda.current_device()
+                stream = torch.cuda.current_stream(device)
+                self._capture_mempool_id = torch._C._cuda_getCaptureMempoolId(
+                    device, stream.cuda_stream
+                )
+            return self._capture_mempool_id
+
+        def _is_tensor_from_capture_pool(self, tensor: Tensor) -> bool:
+            capture_pool = self._get_capture_mempool_id()
+            if capture_pool == (0, 0):
+                return False
+            device = tensor.device.index
+            if device is None:
+                return False
+            tensor_pool = torch._C._cuda_getBlockMempoolId(device, tensor.data_ptr())
+            return tensor_pool == capture_pool
+
+        # TODO: Do we want to handle pinned host tensors for any other ops?
+        _COPY_OPS = frozenset({"aten::copy_", "aten::_to_copy"})
+
+        # This is a proxy for telling if an op launched a CUDA kernel.
+        # If it only ever returns host tensors, does it ever launch work
+        # on GPU while also being capturable in a CUDA graph (i.e. not 
+        # causing a stream sync)
+        def _has_cuda_tensor_output(self, values: object) -> bool:
+            for v in tree_iter(values):
+                if isinstance(v, Tensor) and v.is_cuda:
+                    return True
+            return False
+
+        def _is_copy_op(self, func: object) -> bool:
+            if hasattr(func, "_schema"):
+                return func._schema.name in self._COPY_OPS
+            return False
+
+        def __torch_dispatch__(
+            self,
+            func: object,
+            types: object,
+            args: tuple[object, ...] = (),
+            kwargs: dict[str, object] | None = None,
+        ) -> object:
+            kwargs = kwargs or {}
+            out = func(*args, **kwargs)  # type: ignore[operator]
+            if is_current_stream_capturing() and self._has_cuda_tensor_output(out):
+                self._track_inputs([args, kwargs], track_pinned=self._is_copy_op(func))
+                self._mark_outputs(out)
+            return out
+
+        def _track_inputs(self, values: object, *, track_pinned: bool = False) -> None:
+            for v in tree_iter(values):
+                if not isinstance(v, Tensor) or v.data_ptr() == 0:
+                    continue
+                if v.is_cuda:
+                    if not self._is_tensor_from_capture_pool(v):
+                        self._graph._track_external_input(v)
+                elif track_pinned and v.is_pinned():
+                    self._graph._track_external_input(v)
+
+        def _mark_outputs(self, values: object) -> None:
+            for v in tree_iter(values):
+                if isinstance(v, Tensor) and v.is_cuda:
+                    self._graph._mark_internal_output(v)
+
+    return _TensorTrackingMode
+
+
+_TensorTrackingModeClass: type | None = None
+
+
+def _get_tracking_mode(cuda_graph: CUDAGraph) -> TorchDispatchMode:
+    global _TensorTrackingModeClass
+    if _TensorTrackingModeClass is None:
+        _TensorTrackingModeClass = _get_tensor_tracking_mode_class()
+    return _TensorTrackingModeClass(cuda_graph)
 
 
 __all__ = [
@@ -90,11 +211,76 @@ class CUDAGraph(_CUDAGraph):
 
     """
 
+    _external_inputs: dict[int, _TrackedTensorInfo]
+    _internal_outputs: set[int]
+    _check_input_liveness: bool
+    _tracking_mode: TorchDispatchMode | None
+
     def __new__(cls, keep_graph: bool = False) -> Self:
-        return super().__new__(cls, keep_graph)
+        instance = super().__new__(cls, keep_graph)
+        instance._external_inputs = {}
+        instance._internal_outputs = set()
+        instance._check_input_liveness = False
+        instance._tracking_mode = None
+        return instance
+
+    def _track_external_input(self, tensor: Tensor) -> None:
+        data_ptr = tensor.data_ptr()
+        if (
+            data_ptr not in self._internal_outputs
+            and data_ptr not in self._external_inputs
+        ):
+            self._external_inputs[data_ptr] = _TrackedTensorInfo(tensor)
+
+    def _mark_internal_output(self, tensor: Tensor) -> None:
+        data_ptr = tensor.data_ptr()
+        if data_ptr not in self._external_inputs:
+            self._internal_outputs.add(data_ptr)
+
+    def _start_input_tracking(self) -> None:
+        self._check_input_liveness = True
+        self._external_inputs.clear()
+        self._internal_outputs.clear()
+        # Note that this call causes a circular reference. We use the __del__
+        # method to release the ref to the tracker.
+        self._tracking_mode = _get_tracking_mode(self)
+        self._tracking_mode.__enter__()
+
+    def _stop_input_tracking(self) -> None:
+        if self._tracking_mode is not None:
+            self._tracking_mode.__exit__(None, None, None)
+            self._tracking_mode = None
+
+    def __del__(self) -> None:
+        try:
+            # Release all the input tracking state
+            self._external_inputs.clear()
+            self._internal_outputs.clear()
+            self._stop_input_tracking()
+        except Exception:
+            pass  # don't raise under GC
+
+    def _check_external_inputs_alive(self) -> None:
+        dead = [i for i in self._external_inputs.values() if not i.is_alive()]
+        if not dead:
+            return
+
+        def fmt(label: str, tb: str | None) -> str:
+            return f"  {label}:\n{textwrap.indent(tb.strip(), '    ')}\n" if tb else ""
+
+        parts = [f"CUDA graph replay detected {len(dead)} dead tensor(s).\n"]
+        for i, info in enumerate(dead[:5], 1):
+            parts.append(f"Dead tensor #{i} (data_ptr={info.data_ptr:#x}):")
+            parts.append(fmt("Creation Traceback (Python)", info.creation_traceback_py))
+            parts.append(fmt("Creation Traceback (C++)", info.creation_traceback_cpp))
+            parts.append(fmt("Deletion Traceback (Python)", info.deletion_traceback_py))
+        if len(dead) > 5:
+            parts.append(f"  ... and {len(dead) - 5} more\n")
+        parts.append(fmt("Replay Traceback (Python)", "".join(traceback.format_stack()[:-2])))
+        raise RuntimeError("".join(parts))
 
     def capture_begin(
-        self, pool: _POOL_HANDLE | None = None, capture_error_mode: str = "global"
+        self, pool: _POOL_HANDLE | None = None, capture_error_mode: str = "global", check_input_liveness: bool = False,
     ) -> None:
         r"""Begin capturing CUDA work on the current stream.
 
@@ -111,8 +297,25 @@ class CUDAGraph(_CUDAGraph):
                 may be unsafe. "global" will error on actions in other threads, "thread_local" will only error for
                 actions in the current thread, and "relaxed" will not error on these actions. Do NOT change this setting
                 unless you're familiar with `cudaStreamCaptureMode <https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html#group__CUDART__STREAM_1g9d0535d93a214cbf126835257b16ba85>`_
+            check_input_liveness (bool, optional):
+                If ``True``, tracks external tensor inputs during graph capture and
+                raises an error if any are deallocated before replay. This helps debug "use after free" errors
+                where input tensors are garbage collected between capture and replay. Default: ``False``.
+
+                .. note::
+                    This tracking covers both CUDA tensors and pinned host memory tensors used during capture.
+                    Tensors allocated from the graph's own memory pool (e.g., outputs from a previous graph
+                    sharing the same pool) are automatically excluded from tracking since they're managed
+                    by the pool. Operations that don't produce CUDA tensor outputs (e.g., returning only
+                    CPU values like booleans) also don't cause their inputs to be tracked.
+
+                .. note::
+                    Custom CUDA kernels added outside PyTorch (e.g., via cuLaunchKernel or DLPack) are not
+                    tracked by this mechanism.
         """  # noqa: B950
         super().capture_begin(pool=pool, capture_error_mode=capture_error_mode)
+        if check_input_liveness:
+            self._start_input_tracking()
 
     def capture_end(self) -> None:
         r"""End CUDA graph capture on the current stream.
@@ -124,6 +327,7 @@ class CUDAGraph(_CUDAGraph):
         which call ``capture_end`` internally.
         """
         super().capture_end()
+        self._stop_input_tracking()
 
     def instantiate(self) -> None:
         r"""Instantiate the CUDA graph. Will be called by
@@ -136,6 +340,8 @@ class CUDAGraph(_CUDAGraph):
 
     def replay(self) -> None:
         r"""Replay the CUDA work captured by this graph."""
+        if self._check_input_liveness:
+            self._check_external_inputs_alive()
         super().replay()
 
     def reset(self) -> None:
@@ -197,6 +403,20 @@ class graph:
             may be unsafe. "global" will error on actions in other threads, "thread_local" will only error for
             actions in the current thread, and "relaxed" will not error on actions. Do NOT change this setting
             unless you're familiar with `cudaStreamCaptureMode <https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html#group__CUDART__STREAM_1g9d0535d93a214cbf126835257b16ba85>`_
+        check_input_liveness (bool, optional): If ``True``, tracks external tensor inputs during graph capture and
+            raises an error if any are deallocated before replay. This helps debug "use after free" errors
+            where input tensors are garbage collected between capture and replay. Default: ``False``.
+
+            .. note::
+                This tracking covers both CUDA tensors and pinned host memory tensors used during capture.
+                Tensors allocated from the graph's own memory pool (e.g., outputs from a previous graph
+                sharing the same pool) are automatically excluded from tracking since they're managed
+                by the pool. Operations that don't produce CUDA tensor outputs (e.g., returning only
+                CPU values like booleans) also don't cause their inputs to be tracked.
+
+            .. note::
+                Custom CUDA kernels added outside PyTorch (e.g., via cuLaunchKernel or DLPack) are not
+                tracked by this mechanism.
 
     .. note::
         For effective memory sharing, if you pass a ``pool`` used by a previous capture and the previous capture
@@ -217,6 +437,7 @@ class graph:
         pool: _POOL_HANDLE | None = None,
         stream: torch.cuda.Stream | None = None,
         capture_error_mode: str = "global",
+        check_input_liveness: bool = False,
     ):
         # Lazy-init of default_capture_stream helps avoid circular-import errors.
         # Not thread safe, but graphs already have the general (explicitly documented)
@@ -233,6 +454,7 @@ class graph:
         self.stream_ctx = torch.cuda.stream(self.capture_stream)
         self.cuda_graph = cuda_graph
         self.capture_error_mode = capture_error_mode
+        self.check_input_liveness = check_input_liveness
 
     def __enter__(self) -> None:
         # Free as much memory as we can for the graph
@@ -259,6 +481,7 @@ class graph:
             *self.pool,
             # pyrefly: ignore [bad-keyword-argument]
             capture_error_mode=self.capture_error_mode,
+            check_input_liveness=self.check_input_liveness,
         )
 
     def __exit__(self, *args: object) -> None:
