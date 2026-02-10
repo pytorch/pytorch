@@ -12,11 +12,7 @@ import torch
 import torch._dynamo.test_case
 import unittest
 from torch._dynamo.test_case import CPythonTestCase
-from torch.testing._internal.common_utils import (
-    run_tests,
-    xfailIfTorchDynamo,
-    TEST_WITH_TORCHDYNAMO,
-)
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_TORCHDYNAMO
 
 # ======= END DYNAMO PATCH =======
 
@@ -49,11 +45,8 @@ import functools
 
 py_functools = import_helper.import_fresh_module('functools',
                                                  blocked=['_functools'])
-if TEST_WITH_TORCHDYNAMO:
-    c_functools = False
-else:
-    c_functools = import_helper.import_fresh_module('functools',
-                                                    fresh=['_functools'])
+c_functools = import_helper.import_fresh_module('functools',
+                                                fresh=['_functools'])
 
 decimal = import_helper.import_fresh_module('decimal', fresh=['_decimal'])
 
@@ -876,16 +869,18 @@ class TestReduce:
         self.assertEqual(self.reduce(add, Squares(10)), 285)
         self.assertEqual(self.reduce(add, Squares(10), 0), 285)
         self.assertEqual(self.reduce(add, Squares(0), 0), 0)
-        self.assertRaises(TypeError, self.reduce)
-        self.assertRaises(TypeError, self.reduce, 42, 42)
-        self.assertRaises(TypeError, self.reduce, 42, 42, 42)
+        with torch._dynamo.error_on_graph_break(False):
+            self.assertRaises(TypeError, self.reduce)
+            self.assertRaises(TypeError, self.reduce, 42, 42)
+            self.assertRaises(TypeError, self.reduce, 42, 42, 42)
         self.assertEqual(self.reduce(42, "1"), "1") # func is never called with one item
         self.assertEqual(self.reduce(42, "", "1"), "1") # func is never called with one item
-        self.assertRaises(TypeError, self.reduce, 42, (42, 42))
-        self.assertRaises(TypeError, self.reduce, add, []) # arg 2 must not be empty sequence with no initial value
-        self.assertRaises(TypeError, self.reduce, add, "")
-        self.assertRaises(TypeError, self.reduce, add, ())
-        self.assertRaises(TypeError, self.reduce, add, object())
+        with torch._dynamo.error_on_graph_break(False):
+            self.assertRaises(TypeError, self.reduce, 42, (42, 42))
+            self.assertRaises(TypeError, self.reduce, add, []) # arg 2 must not be empty sequence with no initial value
+            self.assertRaises(TypeError, self.reduce, add, "")
+            self.assertRaises(TypeError, self.reduce, add, ())
+            self.assertRaises(TypeError, self.reduce, add, object())
 
         with torch._dynamo.error_on_graph_break(False):
             class TestFailingIter:
@@ -929,7 +924,10 @@ class TestReduce:
 @unittest.skipUnless(c_functools, 'requires the C _functools module')
 class TestReduceC(TestReduce, CPythonTestCase):
     if c_functools:
-        reduce = c_functools.reduce
+        if TEST_WITH_TORCHDYNAMO:
+            reduce = functools.reduce
+        else:
+            reduce = c_functools.reduce
 
 
 class TestReducePy(TestReduce, CPythonTestCase):
@@ -1034,7 +1032,10 @@ class TestCmpToKey:
 @unittest.skipUnless(c_functools, 'requires the C _functools module')
 class TestCmpToKeyC(TestCmpToKey, CPythonTestCase):
     if c_functools:
-        cmp_to_key = c_functools.cmp_to_key
+        if TEST_WITH_TORCHDYNAMO:
+            cmp_to_key = functools.cmp_to_key
+        else:
+            cmp_to_key = c_functools.cmp_to_key
 
     @support.cpython_only
     def test_disallow_instantiation(self):
