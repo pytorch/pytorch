@@ -299,10 +299,6 @@ size_t NCCLSymmetricMemory::get_offset() {
   return offset_;
 }
 
-std::string NCCLSymmetricMemory::get_group_name() {
-  return pai_->group_name_;
-}
-
 class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
  public:
   void* alloc(

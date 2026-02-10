@@ -1105,9 +1105,7 @@ class TestDecompStrategyPath(TestCase):
         elementwise sharding rules from the resulting OpStrategy.
         """
         try:
-            from torch.distributed.tensor._decompositions import (
-                DecompShardingStrategy,
-            )
+            from torch.distributed.tensor._decompositions import DecompShardingStrategy
         except ImportError:
             self.skipTest("_decompositions module not available")
         from torch.distributed.tensor._dtensor_spec import TensorMeta
@@ -1126,9 +1124,7 @@ class TestDecompStrategyPath(TestCase):
         spec = DTensorSpec(
             mesh=mesh,
             placements=(Shard(0),),
-            tensor_meta=TensorMeta(
-                shape=t.shape, stride=t.stride(), dtype=t.dtype
-            ),
+            tensor_meta=TensorMeta(shape=t.shape, stride=t.stride(), dtype=t.dtype),
         )
         op_schema = OpSchema(aten_softplus, (spec,), {})
         DecompShardingStrategy.ensure_schema_info(aten_softplus, propagator)
@@ -1156,25 +1152,22 @@ class TestDecompStrategyPath(TestCase):
         decomp fallback, and uses even tensor sizes for correct sharding.
         """
         try:
-            from torch.distributed.tensor._decompositions import (
-                DecompShardingStrategy,  # noqa: F401
+            from torch.distributed.tensor._decompositions import (  # noqa: F401
+                DecompShardingStrategy,
             )
         except ImportError:
             self.skipTest("_decompositions module not available")
 
+        import torch.testing._internal.common_methods_invocations as common_ops
         from torch.distributed.tensor._ops.strategy_validation import compare_operator
         from torch.testing._internal.opinfo import core as opinfo_core
-
-        import torch.testing._internal.common_methods_invocations as common_ops
 
         propagator = torch.distributed.tensor.DTensor._op_dispatcher.sharding_propagator
         aten_addcmul = torch.ops.aten.addcmul.default
 
         # Save and remove addcmul from strategy registries to force decomp path
         saved_strategy = propagator.op_strategy_funcs.pop(aten_addcmul, None)
-        saved_single = propagator.op_single_dim_strategy_funcs.pop(
-            aten_addcmul, None
-        )
+        saved_single = propagator.op_single_dim_strategy_funcs.pop(aten_addcmul, None)
 
         # Override sizes to ensure even sharding with world_size=2
         orig_sizes = (opinfo_core.L, opinfo_core.M, opinfo_core.S, opinfo_core.XS)
@@ -1216,9 +1209,7 @@ class TestDecompStrategyPath(TestCase):
             ) = orig_sizes
             # Re-init process group since compare_operator destroys it
             if not dist.is_initialized():
-                dist.init_process_group(
-                    "fake", rank=0, world_size=self.world_size
-                )
+                dist.init_process_group("fake", rank=0, world_size=self.world_size)
 
 
 class TestQuerySingleDimStrategyKwargs(TestCase):
