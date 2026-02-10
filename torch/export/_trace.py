@@ -87,6 +87,7 @@ from torch.export.dynamic_shapes import (
 from torch.export.exported_program import OutputKind
 from torch.fx._symbolic_trace import _ConstantAttributeType
 from torch.fx.experimental.proxy_tensor import (
+    get_proxy_mode,
     get_proxy_slot,
     make_fx,
     PreDispatchTorchFunctionMode,
@@ -1815,8 +1816,9 @@ def _export_to_aten_ir_make_fx(
                 """
                 out = original_getattr(self, attr)
                 if attr in attrs_to_proxy:
-                    if torch._C._is_torch_function_mode_enabled():
-                        if isinstance(out, torch.Tensor):
+                    if isinstance(out, torch.Tensor):
+                        tracer = None
+                        if torch._C._is_torch_function_mode_enabled():
                             # When we get here there is no guarantee that we will hit the
                             # PreDispatchTorchFunctionMode, so we manually peak into the torch
                             # function mode list and tweak the PreDispatchTorchFunctionMode.
@@ -1830,16 +1832,28 @@ def _export_to_aten_ir_make_fx(
                             for mode in torch_function_mode_stack:
                                 if isinstance(mode, PreDispatchTorchFunctionMode):
                                     tracer = mode.tracer
-                                    proxy = get_proxy_slot(self, tracer).proxy
-                                    inner_proxy = tracer.create_proxy(
-                                        "call_function",
-                                        torch.ops.export.access_subclass_inner_tensor.default,
-                                        (proxy, attr),
-                                        {},
-                                    )
-                                    track_tensor_tree(
-                                        out, inner_proxy, constant=None, tracer=tracer
-                                    )
+                                    break
+
+                        # When this is called from within a subclass's __torch_function__,
+                        # PreDispatchTorchFunctionMode has been temporarily popped from the
+                        # torch function mode stack. Fall back to get_proxy_mode() which
+                        # accesses ProxyTorchDispatchMode via the dispatch mode registry.
+                        if tracer is None:
+                            proxy_mode = get_proxy_mode()
+                            if proxy_mode is not None:
+                                tracer = proxy_mode.tracer
+
+                        if tracer is not None:
+                            proxy = get_proxy_slot(self, tracer).proxy
+                            inner_proxy = tracer.create_proxy(
+                                "call_function",
+                                torch.ops.export.access_subclass_inner_tensor.default,
+                                (proxy, attr),
+                                {},
+                            )
+                            track_tensor_tree(
+                                out, inner_proxy, constant=None, tracer=tracer
+                            )
                 return out
 
             @contextmanager
@@ -1868,6 +1882,11 @@ def _export_to_aten_ir_make_fx(
                             instance = subclass_types_to_instances[subclass_type][0]
                             # Query subclass specific attrs
                             attrs_to_proxy = set(dir(instance)) - set(dir(torch.Tensor))
+                            # Also include inner tensor attrs from __tensor_flatten__,
+                            # which may shadow existing torch.Tensor attributes.
+                            if hasattr(instance, "__tensor_flatten__"):
+                                inner_keys, _ = instance.__tensor_flatten__()
+                                attrs_to_proxy.update(inner_keys)
                             tensor_type_to_old_getattribute[subclass_type] = (
                                 subclass_type.__getattribute__,  # type: ignore[attr-defined]
                                 attrs_to_proxy,
