@@ -5,6 +5,7 @@ import itertools
 import unittest
 
 import torch
+from torch.distributed._local_tensor import LocalTensorMode
 from torch.distributed.tensor import (
     DeviceMesh,
     distribute_tensor,
@@ -19,7 +20,6 @@ from torch.distributed.tensor._sharding_prop import ShardingPropagator
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import MI200_ARCH, run_tests, skipIfRocmArch
-from torch.distributed._local_tensor import LocalTensorMode
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorConverter,
@@ -1034,9 +1034,7 @@ class DistBucketizeTest(LocalDTensorTestBase):
 
             for shard_dim in range(2):
                 dist_input = distribute_tensor(input_tensor, mesh, [Shard(shard_dim)])
-                dist_boundaries = distribute_tensor(
-                    boundaries, mesh, [Replicate()]
-                )
+                dist_boundaries = distribute_tensor(boundaries, mesh, [Replicate()])
                 result = torch.bucketize(dist_input, dist_boundaries)
 
                 self.assertTrue(result.placements[0].is_shard(shard_dim))
