@@ -1420,6 +1420,28 @@ def _make_node_magic(method, func):
                     self._optimized_summation,
                     other._optimized_summation,
                 )
+            elif method in ("eq", "ne", "ge", "gt", "le", "lt"):
+                import sympy
+
+                # Optimization: when one side is optimized summation or single symbol
+                # and other is constant, use evaluate=False to skip expensive relational evaluation
+                lhs_is_simple = self._optimized_summation or self.expr.is_symbol
+                rhs_is_simple = other._optimized_summation or other.expr.is_symbol
+                if (lhs_is_simple and other.expr.is_number) or (
+                    rhs_is_simple and self.expr.is_number
+                ):
+                    rel_class = {
+                        "eq": sympy.Eq,
+                        "ne": sympy.Ne,
+                        "ge": sympy.Ge,
+                        "gt": sympy.Gt,
+                        "le": sympy.Le,
+                        "lt": sympy.Lt,
+                    }[method]
+                    out = rel_class(self.expr, other.expr, evaluate=False)
+                else:
+                    out = func(self.expr, other.expr)
+
             else:
                 # TODO: consider constant prop here
                 out = func(self.expr, other.expr)
