@@ -399,6 +399,68 @@ class CommonRulesTest(DTensorContinuousTestBase):
         self.assertEqual(schema_suggestion.args_schema[0].dim_map, mat1)
         self.assertEqual(schema_suggestion.args_schema[1].dim_map, mat1)
 
+    def test_mul_replicate_partial_linearity(self):
+        """Test that mul supports R, P(sum) -> P(sum) linearity.
+
+        For multiplication: a * (b1 + b2) = a*b1 + a*b2, so if one input is
+        replicated and the other is partial sum, the output can be partial sum.
+        This tests both (P(sum), R) and (R, P(sum)) orderings.
+        """
+        from torch.distributed.tensor._op_schema import OpSpec, OpStrategy
+        from torch.distributed.tensor._ops._pointwise_ops import (
+            linear_pointwise_strategy,
+        )
+        from torch.distributed.tensor.placement_types import Partial, Replicate
+
+        mesh = DeviceMesh(self.device_type(), torch.arange(self.world_size))
+        mul_call = aten.mul.Tensor
+
+        tensor_meta = self._gen_tensor_meta(torch.Size([4, 3]))
+
+        # Create input strategies with both Replicate and Partial(sum) options
+        replicate_spec = DTensorSpec(
+            mesh=mesh, placements=(Replicate(),), tensor_meta=tensor_meta
+        )
+        partial_sum_spec = DTensorSpec(
+            mesh=mesh, placements=(Partial("sum"),), tensor_meta=tensor_meta
+        )
+
+        # Build input strategies that contain both options
+        input_strategy = OpStrategy(
+            [
+                OpSpec(output_specs=replicate_spec, input_specs=()),
+                OpSpec(output_specs=partial_sum_spec, input_specs=()),
+            ]
+        )
+
+        op_schema = OpSchema(mul_call, (input_strategy, input_strategy), {})
+        output_strategy = linear_pointwise_strategy(op_schema)
+
+        # Collect all generated (input1, input2) -> output combinations with Partial
+        partial_combos = set()
+        for spec in output_strategy.strategies:
+            output_plc = spec.output_spec.placements[0]
+            if len(spec.input_specs) >= 2:
+                input1_plc = spec.input_specs[0].placements[0]
+                input2_plc = spec.input_specs[1].placements[0]
+                if isinstance(output_plc, Partial):
+                    partial_combos.add(
+                        (str(input1_plc), str(input2_plc), str(output_plc))
+                    )
+
+        # Should have both orderings for multiplicative linearity:
+        # (P(sum), R) -> P(sum) and (R, P(sum)) -> P(sum)
+        self.assertIn(
+            ("P(sum)", "R", "P(sum)"),
+            partial_combos,
+            f"Missing (P(sum), R) -> P(sum), got: {partial_combos}",
+        )
+        self.assertIn(
+            ("R", "P(sum)", "P(sum)"),
+            partial_combos,
+            f"Missing (R, P(sum)) -> P(sum), got: {partial_combos}",
+        )
+
 
 if __name__ == "__main__":
     run_tests()
