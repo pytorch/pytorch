@@ -48,6 +48,11 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 sym_node_log = torch._logging.getArtifactLogger(__name__, "sym_node")
 
+# Sentinel value to indicate "don't compute hint" vs actual None
+# When passed as hint to SymNode, it means we already know hint is unavailable
+# and should not waste time calling compute_hint()
+_NO_HINT = object()
+
 
 __all__ = ["SymNode", "method_to_operator", "magic_methods", "DynamicInt"]
 
@@ -140,7 +145,10 @@ class SymNode:
                 hint = self.pytype(hint) if not isinstance(hint, SymTypes) else hint
             return hint
 
-        if hint is not None:
+        if hint is _NO_HINT:
+            # Caller explicitly indicates hint is unavailable, don't compute
+            hint = None
+        elif hint is not None:
             if not (type(hint) is pytype or type(hint) is _to_symtype(pytype)):
                 raise AssertionError(
                     "Cannot create SymNode of type "
@@ -1384,7 +1392,7 @@ def _make_node_magic(method, func):
 
         op = method_to_operator(method)
 
-        out_hint = None
+        out_hint: object = _NO_HINT
         if self.hint is not None and other.hint is not None:
             out_hint = op(self.hint, other.hint)
 
@@ -1468,6 +1476,7 @@ def _make_node_magic(method, func):
 
         if (
             pytype is not None
+            and out_hint is not _NO_HINT
             and out_hint is not None
             and not isinstance(out_hint, SymTypes)
         ):
@@ -1510,7 +1519,7 @@ def _make_node_magic(method, func):
             log.warning("failed to eval %s(%s)", method, expr)
             raise
         sym_node_log.debug("%s %s -> %s", func, expr, out)
-        out_hint = None
+        out_hint: object = _NO_HINT
         if self.hint is not None:
             out_hint = op(self.hint)
         pytype: type
