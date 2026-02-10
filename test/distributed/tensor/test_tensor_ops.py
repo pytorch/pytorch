@@ -988,6 +988,49 @@ class DistTensorOpsTest(DTensorTestBase):
                     self.assertEqual(x.full_tensor(), y)
 
 
+class DistBucketizeTest(DTensorTestBase):
+    @with_comms
+    def test_bucketize_partial_input(self):
+        # Bucketize returns indices, which cannot be combined with sum/avg
+        # reductions. Partial inputs should be converted to Replicate.
+        mesh = self.build_device_mesh()
+        boundaries = torch.tensor([1.0, 3.0, 5.0, 7.0], device=self.device_type)
+        input_tensor = torch.tensor(
+            [[2.0, 4.0, 6.0, 8.0], [0.0, 1.0, 5.0, 9.0]],
+            device=self.device_type,
+        )
+        expected = torch.bucketize(input_tensor, boundaries)
+
+        for reduce_op in ("sum", "avg", "max"):
+            partial_input = DTensor.from_local(input_tensor, mesh, [Partial(reduce_op)])
+            dist_boundaries = distribute_tensor(boundaries, mesh, [Replicate()])
+            result = torch.bucketize(partial_input, dist_boundaries)
+
+            # Output must be Replicate, not Partial
+            self.assertTrue(
+                result.placements[0].is_replicate(),
+                f"Expected Replicate output but got {result.placements[0]} "
+                f"for Partial({reduce_op}) input",
+            )
+            self.assertEqual(result.to_local(), expected)
+
+    @with_comms
+    def test_bucketize_sharded_input(self):
+        # Sharded inputs should propagate sharding to output normally.
+        mesh = self.build_device_mesh()
+        boundaries = torch.tensor([1.0, 3.0, 5.0, 7.0], device=self.device_type)
+        input_tensor = torch.randn(8, 4, device=self.device_type)
+        expected = torch.bucketize(input_tensor, boundaries)
+
+        for shard_dim in range(2):
+            dist_input = distribute_tensor(input_tensor, mesh, [Shard(shard_dim)])
+            dist_boundaries = distribute_tensor(boundaries, mesh, [Replicate()])
+            result = torch.bucketize(dist_input, dist_boundaries)
+
+            self.assertTrue(result.placements[0].is_shard(shard_dim))
+            self.assertEqual(result.full_tensor(), expected)
+
+
 class DistArgMaxArgMinTest(DTensorTestBase):
     _ops = [torch.argmax, torch.argmin]
     sample = [
