@@ -990,7 +990,6 @@ inductor_skip_exact_stride = {
     "linalg.matrix_norm",
     "ormqr",
     "rot90",
-    "sum",
     "tensordot",
 }
 
