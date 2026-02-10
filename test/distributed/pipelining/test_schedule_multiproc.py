@@ -1,10 +1,17 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 import copy
+import gc
 import logging
 from dataclasses import dataclass
 
-from model_registry import ModelWithKwargs, MultiMLP, MultiMLPKwargs, MultiMLPWithDw
+from model_registry import (
+    MLPModule,
+    ModelWithKwargs,
+    MultiMLP,
+    MultiMLPKwargs,
+    MultiMLPWithDw,
+)
 from schedule_registry import (
     ScheduleUnbalanced,
     ScheduleVShaped,
@@ -594,8 +601,11 @@ class ScheduleTest(MultiProcContinuousTest):
             ScheduleInterleavedZeroBubble,
         ],
     )
+    @parametrize("enable_activation_offload", [True, False])
     @skip_if_lt_x_gpu(4)
-    def test_grad_with_manual_interleaved(self, ScheduleClass):
+    def test_grad_with_manual_interleaved(
+        self, ScheduleClass, enable_activation_offload
+    ):
         stages_per_rank = 2
         n_stages = stages_per_rank * self.world_size
         mod, ref_mod, x, target, loss_fn = setup_models_and_data(
@@ -619,7 +629,11 @@ class ScheduleTest(MultiProcContinuousTest):
 
         # Create schedule
         schedule = ScheduleClass(
-            stages, num_microbatches, loss_fn=loss_fn, scale_grads=False
+            stages,
+            num_microbatches,
+            loss_fn=loss_fn,
+            scale_grads=False,
+            enable_activation_offload=enable_activation_offload,
         )
 
         # Run pipeline with tensor leak checking
@@ -652,6 +666,66 @@ class ScheduleTest(MultiProcContinuousTest):
         # since gradients are small
         check_gradients(
             self.config, stage_modules, ref_mod, submod_names, rtol=5e-3, atol=5e-3
+        )
+
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+    )
+    @skip_if_lt_x_gpu(4)
+    def test_activation_offload_memory(self):
+        """Test that ActivationOffloadHooks matches save_on_cpu memory usage."""
+        from torch.distributed.pipelining.stage import ActivationOffloadHooks
+
+        d_hid = 1024
+        batch_size = 1024
+        n_blocks = 10
+
+        model = torch.nn.Sequential(*[MLPModule(d_hid) for _ in range(n_blocks)]).to(
+            self.device
+        )
+        x = torch.randn(batch_size, d_hid, device=self.device)
+
+        def reset_memory():
+            torch.cuda.synchronize(self.device)
+            torch.cuda.reset_peak_memory_stats(self.device)
+            torch.cuda.empty_cache()
+            gc.collect()
+            torch.cuda.synchronize(self.device)
+
+        def get_peak_memory():
+            torch.cuda.synchronize(self.device)
+            return torch.cuda.max_memory_allocated(self.device)
+
+        # Measure save_on_cpu peak memory
+        for p in model.parameters():
+            p.grad = None
+        reset_memory()
+        with torch.autograd.graph.save_on_cpu(pin_memory=True):
+            y = model(x)
+        y.sum().backward()
+        peak_save_on_cpu = get_peak_memory()
+        del y
+
+        # Measure our hooks peak memory (sync fallback, no prefetch)
+        for p in model.parameters():
+            p.grad = None
+        reset_memory()
+        prefetch_stream = torch.cuda.Stream(self.device)
+        hooks = ActivationOffloadHooks(prefetch_stream)
+        with hooks:
+            y = model(x)
+        y.sum().backward()
+        peak_our_hooks = get_peak_memory()
+        hooks.cleanup()
+        del y
+
+        self.assertLessEqual(
+            peak_our_hooks,
+            peak_save_on_cpu,
+            f"ActivationOffloadHooks should match save_on_cpu memory. "
+            f"save_on_cpu: {peak_save_on_cpu / 1e6:.1f} MB, "
+            f"our hooks: {peak_our_hooks / 1e6:.1f} MB",
         )
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])

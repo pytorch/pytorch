@@ -21,6 +21,7 @@ from torch.distributed.pipelining import (
 from torch.distributed.pipelining._utils import generate_stage_to_rank_mapping
 from torch.distributed.pipelining.schedules import (
     _Action,
+    _add_activation_prefetch,
     _add_reduce_grad,
     _add_send_recv,
     _add_unshard_reshard,
@@ -35,6 +36,7 @@ from torch.distributed.pipelining.schedules import (
     get_schedule_class,
     I,
     PipelineScheduleSingle,
+    PREFETCH,
     RECV_F,
     RESHARD,
     SEND_B,
@@ -521,6 +523,7 @@ class TestScheduleLowering(TestCase):
             ("3RESHARD", _Action(3, RESHARD, None)),
             ("2SEND_B2", _Action(2, SEND_B, 2)),
             ("1RECV_F1", _Action(1, RECV_F, 1)),
+            ("0PREFETCH2", _Action(0, PREFETCH, 2)),
         ],
     )
     def test_action_parse(self, action_str_and_ref):
@@ -604,6 +607,68 @@ class TestScheduleLowering(TestCase):
         expected_comms_sch = self._parse_actions(test_info["comms"])
 
         comms_sch = _add_reduce_grad(compute_sch, 2)
+        for expected, actual in zip(expected_comms_sch, comms_sch, strict=True):
+            self.assertEqual(
+                expected,
+                actual,
+                (
+                    f"Mismatch: expected action {expected} but found {actual}."
+                    f"\nWhole Schedule: {comms_sch}"
+                ),
+            )
+
+    @parametrize(
+        "test_info",
+        [
+            {
+                "compute": ["0F0", "0F1", "0B0", "0B1"],
+                "comms": [
+                    "0F0",
+                    "0PREFETCH0",
+                    "0F1",
+                    "0PREFETCH1",
+                    "0B0",
+                    "0B1",
+                ],
+            },
+            {
+                "compute": ["0F0", "0F1", "1F0", "1F1", "1B0", "1B1", "0B0", "0B1"],
+                "comms": [
+                    "0F0",
+                    "0F1",
+                    "1F0",
+                    "1PREFETCH0",
+                    "1F1",
+                    "1PREFETCH1",
+                    "1B0",
+                    "0PREFETCH0",
+                    "1B1",
+                    "0PREFETCH1",
+                    "0B0",
+                    "0B1",
+                ],
+            },
+            {
+                "compute": ["0F0", "0F1", "0I0", "0W0", "0I1", "0W1"],
+                "comms": [
+                    "0F0",
+                    "0PREFETCH0",
+                    "0F1",
+                    "0I0",
+                    "0PREFETCH1",
+                    "0W0",
+                    "0I1",
+                    "0W1",
+                ],
+            },
+        ],
+    )
+    def test_activation_prefetch(self, test_info):
+        """Test the lowering pass that inserts PREFETCH actions before backward ops."""
+        compute_sch = self._parse_actions(test_info["compute"])
+        expected_comms_sch = self._parse_actions(test_info["comms"])
+
+        comms_sch = _add_activation_prefetch(compute_sch)
         for expected, actual in zip(expected_comms_sch, comms_sch, strict=True):
             self.assertEqual(
                 expected,
