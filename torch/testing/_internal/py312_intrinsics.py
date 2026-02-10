@@ -5,7 +5,7 @@ import torch
 # CALL_INTRINSIC_2 7. The problem is those intrinsics only exists on Python
 # 3.12+ and the Python code to produce them is not backwards compatible with
 # previous versions.
-class Foo:
+class TestPy312Intrinsics:
     @classmethod
     def _default_update(cls):
         def f[T](a:'This is a new annotation'):
@@ -20,7 +20,7 @@ class Foo:
     def test_default_update(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(x):
-            wrapper, f = Foo._default_update()
+            wrapper, f = TestPy312Intrinsics._default_update()
             return x + 1
         x = torch.randn(2)
         fn(x)
