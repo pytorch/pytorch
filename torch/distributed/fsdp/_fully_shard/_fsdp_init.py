@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from typing import Any
 
     from ._fsdp_api import MixedPrecisionPolicy, OffloadPolicy
+    from ._fsdp_common import ShardPlacementFnResult
     from ._fsdp_state import FSDPState
 
 
@@ -357,7 +358,7 @@ def _init_param_group(
     mesh_info: DataParallelMeshInfo,
     post_forward_mesh_info: FSDPMeshInfo | None,
     device: torch.device,
-    shard_placement_fn: "Callable[[nn.Parameter], Any] | None",
+    shard_placement_fn: "Callable[[nn.Parameter], ShardPlacementFnResult] | None",
     mp_policy: "MixedPrecisionPolicy",
     offload_policy: "OffloadPolicy",
     reshard_after_forward: bool | int | None = None,
@@ -407,7 +408,7 @@ def _init_param_group(
     ] = {}
     for param in params:
         param_mesh_info = resolve_shard_placement(
-            shard_placement_fn(param) if shard_placement_fn else None,
+            shard_placement_fn(param),
             mesh_info,
         ).mesh_info
         shard_pg = param_mesh_info.shard_process_group
@@ -429,11 +430,13 @@ def _init_param_group(
 
     # Create a FSDPParamGroup per process group
     for group_mesh_info, group_params in pg_to_group.values():
-        group_post_forward = post_forward_mesh_info
-        if reshard_after_forward is not None and group_mesh_info is not mesh_info:
+        if group_mesh_info is not mesh_info:
+            assert reshard_after_forward is not None
             group_post_forward = _get_post_forward_mesh_info(
                 reshard_after_forward, group_mesh_info
             )
+        else:
+            group_post_forward = post_forward_mesh_info
         state._fsdp_param_groups.append(
             FSDPParamGroup(
                 group_params,

@@ -1360,7 +1360,7 @@ class TestFullyShardNDTraining(FSDPTest):
         dp_shard_size = dp_size // dp_replicate
         if dp_shard_size < ep_degree:
             return None
-        efsdp = dp_shard_size // ep_degree
+        efsdp_size = dp_shard_size // ep_degree
 
         # Build tp_mesh and dp_mesh
         if dp_replicate > 1 and tp_degree > 1:
@@ -1399,9 +1399,11 @@ class TestFullyShardNDTraining(FSDPTest):
         if dp_replicate > 1:
             dp_shard_mesh = dp_mesh["dp_shard"]
             sparse_mesh = dp_shard_mesh._unflatten(
-                0, (efsdp, ep_degree), ("efsdp", "ep")
+                0, (efsdp_size, ep_degree), ("efsdp", "ep")
             )
-            full_sparse = dp_mesh._unflatten(1, (efsdp, ep_degree), ("efsdp", "ep"))
+            full_sparse = dp_mesh._unflatten(
+                1, (efsdp_size, ep_degree), ("efsdp", "ep")
+            )
             expert_hsdp_mesh = full_sparse["dp_replicate", "efsdp"]
             efsdp_mesh_info = HSDPMeshInfo(
                 mesh=expert_hsdp_mesh, shard_mesh_dim=1, replicate_mesh_dim=0
@@ -1410,7 +1412,9 @@ class TestFullyShardNDTraining(FSDPTest):
                 mesh=dp_mesh, shard_mesh_dim=1, replicate_mesh_dim=0
             )
         else:
-            sparse_mesh = dp_mesh._unflatten(0, (efsdp, ep_degree), ("efsdp", "ep"))
+            sparse_mesh = dp_mesh._unflatten(
+                0, (efsdp_size, ep_degree), ("efsdp", "ep")
+            )
             efsdp_mesh_info = FSDPMeshInfo(mesh=sparse_mesh["efsdp"], shard_mesh_dim=0)
             dp_mesh_info = FSDPMeshInfo(mesh=dp_mesh, shard_mesh_dim=0)
 
