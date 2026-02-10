@@ -416,6 +416,7 @@ class TritonTemplateKernel(TritonKernel):
         workspace_arg: Optional[WorkspaceArg] = None,
         prologue_loads_all_inputs=False,
         hint_override: Optional[int] = None,
+        triton_meta: Optional[dict[str, object]] = None,
     ) -> None:
         if tma_store:
             pass
@@ -485,7 +486,7 @@ class TritonTemplateKernel(TritonKernel):
         # pyrefly: ignore [invalid-type-var]
         self.epilogue_fn = epilogue_fn
         self.render_hooks = {}  # type: ignore[var-annotated]
-        self.triton_meta: Optional[dict[str, object]] = None
+        self.triton_meta: Optional[dict[str, object]] = triton_meta
         # For Templated Attention this can be a list of ir.Subgraph
         self.subgraphs: Optional[list[ir.ComputedBuffer]] = subgraphs
 
@@ -683,7 +684,10 @@ class TritonTemplateKernel(TritonKernel):
             if v := self.meta.get(k, None):
                 triton_meta[k] = v
 
-        self.triton_meta = triton_meta
+        if self.triton_meta is None:
+            self.triton_meta = triton_meta
+        else:
+            self.triton_meta.update(triton_meta)
 
         inductor_meta = {
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
@@ -702,7 +706,7 @@ class TritonTemplateKernel(TritonKernel):
         template_args = f"""
             num_stages={self.num_stages},
             num_warps={self.num_warps},
-            triton_meta={triton_meta!r},
+            triton_meta={self.triton_meta!r},
             inductor_meta={inductor_meta!r},
         """
 
@@ -1627,6 +1631,7 @@ class GeneratedCodeCache:
         num_buffers_warp_spec: int,
         kwargs: dict[str, Any],
         hint_override: Optional[int] = None,
+        triton_meta: Optional[dict[str, Any]] = None,
     ) -> Optional[str]:
         def layout_key(layout: ir.Layout) -> str:
             assert not isinstance(layout, ir.FlexibleLayout)
@@ -1680,6 +1685,7 @@ class GeneratedCodeCache:
                 "transpose_discontiguous_tensor_descriptors_override": transpose_discontiguous_tensor_descriptors_override,
                 "kwargs": kwargs,
                 "hint_override": hint_override,
+                "triton_meta": triton_meta,
             }
         )
 
@@ -1794,6 +1800,7 @@ class TritonTemplate(KernelTemplate):
         hint_override: Optional[int] = None,
         tma_store: bool = False,
         transpose_discontiguous_tensor_descriptors_override: Optional[bool] = None,
+        triton_meta: Optional[dict[str, Any]] = None,
     ) -> Optional[GenerateAndLoadResult]:
         """Generate the python code and load it into the current process"""
         caching_enabled = (
@@ -1820,6 +1827,8 @@ class TritonTemplate(KernelTemplate):
                 num_consumer_groups,
                 num_buffers_warp_spec,
                 kwargs,
+                hint_override,
+                triton_meta,
             )
 
         assert self.template, "requires jinja2"
@@ -1875,6 +1884,7 @@ class TritonTemplate(KernelTemplate):
                 hint_override=hint_override,
                 tma_store=tma_store,
                 transpose_discontiguous_tensor_descriptors_override=transpose_discontiguous_tensor_descriptors_override,
+                triton_meta=triton_meta,
                 **kernel_options,
             )
 
@@ -1996,6 +2006,7 @@ class TritonTemplate(KernelTemplate):
         hint_override: Optional[int] = None,
         tma_store: bool = False,
         transpose_discontiguous_tensor_descriptors_override: Optional[bool] = None,
+        triton_meta: Optional[dict[str, Any]] = None,
         **kwargs,
     ):
         """This function generates a TritonTemplateCaller
@@ -2043,6 +2054,7 @@ class TritonTemplate(KernelTemplate):
             hint_override=hint_override,
             tma_store=tma_store,
             transpose_discontiguous_tensor_descriptors_override=transpose_discontiguous_tensor_descriptors_override,
+            triton_meta=triton_meta,
         )
 
         # May happen as result of dev by 0.
@@ -2118,6 +2130,7 @@ class TritonTemplate(KernelTemplate):
                 hint_override=hint_override,
                 tma_store=tma_store,
                 transpose_discontiguous_tensor_descriptors_override=transpose_discontiguous_tensor_descriptors_override,
+                triton_meta=triton_meta,
                 **options,
             )
             render = functools.partial(
