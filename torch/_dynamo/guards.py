@@ -2207,7 +2207,31 @@ class GuardBuilder(GuardBuilderBase):
 
     def TENSOR_SUBCLASS_METADATA_MATCH(self, guard: Guard) -> None:
         value = self.get(guard)
-        original_metadata = deepcopy(self.get(guard).__tensor_flatten__()[1])
+        
+        # Try normal deepcopy first. If it fails (e.g., due to tensors like FakeTensor,
+        # FunctionalTensor, ProxyTensor that can't have data_ptr() accessed), fall back
+        # to a shallow recursive copy that handles containers but leaves tensors as-is.
+        try:
+            original_metadata = deepcopy(self.get(guard).__tensor_flatten__()[1])
+        except RuntimeError:
+            # Deepcopy failed, likely due to tensors that don't support data_ptr().
+            # Do a manual shallow copy of the metadata structure.
+            def shallow_copy_metadata(obj: Any) -> Any:
+                if isinstance(obj, torch.Tensor):
+                    # Don't try to copy tensors that might fail - metadata tensors
+                    # are typically not mutated so sharing the reference is safe
+                    return obj
+                elif isinstance(obj, dict):
+                    return {shallow_copy_metadata(k): shallow_copy_metadata(v) for k, v in obj.items()}
+                elif isinstance(obj, list):
+                    return [shallow_copy_metadata(item) for item in obj]
+                elif isinstance(obj, tuple):
+                    return tuple(shallow_copy_metadata(item) for item in obj)
+                else:
+                    # For primitive types, just return as-is
+                    return obj
+            
+            original_metadata = shallow_copy_metadata(self.get(guard).__tensor_flatten__()[1])
         if hasattr(value, "__metadata_guard__"):
             verify_guard_fn_signature(value)
             cls = type(value)
