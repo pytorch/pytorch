@@ -1828,20 +1828,17 @@ class DunderDictVariable(ConstDictVariable):
 
     def __init__(
         self,
-        vt: "variables.NestedUserFunctionVariable",
+        vt: VariableTracker,
         side_effects: "SideEffects",
         **kwargs: Any,
     ) -> None:
         super().__init__({}, **kwargs)
         self.items = SideEffectsProxyDict(vt, side_effects)
 
-    # Is it bad to implement dunder methods for VariableTrackers?
-    def __getitem__(self, name: str) -> VariableTracker:  #
+    def getitem(self, name: str) -> VariableTracker:
         return self.items[name]
 
-    def __contains__(
-        self, name: str
-    ) -> bool:  # pyrefly: ignore[bad-param-name-override]
+    def contains(self, name: str) -> bool:
         return name in self.items
 
     def getitem_or_default(
