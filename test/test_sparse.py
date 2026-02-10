@@ -270,7 +270,8 @@ class TestSparse(TestSparseBase):
         Test if a CPU tensor is uncoalesced.  This is used to ensure
         correctness of the uncoalesced tensor generation algorithm.
         """
-        assert not x.is_coalesced()
+        if x.is_coalesced():
+            raise AssertionError("expected tensor to be uncoalesced")
         existing_indices = set()
         indices = x._indices()
         for i in range(x._nnz()):
@@ -2134,7 +2135,8 @@ class TestSparse(TestSparseBase):
         indices = self.index_tensor([[1, 2], [0, 2]], device=device)
         values = torch.tensor([1.], dtype=dtype, device=device).expand(2, 3, 4, 5)
         x = self.sparse_tensor(indices, values, dtype=dtype, device=device)
-        assert not x._values().is_contiguous()
+        if x._values().is_contiguous():
+            raise AssertionError("expected values to be non-contiguous")
         y = x + x
         expected = self.safeToDense(x) + self.safeToDense(x)
         self.assertEqual(self.safeToDense(y), expected)
@@ -3702,8 +3704,10 @@ class TestSparse(TestSparseBase):
                 # check softmax Jacobian definition for dense input
                 x1 = to_dense(x, fill_value=float('-inf'))
                 J = softmax_jacobian_analytic(x1, dim)
-                assert J.shape[0] == x.shape[dim]
-                assert J.shape[dim + 1] == x.shape[dim]
+                if J.shape[0] != x.shape[dim]:
+                    raise AssertionError(f"J.shape[0] mismatch: {J.shape[0]} != {x.shape[dim]}")
+                if J.shape[dim + 1] != x.shape[dim]:
+                    raise AssertionError(f"J.shape[{dim + 1}] mismatch: {J.shape[dim + 1]} != {x.shape[dim]}")
 
                 # check softmax Jacobian from autograd, dense input
                 J2 = softmax_jacobian_autograd(x1, dim)
@@ -4315,12 +4319,15 @@ class TestSparseUnaryUfuncs(TestCase):
     @_sparse_unary_ops
     def test_sparse_consistency(self, device, dtype, op):
         sample = first_sample(self, op.sample_inputs(device, dtype))
-        assert isinstance(sample.input, torch.Tensor)
+        if not isinstance(sample.input, torch.Tensor):
+            raise AssertionError(f"expected sample.input to be Tensor, got {type(sample.input)}")
 
         expected = op(sample.input, *sample.args, **sample.kwargs)
-        assert torch.is_tensor(expected)
+        if not torch.is_tensor(expected):
+            raise AssertionError(f"expected tensor, got {type(expected)}")
         output = op(sample.input.to_sparse(), *sample.args, **sample.kwargs)
-        assert torch.is_tensor(output)
+        if not torch.is_tensor(output):
+            raise AssertionError(f"expected tensor, got {type(output)}")
         self.assertEqual(_sparse_to_dense(output), expected)
 
     @_sparse_unary_ops
@@ -4927,7 +4934,8 @@ class TestSparseAny(TestCase):
                                         f'layout={layout}, is_hybrid={is_hybrid}, is_batch={is_batch},'
                                         f' nontrivial_blocksize={nontrivial_blocksize},'
                                         f' contiguous_indices{contiguous_indices}, contiguous_values={contiguous_values}')
-        assert not untested_combinations, untested_combinations
+        if untested_combinations:
+            raise AssertionError(f"untested combinations: {untested_combinations}")
 
     @all_sparse_layouts('layout', include_strided=False)
     def test_constructor_autograd(self, device, layout):
@@ -5074,7 +5082,7 @@ class TestSparseAny(TestCase):
                 elif to_layout is torch.sparse_bsc:
                     return x.to_sparse_bsc(blocksize)
                 else:
-                    assert 0  # unreachable
+                    raise AssertionError(f"unreachable: to_layout={to_layout}")
 
             # TODO: The following exception cases all correspond to
             # not implemented conversions
@@ -5148,7 +5156,7 @@ class TestSparseAny(TestCase):
                     self.assertEqual(r._indices().dtype, torch.int64)
                     self.assertEqual(r._values().dtype, dtype)
                 else:
-                    assert 0  # unreachable
+                    raise AssertionError("unreachable")
 
                 # Finally, we'll test tensor equality:
                 self.assertEqual(r, t)
@@ -5256,7 +5264,8 @@ class TestSparseAny(TestCase):
         inp = torch.tensor([[1, 2], [3, 4]], device=device).to_sparse(
             layout=layout,
             blocksize=(1, 1) if layout in {torch.sparse_bsr, torch.sparse_bsc} else None)
-        assert inp.layout is layout
+        if inp.layout is not layout:
+            raise AssertionError(f"expected layout {layout}, got {inp.layout}")
 
         expected_behaviour = dict(
             # <mth name> = (<supported layouts>, <exception message on other layouts>)
@@ -5580,7 +5589,7 @@ class TestSparseAny(TestCase):
             elif layout is torch.strided:
                 pass
             else:
-                assert 0  # unreachable
+                raise AssertionError(f"unreachable: layout={layout}")
             self.assertTrue(t.is_pinned())
 
     @unittest.skipIf(not torch.cuda.is_available(), 'requires cuda')
@@ -5629,7 +5638,7 @@ class TestSparseAny(TestCase):
             elif layout is torch.strided:
                 pass
             else:
-                assert 0  # unreachable
+                raise AssertionError(f"unreachable: layout={layout}")
 
 
     @unittest.skipIf(not torch.cuda.is_available(), 'requires cuda')
@@ -5659,7 +5668,7 @@ class TestSparseAny(TestCase):
             elif layout is torch.strided:
                 pass
             else:
-                assert 0  # unreachable
+                raise AssertionError(f"unreachable: layout={layout}")
             self.assertTrue(t.is_pinned())
 
     @unittest.skipIf(not torch.cuda.is_available(), 'requires cuda')
