@@ -155,6 +155,38 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
     outSplitSizes,                                                             \
     globalRankStart,                                                           \
     globalRankStride,                                                          \
+    worldSize)                                                                 \
+    RECORD_PARAM_COMMS_DATA_WITH_ASYNC_OP(                                     \
+    seq,                                                                       \
+    pgName,                                                                    \
+    InputTensors,                                                              \
+    OutputTensors,                                                             \
+    rank,                                                                      \
+    collName,                                                                  \
+    inNelems,                                                                  \
+    outNelems,                                                                 \
+    dType,                                                                     \
+    inSplitSizes,                                                              \
+    outSplitSizes,                                                             \
+    globalRankStart,                                                           \
+    globalRankStride,                                                          \
+    worldSize,                                                                 \
+    True);
+
+#define RECORD_PARAM_COMMS_DATA_WITH_ASYNC_OP(                                 \
+    seq,                                                                       \
+    pgName,                                                                    \
+    InputTensors,                                                              \
+    OutputTensors,                                                             \
+    rank,                                                                      \
+    collName,                                                                  \
+    inNelems,                                                                  \
+    outNelems,                                                                 \
+    dType,                                                                     \
+    inSplitSizes,                                                              \
+    outSplitSizes,                                                             \
+    globalRankStart,                                                           \
+    globalRankStride,                                                          \
     worldSize,                                                                 \
     isAsyncOp)                                                                 \
   auto paramCommsInfo = std::make_shared<torch::ParamCommsDebugInfo>(          \
