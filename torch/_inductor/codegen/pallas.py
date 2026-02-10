@@ -2775,7 +2775,7 @@ import torch
 import jax
 import jax.numpy as jnp
 from jax.experimental import pallas as pl
-from torch._inductor.runtime.runtime_utils import pallas_partial_reduce, torch_dtype_to_jax_runtime
+from torch._inductor.runtime.runtime_utils import pallas_gpu_align_output_specs, pallas_gpu_pad_inputs, pallas_gpu_unpad_results, pallas_partial_reduce, torch_dtype_to_jax_runtime
 """ + (
             "\nfrom jax.experimental.pallas import mosaic_gpu as plgpu"
             if not ctx.interpret_is_cpu
@@ -2937,10 +2937,7 @@ from torch._inductor.runtime.runtime_utils import pallas_partial_reduce, torch_d
         for param in kernel_input_params:
             code.writeline(f"_max_numel = max(_max_numel, {param}.size)")
         code.writeline("for shape in out_shapes:")
-        code.writeline("    _numel = 1")
-        code.writeline("    for s in shape:")
-        code.writeline("        _numel *= s")
-        code.writeline("    _max_numel = max(_max_numel, _numel)")
+        code.writeline("    _max_numel = max(_max_numel, math.prod(shape))")
 
         code.writeline("_num_tiles = (_max_numel + _tile_size - 1) // _tile_size")
 
@@ -3025,18 +3022,9 @@ from torch._inductor.runtime.runtime_utils import pallas_partial_reduce, torch_d
 
         code.writeline("")
         code.writeline("# Create flattened output specs aligned to tile size")
-        code.writeline("_flat_out_specs = []")
-        code.writeline("for shape, dtype in zip(out_shapes, out_dtypes):")
-        code.writeline("    _numel = 1")
-        code.writeline("    for s in shape:")
-        code.writeline("        _numel *= s")
         code.writeline(
-            "    _aligned_numel = ((_numel + _tile_size - 1) // _tile_size) * _tile_size"
+            "_flat_out_specs, _ = pallas_gpu_align_output_specs(out_shapes, out_dtypes, _tile_size)"
         )
-        code.writeline(
-            "    _flat_out_specs.append(jax.ShapeDtypeStruct((_aligned_numel,), dtype))"
-        )
-        code.writeline("_flat_out_specs = tuple(_flat_out_specs)")
 
         code.writeline("")
         code.writeline("# Call plgpu.kernel with TMA kernel")
@@ -3052,57 +3040,26 @@ from torch._inductor.runtime.runtime_utils import pallas_partial_reduce, torch_d
 
         code.writeline("")
         code.writeline("# Reshape results to original shapes")
-        code.writeline("if not isinstance(_result, tuple):")
-        code.writeline("    _result = (_result,)")
-        code.writeline("_final_results = []")
-        code.writeline("for _res, _shape in zip(_result, _orig_out_shapes):")
-        code.writeline("    _orig_numel = 1")
-        code.writeline("    for _s in _shape:")
-        code.writeline("        _orig_numel *= _s")
-        code.writeline("    _final_results.append(_res[:_orig_numel].reshape(_shape))")
         code.writeline(
-            "return _final_results[0] if len(_final_results) == 1 else tuple(_final_results)"
+            "return pallas_gpu_unpad_results(_result, _orig_out_shapes)"
         )
-
-    @staticmethod
-    def _emit_gpu_pad_inputs(
-        code: IndentedBuffer,
-        kernel_input_params: list[str],
-        indent: str,
-    ) -> None:
-        """Emit code to flatten and pad each input to a 128-aligned size."""
-        for i, param in enumerate(kernel_input_params):
-            code.writeline(f"{indent}_orig_size_{i} = {param}.size")
-            code.writeline(
-                f"{indent}_aligned_size_{i} = ((_orig_size_{i} + 127) // 128) * 128"
-            )
-            code.writeline(f"{indent}if _orig_size_{i} != _aligned_size_{i}:")
-            code.writeline(f"{indent}    _flat_{i} = {param}.flatten()")
-            code.writeline(
-                f"{indent}    _padded_{i} = jnp.pad(_flat_{i}, (0, _aligned_size_{i} - _orig_size_{i}))"
-            )
-            code.writeline(f"{indent}    _padded_inputs.append(_padded_{i})")
-            code.writeline(f"{indent}else:")
-            code.writeline(f"{indent}    _padded_inputs.append({param}.flatten())")
 
     def _codegen_jit_wrapper_legacy_gpu(
         self, ctx: _CodegenContext, kernel_arg: str
     ) -> None:
         code = ctx.code
         kernel_input_params = ctx.kernel_input_params
+        input_list = f"[{', '.join(kernel_input_params)}]"
 
         # Legacy GPU path with explicit padding (use_emit_pipeline=False)
         # Mosaic GPU requires tensor sizes to be multiples of 128.
         # Only apply padding when all tensors have the same size (no broadcasting).
         code.writeline("# Check if all tensors have same size (no broadcasting)")
         code.writeline("_all_sizes = []")
-        for i, param in enumerate(kernel_input_params):
+        for param in kernel_input_params:
             code.writeline(f"_all_sizes.append({param}.size)")
         code.writeline("for shape in out_shapes:")
-        code.writeline("    _numel = 1")
-        code.writeline("    for s in shape:")
-        code.writeline("        _numel *= s")
-        code.writeline("    _all_sizes.append(_numel)")
+        code.writeline("    _all_sizes.append(math.prod(shape))")
         code.writeline("_unique_sizes = set(_all_sizes)")
         code.writeline(
             "_can_pad = len(_unique_sizes) == 1 and all(s > 1 for s in _unique_sizes)"
@@ -3111,34 +3068,33 @@ from torch._inductor.runtime.runtime_utils import pallas_partial_reduce, torch_d
         code.writeline("")
         code.writeline("if _can_pad:")
         code.writeline("    # All tensors same size - safe to flatten and pad")
-        code.writeline("    _orig_out_shapes = out_shapes")
-        code.writeline("    _padded_inputs = []")
-        self._emit_gpu_pad_inputs(code, kernel_input_params, indent="    ")
-
-        self._emit_gpu_align_call_unpad(code, kernel_arg, indent="    ")
+        code.writeline(f"    _padded_inputs = pallas_gpu_pad_inputs({input_list})")
+        code.writeline(
+            "    _aligned_out_specs, _is_scalar = pallas_gpu_align_output_specs(out_shapes, out_dtypes)"
+        )
+        code.writeline("    _result = plgpu.kernel(")
+        code.writeline("        " + kernel_arg)
+        code.writeline("        out_shape=_aligned_out_specs,")
+        code.writeline("    )(*_padded_inputs)")
+        code.writeline(
+            "    return pallas_gpu_unpad_results(_result, out_shapes, _is_scalar)"
+        )
 
         code.writeline("else:")
         code.writeline(
             "    # Different sizes - check if it's a reduction (scalar output)"
         )
-        code.writeline("    _out_numel = 1")
-        code.writeline("    for s in out_shapes[0]:")
-        code.writeline("        _out_numel *= s")
+        code.writeline("    _out_numel = math.prod(out_shapes[0])")
         code.writeline("    ")
         code.writeline("    if _out_numel <= 1:")
         code.writeline(
             "        # Scalar output (reduction) - pad inputs but keep scalar output"
         )
-        code.writeline("        _orig_out_shapes = out_shapes")
-        code.writeline("        _padded_inputs = []")
-        self._emit_gpu_pad_inputs(code, kernel_input_params, indent="        ")
-        code.writeline("        ")
-        code.writeline("        # Scalar output - don't pad")
+        code.writeline(f"        _padded_inputs = pallas_gpu_pad_inputs({input_list})")
         code.writeline("        _aligned_out_specs = tuple(")
         code.writeline("            jax.ShapeDtypeStruct(shape, dtype)")
         code.writeline("            for shape, dtype in zip(out_shapes, out_dtypes)")
         code.writeline("        )")
-        code.writeline("        ")
         code.writeline("        _result = plgpu.kernel(")
         code.writeline("            " + kernel_arg)
         code.writeline("            out_shape=_aligned_out_specs,")
@@ -3149,79 +3105,21 @@ from torch._inductor.runtime.runtime_utils import pallas_partial_reduce, torch_d
             "        # Non-scalar output with broadcasting - broadcast inputs to output shape"
         )
         code.writeline("        _target_shape = out_shapes[0]")
-        code.writeline("        _target_numel = _out_numel")
-        code.writeline("        _orig_out_shapes = out_shapes")
-        code.writeline("        ")
-        code.writeline("        # Broadcast and flatten all inputs to target shape")
-        code.writeline("        _padded_inputs = []")
-        for i, param in enumerate(kernel_input_params):
-            code.writeline(
-                f"        _broadcasted_{i} = jnp.broadcast_to({param}, _target_shape).flatten()"
-            )
-            code.writeline(
-                f"        _aligned_size_{i} = ((_target_numel + 127) // 128) * 128"
-            )
-            code.writeline(f"        if _target_numel != _aligned_size_{i}:")
-            code.writeline(
-                f"            _padded_{i} = jnp.pad(_broadcasted_{i}, (0, _aligned_size_{i} - _target_numel))"
-            )
-            code.writeline(f"            _padded_inputs.append(_padded_{i})")
-            code.writeline("        else:")
-            code.writeline(f"            _padded_inputs.append(_broadcasted_{i})")
-
-        self._emit_gpu_align_call_unpad(code, kernel_arg, indent="        ")
-
-    @staticmethod
-    def _emit_gpu_align_call_unpad(
-        code: IndentedBuffer, kernel_arg: str, indent: str
-    ) -> None:
-        """Emit align-output-specs + plgpu.kernel call + unpad results pattern."""
-        code.writeline(f"{indent}# Align output shapes to warpgroup size (128)")
-        code.writeline(f"{indent}_aligned_out_specs = []")
-        code.writeline(f"{indent}_is_scalar_output = []")
-        code.writeline(f"{indent}for shape, dtype in zip(out_shapes, out_dtypes):")
-        code.writeline(f"{indent}    _numel = 1")
-        code.writeline(f"{indent}    for s in shape:")
-        code.writeline(f"{indent}        _numel *= s")
-        code.writeline(f"{indent}    if _numel <= 1:")
+        code.writeline("        _broadcasted = [")
         code.writeline(
-            f"{indent}        _aligned_out_specs.append(jax.ShapeDtypeStruct(shape, dtype))"
+            f"            jnp.broadcast_to(_inp, _target_shape) for _inp in {input_list}"
         )
-        code.writeline(f"{indent}        _is_scalar_output.append(True)")
-        code.writeline(f"{indent}    else:")
+        code.writeline("        ]")
+        code.writeline("        _padded_inputs = pallas_gpu_pad_inputs(_broadcasted)")
         code.writeline(
-            f"{indent}        _aligned_numel = ((_numel + 127) // 128) * 128"
+            "        _aligned_out_specs, _is_scalar = pallas_gpu_align_output_specs(out_shapes, out_dtypes)"
         )
+        code.writeline("        _result = plgpu.kernel(")
+        code.writeline("            " + kernel_arg)
+        code.writeline("            out_shape=_aligned_out_specs,")
+        code.writeline("        )(*_padded_inputs)")
         code.writeline(
-            f"{indent}        _aligned_out_specs.append(jax.ShapeDtypeStruct((_aligned_numel,), dtype))"
-        )
-        code.writeline(f"{indent}        _is_scalar_output.append(False)")
-        code.writeline(f"{indent}_aligned_out_specs = tuple(_aligned_out_specs)")
-
-        code.writeline(f"{indent}_result = plgpu.kernel(")
-        code.writeline(f"{indent}    " + kernel_arg)
-        code.writeline(f"{indent}    out_shape=_aligned_out_specs,")
-        code.writeline(f"{indent})(*_padded_inputs)")
-
-        code.writeline(f"{indent}# Remove padding from results")
-        code.writeline(f"{indent}if not isinstance(_result, tuple):")
-        code.writeline(f"{indent}    _result = (_result,)")
-        code.writeline(f"{indent}_unpadded_results = []")
-        code.writeline(
-            f"{indent}for _res, _shape, _is_scalar in zip(_result, _orig_out_shapes, _is_scalar_output):"
-        )
-        code.writeline(f"{indent}    if _is_scalar:")
-        code.writeline(f"{indent}        _unpadded_results.append(_res)")
-        code.writeline(f"{indent}    else:")
-        code.writeline(f"{indent}        _orig_numel = 1")
-        code.writeline(f"{indent}        for _s in _shape:")
-        code.writeline(f"{indent}            _orig_numel *= _s")
-        code.writeline(
-            f"{indent}        _unpadded = _res[:_orig_numel].reshape(_shape)"
-        )
-        code.writeline(f"{indent}        _unpadded_results.append(_unpadded)")
-        code.writeline(
-            f"{indent}return _unpadded_results[0] if len(_unpadded_results) == 1 else tuple(_unpadded_results)"
+            "        return pallas_gpu_unpad_results(_result, out_shapes, _is_scalar)"
         )
 
     def _codegen_jit_wrapper_cpu_tpu(
