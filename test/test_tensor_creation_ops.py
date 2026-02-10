@@ -2831,7 +2831,8 @@ class TestTensorCreation(TestCase):
         tensor = torch.tensor((1, 2, 3), device=device)
 
         # need more than one device_type to test this
-        assert self.device_type == 'cuda'
+        if self.device_type != 'cuda':
+            raise AssertionError(f"device_type should be 'cuda', got {self.device_type!r}")
         for left, right in product([tensor, tensor.cpu()], [tensor, tensor.cpu()]):
             for device_arg in [torch_device, cpu_device, None]:
                 if device_arg is None:
