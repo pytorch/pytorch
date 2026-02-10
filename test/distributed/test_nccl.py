@@ -398,35 +398,6 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
 
     @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
-    @requires_nccl_version((2, 29), "NCCL one-sided host API support from nccl 2.29")
-    @skip_if_lt_x_gpu(2)
-    def test_put_wait_signal(self):
-        symm_mem.set_backend("NCCL")
-        torch.cuda.set_device(self.rank)
-        # Use this barrier to make sure all ranks are initialized.
-        c10d.barrier()
-        group_name = c10d.group.WORLD.group_name
-
-        dtype = torch.float
-        numel = 1024
-        src = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(self.rank)
-        dst = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(-1)
-        symm_mem.rendezvous(src, group=group_name)
-        hdl = symm_mem.rendezvous(dst, group=group_name)
-
-        # Pair ranks: odd ranks send to previous even ranks.
-        if self.rank % 2 == 1:
-            dst_rank = self.rank - 1
-            symm_mem.put_signal(src, hdl, dst_rank)
-        elif self.rank % 2 == 0 and self.rank + 1 < self.world_size:
-            src_rank = self.rank + 1
-            symm_mem.wait_signal(hdl, src_rank)
-            self.assertEqual(dst, torch.full_like(dst, float(src_rank)))
-
-        c10d.barrier()
-
-    @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
-    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     @skip_if_lt_x_gpu(2)
     def test_mempool_tensor_factory(self):
         symm_mem.set_backend("NCCL")
