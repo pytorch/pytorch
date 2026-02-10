@@ -591,6 +591,34 @@ class SizeVarAllocator:
 
         return sympy_subs(expr, self.backed_var_to_val)
 
+    def to_symint_or_int(self, expr: Union[Expr, int]) -> Union[SymInt, int]:
+        """Convert a sympy expression to SymInt, or return int as is."""
+        if isinstance(expr, int):
+            return expr
+
+        from torch.fx.experimental.sym_node import SymNode
+
+        expr = self.simplify(expr)
+        if isinstance(expr, (int, sympy.Integer)):
+            return int(expr)
+
+        # Remove precomputed replacements to get canonical form
+        # (consistent with symbolic_hint behavior)
+        expr = self.remove_precomputed_replacements(expr)
+
+        try:
+            hint = self.size_hint(expr)
+        except Exception:
+            hint = None
+        node = SymNode(expr, self.shape_env, int, hint)
+        return SymInt(node)
+
+    def to_symints_or_ints(
+        self, exprs: Sequence[Union[Expr, int]]
+    ) -> list[Union[SymInt, int]]:
+        """Convert a sequence of sympy expressions to SymInts, or return ints as is."""
+        return [self.to_symint_or_int(e) for e in exprs]
+
     def size_hint(
         self,
         expr: Union[Expr, int],

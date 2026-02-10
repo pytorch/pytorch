@@ -166,7 +166,8 @@ class TestLibtorchAgnostic(TestCase):
             t = torch.rand(32, 32, device=device)
             self.assertGreater(torch.cuda.memory_allocated(device), prior_mem)
             identi_t = libtorch_agnostic.ops.identity(t)
-            assert identi_t is t
+            if identi_t is not t:
+                raise AssertionError("Expected identity op to return the same tensor")
 
         init_mem = torch.cuda.memory_allocated(device)
 
@@ -1678,31 +1679,46 @@ except RuntimeError as e:
         """Test for from_blob with custom deleter (2.11 feature)."""
         import libtorch_agn_2_11 as libtorch_agnostic
 
-        libtorch_agnostic.ops.reset_deleter_call_count()
-        self.assertEqual(libtorch_agnostic.ops.get_deleter_call_count(), 0)
+        is_cuda = torch.device(device).type == "cuda"
+        if is_cuda:
+            init_mem = torch.cuda.memory_allocated(device)
 
-        # We need an original tensor to create the tensor with from_blob.
-        original = torch.rand(2, 3, device=device, dtype=torch.float32)
-        blob_tensor = libtorch_agnostic.ops.my_from_blob_with_deleter(
-            original.data_ptr(),
-            original.size(),
-            original.stride(),
-            device,
-            torch.float32,
-        )
+        def inner():
+            libtorch_agnostic.ops.reset_deleter_call_count()
+            self.assertEqual(libtorch_agnostic.ops.get_deleter_call_count(), 0)
 
-        self.assertEqual(blob_tensor, original)
-        self.assertEqual(blob_tensor.data_ptr(), original.data_ptr())
+            # We need an original tensor to create the tensor with from_blob.
+            original = torch.rand(2, 3, device=device, dtype=torch.float32)
+            blob_tensor = libtorch_agnostic.ops.my_from_blob_with_deleter(
+                original.data_ptr(),
+                original.size(),
+                original.stride(),
+                device,
+                torch.float32,
+            )
 
-        self.assertEqual(libtorch_agnostic.ops.get_deleter_call_count(), 0)
+            self.assertEqual(blob_tensor, original)
+            self.assertEqual(blob_tensor.data_ptr(), original.data_ptr())
 
-        del blob_tensor
-        gc.collect()
+            self.assertEqual(libtorch_agnostic.ops.get_deleter_call_count(), 0)
 
-        # Ensure the deleter was called. The original tensor still exists and
-        # can be used.
-        self.assertEqual(libtorch_agnostic.ops.get_deleter_call_count(), 1)
-        original += 1
+            del blob_tensor
+            gc.collect()
+
+            # Ensure the deleter was called. The original tensor still exists
+            # and can be used.
+            self.assertEqual(libtorch_agnostic.ops.get_deleter_call_count(), 1)
+            original += 1
+            # original goes out of scope here and its cuda memory should be
+            # freed.
+
+        inner()
+
+        if is_cuda:
+            # original tensor is out of scope, all the memory should be freed
+            torch.cuda.synchronize(device)
+            curr_mem = torch.cuda.memory_allocated(device)
+            self.assertEqual(curr_mem, init_mem)
 
     @onlyCUDA
     @skipIfTorchVersionLessThan(2, 11)
