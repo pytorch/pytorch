@@ -7184,14 +7184,13 @@ class ShapeEnv:
             has_only_ephemeral_sources = x in self.var_to_sources and all(
                 s.is_ephemeral() for s in self.var_to_sources[x]
             )
-            # NB: size_hint is int, not sympy.Expr, do not use int_oo here
-            hint_size = self.size_hint(x, allow_none=True)
-            if hint_size is None:
+
+            hint = self.backed_var_to_val.get(x)
+            if hint is None:
+                # NB: size_hint is int, not sympy.Expr, do not use int_oo here
                 size = sys.maxsize
             elif symbol_is_type(x, SymT.SIZE):
-                if not isinstance(hint_size, sympy.Expr):
-                    raise AssertionError(f"Expected sympy.Expr, got {type(hint_size)}")
-                size = int(hint_size)
+                size = int(hint)
             else:
                 size = sys.maxsize
             name = x.name
