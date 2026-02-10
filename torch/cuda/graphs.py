@@ -45,7 +45,12 @@ class _TrackedTensorInfo:
             except Exception:
                 pass  # don't raise under GC
 
-        self.weakref: weakref.ref[Tensor] = weakref.ref(tensor, on_release)
+        # Track the base tensor that owns the storage, not the view.
+        # A view being deleted doesn't free memory if the base is alive.
+        base = tensor
+        while base._base is not None:
+            base = base._base
+        self.weakref: weakref.ref[Tensor] = weakref.ref(base, on_release)
 
     def is_alive(self) -> bool:
         return self.weakref() is not None
@@ -84,7 +89,7 @@ def _get_tensor_tracking_mode_class() -> type:
 
         # This is a proxy for telling if an op launched a CUDA kernel.
         # If it only ever returns host tensors, does it ever launch work
-        # on GPU while also being capturable in a CUDA graph (i.e. not 
+        # on GPU while also being capturable in a CUDA graph (i.e. not
         # causing a stream sync)
         def _has_cuda_tensor_output(self, values: object) -> bool:
             for v in tree_iter(values):
@@ -238,7 +243,6 @@ class CUDAGraph(_CUDAGraph):
             self._internal_outputs.add(data_ptr)
 
     def _start_input_tracking(self) -> None:
-        self._check_input_liveness = True
         self._external_inputs.clear()
         self._internal_outputs.clear()
         # Note that this call causes a circular reference. We use the __del__
@@ -270,17 +274,22 @@ class CUDAGraph(_CUDAGraph):
 
         parts = [f"CUDA graph replay detected {len(dead)} dead tensor(s).\n"]
         for i, info in enumerate(dead[:5], 1):
-            parts.append(f"Dead tensor #{i} (data_ptr={info.data_ptr:#x}):")
+            parts.append(f"Dead tensor #{i} (data_ptr={info.data_ptr:#x}):\n")
             parts.append(fmt("Creation Traceback (Python)", info.creation_traceback_py))
             parts.append(fmt("Creation Traceback (C++)", info.creation_traceback_cpp))
             parts.append(fmt("Deletion Traceback (Python)", info.deletion_traceback_py))
         if len(dead) > 5:
             parts.append(f"  ... and {len(dead) - 5} more\n")
-        parts.append(fmt("Replay Traceback (Python)", "".join(traceback.format_stack()[:-2])))
+        parts.append(
+            fmt("Replay Traceback (Python)", "".join(traceback.format_stack()[:-2]))
+        )
         raise RuntimeError("".join(parts))
 
     def capture_begin(
-        self, pool: _POOL_HANDLE | None = None, capture_error_mode: str = "global", check_input_liveness: bool = False,
+        self,
+        pool: _POOL_HANDLE | None = None,
+        capture_error_mode: str = "global",
+        check_input_liveness: bool = False,
     ) -> None:
         r"""Begin capturing CUDA work on the current stream.
 
@@ -340,8 +349,9 @@ class CUDAGraph(_CUDAGraph):
 
     def replay(self) -> None:
         r"""Replay the CUDA work captured by this graph."""
-        if self._check_input_liveness:
-            self._check_external_inputs_alive()
+        # The call below would be a no-op if input liveness check was not turned on
+        # during the capture.
+        self._check_external_inputs_alive()
         super().replay()
 
     def reset(self) -> None:
@@ -481,6 +491,7 @@ class graph:
             *self.pool,
             # pyrefly: ignore [bad-keyword-argument]
             capture_error_mode=self.capture_error_mode,
+            # pyrefly: ignore [bad-keyword-argument]
             check_input_liveness=self.check_input_liveness,
         )
 

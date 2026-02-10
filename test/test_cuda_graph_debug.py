@@ -40,7 +40,7 @@ class SimpleMLP(nn.Module):
 
 
 class TestCUDAGraphDebugInputs(TestCase):
-    def test_nothing_dead(self):
+    def test_nothing_dead_ok(self):
         x = torch.randn(100, device="cuda")
         g = torch.cuda.CUDAGraph()
 
@@ -119,7 +119,7 @@ class TestCUDAGraphDebugInputs(TestCase):
         torch.cuda.synchronize()
         self.assertEqual(y, model(x))
 
-    def test_model_weights_dead(self):
+    def test_model_weight_dead(self):
         model = SimpleMLP(width=64, depth=5).cuda()
         x = torch.randn(8, 64, device="cuda")
         g = torch.cuda.CUDAGraph()
@@ -129,7 +129,7 @@ class TestCUDAGraphDebugInputs(TestCase):
         with torch.no_grad(), torch.cuda.graph(g, check_input_liveness=True):
             y = model(x)
 
-        del model
+        del model.layers[2].weight
         _sync_and_gc_collect()
 
         with self.assertRaisesRegex(RuntimeError, "dead.*tensor"):
@@ -153,7 +153,7 @@ class TestCUDAGraphDebugInputs(TestCase):
         with self.assertRaisesRegex(RuntimeError, "dead.*tensor"):
             g.replay()
 
-    def test_view_tensor_base_dead(self):
+    def test_view_tensor(self):
         base = torch.randn(100, device="cuda")
         view = base[10:50]
         g = torch.cuda.CUDAGraph()
@@ -163,7 +163,13 @@ class TestCUDAGraphDebugInputs(TestCase):
         with torch.cuda.graph(g, check_input_liveness=True):
             y = view * 2
 
-        del base, view
+        del view
+        _sync_and_gc_collect()
+
+        # should be ok, the base tensor's memory is still alive
+        g.replay()
+
+        del base
         _sync_and_gc_collect()
 
         with self.assertRaisesRegex(RuntimeError, "dead.*tensor"):
