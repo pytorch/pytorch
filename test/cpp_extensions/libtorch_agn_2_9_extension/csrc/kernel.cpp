@@ -78,11 +78,11 @@ void boxed_sgd_out_of_place(StableIValue* stack, uint64_t num_args, uint64_t num
   stack[0] = from(res);
 }
 
-STABLE_TORCH_LIBRARY(libtorch_agn_2_9, m) {
+STABLE_TORCH_LIBRARY(STABLE_LIB_NAME, m) {
   m.def("sgd_out_of_place(Tensor param, Tensor grad, float weight_decay, float lr, bool maximize) -> Tensor");
 }
 
-STABLE_TORCH_LIBRARY_IMPL(libtorch_agn_2_9, CPU, m) {
+STABLE_TORCH_LIBRARY_IMPL(STABLE_LIB_NAME, CPU, m) {
   m.impl("sgd_out_of_place", &boxed_sgd_out_of_place);
 }
 
@@ -91,15 +91,15 @@ Tensor identity(Tensor t) {
 }
 
 
-STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agn_2_9, m) {
+STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
   m.def("identity(Tensor t) -> Tensor");
 }
 
-STABLE_TORCH_LIBRARY_IMPL(libtorch_agn_2_9, CUDA, m) {
+STABLE_TORCH_LIBRARY_IMPL(STABLE_LIB_NAME, CUDA, m) {
   m.impl("identity", TORCH_BOX(&identity));
 }
 
-STABLE_TORCH_LIBRARY_IMPL(libtorch_agn_2_9, CPU, m) {
+STABLE_TORCH_LIBRARY_IMPL(STABLE_LIB_NAME, CPU, m) {
   m.impl("identity", TORCH_BOX(&identity));
 }
 
@@ -111,11 +111,11 @@ Tensor my_abs(Tensor t) {
   return torch::stable::detail::to<Tensor>(stack[0]);
 }
 
-STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agn_2_9, m) {
+STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
   m.def("my_abs(Tensor t) -> Tensor");
 }
 
-STABLE_TORCH_LIBRARY_IMPL(libtorch_agn_2_9, CompositeExplicitAutograd, m) {
+STABLE_TORCH_LIBRARY_IMPL(STABLE_LIB_NAME, CompositeExplicitAutograd, m) {
   m.impl("my_abs", TORCH_BOX(&my_abs));
 }
 
@@ -137,11 +137,11 @@ Tensor my_ones_like(Tensor t, StableIValue device) {
   return torch::stable::detail::to<Tensor>(stack[0]);
 }
 
-STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agn_2_9, m) {
+STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
   m.def("my_ones_like(Tensor t, Device d) -> Tensor");
 }
 
-STABLE_TORCH_LIBRARY_IMPL(libtorch_agn_2_9, CompositeExplicitAutograd, m) {
+STABLE_TORCH_LIBRARY_IMPL(STABLE_LIB_NAME, CompositeExplicitAutograd, m) {
   m.impl("my_ones_like", TORCH_BOX(&my_ones_like));
 }
 
@@ -164,11 +164,11 @@ std::tuple<Tensor, Tensor, bool> exp_neg_is_leaf(Tensor t1, Tensor t2, Tensor t3
     torch::stable::detail::to<bool>(stack_is_leaf[0]));
 }
 
-STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agn_2_9, m) {
+STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
   m.def("exp_neg_is_leaf(Tensor t1, Tensor t2, Tensor t3) -> (Tensor, Tensor, bool)");
 }
 
-STABLE_TORCH_LIBRARY_IMPL(libtorch_agn_2_9, CompositeExplicitAutograd, m) {
+STABLE_TORCH_LIBRARY_IMPL(STABLE_LIB_NAME, CompositeExplicitAutograd, m) {
   m.impl("exp_neg_is_leaf", TORCH_BOX(&exp_neg_is_leaf));
 }
 
@@ -180,11 +180,11 @@ Tensor neg_exp(Tensor t) {
   return torch::stable::detail::to<Tensor>(stack[0]);
 }
 
-STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agn_2_9, m) {
+STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
   m.def("neg_exp(Tensor t) -> Tensor");
 }
 
-STABLE_TORCH_LIBRARY_IMPL(libtorch_agn_2_9, CompositeExplicitAutograd, m) {
+STABLE_TORCH_LIBRARY_IMPL(STABLE_LIB_NAME, CompositeExplicitAutograd, m) {
   m.impl("neg_exp", TORCH_BOX(&neg_exp));
 }
 
@@ -204,11 +204,11 @@ Tensor divide_neg_exp(Tensor t) {
   return torch::stable::detail::to<Tensor>(stack_div[0]);
 }
 
-STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agn_2_9, m) {
+STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
   m.def("divide_neg_exp(Tensor t) -> Tensor");
 }
 
-STABLE_TORCH_LIBRARY_IMPL(libtorch_agn_2_9, CompositeExplicitAutograd, m) {
+STABLE_TORCH_LIBRARY_IMPL(STABLE_LIB_NAME, CompositeExplicitAutograd, m) {
   m.impl("divide_neg_exp", TORCH_BOX(&divide_neg_exp));
 }
 
@@ -216,11 +216,11 @@ bool is_contiguous(Tensor t) {
   return t.is_contiguous();
 }
 
-STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agn_2_9, m) {
+STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
   m.def("is_contiguous(Tensor t) -> bool");
 }
 
-STABLE_TORCH_LIBRARY_IMPL(libtorch_agn_2_9, CompositeExplicitAutograd, m) {
+STABLE_TORCH_LIBRARY_IMPL(STABLE_LIB_NAME, CompositeExplicitAutograd, m) {
   m.impl("is_contiguous", TORCH_BOX(&is_contiguous));
 }
 
@@ -277,7 +277,7 @@ Tensor my_clone(Tensor t) {
   return clone(t);
 }
 
-STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agn_2_9, m) {
+STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
   m.def("my_transpose(Tensor t, int dim0, int dim1) -> Tensor");
   m.def("my_empty_like(Tensor t) -> Tensor");
   m.def("fill_infinity(Tensor(a!) t) -> Tensor(a!)");
@@ -289,7 +289,7 @@ STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agn_2_9, m) {
   m.def("my_clone(Tensor t) -> Tensor");
 }
 
-STABLE_TORCH_LIBRARY_IMPL(libtorch_agn_2_9, CompositeExplicitAutograd, m) {
+STABLE_TORCH_LIBRARY_IMPL(STABLE_LIB_NAME, CompositeExplicitAutograd, m) {
   m.impl("my_transpose", TORCH_BOX(&my_transpose));
   m.impl("my_empty_like", TORCH_BOX(&my_empty_like));
   m.impl("fill_infinity", TORCH_BOX(&fill_infinity));
@@ -300,7 +300,7 @@ STABLE_TORCH_LIBRARY_IMPL(libtorch_agn_2_9, CompositeExplicitAutograd, m) {
   m.impl("my_clone", TORCH_BOX(&my_clone));
 }
 
-STABLE_TORCH_LIBRARY_IMPL(libtorch_agn_2_9, CompositeImplicitAutograd, m) {
+STABLE_TORCH_LIBRARY_IMPL(STABLE_LIB_NAME, CompositeImplicitAutograd, m) {
   m.impl("my_pad", TORCH_BOX(&my_pad));
   m.impl("my_narrow", TORCH_BOX(&my_narrow));
 }
@@ -317,7 +317,7 @@ Tensor my_amax_vec(Tensor t) {
   return amax(t, {0,1}, false);
 }
 
-STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agn_2_9, m) {
+STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
   m.def("my_zero_(Tensor(a!) t) -> Tensor(a!)");
   m.def("my_amax(Tensor a) -> Tensor");
   m.def("my_amax_vec(Tensor a) -> Tensor");
@@ -344,7 +344,7 @@ bool test_default_constructor(bool defined) {
   return out.defined();
 }
 
-STABLE_TORCH_LIBRARY_IMPL(libtorch_agn_2_9, CompositeExplicitAutograd, m) {
+STABLE_TORCH_LIBRARY_IMPL(STABLE_LIB_NAME, CompositeExplicitAutograd, m) {
   m.impl("my_zero_", TORCH_BOX(&my_zero_));
   m.impl("my_amax", TORCH_BOX(&my_amax));
   m.impl("my_amax_vec", TORCH_BOX(&my_amax_vec));
@@ -369,11 +369,11 @@ Tensor mv_tensor_accessor_cpu(Tensor m, Tensor v) {
   return res;
 }
 
-STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agn_2_9, m) {
+STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
   m.def("mv_tensor_accessor(Tensor m, Tensor v) -> Tensor");
 }
 
-STABLE_TORCH_LIBRARY_IMPL(libtorch_agn_2_9, CPU, m) {
+STABLE_TORCH_LIBRARY_IMPL(STABLE_LIB_NAME, CPU, m) {
   m.impl("mv_tensor_accessor", TORCH_BOX(&mv_tensor_accessor_cpu));
 }
 
@@ -419,14 +419,14 @@ int64_t test_get_current_device_index() {
   return torch::stable::accelerator::getCurrentDeviceIndex();
 }
 
-STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agn_2_9, m) {
+STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
   m.def("test_device_guard(int device_index) -> int");
   m.def("test_device_guard_set_index() -> int");
   m.def("test_stream(int device_index) -> int");
   m.def("test_get_current_device_index() -> int");
 }
 
-STABLE_TORCH_LIBRARY_IMPL(libtorch_agn_2_9, CompositeExplicitAutograd, m) {
+STABLE_TORCH_LIBRARY_IMPL(STABLE_LIB_NAME, CompositeExplicitAutograd, m) {
   m.impl("test_device_guard", TORCH_BOX(&test_device_guard));
   m.impl("test_device_guard_set_index", TORCH_BOX(&test_device_guard_set_index));
   m.impl("test_stream", TORCH_BOX(&test_stream));
@@ -439,11 +439,11 @@ Tensor my_flatten(Tensor t, int64_t start_dim, int64_t end_dim) {
   return flatten(t, start_dim, end_dim);
 }
 
-STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agn_2_9, m) {
+STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
   m.def("my_flatten(Tensor t, int start_dim=0, int end_dim=-1) -> Tensor");
 }
 
-STABLE_TORCH_LIBRARY_IMPL(libtorch_agn_2_9, CompositeExplicitAutograd, m) {
+STABLE_TORCH_LIBRARY_IMPL(STABLE_LIB_NAME, CompositeExplicitAutograd, m) {
   m.impl("my_flatten", TORCH_BOX(&my_flatten));
 }
 
@@ -471,11 +471,11 @@ Tensor my_optional_tensor_ref(
   return zero_(zeros_tensor);
 }
 
-STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agn_2_9, m) {
+STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
   m.def("my_optional_tensor_ref(Tensor? maybe_tensor, int default_size) -> Tensor");
 }
 
-STABLE_TORCH_LIBRARY_IMPL(libtorch_agn_2_9, CompositeExplicitAutograd, m) {
+STABLE_TORCH_LIBRARY_IMPL(STABLE_LIB_NAME, CompositeExplicitAutograd, m) {
   m.impl("my_optional_tensor_ref", TORCH_BOX(&my_optional_tensor_ref));
 }
 
@@ -487,12 +487,12 @@ int64_t my_element_size(Tensor t) {
   return static_cast<int64_t>(t.element_size());
 }
 
-STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agn_2_9, m) {
+STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
   m.def("my_storage_offset(Tensor t) -> int");
   m.def("my_element_size(Tensor t) -> int");
 }
 
-STABLE_TORCH_LIBRARY_IMPL(libtorch_agn_2_9, CompositeExplicitAutograd, m) {
+STABLE_TORCH_LIBRARY_IMPL(STABLE_LIB_NAME, CompositeExplicitAutograd, m) {
   m.impl("my_storage_offset", TORCH_BOX(&my_storage_offset));
   m.impl("my_element_size", TORCH_BOX(&my_element_size));
 }
@@ -513,14 +513,14 @@ Tensor my_matmul(const Tensor& self, const Tensor& other) {
   return torch::stable::matmul(self, other);
 }
 
-STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agn_2_9, m) {
+STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
   m.def("my_unsqueeze(Tensor t, int dim) -> Tensor");
   m.def("my_squeeze(Tensor t, int dim) -> Tensor");
   m.def("my_select(Tensor t, int dim, int index) -> Tensor");
   m.def("my_matmul(Tensor self, Tensor other) -> Tensor");
 }
 
-STABLE_TORCH_LIBRARY_IMPL(libtorch_agn_2_9, CompositeExplicitAutograd, m) {
+STABLE_TORCH_LIBRARY_IMPL(STABLE_LIB_NAME, CompositeExplicitAutograd, m) {
   m.impl("my_unsqueeze", TORCH_BOX(&my_unsqueeze));
   m.impl("my_squeeze", TORCH_BOX(&my_squeeze));
   m.impl("my_select", TORCH_BOX(&my_select));
