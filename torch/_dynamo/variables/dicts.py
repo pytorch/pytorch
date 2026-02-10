@@ -1835,6 +1835,9 @@ class DunderDictVariable(ConstDictVariable):
         super().__init__({}, **kwargs)
         self.items = SideEffectsProxyDict(vt, side_effects)
 
+    def setitem(self, name: str, value: VariableTracker) -> None:
+        self.items[name] = value
+
     def getitem(self, name: str) -> VariableTracker:
         return self.items[name]
 
@@ -1843,7 +1846,6 @@ class DunderDictVariable(ConstDictVariable):
 
     def getitem_or_default(
         self,
-        tx: "InstructionTranslator",
         name: str,
         default: Callable,
     ) -> VariableTracker:
@@ -1851,6 +1853,5 @@ class DunderDictVariable(ConstDictVariable):
             return self.items[name]
         else:
             value = default()
-            vt = ConstantVariable.create(name)
-            self.call_method(tx, "__setitem__", [vt, value], {})
+            self.items[name] = value
             return value

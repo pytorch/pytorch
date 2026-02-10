@@ -1746,7 +1746,6 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             return self.get_dict_vt(tx)
         elif name == "__type_params__":
             return fn_dict.getitem_or_default(
-                tx,
                 name,
                 lambda: variables.TupleVariable(
                     [],
@@ -1756,7 +1755,6 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         elif name in ("__name__", "__qualname__", "__doc__", "__module__"):
             val = getattr(self, f"get_{name[2:-2]}")()
             return fn_dict.getitem_or_default(
-                tx,
                 name,
                 lambda: ConstantVariable.create(
                     val, source=self.source and AttrSource(self.source, name)
