@@ -202,17 +202,16 @@ jobs:
           PYTORCH_ROOT: ""
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: test-infra/.github/actions/calculate-docker-image@main
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: !{{ config["container_image"] }}
           custom-tag-prefix: !{{ config["container_image_tag_prefix"] }}
           docker-build-dir: .ci/docker
-          working-directory: pytorch
         env:
           PYTORCH_ROOT: ""
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
         env:
