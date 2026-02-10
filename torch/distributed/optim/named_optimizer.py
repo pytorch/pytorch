@@ -106,8 +106,10 @@ class _NamedOptimizer(optim.Optimizer):
     def _param_groups_check(self) -> None:
         if self.param_groups is not None:
             for param_group in self.param_groups:
-                assert isinstance(param_group, dict), "param group must be a dict"
-                assert "params" in param_group, "param group must contain key params"
+                if not isinstance(param_group, dict):
+                    raise AssertionError("param group must be a dict")
+                if "params" not in param_group:
+                    raise AssertionError("param group must contain key params")
                 params = param_group["params"]
                 if isinstance(params, torch.Tensor):
                     params = [params]
@@ -218,7 +220,8 @@ class _NamedOptimizer(optim.Optimizer):
 
                 src_state_val = state[param_key][state_key]
                 if isinstance(state_val, ShardedTensor):
-                    assert isinstance(src_state_val, ShardedTensor)
+                    if not isinstance(src_state_val, ShardedTensor):
+                        raise AssertionError
                     num_shards = len(state_val.local_shards())
                     num_new_shards = len(src_state_val.local_shards())
                     if num_shards != num_new_shards:
@@ -230,7 +233,8 @@ class _NamedOptimizer(optim.Optimizer):
                     ):
                         shard.tensor.detach().copy_(src_shard.tensor)
                 elif isinstance(state_val, torch.Tensor):
-                    assert isinstance(src_state_val, torch.Tensor)
+                    if not isinstance(src_state_val, torch.Tensor):
+                        raise AssertionError
                     state_val.detach().copy_(src_state_val)
                 else:
                     new_state[idx][state_key] = deepcopy(src_state_val)
@@ -275,7 +279,8 @@ class _NamedOptimizer(optim.Optimizer):
 
         Warning: This API is still in development and subject to change.
         """
-        assert isinstance(param_group, dict), "param group must be a dict"
+        if not isinstance(param_group, dict):
+            raise AssertionError("param group must be a dict")
 
         params = param_group["params"]
         if isinstance(params, torch.Tensor):

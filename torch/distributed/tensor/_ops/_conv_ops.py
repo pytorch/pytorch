@@ -24,18 +24,26 @@ def convolution_rules(op_schema: OpSchema) -> OutputSharding:
         _groups,
     ) = op_schema.args_schema
 
-    assert isinstance(input_spec, DTensorSpec)
-    assert isinstance(weight_spec, DTensorSpec)
+    if not isinstance(input_spec, DTensorSpec):
+        raise AssertionError
+    if not isinstance(weight_spec, DTensorSpec):
+        raise AssertionError
     # bias_spec can be None (optional parameter in aten.convolution schema)
     if bias_spec is not None:
-        assert isinstance(bias_spec, DTensorSpec)
-    assert input_spec.tensor_meta is not None
-    assert weight_spec.tensor_meta is not None
+        if not isinstance(bias_spec, DTensorSpec):
+            raise AssertionError
+    if input_spec.tensor_meta is None:
+        raise AssertionError
+    if weight_spec.tensor_meta is None:
+        raise AssertionError
     in_shape = input_spec.tensor_meta.shape
     weight_shape = weight_spec.tensor_meta.shape
-    assert isinstance(stride, list), f"stride must be list, got {type(stride)}"
-    assert isinstance(padding, list), f"padding must be list, got {type(padding)}"
-    assert isinstance(dilation, list), f"dilation must be list, got {type(dilation)}"
+    if not isinstance(stride, list):
+        raise AssertionError(f"stride must be list, got {type(stride)}")
+    if not isinstance(padding, list):
+        raise AssertionError(f"padding must be list, got {type(padding)}")
+    if not isinstance(dilation, list):
+        raise AssertionError(f"dilation must be list, got {type(dilation)}")
     # weight_shape might not be torch.Size in all cases (e.g., SymIntArrayRef during tracing)
     # so we don't assert its type, just use it
     out_conv_shape = [
@@ -82,13 +90,18 @@ def convolution_backward_rules(op_schema: OpSchema) -> OutputSharding:
         _output_mask,
     ) = op_schema.args_schema
 
-    assert isinstance(grad_output_spec, DTensorSpec)
-    assert isinstance(input_spec, DTensorSpec)
-    assert isinstance(weight_spec, DTensorSpec)
+    if not isinstance(grad_output_spec, DTensorSpec):
+        raise AssertionError
+    if not isinstance(input_spec, DTensorSpec):
+        raise AssertionError
+    if not isinstance(weight_spec, DTensorSpec):
+        raise AssertionError
     # bias_shape_opt can be None (optional parameter in aten.convolution_backward schema)
     if bias_shape_opt is not None:
-        assert isinstance(bias_shape_opt, list)
-    assert input_spec.tensor_meta is not None
+        if not isinstance(bias_shape_opt, list):
+            raise AssertionError
+    if input_spec.tensor_meta is None:
+        raise AssertionError
     weight_tensor_meta = weight_spec.tensor_meta
 
     # Only create bias_tensor_meta if bias_shape_opt is not None

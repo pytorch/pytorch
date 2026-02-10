@@ -211,7 +211,8 @@ def parse_module_info(module_info: ModuleInfo) -> Graph:
     mod_stats = module_info["mod_stats"]
     fw_pre_order = module_info["mod_order"]["fw_pre_order"]
     # assertion and number of nodes
-    assert len(mod_stats) == len(fw_pre_order)
+    if len(mod_stats) != len(fw_pre_order):
+        raise AssertionError
     n_nodes = len(mod_stats)
 
     # create graph

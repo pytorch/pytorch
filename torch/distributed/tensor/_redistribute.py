@@ -110,10 +110,12 @@ class _TransformInfo(NamedTuple):
     logical_shape: list[int]
 
     def __post_init__(self):
-        assert self.mesh_dim >= 0
-        assert self.src_dst_placements[0] != self.src_dst_placements[1], (
-            "TransformInfo should only be created if it is an op with some effect, not a no-op"
-        )
+        if self.mesh_dim < 0:
+            raise AssertionError
+        if self.src_dst_placements[0] == self.src_dst_placements[1]:
+            raise AssertionError(
+                "TransformInfo should only be created if it is an op with some effect, not a no-op"
+            )
 
 
 # Global cache for DTensorRedistributePlanner instances
@@ -259,7 +261,8 @@ class DTensorRedistributePlanner:
         Returns:
             A string showing the sequence of DistState transitions, separated by '->'.
         """
-        assert len(src_placement) == mesh.ndim
+        if len(src_placement) != mesh.ndim:
+            raise AssertionError
         if src_shard_order is None:
             src_shard_order = DTensorSpec.compute_default_shard_order(src_placement)
         cur_placement = list(src_placement)
@@ -276,9 +279,10 @@ class DTensorRedistributePlanner:
             src_dim_placement, dst_dim_placement = transform_info.src_dst_placements
             if src_dim_placement.is_shard():
                 src_dim = src_dim_placement.dim  # type: ignore[attr-defined]
-                assert (
+                if not (
                     src_dim in shard_order_dict and len(shard_order_dict[src_dim]) > 0
-                )
+                ):
+                    raise AssertionError
                 shard_order_dict[src_dim].pop()
             if dst_dim_placement.is_shard():
                 dst_dim = dst_dim_placement.dim  # type: ignore[attr-defined]
@@ -306,8 +310,10 @@ class DTensorRedistributePlanner:
             dtensor_meta: TensorMeta of the DTensor to redistribute
         """
         self.device_mesh = device_mesh
-        assert device_mesh._is_current_rank_part_of_mesh()
-        assert dtensor_meta is not None
+        if not device_mesh._is_current_rank_part_of_mesh():
+            raise AssertionError
+        if dtensor_meta is None:
+            raise AssertionError
         self.dtensor_meta = dtensor_meta
         self.tensor_dimension = len(dtensor_meta.shape)
         self.strided_shard_placements_in_target: set[_StridedShard] = set()
@@ -682,7 +688,8 @@ class DTensorRedistributePlanner:
         for entry in src_state.tensor_dim_to_mesh_dim:
             tensor_dim = entry.tensor_dim
             mesh_dims = entry.mesh_dims
-            assert len(mesh_dims) > 0
+            if len(mesh_dims) <= 0:
+                raise AssertionError
             for mdim in mesh_dims:
                 if mdim == mesh_dim:
                     continue
@@ -945,7 +952,8 @@ def _gen_transform_infos_non_cached(
         use_graph_based_transform = _FORCE_MIN_COST_REDISTRIBUTION_PLAN
     elif use_graph_based_transform is None:
         use_graph_based_transform = False
-    assert src_spec.tensor_meta is not None
+    if src_spec.tensor_meta is None:
+        raise AssertionError
     drp = get_redistribute_planner(
         device_mesh,
         src_spec.tensor_meta,

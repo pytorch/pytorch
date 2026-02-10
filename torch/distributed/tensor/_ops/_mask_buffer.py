@@ -15,7 +15,8 @@ class MaskBuffer:
         if self.refcount == 0:
             self.data = mask
         else:
-            assert self.data is not None
+            if self.data is None:
+                raise AssertionError
             if not torch.equal(self.data, mask):
                 raise RuntimeError(
                     "MaskBuffer has been materialized with conflicting data"

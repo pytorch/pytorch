@@ -122,7 +122,8 @@ def _init_process_group(store, rank, world_size):
     # default group to be initialized.
     group = dist.ProcessGroupGloo(store, rank, world_size, process_group_timeout)
 
-    assert group is not None, "Failed to initialize default ProcessGroup."
+    if group is None:
+        raise AssertionError("Failed to initialize default ProcessGroup.")
 
     if (rank != -1) and (rank != group.rank()):
         raise RuntimeError(f"rank argument {rank} doesn't match pg rank {group.rank()}")

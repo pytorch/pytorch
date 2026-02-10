@@ -14,20 +14,23 @@ _FILE_PREFIX = "_remote_module_"
 
 
 def get_arg_return_types_from_interface(module_interface):
-    assert getattr(module_interface, "__torch_script_interface__", False), (
-        "Expect a TorchScript class interface decorated by @torch.jit.interface."
-    )
+    if not getattr(module_interface, "__torch_script_interface__", False):
+        raise AssertionError(
+            "Expect a TorchScript class interface decorated by @torch.jit.interface."
+        )
     qualified_name = torch._jit_internal._qualified_name(module_interface)
     cu = torch.jit._state._python_cu
     module_interface_c = cu.get_interface(qualified_name)
-    assert "forward" in module_interface_c.getMethodNames(), (
-        f"Expect forward in interface methods, while it has {module_interface_c.getMethodNames()}"
-    )
+    if "forward" not in module_interface_c.getMethodNames():
+        raise AssertionError(
+            f"Expect forward in interface methods, while it has {module_interface_c.getMethodNames()}"
+        )
     method_schema = module_interface_c.getMethod("forward")
 
     arg_str_list = []
     arg_type_str_list = []
-    assert method_schema is not None
+    if method_schema is None:
+        raise AssertionError
     for argument in method_schema.arguments:
         arg_str_list.append(argument.name)
 
@@ -44,7 +47,8 @@ def get_arg_return_types_from_interface(module_interface):
     arg_type_str_list = arg_type_str_list[1:]  # Remove "self".
     arg_types_str = ", ".join(arg_type_str_list)
 
-    assert len(method_schema.returns) == 1
+    if len(method_schema.returns) != 1:
+        raise AssertionError
     argument = method_schema.returns[0]
     return_type_str = str(argument.type)
 
@@ -102,7 +106,8 @@ def _do_instantiate_remote_module_template(
     spec = importlib.util.spec_from_loader(
         generated_module_name, loader, origin="torch-git"
     )
-    assert spec is not None
+    if spec is None:
+        raise AssertionError
     module = importlib.util.module_from_spec(spec)
     sys.modules[generated_module_name] = module
     loader.exec_module(module)

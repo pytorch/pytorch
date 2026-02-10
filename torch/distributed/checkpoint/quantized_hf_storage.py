@@ -230,9 +230,8 @@ class QuantizedHuggingFaceStorageReader(HuggingFaceStorageReader):
 
         scales = scales.to(torch.int32) - 127
 
-        assert blocks.shape[:-1] == scales.shape, (
-            f"{blocks.shape=} does not match {scales.shape=}"
-        )
+        if blocks.shape[:-1] != scales.shape:
+            raise AssertionError(f"{blocks.shape=} does not match {scales.shape=}")
 
         lut = torch.tensor(FP4_VALUES, dtype=self.target_dtype, device=blocks.device)
 
@@ -413,7 +412,8 @@ class QuantizedHuggingFaceStorageReader(HuggingFaceStorageReader):
 
                 # Calculate which groups we need based on the requested range in dim 2.
                 # Ensure the reequest is in 3D.
-                assert len(req.storage_offsets) == 3
+                if len(req.storage_offsets) != 3:
+                    raise AssertionError
 
                 # Positions in dequantized space.
                 dim2_start_deq = req.storage_offsets[2]

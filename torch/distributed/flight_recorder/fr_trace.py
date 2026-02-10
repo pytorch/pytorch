@@ -45,13 +45,15 @@ def main(args: Sequence[str] | None = None) -> None:
     # pyrefly: ignore [bad-assignment]
     args = config.parse_args(args)
     # pyrefly: ignore [missing-attribute]
-    assert args.trace_dir, "Trace directory trace_dir is required"
+    if not args.trace_dir:
+        raise AssertionError("Trace directory trace_dir is required")
     # pyrefly: ignore [bad-argument-type]
     details, version = read_dir(args)
     # pyrefly: ignore [missing-attribute]
     if args.transform_ft:
         # pyrefly: ignore [missing-attribute]
-        assert args.group_world_size, "World size is required for transform_ft"
+        if not args.group_world_size:
+            raise AssertionError("World size is required for transform_ft")
         # pyrefly: ignore [bad-argument-type]
         details = transform_ft(details, args.group_world_size)
     # pyrefly: ignore [bad-argument-type]

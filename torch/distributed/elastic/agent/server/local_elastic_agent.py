@@ -292,7 +292,8 @@ class LocalElasticAgent(SimpleElasticAgent):
     def _start_workers(self, worker_group: WorkerGroup) -> dict[int, Any]:
         spec = worker_group.spec
         store = worker_group.store
-        assert store is not None
+        if store is None:
+            raise AssertionError
         restart_count = spec.max_restarts - self._remaining_restarts
 
         use_agent_store: bool = spec.rdzv_handler.use_agent_store
@@ -348,8 +349,10 @@ class LocalElasticAgent(SimpleElasticAgent):
         self._setup_local_watchdog(envs=envs)
         self._setup_healthcheck()
 
-        assert spec.entrypoint is not None
-        assert self._logs_specs is not None
+        if spec.entrypoint is None:
+            raise AssertionError
+        if self._logs_specs is None:
+            raise AssertionError
         self._pcontext = start_processes(
             name=spec.role,
             entrypoint=spec.entrypoint,
@@ -421,7 +424,8 @@ class LocalElasticAgent(SimpleElasticAgent):
     def _monitor_workers(self, worker_group: WorkerGroup) -> RunResult:
         role = worker_group.spec.role
         worker_pids = {w.id for w in worker_group.workers}
-        assert self._pcontext is not None
+        if self._pcontext is None:
+            raise AssertionError
         pc_pids = set(self._pcontext.pids().values())
         if worker_pids != pc_pids:
             logger.error(

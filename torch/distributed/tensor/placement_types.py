@@ -80,9 +80,10 @@ class Shard(torch._C._distributed.Shard):
         contiguous: bool,
         dim: int,
     ) -> tuple[list[torch.Tensor], list[int]]:
-        assert dim <= tensor.ndim, (
-            f"Sharding dim {dim} greater than tensor ndim {tensor.ndim}"
-        )
+        if dim > tensor.ndim:
+            raise AssertionError(
+                f"Sharding dim {dim} greater than tensor ndim {tensor.ndim}"
+            )
 
         # chunk tensor over dimension `dim` into n slices
         tensor_list = list(torch.chunk(tensor, num_chunks, dim=dim))
@@ -145,9 +146,10 @@ class Shard(torch._C._distributed.Shard):
         # For the SymInt implementation just compute the value for the tensor we
         # want rather than computing all of them.
 
-        assert self.dim <= tensor.ndim, (
-            f"Sharding dim {self.dim} greater than tensor ndim {tensor.ndim}"
-        )
+        if self.dim > tensor.ndim:
+            raise AssertionError(
+                f"Sharding dim {self.dim} greater than tensor ndim {tensor.ndim}"
+            )
 
         # chunk tensor over dimension `dim` into n slices
         dim_size = tensor.size(self.dim)
@@ -273,7 +275,8 @@ class Shard(torch._C._distributed.Shard):
         first = next(it)
         # Tensors in the scatter list are expected to have the same shape because
         # split is requested with padding.
-        assert all(first.shape == v.shape for v in it)
+        if not all(first.shape == v.shape for v in it):
+            raise AssertionError
 
         output = torch.empty_like(first)
 
@@ -329,7 +332,8 @@ class Shard(torch._C._distributed.Shard):
         )
 
         if is_padded:
-            assert pad_sizes is not None
+            if pad_sizes is None:
+                raise AssertionError
             output = Shard._maybe_unpad_tensor_with_sizes(
                 self.dim, output, pad_sizes, mesh._sym_get_coordinate(mesh_dim), False
             )
@@ -709,7 +713,8 @@ class _StridedShard(torch._C._distributed.StridedShard):
         first = next(it)
         # Tensors in the scatter list are expected to have the same shape because
         # split is requested with padding.
-        assert all(first.shape == v.shape for v in it)
+        if not all(first.shape == v.shape for v in it):
+            raise AssertionError
 
         output = torch.empty_like(first)
 
@@ -730,9 +735,10 @@ class _StridedShard(torch._C._distributed.StridedShard):
         with_padding: bool = True,
         contiguous: bool = True,
     ) -> tuple[list[torch.Tensor], list[int]]:
-        assert self.dim <= tensor.ndim, (
-            f"Sharding dim {self.dim} greater than tensor ndim {tensor.ndim}"
-        )
+        if self.dim > tensor.ndim:
+            raise AssertionError(
+                f"Sharding dim {self.dim} greater than tensor ndim {tensor.ndim}"
+            )
 
         # Essentially _StridedShard express the right-to-left sharding in the
         # reversed order. Here we perform first_split as the virtual "right" sharding,
@@ -1298,13 +1304,13 @@ class _MaskPartial(Partial):
     def _partition_value(
         self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
     ) -> torch.Tensor:
-        assert mesh._is_current_rank_part_of_mesh(), "rank is not part of mesh"
+        if not mesh._is_current_rank_part_of_mesh():
+            raise AssertionError("rank is not part of mesh")
         # override parent logic to perform partial mask for embedding
         num_chunks = mesh.size(mesh_dim)
         # get local shard size and offset on the embedding_dim
-        assert self.offset_shape is not None, (
-            "offset_shape needs to be set for _MaskPartial"
-        )
+        if self.offset_shape is None:
+            raise AssertionError("offset_shape needs to be set for _MaskPartial")
         local_shard_size, local_offset_on_dim = Shard.local_shard_size_and_offset(
             self.offset_shape[self.offset_dim],
             num_chunks,
@@ -1321,7 +1327,8 @@ class _MaskPartial(Partial):
         self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
     ) -> torch.Tensor:
         # by the time we need reduction, we should have already saved the mask
-        assert self.mask_buffer.data is not None
+        if self.mask_buffer.data is None:
+            raise AssertionError
 
         # apply the mask to the tensor that pending reduction
         self.mask_buffer.apply_mask(tensor)
@@ -1342,7 +1349,8 @@ class _MaskPartial(Partial):
         shard_spec: Placement,
     ) -> torch.Tensor:
         # by the time we need reduction, we should have already saved the mask
-        assert self.mask_buffer.data is not None
+        if self.mask_buffer.data is None:
+            raise AssertionError
 
         # apply the mask to the tensor that pending reduction
         self.mask_buffer.apply_mask(tensor)

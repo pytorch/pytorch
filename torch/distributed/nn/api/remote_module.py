@@ -457,7 +457,8 @@ class _RemoteModule(nn.Module):
     def _prepare_init(self, remote_device_str: str) -> bool:
         """Prepare the initialization and returns whether to enable automatically moving CPU tensors to CUDA devices."""
         # Sanity check.
-        assert rpc._is_current_rpc_agent_set(), "RemoteModule only works in RPC."
+        if not rpc._is_current_rpc_agent_set():
+            raise AssertionError("RemoteModule only works in RPC.")
 
         remote_device = _remote_device(remote_device_str)
         self.on = (
