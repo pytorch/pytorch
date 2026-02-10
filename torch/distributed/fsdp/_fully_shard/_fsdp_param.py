@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import inspect
 import itertools
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from enum import auto, Enum
 from typing import Any, cast
@@ -26,7 +26,8 @@ from ._fsdp_common import (
     compiled_autograd_enabled,
     FSDPMeshInfo,
     HSDPMeshInfo,
-    ShardPlacementResult,
+    resolve_shard_placement,
+    ShardPlacementFnResult,
 )
 
 
@@ -226,7 +227,8 @@ class FSDPParam:
         module_info: ParamModuleInfo,
         post_forward_mesh_info: FSDPMeshInfo | None,
         device: torch.device,
-        shard_result: ShardPlacementResult,
+        shard_placement_fn: Callable[[nn.Parameter], ShardPlacementFnResult] | None,
+        mesh_info: FSDPMeshInfo,
         mp_policy: MixedPrecisionPolicy,
         offload_policy: OffloadPolicy,
     ):
@@ -240,6 +242,10 @@ class FSDPParam:
             self.offload_to_cpu and cast(CPUOffloadPolicy, offload_policy).pin_memory
         )
         self.grad_offload_event: torch.Event | None = None
+        shard_result = resolve_shard_placement(
+            shard_placement_fn(param) if callable(shard_placement_fn) else None,
+            mesh_info,
+        )
         self.mesh_info = shard_result.mesh_info
         fsdp_placement = shard_result.placement
         self._init_sharded_param(param, device, fsdp_placement)

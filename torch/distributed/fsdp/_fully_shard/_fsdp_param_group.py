@@ -34,7 +34,6 @@ from ._fsdp_common import (
     FSDPMeshInfo,
     HSDPMeshInfo,
     is_bw,
-    resolve_shard_placement,
     ShardPlacementResult,
     TrainingState,
 )
@@ -152,12 +151,8 @@ class FSDPParamGroup:
                 module_info,
                 post_forward_mesh_info,
                 device,
-                resolve_shard_placement(
-                    shard_placement_fn(param) if shard_placement_fn else None,
-                    default_mesh_info,
-                )
-                if shard_placement_fn
-                else param_to_shard_result[param],
+                shard_placement_fn,
+                default_mesh_info,
                 mp_policy,
                 offload_policy,
             )
