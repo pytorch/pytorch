@@ -5228,6 +5228,7 @@ known_graph_breaks_tests = {
     "test_nested_checkpoint_two_children_early_stop_True",  # dynamo disable
     "test_custom_autograd_ac_early_stop",  # marked as skipped
     "test_checkpoint_compile_no_recompile",  # torch._dynamo.exc.Unsupported: Attempted to call function marked as skipped
+    "test_checkpoint_device_context_fn",  # torch._dynamo.exc.Unsupported: Attempted to call function marked as skipped
     "test_dropout",  # dynamo disable
     "test_dropout_inductor",  # dynamo disable
     "test_function_with_kwargs",  # dynamo disable
@@ -5360,6 +5361,10 @@ if not HAS_CUDA_AND_TRITON:
 
 if IS_S390X:
     skipped_tests.add("test_deep_reentrant")
+
+# clear_saved_tensors_on_access is incompatible with compiled autograd
+skipped_tests.add("test_clear_saved_tensors_on_access")
+skipped_tests.add("test_clear_saved_tensors_on_access_double_access_error")
 
 test_autograd = load_test_module("test_autograd")
 test_custom_ops = load_test_module("test_custom_ops")
