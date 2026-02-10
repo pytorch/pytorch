@@ -264,8 +264,6 @@ class FSDPParam:
         device: torch.device,
         shard_placement_fn: Callable | None,
     ):
-        should_restore_grad_dtype = param.is_leaf and param.requires_grad
-        orig_grad_dtype = param.grad_dtype if should_restore_grad_dtype else None
         if param.device != device and param.device.type != "meta":
             raise AssertionError(
                 f"Expects the parameter to already be moved to device {device} but got {param.device}"
@@ -410,8 +408,8 @@ class FSDPParam:
         self.sharded_param = nn.Parameter(
             self.to_sharded_dtensor(sharded_param), requires_grad=param.requires_grad
         )
-        if should_restore_grad_dtype and self.sharded_param.requires_grad:
-            self.sharded_param.grad_dtype = orig_grad_dtype
+        if param.is_leaf and param.requires_grad:
+            self.sharded_param.grad_dtype = param.grad_dtype
         # Let `param_data` be freed normally when its ref count reaches 0 when
         # the `fully_shard` call returns to allow provided parameters to alias
         self._setattr_on_modules(self.sharded_param)
