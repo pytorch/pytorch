@@ -1189,6 +1189,15 @@ This class does not support ``__members__`` property.)");
           })
       .def_property_readonly("buffer_size", &SymmetricMemory::get_buffer_size)
       .def_property_readonly("offset", &SymmetricMemory::get_offset)
+      .def_property_readonly("device", &SymmetricMemory::get_device)
+      // Convert the pybind `_SymmetricMemory` object into the TorchBind custom
+      // class object (`__torch__.torch.classes.c10d.SymmetricMemory`) so it can
+      // be passed to dispatcher ops that expect the TorchBind type.
+      .def(
+          "boxed",
+          [](c10::intrusive_ptr<SymmetricMemory> self) {
+            return torch::jit::toPyObject(c10::IValue(std::move(self)));
+          })
       .def(
           "get_buffer",
           &SymmetricMemory::get_buffer,
@@ -3254,7 +3263,13 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               py::arg("backend"),
               py::arg("gloo_backend"))
           .def_property_readonly(
-              "wrapped_pg", &::c10d::ProcessGroupWrapper::getWrappedPg);
+              "wrapped_pg", &::c10d::ProcessGroupWrapper::getWrappedPg)
+          .def_property_readonly(
+              "options", &::c10d::ProcessGroupWrapper::getBackendOptions)
+          .def(
+              "get_error",
+              &::c10d::ProcessGroupWrapper::getError,
+              py::call_guard<py::gil_scoped_release>());
 #endif
 
 #ifdef USE_C10D_NCCL

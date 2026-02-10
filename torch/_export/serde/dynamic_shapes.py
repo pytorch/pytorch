@@ -145,7 +145,8 @@ def _dump_dynamic_shapes(
             for i, s in enumerate(tensor.shape):
                 out.append(s if shape.get(i) is None else shape.get(i))
         else:
-            assert isinstance(shape, (tuple, list))
+            if not isinstance(shape, (tuple, list)):
+                raise AssertionError(f"expected tuple or list, got {type(shape)}")
             for i, s in enumerate(tensor.shape):
                 out.append(s if shape[i] is None else shape[i])
         return out
@@ -161,7 +162,8 @@ def _dump_dynamic_shapes(
         if isinstance(val, _DimHint):  # store enum as string
             return val.__class__.__name__ + "." + val.type.name
 
-        assert isinstance(val, Dim)
+        if not isinstance(val, Dim):
+            raise AssertionError(f"expected Dim, got {type(val)}")
 
         # track root dim
         root = val.root if isinstance(val, _DerivedDim) else val  # type: ignore[attr-defined]

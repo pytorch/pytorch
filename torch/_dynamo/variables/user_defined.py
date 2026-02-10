@@ -76,6 +76,7 @@ from ..utils import (
     check_constant_args,
     cmp_name_to_op_mapping,
     dict_methods,
+    enum_type_methods,
     frozenset_methods,
     get_custom_getattr,
     has_torch_function,
@@ -155,6 +156,15 @@ def is_cython_function(obj: object) -> bool:
 
 class UserDefinedVariable(VariableTracker):
     value: object
+
+    def _maybe_get_baseclass_method(self, name: str) -> Any:
+        """Get method from the base class if not overridden in value's __dict__."""
+        if name not in getattr(self.value, "__dict__", {}):
+            try:
+                return inspect.getattr_static(type(self.value), name)
+            except AttributeError:
+                pass
+        return None
 
 
 class UserDefinedClassVariable(UserDefinedVariable):
@@ -416,6 +426,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        from .builder import SourcelessBuilder
+
         if (
             name == "__subclasses__"
             and len(args) == 0
@@ -442,10 +454,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.ConstantVariable(self.value != args[0].value)
         elif issubclass(self.value, dict) and name != "__new__":
             # __new__ is handled below
-            return variables.BuiltinVariable(dict).call_method(tx, name, args, kwargs)
+            return SourcelessBuilder.create(tx, dict).call_method(
+                tx, name, args, kwargs
+            )
         elif issubclass(self.value, (set, frozenset)) and name != "__new__":
             # __new__ is handled below
-            return variables.BuiltinVariable(set).call_method(tx, name, args, kwargs)
+            return SourcelessBuilder.create(tx, set).call_method(tx, name, args, kwargs)
         elif (
             name == "__new__"
             and self.value is collections.OrderedDict
@@ -492,7 +506,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         from ..side_effects import SideEffects
-        from .builder import wrap_fx_proxy
+        from .builder import SourcelessBuilder, wrap_fx_proxy
         from .ctx_manager import GenericContextWrappingVariable
 
         constant_args = check_constant_args(args, kwargs)
@@ -521,6 +535,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
         elif self.value is collections.defaultdict:
             if len(args) == 0:
                 default_factory = variables.ConstantVariable.create(None)
+            elif len(args) == 1:
+                # In the case the argument is a builtin, then we can take the callable as the factory method.
+                # Otherwise, it must be a ConstantVariable holding None.
+                if not DefaultDictVariable.is_supported_arg(args[0]):
+                    raise_observed_exception(TypeError, tx, args=[args[0]])
+                default_factory = args[0]
+                args = []
             else:
                 default_factory, *args = args
             dict_vt = variables.BuiltinVariable.call_custom_dict(
@@ -543,7 +564,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                         *graph_break_hints.SUPPORTABLE,
                     ],
                 )
-            return variables.BuiltinVariable(dict).call_dict(tx, *args, **kwargs)
+            return SourcelessBuilder.create(tx, dict).call_dict(tx, *args, **kwargs)
         elif self.value is collections.deque:
             maxlen = variables.ConstantVariable.create(None)
 
@@ -725,7 +746,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 ] + args[1:]
 
             cm_obj = tx.output.side_effects.track_new_user_defined_object(
-                variables.BuiltinVariable(object),
+                SourcelessBuilder.create(tx, object),
                 self,
                 arg_new,  # type: ignore[arg-type]
             )
@@ -781,7 +802,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             # This simulates `THPSize_pynew`, the C impl for `Size.__new__`.
             from .lists import SizeVariable
 
-            tup = variables.BuiltinVariable(tuple).call_function(tx, args, kwargs)
+            tup = SourcelessBuilder.create(tx, tuple).call_function(tx, args, kwargs)
             return SizeVariable(tup.items)  # type: ignore[missing-attribute]
         elif is_frozen_dataclass(self.value) and self.is_standard_new():
             fields = dataclasses.fields(self.value)  # type: ignore[arg-type]
@@ -821,7 +842,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             kwargs.update(default_kwargs)
 
             var = tx.output.side_effects.track_new_user_defined_object(
-                variables.BuiltinVariable(object),
+                SourcelessBuilder.create(tx, object),
                 self,
                 args,  # type: ignore[arg-type]
             )
@@ -984,6 +1005,45 @@ class UserDefinedExceptionClassVariable(UserDefinedClassVariable):
     @property
     def fn(self) -> type[object]:
         return self.value
+
+
+class UserDefinedEnumClassVariable(UserDefinedClassVariable):
+    """
+    Represents Enum class objects (the class itself, not instances).
+
+    Handles Enum metaclass methods like __contains__ by checking if the method
+    is from the standard EnumType metaclass and executing it directly.
+
+    Not yet supported:
+    - __iter__: iteration over enum members (e.g., `for x in SomeEnum`)
+    - __reversed__: reversed iteration
+    - Flag enum membership checks (e.g., `Flag.A in combined_flags`)
+    """
+
+    # pyrefly: ignore[bad-override]
+    value: type[enum.Enum]
+
+    def call_method(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        method = self._maybe_get_baseclass_method(name)
+        if method in enum_type_methods:
+            if name == "__contains__" and len(args) == 1 and not kwargs:
+                arg = args[0]
+                if isinstance(arg, variables.EnumVariable):
+                    # Check if the enum value is a member of this enum class
+                    return variables.ConstantVariable.create(arg.value in self.value)
+                elif arg.is_python_constant():
+                    # Check if a constant value is in the enum
+                    return variables.ConstantVariable.create(
+                        arg.as_python_constant() in self.value
+                    )
+
+        return super().call_method(tx, name, args, kwargs)
 
 
 class NO_SUCH_SUBOBJ:
@@ -1156,14 +1216,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         }
         return fns
 
-    def _maybe_get_baseclass_method(self, name: str) -> set[types.FunctionType] | None:
-        if name not in getattr(self.value, "__dict__", {}):
-            try:
-                return inspect.getattr_static(type(self.value), name)
-            except AttributeError:
-                pass
-        return None
-
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -1301,8 +1353,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         return super().unpack_var_sequence(tx)
 
     def has_force_unpack_var_sequence(self, tx: "InstructionTranslator") -> bool:
+        from .builder import SourcelessBuilder
+
         try:
-            variables.BuiltinVariable(iter).call_function(tx, [self], {})
+            SourcelessBuilder.create(tx, iter).call_function(tx, [self], {})
             return True
         except ObservedTypeError:
             handle_observed_exception(tx)
@@ -1311,8 +1365,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def force_unpack_var_sequence(
         self, tx: "InstructionTranslator"
     ) -> list[VariableTracker]:
+        from .builder import SourcelessBuilder
+
         result = []
-        iter_ = variables.BuiltinVariable(iter).call_function(tx, [self], {})
+        iter_ = SourcelessBuilder.create(tx, iter).call_function(tx, [self], {})
 
         while True:
             try:
@@ -2417,6 +2473,8 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
     def __init__(
         self, value: object, set_vt: SetVariable | None = None, **kwargs: Any
     ) -> None:
+        from .builder import SourcelessBuilder
+
         tx = kwargs.pop("tx", None)
         super().__init__(value, **kwargs)
 
@@ -2437,7 +2495,7 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
                 init_args = kwargs.get("init_args", {})
                 if tx is None:
                     tx = torch._dynamo.symbolic_convert.InstructionTranslator.current_tx()
-                self._set_vt = variables.BuiltinVariable(python_type).call_function(  # type: ignore[assignment]
+                self._set_vt = SourcelessBuilder.create(tx, python_type).call_function(  # type: ignore[assignment]
                     tx, init_args, {}
                 )
         else:
