@@ -291,7 +291,6 @@ from .torch_function import (
 )
 from .user_defined import (
     FrozenDataClassVariable,
-    InspectVariable,
     IntWrapperVariable,
     KeyedJaggedTensorVariable,
     MutableMappingVariable,
@@ -1807,10 +1806,7 @@ class VariableBuilder:
 
     def wrap_user_defined(self, value: Any) -> VariableTracker:
         self.install_guards(GuardBuilder.TYPE_MATCH)
-        if InspectVariable.is_matching_object(value):
-            result = InspectVariable(value, source=self.source)
-        else:
-            result = UserDefinedObjectVariable(value, source=self.source)
+        result = UserDefinedObjectVariable(value, source=self.source)
         if not SideEffects.cls_supports_mutation_side_effects(type(value)):
             # don't allow STORE_ATTR mutation with custom __setattr__
             return result
