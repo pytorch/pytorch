@@ -57,24 +57,18 @@ except ImportError:
 test_classes = {}
 
 
-def make_pallas(cls, _debug_cpu_to_tpu_pallas=False):
+def make_pallas(cls):
     """Create a test class variant that uses Pallas backend.
 
     Args:
         cls: The test class to create a Pallas variant of.
-        _debug_cpu_to_tpu_pallas: If True, route CPU operations to TPU.
     """
     patches = [
         (config, "cpu_backend", "pallas"),
         (config, "cuda_backend", "pallas"),
     ]
-    if _debug_cpu_to_tpu_pallas:
-        cls_prefix = "PallasTpu"
-        suffix = "_pallas_tpu"
-        patches.append((config, "_debug_cpu_to_tpu_pallas", True))
-    else:
-        cls_prefix = "Pallas"
-        suffix = "_pallas"
+    cls_prefix = "Pallas"
+    suffix = "_pallas"
 
     # Mark tests based on sentinel files in pallas_expected_failures/ and pallas_skip_tests/
     for name in cls.__dict__:
@@ -411,7 +405,6 @@ class PallasTestsMixin:
         expected = fn(x, y)
         self.assertEqual(result, expected)
 
-    @skip_if_tpu
     def test_different_shapes(self):
         """Test with different tensor shapes."""
         if self.DEVICE == "cuda":
@@ -481,7 +474,6 @@ class PallasTestsMixin:
         expected = operate_on_tensor(x_t_contiguous)
         self.assertEqual(result, expected)
 
-    @skip_if_tpu
     def test_strided_int_pallas(self):
         """Test strided access patterns with the Pallas backend."""
         if self.DEVICE == "cuda":
@@ -498,7 +490,6 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
-    @skip_if_tpu
     def test_strided_offset_pallas(self):
         """Test strided access with offset."""
         if self.DEVICE == "cuda":
@@ -639,7 +630,6 @@ class PallasTestsMixin:
         x = base_2d[::2, ::2].unsqueeze(0)
         self.assertEqual(compiled(x), x * 2.0 + 1.0)
 
-    @skip_if_tpu
     def test_stride_non_contiguous_dtypes(self):
         """Test non-contiguous patterns with various dtypes."""
         compiled = self._compile(lambda x: x * 2.0 + 1.0)
@@ -671,7 +661,6 @@ class PallasTestsMixin:
         x = torch.randn(1, 1, 16, device=self.DEVICE).expand(4, 8, 16)
         self.assertEqual(compiled(x, x), x + x)
 
-    @skip_if_tpu
     def test_stride_multiple_inputs(self):
         """Test multiple strided inputs and broadcasting."""
         compiled = self._compile(lambda a, b, c: a * b + c)
@@ -731,7 +720,6 @@ class PallasTestsMixin:
         expected = fn(x, y)
         self.assertEqual(result, expected)
 
-    @skip_if_tpu
     def test_complex_indexing_gather(self):
         """Test complex indexing with gather-like operations."""
         if self.DEVICE == "cuda":
@@ -752,7 +740,6 @@ class PallasTestsMixin:
         expected = fn(x, indices)
         self.assertEqual(result, expected)
 
-    @skip_if_tpu
     def test_complex_indexing_2d(self):
         """Test complex indexing on 2D tensors with integer array indexing."""
         if self.DEVICE == "cuda":
@@ -957,7 +944,7 @@ class PallasTestsMixin:
 
     def test_sign(self):
         """Test sign operation."""
-        if self.DEVICE == "cuda" or self.is_tpu:
+        if self.is_tpu:
             self.skipTest("sign not supported in Pallas GPU (Mosaic) backend")
 
         def fn(x):
@@ -998,10 +985,9 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
-    @skip_if_tpu
     def test_erf(self):
         """Test erf operation."""
-        if self.DEVICE == "cuda" or self.is_tpu:
+        if self.is_tpu:
             self.skipTest("erf not supported in Pallas GPU (Mosaic) backend")
 
         def fn(x):
@@ -1014,10 +1000,9 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
-    @skip_if_tpu
     def test_atan2(self):
         """Test atan2 operation."""
-        if self.DEVICE == "cuda" or self.is_tpu:
+        if self.is_tpu:
             self.skipTest("atan2 not supported in Pallas Mosaic backend")
 
         def fn(a, b):
@@ -1031,7 +1016,6 @@ class PallasTestsMixin:
         expected = fn(a, b)
         self.assertEqual(result, expected)
 
-    @skip_if_tpu
     def test_sum_reduction(self):
         """Test sum reduction."""
 
@@ -1045,7 +1029,6 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
-    @skip_if_tpu
     def test_max_reduction(self):
         """Test max reduction."""
 
@@ -1059,7 +1042,6 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
-    @skip_if_tpu
     def test_min_reduction(self):
         """Test min reduction."""
 
@@ -1157,7 +1139,6 @@ class PallasTestsMixin:
 
     @skip_if_cpu
     @skip_if_cuda
-    @skip_if_tpu
     def test_rope(self):
         """Test Rotary Position Embedding with slice + cat.
 
@@ -1180,7 +1161,6 @@ class PallasTestsMixin:
         expected = fn(x, cos, sin)
         self.assertEqual(result, expected)
 
-    @skip_if_tpu
     def test_arange_multi_output(self):
         """Test arange with view and multiple outputs."""
         if self.DEVICE == "cuda" or self.is_tpu:
@@ -1611,7 +1591,7 @@ if test_torchinductor.RUN_TPU and has_tpu_pallas():
             else:
                 raise unittest.SkipTest("torch_tpu not installed")
 
-    make_pallas(test_torchinductor.SweepInputsTpuTest, _debug_cpu_to_tpu_pallas=True)
+    make_pallas(test_torchinductor.SweepInputsTpuTest)
 
 
 if __name__ == "__main__":
