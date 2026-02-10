@@ -484,6 +484,22 @@ class ComboKernelTests(TestCase):
         else:
             FileCheck().check("pid_offset = pid").run(code[0])
 
+    @requires_gpu_and_triton
+    def test_large_grid_combo_kernel(self):
+        def fn(a, b, c):
+            return torch.relu(a), torch.sigmoid(b), torch.tanh(c)
+
+        inps = [
+            torch.rand(50_000_000, device=GPU_TYPE),
+            torch.rand(50_000_000, device=GPU_TYPE),
+            torch.rand(50_000_000, device=GPU_TYPE),
+        ]
+
+        out_eager = fn(*inps)
+        out_compiled, (code,) = run_and_get_code(torch.compile(fn), *inps)
+        self.assertEqual(out_eager, out_compiled)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
 
 class ComboKernelBenchmarkTests(TestCase):
     check_model_gpu = check_model_gpu
