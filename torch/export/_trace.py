@@ -1807,6 +1807,18 @@ def _export_to_aten_ir_make_fx(
                     non_strict_root, assigned_buffers
                 )
 
+            def _find_tracer():
+                """Find the active tracer from torch function mode stack or proxy mode."""
+                if torch._C._is_torch_function_mode_enabled():
+                    for mode in torch.overrides._get_current_function_mode_stack():
+                        if isinstance(mode, PreDispatchTorchFunctionMode):
+                            return mode.tracer
+                # When called from within a subclass's __torch_function__,
+                # PreDispatchTorchFunctionMode has been temporarily popped from
+                # the mode stack. Fall back to ProxyTorchDispatchMode.
+                proxy_mode = get_proxy_mode()
+                return proxy_mode.tracer if proxy_mode is not None else None
+
             def custom_getattribute(self, attr, *, original_getattr, attrs_to_proxy):
                 """
                 The idea here is that we override subclass getattr methods to proxy
@@ -1815,45 +1827,19 @@ def _export_to_aten_ir_make_fx(
                 system.
                 """
                 out = original_getattr(self, attr)
-                if attr in attrs_to_proxy:
-                    if isinstance(out, torch.Tensor):
-                        tracer = None
-                        if torch._C._is_torch_function_mode_enabled():
-                            # When we get here there is no guarantee that we will hit the
-                            # PreDispatchTorchFunctionMode, so we manually peak into the torch
-                            # function mode list and tweak the PreDispatchTorchFunctionMode.
-                            # This has side effect of proxying stuff like
-                            # proxy.node.meta["val"] = extract_val(val) because at that time, torch function
-                            # mode is still active. It seems bad to turn it off inside proxy_tensor.py, so
-                            # I guess we will just rely on DCE for now to remove extra stuff like detach
-                            torch_function_mode_stack = (
-                                torch.overrides._get_current_function_mode_stack()
-                            )
-                            for mode in torch_function_mode_stack:
-                                if isinstance(mode, PreDispatchTorchFunctionMode):
-                                    tracer = mode.tracer
-                                    break
-
-                        # When this is called from within a subclass's __torch_function__,
-                        # PreDispatchTorchFunctionMode has been temporarily popped from the
-                        # torch function mode stack. Fall back to get_proxy_mode() which
-                        # accesses ProxyTorchDispatchMode via the dispatch mode registry.
-                        if tracer is None:
-                            proxy_mode = get_proxy_mode()
-                            if proxy_mode is not None:
-                                tracer = proxy_mode.tracer
-
-                        if tracer is not None:
-                            proxy = get_proxy_slot(self, tracer).proxy
-                            inner_proxy = tracer.create_proxy(
-                                "call_function",
-                                torch.ops.export.access_subclass_inner_tensor.default,
-                                (proxy, attr),
-                                {},
-                            )
-                            track_tensor_tree(
-                                out, inner_proxy, constant=None, tracer=tracer
-                            )
+                if attr in attrs_to_proxy and isinstance(out, torch.Tensor):
+                    tracer = _find_tracer()
+                    if tracer is not None:
+                        proxy = get_proxy_slot(self, tracer).proxy
+                        inner_proxy = tracer.create_proxy(
+                            "call_function",
+                            torch.ops.export.access_subclass_inner_tensor.default,
+                            (proxy, attr),
+                            {},
+                        )
+                        track_tensor_tree(
+                            out, inner_proxy, constant=None, tracer=tracer
+                        )
                 return out
 
             @contextmanager
