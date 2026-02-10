@@ -652,7 +652,7 @@ class FSDPParamGroup:
 
     @staticmethod
     def _prefetch_unshard(
-        target_fsdp_param_group: FSDPParamGroup, pass_type: str
+        target_fsdp_param_group: "FSDPParamGroup", pass_type: str
     ) -> None:
         if pass_type == "backward":
             training_state = TrainingState.PRE_BACKWARD

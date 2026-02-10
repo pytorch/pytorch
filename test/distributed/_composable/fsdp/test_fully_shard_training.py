@@ -1459,7 +1459,9 @@ class TestFullyShardNDTraining(FSDPTest):
         torch.manual_seed(42)
         model = Transformer(model_args)
         ref_model = copy.deepcopy(model).to(device_type)
-        Transformer.parallelize(model, tp_mesh=tp_mesh, ep_mesh=ep_mesh)
+        Transformer.parallelize(
+            model, tp_mesh=tp_mesh, use_seq_parallel=False, ep_mesh=ep_mesh
+        )
         for block in model.layers:
             expert_params = set(block.expert_layer.experts.parameters())
 

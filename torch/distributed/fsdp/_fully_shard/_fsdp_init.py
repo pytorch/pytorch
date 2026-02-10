@@ -1,6 +1,6 @@
 import itertools
 import logging
-from typing import cast, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
@@ -355,7 +355,7 @@ def _init_param_group(
     params: list[nn.Parameter],
     modules: tuple[nn.Module, ...],
     mesh_info: DataParallelMeshInfo,
-    post_forward_mesh_info: "FSDPMeshInfo | None",
+    post_forward_mesh_info: FSDPMeshInfo | None,
     device: torch.device,
     shard_placement_fn: "Callable[[nn.Parameter], Any] | None",
     mp_policy: "MixedPrecisionPolicy",
@@ -384,11 +384,11 @@ def _init_param_group(
     # Resolve shard placement once per param and cache the results
     # to avoid calling the user function again in FSDPParam.__init__.
     param_to_shard_result: dict[nn.Parameter, ShardPlacementResult] = {}
-    default_mesh_info = cast(FSDPMeshInfo, mesh_info)
+    assert isinstance(mesh_info, FSDPMeshInfo)
     for param in params:
         param_to_shard_result[param] = resolve_shard_placement(
             shard_placement_fn(param) if shard_placement_fn else None,
-            default_mesh_info,
+            mesh_info,
         )
 
     # Group params by their process group to support per-param mesh,
@@ -422,9 +422,7 @@ def _init_param_group(
     # Create a FSDPParamGroup per process group
     for group_mesh_info, group_params in pg_to_group.values():
         group_post_forward = post_forward_mesh_info
-        if reshard_after_forward is not None and group_mesh_info is not cast(
-            FSDPMeshInfo, mesh_info
-        ):
+        if reshard_after_forward is not None and group_mesh_info is not mesh_info:
             group_post_forward = _get_post_forward_mesh_info(
                 reshard_after_forward, group_mesh_info
             )
