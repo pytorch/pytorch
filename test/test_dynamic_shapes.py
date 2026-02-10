@@ -5000,6 +5000,49 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
             compiled_result = bug_module(key)
 
         self.assertEqual(compiled_result, eager_result)
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_view_as_complex_unbacked_no_dde(self):
+        """
+        Test that view_as_complex does not raise GuardOnDataDependentSymNode
+        when operating on tensors with unbacked dimensions.
+        """
+
+        def func(x):
+            return torch.view_as_complex(x)
+
+        # Create a tensor with shape [..., 2] where batch dim is unbacked
+        x = torch.rand(4, 8, 2)
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+
+        torch._dynamo.reset()
+        # This should not raise GuardOnDataDependentSymNode
+        compiled_func = torch.compile(func, fullgraph=True, backend="eager")
+        result = compiled_func(x)
+        expected = torch.view_as_complex(x)
+        self.assertTrue(
+            torch.allclose(torch.view_as_real(result), torch.view_as_real(expected))
+        )
+
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_view_as_real_backward_unbacked_no_dde(self):
+        """
+        Test that view_as_real backward (which calls view_as_complex) does not
+        raise GuardOnDataDependentSymNode when operating on tensors with
+        unbacked dimensions.
+        """
+
+        def func(x):
+            y = torch.view_as_real(x)
+            return y.sum()
+
+        x = torch.rand(4, 8, dtype=torch.complex64, requires_grad=True)
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+
+        torch._dynamo.reset()
+        # This should not raise GuardOnDataDependentSymNode during backward
+        compiled_func = torch.compile(func, fullgraph=True, backend="eager")
+        result = compiled_func(x)
+        result.backward()
 
 
 instantiate_parametrized_tests(TestUnbacked)
