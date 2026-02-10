@@ -1803,7 +1803,7 @@ const interactionCheckbox = interactionLabel.append('input')
   .attr('type', 'checkbox')
   .attr('id', 'interaction-mode-toggle')
   .attr('style', 'cursor: pointer; margin-right: 5px;');
-interactionLabel.append('span').text('Click to show trace (applies on file load)');
+interactionLabel.append('span').text('Require click to show trace (applies on file load)');
 
 interactionCheckbox.on('change', function() {
   const mode = this.checked ? 'click' : 'hover';
