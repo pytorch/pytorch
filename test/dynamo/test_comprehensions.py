@@ -2005,6 +2005,8 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(compiled(x), outer(x))
         self.assertEqual(len(backend.graphs), 2)
+        self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
+        self.assertEqual(count_op(backend.graphs[1], operator.add), 1)
 
     @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_nested_comprehension_name_shadowing(self):
@@ -2013,12 +2015,14 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         def inner(x):
             a = x + 2
             result = [torch._dynamo.graph_break() or a.item() for i in range(2)]
+            self.assertEqual(a, torch.full((), 4, dtype=torch.float32))
             b = x + 3
             return b, result
 
         def outer(x):
             a = x + 1
             r = inner(a)
+            self.assertEqual(a, torch.full((), 2, dtype=torch.float32))
             return a + 4, r
 
         backend = torch._dynamo.testing.EagerAndRecordGraphs()
@@ -2026,7 +2030,11 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         x = torch.tensor(1.0)
 
         self.assertEqual(compiled(x), outer(x))
-        self.assertEqual(len(backend.graphs), 2)
+        self.assertEqual(len(backend.graphs), 4)
+        self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
+        self.assertEqual(count_op(backend.graphs[1], operator.add), 0)
+        self.assertEqual(count_op(backend.graphs[2], operator.add), 1)
+        self.assertEqual(count_op(backend.graphs[3], operator.add), 1)
 
 
 if __name__ == "__main__":
