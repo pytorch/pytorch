@@ -245,11 +245,11 @@ class FSDPState(_State):
         # all_states may contain the same state multiple times when multiple
         # modules share one FSDP state (multi-module fully_shard), so
         # deduplicate to avoid appending the same param group repeatedly.
-        visited_states: set[FSDPState] = set()
+        seen_states: set[FSDPState] = set()
         for state in self._state_ctx.all_states:
-            if state in visited_states:
+            if state in seen_states:
                 continue
-            visited_states.add(state)
+            seen_states.add(state)
             for fsdp_param_group in state._fsdp_param_groups:
                 for fsdp_param in fsdp_param_group.fsdp_params:
                     param_to_fsdp_param[fsdp_param.sharded_param] = fsdp_param

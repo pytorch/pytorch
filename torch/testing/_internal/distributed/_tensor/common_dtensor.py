@@ -210,6 +210,8 @@ class Experts(nn.Module):
         nn.init.normal_(self.w2, std=0.02)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # Weights are DTensors (sharded by EP/TP) but x is a plain tensor
+        # (dispatched by EP hooks), so extract local shards for bmm.
         if isinstance(self.w1, DTensor):
             w1, w2 = self.w1.to_local(), self.w2.to_local()
         else:

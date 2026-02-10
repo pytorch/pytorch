@@ -1474,17 +1474,15 @@ class TestFullyShardNDTraining(FSDPTest):
             def _shard_placement_fn(
                 param,
                 _expert_params=expert_params,
-                _efsdp_mesh_info=efsdp_mesh_info,
-                _dp_mesh_info=dp_mesh_info,
             ):
                 if param in _expert_params:
                     return ShardPlacementResult(
                         placement=Shard(0),
-                        mesh_info=_efsdp_mesh_info,
+                        mesh_info=efsdp_mesh_info,
                     )
                 return ShardPlacementResult(
                     placement=Shard(0),
-                    mesh_info=_dp_mesh_info,
+                    mesh_info=dp_mesh_info,
                 )
 
             # Blocks always have DTensor expert params (from EP), so int

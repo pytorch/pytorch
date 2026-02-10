@@ -401,7 +401,11 @@ def _init_param_group(
     # For HSDP, also key by replicate_process_group to avoid grouping
     # FSDPMeshInfo params with HSDPMeshInfo params that share the same
     # shard_process_group but require different gradient reduction behavior.
-    assert isinstance(mesh_info, FSDPMeshInfo)
+    if not isinstance(mesh_info, FSDPMeshInfo):
+        raise ValueError(
+            "Per-param mesh via shard_placement_fn is not supported with "
+            f"{type(mesh_info).__name__}; it requires FSDPMeshInfo"
+        )
     pg_to_group: dict[
         tuple[dist.ProcessGroup, dist.ProcessGroup | None],
         tuple[FSDPMeshInfo, list[nn.Parameter]],
@@ -431,7 +435,11 @@ def _init_param_group(
     # Create a FSDPParamGroup per process group
     for group_mesh_info, group_params in pg_to_group.values():
         if group_mesh_info is not mesh_info:
-            assert reshard_after_forward is not None
+            if reshard_after_forward is None:
+                raise ValueError(
+                    "reshard_after_forward must be specified when "
+                    "shard_placement_fn returns a custom mesh"
+                )
             group_post_forward = _get_post_forward_mesh_info(
                 reshard_after_forward, group_mesh_info
             )
