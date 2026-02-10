@@ -1,6 +1,5 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
-import dataclasses
 import functools
 import logging
 from collections.abc import Callable, Sequence
@@ -17,8 +16,8 @@ from torch.distributed._composable_state import (
     _State,
 )
 from torch.distributed.device_mesh import _get_device_handle
+from torch.distributed.fsdp._common_utils import flatten_output_tensors
 from torch.distributed.utils import _apply_to_tensors, _to_kwargs
-from torch.utils._pytree import tree_flatten
 
 from ._fsdp_api import MixedPrecisionPolicy
 from ._fsdp_common import (
@@ -27,11 +26,7 @@ from ._fsdp_common import (
     detect_compiled_autograd,
     TrainingState,
 )
-from ._fsdp_param_group import (
-    flatten_output_tensors,
-    FSDPCommContext,
-    FSDPParamGroup,
-)
+from ._fsdp_param_group import FSDPCommContext, FSDPParamGroup
 
 
 if TYPE_CHECKING:

@@ -1,15 +1,18 @@
 # mypy: allow-untyped-defs
 import contextlib
-import dataclasses
 import logging
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from typing import Any, cast, NamedTuple
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed.device_mesh import _get_device_handle
-from torch.distributed.fsdp._common_utils import _named_parameters_with_duplicates
+from torch.distributed.fsdp._common_utils import (
+    _named_parameters_with_duplicates,
+    flatten_output_tensors,
+    replace_output_tensors,
+)
 from torch.distributed.tensor import Shard
 from torch.profiler import record_function
 from torch.utils.hooks import RemovableHandle
@@ -37,77 +40,6 @@ from ._fsdp_common import (
     TrainingState,
 )
 from ._fsdp_param import alloc_storage, FSDPParam, ParamModuleInfo, ShardedState
-
-
-def flatten_output_tensors(output: Any) -> tuple[torch.Tensor, ...]:
-    """
-    Recursively flatten tensors in the output and return tensors which require gradients.
-
-    This handles both standard pytree structures and unregistered dataclasses.
-    Uses the same traversal order as :func:`replace_output_tensors`.
-    """
-    tensors_list: list[torch.Tensor] = []
-    _collect_grad_tensors(output, tensors_list)
-    return tuple(tensors_list)
-
-
-def _collect_grad_tensors(output: Any, out: list[torch.Tensor]) -> None:
-    """Collect grad-requiring tensors in the same order as replace_output_tensors."""
-    if torch.is_tensor(output) and output.requires_grad:
-        out.append(output)
-    elif dataclasses.is_dataclass(output) and not isinstance(output, type):
-        for field in dataclasses.fields(output):
-            _collect_grad_tensors(getattr(output, field.name), out)
-    elif isinstance(output, dict):
-        for v in output.values():
-            _collect_grad_tensors(v, out)
-    elif isinstance(output, (list, tuple)):
-        for item in output:
-            _collect_grad_tensors(item, out)
-
-
-def replace_output_tensors(output: Any, tensor_iter: Iterator[torch.Tensor]) -> Any:
-    """
-    Replace grad-requiring tensors in output using replacements from tensor_iter.
-
-    Tensors are consumed from tensor_iter in the same traversal order as
-    flatten_output_tensors. Handles pytree structures and unregistered
-    dataclasses.
-    """
-    if torch.is_tensor(output) and output.requires_grad:
-        return next(tensor_iter)
-    elif dataclasses.is_dataclass(output) and not isinstance(output, type):
-        changes = {}
-        for field in dataclasses.fields(output):
-            old_val = getattr(output, field.name)
-            new_val = replace_output_tensors(old_val, tensor_iter)
-            if new_val is not old_val:
-                changes[field.name] = new_val
-        if changes:
-            return dataclasses.replace(output, **changes)
-        return output
-    elif isinstance(output, dict):
-        new_dict = {}
-        any_changed = False
-        for k, v in output.items():
-            new_v = replace_output_tensors(v, tensor_iter)
-            new_dict[k] = new_v
-            if new_v is not v:
-                any_changed = True
-        return new_dict if any_changed else output
-    elif isinstance(output, (list, tuple)):
-        new_items = []
-        any_changed = False
-        for item in output:
-            new_item = replace_output_tensors(item, tensor_iter)
-            new_items.append(new_item)
-            if new_item is not item:
-                any_changed = True
-        if any_changed:
-            return type(output)(new_items)
-        return output
-    else:
-        return output
 
 
 logger = logging.getLogger("torch.distributed.fsdp.fully_shard")
@@ -797,7 +729,11 @@ class FSDPParamGroup:
         # Replace tensors in the structure (iterator order matches flatten order)
         tensor_iter = iter(out_tensors)
         new_args, new_kwargs = replace_output_tensors((args, kwargs), tensor_iter)
-        assert not list(tensor_iter), "Not all replacement tensors were consumed"
+        remaining = list(tensor_iter)
+        if remaining:
+            raise RuntimeError(
+                f"{len(remaining)} replacement tensors were not consumed"
+            )
         return new_args, new_kwargs
 
     def _register_state_dict_hooks(self) -> None:
