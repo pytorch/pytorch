@@ -212,6 +212,66 @@ class TestUtils(TestCase):
         fn(x)
         self.assertEqual(traced_code_lists, [])
 
+    def test_reinplace_counters_use_trigger_name_not_enum_value(self):
+        """Test that ReinplaceCounters uses trigger.name in dictionary keys instead of the enum value"""
+        from torch._dynamo.utils import ReinplaceCounters, ReInplaceTrigger
+
+        # Clear any existing state
+        ReinplaceCounters.clear()
+
+        # Test with AUTO_FUNC_V1 trigger
+        trigger = ReInplaceTrigger.AUTO_FUNC_V1
+
+        # Add some values
+        ReinplaceCounters.add_missed_opportunities(trigger, 2)
+        ReinplaceCounters.add_missed_bytes(trigger, 512)
+
+        # Check that the dictionary keys use the trigger name, not the enum value
+        expected_tensor_key = "missed_tensors_AUTO_FUNC_V1"
+        expected_bytes_key = "missed_bytes_AUTO_FUNC_V1"
+
+        # Verify the keys exist with the correct format
+        self.assertIn(
+            expected_tensor_key,
+            ReinplaceCounters._values,
+            f"Expected key {expected_tensor_key} not found",
+        )
+        self.assertIn(
+            expected_bytes_key,
+            ReinplaceCounters._values,
+            f"Expected key {expected_bytes_key} not found",
+        )
+
+        # Verify the values are correct
+        self.assertEqual(ReinplaceCounters._values[expected_tensor_key], 2)
+        self.assertEqual(ReinplaceCounters._values[expected_bytes_key], 512)
+
+        # Clear for next test
+        ReinplaceCounters.clear()
+
+        # Test with a different trigger to ensure it's not hardcoded
+        trigger2 = ReInplaceTrigger.TRITON_OPS
+        ReinplaceCounters.add_missed_opportunities(trigger2, 3)
+
+        expected_key2 = "missed_tensors_TRITON_OPS"
+        self.assertIn(
+            expected_key2,
+            ReinplaceCounters._values,
+            f"Expected key {expected_key2} not found",
+        )
+        self.assertEqual(ReinplaceCounters._values[expected_key2], 3)
+
+        # Verify the old key doesn't exist
+        self.assertNotIn("missed_tensors_AUTO_FUNC_V1", ReinplaceCounters._values)
+
+        # Test edge case: check that we don't use the enum integer value
+        # ReInplaceTrigger.AUTO_FUNC_V1 has value 1, so we verify "missed_tensors_1" doesn't exist
+        self.assertNotIn(
+            f"missed_tensors_{trigger.value}",
+            ReinplaceCounters._values,
+            "Should not use enum value (integer) in key, should use trigger.name instead",
+        )
+
 
 class TestModel(torch.nn.Module):
     def __init__(self):
