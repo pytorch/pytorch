@@ -666,6 +666,7 @@ class TritonTemplateKernel(TritonKernel):
             ),
             "device": DeviceProperties.create(self.output_node.get_device()),
             "constants": {},
+            "launch_pdl": TritonKernel._enable_pdl_codegen(),
         }
         triton_meta["configs"] = [config_of(signature)]
         for arg_num in equal_1_arg_indices(signature):  # type: ignore[index]
@@ -740,6 +741,18 @@ class TritonTemplateKernel(TritonKernel):
 
     def gen_defines(self):
         return self.defines
+
+    def pdl_wait(self):
+        """Template helper: emit gdc_wait if PDL enabled."""
+        if self._enable_pdl_codegen():
+            return self.GDC_WAIT
+        return ""
+
+    def pdl_launch(self):
+        """Template helper: emit gdc_wait and gdc_launch if PDL enabled."""
+        if self._enable_pdl_codegen():
+            return f"{self.GDC_WAIT}\n    {self.GDC_LAUNCH}"
+        return ""
 
     def def_kernel(self, *argnames):
         """
@@ -1450,6 +1463,8 @@ class TritonTemplateKernel(TritonKernel):
                 self.modification,
                 self.gen_argdefs,
                 self.gen_defines,
+                self.pdl_wait,
+                self.pdl_launch,
                 *self.extra_template_env_fns,
             ]
         }

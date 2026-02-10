@@ -83,7 +83,7 @@
     accumulator = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
     a_scale = load_scales(A_inverse_scale, SCALE_RECIPE_A)
     b_scale = load_scales(B_inverse_scale, SCALE_RECIPE_B)
-
+    {{pdl_wait()}}
     for _ in range(0, k_tiles * tiles_per_SM):
         ki = tl.where(ki == k_tiles - 1, 0, ki + 1)
         if ki == 0:
@@ -150,7 +150,7 @@
             )}}
             {%- endif %}
             accumulator = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
-
+    {{pdl_launch()}}
 
 @triton.jit
 def load_scales(scale_ptr, SCALE_RECIPE: tl.constexpr):

@@ -35,6 +35,7 @@
     tile_id_c = start_pid - NUM_SMS
     num_pid_in_group = GROUP_M * grid_n
 
+    {{pdl_wait()}}
     for tile_id in tl.range(
         start_pid, num_tiles, NUM_SMS, flatten=FLATTEN, warp_specialize=WARP_SPECIALIZE
     ):
@@ -45,6 +46,7 @@
         offs_bn = pid_n * BLOCK_N
 
         accumulator = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
+
         for ki in range(k_tiles):
             offs_k = ki * BLOCK_K
             a = tl.load_tensor_descriptor(
@@ -78,6 +80,7 @@
                 val_shape=("BLOCK_M", "BLOCK_N // EPILOGUE_SUBTILE"),
                 block_indexing=True
             )}}
+    {{pdl_launch()}}
 
 @triton.jit
 def _compute_pid(tile_id, num_pid_in_group, grid_m, GROUP_M: tl.constexpr, NUM_SMS: tl.constexpr):
