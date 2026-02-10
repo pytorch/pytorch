@@ -7,6 +7,7 @@
 #include <ATen/Utils.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/cuda/UpSample.cuh>
+#include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -146,7 +147,7 @@ __global__ void upsample_bicubic2d_out_frame_parallel(
     int c = i % channels;
     accscalar_t coefficients[4];
 
-    for (int k = 0; k < 4; k++) {
+    for (const auto k : c10::irange(4)) {
       coefficients[k] = cubic_interp1d(
           upsample_get_value_bounded<scalar_t>(
               idata, n, c, input_height, input_width, in_y - 1 + k, in_x - 1),
