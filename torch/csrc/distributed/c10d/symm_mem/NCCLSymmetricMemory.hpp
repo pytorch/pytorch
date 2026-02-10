@@ -25,8 +25,6 @@ class NCCLSymmetricMemory : public SymmetricMemory {
 
   size_t get_buffer_size() override;
 
-  std::string get_group_name();
-
   bool has_multicast_support() override;
 
   void* get_multicast_ptr() override;
