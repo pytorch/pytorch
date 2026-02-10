@@ -406,9 +406,10 @@ def _apply_to_modules(
     if filter_fqns is not None:
         filter_prefixes = set()
         for fqn in filter_fqns:
-            parts = fqn.split(".")
-            for i in range(1, len(parts)):
-                filter_prefixes.add(".".join(parts[:i]) + ".")
+            i = fqn.find(".")
+            while i != -1:
+                filter_prefixes.add(fqn[: i + 1])
+                i = fqn.find(".", i + 1)
 
     def f(module: torch.nn.Module, prefix: str, tree_level: int, *args, **kwargs):
         # Call the module function before recursing over children (pre-order)
