@@ -1050,7 +1050,6 @@ class PallasKernel(SIMDKernel):
         # Mark this as requiring flatten access
         return index_str
 
-
     def _get_iter_vars(self) -> OrderedSet:
         """Get the set of iteration variable symbols."""
         return OrderedSet(self.range_tree_nodes.keys())
@@ -1199,7 +1198,9 @@ class PallasKernel(SIMDKernel):
             out_buf = V.graph.get_buffer(buf_name)
             if out_buf is None:
                 continue
-            if buf_name not in output_buffers and not isinstance(out_buf, ComputedBuffer):
+            if buf_name not in output_buffers and not isinstance(
+                out_buf, ComputedBuffer
+            ):
                 continue
             layout = getattr(out_buf, "get_layout", lambda: None)()
             if layout is None:
