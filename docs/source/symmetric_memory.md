@@ -271,7 +271,7 @@ engines) instead of using CUDA streaming multiprocessors (SMs). This frees up
 SMs for compute work, enabling better overlap of communication and computation.
 
 For setup instructions, requirements, and examples, see
-[Copy Engine Collectives](distributed.md#copy-engine-collectives).
+[Copy Engine Collectives](copy-engine-collectives).
 
 ## Higher-Precision Reduction
 
@@ -282,7 +282,7 @@ accumulate → BF16/FP16 out). This improves numerical accuracy without any code
 changes.
 
 For details on scope, supported domains, and version requirements, see
-[Higher-Precision Reduction with Symmetric Memory](distributed.md#higher-precision-reduction-with-symmetric-memory).
+[Higher-Precision Reduction with Symmetric Memory](higher-precision-reduction-with-symmetric-memory).
 
 ## API Reference
 

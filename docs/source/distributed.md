@@ -152,6 +152,8 @@ You can tune NCCL communicators even further using `torch.distributed.ProcessGro
 and `torch.distributed.ProcessGroupNCCL.Options`. Learn more about them using `help`
 (e.g. `help(torch.distributed.ProcessGroupNCCL.NCCLConfig)`) in the interpreter.
 
+(copy-engine-collectives)=
+
 ### Copy Engine Collectives
 
 :::{note}
@@ -222,6 +224,8 @@ environment variable `NCCL_CTA_POLICY` be set to 2
 - As of NCCL 2.28, CE collectives cannot run with the default stream, so you
 would need to use the `async_op=True` flag to activate the internal stream of
 `ProcessGroupNCCL` or create a side stream yourself
+
+(higher-precision-reduction-with-symmetric-memory)=
 
 ### Higher-Precision Reduction with Symmetric Memory
 
