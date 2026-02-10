@@ -7975,18 +7975,31 @@ class ShapeEnv:
         if fast_result is not None:
             return bool(fast_result)
 
-        static_expr = self._maybe_evaluate_static(expr)
-        if static_expr is not None:
-            self.log.debug(
-                "runtime_assert %s == %s [statically known]", orig_expr, static_expr
-            )
-            # TODO: assert bool(static_expr)
-            return bool(static_expr)
+        # Fast path: skip _maybe_evaluate_static for single unbacked symbol >= 0
+        # when the symbol has unknown range [-int_oo, int_oo].
+        skip_static_eval = False
+        if isinstance(expr, sympy.GreaterThan) and expr.rhs == 0:
+            lhs = expr.lhs
+            if isinstance(lhs, sympy.Symbol) and symbol_is_type(lhs, SymT.UNBACKED_INT):
+                vr = self.var_to_range.get(lhs)
+                if vr is not None and vr.lower == -int_oo and vr.upper == int_oo:
+                    skip_static_eval = True
 
-        # Attempt to eliminate the unbacked SymInt
-        new_expr = self._maybe_evaluate_static(expr, unbacked_only=True)
-        if new_expr is None:
-            raise AssertionError("new_expr must not be None")
+        if skip_static_eval:
+            new_expr = expr
+        else:
+            static_expr = self._maybe_evaluate_static(expr)
+            if static_expr is not None:
+                self.log.debug(
+                    "runtime_assert %s == %s [statically known]", orig_expr, static_expr
+                )
+                # TODO: assert bool(static_expr)
+                return bool(static_expr)
+
+            # Attempt to eliminate the unbacked SymInt
+            new_expr = self._maybe_evaluate_static(expr, unbacked_only=True)
+            if new_expr is None:
+                raise AssertionError("new_expr must not be None")
         if (
             not self.prefer_deferred_runtime_asserts_over_guards
             and new_expr.free_symbols <= self.backed_var_to_val.keys()
