@@ -971,6 +971,7 @@ class TestExpandPlaceholder(TestCase):
                 op_schema.args_meta,
                 op_schema.kwargs_meta,
             )
+
     def test_expand_filters_mixed_partial_types(self):
         """Test that expand_to_full_mesh_op_strategy filters out mixed partial types.
 
