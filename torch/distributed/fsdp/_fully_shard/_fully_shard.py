@@ -218,14 +218,11 @@ def fully_shard(
         params,
         modules,
         mesh_info,
-        None,  # post_forward_mesh_info (computed per-group from reshard_after_forward)
+        reshard_after_forward if not auto_reshard_after_forward else True,
         device,
         shard_placement_fn,
         mp_policy,
         offload_policy,
-        reshard_after_forward=reshard_after_forward
-        if not auto_reshard_after_forward
-        else True,  # type: ignore[arg-type]
     )
 
     # For Dynamo

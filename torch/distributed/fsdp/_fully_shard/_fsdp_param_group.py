@@ -142,15 +142,14 @@ class FSDPParamGroup:
         self.modules = modules  # permit ref cycle because 1:1 lifetime
         param_module_infos = _get_param_module_infos(params, modules)
 
-        default_mesh_info = cast(FSDPMeshInfo, mesh_info)
         self.fsdp_params = [
             FSDPParam(
                 param,
                 module_info,
+                mesh_info,  # pyrefly: ignore [bad-argument-type]
                 post_forward_mesh_info,
                 device,
                 shard_placement_fn,
-                default_mesh_info,
                 mp_policy,
                 offload_policy,
             )

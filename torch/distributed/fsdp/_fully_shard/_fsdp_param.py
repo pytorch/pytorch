@@ -225,10 +225,10 @@ class FSDPParam:
         self,
         param: nn.Parameter,
         module_info: ParamModuleInfo,
+        mesh_info: FSDPMeshInfo,
         post_forward_mesh_info: FSDPMeshInfo | None,
         device: torch.device,
         shard_placement_fn: Callable[[nn.Parameter], ShardPlacementFnResult] | None,
-        mesh_info: FSDPMeshInfo,
         mp_policy: MixedPrecisionPolicy,
         offload_policy: OffloadPolicy,
     ):
