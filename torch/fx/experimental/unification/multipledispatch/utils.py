@@ -77,7 +77,6 @@ def reverse_dict(d):
     result = OrderedDict()  # type: ignore[var-annotated]
     for key in d:
         for val in d[key]:
-            # pyrefly: ignore [unsupported-operation]
             result[val] = result.get(val, ()) + (key,)
     return result
 
