@@ -7184,9 +7184,10 @@ class ShapeEnv:
             has_only_ephemeral_sources = x in self.var_to_sources and all(
                 s.is_ephemeral() for s in self.var_to_sources[x]
             )
-            # Fast path: just access the hint directly from backed_var_to_val
+
             hint = self.backed_var_to_val.get(x)
             if hint is None:
+                # NB: size_hint is int, not sympy.Expr, do not use int_oo here
                 size = sys.maxsize
             elif symbol_is_type(x, SymT.SIZE):
                 size = int(hint)
@@ -7985,15 +7986,24 @@ class ShapeEnv:
         if fast_result is not None:
             return bool(fast_result)
 
-        # Fast path: skip _maybe_evaluate_static for single unbacked symbol >= 0
+        # Skip _maybe_evaluate_static for single unbacked symbol >= 0 (or 0 <= symbol)
         # when the symbol has unknown range [-int_oo, int_oo].
+        # This pattern is common during tracing and doesn't benefit from static evaluation
+        # since the symbol has no constraints.
+        # Note that the first time this is called value range will be updated and next time
+        # it's called (if any) we would call _maybe_evaluate_static and it would return True.
         skip_static_eval = False
+        unbacked_sym = None
         if isinstance(expr, sympy.GreaterThan) and expr.rhs == 0:
-            lhs = expr.lhs
-            if isinstance(lhs, sympy.Symbol) and symbol_is_type(lhs, SymT.UNBACKED_INT):
-                vr = self.var_to_range.get(lhs)
-                if vr is not None and vr.lower == -int_oo and vr.upper == int_oo:
-                    skip_static_eval = True
+            unbacked_sym = expr.lhs
+        elif isinstance(expr, sympy.LessThan) and expr.lhs == 0:
+            unbacked_sym = expr.rhs
+        if isinstance(unbacked_sym, sympy.Symbol) and symbol_is_type(
+            unbacked_sym, SymT.UNBACKED_INT
+        ):
+            vr = self.var_to_range[unbacked_sym]
+            if vr.lower == -int_oo and vr.upper == int_oo:
+                skip_static_eval = True
 
         if skip_static_eval:
             new_expr = expr
