@@ -7778,6 +7778,16 @@ class ShapeEnv:
             if fast_result is not None:
                 return fast_result
 
+            # Aggressive guard-free semantics: skip expensive static evaluation
+            # when we have a fallback value. This is safe because the fallback
+            # represents a valid code path that could be taken anyway.
+            if (
+                torch.fx.experimental._config.aggressive_guard_free_semantics
+                and fallback_value is not None
+            ):
+                self._log_suppressed_dde(orig_expr, fallback_value)
+                return fallback_value
+
             static_expr = self._maybe_evaluate_static(
                 expr, size_oblivious=size_oblivious
             )
