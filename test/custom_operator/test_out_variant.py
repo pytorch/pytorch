@@ -233,8 +233,8 @@ class TestOutVariant(TestCase):
             )
 
     def test_op_with_out_suffix_in_name(self):
-        # torchgen reserves _out suffix for out variants, so operators with _out
-        # in their name will fail schema parsing
+        # Ops with _out in their name are functional (no write args, no trailing _)
+        # and simply have no out variant registered.
         self.lib.define(
             "my_custom_out(Tensor x) -> Tensor",
         )
@@ -245,8 +245,8 @@ class TestOutVariant(TestCase):
         def my_custom_out_impl(x: Tensor) -> Tensor:
             return x * 2
 
-        with self.assertRaisesRegex(ValueError, "Failed to parse schema"):
-            to_out_variant(torch.ops._TestOutVariant.my_custom_out.default)
+        out_op = to_out_variant(torch.ops._TestOutVariant.my_custom_out.default)
+        self.assertIsNone(out_op)
 
     def test_mutable_op_not_functional(self):
         self.lib.define(
@@ -261,9 +261,9 @@ class TestOutVariant(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Failed to find out variant"):
             to_out_variant(torch.ops._TestOutVariant.mutating_op.default)
 
-    def test_trailing_underscore_functional(self):
-        # Operators with trailing underscore but no mutable args violate
-        # torchgen's inplace naming convention, causing schema parsing to fail
+    def test_trailing_underscore_not_functional(self):
+        # Operators with trailing underscore are treated as non-functional
+        # (inplace convention), even if they have no mutable args.
         self.lib.define(
             "my_func_(Tensor x) -> Tensor",
         )
@@ -272,7 +272,7 @@ class TestOutVariant(TestCase):
         def my_func__impl(x: Tensor) -> Tensor:
             return x * 2
 
-        with self.assertRaisesRegex(ValueError, "Failed to parse schema"):
+        with self.assertRaisesRegex(RuntimeError, "not functional"):
             to_out_variant(torch.ops._TestOutVariant.my_func_.default)
 
     def test_wrong_number_of_out_tensors(self):
@@ -376,7 +376,7 @@ class TestOutVariant(TestCase):
         def div_fake(x: Tensor, y: Tensor) -> Tensor:
             return torch.empty_like(x)
 
-        self.lib.define("div.out(Tensor x, Tensor y, *, Tensor(a!) result) -> ()")
+        self.lib.define("div.out(Tensor x, Tensor y, *, Tensor! result) -> ()")
 
         @torch.library.impl("_TestOutVariant::div.out", "CompositeExplicitAutograd")
         def div_out_impl(x: Tensor, y: Tensor, *, result: Tensor) -> None:

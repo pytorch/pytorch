@@ -1,13 +1,41 @@
 from __future__ import annotations
 
-import dataclasses
 import logging
 
 import torch
-from torchgen.model import FunctionSchema, SchemaKind
 
 
 log = logging.getLogger(__name__)
+
+
+def _is_functional(schema: torch._C.FunctionSchema) -> bool:
+    """
+    A schema is functional if no argument is written to and the name doesn't
+    end with '_'.
+    """
+    op_name = schema.name.split("::")[-1]
+    if op_name.endswith("_"):
+        return False
+    return not any(arg.is_write for arg in schema.arguments)
+
+
+def _signatures_match(
+    schema_a: torch._C.FunctionSchema,
+    schema_b: torch._C.FunctionSchema,
+) -> bool:
+    """Compare two schemas by their non-out arguments (name, type, default value)."""
+    non_out_args_a = [arg for arg in schema_a.arguments if not arg.is_out]
+    non_out_args_b = [arg for arg in schema_b.arguments if not arg.is_out]
+    if len(non_out_args_a) != len(non_out_args_b):
+        return False
+    for a, b in zip(non_out_args_a, non_out_args_b):
+        if a.name != b.name:
+            return False
+        if str(a.type) != str(b.type):
+            return False
+        if a.default_value != b.default_value:
+            return False
+    return True
 
 
 def to_out_variant(op: torch._ops.OpOverload) -> torch._ops.OpOverload | None:
@@ -16,56 +44,37 @@ def to_out_variant(op: torch._ops.OpOverload) -> torch._ops.OpOverload | None:
 
     Uses signature matching to find the correct out variant among all overloads.
     """
-    native_schema = _parse_schema(op._schema)
+    schema = op._schema
 
-    # Only convert functional ops
-    if native_schema.kind() != SchemaKind.functional:
+    if not _is_functional(schema):
         raise RuntimeError(
             f"Failed to find out variant for op '{op}' as its schema is not functional. \n"
-            f"  {op._schema}"
+            f"  {schema}"
         )
-
-    # Get the normalized signature for matching
-    signature = dataclasses.replace(native_schema.signature(), returns=())
 
     # Get the op packet to access all overloads
     namespace = op.namespace
-    op_name = op._schema.name.split("::")[1]
+    op_name = schema.name.split("::")[1]
     torch_packet = getattr(getattr(torch.ops, namespace), op_name)
 
     # Search through all overloads for matching out variant
     for overload_name in torch_packet.overloads():
         candidate = getattr(torch_packet, overload_name)
-        candidate_native_schema = _parse_schema(candidate._schema)
+        candidate_schema = candidate._schema
 
-        if candidate_native_schema.kind() != SchemaKind.out:
+        if not any(arg.is_out for arg in candidate_schema.arguments):
             continue
 
-        candidate_signature = dataclasses.replace(
-            candidate_native_schema.signature(), returns=()
-        )
-        if candidate_signature != signature:
+        if not _signatures_match(schema, candidate_schema):
             continue
 
-        if len(candidate_native_schema.arguments.out) != len(native_schema.returns):
+        out_args = [arg for arg in candidate_schema.arguments if arg.is_out]
+        if len(out_args) != len(schema.returns):
             continue
 
         return candidate
 
     return None
-
-
-def _parse_schema(
-    schema: torch._C.FunctionSchema,
-) -> FunctionSchema:
-    """Convert a pybind FunctionSchema to a torchgen FunctionSchema."""
-    try:
-        return FunctionSchema.parse(str(schema))
-    except Exception as e:
-        raise ValueError(
-            f"Failed to parse schema '{schema}'. This means we will "
-            "not be able to find the corresponding op or out variant."
-        ) from e
 
 
 def check_out_variant(
