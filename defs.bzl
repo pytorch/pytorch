@@ -1,13 +1,14 @@
 def get_blas_gomp_arch_deps():
-    return [
-        ("x86_64", [
+    return select({
+        "ovr_config//cpu:x86_64": [
             "fbsource//third-party/mkl:{}".format(native.read_config("fbcode", "mkl_lp64", "mkl_lp64_omp")),
-        ]),
-        ("aarch64", [
+        ],
+        "ovr_config//cpu:arm64": [
             "third-party//Arm-Performance-Libraries:armpl_lp64_mp",
             "third-party//openmp:omp",
-        ]),
-    ]
+        ],
+        "DEFAULT": [],
+    })
 
 default_compiler_flags = [
     "-Wall",
