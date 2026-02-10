@@ -435,6 +435,8 @@ def _init_param_group(
     # Create a FSDPParamGroup per process group
     for group_mesh_info, group_params in pg_to_group.values():
         if group_mesh_info is not mesh_info:
+            # fully_shard always passes a non-None reshard_after_forward,
+            # but guard defensively for direct callers of _init_param_group.
             if reshard_after_forward is None:
                 raise ValueError(
                     "reshard_after_forward must be specified when "
