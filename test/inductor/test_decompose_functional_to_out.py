@@ -8,7 +8,8 @@ to their out variants by:
 2. Allocating output buffers with torch.empty
 3. Replacing functional calls with out variant calls
 
-Tests use vLLM-style schema format: Tensor! (positional mutable args, void return)
+Tests use kwarg-only out format with Tensor(a!) alias annotation.
+Note: torchgen requires explicit alias annotation - Tensor! alone is not parseable.
 """
 
 import torch
@@ -25,7 +26,7 @@ class TestDecomposeFunctionalToOut(TestCase):
 
     @classmethod
     def _setup_test_ops(cls):
-        """Register test ops with functional and out variants (vLLM style)."""
+        """Register test ops with functional and out variants (PyTorch standard style)."""
         cls.lib = torch.library.Library("test_decompose", "FRAGMENT")
 
         # === Single output op ===
@@ -39,16 +40,17 @@ class TestDecomposeFunctionalToOut(TestCase):
         def add_one_meta(x: Tensor) -> Tensor:
             return torch.empty_like(x)
 
-        # vLLM style: positional Tensor! arg, returns ()
-        cls.lib.define("add_one.out(Tensor x, Tensor! out) -> ()")
+        # kwarg-only out with Tensor(a!) alias annotation (required by torchgen)
+        cls.lib.define("add_one.out(Tensor x, *, Tensor(a!) out) -> Tensor(a!)")
 
         @torch.library.impl("test_decompose::add_one.out", "CompositeExplicitAutograd")
-        def add_one_out_impl(x: Tensor, out: Tensor) -> None:
+        def add_one_out_impl(x: Tensor, *, out: Tensor) -> Tensor:
             out.copy_(x + 1)
+            return out
 
         @torch.library.impl("test_decompose::add_one.out", "Meta")
-        def add_one_out_meta(x: Tensor, out: Tensor) -> None:
-            pass
+        def add_one_out_meta(x: Tensor, *, out: Tensor) -> Tensor:
+            return out
 
         # === Multiple outputs op ===
         cls.lib.define("split_scale(Tensor x, float scale) -> (Tensor, Tensor)")
@@ -61,26 +63,27 @@ class TestDecomposeFunctionalToOut(TestCase):
         def split_scale_meta(x: Tensor, scale: float) -> tuple[Tensor, Tensor]:
             return torch.empty_like(x), torch.empty_like(x)
 
-        # vLLM style: positional Tensor! args, returns ()
+        # kwarg-only out args with Tensor(a!) alias annotation (required by torchgen)
         cls.lib.define(
-            "split_scale.out(Tensor x, float scale, "
-            "Tensor! out_scaled, Tensor! out_divided) -> ()"
+            "split_scale.out(Tensor x, float scale, *, "
+            "Tensor(a!) out_scaled, Tensor(b!) out_divided) -> (Tensor(a!), Tensor(b!))"
         )
 
         @torch.library.impl(
             "test_decompose::split_scale.out", "CompositeExplicitAutograd"
         )
         def split_scale_out_impl(
-            x: Tensor, scale: float, out_scaled: Tensor, out_divided: Tensor
-        ) -> None:
+            x: Tensor, scale: float, *, out_scaled: Tensor, out_divided: Tensor
+        ) -> tuple[Tensor, Tensor]:
             out_scaled.copy_(x * scale)
             out_divided.copy_(x / scale)
+            return out_scaled, out_divided
 
         @torch.library.impl("test_decompose::split_scale.out", "Meta")
         def split_scale_out_meta(
-            x: Tensor, scale: float, out_scaled: Tensor, out_divided: Tensor
-        ) -> None:
-            pass
+            x: Tensor, scale: float, *, out_scaled: Tensor, out_divided: Tensor
+        ) -> tuple[Tensor, Tensor]:
+            return out_scaled, out_divided
 
     def test_single_output_graph_transformation(self):
         """
@@ -213,17 +216,19 @@ class TestReinplace(TestCase):
         def add_one_meta(x: Tensor) -> Tensor:
             return torch.empty_like(x)
 
-        cls.lib.define("add_one.out(Tensor x, Tensor! out) -> ()")
+        # kwarg-only out with Tensor(a!) alias annotation (required by torchgen)
+        cls.lib.define("add_one.out(Tensor x, *, Tensor(a!) out) -> Tensor(a!)")
 
         @torch.library.impl(
             "test_reinplace::add_one.out", "CompositeExplicitAutograd"
         )
-        def add_one_out_impl(x: Tensor, out: Tensor) -> None:
+        def add_one_out_impl(x: Tensor, *, out: Tensor) -> Tensor:
             out.copy_(x + 1)
+            return out
 
         @torch.library.impl("test_reinplace::add_one.out", "Meta")
-        def add_one_out_meta(x: Tensor, out: Tensor) -> None:
-            pass
+        def add_one_out_meta(x: Tensor, *, out: Tensor) -> Tensor:
+            return out
 
     def test_reinplace_fires_when_input_not_used_downstream(self):
         """
