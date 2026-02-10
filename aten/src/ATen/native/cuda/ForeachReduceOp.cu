@@ -623,8 +623,8 @@ std::vector<Tensor> _foreach_norm_cuda_with_dim(
     }
   }
 
-  auto tensor_lists =
-      std::vector<std::vector<Tensor>>{input_tensors, output_tensors};
+  auto tensor_lists = std::vector<std::vector<Tensor>>{
+      std::move(input_tensors), output_tensors};
 
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kHalf,
