@@ -50,13 +50,20 @@ def create_names_map(
 
     tensors_dict_keys = set(named_params_dict.keys())
     tied_tensors_dict_keys = set(tied_named_params_dict.keys())
-    assert tensors_dict_keys.issubset(tied_tensors_dict_keys)
+    if not tensors_dict_keys.issubset(tied_tensors_dict_keys):
+        raise AssertionError(
+            f"tensors_dict_keys {tensors_dict_keys} is not a subset of "
+            f"tied_tensors_dict_keys {tied_tensors_dict_keys}"
+        )
 
     tensor_to_mapping: dict[Tensor, tuple[str, list[str]]] = {}
     for key, tensor in named_params_dict.items():
         tensor_to_mapping[tensor] = (key, [])
     for key, tensor in tied_named_params_dict.items():
-        assert tensor in tensor_to_mapping
+        if tensor not in tensor_to_mapping:
+            raise AssertionError(
+                f"tensor for key '{key}' not found in tensor_to_mapping"
+            )
         tensor_to_mapping[tensor][1].append(key)
     return dict(tensor_to_mapping.values())
 
@@ -71,6 +78,7 @@ def _extract_members(
     names_map = create_names_map(unique_named_members, all_named_members)
 
     # Remove all the members in the model
+    # pyrefly: ignore [implicit-any]
     memo = {}
     accessor = NamedMemberAccessor(mod)
     for name, p in all_named_members:
@@ -159,10 +167,16 @@ def load_state(
     load_state takes `weights` and `buffers` and assigns them to the model.
     This is the inverse operation of `make_functional_deprecated_v1`.
     """
-    assert len(weight_names) == len(weights)
+    if len(weight_names) != len(weights):
+        raise AssertionError(
+            f"len(weight_names)={len(weight_names)} != len(weights)={len(weights)}"
+        )
     load_weights(model, weight_names, weights)
     if len(buffers) > 0:
-        assert len(buffer_names) == len(buffers)
+        if len(buffer_names) != len(buffers):
+            raise AssertionError(
+                f"len(buffer_names)={len(buffer_names)} != len(buffers)={len(buffers)}"
+            )
         load_buffers(model, buffer_names, buffers)
     return model
 

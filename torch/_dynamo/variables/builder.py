@@ -198,7 +198,13 @@ from .dicts import (
     OrderedSetVariable,
     SetVariable,
 )
-from .distributed import DeviceMeshVariable, WorldMetaClassVariable
+from .distributed import (
+    DeviceMeshVariable,
+    PlacementClassVariable,
+    PlacementVariable,
+    ProcessGroupVariable,
+    WorldMetaClassVariable,
+)
 from .functions import (
     BuiltinMethodVariable,
     CollectionsNamedTupleFunction,
@@ -492,7 +498,7 @@ class VariableBuilder:
                 side_effect_result.set_nn_module_stack_source(self.source)
             return side_effect_result
 
-        cached_vt = self.tx.output.variable_tracker_cache.lookup(value, self.source)
+        cached_vt = self.tx.output.variable_tracker_cache.get(self.source)
         if cached_vt:
             # If allow_lazy_constant=False but the cached VT is a lazy variable,
             # we need to rebuild to get a non-lazy version. This happens when
@@ -526,7 +532,13 @@ class VariableBuilder:
         ):
             vt = self.tx.output.side_effects.track_object_existing(value, vt)
 
-        self.tx.output.variable_tracker_cache.add(value, self.source, vt)
+        # Skip caching for JVP_NESTING source because
+        # JvpIncrementNestingCtxManagerVariable hides global JVP mutation from
+        # Dynamo, resulting in stale value. We attempted a fix in
+        # https://github.com/pytorch/pytorch/pull/174329 but it exposed other
+        # issues.  This only affects cache hit rate, NOT correctness.
+        if "JVP_NESTING" not in self.source.name:
+            self.tx.output.variable_tracker_cache[self.source] = vt
         return vt
 
     def _can_lift_attrs_to_inputs(self, vt: VariableTracker) -> bool:
@@ -584,8 +596,10 @@ class VariableBuilder:
         ]
 
         if trace_numpy and np:
+            # pyrefly: ignore [bad-argument-type]
             entries.append((np.ndarray, cls.wrap_numpy_ndarray))
 
+        # pyrefly: ignore [implicit-any]
         result = {}
         for ts, fn in entries:
             for t in ts if isinstance(ts, tuple) else (ts,):
@@ -641,9 +655,7 @@ class VariableBuilder:
                 ],
             )
 
-        def build_key_value(
-            k: Any, v: Any
-        ) -> tuple[VariableTracker, LazyVariableTracker]:
+        def build_key_value(k: Any, v: Any) -> tuple[VariableTracker, VariableTracker]:
             key = ConstantVariable.create(k)
             source_key = k
 
@@ -680,6 +692,7 @@ class VariableBuilder:
             (torch.__version__, lambda self, value: TorchVersionVariable()),
         ]
 
+        # pyrefly: ignore [implicit-any]
         result = {}
         for ts, fn in entries:
             for t in ts if isinstance(ts, (tuple, list)) else (ts,):
@@ -816,7 +829,7 @@ class VariableBuilder:
             # _HashableTracker class in dicts.py
             def build_key_value(
                 i: Any, k: Any, v: Any
-            ) -> tuple[LazyVariableTracker, LazyVariableTracker]:
+            ) -> tuple[VariableTracker, VariableTracker]:
                 base = self.get_source()
                 if all_const:
                     key = ConstantVariable.create(k)
@@ -1192,10 +1205,24 @@ class VariableBuilder:
             return DispatchKeySetVariable(value)
         elif WorldMetaClassVariable.is_group_member_type(value):
             return WorldMetaClassVariable(value, source=self.source)
+        elif ProcessGroupVariable.is_process_group(value):
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return ProcessGroupVariable(value, source=self.source)
         elif DeviceMeshVariable.is_device_mesh(value):
             # TODO: see if we need to add custom guard instead of a simple ID_MATCH
             self.install_guards(GuardBuilder.EQUALS_MATCH)
             return DeviceMeshVariable(value, source=self.source)
+        elif PlacementClassVariable.is_placement_type(value):
+            # TODO: see if we need to add custom guard instead of a simple ID_MATCH
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return PlacementClassVariable(value, source=self.source)
+        elif PlacementVariable.is_placement(value):
+            # TODO: see if we need to add custom guard instead of a simple ID_MATCH
+            self.install_guards(GuardBuilder.EQUALS_MATCH)
+            return PlacementVariable(
+                value,
+                source=self.source,
+            )
         elif value is OrderedSet:
             self.install_guards(GuardBuilder.ID_MATCH)
             return OrderedSetClassVariable()
@@ -1615,7 +1642,7 @@ class VariableBuilder:
             # _HashableTracker class in dicts.py
             def build_key_value(
                 i: Any, k: Any, v: Any
-            ) -> tuple[LazyVariableTracker, LazyVariableTracker]:
+            ) -> tuple[VariableTracker, VariableTracker]:
                 base = self.get_source()
                 source_key = ConstDictKeySource(base, i)
                 key = LazyVariableTracker.create(k, source_key)
@@ -2942,6 +2969,7 @@ def _dataclasses_fields_lambda(obj: VariableTracker) -> TupleVariable:
             base_src = AttrSource(obj.source, "__dataclass_fields__")
             source = DictGetItemSource(base_src, field.name)
         items.append(UserDefinedObjectVariable(field, source=source))
+    # pyrefly: ignore [bad-argument-type]
     return TupleVariable(items)
 
 
@@ -3590,9 +3618,12 @@ def record_automatic_dynamic(
         candidates = {}
         for i_stride, neg_i in pending:
             i = -neg_i
+            # pyrefly: ignore [unsupported-operation]
             stride[i] = candidates.get(i_stride, i_stride)
+            # pyrefly: ignore [no-matching-overload]
             candidates.setdefault(i_stride * ex_size[i], InferStride(i))
     else:
+        # pyrefly: ignore [implicit-any]
         stride = []
 
     return process_automatic_dynamic(
@@ -3736,6 +3767,7 @@ def _automatic_dynamic(
     # TODO: index export_constraints ahead of time so we don't have to
     # do a linear scan every time here
     t_id = id(e)
+    # pyrefly: ignore [implicit-any]
     dim2constraint = {}
 
     def update_dim2constraint(
@@ -3805,7 +3837,9 @@ def _automatic_dynamic(
             # into the mutable state
             log.debug("automatic dynamic %s marked dynamic", name)
             mark_size = [auto_unset] * e.dim()
+            # pyrefly: ignore [unsupported-operation]
             mark_size[i] = auto_dynamic
+            # pyrefly: ignore [bad-argument-type]
             frame_state_entry |= FrameStateSizeEntry.make_size(size=mark_size)
 
         # NB: both static and dynamic have precedence over
@@ -3910,6 +3944,7 @@ def _automatic_dynamic(
         dynamic_sizes=dynamic_sizes,
         dynamic_strides=dynamic_strides,
         constraint_sizes=constraint_sizes,
+        # pyrefly: ignore [bad-argument-type]
         constraint_strides=constraint_strides,
         specialize_on=specialize_on,
         view_base_context=view_base_context,
@@ -4049,8 +4084,38 @@ class SourcelessBuilder:
     def __init__(self) -> None:
         raise AssertionError("Use SourcelessBuilder.create()")
 
+    @overload
     @staticmethod
-    def create(tx: "InstructionTranslator", value: Any) -> VariableTracker:
+    def create(
+        tx: "InstructionTranslatorBase",
+        value: type[set[Any]]
+        | type[dict[Any, Any]]
+        | type[tuple[Any, ...]]
+        | type[list[Any]],
+    ) -> BuiltinVariable: ...
+
+    @overload
+    @staticmethod
+    def create(tx: "InstructionTranslatorBase", value: list[Any]) -> ListVariable: ...
+
+    @overload
+    @staticmethod
+    def create(
+        tx: "InstructionTranslatorBase", value: tuple[Any, ...]
+    ) -> TupleVariable: ...
+
+    @overload
+    @staticmethod
+    def create(
+        tx: "InstructionTranslatorBase", value: bool | int | float | str
+    ) -> ConstantVariable: ...
+
+    @overload
+    @staticmethod
+    def create(tx: "InstructionTranslatorBase", value: Any) -> VariableTracker: ...
+
+    @staticmethod
+    def create(tx: "InstructionTranslatorBase", value: Any) -> VariableTracker:
         value_type = type(value)
         # type: ignore[attr-defined]
         fast_handler = SourcelessBuilder._type_handlers.get(value_type)
@@ -4060,7 +4125,7 @@ class SourcelessBuilder:
         if isinstance(value, VariableTracker):
             # This is always valid to call, and useful for recursive calls.
             return value
-        elif is_opaque_type(type(value)):
+        elif is_opaque_value_type(type(value)):
             # This is for handling opaque objects in custom ops
             fake_script_obj = torch._library.fake_class_registry.maybe_to_fake_obj(
                 tx.output.fake_mode, value
@@ -4109,6 +4174,7 @@ class SourcelessBuilder:
             assert getattr(value.__self__, value.__func__.__name__) == value
             cls_obj_vt = SourcelessBuilder.create(tx, value.__self__)
             try:
+                # pyrefly: ignore[bad-argument-type]
                 return cls_obj_vt.var_getattr(tx, value.__func__.__name__)
             except NotImplementedError:
                 pass  # failthrough to unimplemented branch
@@ -4116,6 +4182,8 @@ class SourcelessBuilder:
             return SourcelessGraphModuleVariable(value)
         elif isinstance(value, torch.utils._pytree.TreeSpec):
             return UserDefinedObjectVariable(value)
+        elif PlacementVariable.is_placement(value):
+            return PlacementVariable(value)
         elif DeviceMeshVariable.is_device_mesh(value):
             return DeviceMeshVariable(value)
         elif value is functools.wraps:

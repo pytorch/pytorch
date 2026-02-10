@@ -126,7 +126,8 @@ def create_subclass_metadata(
         attrs[key] = new_subclass_meta
 
     # It *must* be because is_traceable_wrapper_subclass() - but mypy is not smart.
-    assert isinstance(a, Tensor)
+    if not isinstance(a, Tensor):
+        raise AssertionError(f"expected Tensor, got {type(a)}")
 
     new_start_idx = (
         new_start_idx
@@ -163,7 +164,10 @@ def create_subclass_meta(
     infos: list[Union[PlainTensorMeta, SubclassCreationMeta]] = []
     for a in curr_args:
         if is_traceable_wrapper_subclass(a):
-            assert isinstance(a, Tensor)
+            if not isinstance(a, Tensor):
+                raise AssertionError(
+                    f"expected Tensor for traceable wrapper subclass, got {type(a)}"
+                )
             start_idx = idx
             subclass_meta, _ = create_subclass_metadata(
                 a,
@@ -285,7 +289,8 @@ def runtime_unwrap_tensor_subclasses(
             out.append(x)
             return out
 
-        assert isinstance(x, Tensor)
+        if not isinstance(x, Tensor):
+            raise AssertionError(f"expected Tensor, got {type(x)}")
 
         attrs, _ = x.__tensor_flatten__()
 
@@ -296,11 +301,15 @@ def runtime_unwrap_tensor_subclasses(
             flatten_subclass(inner_tensor, inner_meta, out=out)
 
         if append_symints:
-            assert isinstance(meta, SubclassCreationMeta)
+            if not isinstance(meta, SubclassCreationMeta):
+                raise AssertionError(f"expected SubclassCreationMeta, got {type(meta)}")
             # outer_size
             size = x.size()
             symint_placeholders = compute_symint_placeholders(meta.outer_size)
-            assert len(size) == len(symint_placeholders)
+            if len(size) != len(symint_placeholders):
+                raise AssertionError(
+                    f"size length mismatch: {len(size)} != {len(symint_placeholders)}"
+                )
             out.extend(
                 [r for (r, is_symint) in zip(size, symint_placeholders) if is_symint]
             )
@@ -308,7 +317,10 @@ def runtime_unwrap_tensor_subclasses(
             # outer_stride
             stride = x.stride()
             symint_placeholders = compute_symint_placeholders(meta.outer_stride)
-            assert len(stride) == len(symint_placeholders)
+            if len(stride) != len(symint_placeholders):
+                raise AssertionError(
+                    f"stride length mismatch: {len(stride)} != {len(symint_placeholders)}"
+                )
             out.extend(
                 [r for (r, is_symint) in zip(stride, symint_placeholders) if is_symint]
             )
@@ -317,7 +329,10 @@ def runtime_unwrap_tensor_subclasses(
     xs_inner: list[int | Tensor | SymInt | OpaqueType] = []
 
     if append_symints:
-        assert subclass_metas is not None
+        if subclass_metas is None:
+            raise AssertionError(
+                "subclass_metas must not be None when append_symints is True"
+            )
 
     for idx, x in enumerate(wrapped_args):
         if not is_traceable_wrapper_subclass(x):
@@ -328,7 +343,8 @@ def runtime_unwrap_tensor_subclasses(
             get_plain_tensors(typing.cast(Tensor, x), out=xs_inner)
         else:
             meta = subclass_metas[idx]
-            assert isinstance(meta, SubclassCreationMeta)
+            if not isinstance(meta, SubclassCreationMeta):
+                raise AssertionError(f"expected SubclassCreationMeta, got {type(meta)}")
             flatten_subclass(typing.cast(Tensor, x), meta, out=xs_inner)
 
     return xs_inner
@@ -385,6 +401,7 @@ def wrap_tensor_subclasses(
     is_runtime: bool = False,
     make_subclass_override: Callable[..., Any] | None = None,
 ) -> tuple[Any, ...]:
+    # pyrefly: ignore [implicit-any]
     wrapped_args = []
     num_args_tallied = 0
     for subclass_meta in subclass_metas:
@@ -392,8 +409,14 @@ def wrap_tensor_subclasses(
             wrapped_args.append(unwrapped_args[subclass_meta.unwrapped_idx])
             num_args_tallied += 1
         else:
-            assert isinstance(subclass_meta, SubclassCreationMeta)
-            assert subclass_meta.included_subclass_symints == included_subclass_symints
+            if not isinstance(subclass_meta, SubclassCreationMeta):
+                raise AssertionError(
+                    f"expected SubclassCreationMeta, got {type(subclass_meta)}"
+                )
+            if subclass_meta.included_subclass_symints != included_subclass_symints:
+                raise AssertionError(
+                    f"included_subclass_symints mismatch: {subclass_meta.included_subclass_symints} != {included_subclass_symints}"
+                )
 
             if make_subclass_override:
                 wrapped_args.append(
@@ -429,19 +452,21 @@ def wrap_tensor_subclasses(
     # but `subclass_metas` will only correspond to subclass metadata on `user_fw_outs`.
     # We then need to make sure that we return (*wrapped_user_fw_outs, *activations).
     if num_fw_outs_saved_for_bw is not None:
-        assert len(unwrapped_args) == num_args_tallied + num_fw_outs_saved_for_bw, (
-            f"Expected the number actual unwrapped-subclass outputs {len(unwrapped_args)} to equal "
-            f"the number of args calculated from subclasses ({num_args_tallied}) plus the number of "
-            f"additional activations saved for the backward pass ({num_fw_outs_saved_for_bw})"
-        )
+        if len(unwrapped_args) != num_args_tallied + num_fw_outs_saved_for_bw:
+            raise AssertionError(
+                f"Expected the number actual unwrapped-subclass outputs {len(unwrapped_args)} to equal "
+                f"the number of args calculated from subclasses ({num_args_tallied}) plus the number of "
+                f"additional activations saved for the backward pass ({num_fw_outs_saved_for_bw})"
+            )
         activations = unwrapped_args[num_args_tallied:]
         if isinstance(wrapped_args, tuple) and isinstance(activations, tuple):
             return wrapped_args + activations
         return tuple(list(wrapped_args) + list(activations))
     else:
-        assert len(unwrapped_args) == num_args_tallied, (
-            f"Expected {len(unwrapped_args)} == {num_args_tallied}"
-        )
+        if len(unwrapped_args) != num_args_tallied:
+            raise AssertionError(
+                f"Expected {len(unwrapped_args)} == {num_args_tallied}"
+            )
         return tuple(wrapped_args)
 
 
@@ -457,10 +482,23 @@ def wrap_tensor_subclasses_maybe_joint(
 ) -> tuple[Any, ...]:
     # Since this function is reused for both inference and joint graphs,
     if is_joint_structure:
-        assert isinstance(unwrapped_args, tuple) and len(unwrapped_args) == 2
-        assert isinstance(unwrapped_args[0], (tuple, list)) and isinstance(
-            unwrapped_args[1], (tuple, list)
-        )
+        if not (isinstance(unwrapped_args, tuple) and len(unwrapped_args) == 2):
+            unwrapped_len = (
+                len(unwrapped_args)
+                if isinstance(unwrapped_args, (tuple, list))
+                else "N/A"
+            )
+            raise AssertionError(
+                f"expected tuple of length 2 for joint structure, "
+                f"got {type(unwrapped_args)} with length {unwrapped_len}"
+            )
+        if not (
+            isinstance(unwrapped_args[0], (tuple, list))
+            and isinstance(unwrapped_args[1], (tuple, list))
+        ):
+            raise AssertionError(
+                f"expected primals and tangents to be tuple or list, got {type(unwrapped_args[0])} and {type(unwrapped_args[1])}"
+            )
         primals, tangents = unwrapped_args[0], unwrapped_args[1]
         wrapped_primals = wrap_tensor_subclasses(
             primals,
@@ -508,25 +546,45 @@ def compute_inner_mutated_inp_indices_from_subclass_meta(
     if not fw_metadata.subclass_inp_meta:
         # Sometimes we don't have subclass info, e.g. synthetic_base codepaths
         return inner_metadata.mutated_inp_runtime_indices
-    assert len(fw_metadata.subclass_inp_meta) == len(fw_metadata.input_info)
+    if len(fw_metadata.subclass_inp_meta) != len(fw_metadata.input_info):
+        raise AssertionError(
+            f"subclass_inp_meta length ({len(fw_metadata.subclass_inp_meta)}) != input_info length ({len(fw_metadata.input_info)})"
+        )
     for outer_idx, inp_meta in enumerate(fw_metadata.subclass_inp_meta):
         if isinstance(inp_meta, PlainTensorMeta):
-            assert outer_idx < len(fw_metadata.input_info)
-            if inner_metadata is not None:
-                assert inner_idx < len(inner_metadata.input_info)
-                assert (
-                    inner_metadata.input_info[inner_idx]
-                    == fw_metadata.input_info[outer_idx]
+            if outer_idx >= len(fw_metadata.input_info):
+                raise AssertionError(
+                    f"outer_idx ({outer_idx}) >= len(fw_metadata.input_info) ({len(fw_metadata.input_info)})"
                 )
+            if inner_metadata is not None:
+                if inner_idx >= len(inner_metadata.input_info):
+                    raise AssertionError(
+                        f"inner_idx ({inner_idx}) >= len(inner_metadata.input_info) ({len(inner_metadata.input_info)})"
+                    )
+                if (
+                    inner_metadata.input_info[inner_idx]
+                    != fw_metadata.input_info[outer_idx]
+                ):
+                    raise AssertionError(
+                        f"input_info mismatch at inner_idx={inner_idx}, outer_idx={outer_idx}: "
+                        f"{inner_metadata.input_info[inner_idx]} != {fw_metadata.input_info[outer_idx]}"
+                    )
             updated_input_info.append(fw_metadata.input_info[outer_idx])
             inner_idx += 1
         else:
-            assert inp_meta.original_subclass is not None
+            if inp_meta.original_subclass is None:
+                raise AssertionError(
+                    "inp_meta.original_subclass must not be None for SubclassCreationMeta"
+                )
             for _ in range(inp_meta.arg_count):
                 updated_input_info.append(fw_metadata.input_info[outer_idx])
                 inner_idx += 1
     if inner_metadata is not None:
-        assert len(inner_metadata.input_info) == len(updated_input_info)
+        if len(inner_metadata.input_info) != len(updated_input_info):
+            raise AssertionError(
+                f"inner_metadata.input_info length ({len(inner_metadata.input_info)}) "
+                f"!= updated_input_info length ({len(updated_input_info)})"
+            )
 
     return [
         i
