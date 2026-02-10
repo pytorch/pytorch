@@ -36,6 +36,7 @@
     bn_blocks = tl.cdiv(N, TILE_SIZE_B)
     bk_blocks = tl.cdiv(K, TILE_SIZE_B)
 
+    {{pdl_wait()}}
     for tile_id in range(start_pid, num_tiles, NUM_SMS):
         group_id = tile_id // num_pid_in_group
         first_pid_m = group_id * GROUP_M
@@ -47,6 +48,7 @@
         offs_bn = pid_n * BLOCK_N
 
         accumulator = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
+
         for ki in range(0, k_tiles):
             offs_k = ki * BLOCK_K
 
@@ -122,7 +124,7 @@
             val_shape=("BLOCK_M", "BLOCK_N"),
             block_indexing=True,
         )}}
-
+    {{pdl_launch()}}
 
 @triton.jit
 def blockwise1xTILESIZE_scaling(

@@ -55,7 +55,7 @@
         block_shape=[BLOCK_K, BLOCK_N] if B_ROW_MAJOR else [BLOCK_N, BLOCK_K],
     )
     {%- endif %}
-
+    {{pdl_wait()}}
     for tile_id in tl.range(start_pid, num_tiles, NUM_SMS):
 
         # re-order program ID for better L2 performance
@@ -122,3 +122,4 @@
         {%- else %}
         {{store_output(("rm", "rn"), "acc", indent_width=8, val_shape=("BLOCK_M", "BLOCK_N"), block_indexing=True)}}
         {%- endif %}
+    {{pdl_launch()}}

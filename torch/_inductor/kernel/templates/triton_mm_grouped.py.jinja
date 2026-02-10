@@ -199,6 +199,7 @@ def do_mma(a, b, accumulator):
     k_end_offset = 0
 {%- endif %}
     iterated_tiles = 0
+    {{pdl_wait()}}
     for g in tl.range(G):
 {%- if M_IS_VARYING %}
         # Move across groups
@@ -263,6 +264,7 @@ def do_mma(a, b, accumulator):
                 n_offset = (n_start_offset + n_tile_offset).to(tl.int32)
 
                 k_block_offset = 0
+
                 for k in range(k_size // BLOCK_K):
                     k_offset = k_start_offset + k_block_offset
                     a, b = do_tma_loads(
@@ -293,7 +295,9 @@ def do_mma(a, b, accumulator):
 {%- endif %}
 {%- endif %}
                     accumulator = do_mma(a, b, accumulator)
+
 {%- else %}
+
                 offs_am = tile_m_idx * BLOCK_M + tl.arange(0, BLOCK_M)
                 offs_bn = tile_n_idx * BLOCK_N + tl.arange(0, BLOCK_N)
                 for k_block_offset in range(0, k_size, BLOCK_K):
@@ -326,6 +330,7 @@ def do_mma(a, b, accumulator):
 {%- endif %}
                     a_ptrs += BLOCK_K
                     b_ptrs += BLOCK_K
+
 {%- endif %}
 
                 offs_am = tile_m_idx * BLOCK_M + tl.arange(0, BLOCK_M)
@@ -377,3 +382,4 @@ def do_mma(a, b, accumulator):
                 tidx += NUM_SMS
 
             iterated_tiles += num_tiles
+    {{pdl_launch()}}

@@ -6773,7 +6773,9 @@ class Scheduler:
                 ):
                     self.flush()
 
-            if all(isinstance(n, SchedulerNode) for n in node.get_nodes()):
+            if node.is_template() or all(
+                isinstance(n, SchedulerNode) for n in node.get_nodes()
+            ):
                 self.previous_node = node
             else:
                 self.previous_node = None

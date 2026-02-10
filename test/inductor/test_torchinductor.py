@@ -15532,10 +15532,11 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 .check("gdc_wait")
                 .check("store")
                 .check("gdc_launch")
-                # matmul template
-                .check_not("'launch_pdl': True")
-                .check_not("gdc_wait")
-                .check_not("gdc_launch")
+                # matmul template now has PDL enabled
+                .check("'launch_pdl': True")
+                .check("gdc_wait")
+                .check("for ")  # gdc_wait must be before the K-loop
+                .check("gdc_launch")
                 .check("store")
             ).run(code)
         else:
@@ -15554,12 +15555,183 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 .check("gdc_wait")
                 .check("gdc_launch")
                 .check("store")
-                # matmul template
-                .check_not("'launch_pdl': True")
-                .check_not("gdc_wait")
-                .check_not("gdc_launch")
+                # matmul template now has PDL enabled
+                .check("'launch_pdl': True")
+                .check("gdc_wait")
+                .check("for ")  # gdc_wait must be before the K-loop
+                .check("gdc_launch")
                 .check("store")
             ).run(code)
+
+    @requires_cuda_and_triton
+    @skipCUDAIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
+    @config.patch(
+        {
+            "triton.enable_pdl": True,
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "TRITON",
+        }
+    )
+    def test_pdl_template_chain_correctness(self):
+        """Test inductor -> template -> inductor chain correctness with PDL."""
+
+        def fn(a, b, c):
+            # First kernel: elementwise on a
+            a = a * 2 + 1
+            # Template: matmul
+            d = a @ b
+            # Second kernel: elementwise on result + c
+            return d + c
+
+        a = torch.randn(256, 128, device=GPU_TYPE)
+        b = torch.randn(128, 256, device=GPU_TYPE)
+        c = torch.randn(256, 256, device=GPU_TYPE)
+        # Use check_lowp=False for matmul precision tolerance
+        self.common(fn, (a, b, c), check_lowp=False)
+
+    @requires_cuda_and_triton
+    @skipCUDAIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
+    @config.patch(
+        {
+            "triton.enable_pdl": True,
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "TRITON",
+        }
+    )
+    def test_pdl_template_prologue_fusion_correctness(self):
+        """Test prologue fusion correctness: earlier kernel output fused into template load."""
+
+        def fn(a, b):
+            # These ops should be prologue-fused into the matmul template
+            a = a.relu()
+            b = b.sigmoid()
+            return a @ b
+
+        a = torch.randn(512, 256, device=GPU_TYPE)
+        b = torch.randn(256, 512, device=GPU_TYPE)
+        self.common(fn, (a, b), check_lowp=False)
+
+    @requires_cuda_and_triton
+    @skipCUDAIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
+    @config.patch(
+        {
+            "triton.enable_pdl": True,
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "TRITON",
+        }
+    )
+    def test_pdl_template_epilogue_fusion_correctness(self):
+        """Test epilogue fusion correctness: template output fused with subsequent op."""
+
+        def fn(a, b, bias):
+            # Matmul with epilogue fusion (bias add + relu)
+            c = a @ b
+            c = c + bias
+            return c.relu()
+
+        a = torch.randn(256, 128, device=GPU_TYPE)
+        b = torch.randn(128, 256, device=GPU_TYPE)
+        bias = torch.randn(256, device=GPU_TYPE)
+        self.common(fn, (a, b, bias), check_lowp=False)
+
+    @requires_cuda_and_triton
+    @skipCUDAIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
+    @config.patch(
+        {
+            "triton.enable_pdl": True,
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "TRITON",
+        }
+    )
+    def test_pdl_template_output_consumed_by_kernel(self):
+        """Test that template output is correctly consumed by subsequent kernel with PDL wait."""
+
+        def fn(a, b, c):
+            # Template produces output
+            d = a @ b
+            # Subsequent kernel must wait for template output
+            return d * c + d.sum()
+
+        a = torch.randn(256, 128, device=GPU_TYPE)
+        b = torch.randn(128, 256, device=GPU_TYPE)
+        c = torch.randn(256, 256, device=GPU_TYPE)
+        self.common(fn, (a, b, c), check_lowp=False)
+
+        # Verify PDL is used and subsequent kernel waits
+        code = run_and_get_triton_code(torch.compile(fn, mode="max-autotune"), a, b, c)
+        (
+            FileCheck()
+            # Template should have PDL
+            .check("'launch_pdl': True")
+            .check("gdc_wait")
+            .check("for ")  # K-loop
+            .check("gdc_launch")
+        ).run(code)
+
+    @requires_cuda_and_triton
+    @skipCUDAIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
+    @config.patch(
+        {
+            "triton.enable_pdl": True,
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "TRITON",
+        }
+    )
+    def test_pdl_multiple_templates_correctness(self):
+        """Test multiple templates in sequence with PDL."""
+
+        def fn(a, b, c):
+            # First matmul
+            d = a @ b
+            # Second matmul consumes first's output
+            return d @ c
+
+        a = torch.randn(256, 128, device=GPU_TYPE)
+        b = torch.randn(128, 256, device=GPU_TYPE)
+        c = torch.randn(256, 128, device=GPU_TYPE)
+        self.common(fn, (a, b, c), check_lowp=False)
+
+    @requires_cuda_and_triton
+    @skipCUDAIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
+    @config.patch(
+        {
+            "triton.enable_pdl": True,
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "TRITON",
+        }
+    )
+    def test_pdl_bmm_template_correctness(self):
+        """Test batched matmul template correctness with PDL."""
+
+        def fn(a, b):
+            # Batched matmul
+            return torch.bmm(a, b)
+
+        a = torch.randn(8, 64, 32, device=GPU_TYPE)
+        b = torch.randn(8, 32, 64, device=GPU_TYPE)
+        self.common(fn, (a, b), check_lowp=False)
+
+    @requires_cuda_and_triton
+    @skipCUDAIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
+    @config.patch(
+        {
+            "triton.enable_pdl": True,
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "TRITON",
+        }
+    )
+    def test_pdl_template_with_reduction_correctness(self):
+        """Test template followed by reduction with PDL."""
+
+        def fn(a, b):
+            c = a @ b
+            # Reduction on template output
+            return c.sum(dim=-1), c.mean()
+
+        a = torch.randn(256, 128, device=GPU_TYPE)
+        b = torch.randn(128, 256, device=GPU_TYPE)
+        # Reduction over matmul output needs looser tolerance
+        self.common(fn, (a, b), atol=1e-4, rtol=1e-4, check_lowp=False)
 
     def test_use_deterministic_algorithms(self):
         @torch.compile(backend="inductor", fullgraph=True)

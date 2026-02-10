@@ -3356,8 +3356,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     def _enable_pdl_codegen():
         if not torch._inductor.config.triton.enable_pdl:
             return False
-        if isinstance(V.kernel, torch._inductor.select_algorithm.TritonTemplateKernel):
-            return False
         # PDL uses CUDA-specific intrinsics (gdc_wait/gdc_launch), not available on ROCm
         if torch.version.hip:
             return False
@@ -3381,10 +3379,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             prev_deps = prev_node.read_writes.writes
             if consider_reads:
                 prev_deps = itertools.chain(prev_deps, prev_node.read_writes.reads)
-            return any(
-                dep == current_node.mutation_renames.get(w.name, w.name)
-                for w in prev_deps
+            mutation_renames = (
+                current_node.mutation_renames if current_node is not None else {}
             )
+            return any(dep == mutation_renames.get(w.name, w.name) for w in prev_deps)
 
         assert dependencies
         need_wait = prev_node is None or any(matching_dep(d) for d in dependencies)
