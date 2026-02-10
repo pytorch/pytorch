@@ -104,6 +104,126 @@ log = logging.getLogger(__name__)
 
 
 inductor_config = import_module("torch._inductor.config")
+
+
+def _extract_distributed_info(
+    gm: torch.fx.GraphModule,
+) -> dict[str, dict[str, int]]:
+    """
+    Extract process group information from distributed ops in the graph.
+
+    Returns a dict mapping group names to dicts with 'size' and 'rank' keys.
+    Example: {'tp': {'size': 4, 'rank': 0}, 'dp': {'size': 2, 'rank': 0}}
+    """
+    from torch.fx.operator_schemas import normalize_function
+
+    group_info: dict[str, dict[str, int]] = {}
+
+    for node in gm.graph.nodes:
+        if node.op != "call_function":
+            continue
+        if not isinstance(node.target, OpOverload):
+            continue
+        if node.target.namespace not in {"_c10d_functional", "c10d_functional"}:
+            continue
+
+        opt_args_kwargs = normalize_function(
+            node.target,
+            args=node.args,
+            kwargs=node.kwargs,
+            normalize_to_only_use_kwargs=True,
+        )
+        if opt_args_kwargs is None:
+            continue
+        _, kwargs = opt_args_kwargs
+
+        group_name = kwargs.get("group_name")
+        if group_name is None:
+            continue
+
+        if group_name in group_info:
+            continue
+
+        from torch.distributed.distributed_c10d import (
+            _get_group_size_by_name,
+            _resolve_process_group,
+        )
+
+        group_size = _get_group_size_by_name(group_name)
+        pg = _resolve_process_group(group_name)
+        rank = pg.rank()
+        group_info[group_name] = {"size": group_size, "rank": rank}
+
+    return group_info
+
+
+def setup_fake_process_groups(
+    group_info: dict[str, dict[str, int]],
+) -> None:
+    """
+    Set up fake process groups for repro execution.
+
+    Args:
+        group_info: dict mapping group_name -> {'size': group_size, 'rank': rank}
+    """
+    import torch.distributed as dist
+    from torch.testing._internal.distributed.fake_pg import FakeStore
+
+    if not group_info:
+        return
+
+    world_size = max(info["size"] for info in group_info.values())
+
+    global_rank = 0
+    for info in group_info.values():
+        if info["size"] == world_size:
+            global_rank = info["rank"]
+            break
+
+    store = FakeStore()
+    dist.init_process_group(
+        backend="fake",
+        rank=global_rank,
+        world_size=world_size,
+        store=store,
+    )
+
+    default_pg = dist.distributed_c10d._get_default_group()
+    torch._C._distributed_c10d._unregister_all_process_groups()
+
+    for group_name, info in group_info.items():
+        group_size = info["size"]
+        if group_size == world_size:
+            # pyrefly: ignore[bad-argument-type]
+            torch._C._distributed_c10d._register_process_group(group_name, default_pg)
+        else:
+            ranks = list(range(group_size))
+            new_pg = dist.new_group(ranks)
+            # pyrefly: ignore[bad-argument-type]
+            torch._C._distributed_c10d._register_process_group(group_name, new_pg)
+
+
+def generate_standalone_repro(
+    gm: torch.fx.GraphModule,
+    args: Sequence[Any],
+    *,
+    save_path: Optional[str] = None,
+) -> str:
+    """
+    Generate a self-contained repro script from an FX graph.
+    """
+    buf = io.StringIO()
+    save_graph_repro(buf, gm, args, "inductor", save_dir=None)
+    repro = buf.getvalue()
+
+    if save_path is not None:
+        with open(save_path, "w") as f:
+            f.write(repro)
+        log.info("Saved standalone repro to %s", save_path)
+
+    return repro
+
+
 use_buck = is_fbcode()
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
@@ -594,13 +714,9 @@ def save_graph_repro(
     if save_dir is not None:
         save_dir = normalize_path_separator(save_dir)
 
-    # Check if the graph contains distributed operations
-    has_distributed_ops = any(
-        node.op == "call_function"
-        and isinstance(node.target, OpOverload)
-        and node.target.namespace in {"_c10d_functional", "c10d_functional"}
-        for node in gm.graph.nodes
-    )
+    # Extract distributed info from the graph
+    distributed_info = _extract_distributed_info(gm)
+    has_distributed_ops = len(distributed_info) > 0
 
     fd.write(
         generate_compiler_repro_string(
@@ -626,15 +742,9 @@ def save_graph_repro(
     # Add distributed initialization before run_repro if needed
     if has_distributed_ops:
         fd.write(
-            "    # Initialize FakeProcessGroup for distributed operations\n"
-            "    store = FakeStore()\n"
-            "    dist.init_process_group(\n"
-            '        backend="fake",\n'
-            "        rank=0,\n"
-            "        world_size=2,\n"
-            "        store=store\n"
-            "    )\n"
+            "    from torch._dynamo.repro.after_aot import setup_fake_process_groups\n"
         )
+        fd.write(f"    setup_fake_process_groups({distributed_info!r})\n")
 
     fd.write(
         f"    with torch.no_grad():\n"
