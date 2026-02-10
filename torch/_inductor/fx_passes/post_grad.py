@@ -1005,6 +1005,9 @@ def same_meta(node1: torch.fx.Node, node2: torch.fx.Node):
             val1.layout != torch.strided
             or statically_known_true(sym_eq(val1.stride(), val2.stride()))
         )
+        # Check conjugate and negative bits - a clone that resolves these is not a no-op
+        and val1.is_conj() == val2.is_conj()
+        and val1.is_neg() == val2.is_neg()
     )
 
 
@@ -1201,6 +1204,19 @@ def remove_assert_ops(graph: torch.fx.Graph):
         graph.erase_node(node)
 
 
+def apply_pass_to_subgraphs(pass_fn: Callable[[fx.Graph], None], graph: fx.Graph):
+    """Recursively apply a pass function to all subgraphs referenced by get_attr nodes."""
+    gm = graph.owning_module
+    if gm is None:
+        return
+    subgraph_names: OrderedSet[str] = OrderedSet(
+        x.target for x in graph.find_nodes(op="get_attr")
+    )
+    for child_name, child_mod in gm.named_children():
+        if child_name in subgraph_names and isinstance(child_mod, torch.fx.GraphModule):
+            pass_fn(child_mod.graph)
+
+
 def decompose_triton_kernel_wrapper_functional(graph):
     """Decomposes triton_kernel_wrapper_functional nodes into clones and the underlying
     mutation node.
@@ -1209,6 +1225,9 @@ def decompose_triton_kernel_wrapper_functional(graph):
     tells us (via rewriting the arguments or .meta to those nodes) which
     Tensors we should clone and which Tensors are safe to reinplace.
     """
+    # First, recursively process any subgraphs
+    apply_pass_to_subgraphs(decompose_triton_kernel_wrapper_functional, graph)
+
     graph_pass = PatternMatcherPass()
 
     @register_graph_pattern(
@@ -1461,18 +1480,18 @@ def view_to_reshape(gm):
     """
     Replace view ops in the GraphModule to reshape ops.
     """
-    subgraph_names: OrderedSet[str] = OrderedSet(
-        x.target for x in gm.graph.find_nodes(op="get_attr")
-    )
 
-    for child_name, child_mod in gm.named_children():
-        if child_name in subgraph_names and isinstance(child_mod, torch.fx.GraphModule):
-            view_to_reshape(child_mod)
+    def _view_to_reshape_graph(graph):
+        for nd in graph.find_nodes(
+            op="call_function", target=torch.ops.aten.view.default
+        ):
+            nd.target = torch.ops.aten.reshape.default
 
-    for nd in gm.graph.find_nodes(
-        op="call_function", target=torch.ops.aten.view.default
-    ):
-        nd.target = torch.ops.aten.reshape.default
+    def _recursive_view_to_reshape(graph):
+        apply_pass_to_subgraphs(_recursive_view_to_reshape, graph)
+        _view_to_reshape_graph(graph)
+
+    _recursive_view_to_reshape(gm.graph)
 
 
 def should_prefer_unfused_addmm(match):

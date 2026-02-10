@@ -201,6 +201,7 @@ TEST_ON_CUDA = (
 TEST_ON_XPU = torch.xpu.is_available() and torch.utils._triton.has_triton()
 
 device_configs = {}
+test_device = ("cpu",)
 if HAS_GPU:
     if TEST_ON_CUDA:
         test_device = (
@@ -210,8 +211,6 @@ if HAS_GPU:
     elif TEST_ON_XPU:
         torch._C._set_onednn_allow_tf32(True)
         test_device = ("xpu",)
-else:
-    test_device = ("cpu",)
 
 
 class SubstringSet:
@@ -692,21 +691,23 @@ class TestFlexAttention(InductorTestCase):
         paged_attention = PagedAttention(
             n_pages, page_size, max_batch_size, device=device
         )
+
+        def make_reserve_tensor(fractions):
+            pattern = [KV_S * f for f in fractions]
+            return torch.tensor(
+                [pattern[i % len(pattern)] for i in range(KV_B)],
+                device=device,
+                dtype=torch.int64,
+            )
+
         batch_reserve(
-            paged_attention,
-            torch.tensor([KV_S // 4, KV_S // 2, KV_S // 4, KV_S // 3], device=device),
+            paged_attention, make_reserve_tensor([1 / 4, 1 / 2, 1 / 4, 1 / 3])
         )
         batch_reserve(
-            paged_attention,
-            torch.tensor([KV_S // 4, KV_S // 2, KV_S // 2, KV_S // 2], device=device),
+            paged_attention, make_reserve_tensor([1 / 4, 1 / 2, 1 / 2, 1 / 2])
         )
-        batch_reserve(
-            paged_attention,
-            torch.tensor([KV_S // 2, KV_S, KV_S // 2, KV_S], device=device),
-        )
-        batch_reserve(
-            paged_attention, torch.tensor([KV_S, KV_S, KV_S, KV_S], device=device)
-        )
+        batch_reserve(paged_attention, make_reserve_tensor([1 / 2, 1, 1 / 2, 1]))
+        batch_reserve(paged_attention, make_reserve_tensor([1, 1, 1, 1]))
 
         # update cache with k and v
         input_pos = (
@@ -1942,6 +1943,21 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         def score_mod_scale(qk, b, h, q, kv):
             return qk + scale
+
+        self.run_test(score_mod_scale, dtype, device=device)
+        self.run_test_with_paged_attention(score_mod_scale, dtype, device=device)
+
+    @supported_platform
+    @skip_on_cpu
+    @dtypes(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
+    def test_captured_scalar_grad(self, device, dtype):
+        """Test learnable scalar parameter with shape (1,) using literal index."""
+        scale = torch.ones((1,), device=device, dtype=dtype, requires_grad=True)
+
+        def score_mod_scale(qk, b, h, q, kv):
+            return qk + scale[0]
 
         self.run_test(score_mod_scale, dtype, device=device)
         self.run_test_with_paged_attention(score_mod_scale, dtype, device=device)
@@ -4438,7 +4454,11 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @skip_on_cpu
-    @unittest.skipIf(config.triton.native_matmul, "different dynamo counters")
+    @config.patch(
+        {
+            "triton.native_matmul": False,
+        }
+    )
     def test_free_symbol_dynamic(self, device):
         def batch_flip_causal(b, h, q_idx, kv_idx):
             return (q_idx >= kv_idx) & (b % 2 == 0)

@@ -1046,7 +1046,8 @@ elseif(USE_CUDA)
         "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.cpp"
     )
     # Add torch_cpu as a dependency to ensure ATen headers are available
-    target_link_libraries(torch_nvshmem PRIVATE torch_cpu)
+    # torch::cudart provides CUDA include directories for .cpp files that include cuda_runtime.h
+    target_link_libraries(torch_nvshmem PRIVATE torch_cpu torch::cudart)
     set_target_properties(torch_nvshmem PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
     target_compile_options(torch_nvshmem PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-rdc=true>)
     target_compile_options(torch_nvshmem PRIVATE "-U__CUDA_NO_HALF_OPERATORS__")
@@ -1785,14 +1786,18 @@ if(USE_ROCM)
   target_link_libraries(torch_hip PUBLIC torch_cpu_library ${Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS})
   target_link_libraries(torch_hip PRIVATE ${Caffe2_HIP_DEPENDENCY_LIBS})
 
+  if(USE_ROCM_CK_SDPA)
+    target_link_libraries(torch_hip PRIVATE ck_sdpa)
+  endif()
+
   if(USE_MSLK)
     if(USE_ROCM)
       target_link_libraries(torch_hip PRIVATE mslk)
     endif()
   endif()
   # Since PyTorch files contain HIP headers, this is also needed to capture the includes.
-  # ROCM_INCLUDE_DIRS is defined in LoadHIP.cmake
-  target_include_directories(torch_hip PRIVATE ${Caffe2_HIP_INCLUDE} ${ROCM_INCLUDE_DIRS})
+  # ROCM_INCLUDE_DIRS is defined in LoadHIP.cmake and added as SYSTEM includes in cmake/Dependencies.cmake
+  target_include_directories(torch_hip PRIVATE ${Caffe2_HIP_INCLUDE})
   target_include_directories(torch_hip INTERFACE $<INSTALL_INTERFACE:include>)
 endif()
 
@@ -1979,7 +1984,7 @@ if(BUILD_TEST)
     set(BASE_HIPCC_FLAGS ${HIP_HIPCC_FLAGS})
     foreach(test_src ${Caffe2_HIP_TEST_SRCS})
       get_filename_component(test_name ${test_src} NAME_WE)
-      if(WIN32 AND test_src MATCHES "^.*\.hip$")
+      if(test_src MATCHES "^.*\.hip$")
         # Solves bug with hip_add_executable propagating flags from the previous tests
         set(HIP_HIPCC_FLAGS ${BASE_HIPCC_FLAGS})
         set_source_files_properties(${test_src} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
