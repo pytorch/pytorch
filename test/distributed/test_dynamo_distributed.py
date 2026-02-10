@@ -2223,8 +2223,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
     def test_compiled_all_reduce_returns_none(self):
         def fn(x, w):
             result = dist.all_reduce(x, async_op=False)
-            if result is not None:
-                raise RuntimeError("expected None")
+            assert result is None
             return x @ w
 
         x = torch.randn(4, 4, device=self.device)
@@ -2237,8 +2236,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
     def test_compiled_all_gather_into_tensor_returns_none(self):
         def fn(output, input, w):
             result = dist.all_gather_into_tensor(output, input, async_op=False)
-            if result is not None:
-                raise RuntimeError("expected None")
+            assert result is None
             return output @ w
 
         input = torch.randn(4, 4, device=self.device)
@@ -2251,8 +2249,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
     def test_compiled_reduce_scatter_tensor_returns_none(self):
         def fn(output, input, w):
             result = dist.reduce_scatter_tensor(output, input, async_op=False)
-            if result is not None:
-                raise RuntimeError("expected None")
+            assert result is None
             return output @ w
 
         input = torch.randn(4, 4, device=self.device)
@@ -2265,8 +2262,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
     def test_compiled_all_to_all_single_returns_none(self):
         def fn(output, input, w):
             result = dist.all_to_all_single(output, input, async_op=False)
-            if result is not None:
-                raise RuntimeError("expected None")
+            assert result is None
             return output @ w
 
         input = torch.randn(4, 4, device=self.device)
@@ -2279,8 +2275,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
     def test_compiled_all_gather_returns_none(self):
         def fn(tensor_list, tensor, w):
             result = dist.all_gather(tensor_list, tensor, async_op=False)
-            if result is not None:
-                raise RuntimeError("expected None")
+            assert result is None
             return tensor_list[0] @ w
 
         tensor = torch.randn(4, 4, device=self.device)
@@ -2293,8 +2288,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
     def test_compiled_reduce_scatter_base_returns_none(self):
         def fn(output, input, w):
             result = dist._reduce_scatter_base(output, input, async_op=False)
-            if result is not None:
-                raise RuntimeError("expected None")
+            assert result is None
             return output @ w
 
         input = torch.randn(4, 4, device=self.device)
@@ -2307,8 +2301,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
     def test_compiled_all_gather_base_returns_none(self):
         def fn(output, input, w):
             result = dist._all_gather_base(output, input, async_op=False)
-            if result is not None:
-                raise RuntimeError("expected None")
+            assert result is None
             return output @ w
 
         input = torch.randn(4, 4, device=self.device)
@@ -2320,9 +2313,10 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
         input = torch.ones(4, device=self.device)
         output = torch.empty(4, device=self.device)
+        w = torch.ones(4, device=self.device)
         compiled_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
-        actual = compiled_fn(output, input)
-        self.assertEqual(actual, input)
+        actual = compiled_fn(output, input, w)
+        self.assertEqual(actual, input @ w)
 
 
 if __name__ == "__main__":
