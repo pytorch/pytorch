@@ -11,7 +11,7 @@ import typing
 import warnings
 from collections.abc import Callable
 from enum import Enum
-from typing import Literal, NamedTuple, TypeAlias
+from typing import Any, Literal, NamedTuple, TypeAlias
 from typing_extensions import NotRequired, TypedDict
 
 import torch
@@ -427,23 +427,29 @@ def _adjust_num_blocks_and_indices(
     return num_blocks, indices
 
 
+def _closure_contents(fn: object) -> tuple[object, ...]:
+    """Extract closure cell contents for comparison."""
+    closure = getattr(fn, "__closure__", None)
+    if closure is None:
+        return ()
+    return tuple(cell.cell_contents for cell in closure)
+
+
 class _MaskModWrapper:
     """Wraps a mask_mod function with value-based equality.
 
     BlockMask stores an arbitrary callable (mask_mod) in its pytree context.
     The default __eq__ for functions uses identity comparison, which is too
     strict when the same closure is recreated (e.g., defined inside forward()).
-    This wrapper compares functions by their code object instead.
+    This wrapper compares functions by their code object and closure contents.
     """
 
     __slots__ = ("fn",)
 
-    def __init__(self, fn: _mask_mod_signature | None = None) -> None:
+    def __init__(self, fn: _mask_mod_signature) -> None:
         self.fn = fn
 
     def __call__(self, *args, **kwargs):
-        if self.fn is None:
-            raise RuntimeError("Cannot call _MaskModWrapper with fn=None")
         return self.fn(*args, **kwargs)
 
     def __eq__(self, other: object) -> bool:
@@ -455,13 +461,12 @@ class _MaskModWrapper:
             inspect.isfunction(self.fn)
             and inspect.isfunction(other.fn)
             and self.fn.__code__ == other.fn.__code__
+            and _closure_contents(self.fn) == _closure_contents(other.fn)
         ):
             return True
         return False
 
     def __hash__(self) -> int:
-        if self.fn is None:
-            return hash(None)
         if inspect.isfunction(self.fn):
             return hash(self.fn.__code__)
         return hash(self.fn)
@@ -965,13 +970,13 @@ class BlockMask:
         return BlockMask(*mapped_attributes)
 
     @staticmethod
-    def _wrap_context_value(attr, value):
+    def _wrap_context_value(attr: str, value: Any) -> Any:
         if attr == "mask_mod":
             return _MaskModWrapper(value)
         return value
 
     @staticmethod
-    def _unwrap_context_value(attr, value):
+    def _unwrap_context_value(attr: str, value: Any) -> Any:
         if attr == "mask_mod":
             if not isinstance(value, _MaskModWrapper):
                 raise AssertionError(f"Expected _MaskModWrapper, got {type(value)}")

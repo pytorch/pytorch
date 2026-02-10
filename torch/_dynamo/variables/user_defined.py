@@ -1166,10 +1166,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # TODO else try reconstructing the object by, e.g., leveraging side
             # effects and `as_python_constant`.
 
-        # Special case for _MaskModWrapper during legacy export: reconstruct from
-        # tracked attributes since Dynamo creates objects via __new__ without
-        # calling __init__. This path is not really important but we shouldn't
-        # break existing cases
+        # Special case for _MaskModWrapper during legacy export: Dynamo creates
+        # objects via __new__ without calling __init__, so self.value.fn is unset.
+        # Reconstruct from the tracked side-effect attribute instead.
         from torch.nn.attention.flex_attention import _MaskModWrapper
 
         if isinstance(self.value, _MaskModWrapper):
