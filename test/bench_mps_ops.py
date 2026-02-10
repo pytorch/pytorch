@@ -2,6 +2,7 @@
 # Collection of op level benchmarks for MPS
 # Useful as reference tool when migrating ops from MPS to Metal
 import itertools
+import sys
 import timeit
 import warnings
 from typing import Optional
@@ -156,49 +157,74 @@ def bench_scan(
 def main() -> None:
     dtypes = [torch.float16, torch.float32, torch.bfloat16]
 
-    # Profile index ops
-    B = 11
-    rc = []
-    for dtype, N in itertools.product(
-        [torch.int8, torch.float16, torch.float32], [50, 100, 500, 1000, 2000]
-    ):
-        x = torch.testing.make_tensor((B, N, N), device="mps", dtype=dtype)
-        y = torch.randint(0, B, (3,))
-        rc.append(bench_binary_op(torch.Tensor.__getitem__, x, y, f"{B}x{N}x{N}"))
-    Compare(rc).print()
+    def bench_index_ops():
+        B = 11
+        rc = []
+        for dtype, N in itertools.product(
+            [torch.int8, torch.float16, torch.float32], [50, 100, 500, 1000, 2000]
+        ):
+            x = torch.testing.make_tensor((B, N, N), device="mps", dtype=dtype)
+            y = torch.randint(0, B, (3,))
+            rc.append(
+                bench_binary_op(torch.Tensor.__getitem__, x, y, f"{B}x{N}x{N}")
+            )
+        Compare(rc).print()
 
-    # Profile unary ops
-    rc = []
-    for op, dtype in itertools.product([torch.sqrt, torch.sin], dtypes):
-        rc.extend(bench_unary(op, dtype=dtype))
-    Compare(rc).print()
+    def bench_unary_ops():
+        rc = []
+        for op, dtype in itertools.product([torch.sqrt, torch.sin], dtypes):
+            rc.extend(bench_unary(op, dtype=dtype))
+        Compare(rc).print()
 
-    # Profile reduction ops
-    rc = []
-    for op in [torch.sum, torch.max]:
-        rc.extend(bench_reduction(op))
-    Compare(rc).print()
+    def bench_reduction_ops():
+        rc = []
+        for op in [torch.sum, torch.max]:
+            rc.extend(bench_reduction(op))
+        Compare(rc).print()
 
-    # Profile scan ops (cumsum)
-    rc = []
-    for dtype in dtypes:
-        rc.extend(bench_scan(torch.cumsum, dtype=dtype))
-    Compare(rc).print()
+    def bench_scan_ops():
+        rc = []
+        for dtype in dtypes:
+            rc.extend(bench_scan(torch.cumsum, dtype=dtype))
+        Compare(rc).print()
 
-    # Profile scan with indices ops (cummin)
-    rc = []
-    for dtype in dtypes:
-        rc.extend(bench_scan(torch.cummin, dtype=dtype, with_indices=True))
-    Compare(rc).print()
+    def bench_scan_with_indices_ops():
+        rc = []
+        for dtype in dtypes:
+            rc.extend(bench_scan(torch.cummin, dtype=dtype, with_indices=True))
+        Compare(rc).print()
 
-    # Profile binary ops
-    rc = []
-    ops = [torch.fmax, torch.add]
-    for op, dtype in itertools.product(ops, dtypes):
-        rc.extend(bench_binary(op, dt_a=dtype))
-        if dtype == torch.float32:
-            rc.extend(bench_binary(op, dt_b=torch.float16))
-    Compare(rc).print()
+    def bench_binary_ops():
+        rc = []
+        ops = [torch.fmax, torch.add]
+        for op, dtype in itertools.product(ops, dtypes):
+            rc.extend(bench_binary(op, dt_a=dtype))
+            if dtype == torch.float32:
+                rc.extend(bench_binary(op, dt_b=torch.float16))
+        Compare(rc).print()
+
+    benchmarks = {
+        "index": bench_index_ops,
+        "unary": bench_unary_ops,
+        "reduction": bench_reduction_ops,
+        "scan": bench_scan_ops,
+        "scan_with_indices": bench_scan_with_indices_ops,
+        "binary": bench_binary_ops,
+    }
+
+    selected = sys.argv[1:]
+    if not selected:
+        selected = list(benchmarks.keys())
+    for name in selected:
+        if name not in benchmarks:
+            print(
+                f"Unknown benchmark: {name}. Available: {', '.join(benchmarks.keys())}"
+            )
+            sys.exit(1)
+
+    for name in selected:
+        print(f"Running {name}...")
+        benchmarks[name]()
 
 
 if __name__ == "__main__":
