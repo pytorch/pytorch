@@ -27,9 +27,28 @@ from torch.testing._internal.common_utils import (
 )
 
 
+def _torchVersionLessThan(major, minor):
+    version_parts = torch.__version__.split(".")
+    current_major = int(version_parts[0])
+    current_minor = int(
+        version_parts[1].split("+")[0].split("a")[0].split("b")[0].split("rc")[0]
+    )
+    return (current_major < major) or (current_major == major and current_minor < minor)
+
+
+def skipIfTorchVersionLessThan(major, minor):
+    """Skip test if PyTorch version is less than specified version."""
+
+    def decorator(func):
+        reason = f"Test requires PyTorch >= {major}.{minor}, current version is {torch.__version__}"
+        return unittest.skipIf(_torchVersionLessThan(major, minor), reason)(func)
+
+    return decorator
+
+
 def get_supported_dtypes():
     """Return a list of dtypes that are supported by torch stable ABI."""
-    return [
+    supported_by_2_10 = [
         torch.int8,
         torch.int16,
         torch.int32,
@@ -52,25 +71,14 @@ def get_supported_dtypes():
         torch.bool,
     ]
 
+    supported_by_2_11 = [
+        torch.float8_e8m0fnu,
+        torch.float4_e2m1fn_x2,
+    ]
 
-def skipIfTorchVersionLessThan(major, minor):
-    """Skip test if PyTorch version is less than specified version."""
-
-    def decorator(func):
-        version_parts = torch.__version__.split(".")
-        current_major = int(version_parts[0])
-        current_minor = int(
-            version_parts[1].split("+")[0].split("a")[0].split("b")[0].split("rc")[0]
-        )
-
-        should_skip = (current_major < major) or (
-            current_major == major and current_minor < minor
-        )
-        reason = f"Test requires PyTorch >= {major}.{minor}, current version is {torch.__version__}"
-
-        return unittest.skipIf(should_skip, reason)(func)
-
-    return decorator
+    return supported_by_2_10 + (
+        supported_by_2_11 if not _torchVersionLessThan(2, 11) else []
+    )
 
 
 @unittest.skipIf(
@@ -260,6 +268,27 @@ class TestLibtorchAgnostic(TestCase):
         import libtorch_agn_2_9 as libtorch_agnostic
 
         t = torch.rand(3, 1, device=device) - 0.5
+        cpu_t = libtorch_agnostic.ops.my_ones_like(t, "cpu")
+        self.assertEqual(cpu_t, torch.ones_like(t, device="cpu"))
+
+        def _make_cuda_tensors(prior_mem):
+            cuda_t = libtorch_agnostic.ops.my_ones_like(t, device)
+            self.assertGreater(torch.cuda.memory_allocated(device), prior_mem)
+            self.assertEqual(cuda_t, torch.ones_like(t, device=device))
+
+        if t.is_cuda:
+            init_mem = torch.cuda.memory_allocated(device)
+            for _ in range(3):
+                _make_cuda_tensors(init_mem)
+                curr_mem = torch.cuda.memory_allocated(device)
+                self.assertEqual(curr_mem, init_mem)
+
+    @xfailIfTorchDynamo
+    @skipIfTorchVersionLessThan(2, 11)  # Requires 2.11 for Float8_e8m0fnu support
+    def test_my_ones_like_with_Float8_e8m0fnu(self, device):
+        import libtorch_agn_2_11 as libtorch_agnostic
+
+        t = torch.zeros(3, 1, device=device, dtype=torch.float8_e8m0fnu)
         cpu_t = libtorch_agnostic.ops.my_ones_like(t, "cpu")
         self.assertEqual(cpu_t, torch.ones_like(t, device="cpu"))
 
@@ -962,10 +991,12 @@ class TestLibtorchAgnostic(TestCase):
     @skipIfTorchVersionLessThan(2, 10)
     @skipIfTorchDynamo("no data pointer defined for FakeTensor, FunctionalTensor")
     def test_get_template_any_data_ptr(self, device):
-        import libtorch_agn_2_10 as libtorch_agnostic
+        if _torchVersionLessThan(2, 11):
+            import libtorch_agn_2_10 as libtorch_agnostic
+        else:
+            import libtorch_agn_2_11 as libtorch_agnostic
 
         supported_dtypes = get_supported_dtypes()
-
         for dtype in supported_dtypes:
             t = torch.empty(2, 5, device=device, dtype=dtype)
             expected_p = t.data_ptr()
