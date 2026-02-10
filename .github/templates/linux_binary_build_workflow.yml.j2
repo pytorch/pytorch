@@ -216,6 +216,7 @@ jobs:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
         env:
           PYTORCH_ROOT: ""
+      !{{ common.checkout(deep_clone=False, directory="pytorch") }} #Cloning for Test Pytorch binary 
       - name: Test Pytorch binary
         uses: ./.github/actions/test-pytorch-binary
         env:

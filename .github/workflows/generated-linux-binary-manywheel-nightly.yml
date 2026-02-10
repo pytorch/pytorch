@@ -475,6 +475,18 @@ jobs:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
         env:
           PYTORCH_ROOT: ""
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch #Cloning for Test Pytorch binary 
       - name: Test Pytorch binary
         uses: ./.github/actions/test-pytorch-binary
         env:
@@ -603,6 +615,18 @@ jobs:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
         env:
           PYTORCH_ROOT: ""
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch #Cloning for Test Pytorch binary 
       - name: Test Pytorch binary
         uses: ./.github/actions/test-pytorch-binary
         env:
@@ -1166,6 +1190,18 @@ jobs:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
         env:
           PYTORCH_ROOT: ""
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch #Cloning for Test Pytorch binary 
       - name: Test Pytorch binary
         uses: ./.github/actions/test-pytorch-binary
         env:
@@ -1294,6 +1330,18 @@ jobs:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
         env:
           PYTORCH_ROOT: ""
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch #Cloning for Test Pytorch binary 
       - name: Test Pytorch binary
         uses: ./.github/actions/test-pytorch-binary
         env:
@@ -1857,6 +1905,18 @@ jobs:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
         env:
           PYTORCH_ROOT: ""
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch #Cloning for Test Pytorch binary 
       - name: Test Pytorch binary
         uses: ./.github/actions/test-pytorch-binary
         env:
@@ -1985,6 +2045,18 @@ jobs:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
         env:
           PYTORCH_ROOT: ""
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch #Cloning for Test Pytorch binary 
       - name: Test Pytorch binary
         uses: ./.github/actions/test-pytorch-binary
         env:
@@ -2548,6 +2620,18 @@ jobs:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
         env:
           PYTORCH_ROOT: ""
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch #Cloning for Test Pytorch binary 
       - name: Test Pytorch binary
         uses: ./.github/actions/test-pytorch-binary
         env:
@@ -2676,6 +2760,18 @@ jobs:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
         env:
           PYTORCH_ROOT: ""
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch #Cloning for Test Pytorch binary 
       - name: Test Pytorch binary
         uses: ./.github/actions/test-pytorch-binary
         env:
@@ -3239,6 +3335,18 @@ jobs:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
         env:
           PYTORCH_ROOT: ""
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch #Cloning for Test Pytorch binary 
       - name: Test Pytorch binary
         uses: ./.github/actions/test-pytorch-binary
         env:
@@ -3367,6 +3475,18 @@ jobs:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
         env:
           PYTORCH_ROOT: ""
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch #Cloning for Test Pytorch binary 
       - name: Test Pytorch binary
         uses: ./.github/actions/test-pytorch-binary
         env:
@@ -3930,6 +4050,18 @@ jobs:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
         env:
           PYTORCH_ROOT: ""
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch #Cloning for Test Pytorch binary 
       - name: Test Pytorch binary
         uses: ./.github/actions/test-pytorch-binary
         env:
@@ -4058,6 +4190,18 @@ jobs:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
         env:
           PYTORCH_ROOT: ""
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch #Cloning for Test Pytorch binary 
       - name: Test Pytorch binary
         uses: ./.github/actions/test-pytorch-binary
         env:
@@ -4621,6 +4765,18 @@ jobs:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
         env:
           PYTORCH_ROOT: ""
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch #Cloning for Test Pytorch binary 
       - name: Test Pytorch binary
         uses: ./.github/actions/test-pytorch-binary
         env:
@@ -4749,6 +4905,18 @@ jobs:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
         env:
           PYTORCH_ROOT: ""
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch #Cloning for Test Pytorch binary 
       - name: Test Pytorch binary
         uses: ./.github/actions/test-pytorch-binary
         env:
