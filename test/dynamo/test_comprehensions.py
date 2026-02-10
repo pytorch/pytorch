@@ -741,6 +741,7 @@ class ComprehensionTests(torch._inductor.test_case.TestCase):
         self.assertEqual(count_op(backend.graphs[0], operator.add), 1)
         self.assertEqual(count_op(backend.graphs[1], operator.add), 1)
 
+
 @skipIfNotPy312
 class NestedGraphBreakTests(torch._inductor.test_case.TestCase):
     @torch._dynamo.config.patch(nested_graph_breaks=False)
@@ -815,7 +816,7 @@ class NestedGraphBreakTests(torch._inductor.test_case.TestCase):
             x = x + 1
             result = [(y := i * 2) for i in [torch._dynamo.graph_break() or 1, 2, 3]]
             x = x + 2
-            return x + sum(result)
+            return x + sum(result) + y
 
         def outer(x):
             x = x + 3
@@ -837,7 +838,7 @@ class NestedGraphBreakTests(torch._inductor.test_case.TestCase):
         def inner(x, multiplier):
             x = x + 1
             result = [multiplier * i for i in [torch._dynamo.graph_break() or 1, 2, 3]]
-            x = x + 2
+            x = x + 2 + sum(result)
             return x
 
         def outer(x):
@@ -1011,13 +1012,13 @@ class NestedGraphBreakTests(torch._inductor.test_case.TestCase):
         def inner(x):
             y = x * 2
             lst = [graph_break_fn(i) for i in range(5)]
-            z = x + 3
+            z = x + 3 + sum(lst)
             return z, y
 
         def outer(x):
             x = x + 1
             result = inner(x)
-            x = x + 4
+            x = x + 5
             return result
 
         backend = torch._dynamo.testing.EagerAndRecordGraphs()
@@ -1028,7 +1029,7 @@ class NestedGraphBreakTests(torch._inductor.test_case.TestCase):
         self.assertEqual(len(backend.graphs), 2)
         self.assertEqual(count_op(backend.graphs[0], operator.add), 1)
         self.assertEqual(count_op(backend.graphs[0], operator.mul), 1)
-        self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
+        self.assertEqual(count_op(backend.graphs[1], operator.add), 3)
 
     @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_nested_multiple_comprehensions_one_break(self):
@@ -1732,7 +1733,7 @@ class NestedGraphBreakTests(torch._inductor.test_case.TestCase):
         self.assertEqual(compiled(x), outer(x))
         self.assertEqual(len(backend.graphs), 3)
         self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
-        self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
+        self.assertEqual(count_op(backend.graphs[1], operator.add), 1)
         self.assertEqual(count_op(backend.graphs[2], operator.add), 2)
 
     @torch._dynamo.config.patch(nested_graph_breaks=True)
@@ -1835,7 +1836,7 @@ class NestedGraphBreakTests(torch._inductor.test_case.TestCase):
         self.assertEqual(compiled(x), outer(x))
         self.assertEqual(len(backend.graphs), 3)
         self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
-        self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
+        self.assertEqual(count_op(backend.graphs[1], operator.add), 1)
         self.assertEqual(count_op(backend.graphs[2], operator.add), 2)
 
     @torch._dynamo.config.patch(nested_graph_breaks=True)

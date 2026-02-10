@@ -73,6 +73,7 @@ from .bytecode_analysis import (
 )
 from .bytecode_transformation import (
     cleaned_instructions,
+    clear_instruction_args,
     create_binary_slice,
     create_call_function,
     create_call_function_ex,
@@ -136,6 +137,7 @@ from .utils import (
     get_instruction_source_311,
     get_metrics_context,
     graph_break_dup_warning_checker,
+    is_safe_constant,
     istype,
     LazyString,
     proxy_args_kwargs,
@@ -4215,6 +4217,10 @@ class InstructionTranslatorBase(
             self.pop()
         else:
             self.popn(2)
+        # Decrement comprehension depth when exiting a comprehension's for loop.
+        # This ensures sequential comprehensions each set up their own speculation.
+        if self._comprehension_depth > 0:
+            self._comprehension_depth -= 1
 
     def LOAD_FAST_CHECK(self, inst: Instruction) -> None:
         if istype(self.symbolic_locals.get(inst.argval, None), NullVariable):
@@ -4544,6 +4550,12 @@ class InstructionTranslatorBase(
                     if var_name not in defined_inside and var_name not in captured_vars:
                         captured_vars.append(var_name)
 
+            # Detect LOAD_DEREF referencing closure variables
+            elif inst.opname == "LOAD_DEREF":
+                var_name = inst.argval
+                if var_name not in captured_vars:
+                    captured_vars.append(var_name)
+
         # Extract pre_store_ops: all opcodes from END_FOR+1 until first STORE_FAST
         pre_store_ops: list[str] = []
         scan_ip = end_for_ip + 1
@@ -4714,13 +4726,88 @@ class InstructionTranslatorBase(
 
         # --- Step 3: Add the comprehension bytecode ---
 
-        # Ensure iterator variables are in co_varnames for the generated code.
-        # The comprehension bytecode uses STORE_FAST for iterator cleanup.
-        for var_name in analysis.iterator_vars:
+        # Ensure all variables used by comprehension bytecode are in co_varnames.
+        # - iterator_vars: variables from LOAD_FAST_AND_CLEAR pattern
+        # - walrus_vars: variables created by walrus operator (:=)
+        # - captured_vars: outer scope variables accessed via LOAD_FAST
+        # - result_var: variable the comprehension result is assigned to
+        vars_for_co_varnames = (
+            analysis.iterator_vars
+            + analysis.walrus_vars
+            + analysis.captured_vars
+            + ([analysis.result_var] if analysis.result_var else [])
+        )
+
+        for var_name in vars_for_co_varnames:
             if var_name not in self.output.code_options["co_varnames"]:
                 self.output.code_options["co_varnames"] += (var_name,)
 
-        copied_insts = self._copy_comprehension_bytecode(start_ip, analysis.end_ip)
+        # Identify closure vars that need LOAD_DEREF -> LOAD_FAST conversion.
+        # These are captured_vars that are in cell_and_freevars (closure variables).
+        deref_to_fast_vars = {
+            var_name
+            for var_name in analysis.captured_vars
+            if var_name in self.cell_and_freevars()
+        }
+
+        # Load closure variables into local slots before the comprehension bytecode.
+        # LOAD_DEREF instructions will be converted to LOAD_FAST, so we need
+        # the values in local slots.
+        if deref_to_fast_vars:
+            cg = PyCodegen(self)
+            for var_name in deref_to_fast_vars:
+                if self.parent is None:
+                    # Top-level function: use LOAD_DEREF
+                    cg.extend_output(
+                        [
+                            create_instruction("LOAD_DEREF", argval=var_name),
+                            create_instruction("STORE_FAST", argval=var_name),
+                        ]
+                    )
+                else:
+                    # Inlined function: the closure variable is not in the outer
+                    # function's freevars. Get the actual closure cell contents
+                    # from the function's closure and install it as a global.
+                    assert hasattr(self, "funcvar"), (
+                        "Expected InliningInstructionTranslator to have funcvar"
+                    )
+                    fn = self.funcvar.fn
+                    closure = fn.__closure__ or ()
+                    freevars = fn.__code__.co_freevars
+                    if var_name in freevars:
+                        idx = freevars.index(var_name)
+                        actual_value = closure[idx].cell_contents
+                        if is_safe_constant(actual_value):
+                            cg.extend_output(
+                                [
+                                    cg.create_load_const(actual_value),
+                                    create_instruction("STORE_FAST", argval=var_name),
+                                ]
+                            )
+                        else:
+                            # Mutable object: install as a global
+                            global_name = self.output.install_global_by_id(
+                                f"__closure_{var_name}", actual_value
+                            )
+                            cg.extend_output(
+                                [
+                                    cg.create_load_global(global_name, add=True),
+                                    create_instruction("STORE_FAST", argval=var_name),
+                                ]
+                            )
+                    else:
+                        # Fall back to symbolic reconstruction
+                        cell = self.symbolic_locals[var_name]
+                        cell_contents = self.output.side_effects.load_cell(cell)
+                        cg(cell_contents, allow_cache=False)
+                        cg.extend_output(
+                            [create_instruction("STORE_FAST", argval=var_name)]
+                        )
+            self.output.add_output_instructions(cg.get_instructions())
+
+        copied_insts = self._copy_comprehension_bytecode(
+            start_ip, analysis.end_ip, deref_to_fast_vars
+        )
         self.output.add_output_instructions(copied_insts)
 
         if analysis.result_on_stack:
@@ -4774,9 +4861,13 @@ class InstructionTranslatorBase(
         self.instruction_pointer = None
 
     def _copy_comprehension_bytecode(
-        self, start_ip: int, end_ip: int
+        self, start_ip: int, end_ip: int, deref_to_fast_vars: set[str] | None = None
     ) -> list[Instruction]:
-        """Copy comprehension bytecode instructions, updating jump targets."""
+        """Copy comprehension bytecode instructions, updating jump targets.
+
+        Args:
+            deref_to_fast_vars: Variable names to convert from LOAD_DEREF to LOAD_FAST
+        """
         inst_map: dict[Instruction, Instruction] = {}
         copied_insts: list[Instruction] = []
 
@@ -4787,9 +4878,24 @@ class InstructionTranslatorBase(
             inst_map[original_inst] = copied_inst
             copied_insts.append(copied_inst)
 
+        # Clear instruction args so fix_vars can recalculate them for the new context.
+        # This is needed because the copied bytecode has arg values that reference
+        # indices in the original function's co_varnames/co_consts, which may differ
+        # from the generated code's.
+        clear_instruction_args(copied_insts)
+
         for copied_inst in copied_insts:
             if copied_inst.target is not None and copied_inst.target in inst_map:
                 copied_inst.target = inst_map[copied_inst.target]
+
+            # Convert LOAD_DEREF to LOAD_FAST for closure vars loaded to local slots
+            if (
+                deref_to_fast_vars
+                and copied_inst.opname == "LOAD_DEREF"
+                and copied_inst.argval in deref_to_fast_vars
+            ):
+                copied_inst.opname = "LOAD_FAST"
+                copied_inst.opcode = dis.opmap["LOAD_FAST"]
 
         return copied_insts
 
