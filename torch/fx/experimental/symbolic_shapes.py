@@ -1331,7 +1331,6 @@ def _free_unbacked_symbols_with_path(
         )
         # TODO: DivideByKey needs to test divisibility at runtime!
 
-        # pyrefly: ignore [unsupported-operation]
         r[unbacked] = path + (DivideByKey(divisor),)
         if real is not None:
             if not isinstance(real, int):
@@ -1355,7 +1354,6 @@ def _free_unbacked_symbols_with_path(
         and s.rhs == 1
         and s.lhs in pending
     ):
-        # pyrefly: ignore [unsupported-operation]
         r[s.lhs] = path + (ConvertIntKey(),)
         if real is not None:
             if type(real) is not bool:
