@@ -718,7 +718,8 @@ class LocksTest(TestMixin, TestCase):
                 raise NotImplementedError
             self.assertFalse(self.lock_or_flock_locked(lock_or_flock))
 
-        assert lock_typename in ["Lock", "FileLock"]
+        if lock_typename not in ["Lock", "FileLock"]:
+            raise AssertionError(f"Unexpected lock_typename: {lock_typename}")
         flock_fpath: Path = (
             impls._OnDiskCacheImpl()._cache_dir
             / f"testing-locks-instance-{self.random_string}.lock"
@@ -741,7 +742,12 @@ class LocksTest(TestMixin, TestCase):
             raise NotImplementedError
 
         with self.executor() as executor:
-            assert lock_timeout in ["BLOCKING", "NON_BLOCKING", "BLOCKING_WITH_TIMEOUT"]
+            if lock_timeout not in [
+                "BLOCKING",
+                "NON_BLOCKING",
+                "BLOCKING_WITH_TIMEOUT",
+            ]:
+                raise AssertionError(f"Unexpected lock_timeout: {lock_timeout}")
             lock_or_flock_future: Future[None] = executor.submit(
                 inner,
                 lock_or_flock,

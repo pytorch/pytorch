@@ -269,7 +269,7 @@ class TestAwait(JitTestCase):
         def main(x: Tensor) -> Tensor:
             aw = torch.jit._awaitable(delayed, x)
             if torch.jit.is_scripting():
-                assert isinstance(aw, torch.jit._Await)
+                assert isinstance(aw, torch.jit._Await)  # noqa: S101
             return torch.jit._awaitable_wait(aw)
 
         inp = torch.eye(2)

@@ -64,7 +64,8 @@ def skipOps(op_db, test_case_name, base_test_name, to_skip):
             for o in all_opinfos
             if o.name == op_name and o.variant_test_name == variant_name
         ]
-        assert len(matching_opinfos) >= 1, f"Couldn't find OpInfo for {xfail}"
+        if not (len(matching_opinfos) >= 1):
+            raise AssertionError(f"Couldn't find OpInfo for {xfail}")
         for opinfo in matching_opinfos:
             decorators = list(opinfo.decorators)
             if expected_failure:
@@ -664,7 +665,8 @@ class TestDTensorOps(TestCase):
 
     def run_one_hot(self):
         ops = [op for op in op_db if op.name == "nn.functional.one_hot"]
-        assert len(ops) == 1
+        if len(ops) != 1:
+            raise AssertionError(f"Expected 1 op, got {len(ops)}")
         op = ops[0]
         # num_classes = -1 appears to have a bug with dtensor.max().item()
         self.run_opinfo_test(

@@ -405,7 +405,7 @@ class TestDraftExport(TestCase):
     def test_shape_failure(self):
         class M(torch.nn.Module):
             def forward(self, a):
-                assert a.shape[0] == 3
+                assert a.shape[0] == 3  # noqa: S101
                 return a * a
 
         inp = (torch.ones(3, 3),)

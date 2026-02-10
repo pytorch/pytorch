@@ -275,9 +275,10 @@ class TestMemoryTracker(InductorTestCase):
             # Alternative schedule: change which operation is the last use of zeros
             # Original: zeros_like, add, sum (zeros freed after sum)
             # Alternative: zeros_like, sum, add (zeros freed after add)
-            assert len(compute_nodes) == 5, (
-                f"Expected 3 compute nodes, got {len(compute_nodes)}"
-            )
+            if len(compute_nodes) != 5:
+                raise AssertionError(
+                    f"Expected 3 compute nodes, got {len(compute_nodes)}"
+                )
             reordered_nodes = [
                 compute_nodes[0],  # zeros_like: zeros = torch.zeros_like(primals_1)
                 compute_nodes[2],  # sum: sum_result = zeros.sum() (zeros still alive)

@@ -109,7 +109,8 @@ class TestDtypeBase(JitTestCase):
     @staticmethod
     def node_output_dtype_single(graph):
         dtypes = TestDtypeBase.node_output_dtypes(graph)
-        assert len(dtypes) == 1
+        if len(dtypes) != 1:
+            raise AssertionError(f"Expected 1 output dtype, got {len(dtypes)}")
         return dtypes[0]
 
     def prop_dtype_on_graph(self, graph, example_inputs):

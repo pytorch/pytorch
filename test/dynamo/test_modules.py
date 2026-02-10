@@ -2823,7 +2823,8 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
         mod = MyModule()
         out = torch.compile(mod, fullgraph=True)(torch.randn(10))
-        assert mod.text_encoding is out
+        if mod.text_encoding is not out:
+            raise AssertionError("Expected mod.text_encoding to be out")
 
     def test_module_dict_iter_values(self):
         class MyModule(torch.nn.Module):
@@ -3495,8 +3496,10 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         input_tensor = torch.randn(4, 10)
 
         eager_output = model(input_tensor)
-        assert hasattr(model.linear, "weight")
-        assert not hasattr(model.linear, "_tmp_weight")
+        if not hasattr(model.linear, "weight"):
+            raise AssertionError("Expected model.linear to have weight")
+        if hasattr(model.linear, "_tmp_weight"):
+            raise AssertionError("Expected model.linear to not have _tmp_weight")
 
         torch.manual_seed(0)
         model_to_compile = SimpleModel()
@@ -3505,8 +3508,12 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
         compiled_model = torch.compile(model_to_compile, fullgraph=True)
         compiled_output = compiled_model(input_tensor)
-        assert hasattr(model.linear, "weight")
-        assert not hasattr(compiled_model.linear, "_tmp_weight")
+        if not hasattr(model.linear, "weight"):
+            raise AssertionError("Expected model.linear to have weight")
+        if hasattr(compiled_model.linear, "_tmp_weight"):
+            raise AssertionError(
+                "Expected compiled_model.linear to not have _tmp_weight"
+            )
         torch.testing.assert_close(eager_output, compiled_output)
 
     def test_submodule_forward_hooks_with_kwargs(self):
