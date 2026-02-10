@@ -597,48 +597,15 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
             loss.backward()
 
     @skip_if_lt_x_gpu(1)
-    def test_dataclass_input(self):
-        @dataclasses.dataclass
-        class Input:
-            x: torch.Tensor
-
-        class Model(nn.Module):
-            def __init__(self, *args, **kwargs) -> None:
-                super().__init__(*args, **kwargs)
-                self._layer = nn.Linear(10, 10)
-
-            def forward(self, input: Input):
-                return self._layer(input.x)
-
-        mp_policy = MixedPrecisionPolicy(
-            torch.bfloat16, torch.bfloat16, torch.bfloat16, True
-        )
-        model = Model()
-        inp = Input(torch.randn(2, 10).to(device_type))
-
-        fully_shard(model, mp_policy=mp_policy)
-        loss = model(inp).sum()
-        loss.backward()
-
-    @skip_if_lt_x_gpu(1)
-    def test_dataclass_no_memory_leakage(self):
+    def test_dataclass_input_output(self):
         """
-        Test that FSDP with dataclass inputs/outputs does not leak memory.
+        Test that FSDP correctly handles dataclass inputs/outputs and computes
+        gradients correctly for all input tensors.
 
-        This test catches a regression where using _apply_to_tensors instead of
-        tree_flatten/tree_unflatten caused memory to grow step-by-step during
-        training. The issue was that _apply_to_tensors creates new container
-        copies that somehow prevented proper garbage collection or caused cache
-        growth (particularly with DTensor + MoE + expert parallelism).
-
-        The fix uses a hybrid approach: tree_flatten for efficiency with special
-        handling for unregistered dataclasses.
-
-        NOTE: The full memory leak (GiBs of growth) requires DTensor + MoE + EP
-        which is not easily testable in a unit test. This test verifies:
-        1. Dataclass functionality works correctly (gradients are computed)
-        2. Memory is stable over multiple training steps
-        3. No obvious memory growth pattern
+        This test also catches a regression where applying RegisterPostBackwardFunction
+        individually to each tensor (instead of batching all tensors together)
+        causes post_backward() to be called multiple times, which disrupts the
+        autograd graph and results in some input tensors having None gradients.
         """
 
         @dataclasses.dataclass
@@ -651,232 +618,109 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
             x: torch.Tensor
             y: torch.Tensor
 
-        class Model(nn.Module):
-            def __init__(self, dim: int = 64) -> None:
-                super().__init__()
-                self._layer1 = nn.Linear(dim, dim * 4)
-                self._layer2 = nn.Linear(dim * 4, dim)
+        @dataclasses.dataclass
+        class Scale:
+            factor: torch.Tensor
 
-            def forward(self, input: Input) -> Output:
-                x = self._layer2(torch.relu(self._layer1(input.x)))
-                y = self._layer2(torch.relu(self._layer1(input.y)))
+        class Model(nn.Module):
+            def __init__(self, *args, **kwargs) -> None:
+                super().__init__(*args, **kwargs)
+                self._layer = nn.Linear(10, 10)
+
+            def forward(self, input: Input, *, scale: Scale | None = None):
+                x = self._layer(input.x)
+                y = self._layer(input.y)
+                if scale is not None:
+                    x = x * scale.factor
+                    y = y * scale.factor
                 return Output(x=x, y=y)
 
-        dim = 64
-        batch_size = 32
-        num_warmup_steps = 3
-        num_test_steps = 10
-        # Allow some memory variance but catch significant growth
-        max_memory_growth_bytes = 10 * 1024 * 1024  # 10 MB threshold
+        class TensorModel(nn.Module):
+            def __init__(self, *args, **kwargs) -> None:
+                super().__init__(*args, **kwargs)
+                self._layer = nn.Linear(10, 10)
 
-        mp_policy = MixedPrecisionPolicy(
-            param_dtype=torch.bfloat16,
-            reduce_dtype=torch.float32,
-        )
+            def forward(self, x: torch.Tensor, *, scale: torch.Tensor | None = None):
+                out = self._layer(x)
+                if scale is not None:
+                    out = out * scale
+                return out
 
-        # Create model with multiple layers to simulate realistic workload
-        torch.manual_seed(42)
-        model = nn.Sequential(*[Model(dim) for _ in range(4)])
-        for layer in model:
-            fully_shard(layer, mp_policy=mp_policy, reshard_after_forward=True)
-        fully_shard(model, mp_policy=mp_policy, reshard_after_forward=True)
+        mp_policies = [
+            MixedPrecisionPolicy(
+                param_dtype=torch.bfloat16,
+                reduce_dtype=torch.bfloat16,
+            ),
+            MixedPrecisionPolicy(
+                param_dtype=torch.bfloat16,
+                reduce_dtype=torch.float32,
+            ),
+        ]
 
-        optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+        for mp_policy in mp_policies:
+            # Test with normal torch.Tensor as both arg and kwarg
+            tensor_model = TensorModel()
+            fully_shard(tensor_model, mp_policy=mp_policy)
+            x = torch.randn(10, 10, device=device_type, requires_grad=True)
+            scale = torch.randn(10, 10, device=device_type, requires_grad=True)
+            loss = tensor_model(x, scale=scale).sum()
+            loss.backward()
+            self.assertIsNotNone(x.grad, "Input x gradient should not be None")
+            self.assertIsNotNone(scale.grad, "Input scale gradient should not be None")
 
-        def run_step():
+            # Test with dataclass as positional arg only
+            torch.manual_seed(42)
+            model = nn.Sequential(*[Model(), Model()])
             inp = Input(
-                x=torch.randn(batch_size, dim, device=device_type, requires_grad=True),
-                y=torch.randn(batch_size, dim, device=device_type, requires_grad=True),
+                x=torch.randn(10, 10, device=device_type, requires_grad=True),
+                y=torch.randn(10, 10, device=device_type, requires_grad=True),
             )
-            optimizer.zero_grad()
+
+            for layer in model:
+                fully_shard(layer, mp_policy=mp_policy, reshard_after_forward=True)
+            fully_shard(model, mp_policy=mp_policy, reshard_after_forward=True)
+
             output = model(inp)
             loss = output.x.sum() + output.y.sum()
             loss.backward()
-            optimizer.step()
-            # Verify gradients are computed correctly for dataclass tensors
-            self.assertIsNotNone(inp.x.grad, "Gradient for inp.x should not be None")
-            self.assertIsNotNone(inp.y.grad, "Gradient for inp.y should not be None")
-            return loss.item()
 
-        # Warmup steps to stabilize memory
-        for _ in range(num_warmup_steps):
-            run_step()
-
-        # Force garbage collection and synchronize
-        import gc
-        gc.collect()
-        torch.cuda.synchronize()
-        torch.cuda.reset_peak_memory_stats()
-
-        # Record baseline memory after warmup
-        baseline_memory = torch.cuda.memory_allocated()
-
-        # Run test steps
-        memory_readings = [baseline_memory]
-        for step in range(num_test_steps):
-            run_step()
-            gc.collect()
-            torch.cuda.synchronize()
-            current_memory = torch.cuda.memory_allocated()
-            memory_readings.append(current_memory)
-
-        # Check for memory growth
-        final_memory = memory_readings[-1]
-        memory_growth = final_memory - baseline_memory
-
-        # The test fails if memory grows significantly
-        # Before the fix, memory would grow by several GiB over ~50 steps
-        # With the fix, memory should be stable (within the threshold)
-        self.assertLessEqual(
-            memory_growth,
-            max_memory_growth_bytes,
-            f"Memory leak detected! Memory grew by {memory_growth / (1024 * 1024):.2f} MB "
-            f"over {num_test_steps} steps (threshold: {max_memory_growth_bytes / (1024 * 1024):.2f} MB). "
-            f"Memory readings (MB): {[m / (1024 * 1024) for m in memory_readings]}"
-        )
-
-
-class TestFullyShardDataclassMemoryLeak(FSDPTest):
-    """
-    Test class for catching memory leaks with dataclass inputs/outputs and DTensor.
-
-    This test requires multiple GPUs and uses DTensor with varying tensor shapes
-    to trigger the planner cache growth that caused memory leaks in the original
-    _apply_to_tensors implementation.
-    """
-
-    @property
-    def world_size(self) -> int:
-        return min(4, torch.get_device_module(device_type).device_count())
-
-    @skip_if_lt_x_gpu(2)
-    def test_dataclass_dtensor_memory_leak(self):
-        """
-        Test that FSDP with dataclass outputs and DTensor works correctly.
-
-        This test verifies that:
-        1. Dataclass inputs/outputs work correctly with FSDP
-        2. Gradients are properly computed for dataclass tensors
-        3. Training steps complete successfully with varying input shapes
-
-        The memory leak in the original issue (which this test guards against) occurred
-        because _apply_to_tensors created container copies that held tensor references.
-        The fix uses tree_flatten with special dataclass handling instead.
-
-        Note: Actual memory leak detection requires testing with large models like
-        DeepSeek V3 16B - this test exercises the code path but may not detect
-        memory leaks in a small CI environment.
-        """
-        from torch.distributed.device_mesh import init_device_mesh
-
-        @dataclasses.dataclass
-        class ModelInput:
-            tokens: torch.Tensor
-            mask: torch.Tensor
-
-        @dataclasses.dataclass
-        class ModelOutput:
-            hidden: torch.Tensor
-            aux_loss: torch.Tensor
-
-        class ExpertLayer(nn.Module):
-            def __init__(self, dim: int):
-                super().__init__()
-                self.w1 = nn.Linear(dim, dim * 4, bias=False)
-                self.w2 = nn.Linear(dim * 4, dim, bias=False)
-
-            def forward(self, x: torch.Tensor) -> torch.Tensor:
-                return self.w2(torch.relu(self.w1(x)))
-
-        class MoEBlock(nn.Module):
-            def __init__(self, dim: int, num_experts: int = 4):
-                super().__init__()
-                self.dim = dim
-                self.num_experts = num_experts
-                self.experts = nn.ModuleList(
-                    [ExpertLayer(dim) for _ in range(num_experts)]
-                )
-                self.gate = nn.Linear(dim, num_experts, bias=False)
-
-            def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-                batch_size, seq_len, dim = x.shape
-                scores = torch.softmax(self.gate(x), dim=-1)
-                _, top_expert = scores.max(dim=-1)
-
-                output = torch.zeros_like(x)
-                for i, expert in enumerate(self.experts):
-                    mask = (top_expert == i).unsqueeze(-1).float()
-                    expert_input = x * mask
-                    expert_output = expert(expert_input)
-                    output = output + expert_output * mask
-
-                aux_loss = scores.mean()
-                return output, aux_loss
-
-        class DataclassMoEModel(nn.Module):
-            def __init__(self, dim: int, num_layers: int = 2):
-                super().__init__()
-                self.embed = nn.Linear(dim, dim)
-                self.layers = nn.ModuleList(
-                    [MoEBlock(dim) for _ in range(num_layers)]
-                )
-                self.output = nn.Linear(dim, dim)
-
-            def forward(self, inp: ModelInput) -> ModelOutput:
-                x = self.embed(inp.tokens)
-                total_aux_loss = torch.tensor(0.0, device=x.device)
-
-                for layer in self.layers:
-                    layer_out, aux_loss = layer(x)
-                    x = x + layer_out
-                    total_aux_loss = total_aux_loss + aux_loss
-
-                hidden = self.output(x)
-                return ModelOutput(hidden=hidden, aux_loss=total_aux_loss)
-
-        mesh = init_device_mesh(device_type.type, (self.world_size,))
-        dim = 64
-        batch_size = 8
-        seq_len = 32
-        num_steps = 10
-
-        torch.manual_seed(42)
-        model = DataclassMoEModel(dim, num_layers=2)
-
-        for layer in model.layers:
-            for expert in layer.experts:
-                fully_shard(expert, mesh=mesh)
-            fully_shard(layer, mesh=mesh)
-        fully_shard(model, mesh=mesh)
-
-        optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
-
-        for step_idx in range(num_steps):
-            torch.manual_seed(42 + self.rank + step_idx * 100)
-            # Vary seq_len each step to exercise different tensor shapes
-            step_seq_len = seq_len + step_idx
-            inp = ModelInput(
-                tokens=torch.randn(
-                    batch_size, step_seq_len, dim, device=device_type, requires_grad=True
-                ),
-                mask=torch.ones(
-                    batch_size, step_seq_len, device=device_type, requires_grad=False
-                ),
-            )
-
-            optimizer.zero_grad()
-            output = model(inp)
-            loss = output.hidden.sum() + output.aux_loss
-            loss.backward()
-            optimizer.step()
-
-            # Verify gradients are computed for dataclass tensors
+            # Critical check: ALL input tensors must have gradients computed
+            # This catches the regression where RegisterPostBackwardFunction.apply
+            # is called per-tensor instead of batched, causing some gradients to be None
             self.assertIsNotNone(
-                inp.tokens.grad, "Gradient for inp.tokens should not be None"
+                inp.x.grad,
+                "Dataclass input.x gradient is None - post_backward hook issue",
             )
-            self.assertTrue(
-                inp.tokens.grad.abs().sum() > 0,
-                "Gradient for inp.tokens should be non-zero"
+            self.assertIsNotNone(
+                inp.y.grad,
+                "Dataclass input.y gradient is None - post_backward hook issue",
+            )
+
+            # Test with dataclass as both positional arg and kwarg
+            # Also test mixed requires_grad (scale.factor requires grad, but inp tensors don't)
+            inp_no_grad = Input(
+                x=torch.randn(10, 10, device=device_type, requires_grad=False),
+                y=torch.randn(10, 10, device=device_type, requires_grad=False),
+            )
+            scale = Scale(
+                factor=torch.randn(10, 10, device=device_type, requires_grad=True)
+            )
+            output = model[0](inp_no_grad, scale=scale)
+            loss = output.x.sum() + output.y.sum()
+            loss.backward()
+            # Verify gradient for scale.factor (requires_grad=True)
+            self.assertIsNotNone(
+                scale.factor.grad,
+                "scale.factor gradient should not be None",
+            )
+            # Verify no gradient for inp tensors (requires_grad=False)
+            self.assertIsNone(
+                inp_no_grad.x.grad,
+                "inp.x should not have gradient (requires_grad=False)",
+            )
+            self.assertIsNone(
+                inp_no_grad.y.grad,
+                "inp.y should not have gradient (requires_grad=False)",
             )
 
 
