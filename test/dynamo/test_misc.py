@@ -13250,8 +13250,9 @@ fn
 
     @unittest.skipIf(sys.version_info < (3, 12), "Python 3.12+")
     def test_CALL_INTRINSIC(self):
-        from torch.testing._internal.py312_intrinsics import TestPy312Intrinsics
-        TestPy312Intrinsics.test_default_update(self)
+        from torch.testing._internal.py312_intrinsics import Py312Intrinsics
+
+        Py312Intrinsics.test_default_update(self)
 
     @unittest.skipIf(sys.version_info < (3, 11), "Python 3.11+")
     def test_RAISE_VARARGS_0(self):
