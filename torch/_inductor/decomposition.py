@@ -369,11 +369,10 @@ def mm(
 
     # TODO: Re-enable for mps once our reductions are performant enough
     # (https://github.com/pytorch/pytorch/issues/150121)
-    if config.coordinate_descent_tuning and self.device.type not in ["cpu", "mps"]:
-        if statically_known_true(self.shape[0] == 1) or statically_known_true(
-            input2.shape[1] == 1
-        ):
-            return (self.unsqueeze(2) * input2.unsqueeze(0)).sum(dim=1)
+    # NOTE: The batch=1 decomposition to unsqueeze+mul+sum is now registered as an
+    # autotuning choice in kernel/mm.py (batch1_decompose_subgraph_template) rather
+    # than applied unconditionally here. This allows autotuning to compare it against
+    # cuBLAS mm and other choices.
     if self.device.type == "cpu":
         if (
             statically_known_true(self.size(-1) == 1)
