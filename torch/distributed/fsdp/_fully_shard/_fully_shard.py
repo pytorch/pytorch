@@ -229,7 +229,7 @@ def fully_shard(
         offload_policy,
         reshard_after_forward=reshard_after_forward
         if not auto_reshard_after_forward
-        else True,  # type: ignore[arg-type]
+        else True,
     )
 
     # For Dynamo

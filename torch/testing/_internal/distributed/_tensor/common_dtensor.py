@@ -484,7 +484,7 @@ class Transformer(nn.Module):
     @staticmethod
     def parallelize(
         module: "Transformer",
-        tp_mesh: DeviceMesh,
+        tp_mesh: DeviceMesh | None,
         use_seq_parallel: bool,
         local_output_for_attn: bool = False,
         ep_mesh: DeviceMesh | None = None,
