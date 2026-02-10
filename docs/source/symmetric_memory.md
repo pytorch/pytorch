@@ -263,6 +263,27 @@ result tensor will be created from symmetric memory too.
 As of torch 2.11, the `CUDA` and `NVSHMEM` backends support MemPool. MemPool
 support of the `NCCL` backend is in progress.
 
+## Copy Engine Collectives
+
+When NCCL collective operations are performed on symmetric memory tensors with
+the zero-CTA policy, data movement is offloaded to the GPU's copy engines (DMA
+engines) instead of using CUDA streaming multiprocessors (SMs). This frees up
+SMs for compute work, enabling better overlap of communication and computation.
+
+For setup instructions, requirements, and examples, see
+[Copy Engine Collectives](distributed.md#copy-engine-collectives).
+
+## Higher-Precision Reduction
+
+When NCCL collectives such as ``reduce_scatter`` and ``all_reduce`` operate on
+symmetric memory tensors, NCCL's symmetric kernel implementation automatically
+performs internal reduction with higher precision (e.g., BF16/FP16 in → FP32
+accumulate → BF16/FP16 out). This improves numerical accuracy without any code
+changes.
+
+For details on scope, supported domains, and version requirements, see
+[Higher-Precision Reduction with Symmetric Memory](distributed.md#higher-precision-reduction-with-symmetric-memory).
+
 ## API Reference
 
 ```{eval-rst}

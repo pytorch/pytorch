@@ -223,6 +223,45 @@ environment variable `NCCL_CTA_POLICY` be set to 2
 would need to use the `async_op=True` flag to activate the internal stream of
 `ProcessGroupNCCL` or create a side stream yourself
 
+### Higher-Precision Reduction with Symmetric Memory
+
+When tensors are allocated with symmetric memory, NCCL's symmetric kernel
+implementation enables internal reduction with higher precision. For example, with
+BF16 inputs, NCCL will automatically accumulate in FP32 internally before producing
+BF16 outputs (BF16 in → FP32 accumulate → BF16 out). This improves numerical
+accuracy of reduction operations without changing the collective call.
+
+**Scope**
+
+- **Applicable operations**: ``reduce_scatter`` and ``all_reduce`` only
+- **Domain**: Within the NVLink domain as of torch 2.9 (NCCL 2.27);
+  NVLink + network for ``reduce_scatter`` as of torch 2.11 (NCCL 2.29)
+- **Precision**: BF16/FP16 in → FP32 internal accumulation → BF16/FP16 out
+
+**Example**
+
+```python
+import torch.distributed as dist
+import torch.distributed._symmetric_memory as symm_mem
+
+# Allocate tensors using symmetric memory
+inp = symm_mem.empty(1024, 1024, device=device, dtype=torch.bfloat16)
+symm_mem.rendezvous(inp, group_name)
+
+# reduce_scatter and all_reduce on symmetric memory tensors
+# automatically benefit from FP32 internal accumulation
+dist.all_reduce(inp)
+```
+
+:::{note}
+This higher-precision accumulation is enabled transparently by NCCL when
+using symmetric memory tensors. No additional configuration is required
+beyond the symmetric tensor creation and rendezvous described above. This
+currently applies to ``reduce_scatter`` and ``all_reduce`` within the
+supported domains only; other collectives (e.g., ``all_gather``) and
+inter-node communication are not affected.
+:::
+
 (distributed-basics)=
 
 ## Basics
