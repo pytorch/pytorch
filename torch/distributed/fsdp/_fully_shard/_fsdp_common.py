@@ -182,25 +182,12 @@ def is_bw() -> bool:
     return torch._C._current_graph_task_id() != -1
 
 
-# Type alias for shard_placement_fn return values.
-# Returns placement and mesh_info for each parameter.
 @dataclass
 class ShardPlacementResult:
-    """Result from shard_placement_fn for a parameter.
-
-    Attributes:
-        placement: The sharding placement (None means Shard(0)).
-        mesh_info: The FSDPMeshInfo to use for this parameter.
-    """
-
     placement: Optional[Shard]
     mesh_info: "FSDPMeshInfo"
 
 
-# Type alias for shard_placement_fn return type.
-# - Shard: Simple API, just specify shard dimension (uses default mesh)
-# - ShardPlacementResult: Advanced API, specify both shard dimension and custom mesh
-# - None: Use default sharding (Shard(0)) on default mesh
 ShardPlacementFnResult = Shard | ShardPlacementResult | None
 
 
@@ -224,10 +211,8 @@ def resolve_shard_placement(
     """
     if result is None:
         return ShardPlacementResult(placement=None, mesh_info=default_mesh_info)
-    # For backward compatibility with old shard_placement_fn that returns just Shard
     if isinstance(result, Shard):
         return ShardPlacementResult(placement=result, mesh_info=default_mesh_info)
     if isinstance(result, ShardPlacementResult):
         return result
-    # Should not reach here with properly typed code
     raise ValueError(f"Invalid shard_placement_fn result: {result}")

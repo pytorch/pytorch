@@ -35,6 +35,7 @@ from ._fsdp_common import (
     HSDPMeshInfo,
     is_bw,
     resolve_shard_placement,
+    ShardPlacementResult,
     TrainingState,
 )
 from ._fsdp_param import alloc_storage, FSDPParam, ParamModuleInfo, ShardedState
@@ -136,7 +137,9 @@ class FSDPParamGroup:
         mesh_info: DataParallelMeshInfo,
         post_forward_mesh_info: FSDPMeshInfo | None,
         device: torch.device,
-        shard_placement_fn: Callable[[nn.Parameter], Any] | None,
+        shard_placement_fn: Callable[[nn.Parameter], Any]
+        | dict[nn.Parameter, ShardPlacementResult]
+        | None,
         mp_policy: MixedPrecisionPolicy,
         offload_policy: OffloadPolicy,
     ):
@@ -144,21 +147,36 @@ class FSDPParamGroup:
         param_module_infos = _get_param_module_infos(params, modules)
 
         default_mesh_info = cast(FSDPMeshInfo, mesh_info)
-        self.fsdp_params = [
-            FSDPParam(
-                param,
-                module_info,
-                post_forward_mesh_info,
-                device,
-                resolve_shard_placement(
-                    shard_placement_fn(param) if shard_placement_fn else None,
-                    default_mesh_info,
-                ),
-                mp_policy,
-                offload_policy,
-            )
-            for param, module_info in zip(params, param_module_infos)
-        ]
+        if isinstance(shard_placement_fn, dict):
+            param_to_shard_result = shard_placement_fn
+            self.fsdp_params = [
+                FSDPParam(
+                    param,
+                    module_info,
+                    post_forward_mesh_info,
+                    device,
+                    param_to_shard_result[param],
+                    mp_policy,
+                    offload_policy,
+                )
+                for param, module_info in zip(params, param_module_infos)
+            ]
+        else:
+            self.fsdp_params = [
+                FSDPParam(
+                    param,
+                    module_info,
+                    post_forward_mesh_info,
+                    device,
+                    resolve_shard_placement(
+                        shard_placement_fn(param) if shard_placement_fn else None,
+                        default_mesh_info,
+                    ),
+                    mp_policy,
+                    offload_policy,
+                )
+                for param, module_info in zip(params, param_module_infos)
+            ]
         self.mesh_info = mesh_info
         self.post_forward_mesh_info = post_forward_mesh_info
         # pyrefly: ignore [read-only]
