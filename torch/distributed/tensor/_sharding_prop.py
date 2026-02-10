@@ -194,6 +194,7 @@ def _select_min_redistribute_cost(
     shape_env = next(iter(x for x in costs if not is_concrete_float(x))).node.shape_env  # type: ignore[arg-type]
     replacements = {}
     for sym in free_unbacked:
+        # TODO(laithsakka): unify with optimization_hint API
         if (hint := shape_env.var_to_hint_override.get(sym)) is not None:
             replacements[sym] = hint
         elif (upper := shape_env.bound_sympy(sym).upper) is not int_oo:
@@ -676,6 +677,8 @@ class ShardingPropagator:
 
             op_strategy = None
             if DecompShardingStrategy.has_decomp(op_schema.op):
+                # Ensure schema_info is registered for proper cache key computation
+                DecompShardingStrategy.ensure_schema_info(op_schema.op, self)
                 try:
                     op_strategy = DecompShardingStrategy.propagate_strategy(
                         op_schema, self

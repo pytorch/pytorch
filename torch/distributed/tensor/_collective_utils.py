@@ -54,7 +54,9 @@ def shard_dim_alltoall(input, gather_dim, shard_dim, mesh, mesh_dim):
         if isinstance(out, funcol.AsyncCollectiveTensor):
             # stick to the same behavior for the alltoall case, remove this once we enable alltoall async
             out = out.wait()
-        out = torch.chunk(out, mesh.size(mesh_dim), dim=shard_dim)[
+        from torch.distributed.tensor.placement_types import Shard
+
+        out = Shard._custom_chunk(out, mesh.size(mesh_dim), dim=shard_dim)[
             mesh.get_local_rank(mesh_dim)
         ]
         return out.contiguous()

@@ -322,6 +322,7 @@ def _do_bench_using_profiling(
         may_ban_benchmarking()
 
     device_type = get_gpu_type()
+    device_type_upper = device_type.upper()
     device_interface = get_interface_for_device(device_type)
     fn()
     device_interface.synchronize()
@@ -349,7 +350,7 @@ def _do_bench_using_profiling(
     device_interface.synchronize()
     with torch.profiler.profile(
         activities=[
-            getattr(torch.profiler.ProfilerActivity, device_type.upper()),
+            getattr(torch.profiler.ProfilerActivity, device_type_upper),
         ]
     ) as p:
         # Benchmark
@@ -368,7 +369,8 @@ def _do_bench_using_profiling(
         [
             event
             for event in p.events()
-            if event.device_type == DeviceType.CUDA and event.name != "Context Sync"
+            if event.device_type == getattr(DeviceType, device_type_upper)
+            and event.name != "Context Sync"
         ]
     )
     if len(filtered_events) % n_repeat != 0:
@@ -2827,6 +2829,7 @@ def get_gpu_shared_memory() -> int:
 def get_max_numwarps() -> int:
     if torch.cuda.is_available():
         warp_size = torch.cuda.get_device_properties().warp_size
+        # pyrefly: ignore [missing-attribute]
         max_threads_per_block = torch.cuda.get_device_properties().max_threads_per_block
     else:
         # Defaults
@@ -3237,8 +3240,10 @@ def dump_node_schedule(node_schedule: Sequence[BaseSchedulerNode]) -> None:
     print(f"Node schedule with {len(node_schedule)} nodes")
     for idx, node in enumerate(node_schedule):
         print(f" {idx:3}:")
+        # pyrefly: ignore [unnecessary-comparison]
         if node is EnableReduction:
             print("enable reduction")
+        # pyrefly: ignore [unnecessary-comparison]
         elif node is DisableReduction:
             print("disable reduction")
         elif isinstance(node, SchedulerNode):
