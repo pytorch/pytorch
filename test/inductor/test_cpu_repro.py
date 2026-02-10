@@ -5126,6 +5126,52 @@ class CPUReproTests(TestCase):
         self.common(fn, (x,))
         check_metrics_vec_kernel_count(1)
 
+    def test_masked_handle_scalar_var(self):
+        def fn():
+            # Simplified reproducer of https://github.com/pytorch/pytorch/issues/173626
+            window_size = 7
+            shift_size = 3
+            height, width = 14, 14
+            img_mask = torch.zeros((1, height, width, 1), dtype=torch.float32)
+            h_slices = (
+                slice(0, -window_size),
+                slice(-window_size, -shift_size),
+                slice(-shift_size, None),
+            )
+            w_slices = (
+                slice(0, -window_size),
+                slice(-window_size, -shift_size),
+                slice(-shift_size, None),
+            )
+            count = 0
+            for h in h_slices:
+                for w in w_slices:
+                    img_mask[:, h, w, :] = count
+                    count += 1
+
+            masked_window = img_mask.view(
+                1,
+                height // window_size,
+                window_size,
+                width // window_size,
+                window_size,
+                1,
+            )
+            masked_window = (
+                masked_window.permute(0, 1, 3, 2, 4, 5)
+                .contiguous()
+                .view(-1, window_size * window_size)
+            )
+            attn_mask = masked_window.unsqueeze(1) - masked_window.unsqueeze(2)
+            res = attn_mask.masked_fill(attn_mask != 0, float(-100.0)).masked_fill(
+                attn_mask == 0, float(0.0)
+            )
+            return res
+
+        metrics.reset()
+        self.common(fn, ())
+        check_metrics_vec_kernel_count(1)
+
     def test_highp_to_lowp_cse_var_cache_with_store(self):
         # Fix issue: https://github.com/pytorch/pytorch/issues/128263
         input = torch.randn(5, 128, dtype=torch.float32)
