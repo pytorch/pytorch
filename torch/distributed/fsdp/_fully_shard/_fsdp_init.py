@@ -371,37 +371,27 @@ def _init_param_group(
     params, this creates a single group.
     """
     # Import here to avoid circular imports
-    from ._fsdp_common import (
-        FSDPMeshInfo,
-        resolve_shard_placement,
-        ShardPlacementResult,
-    )
+    from ._fsdp_common import FSDPMeshInfo, resolve_shard_placement
     from ._fsdp_param_group import FSDPParamGroup
 
     if not params:
         return
-
-    # Resolve shard placement once per param and cache the results
-    # to avoid calling the user function again in FSDPParam.__init__.
-    param_to_shard_result: dict[nn.Parameter, ShardPlacementResult] = {}
-    assert isinstance(mesh_info, FSDPMeshInfo)
-    for param in params:
-        param_to_shard_result[param] = resolve_shard_placement(
-            shard_placement_fn(param) if shard_placement_fn else None,
-            mesh_info,
-        )
 
     # Group params by their process group to support per-param mesh,
     # e.g., expert params using ep_mesh vs regular params using dp_mesh.
     # For HSDP, also key by replicate_process_group to avoid grouping
     # FSDPMeshInfo params with HSDPMeshInfo params that share the same
     # shard_process_group but require different gradient reduction behavior.
+    assert isinstance(mesh_info, FSDPMeshInfo)
     pg_to_group: dict[
         tuple[dist.ProcessGroup, dist.ProcessGroup | None],
         tuple[FSDPMeshInfo, list[nn.Parameter]],
     ] = {}
     for param in params:
-        param_mesh_info = param_to_shard_result[param].mesh_info
+        param_mesh_info = resolve_shard_placement(
+            shard_placement_fn(param) if shard_placement_fn else None,
+            mesh_info,
+        ).mesh_info
         shard_pg = param_mesh_info.shard_process_group
         replicate_pg: dist.ProcessGroup | None = None
         if isinstance(param_mesh_info, HSDPMeshInfo):
