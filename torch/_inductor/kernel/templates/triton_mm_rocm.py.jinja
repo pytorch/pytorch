@@ -36,7 +36,7 @@
         offs_b_n = rn % N
     offs_k = tl.arange(0, BLOCK_K)
     acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
-
+    {{pdl_wait()}}
     for k_idx in range(0, tl.cdiv(K, BLOCK_K)):
         {% if not EVEN_K %}
         a_mask = offs_k[None, :] < (K - k_idx * BLOCK_K)
@@ -59,7 +59,7 @@
         {% else %}
         acc += tl.dot(a, b, allow_tf32=ALLOW_TF32, out_dtype=ACC_TYPE)
         {% endif %}
-
+    {{pdl_launch()}}
     # rematerialize rm and rn to save registers
     rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
     rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
