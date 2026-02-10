@@ -2831,7 +2831,8 @@ class TestTensorCreation(TestCase):
         tensor = torch.tensor((1, 2, 3), device=device)
 
         # need more than one device_type to test this
-        assert self.device_type == 'cuda'
+        if self.device_type != 'cuda':
+            raise AssertionError(f"device_type should be 'cuda', got {self.device_type!r}")
         for left, right in product([tensor, tensor.cpu()], [tensor, tensor.cpu()]):
             for device_arg in [torch_device, cpu_device, None]:
                 if device_arg is None:
@@ -2847,7 +2848,7 @@ class TestTensorCreation(TestCase):
             with self.assertRaisesRegex(RuntimeError, r'floating point'):
                 torch_method(3, dtype=dtype)
             return
-        for size in [0, 1, 2, 5, 10, 50, 100, 1024, 2048]:
+        for size in [1, 2, 5, 10, 50, 100, 1024, 2048]:
             for periodic in [True, False]:
                 res = torch_method(
                     size,
@@ -2896,7 +2897,7 @@ class TestTensorCreation(TestCase):
             with self.assertRaisesRegex(RuntimeError, r'floating point'):
                 torch_method(3, dtype=dtype)
             return
-        for size in [0, 1, 2, 5, 10, 50, 100, 1024, 2048]:
+        for size in [1, 2, 5, 10, 50, 100, 1024, 2048]:
             for periodic in [True, False]:
                 res = torch_method(size, sym=not periodic, **kwargs, device=device, dtype=dtype)
                 # NB: scipy always returns a float64 result

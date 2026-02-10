@@ -50,7 +50,7 @@ from torch._inductor.utils import (
     output_node,
     set_tracing_context_output_strides,
 )
-from torch.fx._graph_pickler import _ops_filter_safe
+from torch.fx._graph_pickler import _node_metadata_key_filter_safe, _ops_filter_safe
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_in_torch_dispatch_mode
 
@@ -966,6 +966,9 @@ class RegionalOutputCode(OutputCode):
         self,
         graph_module: torch.fx.GraphModule,
         ops_filter: Callable[[str], bool] = _ops_filter_safe,
+        node_metadata_key_filter: Optional[Callable[[str], bool]] = (
+            _node_metadata_key_filter_safe
+        ),
     ):
         """
         Args:
@@ -983,6 +986,7 @@ class RegionalOutputCode(OutputCode):
             module.graph._codegen, torch.fx.graph._BoxedCodeGen
         )
         self._ops_filter = ops_filter
+        self._node_metadata_key_filter = node_metadata_key_filter
 
     def __call__(self, inputs: list[Any]) -> Any:
         """
@@ -1083,6 +1087,7 @@ class RegionalOutputCode(OutputCode):
                 graph_module,
                 options=Options(
                     ops_filter=self._ops_filter,
+                    node_metadata_key_filter=self._node_metadata_key_filter,
                 ),
             )
             # Clear the graph module to avoid pickling it with standard pickle

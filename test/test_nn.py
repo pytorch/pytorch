@@ -149,10 +149,14 @@ class TestNN(NNTestCase):
 
     def test_requires_grad_(self):
         m = _create_basic_net()[-1]
-        assert len(list(m.buffers())) > 0, 'invalid test'
-        assert all(not b.requires_grad for b in m.buffers()) > 0, 'invalid test'
-        assert len(list(m.parameters())) > 0, 'invalid test'
-        assert all(p.requires_grad for p in m.parameters()) > 0, 'invalid test'
+        if len(list(m.buffers())) <= 0:
+            raise AssertionError('invalid test: expected buffers')
+        if not all(not b.requires_grad for b in m.buffers()):
+            raise AssertionError('invalid test: buffers should not require grad')
+        if len(list(m.parameters())) <= 0:
+            raise AssertionError('invalid test: expected parameters')
+        if not all(p.requires_grad for p in m.parameters()):
+            raise AssertionError('invalid test: parameters should require grad')
         for requires_grad in (False, True):
             self.assertIs(m.requires_grad_(requires_grad), m)
             for p in m.parameters():
@@ -505,6 +509,9 @@ class TestNN(NNTestCase):
         n = Net()
         s = nn.Sequential(n, n, n, n)
         self.assertEqual(list(s.modules()), [s, n, l])
+        # test the option to not remove duplicate module instances
+        self.assertEqual(list(s.modules(remove_duplicate=False)), [
+            s, n, l, l, n, l, l, n, l, l, n, l, l])
 
     def test_named_modules(self):
         class Net(nn.Module):
@@ -1349,8 +1356,10 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         # Unit test for set_default
         # 1. Ensure parameter is correctly inserted when
         #    the key is not present in `ParameterDict`
-        assert 'p11' not in parameter_dict
-        assert 'p11' not in parameters
+        if 'p11' in parameter_dict:
+            raise AssertionError("'p11' should not be in parameter_dict")
+        if 'p11' in parameters:
+            raise AssertionError("'p11' should not be in parameters")
         parameters['p11'] = Parameter(torch.randn(10, 10))
         p_setdefault = parameter_dict.setdefault('p11', parameters['p11'])
         self.assertIs(p_setdefault, parameters['p11'])
@@ -4343,7 +4352,11 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         inp = inp.cuda()
         # otherwise, subsequent warnings will be hidden, and further tests rely on them
         warnings.simplefilter("always")
-        self.assertEqual(m(inp)[0].cpu(), out_expected[0])
+        # Relax tolerances: non-contiguous weights cause cuDNN to use different
+        # algorithms, leading to small numerical differences vs CPU computation.
+        # Observed max: atol ~6.4e-5, rtol ~3.1e-3. Using 1.5x margin.
+        # See https://github.com/pytorch/pytorch/issues/163072
+        self.assertEqual(m(inp)[0].cpu(), out_expected[0], atol=1e-4, rtol=5e-3)
 
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     @set_default_dtype(torch.double)
@@ -5897,7 +5910,8 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         memory_format_cl = torch.channels_last if nd == 2 else torch.channels_last_3d
         grad_tensor_cl = grad_tensor.contiguous(memory_format=memory_format_cl)
 
-        assert theta.grad is None
+        if theta.grad is not None:
+            raise AssertionError("expected theta.grad to be None")
         grid.backward(grad_tensor_cl)
         theta_grad_cl = theta.grad.clone().contiguous()
 
@@ -5928,12 +5942,14 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
                     def get_grid(device='cpu', data=None):
                         if data is not None:
-                            assert list(data.shape) == grid_shape
+                            if list(data.shape) != grid_shape:
+                                raise AssertionError(f"data.shape mismatch: {list(data.shape)} != {grid_shape}")
                             data = data.permute(grid_dim_contig_order).to(device)
                         else:
                             data = torch.randn(grid_init_shape, device=device)
                         grid = data.permute(grid_fwd_permute)
-                        assert grid.permute(grid_dim_contig_order).is_contiguous()
+                        if not grid.permute(grid_dim_contig_order).is_contiguous():
+                            raise AssertionError("expected grid to be contiguous after permute")
                         return grid
 
                     input_cpu = torch.randn(C, N, IH, IW).transpose(0, 1).requires_grad_(input_requires_grad)
@@ -8534,7 +8550,8 @@ class TestNNDeviceType(NNTestCase):
                 atol = 1e-2
                 rtol = 1.2e-1
             else:
-                assert dtype == torch.half
+                if dtype != torch.half:
+                    raise AssertionError(f"expected dtype torch.half, got {dtype}")
                 atol = 5e-3
                 rtol = 1.5e-2
             self.assertEqual(m_bf.weight.grad, m_f.weight.grad.to(dtype=dtype), atol=atol, rtol=rtol)
@@ -11139,7 +11156,8 @@ class TestNNDeviceType(NNTestCase):
 
         # Get a state dict for PyTorch 1.7 LSTM. Before PyTorch 1.8, proj_size
         # didn't exist.
-        assert model.proj_size == 0
+        if model.proj_size != 0:
+            raise AssertionError(f"expected proj_size == 0, got {model.proj_size}")
         state_dict = model.__dict__
         del state_dict['proj_size']
 
@@ -11506,8 +11524,10 @@ class TestNNDeviceType(NNTestCase):
                                        create_graph=True)[0]
         loss2 = der_out2.sum()
         loss2.backward(retain_graph=True)
-        assert torch.allclose(der_out1, der_out2)
-        assert torch.allclose(x1.grad, x2.grad)
+        if not torch.allclose(der_out1, der_out2):
+            raise AssertionError("der_out1 and der_out2 should be close")
+        if not torch.allclose(x1.grad, x2.grad):
+            raise AssertionError("x1.grad and x2.grad should be close")
 
     @onlyCUDA
     def test_upsamplingNearest1d_launch_config(self, device):
@@ -12609,9 +12629,10 @@ class TestThatContainsCUDAAssert(TestCase):
 if __name__ == '__main__':
     run_tests()
         """)
-        # CUDA says "device-side assert triggered", ROCm says "unspecified launch failure"
+        # CUDA says "device-side assert triggered"
+        # ROCm says "unspecified launch failure", or HSA_STATUS_ERROR_EXCEPTION
         has_cuda_assert = 'CUDA error: device-side assert triggered' in stderr
-        has_hip_assert = 'HIP error' in stderr and 'launch failure' in stderr
+        has_hip_assert = 'launch failure' in stderr or 'HSA_STATUS_ERROR_EXCEPTION' in stderr
         self.assertTrue(has_cuda_assert or has_hip_assert,
                         f"Expected device assert error in stderr, got: {stderr}")
 
@@ -13430,7 +13451,8 @@ if __name__ == '__main__':
                                                batch_first=batch_first, device=device, dtype=dtype)
 
             if not training:
-                assert dropout == 0
+                if dropout != 0:
+                    raise AssertionError(f"expected dropout == 0 when not training, got {dropout}")
                 model = model.eval()
 
             # set constant weights of the model
@@ -13650,7 +13672,8 @@ if __name__ == '__main__':
             model = nn.TransformerEncoderLayer(d_model, nhead, dim_feedforward, dropout,
                                                activation, batch_first=batch_first, device=device, dtype=dtype)
             if not training:
-                assert dropout == 0
+                if dropout != 0:
+                    raise AssertionError(f"expected dropout == 0 when not training, got {dropout}")
                 model = model.eval()
 
             # set constant weights of the model
