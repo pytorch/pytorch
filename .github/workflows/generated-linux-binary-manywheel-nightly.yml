@@ -428,27 +428,23 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
+          path: pytorch
           show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
+        working-directory: pytorch
       - name: Setup ROCm
-        uses: ./.github/actions/setup-rocm
-        env:
-          PYTORCH_ROOT: ""
+        uses: ./pytorch/.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
           name: manywheel-py3_10-rocm7_1
           path: "${{ runner.temp }}/artifacts/"
-        env:
-          PYTORCH_ROOT: ""
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
-        env:
-          PYTORCH_ROOT: ""
       - name: configure aws credentials
         id: aws_creds
         if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
@@ -457,33 +453,38 @@ jobs:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
           role-duration-seconds: 18000
-        env:
-          PYTORCH_ROOT: ""
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: rocm7.1
           docker-build-dir: .ci/docker
-        env:
-          PYTORCH_ROOT: ""
+          working-directory: pytorch
       - name: Pull Docker image
-        uses: test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
-        env:
-          PYTORCH_ROOT: ""
       - name: Test Pytorch binary
-        uses: ./.github/actions/test-pytorch-binary
+        uses: ./pytorch/.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
+      - name: Clone Pytorch for diskspace-cleanup in teardown-rocm 
+        uses: - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        env:
           PYTORCH_ROOT: ""
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
-        env:
-          PYTORCH_ROOT: ""
   manywheel-py3_10-rocm7_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -556,27 +557,23 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
+          path: pytorch
           show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
+        working-directory: pytorch
       - name: Setup ROCm
-        uses: ./.github/actions/setup-rocm
-        env:
-          PYTORCH_ROOT: ""
+        uses: ./pytorch/.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
           name: manywheel-py3_10-rocm7_2
           path: "${{ runner.temp }}/artifacts/"
-        env:
-          PYTORCH_ROOT: ""
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
-        env:
-          PYTORCH_ROOT: ""
       - name: configure aws credentials
         id: aws_creds
         if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
@@ -585,33 +582,38 @@ jobs:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
           role-duration-seconds: 18000
-        env:
-          PYTORCH_ROOT: ""
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: rocm7.2
           docker-build-dir: .ci/docker
-        env:
-          PYTORCH_ROOT: ""
+          working-directory: pytorch
       - name: Pull Docker image
-        uses: test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
-        env:
-          PYTORCH_ROOT: ""
       - name: Test Pytorch binary
-        uses: ./.github/actions/test-pytorch-binary
+        uses: ./pytorch/.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
+      - name: Clone Pytorch for diskspace-cleanup in teardown-rocm 
+        uses: - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        env:
           PYTORCH_ROOT: ""
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
-        env:
-          PYTORCH_ROOT: ""
   manywheel-py3_10-rocm7_2-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -1119,27 +1121,23 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
+          path: pytorch
           show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
+        working-directory: pytorch
       - name: Setup ROCm
-        uses: ./.github/actions/setup-rocm
-        env:
-          PYTORCH_ROOT: ""
+        uses: ./pytorch/.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
           name: manywheel-py3_11-rocm7_1
           path: "${{ runner.temp }}/artifacts/"
-        env:
-          PYTORCH_ROOT: ""
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
-        env:
-          PYTORCH_ROOT: ""
       - name: configure aws credentials
         id: aws_creds
         if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
@@ -1148,33 +1146,38 @@ jobs:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
           role-duration-seconds: 18000
-        env:
-          PYTORCH_ROOT: ""
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: rocm7.1
           docker-build-dir: .ci/docker
-        env:
-          PYTORCH_ROOT: ""
+          working-directory: pytorch
       - name: Pull Docker image
-        uses: test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
-        env:
-          PYTORCH_ROOT: ""
       - name: Test Pytorch binary
-        uses: ./.github/actions/test-pytorch-binary
+        uses: ./pytorch/.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
+      - name: Clone Pytorch for diskspace-cleanup in teardown-rocm 
+        uses: - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        env:
           PYTORCH_ROOT: ""
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
-        env:
-          PYTORCH_ROOT: ""
   manywheel-py3_11-rocm7_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -1247,27 +1250,23 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
+          path: pytorch
           show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
+        working-directory: pytorch
       - name: Setup ROCm
-        uses: ./.github/actions/setup-rocm
-        env:
-          PYTORCH_ROOT: ""
+        uses: ./pytorch/.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
           name: manywheel-py3_11-rocm7_2
           path: "${{ runner.temp }}/artifacts/"
-        env:
-          PYTORCH_ROOT: ""
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
-        env:
-          PYTORCH_ROOT: ""
       - name: configure aws credentials
         id: aws_creds
         if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
@@ -1276,33 +1275,38 @@ jobs:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
           role-duration-seconds: 18000
-        env:
-          PYTORCH_ROOT: ""
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: rocm7.2
           docker-build-dir: .ci/docker
-        env:
-          PYTORCH_ROOT: ""
+          working-directory: pytorch
       - name: Pull Docker image
-        uses: test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
-        env:
-          PYTORCH_ROOT: ""
       - name: Test Pytorch binary
-        uses: ./.github/actions/test-pytorch-binary
+        uses: ./pytorch/.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
+      - name: Clone Pytorch for diskspace-cleanup in teardown-rocm 
+        uses: - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        env:
           PYTORCH_ROOT: ""
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
-        env:
-          PYTORCH_ROOT: ""
   manywheel-py3_11-rocm7_2-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -1810,27 +1814,23 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
+          path: pytorch
           show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
+        working-directory: pytorch
       - name: Setup ROCm
-        uses: ./.github/actions/setup-rocm
-        env:
-          PYTORCH_ROOT: ""
+        uses: ./pytorch/.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
           name: manywheel-py3_12-rocm7_1
           path: "${{ runner.temp }}/artifacts/"
-        env:
-          PYTORCH_ROOT: ""
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
-        env:
-          PYTORCH_ROOT: ""
       - name: configure aws credentials
         id: aws_creds
         if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
@@ -1839,33 +1839,38 @@ jobs:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
           role-duration-seconds: 18000
-        env:
-          PYTORCH_ROOT: ""
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: rocm7.1
           docker-build-dir: .ci/docker
-        env:
-          PYTORCH_ROOT: ""
+          working-directory: pytorch
       - name: Pull Docker image
-        uses: test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
-        env:
-          PYTORCH_ROOT: ""
       - name: Test Pytorch binary
-        uses: ./.github/actions/test-pytorch-binary
+        uses: ./pytorch/.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
+      - name: Clone Pytorch for diskspace-cleanup in teardown-rocm 
+        uses: - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        env:
           PYTORCH_ROOT: ""
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
-        env:
-          PYTORCH_ROOT: ""
   manywheel-py3_12-rocm7_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -1938,27 +1943,23 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
+          path: pytorch
           show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
+        working-directory: pytorch
       - name: Setup ROCm
-        uses: ./.github/actions/setup-rocm
-        env:
-          PYTORCH_ROOT: ""
+        uses: ./pytorch/.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
           name: manywheel-py3_12-rocm7_2
           path: "${{ runner.temp }}/artifacts/"
-        env:
-          PYTORCH_ROOT: ""
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
-        env:
-          PYTORCH_ROOT: ""
       - name: configure aws credentials
         id: aws_creds
         if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
@@ -1967,33 +1968,38 @@ jobs:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
           role-duration-seconds: 18000
-        env:
-          PYTORCH_ROOT: ""
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: rocm7.2
           docker-build-dir: .ci/docker
-        env:
-          PYTORCH_ROOT: ""
+          working-directory: pytorch
       - name: Pull Docker image
-        uses: test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
-        env:
-          PYTORCH_ROOT: ""
       - name: Test Pytorch binary
-        uses: ./.github/actions/test-pytorch-binary
+        uses: ./pytorch/.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
+      - name: Clone Pytorch for diskspace-cleanup in teardown-rocm 
+        uses: - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        env:
           PYTORCH_ROOT: ""
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
-        env:
-          PYTORCH_ROOT: ""
   manywheel-py3_12-rocm7_2-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -2501,27 +2507,23 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
+          path: pytorch
           show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
+        working-directory: pytorch
       - name: Setup ROCm
-        uses: ./.github/actions/setup-rocm
-        env:
-          PYTORCH_ROOT: ""
+        uses: ./pytorch/.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
           name: manywheel-py3_13-rocm7_1
           path: "${{ runner.temp }}/artifacts/"
-        env:
-          PYTORCH_ROOT: ""
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
-        env:
-          PYTORCH_ROOT: ""
       - name: configure aws credentials
         id: aws_creds
         if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
@@ -2530,33 +2532,38 @@ jobs:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
           role-duration-seconds: 18000
-        env:
-          PYTORCH_ROOT: ""
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: rocm7.1
           docker-build-dir: .ci/docker
-        env:
-          PYTORCH_ROOT: ""
+          working-directory: pytorch
       - name: Pull Docker image
-        uses: test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
-        env:
-          PYTORCH_ROOT: ""
       - name: Test Pytorch binary
-        uses: ./.github/actions/test-pytorch-binary
+        uses: ./pytorch/.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
+      - name: Clone Pytorch for diskspace-cleanup in teardown-rocm 
+        uses: - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        env:
           PYTORCH_ROOT: ""
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
-        env:
-          PYTORCH_ROOT: ""
   manywheel-py3_13-rocm7_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -2629,27 +2636,23 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
+          path: pytorch
           show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
+        working-directory: pytorch
       - name: Setup ROCm
-        uses: ./.github/actions/setup-rocm
-        env:
-          PYTORCH_ROOT: ""
+        uses: ./pytorch/.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
           name: manywheel-py3_13-rocm7_2
           path: "${{ runner.temp }}/artifacts/"
-        env:
-          PYTORCH_ROOT: ""
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
-        env:
-          PYTORCH_ROOT: ""
       - name: configure aws credentials
         id: aws_creds
         if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
@@ -2658,33 +2661,38 @@ jobs:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
           role-duration-seconds: 18000
-        env:
-          PYTORCH_ROOT: ""
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: rocm7.2
           docker-build-dir: .ci/docker
-        env:
-          PYTORCH_ROOT: ""
+          working-directory: pytorch
       - name: Pull Docker image
-        uses: test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
-        env:
-          PYTORCH_ROOT: ""
       - name: Test Pytorch binary
-        uses: ./.github/actions/test-pytorch-binary
+        uses: ./pytorch/.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
+      - name: Clone Pytorch for diskspace-cleanup in teardown-rocm 
+        uses: - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        env:
           PYTORCH_ROOT: ""
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
-        env:
-          PYTORCH_ROOT: ""
   manywheel-py3_13-rocm7_2-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -3192,27 +3200,23 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
+          path: pytorch
           show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
+        working-directory: pytorch
       - name: Setup ROCm
-        uses: ./.github/actions/setup-rocm
-        env:
-          PYTORCH_ROOT: ""
+        uses: ./pytorch/.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
           name: manywheel-py3_13t-rocm7_1
           path: "${{ runner.temp }}/artifacts/"
-        env:
-          PYTORCH_ROOT: ""
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
-        env:
-          PYTORCH_ROOT: ""
       - name: configure aws credentials
         id: aws_creds
         if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
@@ -3221,33 +3225,38 @@ jobs:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
           role-duration-seconds: 18000
-        env:
-          PYTORCH_ROOT: ""
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: rocm7.1
           docker-build-dir: .ci/docker
-        env:
-          PYTORCH_ROOT: ""
+          working-directory: pytorch
       - name: Pull Docker image
-        uses: test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
-        env:
-          PYTORCH_ROOT: ""
       - name: Test Pytorch binary
-        uses: ./.github/actions/test-pytorch-binary
+        uses: ./pytorch/.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
+      - name: Clone Pytorch for diskspace-cleanup in teardown-rocm 
+        uses: - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        env:
           PYTORCH_ROOT: ""
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
-        env:
-          PYTORCH_ROOT: ""
   manywheel-py3_13t-rocm7_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -3320,27 +3329,23 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
+          path: pytorch
           show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
+        working-directory: pytorch
       - name: Setup ROCm
-        uses: ./.github/actions/setup-rocm
-        env:
-          PYTORCH_ROOT: ""
+        uses: ./pytorch/.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
           name: manywheel-py3_13t-rocm7_2
           path: "${{ runner.temp }}/artifacts/"
-        env:
-          PYTORCH_ROOT: ""
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
-        env:
-          PYTORCH_ROOT: ""
       - name: configure aws credentials
         id: aws_creds
         if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
@@ -3349,33 +3354,38 @@ jobs:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
           role-duration-seconds: 18000
-        env:
-          PYTORCH_ROOT: ""
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: rocm7.2
           docker-build-dir: .ci/docker
-        env:
-          PYTORCH_ROOT: ""
+          working-directory: pytorch
       - name: Pull Docker image
-        uses: test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
-        env:
-          PYTORCH_ROOT: ""
       - name: Test Pytorch binary
-        uses: ./.github/actions/test-pytorch-binary
+        uses: ./pytorch/.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
+      - name: Clone Pytorch for diskspace-cleanup in teardown-rocm 
+        uses: - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        env:
           PYTORCH_ROOT: ""
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
-        env:
-          PYTORCH_ROOT: ""
   manywheel-py3_13t-rocm7_2-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -3883,27 +3893,23 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
+          path: pytorch
           show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
+        working-directory: pytorch
       - name: Setup ROCm
-        uses: ./.github/actions/setup-rocm
-        env:
-          PYTORCH_ROOT: ""
+        uses: ./pytorch/.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
           name: manywheel-py3_14-rocm7_1
           path: "${{ runner.temp }}/artifacts/"
-        env:
-          PYTORCH_ROOT: ""
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
-        env:
-          PYTORCH_ROOT: ""
       - name: configure aws credentials
         id: aws_creds
         if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
@@ -3912,33 +3918,38 @@ jobs:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
           role-duration-seconds: 18000
-        env:
-          PYTORCH_ROOT: ""
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: rocm7.1
           docker-build-dir: .ci/docker
-        env:
-          PYTORCH_ROOT: ""
+          working-directory: pytorch
       - name: Pull Docker image
-        uses: test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
-        env:
-          PYTORCH_ROOT: ""
       - name: Test Pytorch binary
-        uses: ./.github/actions/test-pytorch-binary
+        uses: ./pytorch/.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
+      - name: Clone Pytorch for diskspace-cleanup in teardown-rocm 
+        uses: - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        env:
           PYTORCH_ROOT: ""
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
-        env:
-          PYTORCH_ROOT: ""
   manywheel-py3_14-rocm7_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -4011,27 +4022,23 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
+          path: pytorch
           show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
+        working-directory: pytorch
       - name: Setup ROCm
-        uses: ./.github/actions/setup-rocm
-        env:
-          PYTORCH_ROOT: ""
+        uses: ./pytorch/.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
           name: manywheel-py3_14-rocm7_2
           path: "${{ runner.temp }}/artifacts/"
-        env:
-          PYTORCH_ROOT: ""
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
-        env:
-          PYTORCH_ROOT: ""
       - name: configure aws credentials
         id: aws_creds
         if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
@@ -4040,33 +4047,38 @@ jobs:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
           role-duration-seconds: 18000
-        env:
-          PYTORCH_ROOT: ""
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: rocm7.2
           docker-build-dir: .ci/docker
-        env:
-          PYTORCH_ROOT: ""
+          working-directory: pytorch
       - name: Pull Docker image
-        uses: test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
-        env:
-          PYTORCH_ROOT: ""
       - name: Test Pytorch binary
-        uses: ./.github/actions/test-pytorch-binary
+        uses: ./pytorch/.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
+      - name: Clone Pytorch for diskspace-cleanup in teardown-rocm 
+        uses: - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        env:
           PYTORCH_ROOT: ""
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
-        env:
-          PYTORCH_ROOT: ""
   manywheel-py3_14-rocm7_2-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -4574,27 +4586,23 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
+          path: pytorch
           show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
+        working-directory: pytorch
       - name: Setup ROCm
-        uses: ./.github/actions/setup-rocm
-        env:
-          PYTORCH_ROOT: ""
+        uses: ./pytorch/.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
           name: manywheel-py3_14t-rocm7_1
           path: "${{ runner.temp }}/artifacts/"
-        env:
-          PYTORCH_ROOT: ""
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
-        env:
-          PYTORCH_ROOT: ""
       - name: configure aws credentials
         id: aws_creds
         if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
@@ -4603,33 +4611,38 @@ jobs:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
           role-duration-seconds: 18000
-        env:
-          PYTORCH_ROOT: ""
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: rocm7.1
           docker-build-dir: .ci/docker
-        env:
-          PYTORCH_ROOT: ""
+          working-directory: pytorch
       - name: Pull Docker image
-        uses: test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
-        env:
-          PYTORCH_ROOT: ""
       - name: Test Pytorch binary
-        uses: ./.github/actions/test-pytorch-binary
+        uses: ./pytorch/.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
+      - name: Clone Pytorch for diskspace-cleanup in teardown-rocm 
+        uses: - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        env:
           PYTORCH_ROOT: ""
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
-        env:
-          PYTORCH_ROOT: ""
   manywheel-py3_14t-rocm7_1-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
@@ -4702,27 +4715,23 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
+          path: pytorch
           show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
+        working-directory: pytorch
       - name: Setup ROCm
-        uses: ./.github/actions/setup-rocm
-        env:
-          PYTORCH_ROOT: ""
+        uses: ./pytorch/.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
           name: manywheel-py3_14t-rocm7_2
           path: "${{ runner.temp }}/artifacts/"
-        env:
-          PYTORCH_ROOT: ""
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
-        env:
-          PYTORCH_ROOT: ""
       - name: configure aws credentials
         id: aws_creds
         if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
@@ -4731,33 +4740,38 @@ jobs:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
           aws-region: us-east-1
           role-duration-seconds: 18000
-        env:
-          PYTORCH_ROOT: ""
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: rocm7.2
           docker-build-dir: .ci/docker
-        env:
-          PYTORCH_ROOT: ""
+          working-directory: pytorch
       - name: Pull Docker image
-        uses: test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
-        env:
-          PYTORCH_ROOT: ""
       - name: Test Pytorch binary
-        uses: ./.github/actions/test-pytorch-binary
+        uses: ./pytorch/.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
+      - name: Clone Pytorch for diskspace-cleanup in teardown-rocm 
+        uses: - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        env:
           PYTORCH_ROOT: ""
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
-        env:
-          PYTORCH_ROOT: ""
   manywheel-py3_14t-rocm7_2-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
