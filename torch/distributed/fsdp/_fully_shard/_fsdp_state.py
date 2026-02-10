@@ -211,6 +211,8 @@ class FSDPState(_State):
                         "the root module first"
                     )
                 state._is_root = False
+            # A single state can map to multiple modules (e.g.
+            # fully_shard([mod_a, mod_b, mod_c])), so dedup here.
             if state not in visited_states:
                 self._state_ctx.all_states.append(state)
             visited_states.add(state)

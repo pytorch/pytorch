@@ -266,12 +266,16 @@ class FSDPParam:
         shard_placement_fn: Callable[[nn.Parameter], ShardPlacementFnResult] | None,
         mesh_info: DataParallelMeshInfo,
     ):
-        shard_result = resolve_shard_placement(
-            shard_placement_fn(param) if callable(shard_placement_fn) else None,
-            cast(FSDPMeshInfo, mesh_info),
-        )
-        self.mesh_info = shard_result.mesh_info
-        fsdp_placement = shard_result.placement
+        if callable(shard_placement_fn):
+            shard_result = resolve_shard_placement(
+                shard_placement_fn(param),
+                cast(FSDPMeshInfo, mesh_info),
+            )
+            self.mesh_info = shard_result.mesh_info
+            fsdp_placement = shard_result.placement
+        else:
+            self.mesh_info = mesh_info  # pyrefly: ignore[bad-assignment]
+            fsdp_placement = None
         if param.device != device and param.device.type != "meta":
             raise AssertionError(
                 f"Expects the parameter to already be moved to device {device} but got {param.device}"
