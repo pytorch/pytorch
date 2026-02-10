@@ -200,7 +200,12 @@ def is_fake(x: object) -> TypeGuard[Tensor]:
     if isinstance(x, FakeTensor):
         return True
     if is_traceable_wrapper_subclass(x):
-        attrs, _ = type(x).__tensor_flatten__(x)
+        try:
+            attrs, _ = type(x).__tensor_flatten__(x)
+        except AttributeError:
+            # Tensor subclass is not fully initialized (e.g., in __init__ before attributes are set).
+            # A partially initialized tensor is a real tensor, not a fake one.
+            return False
         flattened_tensors = [getattr(x, attr) for attr in attrs]
         all_fake = all(is_fake(x) for x in flattened_tensors)
         any_fake = any(is_fake(x) for x in flattened_tensors)
@@ -225,7 +230,11 @@ def maybe_get_fake_mode(t: object) -> Optional[FakeTensorMode]:
     if isinstance(t, FakeTensor):
         return t.fake_mode
     if is_traceable_wrapper_subclass(t):
-        inner_tensor_names, _ = t.__tensor_flatten__()
+        try:
+            inner_tensor_names, _ = t.__tensor_flatten__()
+        except AttributeError:
+            # Tensor subclass not fully initialized - it's a real tensor with no fake mode
+            return None
         modes = [
             maybe_get_fake_mode(getattr(t, t_name)) for t_name in inner_tensor_names
         ]

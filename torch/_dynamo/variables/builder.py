@@ -2272,6 +2272,17 @@ class VariableBuilder:
         # We cannot already be tracking the tensor, which implies
         # it would have already been wrapped
         assert value not in self.tx.output.side_effects
+        
+        # Check if we're wrapping `self` in an `__init__` method of a tensor subclass
+        # If so, skip faking since the tensor may not be fully initialized yet
+        from ..source import LocalSource
+        if (isinstance(source, LocalSource) and 
+            source.local_name == "self" and
+            self.tx.f_code.co_name == "__init__" and
+            is_traceable_wrapper_subclass(value)):
+            # Treat as unspecialized - don't try to fake it
+            from .user_defined import UserDefinedObjectVariable
+            return UserDefinedObjectVariable(value, source=source)
 
         is_static_input = get_static_address_type(value) is not None
 
@@ -2512,7 +2523,11 @@ class VariableBuilder:
                     SubclassAttrListSource(source).make_guard(GuardBuilder.EQUALS_MATCH)
                 )
 
-            attrs, _ = value.__tensor_flatten__()
+            try:
+                attrs, _ = value.__tensor_flatten__()
+            except AttributeError:
+                # Tensor subclass not fully initialized - skip inner tensor handling
+                attrs = []
             for attr in attrs:
                 inner_value = getattr(value, attr)
                 inner_source = AttrSource(self.source, attr)
@@ -3710,7 +3725,12 @@ def _automatic_dynamic(
 
         # Get symbolic contexts for inner tensors
         inner_contexts = {}  # mapping from attr -> symbolic context
-        attrs, _ = type(e).__tensor_flatten__(e)
+        try:
+            attrs, _ = type(e).__tensor_flatten__(e)
+        except AttributeError:
+            # Tensor subclass not fully initialized - cannot inspect inner tensors.
+            # Fall back to just using the outer context.
+            attrs = []
         for attr in attrs:
             inner_tensor = getattr(e, attr)
             inner_source = AttrSource(source, attr)
