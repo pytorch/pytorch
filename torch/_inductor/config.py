@@ -2257,9 +2257,6 @@ class rocm:
     # scenarios, and run on kBatch=1 in non-splitK scenarios
     kBatch_sweep: Optional[list[int]] = None
 
-    # Default kpack value for ROCm/AMD GPUs used in template heuristics
-    default_kpack: int = 1
-
     # The threshold at which we trigger a splitK config - K // max(M,N) has to be greater than this
     split_k_threshold: int = 16
 
