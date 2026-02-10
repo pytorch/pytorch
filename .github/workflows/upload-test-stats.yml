@@ -9,6 +9,7 @@ on:
       - periodic
       - periodic-rocm-mi200
       - periodic-rocm-mi300
+      - periodic-rocm-mi355
       - inductor
       - unstable
       - slow
@@ -24,6 +25,7 @@ on:
       - inductor-cu124
       - inductor-rocm-mi200
       - inductor-rocm-mi300
+      - inductor-rocm-mi355
       - inductor-perf-nightly-rocm-mi300
       - inductor-perf-nightly-rocm-mi355
       - mac-mps

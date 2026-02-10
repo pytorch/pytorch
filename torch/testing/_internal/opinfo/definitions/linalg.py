@@ -476,7 +476,8 @@ def sample_inputs_matrix_rank(op_info, device, dtype, requires_grad=False, **kwa
             return None
         if kwarg_type == "float":
             return 1.0
-        assert kwarg_type == "tensor"
+        if kwarg_type != "tensor":
+            raise AssertionError(f"Expected kwarg_type == 'tensor', got {kwarg_type!r}")
         return torch.ones(inp.shape[:-2], device=device)
 
     for tol_type in ["float", "tensor"]:
@@ -488,7 +489,10 @@ def sample_inputs_matrix_rank(op_info, device, dtype, requires_grad=False, **kwa
             for sample in sample_inputs_linalg_invertible(
                 op_info, device, dtype, requires_grad
             ):
-                assert sample.kwargs == {}
+                if sample.kwargs != {}:
+                    raise AssertionError(
+                        f"Expected sample.kwargs == {{}}, got {sample.kwargs}"
+                    )
                 sample.kwargs = {
                     "atol": make_tol_arg(atol_type, sample.input),
                     "rtol": make_tol_arg(rtol_type, sample.input),
@@ -1165,12 +1169,6 @@ op_db: list[OpInfo] = [
                 "TestCommon",
                 "test_numpy_ref_mps",
             ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_non_standard_bool_values",
-                device_type="mps",
-            ),
             # RuntimeError: Failed to create function state object for: cross_float2
             DecorateInfo(
                 unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
@@ -1301,34 +1299,6 @@ op_db: list[OpInfo] = [
                 "TestInductorOpInfo",
                 "test_comprehensive",
                 device_type="cuda",
-            ),
-            # NotImplementedError: The operator 'aten::vdot' is not currently implemented for the MPS device
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_variant_consistency_eager",
-                device_type="mps",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_noncontiguous_samples",
-                device_type="mps",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, "TestCommon", "test_out", device_type="mps"
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_out_warning",
-                device_type="mps",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_out_requires_grad_error",
-                device_type="mps",
             ),
         ),
     ),
@@ -2613,6 +2583,12 @@ op_db: list[OpInfo] = [
                 device_type="cuda",
                 dtypes=[torch.cdouble],
             ),
+            # NotImplementedError: The operator 'aten::linalg_qr.out' is not currently implemented for the MPS device
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                device_type="mps",
+            ),
         ),
     ),
     OpInfo(
@@ -2931,18 +2907,20 @@ python_ref_db: list[OpInfo] = [
         torch_opinfo_name="linalg.vecdot",
         op_db=op_db,
         skips=(
-            # NotImplementedError: The operator 'aten::vdot' is not currently implemented for the MPS device
+            # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestCommon",
                 "test_python_ref_torch_fallback",
                 device_type="mps",
+                dtypes=(torch.float16, torch.bfloat16),
             ),
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestCommon",
                 "test_python_ref",
                 device_type="mps",
+                dtypes=(torch.float16, torch.bfloat16),
             ),
         ),
     ),
