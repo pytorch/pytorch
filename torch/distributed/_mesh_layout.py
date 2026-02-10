@@ -305,9 +305,12 @@ class _MeshLayout(Layout):
         Returns:
             torch.Tensor: A tensor representing the actual device allocation from rank_map
         """
-        assert rank_map.ndim == 1
-        assert rank_map.is_contiguous()
-        assert rank_map.numel() >= self.cosize()
+        if rank_map.ndim != 1:
+            raise AssertionError
+        if not rank_map.is_contiguous():
+            raise AssertionError
+        if rank_map.numel() < self.cosize():
+            raise AssertionError
 
         complement_layout = self.complement(rank_map.numel())
 

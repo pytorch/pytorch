@@ -66,7 +66,8 @@ class _ReplicateState(_State):
     def lazy_init(self) -> None:
         @torch._disable_dynamo(recursive=True)
         def _lazy_init():
-            assert self._init_args is not None
+            if self._init_args is None:
+                raise AssertionError
             self.init(*self._init_args, **self._init_kwargs)
             self.register_comm_hook()
             self._init_args = ()
