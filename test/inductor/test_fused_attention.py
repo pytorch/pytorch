@@ -35,13 +35,13 @@ class TestSDPAPatternRewriterTemplate(TestCase):
     use_static_shapes = True
 
     def setUp(self):
-        self.prev_tf32 = torch.backends.cuda.matmul.allow_tf32
-        torch.backends.cuda.matmul.allow_tf32 = True
+        self.prev_tf32 = torch.backends.cuda.matmul.fp32_precision
+        torch.backends.cuda.matmul.fp32_precision = "tf32"
         super().setUp()
 
     def tearDown(self):
         super().tearDown()
-        torch.backends.cuda.matmul.allow_tf32 = self.prev_tf32
+        torch.backends.cuda.matmul.fp32_precision = self.prev_tf32
 
     def _clone_inputs(self, inputs):
         def clone(x):
@@ -1147,6 +1147,109 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             check_train=False,
         )
 
+    def _test_sdpa_rewriter_25(self):
+        def dot_prod_attention(
+            query: torch.Tensor,
+            key: torch.Tensor,
+            value: torch.Tensor,
+            attn_mask: torch.Tensor,
+            training: bool,
+        ) -> torch.Tensor:
+            query = query.transpose(1, 2)
+            key = key.transpose(1, 2)
+            value = value.transpose(1, 2)
+            scores = torch.matmul(query, key.permute(0, 1, 3, 2))
+            scores += attn_mask
+            attn_weights = scores.float().softmax(dim=-1).type(value.dtype)
+            attn_weights = torch.nn.functional.dropout(
+                attn_weights, p=0.1, training=training
+            )
+            return attn_weights.matmul(value)
+
+        tensor_shape = (4, 2, 16, 32)
+        attn_mask = torch.randn((1, 1, 1, 2), dtype=torch.half, device=self.device)
+        args = [
+            torch.randn(tensor_shape, dtype=torch.half, device=self.device),
+            torch.randn(tensor_shape, dtype=torch.half, device=self.device),
+            torch.randn(tensor_shape, dtype=torch.half, device=self.device),
+            attn_mask,
+        ]
+        self._check_common(
+            dot_prod_attention,
+            args1=args,
+            has_dropout=True,
+            check_train=True,
+        )
+
+    def _test_sdpa_rewriter_26(self):
+        def dot_prod_attention(
+            query: torch.Tensor,
+            key: torch.Tensor,
+            value: torch.Tensor,
+            attn_mask: torch.Tensor,
+            training: bool,
+        ) -> torch.Tensor:
+            query = query.transpose(1, 2)
+            key = key.transpose(1, 2)
+            value = value.transpose(1, 2)
+            scores = torch.matmul(query, key.permute(0, 1, 3, 2))
+            scores += attn_mask
+            attn_weights = scores.float().softmax(dim=-1).type(value.dtype)
+            attn_weights = torch.nn.functional.dropout(
+                attn_weights, p=0.1, training=training
+            )
+
+            return attn_weights.matmul(value), key, value
+
+        tensor_shape = (4, 2, 16, 32)
+        attn_mask = torch.randn((1, 1, 1, 2), dtype=torch.half, device=self.device)
+        args = [
+            torch.randn(tensor_shape, dtype=torch.half, device=self.device),
+            torch.randn(tensor_shape, dtype=torch.half, device=self.device),
+            torch.randn(tensor_shape, dtype=torch.half, device=self.device),
+            attn_mask,
+        ]
+        self._check_common(
+            dot_prod_attention,
+            args1=args,
+            has_dropout=True,
+            check_train=True,
+        )
+
+    def _test_sdpa_rewriter_27(self):
+        def dot_prod_attention(
+            query: torch.Tensor,
+            key: torch.Tensor,
+            value: torch.Tensor,
+            training: bool,
+        ) -> torch.Tensor:
+            attn_mask = torch.full(
+                (1, 1, 1, 2), 0.0, dtype=torch.half, device=query.device
+            )
+            query = query.transpose(1, 2)
+            key = key.transpose(1, 2)
+            value = value.transpose(1, 2)
+            scores = torch.matmul(query, key.permute(0, 1, 3, 2))
+            scores += attn_mask
+            attn_weights = scores.float().softmax(dim=-1).type(value.dtype)
+            attn_weights = torch.nn.functional.dropout(
+                attn_weights, p=0.1, training=training
+            )
+            return attn_weights.matmul(value), key, value
+
+        tensor_shape = (4, 2, 16, 32)
+        args = [
+            torch.randn(tensor_shape, dtype=torch.half, device=self.device),
+            torch.randn(tensor_shape, dtype=torch.half, device=self.device),
+            torch.randn(tensor_shape, dtype=torch.half, device=self.device),
+        ]
+        self._check_common(
+            dot_prod_attention,
+            args1=args,
+            has_dropout=True,
+            check_train=True,
+        )
+
 
 if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENTION):
 
@@ -1229,12 +1332,22 @@ if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENT
         test_sdpa_rewriter_24_gpu = functools.partialmethod(
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_24
         )
+        if HAS_XPU_AND_TRITON:
+            test_sdpa_rewriter_25_gpu = functools.partialmethod(
+                TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_25
+            )
+            test_sdpa_rewriter_26_gpu = functools.partialmethod(
+                TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_26
+            )
+            test_sdpa_rewriter_27_gpu = functools.partialmethod(
+                TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_27
+            )
 
         @skipIfXpu(msg="FIXME: ENable for XPU")
         def test_skip_non_tf32(self):
             try:
-                orig = torch.backends.cuda.matmul.allow_tf32
-                torch.backends.cuda.matmul.allow_tf32 = False
+                orig = torch.backends.cuda.matmul.fp32_precision
+                torch.backends.cuda.matmul.fp32_precision = "ieee"
 
                 class Model(torch.nn.Module):
                     def __init__(self):
@@ -1265,7 +1378,7 @@ if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENT
                 self.assertEqual(out, func(*test_inputs))
 
             finally:
-                torch.backends.cuda.matmul.allow_tf32 = orig
+                torch.backends.cuda.matmul.fp32_precision = orig
 
     class SDPAPatternRewriterGpuDynamicTests(SDPAPatternRewriterGpuTests):
         use_static_shapes = False

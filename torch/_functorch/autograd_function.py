@@ -234,7 +234,10 @@ def wrap_outputs_maintaining_identity(
             result.append(unwrapped_input_to_orig_input[id(output)])
             continue
         if out_dims_specified:
-            assert flat_out_dims is not None
+            if flat_out_dims is None:
+                raise AssertionError(
+                    "flat_out_dims must not be None when out_dims is specified"
+                )
             result.append(wrap_fn(output, flat_out_dims[i]))
         else:
             result.append(wrap_fn(output))
@@ -432,7 +435,8 @@ def custom_function_call_vmap_generate_rule(
     with interpreter.lower():
         outputs = custom_function_call(vmapped_function, *unwrapped_operands)
 
-    assert isinstance(outputs, tuple)
+    if not isinstance(outputs, tuple):
+        raise AssertionError(f"expected outputs to be a tuple, got {type(outputs)}")
     outputs, out_dims = unpack_outputs(outputs)
     return wrap_batched(outputs, out_dims, interpreter.level())
 
@@ -482,10 +486,12 @@ def vmapify_autograd_function(
                 inp.shape if isinstance(inp, torch.Tensor) else None for inp in inputs
             )
             if not hasattr(ctx, "_pt_input_shapes"):
+                # pyrefly: ignore [implicit-any]
                 ctx._pt_input_shapes = {}
             ctx._pt_input_shapes.update({key: input_shapes})
 
             if not hasattr(ctx, "_pt_saved_tensors_bdims_stack"):
+                # pyrefly: ignore [implicit-any]
                 ctx._pt_saved_tensors_bdims_stack = {}
             ctx._pt_saved_tensors_bdims_stack.update(
                 {key: (wrapped_ctx._pt_saved_tensors_bdims)}
@@ -500,6 +506,7 @@ def vmapify_autograd_function(
         )(inputs, outputs)
 
         if not hasattr(ctx, "_pt_out_dims"):
+            # pyrefly: ignore [implicit-any]
             ctx._pt_out_dims = {}
         ctx._pt_out_dims.update({key: out_dims})
 
@@ -764,7 +771,8 @@ def reductify_leaf(
     # This means that we need to also reduce the grad_input to the shape of the
     # input. This behavior is controlled by the `target_shape_without_bdim_to_reduce_to` flag;
     # if not-None then we do the reducing manually, otherwise, we do not do a reduction.
-    assert input_bdim is not None
+    if input_bdim is None:
+        raise AssertionError("input_bdim must not be None")
 
     if grad_input_bdim is None:
         grad_input = grad_input.unsqueeze(input_bdim)
@@ -814,8 +822,7 @@ class AutogradFunctionApply(HigherOrderOperator):
 
         class ApplyTemplate(torch.autograd.Function):
             @staticmethod
-            # pyrefly: ignore [bad-override]
-            def forward(ctx: Any, *args: Any) -> Any:
+            def forward(*args: Any, **kwargs: Any) -> Any:
                 nonlocal saved_values
 
                 # The Interpreter here is required to propagate metadata
@@ -834,6 +841,10 @@ class AutogradFunctionApply(HigherOrderOperator):
                         for proxy in _get_proxies(t):
                             proxy.node.meta["saved_tensor_with_no_vc_check"] = True
 
+                return output
+
+            @staticmethod
+            def setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> None:
                 # If users call ctx.mark_non_differentiable() in the original fwd function.
                 if len(non_differentiable_idx) > 0:
                     non_differentiable_output = []
@@ -842,15 +853,14 @@ class AutogradFunctionApply(HigherOrderOperator):
                             non_differentiable_output.append(x)
                     ctx.mark_non_differentiable(*non_differentiable_output)
 
-                return output
-
             @staticmethod
             def backward(ctx: Any, *grad: Any) -> Any:
                 # The Interpreter here is required to propagate metadata
                 # from the dynamo graph body to the local_map graph body.
                 # This is required for fx_traceback.annotate for work.
 
-                assert saved_values is not None
+                if saved_values is None:
+                    raise AssertionError("saved_values must not be None")
                 return torch.fx.Interpreter(bwd).run(*grad, *saved_values)
 
         return ApplyTemplate.apply(*fwd_args)
