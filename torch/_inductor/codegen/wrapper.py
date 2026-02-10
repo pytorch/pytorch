@@ -3240,6 +3240,23 @@ class PythonWrapperCodegen(CodeGen):
                 f"device='{device.type}', "
                 f"name='{name}')"
             )
+        # With torch.utils.deterministic.fill_uninitialized_memory, we fill the buffer with NaN or MAX_INT
+        elif (
+            torch.are_deterministic_algorithms_enabled()
+            and torch.utils.deterministic.fill_uninitialized_memory  # type: ignore[attr-defined]
+        ):
+            if dtype.is_floating_point or dtype.is_complex:
+                value = "float('nan')"
+            elif dtype == torch.bool:
+                value = "True"
+            else:
+                value = f"torch.iinfo({dtype}).max"
+            out = (
+                f"{name} = empty_strided("
+                f"{codegen_allocation_shape_tuple}, "
+                f"{codegen_stride_tuple}, "
+                f"device='{device.type}', dtype={dtype}).fill_({value})"
+            )
         elif device.type == "cpu" and is_pinned:
             out = (
                 f"{name} = empty_strided_cpu_pinned("
