@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: distributed"]
 import copy
-import os
 from typing import TYPE_CHECKING
 
 import torch
@@ -31,7 +30,7 @@ from torch.distributed.tensor.parallel import (
 )
 from torch.testing._internal.common_distributed import (
     at_least_x_gpu,
-    MultiProcessTestCase,
+    MultiProcContinuousTest,
     requires_accelerator_dist_backend,
     skip_if_lt_x_gpu,
 )
@@ -85,26 +84,17 @@ class MLPModuleEven(torch.nn.Module):
         return x
 
 
-class ComposabilityTest(MultiProcessTestCase):
+class ComposabilityTest(MultiProcContinuousTest):
     @classmethod
     def backend_str(cls) -> str:
         # Testing with NCCL backend
         return backend
 
-    def setUp(self):
-        super().setUp()
-        self._spawn_processes()
+    @classmethod
+    def device_type(cls) -> str:
+        return device_type
 
-    def tearDown(self):
-        super().tearDown()
-        try:
-            os.remove(self.file_name)
-        except OSError:
-            pass
-
-    @property
-    def world_size(self):
-        return 8
+    world_size = 8
 
     @property
     def device(self):
@@ -153,16 +143,7 @@ class ComposabilityTest(MultiProcessTestCase):
                     x = layer(x)
                 return x
 
-        device = torch.device(device_type, self.device)
         torch.accelerator.set_device_index(self.device)
-        store = torch.distributed.FileStore(self.file_name, self.world_size)
-        torch.distributed.init_process_group(
-            backend=backend,
-            store=store,
-            rank=self.rank,
-            world_size=self.world_size,
-            device_id=device,
-        )
         # create "entire model"
         total_layers = 8
         dim = 10
@@ -224,13 +205,6 @@ class ComposabilityTest(MultiProcessTestCase):
     )
     def test_3d_with_tp_dp_pp(self, ScheduleClass, MixedPrecisionParam):
         torch.accelerator.set_device_index(self.device)
-        store = torch.distributed.FileStore(self.file_name, self.world_size)
-        torch.distributed.init_process_group(
-            backend=backend,
-            store=store,
-            rank=self.rank,
-            world_size=self.world_size,
-        )
         dim = 8
         tp_size = 2
         pp_size = 2
@@ -352,8 +326,6 @@ class ComposabilityTest(MultiProcessTestCase):
             for optimizer in optimizers:
                 optimizer.step()
 
-        torch.distributed.destroy_process_group()
-
     @requires_accelerator_dist_backend()
     @skip_if_lt_x_gpu(8)
     @skip_but_pass_in_sandcastle_if(not at_least_x_gpu(8), "Test requires 8+ GPUs")
@@ -376,13 +348,6 @@ class ComposabilityTest(MultiProcessTestCase):
     )
     def test_replicate_pp(self, ScheduleClass, MixedPrecisionParam):
         torch.accelerator.set_device_index(self.device)
-        store = torch.distributed.FileStore(self.file_name, self.world_size)
-        torch.distributed.init_process_group(
-            backend=backend,
-            store=store,
-            rank=self.rank,
-            world_size=self.world_size,
-        )
         dim = 8
         pp_size = 2
         num_microbatches = 8
@@ -545,8 +510,6 @@ class ComposabilityTest(MultiProcessTestCase):
             for ref_optimizer in ref_optimizers:
                 ref_optimizer.step()
 
-        torch.distributed.destroy_process_group()
-
     @requires_accelerator_dist_backend()
     @skip_if_lt_x_gpu(8)
     @skip_but_pass_in_sandcastle_if(not at_least_x_gpu(8), "Test requires 8+ GPUs")
@@ -562,13 +525,6 @@ class ComposabilityTest(MultiProcessTestCase):
     )
     def test_replicate_pp_grads(self, ScheduleClass):
         torch.accelerator.set_device_index(self.device)
-        store = torch.distributed.FileStore(self.file_name, self.world_size)
-        torch.distributed.init_process_group(
-            backend=backend,
-            store=store,
-            rank=self.rank,
-            world_size=self.world_size,
-        )
         dim = 8
         pp_size = 2
         num_microbatches = 8
@@ -794,7 +750,6 @@ class ComposabilityTest(MultiProcessTestCase):
             check_gradient_parity(
                 pipeline_model_parameter_dict, ref_model_parameter_dict
             )
-        torch.distributed.destroy_process_group()
 
 
 instantiate_parametrized_tests(ComposabilityTest)
