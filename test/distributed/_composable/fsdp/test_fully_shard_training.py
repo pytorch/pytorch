@@ -535,16 +535,14 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         ref_root_loss = ref_model(inp).sum()
         ref_root_loss.backward()
         for param in ref_model.parameters():
-            dist.all_reduce(param.grad)
-            param.grad.detach().div_(self.world_size)
+            dist.all_reduce(param.grad, op=dist.ReduceOp.AVG)
         ref_optim.step()
         ref_optim.zero_grad()
         ref_nonroot_loss = ref_model[0](inp).sum()
         ref_nonroot_loss.backward()
         for param in ref_model.parameters():
             if param.grad is not None:
-                dist.all_reduce(param.grad)
-                param.grad.detach().div_(self.world_size)
+                dist.all_reduce(param.grad, op=dist.ReduceOp.AVG)
         ref_optim.step()
 
         root_loss = model(inp).sum()
