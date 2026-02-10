@@ -38,6 +38,8 @@ jobs:
     container:
       image: ${{ inputs.docker_image }}
       options: --gpus all --ipc=host --tty
+      volumes:
+        - /mnt/hf_cache:/mnt/hf_cache
     steps:
       - name: Install system dependencies
         run: |
@@ -101,14 +103,11 @@ jobs:
             dist/torch-*.whl \
             dist/vision/torchvision-*.whl \
             dist/audio/torchaudio-*.whl \
+            dist/ao/torchao-*.whl \
             dist/vllm/vllm-*.whl \
+            dist/deepgemm/deep_gemm-*.whl \
             --extra-index-url https://download.pytorch.org/whl/cu129 \
             --index-strategy unsafe-best-match
-
-          # We can build and install torchao from its pinned commit in PyTorch
-          # too, but that pin is too old and nothing seems to use it. Let's
-          # install torchao from pypi then
-          uv pip install torchao==0.15.0 --torch-backend=cu129
 
       - name: Print some debug information
         env:
@@ -178,7 +177,8 @@ jobs:
             --from-benchmark-configs-dir vllm-benchmarks/benchmarks \
             --to-benchmark-configs-dir ../../vllm-project/vllm/.buildkite/performance-benchmarks/tests \
             --models "${MODELS}" \
-            --device "${DEVICE_NAME}"
+            --device "${DEVICE_NAME}" \
+            --include-eager-mode
           popd
 
           pushd vllm-project/vllm
@@ -190,6 +190,8 @@ jobs:
         working-directory: vllm-project/vllm
         env:
           HF_TOKEN: ${{ secrets.VLLM_TEST_HUGGING_FACE_TOKEN }}
+          HF_HOME: /mnt/hf_cache
+          TRANSFORMERS_OFFLINE: 1
           # vLLM-related environment variables
           ENGINE_VERSION: v1
           SAVE_TO_PYTORCH_BENCHMARK_FORMAT: 1
