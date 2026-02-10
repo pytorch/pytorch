@@ -75,11 +75,13 @@ class TestCase(InductorTestCase):
         super().tearDown()
 
     def assertZero(self, x: float):
-        assert isinstance(x, float)
+        if not isinstance(x, float):
+            raise AssertionError(f"Expected float, got {type(x)}")
         super().assertEqual(x, 0.0, atol=0, rtol=0)
 
     def assertNotZero(self, x):
-        assert isinstance(x, float)
+        if not isinstance(x, float):
+            raise AssertionError(f"Expected float, got {type(x)}")
         super().assertNotEqual(x, 0.0, atol=0, rtol=0)
 
 

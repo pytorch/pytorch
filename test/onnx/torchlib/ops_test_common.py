@@ -171,9 +171,10 @@ def add_decorate_info(
             # If the OpInfo doesn't exist and it is not enabled, we skip the OpInfo
             # because it could be an OpInfo that is in torch-nightly but not older versions.
             continue
-        assert opinfo is not None, (
-            f"Couldn't find OpInfo for {decorate_meta}. Did you need to specify variant_name?"
-        )
+        if opinfo is None:
+            raise AssertionError(
+                f"Couldn't find OpInfo for {decorate_meta}. Did you need to specify variant_name?"
+            )
         decorators = list(opinfo.decorators)
         new_decorator = opinfo_core.DecorateInfo(
             decorate_meta.decorator,
@@ -438,7 +439,8 @@ def dtype_op_schema_compatible(dtype: torch.dtype, schema) -> bool:
     # Since torch.float32 (tensor(float)) is in the allowed types, we return True.
 
     first_input_type_constraint = inputs[0].type_constraint
-    assert first_input_type_constraint is not None
+    if first_input_type_constraint is None:
+        raise AssertionError("first_input_type_constraint is None")
     allowed_types = first_input_type_constraint.allowed_types
     # Here we consider seq(tensor(float)) compatible with tensor(float) as well
     allowed_dtypes = {type_.dtype for type_ in allowed_types}

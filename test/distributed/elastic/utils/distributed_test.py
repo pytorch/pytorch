@@ -144,7 +144,8 @@ class DistributedUtilTest(TestCase):
         )
         self.assertFalse(store.libuvBackend)
         del os.environ["USE_LIBUV"]
-        assert "USE_LIBUV" not in os.environ
+        if "USE_LIBUV" in os.environ:
+            raise AssertionError("Expected USE_LIBUV to be removed from os.environ")
 
         # libuv backend is enabled by default
         store = create_c10d_store(

@@ -110,8 +110,12 @@ class TestMinifier(TestCase):
             return torch.isnan(fx_g(*inps)[0]).any()
 
         min_f, inps = minifier(failing_f, inps, pass_checker)
-        assert len(min_f.graph.nodes) == 3
-        assert len(inps) == 1
+        if len(min_f.graph.nodes) != 3:
+            raise AssertionError(
+                f"Expected 3 graph nodes, got {len(min_f.graph.nodes)}"
+            )
+        if len(inps) != 1:
+            raise AssertionError(f"Expected 1 input, got {len(inps)}")
 
 
 if __name__ == "__main__":
