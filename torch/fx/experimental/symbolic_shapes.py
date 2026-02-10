@@ -6536,11 +6536,33 @@ class ShapeEnv:
 
         return tuple(equiv.items())
 
+    def _is_nonneg_term(self, term: sympy.Expr) -> bool:
+        """Check if a single term is non-negative (symbol with non-neg range or non-neg constant)."""
+        if term.is_Symbol:
+            vr = self.var_to_range.get(term)
+            return vr is not None and vr.lower >= 0
+        if term.is_number:
+            return term >= 0
+        return False
+
+    def _is_nonneg_sum(self, expr: sympy.Expr) -> bool:
+        """
+        Check if expr is a sum of non-negative terms (Add of symbols with non-neg range
+        and non-negative constants). Returns True only for simple Add expressions.
+        """
+        if not isinstance(expr, sympy.Add):
+            return self._is_nonneg_term(expr)
+
+        # Check each arg in the Add
+        for arg in expr.args:
+            if not self._is_nonneg_term(arg):
+                return False
+
+        return True
+
     def _maybe_fast_eval_comparison(self, expr: sympy.Basic) -> Optional[sympy.Basic]:
         """
         Fast path for trivial comparisons: sum of non-negative terms >= 0.
-        Only checks that all symbols have lower bound >= 0 and appear with
-        positive coefficients, avoiding expensive bound_sympy tree walk.
         Returns sympy.true if pattern matches, None otherwise.
         """
         if len(expr.args) != 2:
@@ -6556,25 +6578,10 @@ class ShapeEnv:
         else:
             return None
 
-        # Get coefficients of each term in the sum
-        # as_coefficients_dict returns {term: coeff} for sum of terms
-        coeffs = sum_expr.as_coefficients_dict()
+        if self._is_nonneg_sum(sum_expr):
+            return sympy.true
 
-        for term, coeff in coeffs.items():
-            if term == 1:
-                # Constant term - must be non-negative
-                if coeff < 0:
-                    return None
-            else:
-                # Symbol or expression - coeff must be positive and term non-negative
-                if coeff < 0:
-                    return None
-                for sym in term.free_symbols:
-                    vr = self.var_to_range.get(sym)
-                    if vr is None or vr.lower < 0:
-                        return None
-
-        return sympy.true
+        return None
 
     @_lru_cache
     def _maybe_evaluate_static(
