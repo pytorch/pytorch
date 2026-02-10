@@ -207,7 +207,7 @@ class ReinplaceCounters:
     @classmethod
     def add_missed_opportunities(cls, trigger: ReInplaceTrigger, count: int) -> None:
         if count != 0:
-            cls._values[f"missed_tensors_{trigger}"] += count
+            cls._values[f"missed_tensors_{trigger.name}"] += count
 
     @classmethod
     def clear(cls) -> None:
@@ -217,7 +217,7 @@ class ReinplaceCounters:
     def get_total_missed(cls) -> int:
         sum = 0
         for trigger in ReInplaceTrigger:
-            sum += cls._values.get(f"missed_tensors_{trigger}", 0)
+            sum += cls._values.get(f"missed_tensors_{trigger.name}", 0)
         return sum
 
     @classmethod
@@ -3552,6 +3552,18 @@ def _wrap_graph_break_with_torch_runtime_err(gb_fn: Callable[[], NoReturn]) -> N
 
 
 def get_fake_value(
+    node: torch.fx.Node,
+    tx: InstructionTranslatorBase,
+    allow_non_graph_fake: bool = False,
+) -> Any:
+    _t0 = time.time_ns()
+    try:
+        return _get_fake_value_impl(node, tx, allow_non_graph_fake)
+    finally:
+        tx.output.bytecode_tracing_timings.get_fake_value_ns += time.time_ns() - _t0
+
+
+def _get_fake_value_impl(
     node: torch.fx.Node,
     tx: InstructionTranslatorBase,
     allow_non_graph_fake: bool = False,
