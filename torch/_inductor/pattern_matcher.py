@@ -1483,16 +1483,22 @@ def register_replacement(
         with fake_mode:
             for i, grad in enumerate(requires_grad):
                 if isinstance(args[i], torch.Tensor):
+                    # pyrefly: ignore [missing-attribute]
                     if grad and is_integer_dtype(args[i].dtype):
                         return False
 
                     args[i] = torch.empty_strided(
+                        # pyrefly: ignore [missing-attribute]
                         args[i].size(),
+                        # pyrefly: ignore [missing-attribute]
                         args[i].stride(),
+                        # pyrefly: ignore [missing-attribute]
                         dtype=args[i].dtype,
+                        # pyrefly: ignore [missing-attribute]
                         device=args[i].device,
                         requires_grad=grad,
                     )
+                    # pyrefly: ignore [missing-attribute]
                     for v in itertools.chain(args[i].shape, args[i].stride()):
                         if isinstance(v, torch.SymInt) and all(
                             statically_known_true(v != a) for a in sym_args
