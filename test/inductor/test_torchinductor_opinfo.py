@@ -991,7 +991,6 @@ inductor_skip_exact_stride = {
     "ormqr",
     "rot90",
     "sum",
-    "tensordot",
 }
 
 # On XPU, Inductor may apply additional layout optimizations that can change
