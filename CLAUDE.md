@@ -1,3 +1,13 @@
+# Environment
+
+If any tool you're trying to use (pip, python, spin, etc) is missing, always stop and ask the user if an environment is needed. Do NOT try to find alternatives or install these tools.
+
+# Build
+
+Always ask for build configuration environment variables before running build.
+All build (both codegen, C++ and python) is done via `pip install -e . -v --no-build-isolation`.
+You should NEVER run any other command to build PyTorch.
+
 # Testing
 
 Use our test class and test runner:
@@ -13,6 +23,12 @@ if __name__ == "__main__":
 ```
 
 To test Tensor equality, use assertEqual.
+
+# Linting
+
+Only use commands provided via `spin` for linting.
+Use `spin help` to list available commands.
+Generally, use `spin lint` as to run the lint and `spin fixlint` to apply automatic fixes.
 
 # Commit messages
 
