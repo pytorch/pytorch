@@ -113,7 +113,11 @@ def remat_using_tags_for_fwd_loss_bwd_graph(gm: fx.GraphModule) -> fx.GraphModul
         # This is not as inefficient as it looks, because we only add fresh dependencies
         # when they are not yet processed as recomputed nodes.
         for dep in sorted(deps, key=lambda n: order[n]):
-            assert dep not in recomputed_nodes, "We shouldn't have recomputed it before"
+            if dep in recomputed_nodes:
+                raise AssertionError(
+                    f"We shouldn't have recomputed {dep} before, "
+                    f"but found it in recomputed_nodes"
+                )
             dup = new_graph.node_copy(dep, remat_input)
             dup.name = dep.name + "_recomputed"
             recomputed_nodes[dep] = dup
