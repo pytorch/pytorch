@@ -5113,9 +5113,7 @@ class InstructionTranslatorBase(
         self.instruction_pointer = None
 
     def _copy_comprehension_bytecode(
-        self,
-        start_ip: int,
-        end_ip: int,
+        self, start_ip: int, end_ip: int
     ) -> list[Instruction]:
         """Copy comprehension bytecode instructions, updating jump targets."""
         inst_map: dict[Instruction, Instruction] = {}
