@@ -2273,12 +2273,14 @@ class VariableBuilder:
         # it would have already been wrapped
         assert value not in self.tx.output.side_effects
         
-        # Check if we're wrapping `self` in an `__init__` method of a tensor subclass
+        # Check if we're wrapping the first parameter in an `__init__` method of a tensor subclass
         # If so, skip faking since the tensor may not be fully initialized yet
         from ..source import LocalSource
         if (isinstance(source, LocalSource) and 
-            source.local_name == "self" and
+            source.is_input and
             self.tx.f_code.co_name == "__init__" and
+            self.tx.f_code.co_argcount > 0 and
+            source.local_name == self.tx.f_code.co_varnames[0] and
             is_traceable_wrapper_subclass(value)):
             # Treat as unspecialized - don't try to fake it
             from .user_defined import UserDefinedObjectVariable
