@@ -29,7 +29,7 @@ import torch.distributed as dist
 from torch.distributed._local_tensor import LocalTensor, LocalTensorMode
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import distribute_tensor, DTensor, Replicate
-from torch.distributed.tensor.placement_types import Partial, Shard
+from torch.distributed.tensor.placement_types import Partial, Placement, Shard
 from torch.utils import _pytree as pytree
 
 
@@ -108,7 +108,7 @@ class ComparisonStats:
 
 def placement_tuple_to_str(placements: tuple) -> str:
     """Convert a tuple of placements to a readable string."""
-    parts = []
+    parts: list[str] = []
     for p in placements:
         if isinstance(p, Shard):
             parts.append(f"S{p.dim}")
@@ -301,7 +301,7 @@ def get_1d_input_placements_for_tensor(
         t: The tensor to get placements for
         include_partial: If True, include Partial placements for inputs.
     """
-    placements = [Replicate()]
+    placements: list[Placement] = [Replicate()]
     for dim in range(t.ndim):
         placements.append(Shard(dim))
     if include_partial and t.dtype != torch.bool:
@@ -317,7 +317,7 @@ def get_1d_output_placements_for_tensor(t: torch.Tensor) -> list:
     For integer outputs, only P(min) and P(max) are included since
     P(sum) and P(avg) don't make semantic sense for discrete values.
     """
-    placements = [Replicate()]
+    placements: list[Placement] = [Replicate()]
     for dim in range(t.ndim):
         placements.append(Shard(dim))
 
@@ -397,7 +397,9 @@ def _create_partial_input(
                 local_tensors[r] = tensor.clone() * (
                     (1 - base_ratio) / (world_size - 1)
                 ) * scale - offset / (world_size - 1)
-        return LocalTensor(local_tensors)
+        return LocalTensor(
+            local_tensors
+        )  # pyrefly: ignore[bad-argument-type, bad-argument-count]
 
     elif reduce_op == "min":
         local_tensors = {}
@@ -413,7 +415,9 @@ def _create_partial_input(
                     mask, torch.full_like(flat, 0.7), torch.zeros_like(flat)
                 )
             local_tensors[r] = (flat + r_offset).reshape(tensor.shape)
-        return LocalTensor(local_tensors)
+        return LocalTensor(
+            local_tensors
+        )  # pyrefly: ignore[bad-argument-type, bad-argument-count]
 
     elif reduce_op == "max":
         local_tensors = {}
@@ -429,11 +433,15 @@ def _create_partial_input(
                     mask, torch.full_like(flat, -1.3), torch.zeros_like(flat)
                 )
             local_tensors[r] = (flat + r_offset).reshape(tensor.shape)
-        return LocalTensor(local_tensors)
+        return LocalTensor(
+            local_tensors
+        )  # pyrefly: ignore[bad-argument-type, bad-argument-count]
 
     else:
         local_tensors = {r: tensor.clone() for r in range(world_size)}
-        return LocalTensor(local_tensors)
+        return LocalTensor(
+            local_tensors
+        )  # pyrefly: ignore[bad-argument-type, bad-argument-count]
 
 
 def validate_combination(
@@ -481,16 +489,20 @@ def validate_combination(
                 )
                 local_tensors.append(local_tensor)
             elif isinstance(placement, Replicate):
-                local_tensor = LocalTensor(
-                    {r: tensor.clone() for r in range(world_size)}
+                local_tensor = LocalTensor(  # pyrefly: ignore[bad-argument-type]
+                    {
+                        r: tensor.clone() for r in range(world_size)
+                    }  # pyrefly: ignore[bad-argument-count]
                 )
                 local_tensors.append(local_tensor)
             elif isinstance(placement, Shard):
                 # Create sharded LocalTensor directly to work in LocalTensorMode
                 shard_dim = placement.dim
                 chunks = tensor.tensor_split(world_size, dim=shard_dim)
-                local_tensor = LocalTensor(
-                    {r: chunks[r].clone().contiguous() for r in range(world_size)}
+                local_tensor = LocalTensor(  # pyrefly: ignore[bad-argument-type]
+                    {
+                        r: chunks[r].clone().contiguous() for r in range(world_size)
+                    }  # pyrefly: ignore[bad-argument-count]
                 )
                 local_tensors.append(local_tensor)
             else:
@@ -569,10 +581,10 @@ class _CaptureAtenOp(torch.utils._python_dispatch.TorchDispatchMode):
 
     def __init__(self, target_op_name: str = ""):
         self.target_op_name = target_op_name.lower()
-        self.all_ops = []
-        self.best_match = None
-        self.best_match_args = None
-        self.best_match_kwargs = None
+        self.all_ops: list[tuple] = []
+        self.best_match: Any = None
+        self.best_match_args: tuple | None = None
+        self.best_match_kwargs: dict | None = None
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if kwargs is None:
@@ -1013,6 +1025,8 @@ def compare_operator(
 
                     if isinstance(output_strategy, OpStrategy):
                         for spec in output_strategy.strategies:
+                            if spec.input_specs is None:
+                                continue
                             output_plc = spec.output_spec.placements[0]
                             input_plcs = tuple(
                                 s.placements[0] for s in spec.input_specs
@@ -1097,6 +1111,8 @@ def compare_operator(
                         and fully_negated_sample
                         and has_pmin_pmax(input_placements, output_placement)
                     ):
+                        assert fully_negated_tensors is not None
+                        assert fully_negated_ground_truth is not None
                         negated_combo = PlacementCombination(
                             input_placements, output_placement
                         )
@@ -1118,6 +1134,7 @@ def compare_operator(
                         and non_rounded_sample
                         and has_any_partial(input_placements, output_placement)
                     ):
+                        assert non_rounded_ground_truth is not None
                         non_rounded_combo = PlacementCombination(
                             input_placements, output_placement
                         )
@@ -1138,6 +1155,8 @@ def compare_operator(
                         and non_rounded_negated_sample
                         and has_pmin_pmax(input_placements, output_placement)
                     ):
+                        assert non_rounded_negated_tensors is not None
+                        assert non_rounded_negated_ground_truth is not None
                         non_rounded_negated_combo = PlacementCombination(
                             input_placements, output_placement
                         )
@@ -1339,17 +1358,17 @@ if __name__ == "__main__":
     # Override common size variables to ensure even sharding across world_size=2
     from torch.testing._internal.opinfo import core as opinfo_core
 
-    opinfo_core.L = 24
-    opinfo_core.M = 12
-    opinfo_core.S = 4
-    opinfo_core.XS = 2
+    opinfo_core.L = 24  # pyrefly: ignore[bad-assignment]
+    opinfo_core.M = 12  # pyrefly: ignore[bad-assignment]
+    opinfo_core.S = 4  # pyrefly: ignore[bad-assignment]
+    opinfo_core.XS = 2  # pyrefly: ignore[bad-assignment]
 
     import torch.testing._internal.common_methods_invocations as common_ops
 
-    common_ops.L = 24
-    common_ops.M = 12
-    common_ops.S = 4
-    common_ops.XS = 2
+    common_ops.L = 24  # pyrefly: ignore[bad-assignment]
+    common_ops.M = 12  # pyrefly: ignore[bad-assignment]
+    common_ops.S = 4  # pyrefly: ignore[bad-assignment]
+    common_ops.XS = 2  # pyrefly: ignore[bad-assignment]
 
     parser = argparse.ArgumentParser(
         description="Compare DTensor rules against ground truth"
