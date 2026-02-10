@@ -20,10 +20,9 @@ Usage:
 
 import argparse
 import gc
-import os
 import json
-import pickle
-from dataclasses import dataclass, asdict
+import os
+from dataclasses import asdict, dataclass
 
 import torch
 import torch.distributed as dist
@@ -50,7 +49,9 @@ class BenchmarkResult:
 class TransformerBlock(nn.Module):
     def __init__(self, d_model: int, n_heads: int, d_ff: int, dropout: float = 0.1):
         super().__init__()
-        self.self_attn = nn.MultiheadAttention(d_model, n_heads, dropout=dropout, batch_first=True)
+        self.self_attn = nn.MultiheadAttention(
+            d_model, n_heads, dropout=dropout, batch_first=True
+        )
         self.norm1 = nn.LayerNorm(d_model)
         self.norm2 = nn.LayerNorm(d_model)
         self.ff = nn.Sequential(
@@ -92,10 +93,9 @@ class TransformerModel(nn.Module):
         self.d_model = d_model
         self.embedding = nn.Embedding(vocab_size, d_model)
         self.pos_embedding = nn.Embedding(max_seq_len, d_model)
-        self.layers = nn.ModuleList([
-            TransformerBlock(d_model, n_heads, d_ff, dropout)
-            for _ in range(n_layers)
-        ])
+        self.layers = nn.ModuleList(
+            [TransformerBlock(d_model, n_heads, d_ff, dropout) for _ in range(n_layers)]
+        )
         self.norm = nn.LayerNorm(d_model)
         self.lm_head = nn.Linear(d_model, vocab_size, bias=False)
 
@@ -133,10 +133,9 @@ class TransformerStage(nn.Module):
             self.embedding = nn.Embedding(vocab_size, d_model)
             self.pos_embedding = nn.Embedding(max_seq_len, d_model)
 
-        self.layers = nn.ModuleList([
-            TransformerBlock(d_model, n_heads, d_ff, dropout)
-            for _ in range(n_layers)
-        ])
+        self.layers = nn.ModuleList(
+            [TransformerBlock(d_model, n_heads, d_ff, dropout) for _ in range(n_layers)]
+        )
 
         if is_last:
             self.norm = nn.LayerNorm(d_model)
@@ -192,8 +191,8 @@ def create_pipeline_stages(
 
     stages = []
     for stage_idx in stage_indices:
-        is_first = (stage_idx == 0)
-        is_last = (stage_idx == num_stages - 1)
+        is_first = stage_idx == 0
+        is_last = stage_idx == num_stages - 1
 
         stage = TransformerStage(
             d_model=d_model,
@@ -270,7 +269,6 @@ def run_benchmark(
     """Run a single benchmark configuration."""
     reset_memory_stats(device)
 
-    d_model = 2048
     vocab_size = 32000
     stages_per_rank = 2
     num_stages = world_size * stages_per_rank
@@ -357,6 +355,7 @@ def run_benchmark(
     time_per_step = None
 
     if not memory_only:
+        torch.distributed.barrier()
         torch.cuda.synchronize(device)
         start_event = torch.cuda.Event(enable_timing=True)
         end_event = torch.cuda.Event(enable_timing=True)
@@ -381,7 +380,9 @@ def run_benchmark(
     if snapshot_dir:
         torch.cuda.synchronize(device)
         offload_str = "with_offload" if offload_enabled else "no_offload"
-        file_prefix = os.path.join(snapshot_dir, f"memory_snapshot_rank{rank}_{offload_str}")
+        file_prefix = os.path.join(
+            snapshot_dir, f"memory_snapshot_rank{rank}_{offload_str}"
+        )
         export_memory_snapshot(file_prefix)
         stop_record_memory_history()
 
@@ -406,9 +407,15 @@ def main():
     parser.add_argument("--warmup-steps", type=int, default=2)
     parser.add_argument("--benchmark-steps", type=int, default=5)
     parser.add_argument("--memory-only", action="store_true")
-    parser.add_argument("--snapshot-dir", type=str, default="./snapshots",
-                        help="Directory to save memory snapshots (view at https://pytorch.org/memory_viz)")
-    parser.add_argument("--output", type=str, default="activation_offload_benchmark.json")
+    parser.add_argument(
+        "--snapshot-dir",
+        type=str,
+        default="./snapshots",
+        help="Directory to save memory snapshots (view at https://pytorch.org/memory_viz)",
+    )
+    parser.add_argument(
+        "--output", type=str, default="activation_offload_benchmark.json"
+    )
     args = parser.parse_args()
 
     dist.init_process_group(backend="nccl")
@@ -484,25 +491,47 @@ def main():
         print("\n" + "=" * 70)
         print("RESULTS")
         print("=" * 70)
-        print(f"\n{'Configuration':<30} {'Peak Mem (GB)':<15} {'Throughput (samples/s)':<25}")
+        print(
+            f"\n{'Configuration':<30} {'Peak Mem (GB)':<15} {'Throughput (samples/s)':<25}"
+        )
         print("-" * 70)
 
         for r in results:
             offload_str = "WITH offload" if r.offload_enabled else "WITHOUT offload"
-            throughput_str = f"{r.throughput_samples_per_sec:.1f}" if r.throughput_samples_per_sec else "N/A"
+            throughput_str = (
+                f"{r.throughput_samples_per_sec:.1f}"
+                if r.throughput_samples_per_sec
+                else "N/A"
+            )
             print(f"{offload_str:<30} {r.peak_memory_gb:<15.2f} {throughput_str:<25}")
 
         # Comparison
         print("\n" + "-" * 70)
-        mem_saved = result_no_offload.peak_memory_gb - result_with_offload.peak_memory_gb
-        mem_pct = (mem_saved / result_no_offload.peak_memory_gb) * 100 if result_no_offload.peak_memory_gb > 0 else 0
+        mem_saved = (
+            result_no_offload.peak_memory_gb - result_with_offload.peak_memory_gb
+        )
+        mem_pct = (
+            (mem_saved / result_no_offload.peak_memory_gb) * 100
+            if result_no_offload.peak_memory_gb > 0
+            else 0
+        )
 
         print(f"\nMemory savings: {mem_saved:.2f} GB ({mem_pct:.1f}%)")
 
-        if result_no_offload.throughput_samples_per_sec and result_with_offload.throughput_samples_per_sec:
-            throughput_diff = result_with_offload.throughput_samples_per_sec - result_no_offload.throughput_samples_per_sec
-            throughput_pct = (throughput_diff / result_no_offload.throughput_samples_per_sec) * 100
-            print(f"Throughput change: {throughput_diff:+.1f} samples/s ({throughput_pct:+.1f}%)")
+        if (
+            result_no_offload.throughput_samples_per_sec
+            and result_with_offload.throughput_samples_per_sec
+        ):
+            throughput_diff = (
+                result_with_offload.throughput_samples_per_sec
+                - result_no_offload.throughput_samples_per_sec
+            )
+            throughput_pct = (
+                throughput_diff / result_no_offload.throughput_samples_per_sec
+            ) * 100
+            print(
+                f"Throughput change: {throughput_diff:+.1f} samples/s ({throughput_pct:+.1f}%)"
+            )
 
         # Save results to JSON
         with open(args.output, "w") as f:

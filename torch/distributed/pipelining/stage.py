@@ -2,6 +2,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import logging
 import operator
+import weakref
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import Any, cast, Union
@@ -37,13 +38,24 @@ class ActivationOffloadHooks(torch.autograd.graph.saved_tensors_hooks):
     and prefetch them back to GPU before backward.
     """
 
-    def __init__(self):
-        self.prefetch_stream = torch.cuda.Stream() if torch.cuda.is_available() else None
-        self.d2h_stream = torch.cuda.Stream() if torch.cuda.is_available() else None
+    def __init__(
+        self,
+        prefetch_stream: torch.cuda.Stream | None,
+    ):
+        self.prefetch_stream = prefetch_stream
         self.packed_tensors: list[dict] = []
+        # Dedup: the same tensor can be saved by multiple autograd nodes
+        # (e.g. ReLU output is saved by both ReluBackward0 and
+        # LinearBackward0). Without dedup, each pack() creates a separate
+        # CPU copy and start_prefetch() allocates a separate GPU tensor,
+        # wasting both bandwidth and memory. We use data_ptr as a fast
+        # lookup key and verify identity via weakref to avoid false matches
+        # from memory reuse by the caching allocator.
+        self._dedup: dict[int, tuple[weakref.ref, int]] = {}
 
         def pack(tensor: torch.Tensor):
             """Called during forward when autograd saves a tensor."""
+            # Skip non-CUDA tensors
             if not tensor.is_cuda:
                 packed = {
                     "device": tensor.device,
@@ -56,23 +68,37 @@ class ActivationOffloadHooks(torch.autograd.graph.saved_tensors_hooks):
                 self.packed_tensors.append(packed)
                 return len(self.packed_tensors) - 1
 
-            # Async copy to pinned CPU memory on separate stream
-            cpu_buffer = torch.empty(tensor.shape, dtype=tensor.dtype, pin_memory=True)
-            if self.d2h_stream is not None:
-                # Record event on current stream, then have d2h_stream wait for it
-                # This ensures the tensor is ready before we copy it
-                current_stream = torch.cuda.current_stream(tensor.device)
-                ready_event = torch.cuda.Event()
-                ready_event.record(current_stream)
-                self.d2h_stream.wait_event(ready_event)
+            # Skip model parameters — they should stay on GPU.
+            if isinstance(tensor, nn.Parameter):
+                packed = {
+                    "device": tensor.device,
+                    "cpu_data": None,
+                    "gpu_data": tensor,
+                    "prefetch_event": None,
+                    "d2h_event": None,
+                    "state": "ready",
+                }
+                self.packed_tensors.append(packed)
+                return len(self.packed_tensors) - 1
 
-                with torch.cuda.stream(self.d2h_stream):
-                    cpu_buffer.copy_(tensor, non_blocking=True)
-                    d2h_event = torch.cuda.Event()
-                    d2h_event.record()
-            else:
-                cpu_buffer.copy_(tensor)
-                d2h_event = None
+            # Deduplicate: if this exact tensor was already packed, reuse it
+            dptr = tensor.data_ptr()
+            if dptr in self._dedup:
+                ref, idx = self._dedup[dptr]
+                if ref() is tensor:
+                    return idx
+                del self._dedup[dptr]
+
+            # Copy to pinned CPU on the current stream (like save_on_cpu).
+            # Copying on the current stream lets the caching allocator reuse
+            # the GPU block as soon as the copy finishes, which is ordered
+            # before any subsequent compute. Using a separate d2h_stream
+            # would require record_stream, which holds GPU blocks until
+            # d2h_stream catches up and defeats the memory savings.
+            cpu_buffer = torch.empty(tensor.shape, dtype=tensor.dtype, pin_memory=True)
+            cpu_buffer.copy_(tensor, non_blocking=True)
+            d2h_event = torch.cuda.Event()
+            d2h_event.record()
 
             packed = {
                 "device": tensor.device,
@@ -83,24 +109,36 @@ class ActivationOffloadHooks(torch.autograd.graph.saved_tensors_hooks):
                 "state": "on_cpu",
             }
             self.packed_tensors.append(packed)
-            return len(self.packed_tensors) - 1
+            index = len(self.packed_tensors) - 1
+            self._dedup[dptr] = (weakref.ref(tensor), index)
+            return index
 
         def unpack(index: int):
             """Called during backward when autograd needs the tensor."""
             packed = self.packed_tensors[index]
             if packed["state"] == "ready":
-                return packed["gpu_data"] or packed["cpu_data"]
+                # Parameters and non-CUDA tensors
+                if packed["gpu_data"] is not None:
+                    return packed["gpu_data"]
+                return packed["cpu_data"]
             if packed["state"] == "prefetching":
                 if packed["prefetch_event"]:
                     torch.cuda.current_stream().wait_event(packed["prefetch_event"])
-                packed["state"] = "ready"
-                return packed["gpu_data"]
-            # Sync fallback: wait for D2H then do sync H2D
+                # Move gpu_data out of packed so we don't hold the reference.
+                # Keep cpu_data for potential re-unpack (deduplication).
+                gpu_data = packed["gpu_data"]
+                packed["gpu_data"] = None
+                packed["prefetch_event"] = None
+                packed["state"] = "on_cpu"
+                return gpu_data
+            # Sync fallback: wait for D2H then create fresh GPU tensor.
+            # Don't cache in packed["gpu_data"] — we want autograd to be
+            # the sole owner so GPU memory is freed when backward is done
+            # with the tensor.
             if packed["d2h_event"]:
                 packed["d2h_event"].synchronize()
-            packed["gpu_data"] = packed["cpu_data"].to(packed["device"])
-            packed["state"] = "ready"
-            return packed["gpu_data"]
+                packed["d2h_event"] = None
+            return packed["cpu_data"].to(packed["device"])
 
         super().__init__(pack, unpack)
 
@@ -129,10 +167,12 @@ class ActivationOffloadHooks(torch.autograd.graph.saved_tensors_hooks):
             packed["gpu_data"] = None
             packed["cpu_data"] = None
         self.packed_tensors.clear()
+        self._dedup.clear()
 
     def reset(self):
         """Reset for next microbatch."""
         self.packed_tensors.clear()
+        self._dedup.clear()
 
 
 def _normalize_model_output_as_tuple(output: Any) -> tuple[Any]:
@@ -298,6 +338,7 @@ class _PipelineStageBase(ABC):
         # Activation offloading (enabled via schedule)
         self.enable_activation_offload = False
         self.activation_hooks: dict[int, ActivationOffloadHooks] = {}
+        self._offload_prefetch_stream: torch.cuda.Stream | None = None
 
         # Forward infra
         self.args_recv_info: dict[int, tuple[InputInfo, ...]] = {}
@@ -808,7 +849,9 @@ class _PipelineStageBase(ABC):
         # Compute forward
         try:
             if self.enable_activation_offload:
-                hooks = ActivationOffloadHooks()
+                if self._offload_prefetch_stream is None:
+                    self._offload_prefetch_stream = torch.cuda.Stream()
+                hooks = ActivationOffloadHooks(self._offload_prefetch_stream)
                 self.activation_hooks[fwd_chunk_id] = hooks
                 with hooks:
                     output = self.forward_maybe_with_nosync(
