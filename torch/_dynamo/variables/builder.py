@@ -498,7 +498,7 @@ class VariableBuilder:
                 side_effect_result.set_nn_module_stack_source(self.source)
             return side_effect_result
 
-        cached_vt = self.tx.output.variable_tracker_cache.lookup(value, self.source)
+        cached_vt = self.tx.output.variable_tracker_cache.get(self.source)
         if cached_vt:
             # If allow_lazy_constant=False but the cached VT is a lazy variable,
             # we need to rebuild to get a non-lazy version. This happens when
@@ -532,7 +532,13 @@ class VariableBuilder:
         ):
             vt = self.tx.output.side_effects.track_object_existing(value, vt)
 
-        self.tx.output.variable_tracker_cache.add(value, self.source, vt)
+        # Skip caching for JVP_NESTING source because
+        # JvpIncrementNestingCtxManagerVariable hides global JVP mutation from
+        # Dynamo, resulting in stale value. We attempted a fix in
+        # https://github.com/pytorch/pytorch/pull/174329 but it exposed other
+        # issues.  This only affects cache hit rate, NOT correctness.
+        if "JVP_NESTING" not in self.source.name:
+            self.tx.output.variable_tracker_cache[self.source] = vt
         return vt
 
     def _can_lift_attrs_to_inputs(self, vt: VariableTracker) -> bool:
@@ -590,8 +596,10 @@ class VariableBuilder:
         ]
 
         if trace_numpy and np:
+            # pyrefly: ignore [bad-argument-type]
             entries.append((np.ndarray, cls.wrap_numpy_ndarray))
 
+        # pyrefly: ignore [implicit-any]
         result = {}
         for ts, fn in entries:
             for t in ts if isinstance(ts, tuple) else (ts,):
@@ -647,9 +655,7 @@ class VariableBuilder:
                 ],
             )
 
-        def build_key_value(
-            k: Any, v: Any
-        ) -> tuple[VariableTracker, LazyVariableTracker]:
+        def build_key_value(k: Any, v: Any) -> tuple[VariableTracker, VariableTracker]:
             key = ConstantVariable.create(k)
             source_key = k
 
@@ -686,6 +692,7 @@ class VariableBuilder:
             (torch.__version__, lambda self, value: TorchVersionVariable()),
         ]
 
+        # pyrefly: ignore [implicit-any]
         result = {}
         for ts, fn in entries:
             for t in ts if isinstance(ts, (tuple, list)) else (ts,):
@@ -822,7 +829,7 @@ class VariableBuilder:
             # _HashableTracker class in dicts.py
             def build_key_value(
                 i: Any, k: Any, v: Any
-            ) -> tuple[LazyVariableTracker, LazyVariableTracker]:
+            ) -> tuple[VariableTracker, VariableTracker]:
                 base = self.get_source()
                 if all_const:
                     key = ConstantVariable.create(k)
@@ -1635,7 +1642,7 @@ class VariableBuilder:
             # _HashableTracker class in dicts.py
             def build_key_value(
                 i: Any, k: Any, v: Any
-            ) -> tuple[LazyVariableTracker, LazyVariableTracker]:
+            ) -> tuple[VariableTracker, VariableTracker]:
                 base = self.get_source()
                 source_key = ConstDictKeySource(base, i)
                 key = LazyVariableTracker.create(k, source_key)
@@ -2962,6 +2969,7 @@ def _dataclasses_fields_lambda(obj: VariableTracker) -> TupleVariable:
             base_src = AttrSource(obj.source, "__dataclass_fields__")
             source = DictGetItemSource(base_src, field.name)
         items.append(UserDefinedObjectVariable(field, source=source))
+    # pyrefly: ignore [bad-argument-type]
     return TupleVariable(items)
 
 
@@ -3610,9 +3618,12 @@ def record_automatic_dynamic(
         candidates = {}
         for i_stride, neg_i in pending:
             i = -neg_i
+            # pyrefly: ignore [unsupported-operation]
             stride[i] = candidates.get(i_stride, i_stride)
+            # pyrefly: ignore [no-matching-overload]
             candidates.setdefault(i_stride * ex_size[i], InferStride(i))
     else:
+        # pyrefly: ignore [implicit-any]
         stride = []
 
     return process_automatic_dynamic(
@@ -3756,6 +3767,7 @@ def _automatic_dynamic(
     # TODO: index export_constraints ahead of time so we don't have to
     # do a linear scan every time here
     t_id = id(e)
+    # pyrefly: ignore [implicit-any]
     dim2constraint = {}
 
     def update_dim2constraint(
@@ -3825,7 +3837,9 @@ def _automatic_dynamic(
             # into the mutable state
             log.debug("automatic dynamic %s marked dynamic", name)
             mark_size = [auto_unset] * e.dim()
+            # pyrefly: ignore [unsupported-operation]
             mark_size[i] = auto_dynamic
+            # pyrefly: ignore [bad-argument-type]
             frame_state_entry |= FrameStateSizeEntry.make_size(size=mark_size)
 
         # NB: both static and dynamic have precedence over
@@ -3930,6 +3944,7 @@ def _automatic_dynamic(
         dynamic_sizes=dynamic_sizes,
         dynamic_strides=dynamic_strides,
         constraint_sizes=constraint_sizes,
+        # pyrefly: ignore [bad-argument-type]
         constraint_strides=constraint_strides,
         specialize_on=specialize_on,
         view_base_context=view_base_context,

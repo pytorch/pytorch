@@ -427,7 +427,7 @@ class OptimizedModule(torch.nn.Module):
 
     def __len__(self) -> int:
         # Proxy the len call to the original module
-        # pyrefly: ignore [invalid-argument]
+        # pyrefly: ignore [invalid-argument, unsafe-overlap]
         if isinstance(self._orig_mod, Sized):
             return len(self._orig_mod)
         # Mimic python's default behavior for objects without a length
@@ -625,12 +625,22 @@ def innermost_fn(
     function. TorchDynamo caches on fn.__code__ object, so its necessary to find
     the innermost function to pass on the optimize, run, disable etc.
     """
+    # Don't unwrap bound methods. When a method is decorated at class definition
+    # time, _torchdynamo_orig_callable is set on the wrapper function. Accessing
+    # this attribute on a bound method delegates to __func__, which would return
+    # the unbound original function and lose the self binding.
+    if isinstance(fn, types.MethodType):
+        return fn
+
     unaltered_fn = fn
     while hasattr(unaltered_fn, unaltered_fn_attr):
         unaltered_fn = getattr(unaltered_fn, unaltered_fn_attr)
         assert callable(unaltered_fn), (
             f"A callable function is expected, but {type(unaltered_fn)} is provided."
         )
+        # Stop unwrapping if we hit a bound method
+        if isinstance(unaltered_fn, types.MethodType):
+            break
     return unaltered_fn
 
 
@@ -1362,6 +1372,7 @@ def argument_names(
             and p.default is not inspect.Parameter.empty
         }
         # Get annotations for parameters and return value
+        # pyrefly: ignore [implicit-any]
         annotations = {}
         if sig.return_annotation:
             annotations = {"return": sig.return_annotation}
@@ -1729,6 +1740,7 @@ class FlattenInputOutputSignature(torch.fx.Transformer):
     ) -> Any:
         dynamo_result_flat = args[0]
         lookup = [*dynamo_result_flat, *self.new_args]  # type: ignore[misc]
+        # pyrefly: ignore [implicit-any]
         new_results_flat = []
         for i in range(len(self.flat_results)):
             if self.matched_output_elements_positions[i] is not None:
@@ -1781,6 +1793,7 @@ class ExportResult(NamedTuple):
 
 # NOTE: this function only supports graphs created by Dynamo's OutputGraph module
 def check_signature_rewritable(graph: torch.fx.GraphModule) -> None:
+    # pyrefly: ignore [implicit-any]
     input_errors = []
     for node in graph.graph.find_nodes(op="placeholder"):
         # set in OutputGraph._call_user_compiler

@@ -153,6 +153,7 @@ try:
     else:
         NP_SUPPORTED_MODULES = ()
 
+        # pyrefly: ignore [implicit-any]
         NP_TO_TNP_MODULE = {}
     from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
 except ImportError:
@@ -207,7 +208,7 @@ class ReinplaceCounters:
     @classmethod
     def add_missed_opportunities(cls, trigger: ReInplaceTrigger, count: int) -> None:
         if count != 0:
-            cls._values[f"missed_tensors_{trigger}"] += count
+            cls._values[f"missed_tensors_{trigger.name}"] += count
 
     @classmethod
     def clear(cls) -> None:
@@ -217,7 +218,7 @@ class ReinplaceCounters:
     def get_total_missed(cls) -> int:
         sum = 0
         for trigger in ReInplaceTrigger:
-            sum += cls._values.get(f"missed_tensors_{trigger}", 0)
+            sum += cls._values.get(f"missed_tensors_{trigger.name}", 0)
         return sum
 
     @classmethod
@@ -1992,6 +1993,7 @@ class ChromiumEventLogger:
             event_metadata = all_event_data[event_name]
             del all_event_data[event_name]
         else:
+            # pyrefly: ignore [implicit-any]
             event_metadata = {}
         # Add the passed in metadata
         event_metadata.update(metadata)
@@ -2199,6 +2201,29 @@ def clone_tensor(x: torch.Tensor) -> torch.Tensor:
     return y
 
 
+def _copy_dynamo_attr(src: torch.Tensor, dst: torch.Tensor, attr: str) -> None:
+    """Copy a single dynamo attribute from src to dst, or remove it from dst if src doesn't have it."""
+    if hasattr(src, attr):
+        setattr(dst, attr, getattr(src, attr).copy())
+    elif hasattr(dst, attr):
+        delattr(dst, attr)
+
+
+def copy_dynamo_tensor_attributes(src: torch.Tensor, dst: torch.Tensor) -> None:
+    """
+    Copy dynamo-specific tensor attributes from src to dst.
+    These attributes are used for dynamic shape marking and must be preserved
+    when cloning or casting tensors. If src doesn't have an attribute but dst does,
+    the attribute is removed from dst.
+    """
+    _copy_dynamo_attr(src, dst, "_dynamo_dynamic_indices")
+    _copy_dynamo_attr(src, dst, "_dynamo_unbacked_indices")
+    _copy_dynamo_attr(src, dst, "_dynamo_hint_overrides")
+    _copy_dynamo_attr(src, dst, "_dynamo_shape_ids")
+    _copy_dynamo_attr(src, dst, "_dynamo_strict_unbacked_indices")
+    _copy_dynamo_attr(src, dst, "_dynamo_weak_dynamic_indices")
+
+
 def clone_input(
     x: torch.Tensor, *, dtype: Optional[torch.dtype] = None
 ) -> torch.Tensor:
@@ -2214,8 +2239,7 @@ def clone_input(
             y.requires_grad_(x.requires_grad)
         if x.is_leaf and x.grad is not None:
             y.grad = clone_input(x.grad, dtype=dtype)
-        if hasattr(x, "_dynamo_dynamic_indices"):
-            y._dynamo_dynamic_indices = x._dynamo_dynamic_indices.copy()  # type: ignore[attr-defined]
+        copy_dynamo_tensor_attributes(x, y)
         return y
 
     with torch.no_grad():
@@ -2274,8 +2298,7 @@ def clone_input(
             # tensor refers to a single memory location. Please clone() the tensor before
             # performing the operation.
             return torch_clone(x)
-        if hasattr(x, "_dynamo_dynamic_indices"):
-            result._dynamo_dynamic_indices = x._dynamo_dynamic_indices.copy()  # type: ignore[attr-defined]
+        copy_dynamo_tensor_attributes(x, result)
         return result
 
 
@@ -3569,7 +3592,9 @@ def get_fake_value(
             id(arg): arg._version for arg in flat_args_kwargs if is_fake(arg)
         }
     else:
+        # pyrefly: ignore [implicit-any]
         flat_args_kwargs = []
+        # pyrefly: ignore [implicit-any]
         id_to_initial_version = {}
 
     nnmodule = None

@@ -1331,6 +1331,7 @@ def _free_unbacked_symbols_with_path(
         )
         # TODO: DivideByKey needs to test divisibility at runtime!
 
+        # pyrefly: ignore [unsupported-operation]
         r[unbacked] = path + (DivideByKey(divisor),)
         if real is not None:
             if not isinstance(real, int):
@@ -1354,6 +1355,7 @@ def _free_unbacked_symbols_with_path(
         and s.rhs == 1
         and s.lhs in pending
     ):
+        # pyrefly: ignore [unsupported-operation]
         r[s.lhs] = path + (ConvertIntKey(),)
         if real is not None:
             if type(real) is not bool:
@@ -1412,12 +1414,16 @@ def compute_unbacked_bindings(
             if isinstance(example_value, torch.Tensor)
             else ""
         )
-        raise PendingUnbackedSymbolNotFound(
+        msg = (
             f"Pending unbacked symbols {pending} not in returned outputs {example_value} {extra}.\n"
             "Did you accidentally call new_dynamic_size() or item() more times "
             "than you needed to in your fake implementation?\n"
             "For more help, see https://docs.google.com/document/d/1RWrH-3wLEpzR9kCS6gGBNen_-Fs-8PVbWWFE5AcgeWE/edit"
         )
+        if torch.fx.experimental._config.soft_pending_unbacked_not_found_error:
+            log.warning(msg)
+        else:
+            raise PendingUnbackedSymbolNotFound(msg)
 
     # Why do we have to do some rebinding here?  If the original FX node
     # wasn't a binding site because you had a memo hit, but post

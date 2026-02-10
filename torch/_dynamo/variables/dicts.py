@@ -760,36 +760,44 @@ class ConstDictVariable(VariableTracker):
             # defaultdict.
 
             # TODO(guilhermeleobas): this check should be on builtin.py::call_or_
-            if not istype(
-                other, (ConstDictVariable, variables.UserDefinedDictVariable)
+            if istype(
+                other,
+                (
+                    ConstDictVariable,
+                    variables.UserDefinedDictVariable,
+                    variables.DefaultDictVariable,
+                ),
             ):
+                # Always return the specialized dictionary, and in the case
+                # both are specialized, take the first to be the type of the
+                # new dictionary
+                if self.user_cls is not dict:
+                    user_cls = self.user_cls
+                    to_cpy = self
+                else:
+                    assert isinstance(other, ConstDictVariable)
+                    user_cls = other.user_cls
+                    to_cpy = other
+
+                to_cpy.install_dict_keys_match_guard()
+                new_dict_vt = to_cpy.clone(
+                    items=self.items.copy(),
+                    mutation_type=ValueMutationNew(),
+                    source=None,
+                    user_cls=user_cls,
+                )
+
+                # NB - Guard on all the keys of the other dict to ensure
+                # correctness.
+                args[0].install_dict_keys_match_guard()  # type: ignore[attr-defined]
+                new_dict_vt.items.update(args[0].items)  # type: ignore[attr-defined]
+                return new_dict_vt
+            else:
                 err_msg = (
                     f"unsupported operand type(s) for |: '{self.python_type().__name__}'"
                     f"and '{other.python_type().__name__}'"
                 )
                 raise_observed_exception(TypeError, tx, args=[err_msg])
-
-            # OrderedDict overloads __ror__
-            ts = {self.user_cls, other.user_cls}  # type: ignore[attr-defined]
-            user_cls = (
-                collections.OrderedDict
-                if any(issubclass(t, collections.OrderedDict) for t in ts)
-                else dict
-            )
-
-            self.install_dict_keys_match_guard()
-            new_dict_vt = self.clone(
-                items=self.items.copy(),
-                mutation_type=ValueMutationNew(),
-                source=None,
-                user_cls=user_cls,
-            )
-
-            # NB - Guard on all the keys of the other dict to ensure
-            # correctness.
-            args[0].install_dict_keys_match_guard()  # type: ignore[attr-defined]
-            new_dict_vt.items.update(args[0].items)  # type: ignore[attr-defined]
-            return new_dict_vt
         elif name == "__ior__":
             self.call_method(tx, "update", args, kwargs)
             return self
@@ -961,16 +969,14 @@ class DefaultDictVariable(ConstDictVariable):
 
     @staticmethod
     def is_supported_arg(arg: VariableTracker) -> bool:
-        if isinstance(arg, variables.BuiltinVariable):
-            return arg.fn in (list, tuple, dict, set)
-        else:
-            return isinstance(
-                arg,
-                (
-                    variables.functions.BaseUserFunctionVariable,
-                    variables.functions.PolyfilledFunctionVariable,
-                ),
-            )
+        return isinstance(
+            arg,
+            (
+                variables.BuiltinVariable,
+                variables.functions.BaseUserFunctionVariable,
+                variables.functions.PolyfilledFunctionVariable,
+            ),
+        ) or (isinstance(arg, variables.ConstantVariable) and arg.value is None)
 
     def call_method(
         self,
@@ -997,8 +1003,35 @@ class DefaultDictVariable(ConstDictVariable):
                         tx, "__setitem__", [args[0], default_var], kwargs
                     )
                     return default_var
+        elif name == "__setattr__" and self.is_mutable:
+            if len(args) != 2:
+                raise_args_mismatch(tx, name, "2 args", f"{len(args)} args")
+            # Setting a default factory must be a callable or None type
+            if (
+                istype(args[0], ConstantVariable) and args[0].value == "default_factory"
+            ) and self.is_supported_arg(args[1]):
+                tx.output.side_effects.mutation(self)
+                self.default_factory = args[1]
+                return ConstantVariable.create(None)
+            return super().call_method(tx, name, args, kwargs)
+        elif name == "__eq__":
+            if len(args) != 1:
+                raise_args_mismatch(tx, name, "1 args", f"{len(args)} args")
+
+            return variables.UserFunctionVariable(polyfills.dict___eq__).call_function(
+                tx, [self, args[0]], {}
+            )
         else:
             return super().call_method(tx, name, args, kwargs)
+
+    def var_getattr(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+    ) -> VariableTracker:
+        if name == "default_factory":
+            return self.default_factory
+        return super().var_getattr(tx, name)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         # emit `defaultdict(default_factory, new_dict)`
@@ -1038,6 +1071,7 @@ class SetVariable(ConstDictVariable):
                 realized_items.append(item)
             else:
                 # VariableTracker - realize to install guards
+                # pyrefly: ignore [bad-argument-type]
                 realized_items.append(item.realize())
         # pyrefly: ignore[bad-assignment]
         items = dict.fromkeys(realized_items, SetVariable._default_value())
@@ -1389,6 +1423,7 @@ class OrderedSetClassVariable(VariableTracker):
             )
 
         if len(args) == 0:
+            # pyrefly: ignore [implicit-any]
             items = []
         else:
             items = args[0].force_unpack_var_sequence(tx)
@@ -1604,6 +1639,8 @@ class DictViewVariable(VariableTracker):
             return ListIteratorVariable(
                 self.view_items_vt, mutation_type=ValueMutationNew()
             )
+        elif name == "__repr__":
+            return ConstantVariable.create(self.debug_repr())
         return super().call_method(tx, name, args, kwargs)
 
 
@@ -1621,6 +1658,16 @@ class DictKeysVariable(DictViewVariable):
 
     def python_type(self) -> type:
         return dict_keys
+
+    def debug_repr(self) -> str:
+        if not self.view_items:
+            return "dict_keys([])"
+        else:
+            return (
+                "dict_keys(["
+                + ",".join(f"{k.vt.debug_repr()}" for k in self.view_items)
+                + "])"
+            )
 
     def call_method(
         self,
@@ -1665,6 +1712,16 @@ class DictValuesVariable(DictViewVariable):
     def python_type(self) -> type:
         return dict_values
 
+    def debug_repr(self) -> str:
+        if not self.view_items:
+            return "dict_values([])"
+        else:
+            return (
+                "dict_values(["
+                + ",".join(f"{v.debug_repr()}" for v in self.view_items)
+                + "])"
+            )
+
 
 class DictItemsVariable(DictViewVariable):
     kv = "items"
@@ -1676,6 +1733,19 @@ class DictItemsVariable(DictViewVariable):
 
     def python_type(self) -> type:
         return dict_items
+
+    def debug_repr(self) -> str:
+        if not self.view_items:
+            return "dict_items([])"
+        else:
+            return (
+                "dict_items(["
+                + ",".join(
+                    f"({k.vt.debug_repr()}, {v.debug_repr()})"
+                    for k, v in self.view_items
+                )
+                + "])"
+            )
 
     def call_method(
         self,
