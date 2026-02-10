@@ -3847,11 +3847,7 @@ class Layout(OutputSpec):
         if ndim not in [4, 5] or shape[1] == 1:
             return False
         for left, right, size in zip(
-            # pyrefly: ignore [bad-specialization]
-            strides,
-            # pyrefly: ignore [bad-specialization]
-            make_channels_last_strides_for(shape),
-            shape,
+            strides, make_channels_last_strides_for(shape), shape
         ):
             if size != 1 and left != right:
                 return False
@@ -5764,12 +5760,9 @@ class ConcatKernel(NopKernel):
         assert isinstance(fx_node_args, list), type(fx_node_args)
         # If any of the inputs has meta tensor and the meta tensor is in CL format, use CL format for the output
         if any_input_is_storage_and_layout is False and any(
-            # pyrefly: ignore [missing-attribute]
             "val" in arg.meta
             and (
-                # pyrefly: ignore [missing-attribute]
                 arg.meta["val"].is_contiguous(memory_format=torch.channels_last)
-                # pyrefly: ignore [missing-attribute]
                 or arg.meta["val"].is_contiguous(memory_format=torch.channels_last_3d)
             )
             for arg in fx_node_args
@@ -9044,12 +9037,10 @@ class Conditional(ExternKernel):
                     ret.append(output)
                 else:
                     ret.append(
-                        # pyrefly: ignore [bad-argument-type]
                         ExternKernel.require_exact_strides(
                             TensorBox(output), fake.stride(), allow_padding=False
                         )
                     )
-            # pyrefly: ignore [bad-return]
             return ret
 
         for subgraph in (true_fn, false_fn):
