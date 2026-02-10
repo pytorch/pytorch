@@ -128,7 +128,7 @@ def run_test_plan(
             # is already a dependency of vLLM. This is needed as a stop gap to reduce
             # the number of requests to HF until #172300 can be landed to enable
             # HF offline mode
-            if step.startswith("pytest"):
+            if "pytest" in step:
                 # Use a low retry count and a high delay value to lower the risk of
                 # having a retry storm and make thing worse
                 rerun_count = os.getenv(

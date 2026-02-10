@@ -1,0 +1,42 @@
+name: Claude Issue Triage
+
+on:
+  issues:
+    types: [opened]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: "Issue number to triage (for manual runs)"
+        type: string
+        required: false
+
+jobs:
+  capture-issue:
+    if: github.repository == 'pytorch/pytorch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      contents: read
+
+    steps:
+      - name: Validate and capture issue number
+        run: |
+          ISSUE_NUM="${{ inputs.issue_number || github.event.issue.number }}"
+          if [ -z "$ISSUE_NUM" ]; then
+            echo "::error::Issue number is required. For manual runs, provide the issue_number input."
+            exit 1
+          fi
+          if [ -n "${{ inputs.issue_number }}" ] && ! [[ "$ISSUE_NUM" =~ ^[0-9]+$ ]]; then
+            echo "::error::Invalid issue number format: '$ISSUE_NUM'. Must be a positive integer."
+            exit 1
+          fi
+          echo "Capturing issue #${ISSUE_NUM} for triage"
+          echo "$ISSUE_NUM" > issue_number.txt
+
+      - name: Upload issue number artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue-triage-data
+          path: issue_number.txt
+          retention-days: 1
+          if-no-files-found: error

@@ -52,9 +52,12 @@ def _staged_schema():
             elif t in _CPP_TYPE_MAP:
                 return (t.__name__, _CPP_TYPE_MAP[t], _THRIFT_TYPE_MAP[t])
             elif isinstance(t, str):
-                assert t in defs
-                assert t not in cpp_enum_defs
-                assert "[" not in t
+                if t not in defs:
+                    raise AssertionError(f"type {t} not in defs")
+                if t in cpp_enum_defs:
+                    raise AssertionError(f"type {t} unexpectedly in cpp_enum_defs")
+                if "[" in t:
+                    raise AssertionError(f"type {t} contains '[' which is not allowed")
                 return t, f"ForwardRef<{t}>", t
             elif isinstance(t, ForwardRef):
                 return (
@@ -79,9 +82,15 @@ def _staged_schema():
                         ">",
                     )
                 elif o == Union:
-                    assert level == 0, "Optional is only supported at the top level."
+                    if level != 0:
+                        raise AssertionError(
+                            f"Optional is only supported at the top level, got level={level}"
+                        )
                     args = typing.get_args(t)
-                    assert len(args) == 2 and args[1] is type(None)
+                    if len(args) != 2 or args[1] is not type(None):
+                        raise AssertionError(
+                            f"expected Optional type with 2 args ending in None, got {args}"
+                        )
                     yaml_type, cpp_type, thrift_type = dump_type(args[0], level + 1)
                     return (
                         f"Optional[{yaml_type}]",
@@ -129,13 +138,15 @@ def _staged_schema():
             t, cpp_type, thrift_type = dump_type(f.type, 0)
             ret = {"type": t}
             cpp_default: Optional[str] = None
-            assert typing.get_origin(f.type) is Annotated, (
-                f"Field {f.name} must be annotated with an integer id."
-            )
+            if typing.get_origin(f.type) is not Annotated:
+                raise AssertionError(
+                    f"Field {f.name} must be annotated with an integer id."
+                )
             thrift_id = f.type.__metadata__[0]
-            assert type(thrift_id) is int, (
-                f"Field {f.name} must be annotated with an integer id."
-            )
+            if type(thrift_id) is not int:
+                raise AssertionError(
+                    f"Field {f.name} must be annotated with an integer id, got {type(thrift_id)}"
+                )
 
             value = dataclasses.MISSING
             if f.default is not dataclasses.MISSING:
@@ -379,14 +390,23 @@ union {name} {{
             else:
                 raise AssertionError(f"Unknown schema type {name}: {value}")
         elif isinstance(value, (int, tuple)):
-            assert name in ("SCHEMA_VERSION", "TREESPEC_VERSION")
+            if name not in ("SCHEMA_VERSION", "TREESPEC_VERSION"):
+                raise AssertionError(
+                    f"expected SCHEMA_VERSION or TREESPEC_VERSION, got {name}"
+                )
         else:
             raise AssertionError(f"Unknown variable {name}: {value}")
 
     yaml_ret["SCHEMA_VERSION"] = list(defs["SCHEMA_VERSION"])
-    assert all(x > 0 for x in yaml_ret["SCHEMA_VERSION"])
+    if not all(x > 0 for x in yaml_ret["SCHEMA_VERSION"]):
+        raise AssertionError(
+            f"all SCHEMA_VERSION values must be > 0, got {yaml_ret['SCHEMA_VERSION']}"
+        )
     yaml_ret["TREESPEC_VERSION"] = defs["TREESPEC_VERSION"]
-    assert yaml_ret["TREESPEC_VERSION"] > 0
+    if yaml_ret["TREESPEC_VERSION"] <= 0:
+        raise AssertionError(
+            f"TREESPEC_VERSION must be > 0, got {yaml_ret['TREESPEC_VERSION']}"
+        )
 
     cpp_header = f"""
 #pragma once
@@ -551,7 +571,10 @@ def _diff_schema(dst, src):
             src_kind == dst_kind,
             f"Type {key} changed kind from {dst_kind} to {src_kind}",
         )
-        assert isinstance(src_fields, dict) and isinstance(dst_fields, dict)
+        if not isinstance(src_fields, dict) or not isinstance(dst_fields, dict):
+            raise AssertionError(
+                f"expected dict fields, got src={type(src_fields)}, dst={type(dst_fields)}"
+            )
         added_fields = {
             key: src_fields[key] for key in src_fields.keys() - dst_fields.keys()
         }
@@ -587,11 +610,13 @@ def _diff_schema(dst, src):
             else:
                 raise AssertionError(f"Unknown kind {src_kind}: {key}")
         if len(added_fields) > 0:
-            assert key not in additions
+            if key in additions:
+                raise AssertionError(f"key {key} already in additions")
             additions[key] = {}
             additions[key]["fields"] = added_fields
         if len(subtracted_fields) > 0:
-            assert key not in subtractions
+            if key in subtractions:
+                raise AssertionError(f"key {key} already in subtractions")
             subtractions[key] = {}
             subtractions[key]["fields"] = subtracted_fields
 
@@ -629,7 +654,8 @@ def update_schema():
         content = importlib.resources.read_text(__package__, "schema.yaml")
         match = re.search("checksum<<([A-Fa-f0-9]{64})>>", content)
         _check(match is not None, "checksum not found in schema.yaml")
-        assert match is not None
+        if match is None:
+            raise AssertionError("checksum not found in schema.yaml")
         checksum_head = match.group(1)
 
         thrift_content = importlib.resources.read_text(
@@ -639,17 +665,25 @@ def update_schema():
         )
         match = re.search("checksum<<([A-Fa-f0-9]{64})>>", thrift_content)
         _check(match is not None, "checksum not found in export_schema.thrift")
-        assert match is not None
+        if match is None:
+            raise AssertionError("checksum not found in export_schema.thrift")
         thrift_checksum_head = match.group(1)
         thrift_content = thrift_content.splitlines()
-        assert thrift_content[0].startswith("// @" + "generated")
-        assert thrift_content[1].startswith("// checksum<<")
+        if not thrift_content[0].startswith("// @" + "generated"):
+            raise AssertionError(
+                f"expected first line to start with '// @generated', got {thrift_content[0]!r}"
+            )
+        if not thrift_content[1].startswith("// checksum<<"):
+            raise AssertionError(
+                f"expected second line to start with '// checksum<<', got {thrift_content[1]!r}"
+            )
         thrift_checksum_real = _hash_content("\n".join(thrift_content[2:]))
 
         from yaml import load, Loader
 
         dst = load(content, Loader=Loader)
-        assert isinstance(dst, dict)
+        if not isinstance(dst, dict):
+            raise AssertionError(f"expected dict from yaml, got {type(dst)}")
     else:
         checksum_head = None
         thrift_checksum_head = None
@@ -663,8 +697,14 @@ def update_schema():
     # pyrefly: ignore [missing-attribute]
     thrift_schema_path = __package__.replace(".", "/") + "/export_schema.thrift"
     torch_prefix = "torch/"
-    assert yaml_path.startswith(torch_prefix)  # sanity check
-    assert thrift_schema_path.startswith(torch_prefix)  # sanity check
+    if not yaml_path.startswith(torch_prefix):
+        raise AssertionError(
+            f"yaml_path must start with {torch_prefix}, got {yaml_path}"
+        )
+    if not thrift_schema_path.startswith(torch_prefix):
+        raise AssertionError(
+            f"thrift_schema_path must start with {torch_prefix}, got {thrift_schema_path}"
+        )
 
     return _Commit(
         result=src,

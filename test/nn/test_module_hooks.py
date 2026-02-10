@@ -641,10 +641,18 @@ class TestStateDictHooks(TestCase):
                 unexpected_keys,
                 error_msgs,
             ):
-                assert [] == error_msgs
-                assert [] == unexpected_keys
-                assert [] == missing_keys
-                assert strict
+                if error_msgs != []:
+                    raise AssertionError(f"Expected empty error_msgs, got {error_msgs}")
+                if unexpected_keys != []:
+                    raise AssertionError(
+                        f"Expected empty unexpected_keys, got {unexpected_keys}"
+                    )
+                if missing_keys != []:
+                    raise AssertionError(
+                        f"Expected empty missing_keys, got {missing_keys}"
+                    )
+                if not strict:
+                    raise AssertionError("Expected strict to be True")
                 nonlocal hook_called
                 hook_called += 1
 
@@ -659,11 +667,20 @@ class TestStateDictHooks(TestCase):
                 unexpected_keys,
                 error_msgs,
             ):
-                assert [] == error_msgs
-                assert [] == unexpected_keys
-                assert [] == missing_keys
-                assert strict
-                assert self is module
+                if error_msgs != []:
+                    raise AssertionError(f"Expected empty error_msgs, got {error_msgs}")
+                if unexpected_keys != []:
+                    raise AssertionError(
+                        f"Expected empty unexpected_keys, got {unexpected_keys}"
+                    )
+                if missing_keys != []:
+                    raise AssertionError(
+                        f"Expected empty missing_keys, got {missing_keys}"
+                    )
+                if not strict:
+                    raise AssertionError("Expected strict to be True")
+                if self is not module:
+                    raise AssertionError("Expected self is module")
                 nonlocal hook_called
                 hook_called += 1
 
@@ -704,7 +721,8 @@ class TestStateDictHooks(TestCase):
                 self.foo = torch.nn.Parameter(torch.rand(10))
 
             def my_post_load_hook(self, module, incompatible_keys):
-                assert module is self
+                if module is not self:
+                    raise AssertionError("Expected module is self")
                 nonlocal hook_called
                 incompatible_keys.missing_keys.append("foo")
                 incompatible_keys.unexpected_keys.append("bar")

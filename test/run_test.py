@@ -30,6 +30,7 @@ from torch.testing._internal.common_utils import (
     get_report_path,
     IS_CI,
     IS_MACOS,
+    isRocmArchAnyOf,
     retry_shell,
     set_cwd,
     shell,
@@ -191,12 +192,16 @@ ROCM_BLOCKLIST = [
     "distributed/rpc/test_tensorpipe_agent",
     "distributed/rpc/test_share_memory",
     "distributed/rpc/cuda/test_tensorpipe_agent",
-    "inductor/test_max_autotune",  # taking excessive time, many tests >30 min
     "test_determination",
     "test_jit_legacy",
     "test_cuda_nvml_based_avail",
     "test_jit_cuda_fuser",
 ]
+
+# Add architecture-specific blocklist entries
+if TEST_WITH_ROCM and isRocmArchAnyOf(("gfx1100",)):
+    # Some autotune tests on gfx1100 are hanging, disable for now
+    ROCM_BLOCKLIST.append("inductor/test_max_autotune")
 
 S390X_BLOCKLIST = [
     # these tests fail due to various reasons
@@ -523,7 +528,10 @@ def run_test(
         ]
 
     if extra_unittest_args:
-        assert isinstance(extra_unittest_args, list)
+        if not isinstance(extra_unittest_args, list):
+            raise AssertionError(
+                f"extra_unittest_args must be a list, got {type(extra_unittest_args)}"
+            )
         unittest_args.extend(extra_unittest_args)
 
     # If using pytest, replace -f with equivalent -x
@@ -694,7 +702,8 @@ def install_cpp_extensions(extensions_dir, env=os.environ):
     )
     install_directory = os.path.join(extensions_dir, "install", platlib_rel)
 
-    assert install_directory, "install_directory must not be empty"
+    if not install_directory:
+        raise AssertionError("install_directory must not be empty")
     return install_directory, 0
 
 
@@ -1273,9 +1282,10 @@ def get_pytest_args(options, is_cpp_test=False, is_distributed_test=False):
 
 
 def run_ci_sanity_check(test: ShardedTest, test_directory, options):
-    assert test.name == "test_ci_sanity_check_fail", (
-        f"This handler only works for test_ci_sanity_check_fail, got {test.name}"
-    )
+    if test.name != "test_ci_sanity_check_fail":
+        raise AssertionError(
+            f"This handler only works for test_ci_sanity_check_fail, got {test.name}"
+        )
     ret_code = run_test(test, test_directory, options, print_log=False)
     # This test should fail
     if ret_code != 1:
@@ -1391,7 +1401,9 @@ def parse_args():
         "--mps",
         "--mps",
         action="store_true",
-        help=("If this flag is present, we will only run test_mps and test_metal"),
+        help=(
+            "If this flag is present, we will only run subset of tests, such as test_mps, test_nn, ..."
+        ),
     )
     parser.add_argument(
         "--xpu",
@@ -1679,7 +1691,9 @@ def get_selected_tests(options) -> list[str]:
         options.exclude.extend(CPP_TESTS)
 
     if options.mps:
+        os.environ["PYTORCH_TEST_OPS_ONLY_MPS"] = "1"
         selected_tests = [
+            "test_ops",
             "test_mps",
             "test_metal",
             "test_modules",
@@ -1860,12 +1874,15 @@ def load_test_class_times(
 def get_sharding_opts(options) -> tuple[int, int]:
     which_shard, num_shards = 1, 1
     if options.shard:
-        assert len(options.shard) == 2, "Unexpected shard format"
-        assert min(options.shard) > 0, "Shards must be positive numbers"
+        if len(options.shard) != 2:
+            raise AssertionError("Unexpected shard format")
+        if min(options.shard) <= 0:
+            raise AssertionError("Shards must be positive numbers")
         which_shard, num_shards = options.shard
-        assert which_shard <= num_shards, (
-            "Selected shard must be less than or equal to total number of shards"
-        )
+        if which_shard > num_shards:
+            raise AssertionError(
+                "Selected shard must be less than or equal to total number of shards"
+            )
 
     return (which_shard, num_shards)
 
@@ -1913,9 +1930,10 @@ def run_test_module(
         print_to_stderr(
             f"Finished {str(test)} ... [{datetime.now()}][{end}], took {(end - start) / 60:.2f}min"
         )
-        assert isinstance(return_code, int) and not isinstance(return_code, bool), (
-            f"While running {str(test)} got non integer return code {return_code}"
-        )
+        if not isinstance(return_code, int) or isinstance(return_code, bool):
+            raise AssertionError(
+                f"While running {str(test)} got non integer return code {return_code}"
+            )
         if return_code == 0:
             return None
 
