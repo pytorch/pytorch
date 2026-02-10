@@ -185,7 +185,7 @@ def is_bw() -> bool:
 @dataclass
 class ShardPlacementResult:
     placement: Optional[Shard]
-    mesh_info: "FSDPMeshInfo"
+    mesh_info: FSDPMeshInfo
 
 
 ShardPlacementFnResult = Shard | ShardPlacementResult | None
@@ -193,7 +193,7 @@ ShardPlacementFnResult = Shard | ShardPlacementResult | None
 
 def resolve_shard_placement(
     result: ShardPlacementFnResult,
-    default_mesh_info: "FSDPMeshInfo",
+    default_mesh_info: FSDPMeshInfo,
 ) -> ShardPlacementResult:
     """Resolve the shard_placement_fn result to a ShardPlacementResult.
 
