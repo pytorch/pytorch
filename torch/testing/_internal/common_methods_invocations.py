@@ -9974,7 +9974,8 @@ class foreach_norm_sample_func(foreach_inputs_sample_func):
                          for i in range(1, 5)]
             else:
                 # linalg.vector_norm cannot compute the inf norm on an empty tensor because the operation does not have an identity
-                _foreach_inputs_kwargs["intersperse_empty_tensors"] = ord != float('inf')
+                # empty tensors have dim() == 1 thus dim = -2 does not work if they are in the list.
+                _foreach_inputs_kwargs["intersperse_empty_tensors"] = ord != float('inf') and dim != -2
                 input = sample_inputs_foreach(None, device, dtype, 20, zero_size=False, **_foreach_inputs_kwargs)
 
             disable_fastpath = dtype not in floating_types_and(torch.half, torch.bfloat16)

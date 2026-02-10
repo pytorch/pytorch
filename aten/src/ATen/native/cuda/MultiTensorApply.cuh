@@ -425,10 +425,10 @@ void multi_tensor_apply_dim(
     tensorListMeta.prod_of_other_dim[loc_tensor_info] = c10::multiply_integers(
         tensor.sizes().begin(), tensor.sizes().end() - 2);
 
-    for (int d = 0; d < depth; d++) {
-      tensorListMeta.addresses[d][loc_tensor_info] =
-          tensor_lists[d][t].const_data_ptr();
-    }
+    tensorListMeta.addresses[0][loc_tensor_info] =
+        tensor_lists[0][t].const_data_ptr();
+    tensorListMeta.addresses[1][loc_tensor_info] =
+        tensor_lists[1][t].mutable_data_ptr();
     loc_tensor_info++;
 
     int outer_dim_size =
