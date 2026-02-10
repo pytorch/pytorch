@@ -291,6 +291,7 @@ from .torch_function import (
 )
 from .user_defined import (
     FrozenDataClassVariable,
+    InspectVariable,
     IntWrapperVariable,
     KeyedJaggedTensorVariable,
     MutableMappingVariable,
@@ -498,7 +499,7 @@ class VariableBuilder:
                 side_effect_result.set_nn_module_stack_source(self.source)
             return side_effect_result
 
-        cached_vt = self.tx.output.variable_tracker_cache.lookup(value, self.source)
+        cached_vt = self.tx.output.variable_tracker_cache.get(self.source)
         if cached_vt:
             # If allow_lazy_constant=False but the cached VT is a lazy variable,
             # we need to rebuild to get a non-lazy version. This happens when
@@ -532,7 +533,13 @@ class VariableBuilder:
         ):
             vt = self.tx.output.side_effects.track_object_existing(value, vt)
 
-        self.tx.output.variable_tracker_cache.add(value, self.source, vt)
+        # Skip caching for JVP_NESTING source because
+        # JvpIncrementNestingCtxManagerVariable hides global JVP mutation from
+        # Dynamo, resulting in stale value. We attempted a fix in
+        # https://github.com/pytorch/pytorch/pull/174329 but it exposed other
+        # issues.  This only affects cache hit rate, NOT correctness.
+        if "JVP_NESTING" not in self.source.name:
+            self.tx.output.variable_tracker_cache[self.source] = vt
         return vt
 
     def _can_lift_attrs_to_inputs(self, vt: VariableTracker) -> bool:
@@ -647,9 +654,7 @@ class VariableBuilder:
                 ],
             )
 
-        def build_key_value(
-            k: Any, v: Any
-        ) -> tuple[VariableTracker, LazyVariableTracker]:
+        def build_key_value(k: Any, v: Any) -> tuple[VariableTracker, VariableTracker]:
             key = ConstantVariable.create(k)
             source_key = k
 
@@ -822,7 +827,7 @@ class VariableBuilder:
             # _HashableTracker class in dicts.py
             def build_key_value(
                 i: Any, k: Any, v: Any
-            ) -> tuple[LazyVariableTracker, LazyVariableTracker]:
+            ) -> tuple[VariableTracker, VariableTracker]:
                 base = self.get_source()
                 if all_const:
                     key = ConstantVariable.create(k)
@@ -1635,7 +1640,7 @@ class VariableBuilder:
             # _HashableTracker class in dicts.py
             def build_key_value(
                 i: Any, k: Any, v: Any
-            ) -> tuple[LazyVariableTracker, LazyVariableTracker]:
+            ) -> tuple[VariableTracker, VariableTracker]:
                 base = self.get_source()
                 source_key = ConstDictKeySource(base, i)
                 key = LazyVariableTracker.create(k, source_key)
@@ -1802,7 +1807,10 @@ class VariableBuilder:
 
     def wrap_user_defined(self, value: Any) -> VariableTracker:
         self.install_guards(GuardBuilder.TYPE_MATCH)
-        result = UserDefinedObjectVariable(value, source=self.source)
+        if InspectVariable.is_matching_object(value):
+            result = InspectVariable(value, source=self.source)
+        else:
+            result = UserDefinedObjectVariable(value, source=self.source)
         if not SideEffects.cls_supports_mutation_side_effects(type(value)):
             # don't allow STORE_ATTR mutation with custom __setattr__
             return result

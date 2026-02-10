@@ -20,7 +20,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_fsdp import get_devtype
 from torch.testing._internal.common_utils import parametrize, run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
+    DTensorContinuousTestBase,
     skip_if_lt_x_gpu,
     with_comms,
 )
@@ -48,7 +48,7 @@ class DenseModel(torch.nn.Module):
 
 
 # TODO: Consolidate DeviceMesh based FSDP and HSDP test cases.
-class TestHSDPWithDeviceMeshAndDTensor(DTensorTestBase):
+class TestHSDPWithDeviceMeshAndDTensor(DTensorContinuousTestBase):
     def _create_model(self, device, device_mesh=None):
         device_id = device_type
         if device_mesh:
