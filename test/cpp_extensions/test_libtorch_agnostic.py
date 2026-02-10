@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 
 import torch
+from torch._dynamo.testing import CompileCounter
 from torch.testing._internal.common_cuda import _get_torch_cuda_version
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
@@ -27,9 +28,28 @@ from torch.testing._internal.common_utils import (
 )
 
 
+def _torchVersionLessThan(major, minor):
+    version_parts = torch.__version__.split(".")
+    current_major = int(version_parts[0])
+    current_minor = int(
+        version_parts[1].split("+")[0].split("a")[0].split("b")[0].split("rc")[0]
+    )
+    return (current_major < major) or (current_major == major and current_minor < minor)
+
+
+def skipIfTorchVersionLessThan(major, minor):
+    """Skip test if PyTorch version is less than specified version."""
+
+    def decorator(func):
+        reason = f"Test requires PyTorch >= {major}.{minor}, current version is {torch.__version__}"
+        return unittest.skipIf(_torchVersionLessThan(major, minor), reason)(func)
+
+    return decorator
+
+
 def get_supported_dtypes():
     """Return a list of dtypes that are supported by torch stable ABI."""
-    return [
+    supported_by_2_10 = [
         torch.int8,
         torch.int16,
         torch.int32,
@@ -52,25 +72,14 @@ def get_supported_dtypes():
         torch.bool,
     ]
 
+    supported_by_2_11 = [
+        torch.float8_e8m0fnu,
+        torch.float4_e2m1fn_x2,
+    ]
 
-def skipIfTorchVersionLessThan(major, minor):
-    """Skip test if PyTorch version is less than specified version."""
-
-    def decorator(func):
-        version_parts = torch.__version__.split(".")
-        current_major = int(version_parts[0])
-        current_minor = int(
-            version_parts[1].split("+")[0].split("a")[0].split("b")[0].split("rc")[0]
-        )
-
-        should_skip = (current_major < major) or (
-            current_major == major and current_minor < minor
-        )
-        reason = f"Test requires PyTorch >= {major}.{minor}, current version is {torch.__version__}"
-
-        return unittest.skipIf(should_skip, reason)(func)
-
-    return decorator
+    return supported_by_2_10 + (
+        supported_by_2_11 if not _torchVersionLessThan(2, 11) else []
+    )
 
 
 @unittest.skipIf(
@@ -275,6 +284,27 @@ class TestLibtorchAgnostic(TestCase):
                 curr_mem = torch.cuda.memory_allocated(device)
                 self.assertEqual(curr_mem, init_mem)
 
+    @xfailIfTorchDynamo
+    @skipIfTorchVersionLessThan(2, 11)  # Requires 2.11 for Float8_e8m0fnu support
+    def test_my_ones_like_with_Float8_e8m0fnu(self, device):
+        import libtorch_agn_2_11 as libtorch_agnostic
+
+        t = torch.zeros(3, 1, device=device, dtype=torch.float8_e8m0fnu)
+        cpu_t = libtorch_agnostic.ops.my_ones_like(t, "cpu")
+        self.assertEqual(cpu_t, torch.ones_like(t, device="cpu"))
+
+        def _make_cuda_tensors(prior_mem):
+            cuda_t = libtorch_agnostic.ops.my_ones_like(t, device)
+            self.assertGreater(torch.cuda.memory_allocated(device), prior_mem)
+            self.assertEqual(cuda_t, torch.ones_like(t, device=device))
+
+        if t.is_cuda:
+            init_mem = torch.cuda.memory_allocated(device)
+            for _ in range(3):
+                _make_cuda_tensors(init_mem)
+                curr_mem = torch.cuda.memory_allocated(device)
+                self.assertEqual(curr_mem, init_mem)
+
     def test_my_transpose(self, device):
         import libtorch_agn_2_9 as libtorch_agnostic
 
@@ -371,6 +401,39 @@ class TestLibtorchAgnostic(TestCase):
         out0 = libtorch_agnostic.ops.my_narrow(t, dim0, start0, length0)
         expected0 = torch.narrow(t, dim0, start0, length0)
         self.assertEqual(out0, expected0)
+
+    @onlyCPU
+    def test_my_narrow_symint(self, device):
+        op = torch.ops.libtorch_agn_2_9.my_narrow_symint
+
+        t1 = torch.randn(4, 5, device=device)
+        out = op(t1, 0, 1, 2)
+        expected = torch.narrow(t1, 0, 1, 2)
+        self.assertEqual(out, expected)
+
+        torch.library.opcheck(
+            torch.ops.libtorch_agn_2_9.my_narrow_symint,
+            (t1, 0, 1, 2),
+        )
+
+        # Below is a real example to confirm recompilation doesn't happen
+        # Wrap in a function so shape computation happens inside the compiled
+        # region — t.shape[0] becomes a symbolic SymInt during tracing
+        def fn(t):
+            return op(t, 0, 2, t.shape[0] - 2)
+
+        cnt = CompileCounter()
+        compiled_fn = torch.compile(fn, dynamic=True, backend=cnt)
+
+        out2 = compiled_fn(t1)
+        self.assertEqual(out2, torch.narrow(t1, 0, 2, t1.shape[0] - 2))
+        self.assertEqual(cnt.frame_count, 1)
+
+        # Second call with different shape should not recompile
+        t2 = torch.randn(6, 3, device=device)
+        out3 = compiled_fn(t2)
+        self.assertEqual(out3, torch.narrow(t2, 0, 2, t2.shape[0] - 2))
+        self.assertEqual(cnt.frame_count, 1)
 
     @onlyCUDA
     @deviceCountAtLeast(2)
@@ -962,10 +1025,12 @@ class TestLibtorchAgnostic(TestCase):
     @skipIfTorchVersionLessThan(2, 10)
     @skipIfTorchDynamo("no data pointer defined for FakeTensor, FunctionalTensor")
     def test_get_template_any_data_ptr(self, device):
-        import libtorch_agn_2_10 as libtorch_agnostic
+        if _torchVersionLessThan(2, 11):
+            import libtorch_agn_2_10 as libtorch_agnostic
+        else:
+            import libtorch_agn_2_11 as libtorch_agnostic
 
         supported_dtypes = get_supported_dtypes()
-
         for dtype in supported_dtypes:
             t = torch.empty(2, 5, device=device, dtype=dtype)
             expected_p = t.data_ptr()
