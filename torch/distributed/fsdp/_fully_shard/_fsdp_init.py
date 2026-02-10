@@ -377,6 +377,24 @@ def _init_param_group(
     if not params:
         return
 
+    if shard_placement_fn is None:
+        # No shard_placement_fn means all params use the same mesh_info,
+        # so no grouping is needed. This also handles DDPMeshInfo from
+        # replicate_with_fsdp, which doesn't have shard_process_group.
+        state._fsdp_param_groups.append(
+            FSDPParamGroup(
+                params,
+                modules,
+                mesh_info,
+                post_forward_mesh_info,
+                device,
+                shard_placement_fn,
+                mp_policy,
+                offload_policy,
+            )
+        )
+        return
+
     # Group params by their process group to support per-param mesh,
     # e.g., expert params using ep_mesh vs regular params using dp_mesh.
     # For HSDP, also key by replicate_process_group to avoid grouping

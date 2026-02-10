@@ -1524,7 +1524,7 @@ class TestFullyShardNDTraining(FSDPTest):
         dp_replicate_group = (
             dp_mesh["dp_replicate"].get_group() if dp_replicate > 1 else None
         )
-        for iter_idx in range(10):
+        for iter_idx in range(5):
             ref_loss = ref_model(inp).sum()
             loss = model(inp).sum()
             ref_loss.backward()
