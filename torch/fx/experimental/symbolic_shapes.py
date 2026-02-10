@@ -7184,9 +7184,10 @@ class ShapeEnv:
             has_only_ephemeral_sources = x in self.var_to_sources and all(
                 s.is_ephemeral() for s in self.var_to_sources[x]
             )
-            # Fast path: just access the hint directly from backed_var_to_val
+
             hint = self.backed_var_to_val.get(x)
             if hint is None:
+                # NB: size_hint is int, not sympy.Expr, do not use int_oo here
                 size = sys.maxsize
             elif symbol_is_type(x, SymT.SIZE):
                 size = int(hint)
