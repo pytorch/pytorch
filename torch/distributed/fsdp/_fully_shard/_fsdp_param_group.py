@@ -12,7 +12,6 @@ from torch.distributed.device_mesh import _get_device_handle
 from torch.distributed.fsdp._common_utils import _named_parameters_with_duplicates
 from torch.distributed.tensor import Shard
 from torch.profiler import record_function
-from torch.utils._pytree import tree_flatten
 from torch.utils.hooks import RemovableHandle
 
 from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
@@ -45,20 +44,26 @@ def flatten_output_tensors(output: Any) -> tuple[torch.Tensor, ...]:
     Recursively flatten tensors in the output and return tensors which require gradients.
 
     This handles both standard pytree structures and unregistered dataclasses.
+    Uses the same traversal order as :func:`replace_output_tensors`.
     """
-    flat_outputs, _ = tree_flatten(output)
     tensors_list: list[torch.Tensor] = []
-    for item in flat_outputs:
-        if torch.is_tensor(item) and item.requires_grad:
-            tensors_list.append(item)
-        elif dataclasses.is_dataclass(item) and not isinstance(item, type):
-            # tree_flatten treated this dataclass as a leaf (unregistered)
-            tensors_list.extend(
-                t
-                for field in dataclasses.fields(item)
-                for t in flatten_output_tensors(getattr(item, field.name))
-            )
+    _collect_grad_tensors(output, tensors_list)
     return tuple(tensors_list)
+
+
+def _collect_grad_tensors(output: Any, out: list[torch.Tensor]) -> None:
+    """Collect grad-requiring tensors in the same order as replace_output_tensors."""
+    if torch.is_tensor(output) and output.requires_grad:
+        out.append(output)
+    elif dataclasses.is_dataclass(output) and not isinstance(output, type):
+        for field in dataclasses.fields(output):
+            _collect_grad_tensors(getattr(output, field.name), out)
+    elif isinstance(output, dict):
+        for v in output.values():
+            _collect_grad_tensors(v, out)
+    elif isinstance(output, (list, tuple)):
+        for item in output:
+            _collect_grad_tensors(item, out)
 
 
 def replace_output_tensors(output: Any, tensor_iter: Iterator[torch.Tensor]) -> Any:
