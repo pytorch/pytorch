@@ -1503,9 +1503,6 @@ class cpp:
         os.environ.get("TORCHINDUCTOR_CPP_USE_CONSTEXPR_FOR_INT_ARRAY", "1") == "1"
     )
 
-    # threshold between two step reduction algorithm and welford reduction algorithm
-    use_two_step_variance_threshold = 1024
-
 
 class triton:
     """
