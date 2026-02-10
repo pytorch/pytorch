@@ -5,7 +5,6 @@
 
 #include <c10/util/Exception.h>
 #include <c10/util/FileSystem.h>
-#include <torch/csrc/inductor/aoti_torch/generated_enum_converters.h>
 #include <torch/csrc/inductor/aoti_torch/oss_proxy_executor.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 
@@ -19,10 +18,6 @@ bool has_key(
     const std::string& key) {
   return map.find(key) != map.end();
 }
-
-using torch::aot_inductor::convertSerializedLayout;
-using torch::aot_inductor::convertSerializedMemoryFormat;
-using torch::aot_inductor::convertSerializedScalarType;
 
 } // namespace
 
@@ -169,8 +164,7 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
           index,
           " but got ",
           serialized_arg_type);
-      stack.at(index) =
-          convertSerializedScalarType(serialized_arg_val.get<int>());
+      stack.at(index) = serialized_arg_val.get<c10::ScalarType>();
       break;
     }
     case c10::TypeKind::MemoryFormatType: {
@@ -182,8 +176,7 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
           index,
           " but got ",
           serialized_arg_type);
-      stack.at(index) =
-          convertSerializedMemoryFormat(serialized_arg_val.get<int>());
+      stack.at(index) = serialized_arg_val.get<c10::MemoryFormat>();
       break;
     }
     case c10::TypeKind::LayoutType: {
@@ -195,7 +188,7 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
           index,
           " but got ",
           serialized_arg_type);
-      stack.at(index) = convertSerializedLayout(serialized_arg_val.get<int>());
+      stack.at(index) = serialized_arg_val.get<c10::Layout>();
       break;
     }
     case c10::TypeKind::DeviceObjType: {
