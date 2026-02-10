@@ -18401,7 +18401,7 @@ def forward(self, x, y):
             model,
             (),
             kwargs=kwargs,
-            dynamic_shapes={    
+            dynamic_shapes={
                 "x": {0: torch.export.Dim.DYNAMIC, 1: torch.export.Dim.DYNAMIC},
                 "kwargs": {"y": {1: torch.export.Dim.DYNAMIC}},
             },

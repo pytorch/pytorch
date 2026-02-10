@@ -1519,6 +1519,21 @@ def _get_range_constraints(
     )
     combined_args = _combine_args(mod, args, kwargs)
 
+    # This is because we trace based on the kwargs passed in from user
+    # not based on the signature. I feel it would be better to just enforce
+    # one ordering at the start of tracing to avoid confusions, but that is
+    # bigger refactor, so do this to unblock for now.
+    combined_args_traced_order = {}
+    for arg in kwargs:
+        if arg in combined_args:
+            combined_args_traced_order[arg] = combined_args[arg]
+
+    for key in combined_args:
+        if key not in combined_args_traced_order:
+            combined_args_traced_order[key] = combined_args[key]
+
+    combined_args = combined_args_traced_order
+
     range_constraints = make_constraints(
         fake_mode,
         gm,
