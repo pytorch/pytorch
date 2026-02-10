@@ -2,7 +2,7 @@
 import contextlib
 import dataclasses
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from typing import Any, cast, NamedTuple
 
 import torch
@@ -12,7 +12,7 @@ from torch.distributed.device_mesh import _get_device_handle
 from torch.distributed.fsdp._common_utils import _named_parameters_with_duplicates
 from torch.distributed.tensor import Shard
 from torch.profiler import record_function
-from torch.utils._pytree import tree_flatten, tree_unflatten
+from torch.utils._pytree import tree_flatten
 from torch.utils.hooks import RemovableHandle
 
 from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
@@ -61,22 +61,21 @@ def flatten_output_tensors(output: Any) -> tuple[torch.Tensor, ...]:
     return tuple(tensors_list)
 
 
-def replace_output_tensors(
-    output: Any, replacement_map: dict[int, torch.Tensor]
-) -> Any:
+def replace_output_tensors(output: Any, tensor_iter: Iterator[torch.Tensor]) -> Any:
     """
-    Replace tensors in output structure using replacement_map keyed by tensor id.
+    Replace grad-requiring tensors in output using replacements from tensor_iter.
 
-    Returns a new structure with tensors replaced. Handles pytree structures
-    and unregistered dataclasses.
+    Tensors are consumed from tensor_iter in the same traversal order as
+    flatten_output_tensors. Handles pytree structures and unregistered
+    dataclasses.
     """
-    if torch.is_tensor(output):
-        return replacement_map.get(id(output), output)
+    if torch.is_tensor(output) and output.requires_grad:
+        return next(tensor_iter)
     elif dataclasses.is_dataclass(output) and not isinstance(output, type):
         changes = {}
         for field in dataclasses.fields(output):
             old_val = getattr(output, field.name)
-            new_val = replace_output_tensors(old_val, replacement_map)
+            new_val = replace_output_tensors(old_val, tensor_iter)
             if new_val is not old_val:
                 changes[field.name] = new_val
         if changes:
@@ -86,7 +85,7 @@ def replace_output_tensors(
         new_dict = {}
         any_changed = False
         for k, v in output.items():
-            new_v = replace_output_tensors(v, replacement_map)
+            new_v = replace_output_tensors(v, tensor_iter)
             new_dict[k] = new_v
             if new_v is not v:
                 any_changed = True
@@ -95,7 +94,7 @@ def replace_output_tensors(
         new_items = []
         any_changed = False
         for item in output:
-            new_item = replace_output_tensors(item, replacement_map)
+            new_item = replace_output_tensors(item, tensor_iter)
             new_items.append(new_item)
             if new_item is not item:
                 any_changed = True
@@ -790,13 +789,10 @@ class FSDPParamGroup:
         # Apply RegisterPostBackwardFunction to all tensors at once
         out_tensors = RegisterPostBackwardFunction.apply(self, *inp_tensors)
 
-        # Build replacement map from old tensor ids to new tensors
-        replacement_map: dict[int, torch.Tensor] = {
-            id(old_t): new_t for old_t, new_t in zip(inp_tensors, out_tensors)
-        }
-
-        # Replace tensors in the structure
-        new_args, new_kwargs = replace_output_tensors((args, kwargs), replacement_map)
+        # Replace tensors in the structure (iterator order matches flatten order)
+        tensor_iter = iter(out_tensors)
+        new_args, new_kwargs = replace_output_tensors((args, kwargs), tensor_iter)
+        assert not list(tensor_iter), "Not all replacement tensors were consumed"
         return new_args, new_kwargs
 
     def _register_state_dict_hooks(self) -> None:
