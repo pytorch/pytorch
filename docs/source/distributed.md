@@ -248,7 +248,8 @@ accuracy of reduction operations without changing the collective call.
 import torch.distributed as dist
 import torch.distributed._symmetric_memory as symm_mem
 
-# Allocate tensors using symmetric memory
+# Allocate tensors using NCCL symmetric memory
+symm_mem.set_backend("NCCL")
 inp = symm_mem.empty(1024, 1024, device=device, dtype=torch.bfloat16)
 symm_mem.rendezvous(inp, group_name)
 
