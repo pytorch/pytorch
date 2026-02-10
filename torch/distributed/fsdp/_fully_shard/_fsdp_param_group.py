@@ -3,8 +3,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
-from collections.abc import Callable
-from typing import Any, cast, NamedTuple
+from typing import Any, cast, NamedTuple, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
@@ -38,6 +37,10 @@ from ._fsdp_common import (
     TrainingState,
 )
 from ._fsdp_param import alloc_storage, FSDPParam, ParamModuleInfo, ShardedState
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 logger = logging.getLogger("torch.distributed.fsdp.fully_shard")
