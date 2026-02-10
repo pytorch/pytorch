@@ -538,15 +538,28 @@ def check_model(
             type(actual_item) is type(correct_item)
             for actual_item, correct_item in zip(actual, correct)
         ):
-            raise AssertionError
+            raise AssertionError(
+                f"Item type mismatch: expected types {[type(c) for c in correct]}, "
+                f"got {[type(a) for a in actual]}"
+            )
 
     correct_flat, correct_spec = tree_flatten(correct)
     actual_flat = pytree.tree_leaves(actual)
 
+    def to_dtype_preserve_strides(src, dtype):
+        if any(s == 0 for s in src.stride()):
+            return src.to(dtype)
+        # Preserve strides when casting.
+        result = torch.empty_strided(
+            src.size(), src.stride(), device=src.device, dtype=dtype
+        )
+        result.copy_(src)
+        return result
+
     def reference_to_expect(actual_flat, correct_flat):
         return tuple(
             (
-                y.to(x.dtype)
+                to_dtype_preserve_strides(y, x.dtype)
                 if isinstance(y, torch.Tensor) and y.dtype.is_floating_point
                 else y
             )
@@ -565,6 +578,11 @@ def check_model(
         correct_flat = reference_to_expect(actual_flat, correct_flat)
         correct = tree_unflatten(correct_flat, correct_spec)
 
+    def has_zero_dim(x):
+        if not isinstance(x, tuple):
+            x = (x,)
+        return any(isinstance(t, torch.Tensor) and 0 in t.size() for t in x)
+
     # Allow assert_equal to be a custom function, instead of True or False, for
     # cases where differences may not indicate incorrectness.
     if assert_equal:
@@ -577,6 +595,7 @@ def check_model(
         else:
             assert_equal_fn = self.assertEqual
 
+        check_exact_stride = exact_stride and not has_zero_dim(correct)
         assert_equal_fn(
             actual,
             correct,
@@ -584,7 +603,7 @@ def check_model(
             rtol=rtol,
             equal_nan=True,
             exact_dtype=exact_dtype,
-            exact_stride=exact_stride,
+            exact_stride=check_exact_stride,
         )
         # In case of input mutations, check that inputs are the same
         # (This never uses a custom assert_equal fn.)
@@ -613,7 +632,10 @@ def check_model(
                     correct_val, actual_val
                 )
                 if not strides_equal:
-                    raise AssertionError
+                    raise AssertionError(
+                        f"Significant strides mismatch: expected {correct_val.stride()}, "
+                        f"got {actual_val.stride()}"
+                    )
                 if correct_val.layout != actual_val.layout:
                     raise AssertionError(
                         f"Expected layout {correct_val.layout}, got {actual_val.layout}"
@@ -623,7 +645,8 @@ def check_model(
                         raise AssertionError(
                             f"Expected dtype {correct_val.dtype}, got {actual_val.dtype}"
                         )
-                if exact_stride:
+                check_exact_stride = exact_stride and not has_zero_dim(correct_val)
+                if check_exact_stride:
                     if correct_val.stride() != actual_val.stride():
                         raise AssertionError(
                             f"Expected stride {correct_val.stride()}, got {actual_val.stride()}"
@@ -674,15 +697,17 @@ def check_model(
             else:
                 expect_grad = correct_grad
 
-            self.assertEqual(
-                actual_grad,
-                expect_grad,
-                atol=grad_atol or atol,
-                rtol=grad_rtol or rtol,
-                equal_nan=True,
-                exact_dtype=exact_dtype,
-                exact_stride=exact_stride,
-            )
+            for actual_g, expect_g in zip(actual_grad, expect_grad):
+                check_exact_stride = exact_stride and not has_zero_dim(expect_g)
+                self.assertEqual(
+                    actual_g,
+                    expect_g,
+                    atol=grad_atol or atol,
+                    rtol=grad_rtol or rtol,
+                    equal_nan=True,
+                    exact_dtype=exact_dtype,
+                    exact_stride=check_exact_stride,
+                )
 
     torch._dynamo.reset()
 
@@ -11714,7 +11739,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         if not any(
             "inductor_wrapper_call" in e.name for e in prof.profiler.function_events
         ):
-            raise AssertionError
+            raise AssertionError(
+                "Expected 'inductor_wrapper_call' in profiler function events"
+            )
 
     def test_insignificant_strides(self):
         def f(x):
