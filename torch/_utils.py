@@ -1181,7 +1181,7 @@ def _maybe_view_chunk_cat(
 
     numel_between = math.prod(shape[1:gather_dim]) if gather_dim > 1 else 1
 
-    if guard_or_false(shape[0] == group_size) and numel_between == 1:
+    if guard_or_false(shape[0] == group_size) and guard_or_false(numel_between == 1):
         # View optimization: reshape to collapse dim 0 into gather_dim
         final_shape = (
             [1]  # Dim 0 becomes 1
