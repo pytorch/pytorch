@@ -237,6 +237,7 @@ class TestUtils(TestCase):
                 "test_event", key1="value1", key2="value2"
             )
             mock_rf.assert_called_once_with("test_event_data: key1=value1, key2=value2")
+
     def test_reinplace_counters_use_trigger_name_not_enum_value(self):
         """Test that ReinplaceCounters uses trigger.name in dictionary keys instead of the enum value"""
         from torch._dynamo.utils import ReinplaceCounters, ReInplaceTrigger
