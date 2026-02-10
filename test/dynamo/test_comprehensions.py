@@ -741,6 +741,8 @@ class ComprehensionTests(torch._inductor.test_case.TestCase):
         self.assertEqual(count_op(backend.graphs[0], operator.add), 1)
         self.assertEqual(count_op(backend.graphs[1], operator.add), 1)
 
+@skipIfNotPy312
+class NestedGraphBreakTests(torch._inductor.test_case.TestCase):
     @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_nested_function_calls_with_comprehension_graph_break(self):
         """Test nested function calls where inner function has comprehension with graph break."""
@@ -771,6 +773,1098 @@ class ComprehensionTests(torch._inductor.test_case.TestCase):
         self.assertEqual(len(backend.graphs), 6)
         for i in range(6):
             self.assertEqual(count_op(backend.graphs[i], operator.add), 1)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_nested_function_calls_with_comprehension_graph_break_nested_graph_breaks_true(
+        self,
+    ):
+        """Test nested function calls where inner function has comprehension with graph break."""
+
+        def h(x):
+            x = x + 3
+            [torch._dynamo.graph_break() or i for i in range(3)]
+            x = x + 4
+            return x
+
+        def g(x):
+            x = x + 2
+            x = h(x)
+            x = x + 5
+            return x
+
+        def f(x):
+            x = x + 1
+            x = g(x)
+            x = x + 6
+            return x
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(f, backend=backend)
+        x = torch.randn(4)
+
+        self.assertEqual(compiled(x), f(x))
+        self.assertEqual(len(backend.graphs), 2)
+        self.assertEqual(count_op(backend.graphs[0], operator.add), 3)
+        self.assertEqual(count_op(backend.graphs[1], operator.add), 3)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_nested_function_comprehension_with_walrus(self):
+        """Nested function with comprehension containing walrus operator."""
+
+        def inner(x):
+            x = x + 1
+            result = [(y := i * 2) for i in [torch._dynamo.graph_break() or 1, 2, 3]]
+            x = x + 2
+            return x + sum(result)
+
+        def outer(x):
+            x = x + 3
+            x = inner(x)
+            x = x + 4
+            return x
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(outer, backend=backend)
+        x = torch.randn(4)
+
+        self.assertEqual(compiled(x), outer(x))
+        self.assertEqual(len(backend.graphs), 2)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_nested_function_comprehension_with_captured_var(self):
+        """Nested function with comprehension capturing outer variable passed as parameter."""
+
+        def inner(x, multiplier):
+            x = x + 1
+            result = [multiplier * i for i in [torch._dynamo.graph_break() or 1, 2, 3]]
+            x = x + 2
+            return x
+
+        def outer(x):
+            multiplier = 5
+            x = x + 3
+            x = inner(x, multiplier)
+            x = x + 4
+            return x
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(outer, backend=backend)
+        x = torch.randn(4)
+
+        self.assertEqual(compiled(x), outer(x))
+        self.assertEqual(len(backend.graphs), 2)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_triple_nested_function_comprehension(self):
+        """Triple nested function calls (f->g->h->deepest) with comprehension in deepest."""
+
+        def deepest(x):
+            x = x + 4
+            [torch._dynamo.graph_break() or i for i in range(3)]
+            x = x + 5
+            return x
+
+        def h(x):
+            x = x + 3
+            x = deepest(x)
+            x = x + 6
+            return x
+
+        def g(x):
+            x = x + 2
+            x = h(x)
+            x = x + 7
+            return x
+
+        def f(x):
+            x = x + 1
+            x = g(x)
+            x = x + 8
+            return x
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(f, backend=backend)
+        x = torch.randn(4)
+
+        self.assertEqual(compiled(x), f(x))
+        self.assertEqual(len(backend.graphs), 2)
+        # Before comprehension: x+1, x+2, x+3, x+4 = 4 adds
+        self.assertEqual(count_op(backend.graphs[0], operator.add), 4)
+        # After comprehension: x+5, x+6, x+7, x+8 = 4 adds
+        self.assertEqual(count_op(backend.graphs[1], operator.add), 4)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_multiple_nested_comprehensions_in_different_functions(self):
+        """Two sequential nested function calls each with comprehensions."""
+
+        def inner1(x):
+            x = x + 1
+            [torch._dynamo.graph_break() or i for i in range(2)]
+            x = x + 2
+            return x
+
+        def inner2(x):
+            x = x + 3
+            [torch._dynamo.graph_break() or i for i in range(2)]
+            x = x + 4
+            return x
+
+        def outer(x):
+            x = inner1(x)
+            x = inner2(x)
+            return x
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(outer, backend=backend)
+        x = torch.randn(4)
+
+        self.assertEqual(compiled(x), outer(x))
+        # Graph 1: x+1, Graph 2: x+2, x+3, Graph 3: x+4
+        self.assertEqual(len(backend.graphs), 3)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_nested_function_comprehension_with_outer_list_mutation(self):
+        """Nested function with comprehension mutating outer list."""
+
+        def inner(x, results):
+            x = x + 1
+            [results.append(torch._dynamo.graph_break() or i) for i in range(3)]
+            x = x + 2
+            return x
+
+        def outer(x):
+            results = []
+            x = x + 3
+            x = inner(x, results)
+            x = x + 4
+            return x, results
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(outer, backend=backend)
+        x = torch.randn(4)
+
+        compiled_result = compiled(x)
+        eager_result = outer(x)
+        self.assertEqual(compiled_result[0], eager_result[0])
+        self.assertEqual(compiled_result[1], eager_result[1])
+        self.assertEqual(len(backend.graphs), 2)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_nested_list_comprehension_graph_break(self):
+        """Nested version of test_list_comprehension_graph_break."""
+
+        def inner(x):
+            y = x + 2
+            result = [torch._dynamo.graph_break() or i for i in range(3)]
+            z = x + 3
+            return y, result, z
+
+        def outer(x):
+            x = x + 1
+            result = inner(x)
+            x = x + 4
+            return result
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(outer, backend=backend)
+        x = torch.randn(4)
+
+        self.assertEqual(compiled(x), outer(x))
+        self.assertEqual(len(backend.graphs), 2)
+        self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
+        self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_nested_dict_comprehension_graph_break(self):
+        """Nested version of test_dict_comprehension_graph_break."""
+
+        def inner(x):
+            y = x + 2
+            result = {i: torch._dynamo.graph_break() or i**2 for i in range(3)}
+            z = x + 3
+            return y, result, z
+
+        def outer(x):
+            x = x + 1
+            result = inner(x)
+            x = x + 4
+            return result
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(outer, backend=backend)
+        x = torch.randn(4)
+
+        self.assertEqual(compiled(x), outer(x))
+        self.assertEqual(len(backend.graphs), 2)
+        self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
+        self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_nested_list_comprehension_with_graph_break_function(self):
+        """Nested version of test_list_comprehension_with_graph_break_function."""
+
+        def graph_break_fn(i):
+            if i == 3:
+                torch._dynamo.graph_break()
+            return i
+
+        def inner(x):
+            y = x * 2
+            lst = [graph_break_fn(i) for i in range(5)]
+            z = x + 3
+            return z, y
+
+        def outer(x):
+            x = x + 1
+            result = inner(x)
+            x = x + 4
+            return result
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(outer, backend=backend)
+        x = torch.randn(4)
+
+        self.assertEqual(compiled(x), outer(x))
+        self.assertEqual(len(backend.graphs), 2)
+        self.assertEqual(count_op(backend.graphs[0], operator.add), 1)
+        self.assertEqual(count_op(backend.graphs[0], operator.mul), 1)
+        self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_nested_multiple_comprehensions_one_break(self):
+        """Nested version of test_multiple_comprehensions_one_break."""
+
+        def inner(x):
+            a = x + 2
+            list1 = [i for i in range(2)]  # noqa: C416
+            list2 = [torch._dynamo.graph_break() or i for i in range(2)]
+            b = x + 3
+            list3 = [i * 2 for i in range(2)]
+            return a, list1, list2, b, list3
+
+        def outer(x):
+            x = x + 1
+            result = inner(x)
+            x = x + 4
+            return result
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(outer, backend=backend)
+        x = torch.randn(4)
+
+        self.assertEqual(compiled(x), outer(x))
+        self.assertEqual(len(backend.graphs), 2)
+        self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
+        self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_nested_nested_comprehension_inner_break(self):
+        """Nested version of test_nested_comprehension_inner_break."""
+
+        def inner(x):
+            a = x + 2
+            result = [
+                [torch._dynamo.graph_break() or i * j for j in range(2)]
+                for i in range(2)
+            ]
+            b = x + 3
+            return a, result, b
+
+        def outer(x):
+            x = x + 1
+            result = inner(x)
+            x = x + 4
+            return result
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(outer, backend=backend)
+        x = torch.randn(4)
+
+        self.assertEqual(compiled(x), outer(x))
+        self.assertEqual(len(backend.graphs), 2)
+        self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
+        self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_nested_multi_iterator_comprehension_break(self):
+        """Nested version of test_multi_iterator_comprehension_break."""
+
+        def inner(x):
+            a = x + 2
+            result = [
+                (torch._dynamo.graph_break() or i, j)
+                for i in range(2)
+                for j in range(2)
+            ]
+            b = x + 3
+            return a, result, b
+
+        def outer(x):
+            x = x + 1
+            result = inner(x)
+            x = x + 4
+            return result
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(outer, backend=backend)
+        x = torch.randn(4)
+
+        self.assertEqual(compiled(x), outer(x))
+        self.assertEqual(len(backend.graphs), 2)
+        self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
+        self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_nested_discarded_comprehension_graph_break(self):
+        """Nested version of test_discarded_comprehension_graph_break."""
+
+        def inner(x):
+            a = x + 2
+            [torch._dynamo.graph_break() or i for i in range(3)]
+            b = x + 3
+            return a, b
+
+        def outer(x):
+            x = x + 1
+            result = inner(x)
+            x = x + 4
+            return result
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(outer, backend=backend)
+        x = torch.randn(4)
+
+        self.assertEqual(compiled(x), outer(x))
+        self.assertEqual(len(backend.graphs), 2)
+        self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
+        self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_nested_comprehension_in_expression_graph_break(self):
+        """Nested version of test_comprehension_in_expression_graph_break."""
+
+        def inner(x):
+            a = x + 2
+            total = sum([torch._dynamo.graph_break() or i for i in range(3)])
+            b = x + 3
+            return a, total, b
+
+        def outer(x):
+            x = x + 1
+            result = inner(x)
+            x = x + 4
+            return result
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(outer, backend=backend)
+        x = torch.randn(4)
+
+        self.assertEqual(compiled(x), outer(x))
+        self.assertEqual(len(backend.graphs), 2)
+        self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
+        self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_nested_comprehension_return_directly(self):
+        """Nested version of test_comprehension_return_directly."""
+
+        def inner(x):
+            a = x + 2  # noqa: F841
+            return [torch._dynamo.graph_break() or i for i in range(3)]
+
+        def outer(x):
+            x = x + 1
+            result = inner(x)
+            x = x + 3
+            return result
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(outer, backend=backend)
+        x = torch.randn(4)
+
+        self.assertEqual(compiled(x), outer(x))
+        self.assertGreaterEqual(len(backend.graphs), 1)
+        self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_nested_walrus_operator_in_comprehension(self):
+        """Nested version of test_walrus_operator_in_comprehension."""
+
+        def inner(x):
+            a = x + 2
+            result = [(y := (torch._dynamo.graph_break() or i * 2)) for i in range(3)]
+            b = x + 3
+            return a, result, y, b
+
+        def outer(x):
+            x = x + 1
+            result = inner(x)
+            x = x + 4
+            return result
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(outer, backend=backend)
+        x = torch.randn(4)
+
+        self.assertEqual(compiled(x), outer(x))
+        self.assertEqual(len(backend.graphs), 2)
+        self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
+        self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_nested_walrus_operator_in_if_in_comprehension(self):
+        """Nested version of test_walrus_operator_in_if_in_comprehension."""
+
+        def inner(x):
+            a = x + 2
+            result = [
+                (torch._dynamo.graph_break() or y) for i in range(5) if (y := i * 2) > 2
+            ]
+            b = x + 3
+            return a, result, y, b
+
+        def outer(x):
+            x = x + 1
+            result = inner(x)
+            x = x + 4
+            return result
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(outer, backend=backend)
+        x = torch.randn(4)
+
+        self.assertEqual(compiled(x), outer(x))
+        self.assertEqual(len(backend.graphs), 2)
+        self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
+        self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_nested_walrus_operator_in_comprehension_with_tensor(self):
+        """Nested version of test_walrus_operator_in_comprehension_with_tensor."""
+
+        def inner(x):
+            a = x + 2
+            result = [
+                (torch._dynamo.graph_break() or y + x.numel())
+                for i in range(5)
+                if (y := i * 2) > 2
+            ]
+            b = x + 3
+            return a, result, y, b
+
+        def outer(x):
+            x = x + 1
+            result = inner(x)
+            x = x + 4
+            return result
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(outer, backend=backend)
+        x = torch.randn(4)
+
+        self.assertEqual(compiled(x), outer(x))
+        self.assertEqual(len(backend.graphs), 2)
+        self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
+        self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_nested_multiple_walrus_operators_in_comprehension(self):
+        """Nested version of test_multiple_walrus_operators_in_comprehension."""
+
+        def inner(x):
+            a = x + 2
+            result = [
+                ((y := (torch._dynamo.graph_break() or i * 2)), (z := i * 3))
+                for i in range(3)
+            ]
+            b = x + 3
+            return a, result, y, z, b
+
+        def outer(x):
+            x = x + 1
+            result = inner(x)
+            x = x + 4
+            return result
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(outer, backend=backend)
+        x = torch.randn(4)
+
+        self.assertEqual(compiled(x), outer(x))
+        self.assertEqual(len(backend.graphs), 2)
+        self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
+        self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_nested_nested_comprehension_with_walrus_operators(self):
+        """Nested version of test_nested_comprehension_with_walrus_operators."""
+
+        def inner(x):
+            a = x + 2
+            result = [
+                (
+                    outer_val := i * 10,
+                    [
+                        (inner_val := (torch._dynamo.graph_break() or j * 2))
+                        for j in range(2)
+                    ],
+                )
+                for i in range(3)
+            ]
+            b = x + 3
+            return a, result, outer_val, inner_val, b
+
+        def outer(x):
+            x = x + 1
+            result = inner(x)
+            x = x + 4
+            return result
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(outer, backend=backend)
+        x = torch.randn(4)
+
+        self.assertEqual(compiled(x), outer(x))
+        self.assertEqual(len(backend.graphs), 2)
+        self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
+        self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_nested_nested_comprehension_with_captured_outer_variable(self):
+        """Nested version of test_nested_comprehension_with_captured_outer_variable."""
+
+        def inner(x):
+            outer_val = 100
+            a = x + 2
+            result = [
+                [outer_val + j for j in range(2) if torch._dynamo.graph_break() or True]
+                for i in range(2)
+            ]
+            b = x + 3
+            return a, result, b
+
+        def outer(x):
+            x = x + 1
+            result = inner(x)
+            x = x + 4
+            return result
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(outer, backend=backend)
+        x = torch.randn(4)
+
+        self.assertEqual(compiled(x), outer(x))
+        self.assertEqual(len(backend.graphs), 2)
+        self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
+        self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_nested_triple_nested_comprehension_with_walrus(self):
+        """Nested version of test_triple_nested_comprehension_with_walrus."""
+
+        def inner(x):
+            a = x + 2
+            result = [
+                [
+                    [
+                        (w := i + j + k)
+                        for k in range(2)
+                        if torch._dynamo.graph_break() or True
+                    ]
+                    for j in range(2)
+                ]
+                for i in range(2)
+            ]
+            b = x + 3
+            return a, result, w, b
+
+        def outer(x):
+            x = x + 1
+            result = inner(x)
+            x = x + 4
+            return result
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(outer, backend=backend)
+        x = torch.randn(4)
+
+        self.assertEqual(compiled(x), outer(x))
+        self.assertEqual(len(backend.graphs), 2)
+        self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
+        self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_nested_nested_dict_comprehension_with_walrus_and_captured(self):
+        """Nested version of test_nested_dict_comprehension_with_walrus_and_captured."""
+
+        def inner(x):
+            multiplier = 10
+            a = x + 2
+            result = {
+                i: {
+                    j: (inner_val := j * multiplier)
+                    for j in range(2)
+                    if torch._dynamo.graph_break() or True
+                }
+                for i in range(3)
+            }
+            b = x + 3
+            return a, result, inner_val, b
+
+        def outer(x):
+            x = x + 1
+            result = inner(x)
+            x = x + 4
+            return result
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(outer, backend=backend)
+        x = torch.randn(4)
+
+        self.assertEqual(compiled(x), outer(x))
+        self.assertEqual(len(backend.graphs), 2)
+        self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
+        self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_nested_comprehension_with_outer_variable_read(self):
+        """Nested version of test_comprehension_with_outer_variable_read."""
+
+        def inner(x):
+            outer_val = 10
+            a = x + 2
+            result = [
+                i + outer_val for i in range(3) if torch._dynamo.graph_break() or True
+            ]
+            b = x + 3
+            return a, result, b
+
+        def outer(x):
+            x = x + 1
+            result = inner(x)
+            x = x + 4
+            return result
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(outer, backend=backend)
+        x = torch.randn(4)
+
+        self.assertEqual(compiled(x), outer(x))
+        self.assertEqual(len(backend.graphs), 2)
+        self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
+        self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_nested_comprehension_with_outer_list_mutation(self):
+        """Nested version of test_comprehension_with_outer_list_mutation."""
+
+        def inner(x):
+            outer_list = []
+            a = x + 2
+            result = [
+                outer_list.append(i) or i * 2
+                for i in range(3)
+                if torch._dynamo.graph_break() or True
+            ]
+            b = x + 3
+            return a, result, outer_list, b
+
+        def outer(x):
+            x = x + 1
+            result = inner(x)
+            x = x + 4
+            return result
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(outer, backend=backend)
+        x = torch.randn(4)
+
+        self.assertEqual(compiled(x), outer(x))
+        self.assertEqual(len(backend.graphs), 2)
+        self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
+        self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_nested_comprehension_with_outer_dict_mutation(self):
+        """Nested version of test_comprehension_with_outer_dict_mutation."""
+
+        def inner(x):
+            outer_dict = {}
+            a = x + 2
+            result = [
+                outer_dict.update({i: i * 10}) or i * 2
+                for i in range(3)
+                if torch._dynamo.graph_break() or True
+            ]
+            b = x + 3
+            return a, result, outer_dict, b
+
+        def outer(x):
+            x = x + 1
+            result = inner(x)
+            x = x + 4
+            return result
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(outer, backend=backend)
+        x = torch.randn(4)
+
+        self.assertEqual(compiled(x), outer(x))
+        self.assertEqual(len(backend.graphs), 2)
+        self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
+        self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_nested_comprehension_with_outer_list_extend(self):
+        """Nested version of test_comprehension_with_outer_list_extend."""
+
+        def inner(x):
+            outer_list = [100]
+            a = x + 2
+            result = [
+                outer_list.extend([i, i * 10]) or i
+                for i in range(3)
+                if torch._dynamo.graph_break() or True
+            ]
+            b = x + 3
+            return a, result, outer_list, b
+
+        def outer(x):
+            x = x + 1
+            result = inner(x)
+            x = x + 4
+            return result
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(outer, backend=backend)
+        x = torch.randn(4)
+
+        self.assertEqual(compiled(x), outer(x))
+        self.assertEqual(len(backend.graphs), 2)
+        self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
+        self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_nested_comprehension_with_outer_list_pop(self):
+        """Nested version of test_comprehension_with_outer_list_pop."""
+
+        def inner(x):
+            outer_list = [10, 20, 30, 40, 50]
+            popped_values = []
+            a = x + 2
+            result = [
+                popped_values.append(outer_list.pop()) or i
+                for i in range(3)
+                if torch._dynamo.graph_break() or True
+            ]
+            b = x + 3
+            return a, result, outer_list, popped_values, b
+
+        def outer(x):
+            x = x + 1
+            result = inner(x)
+            x = x + 4
+            return result
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(outer, backend=backend)
+        x = torch.randn(4)
+
+        self.assertEqual(compiled(x), outer(x))
+        self.assertEqual(len(backend.graphs), 2)
+        self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
+        self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_nested_comprehension_with_global_variable(self):
+        """Nested version of test_comprehension_with_global_variable."""
+        global _GLOBAL_VALUE_FOR_COMPREHENSION_TEST
+        _GLOBAL_VALUE_FOR_COMPREHENSION_TEST = 100
+
+        def inner(x):
+            a = x + 2
+            result = [
+                i + _GLOBAL_VALUE_FOR_COMPREHENSION_TEST
+                for i in range(3)
+                if torch._dynamo.graph_break() or True
+            ]
+            b = x + 3
+            return a, result, b
+
+        def outer(x):
+            x = x + 1
+            result = inner(x)
+            x = x + 4
+            return result
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(outer, backend=backend)
+        x = torch.randn(4)
+
+        self.assertEqual(compiled(x), outer(x))
+        self.assertEqual(len(backend.graphs), 2)
+        self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
+        self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_nested_comprehension_with_closure_variable(self):
+        """Nested version of test_comprehension_with_closure_variable."""
+
+        def make_outer():
+            closure_val = 50
+
+            def inner(x):
+                a = x + 2
+                result = [
+                    i + closure_val
+                    for i in range(3)
+                    if torch._dynamo.graph_break() or True
+                ]
+                b = x + 3
+                return a, result, b
+
+            def outer(x):
+                x = x + 1
+                result = inner(x)
+                x = x + 4
+                return result
+
+            return outer
+
+        outer = make_outer()
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(outer, backend=backend)
+        x = torch.randn(4)
+
+        self.assertEqual(compiled(x), outer(x))
+        self.assertEqual(len(backend.graphs), 2)
+        self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
+        self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_nested_comprehension_with_closure_list_mutation(self):
+        """Nested version of test_comprehension_with_closure_list_mutation."""
+
+        def make_outer():
+            closure_list = []
+
+            def inner(x):
+                a = x + 2
+                result = [
+                    closure_list.append(i) or i * 2
+                    for i in range(3)
+                    if torch._dynamo.graph_break() or True
+                ]
+                b = x + 3
+                return a, result, closure_list.copy(), b
+
+            def outer(x):
+                x = x + 1
+                result = inner(x)
+                x = x + 4
+                return result
+
+            return outer
+
+        outer = make_outer()
+        outer_ref = make_outer()
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(outer, backend=backend)
+        x = torch.randn(4)
+
+        self.assertEqual(compiled(x), outer_ref(x))
+        self.assertEqual(len(backend.graphs), 2)
+        self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
+        self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_nested_nested_multi_for_comprehension_graph_break(self):
+        """Nested version of test_nested_multi_for_comprehension_graph_break."""
+
+        def inner(x):
+            a = x + 2
+            result = [
+                [(torch._dynamo.graph_break() or i + j + k) for k in range(2)]
+                for i in range(2)
+                for j in range(2)
+            ]
+            b = x + 3
+            return a, result, b
+
+        def outer(x):
+            x = x + 1
+            result = inner(x)
+            x = x + 4
+            return result
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(outer, backend=backend)
+        x = torch.randn(4)
+
+        self.assertEqual(compiled(x), outer(x))
+        self.assertEqual(len(backend.graphs), 2)
+        self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
+        self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_nested_multiple_comprehension_graph_breaks(self):
+        """Nested version of test_multiple_comprehension_graph_breaks."""
+
+        def inner(x):
+            a = x + 2
+            list1 = [torch._dynamo.graph_break() or i for i in range(2)]
+            b = x + 3
+            list2 = [torch._dynamo.graph_break() or i * 2 for i in range(2)]
+            c = x + 4
+            return a, list1, b, list2, c
+
+        def outer(x):
+            x = x + 1
+            result = inner(x)
+            x = x + 5
+            return result
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(outer, backend=backend)
+        x = torch.randn(4)
+
+        self.assertEqual(compiled(x), outer(x))
+        self.assertEqual(len(backend.graphs), 3)
+        self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
+        self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
+        self.assertEqual(count_op(backend.graphs[2], operator.add), 2)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_nested_comprehension_modifying_global_variable(self):
+        """Nested version of test_comprehension_modifying_global_variable."""
+        global _GLOBAL_VALUE_FOR_COMPREHENSION_TEST
+        _GLOBAL_VALUE_FOR_COMPREHENSION_TEST = 100
+        original_value = _GLOBAL_VALUE_FOR_COMPREHENSION_TEST
+
+        def inner(x):
+            global _GLOBAL_VALUE_FOR_COMPREHENSION_TEST
+            a = x + 2
+            _GLOBAL_VALUE_FOR_COMPREHENSION_TEST += 1
+            result = [
+                torch._dynamo.graph_break() or _GLOBAL_VALUE_FOR_COMPREHENSION_TEST + i
+                for i in range(3)
+            ]
+            b = x + 3
+            return a, result, b
+
+        def outer(x):
+            x = x + 1
+            result = inner(x)
+            x = x + 4
+            return result
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(outer, backend=backend)
+        x = torch.randn(4)
+
+        _GLOBAL_VALUE_FOR_COMPREHENSION_TEST = original_value
+        compiled_result = compiled(x)
+        _GLOBAL_VALUE_FOR_COMPREHENSION_TEST = original_value
+        expected_result = outer(x)
+        _GLOBAL_VALUE_FOR_COMPREHENSION_TEST = original_value
+
+        self.assertEqual(compiled_result, expected_result)
+        self.assertEqual(len(backend.graphs), 2)
+        self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
+        self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_nested_comprehension_modifying_closure_variable(self):
+        """Nested version of test_comprehension_modifying_closure_variable."""
+
+        def make_outer():
+            closure_val = [0]
+
+            def inner(x):
+                a = x + 2
+                closure_val[0] += 1
+                result = [
+                    torch._dynamo.graph_break() or closure_val[0] + i for i in range(3)
+                ]
+                b = x + 3
+                return a, result, closure_val[0], b
+
+            def outer(x):
+                x = x + 1
+                result = inner(x)
+                x = x + 4
+                return result
+
+            return outer
+
+        outer = make_outer()
+        outer_ref = make_outer()
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(outer, backend=backend)
+        x = torch.randn(4)
+
+        self.assertEqual(compiled(x), outer_ref(x))
+        self.assertEqual(len(backend.graphs), 2)
+        self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
+        self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_nested_list_and_dict_comprehension_graph_breaks(self):
+        """Nested version of test_list_and_dict_comprehension_graph_breaks."""
+
+        def inner(x):
+            a = x + 2
+            list1 = [torch._dynamo.graph_break() or i for i in range(2)]
+            b = x + 3
+            dict1 = {i: torch._dynamo.graph_break() or i * 10 for i in range(2)}
+            c = x + 4
+            return a, list1, b, dict1, c
+
+        def outer(x):
+            x = x + 1
+            result = inner(x)
+            x = x + 5
+            return result
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(outer, backend=backend)
+        x = torch.randn(4)
+
+        self.assertEqual(compiled(x), outer(x))
+        self.assertEqual(len(backend.graphs), 3)
+        self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
+        self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
+        self.assertEqual(count_op(backend.graphs[2], operator.add), 2)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_nested_nested_dict_in_list_comprehension_graph_break(self):
+        """Nested version of test_nested_dict_in_list_comprehension_graph_break."""
+
+        def inner(x):
+            a = x + 2
+            result = [
+                {j: torch._dynamo.graph_break() or i * j for j in range(2)}
+                for i in range(2)
+            ]
+            b = x + 3
+            return a, result, b
+
+        def outer(x):
+            x = x + 1
+            result = inner(x)
+            x = x + 4
+            return result
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(outer, backend=backend)
+        x = torch.randn(4)
+
+        self.assertEqual(compiled(x), outer(x))
+        self.assertEqual(len(backend.graphs), 2)
+        self.assertEqual(count_op(backend.graphs[0], operator.add), 2)
+        self.assertEqual(count_op(backend.graphs[1], operator.add), 2)
 
 
 if __name__ == "__main__":
