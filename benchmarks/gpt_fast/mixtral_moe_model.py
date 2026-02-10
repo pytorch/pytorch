@@ -48,7 +48,10 @@ class ModelArgs:
             for config in transformer_configs
             if config in str(name).upper() or config in str(name)
         ]
-        assert len(config) == 1, name
+        if len(config) != 1:
+            raise AssertionError(
+                f"Expected exactly one config match for '{name}', but got {len(config)}: {config}"
+            )
         return cls(**transformer_configs[config[0]])
 
 
@@ -78,7 +81,10 @@ class KVCache(nn.Module):
 
     def update(self, input_pos, k_val, v_val):
         # input_pos: [S], k_val: [B, H, S, D]
-        assert input_pos.shape[0] == k_val.shape[2]
+        if input_pos.shape[0] != k_val.shape[2]:
+            raise AssertionError(
+                f"input_pos.shape[0] ({input_pos.shape[0]}) must equal k_val.shape[2] ({k_val.shape[2]})"
+            )
 
         k_out = self.k_cache
         v_out = self.v_cache
@@ -130,7 +136,8 @@ class Transformer(nn.Module):
         )
 
     def forward(self, idx: Tensor, input_pos: Optional[Tensor] = None) -> Tensor:
-        assert self.freqs_cis is not None, "Caches must be initialized first"
+        if self.freqs_cis is None:
+            raise AssertionError("Caches must be initialized first")
         mask = self.causal_mask[None, None, input_pos]
         freqs_cis = self.freqs_cis[input_pos]
         x = self.tok_embeddings(idx)
@@ -165,7 +172,10 @@ class TransformerBlock(nn.Module):
 class Attention(nn.Module):
     def __init__(self, config: ModelArgs):
         super().__init__()
-        assert config.dim % config.n_head == 0
+        if config.dim % config.n_head != 0:
+            raise AssertionError(
+                f"config.dim ({config.dim}) must be divisible by config.n_head ({config.n_head})"
+            )
 
         total_head_dim = (config.n_head + 2 * config.n_local_heads) * config.head_dim
         # key, query, value projections for all heads, but in a batch

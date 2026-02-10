@@ -70,7 +70,7 @@
         ) | indent_except_first(2) }}
         return mask_mod_output
     {{ set_cute_hash("mask_mod", "mask") }}
-    block_sparse_tensors = BlockSparseTensorsTorch(Q_NUM_BLKS, Q_IDX, FULL_Q_NUM_BLKS, FULL_Q_IDX)
+    block_sparse_tensors = BlockSparseTensorsTorch(Q_NUM_BLKS, Q_IDX, FULL_Q_NUM_BLKS, FULL_Q_IDX, block_size=({{SPARSE_Q_BLOCK_SIZE}}, {{SPARSE_KV_BLOCK_SIZE}}))
     {% else %}
     mask_mod = None
     block_sparse_tensors = None
@@ -100,5 +100,5 @@
         dk=dk_out_transposed,
         dv=dv_out_transposed,
         block_sparse_tensors=block_sparse_tensors,
-        deterministic=torch.are_deterministic_algorithms_enabled()
+        deterministic=torch.are_deterministic_algorithms_enabled() and not torch.is_deterministic_algorithms_warn_only_enabled()
     )
