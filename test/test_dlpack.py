@@ -249,7 +249,8 @@ class TestTorchDlPack(TestCase):
     def test_from_dlpack_dtype(self, device, dtype):
         x = make_tensor((5,), dtype=dtype, device=device)
         y = torch.from_dlpack(x)
-        assert x.dtype == y.dtype
+        if x.dtype != y.dtype:
+            raise AssertionError(f"dtype mismatch: {x.dtype} != {y.dtype}")
 
     @skipMeta
     @onlyCUDA
@@ -263,9 +264,11 @@ class TestTorchDlPack(TestCase):
 
             def __dlpack__(self, stream=None):
                 if torch.version.hip is None:
-                    assert stream == 1
+                    if stream != 1:
+                        raise AssertionError(f"expected stream=1, got {stream}")
                 else:
-                    assert stream == 0
+                    if stream != 0:
+                        raise AssertionError(f"expected stream=0, got {stream}")
                 capsule = self.tensor.__dlpack__(stream=stream)
                 return capsule
 
