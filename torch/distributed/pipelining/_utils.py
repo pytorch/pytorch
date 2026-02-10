@@ -3,15 +3,14 @@
 
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import Optional
 
 import torch
 from torch import fx
+from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.tensor import DTensor
+from torch.distributed.tensor.placement_types import Placement
 
-
-if TYPE_CHECKING:
-    from torch.distributed.tensor import DTensor
-    from torch.distributed.tensor.placement_types import Placement
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +70,15 @@ class PipeliningDTensorError(RuntimeError):
 class _DTensorMeta:
     """
     Metadata needed to reconstruct a DTensor from a local tensor.
+
+    This dataclass captures all information required to reconstruct a DTensor
+    on a receiving pipeline stage, including mesh identification for multi-mesh
+    scenarios where different DTensors may live on different submeshes within
+    a mesh universe.
+
+    Note: This dataclass is intentionally NOT frozen because the `mesh` field
+    is lazily populated during mesh resolution (in `_resolve_mesh`). After
+    metadata inference completes, instances are treated as read-only.
     """
 
     # Global tensor properties
@@ -79,27 +87,41 @@ class _DTensorMeta:
     dtype: torch.dtype
 
     # DTensor distribution properties
-    placements: tuple["Placement", ...]  # e.g., (Shard(0), Replicate())
+    placements: tuple[Placement, ...]  # e.g., (Shard(0), Replicate())
+
+    # Mesh identification - used to look up the correct DeviceMesh
+    mesh_dim_names: tuple[str, ...]  # e.g., ("tp",) or ("dp", "tp")
+    mesh_shape: Optional[tuple[int, ...]] = None  # Optional, for validation/uniqueness
+
+    # Cached mesh instance (lazily populated after lookup during _resolve_mesh)
+    mesh: Optional[DeviceMesh] = None
 
     @staticmethod
-    def from_dtensor(dtensor: "DTensor") -> "_DTensorMeta":
+    def from_dtensor(dtensor: DTensor) -> "_DTensorMeta":
         """Extract metadata from a DTensor."""
+
         spec = dtensor._spec
+        device_mesh = dtensor.device_mesh
+
         return _DTensorMeta(
             global_shape=spec.shape,
             global_stride=spec.stride,
             dtype=dtensor.dtype,
             placements=spec.placements,
+            mesh_dim_names=tuple(device_mesh.mesh_dim_names)
+            if device_mesh.mesh_dim_names
+            else (),
+            mesh_shape=tuple(device_mesh.mesh.shape),
+            mesh=device_mesh,
         )
 
 
 def validate_dtensor_metadata(
     desc: str,
     expected: _DTensorMeta,
-    given_dtensor: "DTensor",
+    given_dtensor: DTensor,
 ) -> None:
     """Validate DTensor metadata matches expected configuration."""
-    from torch.distributed.tensor import DTensor
 
     if not isinstance(given_dtensor, DTensor):
         raise PipeliningDTensorError(
@@ -122,8 +144,6 @@ def validate_dtensor_metadata(
 
 
 def validate_tensor_metadata(desc, expected, given):
-    from torch.distributed.tensor import DTensor
-
     # For DTensors, compare local shapes since that's what's communicated
     if isinstance(given, DTensor):
         given_local = given.to_local()
@@ -217,6 +237,26 @@ def generate_rank_to_stage_mapping(
         stages.sort()
 
     return rank_to_stages
+
+
+@dataclass(frozen=True)
+class _StageGradMeta:
+    """
+    Metadata about stage gradients, transmitted during backward metadata inference.
+
+    This is used in the two-phase metadata inference where:
+    - Phase 1 (forward): Stages 0 → N transmit forward activation metadata
+    - Phase 2 (backward): Stages N → 0 transmit gradient metadata
+
+    The gradient metadata allows receiving stages to properly reconstruct
+    DTensor gradients with the correct placements (which may differ from
+    forward activation placements, e.g., Replicate → Partial).
+    """
+
+    # Gradients of inputs (to be sent to previous stage)
+    input_grad_metas: tuple[Optional[_DTensorMeta], ...]
+    # Gradients of outputs (what this stage receives from next stage)
+    output_grad_metas: tuple[Optional[_DTensorMeta], ...]
 
 
 @dataclass
