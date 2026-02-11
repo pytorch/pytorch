@@ -212,6 +212,8 @@ jobs:
       !{{ common.checkout(deep_clone=False) }} #Cloning for diskspace-cleanup of teardown-rocm
       - name: Teardown ROCm
         uses: ./pytorch/.github/actions/teardown-rocm
+        env:
+          PYTORCH_ROOT: ""
     {%- endif %}
 
 {%- if branches == "nightly" %}
