@@ -12463,6 +12463,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             eager = fn()
             compiled = cfunc()
             torch.testing.assert_close(eager, compiled, equal_nan=True)
+            self.assertTrue(eager.is_pinned())
+            self.assertTrue(compiled.is_pinned())
 
     def test_inplace_resize_as(self):
         def fn(x, y):
