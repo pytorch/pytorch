@@ -21,8 +21,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import torch
-import torch.distributed as dist
-from torch.distributed._local_tensor import LocalTensor, LocalTensorMode
+from torch.distributed._local_tensor import LocalTensor
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import distribute_tensor, DTensor, Replicate
 from torch.distributed.tensor.placement_types import Partial, Placement, Shard
@@ -607,5 +606,3 @@ def create_fully_negated_sample(sample):
     new_kwargs = pytree.tree_map(negate_tensor, sample.kwargs)
 
     return SampleInput(new_input, args=new_args, kwargs=new_kwargs)
-
-
