@@ -217,6 +217,11 @@ register_artifact(
     off_by_default=True,
 )
 register_artifact(
+    "overlap_scheduling",
+    "Detailed Inductor overlap scheduling pass information",
+    off_by_default=True,
+)
+register_artifact(
     "sym_node",
     "Logs extra info for various SymNode operations",
     off_by_default=True,
