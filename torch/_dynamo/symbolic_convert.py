@@ -4291,7 +4291,8 @@ class InstructionTranslatorBase(
             # https://github.com/python/cpython/blob/28fb13cb33d569720938258db68956b5f9c9eb40/Objects/funcobject.c#L574-L594
             items = attr.items
             ann = ConstDictVariable(
-                dict(zip(items[::2], items[1::2])), mutation_type=ValueMutationNew()
+                dict(zip(items[::2], items[1::2], strict=True)),
+                mutation_type=ValueMutationNew(),
             )
             fn.annotations = ann
         elif flags & 0x02:
