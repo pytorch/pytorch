@@ -1104,7 +1104,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             (torch.float32, 128): ROCmFlexConfig(128, 32, 1, 4),
             (torch.float32, 256): ROCmFlexConfig(64, 16, 1, 4),
             (torch.bfloat16, 64): ROCmFlexConfig(128, 64, 1, 8),
-            (torch.bfloat16, 128): ROCmFlexConfig(128, 64, 1, 8),
+            (torch.bfloat16, 128): ROCmFlexConfig(128, 64, 1, 4),
             (torch.bfloat16, 256): ROCmFlexConfig(32, 64, 1, 8),
             (torch.float16, 64): ROCmFlexConfig(128, 64, 1, 8),
             (torch.float16, 128): ROCmFlexConfig(128, 64, 1, 8),
@@ -1280,7 +1280,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             if head_dim == 64:
                 default_config = ROCmFlexConfig(64, 64, 1, 4)
             elif head_dim == 128:
-                default_config = ROCmFlexConfig(64, 128, 1, 8)
+                default_config = ROCmFlexConfig(64, 128, 1, 4)
             else:
                 default_config = ROCmFlexConfig(64, 64, 1, 4)
         else:
