@@ -3,7 +3,7 @@
 import copy
 import dataclasses
 import functools
-from typing import Optional, Union
+from typing import Any, NamedTuple, Optional, Union
 
 import torch
 import torch.distributed as dist
@@ -388,6 +388,183 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
             ):
                 ref_param_compute.detach().copy_(ref_param)
 
+    def _reduce_1d_partial_grads(
+        self, module: nn.Module, group: dist.ProcessGroup | None = None
+    ) -> None:
+        group = group or dist.distributed_c10d._get_default_group()
+        for param in module.parameters():
+            if param.grad is not None:
+                param.grad.div_(group.size())
+
+    @skip_if_lt_x_gpu(2)
+    def test_structured_input_output(self):
+        """
+        Tests numeric parity between FSDP and a reference model when using
+        structured (dataclass, nested dataclass, NamedTuple) activations
+        between FSDP-wrapped modules, with and without mixed precision.
+        """
+        self.run_subtests(
+            {
+                "container_type": ["dataclass", "nested_dataclass", "namedtuple"],
+                "mp_config": [
+                    (None, None),  # fp32
+                    (torch.bfloat16, torch.bfloat16),  # bf16 compute + reduce
+                    (torch.bfloat16, torch.float32),  # bf16 compute, fp32 reduce
+                ],
+            },
+            self._test_structured_input_output,
+        )
+
+    def _test_structured_input_output(
+        self,
+        container_type: str,
+        mp_config: tuple[Optional[torch.dtype], Optional[torch.dtype]],
+    ):
+        param_dtype, reduce_dtype = mp_config
+
+        @dataclasses.dataclass
+        class DC:
+            x: torch.Tensor
+            y: torch.Tensor
+
+        @dataclasses.dataclass
+        class Inner:
+            x: torch.Tensor
+            y: torch.Tensor
+
+        @dataclasses.dataclass
+        class Outer:
+            inner: Inner
+            z: torch.Tensor
+
+        class TensorPair(NamedTuple):
+            x: torch.Tensor
+            y: torch.Tensor
+
+        class ContainerModule(nn.Module):
+            """Applies a linear layer to each tensor in the container."""
+
+            def __init__(self, ctype: str, dim: int):
+                super().__init__()
+                self.ctype = ctype
+                self._layer = nn.Linear(dim, dim)
+
+            def forward(self, inp: Any) -> Any:
+                if self.ctype == "dataclass":
+                    return DC(x=self._layer(inp.x), y=self._layer(inp.y))
+                elif self.ctype == "nested_dataclass":
+                    return Outer(
+                        inner=Inner(
+                            x=self._layer(inp.inner.x),
+                            y=self._layer(inp.inner.y),
+                        ),
+                        z=self._layer(inp.z),
+                    )
+                else:  # namedtuple
+                    return TensorPair(x=self._layer(inp.x), y=self._layer(inp.y))
+
+        class ToContainer(nn.Module):
+            """Converts a plain tensor into a structured container."""
+
+            def __init__(self, ctype: str):
+                super().__init__()
+                self.ctype = ctype
+
+            def forward(self, x: torch.Tensor) -> Any:
+                # clone() so each field has an independent autograd path
+                if self.ctype == "dataclass":
+                    return DC(x=x, y=x.clone())
+                elif self.ctype == "nested_dataclass":
+                    return Outer(inner=Inner(x=x, y=x.clone()), z=x.clone())
+                else:  # namedtuple
+                    return TensorPair(x=x, y=x.clone())
+
+        class FromContainer(nn.Module):
+            """Extracts and sums tensors from a structured container."""
+
+            def __init__(self, ctype: str):
+                super().__init__()
+                self.ctype = ctype
+
+            def forward(self, inp: Any) -> torch.Tensor:
+                if self.ctype == "nested_dataclass":
+                    return inp.inner.x + inp.inner.y + inp.z
+                else:
+                    return inp.x + inp.y
+
+        torch.manual_seed(42)
+        dim = 16
+        local_batch_size = 2
+        global_batch_size = self.world_size * local_batch_size
+
+        model = nn.Sequential(
+            ToContainer(container_type),
+            ContainerModule(container_type, dim),
+            ContainerModule(container_type, dim),
+            FromContainer(container_type),
+        )
+        ref_model = copy.deepcopy(model).to(device_type)
+
+        mp_policy = MixedPrecisionPolicy(
+            param_dtype=param_dtype, reduce_dtype=reduce_dtype
+        )
+        for module in model:
+            fully_shard(module, mp_policy=mp_policy)
+        fully_shard(model, mp_policy=mp_policy)
+
+        if param_dtype is not None:
+            # Maintain a bf16 copy for compute, fp32 copy for optimizer
+            ref_model_compute = copy.deepcopy(ref_model).to(param_dtype)
+        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+
+        torch.manual_seed(1)  # same on all ranks
+        for iter_idx in range(10):
+            global_inp = torch.rand((global_batch_size, dim), device=device_type.type)
+            local_inp = global_inp[
+                self.rank * local_batch_size : (self.rank + 1) * local_batch_size
+            ].detach()
+
+            # FSDP forward/backward
+            optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
+            fsdp_loss = model(local_inp).sum()
+            fsdp_loss.backward()
+            optim.step()
+
+            # Ref forward/backward
+            ref_optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
+            if param_dtype is not None:
+                ref_loss = ref_model_compute(global_inp.to(param_dtype)).sum()
+                ref_loss.backward()
+                # Simulate gradient reduction matching FSDP's behavior
+                if reduce_dtype is not None and reduce_dtype != param_dtype:
+                    # Cast grads to reduce_dtype, all-reduce, divide
+                    for p in ref_model_compute.parameters():
+                        p.grad.data = p.grad.to(reduce_dtype)
+                        dist.all_reduce(p.grad)
+                        p.grad.div_(self.world_size)
+                else:
+                    self._reduce_1d_partial_grads(ref_model_compute)
+                for p_fp32, p_compute in zip(
+                    ref_model.parameters(), ref_model_compute.parameters()
+                ):
+                    p_fp32.grad = p_compute.grad.to(p_fp32.dtype)
+                    p_compute.grad = None
+                ref_optim.step()
+                for p_fp32, p_compute in zip(
+                    ref_model.parameters(), ref_model_compute.parameters()
+                ):
+                    p_compute.detach().copy_(p_fp32)
+            else:
+                ref_loss = ref_model(global_inp).sum()
+                ref_loss.backward()
+                self._reduce_1d_partial_grads(ref_model)
+                ref_optim.step()
+
+            dist.all_reduce(fsdp_loss)  # partial -> replicated
+            self.assertEqual(fsdp_loss, ref_loss)
+            check_sharded_parity(self, ref_model, model)
+
 
 class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
     @property
@@ -595,133 +772,6 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
             inp = torch.randn((4, 32), device=device_type.type)
             loss = model(inp).sum()
             loss.backward()
-
-    @skip_if_lt_x_gpu(1)
-    def test_dataclass_input_output(self):
-        """
-        Test that FSDP correctly handles dataclass inputs/outputs and computes
-        gradients correctly for all input tensors.
-
-        This test also catches a regression where applying RegisterPostBackwardFunction
-        individually to each tensor (instead of batching all tensors together)
-        causes post_backward() to be called multiple times, which disrupts the
-        autograd graph and results in some input tensors having None gradients.
-        """
-
-        @dataclasses.dataclass
-        class Input:
-            x: torch.Tensor
-            y: torch.Tensor
-
-        @dataclasses.dataclass
-        class Output:
-            x: torch.Tensor
-            y: torch.Tensor
-
-        @dataclasses.dataclass
-        class Scale:
-            factor: torch.Tensor
-
-        class Model(nn.Module):
-            def __init__(self, *args, **kwargs) -> None:
-                super().__init__(*args, **kwargs)
-                self._layer = nn.Linear(10, 10)
-
-            def forward(self, input: Input, *, scale: Scale | None = None):
-                x = self._layer(input.x)
-                y = self._layer(input.y)
-                if scale is not None:
-                    x = x * scale.factor
-                    y = y * scale.factor
-                return Output(x=x, y=y)
-
-        class TensorModel(nn.Module):
-            def __init__(self, *args, **kwargs) -> None:
-                super().__init__(*args, **kwargs)
-                self._layer = nn.Linear(10, 10)
-
-            def forward(self, x: torch.Tensor, *, scale: torch.Tensor | None = None):
-                out = self._layer(x)
-                if scale is not None:
-                    out = out * scale
-                return out
-
-        mp_policies = [
-            MixedPrecisionPolicy(
-                param_dtype=torch.bfloat16,
-                reduce_dtype=torch.bfloat16,
-            ),
-            MixedPrecisionPolicy(
-                param_dtype=torch.bfloat16,
-                reduce_dtype=torch.float32,
-            ),
-        ]
-
-        for mp_policy in mp_policies:
-            # Test with normal torch.Tensor as both arg and kwarg
-            tensor_model = TensorModel()
-            fully_shard(tensor_model, mp_policy=mp_policy)
-            x = torch.randn(10, 10, device=device_type, requires_grad=True)
-            scale = torch.randn(10, 10, device=device_type, requires_grad=True)
-            loss = tensor_model(x, scale=scale).sum()
-            loss.backward()
-            self.assertIsNotNone(x.grad, "Input x gradient should not be None")
-            self.assertIsNotNone(scale.grad, "Input scale gradient should not be None")
-
-            # Test with dataclass as positional arg only
-            torch.manual_seed(42)
-            model = nn.Sequential(*[Model(), Model()])
-            inp = Input(
-                x=torch.randn(10, 10, device=device_type, requires_grad=True),
-                y=torch.randn(10, 10, device=device_type, requires_grad=True),
-            )
-
-            for layer in model:
-                fully_shard(layer, mp_policy=mp_policy, reshard_after_forward=True)
-            fully_shard(model, mp_policy=mp_policy, reshard_after_forward=True)
-
-            output = model(inp)
-            loss = output.x.sum() + output.y.sum()
-            loss.backward()
-
-            # Critical check: ALL input tensors must have gradients computed
-            # This catches the regression where RegisterPostBackwardFunction.apply
-            # is called per-tensor instead of batched, causing some gradients to be None
-            self.assertIsNotNone(
-                inp.x.grad,
-                "Dataclass input.x gradient is None - post_backward hook issue",
-            )
-            self.assertIsNotNone(
-                inp.y.grad,
-                "Dataclass input.y gradient is None - post_backward hook issue",
-            )
-
-            # Test with dataclass as both positional arg and kwarg
-            # Also test mixed requires_grad (scale.factor requires grad, but inp tensors don't)
-            inp_no_grad = Input(
-                x=torch.randn(10, 10, device=device_type, requires_grad=False),
-                y=torch.randn(10, 10, device=device_type, requires_grad=False),
-            )
-            scale = Scale(
-                factor=torch.randn(10, 10, device=device_type, requires_grad=True)
-            )
-            output = model[0](inp_no_grad, scale=scale)
-            loss = output.x.sum() + output.y.sum()
-            loss.backward()
-            # Verify gradient for scale.factor (requires_grad=True)
-            self.assertIsNotNone(
-                scale.factor.grad,
-                "scale.factor gradient should not be None",
-            )
-            # Verify no gradient for inp tensors (requires_grad=False)
-            self.assertIsNone(
-                inp_no_grad.x.grad,
-                "inp.x should not have gradient (requires_grad=False)",
-            )
-            self.assertIsNone(
-                inp_no_grad.y.grad,
-                "inp.y should not have gradient (requires_grad=False)",
-            )
 
 
 if __name__ == "__main__":

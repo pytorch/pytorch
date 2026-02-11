@@ -16,7 +16,7 @@ from torch.distributed._composable_state import (
     _State,
 )
 from torch.distributed.device_mesh import _get_device_handle
-from torch.distributed.fsdp._common_utils import flatten_output_tensors
+from torch.distributed.fsdp._common_utils import collect_grad_tensors
 from torch.distributed.utils import _apply_to_tensors, _to_kwargs
 
 from ._fsdp_api import MixedPrecisionPolicy
@@ -356,7 +356,7 @@ class FSDPState(_State):
     def _register_pre_backward_hook(self, output: Any) -> Any:
         if not torch.is_grad_enabled():
             return output
-        tensors = flatten_output_tensors(output)
+        tensors = collect_grad_tensors(output)
         if tensors:
             for t in tensors:
                 t.register_hook(self._pre_backward)

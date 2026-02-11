@@ -10,8 +10,8 @@ import torch.nn as nn
 from torch.distributed.device_mesh import _get_device_handle
 from torch.distributed.fsdp._common_utils import (
     _named_parameters_with_duplicates,
-    flatten_output_tensors,
-    replace_output_tensors,
+    collect_grad_tensors,
+    replace_grad_tensors,
 )
 from torch.distributed.tensor import Shard
 from torch.profiler import record_function
@@ -719,7 +719,7 @@ class FSDPParamGroup:
             return args, kwargs
 
         # Collect all tensors that require gradients (including from dataclasses)
-        inp_tensors = flatten_output_tensors((args, kwargs))
+        inp_tensors = collect_grad_tensors((args, kwargs))
         if len(inp_tensors) == 0:
             return args, kwargs
 
@@ -728,7 +728,7 @@ class FSDPParamGroup:
 
         # Replace tensors in the structure (iterator order matches flatten order)
         tensor_iter = iter(out_tensors)
-        new_args, new_kwargs = replace_output_tensors((args, kwargs), tensor_iter)
+        new_args, new_kwargs = replace_grad_tensors((args, kwargs), tensor_iter)
         remaining = list(tensor_iter)
         if remaining:
             raise RuntimeError(

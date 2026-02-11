@@ -23,6 +23,7 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_PREFIX,
 )
 from torch.distributed.utils import _apply_to_tensors
+from torch.nn.parallel.scatter_gather import _is_namedtuple
 from torch.utils._mode_utils import no_dispatch
 
 from .api import (
@@ -42,12 +43,12 @@ if TYPE_CHECKING:
     from ._flat_param import FlatParamHandle
 
 
-def flatten_output_tensors(output: Any) -> tuple[torch.Tensor, ...]:
+def collect_grad_tensors(output: Any) -> tuple[torch.Tensor, ...]:
     """
-    Recursively flatten tensors in the output and return tensors which require gradients.
+    Recursively collect tensors that require gradients from a nested structure.
 
     This handles both standard pytree structures and unregistered dataclasses.
-    Uses the same traversal order as :func:`replace_output_tensors`.
+    Uses the same traversal order as :func:`replace_grad_tensors`.
     """
     tensors_list: list[torch.Tensor] = []
     _collect_grad_tensors(output, tensors_list)
@@ -55,7 +56,7 @@ def flatten_output_tensors(output: Any) -> tuple[torch.Tensor, ...]:
 
 
 def _collect_grad_tensors(output: Any, out: list[torch.Tensor]) -> None:
-    """Collect grad-requiring tensors in the same order as replace_output_tensors."""
+    """Collect grad-requiring tensors in the same order as replace_grad_tensors."""
     if torch.is_tensor(output) and output.requires_grad:
         out.append(output)
     elif dataclasses.is_dataclass(output) and not isinstance(output, type):
@@ -64,18 +65,23 @@ def _collect_grad_tensors(output: Any, out: list[torch.Tensor]) -> None:
     elif isinstance(output, dict):
         for v in output.values():
             _collect_grad_tensors(v, out)
-    elif isinstance(output, (list, tuple, set)):
+    elif isinstance(output, (list, tuple)):
         for item in output:
             _collect_grad_tensors(item, out)
 
 
-def replace_output_tensors(output: Any, tensor_iter: Iterator[torch.Tensor]) -> Any:
+def replace_grad_tensors(output: Any, tensor_iter: Iterator[torch.Tensor]) -> Any:
     """
-    Replace grad-requiring tensors in output using replacements from tensor_iter.
+    Replace grad-requiring tensors in a nested structure using replacements
+    from tensor_iter.
 
     Tensors are consumed from tensor_iter in the same traversal order as
-    flatten_output_tensors. Handles pytree structures and unregistered
-    dataclasses.
+    :func:`collect_grad_tensors`. Handles pytree structures, unregistered
+    dataclasses, and NamedTuples.
+
+    Note: dataclass reconstruction uses ``dataclasses.replace()``, which calls
+    ``__init__``. Dataclasses with custom ``__init__`` validation or
+    ``__post_init__`` side effects may not be compatible.
     """
     if torch.is_tensor(output) and output.requires_grad:
         return next(tensor_iter)
@@ -83,7 +89,7 @@ def replace_output_tensors(output: Any, tensor_iter: Iterator[torch.Tensor]) -> 
         changes = {}
         for field in dataclasses.fields(output):
             old_val = getattr(output, field.name)
-            new_val = replace_output_tensors(old_val, tensor_iter)
+            new_val = replace_grad_tensors(old_val, tensor_iter)
             if new_val is not old_val:
                 changes[field.name] = new_val
         if changes:
@@ -93,16 +99,28 @@ def replace_output_tensors(output: Any, tensor_iter: Iterator[torch.Tensor]) -> 
         new_dict = {}
         any_changed = False
         for k, v in output.items():
-            new_v = replace_output_tensors(v, tensor_iter)
+            new_v = replace_grad_tensors(v, tensor_iter)
             new_dict[k] = new_v
             if new_v is not v:
                 any_changed = True
         return type(output)(new_dict) if any_changed else output
-    elif isinstance(output, (list, tuple, set)):
+    elif _is_namedtuple(output):
+        assert isinstance(output, tuple)
         new_items = []
         any_changed = False
         for item in output:
-            new_item = replace_output_tensors(item, tensor_iter)
+            new_item = replace_grad_tensors(item, tensor_iter)
+            new_items.append(new_item)
+            if new_item is not item:
+                any_changed = True
+        if any_changed:
+            return type(output)(*new_items)
+        return output
+    elif isinstance(output, (list, tuple)):
+        new_items = []
+        any_changed = False
+        for item in output:
+            new_item = replace_grad_tensors(item, tensor_iter)
             new_items.append(new_item)
             if new_item is not item:
                 any_changed = True
