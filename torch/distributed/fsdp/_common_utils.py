@@ -44,7 +44,10 @@ if TYPE_CHECKING:
 
 def _is_namedtuple(obj: Any) -> bool:
     return (
-        isinstance(obj, tuple) and hasattr(obj, "_asdict") and hasattr(obj, "_fields")
+        isinstance(obj, tuple)
+        and hasattr(obj, "_asdict")
+        and hasattr(obj, "_fields")
+        and hasattr(obj, "_make")
     )
 
 
@@ -98,9 +101,12 @@ def replace_grad_tensors(output: Any, tensor_iter: Iterator[torch.Tensor]) -> An
     shallowly nested, so recursion depth is not a concern.
     """
     result = _replace_grad_tensors(output, tensor_iter)
-    remaining = list(tensor_iter)
-    if remaining:
-        raise RuntimeError(f"{len(remaining)} replacement tensors were not consumed")
+    sentinel = object()
+    leftover = next(tensor_iter, sentinel)
+    if leftover is not sentinel:
+        # Count remaining without holding references to all of them
+        n = 1 + sum(1 for _ in tensor_iter)
+        raise RuntimeError(f"{n} replacement tensors were not consumed")
     return result
 
 
