@@ -582,7 +582,7 @@ class AOTAutogradCacheTests(InductorTestCase):
         def gn(x, y):
             return x + y
 
-        @torch.compile
+        @torch.compile(backend='eager')
         def fn(x, y):
             return gn(x, y) + gn(x, y)
 
@@ -604,7 +604,7 @@ class AOTAutogradCacheTests(InductorTestCase):
                 torch._dynamo.graph_break()
                 return x.sin()
 
-        @torch.compile
+        @torch.compile(backend='eager')
         def fn(x, y, z):
             return AllowInGraphFunc.apply(x)
 
@@ -1437,7 +1437,7 @@ class AOTAutogradCacheTests(InductorTestCase):
         """
         torch._dynamo.eval_frame.clear_dynamo_tls()
 
-        @torch.compile
+        @torch.compile(backend='eager')
         def fn(x):
             # Calls x.sum().backward() during forward execution of fn
             (x_grad,) = torch.autograd.grad(x.sum(), x)
@@ -1776,7 +1776,7 @@ class AOTAutogradCacheTests(InductorTestCase):
         device index in the cache key.
         """
 
-        @torch.compile
+        @torch.compile(backend='eager')
         def f():
             y = torch.tensor([5], device="cuda")
             return (y,)

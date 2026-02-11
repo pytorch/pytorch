@@ -3258,7 +3258,7 @@ class GraphModule(torch.nn.Module):
         )  # Recompile! input is no longer a functools partial
 
     def test_manual_seed(self):
-        @torch.compile
+        @torch.compile(backend='eager')
         def foo():
             torch.manual_seed(3)
             return torch.randint(0, 5, (5,))
@@ -3320,7 +3320,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(cnts.frame_count, 1)
 
     def test_complex_closure(self):
-        @torch.compile
+        @torch.compile(backend='eager')
         def forward(y):
             def a():
                 def x(z):

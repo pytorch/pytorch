@@ -6110,7 +6110,7 @@ class GraphModule(torch.nn.Module):
 
     def test_vmap_call_compiled_backward_fn(self):
         # See PyTorch issue #138422
-        @torch.compile
+        @torch.compile(backend='eager')
         def f(x):
             return x**2
 
@@ -6128,7 +6128,7 @@ class GraphModule(torch.nn.Module):
 
     def test_vjp_call_compiled_backward_fn(self):
         # See PyTorch issue #138422
-        @torch.compile
+        @torch.compile(backend='eager')
         def f(x):
             return x**2
 
@@ -6146,7 +6146,7 @@ class GraphModule(torch.nn.Module):
 
     def test_grad_call_compiled_backward_fn(self):
         # See PyTorch issue #138422
-        @torch.compile
+        @torch.compile(backend='eager')
         def f(x):
             return x**2
 

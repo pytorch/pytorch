@@ -3125,7 +3125,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
     def test_error_return_without_exception_set(self):
         # https://github.com/pytorch/pytorch/issues/93781
-        @torch.compile
+        @torch.compile(backend='eager')
         def f():
             _generator_type = type(_ for _ in ())
 
@@ -5455,7 +5455,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertEqual(ref, res)
 
     def test_vc_bumped_in_inference_graph(self):
-        @torch.compile
+        @torch.compile(backend='eager')
         def f(x):
             return x.mul_(2)
 
