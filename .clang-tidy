@@ -1,5 +1,5 @@
 ---
-# NOTE there must be no spaces before te '-', so put the comma last.
+# NOTE there must be no spaces before the '-', so put the comma last.
 # The check bugprone-unchecked-optional-access is also turned on.
 # Note that it can cause clang-tidy to hang randomly. The tracking issue
 # can be found at https://github.com/llvm/llvm-project/issues/69369.
