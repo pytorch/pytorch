@@ -362,6 +362,160 @@ class TestCompilePrint(TestCase):
         self.assertIn("fwd", output)
         self.assertIn("tensor(", output)
 
+    def test_multiple_compile_prints(self):
+        """Two separate make_compile_print instances in the same function."""
+
+        def make_fn(cp1, cp2):
+            def f(x, y):
+                cp1(x)
+                cp2(y)
+                return (x + y).sum()
+
+            return f
+
+        inputs = [
+            torch.randn(3, 3, requires_grad=True),
+            torch.randn(3, 3, requires_grad=True),
+        ]
+
+        # Eager
+        fwd1, bwd1 = [], []
+        fwd2, bwd2 = [], []
+        cp1 = make_compile_print(
+            fwd_f=lambda t: fwd1.append(t.shape),
+            bwd_f=lambda t: bwd1.append(t.shape),
+        )
+        cp2 = make_compile_print(
+            fwd_f=lambda t: fwd2.append(t.shape),
+            bwd_f=lambda t: bwd2.append(t.shape),
+        )
+        f = make_fn(cp1, cp2)
+        cloned = [x.clone().detach().requires_grad_(True) for x in inputs]
+        out = f(*cloned)
+        out.backward()
+        self.assertEqual(len(fwd1), 1)
+        self.assertEqual(len(fwd2), 1)
+        self.assertEqual(len(bwd1), 1)
+        self.assertEqual(len(bwd2), 1)
+        eager_grads = [x.grad for x in cloned]
+
+        # Compile
+        fwd1, bwd1, fwd2, bwd2 = [], [], [], []
+        cp1 = make_compile_print(
+            fwd_f=lambda t: fwd1.append(t.shape),
+            bwd_f=lambda t: bwd1.append(t.shape),
+        )
+        cp2 = make_compile_print(
+            fwd_f=lambda t: fwd2.append(t.shape),
+            bwd_f=lambda t: bwd2.append(t.shape),
+        )
+        f = make_fn(cp1, cp2)
+        compiled_f = torch.compile(f, backend="aot_eager", fullgraph=True)
+        cloned = [x.clone().detach().requires_grad_(True) for x in inputs]
+        out = compiled_f(*cloned)
+        out.backward()
+        self.assertTrue(len(fwd1) >= 1)
+        self.assertTrue(len(fwd2) >= 1)
+        self.assertTrue(len(bwd1) >= 1)
+        self.assertTrue(len(bwd2) >= 1)
+        self.assertEqual(eager_grads[0], cloned[0].grad)
+        self.assertEqual(eager_grads[1], cloned[1].grad)
+
+        # aot_function
+        fwd1, bwd1, fwd2, bwd2 = [], [], [], []
+        cp1 = make_compile_print(
+            fwd_f=lambda t: fwd1.append(t.shape),
+            bwd_f=lambda t: bwd1.append(t.shape),
+        )
+        cp2 = make_compile_print(
+            fwd_f=lambda t: fwd2.append(t.shape),
+            bwd_f=lambda t: bwd2.append(t.shape),
+        )
+        f = make_fn(cp1, cp2)
+        compiled_f = aot_function(f, fw_compiler=lambda g, _: g)
+        cloned = [x.clone().detach().requires_grad_(True) for x in inputs]
+        fwd1.clear()
+        fwd2.clear()
+        bwd1.clear()
+        bwd2.clear()
+        out = compiled_f(*cloned)
+        self.assertTrue(len(fwd1) >= 1)
+        self.assertTrue(len(fwd2) >= 1)
+        out.backward()
+        self.assertEqual(eager_grads[0], cloned[0].grad)
+        self.assertEqual(eager_grads[1], cloned[1].grad)
+
+    def test_tag_printing(self):
+        """tag kwarg prints [tag][fwd] and [tag][bwd] labels."""
+        cp = make_compile_print(
+            fwd_f=lambda t: None,
+            bwd_f=lambda t: None,
+        )
+
+        # Eager
+        x = torch.randn(3, 3, requires_grad=True)
+        buf = StringIO()
+        with redirect_stdout(buf):
+            cp(x, tag="X")
+            x.sum().backward()
+        output = buf.getvalue()
+        self.assertIn("[X][fwd]", output)
+        self.assertIn("[X][bwd]", output)
+
+        # Compile
+        def f(x):
+            cp(x, tag="X")
+            return x.sum()
+
+        compiled_f = torch.compile(f, backend="aot_eager", fullgraph=True)
+        x = torch.randn(3, 3, requires_grad=True)
+        buf = StringIO()
+        with redirect_stdout(buf):
+            out = compiled_f(x)
+            out.backward()
+        output = buf.getvalue()
+        self.assertIn("[X][fwd]", output)
+        self.assertIn("[X][bwd]", output)
+
+    def test_multiple_tags(self):
+        """Two cp calls with different tags in the same function."""
+        cp = make_compile_print(
+            fwd_f=lambda t: None,
+            bwd_f=lambda t: None,
+        )
+
+        def f(x, y):
+            cp(x, tag="A")
+            cp(y, tag="B")
+            return (x + y).sum()
+
+        # Eager
+        x = torch.randn(3, 3, requires_grad=True)
+        y = torch.randn(3, 3, requires_grad=True)
+        buf = StringIO()
+        with redirect_stdout(buf):
+            out = f(x, y)
+            out.backward()
+        output = buf.getvalue()
+        self.assertIn("[A][fwd]", output)
+        self.assertIn("[B][fwd]", output)
+        self.assertIn("[A][bwd]", output)
+        self.assertIn("[B][bwd]", output)
+
+        # Compile
+        compiled_f = torch.compile(f, backend="aot_eager", fullgraph=True)
+        x = torch.randn(3, 3, requires_grad=True)
+        y = torch.randn(3, 3, requires_grad=True)
+        buf = StringIO()
+        with redirect_stdout(buf):
+            out = compiled_f(x, y)
+            out.backward()
+        output = buf.getvalue()
+        self.assertIn("[A][fwd]", output)
+        self.assertIn("[B][fwd]", output)
+        self.assertIn("[A][bwd]", output)
+        self.assertIn("[B][bwd]", output)
+
 
 class TestCompilePrintEagerOnly(TestCase):
     def test_returns_none(self):

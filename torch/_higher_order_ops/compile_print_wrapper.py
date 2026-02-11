@@ -37,18 +37,30 @@ def make_compile_print(
     """
 
     @leaf_function
-    def fwd_leaf_fn(*tensors: torch.Tensor) -> tuple[torch.Tensor, ...]:
+    def fwd_leaf_fn(*tensors: torch.Tensor, tag: str = "") -> tuple[torch.Tensor, ...]:
+        if tag:
+            print(f"[{tag}][fwd]")
         for t in tensors:
             if isinstance(t, torch.Tensor):
                 fwd_f(t)
         return (tensors[0].new_zeros(()),)
 
     @fwd_leaf_fn.register_fake  # pyrefly: ignore[missing-attribute]
-    def fwd_fake_fn(*tensors: torch.Tensor) -> tuple[torch.Tensor, ...]:
+    def fwd_fake_fn(*tensors: torch.Tensor, tag: str = "") -> tuple[torch.Tensor, ...]:
         return (tensors[0].new_zeros(()),)
 
-    def compile_print_impl(*args: torch.Tensor) -> None:
-        fwd_leaf_fn(*args)
+    def compile_print_impl(*args: torch.Tensor, tag: str = "") -> None:
+        fwd_leaf_fn(*args, tag=tag)
+
+        hook_fn = bwd_f
+        if tag:
+
+            def tagged_bwd_f(t: torch.Tensor) -> None:
+                print(f"[{tag}][bwd]")
+                bwd_f(t)
+
+            hook_fn = tagged_bwd_f
+
         # Backward hooks are registered on the original tensors. Since the tensors
         # are used downstream (e.g. x.sum()), gradients flow through them and the
         # hooks fire during backward.
@@ -58,7 +70,7 @@ def make_compile_print(
         if torch.compiler.is_compiling():
             for t in args:
                 if isinstance(t, torch.Tensor) and t.requires_grad:
-                    t.register_hook(bwd_f)
+                    t.register_hook(hook_fn)
         else:
             from torch._guards import detect_fake_mode
             from torch.fx.experimental.proxy_tensor import get_proxy_mode
@@ -66,7 +78,7 @@ def make_compile_print(
             if get_proxy_mode() is None and detect_fake_mode(args) is None:
                 for t in args:
                     if isinstance(t, torch.Tensor) and t.requires_grad:
-                        t.register_hook(bwd_f)
+                        t.register_hook(hook_fn)
 
     return compile_print_impl
 
@@ -75,6 +87,7 @@ def compile_print(
     fwd_f: Callable[[torch.Tensor], None],
     bwd_f: Callable[[torch.Tensor], None],
     *args: torch.Tensor,
+    tag: str = "",
 ) -> None:
     """
     Run fwd_f(tensor) on all tensor args in forward, and register bwd_f as a
@@ -104,6 +117,7 @@ def compile_print(
         fwd_f: Function to call on each tensor in forward pass. Signature: (Tensor) -> None.
         bwd_f: Function to call on each gradient in backward pass. Signature: (Tensor) -> None.
         *args: Tensors to observe.
+        tag: Optional tag string. When set, prints [tag][fwd] and [tag][bwd] labels.
     """
     fn = make_compile_print(fwd_f, bwd_f)
-    fn(*args)
+    fn(*args, tag=tag)
