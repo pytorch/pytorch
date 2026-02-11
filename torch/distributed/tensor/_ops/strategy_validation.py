@@ -15,14 +15,13 @@ Run as a module to compare DTensor rules against ground truth:
     python -m torch.distributed.tensor._ops.strategy_validation --op div --incorrect-only
 """
 
-from __future__ import annotations
-
 import itertools
 import re
 import time
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, TYPE_CHECKING
+from typing import Any
 
 import torch
 import torch.distributed as dist
@@ -31,10 +30,6 @@ from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import distribute_tensor, DTensor, Replicate
 from torch.distributed.tensor.placement_types import Partial, Placement, Shard
 from torch.utils import _pytree as pytree
-
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
 
 
 # Partial reduce ops to enumerate
@@ -396,12 +391,11 @@ def _create_partial_input(
                 local_tensors[r] = tensor.clone() * (
                     (1 - base_ratio) / (world_size - 1)
                 ) * scale - offset / (world_size - 1)
-        return LocalTensor(  # pyrefly: ignore[bad-argument-type]
-            local_tensors  # pyrefly: ignore[bad-argument-count]
-        )
+        # pyrefly: ignore [bad-argument-type, bad-argument-count]
+        return LocalTensor(local_tensors)
 
     elif reduce_op == "min":
-        local_tensors = {}
+        local_tensors: dict[int, torch.Tensor] = {}
         flat = tensor.flatten()
         mask = (torch.arange(flat.numel(), device=tensor.device) + tensor_idx) % 2 == 0
         for r in range(world_size):
@@ -414,12 +408,11 @@ def _create_partial_input(
                     mask, torch.full_like(flat, 0.7), torch.zeros_like(flat)
                 )
             local_tensors[r] = (flat + r_offset).reshape(tensor.shape)
-        return LocalTensor(  # pyrefly: ignore[bad-argument-type]
-            local_tensors  # pyrefly: ignore[bad-argument-count]
-        )
+        # pyrefly: ignore [bad-argument-type, bad-argument-count]
+        return LocalTensor(local_tensors)
 
     elif reduce_op == "max":
-        local_tensors = {}
+        local_tensors: dict[int, torch.Tensor] = {}
         flat = tensor.flatten()
         mask = (torch.arange(flat.numel(), device=tensor.device) + tensor_idx) % 2 == 0
         for r in range(world_size):
@@ -432,15 +425,13 @@ def _create_partial_input(
                     mask, torch.full_like(flat, -1.3), torch.zeros_like(flat)
                 )
             local_tensors[r] = (flat + r_offset).reshape(tensor.shape)
-        return LocalTensor(  # pyrefly: ignore[bad-argument-type]
-            local_tensors  # pyrefly: ignore[bad-argument-count]
-        )
+        # pyrefly: ignore [bad-argument-type, bad-argument-count]
+        return LocalTensor(local_tensors)
 
     else:
         local_tensors = {r: tensor.clone() for r in range(world_size)}
-        return LocalTensor(  # pyrefly: ignore[bad-argument-type]
-            local_tensors  # pyrefly: ignore[bad-argument-count]
-        )
+        # pyrefly: ignore [bad-argument-type, bad-argument-count]
+        return LocalTensor(local_tensors)
 
 
 def validate_combination(
@@ -488,22 +479,16 @@ def validate_combination(
                 )
                 local_tensors.append(local_tensor)
             elif isinstance(placement, Replicate):
-                local_tensor = LocalTensor(  # pyrefly: ignore[bad-argument-type]
-                    {  # pyrefly: ignore[bad-argument-count]
-                        r: tensor.clone() for r in range(world_size)
-                    }
-                )
-                local_tensors.append(local_tensor)
+                _tmp = {r: tensor.clone() for r in range(world_size)}
+                # pyrefly: ignore [bad-argument-type, bad-argument-count]
+                local_tensors.append(LocalTensor(_tmp))
             elif isinstance(placement, Shard):
                 # Create sharded LocalTensor directly to work in LocalTensorMode
                 shard_dim = placement.dim
                 chunks = tensor.tensor_split(world_size, dim=shard_dim)
-                local_tensor = LocalTensor(  # pyrefly: ignore[bad-argument-type]
-                    {  # pyrefly: ignore[bad-argument-count]
-                        r: chunks[r].clone().contiguous() for r in range(world_size)
-                    }
-                )
-                local_tensors.append(local_tensor)
+                _tmp = {r: chunks[r].clone().contiguous() for r in range(world_size)}
+                # pyrefly: ignore [bad-argument-type, bad-argument-count]
+                local_tensors.append(LocalTensor(_tmp))
             else:
                 # Fallback for other placement types
                 dt = distribute_tensor(tensor.clone(), mesh, (placement,))
