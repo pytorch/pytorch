@@ -1037,9 +1037,6 @@ if torch.backends.mps.is_available():
             "masked_scatter",
             # unsupported float64 dtype
             "multinomial",
-            "nn.functional.conv1d",
-            "nn.functional.conv2d",
-            "nn.functional.conv3d",
             "gather",
             "scatter",
             "scatter_add",
