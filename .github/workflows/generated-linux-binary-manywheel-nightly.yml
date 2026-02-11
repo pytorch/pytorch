@@ -481,7 +481,7 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
       - name: Teardown ROCm
-        uses: ./pytorch/.github/actions/teardown-rocm
+        uses: ./.github/actions/teardown-rocm
         env:
           PYTORCH_ROOT: ""
   manywheel-py3_10-rocm7_1-upload:  # Uploading
@@ -609,7 +609,7 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
       - name: Teardown ROCm
-        uses: ./pytorch/.github/actions/teardown-rocm
+        uses: ./.github/actions/teardown-rocm
         env:
           PYTORCH_ROOT: ""
   manywheel-py3_10-rocm7_2-upload:  # Uploading
@@ -1172,7 +1172,7 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
       - name: Teardown ROCm
-        uses: ./pytorch/.github/actions/teardown-rocm
+        uses: ./.github/actions/teardown-rocm
         env:
           PYTORCH_ROOT: ""
   manywheel-py3_11-rocm7_1-upload:  # Uploading
@@ -1300,7 +1300,7 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
       - name: Teardown ROCm
-        uses: ./pytorch/.github/actions/teardown-rocm
+        uses: ./.github/actions/teardown-rocm
         env:
           PYTORCH_ROOT: ""
   manywheel-py3_11-rocm7_2-upload:  # Uploading
@@ -1863,7 +1863,7 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
       - name: Teardown ROCm
-        uses: ./pytorch/.github/actions/teardown-rocm
+        uses: ./.github/actions/teardown-rocm
         env:
           PYTORCH_ROOT: ""
   manywheel-py3_12-rocm7_1-upload:  # Uploading
@@ -1991,7 +1991,7 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
       - name: Teardown ROCm
-        uses: ./pytorch/.github/actions/teardown-rocm
+        uses: ./.github/actions/teardown-rocm
         env:
           PYTORCH_ROOT: ""
   manywheel-py3_12-rocm7_2-upload:  # Uploading
@@ -2554,7 +2554,7 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
       - name: Teardown ROCm
-        uses: ./pytorch/.github/actions/teardown-rocm
+        uses: ./.github/actions/teardown-rocm
         env:
           PYTORCH_ROOT: ""
   manywheel-py3_13-rocm7_1-upload:  # Uploading
@@ -2682,7 +2682,7 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
       - name: Teardown ROCm
-        uses: ./pytorch/.github/actions/teardown-rocm
+        uses: ./.github/actions/teardown-rocm
         env:
           PYTORCH_ROOT: ""
   manywheel-py3_13-rocm7_2-upload:  # Uploading
@@ -3245,7 +3245,7 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
       - name: Teardown ROCm
-        uses: ./pytorch/.github/actions/teardown-rocm
+        uses: ./.github/actions/teardown-rocm
         env:
           PYTORCH_ROOT: ""
   manywheel-py3_13t-rocm7_1-upload:  # Uploading
@@ -3373,7 +3373,7 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
       - name: Teardown ROCm
-        uses: ./pytorch/.github/actions/teardown-rocm
+        uses: ./.github/actions/teardown-rocm
         env:
           PYTORCH_ROOT: ""
   manywheel-py3_13t-rocm7_2-upload:  # Uploading
@@ -3936,7 +3936,7 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
       - name: Teardown ROCm
-        uses: ./pytorch/.github/actions/teardown-rocm
+        uses: ./.github/actions/teardown-rocm
         env:
           PYTORCH_ROOT: ""
   manywheel-py3_14-rocm7_1-upload:  # Uploading
@@ -4064,7 +4064,7 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
       - name: Teardown ROCm
-        uses: ./pytorch/.github/actions/teardown-rocm
+        uses: ./.github/actions/teardown-rocm
         env:
           PYTORCH_ROOT: ""
   manywheel-py3_14-rocm7_2-upload:  # Uploading
@@ -4627,7 +4627,7 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
       - name: Teardown ROCm
-        uses: ./pytorch/.github/actions/teardown-rocm
+        uses: ./.github/actions/teardown-rocm
         env:
           PYTORCH_ROOT: ""
   manywheel-py3_14t-rocm7_1-upload:  # Uploading
@@ -4755,7 +4755,7 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
       - name: Teardown ROCm
-        uses: ./pytorch/.github/actions/teardown-rocm
+        uses: ./.github/actions/teardown-rocm
         env:
           PYTORCH_ROOT: ""
   manywheel-py3_14t-rocm7_2-upload:  # Uploading

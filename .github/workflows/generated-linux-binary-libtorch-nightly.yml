@@ -494,7 +494,7 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
       - name: Teardown ROCm
-        uses: ./pytorch/.github/actions/teardown-rocm
+        uses: ./.github/actions/teardown-rocm
         env:
           PYTORCH_ROOT: ""
   libtorch-rocm7_1-shared-with-deps-release-upload:  # Uploading
@@ -625,7 +625,7 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
       - name: Teardown ROCm
-        uses: ./pytorch/.github/actions/teardown-rocm
+        uses: ./.github/actions/teardown-rocm
         env:
           PYTORCH_ROOT: ""
   libtorch-rocm7_2-shared-with-deps-release-upload:  # Uploading
