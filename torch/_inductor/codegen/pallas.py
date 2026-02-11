@@ -2578,8 +2578,10 @@ class PallasKernel(SIMDKernel):
         non_alias_out_set = OrderedSet(
             [name for name, flag in aliasable_flags.items() if not flag]
         )
-        # On CPU (interpret=True), we need to copy back even aliased outputs
-        # because pallas_call returns a new array (doesn't mutate in-place)
+        # On CPU (interpret=True) and TPU, pallas_call returns new arrays so
+        # we must copy back every output.  On CUDA, aliased outputs are
+        # mutated in-place by the donated-buffer mechanism so only
+        # non-aliased outputs need an explicit copy.
         if interpret_is_cpu or is_tpu:
             copy_output_indices = list(range(len(output_params)))
         else:
@@ -3124,8 +3126,18 @@ from torch._inductor.runtime.runtime_utils import (
             if ctx.alias_params:
                 code.writeline("# Convert Torch -> JAX for donated outputs")
                 for alias_name in ctx.alias_params:
+                    # On CPU/TPU, alias outputs may be non-contiguous (e.g.
+                    # torch.cat slices) and JAX's from_dlpack rejects
+                    # non-trivially strided tensors.  Making them contiguous
+                    # is safe because CPU/TPU already copies all results back
+                    # via copy_output_indices.  On CUDA, the donated-buffer
+                    # mechanism requires the original buffer for in-place
+                    # mutation, so we cannot make a contiguous copy.
                     self._emit_torch_to_jax(
-                        code, alias_name, ctx.is_tpu, contiguous=False
+                        code,
+                        alias_name,
+                        ctx.is_tpu,
+                        contiguous=ctx.interpret_is_cpu,
                     )
             code.writeline("# Convert Torch -> JAX for in-place tensors")
             for ptr in ctx.pointer_tail:
