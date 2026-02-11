@@ -1060,6 +1060,9 @@ class aten_distributed_optimizations:
     # as atomic units with memory-bound runtime estimates.
     enable_fusion_regions: Optional[bool] = None
 
+    # Prioritize bucketing during overlap scheduling by grouping candidates by bucket key
+    prioritize_bucketing_during_scheduling: bool = True
+
 
 def parallel_compile_enabled_internally() -> bool:
     """
@@ -1502,9 +1505,6 @@ class cpp:
     use_constexpr_for_int_array = (
         os.environ.get("TORCHINDUCTOR_CPP_USE_CONSTEXPR_FOR_INT_ARRAY", "1") == "1"
     )
-
-    # threshold between two step reduction algorithm and welford reduction algorithm
-    use_two_step_variance_threshold = 1024
 
 
 class triton:
