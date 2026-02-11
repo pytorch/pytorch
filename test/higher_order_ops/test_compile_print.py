@@ -1,11 +1,15 @@
+# Owner(s): ["module: higher order operators"]
 """Tests for compile_print and make_compile_print."""
 
+from collections.abc import Callable
+from contextlib import redirect_stdout
 from dataclasses import dataclass, field
 from functools import partial
-from typing import Callable, Optional
+from io import StringIO
+from typing import Optional
 
 import torch
-from functorch.compile import aot_function, nop
+from functorch.compile import aot_function
 from torch._higher_order_ops.compile_print_wrapper import (
     compile_print,
     make_compile_print,
@@ -299,6 +303,64 @@ class TestCompilePrint(TestCase):
 
         aot = run_aot_function(make_fn, inputs)
         self.assertEqual(aot.grads[0], torch.ones(3, 3))
+
+    def test_print_tensor_repr(self):
+        """print(tensor) calls __repr__ which dispatches torch.isfinite; verify it works."""
+
+        def make_fn(cp):
+            def f(x):
+                cp(x)
+                return x.sum()
+
+            return f
+
+        # Eager mode: fwd and bwd both call print(tensor)
+        inputs = [torch.randn(3, 3, requires_grad=True)]
+        cp = make_compile_print(
+            fwd_f=lambda t: print("fwd", t),
+            bwd_f=lambda t: print("bwd", t),
+        )
+        buf = StringIO()
+        with redirect_stdout(buf):
+            run_eager(lambda _cp: make_fn(cp), inputs)
+        output = buf.getvalue()
+        self.assertIn("fwd", output)
+        self.assertIn("bwd", output)
+        # print(tensor) includes "tensor(" in its repr
+        self.assertGreaterEqual(output.count("tensor("), 2)
+
+        # torch.compile mode
+        inputs = [torch.randn(3, 3, requires_grad=True)]
+        cp = make_compile_print(
+            fwd_f=lambda t: print("fwd", t),
+            bwd_f=lambda t: print("bwd", t),
+        )
+        f = make_fn(cp)
+        compiled_f = torch.compile(f, backend="aot_eager", fullgraph=True)
+        cloned = [x.clone().detach().requires_grad_(x.requires_grad) for x in inputs]
+        buf = StringIO()
+        with redirect_stdout(buf):
+            out = compiled_f(*cloned)
+            out.backward()
+        output = buf.getvalue()
+        self.assertIn("fwd", output)
+        self.assertIn("bwd", output)
+        self.assertGreaterEqual(output.count("tensor("), 2)
+
+        # aot_function mode — backward hooks don't fire here because
+        # only the leaf function body runs at runtime, not compile_print_impl
+        # which registers the hooks. Forward print still exercises the fix.
+        inputs = [torch.randn(3, 3, requires_grad=True)]
+        cp = make_compile_print(
+            fwd_f=lambda t: print("fwd", t),
+            bwd_f=lambda t: print("bwd", t),
+        )
+        buf = StringIO()
+        with redirect_stdout(buf):
+            run_aot_function(lambda _cp: make_fn(cp), inputs)
+        output = buf.getvalue()
+        self.assertIn("fwd", output)
+        self.assertIn("tensor(", output)
 
 
 class TestCompilePrintEagerOnly(TestCase):

@@ -43,7 +43,7 @@ def make_compile_print(
                 fwd_f(t)
         return (tensors[0].new_zeros(()),)
 
-    @fwd_leaf_fn.register_fake
+    @fwd_leaf_fn.register_fake  # pyrefly: ignore[missing-attribute]
     def fwd_fake_fn(*tensors: torch.Tensor) -> tuple[torch.Tensor, ...]:
         return (tensors[0].new_zeros(()),)
 

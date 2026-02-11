@@ -3,6 +3,7 @@
 """Tests for @leaf_function with make_fx and aot_function."""
 
 from functools import partial
+from unittest.mock import patch
 
 import torch
 import torch._dynamo.config as config
@@ -371,6 +372,110 @@ class GraphModule(torch.nn.Module):
         out_compiled.backward()
         self.assertEqual(x.grad, x_clone.grad)
         self.assertEqual(y.grad, y_clone.grad)
+
+    def test_aot_function_none_gradient(self):
+        @leaf_function
+        def my_fn(x, y):
+            return (x @ x,)
+
+        @my_fn.register_fake
+        def my_fn_fake(x, y):
+            return (x @ x,)
+
+        def f(x, y):
+            return my_fn(x, y)[0]
+
+        fw_graph_cell = [None]
+        bw_graph_cell = [None]
+
+        x = torch.randn(1, 1, requires_grad=True)
+        y = torch.randn(1, 1, requires_grad=True)
+        x_clone = x.clone().detach().requires_grad_(True)
+        y_clone = y.clone().detach().requires_grad_(True)
+
+        compiled_f = aot_function(
+            f,
+            fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell),
+            bw_compiler=partial(extract_graph, graph_cell=bw_graph_cell),
+        )
+
+        out_eager = f(x, y)
+        out_compiled = compiled_f(x_clone, y_clone)
+        self.assertEqual(out_eager, out_compiled)
+
+        out_eager.sum().backward()
+        out_compiled.sum().backward()
+        self.assertEqual(x.grad, x_clone.grad)
+        self.assertEqual(y_clone.grad, [[0]])
+
+    def test_aot_function_empty_return(self):
+        printed = []
+
+        @leaf_function
+        def my_fn(x, y):
+            z = x @ y
+            print(z)
+            return (x,)
+
+        @my_fn.register_fake
+        def my_fn_fake(x, y):
+            return (x,)
+
+        def f(x, y):
+            my_fn(x, y)
+            return x.sum()
+
+        fw_graph_cell = [None]
+        bw_graph_cell = [None]
+
+        x = torch.randn(1, 1, requires_grad=True)
+        y = torch.randn(1, 1, requires_grad=True)
+        x_clone = x.clone().detach().requires_grad_(True)
+        y_clone = y.clone().detach().requires_grad_(True)
+
+        compiled_f = aot_function(
+            f,
+            fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell),
+            bw_compiler=partial(extract_graph, graph_cell=bw_graph_cell),
+        )
+
+        with patch("builtins.print", lambda *args, **kwargs: printed.append(args)):
+            out_eager = f(x, y)
+            out_compiled = compiled_f(x_clone, y_clone)
+        self.assertEqual(out_eager, out_compiled)
+
+        # Both eager and compiled should have printed a tensor via print(z)
+        self.assertEqual(len(printed), 2)
+        self.assertIsInstance(printed[0][0], torch.Tensor)
+        self.assertIsInstance(printed[1][0], torch.Tensor)
+
+        out_eager.sum().backward()
+        out_compiled.sum().backward()
+
+        self.assertExpectedInline(
+            normalize_gm(fw_graph_cell[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_1: "f32[1, 1]", primals_2: "f32[1, 1]"):
+        _tree_spec_constant0 = self._tree_spec_constant0
+        _tree_spec_constant1 = self._tree_spec_constant1
+        invoke_leaf_function = torch.ops.higher_order.invoke_leaf_function(_tree_spec_constant0, _tree_spec_constant1, primals_1, primals_2);  _tree_spec_constant0 = _tree_spec_constant1 = primals_1 = primals_2 = None
+        getitem: "f32[1, 1]" = invoke_leaf_function[0];  invoke_leaf_function = None
+        sum_1: "f32[]" = torch.ops.aten.sum.default(getitem);  getitem = None
+        return (sum_1,)
+""",  # noqa: B950
+        )
+
+        # backward doesn't have leaf function because the result of leaf function is not in final output
+        self.assertExpectedInline(
+            normalize_gm(bw_graph_cell[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, tangents_1: "f32[]"):
+        expand: "f32[1, 1]" = torch.ops.aten.expand.default(tangents_1, [1, 1]);  tangents_1 = None
+        return (expand, None)
+""",  # noqa: B950
+        )
 
 
 class TestLeafFunctionEscapedGradients(TestCase):

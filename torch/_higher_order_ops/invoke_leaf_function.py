@@ -306,10 +306,13 @@ def _make_forward(
         ]
 
         # NB: we capture dispatch keys at creation time (during tracing), where PythonDispatcher
-        # is active, but at runtime it's not so we remove it from the effective keys.
+        # and Python are active (for __torch_dispatch__ modes), but at runtime they're not on
+        # the stack so we strip them.
         effective_keys = include_keys
-        if include_keys.has(DispatchKey.PythonDispatcher):
-            effective_keys = include_keys.remove(DispatchKey.PythonDispatcher)
+        if effective_keys.has(DispatchKey.PythonDispatcher):
+            effective_keys = effective_keys.remove(DispatchKey.PythonDispatcher)
+        if effective_keys.has(DispatchKey.Python):
+            effective_keys = effective_keys.remove(DispatchKey.Python)
         with torch._C._ForceDispatchKeyGuard(effective_keys, exclude_keys):
             with torch.enable_grad():
                 outputs = fn(*inputs)
@@ -370,6 +373,7 @@ invoke_leaf_function = InvokeLeafFunction()
 # Leaf functions are opaque and may have side effects (logging, printing, etc.).
 # Mark as side-effectful to prevent dead code elimination when outputs are unused.
 from torch.fx.node import has_side_effect
+
 
 has_side_effect(invoke_leaf_function)
 
