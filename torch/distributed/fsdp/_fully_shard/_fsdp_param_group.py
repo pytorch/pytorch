@@ -726,14 +726,8 @@ class FSDPParamGroup:
         # Apply RegisterPostBackwardFunction to all tensors at once
         out_tensors = RegisterPostBackwardFunction.apply(self, *inp_tensors)
 
-        # Replace tensors in the structure (iterator order matches flatten order)
-        tensor_iter = iter(out_tensors)
-        new_args, new_kwargs = replace_grad_tensors((args, kwargs), tensor_iter)
-        remaining = list(tensor_iter)
-        if remaining:
-            raise RuntimeError(
-                f"{len(remaining)} replacement tensors were not consumed"
-            )
+        # Replace tensors in the structure (iterator order matches collect order)
+        new_args, new_kwargs = replace_grad_tensors((args, kwargs), iter(out_tensors))
         return new_args, new_kwargs
 
     def _register_state_dict_hooks(self) -> None:

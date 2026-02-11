@@ -56,9 +56,14 @@ def collect_grad_tensors(output: Any) -> tuple[torch.Tensor, ...]:
 
 
 def _collect_grad_tensors(output: Any, out: list[torch.Tensor]) -> None:
-    """Collect grad-requiring tensors in the same order as replace_grad_tensors."""
+    """Collect grad-requiring tensors in the same order as _replace_grad_tensors."""
+    # Branch order must mirror _replace_grad_tensors exactly.
     if torch.is_tensor(output) and output.requires_grad:
         out.append(output)
+    elif _is_namedtuple(output):
+        # NamedTuple before dataclass to match _replace_grad_tensors ordering.
+        for item in output:
+            _collect_grad_tensors(item, out)
     elif dataclasses.is_dataclass(output) and not isinstance(output, type):
         for field in dataclasses.fields(output):
             _collect_grad_tensors(getattr(output, field.name), out)
@@ -83,13 +88,35 @@ def replace_grad_tensors(output: Any, tensor_iter: Iterator[torch.Tensor]) -> An
     ``__init__``. Dataclasses with custom ``__init__`` validation or
     ``__post_init__`` side effects may not be compatible.
     """
+    result = _replace_grad_tensors(output, tensor_iter)
+    remaining = list(tensor_iter)
+    if remaining:
+        raise RuntimeError(f"{len(remaining)} replacement tensors were not consumed")
+    return result
+
+
+def _replace_grad_tensors(output: Any, tensor_iter: Iterator[torch.Tensor]) -> Any:
+    # Branch order must mirror _collect_grad_tensors exactly.
     if torch.is_tensor(output) and output.requires_grad:
         return next(tensor_iter)
+    elif _is_namedtuple(output):
+        # NamedTuple before dataclass: a NamedTuple that is also a dataclass
+        # should be reconstructed via positional args, not dataclasses.replace.
+        new_items = []
+        any_changed = False
+        for item in output:
+            new_item = _replace_grad_tensors(item, tensor_iter)
+            new_items.append(new_item)
+            if new_item is not item:
+                any_changed = True
+        if any_changed:
+            return type(output)(*new_items)
+        return output
     elif dataclasses.is_dataclass(output) and not isinstance(output, type):
         changes = {}
         for field in dataclasses.fields(output):
             old_val = getattr(output, field.name)
-            new_val = replace_grad_tensors(old_val, tensor_iter)
+            new_val = _replace_grad_tensors(old_val, tensor_iter)
             if new_val is not old_val:
                 changes[field.name] = new_val
         if changes:
@@ -99,28 +126,18 @@ def replace_grad_tensors(output: Any, tensor_iter: Iterator[torch.Tensor]) -> An
         new_dict = {}
         any_changed = False
         for k, v in output.items():
-            new_v = replace_grad_tensors(v, tensor_iter)
+            new_v = _replace_grad_tensors(v, tensor_iter)
             new_dict[k] = new_v
             if new_v is not v:
                 any_changed = True
-        return type(output)(new_dict) if any_changed else output
-    elif _is_namedtuple(output):
-        assert isinstance(output, tuple)
-        new_items = []
-        any_changed = False
-        for item in output:
-            new_item = replace_grad_tensors(item, tensor_iter)
-            new_items.append(new_item)
-            if new_item is not item:
-                any_changed = True
         if any_changed:
-            return type(output)(*new_items)
+            return new_dict if type(output) is dict else type(output)(**new_dict)
         return output
     elif isinstance(output, (list, tuple)):
         new_items = []
         any_changed = False
         for item in output:
-            new_item = replace_grad_tensors(item, tensor_iter)
+            new_item = _replace_grad_tensors(item, tensor_iter)
             new_items.append(new_item)
             if new_item is not item:
                 any_changed = True
