@@ -25,11 +25,11 @@ def _compile_scaled_grouped_mm_prepare_metadata():
         sizeof_ab: cutlass.Int32,
         sizeof_scale_ab: cutlass.Int32,
         sizeof_c: cutlass.Int32,
-        stride_a: tuple[cutlass.Int32, cutlass.Int32],
-        stride_b: tuple[cutlass.Int32, cutlass.Int32, cutlass.Int32],
-        stride_c: tuple[cutlass.Int32, cutlass.Int32],
-        stride_scale_a: tuple[cutlass.Int32, cutlass.Int32],
-        stride_scale_b: tuple[cutlass.Int32, cutlass.Int32],
+        stride_a: tuple[cutlass.Int64, cutlass.Int64],
+        stride_b: tuple[cutlass.Int64, cutlass.Int64, cutlass.Int64],
+        stride_c: tuple[cutlass.Int64, cutlass.Int64],
+        stride_scale_a: tuple[cutlass.Int64, cutlass.Int64],
+        stride_scale_b: tuple[cutlass.Int64, cutlass.Int64],
         CLUSTER_TILE_M: cutlass.Int32,
         CLUSTER_TILE_N: cutlass.Int32,
         out_mnkl: cute.Tensor,
@@ -89,12 +89,12 @@ def _compile_scaled_grouped_mm_prepare_metadata():
             out_ptrs_scale_ab[g, 0] = base_scale_a_u64 + byte_off_scale_a
             out_ptrs_scale_ab[g, 1] = base_scale_b_u64 + byte_off_scale_b
 
-            out_strides_abc[g, 0, 0] = cutlass.Int32(stride_a[0])
-            out_strides_abc[g, 0, 1] = cutlass.Int32(stride_a[1])
-            out_strides_abc[g, 1, 0] = cutlass.Int32(stride_b[2])
-            out_strides_abc[g, 1, 1] = cutlass.Int32(stride_b[1])
-            out_strides_abc[g, 2, 0] = cutlass.Int32(stride_c[0])
-            out_strides_abc[g, 2, 1] = cutlass.Int32(stride_c[1])
+            out_strides_abc[g, 0, 0] = cutlass.Int64(stride_a[0])
+            out_strides_abc[g, 0, 1] = cutlass.Int64(stride_a[1])
+            out_strides_abc[g, 1, 0] = cutlass.Int64(stride_b[2])
+            out_strides_abc[g, 1, 1] = cutlass.Int64(stride_b[1])
+            out_strides_abc[g, 2, 0] = cutlass.Int64(stride_c[0])
+            out_strides_abc[g, 2, 1] = cutlass.Int64(stride_c[1])
 
         if tidx == 0 and bidx == 0:
             nclusters = cutlass.Int32(0)
@@ -123,11 +123,11 @@ def _compile_scaled_grouped_mm_prepare_metadata():
         sizeof_ab: cutlass.Constexpr,
         sizeof_scale_ab: cutlass.Constexpr,
         sizeof_c: cutlass.Constexpr,
-        stride_a: tuple[cutlass.Int32, cutlass.Int32],
-        stride_b: tuple[cutlass.Int32, cutlass.Int32, cutlass.Int32],
-        stride_c: tuple[cutlass.Int32, cutlass.Int32],
-        stride_scale_a: tuple[cutlass.Int32, cutlass.Int32],
-        stride_scale_b: tuple[cutlass.Int32, cutlass.Int32],
+        stride_a: tuple[cutlass.Int64, cutlass.Int64],
+        stride_b: tuple[cutlass.Int64, cutlass.Int64, cutlass.Int64],
+        stride_c: tuple[cutlass.Int64, cutlass.Int64],
+        stride_scale_a: tuple[cutlass.Int64, cutlass.Int64],
+        stride_scale_b: tuple[cutlass.Int64, cutlass.Int64],
         CLUSTER_TILE_M: cutlass.Int32,
         CLUSTER_TILE_N: cutlass.Int32,
         out_mnkl: cute.Tensor,
@@ -174,7 +174,7 @@ def _compile_scaled_grouped_mm_prepare_metadata():
     fake_ptrs_abc = make_fake_tensor(cutlass.Int64, (g, 3), stride=(3, 1))
     fake_ptrs_scale_ab = make_fake_tensor(cutlass.Int64, (g, 2), stride=(2, 1))
     fake_mnkl = make_fake_tensor(cutlass.Int32, (g, 4), stride=(4, 1))
-    fake_strides_abc = make_fake_tensor(cutlass.Int32, (g, 3, 2), stride=(6, 2, 1))
+    fake_strides_abc = make_fake_tensor(cutlass.Int64, (g, 3, 2), stride=(6, 2, 1))
     fake_nclusters = make_fake_tensor(cutlass.Int32, (1,), stride=(1,))
     fake_stream = make_fake_stream()
 

@@ -1652,7 +1652,7 @@ class Sm100GroupedBlockScaledGemmKernel:
         stride_mn = strides_tensor_reg[0]
         stride_k = strides_tensor_reg[1]
         c1 = cutlass.Int32(1)
-        c0 = cutlass.Int32(0)
+        c0 = cutlass.Int64(0)
 
         if cutlass.const_expr(tensor_index == 0):  # tensor A
             m = problem_shape_mnk[0]

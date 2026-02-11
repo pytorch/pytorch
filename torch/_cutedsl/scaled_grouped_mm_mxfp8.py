@@ -183,7 +183,7 @@ def _compile_scaled_grouped_mm_mxfp8(
 
     g = cute.sym_int()
     fake_problem = make_fake_tensor(cutlass.Int32, (g, 4), stride=(4, 1))
-    fake_strides = make_fake_tensor(cutlass.Int32, (g, 3, 2), stride=(6, 2, 1))
+    fake_strides = make_fake_tensor(cutlass.Int64, (g, 3, 2), stride=(6, 2, 1))
     fake_ptrs_abc = make_fake_tensor(cutlass.Int64, (g, 3), stride=(3, 1))
     fake_ptrs_scale = make_fake_tensor(cutlass.Int64, (g, 2), stride=(2, 1))
     fake_total_clusters = make_fake_tensor(cutlass.Int32, (1,), stride=(1,))
@@ -256,7 +256,7 @@ def _alloc_aux_tensors(
     ptrs_abc = torch.empty((cap, 3), device=device, dtype=torch.int64)
     ptrs_scale = torch.empty((cap, 2), device=device, dtype=torch.int64)
     problem_sizes = torch.empty((cap, 4), device=device, dtype=torch.int32)
-    strides_abc = torch.empty((cap, 3, 2), device=device, dtype=torch.int32)
+    strides_abc = torch.empty((cap, 3, 2), device=device, dtype=torch.int64)
     total_num_clusters = torch.empty((1,), device=device, dtype=torch.int32)
     return ptrs_abc, ptrs_scale, problem_sizes, strides_abc, total_num_clusters
 
