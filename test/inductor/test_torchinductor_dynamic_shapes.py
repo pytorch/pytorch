@@ -640,12 +640,17 @@ class TestInductorDynamic(TestCase):
         On CUDA: uses num_blocks only (not num_blocks * num_warps * warp_size).
         On ROCm: uses num_blocks * num_warps * warp_size (total threads limit).
         """
-        from torch._inductor.runtime.triton_heuristics import _check_max_grid_x
+        from torch._inductor.runtime.triton_heuristics import (
+            _check_max_grid_x,
+            _num_warps,
+        )
 
         # Large size that would trigger the buggy check but not the correct one
         size_hints = {"x": 600_000_000}
         x = 64
-        num_warps = 8
+        # Use _num_warps to get the realistic value per platform:
+        # CUDA: max_num_warps=8, ROCm: max_num_warps=(8+1)//2=4
+        num_warps = _num_warps(8)
 
         result_x, result_num_blocks = _check_max_grid_x(size_hints, x, num_warps)
 
