@@ -22,7 +22,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     IS_FBCODE, IS_JETSON, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, slowTest,
     parametrize, reparametrize, subtest, instantiate_parametrized_tests, dtype_name,
-    TEST_WITH_ROCM, decorateIf, skipIfRocm
+    TEST_WITH_ROCM, decorateIf
 )
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
@@ -313,15 +313,17 @@ class TestThatContainsCUDAAssertFailure(TestCase):
 if __name__ == '__main__':
     run_tests()
 """)
-        # CUDA says "device-side assert triggered", ROCm says "unspecified launch failure"
+        # CUDA says "device-side assert triggered"
+        # ROCm says "unspecified launch failure" or HSA_STATUS_ERROR_EXCEPTION
         has_cuda_assert = 'CUDA error: device-side assert triggered' in stderr
-        has_hip_assert = 'HIP error' in stderr and 'launch failure' in stderr
+        has_hip_assert = 'launch failure' in stderr or 'HSA_STATUS_ERROR_EXCEPTION' in stderr
         self.assertTrue(
             has_cuda_assert or has_hip_assert,
             f"Expected device assert error in stderr, got: {stderr}",
         )
-        # should run only 1 test because it throws unrecoverable error.
-        self.assertIn('errors=1', stderr)
+        if torch.version.cuda:
+            # should run only 1 test because it throws unrecoverable error.
+            self.assertIn('errors=1', stderr)
 
 
     @onlyCUDA
@@ -358,15 +360,17 @@ instantiate_device_type_tests(
 if __name__ == '__main__':
     run_tests()
 """)
-        # CUDA says "device-side assert triggered", ROCm says "unspecified launch failure"
+        # CUDA says "device-side assert triggered"
+        # ROCm says "unspecified launch failure" or HSA_STATUS_ERROR_EXCEPTION
         has_cuda_assert = 'CUDA error: device-side assert triggered' in stderr
-        has_hip_assert = 'HIP error' in stderr and 'launch failure' in stderr
+        has_hip_assert = 'launch failure' in stderr or 'HSA_STATUS_ERROR_EXCEPTION' in stderr
         self.assertTrue(
             has_cuda_assert or has_hip_assert,
             f"Expected device assert error in stderr, got: {stderr}",
         )
-        # should run only 1 test because it throws unrecoverable error.
-        self.assertIn('errors=1', stderr)
+        if torch.version.cuda:
+            # should run only 1 test because it throws unrecoverable error.
+            self.assertIn('errors=1', stderr)
 
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support device side asserts")
@@ -2362,7 +2366,6 @@ class TestImports(TestCase):
 
     # The test is flaky on ROCm/XPU and has been open and close multiple times
     # https://github.com/pytorch/pytorch/issues/110040
-    @skipIfRocm
     def test_circular_dependencies(self) -> None:
         """ Checks that all modules inside torch can be imported
         Prevents regression reported in https://github.com/pytorch/pytorch/issues/77441 """
@@ -2377,6 +2380,7 @@ class TestImports(TestCase):
                            "torch._inductor.codegen.cuda",  # depends on cutlass
                            "torch._inductor.codegen.cutedsl",  # depends on cutlass
                            "torch.distributed.benchmarks",  # depends on RPC and DDP Optim
+                           "torch.distributed.debug._frontend",  # depends on tabulate
                            "torch.distributed.examples",  # requires CUDA and torchvision
                            "torch.distributed.tensor.examples",  # example scripts
                            "torch.distributed._tools.sac_ilp",  # depends on pulp
@@ -2458,15 +2462,21 @@ class TestOpInfos(TestCase):
 
         # Construction with natural syntax
         s = SampleInput(a, b, c, d=d, e=e)
-        assert s.input is a
-        assert s.args == (b, c)
-        assert s.kwargs == dict(d=d, e=e)
+        if s.input is not a:
+            raise AssertionError("s.input should be a")
+        if s.args != (b, c):
+            raise AssertionError(f"s.args should be (b, c), got {s.args}")
+        if s.kwargs != dict(d=d, e=e):
+            raise AssertionError(f"s.kwargs mismatch: got {s.kwargs}")
 
         # Construction with explicit args and kwargs
         s = SampleInput(a, args=(b,), kwargs=dict(c=c, d=d, e=e))
-        assert s.input is a
-        assert s.args == (b,)
-        assert s.kwargs == dict(c=c, d=d, e=e)
+        if s.input is not a:
+            raise AssertionError("s.input should be a")
+        if s.args != (b,):
+            raise AssertionError(f"s.args should be (b,), got {s.args}")
+        if s.kwargs != dict(c=c, d=d, e=e):
+            raise AssertionError(f"s.kwargs mismatch: got {s.kwargs}")
 
         # Construction with a mixed form will error
         with self.assertRaises(AssertionError):
@@ -2494,8 +2504,10 @@ class TestOpInfos(TestCase):
         # But when only input is given, metadata is allowed for backward
         # compatibility
         s = SampleInput(a, broadcasts_input=True)
-        assert s.input is a
-        assert s.broadcasts_input
+        if s.input is not a:
+            raise AssertionError("s.input should be a")
+        if not s.broadcasts_input:
+            raise AssertionError("s.broadcasts_input should be True")
 
     def test_sample_input_metadata(self) -> None:
         a, b = (object() for _ in range(2))

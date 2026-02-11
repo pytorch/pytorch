@@ -5,7 +5,7 @@ import logging
 import re
 from typing import TYPE_CHECKING
 
-from torch.onnx._internal._lazy_import import onnxscript_ir as ir
+from torch.onnx._internal._lazy_import import onnx_ir as ir
 from torch.onnx._internal.exporter import _constants
 
 
@@ -20,13 +20,32 @@ logger = logging.getLogger(__name__)
 
 
 def rename_inputs(model: ir.Model, new_names: Sequence[str]) -> None:
-    # TODO: Ensure the names do not have duplicates
+    unique_names = frozenset(new_names)
+    if len(unique_names) != len(new_names):
+        seen = set()
+        duplicates = []
+        for name in new_names:
+            if name in seen:
+                duplicates.append(name)
+            seen.add(name)
+        raise ValueError(f"Input names cannot be duplicated: {duplicates}")
+
     for input, new_name in zip(model.graph.inputs, new_names):
         input.metadata_props["pkg.torch.onnx.original_node_name"] = str(input.name)
         input.name = new_name
 
 
 def rename_outputs(model: ir.Model, new_names: Sequence[str]) -> None:
+    unique_names = frozenset(new_names)
+    if len(unique_names) != len(new_names):
+        seen = set()
+        duplicates = []
+        for name in new_names:
+            if name in seen:
+                duplicates.append(name)
+            seen.add(name)
+        raise ValueError(f"Output names cannot be duplicated: {duplicates}")
+
     for output, new_name in zip(model.graph.outputs, new_names):
         output.metadata_props["pkg.torch.onnx.original_node_name"] = str(output.name)
         output.name = new_name
@@ -76,7 +95,7 @@ def rename_axis(model: ir.Model, rename_mapping: dict[str, str]) -> None:
                 continue
             dim_name = dim.value
             if dim_name in sorted_rename_mapping:
-                # pyrefly: ignore
+                # pyrefly: ignore [bad-index]
                 new_shape.append(sorted_rename_mapping[dim_name])
                 changed = True
             elif dim_name is not None:

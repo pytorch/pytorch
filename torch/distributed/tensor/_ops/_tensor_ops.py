@@ -197,9 +197,16 @@ def create_like_strategy(op_schema: OpSchema) -> StrategyType:
                 Replicate() if isinstance(p, Partial) else p
                 for p in arg_spec.placements
             ),
+            tensor_meta=arg_spec.tensor_meta,
         )
         create_like_strategy.strategies.append(
-            OpSpec(output_specs=output_spec, input_specs=(arg_spec,))
+            OpSpec(
+                output_specs=output_spec,
+                input_specs=(arg_spec,),
+                redistribute_cost=[
+                    generate_redistribute_costs(select_strategy, arg_spec),
+                ],
+            )
         )
 
     return create_like_strategy
@@ -824,8 +831,12 @@ def cat_single_dim_strategy(
 ) -> list[list[Placement | _ShardingPlaceholder]]:
     input_list = args_schema[0]
     # unfortunate naming, but yes it's a TensorList input, and we represent it as a tuple of TensorMeta
-    assert isinstance(input_list, tuple), type(input_list)
+    assert isinstance(input_list, (tuple, list)), type(input_list)
     assert all(isinstance(tm, TensorMeta) for tm in input_list)
+
+    if isinstance(input_list, list):
+        input_list = tuple(input_list)
+
     num_inputs = len(input_list)
     ndim_set = {len(meta.shape) for meta in input_list}
     assert len(ndim_set) in (1, 2), (
@@ -1296,3 +1307,28 @@ def gen_unbind_strategy(op_schema: OpSchema) -> StrategyType:
             )
         )
     return unbind_strategy
+
+
+@register_op_strategy(aten.eye.m_out)
+def eye_out_strategy(op_schema: OpSchema) -> OpStrategy:
+    """
+    Strategy for torch.eye with out= parameter.
+    The sharding is determined by the out tensor's placement.
+    """
+    # eye.m_out has signature: eye(int n, int m, *, Tensor(a!) out) -> Tensor(a!)
+    # The out kwarg is a DTensor that determines the sharding
+    out_spec = op_schema.kwargs_schema["out"]
+    assert isinstance(out_spec, OpStrategy), (
+        f"Expected OpStrategy for out, got {type(out_spec)}"
+    )
+
+    return OpStrategy(
+        [
+            OpSpec(
+                output_specs=strategy.output_spec,
+                input_specs=[strategy.output_spec],  # out is both input and output
+                redistribute_cost=[[0.0]],
+            )
+            for strategy in out_spec.strategies
+        ]
+    )

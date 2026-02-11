@@ -87,7 +87,7 @@ def _reify_object_slots(o, s):
 @dispatch(slice, dict)
 def _reify(o, s):
     """Reify a Python ``slice`` object"""
-    # pyrefly: ignore [not-iterable]
+
     return slice(*reify((o.start, o.stop, o.step), s))
 
 

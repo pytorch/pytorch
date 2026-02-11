@@ -58,7 +58,8 @@ def _addindent(s_, numSpaces):
     if len(s) == 1:
         return s_
     first = s.pop(0)
-    s = [(numSpaces * " ") + line for line in s]
+    # Only add indentation to non-blank lines; blank lines stay empty
+    s = [(numSpaces * " ") + line if line.strip() else "" for line in s]
     s = "\n".join(s)
     s = first + "\n" + s
     return s
@@ -992,7 +993,6 @@ class Module:
                     ) from e
                 out_param = param
             elif p_should_use_set_data:
-                # pyrefly: ignore [bad-assignment]
                 param.data = param_applied
                 out_param = param
             else:
@@ -1000,7 +1000,7 @@ class Module:
                     raise AssertionError("param must be a Parameter")
                 if not param.is_leaf:
                     raise AssertionError("param must be a leaf tensor")
-                # pyrefly: ignore [bad-argument-type]
+
                 out_param = Parameter(param_applied, param.requires_grad)
                 self._parameters[key] = out_param
 
@@ -1339,7 +1339,6 @@ class Module:
 
         """
         device, dtype, non_blocking, convert_to_format = torch._C._nn._parse_to(
-            # pyrefly: ignore [not-iterable]
             *args,
             **kwargs,
         )
@@ -2804,14 +2803,18 @@ class Module:
                 memo.add(module)
                 yield name, module
 
-    def modules(self) -> Iterator["Module"]:
+    def modules(self, remove_duplicate: bool = True) -> Iterator["Module"]:
         r"""Return an iterator over all modules in the network.
+
+        Args:
+            remove_duplicate: whether to remove the duplicated module instances in the result
+                or not.
 
         Yields:
             Module: a module in the network
 
         Note:
-            Duplicate modules are returned only once. In the following
+            Duplicate modules are returned only once by default. In the following
             example, ``l`` will be returned only once.
 
         Example::
@@ -2828,7 +2831,7 @@ class Module:
             1 -> Linear(in_features=2, out_features=2, bias=True)
 
         """
-        for _, module in self.named_modules():
+        for _, module in self.named_modules(remove_duplicate=remove_duplicate):
             yield module
 
     def named_modules(

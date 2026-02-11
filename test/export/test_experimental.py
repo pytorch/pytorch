@@ -222,6 +222,41 @@ def forward(self, p_linear_weight, p_linear_bias, c_lifted_tensor_0, x):
 
         self._test_export_blockmask_with_mask_fn(make_mask_fn)
 
+    def test_export_with_default_kwargs(self):
+        class FunctionalWrapper(torch.nn.Module):
+            """Wrapper with keyword-only argument in __call__."""
+
+            def __init__(self, module):
+                super().__init__()
+                self._module = module
+
+            def __call__(self, *args, _ctx=None, **kwargs):
+                # _ctx is keyword-only with default None
+                out = self._module(*args, **kwargs)
+                return out, _ctx
+
+        inner = torch.nn.Linear(4, 4)
+        wrapper = FunctionalWrapper(inner)
+        x = torch.randn(2, 4, requires_grad=True)
+
+        gm = dynamo_graph_capture_for_export(wrapper)(x)
+        compile_out, compile_ctx = gm(x)
+        eager_out, eager_ctx = wrapper(x)
+        self.assertEqual(compile_ctx, eager_ctx)
+        self.assertEqual(compile_out, eager_out)
+        self.assertExpectedInline(
+            str(gm.code).strip(),
+            """\
+def forward(self, args_0):
+    _fn_args = (args_0, )
+    L_self_modules_module_parameters_weight_ , L_self_modules_module_parameters_bias_ , L_args_0_ , = self._dynamo_bytecode_flatten(*_fn_args)
+    l_self_modules_module_parameters_weight_ = L_self_modules_module_parameters_weight_
+    l_self_modules_module_parameters_bias_ = L_self_modules_module_parameters_bias_
+    l_args_0_ = L_args_0_
+    out = torch._C._nn.linear(l_args_0_, l_self_modules_module_parameters_weight_, l_self_modules_module_parameters_bias_);  l_args_0_ = l_self_modules_module_parameters_weight_ = l_self_modules_module_parameters_bias_ = None
+    return self._dynamo_bytecode_unflatten((out,), _fn_args)""",
+        )
+
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_export_blockmask_mutated_closure(self):
         def make_mask_fn():
@@ -782,21 +817,15 @@ def forward(self, x):
             gm = dynamo_graph_capture_for_export(foo)(*trace_inputs)
             test_inputs = make_inputs()
             self.assertExpectedInline(
-                gm._in_shuffle_graph.code.strip("\r\n "),
-                """\
-def forward(self, arg0_1, arg1_1, arg2_1):
-    return (arg1_1, arg2_1)""",
-            )
-            self.assertExpectedInline(
                 gm.code.strip("\r\n "),
                 """\
 def forward(self, args_0):
-    _tree_leaf_0, _tree_leaf_1, _tree_leaf_2, = pytree.tree_leaves((self, args_0,))
-    L_bar_x , L_bar_y , = self._in_shuffle_graph(_tree_leaf_0, _tree_leaf_1, _tree_leaf_2)
+    _fn_args = (args_0, )
+    L_bar_x , L_bar_y , = self._dynamo_bytecode_flatten(*_fn_args)
     l_bar_x = L_bar_x
     l_bar_y = L_bar_y
     add = l_bar_x + l_bar_y;  l_bar_x = l_bar_y = None
-    return pytree.tree_unflatten(self._out_shuffle_graph(_tree_leaf_0, _tree_leaf_1, _tree_leaf_2, add), self._out_spec)""",
+    return self._dynamo_bytecode_unflatten((add,), _fn_args)""",
             )
             self.assertEqual(gm(*test_inputs), foo(*test_inputs))
         finally:
@@ -819,25 +848,18 @@ def forward(self, args_0):
         inps = (torch.randn(10, 32),)
         ep = dynamo_graph_capture_for_export(MyModel())(*inps)
         self.assertExpectedInline(
-            ep._in_shuffle_graph.code.strip("\r\n "),
-            """\
-def forward(self, arg0_1, arg1_1):
-    _tensor_constant0 = self._tensor_constant0
-    return (arg1_1, _tensor_constant0)""",
-        )
-        self.assertExpectedInline(
             ep.code.strip("\r\n "),
             """\
 def forward(self, args_0):
-    _tree_leaf_0, _tree_leaf_1, = pytree.tree_leaves((self, args_0,))
-    L_x_ , L_outer_ , = self._in_shuffle_graph(_tree_leaf_0, _tree_leaf_1)
+    _fn_args = (args_0, )
+    L_x_ , L_outer_ , = self._dynamo_bytecode_flatten(*_fn_args)
     l_x_ = L_x_
     l_outer_ = L_outer_
     z = l_x_ + l_outer_;  l_x_ = l_outer_ = None
     y = z[(slice(None, -1, None), slice(None, None, None))];  z = None
     stacked = torch.stack([y, y, y], dim = 0);  y = None
     reshaped = stacked.reshape(-1, 3, 32);  stacked = None
-    return pytree.tree_unflatten(self._out_shuffle_graph(_tree_leaf_0, _tree_leaf_1, reshaped), self._out_spec)""",
+    return self._dynamo_bytecode_unflatten((reshaped,), _fn_args)""",
         )
         self.assertEqual(ep(*inps), MyModel()(*inps))
 
@@ -916,12 +938,12 @@ def forward(self, args_0):
             gm.code.strip("\r\n "),
             """\
 def forward(self, args_0):
-    _tree_leaf_0, _tree_leaf_1, = pytree.tree_leaves((self, args_0,))
-    L_args_0_ , = self._in_shuffle_graph(_tree_leaf_0, _tree_leaf_1)
+    _fn_args = (args_0, )
+    L_args_0_ , = self._dynamo_bytecode_flatten(*_fn_args)
     l_args_0_ = L_args_0_
-    add = l_args_0_ + 1
+    add = l_args_0_ + 1;  add = None
     mul = l_args_0_ * 2;  l_args_0_ = None
-    return pytree.tree_unflatten(self._out_shuffle_graph(_tree_leaf_0, _tree_leaf_1, mul, add), self._out_spec)""",
+    return self._dynamo_bytecode_unflatten((mul,), _fn_args)""",
         )
         self.assertEqual(gm(*test_inputs), foo(*test_inputs))
 
@@ -1048,6 +1070,293 @@ def forward(self, args_0):
         ep = dynamo_graph_capture_for_export(m)(torch.randn(2, 3))
         test_inputs = (torch.randn(2, 3),)
         self.assertEqual(ep(*test_inputs), m(*test_inputs))
+
+    def test_restore_state_dict_basic(self):
+        """Test basic state dict restoration with a simple model."""
+        from torch.export import _restore_state_dict
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+                self.register_buffer("buf", torch.randn(4))
+
+            def forward(self, x):
+                return self.linear(x) + self.buf
+
+        model = Model()
+        gm = dynamo_graph_capture_for_export(model)(torch.randn(2, 4))
+
+        # Before restoration, FQNs may be flattened
+        state_dict_before = dict(gm.named_parameters())
+        buffer_dict_before = dict(gm.named_buffers())
+
+        _restore_state_dict(model, gm)
+
+        # After restoration, FQNs should match original module
+        state_dict_after = dict(gm.named_parameters())
+        buffer_dict_after = dict(gm.named_buffers())
+
+        # Check that the parameter names match the original
+        original_param_names = set(dict(model.named_parameters()).keys())
+        restored_param_names = set(state_dict_after.keys())
+        self.assertEqual(original_param_names, restored_param_names)
+
+        # Check that the buffer names match the original
+        original_buffer_names = set(dict(model.named_buffers()).keys())
+        restored_buffer_names = set(buffer_dict_after.keys())
+        self.assertEqual(original_buffer_names, restored_buffer_names)
+
+        # Verify the model still works correctly
+        test_input = torch.randn(2, 4)
+        expected = model(test_input)
+        actual = gm(test_input)
+        self.assertEqual(expected, actual)
+
+    def test_restore_state_dict_nested_modules(self):
+        """Test state dict restoration with nested modules."""
+        from torch.export import _restore_state_dict
+
+        class SubModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = torch.nn.Linear(8, 8)
+                self.register_buffer("scale", torch.tensor(2.0))
+
+            def forward(self, x):
+                return self.fc(x) * self.scale
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.sub1 = SubModule()
+                self.sub2 = SubModule()
+
+            def forward(self, x):
+                return self.sub1(x) + self.sub2(x)
+
+        model = Model()
+        gm = dynamo_graph_capture_for_export(model)(torch.randn(2, 8))
+
+        _restore_state_dict(model, gm)
+
+        # Check that nested FQNs are properly restored
+        original_param_names = set(dict(model.named_parameters()).keys())
+        restored_param_names = set(dict(gm.named_parameters()).keys())
+        self.assertEqual(original_param_names, restored_param_names)
+
+        # Check buffers too
+        original_buffer_names = set(dict(model.named_buffers()).keys())
+        restored_buffer_names = set(dict(gm.named_buffers()).keys())
+        self.assertEqual(original_buffer_names, restored_buffer_names)
+
+        # Verify functionality
+        test_input = torch.randn(2, 8)
+        expected = model(test_input)
+        actual = gm(test_input)
+        self.assertEqual(expected, actual)
+
+    def test_restore_state_dict_with_bound_method(self):
+        """Test state dict restoration when passing a bound method."""
+        from torch.export import _restore_state_dict
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        model = Model()
+        gm = dynamo_graph_capture_for_export(model.forward)(torch.randn(2, 4))
+
+        # Pass bound method instead of module
+        _restore_state_dict(model.forward, gm)
+
+        # Verify FQNs match
+        original_param_names = set(dict(model.named_parameters()).keys())
+        restored_param_names = set(dict(gm.named_parameters()).keys())
+        self.assertEqual(original_param_names, restored_param_names)
+
+    def test_restore_state_dict_type_error(self):
+        """Test that _restore_state_dict raises TypeError for invalid input."""
+        from torch.export import _restore_state_dict
+
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+
+        # Should raise TypeError when given a non-module, non-bound-method
+        with self.assertRaises(TypeError):
+            _restore_state_dict(lambda x: x, gm)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    def test_aot_export_blockmask_with_new_closure(self):
+        import contextlib
+
+        from torch._export.utils import _compiling_state_context
+        from torch._functorch.aot_autograd import (
+            aot_compile_joint_with_descriptors,
+            aot_export_joint_with_descriptors,
+        )
+        from torch._guards import tracing as torch_tracing, TracingContext
+        from torch.nn.attention.flex_attention import create_block_mask
+
+        _register_blockmask_pytree()
+
+        def make_mask_fn():
+            res = 4
+
+            def fn(b, h, q, k):
+                return q >= k + res
+
+            return fn
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                mask_fn = make_mask_fn()
+                block_mask = create_block_mask(
+                    mask_fn, B=1, H=1, Q_LEN=64, KV_LEN=64, device=x.device
+                )
+                return x, block_mask
+
+        args = (torch.randn(2, 128, device="cuda"),)
+        gm = dynamo_graph_capture_for_export(Model())(*args)
+
+        fake_mode = gm.meta["fake_mode"]
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(torch_tracing(TracingContext(fake_mode)))
+            stack.enter_context(_compiling_state_context())
+            stack.enter_context(fake_mode)
+
+            joint_with_descriptors = aot_export_joint_with_descriptors(
+                stack,
+                gm,
+                args=args,
+                kwargs={},
+                keep_inference_input_mutations=True,
+            )
+            self.assertExpectedInline(
+                str(joint_with_descriptors.graph_module.code).strip(),
+                """\
+def forward(self, arg0_1):
+    arange_2 = torch.ops.aten.arange.start(0, 64, device = device(type='cuda', index=0), pin_memory = False)
+    arange_3 = torch.ops.aten.arange.start(0, 64, device = device(type='cuda', index=0), pin_memory = False)
+    add = torch.ops.aten.add.Tensor(arange_3, 4);  arange_3 = None
+    view = torch.ops.aten.view.default(arange_2, [64, 1]);  arange_2 = None
+    ge = torch.ops.aten.ge.Tensor(view, add);  view = add = None
+    expand = torch.ops.aten.expand.default(ge, [1, 64, 64]);  ge = None
+    expand_1 = torch.ops.aten.expand.default(expand, [1, 1, 64, 64]);  expand = None
+    constant_pad_nd = torch.ops.aten.constant_pad_nd.default(expand_1, [0, 64, 0, 64], 0.0);  expand_1 = None
+    view_1 = torch.ops.aten.view.default(constant_pad_nd, [1, 1, 1, 128, 1, 128]);  constant_pad_nd = None
+    permute = torch.ops.aten.permute.default(view_1, [0, 1, 2, 4, 3, 5]);  view_1 = None
+    sum_1 = torch.ops.aten.sum.dim_IntList(permute, [-2, -1]);  permute = None
+    eq = torch.ops.aten.eq.Scalar(sum_1, 16384)
+    gt = torch.ops.aten.gt.Scalar(sum_1, 0)
+    lt = torch.ops.aten.lt.Scalar(sum_1, 16384);  sum_1 = None
+    bitwise_and = torch.ops.aten.bitwise_and.Tensor(gt, lt);  gt = lt = None
+    _to_copy = torch.ops.aten._to_copy.default(bitwise_and, dtype = torch.int8);  bitwise_and = None
+    _to_copy_1 = torch.ops.aten._to_copy.default(eq, dtype = torch.int8);  eq = None
+    _to_copy_2 = torch.ops.aten._to_copy.default(_to_copy, dtype = torch.int32);  _to_copy = None
+    sum_2 = torch.ops.aten.sum.dim_IntList(_to_copy_2, [-1])
+    sort = torch.ops.aten.sort.stable(_to_copy_2, stable = True, descending = True);  _to_copy_2 = None
+    getitem_1 = sort[1];  sort = None
+    _to_copy_3 = torch.ops.aten._to_copy.default(sum_2, dtype = torch.int32, memory_format = torch.contiguous_format);  sum_2 = None
+    _to_copy_4 = torch.ops.aten._to_copy.default(getitem_1, dtype = torch.int32, memory_format = torch.contiguous_format);  getitem_1 = None
+    _to_copy_5 = torch.ops.aten._to_copy.default(_to_copy_1, dtype = torch.int32);  _to_copy_1 = None
+    sum_3 = torch.ops.aten.sum.dim_IntList(_to_copy_5, [-1])
+    sort_1 = torch.ops.aten.sort.stable(_to_copy_5, stable = True, descending = True);  _to_copy_5 = None
+    getitem_3 = sort_1[1];  sort_1 = None
+    _to_copy_6 = torch.ops.aten._to_copy.default(sum_3, dtype = torch.int32, memory_format = torch.contiguous_format);  sum_3 = None
+    _to_copy_7 = torch.ops.aten._to_copy.default(getitem_3, dtype = torch.int32, memory_format = torch.contiguous_format);  getitem_3 = None
+    new_zeros = torch.ops.aten.new_zeros.default(_to_copy_4, [1, 1, 1, 2], dtype = torch.int32, pin_memory = False)
+    arange_4 = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='cuda', index=0), pin_memory = False)
+    unsqueeze = torch.ops.aten.unsqueeze.default(arange_4, -1);  arange_4 = None
+    arange_5 = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='cuda', index=0), pin_memory = False)
+    unsqueeze_1 = torch.ops.aten.unsqueeze.default(_to_copy_3, 3)
+    lt_1 = torch.ops.aten.lt.Tensor(arange_5, unsqueeze_1);  arange_5 = unsqueeze_1 = None
+    scalar_tensor = torch.ops.aten.scalar_tensor.default(1, dtype = torch.int32, layout = torch.strided, device = device(type='cuda', index=0))
+    where = torch.ops.aten.where.self(lt_1, _to_copy_4, scalar_tensor);  lt_1 = scalar_tensor = None
+    new_ones = torch.ops.aten.new_ones.default(new_zeros, [1, 1], pin_memory = False)
+    arange_6 = torch.ops.aten.arange.default(1, dtype = torch.int64, layout = torch.strided, device = device(type='cuda', index=0))
+    unsqueeze_2 = torch.ops.aten.unsqueeze.default(arange_6, -1);  arange_6 = None
+    unsqueeze_3 = torch.ops.aten.unsqueeze.default(unsqueeze_2, -1);  unsqueeze_2 = None
+    view_2 = torch.ops.aten.view.default(new_ones, [1, 1, 1, 1]);  new_ones = None
+    arange_7 = torch.ops.aten.arange.default(1, dtype = torch.int64, layout = torch.strided, device = device(type='cuda', index=0))
+    unsqueeze_4 = torch.ops.aten.unsqueeze.default(arange_7, -1);  arange_7 = None
+    unsqueeze_5 = torch.ops.aten.unsqueeze.default(unsqueeze_4, -1);  unsqueeze_4 = None
+    unsqueeze_6 = torch.ops.aten.unsqueeze.default(unsqueeze_5, -1);  unsqueeze_5 = None
+    index_put = torch.ops.aten.index_put.default(new_zeros, [unsqueeze_6, unsqueeze_3, unsqueeze, where], view_2);  new_zeros = unsqueeze_6 = unsqueeze_3 = unsqueeze = where = view_2 = None
+    slice_3 = torch.ops.aten.slice.Tensor(index_put, 3, 0, 1);  index_put = None
+    transpose_1 = torch.ops.aten.transpose.int(slice_3, -2, -1);  slice_3 = None
+    sum_4 = torch.ops.aten.sum.dim_IntList(transpose_1, [-1])
+    sort_2 = torch.ops.aten.sort.stable(transpose_1, stable = True, descending = True);  transpose_1 = None
+    getitem_5 = sort_2[1];  sort_2 = None
+    _to_copy_8 = torch.ops.aten._to_copy.default(sum_4, dtype = torch.int32, memory_format = torch.contiguous_format);  sum_4 = None
+    _to_copy_9 = torch.ops.aten._to_copy.default(getitem_5, dtype = torch.int32, memory_format = torch.contiguous_format);  getitem_5 = None
+    new_zeros_1 = torch.ops.aten.new_zeros.default(_to_copy_7, [1, 1, 1, 2], dtype = torch.int32, pin_memory = False)
+    arange_8 = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='cuda', index=0), pin_memory = False)
+    unsqueeze_7 = torch.ops.aten.unsqueeze.default(arange_8, -1);  arange_8 = None
+    arange_9 = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='cuda', index=0), pin_memory = False)
+    unsqueeze_8 = torch.ops.aten.unsqueeze.default(_to_copy_6, 3)
+    lt_2 = torch.ops.aten.lt.Tensor(arange_9, unsqueeze_8);  arange_9 = unsqueeze_8 = None
+    scalar_tensor_1 = torch.ops.aten.scalar_tensor.default(1, dtype = torch.int32, layout = torch.strided, device = device(type='cuda', index=0))
+    where_1 = torch.ops.aten.where.self(lt_2, _to_copy_7, scalar_tensor_1);  lt_2 = scalar_tensor_1 = None
+    new_ones_1 = torch.ops.aten.new_ones.default(new_zeros_1, [1, 1], pin_memory = False)
+    arange_10 = torch.ops.aten.arange.default(1, dtype = torch.int64, layout = torch.strided, device = device(type='cuda', index=0))
+    unsqueeze_9 = torch.ops.aten.unsqueeze.default(arange_10, -1);  arange_10 = None
+    unsqueeze_10 = torch.ops.aten.unsqueeze.default(unsqueeze_9, -1);  unsqueeze_9 = None
+    view_3 = torch.ops.aten.view.default(new_ones_1, [1, 1, 1, 1]);  new_ones_1 = None
+    arange_11 = torch.ops.aten.arange.default(1, dtype = torch.int64, layout = torch.strided, device = device(type='cuda', index=0))
+    unsqueeze_11 = torch.ops.aten.unsqueeze.default(arange_11, -1);  arange_11 = None
+    unsqueeze_12 = torch.ops.aten.unsqueeze.default(unsqueeze_11, -1);  unsqueeze_11 = None
+    unsqueeze_13 = torch.ops.aten.unsqueeze.default(unsqueeze_12, -1);  unsqueeze_12 = None
+    index_put_1 = torch.ops.aten.index_put.default(new_zeros_1, [unsqueeze_13, unsqueeze_10, unsqueeze_7, where_1], view_3);  new_zeros_1 = unsqueeze_13 = unsqueeze_10 = unsqueeze_7 = where_1 = view_3 = None
+    slice_6 = torch.ops.aten.slice.Tensor(index_put_1, 3, 0, 1);  index_put_1 = None
+    transpose_3 = torch.ops.aten.transpose.int(slice_6, -2, -1);  slice_6 = None
+    sum_5 = torch.ops.aten.sum.dim_IntList(transpose_3, [-1])
+    sort_3 = torch.ops.aten.sort.stable(transpose_3, stable = True, descending = True);  transpose_3 = None
+    getitem_7 = sort_3[1];  sort_3 = None
+    _to_copy_10 = torch.ops.aten._to_copy.default(sum_5, dtype = torch.int32, memory_format = torch.contiguous_format);  sum_5 = None
+    _to_copy_11 = torch.ops.aten._to_copy.default(getitem_7, dtype = torch.int32, memory_format = torch.contiguous_format);  getitem_7 = None
+    return (arg0_1, _to_copy_3, _to_copy_4, _to_copy_6, _to_copy_7, _to_copy_8, _to_copy_9, _to_copy_10, _to_copy_11)""",
+            )
+
+            compiled_fn = aot_compile_joint_with_descriptors(joint_with_descriptors)
+            # Shouldn't crash
+            self.assertIsNotNone(compiled_fn)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    def test_aot_export_blockmask_closure_spec_mismatch(self):
+        """BlockMasks with same closure code but different captured values must
+        produce different TreeSpecs, so pytree won't confuse them."""
+        from torch.nn.attention.flex_attention import create_block_mask
+
+        _register_blockmask_pytree()
+
+        def make_mask_fn(offset):
+            def fn(b, h, q, k):
+                return q >= k + offset
+
+            return fn
+
+        mask_a = create_block_mask(
+            make_mask_fn(4), B=1, H=1, Q_LEN=64, KV_LEN=64, device="cuda"
+        )
+        mask_b = create_block_mask(
+            make_mask_fn(8), B=1, H=1, Q_LEN=64, KV_LEN=64, device="cuda"
+        )
+        mask_a_same = create_block_mask(
+            make_mask_fn(4), B=1, H=1, Q_LEN=64, KV_LEN=64, device="cuda"
+        )
+
+        _, spec_a = pytree.tree_flatten(mask_a)
+        _, spec_b = pytree.tree_flatten(mask_b)
+        _, spec_a_same = pytree.tree_flatten(mask_a_same)
+
+        # Same closure code + same captured value -> same spec
+        self.assertEqual(spec_a, spec_a_same)
+        # Same closure code + different captured value -> different spec
+        self.assertNotEqual(spec_a, spec_b)
 
 
 if __name__ == "__main__":

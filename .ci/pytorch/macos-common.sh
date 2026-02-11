@@ -12,12 +12,3 @@ sysctl -a | grep machdep.cpu
 export MACOSX_DEPLOYMENT_TARGET=11.1
 export CXX=clang++
 export CC=clang
-
-print_cmake_info() {
-  CMAKE_EXEC=$(which cmake)
-  echo "$CMAKE_EXEC"
-
-  CONDA_INSTALLATION_DIR=$(dirname "$CMAKE_EXEC")
-  # Print all libraries under cmake rpath for debugging
-  ls -la "$CONDA_INSTALLATION_DIR/../lib"
-}

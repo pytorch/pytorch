@@ -169,6 +169,7 @@ class CPythonTestCase(TestCase):
     assertListEqual = unittest.TestCase.assertListEqual
     assertTupleEqual = unittest.TestCase.assertTupleEqual
     assertSetEqual = unittest.TestCase.assertSetEqual
+    # pyrefly: ignore [bad-override]
     assertDictEqual = polyfills.assert_dict_equal
     # pyrefly: ignore [bad-override]
     assertRaises = unittest.TestCase.assertRaises
@@ -239,3 +240,6 @@ class CPythonTestCase(TestCase):
                 enable_trace_unittest=True,
             ),
         )
+
+    def wrap_with_policy(self, method_name: str, policy: Callable) -> None:
+        pass

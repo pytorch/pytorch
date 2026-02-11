@@ -799,7 +799,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 0)
 
     @unittest.skipIf(
-        not torch._C._cpu._is_amx_tile_supported(), "AMX ISA support is required"
+        not torch.cpu._is_amx_tile_supported(), "AMX ISA support is required"
     )
     @inductor_config.patch({"freezing": True})
     @patches
@@ -1305,6 +1305,56 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
+    @dtypes(torch.float32, torch.bfloat16)
+    def test_qlinear_pointwise_int8_layout(self, dtype):
+        class M(torch.nn.Module):
+            def __init__(self, N, K):
+                super().__init__()
+                qw = torch.randint(-128, 127, (N, K), dtype=torch.int8)
+                self.w_scales = torch.Tensor([0.8] * N)
+                self.w_zps = torch.zeros(N).to(dtype=torch.int)
+                self.qw_packed = torch.ops.onednn.qlinear_prepack(qw, None)
+                self.b = torch.rand((N,), dtype=dtype)
+                self.y_scale = 0.5
+                self.y_zp = 0
+                # set int8 output to check int8 layout path
+                self.output_dtype = torch.int8
+                self.post_op = "none"
+                self.unary_post_op_args = ()
+                self.post_op_algo = "none"
+
+            def forward(self, qx, x_scale, x_zp):
+                return torch.ops.onednn.qlinear_pointwise(
+                    qx,
+                    x_scale,
+                    x_zp,
+                    self.qw_packed,
+                    self.w_scales,
+                    self.w_zps,
+                    self.b,
+                    self.y_scale,
+                    self.y_zp,
+                    self.output_dtype,
+                    self.post_op,
+                    self.unary_post_op_args,
+                    self.post_op_algo,
+                )
+
+        x = torch.rand((32, 64), dtype=dtype)
+        x_scale, x_zp = torch.ops.quantized_decomposed.choose_qparams.tensor(
+            x, -128, 127, torch.Tensor([torch.finfo(torch.float32).eps]), torch.int8
+        )
+        qx = torch.ops.quantized_decomposed.quantize_per_tensor.tensor(
+            x, x_scale, x_zp, -128, 127, torch.int8
+        )
+        mod = M(64, 64).eval()
+        counters.clear()
+        self.common(mod, (qx, x_scale.item(), x_zp.item()))
+        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
+
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
     @dtypes(torch.bfloat16)
     @parametrize(
         "batch_size",
@@ -1450,7 +1500,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             self._check_amx_counter(vec_amx)
 
     @unittest.skipIf(
-        not torch._C._cpu._is_amx_tile_supported(), "AMX ISA support is required"
+        not torch.cpu._is_amx_tile_supported(), "AMX ISA support is required"
     )
     @inductor_config.patch({"freezing": True})
     @patches
@@ -1534,7 +1584,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
 
         vec_amx = VecAMX()
         self._check_amx_counter(vec_amx)
-        if torch._C._cpu._is_amx_tile_supported():
+        if torch.cpu._is_amx_tile_supported():
             # Only AMX ISA based micro-kernel is currently supported for da8w8
             self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
 
@@ -1579,7 +1629,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         )
 
     @unittest.skipIf(
-        not torch._C._cpu._is_amx_tile_supported(), "AMX ISA support is required"
+        not torch.cpu._is_amx_tile_supported(), "AMX ISA support is required"
     )
     @inductor_config.patch({"freezing": True})
     @patches
@@ -1650,7 +1700,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @unittest.skipIf(
-        not torch._C._cpu._is_amx_tile_supported(), "AMX ISA support is required"
+        not torch.cpu._is_amx_tile_supported(), "AMX ISA support is required"
     )
     @inductor_config.patch({"freezing": True})
     @inductor_config.patch({"cpp.use_small_dequant_buffer": True})
@@ -1694,7 +1744,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             torch._C.FileCheck().check(_target_code_check).run(code)
 
     @unittest.skipIf(
-        not torch._C._cpu._is_amx_tile_supported(), "AMX ISA support is required"
+        not torch.cpu._is_amx_tile_supported(), "AMX ISA support is required"
     )
     @inductor_config.patch({"freezing": True})
     @patches
@@ -1764,7 +1814,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @unittest.skipIf(
-        not torch._C._cpu._is_amx_tile_supported(), "AMX ISA support is required"
+        not torch.cpu._is_amx_tile_supported(), "AMX ISA support is required"
     )
     @inductor_config.patch({"freezing": True})
     @inductor_config.patch({"cpp.enable_concat_linear": True})
@@ -2749,7 +2799,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             self.common(mod, (u, v))
 
     @unittest.skipIf(
-        not torch._C._cpu._is_amx_tile_supported(), "AMX ISA support is required"
+        not torch.cpu._is_amx_tile_supported(), "AMX ISA support is required"
     )
     @inductor_config.patch({"freezing": True})
     @patches
