@@ -366,6 +366,7 @@ def _create_partial_input(
     different Partial types.
     """
     reduce_op = placement.reduce_op
+    local_tensors: dict[int, torch.Tensor] = {}
 
     if reduce_op in ("sum", "avg"):
         base_ratio = 0.6 + 0.1 * (tensor_idx % 3)
@@ -382,7 +383,6 @@ def _create_partial_input(
         offset = (offset_mag * signs).reshape(tensor.shape)
 
         scale = world_size if reduce_op == "avg" else 1
-        local_tensors = {}
         for r in range(world_size):
             if r == 0:
                 local_tensors[r] = tensor.clone() * base_ratio * scale + offset
@@ -390,8 +390,6 @@ def _create_partial_input(
                 local_tensors[r] = tensor.clone() * (
                     (1 - base_ratio) / (world_size - 1)
                 ) * scale - offset / (world_size - 1)
-        # pyrefly: ignore [bad-argument-type, bad-argument-count]
-        return LocalTensor(local_tensors)
 
     elif reduce_op == "min":
         # For P(min): on each element, one rank holds the true value (offset=0)
@@ -399,7 +397,6 @@ def _create_partial_input(
         # The mask alternates which rank holds the true value (shifted by tensor_idx).
         # 0.7 is arbitrary; any positive value works. Using a different magnitude
         # than max's 1.3 prevents accidental cancellation when min/max are combined.
-        local_tensors: dict[int, torch.Tensor] = {}
         flat = tensor.flatten()
         mask = (torch.arange(flat.numel(), device=tensor.device) + tensor_idx) % 2 == 0
         for r in range(world_size):
@@ -412,14 +409,11 @@ def _create_partial_input(
                     mask, torch.full_like(flat, 0.7), torch.zeros_like(flat)
                 )
             local_tensors[r] = (flat + r_offset).reshape(tensor.shape)
-        # pyrefly: ignore [bad-argument-type, bad-argument-count]
-        return LocalTensor(local_tensors)
 
     elif reduce_op == "max":
         # For P(max): on each element, one rank holds the true value (offset=0)
         # and the other holds value-1.3. max() selects the unmodified value.
         # 1.3 is arbitrary; any positive magnitude works.
-        local_tensors: dict[int, torch.Tensor] = {}
         flat = tensor.flatten()
         mask = (torch.arange(flat.numel(), device=tensor.device) + tensor_idx) % 2 == 0
         for r in range(world_size):
@@ -432,13 +426,13 @@ def _create_partial_input(
                     mask, torch.full_like(flat, -1.3), torch.zeros_like(flat)
                 )
             local_tensors[r] = (flat + r_offset).reshape(tensor.shape)
-        # pyrefly: ignore [bad-argument-type, bad-argument-count]
-        return LocalTensor(local_tensors)
 
     else:
-        local_tensors = {r: tensor.clone() for r in range(world_size)}
-        # pyrefly: ignore [bad-argument-type, bad-argument-count]
-        return LocalTensor(local_tensors)
+        for r in range(world_size):
+            local_tensors[r] = tensor.clone()
+
+    # pyrefly: ignore [bad-argument-type, bad-argument-count]
+    return LocalTensor(local_tensors)
 
 
 def validate_combination(
