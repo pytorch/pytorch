@@ -953,6 +953,7 @@ class OverlapScheduler:
             max_coll_distance=self.max_node_distance,
             region_of=self.region_of,
             bucket_exposed_first=self.bucket_exposed_first,
+            bucket_only_fsdp_groups=self.bucket_only_fsdp_groups,
         )
 
         if self.log_final_collectives_estimations:
