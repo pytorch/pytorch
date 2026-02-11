@@ -12583,6 +12583,123 @@ fn
         opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
         self.assertEqual(fn(x, gn), opt_fn(x, gn))
 
+    def test_inspect_signature_caching(self):
+        """Test that inspect.signature results are cached for repeated calls."""
+        import inspect
+        from unittest.mock import patch
+
+        def target_func(a, b, c=3):
+            return a + b + c
+
+        def other_func(x, y):
+            return x * y
+
+        def fn():
+            results = []
+            for _ in range(10):
+                sig1 = inspect.signature(target_func)
+                sig2 = inspect.signature(other_func)
+                results.append(len(sig1.parameters))
+                results.append(len(sig2.parameters))
+            return sum(results)
+
+        from torch._dynamo.output_graph import OutputGraph
+
+        original_cleanup = OutputGraph.cleanup
+        unique_calls = 0
+
+        def capturing_cleanup(self):
+            nonlocal unique_calls
+            unique_calls = len(self.signature_cache)
+            return original_cleanup(self)
+
+        with patch.object(OutputGraph, "cleanup", capturing_cleanup):
+            compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            result = compiled_fn()
+
+        # 10 iterations * (3 params from target_func + 2 params from other_func) = 50
+        self.assertEqual(result, 50)
+        # signature_cache should have exactly 2 entries (one per unique function)
+        self.assertEqual(unique_calls, 2)
+
+    def test_inspect_signature_caching_methods(self):
+        """Test that inspect.signature caching works for methods."""
+        import inspect
+        from unittest.mock import patch
+
+        class MyClass:
+            def method_a(self, x, y, z):
+                return x + y + z
+
+            def method_b(self, a):
+                return a * 2
+
+        obj = MyClass()
+
+        def fn():
+            results = []
+            for _ in range(10):
+                sig1 = inspect.signature(obj.method_a)
+                sig2 = inspect.signature(obj.method_b)
+                # Note: bound methods don't include 'self' in signature
+                results.append(len(sig1.parameters))
+                results.append(len(sig2.parameters))
+            return sum(results)
+
+        from torch._dynamo.output_graph import OutputGraph
+
+        original_cleanup = OutputGraph.cleanup
+        unique_calls = 0
+
+        def capturing_cleanup(self):
+            nonlocal unique_calls
+            unique_calls = len(self.signature_cache)
+            return original_cleanup(self)
+
+        with patch.object(OutputGraph, "cleanup", capturing_cleanup):
+            compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            result = compiled_fn()
+
+        # 10 iterations * (3 params from method_a + 1 param from method_b) = 40
+        self.assertEqual(result, 40)
+        # signature_cache should have exactly 2 entries (one per unique method)
+        self.assertEqual(unique_calls, 2)
+
+    def test_inspect_variable_redirect(self):
+        """Test that InspectVariable is used and redirects property accesses."""
+        import inspect
+        from unittest.mock import patch
+
+        from torch._dynamo.variables.user_defined import InspectVariable
+
+        redirected_attrs = []
+        original_var_getattr = InspectVariable.var_getattr
+
+        def tracking_var_getattr(self, tx, name):
+            redirects = self._PROPERTY_REDIRECTS.get(type(self.value), {})
+            if name in redirects:
+                redirected_attrs.append(name)
+            return original_var_getattr(self, tx, name)
+
+        def fn(x, gn):
+            sig = inspect.signature(gn)
+            params = sig.parameters
+            param = params["a"]
+            return x + param.kind + len(param.name)
+
+        def gn(a: torch.Tensor, b: int) -> torch.Tensor:
+            return a + b
+
+        x = torch.randn(2, 3)
+        with patch.object(InspectVariable, "var_getattr", tracking_var_getattr):
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            result = opt_fn(x, gn)
+
+        self.assertEqual(result, fn(x, gn))
+        self.assertIn("parameters", redirected_attrs)
+        self.assertIn("kind", redirected_attrs)
+        self.assertIn("name", redirected_attrs)
+
     def test_grad_none(self):
         def fn(x, y):
             x.grad = torch.abs(y)
