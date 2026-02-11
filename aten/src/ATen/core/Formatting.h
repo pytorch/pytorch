@@ -22,4 +22,5 @@ inline std::ostream& operator<<(std::ostream & out, const Tensor & t) {
   return print(out,t,80);
 }
 TORCH_API void print(const Tensor & t, int64_t linesize=80);
+TORCH_API void set_printoptions(bool sci_mode = true);
 }
