@@ -623,7 +623,7 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
     @skip_if_lt_x_gpu(1)
     @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
     def test_mixed_precision_with_activation_checkpoint(self):
-        checkpoint = torch.utils.checkpoint.checkpoint
+        from torch.utils.checkpoint import checkpoint
 
         class Model(nn.Module):
             def __init__(self):
