@@ -987,7 +987,6 @@ This class does not support ``__members__`` property.)");
       .value("BAND", ::c10d::ReduceOp::RedOpType::BAND)
       .value("BOR", ::c10d::ReduceOp::RedOpType::BOR)
       .value("BXOR", ::c10d::ReduceOp::RedOpType::BXOR)
-      .value("PREMUL_SUM", ::c10d::ReduceOp::RedOpType::PREMUL_SUM);
   // Export enum values to ReduceOp class, except PREMUL_SUM which is handled
   // specially as a callable object below
   reduce_op.attr("PREMUL_SUM") = PremulSumCallable();
