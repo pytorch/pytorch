@@ -1555,7 +1555,7 @@ class DeviceCachingAllocator {
         device,
         addr,
         size,
-        queue,
+        reinterpret_cast<void*>(queue),
         mempool_id,
         getApproximateTime(),
         record_context_ >= RecordContext::ALLOC ? std::move(context) : nullptr);
@@ -1593,7 +1593,7 @@ class DeviceCachingAllocator {
       SegmentInfo& segment_info = result.back();
       segment_info.device = head_block->device;
       segment_info.address = reinterpret_cast<size_t>(head_block->ptr);
-      segment_info.queue = head_block->queue;
+      segment_info.stream = reinterpret_cast<void*>(head_block->queue);
       segment_info.is_large = (!head_block->pool->is_small);
       segment_info.is_expandable = head_block->expandable_segment;
       segment_info.context_when_allocated =
@@ -1665,24 +1665,10 @@ class DeviceCachingAllocator {
     TORCH_CHECK(when == RecordContext::NEVER || context_recorder);
     record_history = enabled;
 
-    static const std::unordered_map<std::string, TraceEntry::Action>
-        kActionMap = {
-            {"alloc", TraceEntry::Action::ALLOC},
-            {"free_requested", TraceEntry::Action::FREE_REQUESTED},
-            {"free_completed", TraceEntry::Action::FREE_COMPLETED},
-            {"segment_alloc", TraceEntry::Action::SEGMENT_ALLOC},
-            {"segment_free", TraceEntry::Action::SEGMENT_FREE},
-            {"segment_map", TraceEntry::Action::SEGMENT_MAP},
-            {"segment_unmap", TraceEntry::Action::SEGMENT_UNMAP},
-            {"snapshot", TraceEntry::Action::SNAPSHOT},
-            {"oom", TraceEntry::Action::OOM},
-        };
-
     skip_actions_list.clear();
     for (const auto& action_str : skip_actions) {
-      auto it = kActionMap.find(action_str);
-      TORCH_CHECK(it != kActionMap.end(), "Unknown skip action: ", action_str);
-      skip_actions_list.insert(it->second);
+      auto action = parseTraceEntryAction(action_str);
+      skip_actions_list.insert(action);
     }
 
     context_recorder_.store(record_history ? context_recorder : nullptr);

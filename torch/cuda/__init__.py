@@ -311,6 +311,7 @@ DEVICE_REQUIREMENT: dict[int, Union[_CompatSet, _CompatInterval]] = {
     103: _CompatInterval(start=103),
     110: _CompatInterval(start=110),
     120: _CompatInterval(start=120),
+    121: _CompatInterval(start=121),
 }
 
 
