@@ -644,7 +644,7 @@ TORCH_DTYPE_IMPL(float4_e2m1fn_x2, Float4_e2m1fn_x2)
 
 #undef TORCH_DTYPE_IMPL
 
-AOTITorchError torch_from_blob(
+AOTI_TORCH_EXPORT AOTITorchError torch_from_blob(
     void* data,
     int64_t ndim,
     const int64_t* sizes_ptr,

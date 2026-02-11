@@ -42,6 +42,12 @@ logger = logging.getLogger(__name__)
 # only when necessary to support strided-shard redistribution
 _FORCE_MIN_COST_REDISTRIBUTION_PLAN: bool | None = None
 
+# Global kill switch to disable the transform optimization pass in
+# _optimize_transform_infos.  When True, the optimization that merges
+# consecutive same-type collectives into flattened operations is skipped,
+# and the unmodified transform_infos list is returned as-is.
+_DISABLE_REDISTRIBUTE_TRANSFORM_OPTIMIZATION: bool = False
+
 
 @contextlib.contextmanager
 def use_min_cost_redistribution_plan(enabled: bool = True):
@@ -102,6 +108,35 @@ def use_min_cost_redistribution_plan(enabled: bool = True):
         yield
     finally:
         _FORCE_MIN_COST_REDISTRIBUTION_PLAN = old_value
+
+
+@contextlib.contextmanager
+def disable_redistribute_transform_optimization(disabled: bool = True):
+    """
+    Context manager to disable the transform optimization pass that merges
+    consecutive same-type collectives into single flattened operations.
+
+    When the optimization is disabled, ``_optimize_transform_infos`` becomes a
+    no-op and returns the original list of ``_TransformInfo`` objects unchanged.
+    This is useful for debugging or isolating issues related to the flattened
+    collective merging logic.
+
+    The flag can also be set directly::
+
+        torch.distributed.tensor._redistribute._DISABLE_REDISTRIBUTE_TRANSFORM_OPTIMIZATION = True
+
+    Args:
+        disabled (bool): If True (default), disables the optimization.
+                         If False, explicitly enables it (the normal default).
+    """
+    global _DISABLE_REDISTRIBUTE_TRANSFORM_OPTIMIZATION
+
+    old_value = _DISABLE_REDISTRIBUTE_TRANSFORM_OPTIMIZATION
+    _DISABLE_REDISTRIBUTE_TRANSFORM_OPTIMIZATION = disabled
+    try:
+        yield
+    finally:
+        _DISABLE_REDISTRIBUTE_TRANSFORM_OPTIMIZATION = old_value
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -295,6 +330,9 @@ def _optimize_transform_infos(
 
     """
     if len(transform_infos) < 2:
+        return transform_infos
+
+    if _DISABLE_REDISTRIBUTE_TRANSFORM_OPTIMIZATION:
         return transform_infos
 
     # Comm types that are safe to merge (all_to_all excluded for now)
