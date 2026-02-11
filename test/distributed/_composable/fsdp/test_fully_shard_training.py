@@ -344,6 +344,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 _optim.step()
             self.assertEqual(losses[0], losses[1])
 
+    @skip_if_lt_x_gpu(2)
     @unittest.skipIf(TEST_HPU or TEST_XPU, "Sleep kernel not supported for HPU/XPU")
     @compiled_fsdp_test(compile_compute_on_module=Transformer)
     def test_train_parity_multi_group(self):
@@ -711,7 +712,7 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
             return min_world_size
         return min(min_world_size, torch.get_device_module(device_type).device_count())
 
-    @skip_if_lt_x_gpu(2, allow_cpu=True)
+    @skip_if_lt_x_gpu(2)
     @compiled_fsdp_test(compile_compute_on_module=Transformer)
     @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/1661
     def test_train_parity_with_activation_checkpointing(self):
