@@ -42,13 +42,6 @@ def _sycl_lib_options() -> list[str]:
     return extra_ldflags
 
 
-def _sycl_host_compiler_options() -> list[str]:
-    return [
-        "-fsycl-host-compiler=gcc",
-        "-fsycl-host-compiler-options=-fPIC,-fno-strict-aliasing,-fvisibility=hidden,-Wconversion",
-    ]
-
-
 def _sycl_arch_as_compile_option() -> str:
     arc_option_map = {"Xe12": "intel_gpu_pvc", "Xe20": "intel_gpu_bmg_g21"}
     arch = get_xpu_arch()
@@ -89,14 +82,12 @@ def xpu_compile_command(
         extra_args = []
     include_paths = _cutlass_include_paths()
     sycl_lib_options = _sycl_lib_options()
-    sycl_host_compiler_options = _sycl_host_compiler_options()
     sycl_compiler_options = _sycl_compiler_options()
     options = (
-        sycl_compiler_options
-        + extra_args
-        + sycl_host_compiler_options
+        extra_args
         + ["-I" + path for path in include_paths]
         + ["-isystem /include"]
+        + sycl_compiler_options
         + sycl_lib_options
     )
     src_file = " ".join(src_files)

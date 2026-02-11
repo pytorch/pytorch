@@ -15,6 +15,7 @@ def get_xpu_arch() -> Optional[str]:
     arch_code2name = {
         13136561920: "Xe12",
         21479031808: "Xe20",
+        21483225088: "Xe20",
     }
     try:
         arch_code = torch.xpu.get_device_capability()["architecture"]
