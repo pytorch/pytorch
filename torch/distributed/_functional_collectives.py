@@ -99,22 +99,7 @@ RANK_TYPES = Union[
 ]
 
 
-def _chunk_or_narrow_cat(
-    tensor: torch.Tensor, num_chunks: int, narrow_dim: int, cat_dim: int = 0
-) -> torch.Tensor:
-    """
-    Splits tensor along narrow_dim into num_chunks and concatenates along cat_dim.
-    Uses torch.chunk in eager mode, but torch.narrow under tracing to be unbacked-symint safe.
-    """
-    if not _are_we_tracing():
-        return torch.cat(torch.chunk(tensor, num_chunks, dim=narrow_dim), dim=cat_dim)
-    else:
-        chunk_size = tensor.size(narrow_dim) // num_chunks
-        chunks = [
-            torch.narrow(tensor, narrow_dim, i * chunk_size, chunk_size)
-            for i in range(num_chunks)
-        ]
-        return torch.cat(chunks, dim=cat_dim)
+from torch._utils import _chunk_or_narrow_cat  # noqa: F401
 
 
 """
