@@ -472,10 +472,18 @@ unused memory managed by the allocator will still show as if used in
 :meth:`~torch.cuda.max_memory_allocated` to monitor memory occupied by
 tensors, and use :meth:`~torch.cuda.memory_reserved` and
 :meth:`~torch.cuda.max_memory_reserved` to monitor the total amount of memory
-managed by the caching allocator. Calling :meth:`~torch.cuda.empty_cache`
-releases all **unused** cached memory from PyTorch so that those can be used
-by other GPU applications. However, the occupied GPU memory by tensors will not
-be freed so it can not increase the amount of GPU memory available for PyTorch.
+managed by the caching allocator. These counters are per-process and exclude
+memory used by other GPU processes. For device-wide visibility, you can use 
+:meth:`~torch.cuda.mem_get_info`, which reports the total and free memory on the
+device as queried from the driver. Because this call queries driver-level state,
+it may introduce initialization or synchronization overhead depending on when
+it was invoked. PyTorch also provides :meth:`~torch.cuda.device_memory_used` 
+and :meth:`~torch.cuda.memory.list_gpu_processes`, which expose device-wide and
+per-process GPU memory usage via NVIDIA's management libraries. Calling 
+:meth:`~torch.cuda.empty_cache` releases all **unused** cached memory from 
+PyTorch so that those can be used by other GPU applications. However, 
+the occupied GPU memory by tensors will not be freed  so it can not increase 
+the amount of GPU memory available for PyTorch.
 
 To better understand how CUDA memory is being used over time,
 :ref:`torch_cuda_memory` describes tools for capturing and visualizing traces of memory use.
