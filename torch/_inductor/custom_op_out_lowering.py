@@ -17,14 +17,17 @@ Supports:
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
-from typing import Any, Optional, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch._ops import OpOverload
 
 from . import config, ir
 from .virtualized import V
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 log = logging.getLogger(__name__)
