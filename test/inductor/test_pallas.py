@@ -1157,6 +1157,25 @@ class PallasTestsMixin:
         expected = fn(x, cos, sin)
         self.assertEqual(result, expected)
 
+    @skip_if_cuda
+    @skip_if_tpu
+    def test_chained_stride_slice(self):
+        """Test that chained stride slices compose into a single strided access.
+
+        x[:, 1::2][:, 2::3][:, 3::4] should compose to x[:, 23::24].
+        """
+
+        def fn(x):
+            return x[:, 1::2][:, 2::3][:, 3::4] + 1
+
+        compiled = self._compile(fn)
+
+        # last dim = 480 which is divisible by 24
+        x = torch.randn(4, 480, device=self.DEVICE)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
     @skip_if_tpu
     def test_arange_multi_output(self):
         """Test arange with view and multiple outputs."""
