@@ -325,6 +325,16 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
             lambda: "out_dtype must be the same as input dtype or fp32 for fp16/bf16 inputs",
         )
 
+    # When K == 1, the matmul is an outer product: (M, 1) @ (1, N) = (M, N).
+    # Instead of a full GEMM, broadcast both tensors to (M, N) and do
+    # pointwise multiplication, which is more efficient for this memory-bound case.
+    k = mat1.get_size()[1]
+    if k == 1:
+        result = lowerings[aten.mul](mat1, mat2)
+        if out_dtype is not None and out_dtype != mat1.get_dtype():
+            result = lowerings[prims.convert_element_type.default](result, out_dtype)
+        return result
+
     # Lower matmul-related operations (e.g., torch.matmul / torch.bmm / torch.addmm)
     # into native matmul IR using `ops.dot`. When we see a matmul pattern
     # (C[y, x] = A[y, r] * B[r, x]), the core idea is to emulate a broadcasted
