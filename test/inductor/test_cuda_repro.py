@@ -2741,6 +2741,42 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         b = torch.randn(1000, device="cuda", dtype=torch.float32) + 0.1
         self.common(fn, [a, b])
 
+    @skipIfRocm(msg="ROCm may have small numerical differences")
+    def test_compiled_adam_foreach_capturable_bitwise(self):
+        # Test that compiled Adam with foreach=True and capturable=True
+        # matches eager Adam bitwise.
+        torch.manual_seed(42)
+        params_eager = [torch.randn(64, 64, device="cuda", dtype=torch.float32)]
+        params_compiled = [p.clone() for p in params_eager]
+        grads = [torch.randn_like(p) for p in params_eager]
+
+        opt_eager = torch.optim.Adam(
+            params_eager, lr=0.001, foreach=True, capturable=True
+        )
+        opt_compiled = torch.optim.Adam(
+            params_compiled, lr=0.001, foreach=True, capturable=True
+        )
+
+        # Set gradients
+        for p, g in zip(params_eager, grads):
+            p.grad = g.clone()
+        for p, g in zip(params_compiled, grads):
+            p.grad = g.clone()
+
+        # Eager step
+        opt_eager.step()
+
+        # Compiled step
+        @torch.compile
+        def compiled_step():
+            opt_compiled.step()
+
+        compiled_step()
+
+        # Check bitwise equality
+        for p_eager, p_compiled in zip(params_eager, params_compiled):
+            self.assertEqual(p_eager, p_compiled, atol=0, rtol=0)
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
