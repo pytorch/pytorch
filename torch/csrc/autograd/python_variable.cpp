@@ -851,21 +851,6 @@ py::handle get_dtensor_class() {
   return get_dtensor_class_impl();
 }
 
-bool is_dtensor(PyObject* obj) {
-#ifdef USE_DISTRIBUTED
-  try {
-    py::handle dtensor_class = get_dtensor_class();
-    return (PyObject*)Py_TYPE(obj) == dtensor_class.ptr() ||
-        py::isinstance(py::handle(obj), dtensor_class);
-  } catch (const py::error_already_set&) {
-    // DTensor module not available or failed to import
-    return false;
-  }
-#else
-  return false;
-#endif
-}
-
 DEFINE_CACHING_PYTHON_IMPORT_GETTER(
     get_dtensor_spec_class,
     py::module::import("torch.distributed.tensor")
@@ -979,6 +964,7 @@ static bool arg_type_tensor_or_tensor_list_like(py::handle arg) {
   _(needs_redistribute)                                       \
   _(op)                                                       \
   _(op_to_schema_info)                                        \
+  _(op_to_schema_info_for_single_dim_strategy)                \
   _(output_sharding)                                          \
   _(output_spec)                                              \
   _(schema_info)                                              \
@@ -2227,11 +2213,21 @@ static py::object get_runtime_schema_info_for_op(py::handle py_op) {
       op_dispatcher.attr(dtensor_interned_strings.sharding_propagator);
   const py::dict op_to_schema_info = py::reinterpret_borrow<py::dict>(
       sharding_propagator.attr(dtensor_interned_strings.op_to_schema_info));
+  const py::dict op_to_schema_info_for_single_dim_strategy =
+      py::reinterpret_borrow<py::dict>(sharding_propagator.attr(
+          dtensor_interned_strings.op_to_schema_info_for_single_dim_strategy));
 
   PyObject* runtime_schema_info =
       PyDict_GetItemWithError(op_to_schema_info.ptr(), py_op.ptr());
   if (!runtime_schema_info && PyErr_Occurred()) {
     throw py::error_already_set();
+  }
+  if (!runtime_schema_info) {
+    runtime_schema_info = PyDict_GetItemWithError(
+        op_to_schema_info_for_single_dim_strategy.ptr(), py_op.ptr());
+    if (!runtime_schema_info && PyErr_Occurred()) {
+      throw py::error_already_set();
+    }
   }
   return py::reinterpret_borrow<py::object>(runtime_schema_info);
 }
@@ -2384,10 +2380,21 @@ create_native_op_schema(
     idx++;
   }
 
-  TORCH_CHECK(
-      !compute_mesh.is_none(),
-      "found no DeviceMesh from dtensor args for ",
-      op.operator_name());
+  // Check kwargs for device_mesh even if not used for cache key
+  if (compute_mesh.is_none()) {
+    for (auto argument_it = args_kwargs.kwargs_begin();
+         argument_it != args_kwargs.kwargs_end();
+         ++argument_it) {
+      const auto [tensor_flavor, py_tensor] =
+          check_for_dtensor_or_tensor(*argument_it);
+      if (tensor_flavor == TensorFlavor::EXACTLY_DTENSOR ||
+          tensor_flavor == TensorFlavor::DTENSOR_SUBCLASS) {
+        compute_mesh = py::reinterpret_borrow<py::object>(
+            py_tensor.attr(dtensor_interned_strings.device_mesh));
+        break;
+      }
+    }
+  }
 
   if (native_info.static_kwargkey && !native_info.static_kwargkey.is_none()) {
     // Separator to disambiguate kwargs from args in comparison and hashing.
@@ -2410,6 +2417,10 @@ create_native_op_schema(
         case TensorFlavor::EXACTLY_DTENSOR:
         case TensorFlavor::DTENSOR_SUBCLASS: {
           handle_dtensor_arg(py_tensor.attr(dtensor_interned_strings._spec));
+          if (compute_mesh.is_none()) {
+            compute_mesh = py::reinterpret_borrow<py::object>(
+                py_tensor.attr(dtensor_interned_strings.device_mesh));
+          }
           break;
         }
         case TensorFlavor::EXACTLY_TENSOR:
@@ -2443,6 +2454,11 @@ create_native_op_schema(
       }
     }
   }
+
+  TORCH_CHECK(
+      !compute_mesh.is_none(),
+      "found no DeviceMesh from dtensor args for ",
+      op.operator_name());
 
   return std::make_pair(
       NativeOpSchema(

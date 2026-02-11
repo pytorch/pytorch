@@ -16,8 +16,8 @@ from torch.distributed.tensor import DTensor, Shard
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_fsdp import get_devtype
 from torch.testing._internal.common_utils import parametrize, run_tests
-from torch.testing._internal.distributed._tensor.common_dtensor import (  # update to use DTensorContinuousBase?
-    DTensorTestBase,
+from torch.testing._internal.distributed._tensor.common_dtensor import (
+    DTensorContinuousTestBase,
     skip_if_lt_x_gpu,
     with_comms,
 )
@@ -60,7 +60,7 @@ class TestDummyModelUneven(torch.nn.Module):
         return torch.rand(5, 5, device=device_type.type)
 
 
-class TestFSDPWithDeviceMeshAndDTensor(DTensorTestBase):
+class TestFSDPWithDeviceMeshAndDTensor(DTensorContinuousTestBase):
     def _create_model(self, is_even_sharded_model, device_mesh=None):
         dummy_model = (
             TestDummyModel() if is_even_sharded_model else TestDummyModelUneven()

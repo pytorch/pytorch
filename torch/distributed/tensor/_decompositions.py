@@ -16,7 +16,7 @@ from torch._ops import OpOverload
 from torch.distributed._functional_collectives import _are_we_tracing
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
-from torch.distributed.tensor._op_schema import OpSchema, OpStrategy
+from torch.distributed.tensor._op_schema import OpSchema, OpStrategy, RuntimeSchemaInfo
 from torch.distributed.tensor._ops.utils import expand_to_full_mesh_op_strategy
 from torch.distributed.tensor._sharding_prop import ShardingPropagator
 from torch.distributed.tensor._utils import try_find_mesh_from_args
@@ -28,6 +28,38 @@ from torch.distributed.tensor.placement_types import (
 )
 from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode
 from torch.utils._python_dispatch import TorchDispatchMode
+
+
+def _infer_schema_info_from_op(op: OpOverload) -> RuntimeSchemaInfo:
+    """Infer RuntimeSchemaInfo from an operator's schema for decomposition ops"""
+    schema = op._schema
+
+    # Find first non-tensor positional arg index
+    static_argnum = None
+    for i, arg in enumerate(schema.arguments):
+        if arg.kwarg_only:
+            break
+        if arg.type.kind() != "TensorType" and static_argnum is None:
+            static_argnum = i
+            break
+
+    # Find keyword-only args that aren't tensors
+    kwarg_only_names = []
+    for arg in schema.arguments:
+        if arg.kwarg_only and arg.type.kind() != "TensorType":
+            kwarg_only_names.append(arg.name)
+
+    kwargs = {}
+    if static_argnum is not None:
+        kwargs["static_argnum"] = static_argnum
+    if kwarg_only_names:
+        # pyrefly: ignore [unsupported-operation]
+        kwargs["static_kwargkey"] = kwarg_only_names
+
+    # pyrefly: ignore [bad-argument-type]
+    return RuntimeSchemaInfo(**kwargs)
+
+
 from torch.utils._pytree import tree_any, tree_flatten, tree_map, tree_map_only
 
 
@@ -98,6 +130,16 @@ class DecompShardingStrategy:
     def has_decomp(op: OpOverload) -> bool:
         # Check if op has a decomposition (explicit or CIA)
         return op in decomposition_table or op._can_decompose()
+
+    @staticmethod
+    def ensure_schema_info(op: OpOverload, sharding_prop: ShardingPropagator) -> None:
+        """
+        Register schema_info for decomposition op on first invocation.
+        Needed for correct shard prop cache key.
+        """
+        if op not in sharding_prop.op_to_schema_info:
+            schema_info = _infer_schema_info_from_op(op)
+            sharding_prop.op_to_schema_info[op] = schema_info
 
     @staticmethod
     def propagate_strategy(
