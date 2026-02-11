@@ -16,7 +16,6 @@ Run as a module to compare DTensor rules against ground truth:
 """
 
 import re
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
