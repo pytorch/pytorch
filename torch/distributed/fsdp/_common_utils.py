@@ -46,10 +46,13 @@ _MAX_TRAVERSE_DEPTH = 128
 
 
 def _is_namedtuple(obj: Any) -> bool:
+    # Mirrors torch.nn.parallel.scatter_gather._is_namedtuple
+    fields = getattr(type(obj), "_fields", None)
     return (
         isinstance(obj, tuple)
-        and isinstance(getattr(type(obj), "_fields", None), tuple)
-        and all(isinstance(f, str) for f in obj._fields)
+        and hasattr(obj, "_asdict")
+        and isinstance(fields, tuple)
+        and all(isinstance(f, str) for f in fields)
     )
 
 
@@ -57,8 +60,10 @@ def collect_grad_tensors(output: Any) -> tuple[torch.Tensor, ...]:
     """
     Recursively collect tensors that require gradients from a nested structure.
 
-    This handles both standard pytree structures and unregistered dataclasses.
-    Uses the same traversal order as :func:`replace_grad_tensors`.
+    Traverses dict, list, tuple, NamedTuple, and dataclass containers.
+    Sets and other iterables are *not* traversed (consistent with
+    ``tree_flatten``).  Uses the same traversal order as
+    :func:`replace_grad_tensors`.
     """
     tensors_list: list[torch.Tensor] = []
     _collect_grad_tensors(output, tensors_list)
@@ -100,8 +105,9 @@ def replace_grad_tensors(output: Any, tensor_iter: Iterator[torch.Tensor]) -> An
     from tensor_iter.
 
     Tensors are consumed from tensor_iter in the same traversal order as
-    :func:`collect_grad_tensors`. Handles pytree structures, unregistered
-    dataclasses, and NamedTuples.
+    :func:`collect_grad_tensors`. Traverses dict, list, tuple, NamedTuple,
+    and dataclass containers; sets and other iterables are *not* traversed
+    (consistent with ``tree_flatten``).
 
     Note: dataclass reconstruction uses ``dataclasses.replace()``, which calls
     ``__init__``. Dataclasses with custom ``__init__`` validation,
@@ -115,7 +121,10 @@ def replace_grad_tensors(output: Any, tensor_iter: Iterator[torch.Tensor]) -> An
     if leftover is not sentinel:
         # Count remaining without holding references to all of them
         n = 1 + sum(1 for _ in tensor_iter)
-        raise RuntimeError(f"{n} replacement tensors were not consumed")
+        raise RuntimeError(
+            f"{n} replacement tensors were not consumed while processing "
+            f"{type(output).__qualname__}"
+        )
     return result
 
 
@@ -180,7 +189,12 @@ def _replace_grad_tensors(
             if new_item is not item:
                 any_changed = True
         if any_changed:
-            return type(output)(new_items)
+            typ = type(output)
+            try:
+                return typ(new_items)
+            except TypeError:
+                # Fall back to base type for subclasses with custom __init__
+                return list(new_items) if isinstance(output, list) else tuple(new_items)
         return output
     else:
         return output
