@@ -2369,7 +2369,9 @@ def _check_max_grid_x(size_hints, x, num_warps):
 
     if torch.version.hip:
         # HIP has a 2^31-1 limit on total threads (num_blocks * num_warps * warp_size)
-        warp_size = torch.cuda.get_device_properties().warp_size
+        warp_size = torch.cuda.get_device_properties(
+            torch.cuda.current_device()
+        ).warp_size
         while (
             (num_blocks * num_warps * warp_size) > max_grid_x
             and x < size_hints["x"]
