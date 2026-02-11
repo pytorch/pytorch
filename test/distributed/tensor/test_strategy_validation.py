@@ -910,6 +910,59 @@ class TestPartialCombinationValidity(TestCase):
 
         self.assertTrue(is_valid, f"add Pmin,R->Pmin should be valid: {msg}")
 
+    def test_abs_psum_psum_is_invalid(self):
+        """
+        P(sum)->P(sum) is NOT valid for abs (or any non-linear elementwise op).
+
+        abs(a0 + a1) != abs(a0) + abs(a1) when a0 and a1 have different signs.
+        The _create_partial_input function must create local values with mixed
+        signs to expose this, not just proportional splits (tensor * ratio)
+        that preserve the sign pattern.
+        """
+        t = torch.tensor([1.0, -2.0, 3.0, -4.0, 5.0, -6.0, 7.0, -8.0])
+        sample = SampleInput(t)
+        tensors = extract_tensors_from_sample(sample)
+        ground_truth = torch.abs(t)
+
+        combo = PlacementCombination(
+            input_placements=(Partial("sum"),),
+            output_placement=Partial("sum"),
+        )
+
+        with LocalTensorMode(frozenset(range(self.world_size))):
+            mesh = init_device_mesh("cpu", (self.world_size,))
+            is_valid, msg = validate_combination(
+                torch.abs, sample, tensors, combo, ground_truth, self.world_size, mesh
+            )
+
+        self.assertFalse(
+            is_valid,
+            "abs P(sum)->P(sum) should be invalid (abs is non-linear)",
+        )
+
+    def test_abs_pavg_pavg_is_invalid(self):
+        """P(avg)->P(avg) is NOT valid for abs, same reasoning as P(sum)."""
+        t = torch.tensor([1.0, -2.0, 3.0, -4.0, 5.0, -6.0, 7.0, -8.0])
+        sample = SampleInput(t)
+        tensors = extract_tensors_from_sample(sample)
+        ground_truth = torch.abs(t)
+
+        combo = PlacementCombination(
+            input_placements=(Partial("avg"),),
+            output_placement=Partial("avg"),
+        )
+
+        with LocalTensorMode(frozenset(range(self.world_size))):
+            mesh = init_device_mesh("cpu", (self.world_size,))
+            is_valid, msg = validate_combination(
+                torch.abs, sample, tensors, combo, ground_truth, self.world_size, mesh
+            )
+
+        self.assertFalse(
+            is_valid,
+            "abs P(avg)->P(avg) should be invalid (abs is non-linear)",
+        )
+
     def test_all_zero_output_false_positive(self):
         """
         All-zero ground truth makes every placement trivially validate.
@@ -918,27 +971,33 @@ class TestPartialCombinationValidity(TestCase):
         so validate_combination cannot distinguish valid from invalid rules.
         This is a known limitation: compare_operator skips all-zero samples
         to avoid hundreds of false positive rules.
-        """
-        a = torch.zeros(8, 4)
-        b = torch.randn(8, 4)
-        sample = SampleInput(a, args=(b,))
-        tensors = extract_tensors_from_sample(sample)
-        ground_truth = a * b  # all zeros
 
-        # P(sum),P(sum)->P(sum) is NOT valid for mul in general, but
-        # with all-zero output it trivially passes: sum(0,0)=0=ground_truth.
-        # validate_combination returns True (the computation IS correct for
-        # these specific inputs), showing why compare_operator must skip
-        # all-zero samples.
+        We use zeros_like as the test op because it always produces zeros
+        regardless of input values, unlike mul(zeros, x) which the offset
+        fix in _create_partial_input now correctly handles.
+        """
+        t = torch.randn(8, 4)
+        sample = SampleInput(t)
+        tensors = extract_tensors_from_sample(sample)
+        ground_truth = torch.zeros_like(t)
+
+        # P(sum)->P(sum) is NOT valid for zeros_like, but with all-zero
+        # output it trivially passes: sum(0,0)=0=ground_truth.
         combo = PlacementCombination(
-            input_placements=(Partial("sum"), Partial("sum")),
+            input_placements=(Partial("sum"),),
             output_placement=Partial("sum"),
         )
 
         with LocalTensorMode(frozenset(range(self.world_size))):
             mesh = init_device_mesh("cpu", (self.world_size,))
             is_valid, msg = validate_combination(
-                torch.mul, sample, tensors, combo, ground_truth, self.world_size, mesh
+                torch.zeros_like,
+                sample,
+                tensors,
+                combo,
+                ground_truth,
+                self.world_size,
+                mesh,
             )
 
         # This demonstrates the false positive: validate_combination says
