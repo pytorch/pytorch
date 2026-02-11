@@ -1207,9 +1207,6 @@ class TestDecompStrategyPath(TestCase):
                 common_ops.S,
                 common_ops.XS,
             ) = orig_sizes
-            # Re-init process group since compare_operator destroys it
-            if not dist.is_initialized():
-                dist.init_process_group("fake", rank=0, world_size=self.world_size)
 
 
 class TestQuerySingleDimStrategyKwargs(TestCase):

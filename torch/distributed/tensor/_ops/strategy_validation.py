@@ -38,7 +38,6 @@ from torch.distributed.tensor._op_schema import (
     OpStrategy,
 )
 from torch.distributed.tensor._ops.single_dim_strategy import _ShardingPlaceholder
-from torch.distributed.tensor.debug import _clear_sharding_prop_cache
 from torch.distributed.tensor.placement_types import Partial, Placement, Shard
 from torch.testing._internal.common_methods_invocations import op_db, SampleInput
 from torch.testing._internal.opinfo import core as opinfo_core
@@ -381,6 +380,7 @@ def _create_partial_input(
     different Partial types.
     """
     reduce_op = placement.reduce_op
+    local_tensors: dict[int, torch.Tensor] = {}
 
     if reduce_op in ("sum", "avg"):
         base_ratio = 0.6 + 0.1 * (tensor_idx % 3)
@@ -397,7 +397,6 @@ def _create_partial_input(
         offset = (offset_mag * signs).reshape(tensor.shape)
 
         scale = world_size if reduce_op == "avg" else 1
-        local_tensors = {}
         for r in range(world_size):
             if r == 0:
                 local_tensors[r] = tensor.clone() * base_ratio * scale + offset
@@ -405,8 +404,6 @@ def _create_partial_input(
                 local_tensors[r] = tensor.clone() * (
                     (1 - base_ratio) / (world_size - 1)
                 ) * scale - offset / (world_size - 1)
-        # pyrefly: ignore [bad-argument-type, bad-argument-count]
-        return LocalTensor(local_tensors)
 
     elif reduce_op == "min":
         # For P(min): on each element, one rank holds the true value (offset=0)
@@ -414,7 +411,6 @@ def _create_partial_input(
         # The mask alternates which rank holds the true value (shifted by tensor_idx).
         # 0.7 is arbitrary; any positive value works. Using a different magnitude
         # than max's 1.3 prevents accidental cancellation when min/max are combined.
-        local_tensors: dict[int, torch.Tensor] = {}
         flat = tensor.flatten()
         mask = (torch.arange(flat.numel(), device=tensor.device) + tensor_idx) % 2 == 0
         for r in range(world_size):
@@ -427,14 +423,11 @@ def _create_partial_input(
                     mask, torch.full_like(flat, 0.7), torch.zeros_like(flat)
                 )
             local_tensors[r] = (flat + r_offset).reshape(tensor.shape)
-        # pyrefly: ignore [bad-argument-type, bad-argument-count]
-        return LocalTensor(local_tensors)
 
     elif reduce_op == "max":
         # For P(max): on each element, one rank holds the true value (offset=0)
         # and the other holds value-1.3. max() selects the unmodified value.
         # 1.3 is arbitrary; any positive magnitude works.
-        local_tensors: dict[int, torch.Tensor] = {}
         flat = tensor.flatten()
         mask = (torch.arange(flat.numel(), device=tensor.device) + tensor_idx) % 2 == 0
         for r in range(world_size):
@@ -447,13 +440,13 @@ def _create_partial_input(
                     mask, torch.full_like(flat, -1.3), torch.zeros_like(flat)
                 )
             local_tensors[r] = (flat + r_offset).reshape(tensor.shape)
-        # pyrefly: ignore [bad-argument-type, bad-argument-count]
-        return LocalTensor(local_tensors)
 
     else:
-        local_tensors = {r: tensor.clone() for r in range(world_size)}
-        # pyrefly: ignore [bad-argument-type, bad-argument-count]
-        return LocalTensor(local_tensors)
+        for r in range(world_size):
+            local_tensors[r] = tensor.clone()
+
+    # pyrefly: ignore [bad-argument-type, bad-argument-count]
+    return LocalTensor(local_tensors)
 
 
 def validate_combination(
@@ -771,13 +764,6 @@ def compare_operator(
     if op_name in SKIP_OPS:
         print(f"Skipping '{op_name}' (non-deterministic or uninitialized output)")
         return ComparisonStats()
-
-    # Initialize fake process group for LocalTensorMode
-    if not dist.is_initialized():
-        dist.init_process_group("fake", rank=0, world_size=world_size)
-
-    # Clear sharding propagation cache
-    _clear_sharding_prop_cache()
 
     start_time = time.time()
 
@@ -1350,13 +1336,6 @@ def compare_operator(
                 if len(discrepancies) > 3:
                     print(f"      ... and {len(discrepancies) - 3} more")
 
-    # Cleanup
-    _clear_sharding_prop_cache()
-    try:
-        dist.destroy_process_group()
-    except Exception:
-        pass
-
     return stats
 
 
@@ -1427,72 +1406,76 @@ if __name__ == "__main__":
     }
     dtype = dtype_map.get(args.dtype, torch.float32)
 
-    if args.all_registered:
-        # Test all ops with registered sharding rules
-        op_names = get_registered_op_names()
-        print(f"Testing {len(op_names)} ops with DTensor sharding rules")
-        if args.incorrect_only:
-            print("Mode: incorrect-only (fast)")
-        print(f"Device: {args.device}, Dtype: {dtype}")
-        print("=" * 70)
+    dist.init_process_group("fake", rank=0, world_size=args.world_size)
+    try:
+        if args.all_registered:
+            # Test all ops with registered sharding rules
+            op_names = get_registered_op_names()
+            print(f"Testing {len(op_names)} ops with DTensor sharding rules")
+            if args.incorrect_only:
+                print("Mode: incorrect-only (fast)")
+            print(f"Device: {args.device}, Dtype: {dtype}")
+            print("=" * 70)
 
-        total_stats = ComparisonStats()
-        ops_with_errors = []
+            total_stats = ComparisonStats()
+            ops_with_errors = []
 
-        for i, op_name in enumerate(op_names):
-            if op_name in SKIP_OPS:
-                continue
+            for i, op_name in enumerate(op_names):
+                if op_name in SKIP_OPS:
+                    continue
 
-            print(f"\n[{i + 1}/{len(op_names)}] {op_name}")
-            try:
-                stats = compare_operator(
-                    op_name,
-                    args.device,
-                    dtype,
-                    args.world_size,
-                    args.max_samples,
-                    args.verbose,
-                    args.incorrect_only,
-                )
-                total_stats.true_positives += stats.true_positives
-                total_stats.false_positives.extend(stats.false_positives)
-                total_stats.false_negatives.extend(stats.false_negatives)
+                print(f"\n[{i + 1}/{len(op_names)}] {op_name}")
+                try:
+                    stats = compare_operator(
+                        op_name,
+                        args.device,
+                        dtype,
+                        args.world_size,
+                        args.max_samples,
+                        args.verbose,
+                        args.incorrect_only,
+                    )
+                    total_stats.true_positives += stats.true_positives
+                    total_stats.false_positives.extend(stats.false_positives)
+                    total_stats.false_negatives.extend(stats.false_negatives)
 
-                if stats.false_positives:
-                    ops_with_errors.append((op_name, len(stats.false_positives)))
-            except Exception as e:
-                print(f"  Error: {e}")
+                    if stats.false_positives:
+                        ops_with_errors.append((op_name, len(stats.false_positives)))
+                except Exception as e:
+                    print(f"  Error: {e}")
 
-        # Final summary
-        print("\n" + "=" * 70)
-        print("OVERALL SUMMARY")
-        print("=" * 70)
-        print(f"Total ops tested: {len(op_names)}")
-        print(f"Total true positives: {total_stats.true_positives}")
-        print(f"Total incorrect rules: {len(total_stats.false_positives)}")
-        if not args.incorrect_only:
-            print(f"Total missing rules: {len(total_stats.false_negatives)}")
+            # Final summary
+            print("\n" + "=" * 70)
+            print("OVERALL SUMMARY")
+            print("=" * 70)
+            print(f"Total ops tested: {len(op_names)}")
+            print(f"Total true positives: {total_stats.true_positives}")
+            print(f"Total incorrect rules: {len(total_stats.false_positives)}")
+            if not args.incorrect_only:
+                print(f"Total missing rules: {len(total_stats.false_negatives)}")
 
-        if ops_with_errors:
-            print(f"\nOps with INCORRECT rules ({len(ops_with_errors)}):")
-            for op_name, count in sorted(ops_with_errors, key=lambda x: -x[1]):
-                print(f"  {op_name}: {count}")
+            if ops_with_errors:
+                print(f"\nOps with INCORRECT rules ({len(ops_with_errors)}):")
+                for op_name, count in sorted(ops_with_errors, key=lambda x: -x[1]):
+                    print(f"  {op_name}: {count}")
 
-    else:
-        # Test a single operator
-        op_name = args.op or "add"
-        print(f"Comparing operator: {op_name}")
-        if args.incorrect_only:
-            print("Mode: incorrect-only (fast)")
-        print(f"Device: {args.device}, Dtype: {dtype}")
-        print("=" * 70)
+        else:
+            # Test a single operator
+            op_name = args.op or "add"
+            print(f"Comparing operator: {op_name}")
+            if args.incorrect_only:
+                print("Mode: incorrect-only (fast)")
+            print(f"Device: {args.device}, Dtype: {dtype}")
+            print("=" * 70)
 
-        compare_operator(
-            op_name,
-            args.device,
-            dtype,
-            args.world_size,
-            args.max_samples,
-            args.verbose,
-            args.incorrect_only,
-        )
+            compare_operator(
+                op_name,
+                args.device,
+                dtype,
+                args.world_size,
+                args.max_samples,
+                args.verbose,
+                args.incorrect_only,
+            )
+    finally:
+        dist.destroy_process_group()
