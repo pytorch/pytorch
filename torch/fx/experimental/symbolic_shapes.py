@@ -7186,8 +7186,12 @@ class ShapeEnv:
             )
 
             hint = self.backed_var_to_val.get(x)
-            if hint is None:
-                # NB: size_hint is int, not sympy.Expr, do not use int_oo here
+            if hint is None or isinstance(hint, SingletonInt):
+                # NB: size_hint is int, not sympy.Expr, do not use int_oo here.
+                # SingletonInt is used to represent jagged/nested tensor dimensions
+                # (e.g. the irregular ragged dimension). It cannot be converted to
+                # int, so we treat it the same as an unknown size. This matches the
+                # behavior of size_hint(), which returns None for SingletonInt.
                 size = sys.maxsize
             elif symbol_is_type(x, SymT.SIZE):
                 size = int(hint)
@@ -7773,7 +7777,7 @@ class ShapeEnv:
 
             expr = orig_expr
 
-            # Fast path: try to quickly evaluate trivially true/false comparisons
+            # Try to quickly evaluate trivially true/false comparisons
             # using var_to_range, before calling expensive _maybe_evaluate_static.
             fast_result = self._maybe_fast_eval_comparison(expr)
             if fast_result is not None:
@@ -7969,9 +7973,8 @@ class ShapeEnv:
         expr = orig_expr
 
         # TODO: split conjunctions and evaluate them separately
-
-        # Fast path: check for trivially true comparisons like 0 <= sum_of_nonneg_symbols
-        # This avoids expensive _maybe_evaluate_static for this common pattern.
+        # Try to quickly evaluate trivially true/false comparisons
+        # using var_to_range, before calling expensive _maybe_evaluate_static.
         fast_result = self._maybe_fast_eval_comparison(expr)
         if fast_result is not None:
             return bool(fast_result)
