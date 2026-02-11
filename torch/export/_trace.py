@@ -1808,14 +1808,28 @@ def _export_to_aten_ir_make_fx(
                 )
 
             def _find_tracer():
-                """Find the active tracer from torch function mode stack or proxy mode."""
+                """Find the active tracer, checking TorchFunctionMode stack first,
+                then falling back to the TorchDispatchMode stack.
+
+                The fallback is needed when a subclass's __torch_function__ accesses
+                inner tensor attrs (e.g. self.inner). The dispatch order for an op
+                like F.linear(x, subclass_weight) is:
+
+                  TorchFunctionMetadataMode (popped via _pop_mode_temporarily)
+                    -> PreDispatchTorchFunctionMode (popped via _pop_mode_temporarily)
+                      -> subclass.__torch_function__ runs here
+                        -> accesses self.inner, triggering custom_getattribute
+
+                At this point both TorchFunctionModes have been popped and won't be
+                restored until __torch_function__ returns, so the mode stack is empty.
+                We fall back to ProxyTorchDispatchMode which lives on the separate
+                TorchDispatchMode stack and is unaffected by _pop_mode_temporarily.
+                Both modes share the same tracer object, so either lookup is equivalent.
+                """
                 if torch._C._is_torch_function_mode_enabled():
                     for mode in torch.overrides._get_current_function_mode_stack():
                         if isinstance(mode, PreDispatchTorchFunctionMode):
                             return mode.tracer
-                # When called from within a subclass's __torch_function__,
-                # PreDispatchTorchFunctionMode has been temporarily popped from
-                # the mode stack. Fall back to ProxyTorchDispatchMode.
                 proxy_mode = get_proxy_mode()
                 return proxy_mode.tracer if proxy_mode is not None else None
 
