@@ -385,7 +385,7 @@ struct ExpandableSegment {
     // segment to put them at the end.
     max_handles_ = numSegments(prop.totalGlobalMem + prop.totalGlobalMem / 8);
 #ifdef USE_ROCM
-    C10_HIP_CHECK(hipMemAddressReserve(
+    C10_CUDA_CHECK(hipMemAddressReserve(
         &ptr_, segment_size_ * max_handles_, 0ULL, 0, 0ULL));
 #else
     C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemAddressReserve_(
@@ -489,7 +489,7 @@ struct ExpandableSegment {
             auto h = handles_.at(j).value();
             handles_.at(j) = std::nullopt;
 #ifdef USE_ROCM
-            C10_HIP_CHECK(hipMemRelease(h.handle));
+            C10_CUDA_CHECK(hipMemRelease(h.handle));
 #else
             C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemRelease_(h.handle));
 #endif
@@ -498,7 +498,7 @@ struct ExpandableSegment {
           return rangeFromHandles(begin, begin);
 #ifdef USE_ROCM
         } else {
-          C10_HIP_CHECK(status);
+          C10_CUDA_CHECK(status);
         }
 #else
         } else if (
@@ -565,7 +565,7 @@ struct ExpandableSegment {
         if (!handle.shareable_handle) {
           int fd = 0;
 #ifdef USE_ROCM
-          C10_HIP_CHECK(hipMemExportToShareableHandle(
+          C10_CUDA_CHECK(hipMemExportToShareableHandle(
               &fd, handle.handle, hipMemHandleTypePosixFileDescriptor, 0));
 #else
           C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemExportToShareableHandle_(
@@ -638,7 +638,7 @@ struct ExpandableSegment {
           close(static_cast<int>(pidfd));
           for (auto& h : segment->handles_) {
 #ifdef USE_ROCM
-            C10_HIP_CHECK(hipMemRelease(h.value().handle));
+            C10_CUDA_CHECK(hipMemRelease(h.value().handle));
 #else
             C10_CUDA_DRIVER_CHECK(
                 // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
@@ -654,7 +654,7 @@ struct ExpandableSegment {
         }
         CUmemGenericAllocationHandle handle = 0;
 #ifdef USE_ROCM
-        C10_HIP_CHECK(hipMemImportFromShareableHandle(
+        C10_CUDA_CHECK(hipMemImportFromShareableHandle(
             &handle,
 #if ROCM_VERSION >= 70100
             reinterpret_cast<void*>(static_cast<uintptr_t>(myfd)),
@@ -730,7 +730,7 @@ struct ExpandableSegment {
     forEachAllocatedRange(
         [&](size_t begin, size_t end) { unmapHandles(begin, end); });
 #ifdef USE_ROCM
-    C10_HIP_CHECK(hipMemAddressFree(ptr_, segment_size_ * max_handles_));
+    C10_CUDA_CHECK(hipMemAddressFree(ptr_, segment_size_ * max_handles_));
 #else
     C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemAddressFree_(
         ptr_, segment_size_ * max_handles_));
@@ -745,7 +745,7 @@ struct ExpandableSegment {
     desc.location.id = static_cast<int>(device);
     desc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
 #ifdef USE_ROCM
-    C10_HIP_CHECK(hipMemSetAccess(
+    C10_CUDA_CHECK(hipMemSetAccess(
         ptr_ + begin * segment_size_, (end - begin) * segment_size_, &desc, 1));
 #else
     C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemSetAccess_(
@@ -756,7 +756,7 @@ struct ExpandableSegment {
   void mapAndSetAccess(size_t begin, size_t end) {
     for (auto i : c10::irange(begin, end)) {
 #ifdef USE_ROCM
-      C10_HIP_CHECK(hipMemMap(
+      C10_CUDA_CHECK(hipMemMap(
           ptr_ + i * segment_size_,
           segment_size_,
           0,
@@ -798,7 +798,7 @@ struct ExpandableSegment {
       Handle h = handles_.at(i).value();
       handles_.at(i) = std::nullopt;
 #ifdef USE_ROCM
-      C10_HIP_CHECK(hipMemUnmap(ptr_ + segment_size_ * i, segment_size_));
+      C10_CUDA_CHECK(hipMemUnmap(ptr_ + segment_size_ * i, segment_size_));
 #else
       C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemUnmap_(
           ptr_ + segment_size_ * i, segment_size_));
@@ -807,7 +807,7 @@ struct ExpandableSegment {
         close(std::get<int>(*h.shareable_handle));
       }
 #ifdef USE_ROCM
-      C10_HIP_CHECK(hipMemRelease(h.handle));
+      C10_CUDA_CHECK(hipMemRelease(h.handle));
 #else
       C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemRelease_(h.handle));
 #endif
