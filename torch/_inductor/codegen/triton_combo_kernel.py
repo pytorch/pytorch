@@ -734,9 +734,7 @@ class ComboKernel(Kernel):
         triton_meta["configs"] = [config_of(signature)]
 
         if TritonKernel._enable_pdl_codegen():
-
             # pyrefly: ignore [bad-typed-dict-key, unsupported-operation]
-
             triton_meta["launch_pdl"] = True
 
         mutated_args = self.get_mutated_args_sub_kernels()
