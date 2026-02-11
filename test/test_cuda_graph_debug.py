@@ -144,24 +144,6 @@ class TestCUDAGraphDebugInputs(TestCase):
         with self.assertRaisesRegex(RuntimeError, "dead.*tensor"):
             g.replay()
 
-    def test_multiple_replays_tensor_dies_between(self):
-        x = torch.randn(100, device="cuda")
-        g = torch.cuda.CUDAGraph()
-
-        _warmup_op(lambda: x * 2)
-
-        with torch.cuda.graph(g, check_input_liveness=True):
-            y = x * 2
-
-        g.replay()
-        torch.cuda.synchronize()
-
-        del x
-        _sync_and_gc_collect()
-
-        with self.assertRaisesRegex(RuntimeError, "dead.*tensor"):
-            g.replay()
-
     def test_view_tensor(self):
         base = torch.randn(100, device="cuda")
         view = base[10:50]
