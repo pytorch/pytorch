@@ -173,6 +173,7 @@ def _expand_single_dim_strategy_to_mesh(
     op_schema: OpSchema,
     single_dim_strategy: _SingleDimStrategyFunc,
     output_tensor_meta: TensorMeta | Sequence[TensorMeta | None] | None,
+    allow_unbacked_sharding: bool = False,
 ) -> _ExpandedSingleDimStrategyFunc:
     """
     Expands the single_mesh_dim impl across all mesh dims, and expands ShardingPlacholder into all
@@ -236,9 +237,6 @@ def _expand_single_dim_strategy_to_mesh(
                 )
             )
 
-            # Note: does not support `allow_unbacked_sharding` which is needed by matmul rules for some compile test
-            # currently, we should probably change that test though, since it seems wrong to me to allow sharding unbacked
-            # dims
             # Detect inplace ops by checking if the base op name ends with '_'
             op_name = op.name()
             base_name = op_name.split("::")[1].split(".")[0]
@@ -251,6 +249,7 @@ def _expand_single_dim_strategy_to_mesh(
                 output_tensor_meta=output_tensor_meta,
                 inplace_op=is_inplace,
                 input_index=num_outputs,
+                allow_unbacked_sharding=allow_unbacked_sharding,
             )
 
         return expanded_strategy
@@ -362,6 +361,7 @@ def _expand_single_dim_strategy_to_mesh(
 def register_single_dim_strategy(
     op: Union[torch._ops.OpOverload, list[torch._ops.OpOverload]],
     schema_info: Optional[RuntimeSchemaInfo] = None,
+    allow_unbacked_sharding: bool = False,
 ) -> Callable[[_SingleDimStrategyFunc], _SingleDimStrategyFunc]:
     """
     Registers a single_dim_strategy function for the given op.
@@ -396,7 +396,10 @@ def register_single_dim_strategy(
         "memory_format",
     ]
     return _get_registration_wrapper(
-        DTensor._op_dispatcher.sharding_propagator.register_single_dim_op_strategy,
+        functools.partial(
+            DTensor._op_dispatcher.sharding_propagator.register_single_dim_op_strategy,
+            allow_unbacked_sharding=allow_unbacked_sharding,
+        ),
         op,
         schema_info,
         arg_names_that_require_specializing_cache_strategy,
