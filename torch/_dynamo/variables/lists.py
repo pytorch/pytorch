@@ -45,7 +45,7 @@ from ..utils import (
     set_example_value,
 )
 from .base import AsPythonConstantNotImplementedError, ValueMutationNew, VariableTracker
-from .constant import CONSTANT_VARIABLE_NONE, ConstantVariable
+from .constant import CONSTANT_VARIABLE_FALSE, CONSTANT_VARIABLE_NONE, ConstantVariable
 from .functions import UserFunctionVariable
 from .iter import IteratorVariable
 from .user_defined import UserDefinedTupleVariable
@@ -959,7 +959,7 @@ class ListVariable(CommonListMethodsVariable):
                 raise_args_mismatch(tx, name, "0 args", f"{len(args)} args")
             key_fn_var = kwargs.pop("key", CONSTANT_VARIABLE_NONE)
             reverse = kwargs.pop(
-                "reverse", ConstantVariable.create(False)
+                "reverse", CONSTANT_VARIABLE_FALSE
             ).as_python_constant()
             if len(kwargs) != 0:
                 raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")

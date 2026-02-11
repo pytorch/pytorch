@@ -1927,7 +1927,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             )
         except ObservedAttributeError:
             handle_observed_exception(tx)
-            return variables.ConstantVariable.create(False)
+            return variables.CONSTANT_VARIABLE_FALSE
 
     def is_python_hashable(self) -> bool:
         raise_on_overridden_hash(self.value, self)

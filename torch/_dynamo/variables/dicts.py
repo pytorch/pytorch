@@ -42,7 +42,12 @@ from ..utils import (
     specialize_symnode,
 )
 from .base import ValueMutationNew, VariableTracker
-from .constant import CONSTANT_VARIABLE_NONE, CONSTANT_VARIABLE_TRUE, ConstantVariable
+from .constant import (
+    CONSTANT_VARIABLE_FALSE,
+    CONSTANT_VARIABLE_NONE,
+    CONSTANT_VARIABLE_TRUE,
+    ConstantVariable,
+)
 
 
 if TYPE_CHECKING:
@@ -828,7 +833,7 @@ class ConstDictVariable(VariableTracker):
             if hasattr(self.user_cls, name):
                 return CONSTANT_VARIABLE_TRUE
             if self.user_cls is dict:
-                return ConstantVariable.create(False)
+                return CONSTANT_VARIABLE_FALSE
 
         msg = f"hasattr on {self.user_cls} is not supported"
         unimplemented(
@@ -1338,7 +1343,7 @@ class SetVariable(ConstDictVariable):
             return self
         elif name == "__eq__":
             if not isinstance(args[0], (SetVariable, variables.UserDefinedSetVariable)):
-                return ConstantVariable.create(False)
+                return CONSTANT_VARIABLE_FALSE
             r = self.call_method(tx, "symmetric_difference", args, kwargs)
             return ConstantVariable.create(len(r.set_items) == 0)  # type: ignore[attr-defined]
         elif name in cmp_name_to_op_mapping:
@@ -1620,7 +1625,7 @@ class DictViewVariable(VariableTracker):
         assert self.kv is not None
         if name in self.python_type().__dict__:
             return CONSTANT_VARIABLE_TRUE
-        return ConstantVariable.create(False)
+        return CONSTANT_VARIABLE_FALSE
 
     def call_method(
         self,
@@ -1759,7 +1764,7 @@ class DictItemsVariable(DictViewVariable):
                 raise_args_mismatch(tx, name, "1 args", f"{len(args)} args")
             if isinstance(args[0], DictItemsVariable):
                 return self.dv_dict.call_method(tx, "__eq__", [args[0].dv_dict], {})
-            return ConstantVariable.create(False)
+            return CONSTANT_VARIABLE_FALSE
         elif name == "__iter__":
             from .lists import ListIteratorVariable
 

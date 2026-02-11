@@ -82,7 +82,7 @@ from ..utils import (
     tensortype_to_dtype,
 )
 from .base import AsPythonConstantNotImplementedError, ValueMutationNew, VariableTracker
-from .constant import CONSTANT_VARIABLE_NONE, ConstantVariable, EnumVariable
+from .constant import CONSTANT_VARIABLE_FALSE, CONSTANT_VARIABLE_NONE, ConstantVariable, EnumVariable
 from .dicts import (
     ConstDictVariable,
     DefaultDictVariable,
@@ -2090,7 +2090,7 @@ class BuiltinVariable(VariableTracker):
                 ListIteratorVariable,
             ),
         ):
-            return variables.ConstantVariable.create(False)
+            return variables.CONSTANT_VARIABLE_FALSE
         else:
             return None
 
@@ -2323,7 +2323,7 @@ class BuiltinVariable(VariableTracker):
                     "1 kwargs (`strict`)",
                     f"{len(kwargs)} kwargs",
                 )
-        strict = kwargs.pop("strict", ConstantVariable.create(False))
+        strict = kwargs.pop("strict", CONSTANT_VARIABLE_FALSE)
         iter_args = [
             SourcelessBuilder.create(tx, iter).call_function(tx, [arg], {})
             for arg in args
@@ -2526,7 +2526,7 @@ class BuiltinVariable(VariableTracker):
         *seqs: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
-        strict = ConstantVariable.create(False)
+        strict = CONSTANT_VARIABLE_FALSE
         if kwargs:
             if sys.version_info >= (3, 14):
                 if not (len(kwargs) == 1 and "strict" in kwargs):
@@ -2536,7 +2536,7 @@ class BuiltinVariable(VariableTracker):
                         "1 kwargs (`strict`)",
                         f"{len(kwargs)} kwargs",
                     )
-                strict = kwargs.pop("strict", ConstantVariable.create(False))
+                strict = kwargs.pop("strict", CONSTANT_VARIABLE_FALSE)
             else:
                 raise_args_mismatch(
                     tx,

@@ -770,7 +770,7 @@ class CUDADeviceVariable(ContextWrappingVariable):
             (self.proxy,),
             {},
         )
-        return variables.ConstantVariable.create(False)
+        return variables.CONSTANT_VARIABLE_FALSE
 
     def enter(self, tx: "InstructionTranslator") -> VariableTracker:
         prev_idx = torch.cuda._exchange_device(*self.target_values)

@@ -782,7 +782,7 @@ class TensorVariable(VariableTracker):
 
         # This is seen in inspect signature where we check if the value is a default value
         if name == "__eq__" and isinstance(args[0], UserDefinedClassVariable):
-            return variables.ConstantVariable(False)
+            return variables.CONSTANT_VARIABLE_FALSE
 
         # For historical reasons, these ops decompose down to syntactically
         # invalid aten ops because they contain the python keyword `from`, see

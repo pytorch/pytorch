@@ -43,6 +43,7 @@ import torch.nn
 import torch.utils._pytree as _pytree
 from torch._C import DispatchKeySet
 from torch._dynamo.variables.constant import (
+    CONSTANT_VARIABLE_FALSE,
     CONSTANT_VARIABLE_NONE,
     CONSTANT_VARIABLE_TRUE,
     ConstantVariable,
@@ -815,7 +816,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             ):
                 return CONSTANT_VARIABLE_TRUE
             else:
-                return ConstantVariable.create(False)
+                return CONSTANT_VARIABLE_FALSE
 
         @register(
             torch.is_floating_point,
