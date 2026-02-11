@@ -111,16 +111,6 @@ void magmaLuNoPivBatched(
     magma_int_t* info_array, magma_int_t batchsize, const MAGMAQueue& magma_queue);
 
 template<class scalar_t>
-void magmaCholeskySolve(
-    magma_uplo_t uplo, magma_int_t n, magma_int_t nrhs, scalar_t* dA, magma_int_t ldda,
-    scalar_t* dB, magma_int_t lddb, magma_int_t* info);
-
-template<class scalar_t>
-void magmaCholeskySolveBatched(
-    magma_uplo_t uplo, magma_int_t n, magma_int_t nrhs, scalar_t** dA_array, magma_int_t ldda,
-    scalar_t** dB_array, magma_int_t lddb, magma_int_t& info, magma_int_t batchsize, const MAGMAQueue& magma_queue);
-
-template<class scalar_t>
 void magmaTriangularSolveBatched(
     magma_side_t side, magma_uplo_t uplo, magma_trans_t trans, magma_diag_t diag, magma_int_t m, magma_int_t n,
     scalar_t** dA_array, magma_int_t ldda, scalar_t** dB_array, magma_int_t lddb, magma_int_t batchsize,
@@ -355,82 +345,6 @@ void magmaLuNoPivBatched<c10::complex<float>>(
     magma_int_t m, magma_int_t n, c10::complex<float>** dA_array, magma_int_t ldda,
     magma_int_t* info_array, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
   magma_cgetrf_nopiv_batched(m, n, reinterpret_cast<magmaFloatComplex**>(dA_array), ldda, info_array, batchsize, magma_queue.get_queue());
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template<>
-void magmaCholeskySolve<double>(
-    magma_uplo_t uplo, magma_int_t n, magma_int_t nrhs, double* dA, magma_int_t ldda,
-    double* dB, magma_int_t lddb, magma_int_t* info) {
-  MagmaStreamSyncGuard guard;
-  magma_dpotrs_gpu(uplo, n, nrhs, dA, ldda, dB, lddb, info);
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template<>
-void magmaCholeskySolve<float>(
-    magma_uplo_t uplo, magma_int_t n, magma_int_t nrhs, float* dA, magma_int_t ldda,
-    float* dB, magma_int_t lddb, magma_int_t* info) {
-  MagmaStreamSyncGuard guard;
-  magma_spotrs_gpu(uplo, n, nrhs, dA, ldda, dB, lddb, info);
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template<>
-void magmaCholeskySolve<c10::complex<double>>(
-    magma_uplo_t uplo, magma_int_t n, magma_int_t nrhs, c10::complex<double>* dA, magma_int_t ldda,
-    c10::complex<double>* dB, magma_int_t lddb, magma_int_t* info) {
-  MagmaStreamSyncGuard guard;
-  magma_zpotrs_gpu(uplo, n, nrhs,
-    reinterpret_cast<magmaDoubleComplex*>(dA), ldda,
-    reinterpret_cast<magmaDoubleComplex*>(dB), lddb, info);
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template<>
-void magmaCholeskySolve<c10::complex<float>>(
-    magma_uplo_t uplo, magma_int_t n, magma_int_t nrhs, c10::complex<float>* dA, magma_int_t ldda,
-    c10::complex<float>* dB, magma_int_t lddb, magma_int_t* info) {
-  MagmaStreamSyncGuard guard;
-  magma_cpotrs_gpu(uplo, n, nrhs,
-    reinterpret_cast<magmaFloatComplex*>(dA), ldda,
-    reinterpret_cast<magmaFloatComplex*>(dB), lddb, info);
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template<>
-void magmaCholeskySolveBatched<double>(
-    magma_uplo_t uplo, magma_int_t n, magma_int_t nrhs, double** dA_array, magma_int_t ldda,
-    double** dB_array, magma_int_t lddb, magma_int_t& info, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
-  info = magma_dpotrs_batched(uplo, n, nrhs, dA_array, ldda, dB_array, lddb, batchsize, magma_queue.get_queue());
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template<>
-void magmaCholeskySolveBatched<float>(
-    magma_uplo_t uplo, magma_int_t n, magma_int_t nrhs, float** dA_array, magma_int_t ldda,
-    float** dB_array, magma_int_t lddb, magma_int_t& info, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
-  info = magma_spotrs_batched(uplo, n, nrhs, dA_array, ldda, dB_array, lddb, batchsize, magma_queue.get_queue());
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template<>
-void magmaCholeskySolveBatched<c10::complex<double>>(
-    magma_uplo_t uplo, magma_int_t n, magma_int_t nrhs, c10::complex<double>** dA_array, magma_int_t ldda,
-    c10::complex<double>** dB_array, magma_int_t lddb, magma_int_t& info, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
-  info = magma_zpotrs_batched(uplo, n, nrhs,
-    reinterpret_cast<magmaDoubleComplex**>(dA_array), ldda,
-    reinterpret_cast<magmaDoubleComplex**>(dB_array), lddb, batchsize, magma_queue.get_queue());
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template<>
-void magmaCholeskySolveBatched<c10::complex<float>>(
-    magma_uplo_t uplo, magma_int_t n, magma_int_t nrhs, c10::complex<float>** dA_array, magma_int_t ldda,
-    c10::complex<float>** dB_array, magma_int_t lddb, magma_int_t& info, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
-  info = magma_cpotrs_batched(uplo, n, nrhs,
-    reinterpret_cast<magmaFloatComplex**>(dA_array), ldda,
-    reinterpret_cast<magmaFloatComplex**>(dB_array), lddb, batchsize, magma_queue.get_queue());
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
@@ -937,106 +851,9 @@ REGISTER_CUDA_DISPATCH(ldl_solve_stub, &ldl_solve_kernel)
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ cholesky_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-template <typename scalar_t>
-static void apply_cholesky_solve(Tensor& b, Tensor& A, bool upper, int64_t& info) {
-#if !AT_MAGMA_ENABLED()
-TORCH_CHECK(false, "cholesky_solve: MAGMA library not found in "
-    "compilation. Please rebuild with MAGMA.");
-#else
-  magma_uplo_t uplo = upper ? MagmaUpper : MagmaLower;
-
-  auto A_data = A.data_ptr<scalar_t>();
-  auto b_data = b.data_ptr<scalar_t>();
-  magma_int_t n = magma_int_cast(A.size(-2), "A.size(-2)");
-  magma_int_t lda = std::max<magma_int_t>(1, n);
-  magma_int_t nrhs = magma_int_cast(b.size(-1), "b.size(-1)");
-
-  int info_tmp = 0;
-  if (b.dim() == 2) {
-    magmaCholeskySolve<scalar_t>(uplo, n, nrhs, A_data, lda,
-                                 b_data, lda, &info_tmp);
-    info = info_tmp;
-  } else {
-    auto A_mat_stride = matrixStride(A);
-    auto b_mat_stride = matrixStride(b);
-    magma_int_t batch_size = magma_int_cast(batchCount(A), "batchCount");
-
-    scalar_t** A_array;
-    scalar_t** b_array;
-
-    ALLOCATE_ARRAY(A_array, scalar_t*, batch_size);
-    ALLOCATE_ARRAY(b_array, scalar_t*, batch_size);
-
-    // Set up the created arrays
-    for (int64_t i = 0; i < batch_size; i++) {
-      A_array[i] = &A_data[i * A_mat_stride];
-      b_array[i] = &b_data[i * b_mat_stride];
-    }
-
-    MAGMAQueue magma_queue(b.get_device());
-
-    constexpr int64_t batch_limit = 65535;
-    // Compute as many batches of 65535 possible
-    // The number of "mini"-batches are floor(batch_size / batch_limit)
-    // and these cover floor(batch_size / batch_limit) * batch_limit matrix solves
-    int64_t mini_batches = batch_size / batch_limit, mini_idx;
-    for (mini_idx = 0; mini_idx < mini_batches * batch_limit; mini_idx += batch_limit) {
-      scalar_t** A_array_cur = &A_array[mini_idx];
-      scalar_t** b_array_cur = &b_array[mini_idx];
-
-      magmaCholeskySolveBatched<scalar_t>(
-          uplo, n, nrhs, A_array_cur, lda, b_array_cur, lda,
-          info_tmp, batch_limit, magma_queue);
-
-      if (info_tmp != 0) {
-        break;
-      }
-    }
-
-    // Compute whatever is left = batch_size - floor(batch_size / batch_limit) * batch_limit
-    // which concisely is equal to batch_size % batch_limit
-    if (batch_size % batch_limit != 0 && info_tmp == 0) {
-      magmaCholeskySolveBatched<scalar_t>(
-          uplo, n, nrhs, &A_array[mini_idx], lda, &b_array[mini_idx], lda,
-          info_tmp, batch_size % batch_limit, magma_queue);
-    }
-
-    info = info_tmp;
-  }
-#endif
-}
-
-Tensor _cholesky_solve_helper_cuda_magma(const Tensor& self, const Tensor& A, bool upper) {
-  int64_t info = 0;
-  auto self_working_copy = cloneBatchedColumnMajor(self);
-  auto A_working_copy = cloneBatchedColumnMajor(A);
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "cholesky_solve_cuda", [&]{
-    apply_cholesky_solve<scalar_t>(self_working_copy, A_working_copy, upper, info);
-  });
-  TORCH_CHECK(info == 0, "MAGMA cholesky_solve : invalid argument: ", -info);
-  return self_working_copy;
-}
-
-// Todo: cusolverDn<T>potrsBatched only supports nrhs == 1 and does not have good performance.
-//     Batched cholesky_solve is dispatched to magma.
 Tensor _cholesky_solve_helper_cuda(const Tensor& self, const Tensor& A, bool upper) {
-#if defined(USE_LINALG_SOLVER)
-  auto preferred_backend = at::globalContext().linalgPreferredBackend();
-  switch (preferred_backend) {
-    case at::LinalgBackend::Cusolver:
-      return _cholesky_solve_helper_cuda_cusolver(self, A, upper);
-    case at::LinalgBackend::Magma:
-      return _cholesky_solve_helper_cuda_magma(self, A, upper);
-    default:
-      if (batchCount(self) == 1 || !use_magma_) {
-        return _cholesky_solve_helper_cuda_cusolver(self, A, upper);
-      } else {
-        return _cholesky_solve_helper_cuda_magma(self, A, upper);
-      }
-  }
-#else
-  return _cholesky_solve_helper_cuda_magma(self, A, upper);
-#endif
+  _warn_once_magma_deprecation("cholesky_solve");
+  return _cholesky_solve_helper_cuda_cusolver(self, A, upper);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ cholesky ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
