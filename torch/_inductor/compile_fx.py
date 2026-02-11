@@ -315,7 +315,7 @@ def _step_logger() -> Callable[..., None]:
 def _warn_tf32_disabled() -> None:
     if (
         torch.cuda.is_available()
-        and not torch.backends.cuda.matmul.allow_tf32
+        and torch.backends.cuda.matmul.fp32_precision != "tf32"
         and torch.cuda.get_device_capability() >= (8, 0)
     ):
         warnings.warn(
@@ -868,6 +868,7 @@ def _compile_fx_inner(
             log_level=CompileEventLogLevel.PT2_COMPILE,
         )
 
+        # pyrefly: ignore[bad-return]
         return make_boxed_func(gm.forward)
 
     static_input_idxs: Sequence[int] = graph_kwargs.setdefault("static_input_idxs", ())

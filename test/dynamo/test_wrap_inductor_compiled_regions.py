@@ -1084,9 +1084,9 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
     def test_proxy_tensor_mode_works(self):
         """Test that running compiled code inside ProxyTensorMode works with FX graph fallback"""
         from torch._higher_order_ops.wrap import (
-            InductorCompiledCallable,
             inductor_code_side_table,
             inductor_compiled_code,
+            InductorCompiledCallable,
         )
         from torch.fx.experimental.proxy_tensor import make_fx
 

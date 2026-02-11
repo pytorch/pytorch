@@ -13,11 +13,7 @@ import torch.distributed.tensor._dispatch as op_dispatch
 import torch.distributed.tensor._random as random
 import torch.nn as nn
 from torch._export.wrappers import mark_subclass_constructor_exportable_experimental
-from torch.distributed.device_mesh import (
-    _mesh_resources,
-    _register_distributed_opaque_types,
-    DeviceMesh,
-)
+from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
 from torch.distributed.tensor._collective_utils import check_tensor_meta, mesh_broadcast
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._redistribute import (
@@ -102,6 +98,7 @@ class _ToTorchTensor(torch.autograd.Function):
     ):
         ctx.dtensor_spec = input._spec
         ctx.grad_placements = grad_placements
+        ctx.set_materialize_grads(False)
         local_tensor = input._local_tensor
 
         # We need to return a fresh Tensor object there as autograd metadata
@@ -110,7 +107,10 @@ class _ToTorchTensor(torch.autograd.Function):
         return local_tensor.view_as(local_tensor)
 
     @staticmethod
-    def backward(ctx, grad_output: torch.Tensor):  # type: ignore[override]
+    def backward(ctx, grad_output: torch.Tensor | None):  # type: ignore[override]
+        if grad_output is None:
+            return None, None
+
         dtensor_spec = ctx.dtensor_spec
         mesh = dtensor_spec.mesh
         grad_placements = ctx.grad_placements
@@ -170,6 +170,7 @@ class _FromTorchTensor(torch.autograd.Function):
     ) -> "DTensor":
         ctx.forward_input_placements = placements
         ctx.forward_input_device_mesh = device_mesh
+        ctx.set_materialize_grads(False)
 
         if shape and stride:
             tensor_shape, tensor_stride = shape, stride
@@ -229,9 +230,12 @@ class _FromTorchTensor(torch.autograd.Function):
         return dist_tensor
 
     @staticmethod
-    def backward(ctx, grad_output: "DTensor"):  # type: ignore[override]
+    def backward(ctx, grad_output: "DTensor | None"):  # type: ignore[override]
         forward_input_placements = ctx.forward_input_placements
         forward_input_device_mesh = ctx.forward_input_device_mesh
+
+        if grad_output is None:
+            return None, None, None, None, None, None
 
         # reshard to the placement when creating DistributedTensor
         # so that the gradient layout matches, and we could return
@@ -1460,6 +1464,3 @@ def zeros(  # type: ignore[no-untyped-def]
         device_mesh=device_mesh,
         placements=placements,
     )
-
-
-_register_distributed_opaque_types()
