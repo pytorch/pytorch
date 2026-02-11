@@ -171,7 +171,7 @@ class VecNEON(VecISA):
 
 @dataclasses.dataclass
 class VecSVE256(VecISA):
-    # this function can be repurposed for SVE with variable vec length
+    # Repurposable for SVE targets with variable vector length.
     _bit_width = 256
     _macro = [
         "CPU_CAPABILITY_SVE",
@@ -180,13 +180,32 @@ class VecSVE256(VecISA):
         "__ARM_FEATURE_BF16",
     ]
     _arch_flags = "-march=armv8-a+sve+bf16 -msve-vector-bits=256"
+    _armv9a_arch_flags = (
+        "-march=armv9-a+sve2+fp16fml+sha3+bf16+i8mm -msve-vector-bits=256"
+    )
 
     _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
+    _armv9a_supported: bool | None = None
 
     def __str__(self) -> str:
         if config.is_fbcode():
             return "neon"
         return "asimd"
+
+    def _has_armv9a(self) -> bool:
+        # Return True when torch.cpu.get_capabilities() reports
+        # Armv9-A + SVE2 support.
+        if self._armv9a_supported is None:
+            try:
+                self._armv9a_supported = bool(torch.cpu.get_capabilities()["sve2"])
+            except Exception:
+                self._armv9a_supported = False
+        return self._armv9a_supported
+
+    def build_arch_flags(self) -> str:
+        if self._has_armv9a():
+            return self._armv9a_arch_flags
+        return self._arch_flags
 
     __hash__: Callable[[VecISA], Any] = VecISA.__hash__  # type: ignore[assignment]
 
@@ -524,7 +543,8 @@ def valid_vec_isa_list() -> list[VecISA]:
     elif arch == "ppc64le":
         isa_list.append(VecVSX())
     elif arch == "aarch64":
-        if torch.backends.cpu.get_cpu_capability() == "SVE256":
+        caps = torch.cpu.get_capabilities()
+        if caps["sve2"] or caps["sve"]:
             isa_list.append(VecSVE256())
         else:
             isa_list.append(VecNEON())
