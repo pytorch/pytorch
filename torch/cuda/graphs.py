@@ -17,7 +17,7 @@ from torch import Tensor
 if TYPE_CHECKING:
     # importing _POOL_HANDLE at runtime toplevel causes an import cycle
     from torch.cuda import _POOL_HANDLE
-    from torch.utils._python_dispatch import TorchDispatchMode
+    from torch.utils._cuda_debug import _TensorTrackingMode
 
 from .._utils import _dummy_type
 
@@ -54,94 +54,6 @@ class _TrackedTensorInfo:
 
     def is_alive(self) -> bool:
         return self.weakref() is not None
-
-
-def _get_tensor_tracking_mode_class() -> type:
-    from torch.utils._python_dispatch import TorchDispatchMode
-    from torch.utils._pytree import tree_iter
-
-    class _TensorTrackingMode(TorchDispatchMode):
-        def __init__(self, cuda_graph: CUDAGraph) -> None:
-            self._graph = cuda_graph
-            self._capture_mempool_id: tuple[int, int] | None = None
-
-        def _get_capture_mempool_id(self) -> tuple[int, int]:
-            if self._capture_mempool_id is None:
-                device = torch.cuda.current_device()
-                stream = torch.cuda.current_stream(device)
-                self._capture_mempool_id = torch._C._cuda_getCaptureMempoolId(
-                    device, stream.cuda_stream
-                )
-            return self._capture_mempool_id
-
-        def _is_tensor_from_capture_pool(self, tensor: Tensor) -> bool:
-            capture_pool = self._get_capture_mempool_id()
-            if capture_pool == (0, 0):
-                return False
-            device = tensor.device.index
-            if device is None:
-                return False
-            tensor_pool = torch._C._cuda_getBlockMempoolId(device, tensor.data_ptr())
-            return tensor_pool == capture_pool
-
-        # TODO: Do we want to handle pinned host tensors for any other ops?
-        _COPY_OPS = frozenset({"aten::copy_", "aten::_to_copy"})
-
-        # This is a proxy for telling if an op launched a CUDA kernel.
-        # If it only ever returns host tensors, does it ever launch work
-        # on GPU while also being capturable in a CUDA graph (i.e. not
-        # causing a stream sync)
-        def _has_cuda_tensor_output(self, values: object) -> bool:
-            for v in tree_iter(values):
-                if isinstance(v, Tensor) and v.is_cuda:
-                    return True
-            return False
-
-        def _is_copy_op(self, func: object) -> bool:
-            if hasattr(func, "_schema"):
-                return func._schema.name in self._COPY_OPS
-            return False
-
-        def __torch_dispatch__(
-            self,
-            func: object,
-            types: object,
-            args: tuple[object, ...] = (),
-            kwargs: dict[str, object] | None = None,
-        ) -> object:
-            kwargs = kwargs or {}
-            out = func(*args, **kwargs)  # type: ignore[operator]
-            if is_current_stream_capturing() and self._has_cuda_tensor_output(out):
-                self._track_inputs([args, kwargs], track_pinned=self._is_copy_op(func))
-                self._mark_outputs(out)
-            return out
-
-        def _track_inputs(self, values: object, *, track_pinned: bool = False) -> None:
-            for v in tree_iter(values):
-                if not isinstance(v, Tensor) or v.data_ptr() == 0:
-                    continue
-                if v.is_cuda:
-                    if not self._is_tensor_from_capture_pool(v):
-                        self._graph._track_external_input(v)
-                elif track_pinned and v.is_pinned():
-                    self._graph._track_external_input(v)
-
-        def _mark_outputs(self, values: object) -> None:
-            for v in tree_iter(values):
-                if isinstance(v, Tensor) and v.is_cuda:
-                    self._graph._mark_internal_output(v)
-
-    return _TensorTrackingMode
-
-
-_TensorTrackingModeClass: type | None = None
-
-
-def _get_tracking_mode(cuda_graph: CUDAGraph) -> TorchDispatchMode:
-    global _TensorTrackingModeClass
-    if _TensorTrackingModeClass is None:
-        _TensorTrackingModeClass = _get_tensor_tracking_mode_class()
-    return _TensorTrackingModeClass(cuda_graph)
 
 
 __all__ = [
@@ -219,7 +131,7 @@ class CUDAGraph(_CUDAGraph):
     _external_inputs: dict[int, _TrackedTensorInfo]
     _internal_outputs: set[int]
     _check_input_liveness: bool
-    _tracking_mode: TorchDispatchMode | None
+    _tracking_mode: _TensorTrackingMode | None
 
     def __new__(cls, keep_graph: bool = False) -> Self:
         instance = super().__new__(cls, keep_graph)
@@ -243,11 +155,14 @@ class CUDAGraph(_CUDAGraph):
             self._internal_outputs.add(data_ptr)
 
     def _start_input_tracking(self) -> None:
+        from torch.utils._cuda_debug import _TensorTrackingMode
+
+        self._check_input_liveness = True
         self._external_inputs.clear()
         self._internal_outputs.clear()
         # Note that this call causes a circular reference. We use the __del__
         # method to release the ref to the tracker.
-        self._tracking_mode = _get_tracking_mode(self)
+        self._tracking_mode = _TensorTrackingMode(self)
         self._tracking_mode.__enter__()
 
     def _stop_input_tracking(self) -> None:
