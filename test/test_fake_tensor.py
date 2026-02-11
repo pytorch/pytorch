@@ -1126,7 +1126,7 @@ class FakeTensorTest(TestCase):
                 fake_out.is_contiguous(),
                 f"FakeTensor upsample output should be contiguous, got strides {fake_out.stride()}",
             )
-
+            
     def test_export_numpy(self):
         class MyNumpyModel(torch.nn.Module):
             def forward(self, input):
@@ -1360,7 +1360,7 @@ class FakeTensorOpInfoTest(TestCase):
 
 make_propagate_real_tensors_cls(FakeTensorOpInfoTest)
 instantiate_device_type_tests(
-    FakeTensorOpInfoTest, globals(), only_for=("cpu", device_type), allow_xpu=True
+    FakeTensorOpInfoTest, globals(), only_for=("cpu", device_type)
 )
 instantiate_device_type_tests(
     PropagateRealTensorsFakeTensorOpInfoTest,  # noqa: F821
