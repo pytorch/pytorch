@@ -723,9 +723,11 @@ def _tree_map_with_path(
         raise
 
 
-def _combine_args(f, args, kwargs) -> dict[str, Any]:
+def _combine_args(f, args, kwargs, preserve_order: bool = False) -> dict[str, Any]:
     # combine args and kwargs following the signature of f, as it happens
     # in the body of f when called with *args, **kwargs
+    # the exporter needs to preserve the original order of the arguments
+    # to match the dynamic shapes.
     if isinstance(f, ExportedProgram):
         f = f.module()
 
@@ -735,7 +737,24 @@ def _combine_args(f, args, kwargs) -> dict[str, Any]:
         else inspect.signature(f)
     )
     kwargs = kwargs if kwargs is not None else {}
-    return signature.bind(*args, **kwargs).arguments
+    combined_args = signature.bind(*args, **kwargs).arguments
+    if not preserve_order:
+        return combined_args
+
+    combined_args_traced_order = {}
+    if args:
+        for name, arg in zip(signature.parameters, args):
+            combined_args_traced_order[name] = arg
+
+    for arg in kwargs:
+        if arg in combined_args:
+            combined_args_traced_order[arg] = combined_args[arg]
+
+    for key in combined_args:
+        if key not in combined_args_traced_order:
+            combined_args_traced_order[key] = combined_args[key]
+
+    return combined_args_traced_order
 
 
 class ShapesCollection:
