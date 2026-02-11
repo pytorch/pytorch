@@ -323,9 +323,10 @@ class FakeTensorTest(TestCase):
         with FakeTensorMode():
             x = torch.rand([8, 8], device="cpu")
             y = torch.rand([8, 8], device=device_type)
-            assert x.copy_(y).device.type == "cpu"
-            assert y.copy_(x).device.type == device_type
-
+            if x.copy_(y).device.type != "cpu":
+                raise AssertionError("expected cpu device")
+            if y.copy_(x).device.type != device_type:
+                raise AssertionError(f"expected {device_type} device")
     def test_fake_device(self):
         t = torch.ones(3)
         t = t.view(1, 3)
@@ -545,7 +546,8 @@ class FakeTensorTest(TestCase):
         # does not fail
         with FakeTensorMode():
             out = str(x)
-        assert "FakeTensor" not in out
+        if "FakeTensor" in out:
+            raise AssertionError("FakeTensor should not be in output")
 
     @unittest.skipIf(not RUN_GPU, "requires cuda or xpu")
     def test_upsample_bilinear_small_channels(self):
@@ -1431,7 +1433,8 @@ class FakeTensorConverterTest(TestCase):
         x_conv = converter.from_real_tensor(mode, x)
         self.assertEqual(len(converter.tensor_memo), 1)
         x_conv2 = converter.from_real_tensor(mode, x)
-        assert x_conv2 is x_conv
+        if x_conv2 is not x_conv:
+            raise AssertionError("expected x_conv2 is x_conv")
         del x
         del x_conv
         del x_conv2
@@ -1475,8 +1478,10 @@ class FakeTensorConverterTest(TestCase):
         y_weak = weakref.ref(mode)
         del mode
         del y
-        assert mode_weak() is None
-        assert y_weak() is None
+        if mode_weak() is not None:
+            raise AssertionError("expected mode_weak() is None")
+        if y_weak() is not None:
+            raise AssertionError("expected y_weak() is None")
 
 
 make_propagate_real_tensors_cls(FakeTensorConverterTest)
@@ -1486,7 +1491,8 @@ class FakeTensorOperatorInvariants(TestCase):
     def get_aten_op(self, schema):
         namespace, name = schema.name.split("::")
         overload = schema.overload_name if schema.overload_name else "default"
-        assert namespace == "aten"
+        if namespace != "aten":
+            raise AssertionError(f"expected namespace 'aten', got {namespace!r}")
         return getattr(getattr(torch.ops.aten, name), overload)
 
     def get_all_aten_schemas(self):
@@ -2465,7 +2471,8 @@ class FakeTensorDispatchCache(TestCase):
 
             @staticmethod
             def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
-                assert meta is None
+                if meta is not None:
+                    raise AssertionError(f"expected meta is None, got {meta}")
                 return DifferentDeviceTensor(inner_tensors["inner_tensor"])
 
             @classmethod
@@ -2492,7 +2499,10 @@ class FakeTensorDispatchCache(TestCase):
             fake_wrapped_a = fake_mode.from_tensor(wrapped_a)
 
         self.assertTrue(fake_wrapped_a.is_cpu)
-        assert isinstance(fake_wrapped_a, DifferentDeviceTensor)
+        if not isinstance(fake_wrapped_a, DifferentDeviceTensor):
+            raise AssertionError(
+                f"expected DifferentDeviceTensor, got {type(fake_wrapped_a)}"
+            )
         self.assertFalse(fake_wrapped_a.inner_tensor.is_cpu)
 
     def test__upsample_bilinear2d_aa_backward_dynamic_shapes(self):
