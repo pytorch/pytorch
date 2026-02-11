@@ -95,14 +95,21 @@ class TestOutVariant(TestCase):
         def multi_overload_float(x: Tensor, n: float) -> Tensor:
             return x + n
 
-        self.lib.define(
-            "multi_overload_int.out(Tensor x, SymInt n, *, Tensor(a!) result) -> Tensor(a!)",
+        @torch.library.custom_op(
+            "_TestOutVariant::multi_overload_int.out",
+            mutates_args=["out"],
             tags=[torch.Tag.out_variant],
         )
-        self.lib.define(
-            "multi_overload_float.out(Tensor x, float n, *, Tensor(a!) result) -> Tensor(a!)",
+        def multi_overload_int_out(x: Tensor, n: int, out: Tensor) -> None:
+            return x * n
+
+        @torch.library.custom_op(
+            "_TestOutVariant::multi_overload_float.out",
+            mutates_args=["out"],
             tags=[torch.Tag.out_variant],
         )
+        def multi_overload_float_out(x: Tensor, n: float, out: Tensor) -> None:
+            return x + n
 
         check_out_variant(
             torch.ops._TestOutVariant.multi_overload_int.default,
