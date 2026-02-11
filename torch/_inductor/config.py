@@ -440,10 +440,8 @@ bucket_all_reduces_fx_bucket_size_determinator: Optional[Callable[[int], int]] =
 # Use process group allocator for bucketed collective operations.
 # When enabled, allocates memory from the process group's registered allocator
 # (e.g., NCCL's multicast-compatible allocator) which can improve communication
-# performance. Set via config or TORCH_INDUCTOR_BUCKET_OPS_USE_PG_ALLOC env var.
-bucket_ops_use_pg_alloc: bool = (
-    os.environ.get("TORCH_INDUCTOR_BUCKET_OPS_USE_PG_ALLOC", "1") == "1"
-)
+# performance. Set via config or USE_PG_ALLOC env var.
+bucket_ops_use_pg_alloc: bool = os.environ.get("USE_PG_ALLOC", "0") == "1"
 
 # runtime estimation function for ops
 # for built-in estimation function, pass in "default"; for user-defined estimation function, pass in the function handle

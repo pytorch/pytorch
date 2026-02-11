@@ -32,10 +32,9 @@ c10d::ReduceOp to_reduce_op(const std::string& reduce_op) {
 
 bool usePgAllocator() {
   // Reads from same env var as torch._inductor.config.bucket_ops_use_pg_alloc
-  // Default is enabled (env var not set or set to "1")
-  static const char* env =
-      std::getenv("TORCH_INDUCTOR_BUCKET_OPS_USE_PG_ALLOC");
-  static bool enabled = env == nullptr || std::strcmp(env, "1") == 0;
+  // Default is disabled (only enabled if env var is set to "1")
+  static const char* env = std::getenv("USE_PG_ALLOC");
+  static bool enabled = env != nullptr && std::strcmp(env, "1") == 0;
   return enabled;
 }
 
