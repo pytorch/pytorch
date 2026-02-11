@@ -11,6 +11,7 @@
 #include <ATen/native/utils/ParamUtils.h>
 #include <ATen/native/xnnpack/Engine.h>
 #include <c10/core/GradMode.h>
+#include <c10/core/SymBool.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
 #include <c10/macros/Macros.h>
@@ -509,12 +510,35 @@ struct ConvParams {
        input.scalar_type() == kFloat && // only on CPU Float Tensors
        // For 1x1 filters, MKLDNN is faster than THNN when multi-threaded,
        // but THNN is faster when single-threaded.
-       (is_strided() || is_dilated() || at::symint::size<T>(input, 0) >= 16 ||
-        at::symint::size<T>(weight, -1) != 1 || at::symint::size<T>(weight, -2) != 1 || at::get_num_threads() > 1) &&
-       (groups > 1
-        || (at::symint::size<T>(weight, -1) > 3 && at::symint::size<T>(weight, -2) > 3)
-        || at::symint::size<T>(input, 0) > 1
-        || at::symint::size<T>(input, 0)*at::symint::size<T>(input, 1)*at::symint::size<T>(input, 2)*at::symint::size<T>(input, 3) > 20480) // for some case, native is faster
+       [&]() {
+         if constexpr (std::is_same_v<T, c10::SymInt>) {
+           return is_strided() || is_dilated() ||
+             TORCH_GUARD_OR_FALSE(at::symint::size<T>(input, 0).sym_ge(16)) ||
+             TORCH_GUARD_OR_FALSE(at::symint::size<T>(weight, -1).sym_ne(1)) ||
+             TORCH_GUARD_OR_FALSE(at::symint::size<T>(weight, -2).sym_ne(1)) ||
+             at::get_num_threads() > 1;
+         } else {
+           return is_strided() || is_dilated() ||
+             at::symint::size<T>(input, 0) >= 16 ||
+             at::symint::size<T>(weight, -1) != 1 ||
+             at::symint::size<T>(weight, -2) != 1 ||
+             at::get_num_threads() > 1;
+         }
+       }() &&
+       [&]() {
+         if constexpr (std::is_same_v<T, c10::SymInt>) {
+           return groups > 1
+             || (TORCH_GUARD_OR_FALSE(at::symint::size<T>(weight, -1).sym_gt(3)) &&
+                 TORCH_GUARD_OR_FALSE(at::symint::size<T>(weight, -2).sym_gt(3)))
+             || TORCH_GUARD_OR_FALSE(at::symint::size<T>(input, 0).sym_gt(1))
+             || TORCH_GUARD_OR_FALSE((at::symint::size<T>(input, 0)*at::symint::size<T>(input, 1)*at::symint::size<T>(input, 2)*at::symint::size<T>(input, 3)).sym_gt(20480));
+         } else {
+           return groups > 1
+             || (at::symint::size<T>(weight, -1) > 3 && at::symint::size<T>(weight, -2) > 3)
+             || at::symint::size<T>(input, 0) > 1
+             || at::symint::size<T>(input, 0)*at::symint::size<T>(input, 1)*at::symint::size<T>(input, 2)*at::symint::size<T>(input, 3) > 20480;
+         }
+       }() // for some case, native is faster
         );
 
 #endif
@@ -651,29 +675,53 @@ static void check_shape_forward(const at::Tensor& input,
            "Expected ", weight_dim, "-dimensional input for ", weight_dim,
            "-dimensional weight ", weight_sizes, ", but got ", k, "-dimensional input of size ",
            at::symint::sizes<T>(input), " instead");
-  TORCH_CHECK(weight_sizes[0] >= groups,
-           "Given groups=", groups, ", expected weight to be at least ", groups,
-           " at dimension 0, but got weight of size ", weight_sizes, " instead");
-  TORCH_CHECK(weight_sizes[0] % groups == 0,
-           "Given groups=", groups, ", expected weight to be divisible by ",
-           groups, " at dimension 0, but got weight of size [", weight_sizes,
-           "] instead");
+  if constexpr (std::is_same_v<T, c10::SymInt>) {
+    TORCH_SYM_CHECK(weight_sizes[0].sym_ge(groups),
+             "Given groups=", groups, ", expected weight to be at least ", groups,
+             " at dimension 0, but got weight of size ", weight_sizes, " instead");
+    TORCH_SYM_CHECK((weight_sizes[0] % groups).sym_eq(0),
+             "Given groups=", groups, ", expected weight to be divisible by ",
+             groups, " at dimension 0, but got weight of size [", weight_sizes,
+             "] instead");
+  } else {
+    TORCH_CHECK(weight_sizes[0] >= groups,
+             "Given groups=", groups, ", expected weight to be at least ", groups,
+             " at dimension 0, but got weight of size ", weight_sizes, " instead");
+    TORCH_CHECK(weight_sizes[0] % groups == 0,
+             "Given groups=", groups, ", expected weight to be divisible by ",
+             groups, " at dimension 0, but got weight of size [", weight_sizes,
+             "] instead");
+  }
 
   if (!transposed) {
     std::vector<T> input_shape;
     std::vector<T> kernel_shape;
     bool kernel_size_correct = true;
 
-    TORCH_CHECK(at::symint::size<T>(input, 1) == (weight_sizes[1] * groups),
-                "Given groups=", groups, ", weight of size ", weight_sizes,
-                ", expected input", at::symint::sizes<T>(input), " to have ",
-                (weight_sizes[1] * groups), " channels, but got ", at::symint::size<T>(input, 1),
-                " channels instead");
+    if constexpr (std::is_same_v<T, c10::SymInt>) {
+      TORCH_SYM_CHECK(at::symint::size<T>(input, 1).sym_eq(weight_sizes[1] * groups),
+                  "Given groups=", groups, ", weight of size ", weight_sizes,
+                  ", expected input", at::symint::sizes<T>(input), " to have ",
+                  (weight_sizes[1] * groups), " channels, but got ", at::symint::size<T>(input, 1),
+                  " channels instead");
 
-    TORCH_CHECK(!bias.defined() || (bias.ndimension() == 1 && at::symint::size<T>(bias, 0) == weight_sizes[0]),
-             "Given weight of size ", weight_sizes,
-             ", expected bias to be 1-dimensional with ", weight_sizes[0], " elements",
-             ", but got bias of size ", at::symint::sizes<T>(bias), " instead");
+      TORCH_CHECK(!bias.defined() || (bias.ndimension() == 1 &&
+                  at::symint::size<T>(bias, 0).sym_eq(weight_sizes[0]).expect_true(__FILE__, __LINE__)),
+               "Given weight of size ", weight_sizes,
+               ", expected bias to be 1-dimensional with ", weight_sizes[0], " elements",
+               ", but got bias of size ", at::symint::sizes<T>(bias), " instead");
+    } else {
+      TORCH_CHECK(at::symint::size<T>(input, 1) == (weight_sizes[1] * groups),
+                  "Given groups=", groups, ", weight of size ", weight_sizes,
+                  ", expected input", at::symint::sizes<T>(input), " to have ",
+                  (weight_sizes[1] * groups), " channels, but got ", at::symint::size<T>(input, 1),
+                  " channels instead");
+
+      TORCH_CHECK(!bias.defined() || (bias.ndimension() == 1 && at::symint::size<T>(bias, 0) == weight_sizes[0]),
+               "Given weight of size ", weight_sizes,
+               ", expected bias to be 1-dimensional with ", weight_sizes[0], " elements",
+               ", but got bias of size ", at::symint::sizes<T>(bias), " instead");
+    }
 
     for (const auto i : c10::irange(2, k)) {
       // T could be int64_t or SymInt, Specialized numeric_limts<SymInt> in c10/core/SymInt.h
@@ -683,8 +731,14 @@ static void check_shape_forward(const at::Tensor& input,
       input_shape.push_back(at::symint::size<T>(input, i) + 2 * padding[i-2]);
       // log new kernel size considering dilation
       kernel_shape.push_back(dilation[i-2] * (weight_sizes[i]-1) + 1);
-      if (input_shape.back() < kernel_shape.back()) {
-        kernel_size_correct = false;
+      if constexpr (std::is_same_v<T, c10::SymInt>) {
+        if (TORCH_GUARD_OR_FALSE(input_shape.back().sym_lt(kernel_shape.back()))) {
+          kernel_size_correct = false;
+        }
+      } else {
+        if (input_shape.back() < kernel_shape.back()) {
+          kernel_size_correct = false;
+        }
       }
     }
 
@@ -711,14 +765,26 @@ static void check_shape_forward(const at::Tensor& input,
                   "Given padding=", padding[i-2], " at dimension ", i-2, " , expected padding to be at most ",
                   (std::numeric_limits<T>::max() / 2));
     }
-    TORCH_CHECK(at::symint::size<T>(input, 1) == weight_sizes[0],
-             "Given transposed=", transposed, ", weight of size ", weight_sizes,
-             ", expected input", at::symint::sizes<T>(input), " to have ", weight_sizes[0],
-             " channels, but got ", at::symint::size<T>(input, 1), " channels instead");
-    TORCH_CHECK(!bias.defined() || (bias.ndimension() == 1 && at::symint::size<T>(bias, 0) == weight_sizes[1] * groups),
-             "Given transposed=", transposed, ", weight of size ", weight_sizes,
-             ", expected bias to be 1-dimensional with ", weight_sizes[1] * groups, " elements",
-             ", but got bias of size ", at::symint::sizes<T>(bias), " instead");
+    if constexpr (std::is_same_v<T, c10::SymInt>) {
+      TORCH_SYM_CHECK(at::symint::size<T>(input, 1).sym_eq(weight_sizes[0]),
+               "Given transposed=", transposed, ", weight of size ", weight_sizes,
+               ", expected input", at::symint::sizes<T>(input), " to have ", weight_sizes[0],
+               " channels, but got ", at::symint::size<T>(input, 1), " channels instead");
+      TORCH_CHECK(!bias.defined() || (bias.ndimension() == 1 &&
+                  at::symint::size<T>(bias, 0).sym_eq(weight_sizes[1] * groups).expect_true(__FILE__, __LINE__)),
+               "Given transposed=", transposed, ", weight of size ", weight_sizes,
+               ", expected bias to be 1-dimensional with ", weight_sizes[1] * groups, " elements",
+               ", but got bias of size ", at::symint::sizes<T>(bias), " instead");
+    } else {
+      TORCH_CHECK(at::symint::size<T>(input, 1) == weight_sizes[0],
+               "Given transposed=", transposed, ", weight of size ", weight_sizes,
+               ", expected input", at::symint::sizes<T>(input), " to have ", weight_sizes[0],
+               " channels, but got ", at::symint::size<T>(input, 1), " channels instead");
+      TORCH_CHECK(!bias.defined() || (bias.ndimension() == 1 && at::symint::size<T>(bias, 0) == weight_sizes[1] * groups),
+               "Given transposed=", transposed, ", weight of size ", weight_sizes,
+               ", expected bias to be 1-dimensional with ", weight_sizes[1] * groups, " elements",
+               ", but got bias of size ", at::symint::sizes<T>(bias), " instead");
+    }
   }
 }
 
@@ -1009,7 +1075,7 @@ static Tensor convolution_same(
         input_sizes[i + 2], weight_sizes[i + 2], s, d);
     padding_l.push_back(pad.first);
     padding_r.push_back(pad.second);
-    if (pad.first != pad.second) {
+    if (!TORCH_GUARD_OR_FALSE(pad.first.sym_eq(pad.second))) {
       symmetric_padding = false;
     }
   }
@@ -1025,15 +1091,10 @@ static Tensor convolution_same(
                   " require a zero-padded copy of the input be created");
   SmallVector<c10::SymInt, kDimVectorStaticSize * 2> pad_nd(static_cast<size_t>(2 * dim));
   for (auto i: c10::irange(dim)) {
-    // Apply padding by the difference, leaving only a symmetric padding
-    auto delta_pad = padding_r[i] - padding_l[i];
+    // pad_r >= pad_l always (floor division), so pad the right side by the
+    // difference and use pad_l as the symmetric base for convolution.
     auto pad_idx = 2 * (dim - 1 - i);  // F.pad goes from last dim to first
-    if (delta_pad > 0) {
-      pad_nd[pad_idx + 1] = delta_pad;
-    } else {
-      pad_nd[pad_idx] = delta_pad;
-      padding_l[i] = padding_r[i];
-    }
+    pad_nd[pad_idx + 1] = padding_r[i] - padding_l[i];
   }
   auto padded_input = at::constant_pad_nd_symint(input, pad_nd, 0);
   SymDimVector output_padding(dim);
@@ -1196,10 +1257,19 @@ static ConvBackend _select_conv_backend(
     const ConvParams<T>& params) {
 
   // don't send empty inputs through backends
-  if (at::symint::size<T>(input, 0) == 0 || at::symint::size<T>(input, 1) == 0) {
-    return input.is_mkldnn() ? ConvBackend::MkldnnEmpty : ConvBackend::Empty;
-  } else if (at::symint::numel<T>(input) == 0) {
-    TORCH_CHECK(false, "Only zero batch or zero channel inputs are supported, but got input shape: ", at::symint::sizes<T>(input));
+  if constexpr (std::is_same_v<T, c10::SymInt>) {
+    if (TORCH_GUARD_OR_FALSE(at::symint::size<T>(input, 0).sym_eq(0)) ||
+        TORCH_GUARD_OR_FALSE(at::symint::size<T>(input, 1).sym_eq(0))) {
+      return input.is_mkldnn() ? ConvBackend::MkldnnEmpty : ConvBackend::Empty;
+    } else if (TORCH_GUARD_OR_FALSE(at::symint::numel<T>(input).sym_eq(0))) {
+      TORCH_CHECK(false, "Only zero batch or zero channel inputs are supported, but got input shape: ", at::symint::sizes<T>(input));
+    }
+  } else {
+    if (at::symint::size<T>(input, 0) == 0 || at::symint::size<T>(input, 1) == 0) {
+      return input.is_mkldnn() ? ConvBackend::MkldnnEmpty : ConvBackend::Empty;
+    } else if (at::symint::numel<T>(input) == 0) {
+      TORCH_CHECK(false, "Only zero batch or zero channel inputs are supported, but got input shape: ", at::symint::sizes<T>(input));
+    }
   }
 
   if (params.is_depthwise(input, weight)) {
