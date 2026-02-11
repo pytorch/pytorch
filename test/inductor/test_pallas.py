@@ -68,8 +68,13 @@ def make_pallas(cls):
         (config, "cpu_backend", "pallas"),
         (config, "cuda_backend", "pallas"),
     ]
-    cls_prefix = "Pallas"
-    suffix = "_pallas"
+    if self.is_tpu:
+        cls_prefix = "PallasTpu"
+        suffix = "_pallas_tpu"
+        patches.append((config, "_pallas_tpu", True))
+    else:
+        cls_prefix = "Pallas"
+        suffix = "_pallas"
 
     # Mark tests based on sentinel files in pallas_expected_failures/ and pallas_skip_tests/
     for name in cls.__dict__:
@@ -112,25 +117,6 @@ def _skip_if(condition_fn, reason):
             fn(self, *args, **kwargs)
 
         return wrapper
-
-    return decorator
-
-
-skip_if_tpu = _skip_if(
-    lambda self: config._debug_cpu_to_tpu_pallas, "Not yet working on TPU"
-)
-skip_if_cpu = _skip_if(lambda self: self.DEVICE == "cpu", "Not yet working on CPU")
-skip_if_cuda = _skip_if(lambda self: self.DEVICE == "cuda", "Not yet working on GPU")
-
-
-def skip_if_tpu(fn):
-    @functools.wraps(fn)
-    def wrapper(self, *args, **kwargs):
-        if self.is_tpu:
-            self.skipTest("Not yet working on TPU")
-        fn(self, *args, **kwargs)
-
-    return wrapper
 
 
 class PallasTestsMixin:
