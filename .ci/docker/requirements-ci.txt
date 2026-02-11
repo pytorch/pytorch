@@ -350,9 +350,9 @@ onnxscript==0.6.0
 #Pinned versions:
 #test that import:
 
-onnx-ir==0.1.15
+onnx-ir==0.1.16
 #Description: In-memory IR for ONNX, dependency of onnxscript. Pinned to avoid breaking changes in newer versions.
-#Pinned versions: 0.1.12
+#Pinned versions:
 #test that import:
 
 parameterized==0.8.1
