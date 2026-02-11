@@ -867,7 +867,11 @@ Example:
                 ::c10d::ReduceOp::RedOpType::PREMUL_SUM);
           })
       .def("__repr__", [](const PremulSumCallable&) {
-        return "<ReduceOp.PREMUL_SUM>";
+        return c10::str(
+            "<RedOpType.PREMUL_SUM: ",
+            static_cast<int>(::c10d::ReduceOp::RedOpType::PREMUL_SUM),
+            ">"
+        );
       });
 
   py::class_<::c10d::ReduceOp> reduce_op(
