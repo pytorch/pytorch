@@ -32,6 +32,7 @@ import operator
 import random
 import re
 import sys
+import time
 import types
 import weakref
 from collections.abc import Callable, MutableMapping
@@ -291,6 +292,7 @@ from .torch_function import (
 )
 from .user_defined import (
     FrozenDataClassVariable,
+    InspectVariable,
     IntWrapperVariable,
     KeyedJaggedTensorVariable,
     MutableMappingVariable,
@@ -1803,7 +1805,10 @@ class VariableBuilder:
 
     def wrap_user_defined(self, value: Any) -> VariableTracker:
         self.install_guards(GuardBuilder.TYPE_MATCH)
-        result = UserDefinedObjectVariable(value, source=self.source)
+        if InspectVariable.is_matching_object(value):
+            result = InspectVariable(value, source=self.source)
+        else:
+            result = UserDefinedObjectVariable(value, source=self.source)
         if not SideEffects.cls_supports_mutation_side_effects(type(value)):
             # don't allow STORE_ATTR mutation with custom __setattr__
             return result
@@ -3942,6 +3947,25 @@ def _automatic_dynamic(
 
 # See note [Tensor Fakification and Symbol Caching]
 def wrap_to_fake_tensor_and_record(
+    e: Any,
+    tx: "InstructionTranslatorBase",
+    *,
+    source: Source | None,
+    is_tensor: bool,
+    parent_context: Any | None = None,
+) -> Any:
+    _t0 = time.time_ns()
+    try:
+        return _wrap_to_fake_tensor_and_record_impl(
+            e, tx, source=source, is_tensor=is_tensor, parent_context=parent_context
+        )
+    finally:
+        tx.output.bytecode_tracing_timings.wrap_to_fake_tensor_and_record_ns += (
+            time.time_ns() - _t0
+        )
+
+
+def _wrap_to_fake_tensor_and_record_impl(
     e: Any,
     tx: "InstructionTranslatorBase",
     *,
