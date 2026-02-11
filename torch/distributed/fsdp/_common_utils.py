@@ -58,6 +58,8 @@ def collect_grad_tensors(output: Any) -> tuple[torch.Tensor, ...]:
 def _collect_grad_tensors(output: Any, out: list[torch.Tensor]) -> None:
     """Collect grad-requiring tensors in the same order as _replace_grad_tensors."""
     # Branch order must mirror _replace_grad_tensors exactly.
+    # Only dict, list, tuple, NamedTuple, and dataclass are traversed;
+    # set and other iterables are intentionally skipped (matching tree_flatten).
     if torch.is_tensor(output) and output.requires_grad:
         out.append(output)
     elif _is_namedtuple(output):
@@ -131,7 +133,7 @@ def _replace_grad_tensors(output: Any, tensor_iter: Iterator[torch.Tensor]) -> A
             if new_v is not v:
                 any_changed = True
         if any_changed:
-            return new_dict if type(output) is dict else type(output)(**new_dict)
+            return new_dict if type(output) is dict else type(output)(new_dict)
         return output
     elif isinstance(output, (list, tuple)):
         new_items = []

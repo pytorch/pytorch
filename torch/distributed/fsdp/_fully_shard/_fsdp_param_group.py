@@ -720,7 +720,7 @@ class FSDPParamGroup:
 
         # Collect all tensors that require gradients (including from dataclasses)
         inp_tensors = collect_grad_tensors((args, kwargs))
-        if len(inp_tensors) == 0:
+        if not inp_tensors:
             return args, kwargs
 
         # Apply RegisterPostBackwardFunction to all tensors at once
