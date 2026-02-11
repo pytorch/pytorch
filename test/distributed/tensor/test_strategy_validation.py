@@ -335,6 +335,29 @@ class TestInputPlacements(TestCase):
         partial_ops = {p.reduce_op for p in placements if isinstance(p, Partial)}
         self.assertEqual(partial_ops, {"sum", "avg", "min", "max"})
 
+    def test_get_1d_input_placements_boolean_no_partial(self):
+        t = torch.tensor(True)
+        placements = get_1d_input_placements_for_tensor(t, include_partial=True)
+        # Boolean tensors should have no Partial placements since Partial
+        # decomposition creates float values that lose boolean semantics
+        partial_placements = [p for p in placements if isinstance(p, Partial)]
+        self.assertEqual(len(partial_placements), 0)
+
+    def test_get_1d_output_placements_boolean_no_partial(self):
+        t = torch.tensor(True)
+        placements = get_1d_output_placements_for_tensor(t)
+        # Boolean outputs should have no Partial placements
+        partial_placements = [p for p in placements if isinstance(p, Partial)]
+        self.assertEqual(len(partial_placements), 0)
+
+    def test_get_1d_input_placements_boolean_2d(self):
+        t = torch.tensor([[True, False], [False, True]])
+        placements = get_1d_input_placements_for_tensor(t, include_partial=True)
+        # Boolean 2D: Replicate + 2 Shard, no Partial
+        self.assertEqual(len(placements), 3)
+        partial_placements = [p for p in placements if isinstance(p, Partial)]
+        self.assertEqual(len(partial_placements), 0)
+
 
 class TestExtractTensors(TestCase):
     """Test tensor extraction from samples."""
