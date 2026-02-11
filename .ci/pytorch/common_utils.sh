@@ -389,6 +389,5 @@ function print_sccache_stats() {
 function install_sycl_tla() {
   target_dir=$1
   rm -rf "$target_dir"
-  git clone --depth 1 --single-branch -b v0.6 --quiet https://github.com/intel/sycl-tla.git "${target_dir}"
-  pip install --no-deps dpctl
+  git clone --depth 1 --single-branch -b v0.7 --quiet https://github.com/intel/sycl-tla.git "${target_dir}"
 }

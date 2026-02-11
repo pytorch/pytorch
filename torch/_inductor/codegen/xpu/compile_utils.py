@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import logging
 import os
+import shutil
 from typing import Optional
 
 from torch._inductor import config
@@ -15,9 +16,13 @@ log = logging.getLogger(__name__)
 
 def _sycl_compiler() -> Optional[str]:
     # Search order:
+    # 0) which icpx
     # 1) config.xpu.oneapi_root
     # 2) ONEAPI_ROOT environment variable
     # 3) default system search PATH.
+    if shutil.which("icpx"):
+        return "icpx"
+
     if os.path.exists(config.xpu.oneapi_root or ""):
         oneapi_root = config.xpu.oneapi_root
     elif os.path.exists(os.getenv("ONEAPI_ROOT") or ""):
@@ -32,8 +37,8 @@ def _sycl_compiler() -> Optional[str]:
         else:
             os.environ["CPLUS_INCLUDE_PATH"] = oneapi_inclue
         return os.path.realpath(os.path.join(oneapi_root, "bin/icpx"))
-
-    return "icpx"
+    else:
+        raise RuntimeError("Can not find Intel compiler.")
 
 
 def _sycl_lib_options() -> list[str]:
@@ -60,13 +65,6 @@ def _sycl_lib_options() -> list[str]:
             "Unsupported env, failed to find xpu libs! Currently only Linux is supported."
         )
     return extra_ldflags
-
-
-def _sycl_host_compiler_options() -> list[str]:
-    return [
-        "-fsycl-host-compiler=gcc",
-        "-fsycl-host-compiler-options=-fPIC,-fno-strict-aliasing,-fvisibility=hidden,-Wconversion",
-    ]
 
 
 def _sycl_arch_as_compile_option() -> str:
@@ -109,14 +107,12 @@ def xpu_compile_command(
         extra_args = []
     include_paths = _cutlass_include_paths()
     sycl_lib_options = _sycl_lib_options()
-    sycl_host_compiler_options = _sycl_host_compiler_options()
     sycl_compiler_options = _sycl_compiler_options()
     options = (
-        sycl_compiler_options
-        + extra_args
-        + sycl_host_compiler_options
+        extra_args
         + ["-I" + path for path in include_paths]
         + ["-isystem /include"]
+        + sycl_compiler_options
         + sycl_lib_options
     )
     src_file = " ".join(src_files)

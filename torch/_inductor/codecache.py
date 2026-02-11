@@ -3855,8 +3855,12 @@ class DLLWrapper:
     ) -> None:
         self.lib_path = lib_path
         self.is_open = False
-        self.DLL = cdll.LoadLibrary(lib_path)
-        self.is_open = True
+        self.open()
+
+    def open(self) -> None:
+        if not self.is_open:
+            self.DLL = cdll.LoadLibrary(self.lib_path)
+            self.is_open = True
 
     def close(self) -> None:
         if self.is_open:
@@ -4255,6 +4259,7 @@ from torch._inductor.codegen.xpu import compile_utils as xpu_compile_utils
 class XPUCodeCache(CUTLASSCodeCache):
     _SOURCE_CODE_SUFFIX = "cpp"
     _BACKEND = "XPU"
+    dll_cache: dict[str, DLLWrapper] = {}
 
     @classmethod
     def _use_re_build(cls) -> bool:
@@ -4276,18 +4281,32 @@ class XPUCodeCache(CUTLASSCodeCache):
     def _source_code_extra(cls) -> str:
         extra = repr(
             [
-                # nvcc and cuda hash
                 xpu_compile_utils._sycl_compiler(),
-                # cutlass flags and gcc hash
                 xpu_compile_utils._sycl_compiler_options(),
-                # flags
-                xpu_compile_utils._sycl_host_compiler_options(),
-                # cutlass key
                 cutlass_key(),
-                # hack to deal with AOTI .o compilation
             ]
         )
         return extra
+
+    @classmethod
+    def load(cls, source_code: str, dst_file_ext: str) -> tuple[DLLWrapper, str, str]:
+        """
+        Compiles source code and loads the generated .so file.
+        Returns a tuple of DLLWrapper, hash_key, source_code_path
+        """
+
+        if dst_file_ext != "so":
+            raise RuntimeError(
+                f"Only support loading a .so file for now. "
+                f"Requested file extension: {dst_file_ext}. Source code: {source_code}"
+            )
+        dst_file_path, hash_key, source_code_path = cls.compile(
+            source_code, dst_file_ext
+        )
+        if dst_file_path not in cls.dll_cache:
+            cls.dll_cache[dst_file_path] = DLLWrapper(dst_file_path)
+
+        return (cls.dll_cache[dst_file_path], hash_key, source_code_path)
 
 
 @clear_on_fresh_cache
