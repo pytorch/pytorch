@@ -386,7 +386,9 @@ def _create_partial_input(
                 local_tensors[r] = tensor.clone() * (
                     (1 - base_ratio) / (world_size - 1)
                 )
-        return LocalTensor(local_tensors)  # pyrefly: ignore[bad-argument-type, bad-argument-count]
+        return LocalTensor(
+            local_tensors
+        )  # pyrefly: ignore[bad-argument-type, bad-argument-count]
 
     elif reduce_op == "avg":
         base_ratio = 0.6 + 0.1 * (tensor_idx % 3)
@@ -398,7 +400,9 @@ def _create_partial_input(
                 local_tensors[r] = (
                     tensor.clone() * ((1 - base_ratio) / (world_size - 1)) * world_size
                 )
-        return LocalTensor(local_tensors)  # pyrefly: ignore[bad-argument-type, bad-argument-count]
+        return LocalTensor(
+            local_tensors
+        )  # pyrefly: ignore[bad-argument-type, bad-argument-count]
 
     elif reduce_op == "min":
         local_tensors = {}
@@ -414,7 +418,9 @@ def _create_partial_input(
                     mask, torch.full_like(flat, 0.7), torch.zeros_like(flat)
                 )
             local_tensors[r] = (flat + r_offset).reshape(tensor.shape)
-        return LocalTensor(local_tensors)  # pyrefly: ignore[bad-argument-type, bad-argument-count]
+        return LocalTensor(
+            local_tensors
+        )  # pyrefly: ignore[bad-argument-type, bad-argument-count]
 
     elif reduce_op == "max":
         local_tensors = {}
@@ -430,11 +436,15 @@ def _create_partial_input(
                     mask, torch.full_like(flat, -1.3), torch.zeros_like(flat)
                 )
             local_tensors[r] = (flat + r_offset).reshape(tensor.shape)
-        return LocalTensor(local_tensors)  # pyrefly: ignore[bad-argument-type, bad-argument-count]
+        return LocalTensor(
+            local_tensors
+        )  # pyrefly: ignore[bad-argument-type, bad-argument-count]
 
     else:
         local_tensors = {r: tensor.clone() for r in range(world_size)}
-        return LocalTensor(local_tensors)  # pyrefly: ignore[bad-argument-type, bad-argument-count]
+        return LocalTensor(
+            local_tensors
+        )  # pyrefly: ignore[bad-argument-type, bad-argument-count]
 
 
 def validate_combination(
@@ -489,7 +499,9 @@ def validate_combination(
                 local_tensors.append(local_tensor)
             elif isinstance(placement, Replicate):
                 local_tensor = LocalTensor(  # pyrefly: ignore[bad-argument-type]
-                    {r: tensor.clone() for r in range(world_size)}  # pyrefly: ignore[bad-argument-count]
+                    {
+                        r: tensor.clone() for r in range(world_size)
+                    }  # pyrefly: ignore[bad-argument-count]
                 )
                 local_tensors.append(local_tensor)
             elif isinstance(placement, Shard):
@@ -497,7 +509,9 @@ def validate_combination(
                 shard_dim = placement.dim
                 chunks = tensor.tensor_split(world_size, dim=shard_dim)
                 local_tensor = LocalTensor(  # pyrefly: ignore[bad-argument-type]
-                    {r: chunks[r].clone().contiguous() for r in range(world_size)}  # pyrefly: ignore[bad-argument-count]
+                    {
+                        r: chunks[r].clone().contiguous() for r in range(world_size)
+                    }  # pyrefly: ignore[bad-argument-count]
                 )
                 local_tensors.append(local_tensor)
             else:
