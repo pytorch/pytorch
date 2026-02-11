@@ -49,7 +49,8 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
                 # LLM
                 "google/gemma-2-2b",
                 "tts_angular",  # RuntimeError: Cannot access data pointer of Tensor
-                "mobilenet_v3_large"  # Started hitting flaky graph breaks after move to gfx950 runners, still investigating root cause. Besides this model passes fine
+                # Discovered on gfx950 CI after ROCm 7.2 upgrade
+                "alexnet",
             }
         )
 
