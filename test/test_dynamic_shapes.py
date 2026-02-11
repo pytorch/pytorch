@@ -5022,6 +5022,7 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
             compiled_result = bug_module(key)
 
         self.assertEqual(compiled_result, eager_result)
+
     @skipIfTorchDynamo("mark_unbacked is not traceable")
     def test_view_as_complex_unbacked_no_dde(self):
         """
@@ -5068,6 +5069,103 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
 
 
 instantiate_parametrized_tests(TestUnbacked)
+
+
+class TestMaybeFastEvalComparison(TestCase):
+    """Tests for _maybe_fast_eval_comparison fast path optimization."""
+
+    def test_sum_of_nonneg_ge_zero(self):
+        """Test that sum of non-negative symbols >= 0 returns True."""
+        shape_env = ShapeEnv()
+        # Create unbacked symbols and constrain them to be positive
+        u0 = shape_env.create_unbacked_symint()
+        u1 = shape_env.create_unbacked_symint()
+        torch._check(u0 >= 0)
+        torch._check(u1 >= 0)
+
+        # u0 + u1 >= 0 should be True (both have range [0, inf])
+        expr = sympy.GreaterThan(u0.node.expr + u1.node.expr, 0)
+        result = shape_env._maybe_fast_eval_comparison(expr)
+        self.assertEqual(result, sympy.true)
+
+    def test_single_nonneg_symbol_ge_zero(self):
+        """Test that a single non-negative symbol >= 0 returns True."""
+        shape_env = ShapeEnv()
+        u0 = shape_env.create_unbacked_symint()
+        torch._check(u0 >= 0)
+
+        # u0 >= 0 should be True (u0 has range [0, inf])
+        expr = sympy.GreaterThan(u0.node.expr, 0)
+        result = shape_env._maybe_fast_eval_comparison(expr)
+        self.assertEqual(result, sympy.true)
+
+    def test_zero_le_sum_of_nonneg(self):
+        """Test that 0 <= sum of non-negative symbols returns True."""
+        shape_env = ShapeEnv()
+        u0 = shape_env.create_unbacked_symint()
+        u1 = shape_env.create_unbacked_symint()
+        torch._check(u0 >= 0)
+        torch._check(u1 >= 0)
+
+        # 0 <= u0 + u1 should be True
+        expr = sympy.Le(0, u0.node.expr + u1.node.expr)
+        result = shape_env._maybe_fast_eval_comparison(expr)
+        self.assertEqual(result, sympy.true)
+
+    def test_nonneg_constant_in_sum(self):
+        """Test that sum with non-negative constant >= 0 returns True."""
+        shape_env = ShapeEnv()
+        u0 = shape_env.create_unbacked_symint()
+        torch._check(u0 >= 0)
+
+        # u0 + 5 >= 0 should be True
+        expr = sympy.GreaterThan(u0.node.expr + 5, 0)
+        result = shape_env._maybe_fast_eval_comparison(expr)
+        self.assertEqual(result, sympy.true)
+
+    def test_negative_constant_returns_none(self):
+        """Test that sum with negative constant returns None (undecidable)."""
+        shape_env = ShapeEnv()
+        u0 = shape_env.create_unbacked_symint()
+        torch._check(u0 >= 0)
+
+        # u0 - 5 >= 0 is undecidable (u0 could be 0, making it -5)
+        expr = sympy.GreaterThan(u0.node.expr - 5, 0)
+        result = shape_env._maybe_fast_eval_comparison(expr)
+        self.assertIsNone(result)
+
+    def test_non_zero_rhs_returns_none(self):
+        """Test that comparison with non-zero RHS returns None."""
+        shape_env = ShapeEnv()
+        u0 = shape_env.create_unbacked_symint()
+        torch._check(u0 >= 0)
+
+        # u0 >= 5 is not handled by this fast path
+        expr = sympy.GreaterThan(u0.node.expr, 5)
+        result = shape_env._maybe_fast_eval_comparison(expr)
+        self.assertIsNone(result)
+
+    def test_unhandled_expr_type_returns_none(self):
+        """Test that unhandled expression types return None."""
+        shape_env = ShapeEnv()
+        u0 = shape_env.create_unbacked_symint()
+        torch._check(u0 >= 0)
+
+        # Eq is not handled by the current fast path
+        expr = sympy.Eq(u0.node.expr, 0)
+        result = shape_env._maybe_fast_eval_comparison(expr)
+        self.assertIsNone(result)
+
+    def test_unbacked_symbol_with_default_range_returns_none(self):
+        """Test that unbacked symbols with default range [-inf, inf] return None."""
+        shape_env = ShapeEnv()
+        # Default unbacked symint has range [-int_oo, int_oo]
+        u0 = shape_env.create_unbacked_symint()
+
+        # u0 >= 0 is undecidable since u0 could be negative
+        expr = sympy.GreaterThan(u0.node.expr, 0)
+        result = shape_env._maybe_fast_eval_comparison(expr)
+        self.assertIsNone(result)
 
 
 if __name__ == "__main__":

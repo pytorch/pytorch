@@ -38,6 +38,7 @@ from torch._inductor.graph import GraphLowering
 from torch._inductor.ir import Buffer, ChoiceCaller, FixedLayout, FlexibleLayout
 from torch._inductor.kernel.mm_plus_mm import aten_mm_plus_mm
 from torch._inductor.runtime.triton_heuristics import CachingAutotuner
+from torch._inductor.scheduler import Scheduler
 from torch._inductor.select_algorithm import (
     add_feedback_saver,
     add_preprocessing_fn,
@@ -3935,18 +3936,40 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
         original_tma_mm_configs = tma_heuristic.mm_configs
         original_mm_mm_configs = mm_heuristic.mm_configs
 
-        bad_tma_config = GemmConfig(256, 128, 64, 4, 8, group_m=8)
         good_tma_config = GemmConfig(128, 64, 64, 4, 8, group_m=8)
         if use_async_compile:
             torch._inductor.async_compile.AsyncCompile.wait_pool_ready()
 
-        for gemm_config in [bad_tma_config, good_tma_config]:
+        original_compile_kernel = Scheduler.compile_kernel
+
+        for simulate_fusion_failure in [True, False]:
             torch._dynamo.reset()
-            tma_heuristic.mm_configs = [
-                gemm_config,
-            ]
+            tma_heuristic.mm_configs = [good_tma_config]
             # Regular mm template gets no configs
             mm_heuristic.mm_configs = []
+
+            def mock_compile_kernel_fail_fusion(self, nodes, hint_override=None):
+                fut, mod = original_compile_kernel(self, nodes, hint_override)
+
+                if simulate_fusion_failure and len(nodes) > 1:
+                    if fut is not None:
+
+                        def failing_result_fn():
+                            raise RuntimeError
+
+                        return torch._inductor.codecache.LambdaFuture(
+                            failing_result_fn, fut.future
+                        ), mod
+                    else:
+
+                        class FailingPrecompile:
+                            def precompile(self):
+                                raise RuntimeError
+
+                        mod.triton_ = FailingPrecompile()
+                        return None, mod
+
+                return fut, mod
 
             # Different paths:
             # benchmark_epilogue_fusion: True -> always multi_template
@@ -3970,11 +3993,16 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
                             aten_time=float("inf"), triton_time=0.1
                         ),
                     ),
+                    mock.patch.object(
+                        Scheduler,
+                        "compile_kernel",
+                        mock_compile_kernel_fail_fusion,
+                    ),
                 ):
                     compiled_f = torch.compile(f, mode="max-autotune")
                     out, code = run_and_get_code(compiled_f, a, b)
 
-                    if gemm_config == good_tma_config:
+                    if not simulate_fusion_failure:
                         # Fusion should occur
                         FileCheck().check("triton_tem_fused__to_copy_mm").run(code[0])
                     else:

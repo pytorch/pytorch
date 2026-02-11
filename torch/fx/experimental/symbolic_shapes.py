@@ -6536,6 +6536,53 @@ class ShapeEnv:
 
         return tuple(equiv.items())
 
+    def _is_nonneg_term(self, term: sympy.Expr) -> bool:
+        """Check if a single term is non-negative (symbol with non-neg range or non-neg constant)."""
+        if term.is_Symbol:
+            vr = self.var_to_range.get(term)
+            return vr is not None and vr.lower >= 0
+        if term.is_number:
+            return term >= 0
+        return False
+
+    def _is_nonneg_sum(self, expr: sympy.Expr) -> bool:
+        """
+        Check if expr is a sum of non-negative terms (Add of symbols with non-neg range
+        and non-negative constants). Returns True only for simple Add expressions.
+        """
+        if not isinstance(expr, sympy.Add):
+            return self._is_nonneg_term(expr)
+
+        # Check each arg in the Add
+        for arg in expr.args:
+            if not self._is_nonneg_term(arg):
+                return False
+
+        return True
+
+    def _maybe_fast_eval_comparison(self, expr: sympy.Basic) -> Optional[sympy.Basic]:
+        """
+        Fast path for trivial comparisons: sum of non-negative terms >= 0.
+        Returns sympy.true if pattern matches, None otherwise.
+        """
+        if len(expr.args) != 2:
+            return None
+
+        lhs, rhs = expr.args
+
+        # Handle: sum >= 0 (Ge) or 0 <= sum (Le)
+        if isinstance(expr, sympy.Ge) and rhs == 0:
+            sum_expr = lhs
+        elif isinstance(expr, sympy.Le) and lhs == 0:
+            sum_expr = rhs
+        else:
+            return None
+
+        if self._is_nonneg_sum(sum_expr):
+            return sympy.true
+
+        return None
+
     @_lru_cache
     def _maybe_evaluate_static(
         self,
@@ -7727,6 +7774,12 @@ class ShapeEnv:
 
             expr = orig_expr
 
+            # Try to quickly evaluate trivially true/false comparisons
+            # using var_to_range, before calling expensive _maybe_evaluate_static.
+            fast_result = self._maybe_fast_eval_comparison(expr)
+            if fast_result is not None:
+                return fast_result
+
             static_expr = self._maybe_evaluate_static(
                 expr, size_oblivious=size_oblivious
             )
@@ -7917,6 +7970,11 @@ class ShapeEnv:
         expr = orig_expr
 
         # TODO: split conjunctions and evaluate them separately
+        # Try to quickly evaluate trivially true/false comparisons
+        # using var_to_range, before calling expensive _maybe_evaluate_static.
+        fast_result = self._maybe_fast_eval_comparison(expr)
+        if fast_result is not None:
+            return bool(fast_result)
 
         static_expr = self._maybe_evaluate_static(expr)
         if static_expr is not None:
