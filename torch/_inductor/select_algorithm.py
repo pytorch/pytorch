@@ -2875,7 +2875,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
         if len(choices) == 1:
             if not isinstance(choices[0], CUTLASSTemplateCaller):
-                # CUTLASSTemplateCaller still needs to go through autotuning process to retrieve workspace size.
+                # CUTLASSTemplateCaller still needs to go through the autotuning process to retrieve workspace size.
                 return choices[0].output_node()
 
         if config.deterministic:
