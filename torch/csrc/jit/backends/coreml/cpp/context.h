@@ -3,6 +3,10 @@
 
 #include <string>
 
+#if __has_include(<xplat/lazy_static/lazy_static.h>)
+#include <xplat/lazy_static/lazy_static.h>
+#endif
+
 namespace torch::jit::mobile::coreml {
 
 struct ContextInterface {
@@ -16,6 +20,12 @@ class BackendRegistrar {
 };
 
 void setModelCacheDirectory(std::string path);
+
+#if LAZY_GATE_coreml_backend
+// Register the CoreML backend. Call this before using the backend.
+// With LAZY_STATIC gating, this triggers deferred initialization.
+void registerBackend();
+#endif
 
 } // namespace torch::jit::mobile::coreml
 
