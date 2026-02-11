@@ -418,6 +418,53 @@ def generate_wheels_matrix(
     return ret
 
 
+def generate_libtorch_extraction_configs(
+    os: str,
+    wheel_configs: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    """Generate libtorch extraction configs from existing wheel build configs.
+
+    For each unique arch variant in wheel_configs, find the py3.10 config
+    (py3.11 for windows-arm64) and produce a config that the CI template
+    uses to add an extraction job that depends on that wheel's build job.
+    """
+    preferred_python = "3.11" if os == "windows-arm64" else "3.10"
+
+    # Group wheel configs by (gpu_arch_type, gpu_arch_version)
+    arch_to_config: dict[tuple[str, str], dict[str, str]] = {}
+    for config in wheel_configs:
+        key = (config["gpu_arch_type"], config.get("gpu_arch_version", ""))
+        if config.get("python_version") == preferred_python:
+            arch_to_config[key] = config
+
+    ret: list[dict[str, str]] = []
+    for (gpu_arch_type, gpu_arch_version), source_config in arch_to_config.items():
+        # No libtorch for XPU
+        if gpu_arch_type == "xpu":
+            continue
+
+        desired_cuda = source_config["desired_cuda"]
+        libtorch_variant = "shared-with-deps"
+        build_name = f"libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-release".replace(
+            ".", "_"
+        )
+
+        ret.append(
+            {
+                "source_wheel_build_name": source_config["build_name"],
+                "build_name": build_name,
+                "package_type": "libtorch",
+                "libtorch_variant": libtorch_variant,
+                "libtorch_config": RELEASE,
+                "desired_cuda": desired_cuda,
+                "gpu_arch_type": gpu_arch_type,
+                "gpu_arch_version": gpu_arch_version,
+            }
+        )
+
+    return ret
+
+
 arch_version = ""
 for arch_version in CUDA_ARCHES:
     validate_nccl_dep_consistency(arch_version)
