@@ -48,9 +48,8 @@ _MAX_TRAVERSE_DEPTH = 128
 def _is_namedtuple(obj: Any) -> bool:
     return (
         isinstance(obj, tuple)
-        and hasattr(obj, "_asdict")
-        and hasattr(obj, "_fields")
-        and hasattr(obj, "_make")
+        and isinstance(getattr(type(obj), "_fields", None), tuple)
+        and all(isinstance(f, str) for f in obj._fields)
     )
 
 
@@ -70,7 +69,7 @@ def _collect_grad_tensors(
     output: Any, out: list[torch.Tensor], _depth: int = 0
 ) -> None:
     """Collect grad-requiring tensors in the same order as _replace_grad_tensors."""
-    if _depth > _MAX_TRAVERSE_DEPTH:
+    if _depth >= _MAX_TRAVERSE_DEPTH:
         raise RuntimeError(
             f"collect_grad_tensors exceeded max depth ({_MAX_TRAVERSE_DEPTH}), "
             "likely due to a circular reference in the output structure"
@@ -124,7 +123,7 @@ def _replace_grad_tensors(
     output: Any, tensor_iter: Iterator[torch.Tensor], _depth: int = 0
 ) -> Any:
     # Branch order must mirror _collect_grad_tensors exactly.
-    if _depth > _MAX_TRAVERSE_DEPTH:
+    if _depth >= _MAX_TRAVERSE_DEPTH:
         raise RuntimeError(
             f"replace_grad_tensors exceeded max depth ({_MAX_TRAVERSE_DEPTH}), "
             "likely due to a circular reference in the output structure"
@@ -152,7 +151,14 @@ def _replace_grad_tensors(
             if new_val is not old_val:
                 changes[field.name] = new_val
         if changes:
-            return dataclasses.replace(output, **changes)
+            try:
+                return dataclasses.replace(output, **changes)
+            except TypeError as e:
+                raise TypeError(
+                    f"Failed to reconstruct dataclass {type(output).__qualname__} "
+                    f"via dataclasses.replace(). Dataclasses used as FSDP module "
+                    f"inputs/outputs must support dataclasses.replace(): {e}"
+                ) from None
         return output
     elif isinstance(output, dict):
         new_dict = {}
