@@ -29,6 +29,7 @@ from torch._prims_common import (
     Number,
     NumberType,
     suggest_memory_format,
+    sym_min,
     TensorLike,
 )
 from torch._prims_common.wrappers import (
@@ -931,10 +932,12 @@ def squareCheckInputs(self: Tensor, f_name: str):
         raise AssertionError(
             f"{f_name}: The input tensor must have at least 2 dimensions, got {self.dim()}"
         )
-    if self.size(-1) != self.size(-2):
-        raise AssertionError(
-            f"{f_name}: A must be batches of square matrices, but they are {self.size(-2)} by {self.size(-1)} matrices"
-        )
+    # Use torch._check to defer validation to runtime for unbacked symbolic dimensions.
+    torch._check(
+        self.size(-1) == self.size(-2),
+        lambda: f"{f_name}: A must be batches of square matrices, "
+        f"but they are {self.size(-2)} by {self.size(-1)} matrices",
+    )
 
 
 # Validates input shapes and devices
@@ -1290,7 +1293,8 @@ def linalg_lu_meta(A: Tensor, *, pivot: bool = True) -> tuple[Tensor, Tensor, Te
     sizes = list(A.shape)
     m = sizes[-2]
     n = sizes[-1]
-    k = min(m, n)
+    # Use sym_min to handle unbacked symbolic dimensions
+    k = sym_min(m, n)
 
     sizes[-1] = m
     if pivot:
@@ -1333,7 +1337,8 @@ def linalg_lu_factor_ex_meta(
 
     # Sets sizes to the size of pivots
     sizes.pop()
-    sizes[-1] = min(m, n)
+    # Use sym_min to handle unbacked symbolic dimensions
+    sizes[-1] = sym_min(m, n)
     pivots = A.new_empty(sizes, dtype=torch.int)
 
     # Sets sizes to the size of info
@@ -3582,6 +3587,7 @@ def meta_index_Tensor(self, indices):
         return self.as_strided(shape, strides)
 
     out = self.new_empty(before_shape + replacement_shape + after_shape)
+
     from torch.fx.experimental.symbolic_shapes import guard_or_false
 
     if guard_or_false(self.numel() == 0):
@@ -5693,42 +5699,34 @@ def scatter_shape_check(self, dim, index, src_opt=None):
         lambda: "Index tensor must have the same number of dimensions as self tensor",
     )
 
-    is_wrong_shape = False
     self_dims = ensure_nonempty_dim(self.dim())
 
     # Check: index.size(d) <= self.size(d) for all d != dim
+    # Use torch._check to defer validation to runtime for unbacked symbols.
     for d in range(self_dims):
-        index_d_size = ensure_nonempty_size(index, d)
         if d == dim:
             continue
-        if index_d_size > ensure_nonempty_size(self, d):
-            is_wrong_shape = True
-            break
-
-    # Check: index.size(d) <= src.size(d) for all d if src is Tensor
-    if not is_wrong_shape and src_opt is not None:
-        for d in range(self_dims):
-            index_d_size = ensure_nonempty_size(index, d)
-            if index_d_size > ensure_nonempty_size(src_opt, d):
-                is_wrong_shape = True
-                break
-
-    if src_opt is not None:
+        index_d_size = ensure_nonempty_size(index, d)
+        self_d_size = ensure_nonempty_size(self, d)
         torch._check(
-            ensure_nonempty_dim(self.dim()) == ensure_nonempty_dim(index.dim()),
-            lambda: "Index tensor must have the same number of dimensions as self tensor",
-        )
-        torch._check(
-            not is_wrong_shape,
-            lambda: f"Expected index {index.shape} to be no larger than self {self.shape}"
-            + f" apart from dimension {dim} and to be no larger than src {src_opt.shape}",
-        )
-    else:
-        torch._check(
-            not is_wrong_shape,
+            index_d_size <= self_d_size,
             lambda: f"Expected index {index.shape} to be no larger than self {self.shape}"
             + f" apart from dimension {dim}",
         )
+
+    # Check: index.size(d) <= src.size(d) for all d if src is Tensor
+    if src_opt is not None:
+        torch._check(
+            ensure_nonempty_dim(self.dim()) == ensure_nonempty_dim(src_opt.dim()),
+            lambda: "Index tensor must have the same number of dimensions as src tensor",
+        )
+        for d in range(self_dims):
+            index_d_size = ensure_nonempty_size(index, d)
+            src_d_size = ensure_nonempty_size(src_opt, d)
+            torch._check(
+                index_d_size <= src_d_size,
+                lambda: f"Expected index {index.shape} to be no larger than src {src_opt.shape}",
+            )
 
 
 # From aten/src/ATen/native/TensorAdvancedIndexing.cpp
@@ -6859,6 +6857,16 @@ def _check_scaled_mm_sizes_v2(
                 and recipe_b[0] == ScalingType.BlockWise1x32
             )
 
+        def is_nv_single_level(
+            recipe_a: list[ScalingType], recipe_b: list[ScalingType]
+        ):
+            return (
+                len(recipe_a) == 1
+                and len(recipe_b) == 1
+                and recipe_a[0] == ScalingType.BlockWise1x16
+                and recipe_b[0] == ScalingType.BlockWise1x16
+            )
+
         def is_nv(recipe_a: list[ScalingType], recipe_b: list[ScalingType]):
             return (
                 len(recipe_a) == 2
@@ -7034,6 +7042,23 @@ def _check_scaled_mm_sizes_v2(
                     f"and scale_b must have {expected_scale_b_elems} (got: {scale_b[0].numel()}). Scales must "
                     f"have types {torch.float8_e8m0fnu} (for self: {scale_a[0].dtype}, mat_b: {scale_b[0].dtype}) "
                     f"Must have swizzle type {expected_swizzle} (got self: {swizzle_a[0]}, mat_b: {swizzle_b[0]})"
+                ),
+            )
+        elif is_nv_single_level(scale_recipe_a, scale_recipe_b):
+            expected_scale_a_elems = round_up(M, 128) * round_up(ceil_div(K, 16), 4)
+            expected_scale_b_elems = round_up(N, 128) * round_up(ceil_div(K, 16), 4)
+            expected_swizzle = SwizzleType.SWIZZLE_32_4_4
+            torch._check(
+                scale_a[0].numel() == expected_scale_a_elems
+                and scale_a[0].dtype == torch.float8_e4m3fn
+                and scale_b[0].numel() == expected_scale_b_elems
+                and scale_b[0].dtype == torch.float8_e4m3fn
+                and swizzle_a[0] == expected_swizzle
+                and swizzle_b[0] == expected_swizzle,
+                lambda: (
+                    f"for single-level NV scaling scale_a must have {expected_scale_a_elems} (got: {scale_a[0].numel()}) "
+                    f"and scale_b must have {expected_scale_b_elems} (got: {scale_b[0].numel()}). Must have "
+                    f"swizzle type {expected_swizzle} (got self: {swizzle_a[0]}, mat_b: {swizzle_b[0]})"
                 ),
             )
         elif is_nv(scale_recipe_a, scale_recipe_b):
@@ -8141,7 +8166,13 @@ def _meta_grouped_mm_common(
     # aten/src/ATen/native/cuda/Blas.cpp.
 
     if scaled:
-        fp8_dtype = torch.float8_e4m3fnuz if torch.version.hip else torch.float8_e4m3fn
+        fp8_dtype = torch.float8_e4m3fn
+        if (
+            torch.version.hip
+            and torch.cuda.is_available()
+            and "gfx94" in torch.cuda.get_device_properties(0).gcnArchName
+        ):
+            fp8_dtype = torch.float8_e4m3fnuz
         torch._check(
             mat_a.dtype == fp8_dtype and mat_b.dtype == fp8_dtype,
             lambda: f"Expected inputs of E4M3 FP8 type but got mat_a.dtype={mat_a.dtype} and mat_b.dtype={mat_b.dtype}.",  # noqa: B950
@@ -8377,6 +8408,23 @@ def meta_scaled_grouped_mm(
         out_dtype=out_dtype,
         use_fast_accum=use_fast_accum,
     )
+
+
+@register_meta(aten._foreach_norm.Scalar)
+def meta_foreach_norm(tensors, ord=2, dtype=None):
+    if float(ord) == float("inf"):
+        for t in tensors:
+            torch._check(
+                t.numel() > 0,
+                lambda: "_foreach_norm cannot compute infinity norm on empty tensor",
+            )
+    results = []
+    for t in tensors:
+        out_dtype = dtype if dtype is not None else t.dtype
+        if out_dtype.is_complex:
+            out_dtype = corresponding_real_dtype(out_dtype)
+        results.append(t.new_empty((), dtype=out_dtype))
+    return results
 
 
 @register_meta(aten._softmax)
