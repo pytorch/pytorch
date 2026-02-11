@@ -854,7 +854,17 @@ Example:
       .def(
           "__eq__",
           [](const PremulSumCallable&, const ::c10d::ReduceOp& other) {
+            // NOTE: Currently, we only compare the op type and don't handle
+            // the factor value. Two PREMUL_SUM ops with different factors
+            // will be considered equal.
             return other.op_ == ::c10d::ReduceOp::RedOpType::PREMUL_SUM;
+          })
+      .def(
+          "__eq__",
+          [](const PremulSumCallable&, int64_t other) {
+            // Support comparison with integer value
+            return other ==
+                static_cast<int64_t>(::c10d::ReduceOp::RedOpType::PREMUL_SUM);
           })
       .def(
           "__eq__",
@@ -870,8 +880,7 @@ Example:
         return c10::str(
             "<RedOpType.PREMUL_SUM: ",
             static_cast<int>(::c10d::ReduceOp::RedOpType::PREMUL_SUM),
-            ">"
-        );
+            ">");
       });
 
   py::class_<::c10d::ReduceOp> reduce_op(
@@ -991,6 +1000,7 @@ This class does not support ``__members__`` property.)");
       .value("BAND", ::c10d::ReduceOp::RedOpType::BAND)
       .value("BOR", ::c10d::ReduceOp::RedOpType::BOR)
       .value("BXOR", ::c10d::ReduceOp::RedOpType::BXOR)
+      .export_values();
   // Export enum values to ReduceOp class, except PREMUL_SUM which is handled
   // specially as a callable object below
   reduce_op.attr("PREMUL_SUM") = PremulSumCallable();
