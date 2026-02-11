@@ -6499,6 +6499,19 @@ def pow(a, b):
     dtype = next(x.get_dtype() for x in (a, b) if isinstance(x, ir.TensorBox))
     is_integer_pow = is_integer_dtype(dtype)
 
+    # When pow_precision is enabled and we have tensor exponents, fall back to
+    # ATen to match eager semantics. CUDA's ::pow has integer exponent detection
+    # that uses repeated multiplication, while Triton's libdevice.pow always uses
+    # exp(exp*log(base)), causing 1-5 ULP differences.
+    # Example: pow(0.9, 3.0) gives 0x3f3a9fbd (eager) vs 0x3f3a9fbe (Triton).
+    # This only affects small scalar^tensor kernels (e.g. bias correction), not
+    # the main parameter update kernels, so the fallback cost is minimal.
+    if config.eager_numerics.pow_precision and isinstance(b, ir.TensorBox):
+        if isinstance(a, Number):
+            return fallback_pow_scalar(a, b)
+        else:
+            return fallback_pow_tensor_tensor(a, b)
+
     # Optimize away small fixed powers, or for integers avoid falling back to ATen
     embed_exponent = isinstance(b, int) and (
         -32 < b < 32 or (is_integer_pow and b >= 0)
@@ -7326,7 +7339,27 @@ register_foreach_pointwise(aten._foreach_neg.default, neg)
 register_foreach_pointwise(aten._foreach_abs.default, abs)
 register_foreach_pointwise(aten._foreach_pow.Scalar, pow)
 register_foreach_pointwise(aten._foreach_pow.List, pow)
-register_foreach_pointwise(aten._foreach_pow.ScalarAndTensor, pow)
+
+
+# Special handling for _foreach_pow.ScalarAndTensor when pow_precision is enabled
+def _register_foreach_pow_with_precision():
+    fallback_foreach_pow_scalar_and_tensor = fallback_handler(
+        aten._foreach_pow.ScalarAndTensor, add_to_fallback_set=False
+    )
+    standard_lowering = make_foreach_pointwise(pow)
+
+    def foreach_pow_scalar_and_tensor_wrapper(*args, **kwargs):
+        if config.eager_numerics.pow_precision:
+            return fallback_foreach_pow_scalar_and_tensor(*args, **kwargs)
+        return standard_lowering(*args, **kwargs)
+
+    _register_foreach_lowering(
+        aten._foreach_pow.ScalarAndTensor, foreach_pow_scalar_and_tensor_wrapper
+    )
+
+
+_register_foreach_pow_with_precision()
+
 foreach_div_list = register_foreach_pointwise(aten._foreach_div.List, div)
 register_foreach_pointwise(aten._foreach_div.Tensor, div)
 foreach_div_scalar = register_foreach_pointwise(aten._foreach_div.Scalar, div)
