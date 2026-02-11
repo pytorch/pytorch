@@ -751,7 +751,8 @@ class VariableBuilder:
         if has_triton():
             import triton as triton_mod
 
-            set_allocator = triton_mod.set_allocator  # noqa: F811
+            if hasattr(triton_mod, "set_allocator"):
+                set_allocator = triton_mod.set_allocator  # noqa: F811
 
         # Handle exact type() match
         type_dispatch = self._type_dispatch().get(type(value))
