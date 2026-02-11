@@ -4763,15 +4763,13 @@ print(value, end="")
 
         with self.assertRaises(subprocess.CalledProcessError) as e:
             run_test(-0.1)
-        assert "per_process_memory_fraction is invalid" in e.exception.stderr, (
-            e.exception.stderr
-        )
+        if "per_process_memory_fraction is invalid" not in e.exception.stderr:
+            raise AssertionError(e.exception.stderr)
 
         with self.assertRaises(subprocess.CalledProcessError) as e:
             run_test(1.1)
-        assert "per_process_memory_fraction is invalid" in e.exception.stderr, (
-            e.exception.stderr
-        )
+        if "per_process_memory_fraction is invalid" not in e.exception.stderr:
+            raise AssertionError(e.exception.stderr)
 
     def test_cachingAllocator_raw_alloc(self):
         # Test that raw_alloc respects the setting that
@@ -5608,7 +5606,8 @@ class TestCachingHostAllocatorCudaGraph(TestCase):
             with torch.cuda.graph(graph, capture_error_mode="thread_local"):
                 data = torch.empty(8, pin_memory=True)
                 data2 = torch.empty(8, pin_memory=True)
-            assert data.data_ptr() != data2.data_ptr()
+            if data.data_ptr() == data2.data_ptr():
+                raise AssertionError("data and data2 should have different data_ptr")
             del data2
 
     @parametrize("use_cuda_host_register", [True, False])
@@ -5622,7 +5621,10 @@ class TestCachingHostAllocatorCudaGraph(TestCase):
                 data_ptr = data.data_ptr()
                 del data
                 data2 = torch.randn(8).pin_memory()
-                assert data2.data_ptr() == data_ptr
+                if data2.data_ptr() != data_ptr:
+                    raise AssertionError(
+                        "data2 should have same data_ptr as deleted data"
+                    )
 
     @parametrize("use_cuda_host_register", [True, False])
     def test_pin_memory_use(self, use_cuda_host_register):
@@ -5636,7 +5638,10 @@ class TestCachingHostAllocatorCudaGraph(TestCase):
                 old_data_ptr = data.data_ptr()
                 del data
                 data2 = torch.randn(8).pin_memory()
-            assert data2.data_ptr() != old_data_ptr
+            if data2.data_ptr() == old_data_ptr:
+                raise AssertionError(
+                    "data2 should have different data_ptr than old_data_ptr"
+                )
 
     @parametrize("use_cuda_host_register", [True, False])
     @parametrize("use_background_threads", [True, False])
@@ -5683,9 +5688,11 @@ class TestCachingHostAllocatorCudaGraph(TestCase):
                     del data2
 
             if delete_memory and not use_memory:
-                assert new_data_ptr == old_data_ptr
+                if new_data_ptr != old_data_ptr:
+                    raise AssertionError("new_data_ptr should equal old_data_ptr")
             else:
-                assert new_data_ptr != old_data_ptr
+                if new_data_ptr == old_data_ptr:
+                    raise AssertionError("new_data_ptr should differ from old_data_ptr")
 
     def test_unpinned_memory_use(self):
         # Copying between CPU and CUDA tensors during graph capture
@@ -6059,16 +6066,18 @@ class TestMemPool(TestCase):
 
         # assert the number of segments in the no_split pool is larger than that
         # of the split pool
-        assert len(pool_no_split.snapshot()) > len(pool_split.snapshot()), (
-            f"Expected no_split pool to have more segments, "
-            f"but got {len(pool_no_split.snapshot())} vs {len(pool_split.snapshot())}"
-        )
+        if len(pool_no_split.snapshot()) <= len(pool_split.snapshot()):
+            raise AssertionError(
+                f"Expected no_split pool to have more segments, "
+                f"but got {len(pool_no_split.snapshot())} vs {len(pool_split.snapshot())}"
+            )
 
         # Specifically, the no_split pool should have exactly 1 block per segment
         for seg in pool_no_split.snapshot():
-            assert len(seg["blocks"]) == 1, (
-                f"Expected 1 block in no_split segment, got {len(seg['blocks'])}"
-            )
+            if len(seg["blocks"]) != 1:
+                raise AssertionError(
+                    f"Expected 1 block in no_split segment, got {len(seg['blocks'])}"
+                )
 
         # Count blocks in each pool
         def count_blocks(pool):
