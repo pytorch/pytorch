@@ -327,6 +327,7 @@ class FakeTensorTest(TestCase):
                 raise AssertionError("expected cpu device")
             if y.copy_(x).device.type != device_type:
                 raise AssertionError(f"expected {device_type} device")
+
     def test_fake_device(self):
         t = torch.ones(3)
         t = t.view(1, 3)
@@ -1126,7 +1127,7 @@ class FakeTensorTest(TestCase):
                 fake_out.is_contiguous(),
                 f"FakeTensor upsample output should be contiguous, got strides {fake_out.stride()}",
             )
-            
+
     def test_export_numpy(self):
         class MyNumpyModel(torch.nn.Module):
             def forward(self, input):
@@ -1360,7 +1361,7 @@ class FakeTensorOpInfoTest(TestCase):
 
 make_propagate_real_tensors_cls(FakeTensorOpInfoTest)
 instantiate_device_type_tests(
-    FakeTensorOpInfoTest, globals(), only_for=("cpu", device_type)
+    FakeTensorOpInfoTest, globals(), only_for=("cpu", device_type), allow_xpu=True
 )
 instantiate_device_type_tests(
     PropagateRealTensorsFakeTensorOpInfoTest,  # noqa: F821
