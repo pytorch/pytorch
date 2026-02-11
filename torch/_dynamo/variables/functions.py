@@ -1750,7 +1750,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
                     {},
                     source=self.source and AttrSource(self.source, "__annotations__"),
                     mutation_type=ValueMutationNew(),
-                )
+                ),
             )
         elif name == "__code__":
             return self.code

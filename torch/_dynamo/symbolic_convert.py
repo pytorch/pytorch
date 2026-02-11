@@ -3625,7 +3625,9 @@ class InstructionTranslatorBase(
             closure,
         )
         if annotations:
-            fn.get_dict_vt(self).setitem("__annotations__", annotations)
+            fn.get_dict_vt(self).setitem(  # pyrefly: ignore[bad-argument-type]
+                "__annotations__", annotations
+            )
         self.push(fn)
 
     def UNPACK_SEQUENCE(self, inst: Instruction) -> None:
@@ -4318,9 +4320,8 @@ class InstructionTranslatorBase(
             # maybe use Format.VALUE_WITH_FAKE_GLOBALS instead?
             # https://docs.python.org/3/library/annotationlib.html#annotationlib.Format.VALUE_WITH_FAKE_GLOBALS
             attr = attr.call_function(self, [ConstantVariable.create(1)], {})
-            # fn.annotations = attr
             fn.call_method(
-                self,
+                self,  # pyrefly: ignore[bad-argument-type]
                 "__setattr__",
                 [ConstantVariable.create("__annotations__"), attr],
                 {},
@@ -4336,7 +4337,9 @@ class InstructionTranslatorBase(
                 dict(zip(items[::2], items[1::2], strict=True)),
                 mutation_type=ValueMutationNew(),
             )
-            fn.get_dict_vt(self).setitem("__annotations__", ann)
+            fn.get_dict_vt(self).setitem(  # pyrefly: ignore[bad-argument-type]
+                "__annotations__", ann
+            )
         elif flags & 0x02:
             fn.kwdefaults = attr
         elif flags & 0x01:
