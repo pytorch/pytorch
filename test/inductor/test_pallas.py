@@ -1108,7 +1108,6 @@ class PallasTestsMixin:
         expected = fn(x, weight, bias)
         self.assertEqual(result, expected)
 
-    @skip_if_cpu
     @skip_if_cuda
     @skip_if_tpu
     def test_rope(self):
