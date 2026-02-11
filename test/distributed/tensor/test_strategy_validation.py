@@ -379,3 +379,5 @@ class TestExtractTensors(TestCase):
         self.assertEqual(len(tensors), 2)
 
 
+if __name__ == "__main__":
+    run_tests()
