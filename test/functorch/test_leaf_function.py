@@ -408,7 +408,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(x.grad, x_clone.grad)
         self.assertEqual(y_clone.grad, [[0]])
 
-    def test_aot_function_empty_return(self):
+    def test_aot_function_print(self):
         printed = []
 
         @leaf_function
