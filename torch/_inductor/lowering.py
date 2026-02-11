@@ -2304,7 +2304,14 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
 
 
 def make_fallback(op, layout_constraint=None, warn=True, override_decomp=False):
-    # When emulate_precision_casts is enabled, we skip decomposing addcmul ops
+    # Always skip lerp decompositions - we have a lowering that uses FMA to match
+    # eager CUDA behavior
+    skip_lerp_decomp = op in {
+        aten.lerp.Scalar,
+        aten.lerp.Tensor,
+        aten._foreach_lerp.Scalar,
+    }
+    # When emulate_precision_casts is enabled, we also skip decomposing addcmul ops
     # to use the inductor lowering which preserves FMA semantics.
     # For _foreach_addcdiv, we use the native CUDA kernel.
     skip_decomp_for_precision = config.emulate_precision_casts and op in {
@@ -2312,7 +2319,7 @@ def make_fallback(op, layout_constraint=None, warn=True, override_decomp=False):
         aten._foreach_addcmul.Scalar,
         aten._foreach_addcdiv.Scalar,
     }
-    assert op not in decompositions or override_decomp or skip_decomp_for_precision, (
+    assert op not in decompositions or override_decomp or skip_decomp_for_precision or skip_lerp_decomp, (
         f"both a fallback and a decomp for same op: {op}"
     )
     if (
@@ -7065,6 +7072,116 @@ def _foreach_addcmul_scalar(self, tensor1, tensor2, value=1):
 
 
 _register_foreach_lowering(aten._foreach_addcmul.Scalar, _foreach_addcmul_scalar)
+
+
+@register_lowering(aten.lerp.Scalar, broadcast=True)
+def lerp_scalar(start, end, weight):
+    """
+    Computes start + weight * (end - start) using FMA for precision.
+
+    CUDA's lerp uses FMA internally: fma(weight, end-start, start)
+    This computes weight*(end-start)+start with no intermediate rounding.
+    We match this behavior by using ops.fma.
+    """
+    dtype = get_promoted_dtype(
+        start,
+        end,
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    )
+
+    start_loader = start.make_loader()
+    end_loader = end.make_loader()
+
+    use_fma = dtype.is_floating_point and not torch.version.hip
+
+    def inner_fn(idx):
+        start_val = start_loader(idx)
+        end_val = end_loader(idx)
+
+        # Compute end - start
+        diff = ops.sub(end_val, start_val)
+
+        weight_val = ops.constant(weight, dtype)
+        if use_fma:
+            # Use FMA to match CUDA lerp: fma(weight, diff, start) = weight*diff + start
+            return ops.fma(weight_val, diff, start_val)
+        else:
+            # Fallback for non-FMA targets
+            return ops.add(start_val, ops.mul(weight_val, diff))
+
+    return Pointwise.create(
+        device=start.get_device(),
+        dtype=dtype,
+        inner_fn=inner_fn,
+        ranges=start.get_size(),
+    )
+
+
+@register_lowering(aten.lerp.Tensor, broadcast=True)
+def lerp_tensor(start, end, weight):
+    """
+    Computes start + weight * (end - start) using FMA for precision.
+
+    CUDA's lerp uses FMA internally: fma(weight, end-start, start)
+    This computes weight*(end-start)+start with no intermediate rounding.
+    We match this behavior by using ops.fma.
+    """
+    dtype = get_promoted_dtype(
+        start,
+        end,
+        weight,
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    )
+
+    start_loader = start.make_loader()
+    end_loader = end.make_loader()
+    weight_loader = weight.make_loader()
+
+    use_fma = dtype.is_floating_point and not torch.version.hip
+
+    def inner_fn(idx):
+        start_val = start_loader(idx)
+        end_val = end_loader(idx)
+        weight_val = weight_loader(idx)
+
+        # Compute end - start
+        diff = ops.sub(end_val, start_val)
+
+        if use_fma:
+            # Use FMA to match CUDA lerp: fma(weight, diff, start) = weight*diff + start
+            return ops.fma(weight_val, diff, start_val)
+        else:
+            # Fallback for non-FMA targets
+            return ops.add(start_val, ops.mul(weight_val, diff))
+
+    return Pointwise.create(
+        device=start.get_device(),
+        dtype=dtype,
+        inner_fn=inner_fn,
+        ranges=start.get_size(),
+    )
+
+
+def _foreach_lerp_scalar(start, end, weight):
+    """
+    Foreach version of lerp with scalar weight parameter.
+    Uses foreach_group_loop for consistent grouping behavior.
+    """
+    realize_outputs = (
+        len(V.graph.current_node.users) == 0
+        or V.graph.current_node.target in inplace_foreach_ops
+        or cur_node_has_non_foreach_users()
+    )
+
+    groups = group_foreach_args(zip(start, end))
+
+    def apply_fn(args):
+        return lerp_scalar(*args, weight=weight)
+
+    return foreach_group_loop(groups, len(start), apply_fn, realize_outputs)
+
+
+_register_foreach_lowering(aten._foreach_lerp.Scalar, _foreach_lerp_scalar)
 
 
 register_pointwise_numeric_ldf64(aten.cos)
