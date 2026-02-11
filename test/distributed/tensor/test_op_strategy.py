@@ -39,11 +39,11 @@ from torch.distributed.tensor.debug import _clear_sharding_prop_cache, CommDebug
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
+    DTensorFakePGTestBase,
     DTensorOpTestBase,
     DTensorTestBase,
     with_comms,
 )
-from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
 try:
@@ -726,18 +726,8 @@ TestStrategyHashingWithLocalTensor = create_local_tensor_test_class(
 )
 
 
-class TestOpSchemaMetaProperties(TestCase):
-    def setUp(self):
-        super().setUp()
-        self.world_size = 8
-        store = FakeStore()
-        torch.distributed.init_process_group(
-            backend="fake", rank=0, world_size=self.world_size, store=store
-        )
-
-    def tearDown(self):
-        super().tearDown()
-        torch.distributed.destroy_process_group()
+class TestOpSchemaMetaProperties(DTensorFakePGTestBase):
+    world_size = 8
 
     def test_args_meta_mixed_opstrategy_and_tuplestrategy(self):
         """Test args_meta with both OpStrategy and TupleStrategy"""
@@ -865,27 +855,13 @@ class TestOpSchemaMetaProperties(TestCase):
         self.assertEqual(kwargs_meta["alpha"], 1.0)
 
 
-class TestExpandToFullMeshOpStrategy(TestCase):
+class TestExpandToFullMeshOpStrategy(DTensorFakePGTestBase):
     """Tests for expand_to_full_mesh_op_strategy function.
 
     These tests verify that tensor_meta is correctly assigned to input/output specs,
     especially when the placement list contains None entries (e.g., optional outputs
     like grad_bias in SDPA backward when attn_bias is not used).
     """
-
-    def setUp(self):
-        from torch.testing._internal.distributed.fake_pg import FakeStore
-
-        super().setUp()
-        self.world_size = 4
-        self.fake_store = FakeStore()
-        torch.distributed.init_process_group(
-            backend="fake", rank=0, world_size=self.world_size, store=self.fake_store
-        )
-
-    def tearDown(self):
-        super().tearDown()
-        torch.distributed.destroy_process_group()
 
     def _create_op_strategy_with_tensor_meta(
         self, mesh: DeviceMesh, shape: tuple, dtype: torch.dtype
@@ -1109,19 +1085,7 @@ def _unsupported_cat_fake(tensors, dim=0):
     return torch.empty(shape, dtype=first.dtype, device=first.device)
 
 
-class TestUnsupportedDTensorOp(TestCase):
-    def setUp(self):
-        super().setUp()
-        self.world_size = 4
-        store = FakeStore()
-        torch.distributed.init_process_group(
-            backend="fake", rank=0, world_size=self.world_size, store=store
-        )
-
-    def tearDown(self):
-        super().tearDown()
-        torch.distributed.destroy_process_group()
-
+class TestUnsupportedDTensorOp(DTensorFakePGTestBase):
     def test_unsupported_op_error(self):
         """Test that running an unsupported op on DTensor raises NotImplementedError with appropriate message."""
         mesh = DeviceMesh("cpu", torch.arange(self.world_size))
