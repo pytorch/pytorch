@@ -141,7 +141,7 @@ class OverlapPreservingBucketer:
         insert_overlap_deps: bool = False,
         collective_bucketing: bool = True,
         bucket_mode: BucketMode = "custom_ops_multidtype",
-        bucket_exposed_first: Literal["True", "False", "auto"] = "auto",
+        bucket_exposed_first: bool | None = None,
         region_of: dict[fx.Node, Any] | None = None,
         bucket_only_fsdp_groups: bool = True,
     ):
@@ -466,9 +466,9 @@ class OverlapPreservingBucketer:
         fsdp_pgs: OrderedSet[str],
     ) -> bool:
         """Determine whether to bucket exposed collectives first."""
-        if self.bucket_exposed_first == "auto":
+        if self.bucket_exposed_first is None:
             return current_pg in fsdp_pgs
-        return self.bucket_exposed_first == "True"
+        return self.bucket_exposed_first
 
     def _find_buckets(
         self,
@@ -1062,7 +1062,7 @@ def finalize_overlap_scheduling(
     max_bucket_memory_gb: float = 2.0,
     max_coll_distance: int = 1000,
     region_of: dict[fx.Node, Any] | None = None,
-    bucket_exposed_first: Literal["True", "False", "auto"] = "auto",
+    bucket_exposed_first: bool | None = None,
 ) -> None:
     """
     Finalize overlap scheduling by applying deps, inlining fusions, and optionally bucketing.
