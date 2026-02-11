@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import logging
 import math
+import warnings
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, cast, Optional, TYPE_CHECKING, Union
@@ -16,7 +17,7 @@ from torch._inductor.virtualized import V
 from torch.nn.attention.flex_attention import _Backend
 
 from ...ir import ComputedBuffer, ExternKernel, FixedLayout, TensorBox
-from ...lowering import empty, empty_strided, lowerings, register_lowering
+from ...lowering import empty, empty_strided, lowerings, register_lowering, to_dtype
 from ...select_algorithm import (
     autotune_select_algorithm,
     SymbolicGridFn,
@@ -289,6 +290,8 @@ def flex_attention(
             kv_indices,
             full_kv_num_blocks,
             full_kv_indices,
+            SPARSE_Q_BLOCK_SIZE,
+            SPARSE_KV_BLOCK_SIZE,
             mask_graph=mask_graph,
             subgraph=subgraph,
         )
@@ -400,7 +403,9 @@ def flex_attention(
                 "num_buffers_warp_spec", num_buffers_warp_spec
             )
 
-        cur_kernel_options.setdefault("USE_TMA", False)
+        # Intel GPU enables TMA by default
+        cur_kernel_options.setdefault("USE_TMA", bool(torch.xpu.is_available()))
+
         if cur_kernel_options["USE_TMA"] and not can_use_tma(query, key, value):
             cur_kernel_options["USE_TMA"] = False
 
@@ -732,6 +737,7 @@ def flex_attention_backward(*args, **kwargs):
         joint_placeholder_inps + list(score_mod_other_buffers),
         joint_graph,
     )
+
     freeze_irnodes(all_joint_outputs)
 
     joint_outputs = process_joint_outputs(
@@ -769,6 +775,11 @@ def flex_attention_backward(*args, **kwargs):
                 "Deterministic backward for flex_attention with block_mask using the FLASH backend "
                 "is not yet implemented. The TRITON backend supports deterministic backward."
             )
+        if torch.is_deterministic_algorithms_warn_only_enabled() and needs_block_mask:
+            warnings.warn(
+                "Deterministic backward for flex_attention with block_mask using the FLASH backend "
+                "is not yet implemented. Running non-deterministic backward.",
+            )
         score_is_trivial = is_trivial_score_graph(fw_graph.graph_module)
         return create_flex_flash_attention_backward_kernel(
             query,
@@ -779,6 +790,8 @@ def flex_attention_backward(*args, **kwargs):
             grad_out,
             scale,
             kernel_options,
+            SPARSE_Q_BLOCK_SIZE,
+            SPARSE_KV_BLOCK_SIZE,
             fw_subgraph_buffer=None if score_is_trivial else fw_subgraph_buffer,
             joint_subgraph_buffer=None
             if score_is_trivial
@@ -1004,7 +1017,16 @@ def flex_attention_backward(*args, **kwargs):
         grad_key = lowerings[aten.sum](broadcasted_grad_key, axis=0, keepdims=True)
         grad_value = lowerings[aten.sum](broadcasted_grad_value, axis=0, keepdims=True)
 
-    return (grad_query, grad_key, grad_value, tuple(joint_outputs.captured_grads))
+    # Cast captured grads to match original buffer dtypes. Gradients are accumulated
+    # in fp32 for precision, then cast to the original dtype (e.g., bf16) here.
+    captured_grads = tuple(
+        to_dtype(g, orig.get_dtype())
+        if g is not None and g.get_dtype() != orig.get_dtype()
+        else g
+        for g, orig in zip(joint_outputs.captured_grads, score_mod_other_buffers)
+    )
+
+    return (grad_query, grad_key, grad_value, captured_grads)
 
 
 def get_bwd_subgraph_outputs(

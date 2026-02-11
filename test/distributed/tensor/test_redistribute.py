@@ -37,6 +37,7 @@ from torch.distributed.tensor._redistribute import (
     _gen_transform_infos,
     _optimize_transform_infos,
     _TransformInfo,
+    disable_redistribute_transform_optimization,
     redistribute_local_tensor,
     use_min_cost_redistribution_plan,
 )
@@ -2342,6 +2343,51 @@ class OptimizeFlattenedReductionsTest(TestCase):
             warning_msg = log_context.output[0]
             self.assertIn("non-ascending order", warning_msg)
             self.assertIn("reduce_scatter", warning_msg)
+
+    def test_disable_optimization_context_manager(self):
+        """The disable_redistribute_transform_optimization context manager prevents merging."""
+        mesh = init_device_mesh("cpu", (2, 2, 2), mesh_dim_names=("A", "B", "C"))
+        mesh["A", "B"]._flatten("A_B")
+
+        transform_infos = [
+            _TransformInfo(
+                mesh_dim=0,
+                src_dst_placements=(Partial("sum"), Replicate()),
+                logical_shape=[8, 8],
+            ),
+            _TransformInfo(
+                mesh_dim=1,
+                src_dst_placements=(Partial("sum"), Replicate()),
+                logical_shape=[8, 8],
+            ),
+        ]
+
+        src_placements = (Partial("sum"), Partial("sum"), Replicate())
+        dst_placements = (Replicate(), Replicate(), Replicate())
+
+        # Without the kill switch, transforms should be merged into one flattened op.
+        result = _optimize_transform_infos(
+            transform_infos, mesh, src_placements, dst_placements
+        )
+        self.assertEqual(len(result), 1)
+        self.assertIsInstance(result[0], _FlattenedTransformInfo)
+
+        # With the kill switch, the original transforms should be returned as-is.
+        with disable_redistribute_transform_optimization():
+            result = _optimize_transform_infos(
+                transform_infos, mesh, src_placements, dst_placements
+            )
+        self.assertEqual(len(result), 2)
+        self.assertTrue(all(isinstance(r, _TransformInfo) for r in result))
+        self.assertIs(result[0], transform_infos[0])
+        self.assertIs(result[1], transform_infos[1])
+
+        # After exiting the context manager, optimization should be restored.
+        result = _optimize_transform_infos(
+            transform_infos, mesh, src_placements, dst_placements
+        )
+        self.assertEqual(len(result), 1)
+        self.assertIsInstance(result[0], _FlattenedTransformInfo)
 
 
 class MultiDimRedistributeOptimizationTest(DTensorTestBase):
