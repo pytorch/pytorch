@@ -522,11 +522,20 @@ Tensor my_matmul(const Tensor& self, const Tensor& other) {
   return torch::stable::matmul(self, other);
 }
 
+// Putting my_layout in libtorch_agn_2_9 because it can target 2.9
+// for runtime, but it can only be compiled against 2.11 cuz of
+// the layout API.
+using torch::headeronly::Layout;
+bool my_layout(const Tensor& t, Layout layout) {
+  return t.layout() == layout;
+}
+
 STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
   m.def("my_unsqueeze(Tensor t, int dim) -> Tensor");
   m.def("my_squeeze(Tensor t, int dim) -> Tensor");
   m.def("my_select(Tensor t, int dim, int index) -> Tensor");
   m.def("my_matmul(Tensor self, Tensor other) -> Tensor");
+  m.def("my_layout(Tensor t, Layout layout) -> bool");
 }
 
 STABLE_TORCH_LIBRARY_IMPL(STABLE_LIB_NAME, CompositeExplicitAutograd, m) {
@@ -534,4 +543,5 @@ STABLE_TORCH_LIBRARY_IMPL(STABLE_LIB_NAME, CompositeExplicitAutograd, m) {
   m.impl("my_squeeze", TORCH_BOX(&my_squeeze));
   m.impl("my_select", TORCH_BOX(&my_select));
   m.impl("my_matmul", TORCH_BOX(&my_matmul));
+  m.impl("my_layout", TORCH_BOX(&my_layout));
 }
