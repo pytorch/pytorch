@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 
 import torch
+from torch._dynamo.testing import CompileCounter
 from torch.testing._internal.common_cuda import _get_torch_cuda_version
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
@@ -366,6 +367,39 @@ class TestLibtorchAgnostic(TestCase):
         out0 = libtorch_agnostic.ops.my_narrow(t, dim0, start0, length0)
         expected0 = torch.narrow(t, dim0, start0, length0)
         self.assertEqual(out0, expected0)
+
+    @onlyCPU
+    def test_my_narrow_symint(self, device):
+        op = torch.ops.libtorch_agn_2_9.my_narrow_symint
+
+        t1 = torch.randn(4, 5, device=device)
+        out = op(t1, 0, 1, 2)
+        expected = torch.narrow(t1, 0, 1, 2)
+        self.assertEqual(out, expected)
+
+        torch.library.opcheck(
+            torch.ops.libtorch_agn_2_9.my_narrow_symint,
+            (t1, 0, 1, 2),
+        )
+
+        # Below is a real example to confirm recompilation doesn't happen
+        # Wrap in a function so shape computation happens inside the compiled
+        # region — t.shape[0] becomes a symbolic SymInt during tracing
+        def fn(t):
+            return op(t, 0, 2, t.shape[0] - 2)
+
+        cnt = CompileCounter()
+        compiled_fn = torch.compile(fn, dynamic=True, backend=cnt)
+
+        out2 = compiled_fn(t1)
+        self.assertEqual(out2, torch.narrow(t1, 0, 2, t1.shape[0] - 2))
+        self.assertEqual(cnt.frame_count, 1)
+
+        # Second call with different shape should not recompile
+        t2 = torch.randn(6, 3, device=device)
+        out3 = compiled_fn(t2)
+        self.assertEqual(out3, torch.narrow(t2, 0, 2, t2.shape[0] - 2))
+        self.assertEqual(cnt.frame_count, 1)
 
     @onlyCUDA
     @deviceCountAtLeast(2)
