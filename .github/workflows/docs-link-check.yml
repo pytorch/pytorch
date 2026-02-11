@@ -1,0 +1,124 @@
+name: docs-link-check
+
+# Check internal links and anchors in the built documentation after nightly builds.
+# Catches broken cross-references and stale #anchor fragments that the
+# existing source-level lint (scripts/lint_urls.sh, scripts/lint_xrefs.sh)
+# cannot detect — those only inspect raw source files, not the rendered HTML.
+#
+# Uses linkchecker: https://github.com/linkchecker/linkchecker
+
+on:
+  workflow_run:
+    workflows: ["nightly"]
+    types:
+      - completed
+  workflow_dispatch:
+
+concurrency:
+  group: docs-link-check-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check-doc-anchors:
+    if: github.repository_owner == 'pytorch' && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
+    runs-on: linux.2xlarge
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Download built docs from nightly
+        run: |
+          pip install awscli
+          mkdir -p docs/_build/html
+          # Download the Python docs from the nightly build
+          aws s3 cp s3://pytorch.org/docs/main/ docs/_build/html/ --recursive --no-sign-request || \
+            echo "Could not download from main docs, will try nightly preview"
+          # If main docs not available, the linkchecker will report as needed
+
+      - name: Check internal links and anchors
+        run: |
+          ./scripts/lint_doc_anchors.sh --all || echo "linkchecker_exit_code=$?" >> "$GITHUB_ENV"
+
+      - name: Report results
+        if: env.linkchecker_exit_code != '' && env.linkchecker_exit_code != '0'
+        run: |
+          echo "## Broken internal links / anchors found"
+          echo ""
+          cat linkchecker-report.txt
+          exit 1
+
+      - name: Create issue on failure
+        if: failure() && github.event_name == 'workflow_run'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const issueTitle = '[docs] Broken internal links/anchors detected';
+            const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const failureDate = new Date().toISOString().split('T')[0];
+
+            // Check if an open issue with the same title already exists
+            const existingIssues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'module: docs'
+            });
+
+            const existingIssue = existingIssues.data.find(issue => issue.title === issueTitle);
+            if (existingIssue) {
+              // Add a comment to the existing issue
+              let commentBody = `## Failed again on ${failureDate}\n\n`;
+              commentBody += `[View workflow run](${runUrl})\n\n`;
+              commentBody += '```\n';
+              try {
+                const report = fs.readFileSync('linkchecker-report.txt', 'utf8');
+                commentBody += report.length > 60000 ? report.slice(0, 60000) + '\n...(truncated)' : report;
+              } catch {
+                commentBody += 'Report file not available. Check the workflow run for details.';
+              }
+              commentBody += '\n```';
+
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existingIssue.number,
+                body: commentBody
+              });
+              console.log(`Added comment to existing issue #${existingIssue.number}`);
+              return;
+            }
+
+            let body = '## Docs link check found broken internal links/anchors\n\n';
+            body += `**Failed on:** ${failureDate}\n`;
+            body += `**Workflow run:** [View logs](${runUrl})\n\n`;
+            body += 'The `docs-link-check` workflow (triggered after nightly build) detected broken links or invalid `#anchor` fragments in the built documentation.\n\n';
+            body += '```\n';
+            try {
+              const report = fs.readFileSync('linkchecker-report.txt', 'utf8');
+              body += report.length > 60000 ? report.slice(0, 60000) + '\n...(truncated)' : report;
+            } catch {
+              body += 'Report file not available. Check the workflow run for details.';
+            }
+            body += '\n```\n';
+            body += '\n---\n';
+            body += '_Filed automatically by the [`docs-link-check` workflow](https://github.com/pytorch/pytorch/actions/workflows/docs-link-check.yml)._';
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: issueTitle,
+              body: body,
+              labels: ['module: docs']
+            });

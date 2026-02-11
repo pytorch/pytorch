@@ -1155,7 +1155,7 @@ def register_autograd(
     ``backward`` runs during the backward pass. It accepts ``(ctx, *grads)``:
     - ``grads`` is one or more gradients. The number of gradients matches
     the number of outputs of the operator.
-    The ``ctx`` object is `the same ctx object <context_method_mixins>`_ used by
+    The ``ctx`` object is :ref:`the same ctx object <context-method-mixins>` used by
     :class:`torch.autograd.Function`. The semantics of ``backward_fn`` are the
     same as :meth:`torch.autograd.Function.backward`.
 

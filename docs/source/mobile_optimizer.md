@@ -6,7 +6,7 @@ robots: noindex
 PyTorch Mobile is no longer actively supported. Redirecting to [ExecuTorch documentation](https://docs.pytorch.org/executorch).
 
 ```{raw} html
-<meta http-equiv="Refresh" content="0; url='https://docs.pytorch.org/executorch'" />
+<meta http-equiv="Refresh" content="0; url=https://docs.pytorch.org/executorch" />
 ```
 
 ```{warning}

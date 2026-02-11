@@ -37,10 +37,19 @@ html-stable:
 	# See conf.py for more details.
 	RELEASE=1 make html
 
-.PHONY: help Makefile docset onnx exportdb serve
+.PHONY: help Makefile docset onnx exportdb serve linkcheck-local linkcheck-external
 
 serve:
 	@cd $(BUILDDIR)/html && $(PYCMD) -m http.server $(PORT)
+
+linkcheck-local:
+	@if [ ! -f "$(BUILDDIR)/html/index.html" ]; then \
+		echo "ERROR: Built docs not found. Run 'make html' first."; \
+		exit 1; \
+	fi
+	@echo "Running linkchecker on changed doc files..."
+	@echo "Use './scripts/lint_doc_anchors.sh --all' for full site check."
+	../scripts/lint_doc_anchors.sh HEAD~1 HEAD
 
 # Catch-all target: route all unknown targets to Sphinx using the new
 # "make mode" option.  $(O) is meant as a shortcut for $(SPHINXOPTS).

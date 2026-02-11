@@ -37,6 +37,7 @@ benchmarks/.data
 caffe2/cpp_test/
 dist/
 docs/build/
+linkchecker-report.txt
 docs/cpp/src
 docs/src/**/*
 docs/cpp/build
