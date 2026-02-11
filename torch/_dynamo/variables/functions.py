@@ -3300,7 +3300,10 @@ class FiddleBuildableGetAttrVariable(UserFunctionVariable):
         ):
             obj_var = args[0]
             name = args[1].as_python_constant()
-            attr_value = self.fn(obj_var.value, name)
+            try:
+                attr_value = self.fn(obj_var.value, name)
+            except Exception:
+                return super().call_function(tx, args, kwargs)
             assert obj_var.source is not None
             attr_source = AttrSource(obj_var.source, name)
             return VariableTracker.build(tx, attr_value, attr_source)

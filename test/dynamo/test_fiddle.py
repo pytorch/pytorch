@@ -124,6 +124,19 @@ class FiddleTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(10)
         self.assertEqual(opt_fn(x, cfg), fn(x, cfg))
 
+    def test_config_missing_attr_fallback(self):
+        """Accessing a nonexistent attribute falls back to normal tracing."""
+        cfg = fdl.Config(MLP, hidden_size=256, num_layers=4)
+
+        def fn(x, cfg):
+            if hasattr(cfg, "dropout"):
+                return x * cfg.dropout
+            return x * cfg.hidden_size
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(10)
+        self.assertEqual(opt_fn(x, cfg), fn(x, cfg))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
