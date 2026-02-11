@@ -1550,7 +1550,9 @@ class PallasKernel(SIMDKernel):
 
         var = next(iter(used_vars))
         var_expr = BlockPatternMatcher.get_subexpr_involving_symbol(index, var)
-        stride = BlockPatternMatcher.match_affine_block_expr(var_expr, var)
+        stride = self._safe_int(
+            BlockPatternMatcher.match_affine_block_expr(var_expr, var)
+        )
         if stride is None or stride <= 1:
             return index_str, needs_flatten
 
@@ -1565,6 +1567,23 @@ class PallasKernel(SIMDKernel):
 
         last_dim = self._safe_int(buf_size[-1])
         if last_dim is None or last_dim % stride != 0:
+            return index_str, needs_flatten
+
+        # Verify the iteration variable covers all buffer elements at the
+        # given stride: var_length * stride == buf_numel. This ensures
+        # the flattened stride-access 0, stride, 2*stride, ... maps exactly
+        # to buf[:, ..., :, offset::stride].
+        entry = self.range_tree_nodes.get(var)
+        if entry is None:
+            return index_str, needs_flatten
+        var_length = self._safe_int(entry.length)
+        buf_numel = 1
+        for s in buf_size:
+            d = self._safe_int(s)
+            if d is None:
+                return index_str, needs_flatten
+            buf_numel *= d
+        if var_length is None or var_length * stride != buf_numel:
             return index_str, needs_flatten
 
         prefix = ":, " * (ndim - 1)
