@@ -28,6 +28,7 @@
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/distributed/Placement.h>
+#include <torch/csrc/distributed/DTensorSpec.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/tensor/python_tensor.h>
@@ -974,7 +975,13 @@ static bool arg_type_tensor_or_tensor_list_like(py::handle arg) {
   _(static_argnum)                                            \
   _(static_kwargkey)                                          \
   _(stride)                                                   \
-  _(tensor_meta)
+  _(tensor_meta)                                              \
+  _(mesh)                                                     \
+  _(mesh_dims)                                                \
+  _(placements)                                               \
+  _(reduce_op)                                                \
+  _(shard_order)                                              \
+  _(tensor_dim)                                               \
 
 struct DTensorInternedStrings {
 #define DECLARE_INTERNED_STRING_VARIABLE(s) PyObject* s;
@@ -1729,6 +1736,116 @@ py::object dispatchDTensorOp(
   return result;
 }
 
+static std::optional<torch::distributed::PlacementHashData>
+  py_placement_to_cpp(py::handle placement) {
+    // convert Python placement to C++ equivalent w/ minimal info for C++ cache lookup
+    using namespace torch::distributed;
+    if (py::isinstance<Shard>(placement)) {
+      return PlacementHashData{PlacementHashData::PlacementType::Shard, py::cast<Shard>(placement).dim, 0, {}};
+    }
+    if (py::isinstance<StridedShard>(placement)) {
+      const auto& strided_shard = py::cast<StridedShard>(placement);
+      return PlacementHashData{PlacementHashData::PlacementType::StridedShard, strided_shard.dim, strided_shard.split_factor, {}};
+    }
+    if (py::isinstance<Replicate>(placement)) {
+      return PlacementHashData{PlacementHashData::PlacementType::Replicate, 0, 0, {}};
+    }
+    if (py::isinstance<Partial>(placement)) {
+      auto reduce_op = py::cast<std::string>(
+          placement.attr(dtensor_interned_strings.reduce_op));
+      return PlacementHashData{PlacementHashData::PlacementType::Partial, 0, 0, std::move(reduce_op)};
+    }
+    return std::nullopt; // unhandled placements (MaskedPartial isn't used for torch.cat should i add this later?)
+  }
+
+
+static void try_populate_dtensor_spec(
+  // populates dtensor spec in C++ so we don't have to get info from python obj every time
+  at::Tensor& tensor,
+  const at::Tensor& local_tensor,
+  py::handle spec) {
+
+  using namespace torch::distributed;
+
+  // getting python placement
+  py::object py_placements = spec.attr(dtensor_interned_strings.placements);
+  if (!PyTuple_Check(py_placements.ptr())) {
+    return; // should i throw an error?
+  }
+
+  // py_placements is a tuple DTensorSpec.placements where length = num of mesh dims
+  // since there is one placement per mesh dim
+  const auto n_placements = PyTuple_GET_SIZE(py_placements.ptr());
+  c10::SmallVector<PlacementHashData, 4> placements;
+  placements.reserve(n_placements); // no-op if length < 5
+
+  // for each placement
+  for (Py_ssize_t i = 0; i < n_placements; i++) {
+    auto cpp_placement = py_placement_to_cpp(
+        py::handle(PyTuple_GET_ITEM(py_placements.ptr(), i)));
+    if (!cpp_placement.has_value()) { // if the python -> c++ helper bailed
+      return;
+    }
+    placements.push_back(std::move(*cpp_placement));
+  }
+
+  c10::SmallVector<ShardOrderEntry, 4> shard_order;
+  py::object py_shard_order = spec.attr(dtensor_interned_strings.shard_order);
+  if (!py_shard_order.is_none() && PyTuple_Check(py_shard_order.ptr())) {
+    const auto num_shard_order_entries = PyTuple_GET_SIZE(py_shard_order.ptr());
+    shard_order.reserve(num_shard_order_entries);
+
+    for (Py_ssize_t i = 0; i < num_shard_order_entries; i++) {
+      auto entry = py::handle(PyTuple_GET_ITEM(py_shard_order.ptr(), i));
+      int64_t tensor_dim = py::cast<int64_t>(entry.attr(dtensor_interned_strings.tensor_dim)); // might be problematic??
+      py::object py_mesh_dims = entry.attr(dtensor_interned_strings.mesh_dims);
+      c10::SmallVector<int64_t, 2> mesh_dims;
+
+      for (auto md : py_mesh_dims) {
+        mesh_dims.push_back(py::cast<int64_t>(md)); // might also be problematic??
+      }
+
+      shard_order.push_back({tensor_dim, std::move(mesh_dims)});
+    }
+  }
+
+  auto sizes = tensor.sizes();
+  auto strides = tensor.strides();
+
+  PyObject* mesh_ptr = spec.attr(dtensor_interned_strings.mesh).ptr(); // can i do this??
+
+  size_t spec_hash = DTensorSpec::compute_hash(
+    mesh_ptr,
+    placements,
+    shard_order,
+    sizes,
+    strides,
+    tensor.scalar_type()
+  );
+
+  auto dtensor_spec = c10::make_intrusive<DTensorSpec>();
+  dtensor_spec->local_tensor = local_tensor;
+  dtensor_spec->mesh_ptr = mesh_ptr;
+  dtensor_spec->placements = std::move(placements);
+  dtensor_spec->shard_order = std::move(shard_order);
+  dtensor_spec->spec_hash = spec_hash;
+  tensor.unsafeGetTensorImpl()->set_backend_meta(std::move(dtensor_spec)); // actually setting the metadata
+}
+
+static torch::distributed::DTensorSpec* try_get_dtensor_spec(const at::Tensor& tensor) {
+  if (!tensor.defined()) {
+    return nullptr;
+  }
+  auto* impl = tensor.unsafeGetTensorImpl();
+  // if it's not a DTensor do nothing
+  // could be a regular tensor (torch.cat([dtensor, tensor]))
+  if (!impl->is_python_dispatch()) {
+    return nullptr;
+  }
+  auto* meta = impl->get_backend_meta();
+  return meta ? static_cast<torch::distributed::DTensorSpec*>(meta) : nullptr;
+}
+
 // DTensor-specific variant of make_wrapper_subclass to minimize DTensor
 // overhead.
 static PyObject* THPVariable_dtensor_new(
@@ -1797,6 +1914,7 @@ static PyObject* THPVariable_dtensor_new(
       extra_dispatch_keys);
   tensor.set_requires_grad(requires_grad);
   tensor.unsafeGetTensorImpl()->set_python_dispatch(true);
+  try_populate_dtensor_spec(tensor, local_tensor, spec); // now DTensorSpec is in C++
   py::object py_tensor = py::reinterpret_steal<py::object>(
       THPVariable_WrapWithType(std::move(tensor), (PyTypeObject*)cls));
   py_tensor.attr(dtensor_interned_strings._spec) = spec;
