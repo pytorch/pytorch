@@ -1275,5 +1275,57 @@ class TestQuerySingleDimStrategyKwargs(TestCase):
                 propagator.op_single_dim_strategy_funcs.pop(aten_add, None)
 
 
+class TestCompareOperatorEndToEnd(TestCase):
+    """End-to-end smoke test for compare_operator."""
+
+    world_size = 2
+
+    def setUp(self):
+        super().setUp()
+        if not dist.is_initialized():
+            dist.init_process_group("fake", rank=0, world_size=self.world_size)
+
+    def tearDown(self):
+        super().tearDown()
+        if dist.is_initialized():
+            dist.destroy_process_group()
+
+    def test_compare_operator_add_no_incorrect(self):
+        """compare_operator on add should find valid rules with no incorrect ones."""
+        import torch.testing._internal.common_methods_invocations as common_ops
+        from torch.distributed.tensor._ops.strategy_validation import compare_operator
+        from torch.testing._internal.opinfo import core as opinfo_core
+
+        orig_sizes = (opinfo_core.L, opinfo_core.M, opinfo_core.S, opinfo_core.XS)
+        opinfo_core.L = common_ops.L = 24
+        opinfo_core.M = common_ops.M = 12
+        opinfo_core.S = common_ops.S = 4
+        opinfo_core.XS = common_ops.XS = 2
+
+        try:
+            stats = compare_operator(
+                "add",
+                device="cpu",
+                dtype=torch.float32,
+                world_size=self.world_size,
+                incorrect_only=True,
+            )
+            self.assertGreater(stats.true_positives, 0)
+            self.assertEqual(len(stats.false_positives), 0)
+        finally:
+            (
+                opinfo_core.L,
+                opinfo_core.M,
+                opinfo_core.S,
+                opinfo_core.XS,
+            ) = orig_sizes
+            (
+                common_ops.L,
+                common_ops.M,
+                common_ops.S,
+                common_ops.XS,
+            ) = orig_sizes
+
+
 if __name__ == "__main__":
     run_tests()
