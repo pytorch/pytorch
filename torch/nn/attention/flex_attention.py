@@ -11,7 +11,7 @@ import typing
 import warnings
 from collections.abc import Callable
 from enum import Enum
-from typing import Literal, NamedTuple, TypeAlias
+from typing import Any, Literal, NamedTuple, TypeAlias
 from typing_extensions import NotRequired, TypedDict
 
 import torch
@@ -425,6 +425,54 @@ def _adjust_num_blocks_and_indices(
     num_blocks = torch.where(num_blocks < new_num_cols, num_blocks, new_num_cols)
     num_blocks = torch.sum(indices < num_blocks[:, :, :, None], dim=-1).to(torch.int32)
     return num_blocks, indices
+
+
+def _closure_contents(fn: object) -> tuple[object, ...]:
+    """Extract closure cell contents for comparison."""
+    closure = getattr(fn, "__closure__", None)
+    if closure is None:
+        return ()
+    return tuple(cell.cell_contents for cell in closure)
+
+
+class _MaskModWrapper:
+    """Wraps a mask_mod function with value-based equality.
+
+    BlockMask stores an arbitrary callable (mask_mod) in its pytree context.
+    The default __eq__ for functions uses identity comparison, which is too
+    strict when the same closure is recreated (e.g., defined inside forward()).
+    This wrapper compares functions by their code object and closure contents.
+    """
+
+    __slots__ = ("fn",)
+
+    def __init__(self, fn: _mask_mod_signature) -> None:
+        self.fn = fn
+
+    def __call__(self, *args, **kwargs):
+        return self.fn(*args, **kwargs)
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, _MaskModWrapper):
+            return False
+        if self.fn is other.fn:
+            return True
+        if (
+            inspect.isfunction(self.fn)
+            and inspect.isfunction(other.fn)
+            and self.fn.__code__ == other.fn.__code__
+            and _closure_contents(self.fn) == _closure_contents(other.fn)
+        ):
+            return True
+        return False
+
+    def __hash__(self) -> int:
+        if inspect.isfunction(self.fn):
+            return hash(self.fn.__code__)
+        return hash(self.fn)
+
+    def __repr__(self) -> str:
+        return f"_MaskModWrapper({self.fn})"
 
 
 class BlockMask:
@@ -921,29 +969,54 @@ class BlockMask:
         )
         return BlockMask(*mapped_attributes)
 
+    @staticmethod
+    def _wrap_context_value(attr: str, value: Any) -> Any:
+        if attr == "mask_mod":
+            return _MaskModWrapper(value)
+        return value
+
+    @staticmethod
+    def _unwrap_context_value(attr: str, value: Any) -> Any:
+        if attr == "mask_mod":
+            if not isinstance(value, _MaskModWrapper):
+                raise AssertionError(f"Expected _MaskModWrapper, got {type(value)}")
+            return value.fn
+        return value
+
     def _flatten(self):
-        """Flatten BlockMask into a list of tensors and context."""
+        """Flatten BlockMask into a list of tensors and context.
+
+        Wraps mask_mod in _MaskModWrapper for value-based comparison in TreeSpec.
+        """
         tensors = tuple(getattr(self, attr) for attr in self._TENSOR_ATTRS)
-        context = tuple(getattr(self, attr) for attr in self._CONTEXT_ATTRS)
+        context = tuple(
+            self._wrap_context_value(attr, getattr(self, attr))
+            for attr in self._CONTEXT_ATTRS
+        )
         return tensors, context
 
     @classmethod
     def _unflatten(cls, tensors, context):
         """Unflatten tensors and context back into a BlockMask."""
         kwargs = {
-            **dict(zip(cls._CONTEXT_ATTRS, context)),
-            **dict(zip(cls._TENSOR_ATTRS, tensors)),
+            attr: cls._unwrap_context_value(attr, val)
+            for attr, val in zip(cls._CONTEXT_ATTRS, context)
         }
+        kwargs.update(zip(cls._TENSOR_ATTRS, tensors))
         # pyrefly: ignore [bad-argument-type]
         return cls(**kwargs)
 
     def _flatten_with_keys(self):
-        """Flatten BlockMask with keys for better tracing."""
+        """Flatten BlockMask with keys for better tracing.
+
+        Wraps mask_mod in _MaskModWrapper for value-based comparison in TreeSpec.
+        """
         tensors = tuple(
             (GetAttrKey(attr), getattr(self, attr)) for attr in self._TENSOR_ATTRS
         )
         context = tuple(
-            (GetAttrKey(attr), getattr(self, attr)) for attr in self._CONTEXT_ATTRS
+            (GetAttrKey(attr), self._wrap_context_value(attr, getattr(self, attr)))
+            for attr in self._CONTEXT_ATTRS
         )
         return tensors, context
 
