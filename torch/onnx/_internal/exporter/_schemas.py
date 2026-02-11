@@ -220,6 +220,9 @@ def op_signature_from_function(
                 f"T_{param.name}"
             )
             type_constraints[param.name] = type_constraint
+            kwargs: dict[str, Any] = {}
+            if param.default is not inspect.Parameter.empty:
+                kwargs["default"] = param.default
             params.append(
                 ir.schemas.Parameter(
                     name=param.name,
@@ -227,9 +230,7 @@ def op_signature_from_function(
                     required=param.default is inspect.Parameter.empty,
                     # TODO: Handle variadic
                     variadic=False,
-                    default=param.default
-                    if param.default is not inspect.Parameter.empty
-                    else ir.schemas._EMPTY_DEFAULT,
+                    **kwargs,
                 )
             )
         else:
@@ -270,6 +271,9 @@ def op_signature_from_function(
                     )
                     type_constraints[type_constraint_name] = type_constraint
                 # 4. Create Parameter
+                kwargs: dict[str, Any] = {}
+                if param.default is not inspect.Parameter.empty:
+                    kwargs["default"] = param.default
                 params.append(
                     ir.schemas.Parameter(
                         name=param.name,
@@ -277,9 +281,7 @@ def op_signature_from_function(
                         required=param.default is inspect.Parameter.empty,
                         # TODO: Handle variadic
                         variadic=False,
-                        default=param.default
-                        if param.default is not inspect.Parameter.empty
-                        else ir.schemas._EMPTY_DEFAULT,
+                        **kwargs,
                     )
                 )
 
@@ -318,7 +320,6 @@ def op_signature_from_function(
                     type_constraint=type_constraint,
                     required=True,
                     variadic=False,
-                    default=ir.schemas._EMPTY_DEFAULT,
                 )
             )
 
