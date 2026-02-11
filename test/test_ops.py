@@ -60,6 +60,7 @@ from torch.testing._internal.common_utils import (
     IS_CI,
     IS_FBCODE,
     is_iterable_of_tensors,
+    IS_S390X,
     IS_SANDCASTLE,
     MACOS_VERSION,
     noncontiguous_like,
@@ -832,6 +833,7 @@ class TestCommon(TestCase):
 
     # Tests that the function produces the same result when called with
     #   noncontiguous tensors.
+    @unittest.skipIf(IS_S390X, "Test sometimes fails on s390x due to optimizations")
     @skipXPU
     @with_tf32_off
     @onlyNativeDeviceTypesAnd(["hpu"])
