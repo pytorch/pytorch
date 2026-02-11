@@ -160,7 +160,7 @@ def bench_grid_sampler_2d(
     rc = []
     sync_cmd = "torch.mps.synchronize()" if device == "mps" else ""
 
-    for mode in ("bilinear", "nearest"):
+    for mode in ("bilinear", "nearest", "bicubic"):
         for size in (64, 128, 256, 512):
             N, C = 4, 16
             inp = torch.randn(N, C, size, size, device=device, dtype=dtype)

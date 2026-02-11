@@ -854,8 +854,7 @@ class DistMathOpsTest(DTensorTestBase):
         t = torch.tensor([0, 1, 0, 3, 0, 5], device=self.device_type).float()
         dt = distribute_tensor(t, device_mesh, [Partial()])
         out = torch.ops.aten.linalg_vector_norm(dt, 0)
-        expected = torch.linalg.vector_norm(t, 0)
-        self.assertEqual(out.full_tensor(), expected)
+        self.assertEqual(out.full_tensor().item(), 3.0)
         self.assertEqual(out.placements, (Replicate(),))
 
     @with_comms
