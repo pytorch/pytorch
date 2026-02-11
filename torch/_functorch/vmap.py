@@ -72,7 +72,7 @@ def _validate_and_get_batch_size(
 ) -> int:
     batch_sizes = [
         arg.size(in_dim)
-        for in_dim, arg in zip(flat_in_dims, flat_args)
+        for in_dim, arg in zip(flat_in_dims, flat_args, strict=True)
         if in_dim is not None
     ]
     if len(batch_sizes) == 0:
@@ -181,19 +181,17 @@ def _create_batched_inputs(
         # Compile path avoids BatchedTensor dispatch by normalizing batch dims
         # with functional view ops (movedim) that are trace-friendly.
         batched_inputs = []
-        for in_dim, arg in zip(flat_in_dims, flat_args):
+        for in_dim, arg in zip(flat_in_dims, flat_args, strict=True):
             if in_dim is None:
                 batched_inputs.append(arg)
             elif in_dim == 0:
                 batched_inputs.append(arg)
             else:
-                batched_inputs.append(
-                    torch.ops.aten.movedim.default(arg, in_dim, 0)
-                )
+                batched_inputs.append(torch.ops.aten.movedim.default(arg, in_dim, 0))
     else:
         batched_inputs = [
             arg if in_dim is None else _add_batch_dim(arg, in_dim, vmap_level)
-            for in_dim, arg in zip(flat_in_dims, flat_args)
+            for in_dim, arg in zip(flat_in_dims, flat_args, strict=True)
         ]
     return tree_unflatten(batched_inputs, args_spec)
 
