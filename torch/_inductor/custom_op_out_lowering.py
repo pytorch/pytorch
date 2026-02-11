@@ -1,22 +1,17 @@
 """
 Inductor lowering support for custom op out-variant decomposition.
 
-Instead of running functional custom ops as FallbackKernel (ExternKernelAlloc,
-should_allocate=False), this module redirects them to ExternKernelOut
-(should_allocate=True) via the out-variant overload.
+This module redirects functional custom ops from FallbackKernel (ExternKernelAlloc,
+should_allocate=False) to ExternKernelOut (should_allocate=True) via the out-variant overload.
 
 Key benefit: ExternKernelOut participates in Inductor's buffer reuse via
 AllocateLine.plan() in memory_planning.py, so dead buffers with matching
 (size, dtype, device) are automatically reused for the output allocation.
-ExternKernelAlloc does NOT participate in this (see TODO at memory_planning.py:694).
-
-Usage:
-    Called from FallbackKernel.create() when config.lower_custom_ops_to_out_variant
-    is enabled and the op has a matching out-variant overload.
+ExternKernelAlloc does NOT participate in this for now(see TODO at memory_planning.py:694).
 
 Supports:
-    - Single-output ops: functional(x) -> Tensor → out_variant(x, *, out=buf) -> Tensor
-    - Multi-output ops: functional(x) -> (Tensor, Tensor) → out_variant(x, *, out1=buf1, out2=buf2) -> (Tensor, Tensor)
+    - Single-output ops: functional(x) -> Tensor TO out_variant(x, *, out=buf) -> Tensor
+    - Multi-output ops: functional(x) -> (Tensor, Tensor) TO out_variant(x, *, out1=buf1, out2=buf2) -> (Tensor, Tensor)
 """
 
 from __future__ import annotations
@@ -68,6 +63,13 @@ def try_lower_to_out_variant(
     out_arg_names = [arg.name for arg in out_schema.arguments if arg.is_out]
 
     if isinstance(example_output, torch.Tensor):
+        if len(out_arg_names) != 1:
+            log.debug(
+                "Skipping %s: single output but %d out args",
+                kernel,
+                len(out_arg_names),
+            )
+            return None
         return _lower_single_output(
             kernel,
             out_op,
@@ -110,14 +112,6 @@ def _lower_single_output(
     kwargs: dict[str, Any],
 ) -> Optional[ir.IRNode]:
     """Lower a single-output functional op to ExternKernelOut."""
-    if len(out_arg_names) != 1:
-        log.debug(
-            "Skipping %s: single output but %d out args",
-            kernel,
-            len(out_arg_names),
-        )
-        return None
-
     layout = ir.FixedLayout(
         device=example_output.device,
         dtype=example_output.dtype,
@@ -164,15 +158,26 @@ def _lower_multi_output(
         3. Return the list of AllocatingMultiOutput nodes. The caller wraps
            each in TensorBox.create().
     """
-    # Validate all outputs are tensors before creating any IR nodes.
+    # Validate all outputs are tensors on the same device before creating IR nodes.
     # This avoids leaking a registered packed node if we bail out midway.
+    device: Optional[torch.device] = None
     for i, tensor_out in enumerate(example_output):
         if not isinstance(tensor_out, torch.Tensor):
             log.debug("Skipping %s: non-tensor in multi-output at index %d", kernel, i)
             return None
+        if device is None:
+            device = tensor_out.device
+        elif tensor_out.device != device:
+            log.debug(
+                "Skipping %s: mixed devices in multi-output (index 0: %s, index %d: %s)",
+                kernel,
+                device,
+                i,
+                tensor_out.device,
+            )
+            return None
 
-    device = example_output[0].device
-
+    assert device is not None, "empty multi-output should have been caught earlier"
     packed = CustomOpMultiOutputNode(
         layout=ir.MultiOutputLayout(device=device),
         inputs=list(tensor_args),
@@ -283,20 +288,14 @@ class CustomOpExternKernelOut(ir.ExternKernelOut):
             result.append(f"{k}={V.graph.wrapper_code.val_to_arg_str(v)}")
         return result
 
-    # Keep old method names for backward compat with existing tests
-    codegen_args = _codegen_input_args
-    codegen_kwargs = _codegen_kwargs
-
 
 class AllocatingMultiOutput(ir.MultiOutput):
     """
-    A MultiOutput that overrides should_allocate() to return True.
+    MultiOutput with should_allocate()=True for buffer reuse.
 
-    This makes the output buffer participate in Inductor's AllocateLine.plan()
-    buffer reuse, unlike the base MultiOutput which returns False.
-
-    The actual op call is emitted by the parent CustomOpMultiOutputNode.
-    This node's codegen is a no-op since the parent handles the .out() call.
+    The parent CustomOpMultiOutputNode emits the .out() call; these children
+    are pre-allocated destinations. We skip base codegen which would emit
+    redundant "buf1 = buf0[0]" tuple-indexing (see MultiOutput.codegen).
     """
 
     def should_allocate(self) -> bool:
@@ -306,8 +305,8 @@ class AllocatingMultiOutput(ir.MultiOutput):
         # Skip the base MultiOutput codegen which would emit "buf = packed[i]".
         # The parent CustomOpMultiOutputNode emits the .out() call instead.
         # The buffer was already allocated via AllocateLine (should_allocate=True).
-        # Still run size/stride/alignment asserts for safety.
         if not self.skip_size_stride_alignment_checks:
+            # Still run size/stride/alignment asserts for safety.
             self.codegen_size_asserts(wrapper)
             self.codegen_alignment_asserts(wrapper)
 
@@ -366,7 +365,7 @@ class CustomOpMultiOutputNode(ir.ExternKernel):
         self.codegen_comment(wrapper)
         kernel_name = self.get_kernel_name()
 
-        # CRITICAL: Allocate child output buffers BEFORE emitting the .out() call.
+        # NOTE: Allocate child output buffers BEFORE emitting the .out() call.
         # In the normal multi-output flow (FallbackKernel), the packed node codegen
         # stores the result and children extract via indexing (buf1 = buf0[0]).
         # In our flow, the .out() call needs pre-allocated buffers as arguments.
