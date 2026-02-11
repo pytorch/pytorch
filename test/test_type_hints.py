@@ -2,8 +2,11 @@
 # Owner(s): ["module: typing"]
 
 import doctest
+import importlib.util
 import inspect
 import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -17,12 +20,7 @@ from torch.testing._internal.common_utils import (
 )
 
 
-try:
-    import mypy.api
-
-    HAVE_MYPY = True
-except ImportError:
-    HAVE_MYPY = False
+HAVE_PYREFLY = importlib.util.find_spec("pyrefly") is not None
 
 
 def get_examples_from_docstring(docstr):
@@ -46,7 +44,7 @@ def get_all_examples():
     }
 
     example_file_lines = [
-        "# mypy: allow-untyped-defs",
+        "# pyrefly: allow-untyped-defs",
         "",
         "import math",
         "import io",
@@ -98,40 +96,36 @@ def get_all_examples():
 class TestTypeHints(TestCase):
     # when this test fails on s390x, it also leads to OOM on test reruns
     @xfailIfS390X
-    @unittest.skipIf(not HAVE_MYPY, "need mypy")
+    @unittest.skipIf(not HAVE_PYREFLY, "need pyrefly")
     def test_doc_examples(self):
         """
-        Run documentation examples through mypy.
+        Run documentation examples through pyrefly.
         """
         fn = Path(__file__).resolve().parent / "generated_type_hints_smoketest.py"
         fn.write_text(get_all_examples())
 
-        # OK, so here's the deal.  mypy treats installed packages
-        # and local modules differently: if a package is installed,
-        # mypy will refuse to use modules from that package for type
+        # OK, so here's the deal.  Type checkers like mypy and pyrefly treat
+        # installed packages and local modules differently: if a package is
+        # installed, they will refuse to use modules from that package for type
         # checking unless the module explicitly says that it supports
-        # type checking. (Reference:
-        # https://mypy.readthedocs.io/en/latest/running_mypy.html#missing-imports
-        # )
+        # type checking.
         #
         # Now, PyTorch doesn't support typechecking, and we shouldn't
         # claim that it supports typechecking (it doesn't.) However, not
         # claiming we support typechecking is bad for this test, which
         # wants to use the partial information we get from the bits of
         # PyTorch which are typed to check if it typechecks.  And
-        # although mypy will work directly if you are working in source,
+        # although type checkers will work directly if you are working in source,
         # some of our tests involve installing PyTorch and then running
         # its tests.
         #
-        # The guidance we got from Michael Sullivan and Joshua Oreman,
-        # and also independently developed by Thomas Viehmann,
-        # is that we should create a fake directory and add symlinks for
-        # the packages that should typecheck.  So that is what we do
-        # here.
+        # The guidance is that we should create a fake directory and add
+        # symlinks for the packages that should typecheck.  So that is what
+        # we do here.
         #
-        # If you want to run mypy by hand, and you run from PyTorch
+        # If you want to run pyrefly by hand, and you run from PyTorch
         # root directory, it should work fine to skip this step (since
-        # mypy will preferentially pick up the local files first).  The
+        # pyrefly will preferentially pick up the local files first).  The
         # temporary directory here is purely needed for CI.  For this
         # reason, we also still drop the generated file in the test
         # source folder, for ease of inspection when there are failures.
@@ -145,18 +139,37 @@ class TestTypeHints(TestCase):
             except OSError:
                 raise unittest.SkipTest("cannot symlink") from None
             repo_rootdir = Path(__file__).resolve().parent.parent
+            # Use permissive config for documentation examples (equivalent to mypy's --no-strict-optional)
+            permissive_config = repo_rootdir / "pyrefly-permissive.toml"
+
             # TODO: Would be better not to chdir here, this affects the
             # entire process!
             with set_cwd(str(repo_rootdir)):
-                (stdout, stderr, result) = mypy.api.run(
-                    [
-                        "--cache-dir=.mypy_cache/doc",
-                        "--no-strict-optional",  # needed because of torch.lu_unpack, see gh-36584
-                        str(fn),
-                    ]
-                )
-            if result != 0:
-                self.fail(f"mypy failed:\n{stderr}\n{stdout}")
+                try:
+                    result = subprocess.run(
+                        [
+                            sys.executable,
+                            "-m",
+                            "pyrefly",
+                            "check",
+                            "--config",
+                            str(permissive_config),
+                            str(fn),
+                        ],
+                        capture_output=True,
+                        text=True,
+                        timeout=120,  # 2 minute timeout
+                    )
+                    stdout = result.stdout
+                    stderr = result.stderr
+                    exit_code = result.returncode
+                except subprocess.TimeoutExpired:
+                    self.fail("pyrefly timed out")
+                except subprocess.SubprocessError as e:
+                    self.fail(f"pyrefly subprocess error: {e}")
+
+            if exit_code != 0:
+                self.fail(f"pyrefly failed:\n{stderr}\n{stdout}")
 
 
 if __name__ == "__main__":
