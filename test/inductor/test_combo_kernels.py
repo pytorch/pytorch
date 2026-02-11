@@ -474,13 +474,118 @@ class ComboKernelTests(TestCase):
                 if "triton_poi_fused_0" in event["name"]
             ]
             if torch._inductor.config.combo_kernel_per_subkernel_blocks:
-                # It uses max for y grid, flatten grid approach will optimize this
-                self.assertEqual([791, 1024, 1], triton_events[0]["args"]["grid"])
+                self.assertEqual([3795, 1, 1], triton_events[0]["args"]["grid"])
             else:
                 self.assertEqual([791, 4096, 1], triton_events[0]["args"]["grid"])
 
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+        if torch._inductor.config.combo_kernel_per_subkernel_blocks:
+            FileCheck().check("x_pid_offset = local_pid % x_blocks_0").check(
+                "y_pid_offset = local_pid // x_blocks_0"
+            ).run(code[0])
+        else:
+            FileCheck().check("pid_offset = pid").run(code[0])
+
+    @skipIfXpu(msg="Profiler JSON traceEvents is not supported on XPU")
+    @requires_gpu_and_triton
+    @torch._dynamo.config.patch("assume_static_by_default", False)
+    def test_combo_kernel_dynamic_shapes_grid_changes(self):
+        from torch.profiler import ProfilerActivity
+
+        def fn(x, y):
+            return x.sin(), y.cos()
+
+        fn_c = torch.compile(fn)
+
+        def get_grid(x, y):
+            with tempfile.NamedTemporaryFile(suffix=".json") as trace_file:
+                trace_path = trace_file.name
+                activity = getattr(ProfilerActivity, GPU_TYPE.upper())
+                with torch.profiler.profile(
+                    activities=[activity],
+                    record_shapes=True,
+                ) as prof:
+                    out = fn_c(x, y)
+                prof.export_chrome_trace(trace_path)
+
+                with open(trace_path) as f:
+                    trace_json = json.load(f)
+                triton_events = [
+                    e
+                    for e in trace_json["traceEvents"]
+                    if "triton_poi_fused" in e["name"]
+                ]
+                return triton_events[0]["args"]["grid"], out
+
+        x1 = torch.randn(1024, 512, device=GPU_TYPE)
+        y1 = torch.randn(2048, 256, device=GPU_TYPE)
+        grid1, out1 = get_grid(x1, y1)
+        eager_out1 = fn(x1, y1)
+
+        x2 = torch.randn(512, 256, device=GPU_TYPE)
+        y2 = torch.randn(128, 64, device=GPU_TYPE)
+        grid2, out2 = get_grid(x2, y2)
+        eager_out2 = fn(x2, y2)
+
+        self.assertNotEqual(grid1[0], grid2[0])
+        self.assertEqual(out1, eager_out1)
+        self.assertEqual(out2, eager_out2)
+
+        if torch._inductor.config.combo_kernel_per_subkernel_blocks:
+            self.assertEqual(grid1[1], 1)
+            self.assertEqual(grid2[1], 1)
+
+    @skipIfXpu(msg="Profiler JSON traceEvents is not supported on XPU")
+    @requires_gpu_and_triton
+    def test_combo_kernel_yz_overflow(self):
+        from torch.profiler import ProfilerActivity
+
+        def fn(a, b):
+            a_permute = a.permute(0, 2, 1)
+            a_clone = a_permute.clone(memory_format=torch.contiguous_format)
+            a_view = a_clone.view(-1, a.shape[1])
+
+            b_permute = b.permute(0, 2, 1)
+            b_clone = b_permute.clone(memory_format=torch.contiguous_format)
+            b_view = b_clone.view(-1, b.shape[1])
+            return a_view, b_view
+
+        inps = (
+            torch.rand(4800, 34, 256, device=GPU_TYPE),
+            torch.rand(22630, 44, 256, device=GPU_TYPE),
+        )
+
+        out_eager = fn(*inps)
+        fn_c = torch.compile(fn)
+
+        with tempfile.NamedTemporaryFile(suffix=".json") as trace_file:
+            trace_path = trace_file.name
+            activity = getattr(ProfilerActivity, GPU_TYPE.upper())
+
+            with torch.profiler.profile(
+                activities=[activity],
+                record_shapes=True,
+            ) as prof:
+                out_compiled, code = run_and_get_code(fn_c, *inps)
+
+            prof.export_chrome_trace(trace_path)
+
+            with open(trace_path) as f:
+                trace_json = json.load(f)
+
+            triton_events = [
+                event
+                for event in trace_json["traceEvents"]
+                if "triton_poi_fused_0" in event["name"]
+            ]
+
+            if torch._inductor.config.combo_kernel_per_subkernel_blocks:
+                self.assertEqual([83660, 1, 1], triton_events[0]["args"]["grid"])
+            else:
+                self.assertEqual([4, 45260, 2], triton_events[0]["args"]["grid"])
+
+        self.assertEqual(out_eager, out_compiled)
 
 
 class ComboKernelBenchmarkTests(TestCase):

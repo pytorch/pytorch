@@ -91,7 +91,17 @@ class PlacementTrackingMode(TorchDispatchMode):
         ):
             raise NotImplementedError(f"No DTensorSpec found in args/kwargs for {func}")
 
+        # Set schema_info so the LRU cache key includes static args
         op_schema = OpSchema(func, args_schema, kwargs_schema)
+        schema_info = self.sharding_prop.op_to_schema_info.get(func)
+        if schema_info is None:
+            schema_info = (
+                self.sharding_prop.op_to_schema_info_for_single_dim_strategy.get(func)
+            )
+        if schema_info is not None:
+            op_schema.schema_info = schema_info
+            op_schema._recompute_comparison_key()
+
         if _are_we_tracing():
             output_sharding = self.sharding_prop.propagate_op_sharding_non_cached(
                 op_schema
