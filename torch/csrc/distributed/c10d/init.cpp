@@ -990,14 +990,6 @@ This class does not support ``__members__`` property.)");
       .value("PREMUL_SUM", ::c10d::ReduceOp::RedOpType::PREMUL_SUM);
   // Export enum values to ReduceOp class, except PREMUL_SUM which is handled
   // specially as a callable object below
-  reduce_op.attr("SUM") = ::c10d::ReduceOp::RedOpType::SUM;
-  reduce_op.attr("AVG") = ::c10d::ReduceOp::RedOpType::AVG;
-  reduce_op.attr("PRODUCT") = ::c10d::ReduceOp::RedOpType::PRODUCT;
-  reduce_op.attr("MIN") = ::c10d::ReduceOp::RedOpType::MIN;
-  reduce_op.attr("MAX") = ::c10d::ReduceOp::RedOpType::MAX;
-  reduce_op.attr("BAND") = ::c10d::ReduceOp::RedOpType::BAND;
-  reduce_op.attr("BOR") = ::c10d::ReduceOp::RedOpType::BOR;
-  reduce_op.attr("BXOR") = ::c10d::ReduceOp::RedOpType::BXOR;
   reduce_op.attr("PREMUL_SUM") = PremulSumCallable();
 
   // note(crcrpar): This could be removed because users will not pass
