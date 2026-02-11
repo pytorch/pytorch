@@ -23,7 +23,6 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_PREFIX,
 )
 from torch.distributed.utils import _apply_to_tensors
-from torch.nn.parallel.scatter_gather import _is_namedtuple
 from torch.utils._mode_utils import no_dispatch
 
 from .api import (
@@ -41,6 +40,12 @@ if TYPE_CHECKING:
     from torch.distributed.fsdp._fsdp_extensions import FSDPExtensions
 
     from ._flat_param import FlatParamHandle
+
+
+def _is_namedtuple(obj: Any) -> bool:
+    return (
+        isinstance(obj, tuple) and hasattr(obj, "_asdict") and hasattr(obj, "_fields")
+    )
 
 
 def collect_grad_tensors(output: Any) -> tuple[torch.Tensor, ...]:
@@ -87,8 +92,10 @@ def replace_grad_tensors(output: Any, tensor_iter: Iterator[torch.Tensor]) -> An
     dataclasses, and NamedTuples.
 
     Note: dataclass reconstruction uses ``dataclasses.replace()``, which calls
-    ``__init__``. Dataclasses with custom ``__init__`` validation or
-    ``__post_init__`` side effects may not be compatible.
+    ``__init__``. Dataclasses with custom ``__init__`` validation,
+    ``__post_init__`` side effects, or non-standard dict subclass constructors
+    may not be compatible. In practice, FSDP module outputs are expected to be
+    shallowly nested, so recursion depth is not a concern.
     """
     result = _replace_grad_tensors(output, tensor_iter)
     remaining = list(tensor_iter)
