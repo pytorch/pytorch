@@ -2,6 +2,7 @@
 import logging
 import threading
 from collections.abc import Callable, Sequence
+from contextlib import nullcontext
 from functools import lru_cache
 from itertools import chain
 from typing import cast, Optional
@@ -203,6 +204,12 @@ def _select_min_cost_strategy(
 
 
 class ShardingPropagator:
+    # Lock to protect FakeTensorMode context during tensor meta propagation.
+    # By default this is a no-op (nullcontext) for performance. Multi-threaded
+    # tests should set this to threading.Lock() to prevent race conditions
+    # when multiple threads enter different FakeTensorMode contexts.
+    _fake_mode_lock = nullcontext()
+
     def __init__(self) -> None:
         self.op_to_rules: dict[OpOverload, Callable[[OpSchema], OutputSharding]] = {}
         self.op_strategy_funcs: dict[
@@ -334,11 +341,15 @@ class ShardingPropagator:
 
         # NOTE: We must call the tracing in fake tensor mode so that it avoids
         # materializing memory.
-        fake_mode = detect_fake_mode() or FakeTensorMode()
-        with fake_mode:
-            fake_args = op_schema.gen_fake_args()
-            fake_kwargs = op_schema.gen_fake_kwargs()
-            fake_out = op_schema.op(*fake_args, **fake_kwargs)
+        # NOTE: Use _fake_mode_lock to serialize access when running in
+        # multi-threaded tests (lock must be set to threading.Lock()).
+        # This is a nullcontext by default.
+        with ShardingPropagator._fake_mode_lock:
+            fake_mode = detect_fake_mode() or FakeTensorMode()
+            with fake_mode:
+                fake_args = op_schema.gen_fake_args()
+                fake_kwargs = op_schema.gen_fake_kwargs()
+                fake_out = op_schema.op(*fake_args, **fake_kwargs)
 
         if isinstance(fake_out, torch.Tensor):
             return TensorMeta(
