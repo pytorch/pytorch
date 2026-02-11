@@ -299,7 +299,7 @@ def get_1d_input_placements_for_tensor(
     placements: list[Placement] = [Replicate()]
     for dim in range(t.ndim):
         placements.append(Shard(dim))
-    if include_partial and t.ndim > 0:
+    if include_partial:
         for reduce_op in PARTIAL_REDUCE_OPS:
             placements.append(Partial(reduce_op))
     return placements
@@ -315,9 +315,6 @@ def get_1d_output_placements_for_tensor(t: torch.Tensor) -> list:
     placements: list[Placement] = [Replicate()]
     for dim in range(t.ndim):
         placements.append(Shard(dim))
-
-    if t.ndim == 0:
-        return placements
 
     is_integer = not t.dtype.is_floating_point and not t.dtype.is_complex
     for reduce_op in PARTIAL_REDUCE_OPS:
