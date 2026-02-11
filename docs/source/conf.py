@@ -180,6 +180,10 @@ html_theme_options = {
     "header_links_before_dropdown": 6,
     "navbar_persistent": [],
     "use_edit_page_button": True,
+    # RunLLM Widget Configuration (uncomment and set assistant_id to enable)
+    # Each repository should have its own unique assistant_id from RunLLM
+    "runllm_assistant_id": "834",
+    "runllm_name": "PyTorch Assistant",
     "pytorch_project": "docs",
 }
 
@@ -2499,11 +2503,9 @@ autodoc_default_options = {
 
 html_css_files = [
     "css/jit.css",
-    "css/custom.css",
     "https://cdn.jsdelivr.net/npm/katex@0.10.0-beta/dist/katex.min.css",
 ]
 
-html_js_files = ["js/runllm-widget.js"]
 
 from sphinx.ext.coverage import CoverageBuilder
 
