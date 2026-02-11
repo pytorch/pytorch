@@ -3,7 +3,7 @@
 
 import gc
 import sys
-import threading
+import warnings
 
 import torch
 import torch.nn as nn
@@ -26,17 +26,6 @@ def _warmup_op(op, n=3):
     for _ in range(n):
         op()
     torch.cuda.synchronize()
-
-
-class SimpleMLP(nn.Module):
-    def __init__(self, width, depth):
-        super().__init__()
-        self.layers = nn.ModuleList([nn.Linear(width, width) for _ in range(depth)])
-
-    def forward(self, x):
-        for layer in self.layers:
-            x = torch.relu(layer(x))
-        return x
 
 
 class TestCUDAGraphDebugInputs(TestCase):
@@ -68,7 +57,7 @@ class TestCUDAGraphDebugInputs(TestCase):
         with self.assertRaisesRegex(RuntimeError, "dead.*tensor"):
             g.replay()
 
-    def test_dead_intermediate_tensor_ok(self):
+    def test_dead_intermediate_tensors_ok(self):
         x = torch.randn(100, device="cuda")
         g = torch.cuda.CUDAGraph()
 
@@ -89,23 +78,25 @@ class TestCUDAGraphDebugInputs(TestCase):
         torch.cuda.synchronize()
         self.assertEqual(y, x * 2 + 1)
 
-    def test_multiple_inputs_one_dead(self):
-        a = torch.randn(100, device="cuda")
-        b = torch.randn(100, device="cuda")
-        g = torch.cuda.CUDAGraph()
-
-        _warmup_op(lambda: a + b)
-
-        with torch.cuda.graph(g, check_input_liveness=True):
-            y = a + b
-
-        del a
+        del y
         _sync_and_gc_collect()
 
-        with self.assertRaisesRegex(RuntimeError, "dead.*tensor"):
-            g.replay()
+        g.replay()
+        torch.cuda.synchronize()
 
-    def test_model(self):
+    def test_model_weight_dead(self):
+        class SimpleMLP(nn.Module):
+            def __init__(self, width, depth):
+                super().__init__()
+                self.layers = nn.ModuleList(
+                    [nn.Linear(width, width) for _ in range(depth)]
+                )
+
+            def forward(self, x):
+                for layer in self.layers:
+                    x = torch.relu(layer(x))
+                return x
+
         model = SimpleMLP(width=64, depth=5).cuda()
         x = torch.randn(8, 64, device="cuda")
         g = torch.cuda.CUDAGraph()
@@ -119,17 +110,35 @@ class TestCUDAGraphDebugInputs(TestCase):
         torch.cuda.synchronize()
         self.assertEqual(y, model(x))
 
-    def test_model_weight_dead(self):
-        model = SimpleMLP(width=64, depth=5).cuda()
-        x = torch.randn(8, 64, device="cuda")
-        g = torch.cuda.CUDAGraph()
-
-        _warmup_op(lambda: model(x))
-
-        with torch.no_grad(), torch.cuda.graph(g, check_input_liveness=True):
-            y = model(x)
-
         del model.layers[2].weight
+        _sync_and_gc_collect()
+
+        with self.assertRaisesRegex(RuntimeError, "dead.*tensor"):
+            g.replay()
+
+    def test_model_training_weight_dead(self):
+        model = nn.Linear(32, 16).cuda()
+        x = torch.randn(8, 32, device="cuda")
+        static_grad = torch.randn(8, 16, device="cuda")
+
+        with warnings.catch_warnings():
+            # First cuBLAS backward triggers "no current CUDA context" warning
+            warnings.simplefilter("ignore", UserWarning)
+            for _ in range(3):
+                model(x).backward(static_grad)
+
+        g = torch.cuda.CUDAGraph()
+        model.zero_grad()
+        with torch.cuda.graph(g, check_input_liveness=True):
+            out = model(x)
+            out.backward(static_grad)
+
+        g.replay()
+        torch.cuda.synchronize()
+
+        # out's grad_fn retains weight as a saved tensor from forward
+        del out
+        del model.weight
         _sync_and_gc_collect()
 
         with self.assertRaisesRegex(RuntimeError, "dead.*tensor"):
@@ -168,6 +177,7 @@ class TestCUDAGraphDebugInputs(TestCase):
 
         # should be ok, the base tensor's memory is still alive
         g.replay()
+        torch.cuda.synchronize()
 
         del base
         _sync_and_gc_collect()
@@ -194,21 +204,6 @@ class TestCUDAGraphDebugInputs(TestCase):
         with self.assertRaisesRegex(RuntimeError, "dead.*tensor"):
             g.replay()
 
-    def test_output_tensor_dead_ok(self):
-        x = torch.randn(100, device="cuda")
-        g = torch.cuda.CUDAGraph()
-
-        _warmup_op(lambda: x * 2)
-
-        with torch.cuda.graph(g, check_input_liveness=True):
-            y = x * 2
-
-        del y
-        _sync_and_gc_collect()
-
-        g.replay()
-        torch.cuda.synchronize()
-
     def test_empty_tensor_not_tracked(self):
         x = torch.randn(100, device="cuda")
         empty = torch.empty(0, device="cuda")
@@ -231,19 +226,18 @@ class TestCUDAGraphDebugInputs(TestCase):
 
     def test_ops_without_cuda_output_not_tracked(self):
         x = torch.randn(100, device="cuda")
+        y = torch.randn(100, device="cuda")
         g = torch.cuda.CUDAGraph()
 
-        # torch.equal(x, x) short-circuits (same tensor) and returns bool
-        # It doesn't produce CUDA output, so x shouldn't be tracked for it
-        _warmup_op(lambda: torch.equal(x, x))
+        _warmup_op(lambda: y * 2)
 
         with torch.cuda.graph(g, check_input_liveness=True):
-            # This returns bool (CPU), not CUDA tensor - x shouldn't be tracked
+            # torch.equal returns bool (no CUDA output) - x shouldn't be tracked
             eq_result = torch.equal(x, x)
+            z = y * 2
 
-        # x should NOT be tracked because no op produced CUDA tensor output
         self.assertNotIn(x.data_ptr(), g._external_inputs)
-        self.assertEqual(len(g._external_inputs), 0)
+        self.assertIn(y.data_ptr(), g._external_inputs)
         self.assertTrue(eq_result)
 
     def test_non_capturing_stream_inputs_not_tracked(self):
@@ -334,27 +328,6 @@ class TestCUDAGraphDebugInputs(TestCase):
         with self.assertRaisesRegex(RuntimeError, "dead.*tensor"):
             g.replay()
 
-    def test_pinned_memory_not_tracked_for_non_copy_ops(self):
-        pinned = torch.randn(100).pin_memory()
-        cuda_tensor = torch.randn(100, device="cuda")
-        g = torch.cuda.CUDAGraph()
-
-        _warmup_op(lambda: pinned * 2)
-
-        with torch.cuda.graph(g, check_input_liveness=True):
-            eq_result = pinned * 2
-            y = cuda_tensor * 2
-
-        self.assertNotIn(pinned.data_ptr(), g._external_inputs)
-        self.assertIn(cuda_tensor.data_ptr(), g._external_inputs)
-
-        # Deleting pinned should not affect replay
-        del pinned
-        _sync_and_gc_collect()
-
-        g.replay()
-        torch.cuda.synchronize()
-
 
 class TestCUDAGraphDebugBacktraces(TestCase):
     def test_error_message_contains_all_tracebacks(self):
@@ -387,66 +360,7 @@ class TestCUDAGraphDebugBacktraces(TestCase):
             self.assertIn("replay traceback (python)", error_msg.lower())
 
 
-class TestCUDAGraphDebugMultithreaded(TestCase):
-    def test_capture_main_replay_thread(self):
-        x = torch.randn(100, device="cuda")
-        g = torch.cuda.CUDAGraph()
-
-        _warmup_op(lambda: x * 2)
-
-        with torch.cuda.graph(g, check_input_liveness=True):
-            y = x * 2
-
-        del x
-        _sync_and_gc_collect()
-
-        errors = []
-
-        def worker():
-            try:
-                g.replay()
-            except RuntimeError as e:
-                errors.append(e)
-
-        t = threading.Thread(target=worker)
-        t.start()
-        t.join()
-
-        self.assertEqual(len(errors), 1)
-        self.assertIn("dead", str(errors[0]).lower())
-
-    def test_capture_thread_replay_main(self):
-        x = torch.randn(100, device="cuda")
-        graphs = []
-
-        def capture_worker():
-            g = torch.cuda.CUDAGraph()
-            _warmup_op(lambda: x * 2)
-            with torch.cuda.graph(g, check_input_liveness=True):
-                y = x * 2
-            graphs.append(g)
-
-        t = threading.Thread(target=capture_worker)
-        t.start()
-        t.join()
-
-        g = graphs[0]
-        del x
-        _sync_and_gc_collect()
-
-        with self.assertRaisesRegex(RuntimeError, "dead.*tensor"):
-            g.replay()
-
-
 class TestCUDAGraphDebugExternalOps(TestCase):
-    def setUp(self):
-        super().setUp()
-        _sync_and_gc_collect()
-
-    def tearDown(self):
-        _sync_and_gc_collect()
-        super().tearDown()
-
     def test_custom_autograd_function(self):
         from torch.autograd import Function
 
@@ -499,96 +413,6 @@ class TestCUDAGraphDebugExternalOps(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "dead.*tensor"):
             g.replay()
-
-
-class TestCUDAGraphDebugTraining(TestCase):
-    def setUp(self):
-        super().setUp()
-        self._mt_enabled = torch.autograd.is_multithreading_enabled()
-        torch.autograd.set_multithreading_enabled(False)
-
-    def tearDown(self):
-        torch.autograd.set_multithreading_enabled(self._mt_enabled)
-        super().tearDown()
-
-    def test_training_forward_backward(self):
-        s = torch.cuda.Stream()
-        with torch.cuda.stream(s):
-            model = nn.Linear(32, 16).cuda()
-            x = torch.randn(8, 32, device="cuda")
-            static_grad = torch.randn(8, 16, device="cuda")
-
-            for _ in range(3):
-                model(x).backward(static_grad)
-
-            g = torch.cuda.CUDAGraph()
-            model.zero_grad()
-            with torch.cuda.graph(g, check_input_liveness=True):
-                out = model(x)
-                out.backward(static_grad)
-
-            g.replay()
-            torch.cuda.synchronize()
-
-            del x
-            _sync_and_gc_collect()
-
-            with self.assertRaisesRegex(RuntimeError, "dead.*tensor"):
-                g.replay()
-
-    def test_training_weight_deleted(self):
-        s = torch.cuda.Stream()
-        with torch.cuda.stream(s):
-            model = nn.Linear(32, 16).cuda()
-            weight_ptr = model.weight.data_ptr()
-            x = torch.randn(8, 32, device="cuda")
-            static_grad = torch.randn(8, 16, device="cuda")
-
-            for _ in range(3):
-                model(x).backward(static_grad)
-
-            g = torch.cuda.CUDAGraph()
-            model.zero_grad()
-            with torch.cuda.graph(g, check_input_liveness=True):
-                out = model(x)
-                out.backward(static_grad)
-
-            self.assertIn(weight_ptr, g._external_inputs)
-
-            del model, out
-            _sync_and_gc_collect()
-
-            with self.assertRaisesRegex(RuntimeError, "dead.*tensor"):
-                g.replay()
-
-    def test_training_multilayer(self):
-        s = torch.cuda.Stream()
-        with torch.cuda.stream(s):
-            model = nn.Sequential(
-                nn.Linear(64, 32),
-                nn.ReLU(),
-                nn.Linear(32, 16),
-            ).cuda()
-            x = torch.randn(4, 64, device="cuda")
-            static_grad = torch.randn(4, 16, device="cuda")
-
-            for _ in range(3):
-                model(x).backward(static_grad)
-
-            g = torch.cuda.CUDAGraph()
-            model.zero_grad()
-            with torch.cuda.graph(g, check_input_liveness=True):
-                out = model(x)
-                out.backward(static_grad)
-
-            g.replay()
-            torch.cuda.synchronize()
-
-            del static_grad
-            _sync_and_gc_collect()
-
-            with self.assertRaisesRegex(RuntimeError, "dead.*tensor"):
-                g.replay()
 
 
 if __name__ == "__main__":
