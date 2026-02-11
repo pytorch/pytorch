@@ -1,5 +1,0 @@
-ERROR
-  File "/tmp/tmpmw1999cd/r4/cr4r7xzlfiuous37omagi7443rum4heuuxjbqb4sr2rpwymihgxy.py", line 11, in pallas_fused_full_bbad4d67_kernel
-    out_ptr0[...] = tmp0.reshape(1, s54)
-                                    ^^^
-NameError: name 's54' is not defined

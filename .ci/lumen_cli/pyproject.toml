@@ -21,3 +21,6 @@ preview = true
 
 # Now you can select your preview rules, like RUF048
 extend-select = ["RUF048"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*.py" = ["S101"]

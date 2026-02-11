@@ -68,6 +68,21 @@ def munge_shape_guards(s: str) -> str:
     return "\n".join([line for line, nsubs in lines if nsubs > 0])
 
 
+def munge_global_state_json(text):
+    import re
+
+    match = re.search(r"\+- GLOBAL_STATE:.*", text)
+    if not match:
+        return ""
+
+    line = match.group(0)
+    while "[" in line:
+        line = re.sub(r"\[[^\[\]]*\]", '"#"', line)
+
+    line = re.sub(r':\s*(\d+|true|false|"[^"]*")', r': "#"', line)
+    return line
+
+
 LOG_PREFIX_PATTERNS = [
     re.compile(r"^\[rank\d+\]:\s*"),
     re.compile(r"^[A-Z]+:[^:]+:\s*"),
@@ -182,13 +197,132 @@ class LoggingTests(LoggingTestCase):
 
     @make_logging_test(recompiles=True)
     def test_recompiles(self, records):
-        def fn(x, y):
-            return torch.add(x, y)
+        def outmost_fn(x, ys, zs):
+            return outer_fn(x, ys, zs)
 
-        fn_opt = torch.compile(fn, backend="inductor")
-        fn_opt(torch.ones(1000, 1000), torch.ones(1000, 1000))
-        fn_opt(torch.ones(1000, 1000), 1)
-        self.assertGreater(len(records), 0)
+        def outer_fn(x, ys, zs):
+            return fn(x, ys, zs)
+
+        def fn(x, ys, zs):
+            return inner(x, ys, zs)
+
+        def inner(x, ys, zs):
+            for y, z in zip(ys, zs):
+                x += y * z
+            return x
+
+        ys = [1.0, 2.0, 3.0]
+        zs = [3.0]
+        x = torch.tensor([1.0])
+
+        fn_opt = torch.compile(outmost_fn, backend="eager")
+        fn_opt(x, ys, zs)
+        fn_opt(x, ys[:1], zs)
+
+        record_str = re.sub(
+            r'"[^"]*"',
+            "[file_path]",
+            "\n".join(r.getMessage() for r in records),
+        )
+        self.assertIn(
+            """\
+    - User stack trace:
+    -   File [file_path], line 201, in outmost_fn
+    -     return outer_fn(x, ys, zs)
+    -   File [file_path], line 204, in outer_fn
+    -     return fn(x, ys, zs)
+    -   File [file_path], line 207, in fn
+    -     return inner(x, ys, zs)
+    -   File [file_path], line 210, in inner
+    -     for y, z in zip(ys, zs):""",
+            record_str,
+        )
+
+    @make_logging_test(recompiles=True)
+    def test_recompiles_closure_variable_hint(self, records):
+        def make_cl(n1, n2):
+            def inner(x):
+                return x + n1 + n2
+
+            return inner
+
+        @torch.compile(backend="eager")
+        def fn(cl, x):
+            return cl(x)
+
+        fn(make_cl(0, 1), torch.ones(3))
+        fn(make_cl(0, 2), torch.ones(3))
+
+        record_str = "\n".join(r.getMessage() for r in records)
+        # The recompilation log should include a hint explaining which closure variable
+        # the cell_contents refers to
+        self.assertIn('(HINT: guard on "n2")', record_str)
+
+    @make_logging_test(recompiles=True)
+    def test_recompiles_nested_closure_variable_hint(self, records):
+        # block_mask.mask_mod.__closure__[0].cell_contents.__closure__[0].cell_contents
+        def make_inner_fn(inner_val):
+            def inner(x):
+                return x + inner_val
+
+            return inner
+
+        def make_outer_fn(outer_val, inner_fn):
+            def outer(x):
+                return inner_fn(x) * outer_val
+
+            return outer
+
+        class BlockMask:
+            def __init__(self, mask_mod):
+                self.mask_mod = mask_mod
+
+        @torch.compile(backend="eager")
+        def fn(block_mask, x):
+            return block_mask.mask_mod(x)
+
+        # inner_fn captures inner_val, outer captures (outer_val, inner_fn)
+        # This creates: block_mask.mask_mod.__closure__[0].cell_contents.__closure__[0].cell_contents
+        bm1 = BlockMask(make_outer_fn(2, make_inner_fn(10)))
+        bm2 = BlockMask(make_outer_fn(2, make_inner_fn(20)))
+
+        fn(bm1, torch.ones(3))
+        fn(bm2, torch.ones(3))
+
+        record_str = "\n".join(r.getMessage() for r in records)
+        # The recompilation log should show the hint for the first closure variable
+        self.assertIn('(HINT: guard on "inner_val")', record_str)
+        # Verify it shows the full nested path
+        self.assertIn("cell_contents.__closure__", record_str)
+
+    @make_logging_test(recompiles=True)
+    def test_recompiles_closure_variable_attribute_hint(self, records):
+        # Test when guard is on an attribute of the closure cell contents
+        # e.g., block_mask.mask_mod.__closure__[0].cell_contents.__code__
+        # The hint should still show which closure variable is involved
+        class Transform:
+            def __init__(self, scale):
+                self.scale = scale
+
+            def __call__(self, x):
+                return x * self.scale
+
+        def make_fn(transform):
+            def fn(x):
+                return transform(x)
+
+            return fn
+
+        @torch.compile(backend="eager")
+        def outer(inner_fn, x):
+            return inner_fn(x)
+
+        outer(make_fn(Transform(2)), torch.ones(3))
+        outer(make_fn(Transform(3)), torch.ones(3))  # transform.scale changes
+
+        record_str = "\n".join(r.getMessage() for r in records)
+        # The hint should show the full path from closure var: "transform".scale
+        self.assertIn('(HINT: guard on "transform".scale)', record_str)
 
     test_dynamo_debug = within_range_record_test(30, 90, dynamo=logging.DEBUG)
     test_dynamo_info = within_range_record_test(2, 10, dynamo=logging.INFO)
@@ -231,7 +365,13 @@ class LoggingTests(LoggingTestCase):
 WON'T CONVERT dynamo_error_fn test_logging.py line N
 due to:
 Traceback (most recent call last):
-torch._dynamo.exc.TorchRuntimeError: Dynamo failed to run FX node with fake tensors: call_method add(*(FakeTensor(..., size=(1000, 1000), grad_fn=<MulBackward0>), FakeTensor(..., size=(10, 10))), **{}): got RuntimeError('Attempting to broadcast a dimension of length 10 at -1! Mismatching argument at index 1 had torch.Size([10, 10]); but expected shape should be broadcastable to [1000, 1000]')
+torch._dynamo.exc.TorchRuntimeError: RuntimeError when making fake tensor call
+  Explanation: Dynamo failed to run FX node with fake tensors: call_method add(*(FakeTensor(..., size=(1000, 1000), grad_fn=<MulBackward0>), FakeTensor(..., size=(10, 10))), **{}): got RuntimeError('Attempting to broadcast a dimension of length 10 at -1! Mismatching argument at index 1 had torch.Size([10, 10]); but expected shape should be broadcastable to [1000, 1000]')
+  Hint: Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance("force_eager")`.
+
+  Developer debug context:
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb4315.html
 
 from user code:
    File "test_logging.py", line N, in dynamo_error_fn
@@ -239,7 +379,7 @@ from user code:
         )
 
     test_aot = within_range_record_test(2, 6, aot=logging.INFO)
-    test_inductor_debug = within_range_record_test(3, 28, inductor=logging.DEBUG)
+    test_inductor_debug = within_range_record_test(3, 33, inductor=logging.DEBUG)
     test_inductor_info = within_range_record_test(2, 10, inductor=logging.INFO)
 
     @make_logging_test()
@@ -278,7 +418,14 @@ torch._inductor.exc.InductorError: LoweringException: AssertionError:
   target: aten.round.default
   args[0]: TensorBox(StorageBox(
     InputBuffer(name='primals_1', layout=FixedLayout('cpu', torch.float32, size=[1000, 1000], stride=[1000, 1]))
-  ))""",
+  ))AssertionError:
+  target: aten.round.default
+  args[0]: TensorBox(StorageBox(
+    InputBuffer(name='primals_1', layout=FixedLayout('cpu', torch.float32, size=[1000, 1000], stride=[1000, 1]))
+  ))
+Found from :
+   File "test_logging.py", line N, in inductor_error_fn
+    output = torch.round(a)""",
         )
 
         exitstack.close()
@@ -334,6 +481,23 @@ torch._inductor.exc.InductorError: LoweringException: AssertionError:
         logger.info("hi")
         self.assertEqual(len(records), 1)
 
+    @make_settings_test("torch._logging")
+    def test_directory_based_logging(self, records):
+        # Test that the package itself can log
+        logger = logging.getLogger("torch._logging")
+        logger.info("package log")
+
+        # Test that submodules can also log
+        sublogger = logging.getLogger("torch._logging._internal")
+        sublogger.info("submodule log")
+
+        # We should have at least 2 records (one from package, one from submodule)
+        self.assertGreaterEqual(len(records), 2)
+
+        # Verify both loggers are registered and have handlers
+        self.assertTrue(len(logger.handlers) > 0 or logger.propagate)
+        self.assertTrue(len(sublogger.handlers) > 0 or sublogger.propagate)
+
     @make_logging_test(all=logging.DEBUG, dynamo=logging.INFO)
     def test_all(self, _):
         registry = torch._logging._internal.log_registry
@@ -366,6 +530,292 @@ torch._inductor.exc.InductorError: LoweringException: AssertionError:
         fn(torch.ones(1))
 
         self.assertEqual(len(records), 1)
+
+    @make_logging_test(side_effects=True)
+    def test_side_effects(self, records):
+        my_list = [1, 2, 3]
+
+        @torch.compile(backend="eager")
+        def fn(x, lst):
+            lst.append(4)
+            return x + len(lst)
+
+        fn(torch.ones(1), my_list)
+
+        self.assertEqual(len(records), 1)
+        self.assertExpectedInline(
+            munge_exc(records[0].getMessage()),
+            """\
+Mutating object of type list (source name: L['lst'])
+
+      File "test_logging.py", line N, in test_side_effects
+        fn(torch.ones(1), my_list)
+      File "test_logging.py", line N, in fn
+        lst.append(4)
+""",
+        )
+
+    @make_logging_test(side_effects=True)
+    def test_side_effects_nested_calls(self, records):
+        outer_list = [1]
+
+        def inner(lst):
+            lst.append(2)
+            return len(lst)
+
+        @torch.compile(backend="eager")
+        def outer(x, my_list):
+            result = inner(my_list)
+            my_list.append(3)
+            return x + result + len(my_list)
+
+        outer(torch.ones(1), outer_list)
+
+        self.assertEqual(len(records), 1)
+        self.assertExpectedInline(
+            munge_exc(records[0].getMessage()),
+            """\
+Mutating object of type list (source name: L['my_list'])
+
+      File "test_logging.py", line N, in test_side_effects_nested_calls
+        outer(torch.ones(1), outer_list)
+      File "test_logging.py", line N, in outer
+        result = inner(my_list)
+      File "test_logging.py", line N, in inner
+        lst.append(2)
+
+    ********
+
+      File "test_logging.py", line N, in test_side_effects_nested_calls
+        outer(torch.ones(1), outer_list)
+      File "test_logging.py", line N, in outer
+        my_list.append(3)
+""",
+        )
+
+    @make_logging_test(side_effects=True)
+    def test_side_effects_multiple_mutations_same_object(self, records):
+        my_list = [1, 2, 3]
+
+        @torch.compile(backend="eager")
+        def fn(x, lst):
+            lst.append(4)
+            lst.append(5)
+            lst.extend([6, 7])
+            lst.pop()
+            return x + len(lst)
+
+        fn(torch.ones(1), my_list)
+
+        self.assertEqual(len(records), 1)
+        self.assertExpectedInline(
+            munge_exc(records[0].getMessage()),
+            """\
+Mutating object of type list (source name: L['lst'])
+
+      File "test_logging.py", line N, in test_side_effects_multiple_mutations_same_object
+        fn(torch.ones(1), my_list)
+      File "test_logging.py", line N, in fn
+        lst.append(4)
+
+    ********
+
+      File "test_logging.py", line N, in test_side_effects_multiple_mutations_same_object
+        fn(torch.ones(1), my_list)
+      File "test_logging.py", line N, in fn
+        lst.append(5)
+
+    ********
+
+      File "test_logging.py", line N, in test_side_effects_multiple_mutations_same_object
+        fn(torch.ones(1), my_list)
+      File "test_logging.py", line N, in fn
+        lst.extend([6, 7])
+
+    ********
+
+      File "test_logging.py", line N, in test_side_effects_multiple_mutations_same_object
+        fn(torch.ones(1), my_list)
+      File "test_logging.py", line N, in fn
+        lst.pop()
+""",
+        )
+
+    @make_logging_test(side_effects=True)
+    def test_side_effects_dict_mutations(self, records):
+        my_dict = {"a": 1}
+
+        @torch.compile(backend="eager")
+        def fn(x, d):
+            d["b"] = 2
+            d["c"] = 3
+            return x + len(d)
+
+        fn(torch.ones(1), my_dict)
+
+        self.assertEqual(len(records), 1)
+        self.assertExpectedInline(
+            munge_exc(records[0].getMessage()),
+            """\
+Mutating object of type dict (source name: L['d'])
+
+      File "test_logging.py", line N, in test_side_effects_dict_mutations
+        fn(torch.ones(1), my_dict)
+      File "test_logging.py", line N, in fn
+        d["b"] = 2
+
+    ********
+
+      File "test_logging.py", line N, in test_side_effects_dict_mutations
+        fn(torch.ones(1), my_dict)
+      File "test_logging.py", line N, in fn
+        d["c"] = 3
+""",
+        )
+
+    @make_logging_test(side_effects=True)
+    def test_side_effects_attribute_mutations(self, records):
+        class MyClass:
+            def __init__(self):
+                self.value = 10
+                self.count = 0
+
+        obj = MyClass()
+
+        @torch.compile(backend="eager")
+        def fn(x, o):
+            o.value = 20
+            o.count = 1
+            o.count = 2
+            return x + o.value + o.count
+
+        fn(torch.ones(1), obj)
+
+        self.assertEqual(len(records), 1)
+        self.assertExpectedInline(
+            munge_exc(records[0].getMessage()),
+            """\
+Mutating object of type MyClass (source name: L['o'])
+
+      File "test_logging.py", line N, in test_side_effects_attribute_mutations
+        fn(torch.ones(1), obj)
+      File "test_logging.py", line N, in fn
+        o.value = 20
+
+    ********
+
+      File "test_logging.py", line N, in test_side_effects_attribute_mutations
+        fn(torch.ones(1), obj)
+      File "test_logging.py", line N, in fn
+        o.count = 1
+
+    ********
+
+      File "test_logging.py", line N, in test_side_effects_attribute_mutations
+        fn(torch.ones(1), obj)
+      File "test_logging.py", line N, in fn
+        o.count = 2
+""",
+        )
+
+    @make_logging_test(side_effects=True)
+    def test_side_effects_local_list_no_log(self, records):
+        """Test that lists created inside compiled region don't log side effects."""
+
+        @torch.compile(backend="eager")
+        def fn(x):
+            my_list = [1, 2, 3]  # Created inside compiled region
+            my_list.append(4)
+            return x + len(my_list)
+
+        fn(torch.ones(1))
+
+        # Should NOT have logged the list mutation since it's a local variable
+        self.assertEqual(len(records), 0)
+
+    @make_logging_test(side_effects=True)
+    def test_side_effects_local_object_with_log(self, records):
+        """Test that returned objects created inside compiled region still log attribute mutations."""
+
+        class MyClass:
+            def __init__(self):
+                self.value = 10
+
+        @torch.compile(backend="eager")
+        def fn(x):
+            obj = MyClass()  # Created inside compiled region
+            obj.value = 20
+            return x + obj.value, obj
+
+        fn(torch.ones(1))
+
+        self.assertEqual(len(records), 1)
+        self.assertExpectedInline(
+            munge_exc(records[0].getMessage()),
+            """\
+Mutating object of type MyClass (source: created in torch.compile region)
+
+      File "test_logging.py", line N, in test_side_effects_local_object_with_log
+        fn(torch.ones(1))
+      File "test_logging.py", line N, in fn
+        obj = MyClass()  # Created inside compiled region
+      File "test_logging.py", line N, in __init__
+        self.value = 10
+
+    ********
+
+      File "test_logging.py", line N, in test_side_effects_local_object_with_log
+        fn(torch.ones(1))
+      File "test_logging.py", line N, in fn
+        obj.value = 20
+""",
+        )
+
+    @make_logging_test(side_effects=True)
+    def test_side_effects_nn_module_buffer(self, records):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buf", torch.rand(2, 2))
+
+            def forward(self, x):
+                self.buf += 1
+                return x + self.buf
+
+        @torch.compile(backend="eager")
+        def fn(mod, x):
+            return mod(x)
+
+        fn(Mod(), torch.ones(1))
+
+        self.assertEqual(len(records), 1)
+        self.assertExpectedInline(
+            munge_exc(records[0].getMessage()),
+            """\
+Mutating object of type dict (source name: L['mod']._buffers)
+
+      File "test_logging.py", line N, in test_side_effects_nn_module_buffer
+        fn(Mod(), torch.ones(1))
+      File "test_logging.py", line N, in fn
+        return mod(x)
+      File "test_logging.py", line N, in forward
+        self.buf += 1
+""",
+        )
+
+    @make_logging_test(side_effects=True)
+    @torch._dynamo.config.patch(side_effect_replay_policy="silent")
+    def test_side_effects_silent_config(self, records):
+        my_list = [1, 2, 3]
+
+        @torch.compile(backend="eager")
+        def fn(x, lst):
+            lst.append(4)
+            return x + len(lst)
+
+        fn(torch.ones(1), my_list)
+
+        self.assertEqual(len(records), 0)
 
     @make_settings_test("torch._dynamo.utils")
     def test_dump_compile_times(self, records):
@@ -821,6 +1271,20 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
 +- __SHAPE_GUARD__: 3 <= L['y'].size()[0] <= 14  # torch._check(x.size(0) > 5)  # #:# in # #:# in # and torch._check(x.size(0) < 30)  # #:# in # #:# in #""",  # noqa: B950
         )
 
+    @make_logging_test(guards=True)
+    def test_global_state_guard_logging(self, records):
+        @torch.compile(backend="eager")
+        def f(x):
+            return x + 1
+
+        f(torch.randn(3))
+
+        record = self.getRecord(records, "TREE_GUARD_MANAGER")
+        self.assertExpectedInline(
+            munge_global_state_json(record.getMessage()),
+            """+- GLOBAL_STATE: ___check_global_state() against {"allow_bf16_reduce": "#","allow_fp16_reduce": "#","allow_tf32": "#","autocast_state":{"cached_enabled": "#","dtype": "#","enabled": "#"},"default_dtype": "#","deterministic_algorithms": "#","deterministic_algorithms_warn_only": "#","grad_mode": "#","num_threads": "#","torch_function": "#","torch_function_all_disabled": "#"}""",  # noqa: B950
+        )
+
     @make_logging_test(cudagraph_static_inputs=True)
     def test_cudagraph_static_inputs(self, records):
         @torch.compile(mode="reduce-overhead")
@@ -1008,6 +1472,7 @@ exclusions = {
     "recompiles",
     "recompiles_verbose",
     "graph_breaks",
+    "side_effects",
     "graph",
     "graph_code",
     "graph_code_verbose",
@@ -1030,12 +1495,15 @@ exclusions = {
     "benchmarking",
     "loop_ordering",
     "loop_tiling",
+    "auto_chunker",
     "autotuning",
     "graph_region_expansion",
     "hierarchical_compile",
     "compute_dependencies",
     "annotation",
     "node_runtime_estimation",
+    "caching",
+    "overlap_scheduling",
 }
 for name in torch._logging._internal.log_registry.artifact_names:
     if name not in exclusions:

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import functools
+import math
 import operator
 from typing import Any, TYPE_CHECKING
+
+import sympy
 
 import torch
 
@@ -36,15 +39,11 @@ def is_power_of_2(n: int) -> bool:
 
 def next_power_of_2(n: int) -> int:
     """Return the smallest power of 2 greater than or equal to n"""
-    n -= 1
-    n |= n >> 1
-    n |= n >> 2
-    n |= n >> 4
-    n |= n >> 8
-    n |= n >> 16
-    n |= n >> 32
-    n += 1
-    return n
+    if isinstance(n, sympy.Integer):
+        n = int(n)
+    if n <= 0:
+        return 1
+    return 1 << (n - 1).bit_length()
 
 
 def last_power_of_2(n: int) -> int:
@@ -112,7 +111,6 @@ def get_max_y_grid() -> int:
 
 
 try:
-    # pyrefly: ignore [import-error]
     import colorama
 
     HAS_COLORAMA = True
@@ -208,7 +206,7 @@ def torch_dtype_to_jax_runtime(dtype: torch.dtype) -> Any:
     Returns:
         JAX dtype object (e.g., jnp.float32 object itself)
     """
-    import jax.numpy as jnp  # pyrefly: ignore [import-error]
+    import jax.numpy as jnp  # pyrefly: ignore [import-error, missing-import]
 
     dtype_map = {
         torch.float32: jnp.float32,
@@ -247,3 +245,107 @@ def torch_dtype_to_jax(dtype: torch.dtype) -> str:
     if dtype_name == "bool":
         dtype_name = "bool_"
     return f"jnp.{dtype_name}"
+
+
+def pallas_partial_reduce(reduce_fn: Any, v: Any, pw_numel: int, red_numel: int) -> Any:
+    """
+    Helper for partial reductions in Pallas kernels.
+
+    Reorders axes and reduces, returning result with keepdims-style shape
+    for proper in-kernel broadcasting.
+
+    Args:
+        reduce_fn: The reduction function to apply (e.g., jnp.sum, jnp.max)
+        v: The input array to reduce
+        pw_numel: The number of pointwise elements
+        red_numel: The number of reduction elements
+
+    Returns:
+        Reduced array with keepdims-style shape
+    """
+    import jax.numpy as jnp  # pyrefly: ignore [import-error, missing-import]
+
+    shape = tuple(v.shape)
+    # Find contiguous axes whose product = red_numel (search from right)
+    red_axes = None
+    for i in range(len(shape) - 1, -1, -1):
+        prod = 1
+        for j in range(i, -1, -1):
+            prod *= shape[j]
+            if prod == red_numel:
+                red_axes = list(range(j, i + 1))
+                break
+        if red_axes is not None:
+            break
+    if red_axes is None:
+        red_axes = [len(shape) - 1]
+    # Build output shape with 1s for reduced dimensions (keepdims style)
+    out_shape = tuple(1 if i in red_axes else s for i, s in enumerate(shape))
+    # Move pointwise axes to front, reduction axes to back
+    pw_axes = [i for i in range(len(shape)) if i not in red_axes]
+    reordered = jnp.moveaxis(v, pw_axes, list(range(len(pw_axes))))
+    result = reduce_fn(reordered.reshape(pw_numel, red_numel), axis=-1)
+    return result.reshape(out_shape)
+
+
+def pallas_gpu_pad_inputs(inputs: list[Any], alignment: int = 128) -> list[Any]:
+    """Flatten and pad each input JAX array to a multiple of alignment."""
+    import jax.numpy as jnp  # pyrefly: ignore [import-error, missing-import]
+
+    padded = []
+    for inp in inputs:
+        flat = inp.flatten()
+        orig_size = flat.size
+        aligned_size = ((orig_size + alignment - 1) // alignment) * alignment
+        if orig_size != aligned_size:
+            padded.append(jnp.pad(flat, (0, aligned_size - orig_size)))
+        else:
+            padded.append(flat)
+    return padded
+
+
+def pallas_gpu_align_output_specs(
+    out_shapes: tuple[Any, ...],
+    out_dtypes: tuple[Any, ...],
+    alignment: int = 128,
+) -> tuple[tuple[Any, ...], list[bool]]:
+    """Build aligned output ShapeDtypeStruct specs for GPU kernels.
+
+    Returns (aligned_specs, is_scalar_output) where is_scalar_output[i] is True
+    when the i-th output is scalar and should not be padded/unpadded.
+    """
+    import jax  # pyrefly: ignore [import-error, missing-import]
+
+    aligned_specs = []
+    is_scalar = []
+    for shape, dtype in zip(out_shapes, out_dtypes):
+        numel = math.prod(shape)
+        if numel <= 1:
+            aligned_specs.append(jax.ShapeDtypeStruct(shape, dtype))
+            is_scalar.append(True)
+        else:
+            aligned_numel = ((numel + alignment - 1) // alignment) * alignment
+            aligned_specs.append(jax.ShapeDtypeStruct((aligned_numel,), dtype))
+            is_scalar.append(False)
+    return tuple(aligned_specs), is_scalar
+
+
+def pallas_gpu_unpad_results(
+    results: Any,
+    orig_shapes: tuple[Any, ...],
+    is_scalar_output: list[bool] | None = None,
+) -> Any:
+    """Remove padding from GPU kernel results and reshape to original shapes.
+
+    If is_scalar_output is None, all outputs are treated as non-scalar.
+    """
+    if not isinstance(results, tuple):
+        results = (results,)
+    unpadded = []
+    for i, (res, shape) in enumerate(zip(results, orig_shapes)):
+        if is_scalar_output is not None and is_scalar_output[i]:
+            unpadded.append(res)
+        else:
+            orig_numel = math.prod(shape)
+            unpadded.append(res[:orig_numel].reshape(shape))
+    return unpadded[0] if len(unpadded) == 1 else tuple(unpadded)

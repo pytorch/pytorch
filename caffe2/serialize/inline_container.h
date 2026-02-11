@@ -90,8 +90,8 @@ typedef struct mz_zip_archive mz_zip_archive;
 // model.json as the last file when writing after we have accumulated all
 // other information.
 
-namespace caffe2 {
-namespace serialize {
+
+namespace caffe2::serialize {
 
 static constexpr const char* kSerializationIdRecordName =
     ".data/serialization_id";
@@ -306,5 +306,4 @@ getOffset(size_t cursor, size_t filename_size, size_t size, uint64_t alignment);
 
 } // namespace detail
 
-} // namespace serialize
-} // namespace caffe2
+} // namespace caffe2::serialize

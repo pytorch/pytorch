@@ -16,6 +16,8 @@
 #else
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_strided.h>
+
+#include <algorithm>
 #endif
 namespace at::native {
 
@@ -567,7 +569,7 @@ void apply_lstsq(const Tensor& A, Tensor& B, Tensor& rank, Tensor& singular_valu
   auto n = A.size(-1);
   auto nrhs = B.size(-1);
   auto lda = std::max<int64_t>(1, m);
-  auto ldb = std::max<int64_t>(1, std::max(m, n));
+  auto ldb = std::max<int64_t>({static_cast<int64_t>(1), m, n});
   auto infos_data = infos.data_ptr<int>();
 
   // only 'gels' driver does not compute the rank

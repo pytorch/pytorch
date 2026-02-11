@@ -1,7 +1,5 @@
 #include <torch/nn/modules/container/functional.h>
 
-#include <torch/types.h>
-
 #include <functional>
 #include <utility>
 

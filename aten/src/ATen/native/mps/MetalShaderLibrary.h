@@ -64,6 +64,7 @@ class MetalKernelFunction {
   void startEncoding();
   void setArg(unsigned idx, const at::TensorBase& t);
   void setArg(unsigned idx, const void* ptr, uint64_t size);
+  void setErrorBufferIndex(unsigned idx);
   template <
       typename T,
       typename = std::enable_if_t<

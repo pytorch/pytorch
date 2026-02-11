@@ -252,6 +252,21 @@ class FunctionTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         self.assertTrue(same(actual, expected))
         self.assertTrue(cnt.frame_count, 1)
 
+    def test_foreach_norm_inf_dynamic(self):
+        def fn(tensors):
+            return torch._foreach_norm(tensors, float("inf"))
+
+        fn_opt = torch.compile(fn, fullgraph=True, dynamic=True)
+
+        tensors = [torch.randn(10), torch.randn(20, 30)]
+
+        expected = fn(tensors)
+        actual = fn_opt(tensors)
+
+        self.assertEqual(len(actual), len(expected))
+        for a, e in zip(actual, expected):
+            self.assertEqual(a, e)
+
     def test_addcmul_(self):
         from copy import deepcopy
 
@@ -1296,12 +1311,10 @@ class FunctionTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
             results.append(x.sin())
         else:
             results.append(x.cos())
-        # TODO: add sourceless builder for types.UnionType
-        # if sys.version_info >= (3, 10):
-        #     if isinstance([x], list | tuple):
-        #         results.append(x.sin())
-        #     else:
-        #         results.append(x.cos())
+        if isinstance([x], list | tuple):
+            results.append(x.sin())
+        else:
+            results.append(x.cos())
         return results
 
     @make_test
@@ -2073,7 +2086,7 @@ class FunctionTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         return mytuple(tmp.x, tmp[1], tmp.xy + b)
 
     @make_test
-    def test_namedtuple_replace(a, b):
+    def test_namedtuple_replace_1(a, b):
         mytuple = collections.namedtuple("mytuple", ["x", "y"])
         t = mytuple(a, b)
         t._replace(x=b)
@@ -2129,7 +2142,7 @@ class FunctionTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         return mytuple.add(), mytuple.static_method(), mytuple.class_method()
 
     @make_test
-    def test_namedtuple_replace(a, b):
+    def test_namedtuple_replace_2(a, b):
         mytuple = FunctionTests.MyNamedTuple(a, b)
         replaced = mytuple._replace(first=b)
         return mytuple.first + mytuple.second + replaced.first + replaced.second
@@ -2154,6 +2167,16 @@ class FunctionTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
             return a + b
         else:
             return a - b
+
+    @make_test
+    def test_namedtuple_equality(a, b):
+        mytuple_1 = FunctionTests.MyNamedTuple(a, b)
+        mytuple_2 = FunctionTests.MyNamedTuple(a, b)
+
+        if mytuple_1 == mytuple_2:
+            return 1.0 + a + b
+        else:
+            return a + b
 
     @make_test
     def test_generic_namedtuple_hasattr(a, b):
@@ -3654,7 +3677,7 @@ class GraphModule(torch.nn.Module):
 
             self.assertEqual(
                 range[index],
-                range_variable.apply_index(index).as_python_constant(),
+                range_variable.apply_index(None, index).as_python_constant(),
             )
 
             if expected is not None:
@@ -4192,6 +4215,37 @@ class GraphModule(torch.nn.Module):
         finally:
             torch = old_torch
 
+    @unittest.skipIf(not HAS_GPU, "requires gpu")
+    def test_wrap_triton_handled_during_tracing(self):
+        import triton
+        import triton.language as tl
+
+        @triton.jit
+        def sin_kernel(x_ptr, y_ptr, n_elements, BLOCK_SIZE: "tl.constexpr"):
+            pid = tl.program_id(axis=0)
+            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(x_ptr + offsets, mask=mask)
+            tl.store(y_ptr + offsets, tl.sin(x), mask=mask)
+
+        def fn(x: torch.Tensor) -> torch.Tensor:
+            out = torch.empty_like(x)
+            n_elements = x.numel()
+
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+            wrapped = torch.library.wrap_triton(sin_kernel)
+            wrapped[grid](x, out, n_elements, BLOCK_SIZE=128)
+
+            return out
+
+        compiled = torch.compile(fn, fullgraph=True, backend="eager")
+
+        x = torch.randn(1024, device=device_type)
+        result = compiled(x)
+
+        self.assertEqual(result, torch.sin(x))
+
 
 def udf_mul(x, y):
     return x * y
@@ -4536,6 +4590,17 @@ class DefaultsTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
             return d[k] * x
 
         opt_fn = torch.compile(fn, backend="eager")
+        x = torch.randn(4)
+        res = fn(x)
+        ref = opt_fn(x)
+        self.assertEqual(ref, res)
+
+    def test_frozenset_reconstruction2(self):
+        def fn(x):
+            s = frozenset([1, x])
+            return x + 1, s
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.randn(4)
         res = fn(x)
         ref = opt_fn(x)
@@ -5090,6 +5155,26 @@ class DefaultsTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         self.assertEqual(ref_x, res_x)
         self.assertEqual(ref_tup, res_tup)
 
+    def test_udf_tuple_equality(self):
+        class MyTuple(tuple):  # noqa: SLOT001
+            def __new__(cls, items):
+                return super().__new__(cls, items)
+
+        def fn(x, my_tuple_1, my_tuple_2):
+            """Returns different values based on equality check"""
+            if my_tuple_1 != my_tuple_2:
+                return x + 1.0
+            else:
+                return x - 1.0
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(1)
+        my_tuple_1 = MyTuple([1, -1])
+        my_tuple_2 = MyTuple([1, -1])
+        ref_x = fn(x, my_tuple_1, my_tuple_2)
+        res_x = opt_fn(x, my_tuple_1, my_tuple_2)
+        self.assertEqual(ref_x, res_x)
+
     def test_udf_namedtuple(self):
         class MyTuple(NamedTuple):
             a: torch.Tensor
@@ -5293,6 +5378,27 @@ class DefaultsTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         a = SkipFunctionVariable(value=w)
         with self.assertRaises(Unsupported):
             a.call_function(None, [], {})
+
+    def test_unsupported_msg_in_bind_args_error(self):
+        class BadClass:
+            """Class that requires 'cls' argument."""
+
+            def __init__(self, cls):
+                self.cls = cls
+
+        @contextlib.contextmanager
+        def my_context():
+            yield
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            with my_context():
+                # Error: Missing required positional argument 'cls'
+                obj = BadClass()  # This will raise TypeError
+                return obj
+
+        with self.assertRaisesRegex(Unsupported, "obj = BadClass()"):
+            fn()
 
     def test_inspect_method_source(self):
         class Mod(torch.nn.Module):
