@@ -890,6 +890,10 @@ def _query_dtensor_rules(
                 print(f"        Error querying op_strategy: {e}")
 
     else:
+        # Decomp-based strategy: only discovers rules reachable from a single
+        # seed (Shard(0) on the first input). Rules requiring other input
+        # placements (e.g., Shard(1), Partial, or sharding on non-first inputs)
+        # will not be found, so this under-reports DTensor's capabilities.
         try:
             from torch.distributed.tensor._decompositions import DecompShardingStrategy
         except ImportError:
@@ -1372,7 +1376,9 @@ def get_registered_op_names():
 
 
 if __name__ == "__main__":
-    # Override common size variables to ensure even sharding across world_size=2
+    # Override common size variables to ensure even sharding across world_size=2.
+    # These are process-global mutations, but this is a CLI entry point so the
+    # process exits after running.
     opinfo_core.L = 24  # pyrefly: ignore[bad-assignment]
     opinfo_core.M = 12  # pyrefly: ignore[bad-assignment]
     opinfo_core.S = 4  # pyrefly: ignore[bad-assignment]
