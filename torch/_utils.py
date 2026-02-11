@@ -1128,6 +1128,27 @@ NAME_MAPPING = {
 }
 
 
+def _chunk_or_narrow_cat(
+    tensor: "torch.Tensor",
+    num_chunks: int,
+    narrow_dim: int,
+    cat_dim: int = 0,
+) -> "torch.Tensor":
+    """
+    Splits tensor along narrow_dim into num_chunks and concatenates along cat_dim.
+    Uses torch.chunk in eager mode, but torch.narrow under tracing to be unbacked-symint safe.
+    """
+    if not torch.compiler.is_compiling():
+        return torch.cat(torch.chunk(tensor, num_chunks, dim=narrow_dim), dim=cat_dim)
+    else:
+        chunk_size = tensor.size(narrow_dim) // num_chunks
+        chunks = [
+            torch.narrow(tensor, narrow_dim, i * chunk_size, chunk_size)
+            for i in range(num_chunks)
+        ]
+        return torch.cat(chunks, dim=cat_dim)
+
+
 def _maybe_view_chunk_cat(
     res: "torch.Tensor", group_size: int, gather_dim: int
 ) -> "torch.Tensor":
@@ -1176,7 +1197,6 @@ def _maybe_view_chunk_cat(
     # Optimization: Can use view instead of split+cat when:
     # 1. res.shape[0] == group_size (invariant after all_gather)
     # 2. All dims between 0 and gather_dim (exclusive) have size 1
-    from torch.distributed._functional_collectives import _chunk_or_narrow_cat
     from torch.fx.experimental.symbolic_shapes import guard_or_false
 
     numel_between = math.prod(shape[1:gather_dim]) if gather_dim > 1 else 1
