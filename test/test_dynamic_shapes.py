@@ -88,7 +88,10 @@ def cat_meta(tensors, dim=0):
             if idx == dim:
                 concat_length = concat_length + length
             else:
-                assert length == common_length
+                if length != common_length:
+                    raise AssertionError(
+                        f"length mismatch: {length} != {common_length}"
+                    )
     new_shape = list(shape)
     new_shape[dim] = concat_length
     return tensors[0].new_empty(new_shape)
@@ -1171,32 +1174,37 @@ def forward(self, x_1):
     def test_specialize_zero_one(self):
         shape_env = ShapeEnv(specialize_zero_one=True)
         a0 = create_symint(shape_env, 5)
-        assert a0 != 1
+        if a0 == 1:
+            raise AssertionError("expected a0 != 1")
         self.assertEqual(len(shape_env.guards), 0)
 
         shape_env = ShapeEnv(specialize_zero_one=False)
         a0 = create_symint(shape_env, 5)
-        assert a0 != 1
+        if a0 == 1:
+            raise AssertionError("expected a0 != 1")
         self.assertEqual(len(shape_env.guards), 1)
 
     def test_duck_shape(self):
         shape_env = ShapeEnv(duck_shape=True)
         a0 = create_symint(shape_env, 5)
         a1 = create_symint(shape_env, 5)
-        assert a0 == a1
+        if a0 != a1:
+            raise AssertionError("expected a0 == a1")
         self.assertEqual(len(shape_env.guards), 0)
 
         shape_env = ShapeEnv(duck_shape=False)
         a0 = create_symint(shape_env, 5)
         a1 = create_symint(shape_env, 5)
-        assert a0 == a1
+        if a0 != a1:
+            raise AssertionError("expected a0 == a1")
         self.assertEqual(len(shape_env.guards), 1)
 
     def test_int_bool(self):
         # See https://github.com/pytorch/pytorch/issues/95981
         shape_env = ShapeEnv(duck_shape=True)
         a0 = create_symint(shape_env, 5)
-        assert a0
+        if not a0:
+            raise AssertionError("expected a0 to be truthy")
         self.assertEqual(len(shape_env.guards), 0)
 
     def test_symint_as_scalar(self):
@@ -1207,7 +1215,10 @@ def forward(self, x_1):
 
         class TestSymInt(TorchDispatchMode):
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-                assert func == torch.ops.aten.add.Tensor
+                if func != torch.ops.aten.add.Tensor:
+                    raise AssertionError(
+                        f"expected torch.ops.aten.add.Tensor, got {func}"
+                    )
 
                 nonlocal sym_int_encountered
                 # WARNING: do not do identity tests on the outer
@@ -1225,7 +1236,8 @@ def forward(self, x_1):
     def test_deepcopy(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 2)
-        assert a0 < 4
+        if not (a0 < 4):
+            raise AssertionError(f"expected a0 < 4, got a0={a0}")
         new_shape_env = copy.deepcopy(shape_env)
         self.assertEqual(len(new_shape_env.guards), 1)
 
@@ -3338,7 +3350,10 @@ class TestGuardsExpressions(TestCase):
 def custom_pass(graph: torch.fx.Graph) -> torch.fx.Graph:
     for node in graph.nodes:
         if node.name == "arg3_1":
-            assert node.meta["val"].size()[0] == 2
+            if node.meta["val"].size()[0] != 2:
+                raise AssertionError(
+                    f"expected size()[0] == 2, got {node.meta['val'].size()[0]}"
+                )
     return graph
 
 
@@ -3368,7 +3383,8 @@ class TestUnbacked(TestCase):
             s0 = x.size()[0]
             s1 = x.size()[1]
             torch._check(u0 + s0 + s1 == 102)
-            assert s0 == 2
+            if s0 != 2:
+                raise AssertionError(f"expected s0 == 2, got {s0}")
             return x * 10
 
         func(torch.rand(2, 50), torch.tensor([50]))
@@ -3832,7 +3848,10 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
             torch._check(u1 <= x.size(0))
             torch._check(u0 <= u1)
             out = x[u0:u1]
-            assert statically_known_true(out.size(0) == (u1 - u0))
+            if not statically_known_true(out.size(0) == (u1 - u0)):
+                raise AssertionError(
+                    "expected statically_known_true(out.size(0) == (u1 - u0))"
+                )
             return out
 
         x, xs = torch.randn(10), torch.tensor([3, 6])
@@ -3848,7 +3867,10 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
             torch._check(u0 > 1)
             torch._check(u0 <= x.size(0))
             out = x[-u0:]
-            assert statically_known_true(out.size(0) == u0)
+            if not statically_known_true(out.size(0) == u0):
+                raise AssertionError(
+                    "expected statically_known_true(out.size(0) == u0)"
+                )
             return out
 
         x, n = torch.randn(10), torch.tensor([5])
@@ -4976,6 +4998,73 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         compiled_program = torch.compile(fuzzed_program, fullgraph=True, dynamic=True)
         result_compiled = compiled_program(*args)
         self.assertTrue(torch.allclose(result_compiled, result_original))
+
+    def test_inductor_view_issue_172693(self):
+        class MinimalBugModule(torch.nn.Module):
+            def __init__(self, num_heads: int = 8):
+                super().__init__()
+                self.num_heads = num_heads
+
+            def forward(self, key):
+                reshaped_key = key.reshape(key.shape[0], self.num_heads, -1)
+                torch._dynamo.graph_break()
+                return reshaped_key + 1
+
+        num_heads = 8
+
+        bug_module = MinimalBugModule(num_heads=num_heads)
+
+        key = torch.empty_strided((2, 16, 9), (288, 9, 1)).normal_()
+
+        with torch.inference_mode():
+            eager_result = bug_module(key)
+            bug_module.compile(dynamic=True)
+            compiled_result = bug_module(key)
+
+        self.assertEqual(compiled_result, eager_result)
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_view_as_complex_unbacked_no_dde(self):
+        """
+        Test that view_as_complex does not raise GuardOnDataDependentSymNode
+        when operating on tensors with unbacked dimensions.
+        """
+
+        def func(x):
+            return torch.view_as_complex(x)
+
+        # Create a tensor with shape [..., 2] where batch dim is unbacked
+        x = torch.rand(4, 8, 2)
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+
+        torch._dynamo.reset()
+        # This should not raise GuardOnDataDependentSymNode
+        compiled_func = torch.compile(func, fullgraph=True, backend="eager")
+        result = compiled_func(x)
+        expected = torch.view_as_complex(x)
+        self.assertTrue(
+            torch.allclose(torch.view_as_real(result), torch.view_as_real(expected))
+        )
+
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_view_as_real_backward_unbacked_no_dde(self):
+        """
+        Test that view_as_real backward (which calls view_as_complex) does not
+        raise GuardOnDataDependentSymNode when operating on tensors with
+        unbacked dimensions.
+        """
+
+        def func(x):
+            y = torch.view_as_real(x)
+            return y.sum()
+
+        x = torch.rand(4, 8, dtype=torch.complex64, requires_grad=True)
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+
+        torch._dynamo.reset()
+        # This should not raise GuardOnDataDependentSymNode during backward
+        compiled_func = torch.compile(func, fullgraph=True, backend="eager")
+        result = compiled_func(x)
+        result.backward()
 
 
 instantiate_parametrized_tests(TestUnbacked)
