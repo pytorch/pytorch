@@ -8,10 +8,13 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed.device_mesh import _get_device_handle
-from torch.distributed.fsdp._common_utils import _named_parameters_with_duplicates
+from torch.distributed.fsdp._common_utils import (
+    _named_parameters_with_duplicates,
+    collect_grad_tensors,
+    replace_grad_tensors,
+)
 from torch.distributed.tensor import Shard
 from torch.profiler import record_function
-from torch.utils._pytree import tree_flatten, tree_unflatten
 from torch.utils.hooks import RemovableHandle
 
 from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
@@ -714,25 +717,18 @@ class FSDPParamGroup:
             return args, kwargs
         if not torch.is_grad_enabled():
             return args, kwargs
-        args_list, args_spec = tree_flatten(args)
-        kwargs_list, kwargs_spec = tree_flatten(kwargs)
-        args_kwargs_list = list(args_list) + list(kwargs_list)
-        inp_tensor_indices: list[int] = []
-        inp_tensors: list[torch.Tensor] = []
-        for i, obj in enumerate(args_kwargs_list):
-            if torch.is_tensor(obj) and obj.requires_grad:
-                inp_tensor_indices.append(i)
-                inp_tensors.append(obj)
-        if len(inp_tensors) == 0:
-            return args, kwargs  # no tensors that require gradients
-        inp_tensors = RegisterPostBackwardFunction.apply(self, *inp_tensors)
-        for inp_tensor_idx, inp_tensor in zip(inp_tensor_indices, inp_tensors):
-            args_kwargs_list[inp_tensor_idx] = inp_tensor
-        args_list = args_kwargs_list[: len(args_list)]
-        kwargs_list = args_kwargs_list[len(args_list) :]
-        args = tree_unflatten(args_list, args_spec)
-        kwargs = tree_unflatten(kwargs_list, kwargs_spec)
-        return args, kwargs
+
+        # Collect all tensors that require gradients (including from dataclasses)
+        inp_tensors = collect_grad_tensors((args, kwargs))
+        if not inp_tensors:
+            return args, kwargs
+
+        # Apply RegisterPostBackwardFunction to all tensors at once
+        out_tensors = RegisterPostBackwardFunction.apply(self, *inp_tensors)
+
+        # Replace tensors in the structure (iterator order matches collect order)
+        new_args, new_kwargs = replace_grad_tensors((args, kwargs), iter(out_tensors))
+        return new_args, new_kwargs
 
     def _register_state_dict_hooks(self) -> None:
         num_pre_save_hooks = len(self._module_to_pre_save_state_dict_hook_handle)
