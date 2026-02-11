@@ -809,6 +809,29 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(count_op(backend.graphs[1], operator.add), 3)
 
     @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_nested_comprehension_result_var_name_collision(self):
+        """Comprehension result_var in leaf frame shares a name with a root frame local."""
+
+        def inner(t):
+            x = [torch._dynamo.graph_break() or i for i in range(3)]
+            return sum(x) + t
+
+        def root(t):
+            x = t + 1
+            result = inner(t) + x
+            self.assertEqual(x, t + 1)
+            return result
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(root, backend=backend)
+        t = torch.randn(4)
+
+        self.assertEqual(compiled(t), root(t))
+        self.assertEqual(len(backend.graphs), 2)
+        self.assertEqual(count_op(backend.graphs[0], operator.add), 1)
+        self.assertEqual(count_op(backend.graphs[1], operator.add), 3)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_nested_function_comprehension_with_walrus(self):
         """Nested function with comprehension containing walrus operator."""
 
