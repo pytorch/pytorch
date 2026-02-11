@@ -272,7 +272,7 @@ class NestedValueSize(OpaqueBase):
         return repr_str, all_globals
 
 
-class ExternString(torch._opaque_base.OpaqueBase):
+class HoistedString(torch._opaque_base.OpaqueBase):
     def __init__(self, val):
         self.val = val
 
@@ -283,14 +283,14 @@ class ExternString(torch._opaque_base.OpaqueBase):
         return hash(self.val)
 
     def __fx_repr__(self):
-        return (f"ExternString('{self.val}')", {"ExternString": ExternString})
+        return (f"HoistedString('{self.val}')", {"HoistedString": HoistedString})
 
 
-register_opaque_type(ExternString, typ="value", extern=True)
+register_opaque_type(HoistedString, typ="value", hoist=True)
 
 
 @torch.library.custom_op("mylib::op_with_string", mutates_args=())
-def op_with_string(x: torch.Tensor, s: ExternString) -> torch.Tensor:
+def op_with_string(x: torch.Tensor, s: HoistedString) -> torch.Tensor:
     if s.val == "double":
         return x * 2
     elif s.val == "square":
@@ -1974,9 +1974,9 @@ def forward(self, L_x_ : torch.Tensor, G_Color_GREEN : {_illegal_char_regex.sub(
     return (apply_color_scale,)""",  # noqa: B950
         )
 
-    def test_extern_basic(self):
+    def test_hoist_basic(self):
         def f(x):
-            return op_with_string(x, ExternString("double"))
+            return op_with_string(x, HoistedString("double"))
 
         x = torch.tensor(3.0)
 
@@ -2003,22 +2003,22 @@ def forward(self, L_x_ : torch.Tensor, G_Color_GREEN : {_illegal_char_regex.sub(
             "fx_graph_remote_cache": False,
         }
     )
-    def test_extern_cache_hits(self):
+    def test_hoist_cache_hits(self):
         torch._dynamo.reset()
         AOTAutogradCache.clear()
         torch._inductor.codecache.FxGraphCache.clear()
         counters.clear()
 
-        # Because ExternString should not be in the graph, the following
+        # Because HoistedString should not be in the graph, the following
         # two functions should share AOTAutogradCache and FXGraphCache entries
 
         @torch.compile(fullgraph=True)
         def f(x):
-            return op_with_string(x, ExternString("double"))
+            return op_with_string(x, HoistedString("double"))
 
         @torch.compile(fullgraph=True)
         def g(x):
-            return op_with_string(x, ExternString("square"))
+            return op_with_string(x, HoistedString("square"))
 
         x = torch.tensor(3.0)
 

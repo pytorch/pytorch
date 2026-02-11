@@ -86,7 +86,7 @@ class _OpaqueTypeInfo:
         [Any], list[Any]
     ]  # Callable that takes the object and returns list of values to guard on
     members: dict[str, MemberType]  # Maps member name to how it should be handled
-    extern: bool
+    hoist: bool
 
 
 # Mapping of type -> (string name, reference/value type)
@@ -120,7 +120,7 @@ def register_opaque_type(
     cls: Any,
     *,
     typ: str,
-    extern=False,
+    hoist=False,
     guard_fn: Any = None,
     members: dict[str, MemberType] | None = None,
 ) -> None:
@@ -135,11 +135,11 @@ def register_opaque_type(
         cls (type): The class to register as an opaque type.
         typ (str): Either "reference" or "value". See Note [Opaque Objects] for
             more details.
-        extern (bool): Only applies to value types. An extern=True value type
+        hoist (bool): Only applies to value types. A hoist=True value type
             object is lifted as an input to the torch.compile'd graph, instead
             of being a constant baked into the graph. This is useful to
             improve compilation times in hierarchical compilation
-            (e.g., change your custom ops to use extern strings to avoid
+            (e.g., change your custom ops to use hoisted strings to avoid
             baking the string into the Dynamo/AOTAutograd/FX graphs).
             This flag does nothing for reference types.
         guard_fn (callable | None): A function that takes an instance of the opaque
@@ -221,7 +221,7 @@ def register_opaque_type(
     # Generate a fully qualified name by combining module and qualname
     name = f"{cls.__module__}.{cls.__qualname__}"
 
-    type_info = _OpaqueTypeInfo(name, typ, guard_fn, members or {}, extern)
+    type_info = _OpaqueTypeInfo(name, typ, guard_fn, members or {}, hoist)
     _OPAQUE_TYPES[cls] = type_info
     _OPAQUE_TYPES_BY_NAME[name] = type_info
 
@@ -232,10 +232,10 @@ def is_opaque_value(value: object) -> TypeIs[OpaqueType]:
     return is_opaque_type(type(value))
 
 
-def is_opaque_extern(cls: Any) -> bool:
+def should_hoist(cls: Any) -> bool:
     if cls not in _OPAQUE_TYPES:
         return False
-    return _OPAQUE_TYPES[cls].extern
+    return _OPAQUE_TYPES[cls].hoist
 
 
 def has_members(cls: Any) -> bool:

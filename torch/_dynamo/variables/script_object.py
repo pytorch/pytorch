@@ -29,11 +29,11 @@ import torch.utils._pytree as pytree
 from torch._guards import Source
 from torch._library.opaque_object import (
     get_member_type,
-    is_opaque_extern,
     is_opaque_reference_type,
     is_opaque_type,
     is_opaque_value_type,
     MemberType,
+    should_hoist,
 )
 from torch.fx.proxy import Proxy
 
@@ -219,10 +219,10 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
 
     def as_proxy(self) -> Proxy:
         if not isinstance(self.proxy, torch.fx.Proxy):
-            # If we have an extern value type, then lazily lift it to be a graph
+            # If we have a hoisted value type, then lazily lift it to be a graph
             # input when as_proxy() is called.
             assert is_opaque_value_type(type(self.proxy))
-            if is_opaque_extern(type(self.proxy)):
+            if should_hoist(type(self.proxy)):
                 from torch._dynamo.symbolic_convert import InstructionTranslator
 
                 tx = InstructionTranslator.current_tx()
@@ -231,12 +231,12 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
                 # (and opaque objects are really just used for compile)
                 if self.ctor_args_kwargs[1]:
                     raise RuntimeError(
-                        "NYI: extern opaque objects that accept kwargs, please pass as args"
+                        "NYI: hoisted opaque objects that accept kwargs, please pass as args"
                     )
-                extern_vt = tx.output.synthetic_graph_input(
+                hoisted_vt = tx.output.synthetic_graph_input(
                     type(self.proxy), self.ctor_args_kwargs[0]
                 )
-                self.proxy = extern_vt.as_proxy()
+                self.proxy = hoisted_vt.as_proxy()
 
         return self.proxy
 

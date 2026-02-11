@@ -631,7 +631,7 @@ class FxGraphCachePickler(pickle.Pickler):
             # but I'm sure we could
             if (
                 opaque_object.is_opaque_type(cls)
-                and opaque_object.is_opaque_extern(cls)
+                and opaque_object.should_hoist(cls)
                 and not opaque_object.has_members(cls)
             ):
                 return (_ident, (t.script_class_name,))
