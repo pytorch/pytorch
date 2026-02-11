@@ -347,17 +347,15 @@ class TestCUDAGraphDebugBacktraces(TestCase):
         delete_tensors()
         _sync_and_gc_collect()
 
-        try:
+        with self.assertRaises(RuntimeError) as ctx:
             g.replay()
-            self.fail("Expected RuntimeError")
-        except RuntimeError as e:
-            error_msg = str(e)
-            self.assertIn("2 dead tensor", error_msg.lower())
-            self.assertIn("creation traceback (python)", error_msg.lower())
-            self.assertIn("creation traceback (c++)", error_msg.lower())
-            self.assertIn("deletion traceback (python)", error_msg.lower())
-            self.assertIn("delete_tensors", error_msg)
-            self.assertIn("replay traceback (python)", error_msg.lower())
+        error_msg = str(ctx.exception).lower()
+        self.assertIn("2 dead tensor", error_msg)
+        self.assertIn("creation traceback (python)", error_msg)
+        self.assertIn("creation traceback (c++)", error_msg)
+        self.assertIn("deletion traceback (python)", error_msg)
+        self.assertIn("delete_tensors", error_msg)
+        self.assertIn("replay traceback (python)", error_msg)
 
 
 class TestCUDAGraphDebugExternalOps(TestCase):
