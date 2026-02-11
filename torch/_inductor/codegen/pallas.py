@@ -2537,33 +2537,6 @@ class PallasKernel(SIMDKernel):
         Returns:
             str: Complete Python source code for the Pallas kernel
         """
-        # --- DEBUG PRINT START ---
-        print("\n" + "="*40 + " INDUCTOR KERNEL IR STATE " + "="*40)
-        print(f"Kernel Name: {name or 'Pending...'}")
-        
-        print("\n[1] Range Tree Nodes (Iteration Space):")
-        if hasattr(self, 'range_tree_nodes') and self.range_tree_nodes:
-            for var, entry in self.range_tree_nodes.items():
-                print(f"  {var}: {entry}")
-        else:
-            print("  (None or Empty)")
-
-        print("\n[2] Compute Buffer (IR Operations):")
-        if hasattr(self, 'compute'):
-            print(str(self.compute))
-        else:
-            print("  (None)")
-            
-        print("\n[3] Input/Output Args:")
-        try:
-            arg_defs, _, _, _ = self.args.python_argdefs()
-            for arg in arg_defs:
-                print(f"  {arg.name}: {arg}")
-        except Exception as e:
-            print(f"  (Error inspecting args: {e})")
-            
-        print("="*106 + "\n")
-        # --- DEBUG PRINT END ---
         code = IndentedBuffer()
 
         # Define the Pallas kernel: accepts refs, uses broadcasted expressions
@@ -2694,6 +2667,7 @@ from torch._inductor.runtime.runtime_utils import pallas_partial_reduce, torch_d
         ctx.pointer_tail = [
             p for p in kernel_params if p.startswith(("in_out_ptr", "in_ptr"))
         ]
+
         ctx.kernel_input_params = alias_params + ctx.pointer_tail
         ctx.full_kernel_params = alias_params + kernel_params
 
@@ -3471,13 +3445,6 @@ class PallasScheduling(SIMDScheduling):
         node_schedule: Sequence[BaseSchedulerNode],
         kernel: PallasKernel,
     ) -> str:  # type: ignore[override]
-        print("*" * 12, "In define_kernel: src_code = [", src_code, "]")
-        print("=" * 40 + " INDUCTOR IR NODES " + "=" * 40)
-        for node in node_schedule:
-            print(f"Node: {node}")
-            if hasattr(node, 'node'): # Access the underlying IRNode if available
-                print(f"  IRNode: {node.node}")
-        print("=" * 105)
         wrapper = V.graph.wrapper_code
         if src_code in wrapper.src_to_kernel:
             return wrapper.src_to_kernel[src_code]

@@ -68,7 +68,7 @@ def make_pallas(cls):
         (config, "cpu_backend", "pallas"),
         (config, "cuda_backend", "pallas"),
     ]
-    if self.is_tpu:
+    if has_tpu_pallas():
         cls_prefix = "PallasTpu"
         suffix = "_pallas_tpu"
         patches.append((config, "_pallas_tpu", True))
@@ -158,9 +158,9 @@ class PallasTestsMixin:
     @property
     def is_tpu(self):
         return (
-            tpu_api is not None
-            and isinstance(self.DEVICE, torch.device)
-            and self.DEVICE is tpu_api.tpu_device()
+            has_tpu_pallas()
+            and tpu_api is not None
+            and self.DEVICE == tpu_api.tpu_device()
         )
 
     def _compile(self, fn):
@@ -1158,10 +1158,11 @@ class PallasTestsMixin:
         expected = fn(x, cos, sin)
         self.assertEqual(result, expected)
 
+    @skip_if_tpu
     def test_arange_multi_output(self):
         """Test arange with view and multiple outputs."""
-        if self.DEVICE == "cuda" or self.is_tpu:
-            self.skipTest("arange not supported in Pallas Mosaic backend")
+        if self.DEVICE == "cuda":
+            self.skipTest("arange not supported in Pallas GPU (Mosaic) backend")
 
         def fn(x):
             rng1 = torch.arange(8 * 8, dtype=torch.float32, device=x.device).view(8, 8)
