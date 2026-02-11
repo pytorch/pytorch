@@ -470,3 +470,16 @@ def my_matmul(self, other) -> Tensor:
     Returns: Tensor - matrix product
     """
     return torch.ops.libtorch_agn_2_9.my_matmul.default(self, other)
+
+
+def my_layout(t: Tensor, layout: torch.layout) -> bool:
+    """
+    Checks whether a tensor has the given layout.
+
+    Args:
+        t: Tensor - the input tensor
+        layout: torch.layout - the layout to compare against
+
+    Returns: bool - True if the tensor's layout matches
+    """
+    return torch.ops.libtorch_agn_2_9.my_layout.default(t, layout)
