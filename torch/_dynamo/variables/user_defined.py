@@ -1665,7 +1665,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
                 new_source = None
                 if self.source:
-                    new_source = AttrSource(self.source, "__getattr__")
+                    new_source = AttrSource(
+                        AttrSource(self.source, "__getattr__"), "__func__"
+                    )
                 getattr_vt = VariableTracker.build(tx, getattr_fn, source=new_source)
                 out = getattr_vt.call_function(
                     tx, [self, ConstantVariable.create(name)], {}
