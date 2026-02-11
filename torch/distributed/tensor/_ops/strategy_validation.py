@@ -549,7 +549,9 @@ def validate_combination(
                 f"Shape mismatch: expected {ground_truth.shape}, got {full_output.shape}",
             )
 
-        if not torch.allclose(ground_truth, full_output, atol=1e-5, rtol=1e-5):
+        if not torch.allclose(
+            ground_truth, full_output, atol=1e-5, rtol=1e-5, equal_nan=True
+        ):
             max_diff = (ground_truth - full_output).abs().max().item()
             return False, f"Value mismatch: max_diff={max_diff:.6f}"
 
@@ -799,6 +801,12 @@ def compare_operator(
                 # all reduce ops (sum, max, min), making every placement trivially
                 # match. This produces hundreds of false positive "valid" rules.
                 if ground_truth.numel() > 0 and (ground_truth == 0).all():
+                    total_samples -= 1
+                    continue
+
+                # Skip samples with all-NaN output: NaN is invariant under all
+                # reduce ops, so any placement trivially matches (NaN op NaN = NaN).
+                if ground_truth.numel() > 0 and ground_truth.isnan().all():
                     total_samples -= 1
                     continue
             except Exception:
