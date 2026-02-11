@@ -42,7 +42,6 @@ def swap_tensors(t1, t2):
     """
     # Ensure there are no weakrefs
     if weakref.getweakrefs(t1):
-        breakpoint()
         raise RuntimeError("Cannot swap t1 because it has weakref associated with it")
     if weakref.getweakrefs(t2):
         raise RuntimeError("Cannot swap t2 because it has weakref associated with it")
