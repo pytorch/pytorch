@@ -398,7 +398,10 @@ class BaseUserFunctionVariable(VariableTracker):
         return self.get_code().co_name
 
     def get_qualname(self) -> str:
-        return self.get_code().co_qualname
+        if sys.version_info >= (3, 11):
+            return self.get_code().co_qualname
+        else:
+            return self.get_name()
 
     def get_doc(self) -> str | None:
         # stored in code.co_consts[0]
