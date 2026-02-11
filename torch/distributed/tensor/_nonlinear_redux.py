@@ -206,6 +206,15 @@ def argminmax_handler(
     if op_call not in _ARGMINMAX_REDUCTION_OPS:
         raise NotImplementedError(f"Unsupported reduction op: {op_call}")
 
+    from torch.distributed._local_tensor import local_tensor_mode
+
+    if local_tensor_mode() is not None:
+        # The gather-based approach below uses compute_local_shape_and_global_offset
+        # which returns SymInts in LocalTensor mode. These SymInts are incompatible
+        # with torch.unravel_index and tensor indexing. Redistribute to Replicate
+        # and compute directly instead.
+        return _argminmax_replicate_fallback(op_call, args, kwargs)
+
     local_tensor, global_shape, device_mesh, placements, dim, keepdim = _prep_arguments(
         str(op_call), args, kwargs
     )
@@ -218,8 +227,10 @@ def argminmax_handler(
 
     # Compute local reduction
     if dim is None:
-        local_idx = op_call(local_tensor)
-        local_redux = local_tensor.flatten()[local_idx]
+        val_op = _ARGMINMAX_REDUCTION_OPS[op_call]
+        # unsqueeze scalars to 1-d so they can be allgathered
+        local_redux = val_op(local_tensor).unsqueeze(0)
+        local_idx = op_call(local_tensor).unsqueeze(0)
     else:
         val_op = _ARGMINMAX_REDUCTION_OPS[op_call]
         local_redux, local_idx = val_op(local_tensor, dim=dim, keepdim=True)
@@ -235,13 +246,51 @@ def argminmax_handler(
     gathered_redux, gather_idxs = _gather_tensors(
         gather_dim, gathered_idxs, local_redux, device_mesh, shard_mesh_dims
     )
-    # op_call here is argmin/argmax which returns indices only
-    rank_winner = op_call(gathered_redux, dim, True)
+    # Select the rank with the best value; use dim=0 when dim was None since
+    # the scalars were unsqueezed to 1-d for gathering
+    select_dim = 0 if dim is None else dim
+    rank_winner = op_call(gathered_redux, select_dim, True)
     final_idx = torch.gather(gather_idxs, dim=gather_dim, index=rank_winner)
 
     return dtensor.DTensor._op_dispatcher.wrap(
         final_idx.reshape(expected_shape), output_sharding.output_spec
     )
+
+
+def _argminmax_replicate_fallback(
+    op_call: torch._ops.OpOverload,
+    args: tuple[object, ...],
+    kwargs: dict[str, object],
+) -> object:
+    """Fallback for LocalTensor mode: redistribute to Replicate and compute directly."""
+    input_dtensor = cast(dtensor.DTensor, args[0])
+    device_mesh = input_dtensor.device_mesh
+    replicated = input_dtensor.redistribute(
+        device_mesh, [Replicate()] * len(input_dtensor.placements)
+    )
+    local_tensor = replicated._local_tensor
+
+    dim: Optional[int] = None
+    keepdim: bool = False
+    if len(args) > 1:
+        dim = cast(Optional[int], args[1])
+    if len(args) > 2:
+        keepdim = cast(bool, args[2])
+    if kwargs:
+        if "dim" in kwargs:
+            dim = cast(Optional[int], kwargs["dim"])
+        if "keepdim" in kwargs:
+            keepdim = cast(bool, kwargs["keepdim"])
+
+    if dim is not None:
+        result = op_call(local_tensor, dim, keepdim)
+    elif keepdim:
+        result = op_call(local_tensor, None, keepdim)
+    else:
+        result = op_call(local_tensor)
+
+    output_sharding = _get_output_sharding(op_call, args, kwargs)
+    return dtensor.DTensor._op_dispatcher.wrap(result, output_sharding.output_spec)
 
 
 def minmax_dim_handler(

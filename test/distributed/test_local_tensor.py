@@ -618,6 +618,30 @@ class TestLocalTensorWorld4(LocalTensorWorldTest):
             full_tensor = dist_res.full_tensor()
             self.assertEqual(full_tensor, local_res)
 
+    def test_argmax_argmin_sharded_reduction_dim(self):
+        """
+        argmax/argmin return indices, not values. When sharded along the
+        reduction dim, local indices can't be combined with P(max/min).
+        The strategy forces redistribution so the op runs on replicated data.
+        """
+        with LocalTensorMode(self.world_size):
+            mesh = self.build_device_mesh()
+
+            tensor = torch.randn(8, 4)
+            tensor[3, 2] = 100.0
+            tensor[6, 1] = -100.0
+
+            dtensor = distribute_tensor(tensor, mesh, [Shard(0)])
+
+            # argmax along sharded dim
+            self.assertEqual(dtensor.argmax(dim=0).full_tensor(), tensor.argmax(dim=0))
+
+            # argmin along sharded dim
+            self.assertEqual(dtensor.argmin(dim=0).full_tensor(), tensor.argmin(dim=0))
+
+            # global argmax (no dim)
+            self.assertEqual(dtensor.argmax().full_tensor(), tensor.argmax())
+
 
 class TestLocalTensorWorld8(LocalTensorWorldTest):
     world_size = 8

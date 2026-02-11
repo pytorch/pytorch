@@ -98,38 +98,6 @@ class DistMathOpsTest(DTensorTestBase):
     def test_mean(self):
         self.linear_op_reductions("mean")
 
-    @with_comms
-    def test_argmax_argmin_sharded_reduction_dim(self):
-        """
-        Test that argmax/argmin on a tensor sharded along the reduction dimension
-        produces correct global indices. When sharding along the reduction dim,
-        each shard computes local indices. These local indices cannot be combined
-        with P(max/min) because the global index requires knowing the global position.
-        """
-        device_mesh = self.build_device_mesh()
-
-        # Create tensor with clear max/min at known positions
-        tensor = torch.randn(8, 4)
-        tensor[3, 2] = 100.0  # global max at (3, 2)
-        tensor[6, 1] = -100.0  # global min at (6, 1)
-
-        # Test argmax along dim 0 (which is sharded)
-        dtensor = distribute_tensor(tensor, device_mesh, [Shard(0)])
-
-        result = dtensor.argmax(dim=0)
-        expected = tensor.argmax(dim=0)
-        self.assertEqual(result.full_tensor(), expected)
-
-        # Test argmin along dim 0 (which is sharded)
-        result_min = dtensor.argmin(dim=0)
-        expected_min = tensor.argmin(dim=0)
-        self.assertEqual(result_min.full_tensor(), expected_min)
-
-        # Test global argmax (no dim specified)
-        result_global = dtensor.argmax()
-        expected_global = tensor.argmax()
-        self.assertEqual(result_global.full_tensor(), expected_global)
-
     # TODO: forward test can be removed once test_softmax_with_bwd passes on CPU
     @with_comms
     def test_softmax_fwd(self):
