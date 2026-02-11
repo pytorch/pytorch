@@ -841,6 +841,15 @@ _custom_ops_profile: Optional[Any] = None
 # For testing only!
 enable_invoke_subgraph_regional_compile: bool = False
 
+# Clear WeakIdRef entries from TracingContext.tensor_to_context and
+# MetaTensorDescriber.lookup_tensor at the end of compile. These weakrefs
+# can block torch.utils.swap_tensors from working after compile.
+# - None (default): clear for registered backends (inductor, eager, etc.),
+#   don't clear for custom backends (to support standalone_compile, etc.)
+# - True: always clear regardless of backend
+# - False: never clear regardless of backend
+invalidate_compile_context_weakrefs: Optional[bool] = None
+
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
 
