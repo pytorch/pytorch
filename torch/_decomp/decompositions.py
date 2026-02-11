@@ -5462,6 +5462,160 @@ def resize_as(self, other, memory_format=None):
     return aten.resize(self, other.shape, memory_format=memory_format)
 
 
+def _quantile_impl(self, q, dim, keepdim, interpolation, ignore_nan):
+    torch._check(self.numel() > 0, lambda: "quantile() input tensor must be non-empty")
+    torch._check(q.dim() <= 1, lambda: "quantile() q must be a scalar or 1D tensor")
+    torch._assert_async(
+        (q >= 0).logical_and(q <= 1).all(),
+        "quantile() q values must be in the range [0, 1]",
+    )
+
+    # Treat 0-d input as 1-d (consistent with C++ impl)
+    in_ndim = max(self.dim(), 1)
+    wrapped_dim = utils.canonicalize_dim(in_ndim, dim if dim is not None else 0)
+
+    # Sort input with reduce dim moved to last position
+    if dim is None:
+        sorted_vals = self.flatten().sort().values
+    else:
+        input = self.unsqueeze(0) if self.dim() == 0 else self
+        if wrapped_dim == input.dim() - 1:
+            sorted_vals = input.sort(dim=-1).values
+        else:
+            sorted_vals = input.movedim(wrapped_dim, -1).sort(dim=-1).values
+
+    # Compute output shape
+    out_shape: list[int] = []
+    if dim is not None and self.dim() > 0:
+        out_shape = list(self.shape)
+        if keepdim:
+            out_shape[wrapped_dim] = 1
+        else:
+            del out_shape[wrapped_dim]
+    elif keepdim:
+        out_shape = [1] * self.dim()
+
+    q_scalar = q.dim() == 0
+    if q.dim() > 0:
+        out_shape.insert(0, q.shape[0])
+
+    # For computation, always include q dimension
+    compute_shape = list(out_shape)
+    if q_scalar:
+        compute_shape.insert(0, q.numel())
+
+    # View sorted as (compute_shape[1:], n)
+    n = sorted_vals.size(-1)
+    in_shape = compute_shape[1:] + [n]
+    sorted_vals = sorted_vals.view(in_shape)
+
+    q_flat = q.reshape(-1)
+
+    # Broadcast q to match sorted_vals batch dims: shape (*compute_shape[1:], q_count)
+    for _ in range(len(compute_shape) - 1):
+        q_flat = q_flat.unsqueeze(0)
+
+    if ignore_nan:
+        non_nan_count = sorted_vals.isnan().logical_not().sum(-1, keepdim=True)
+        ranks = q_flat * (non_nan_count - 1)
+        ranks = ranks.masked_fill(ranks < 0, 0)
+    else:
+        last_index = n - 1
+        ranks = q_flat * last_index
+        has_nan = sorted_vals.isnan().any(-1, keepdim=True)
+        ranks = torch.masked_fill(ranks, has_nan, last_index)
+
+    if interpolation == "lower":
+        ranks = ranks.floor()
+    elif interpolation == "higher":
+        ranks = ranks.ceil()
+    elif interpolation == "nearest":
+        ranks = ranks.round()
+
+    ranks_below = ranks.long().clamp(0, n - 1)
+    values_below = sorted_vals.gather(-1, ranks_below)
+
+    if interpolation in ("linear", "midpoint"):
+        if interpolation == "midpoint":
+            weights = torch.full_like(ranks, 0.5)
+        else:
+            weights = ranks - ranks_below.to(ranks.dtype)
+        ranks_above = ranks.ceil().long().clamp(0, n - 1)
+        values_above = sorted_vals.gather(-1, ranks_above)
+        values_below = torch.lerp(values_below, values_above, weights)
+
+    # Reshape to output shape
+    # q dimension is currently last from gather; we need it first for vector q
+    if q_scalar:
+        result = values_below.squeeze(-1)
+    else:
+        # Move q dim from last to first
+        result = values_below.movedim(-1, 0)
+
+    return result.reshape(out_shape) if out_shape else result.squeeze()
+
+
+@aten.quantile.default.py_impl(DispatchKey.CompositeImplicitAutograd)
+def quantile(self, q, dim=None, keepdim=False, *, interpolation="linear"):
+    return _quantile_impl(self, q, dim, keepdim, interpolation, ignore_nan=False)
+
+
+@aten.quantile.scalar.py_impl(DispatchKey.CompositeImplicitAutograd)
+def quantile_scalar(self, q: float, dim=None, keepdim=False, *, interpolation="linear"):
+    torch._check(0 <= q <= 1, lambda: "quantile() q values must be in the range [0, 1]")
+    q_tensor = torch.scalar_tensor(q, dtype=self.dtype, device=self.device)
+    return quantile(self, q_tensor, dim, keepdim, interpolation=interpolation)
+
+
+def _copy_to_out(result, out):
+    _maybe_resize_out(out, result.shape)
+    return _safe_copy_out(copy_from=result, copy_to=out)
+
+
+@aten.quantile.out.py_impl(DispatchKey.CompositeImplicitAutograd)
+def quantile_out(self, q, dim=None, keepdim=False, *, interpolation="linear", out=None):
+    result = quantile(self, q, dim, keepdim, interpolation=interpolation)
+    return _copy_to_out(result, out)
+
+
+@aten.quantile.scalar_out.py_impl(DispatchKey.CompositeImplicitAutograd)
+def quantile_scalar_out(
+    self, q: float, dim=None, keepdim=False, *, interpolation="linear", out=None
+):
+    result = quantile_scalar(self, q, dim, keepdim, interpolation=interpolation)
+    return _copy_to_out(result, out)
+
+
+@aten.nanquantile.default.py_impl(DispatchKey.CompositeImplicitAutograd)
+def nanquantile(self, q, dim=None, keepdim=False, *, interpolation="linear"):
+    return _quantile_impl(self, q, dim, keepdim, interpolation, ignore_nan=True)
+
+
+@aten.nanquantile.scalar.py_impl(DispatchKey.CompositeImplicitAutograd)
+def nanquantile_scalar(
+    self, q: float, dim=None, keepdim=False, *, interpolation="linear"
+):
+    torch._check(0 <= q <= 1, lambda: "quantile() q values must be in the range [0, 1]")
+    q_tensor = torch.scalar_tensor(q, dtype=self.dtype, device=self.device)
+    return nanquantile(self, q_tensor, dim, keepdim, interpolation=interpolation)
+
+
+@aten.nanquantile.out.py_impl(DispatchKey.CompositeImplicitAutograd)
+def nanquantile_out(
+    self, q, dim=None, keepdim=False, *, interpolation="linear", out=None
+):
+    result = nanquantile(self, q, dim, keepdim, interpolation=interpolation)
+    return _copy_to_out(result, out)
+
+
+@aten.nanquantile.scalar_out.py_impl(DispatchKey.CompositeImplicitAutograd)
+def nanquantile_scalar_out(
+    self, q: float, dim=None, keepdim=False, *, interpolation="linear", out=None
+):
+    result = nanquantile_scalar(self, q, dim, keepdim, interpolation=interpolation)
+    return _copy_to_out(result, out)
+
+
 register_inplace(aten.addbmm_, aten.addbmm)
 register_inplace(aten.addmm_, aten.addmm)
 register_inplace(aten.addmv_, aten.addmv)
