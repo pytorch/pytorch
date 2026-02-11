@@ -18,6 +18,8 @@ from torch.distributed._local_tensor import (
     LocalTensorMode,
     maybe_disable_local_tensor_mode,
     maybe_run_for_local_tensor,
+    rank_map,
+    tensor_map,
 )
 
 
@@ -27,8 +29,8 @@ def use_rank_map(world_size: int = 4):
 
     Returns: (values_dict, expected_dict)
     """
-    with LocalTensorMode(world_size) as mode:
-        lt = mode.rank_map(lambda rank: torch.full((2, 3), float(rank)))
+    with LocalTensorMode(world_size):
+        lt = rank_map(lambda rank: torch.full((2, 3), float(rank)))
         values = {
             rank: lt._local_tensors[rank][0, 0].item() for rank in range(world_size)
         }
@@ -46,13 +48,13 @@ def use_tensor_map(world_size: int = 4):
 
     Returns: (values_dict, expected_dict)
     """
-    with LocalTensorMode(world_size) as mode:
-        lt = mode.rank_map(lambda rank: torch.ones(2, 2) * (rank + 1))
+    with LocalTensorMode(world_size):
+        lt = rank_map(lambda rank: torch.ones(2, 2) * (rank + 1))
 
         def scale_by_rank(rank: int, tensor: torch.Tensor) -> torch.Tensor:
             return tensor * (rank + 1)
 
-        scaled = mode.tensor_map(lt, scale_by_rank)
+        scaled = tensor_map(lt, scale_by_rank)
         values = {
             rank: scaled._local_tensors[rank][0, 0].item() for rank in range(world_size)
         }
@@ -128,8 +130,8 @@ def use_maybe_run_decorator(world_size: int = 4):
 
     full_data = torch.arange(16).float()
 
-    with LocalTensorMode(world_size) as mode:
-        ranks = mode.rank_map(lambda r: torch.tensor(r))
+    with LocalTensorMode(world_size):
+        ranks = rank_map(lambda r: torch.tensor(r))
         result = compute_rank_offset(full_data, ranks)
 
         values = {
