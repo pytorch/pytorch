@@ -12427,6 +12427,23 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         test_helper(fn, ())
 
+    @requires_gpu()
+    def test_empty_deterministic_pin_memory(self):
+        if self.device != "cpu":
+            raise unittest.SkipTest("Test only runs on CPU")
+
+        def fn():
+            return torch.empty(
+                4, 4, device=self.device, dtype=torch.float32, pin_memory=True
+            )
+
+        cfunc = torch.compile(fn, fullgraph=True)
+
+        with DeterministicGuard(True, fill_uninitialized_memory=True):
+            eager = fn()
+            compiled = cfunc()
+            torch.testing.assert_close(eager, compiled, equal_nan=True)
+
     def test_inplace_resize_as(self):
         def fn(x, y):
             x.resize_as_(y)
