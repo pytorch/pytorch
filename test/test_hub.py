@@ -46,11 +46,14 @@ class TestHub(TestCase):
 
     def _assert_trusted_list_is_empty(self):
         with open(self.trusted_list_path) as f:
-            assert not f.readlines()
+            lines = f.readlines()
+            if lines:
+                raise AssertionError(f"Expected empty trusted list, got {lines}")
 
     def _assert_in_trusted_list(self, line):
         with open(self.trusted_list_path) as f:
-            assert line in (l.strip() for l in f)
+            if line not in (l.strip() for l in f):
+                raise AssertionError(f"Expected {line} in trusted list")
 
     @retry(Exception, tries=3)
     def test_load_from_github(self):
@@ -99,9 +102,12 @@ class TestHub(TestCase):
             self.assertEqual(
                 sum_of_state_dict(hub_model.state_dict()), SUM_OF_HUB_EXAMPLE
             )
-            assert os.path.exists(
+            if not os.path.exists(
                 os.path.join(tmpdir, "ailzhang_torchhub_example_master")
-            )
+            ):
+                raise AssertionError(
+                    "Expected torchhub_example_master directory to exist"
+                )
 
         # Test that set_dir properly calls expanduser()
         # non-regression test for https://github.com/pytorch/pytorch/issues/69761
@@ -126,7 +132,10 @@ class TestHub(TestCase):
             open(f_ref, "w").close()
             expected_permissions = oct(os.stat(f_ref).st_mode & 0o777)
             actual_permissions = oct(os.stat(f).st_mode & 0o777)
-            assert actual_permissions == expected_permissions
+            if actual_permissions != expected_permissions:
+                raise AssertionError(
+                    f"Expected permissions {expected_permissions}, got {actual_permissions}"
+                )
 
     @retry(Exception, tries=3)
     def test_load_state_dict_from_url(self):
@@ -158,9 +167,10 @@ class TestHub(TestCase):
             self.assertEqual(
                 sum_of_state_dict(hub_model.state_dict()), SUM_OF_HUB_EXAMPLE
             )
-            assert any(
+            if not any(
                 "will be deprecated in favor of default zipfile" in str(w) for w in ws
-            )
+            ):
+                raise AssertionError("Expected deprecation warning for legacy zip")
 
     # Test the default zipfile serialization format produced by >=1.6 release.
     @retry(Exception, tries=3)
