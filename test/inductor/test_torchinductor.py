@@ -11348,6 +11348,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @requires_gpu()
     @skip_if_not_triton
+    @unittest.skipIf(
+        not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
+    )
     def test_hint_override_cache_invalidation(self):
         """Different hint_override values must not produce stale cache hits."""
         from torch._inductor.utils import fresh_inductor_cache, run_and_get_code
