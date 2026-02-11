@@ -7192,7 +7192,8 @@ def _foreach_lerp_scalar(start, end, weight):
     groups = group_foreach_args(zip(start, end))
 
     def apply_fn(args):
-        return lerp_scalar(*args, weight=weight)
+        start_t, end_t = args
+        return lerp_scalar(start_t, end_t, weight)
 
     return foreach_group_loop(groups, len(start), apply_fn, realize_outputs)
 
