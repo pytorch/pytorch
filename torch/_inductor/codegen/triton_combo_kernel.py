@@ -723,9 +723,9 @@ class ComboKernel(Kernel):
             "constants": {},
         }
         triton_meta["enable_fp_fusion"] = (
-            # pyrefly: ignore [bad-typed-dict-key]
+            # pyrefly: ignore [bad-typed-dict-key, unsupported-operation]
             not config.emulate_precision_casts
-        )  # pyrefly: ignore [bad-typed-dict-key, unsupported-operation]
+        )
 
         for arg_num in equal_1_arg_indices(signature):
             triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index,union-attr]
