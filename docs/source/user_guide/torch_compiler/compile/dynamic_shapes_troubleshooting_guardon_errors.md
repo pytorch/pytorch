@@ -7,7 +7,7 @@ When working with PyTorch models that have unbacked symbols which could be comin
 
 **Backed dynamic shapes** emerged as a solution to the "endless recompilations" problem in PyTorch 2. When a function like `torch.ones(x)` was compiled with `x=10`, without dynamic shapes, Dynamo would insert a guard checking that "the input x is exactly 10" and generate a graph hard-coded for size 10. Calling with `x=20` would trigger another compilation, and so on.
 
-To solve this, dynamic shapes can be used to stop hard-coding sizes and represent them symbolically. However, the compiler still needed to make branching decisions (e.g., `if x < 1024`), so we "backed" each dynamic shape with a hint—a concrete value from the example input used during compilation. The hint guides branch selection, and Dynamo adds guards ensuring the branch condition remains valid. These are called *backed* (or *guardable*) shapes because they are backed by a hint and can have guards constraining them.
+To solve this, dynamic shapes can be used to stop hard-coding sizes and represent them symbolically. However, the compiler still needed to make branching decisions (e.g., `if x < 1024`), so we "backed" each dynamic shape with a hint; a concrete value from the example input used during compilation. The hint guides branch selection, and Dynamo adds guards ensuring the branch condition remains valid. These are called *backed* (or *guardable*) shapes because they are backed by a hint and can have guards constraining them.
 
 **Unbacked dynamic shapes** arose from a different need: supporting data-dependent operations like `x.item()`. For such operations, the output value depends on tensor data and is unknown at compile time. Initially, these would trigger graph breaks, but this was problematic for export and performance. To keep data-dependent operations within the graph, we represent their outputs symbolically—but unlike backed shapes, we have no hint to resolve branching. These are called *unbacked* (or *guardless*) shapes. Over time, users have also deliberately chosen unbacked shapes for primary graph inputs to avoid branch-induced recompilations and compile graphs that work across all input shapes.
 
@@ -17,18 +17,18 @@ A key challenge with unbacked shapes is handling branches: without a hint, the c
 
 ## Framework vs User Code Errors
 
-Data-dependent errors (DDEs) can originate from two sources: **framework code** (PyTorch internals) and **user code** (your model). Historically, DDEs were a major pain point—especially for export users—because many common framework operations like reshaping, slicing, narrowing, selection, contiguity checks, and broadcasting checks would trigger these errors when encountering unbacked shapes.
+Data-dependent errors (DDEs) can originate from two sources: **framework code** (PyTorch internals) and **user code** (your model). Historically, DDEs were a major pain point -especially for export users— because many common framework operations like reshaping, slicing, narrowing, selection, contiguity checks, and broadcasting checks would trigger these errors when encountering unbacked shapes.
 
-**Framework code should no longer throw DDEs.** We have implemented explicit unbacked semantics throughout the PyTorch framework, addressing major code branches and eliminating the vast majority of framework-originated DDEs. Operations that previously failed—such as `view`, `narrow`, `select`, and various shape checks—now handle unbacked shapes correctly by automatically selecting general code paths that work for all input values (by sometimes potentially deviating from eager semantics). This means you can now capture specialization-free graphs much more reliably without hitting framework DDEs.
+**Framework code should no longer throw DDEs.** We have implemented explicit unbacked semantics throughout the PyTorch framework, addressing major code branches and eliminating the vast majority of framework-originated DDEs. Operations that previously failed—such as `view`, `narrow`, `select`, and various shape checks now handle unbacked shapes correctly by automatically selecting general code paths that work for all input values (by sometimes potentially deviating from eager semantics). This means you can now capture specialization-free graphs much more reliably without hitting framework DDEs.
 
 If you encounter a DDE originating from PyTorch framework code (identifiable by the "Potential framework code culprit" in the error message pointing to files under `torch/`), this is likely a bug that should be reported, and fixed using the same methods explained later in this document.
 
-Note that some operations are inherently not unbacked-friendly (such as `unbind` and `chunk`) because they require knowing the concrete number of outputs at compile time. The remaining DDEs you may encounter will typically originate from **user code**—branches in your model that depend on data-dependent values.
+Note that some operations are inherently not unbacked-friendly because they require knowing the exact value of a dynamic shape. The DDEs you may encounter will typically originate from **user code**—branches in your model that depend on data-dependent values.
 
 The rest of this document explains how to deal with unbacked shapes in your code. The solutions generally fall into two categories:
 
 1. **Avoid the DDE by rewriting your code to be resilient** — restructure your code so that it doesn't require branching on unbacked symbols, or use alternative APIs that handle unbacked shapes gracefully.
-2. **Provide hints using `torch._check`** — when rewriting is not feasible, you can try using `torch._check` to assert conditions and teach the symbolic reasoning system facts about your unbacked `SymInts`.
+2. **Provide hints using `torch._check`** — when rewriting is not feasible, to teach the symbolic reasoning system facts about your unbacked `SymInts`.
 
 ## Common Error Pattern
 The following output shows the common error pattern `GuardOnDataDependentSymNode` errors:
@@ -50,7 +50,7 @@ For more debugging help, see https://docs.google.com/document/d/1HSuTTVvYH1pTew8
 
 Here is the list of some of the debugging tools available in PyTorch that you can use to troubleshoot these errors:
 
-* `TORCH_LOGS="dynamic"` - Shows detailed logs about symbolic operations
+* `TORCH_LOGS="+dynamic"` - Shows detailed logs about symbolic operations
 * `TORCHDYNAMO_EXTENDED_DEBUG_CREATE_SYMBOL="u2"` - Provides extended logs for specific symbols
 * `TORCHDYNAMO_EXTENDED_DEBUG_CPP=1` - Helps when guards are triggered from C++
 
