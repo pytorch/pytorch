@@ -2420,8 +2420,10 @@ def calc_conv_nd_return_shape(
         out_channels = groups * weight.shape[1]
     else:
         out_channels = weight.shape[0]
-        if weight.shape[1] * groups != input_tensor.shape[1]:
-            raise RuntimeError("Invalid channel dimensions")
+        torch._check(
+            weight.shape[1] * groups == input_tensor.shape[1],
+            lambda: "Invalid channel dimensions",
+        )
 
     ret_shape = [input_tensor.shape[0], out_channels]
     if isinstance(stride, IntLike):
@@ -2566,9 +2568,11 @@ def meta_conv(
         output_padding if is_transposed else None,
     )
 
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
     input_channels_dim = 1
     output_channels_dim = 1
-    if input_tensor.size(input_channels_dim) == 0:
+    if guard_or_false(input_tensor.size(input_channels_dim) == 0):
         shape_out[output_channels_dim] = 0
 
     out = input_tensor.new_empty(shape_out)
