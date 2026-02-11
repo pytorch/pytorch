@@ -1624,7 +1624,6 @@ class FunctionSchema:
                         if not arg.name.startswith("_scratch_")
                     ]
                 )
-                # Allow either: returning all out args (for method chaining) or returning nothing
                 if non_scratch_out_args != len(self.returns):
                     raise AssertionError(
                         f"Must return as many arguments as there are out arguments, or no return at all. "
