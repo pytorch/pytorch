@@ -1772,7 +1772,8 @@ def get_selected_tests(options) -> list[str]:
         options.exclude.extend(["distributions/test_constraints"])
 
     # these tests failing in Python 3.12 temporarily disabling
-    if sys.version_info >= (3, 12):
+    # Skip for non-ROCm platforms; ROCm MI300/MI355 now run on Python 3.12
+    if sys.version_info >= (3, 12) and not TEST_WITH_ROCM:
         options.exclude.extend(
             [
                 "functorch/test_dims",
