@@ -18389,6 +18389,23 @@ def forward(self, x, y):
             self.assertEqual(eager_result, export_result)
             self.assertEqual(export_result.dtype, expected_dtype)
 
+    def test_quantile_export(self):
+        class QuantilePair(torch.nn.Module):
+            def __init__(self, noise=0.1):
+                super().__init__()
+                self.noise = noise
+
+            def forward(self, x):
+                q = torch.tensor(
+                    [self.noise, 1.0 - self.noise], device=x.device, dtype=x.dtype
+                )
+                return torch.quantile(x, q, dim=-1, keepdim=True)
+
+        model = QuantilePair(noise=0.1).eval()
+        x = torch.randn(1, 3200, dtype=torch.float32)
+        ep = export(model, (x,))
+        self.assertEqual(ep.module()(x), model(x))
+
 
 if __name__ == "__main__":
     run_tests()
