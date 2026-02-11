@@ -859,6 +859,12 @@ class TestFlexFlash(InductorTestCase):
     def test_flash_attention_backward_deterministic_block_mask_raises(
         self, device, dtype, case
     ):
+        major, _ = torch.cuda.get_device_capability()
+        if major >= 10:
+            self.skipTest(
+                "SM100+ supports deterministic block-sparse FLASH backward; "
+                "this test validates the error on older architectures"
+            )
         from torch._dynamo.exc import BackendCompilerFailed
 
         q, k, v = create_test_tensors(
@@ -899,6 +905,58 @@ class TestFlexFlash(InductorTestCase):
                     kernel_options={"BACKEND": "FLASH"},
                 )
                 out.sum().backward()
+
+    @dtypes(torch.bfloat16)
+    def test_flash_deterministic_block_mask_without_write_order_raises(
+        self, device, dtype
+    ):
+        major, _ = torch.cuda.get_device_capability()
+        if major < 10:
+            self.skipTest("deterministic block-sparse FLASH backward requires SM100+")
+
+        torch._dynamo.reset()
+        q, k, v = create_test_tensors(
+            seq_len=512,
+            dtype=dtype,
+            device=device,
+            requires_grad=True,
+        )
+        block_mask = _create_block_mask_for_device(
+            _causal_mask, 2, 4, 512, 512, device=device
+        )
+        compiled_fn = torch.compile(flex_attention)
+
+        with DeterministicGuard(True):
+            out = compiled_fn(
+                q,
+                k,
+                v,
+                block_mask=block_mask,
+                kernel_options={"BACKEND": "FLASH"},
+            )
+            with self.assertRaises(ValueError):
+                out.sum().backward()
+
+    @dtypes(torch.bfloat16)
+    def test_flash_deterministic_block_mask_spt_mismatch(self, device, dtype):
+        major, _ = torch.cuda.get_device_capability()
+        if major < 10:
+            self.skipTest("deterministic block-sparse FLASH backward requires SM100+")
+
+        torch._dynamo.reset()
+        block_mask = create_block_mask(
+            _causal_mask,
+            2,
+            4,
+            512,
+            512,
+            device=device,
+            BLOCK_SIZE=_DEFAULT_SPARSE_BLOCK_SIZE * 2,
+            compute_dq_write_order=True,
+            dq_write_order_spt=True,
+        )
+        self.assertIsNotNone(block_mask.dq_write_order)
+        self.assertEqual(block_mask.dq_write_order_spt, True)
 
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("case", GQA_MQA_BLOCK_MASK_CASES, name_fn=mask_case_name)
