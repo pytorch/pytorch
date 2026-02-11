@@ -213,6 +213,7 @@ class ShardingPropagator:
             OpOverload,
             _SingleDimStrategyFunc,
         ] = {}
+        self.op_single_dim_strategy_allow_unbacked: dict[OpOverload, bool] = {}
         # op map to save static argnum to decide to reuse sharding prop cache or
         # re-run sharding prop
         self.op_to_schema_info: dict[OpOverload, RuntimeSchemaInfo] = {}
@@ -258,6 +259,7 @@ class ShardingPropagator:
         op_overload: OpOverload,
         strategy_func: _SingleDimStrategyFunc,
         schema_info: Optional[RuntimeSchemaInfo] = None,
+        allow_unbacked_sharding: bool = False,
     ):
         """
         Register a strategy over a single mesh-dim, relying on infra to automatically expand to the full mesh.
@@ -265,6 +267,8 @@ class ShardingPropagator:
         self.op_single_dim_strategy_funcs[op_overload] = strategy_func
         if schema_info is not None:
             self.op_to_schema_info_for_single_dim_strategy[op_overload] = schema_info
+        if allow_unbacked_sharding:
+            self.op_single_dim_strategy_allow_unbacked[op_overload] = True
 
     def register_op_strategy(
         self,
@@ -566,7 +570,13 @@ class ShardingPropagator:
                 # expand to generate the full set of strategy combinations, each one
                 # with a redistribute cost, and then find the min strategy over those costs.
                 _expanded_strategy_fn = _expand_single_dim_strategy_to_mesh(
-                    mesh, strategy_schema, single_dim_strategy, out_tensor_meta
+                    mesh,
+                    strategy_schema,
+                    single_dim_strategy,
+                    out_tensor_meta,
+                    allow_unbacked_sharding=self.op_single_dim_strategy_allow_unbacked.get(
+                        op_schema.op, False
+                    ),
                 )
                 op_strategy = _expanded_strategy_fn(
                     op_schema.op, strategy_schema.args_meta, strategy_schema.kwargs_meta
