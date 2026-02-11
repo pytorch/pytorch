@@ -1886,6 +1886,8 @@ if __name__ == "__main__":
     def test_graph_make_graphed_callables(
         self, with_amp, cache_enabled, allow_unused_input
     ):
+        if self.expandable_segments:
+            self.skipTest("oneDNN does not support expandable_segments memory")
         torch.manual_seed(5)
         torch.xpu.manual_seed(5)
 
@@ -2095,6 +2097,8 @@ if __name__ == "__main__":
         )
 
     def test_graph_make_graphed_callables_same_pool(self):
+        if self.expandable_segments:
+            self.skipTest("oneDNN does not support expandable_segments memory")
         torch.manual_seed(5)
         torch.xpu.manual_seed(5)
         models = []
