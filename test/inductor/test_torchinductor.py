@@ -7889,7 +7889,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         template([1, 1, 8, 8], [2, 2, 0, -1])
         template([1, 1, 8, 8], [2, 2, -1, 0])
 
-    @xfail_if_mps_unimplemented  # Unsupported Border padding mode
     def test_grid_sampler_2d(self):
         def fn(a, b):
             return (
