@@ -126,7 +126,7 @@ class TestCase(TorchTestCase):
 
 class CPythonTestCase(TestCase):
     """
-    Test class for CPython tests located in "test/dynamo/CPython/Py_version/*".
+    Test class for CPython tests located in "test/cpython/v{Py_version}/*".
 
     This class enables specific features that are disabled by default, such as
     tracing through unittest methods.
@@ -210,7 +210,9 @@ class CPythonTestCase(TestCase):
         # Skip test if python versions doesn't match
         search_path = inspect.getfile(cls)
 
-        new_pattern = re.escape(os.path.join("cpython") + os.path.sep) + r"v(\d)_(\d{2})"
+        new_pattern = (
+            re.escape(os.path.join("cpython") + os.path.sep) + r"v(\d)_(\d{2})"
+        )
 
         m = re.search(new_pattern, search_path)
         if m:
