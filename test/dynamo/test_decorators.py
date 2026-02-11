@@ -1707,7 +1707,7 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
             g(torch.ones(3))
 
     def test_set_stance_force_backend(self):
-        @torch.compile(backend='eager')
+        @torch.compile(backend="eager")
         def a(x):
             return x + 1
 

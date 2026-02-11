@@ -161,7 +161,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
             def backward(ctx, grad_out):
                 return grad_out
 
-        @torch.compile(backend='eager')
+        @torch.compile(backend="eager")
         def f(x: torch.Tensor):
             try:
                 with torch.autocast(device_type="cpu", dtype=None):
