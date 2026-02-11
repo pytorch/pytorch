@@ -19,16 +19,20 @@ def _is_functional(schema: torch._C.FunctionSchema) -> bool:
     return not any(arg.is_write for arg in schema.arguments)
 
 
+def _is_mutable_arg(arg: torch._C.Argument) -> bool:
+    return arg.alias_info is not None and arg.alias_info.is_write
+
+
 def _signatures_match(
     schema_a: torch._C.FunctionSchema,
     schema_b: torch._C.FunctionSchema,
 ) -> bool:
-    """Compare two schemas by their non-out arguments (name, type, default value)."""
-    non_out_args_a = [arg for arg in schema_a.arguments if not arg.is_out]
-    non_out_args_b = [arg for arg in schema_b.arguments if not arg.is_out]
-    if len(non_out_args_a) != len(non_out_args_b):
+    """Compare two schemas by their non-mutable arguments (name, type, default value)."""
+    non_mutable_args_a = [arg for arg in schema_a.arguments if not _is_mutable_arg(arg)]
+    non_mutable_args_b = [arg for arg in schema_b.arguments if not _is_mutable_arg(arg)]
+    if len(non_mutable_args_a) != len(non_mutable_args_b):
         return False
-    for a, b in zip(non_out_args_a, non_out_args_b):
+    for a, b in zip(non_mutable_args_a, non_mutable_args_b):
         if a.name != b.name:
             return False
         if str(a.type) != str(b.type):
@@ -38,11 +42,29 @@ def _signatures_match(
     return True
 
 
+def _has_valid_out_variant_returns(
+    schema: torch._C.FunctionSchema,
+    mutable_args: list[torch._C.Argument],
+) -> bool:
+    """Out variant must return either nothing or the mutable args themselves."""
+    if len(schema.returns) == 0:
+        return True
+
+    if len(schema.returns) != len(mutable_args):
+        return False
+
+    # Each return must alias exactly one mutable arg, in order
+    for ret, arg in zip(schema.returns, mutable_args):
+        if ret.alias_info is None or arg.alias_info is None:
+            return False
+        if ret.alias_info.before_set != arg.alias_info.before_set:
+            return False
+    return True
+
+
 def to_out_variant(op: torch._ops.OpOverload) -> torch._ops.OpOverload | None:
     """
     Given a functional operator overload, return its corresponding out variant.
-
-    Uses signature matching to find the correct out variant among all overloads.
     """
     schema = op._schema
 
@@ -60,17 +82,28 @@ def to_out_variant(op: torch._ops.OpOverload) -> torch._ops.OpOverload | None:
     # Search through all overloads for matching out variant
     for overload_name in torch_packet.overloads():
         candidate = getattr(torch_packet, overload_name)
-        candidate_schema = candidate._schema
 
-        if not any(arg.is_out for arg in candidate_schema.arguments):
+        if torch.Tag.out_variant not in candidate.tags:
             continue
+
+        candidate_schema = candidate._schema
 
         if not _signatures_match(schema, candidate_schema):
             continue
 
-        out_args = [arg for arg in candidate_schema.arguments if arg.is_out]
-        if len(out_args) != len(schema.returns):
+        # We assume that all mutable args are used for out
+        mutable_args = [
+            arg for arg in candidate_schema.arguments if _is_mutable_arg(arg)
+        ]
+        if len(mutable_args) != len(schema.returns):
             continue
+
+        if not _has_valid_out_variant_returns(candidate_schema, mutable_args):
+            raise RuntimeError(
+                f"Out variant {candidate} has invalid returns. "
+                f"Expected either no returns or returns that alias the mutable args, "
+                f"got: {candidate_schema}"
+            )
 
         return candidate
 
@@ -86,15 +119,15 @@ def check_out_variant(
     """
     out_op = to_out_variant(functional_op)
     if out_op is None:
-        # Collect information about all out variants for debugging
-        out_variants_info = _get_out_variants_info(functional_op)
+        tagged_info = _get_out_variants_info(functional_op)
         raise AssertionError(
             f"We did not find an out variant for {functional_op}. Some common mistakes include:\n"
-            "  1. The out variant is not an overload of the original op (e.g., 'op.out' or 'op.overload_out') \n"
-            "  2. The out variant's input arguments does not match the functional op's signature (excluding the out kwargs).\n"
-            "  3. The original operator is not functional.\n"
-            f"Found overloads for {functional_op}:\n"
-            f"{out_variants_info}"
+            "  1. The out variant is missing the torch.Tag.out_variant tag.\n"
+            "  2. The out variant is not an overload of the original op (e.g., 'op.out' or 'op.overload_out') \n"
+            "  3. The out variant's input arguments does not match the functional op's signature (excluding the mutable kwargs).\n"
+            "  4. The original operator is not functional.\n"
+            f"Overloads tagged with out_variant:\n"
+            f"{tagged_info or '  (none)'}"
         )
     if out_op != expected_out_op:
         raise AssertionError(
@@ -105,7 +138,7 @@ def check_out_variant(
 
 
 def _get_out_variants_info(functional_op) -> str:
-    """Collect information about all overloads for debugging."""
+    """Collect information about overloads tagged with out_variant for debugging."""
     namespace = functional_op.namespace
     op_name = functional_op._schema.name.split("::")[1]
     torch_packet = getattr(getattr(torch.ops, namespace), op_name)
@@ -113,6 +146,7 @@ def _get_out_variants_info(functional_op) -> str:
     overloads_info: list[str] = []
     for overload_name in torch_packet.overloads():
         candidate = getattr(torch_packet, overload_name)
-        overloads_info.append(f"  - {overload_name}: {candidate._schema}")
+        if torch.Tag.out_variant in candidate.tags:
+            overloads_info.append(f"  - {overload_name}: {candidate._schema}")
 
     return "\n".join(overloads_info)
