@@ -229,6 +229,20 @@ class TestVmapAPI(TestCase):
         self.assertEqual(output.shape, (2, 5, 7, 3))
         self.assertEqual(output, x.view(2, 1, 1, 3) * y.view(5, 1, 3) * z)
 
+    def test_nested_with_different_map_dim_dynamo(self):
+        if not TEST_WITH_TORCHDYNAMO:
+            self.skipTest("Requires TorchDynamo")
+
+        def fn(x, y):
+            return vmap(lambda x: vmap(lambda y: x * y)(y))(x)
+
+        x = torch.randn(2, 3)
+        y = torch.randn(5, 3)
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        output = opt_fn(x, y)
+        self.assertEqual(output.shape, (2, 5, 3))
+        self.assertEqual(output, x.view(2, 1, 3) * y)
+
     def test_noop_in_inner_vmap(self):
         x = torch.randn(3)
         y = torch.randn(5)

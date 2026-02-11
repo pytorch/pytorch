@@ -177,7 +177,7 @@ def _create_batched_inputs(
     args_spec: TreeSpec,
 ) -> tuple[Any, ...]:
     # See NOTE [Ignored _remove_batch_dim, _add_batch_dim]
-    if _is_compiling():
+    if _is_compiling() and vmap_level == 0:
         # Compile path avoids BatchedTensor dispatch by normalizing batch dims
         # with functional view ops (movedim) that are trace-friendly.
         batched_inputs = []
@@ -221,7 +221,7 @@ def _maybe_remove_batch_dim(
             "Did you mean to set out_dims= to None for output?"
         )
 
-    if _is_compiling():
+    if _is_compiling() and vmap_level == 0:
         # Compile path mirrors eager semantics by adjusting the batch dim with
         # view ops instead of BatchedTensor wrappers.
         if out_dim == 0:
