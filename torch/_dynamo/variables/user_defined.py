@@ -73,12 +73,10 @@ from ..source import (
     UnspecializedParamBufferSource,
 )
 from ..utils import (
-    _FiddleBuildable,
     check_constant_args,
     cmp_name_to_op_mapping,
     dict_methods,
     enum_type_methods,
-    fiddle_buildable_getattr,
     frozenset_methods,
     get_custom_getattr,
     has_torch_function,
@@ -1664,32 +1662,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 ):
                     # Manually trace out the nn module __getattr__ to avoid large compilation latency.
                     out = self.manually_trace_nn_module_getattr(tx, name)
-                elif (
-                    _FiddleBuildable is not None
-                    and isinstance(self.value, _FiddleBuildable)
-                    and self.source
-                ):
-                    # Route through VariableTracker.build so the builder wraps
-                    # Buildable.__getattr__ as FiddleBuildableGetAttrVariable.
-                    # FiddleBuildableGetAttrVariable short circuits the getattr
-                    # access and saves on compile time.
+
+                new_source = None
+                if self.source:
                     new_source = AttrSource(self.source, "__getattr__")
-                    fn_vt = VariableTracker.build(
-                        tx, fiddle_buildable_getattr, source=new_source
-                    )
-                    out = fn_vt.call_function(
-                        tx,
-                        [self, ConstantVariable.create(name)],
-                        {},
-                    )
-                else:
-                    new_source = None
-                    if self.source:
-                        new_source = AttrSource(self.source, "__getattr__")
-                    # TODO (yidiwu): We should use VariableTracker.build here
-                    out = variables.UserMethodVariable(
-                        getattr_fn, self, source=new_source
-                    ).call_function(tx, [ConstantVariable.create(name)], {})
+                getattr_vt = VariableTracker.build(tx, getattr_fn, source=new_source)
+                out = getattr_vt.call_function(
+                    tx, [self, ConstantVariable.create(name)], {}
+                )
 
                 if self.source and getattr_fn is torch.nn.Module.__getattr__:
                     if isinstance(
