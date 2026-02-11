@@ -141,37 +141,37 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
   c10::ArrayRef<const c10::IValue> paramInputs(paramList);                     \
   RECORD_FUNCTION(at::kParamCommsCallName, paramInputs);
 
-#define RECORD_PARAM_COMMS_DATA(                                               \
-    seq,                                                                       \
-    pgName,                                                                    \
-    InputTensors,                                                              \
-    OutputTensors,                                                             \
-    rank,                                                                      \
-    collName,                                                                  \
-    inNelems,                                                                  \
-    outNelems,                                                                 \
-    dType,                                                                     \
-    inSplitSizes,                                                              \
-    outSplitSizes,                                                             \
-    globalRankStart,                                                           \
-    globalRankStride,                                                          \
-    worldSize)                                                                 \
-    RECORD_PARAM_COMMS_DATA_WITH_ASYNC_OP(                                     \
-    seq,                                                                       \
-    pgName,                                                                    \
-    InputTensors,                                                              \
-    OutputTensors,                                                             \
-    rank,                                                                      \
-    collName,                                                                  \
-    inNelems,                                                                  \
-    outNelems,                                                                 \
-    dType,                                                                     \
-    inSplitSizes,                                                              \
-    outSplitSizes,                                                             \
-    globalRankStart,                                                           \
-    globalRankStride,                                                          \
-    worldSize,                                                                 \
-    True);
+#define RECORD_PARAM_COMMS_DATA(         \
+    seq,                                 \
+    pgName,                              \
+    InputTensors,                        \
+    OutputTensors,                       \
+    rank,                                \
+    collName,                            \
+    inNelems,                            \
+    outNelems,                           \
+    dType,                               \
+    inSplitSizes,                        \
+    outSplitSizes,                       \
+    globalRankStart,                     \
+    globalRankStride,                    \
+    worldSize)                           \
+  RECORD_PARAM_COMMS_DATA_WITH_ASYNC_OP( \
+      seq,                               \
+      pgName,                            \
+      InputTensors,                      \
+      OutputTensors,                     \
+      rank,                              \
+      collName,                          \
+      inNelems,                          \
+      outNelems,                         \
+      dType,                             \
+      inSplitSizes,                      \
+      outSplitSizes,                     \
+      globalRankStart,                   \
+      globalRankStride,                  \
+      worldSize,                         \
+      true);
 
 #define RECORD_PARAM_COMMS_DATA_WITH_ASYNC_OP(                                 \
     seq,                                                                       \
