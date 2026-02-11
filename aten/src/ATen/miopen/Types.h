@@ -6,7 +6,7 @@
 
 namespace at::native {
 
-TORCH_CUDA_CPP_API miopenDataType_t getMiopenDataType(const at::Tensor& tensor);
+TORCH_HIP_CPP_API miopenDataType_t getMiopenDataType(const at::Tensor& tensor);
 
 int64_t miopen_version();
 
