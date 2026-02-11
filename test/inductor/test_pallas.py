@@ -104,24 +104,24 @@ def make_pallas(cls, _debug_cpu_to_tpu_pallas=False):
     return test_class
 
 
-def skip_if_tpu(fn):
-    @functools.wraps(fn)
-    def wrapper(self, *args, **kwargs):
-        if config._debug_cpu_to_tpu_pallas:
-            self.skipTest("Not yet working on TPU")
-        fn(self, *args, **kwargs)
+def _skip_if(condition_fn, reason):
+    def decorator(fn):
+        @functools.wraps(fn)
+        def wrapper(self, *args, **kwargs):
+            if condition_fn(self):
+                self.skipTest(reason)
+            fn(self, *args, **kwargs)
 
-    return wrapper
+        return wrapper
+
+    return decorator
 
 
-def skip_if_cuda(fn):
-    @functools.wraps(fn)
-    def wrapper(self, *args, **kwargs):
-        if self.DEVICE == "cuda":
-            self.skipTest("Not yet working on GPU")
-        fn(self, *args, **kwargs)
-
-    return wrapper
+skip_if_tpu = _skip_if(
+    lambda self: config._debug_cpu_to_tpu_pallas, "Not yet working on TPU"
+)
+skip_if_cpu = _skip_if(lambda self: self.DEVICE == "cpu", "Not yet working on CPU")
+skip_if_cuda = _skip_if(lambda self: self.DEVICE == "cuda", "Not yet working on GPU")
 
 
 class PallasTestsMixin:
@@ -1027,7 +1027,6 @@ class PallasTestsMixin:
         self.assertEqual(result, expected)
 
     @skip_if_tpu
-    @skip_if_tpu
     def test_prod_reduction(self):
         """Test prod reduction."""
         if self.DEVICE == "cuda":
@@ -1042,6 +1041,96 @@ class PallasTestsMixin:
         x = torch.randn(16, device=self.DEVICE)
         result = compiled(x)
         expected = fn(x)
+        self.assertEqual(result, expected)
+
+    @skip_if_cuda
+    def test_softmax_two_pass(self):
+        """Test two-pass softmax (max reduction + sum reduction)."""
+
+        def fn(x):
+            return torch.softmax(x, dim=-1)
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(32, 64, device=self.DEVICE)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+    @skip_if_cuda
+    def test_rms_norm(self):
+        """Test RMS normalization (mean-of-squares reduction + rsqrt)."""
+
+        def fn(x, weight):
+            variance = x.pow(2).mean(-1, keepdim=True)
+            x = x * torch.rsqrt(variance + 1e-6)
+            return x * weight
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(32, 64, device=self.DEVICE)
+        weight = torch.randn(64, device=self.DEVICE)
+        result = compiled(x, weight)
+        expected = fn(x, weight)
+        self.assertEqual(result, expected)
+
+    @skip_if_cuda
+    def test_welford(self):
+        """Test Welford variance/mean computation (two-pass fallback)."""
+
+        def fn(x):
+            return torch.var_mean(x, dim=-1, keepdim=True)
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(32, 64, device=self.DEVICE)
+        var_result, mean_result = compiled(x)
+        var_expected, mean_expected = fn(x)
+        self.assertEqual(mean_result, mean_expected)
+        self.assertEqual(var_result, var_expected)
+
+    @skip_if_cuda
+    def test_layer_norm(self):
+        """Test layer normalization (mean + variance reduction, normalize, scale + shift)."""
+
+        def fn(x, weight, bias):
+            mean = x.mean(-1, keepdim=True)
+            variance = (x - mean).pow(2).mean(-1, keepdim=True)
+            x = (x - mean) * torch.rsqrt(variance + 1e-6)
+            return x * weight + bias
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(32, 64, device=self.DEVICE)
+        weight = torch.randn(64, device=self.DEVICE)
+        bias = torch.randn(64, device=self.DEVICE)
+        result = compiled(x, weight, bias)
+        expected = fn(x, weight, bias)
+        self.assertEqual(result, expected)
+
+    @skip_if_cpu
+    @skip_if_cuda
+    @skip_if_tpu
+    def test_rope(self):
+        """Test Rotary Position Embedding with slice + cat.
+
+        Splits input into halves, applies cos/sin rotation, and concatenates
+        back. Exercises non-contiguous output aliases via torch.cat.
+        """
+
+        def fn(x, cos, sin):
+            d = x.shape[-1]
+            x1 = x[..., : d // 2]
+            x2 = x[..., d // 2 :]
+            return torch.cat([x1 * cos - x2 * sin, x2 * cos + x1 * sin], dim=-1)
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(32, 64, device=self.DEVICE)
+        cos = torch.randn(32, 32, device=self.DEVICE)
+        sin = torch.randn(32, 32, device=self.DEVICE)
+        result = compiled(x, cos, sin)
+        expected = fn(x, cos, sin)
         self.assertEqual(result, expected)
 
     @skip_if_tpu
@@ -1363,6 +1452,73 @@ class PallasTestsMixin:
 
         result = compiled(*ws, x)
         expected = fn(*ws, x)
+        self.assertEqual(result, expected)
+
+    @skip_if_cuda  # Mosaic GPU backend doesn't support axis-based reductions needed for softmax
+    def test_nanogpt(self):
+        """Test a minimal NanoGPT-style transformer block.
+
+        Tests the core transformer operations used in GPT-style models:
+        - Single-head self-attention with causal masking
+        - MLP (feed-forward) block with GELU activation
+        - Residual connections
+
+        Uses 2D tensors (seq_len, embed_dim) to match the existing test_simple_mlp
+        pattern and avoid 3D tensor shape issues in Pallas codegen.
+
+        Note: Skipped on CUDA because JAX's Mosaic GPU backend doesn't support
+        axis-based reductions (reduce with axis= parameter), which is required
+        for softmax. Full reductions work, but partial reductions do not.
+        """
+        seq_len = 32
+        n_embd = 64
+
+        def transformer_block(x, w_q, w_k, w_v, w_proj, w_fc, w_out, mask):
+            T, C = x.shape
+
+            # === Self-Attention ===
+            q = x @ w_q  # (T, C)
+            k = x @ w_k
+            v = x @ w_v
+
+            # Scaled dot-product attention
+            scale = 1.0 / (C**0.5)
+            att = (q @ k.t()) * scale  # (T, T)
+            att = att + mask  # Apply causal mask
+            att = torch.softmax(att, dim=-1)
+            attn_out = att @ v  # (T, C)
+
+            # Output projection + residual
+            x = x + (attn_out @ w_proj)
+
+            # === MLP (Feed-Forward) ===
+            h = x @ w_fc  # (T, 4C)
+            # GELU activation (tanh approximation)
+            h = 0.5 * h * (1.0 + torch.tanh(0.7978845608 * (h + 0.044715 * h * h * h)))
+            x = x + (h @ w_out)  # Residual + project back
+
+            return x
+
+        compiled = self._compile(transformer_block)
+
+        # Initialize weights
+        w_q = torch.randn(n_embd, n_embd, device=self.DEVICE) * 0.02
+        w_k = torch.randn(n_embd, n_embd, device=self.DEVICE) * 0.02
+        w_v = torch.randn(n_embd, n_embd, device=self.DEVICE) * 0.02
+        w_proj = torch.randn(n_embd, n_embd, device=self.DEVICE) * 0.02
+        w_fc = torch.randn(n_embd, 4 * n_embd, device=self.DEVICE) * 0.02
+        w_out = torch.randn(4 * n_embd, n_embd, device=self.DEVICE) * 0.02
+
+        # Causal mask
+        mask = torch.triu(
+            torch.full((seq_len, seq_len), float("-inf"), device=self.DEVICE),
+            diagonal=1,
+        )
+
+        x = torch.randn(seq_len, n_embd, device=self.DEVICE)
+
+        result = compiled(x, w_q, w_k, w_v, w_proj, w_fc, w_out, mask)
+        expected = transformer_block(x, w_q, w_k, w_v, w_proj, w_fc, w_out, mask)
         self.assertEqual(result, expected)
 
     def test_warpgroup_size_2d_aligned_32x8(self):
