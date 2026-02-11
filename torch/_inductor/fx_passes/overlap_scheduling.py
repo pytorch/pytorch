@@ -12,7 +12,13 @@ import torch
 import torch.fx as fx
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor.comm_analysis import estimate_fx_collective_memory_footprint
-from torch._inductor.fx_passes.bucketing import _schedulable_wait_node, is_wait_tensor
+from torch._inductor.fx_passes.bucketing import (
+    _schedulable_wait_node,
+    bucket_key,
+    BucketMode,
+    get_full_bucket_key,
+    is_wait_tensor,
+)
 from torch._inductor.fx_passes.memory_estimator import MemoryTracker
 from torch._logging import trace_structured
 from torch.fx.operator_schemas import normalize_function
@@ -21,8 +27,6 @@ from torch.utils._python_dispatch import _disable_current_modes
 
 
 log = logging.getLogger(__name__)
-
-from torch._inductor.fx_passes.bucketing import bucket_key
 
 from ..pattern_matcher import stable_topological_sort
 
@@ -362,6 +366,8 @@ class OverlapScheduler:
         log_final_collectives_estimations: bool = False,
         bucket_exposed_first: bool = True,
         enable_fusion_regions: bool = False,
+        bucket_mode: BucketMode = "custom_ops_multidtype",
+        prioritize_bucketing_during_scheduling: bool = True,
     ):
         self.gm = gm
         self.graph = gm.graph
@@ -375,6 +381,10 @@ class OverlapScheduler:
         self.collective_estimator = collective_estimator
         self.log_final_collectives_estimations = log_final_collectives_estimations
         self.bucket_exposed_first = bucket_exposed_first
+        self.bucket_mode = bucket_mode
+        self.prioritize_bucketing_during_scheduling = (
+            prioritize_bucketing_during_scheduling
+        )
 
         # Make all to(device) non_blocking=False,
         # They can be implicitly depending by user logic on other to(device) non_blocking=True.
@@ -1160,6 +1170,32 @@ class OverlapScheduler:
             ),
         )
 
+        if self.prioritize_bucketing_during_scheduling:
+            # group candidates by bucket key first so same-bucket
+            # collectives are scheduled together, maximizing bucketing opportunities
+            bucket_groups: dict[object, list[fx.Node]] = defaultdict(list)
+            for coll in candidates:
+                key = get_full_bucket_key(coll, self.bucket_mode)
+                bucket_groups[key].append(coll)
+
+            # Sort bucket groups by minimum domination index, larger groups first as tiebreaker
+            sorted_bucket_keys = sorted(
+                bucket_groups.keys(),
+                key=lambda k: (
+                    min(self.compute_index_domination[c] for c in bucket_groups[k]),
+                    -len(bucket_groups[k]),
+                ),
+            )
+
+            # Flatten back to ordered candidate list
+            candidates = []
+            for b_key in sorted_bucket_keys:
+                group = bucket_groups[b_key]
+                group.sort(
+                    key=lambda n: (self.compute_index_domination[n], self.node_idx[n])
+                )
+                candidates.extend(group)
+
         for collective in candidates:
             pg_name = get_group_name(collective)
             pg_available_time = remaining_time_per_pg[pg_name]
@@ -1401,6 +1437,7 @@ class OverlapScheduler:
             max_coll_distance=self.max_node_distance,
             insert_overlap_deps=self.insert_overlap_deps,
             bucket_exposed_first=self.bucket_exposed_first,
+            bucket_mode=self.bucket_mode,
         )
         bucketer.bucket_collectives()
 
@@ -1458,6 +1495,7 @@ def schedule_overlap_bucketing(
     log_final_collectives_estimations: bool = False,
     bucket_exposed_first: bool = True,
     enable_fusion_regions: bool = False,
+    prioritize_bucketing_during_scheduling: bool = True,
 ) -> torch.fx.GraphModule:
     """Schedule nodes to maximize compute-collective overlap.
 
@@ -1508,6 +1546,7 @@ def schedule_overlap_bucketing(
         log_final_collectives_estimations=log_final_collectives_estimations,
         bucket_exposed_first=bucket_exposed_first,
         enable_fusion_regions=enable_fusion_regions,
+        prioritize_bucketing_during_scheduling=prioritize_bucketing_during_scheduling,
     ).run()
     trace_structured(
         "artifact",
@@ -1551,6 +1590,7 @@ def schedule_overlap_bucketing_from_inductor_configs(
         "log_final_collectives_estimations",
         "bucket_exposed_first",
         "enable_fusion_regions",
+        "prioritize_bucketing_during_scheduling",
     )
     for key in config_keys:
         if (val := getattr(dist_opts, key, None)) is not None:
