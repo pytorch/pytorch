@@ -741,10 +741,7 @@ def _combine_args(f, args, kwargs, preserve_order: bool = False) -> dict[str, An
     if not preserve_order:
         return combined_args
 
-    combined_args_traced_order = {}
-    if args:
-        for name, arg in zip(signature.parameters, args):
-            combined_args_traced_order[name] = arg
+    combined_args_traced_order = dict(zip(signature.parameters, args))
 
     for arg in kwargs:
         if arg in combined_args:
