@@ -562,7 +562,7 @@ class Sm100GroupedBlockScaledGemmKernel:
             grid=grid,
             block=[self.threads_per_cta, 1, 1],
             cluster=(*self.cluster_shape_mn, 1),
-            smem=self.shared_storage.size_in_bytes(),
+            smem=self.shared_storage.size_in_bytes(),  # pyrefly: ignore [missing-attribute]
             stream=stream,
             min_blocks_per_mp=1,
         )

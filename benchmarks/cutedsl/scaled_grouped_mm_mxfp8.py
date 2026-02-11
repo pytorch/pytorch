@@ -1,7 +1,9 @@
 import argparse
+import importlib
 import subprocess
 import sys
 import warnings
+from collections.abc import Callable
 
 import torch
 from torch.nn.functional import scaled_grouped_mm, ScalingType, SwizzleType
@@ -43,6 +45,31 @@ def _parse_gmnk(value):
             f"Invalid gmnk '{value}'. Expected G,M,N,K >= 1."
         )
     return values
+
+
+def _parse_mn_pair(value, arg_name: str):
+    parts = value.split(",")
+    if len(parts) != 2:
+        raise argparse.ArgumentTypeError(f"Invalid {arg_name} '{value}'. Expected M,N.")
+    try:
+        values = [int(part) for part in parts]
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            f"Invalid {arg_name} '{value}'. Expected integers."
+        ) from exc
+    if any(v < 1 for v in values):
+        raise argparse.ArgumentTypeError(
+            f"Invalid {arg_name} '{value}'. Expected M,N >= 1."
+        )
+    return values[0], values[1]
+
+
+def _parse_mma_tile_mn(value):
+    return _parse_mn_pair(value, "--mma-tile-mn")
+
+
+def _parse_cluster_shape_mn(value):
+    return _parse_mn_pair(value, "--cluster-shape-mn")
 
 
 def _do_bench_cuda(fn, warmup=10, rep=100):
@@ -121,6 +148,8 @@ def _bench_backend_subprocess(
     rep: int,
     backend: str,
     use_cuda_graphs: bool,
+    mma_tile_mn: tuple[int, int] | None,
+    cluster_shape_mn: tuple[int, int] | None,
 ) -> float:
     cmd = [
         sys.executable,
@@ -144,6 +173,12 @@ def _bench_backend_subprocess(
     ]
     if use_cuda_graphs:
         cmd.append("--use-cuda-graphs")
+    if mma_tile_mn is not None:
+        cmd.extend(["--mma-tile-mn", f"{mma_tile_mn[0]},{mma_tile_mn[1]}"])
+    if cluster_shape_mn is not None:
+        cmd.extend(
+            ["--cluster-shape-mn", f"{cluster_shape_mn[0]},{cluster_shape_mn[1]}"]
+        )
     proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if proc.returncode != 0:
         raise RuntimeError(
@@ -287,11 +322,17 @@ def benchmark_scaled_grouped_mm(
     backend="both",
     emit_us_only=False,
     do_correctness=True,
+    mma_tile_mn: tuple[int, int] | None = None,
+    cluster_shape_mn: tuple[int, int] | None = None,
 ):
     if dtype is None:
         dtype = torch.bfloat16
     if backend not in ("both", "cpp", "cute"):
         raise ValueError(f"backend must be one of both/cpp/cute, got {backend}")
+    if (mma_tile_mn is None) != (cluster_shape_mn is None):
+        raise ValueError(
+            "mma_tile_mn and cluster_shape_mn must be provided together or omitted together"
+        )
 
     if gmnk is None:
         gmnk = [
@@ -329,6 +370,36 @@ def benchmark_scaled_grouped_mm(
 
     results = []
 
+    def _make_cute_call(
+        fn: Callable[[], torch.Tensor],
+    ) -> Callable[[], torch.Tensor]:
+        if mma_tile_mn is None and cluster_shape_mn is None:
+            return fn
+
+        sgmm_mod = importlib.import_module("torch._cutedsl.scaled_grouped_mm_mxfp8")
+
+        def _call_with_override():
+            old_select = sgmm_mod._select_kernel_config
+
+            def _select_override(M, N, K):
+                base = old_select(M, N, K)
+                return sgmm_mod._KernelConfig(
+                    mma_tile_mn if mma_tile_mn is not None else base.mma_tile_mn,
+                    (
+                        cluster_shape_mn
+                        if cluster_shape_mn is not None
+                        else base.cluster_shape_mn
+                    ),
+                )
+
+            sgmm_mod._select_kernel_config = _select_override
+            try:
+                return fn()
+            finally:
+                sgmm_mod._select_kernel_config = old_select
+
+        return _call_with_override
+
     for g, m, n, k in gmnk:
         if not is_blackwell():
             raise RuntimeError("Benchmark requires Blackwell (sm_100).")
@@ -361,7 +432,7 @@ def benchmark_scaled_grouped_mm(
             use_fast_accum=False,
         )
 
-        fn_cute = lambda: scaled_grouped_mm(  # noqa: E731
+        fn_cute_base = lambda: scaled_grouped_mm(  # noqa: E731
             xq,
             wq.transpose(-2, -1),
             [x_blocked_scales],
@@ -373,6 +444,7 @@ def benchmark_scaled_grouped_mm(
             offs=offs,
             output_dtype=torch.bfloat16,
         )
+        fn_cute = _make_cute_call(fn_cute_base)
 
         if use_subprocess and backend == "both":
             us_cpp = _bench_backend_subprocess(
@@ -387,6 +459,8 @@ def benchmark_scaled_grouped_mm(
                 rep=rep,
                 backend="cpp",
                 use_cuda_graphs=use_cuda_graphs,
+                mma_tile_mn=mma_tile_mn,
+                cluster_shape_mn=cluster_shape_mn,
             )
             us_cute = _bench_backend_subprocess(
                 g=g,
@@ -400,6 +474,8 @@ def benchmark_scaled_grouped_mm(
                 rep=rep,
                 backend="cute",
                 use_cuda_graphs=use_cuda_graphs,
+                mma_tile_mn=mma_tile_mn,
+                cluster_shape_mn=cluster_shape_mn,
             )
         else:
             bench_fn_cpp = (
@@ -511,6 +587,18 @@ if __name__ == "__main__":
         help="Problem sizes as G,M,N,K (space-separated).",
     )
     parser.add_argument(
+        "--mma-tile-mn",
+        type=_parse_mma_tile_mn,
+        default=None,
+        help="Override CuTeDSL output MMA tile as M,N (e.g. 256,256).",
+    )
+    parser.add_argument(
+        "--cluster-shape-mn",
+        type=_parse_cluster_shape_mn,
+        default=None,
+        help="Override CuTeDSL cluster shape as M,N (e.g. 2,1).",
+    )
+    parser.add_argument(
         "--grouping",
         choices=["balanced", "random"],
         default="balanced",
@@ -559,6 +647,8 @@ if __name__ == "__main__":
         help="Skip correctness check.",
     )
     args = parser.parse_args()
+    if (args.mma_tile_mn is None) != (args.cluster_shape_mn is None):
+        parser.error("--mma-tile-mn and --cluster-shape-mn must be provided together")
     dtype = torch.bfloat16 if args.input_dtype == "bf16" else torch.float16
     gmnk = args.gmnk if args.gmnk is not None else None
     benchmark_scaled_grouped_mm(
@@ -575,4 +665,6 @@ if __name__ == "__main__":
         backend=args.backend,
         emit_us_only=args.emit_us_only,
         do_correctness=not args.no_correctness,
+        mma_tile_mn=args.mma_tile_mn,
+        cluster_shape_mn=args.cluster_shape_mn,
     )

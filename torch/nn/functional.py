@@ -6878,7 +6878,9 @@ def scaled_grouped_mm(
     swizzle_a = expand_single_value(swizzle_a)
     swizzle_b = expand_single_value(swizzle_b)
 
-    if mat_a.dtype == torch.float8_e4m3fn:
+    # Symbolic FX tracing passes Proxy placeholders (not Tensor), so gate this
+    # dtype/device branch to real Tensor inputs only.
+    if isinstance(mat_a, Tensor) and mat_a.dtype == torch.float8_e4m3fn:
         try:
             major, _ = torch.cuda.get_device_capability(mat_a.device)
         except Exception:
@@ -6886,7 +6888,19 @@ def scaled_grouped_mm(
         if major == 10 and mat_a.dim() == 2 and mat_b.dim() == 3:
             from torch._cutedsl import scaled_grouped_mm_mxfp8
 
-            return scaled_grouped_mm_mxfp8(
+            # Temporary bridge until an inductor lowering exists: run the
+            # CuTeDSL path eagerly under torch.compile.
+            if torch.compiler.is_compiling():
+                import torch._dynamo as torch_dynamo
+
+                # TODO: remove this graph-break bridge once scaled_grouped_mm
+                # is fully CuTeDSL-backed and has a proper compile-time lowering
+                # (or custom op lowering) in the compiler stack.
+                cutedsl_call = torch_dynamo.disable(scaled_grouped_mm_mxfp8)
+            else:
+                cutedsl_call = scaled_grouped_mm_mxfp8
+
+            return cutedsl_call(
                 mat_a,
                 mat_b,
                 scale_a,

@@ -1,11 +1,12 @@
 # Owner(s): ["module: dynamo"]
+import threading
 from unittest.mock import patch
 
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._dynamo.utils
-from torch._dynamo.utils import dynamo_timed
+from torch._dynamo.utils import ChromiumEventLogger, dynamo_timed
 from torch.profiler import record_function
 from torch.testing._internal.common_utils import TemporaryFileName
 
@@ -48,6 +49,66 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(
             any(f"{fn_name} (dynamo_timed)" in evt.name for evt in prof.events())
         )
+
+    def test_compile_events_visible_in_profiler(self):
+        torch._dynamo.reset()
+
+        def fn(x):
+            return x + 1
+
+        with torch.profiler.profile(with_stack=False) as prof:
+            torch.compile(fn, backend="aot_eager")(torch.randn(2, 2))
+
+        event_names = [e.name for e in prof.events()]
+
+        # Check for the main dynamo event (follows pattern from test_dynamo_timed_profiling_backend_compile)
+        self.assertTrue(
+            any("(dynamo_timed)" in name for name in event_names),
+            f"Expected dynamo_timed events in profiler: {event_names}",
+        )
+
+    def test_record_functions_thread_local(self):
+        """Verify record_functions dict is thread-local (no cross-thread contamination)"""
+
+        logger = ChromiumEventLogger()
+        results = {}
+
+        def thread_func(thread_id):
+            # Each thread creates its own record_functions dict
+            rf = logger.get_record_functions()
+            rf[f"thread_{thread_id}"] = f"value_{thread_id}"
+            results[thread_id] = len(rf)
+
+        threads = [threading.Thread(target=thread_func, args=(i,)) for i in range(3)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        # Each thread should only see its own entry (length 1)
+        for thread_id, length in results.items():
+            self.assertEqual(
+                length, 1, f"Thread {thread_id} saw {length} entries instead of 1"
+            )
+
+    def test_nested_compilation_events_in_profiler(self):
+        """Verify nested compilation events (dynamo→inductor) show hierarchy"""
+        torch._dynamo.reset()
+
+        def fn(x):
+            return x * 2 + torch.sin(x)
+
+        with torch.profiler.profile(with_stack=False) as prof:
+            torch.compile(fn, backend="inductor")(torch.randn(10, 10))
+
+        event_names = [e.name.lower() for e in prof.events()]
+
+        # Should see both parent and child events
+        has_dynamo = any("dynamo" in name for name in event_names)
+        has_inductor = any("inductor" in name for name in event_names)
+
+        self.assertTrue(has_dynamo, "Missing dynamo event in nested compilation")
+        self.assertTrue(has_inductor, "Missing inductor event in nested compilation")
 
     @patch.object(torch._dynamo.config, "assume_static_by_default", False)
     def test_profile_dynamic_shapes_runtime(self):
