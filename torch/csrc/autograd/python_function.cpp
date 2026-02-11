@@ -149,9 +149,7 @@ PyObject* to_py_size(const std::vector<c10::SymInt>& size) {
 
 namespace torch::autograd {
 
-static void set_needs_input_grad(
-    THPFunction* py_fn,
-    PyNode* node) {
+static void set_needs_input_grad(THPFunction* py_fn, PyNode* node) {
   size_t edge_idx = 0;
   for (const auto i : c10::irange(py_fn->is_variable_input.size())) {
     if (py_fn->is_variable_input[i]) {
