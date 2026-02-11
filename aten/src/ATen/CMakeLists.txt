@@ -447,8 +447,8 @@ IF(USE_MSLK)
     endif()
 
     add_library(mslk STATIC ${mslk_native_rocm_hip})
-    set_target_properties(mslk PROPERTIES HIP_ARCHITECTURES "${MSLK_HIP_ARCHITECTURES}")
-    target_compile_options(mslk PRIVATE $<$<COMPILE_LANGUAGE:HIP>:${MSLK_HIP_FLAGS}>)
+    set_target_properties(mslk PROPERTIES HIP_ARCHITECTURES ${MSLK_HIP_ARCHITECTURES})
+    target_compile_options(mslk PRIVATE ${MSLK_HIP_FLAGS})
     set_target_properties(mslk PROPERTIES POSITION_INDEPENDENT_CODE ON)
     target_compile_definitions(mslk PRIVATE MSLK_NO_EXTENDED_SHAPES)
 

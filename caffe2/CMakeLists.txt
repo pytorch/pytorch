@@ -1995,9 +1995,7 @@ if(BUILD_TEST)
 
       # Set HIP architectures for HIP tests
       if(test_src MATCHES "^.*\.hip$")
-        set_target_properties(${test_name} PROPERTIES
-          HIP_ARCHITECTURES "${PYTORCH_ROCM_ARCH}"
-          LINKER_LANGUAGE CXX)
+        set_target_properties(${test_name} PROPERTIES HIP_ARCHITECTURES "${PYTORCH_ROCM_ARCH}")
       endif()
 
       target_link_libraries(${test_name} torch_library gtest_main)
