@@ -6,7 +6,7 @@ Tests for torch._dynamo.bytecode_debugger
 
 import re
 import sys
-from contextlib import redirect_stdout
+from contextlib import nullcontext, redirect_stdout
 from io import StringIO
 from unittest.mock import patch
 
@@ -22,15 +22,17 @@ class InteractiveDebugSession:
     Uses a generator for cooperative multitasking between test and debugger.
     The test_logic function receives initial output as its argument, then
     yields commands and receives subsequent output via send().
+
+    Set use_debug=False to test auto-activation (no debug() wrapper).
     """
 
-    def __init__(self, fn, args, test_logic):
+    def __init__(self, fn, args, test_logic, use_debug=True):
         self.test_logic = test_logic
         self.output_buffer = StringIO()
 
         with patch("builtins.input", self._fake_input):
             with redirect_stdout(self.output_buffer):
-                with debug() as self.ctx:
+                with debug() if use_debug else nullcontext() as self.ctx:
                     self.result = fn(*args)
 
         # Ensure test_logic completed by sending final output
@@ -579,11 +581,11 @@ Stack (TOS at end):
         InteractiveDebugSession(fn, (torch.ones(3),), test_logic)
 
     def test_breakpoint_marker(self):
-        """Test that BREAKPOINT_MARKER detection logic works.
+        """Test that create_breakpoint() auto-activates the debugger.
 
-        This verifies that the debugger correctly identifies LOAD_CONST
-        instructions with BREAKPOINT_MARKER as breakpoints, and that the
-        breakpoint is hit at the expected location (before side effect replay).
+        Manually injects a BREAKPOINT_MARKER via create_breakpoint() (without
+        bdb_breakpoint()) and verifies the debugger activates automatically,
+        hitting the breakpoint before side effect replay.
         """
         from torch._dynamo.bytecode_transformation import create_breakpoint
         from torch._dynamo.side_effects import SideEffects
@@ -634,14 +636,18 @@ Stack (TOS at end):
             else:
                 self.fail("Never saw mylist mutated to [1, 2, 3, 4]")
 
+            # Continue to end
+            yield "c"
+
         with patch.object(
             SideEffects,
             "codegen_update_mutated",
             patched_codegen_update_mutated,
         ):
-            InteractiveDebugSession(fn, (torch.randn(3),), test_logic)
+            inp = torch.randn(3)
+            sess = InteractiveDebugSession(fn, (inp,), test_logic, use_debug=False)
 
-        # Verify the mutation happened after the session completed
+        self.assertEqual(sess.result, inp + 1)
         self.assertEqual(mylist, [1, 2, 3, 4])
 
     def test_user_defined_variables_persist(self):
@@ -1144,6 +1150,165 @@ Stack (TOS at end):
             yield "c"
 
         InteractiveDebugSession(fn, (torch.randn(3),), test_logic)
+
+    def test_breakpoint_function(self):
+        """Test that breakpoint() inserts BREAKPOINT_MARKER without a graph break."""
+        from torch._dynamo.bytecode_debugger import breakpoint as bdb_breakpoint
+        from torch._dynamo.resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
+
+        @torch.compile(backend="eager")
+        def fn(x):
+            x = x + 1
+            bdb_breakpoint()
+            return x + 2
+
+        def test_logic(sess, initial):
+            self.assertIn("Entering Dynamo-generated code: fn", initial)
+            # Continue — should hit the programmatic breakpoint
+            output = yield "c"
+            self.assertIn("Breakpoint hit (programmatic)", output)
+            # No graph break: should NOT see a resume function
+            self.assertNotIn(TORCH_DYNAMO_RESUME_IN_PREFIX, output)
+            # Continue to end
+            output = yield "c"
+            self.assertIn("returned:", output)
+
+        inp = torch.randn(3)
+        sess = InteractiveDebugSession(fn, (inp,), test_logic)
+        self.assertEqual(sess.result, inp + 3)
+
+    def test_breakpoint_after_graph_break(self):
+        """Test that breakpoint() after a graph break pauses in the resume function."""
+        from torch._dynamo.bytecode_debugger import breakpoint as bdb_breakpoint
+        from torch._dynamo.resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
+
+        @torch.compile(backend="eager")
+        def fn(x):
+            x = x + 1
+            torch._dynamo.graph_break()
+            bdb_breakpoint()
+            return x + 2
+
+        def test_logic(sess, initial):
+            self.assertIn("Entering Dynamo-generated code: fn", initial)
+            # Enable verbose so we can see the resume function entering
+            yield "v"
+            # Continue — should enter the resume function and hit the breakpoint
+            output = yield "c"
+            self.assertIn(
+                "Entering Dynamo-generated code: " + TORCH_DYNAMO_RESUME_IN_PREFIX,
+                output,
+            )
+            self.assertIn("Breakpoint hit (programmatic)", output)
+            # Continue to end
+            output = yield "c"
+            self.assertIn("returned:", output)
+
+        inp = torch.randn(3)
+        sess = InteractiveDebugSession(fn, (inp,), test_logic)
+        self.assertEqual(sess.result, inp + 3)
+
+    def test_breakpoint_without_debug_context(self):
+        """Test that breakpoint() auto-activates the debugger without with debug()."""
+        from torch._dynamo.bytecode_debugger import breakpoint as bdb_breakpoint
+
+        @torch.compile(backend="eager")
+        def fn(x):
+            x = x + 1
+            bdb_breakpoint()
+            return x + 2
+
+        def test_logic(sess, initial):
+            output = yield "c"
+            self.assertIn("Breakpoint hit (programmatic)", output)
+            output = yield "c"
+
+        inp = torch.randn(3)
+        sess = InteractiveDebugSession(fn, (inp,), test_logic, use_debug=False)
+        self.assertEqual(sess.result, inp + 3)
+
+    def test_breakpoint_without_debug_context_after_graph_break(self):
+        """Test auto-activate only fires for the resume function, not the first graph."""
+        from torch._dynamo.bytecode_debugger import breakpoint as bdb_breakpoint
+        from torch._dynamo.resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
+
+        @torch.compile(backend="eager")
+        def fn(x):
+            x = x + 1
+            torch._dynamo.graph_break()
+            bdb_breakpoint()
+            return x + 2
+
+        def test_logic(sess, initial):
+            # The first prompt should be from the resume function, not fn
+            self.assertIn(
+                "Entering Dynamo-generated code: " + TORCH_DYNAMO_RESUME_IN_PREFIX,
+                initial,
+            )
+            output = yield "c"
+            self.assertIn("Breakpoint hit (programmatic)", output)
+            output = yield "c"
+
+        inp = torch.randn(3)
+        sess = InteractiveDebugSession(fn, (inp,), test_logic, use_debug=False)
+        self.assertEqual(sess.result, inp + 3)
+
+    def test_nested_debug_contexts(self):
+        """Test that nested debug() contexts restore the outer correctly."""
+
+        @torch.compile(backend="eager")
+        def fn1(x):
+            return x + 1
+
+        @torch.compile(backend="eager")
+        def fn2(x):
+            return x * 2
+
+        def test_logic(sess, initial):
+            self.assertIn("Entering Dynamo-generated code: fn1", initial)
+            # Enable verbose so we see all code entries
+            yield "v"
+
+            # Run fn2 inside a nested debug() — its context should take over
+            inner_buf = StringIO()
+            with redirect_stdout(inner_buf):
+                with debug():
+                    fn2(torch.randn(3))
+            inner_output = inner_buf.getvalue()
+            self.assertIn("Entering Dynamo-generated code: fn2", inner_output)
+
+            # Continue fn1 — outer context should still work after inner exits
+            output = yield "c"
+            self.assertIn("fn1 returned:", output)
+
+        InteractiveDebugSession(fn1, (torch.randn(3),), test_logic)
+
+    def test_nested_auto_breakpoints(self):
+        """Test multiple functions with breakpoint() called sequentially."""
+        from torch._dynamo.bytecode_debugger import breakpoint as bdb_breakpoint
+
+        @torch.compile(backend="eager")
+        def fn1(x):
+            bdb_breakpoint()
+            return x + 1
+
+        @torch.compile(backend="eager")
+        def fn2(x):
+            bdb_breakpoint()
+            return x * 2
+
+        output_buf = StringIO()
+        with patch("builtins.input", return_value="c"):
+            with redirect_stdout(output_buf):
+                inp = torch.randn(3)
+                r1 = fn1(inp)
+                r2 = fn2(inp)
+
+        output = output_buf.getvalue()
+        # Both functions should have hit their breakpoints
+        self.assertEqual(output.count("Breakpoint hit (programmatic)"), 2)
+        self.assertEqual(r1, inp + 1)
+        self.assertEqual(r2, inp * 2)
 
 
 if __name__ == "__main__":
