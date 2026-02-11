@@ -12,7 +12,7 @@ from torch._dynamo.decorators import leaf_function
 from torch._dynamo.testing import normalize_gm
 from torch._higher_order_ops.invoke_leaf_function import invoke_leaf_function
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
 
 
 def extract_graph(fx_g, _, graph_cell):
@@ -20,6 +20,7 @@ def extract_graph(fx_g, _, graph_cell):
     return fx_g
 
 
+@skipIfTorchDynamo("leaf_function tests manage their own compilation")
 class TestLeafFunctionMakeFx(TestCase):
     def _has_invoke_leaf_function_node(self, gm):
         for node in gm.graph.nodes:
@@ -199,6 +200,7 @@ class f(torch.nn.Module):
         self.assertEqual(gm(w2, b2, x2), f(w2, b2, x2))
 
 
+@skipIfTorchDynamo("leaf_function tests manage their own compilation")
 class TestLeafFunctionAotFunction(TestCase):
     def test_aot_function_simple(self):
         @leaf_function
@@ -478,6 +480,7 @@ class GraphModule(torch.nn.Module):
         )
 
 
+@skipIfTorchDynamo("leaf_function tests manage their own compilation")
 class TestLeafFunctionEscapedGradients(TestCase):
     def test_aot_function_escaped_gradient_multiple_closures(self):
         weight1 = torch.randn(3, 3, requires_grad=True)
@@ -612,6 +615,7 @@ class TestLeafFunctionEscapedGradients(TestCase):
             self.assertEqual(result[0].shape, (2, 3))
 
 
+@skipIfTorchDynamo("leaf_function tests manage their own compilation")
 class TestLeafFunctionMakeFxAndCompile(TestCase):
     """Tests for @leaf_function when mixing torch.compile and make_fx."""
 

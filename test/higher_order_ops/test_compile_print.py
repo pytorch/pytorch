@@ -16,7 +16,7 @@ from torch._higher_order_ops.compile_print_wrapper import (
 )
 from torch._higher_order_ops.invoke_leaf_function import invoke_leaf_function
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
 
 
 def _extract_graph(fx_g, _, graph_cell):
@@ -148,6 +148,7 @@ def run_aot_function(
     )
 
 
+@skipIfTorchDynamo("compile_print tests manage their own compilation")
 class TestCompilePrint(TestCase):
     def test_single_tensor(self):
         def make_fn(cp):
@@ -517,6 +518,7 @@ class TestCompilePrint(TestCase):
         self.assertIn("[B][bwd]", output)
 
 
+@skipIfTorchDynamo("compile_print tests manage their own compilation")
 class TestCompilePrintEagerOnly(TestCase):
     def test_returns_none(self):
         cp = make_compile_print(fwd_f=lambda t: None, bwd_f=lambda t: None)
