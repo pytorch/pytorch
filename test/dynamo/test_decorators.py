@@ -3418,6 +3418,8 @@ class GraphModule(torch.nn.Module):
                 return (x,)
 
     def test_leaf_function_no_return_value(self):
+        printed = []
+
         @leaf_function
         def fn_no_return(x):
             print("processing")
@@ -3441,7 +3443,9 @@ class GraphModule(torch.nn.Module):
         def loss_fn(out):
             return out[0].sum()
 
-        self._test_leaf_function_helper(Mod, args_fn, loss_fn)
+        with patch("builtins.print", lambda *args, **kwargs: printed.append(args)):
+            self._test_leaf_function_helper(Mod, args_fn, loss_fn)
+        self.assertTrue(any("processing" in p for p in printed))
 
 
 instantiate_parametrized_tests(DecoratorTests)
