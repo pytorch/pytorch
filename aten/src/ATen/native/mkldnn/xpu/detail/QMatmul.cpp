@@ -423,10 +423,10 @@ struct ScaleSpec {
 // The mask and groups parameters work together:
 // - mask=0: per-tensor (single scale for whole tensor)
 // - mask=(1<<0)|(1<<1): scale varies along both dimensions
-// - groups: block sizes for grouping, 
+// - groups: block sizes for grouping,
 // e.g., {128, 1} means 128 elements grouped on dim0
 //
-// The returned value will be used in 
+// The returned value will be used in
 // `set_scales(arg, mask, groups, data_type)`.
 inline ScaleSpec make_scale_spec(
     at::blas::ScalingType scaling_type,
