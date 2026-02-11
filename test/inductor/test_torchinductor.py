@@ -11372,9 +11372,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         code_a = codes_a[0]
         code_b = codes_b[0]
 
-        has_hint = lambda code, h: (
-            f"rand_strided(({h}," in code or f"rand_strided(({h}, " in code
-        )
+        def has_hint(code, h):
+            return f"rand_strided(({h}," in code or f"rand_strided(({h}, " in code
 
         self.assertTrue(has_hint(code_a, HINT_A), f"hint {HINT_A} not in first code")
         self.assertTrue(has_hint(code_b, HINT_B), f"hint {HINT_B} not in second code")
