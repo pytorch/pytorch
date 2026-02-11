@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: pt2"]
+
 """Tests for @leaf_function with make_fx and aot_function."""
 
 from functools import partial
@@ -163,22 +165,8 @@ class f(torch.nn.Module):
             return no_fake_fn(x)
 
         x = torch.randn(3, 3)
-        gm = make_fx(f)(x)
-
-        # Without register_fake, the function body is traced through (not opaque)
-        self.assertFalse(self._has_invoke_leaf_function_node(gm))
-        self.assertExpectedInline(
-            normalize_gm(gm.print_readable(print_output=False)),
-            """\
-class f(torch.nn.Module):
-    def forward(self, x_1: "f32[3, 3]"):
-        mul: "f32[3, 3]" = torch.ops.aten.mul.Tensor(x_1, 2);  x_1 = None
-        return (mul,)
-""",
-        )
-
-        x2 = torch.randn(3, 3)
-        self.assertEqual(gm(x2), f(x2))
+        with self.assertRaisesRegex(Exception, "requires a fake implementation"):
+            make_fx(f)(x)
 
     def test_make_fx_with_module(self):
         @leaf_function
@@ -517,6 +505,168 @@ class TestLeafFunctionEscapedGradients(TestCase):
             x2 = torch.randn(2, 3)
             result = gm(x2)
             self.assertEqual(result[0].shape, (2, 3))
+
+
+class TestLeafFunctionMakeFxAndCompile(TestCase):
+    """Tests for @leaf_function when mixing torch.compile and make_fx."""
+
+    @config.patch(force_compile_during_fx_trace=True)
+    def test_leaf_fn_only_in_compile(self):
+        """Leaf function only inside the torch.compile'd region."""
+        torch._dynamo.reset()
+
+        @leaf_function
+        def my_leaf(x, y):
+            return (x * y + x,)
+
+        @my_leaf.register_fake
+        def my_leaf_fake(x, y):
+            return (x * y + x,)
+
+        def inner(x, y):
+            return my_leaf(x, y)[0]
+
+        compiled = torch.compile(inner, backend="invoke_subgraph")
+
+        def outer(x, y):
+            z = x + 1
+            return compiled(z, y) - 1
+
+        x = torch.randn(3, 3)
+        y = torch.randn(3, 3)
+        traced = make_fx(
+            outer, tracing_mode="fake", _disable_torch_fn_metadata_mode=True
+        )(x, y)
+
+        self.assertExpectedInline(
+            normalize_gm(traced.print_readable(print_output=False)),
+            """\
+class outer(torch.nn.Module):
+    def forward(self, x_1: "f32[3, 3]", y_1: "f32[3, 3]"):
+        add: "f32[3, 3]" = torch.ops.aten.add.Tensor(x_1, 1);  x_1 = None
+        repeated_subgraph0 = self.repeated_subgraph0
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'invoke_subgraph_0', add, y_1);  repeated_subgraph0 = add = y_1 = None
+        getitem: "f32[3, 3]" = invoke_subgraph[0];  invoke_subgraph = None
+        sub: "f32[3, 3]" = torch.ops.aten.sub.Tensor(getitem, 1);  getitem = None
+        return sub
+
+    class repeated_subgraph0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[3, 3]", arg1_1: "f32[3, 3]"):
+            _tree_spec_constant0 = self._tree_spec_constant0
+            _tree_spec_constant1 = self._tree_spec_constant1
+            invoke_leaf_function = torch.ops.higher_order.invoke_leaf_function(_tree_spec_constant0, _tree_spec_constant1, arg0_1, arg1_1);  _tree_spec_constant0 = _tree_spec_constant1 = arg0_1 = arg1_1 = None
+            getitem: "f32[3, 3]" = invoke_leaf_function[0];  invoke_leaf_function = None
+            return (getitem,)
+""",  # noqa: B950
+        )
+
+        x2 = torch.randn(3, 3)
+        y2 = torch.randn(3, 3)
+        expected = (x2 + 1) * y2 + (x2 + 1) - 1
+        self.assertEqual(traced(x2, y2), expected)
+
+    @config.patch(force_compile_during_fx_trace=True)
+    def test_leaf_fn_only_in_make_fx(self):
+        """Leaf function only in the make_fx-traced code, outside torch.compile."""
+        torch._dynamo.reset()
+
+        @leaf_function
+        def my_leaf(x):
+            return (x * 2,)
+
+        @my_leaf.register_fake
+        def my_leaf_fake(x):
+            return (torch.empty_like(x),)
+
+        def inner(x):
+            return x + 1
+
+        compiled = torch.compile(inner, backend="invoke_subgraph")
+
+        def outer(x):
+            y = compiled(x)
+            return my_leaf(y)
+
+        x = torch.randn(3, 3)
+        traced = make_fx(
+            outer, tracing_mode="fake", _disable_torch_fn_metadata_mode=True
+        )(x)
+
+        self.assertExpectedInline(
+            normalize_gm(traced.print_readable(print_output=False)),
+            """\
+class outer(torch.nn.Module):
+    def forward(self, x_1: "f32[3, 3]"):
+        repeated_subgraph0 = self.repeated_subgraph0
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'invoke_subgraph_0', x_1);  repeated_subgraph0 = x_1 = None
+        getitem: "f32[3, 3]" = invoke_subgraph[0];  invoke_subgraph = None
+        _tree_spec_constant0 = self._tree_spec_constant0
+        _tree_spec_constant1 = self._tree_spec_constant1
+        invoke_leaf_function = torch.ops.higher_order.invoke_leaf_function(_tree_spec_constant0, _tree_spec_constant1, getitem);  _tree_spec_constant0 = _tree_spec_constant1 = getitem = None
+        getitem_1: "f32[3, 3]" = invoke_leaf_function[0];  invoke_leaf_function = None
+        return (getitem_1,)
+
+    class repeated_subgraph0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[3, 3]"):
+            add: "f32[3, 3]" = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
+            return (add,)
+""",  # noqa: B950
+        )
+
+        x2 = torch.randn(3, 3)
+        expected = ((x2 + 1) * 2,)
+        self.assertEqual(traced(x2), expected)
+
+    @config.patch(force_compile_during_fx_trace=True)
+    def test_leaf_fn_in_both_compile_and_make_fx(self):
+        """Same leaf function used inside torch.compile and in make_fx-traced code."""
+        torch._dynamo.reset()
+
+        @leaf_function
+        def my_leaf(x):
+            return (x * 2,)
+
+        @my_leaf.register_fake
+        def my_leaf_fake(x):
+            return (torch.empty_like(x),)
+
+        def inner(x):
+            return my_leaf(x)[0]
+
+        compiled = torch.compile(inner, backend="invoke_subgraph")
+
+        def outer(x):
+            y = compiled(x)
+            return my_leaf(y)
+
+        x = torch.randn(3, 3)
+        traced = make_fx(
+            outer, tracing_mode="fake", _disable_torch_fn_metadata_mode=True
+        )(x)
+
+        self.assertExpectedInline(
+            normalize_gm(traced.print_readable(print_output=False)),
+            """\
+class outer(torch.nn.Module):
+    def forward(self, x_1: "f32[3, 3]"):
+        repeated_subgraph0 = self.repeated_subgraph0
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'invoke_subgraph_0', x_1);  repeated_subgraph0 = x_1 = None
+        getitem: "f32[3, 3]" = invoke_subgraph[0];  invoke_subgraph = None
+        _tree_spec_constant0 = self._tree_spec_constant0
+        _tree_spec_constant1 = self._tree_spec_constant1
+        invoke_leaf_function = torch.ops.higher_order.invoke_leaf_function(_tree_spec_constant0, _tree_spec_constant1, getitem);  _tree_spec_constant0 = _tree_spec_constant1 = getitem = None
+        getitem_1: "f32[3, 3]" = invoke_leaf_function[0];  invoke_leaf_function = None
+        return (getitem_1,)
+
+    class repeated_subgraph0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[3, 3]"):
+            _tree_spec_constant0 = self._tree_spec_constant0
+            _tree_spec_constant1 = self._tree_spec_constant1
+            invoke_leaf_function = torch.ops.higher_order.invoke_leaf_function(_tree_spec_constant0, _tree_spec_constant1, arg0_1);  _tree_spec_constant0 = _tree_spec_constant1 = arg0_1 = None
+            getitem: "f32[3, 3]" = invoke_leaf_function[0];  invoke_leaf_function = None
+            return (getitem,)
+""",  # noqa: B950
+        )
 
 
 if __name__ == "__main__":

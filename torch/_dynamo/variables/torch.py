@@ -2653,7 +2653,9 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         """
         import torch.utils._pytree as pytree
         from torch._dynamo.graph_bytecode_inputs import register_user_object
-        from torch._higher_order_ops.invoke_leaf_function import LeafModuleState
+        from torch._higher_order_ops.invoke_leaf_function import (
+            convert_modules_to_states,
+        )
 
         from .higher_order_ops import _make_inlined
         from .nn_module import NNModuleVariable, UnspecializedNNModuleVariable
@@ -2694,20 +2696,6 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             args_var = VariableTracker.build(tx, tuple(args))
             kwargs_var = VariableTracker.build(tx, kwargs)
             return args_var, kwargs_var
-
-        def convert_modules_to_states(
-            values: Any, module_to_index: dict[int, int]
-        ) -> Any:
-            def module_to_state(val: Any) -> Any:
-                if isinstance(val, torch.nn.Module):
-                    return LeafModuleState(
-                        nn_module_index=module_to_index[id(val)],
-                        named_parameters=dict(val.named_parameters()),
-                        named_buffers=dict(val.named_buffers()),
-                    )
-                return val
-
-            return pytree.tree_map(module_to_state, values)
 
         module_to_index_var = VariableTracker.build(tx, module_to_index)
 
