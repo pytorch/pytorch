@@ -239,6 +239,20 @@ class FSDPState(_State):
                     module_fqn += f", {module_name}"
                     module_to_fsdp_param_group[module]._module_fqn = module_fqn
 
+    def _cast_forward_inputs(
+        self, args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> tuple[tuple[Any, ...], dict[str, Any]]:
+        if self._mp_policy.cast_forward_inputs and self._mp_policy.param_dtype:
+            with torch.profiler.record_function("FSDP::cast_forward_inputs"):
+                cast_fn = functools.partial(
+                    _cast_fp_tensor, self._mp_policy.param_dtype
+                )
+                args, kwargs = (
+                    _apply_to_tensors(cast_fn, args),
+                    _apply_to_tensors(cast_fn, kwargs),
+                )
+        return args, kwargs
+
     @disable_if_config_true
     def _pre_forward(
         self, module: nn.Module, args: tuple[Any, ...], kwargs: dict[str, Any]
@@ -252,27 +266,10 @@ class FSDPState(_State):
             if self._fsdp_param_group and not self._fsdp_param_group.is_unsharded:
                 self._fsdp_param_group.unshard()
                 self._fsdp_param_group.wait_for_unshard()
-            if self._mp_policy.cast_forward_inputs and self._mp_policy.param_dtype:
-                with torch.profiler.record_function("FSDP::cast_forward_inputs"):
-                    cast_fn = functools.partial(
-                        _cast_fp_tensor, self._mp_policy.param_dtype
-                    )
-                    args, kwargs = (
-                        _apply_to_tensors(cast_fn, args),
-                        _apply_to_tensors(cast_fn, kwargs),
-                    )
-            return args, kwargs
+            return self._cast_forward_inputs(args, kwargs)
         self._training_state = TrainingState.FORWARD
         args, kwargs = self._root_pre_forward(module, args, kwargs)
-        if self._mp_policy.cast_forward_inputs and self._mp_policy.param_dtype:
-            with torch.profiler.record_function("FSDP::cast_forward_inputs"):
-                cast_fn = functools.partial(
-                    _cast_fp_tensor, self._mp_policy.param_dtype
-                )
-                args, kwargs = (
-                    _apply_to_tensors(cast_fn, args),
-                    _apply_to_tensors(cast_fn, kwargs),
-                )
+        args, kwargs = self._cast_forward_inputs(args, kwargs)
         if self._fsdp_param_group:
             args, kwargs = self._fsdp_param_group.pre_forward(module, args, kwargs)
         for fsdp_state in self._states_to_forward_prefetch:
@@ -285,14 +282,6 @@ class FSDPState(_State):
         # When composing with module-hook-based activation checkpointing, the
         # post-backward hook is responsible for the reshard
         if self._training_state == TrainingState.PRE_BACKWARD:
-            if self._mp_policy.output_dtype is not None:
-                with torch.profiler.record_function("FSDP::cast_forward_outputs"):
-                    output = _apply_to_tensors(
-                        functools.partial(
-                            _cast_fp_tensor, self._mp_policy.output_dtype
-                        ),
-                        output,
-                    )
             return output
         if self._fsdp_param_group:
             output = self._fsdp_param_group.post_forward(module, input, output)

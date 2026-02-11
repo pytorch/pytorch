@@ -623,16 +623,17 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
     @skip_if_lt_x_gpu(1)
     @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
     def test_mixed_precision_with_activation_checkpoint(self):
-        from torch.utils.checkpoint import checkpoint
+        checkpoint = torch.utils.checkpoint.checkpoint
 
         class Model(nn.Module):
             def __init__(self):
                 super().__init__()
+                self.linear0 = nn.Linear(1, 1)
                 self.linear1 = nn.Linear(1, 1)
                 self.linear2 = nn.Linear(1, 1)
 
             def forward(self, x):
-                x = x.float()
+                x = self.linear0(x)
                 x = checkpoint(self.linear1, x, use_reentrant=False)
                 return self.linear2(x)
 
@@ -643,6 +644,13 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
             cast_forward_inputs=True,
         )
 
+        mp_policy_with_fp32_output = MixedPrecisionPolicy(
+            param_dtype=torch.bfloat16,
+            output_dtype=torch.float32,
+            cast_forward_inputs=True,
+        )
+
+        fully_shard(model.linear0, mp_policy=mp_policy_with_fp32_output)
         fully_shard(model.linear1, mp_policy=mp_policy)
         fully_shard(model.linear2, mp_policy=mp_policy)
         fully_shard(model, mp_policy=mp_policy)
