@@ -83,6 +83,7 @@ from .base import (
     AsPythonConstantNotImplementedError,
     AttributeMutationNew,
     raise_type_error_exc,
+    ValueMutationExisting,
     ValueMutationNew,
     VariableTracker,
 )
@@ -366,13 +367,18 @@ class BaseUserFunctionVariable(VariableTracker):
         super().__init__(**kwargs)
         self.dict_vt: DunderDictVariable | None = dict_vt
 
+    def get_source(self) -> Source | None:
+        return self.source
+
     def get_dict_vt(self, tx: "InstructionTranslator") -> "DunderDictVariable":
+        source = self.get_source()
+        mutation = ValueMutationExisting() if source else ValueMutationNew()
         if self.dict_vt is None:
             self.dict_vt = variables.DunderDictVariable(
                 self,
                 side_effects=tx.output.side_effects,
-                mutation_type=ValueMutationNew(),
-                source=self.source and AttrSource(self.source, "__dict__"),
+                mutation_type=mutation,
+                source=source and AttrSource(source, "__dict__"),
             )
         return self.dict_vt
 
@@ -604,7 +610,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         return result
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
-        if name in cmp_name_to_op_mapping:
+        if name == "__dict__":
+            return self.get_dict_vt(tx)
+        elif name in cmp_name_to_op_mapping:
             return variables.GetAttrVariable(self, name)
         source = self.get_source()
         return fn_var_getattr(tx, self.fn, source, name)
@@ -970,8 +978,8 @@ class LocalGeneratorObjectVariable(VariableTracker):
     def has_self(self) -> bool:
         return False
 
-    # def __name__(self) -> str:
-    #     return self.get_name()
+    def __name__(self) -> str:
+        return self.get_name()
 
     def __str__(self) -> str:
         return f"{self.__class__.__name__}({self.get_name()})"
@@ -1744,6 +1752,11 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
                     mutation_type=ValueMutationNew(),
                 )
             )
+        elif name == "__code__":
+            return self.code
+        elif name == "__defaults__":
+            d = getattr(self, "defaults", None)
+            return d.as_python_constant() if d else ConstantVariable.create(None)
         elif name == "__dict__":
             return self.get_dict_vt(tx)
         elif name == "__type_params__":
