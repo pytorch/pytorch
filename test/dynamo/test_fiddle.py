@@ -111,9 +111,7 @@ class FiddleTests(torch._dynamo.test_case.TestCase):
                 try:
                     return super().__getattr__(name)
                 except AttributeError:
-                    raise AttributeError(
-                        f"Field '{name}' not found."
-                    ) from None
+                    raise AttributeError(f"Field '{name}' not found.") from None
 
         cfg = CustomConfig(MLP, hidden_size=256, num_layers=4)
 

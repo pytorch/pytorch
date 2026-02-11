@@ -2209,6 +2209,8 @@ triton.set_allocator not supported
 
   Developer debug context: triton.set_allocator called inside compiled region
 
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb4026.html
+
 from user code:
    File "test_error_messages.py", line N, in fn
     triton.set_allocator(lambda size, align, stream: None)""",
