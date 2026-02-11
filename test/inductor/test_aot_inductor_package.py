@@ -256,8 +256,12 @@ class TestAOTInductorPackage(TestCase):
 
     def test_load_package_from_directory(self):
         class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
             def forward(self, x, y):
-                return x + y
+                return x + self.linear(y)
 
         example_inputs = (
             torch.randn(10, 10, device=self.device),
@@ -292,14 +296,14 @@ class TestAOTInductorPackage(TestCase):
                     self.assertEqual(actual, expected)
 
                     # Verify robustness: move data deeper
-                    nested_dir = os.path.join(temp_dir, "nested_layer")
+                    nested_dir = os.path.join(temp_dir, "nested_dir")
                     os.makedirs(nested_dir)
                     # Move all contents to nested_dir
                     for item in os.listdir(temp_dir):
-                        if item != "nested_layer":
+                        if item != "nested_dir":
                             shutil.move(os.path.join(temp_dir, item), nested_dir)
-                    
-                    # Load from root temp_dir again, it should find it in nested_layer via recursive search
+
+                    # Load from root temp_dir again, it should find it in nested_dir
                     loaded_nested = torch._inductor.aoti_load_package(temp_dir)
                     actual_nested = loaded_nested(*example_inputs)
                     self.assertEqual(actual_nested, expected)

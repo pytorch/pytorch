@@ -1,7 +1,9 @@
 #if !defined(C10_MOBILE) && !defined(ANDROID)
 
 #include <c10/util/error.h>
+#include <c10/util/FileSystem.h>
 #include <c10/util/string_view.h>
+#include <c10/util/tempfile.h>
 #include <torch/csrc/inductor/aoti_package/model_package_loader.h>
 #include <torch/csrc/inductor/aoti_runner/model_container_runner.h>
 
@@ -12,27 +14,12 @@
 #include <iostream>
 #include <regex>
 
-#ifndef _WIN32
-#include <dirent.h>
-#include <sys/stat.h>
-#else
-#include <filesystem>
-namespace fs = std::filesystem;
+#ifdef _WIN32
+#include <unistd.h>
+#include <Windows.h>
 #endif
 
-// TODO: C++17 has the filesystem header, which may replace these
-#ifdef _WIN32
-#include <Windows.h>
-// On Windows, the POSIX implementations are considered deprecated. We simply
-// map to the newer variant.
-#include <direct.h>
-#include <io.h>
-#include <process.h>
-#define access _access
-#define F_OK 0
-#else
-#include <unistd.h>
-#endif
+namespace fs = c10::filesystem;
 
 namespace {
 
@@ -76,108 +63,22 @@ std::string normalize_path_separator(const std::string& orig_path) {
   return normalized_path;
 }
 
-bool file_exists(const std::string& path) {
-#ifdef _WIN32
-  return fs::exists(path);
-#else
-  struct stat rc{};
-  return lstat(path.c_str(), &rc) == 0;
-#endif
-}
-
-bool is_directory(const std::string& path) {
-#ifdef _WIN32
-  return fs::is_directory(path);
-#else
-  struct stat st{};
-  if (stat(path.c_str(), &st) != 0) {
-    return false;
-  }
-  return S_ISDIR(st.st_mode);
-#endif
-}
 
 bool is_zip_file(const std::string& path) {
   return c10::ends_with(path, ".pt2") || c10::ends_with(path, ".zip");
 }
 
 void list_files_recursive(const std::string& root, std::vector<std::string>& out) {
-#ifdef _WIN32
   for (auto const& e : fs::recursive_directory_iterator(root)) {
     if (!fs::is_directory(e)) {
       out.push_back(normalize_path_separator(e.path().string()));
     }
   }
-#else
-  std::vector<std::string> stack{root};
-  while (!stack.empty()) {
-    std::string cur = stack.back();
-    stack.pop_back();
-    DIR* dir = opendir(cur.c_str());
-    if (!dir) {
-      continue;
-    }
-    struct dirent* ent;
-    while ((ent = readdir(dir)) != nullptr) {
-      c10::string_view name(ent->d_name);
-      if (name == "." || name == "..") continue;
-
-      std::string full = cur;
-      if (!full.empty() && full.back() != '/') {
-        full.push_back('/');
-      }
-      full.append(name.data(), name.size());
-
-      bool is_dir = false;
-      bool known_type = false;
-
-#if defined(_DIRENT_HAVE_D_TYPE)
-      if (ent->d_type != DT_UNKNOWN) {
-        is_dir = (ent->d_type == DT_DIR);
-        known_type = true;
-      }
-#endif
-
-      if (!known_type) {
-        struct stat st{};
-        if (lstat(full.c_str(), &st) == 0) {
-          is_dir = S_ISDIR(st.st_mode);
-        } else {
-          continue;
-        }
-      }
-
-      if (is_dir) {
-        stack.push_back(full);
-      } else {
-        out.push_back(full);
-      }
-    }
-    closedir(dir);
-  }
-#endif
 }
 
 std::string create_temp_dir() {
-#ifdef _WIN32
-  try {
-    fs::path temp_dir = fs::temp_directory_path();
-    return temp_dir.string();
-  } catch (const fs::filesystem_error& e) {
-    throw std::runtime_error(
-        "Failed to get temporary directory: " + std::string(e.what()));
-  } catch (...) {
-    throw std::runtime_error(
-        "Unknown error occurred while getting temporary directory");
-  }
-#else
-  std::string temp_dir = "/tmp/XXXXXX";
-  TORCH_CHECK(
-      mkdtemp(temp_dir.data()) != nullptr,
-      "Failed to create temporary directory: ",
-      c10::utils::str_error(errno));
-  return temp_dir;
-#endif
+  c10::TempDir temp_dir = c10::make_tempdir("aotinductor_");
+  return std::move(temp_dir.name);
 }
 
 const char* object_file_ext() {
@@ -225,7 +126,7 @@ namespace torch::inductor {
 
 namespace {
 const nlohmann::json& load_json_file(const std::string& json_path) {
-  TORCH_CHECK(file_exists(json_path), "File not found: ", json_path);
+  TORCH_CHECK(fs::exists(json_path), "File not found: ", json_path);
 
   std::ifstream json_file(json_path);
   TORCH_CHECK(json_file.is_open());
@@ -248,7 +149,7 @@ std::tuple<std::string, std::string> get_cpp_compile_command(
 
   std::string source_args;
   for (const std::string& source : sources) {
-    source_args += normalize_path_separator(source) + " ";
+    source_args += normalize_path_separator(source) + ' ';
   }
 
   std::string file_ext =
@@ -265,43 +166,43 @@ std::tuple<std::string, std::string> get_cpp_compile_command(
     // [Windows compiler need it] convert first char arg to std::string, for
     // following plus(+) strings.
     cflags_args += std::string(_is_windows_os() ? "/" : "-") +
-        arg.get<std::string>() + " ";
+        arg.get<std::string>() + ' ';
   }
 
   std::string definitions_args;
   for (auto& arg : compile_options["definitions"]) {
     definitions_args += std::string(_is_windows_os() ? "/D" : "-D ") +
-        arg.get<std::string>() + " ";
+        arg.get<std::string>() + ' ';
   }
 
   std::string include_dirs_args;
   for (auto& arg : compile_options["include_dirs"]) {
     include_dirs_args += std::string(_is_windows_os() ? "/I" : "-I") +
-        arg.get<std::string>() + " ";
+        arg.get<std::string>() + ' ';
   }
 
   std::string ldflags_args;
   for (auto& arg : compile_options["ldflags"]) {
     ldflags_args += std::string(_is_windows_os() ? "/" : "-") +
-        arg.get<std::string>() + " ";
+        arg.get<std::string>() + ' ';
   }
 
   std::string libraries_dirs_args;
   for (auto& arg : compile_options["libraries_dirs"]) {
     if (_is_windows_os()) {
       libraries_dirs_args +=
-          fmt::format("/LIBPATH:\"{}\"", arg.get<std::string>()) + " ";
+          fmt::format("/LIBPATH:\"{}\"", arg.get<std::string>()) + ' ';
     } else {
-      libraries_dirs_args += "-L" + arg.get<std::string>() + " ";
+      libraries_dirs_args += "-L" + arg.get<std::string>() + ' ';
     }
   }
 
   std::string libraries_args;
   for (auto& arg : compile_options["libraries"]) {
     if (_is_windows_os()) {
-      libraries_args += fmt::format("{}.lib", arg.get<std::string>()) + " ";
+      libraries_args += fmt::format("{}.lib", arg.get<std::string>()) + ' ';
     } else {
-      libraries_args += "-l" + arg.get<std::string>() + " ";
+      libraries_args += "-l" + arg.get<std::string>() + ' ';
     }
   }
 
@@ -312,7 +213,7 @@ std::tuple<std::string, std::string> get_cpp_compile_command(
   for (auto& arg : compile_options["passthrough_args"]) {
     std::string arg_str =
         std::regex_replace(arg.get<std::string>(), script_regex, replacement);
-    passthrough_parameters_args += arg_str + " ";
+    passthrough_parameters_args += arg_str + ' ';
   }
 
   std::string output_flags = get_output_flags(compile_only);
@@ -363,99 +264,15 @@ std::tuple<std::string, std::string> get_cpp_compile_command(
 }
 
 bool recursive_mkdir(const std::string& dir) {
-  // Creates directories recursively, copied from jit_utils.cpp
-  // Check if current dir exists
-  const char* p_dir = dir.c_str();
-  const bool dir_exists = (access(p_dir, F_OK) == 0);
-  if (dir_exists) {
-    return true;
-  }
-
-  // Try to create current directory
-#ifdef _WIN32
-  int ret = _mkdir(dir.c_str());
-#else
-  int ret = mkdir(dir.c_str(), S_IRWXU | S_IRWXG | S_IRWXO);
-#endif
-  // Success
-  if (ret == 0) {
-    return true;
-  }
-
-  // Find folder separator and check if we are at the top
-  auto pos = dir.find_last_of(k_separator);
-  if (pos == std::string::npos) {
-    return false;
-  }
-
-  // Try to create parent directory
-  if (!(recursive_mkdir(dir.substr(0, pos)))) {
-    return false;
-  }
-
-  // Try to create complete path again
-#ifdef _WIN32
-  ret = _mkdir(dir.c_str());
-#else
-  ret = mkdir(dir.c_str(), S_IRWXU | S_IRWXG | S_IRWXO);
-#endif
-  return ret == 0;
+  std::error_code ec;
+  fs::create_directories(dir, ec);
+  return !ec;
 }
 
 bool recursive_rmdir(const std::string& path) {
-#ifdef _WIN32
   std::error_code ec;
-  return fs::remove_all(path, ec) != static_cast<std::uintmax_t>(-1);
-#else
-  DIR* dir = opendir(path.c_str());
-  if (!dir) {
-    return false;
-  }
-
-  struct dirent* entry = nullptr;
-  struct stat statbuf{};
-  bool success = true;
-
-  // Iterate through directory entries
-  while ((entry = readdir(dir)) != nullptr) {
-    std::string name = entry->d_name;
-
-    // Skip "." and ".."
-    if (name == "." || name == "..") {
-      continue;
-    }
-
-    std::string full_path = path;
-    full_path.append("/").append(name);
-
-    // Get file status
-    if (stat(full_path.c_str(), &statbuf) != 0) {
-      success = false;
-      continue;
-    }
-
-    if (S_ISDIR(statbuf.st_mode)) {
-      // Recursively delete subdirectory
-      if (!recursive_rmdir(full_path)) {
-        success = false;
-      }
-    } else {
-      // Delete file
-      if (unlink(full_path.c_str()) != 0) {
-        success = false;
-      }
-    }
-  }
-
-  closedir(dir);
-
-  // Remove the directory itself
-  if (rmdir(path.c_str()) != 0) {
-    success = false;
-  }
-
-  return success;
-#endif
+  fs::remove_all(path, ec);
+  return !ec;
 }
 
 std::string compile_so(
@@ -487,7 +304,7 @@ std::string compile_so(
 
   // Move the mmapped weights onto the .so
   std::string serialized_weights_path = filename + "_serialized_weights.bin";
-  if (file_exists(serialized_weights_path)) {
+  if (fs::exists(serialized_weights_path)) {
     std::ifstream serialized_weights_file(
         serialized_weights_path, std::ios::binary);
     TORCH_CHECK(
@@ -655,7 +472,7 @@ std::unordered_map<std::string, std::string> AOTIModelPackageLoader::
     std::string prefix1 = found_filenames[1].substr(0, pos);
 
     if (!prefix0.empty() && !prefix1.empty() && prefix0 == prefix1) {
-      file_prefix = prefix0 + "/";
+      file_prefix = prefix0 + '/';
     }
   }
 
@@ -680,12 +497,12 @@ std::unordered_map<std::string, std::string> AOTIModelPackageLoader::
   if (metadata_filename.empty()) {
     std::string found_filenames_str;
     for (const std::string& filename : found_filenames) {
-      found_filenames_str += filename + "\n";
+      found_filenames_str += filename + '\n';
     }
     std::string model_names_str;
     for (const std::string& model_name_tmp :
          find_model_names(found_filenames)) {
-      model_names_str += model_name_tmp + "\n";
+      model_names_str += model_name_tmp + '\n';
     }
 
     TORCH_CHECK(
@@ -758,7 +575,7 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
   std::vector<std::string> found_filenames;
   std::string model_directory;
 
-  if (is_directory(model_package_path) && !is_zip_file(model_package_path)) {
+  if (fs::is_directory(model_package_path) && !is_zip_file(model_package_path)) {
     shared_mode_ = true;
     temp_dir_ = normalize_path_separator(model_package_path);
 
@@ -787,12 +604,12 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
 
     model_directory = normalize_path_separator(
         file_prefix + "data" + k_separator + "aotinductor" + k_separator + model_name);
-    
+
     // Use absolute paths for matching
     std::string search_model_dir = normalize_path_separator(
         temp_dir_ + k_separator + model_directory);
     std::string search_const_dir = normalize_path_separator(
-        temp_dir_ + k_separator + "data" + k_separator + "constants");
+        temp_dir_ + k_separator + file_prefix + "data" + k_separator + "constants");
 
     for (auto const& cur_filename : found_filenames) {
       if (c10::starts_with(cur_filename, search_model_dir) ||
@@ -829,11 +646,11 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
     std::string prefix1 = found_filenames[1].substr(0, pos);
 
     if (!prefix0.empty() && !prefix1.empty() && prefix0 == prefix1) {
-      file_prefix = prefix0 + "/";
+      file_prefix = prefix0 + '/';
     } else {
       LOG(WARNING)
           << "You are using an outdated version of the pt2 archive which do not have a prefix in front of each filename. Example: \n"
-          << found_filenames[0] << "\n"
+          << found_filenames[0] << '\n'
           << found_filenames[1];
     }
 
@@ -912,22 +729,24 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
   if (cpp_filename.empty() && so_filename.empty()) {
     std::string found_filenames_str;
     for (const std::string& filename : found_filenames) {
-      found_filenames_str += filename + "\n";
+      found_filenames_str += filename + '\n';
     }
     std::string model_names_str;
     for (const std::string& model_name_tmp :
          find_model_names(found_filenames)) {
-      model_names_str += model_name_tmp + "\n";
+      model_names_str += model_name_tmp + '\n';
     }
 
     TORCH_CHECK(
         false,
         "Failed to find a generated cpp file or so file for model '",
         model_name,
-        "' in the zip archive.\n\nAvailable models in the archive:\n",
+        "' in the ",
+        (shared_mode_ ? "directory" : "zip archive"),
+        ".\n\nAvailable models:\n",
         model_names_str,
         "\n\nTo load a specific model, please provide its name using the `model_name` parameter when calling AOTIModelPackageLoader() or torch._inductor.package.load_package.\n\n",
-        "The following files were loaded from the archive:\n",
+        "The following files were found:\n",
         found_filenames_str);
   }
 
