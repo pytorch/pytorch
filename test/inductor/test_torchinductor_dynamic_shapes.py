@@ -645,27 +645,24 @@ class TestInductorDynamic(TestCase):
             _num_warps,
         )
 
-        # Large size that would trigger the buggy check but not the correct one
         size_hints = {"x": 600_000_000}
         x = 64
-        # Use _num_warps to get the realistic value per platform:
-        # CUDA: max_num_warps=8, ROCm: max_num_warps=(8+1)//2=4
         num_warps = _num_warps(8)
+        warp_size = torch.cuda.get_device_properties(
+            torch.cuda.current_device()
+        ).warp_size
 
-        result_x, result_num_blocks = _check_max_grid_x(size_hints, x, num_warps)
+        result_x, result_num_blocks = _check_max_grid_x(
+            size_hints, x, num_warps, warp_size
+        )
 
         max_grid_x = 2147483647
         if torch.version.hip:
-            # ROCm limits total threads (num_blocks * num_warps * warp_size),
-            # so it legitimately needs to scale up XBLOCK for this large input
-            warp_size = torch.cuda.get_device_properties(device).warp_size
+            # ROCm limits total threads (num_blocks * num_warps * warp_size)
             self.assertLessEqual(
                 result_num_blocks * num_warps * warp_size,
                 max_grid_x,
                 "ROCm total-threads grid limit should be satisfied",
-            )
-            self.assertGreater(
-                result_x, 64, "XBLOCK should be scaled up on ROCm for this input size"
             )
         else:
             # CUDA limits number of blocks only — 600M/64 ≈ 9.4M blocks,

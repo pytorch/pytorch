@@ -185,6 +185,7 @@ def autotune_hints_to_configs(
                     num_elements_per_warp=(
                         device_props.warp_size if device_props.warp_size else 32
                     ),
+                    warp_size=device_props.warp_size,
                 )
                 for xyz in xyz_options
             )
@@ -2361,17 +2362,17 @@ def _num_warps(num_warps, max_num_warps=8, min_num_warps=2, register_intensive=F
     return next_power_of_2(min(max(num_warps, min_num_warps), max_num_warps))
 
 
-def _check_max_grid_x(size_hints, x, num_warps):
+def _check_max_grid_x(size_hints, x, num_warps, warp_size):
     # Check if maxGridSize is exceeded - if so then must scale XBLOCK further
     max_grid_x = 2147483647
     max_block_x = TRITON_MAX_BLOCK["X"]
     num_blocks = (size_hints["x"] + x - 1) // x
 
     if torch.version.hip:
-        # HIP has a 2^31-1 limit on total threads (num_blocks * num_warps * warp_size)
-        warp_size = torch.cuda.get_device_properties(
-            torch.cuda.current_device()
-        ).warp_size
+        # HIP has a 2^31-1 limit on total threads (num_blocks * num_warps * warp_size).
+        # warp_size is queried from device properties in the main process and passed
+        # here to avoid device queries in subprocess workers where CUDA may not be
+        # initialized.
         while (
             (num_blocks * num_warps * warp_size) > max_grid_x
             and x < size_hints["x"]
@@ -2403,6 +2404,7 @@ def triton_config(
     num_warps=None,
     matrix_instr=None,
     waves_per_eu=None,
+    warp_size=None,
 ) -> Config:
     """
     Construct a pointwise triton config with some adjustment heuristics
@@ -2483,7 +2485,7 @@ def triton_config(
     )
     x *= math.ceil(block_size / conditional_product(x, y, z))
 
-    x, _num_blocks = _check_max_grid_x(size_hints, x, num_warps)
+    x, _num_blocks = _check_max_grid_x(size_hints, x, num_warps, warp_size=warp_size)
     x = min(x, size_hints["x"])
 
     cfg = {"XBLOCK": x}
@@ -2553,6 +2555,7 @@ def triton_config_reduction(
     dynamic_scale_rblock=True,
     reduction_hint=None,
     min_num_warps=None,
+    warp_size=None,
 ) -> Config:
     """
     Construct a reduction triton config with some adjustment heuristics
@@ -2597,7 +2600,7 @@ def triton_config_reduction(
         num_warps, max_num_warps=max_num_warps, register_intensive=register_intensive
     )
 
-    x, _num_blocks = _check_max_grid_x(size_hints, x, num_warps)
+    x, _num_blocks = _check_max_grid_x(size_hints, x, num_warps, warp_size=warp_size)
 
     for prefix in sorted(rnumels):
         while total_numel() > target:
@@ -2860,7 +2863,9 @@ def pointwise(
     )
 
     triton_config_with_settings = functools.partial(
-        triton_config, min_elem_per_thread=min_elem_per_thread
+        triton_config,
+        min_elem_per_thread=min_elem_per_thread,
+        warp_size=triton_meta["device"].warp_size,
     )
 
     configs = None
@@ -3144,6 +3149,7 @@ def _reduction_configs(
                 waves_per_eu=waves_per_eu,
                 dynamic_scale_rblock=dynamic_scale_rblock,
                 reduction_hint=reduction_hint,
+                warp_size=triton_meta["device"].warp_size,
             )
 
     def outer_config_opt():
@@ -3607,6 +3613,8 @@ def _persistent_reduction_configs(
     else:
         xblock_vals = [1, 8, 32, 128]
 
+    warp_size = triton_meta["device"].warp_size
+
     if "y" not in size_hints:
         configs = [
             triton_config_reduction(
@@ -3615,6 +3623,7 @@ def _persistent_reduction_configs(
                 rnumel,
                 register_intensive=True,
                 reduction_hint=reduction_hint,
+                warp_size=warp_size,
             )
             for xblock in xblock_vals
             if xblock == 1
@@ -3642,6 +3651,7 @@ def _persistent_reduction_configs(
             size_hints,
             2 * (256 // rnumel) if rnumel <= 256 else 1,
             rnumel,
+            warp_size=warp_size,
         )
     ]
 
@@ -3677,6 +3687,7 @@ def _persistent_reduction_configs(
                         num_warps=num_warps,
                         min_num_warps=min_num_warps,
                         reduction_hint=reduction_hint,
+                        warp_size=warp_size,
                     )
                 ]
 

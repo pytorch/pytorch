@@ -2828,11 +2828,8 @@ def get_gpu_shared_memory() -> int:
 
 def get_max_numwarps() -> int:
     if torch.cuda.is_available():
-        device = torch.cuda.current_device()
-        warp_size = torch.cuda.get_device_properties(device).warp_size
-        max_threads_per_block = torch.cuda.get_device_properties(
-            device
-        ).max_threads_per_block
+        warp_size = torch.cuda.get_device_properties().warp_size
+        max_threads_per_block = torch.cuda.get_device_properties().max_threads_per_block
     else:
         # Defaults
         warp_size = 32
