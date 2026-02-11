@@ -247,6 +247,11 @@ class TestProfilerTree(TestCase):
         # simply coerce them into a platform independent form. If you made a
         # change in the codebase which changes the trace produced, simply use
         # EXPECTTEST_ACCEPT=1 to update the tests to reflect the new structure.
+        def normalize(tree):
+            return re.sub(r"of pybind11\w+ object at", "of PyCapsule object at", tree)
+
+        actual = normalize(actual)
+        expected = normalize(expected)
 
         # expecttest will not show the diff view if `len(actual) < len(expected)`
         if not expecttest.ACCEPT:
