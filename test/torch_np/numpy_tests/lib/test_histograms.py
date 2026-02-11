@@ -814,7 +814,8 @@ class TestHistogramdd(TestCase):
             h1, e1 = histogramdd(r, b, weights=np.ones(10))
             assert_equal(H, h1)
             for edge, e in zip(edges, e1):
-                assert (edge == e).all()
+                if not (edge == e).all():
+                    raise AssertionError("Expected all edges to be equal")
 
     def test_weights(self):
         v = np.random.rand(100, 2)
@@ -995,7 +996,8 @@ class TestHistogramdd(TestCase):
             ]
         )
         H, edges = histogramdd(x, (2, 3, 3))
-        assert all(type(e) is np.ndarray for e in edges)
+        if not all(type(e) is np.ndarray for e in edges):
+            raise AssertionError("Expected all edges to be np.ndarray")
 
 
 if __name__ == "__main__":

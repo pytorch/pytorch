@@ -78,6 +78,9 @@ if HAS_GPU:
     STRING_CONSTANT_C: tl.constexpr = tl.constexpr("CONSTANT_C")
     BOOL_CONSTANT_C: tl.constexpr = tl.constexpr(True)
     FLOAT_CONSTANT_C = tl.constexpr(3.14)  # intentionally un-annotated
+    # Compute at module level to avoid dynamo tracing issue with
+    # torch.backends.cuda.matmul.fp32_precision getter
+    USE_TF32 = torch.backends.cuda.matmul.fp32_precision == "tf32"
 
     if hasattr(triton, "constexpr_function"):
 
@@ -3837,8 +3840,8 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
 
             def grid(meta):
                 return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-                capture_triton(add_kernel)[grid](x, y, output, n_elements, 16)
 
+            capture_triton(add_kernel)[grid](x, y, output, n_elements, 16)
             return output
 
         def f(x, y):
@@ -4261,7 +4264,7 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
                 w.stride(1),
                 z.stride(0),
                 z.stride(1),
-                ALLOW_TF32=torch.backends.cuda.matmul.allow_tf32,
+                ALLOW_TF32=USE_TF32,
             )
             return z
 
