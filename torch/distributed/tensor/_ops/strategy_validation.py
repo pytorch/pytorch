@@ -21,8 +21,12 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import torch
-from torch.distributed.tensor import Replicate
+import torch.distributed as dist
+from torch.distributed._local_tensor import LocalTensor, LocalTensorMode
+from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.tensor import distribute_tensor, DTensor, Replicate
 from torch.distributed.tensor.placement_types import Partial, Placement, Shard
+from torch.testing._internal.common_methods_invocations import SampleInput
 from torch.utils import _pytree as pytree
 
 
@@ -350,3 +354,264 @@ def extract_tensors_from_sample(sample_input) -> list:
     pytree.tree_map(_collect, sample_input.kwargs)
 
     return tensors
+
+
+def _create_partial_input(
+    tensor: torch.Tensor, placement: Partial, world_size: int, tensor_idx: int = 0
+) -> LocalTensor:
+    """
+    Create a LocalTensor with values that reduce to the original tensor.
+
+    Uses asymmetric splits to avoid coincidental matches when combining
+    different Partial types.
+    """
+    reduce_op = placement.reduce_op
+
+    if reduce_op in ("sum", "avg"):
+        base_ratio = 0.6 + 0.1 * (tensor_idx % 3)
+
+        # Add a sign-varying offset so local values have mixed signs.
+        # Pure proportional splits (tensor * ratio) preserve sign patterns,
+        # causing non-linear ops like abs to falsely validate P(sum)->P(sum).
+        flat = tensor.flatten()
+        offset_mag = flat.abs() + 1.0
+        signs = torch.ones_like(flat)
+        signs[
+            (torch.arange(flat.numel(), device=tensor.device) + tensor_idx) % 2 == 0
+        ] = -1.0
+        offset = (offset_mag * signs).reshape(tensor.shape)
+
+        scale = world_size if reduce_op == "avg" else 1
+        local_tensors = {}
+        for r in range(world_size):
+            if r == 0:
+                local_tensors[r] = tensor.clone() * base_ratio * scale + offset
+            else:
+                local_tensors[r] = tensor.clone() * (
+                    (1 - base_ratio) / (world_size - 1)
+                ) * scale - offset / (world_size - 1)
+        # pyrefly: ignore [bad-argument-type, bad-argument-count]
+        return LocalTensor(local_tensors)
+
+    elif reduce_op == "min":
+        # For P(min): on each element, one rank holds the true value (offset=0)
+        # and the other holds value+0.7. min() selects the unmodified value.
+        # The mask alternates which rank holds the true value (shifted by tensor_idx).
+        # 0.7 is arbitrary; any positive value works. Using a different magnitude
+        # than max's 1.3 prevents accidental cancellation when min/max are combined.
+        local_tensors: dict[int, torch.Tensor] = {}
+        flat = tensor.flatten()
+        mask = (torch.arange(flat.numel(), device=tensor.device) + tensor_idx) % 2 == 0
+        for r in range(world_size):
+            if r == 0:
+                r_offset = torch.where(
+                    mask, torch.zeros_like(flat), torch.full_like(flat, 0.7)
+                )
+            else:
+                r_offset = torch.where(
+                    mask, torch.full_like(flat, 0.7), torch.zeros_like(flat)
+                )
+            local_tensors[r] = (flat + r_offset).reshape(tensor.shape)
+        # pyrefly: ignore [bad-argument-type, bad-argument-count]
+        return LocalTensor(local_tensors)
+
+    elif reduce_op == "max":
+        # For P(max): on each element, one rank holds the true value (offset=0)
+        # and the other holds value-1.3. max() selects the unmodified value.
+        # 1.3 is arbitrary; any positive magnitude works.
+        local_tensors: dict[int, torch.Tensor] = {}
+        flat = tensor.flatten()
+        mask = (torch.arange(flat.numel(), device=tensor.device) + tensor_idx) % 2 == 0
+        for r in range(world_size):
+            if r == 0:
+                r_offset = torch.where(
+                    mask, torch.zeros_like(flat), torch.full_like(flat, -1.3)
+                )
+            else:
+                r_offset = torch.where(
+                    mask, torch.full_like(flat, -1.3), torch.zeros_like(flat)
+                )
+            local_tensors[r] = (flat + r_offset).reshape(tensor.shape)
+        # pyrefly: ignore [bad-argument-type, bad-argument-count]
+        return LocalTensor(local_tensors)
+
+    else:
+        local_tensors = {r: tensor.clone() for r in range(world_size)}
+        # pyrefly: ignore [bad-argument-type, bad-argument-count]
+        return LocalTensor(local_tensors)
+
+
+def validate_combination(
+    op: Callable,
+    sample_input,
+    tensors: list,
+    combination: PlacementCombination,
+    ground_truth: torch.Tensor,
+    world_size: int = 2,
+    mesh=None,
+) -> tuple[bool, str]:
+    """
+    Validate a single placement combination against ground truth.
+
+    The validation logic:
+    1. Shard inputs according to input placements to get local tensors
+    2. Run the raw op on local tensors (bypassing DTensor dispatch)
+    3. Wrap the local output in a DTensor with the claimed output placement
+    4. Redistribute to Replicate and compare with ground truth
+
+    Args:
+        op: The operator function
+        sample_input: The SampleInput with original arguments
+        tensors: List of (name, tensor) pairs extracted from sample
+        combination: The placement combination to validate
+        ground_truth: Expected output tensor
+        world_size: Number of simulated ranks
+        mesh: Optional pre-created device mesh (for performance)
+
+    Returns:
+        (is_valid, error_message)
+    """
+    try:
+        if mesh is None:
+            device = tensors[0][1].device.type if tensors else "cpu"
+            mesh = init_device_mesh(device, (world_size,))
+
+        local_tensors = []
+        for tensor_idx, ((name, tensor), placement) in enumerate(
+            zip(tensors, combination.input_placements)
+        ):
+            if isinstance(placement, Partial):
+                local_tensor = _create_partial_input(
+                    tensor, placement, world_size, tensor_idx
+                )
+                local_tensors.append(local_tensor)
+            elif isinstance(placement, Replicate):
+                _tmp = {r: tensor.clone() for r in range(world_size)}
+                # pyrefly: ignore [bad-argument-type, bad-argument-count]
+                local_tensors.append(LocalTensor(_tmp))
+            elif isinstance(placement, Shard):
+                # Create sharded LocalTensor directly to work in LocalTensorMode
+                shard_dim = placement.dim
+                chunks = tensor.tensor_split(world_size, dim=shard_dim)
+                _tmp = {r: chunks[r].clone().contiguous() for r in range(world_size)}
+                # pyrefly: ignore [bad-argument-type, bad-argument-count]
+                local_tensors.append(LocalTensor(_tmp))
+            else:
+                # Fallback for other placement types
+                dt = distribute_tensor(tensor.clone(), mesh, (placement,))
+                local_tensors.append(dt.to_local())
+
+        local_idx = 0
+
+        def _replace_with_local(a):
+            nonlocal local_idx
+            if isinstance(a, torch.Tensor):
+                local = local_tensors[local_idx]
+                local_idx += 1
+                return local
+            return a
+
+        if isinstance(sample_input.input, torch.Tensor):
+            local_input = _replace_with_local(sample_input.input)
+        else:
+            local_input = pytree.tree_map(_replace_with_local, sample_input.input)
+
+        local_args = pytree.tree_map(_replace_with_local, sample_input.args)
+        local_kwargs = pytree.tree_map(_replace_with_local, sample_input.kwargs)
+
+        local_output = op(local_input, *local_args, **local_kwargs)
+
+        if not isinstance(local_output, torch.Tensor):
+            return False, f"Local output is not a tensor: {type(local_output)}"
+
+        if not isinstance(local_output, LocalTensor):
+            return False, "LocalTensor inputs produced non-LocalTensor output"
+
+        output_dt = DTensor.from_local(
+            local_output,
+            mesh,
+            (combination.output_placement,),
+            shape=ground_truth.shape,
+            stride=ground_truth.stride(),
+        )
+
+        if isinstance(combination.output_placement, Replicate):
+            local_values = [local_output._local_tensors[r] for r in range(world_size)]
+            all_same = all(
+                torch.allclose(local_values[0], lv, atol=1e-5, rtol=1e-5)
+                for lv in local_values[1:]
+            )
+            if not all_same:
+                return False, "Replicate output but local values differ across ranks"
+
+        full_output = output_dt.redistribute(mesh, (Replicate(),)).to_local()
+
+        if isinstance(full_output, LocalTensor):
+            full_output = full_output._local_tensors[0]
+
+        if ground_truth.shape != full_output.shape:
+            return (
+                False,
+                f"Shape mismatch: expected {ground_truth.shape}, got {full_output.shape}",
+            )
+
+        if not torch.allclose(
+            ground_truth, full_output, atol=1e-5, rtol=1e-5, equal_nan=True
+        ):
+            max_diff = (ground_truth - full_output).abs().max().item()
+            return False, f"Value mismatch: max_diff={max_diff:.6f}"
+
+        return True, ""
+
+    except Exception as e:
+        # TODO: This is too broad. Consider: (1) explicit checks for shard dim
+        # validity and shape compatibility before calling tensor_split/from_local,
+        # (2) scoped try/except around op() and redistribute() that raise specific
+        # exceptions (e.g., UnsupportedRedistribute, OpError), and (3) only
+        # catching those here, letting real bugs propagate.
+        return False, f"Exception: {type(e).__name__}: {e}"
+
+
+def has_pmin_pmax(input_placements, output_placement) -> bool:
+    """Check if any placement is Partial(min) or Partial(max)."""
+    for p in input_placements:
+        if isinstance(p, Partial) and p.reduce_op in ("min", "max"):
+            return True
+    if isinstance(output_placement, Partial) and output_placement.reduce_op in (
+        "min",
+        "max",
+    ):
+        return True
+    return False
+
+
+def has_any_partial(input_placements, output_placement) -> bool:
+    """Check if any placement is Partial (any reduce op)."""
+    for p in input_placements:
+        if isinstance(p, Partial):
+            return True
+    if isinstance(output_placement, Partial):
+        return True
+    return False
+
+
+def negate_all_tensors(tensors: list) -> list:
+    """Return a new list with all tensors negated."""
+    return [(name, -t) for name, t in tensors]
+
+
+def create_fully_negated_sample(sample):
+    """Create a sample with ALL tensors negated (for P(min)/P(max) sign testing)."""
+
+    def negate_tensor(x):
+        if isinstance(x, torch.Tensor):
+            return -x
+        return x
+
+    new_input = pytree.tree_map(negate_tensor, sample.input)
+    new_args = pytree.tree_map(negate_tensor, sample.args)
+    new_kwargs = pytree.tree_map(negate_tensor, sample.kwargs)
+
+    return SampleInput(new_input, args=new_args, kwargs=new_kwargs)
+
+

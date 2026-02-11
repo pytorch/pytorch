@@ -10,8 +10,12 @@ These tests verify that the validation logic correctly detects:
 """
 
 import torch
+import torch.distributed as dist
+from torch.distributed._local_tensor import LocalTensorMode
+from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import Replicate
 from torch.distributed.tensor._ops.strategy_validation import (
+    _create_partial_input,
     extract_tensors_from_sample,
     get_1d_input_placements_for_tensor,
     get_1d_output_placements_for_tensor,
@@ -22,6 +26,8 @@ from torch.distributed.tensor._ops.strategy_validation import (
     normalize_placement_str,
     parse_placement,
     placement_tuple_to_str,
+    PlacementCombination,
+    validate_combination,
 )
 from torch.distributed.tensor.placement_types import Partial, Shard
 from torch.testing._internal.common_methods_invocations import SampleInput
@@ -377,5 +383,700 @@ class TestExtractTensors(TestCase):
         sample = SampleInput(torch.randn(4, 3), kwargs={"other": torch.randn(4, 3)})
         tensors = extract_tensors_from_sample(sample)
         self.assertEqual(len(tensors), 2)
+
+
+class TestValidateCombination(TestCase):
+    """Test the core validate_combination function."""
+
+    world_size = 2
+
+    def setUp(self):
+        super().setUp()
+        if not dist.is_initialized():
+            dist.init_process_group("fake", rank=0, world_size=self.world_size)
+
+    def tearDown(self):
+        super().tearDown()
+        if dist.is_initialized():
+            dist.destroy_process_group()
+
+    def test_valid_shard_combination(self):
+        """Test that valid sharding is detected as valid."""
+        # For add: S(0), S(0) -> S(0) should be valid
+        a = torch.randn(8, 4)
+        b = torch.randn(8, 4)
+        sample = SampleInput(a, args=(b,))
+        tensors = extract_tensors_from_sample(sample)
+        ground_truth = a + b
+
+        combo = PlacementCombination(
+            input_placements=(Shard(0), Shard(0)), output_placement=Shard(0)
+        )
+
+        with LocalTensorMode(frozenset(range(self.world_size))):
+            mesh = init_device_mesh("cpu", (self.world_size,))
+            is_valid, msg = validate_combination(
+                torch.add, sample, tensors, combo, ground_truth, self.world_size, mesh
+            )
+        self.assertTrue(is_valid, msg)
+
+    def test_invalid_shard_combination(self):
+        """Test that invalid sharding is detected as invalid."""
+        # For add: S(0), S(1) -> S(0) should be invalid
+        # (broadcasting doesn't work this way)
+        a = torch.randn(8, 4)
+        b = torch.randn(8, 4)
+        sample = SampleInput(a, args=(b,))
+        tensors = extract_tensors_from_sample(sample)
+        ground_truth = a + b
+
+        combo = PlacementCombination(
+            input_placements=(Shard(0), Shard(1)), output_placement=Shard(0)
+        )
+
+        with LocalTensorMode(frozenset(range(self.world_size))):
+            mesh = init_device_mesh("cpu", (self.world_size,))
+            is_valid, msg = validate_combination(
+                torch.add, sample, tensors, combo, ground_truth, self.world_size, mesh
+            )
+        self.assertFalse(is_valid)
+
+    def test_valid_partial_sum(self):
+        """Test that P(sum) + P(sum) -> P(sum) is valid for add."""
+        a = torch.randn(8, 4)
+        b = torch.randn(8, 4)
+        sample = SampleInput(a, args=(b,))
+        tensors = extract_tensors_from_sample(sample)
+        ground_truth = a + b
+
+        combo = PlacementCombination(
+            input_placements=(Partial("sum"), Partial("sum")),
+            output_placement=Partial("sum"),
+        )
+
+        with LocalTensorMode(frozenset(range(self.world_size))):
+            mesh = init_device_mesh("cpu", (self.world_size,))
+            is_valid, msg = validate_combination(
+                torch.add, sample, tensors, combo, ground_truth, self.world_size, mesh
+            )
+        self.assertTrue(is_valid, msg)
+
+    def test_invalid_partial_combination(self):
+        """Test that P(sum) + P(max) -> P(sum) is invalid for add."""
+        a = torch.randn(8, 4)
+        b = torch.randn(8, 4)
+        sample = SampleInput(a, args=(b,))
+        tensors = extract_tensors_from_sample(sample)
+        ground_truth = a + b
+
+        combo = PlacementCombination(
+            input_placements=(Partial("sum"), Partial("max")),
+            output_placement=Partial("sum"),
+        )
+
+        with LocalTensorMode(frozenset(range(self.world_size))):
+            mesh = init_device_mesh("cpu", (self.world_size,))
+            is_valid, msg = validate_combination(
+                torch.add, sample, tensors, combo, ground_truth, self.world_size, mesh
+            )
+        self.assertFalse(is_valid)
+
+    def test_nan_output_valid_when_both_nan(self):
+        """Test that NaN outputs are considered valid when both ground truth and sharded match.
+
+        igamma with negative inputs produces NaN. When sharding produces the same
+        NaN pattern, the rule should be valid (NaN == NaN for validation purposes).
+        """
+        # igamma(negative, negative) produces NaN
+        a = torch.tensor([-1.0, -2.0, -3.0, -4.0, -5.0, -6.0, -7.0, -8.0])
+        x = torch.tensor(-1.0)
+        sample = SampleInput(a, args=(x,))
+        tensors = extract_tensors_from_sample(sample)
+        ground_truth = torch.igamma(a, x)
+        self.assertTrue(ground_truth.isnan().all(), "Expected all NaN ground truth")
+
+        combo = PlacementCombination(
+            input_placements=(Shard(0), Replicate()), output_placement=Shard(0)
+        )
+
+        with LocalTensorMode(frozenset(range(self.world_size))):
+            mesh = init_device_mesh("cpu", (self.world_size,))
+            is_valid, msg = validate_combination(
+                torch.igamma,
+                sample,
+                tensors,
+                combo,
+                ground_truth,
+                self.world_size,
+                mesh,
+            )
+        self.assertTrue(is_valid, f"NaN outputs should match: {msg}")
+
+    def test_exhaustive_binary_op_rules(self):
+        """
+        Exhaustively test all placement combinations for binary ops.
+
+        For each op, we define the complete set of valid rules. The test then:
+        1. Verifies all listed rules are detected as valid
+        2. Verifies all unlisted combinations are detected as invalid
+        """
+
+        # Concise placement notation: S0=Shard(0), S1=Shard(1), R=Replicate,
+        # Psum=Partial(sum), Pmax=Partial(max)
+        def p(s):
+            """Parse concise placement string."""
+            if s == "R":
+                return Replicate()
+            if s.startswith("S"):
+                return Shard(int(s[1:]))
+            if s == "Psum":
+                return Partial("sum")
+            if s == "Pmax":
+                return Partial("max")
+            raise ValueError(f"Unknown placement: {s}")
+
+        def parse_rule(rule_str):
+            """Parse 'S0,S0->S0' into ((Shard(0), Shard(0)), Shard(0))."""
+            inputs_str, output_str = rule_str.split("->")
+            inputs = tuple(p(s.strip()) for s in inputs_str.split(","))
+            return (inputs, p(output_str.strip()))
+
+        # Valid rules for 2D binary ops with shape (8, 4)
+        # Format: "input1,input2->output"
+        # NOTE: These rules are for ground-truth validation (no redistribution).
+        # Only placements that produce compatible local tensor shapes are valid.
+        # - Shard(d) produces chunks (4,4) for d=0 or (8,2) for d=1
+        # - Replicate and Partial produce full tensors (8,4)
+        # So Shard can only pair with same-dim Shard, not with R or P.
+        #
+        # For Partial:
+        # - P(sum) + P(sum) -> P(sum) works for add (sums distribute)
+        # - R * P(sum) -> P(sum) works for mul (multiplication distributes into sum)
+        # - P(sum) / R -> P(sum) works for div
+        # - P(max) + P(max) -> P(max) works for max (max is idempotent)
+        # But NOT:
+        # - R + P(sum) -> P(sum) for add (R gets added on each rank, then summed)
+        VALID_RULES = {
+            torch.add: [
+                # Same-dim sharding (chunks match)
+                "S0,S0->S0",
+                "S1,S1->S1",
+                # Partial sum + Partial sum -> Partial sum
+                # (a0+a1) + (b0+b1) = (a0+b0) + (a1+b1) where ai/bi are per-rank
+                "Psum,Psum->Psum",
+                # Partial max with Replicate (NOT Pmax+Pmax, offsets accumulate)
+                "Pmax,R->Pmax",
+                "R,Pmax->Pmax",
+            ],
+            torch.mul: [
+                # Same-dim sharding
+                "S0,S0->S0",
+                "S1,S1->S1",
+                # Partial sum * Replicate -> Partial sum (multiplicative linearity)
+                # r * (p0+p1) = r*p0 + r*p1 where pi are per-rank
+                "Psum,R->Psum",
+                "R,Psum->Psum",
+            ],
+            torch.div: [
+                # Same-dim sharding
+                "S0,S0->S0",
+                "S1,S1->S1",
+                # Partial sum / Replicate -> Partial sum
+                # (p0+p1) / r = p0/r + p1/r
+                "Psum,R->Psum",
+            ],
+            torch.maximum: [
+                # Same-dim sharding
+                "S0,S0->S0",
+                "S1,S1->S1",
+                # Partial max + Partial max -> Partial max
+                # max(max(a0,a1), max(b0,b1)) = max(max(a0,b0), max(a1,b1))
+                "Pmax,Pmax->Pmax",
+                # Partial max with Replicate:
+                # max(r, max(p0,p1)) = max(max(r,p0), max(r,p1)) ✓
+                "Pmax,R->Pmax",
+                "R,Pmax->Pmax",
+            ],
+        }
+
+        # All possible placements for 2D tensor
+        ALL_PLACEMENTS = [
+            Replicate(),
+            Shard(0),
+            Shard(1),
+            Partial("sum"),
+            Partial("max"),
+        ]
+
+        # Test each operator
+        for op, valid_rule_strs in VALID_RULES.items():
+            valid_rules = {parse_rule(r) for r in valid_rule_strs}
+
+            # Create test tensors
+            a = torch.randn(8, 4)
+            b = torch.randn(8, 4)
+            sample = SampleInput(a, args=(b,))
+            tensors = extract_tensors_from_sample(sample)
+            ground_truth = op(a, b)
+
+            with LocalTensorMode(frozenset(range(self.world_size))):
+                mesh = init_device_mesh("cpu", (self.world_size,))
+
+                # Test all combinations
+                for p1 in ALL_PLACEMENTS:
+                    for p2 in ALL_PLACEMENTS:
+                        # Skip fully replicated inputs (degenerate case: any output works)
+                        if isinstance(p1, Replicate) and isinstance(p2, Replicate):
+                            continue
+
+                        for p_out in ALL_PLACEMENTS:
+                            input_plcs = (p1, p2)
+                            combo = PlacementCombination(input_plcs, p_out)
+
+                            is_valid, msg = validate_combination(
+                                op,
+                                sample,
+                                tensors,
+                                combo,
+                                ground_truth,
+                                self.world_size,
+                                mesh,
+                            )
+
+                            # Check if this combo matches any valid rule
+                            should_be_valid = (input_plcs, p_out) in valid_rules
+
+                            if should_be_valid:
+                                self.assertTrue(
+                                    is_valid,
+                                    f"{op.__name__}: {p1},{p2}->{p_out} should be valid but got: {msg}",
+                                )
+                            else:
+                                self.assertFalse(
+                                    is_valid,
+                                    f"{op.__name__}: {p1},{p2}->{p_out} should be invalid",
+                                )
+
+    def test_add_alpha_negates_partial_max_to_min(self):
+        """
+        Test that add with alpha=-1 converts P(max) to P(min).
+
+        When computing a + alpha*b with alpha=-1:
+        - If b is P(max), then -b behaves as P(min)
+        - So R + (-1)*P(max) -> P(min) should be valid
+        - And R + (-1)*P(max) -> P(max) should be invalid
+        """
+        a = torch.randn(8, 4)
+        b = torch.randn(8, 4)
+        # add with alpha=-1 computes: a + (-1)*b = a - b
+        sample = SampleInput(a, args=(b,), kwargs={"alpha": -1})
+        tensors = extract_tensors_from_sample(sample)
+        ground_truth = torch.add(a, b, alpha=-1)
+
+        with LocalTensorMode(frozenset(range(self.world_size))):
+            mesh = init_device_mesh("cpu", (self.world_size,))
+
+            # R + alpha*P(max) where alpha=-1 should produce P(min)
+            # because -max(x) = min(-x)
+            combo_valid = PlacementCombination(
+                input_placements=(Replicate(), Partial("max")),
+                output_placement=Partial("min"),
+            )
+            is_valid, msg = validate_combination(
+                torch.add,
+                sample,
+                tensors,
+                combo_valid,
+                ground_truth,
+                self.world_size,
+                mesh,
+            )
+            self.assertTrue(
+                is_valid, f"R,Pmax->Pmin with alpha=-1 should be valid: {msg}"
+            )
+
+            # R + alpha*P(max) where alpha=-1 should NOT produce P(max)
+            combo_invalid = PlacementCombination(
+                input_placements=(Replicate(), Partial("max")),
+                output_placement=Partial("max"),
+            )
+            is_valid, msg = validate_combination(
+                torch.add,
+                sample,
+                tensors,
+                combo_invalid,
+                ground_truth,
+                self.world_size,
+                mesh,
+            )
+            self.assertFalse(is_valid, "R,Pmax->Pmax with alpha=-1 should be invalid")
+
+            # Similarly, P(max) + alpha*R where alpha=-1 should produce P(max)
+            # because we're subtracting a replicated value from P(max)
+            combo_pmax_minus_r = PlacementCombination(
+                input_placements=(Partial("max"), Replicate()),
+                output_placement=Partial("max"),
+            )
+            is_valid, msg = validate_combination(
+                torch.add,
+                sample,
+                tensors,
+                combo_pmax_minus_r,
+                ground_truth,
+                self.world_size,
+                mesh,
+            )
+            self.assertTrue(
+                is_valid, f"Pmax,R->Pmax with alpha=-1 should be valid: {msg}"
+            )
+
+
+class TestCreatePartialInput(TestCase):
+    """Test the _create_partial_input helper."""
+
+    def test_partial_sum_reduces_correctly(self):
+        tensor = torch.randn(4, 3)
+        local_tensor = _create_partial_input(tensor, Partial("sum"), world_size=2)
+
+        # Sum of local tensors should equal original
+        total = sum(local_tensor._local_tensors[r] for r in range(2))
+        self.assertTrue(torch.allclose(total, tensor))
+
+    def test_partial_avg_reduces_correctly(self):
+        tensor = torch.randn(4, 3)
+        local_tensor = _create_partial_input(tensor, Partial("avg"), world_size=2)
+
+        # Average of local tensors should equal original
+        total = sum(local_tensor._local_tensors[r] for r in range(2))
+        avg = total / 2
+        self.assertTrue(torch.allclose(avg, tensor))
+
+    def test_partial_min_reduces_correctly(self):
+        tensor = torch.randn(4, 3)
+        local_tensor = _create_partial_input(tensor, Partial("min"), world_size=2)
+
+        # Min of local tensors should equal original
+        stacked = torch.stack([local_tensor._local_tensors[r] for r in range(2)])
+        result = stacked.min(dim=0).values
+        self.assertTrue(torch.allclose(result, tensor))
+
+    def test_partial_max_reduces_correctly(self):
+        tensor = torch.randn(4, 3)
+        local_tensor = _create_partial_input(tensor, Partial("max"), world_size=2)
+
+        # Max of local tensors should equal original
+        stacked = torch.stack([local_tensor._local_tensors[r] for r in range(2)])
+        result = stacked.max(dim=0).values
+        self.assertTrue(torch.allclose(result, tensor))
+
+    def test_tensor_idx_produces_different_sum_ratios(self):
+        """
+        Verify that different tensor_idx values produce different P(sum) ratios.
+
+        This is critical for catching invalid rules like mul P(sum),P(sum)->P(sum).
+        If both tensors used the same 0.5/0.5 split, some invalid combinations
+        might accidentally produce correct results.
+        """
+        tensor = torch.ones(4, 3)
+
+        # Create P(sum) with different tensor_idx values
+        local0 = _create_partial_input(
+            tensor, Partial("sum"), world_size=2, tensor_idx=0
+        )
+        local1 = _create_partial_input(
+            tensor, Partial("sum"), world_size=2, tensor_idx=1
+        )
+
+        # Both should reduce to the same original tensor
+        self.assertTrue(
+            torch.allclose(local0._local_tensors[0] + local0._local_tensors[1], tensor)
+        )
+        self.assertTrue(
+            torch.allclose(local1._local_tensors[0] + local1._local_tensors[1], tensor)
+        )
+
+        # But the per-rank values should be DIFFERENT
+        # (tensor_idx=0 uses ratio 0.6, tensor_idx=1 uses ratio 0.7)
+        self.assertFalse(
+            torch.allclose(local0._local_tensors[0], local1._local_tensors[0]),
+            "Different tensor_idx should produce different P(sum) ratios",
+        )
+
+    def test_tensor_idx_produces_different_max_patterns(self):
+        """
+        Verify that different tensor_idx values produce different P(max) offset patterns.
+
+        This is critical for catching invalid rules like add P(max),P(max)->P(max).
+        If both tensors used the same offset pattern, the offsets would cancel out
+        and invalid combinations might appear valid.
+        """
+        tensor = torch.zeros(4, 3)
+
+        # Create P(max) with different tensor_idx values
+        local0 = _create_partial_input(
+            tensor, Partial("max"), world_size=2, tensor_idx=0
+        )
+        local1 = _create_partial_input(
+            tensor, Partial("max"), world_size=2, tensor_idx=1
+        )
+
+        # Both should reduce to the same original tensor
+        stacked0 = torch.stack([local0._local_tensors[r] for r in range(2)])
+        stacked1 = torch.stack([local1._local_tensors[r] for r in range(2)])
+        self.assertTrue(torch.allclose(stacked0.max(dim=0).values, tensor))
+        self.assertTrue(torch.allclose(stacked1.max(dim=0).values, tensor))
+
+        # The offset patterns should be different (shifted by 1 element)
+        # tensor_idx=0: rank0 has [0, -1.3, 0, -1.3, ...], rank1 has [-1.3, 0, ...]
+        # tensor_idx=1: rank0 has [-1.3, 0, -1.3, 0, ...], rank1 has [0, -1.3, ...]
+        self.assertFalse(
+            torch.allclose(local0._local_tensors[0], local1._local_tensors[0]),
+            "Different tensor_idx should produce different P(max) patterns",
+        )
+
+
+class TestPartialCombinationValidity(TestCase):
+    """
+    Tests that verify invalid partial combinations are correctly detected.
+
+    These tests would FAIL if the partial creation logic were simplified
+    (e.g., using symmetric splits or ignoring tensor_idx).
+    """
+
+    world_size = 2
+
+    def setUp(self):
+        super().setUp()
+        if not dist.is_initialized():
+            dist.init_process_group("fake", rank=0, world_size=self.world_size)
+
+    def tearDown(self):
+        super().tearDown()
+        if dist.is_initialized():
+            dist.destroy_process_group()
+
+    def test_mul_psum_psum_is_invalid(self):
+        """
+        Verify that mul with P(sum),P(sum)->P(sum) is detected as INVALID.
+
+        Mathematically: (a0+a1) * (b0+b1) != (a0*b0) + (a1*b1)
+        This test would FAIL if P(sum) used symmetric 0.5/0.5 splits for both
+        tensors, because then a0=a1 and b0=b1, making:
+        (0.5a+0.5a) * (0.5b+0.5b) = a*b = (0.5a*0.5b)*4 which could accidentally match.
+        """
+        a = torch.randn(8, 4) + 2  # Offset to avoid near-zero values
+        b = torch.randn(8, 4) + 2
+        sample = SampleInput(a, args=(b,))
+        tensors = extract_tensors_from_sample(sample)
+        ground_truth = a * b
+
+        combo = PlacementCombination(
+            input_placements=(Partial("sum"), Partial("sum")),
+            output_placement=Partial("sum"),
+        )
+
+        with LocalTensorMode(frozenset(range(self.world_size))):
+            mesh = init_device_mesh("cpu", (self.world_size,))
+            is_valid, msg = validate_combination(
+                torch.mul, sample, tensors, combo, ground_truth, self.world_size, mesh
+            )
+
+        self.assertFalse(
+            is_valid,
+            "mul Psum,Psum->Psum should be invalid (multiplication doesn't distribute over addition)",
+        )
+
+    def test_add_pmax_pmax_is_invalid(self):
+        """
+        Verify that add with P(max),P(max)->P(max) is detected as INVALID.
+
+        When two P(max) tensors with different offset patterns are added,
+        the negative offsets can accumulate, causing the max to not equal
+        the ground truth.
+
+        This test would FAIL if both P(max) inputs used the same offset pattern,
+        because then the offsets would align and potentially cancel correctly.
+        """
+        a = torch.randn(8, 4)
+        b = torch.randn(8, 4)
+        sample = SampleInput(a, args=(b,))
+        tensors = extract_tensors_from_sample(sample)
+        ground_truth = a + b
+
+        combo = PlacementCombination(
+            input_placements=(Partial("max"), Partial("max")),
+            output_placement=Partial("max"),
+        )
+
+        with LocalTensorMode(frozenset(range(self.world_size))):
+            mesh = init_device_mesh("cpu", (self.world_size,))
+            is_valid, msg = validate_combination(
+                torch.add, sample, tensors, combo, ground_truth, self.world_size, mesh
+            )
+
+        self.assertFalse(
+            is_valid,
+            "add Pmax,Pmax->Pmax should be invalid (offsets accumulate with different patterns)",
+        )
+
+    def test_mixed_partial_types_invalid(self):
+        """
+        Verify that mixing different partial types is detected as invalid.
+
+        P(sum) + P(max) -> anything should always be invalid because
+        the reduction semantics are incompatible.
+        """
+        a = torch.randn(8, 4)
+        b = torch.randn(8, 4)
+        sample = SampleInput(a, args=(b,))
+        tensors = extract_tensors_from_sample(sample)
+        ground_truth = a + b
+
+        # Try all output placements - none should be valid
+        for out_reduce_op in ["sum", "max", "min", "avg"]:
+            combo = PlacementCombination(
+                input_placements=(Partial("sum"), Partial("max")),
+                output_placement=Partial(out_reduce_op),
+            )
+
+            with LocalTensorMode(frozenset(range(self.world_size))):
+                mesh = init_device_mesh("cpu", (self.world_size,))
+                is_valid, msg = validate_combination(
+                    torch.add,
+                    sample,
+                    tensors,
+                    combo,
+                    ground_truth,
+                    self.world_size,
+                    mesh,
+                )
+
+            self.assertFalse(
+                is_valid,
+                f"add Psum,Pmax->P({out_reduce_op}) should be invalid",
+            )
+
+    def test_pmin_with_replicate_valid(self):
+        """
+        Verify that P(min) + R -> P(min) is valid for add.
+
+        This mirrors the P(max) + R -> P(max) case but for min.
+        """
+        a = torch.randn(8, 4)
+        b = torch.randn(8, 4)
+        sample = SampleInput(a, args=(b,))
+        tensors = extract_tensors_from_sample(sample)
+        ground_truth = a + b
+
+        combo = PlacementCombination(
+            input_placements=(Partial("min"), Replicate()),
+            output_placement=Partial("min"),
+        )
+
+        with LocalTensorMode(frozenset(range(self.world_size))):
+            mesh = init_device_mesh("cpu", (self.world_size,))
+            is_valid, msg = validate_combination(
+                torch.add, sample, tensors, combo, ground_truth, self.world_size, mesh
+            )
+
+        self.assertTrue(is_valid, f"add Pmin,R->Pmin should be valid: {msg}")
+
+    def test_abs_psum_psum_is_invalid(self):
+        """
+        P(sum)->P(sum) is NOT valid for abs (or any non-linear elementwise op).
+
+        abs(a0 + a1) != abs(a0) + abs(a1) when a0 and a1 have different signs.
+        The _create_partial_input function must create local values with mixed
+        signs to expose this, not just proportional splits (tensor * ratio)
+        that preserve the sign pattern.
+        """
+        t = torch.tensor([1.0, -2.0, 3.0, -4.0, 5.0, -6.0, 7.0, -8.0])
+        sample = SampleInput(t)
+        tensors = extract_tensors_from_sample(sample)
+        ground_truth = torch.abs(t)
+
+        combo = PlacementCombination(
+            input_placements=(Partial("sum"),),
+            output_placement=Partial("sum"),
+        )
+
+        with LocalTensorMode(frozenset(range(self.world_size))):
+            mesh = init_device_mesh("cpu", (self.world_size,))
+            is_valid, msg = validate_combination(
+                torch.abs, sample, tensors, combo, ground_truth, self.world_size, mesh
+            )
+
+        self.assertFalse(
+            is_valid,
+            "abs P(sum)->P(sum) should be invalid (abs is non-linear)",
+        )
+
+    def test_abs_pavg_pavg_is_invalid(self):
+        """P(avg)->P(avg) is NOT valid for abs, same reasoning as P(sum)."""
+        t = torch.tensor([1.0, -2.0, 3.0, -4.0, 5.0, -6.0, 7.0, -8.0])
+        sample = SampleInput(t)
+        tensors = extract_tensors_from_sample(sample)
+        ground_truth = torch.abs(t)
+
+        combo = PlacementCombination(
+            input_placements=(Partial("avg"),),
+            output_placement=Partial("avg"),
+        )
+
+        with LocalTensorMode(frozenset(range(self.world_size))):
+            mesh = init_device_mesh("cpu", (self.world_size,))
+            is_valid, msg = validate_combination(
+                torch.abs, sample, tensors, combo, ground_truth, self.world_size, mesh
+            )
+
+        self.assertFalse(
+            is_valid,
+            "abs P(avg)->P(avg) should be invalid (abs is non-linear)",
+        )
+
+    def test_all_zero_output_false_positive(self):
+        """
+        All-zero ground truth makes every placement trivially validate.
+
+        Zeros are a fixed point of all reduce operations (sum, max, min),
+        so validate_combination cannot distinguish valid from invalid rules.
+        This is a known limitation: compare_operator skips all-zero samples
+        to avoid hundreds of false positive rules.
+
+        We use zeros_like as the test op because it always produces zeros
+        regardless of input values, unlike mul(zeros, x) which the offset
+        fix in _create_partial_input now correctly handles.
+        """
+        t = torch.randn(8, 4)
+        sample = SampleInput(t)
+        tensors = extract_tensors_from_sample(sample)
+        ground_truth = torch.zeros_like(t)
+
+        # P(sum)->P(sum) is NOT valid for zeros_like, but with all-zero
+        # output it trivially passes: sum(0,0)=0=ground_truth.
+        combo = PlacementCombination(
+            input_placements=(Partial("sum"),),
+            output_placement=Partial("sum"),
+        )
+
+        with LocalTensorMode(frozenset(range(self.world_size))):
+            mesh = init_device_mesh("cpu", (self.world_size,))
+            is_valid, msg = validate_combination(
+                torch.zeros_like,
+                sample,
+                tensors,
+                combo,
+                ground_truth,
+                self.world_size,
+                mesh,
+            )
+
+        # This demonstrates the false positive: validate_combination says
+        # valid, even though the rule is invalid for non-zero inputs.
+        self.assertTrue(
+            is_valid,
+            "Expected True (false positive) for all-zero output, showing "
+            "why compare_operator must skip such samples",
+        )
 
 
