@@ -1535,10 +1535,10 @@ class PallasKernel(SIMDKernel):
             # Optimization: If index is just a loop variable (identity map), skip gather
             is_identity_gather = False
             if self.range_tree_nodes:
-                iter_vars = OrderedSet([str(k) for k in self.range_tree_nodes.keys()])
+                iter_vars = {str(k) for k in self.range_tree_nodes.keys()}
                 if all(part in iter_vars for part in index_str.split()):
                     is_identity_gather = True
-
+            
             if is_identity_gather:
                 return f"{buf}[...].flatten()"
 
@@ -2492,7 +2492,7 @@ class PallasKernel(SIMDKernel):
                 # 4. Reshape output with 1s in reduced dims for proper broadcasting
                 reduction_op = reduction_ops[reduction_type]
                 # Use a helper to find reduction axes by product matching
-                reduction_expr = f"torch._inductor.runtime.runtime_utils.pallas_partial_reduce({reduction_op}, {value}, {pointwise_numel}, {reduction_numel})"
+                reduction_expr = f"pallas_partial_reduce({reduction_op}, {value}, {pointwise_numel}, {reduction_numel})"
             elif is_symbolic_partial:
                 # Symbolic sizes: use axis-based reduction (axis=0 for outer reduction)
                 reduction_expr = f"{reduction_ops[reduction_type]}({value}, axis=0)"
@@ -2538,22 +2538,22 @@ class PallasKernel(SIMDKernel):
             str: Complete Python source code for the Pallas kernel
         """
         # --- DEBUG PRINT START ---
-        print("\n" + "=" * 40 + " INDUCTOR KERNEL IR STATE " + "=" * 40)
+        print("\n" + "="*40 + " INDUCTOR KERNEL IR STATE " + "="*40)
         print(f"Kernel Name: {name or 'Pending...'}")
-
+        
         print("\n[1] Range Tree Nodes (Iteration Space):")
-        if hasattr(self, "range_tree_nodes") and self.range_tree_nodes:
+        if hasattr(self, 'range_tree_nodes') and self.range_tree_nodes:
             for var, entry in self.range_tree_nodes.items():
                 print(f"  {var}: {entry}")
         else:
             print("  (None or Empty)")
 
         print("\n[2] Compute Buffer (IR Operations):")
-        if hasattr(self, "compute"):
+        if hasattr(self, 'compute'):
             print(str(self.compute))
         else:
             print("  (None)")
-
+            
         print("\n[3] Input/Output Args:")
         try:
             arg_defs, _, _, _ = self.args.python_argdefs()
@@ -2561,8 +2561,8 @@ class PallasKernel(SIMDKernel):
                 print(f"  {arg.name}: {arg}")
         except Exception as e:
             print(f"  (Error inspecting args: {e})")
-
-        print("=" * 106 + "\n")
+            
+        print("="*106 + "\n")
         # --- DEBUG PRINT END ---
         code = IndentedBuffer()
 
@@ -3475,7 +3475,7 @@ class PallasScheduling(SIMDScheduling):
         print("=" * 40 + " INDUCTOR IR NODES " + "=" * 40)
         for node in node_schedule:
             print(f"Node: {node}")
-            if hasattr(node, "node"):  # Access the underlying IRNode if available
+            if hasattr(node, 'node'): # Access the underlying IRNode if available
                 print(f"  IRNode: {node.node}")
         print("=" * 105)
         wrapper = V.graph.wrapper_code
