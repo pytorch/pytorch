@@ -1109,6 +1109,7 @@ exclude_patterns = [
     'torch/_inductor/fx_passes/serialized_patterns/**',
     'torch/_inductor/autoheuristic/artifacts/**',
     'torch/utils/model_dump/preact.mjs',
+    ".github/contributors.txt",
 ]
 is_formatter = true
 

@@ -5,7 +5,7 @@ import torch
 import torch.distributed as dist
 from torch._decomp import register_decomposition
 from torch.distributed.device_mesh import DeviceMesh
-from torch.distributed.tensor import DTensor
+from torch.distributed.tensor import distribute_tensor, DTensor
 from torch.distributed.tensor.placement_types import (
     _StridedShard,
     Partial,
@@ -13,6 +13,10 @@ from torch.distributed.tensor.placement_types import (
     Shard,
 )
 from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.distributed._tensor.common_dtensor import (
+    DTensorTestBase,
+    with_comms,
+)
 from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
@@ -189,6 +193,57 @@ class TestDecompSharding(TestCase):
         y = d_empty(16, device_mesh=mesh, placements=[Partial()])
         out = aten.polar.default(x, y)
         self.assertEqual(out.placements, (Replicate(),))
+
+
+class TestDecompShardingWithComms(DTensorTestBase):
+    @with_comms
+    def test_decomp_schema_caches_static_args(self):
+        """
+        Test that decomposition ops use the correct cache key with static args.
+        unsafe_chunk decomposes through split, and two unsafe_chunk calls with different dims
+        could cache hit without correct dim/start/end handling.
+
+        This checks the first call allows Shard(2) through, while the 2nd call forces Replicate.
+        """
+        device_mesh = self.build_device_mesh()
+        t = torch.randn(8, 8, 8, requires_grad=False, device=self.device_type)
+        dt = distribute_tensor(t, device_mesh, [Shard(2)])
+
+        # chunk on non-sharding dim propagates through
+        result_dim1 = torch.unsafe_chunk(dt, 2, dim=1)
+        expected_dim1 = torch.unsafe_chunk(t, 2, dim=1)
+        for r, e in zip(result_dim1, expected_dim1):
+            self.assertEqual(r.placements, (Shard(2),))
+            self.assertEqual(r.full_tensor(), e)
+
+        # chunk on sharding dim forces replicate
+        result_dim2 = torch.unsafe_chunk(dt, 2, dim=2)
+        expected_dim2 = torch.unsafe_chunk(t, 2, dim=2)
+        for r, e in zip(result_dim2, expected_dim2):
+            self.assertEqual(r.placements, (Replicate(),))
+            self.assertEqual(r.full_tensor(), e)
+
+    @with_comms
+    def test_decomp_schema_for_cache_aminmax(self):
+        """Test that aminmax with different dim kwargs doesn't hit stale cache."""
+        device_mesh = self.build_device_mesh()
+        t = torch.randn(
+            self.world_size, 4, 4, requires_grad=False, device=self.device_type
+        )
+        dt = distribute_tensor(t, device_mesh, [Shard(0)])
+
+        # First call: full reduction (no dim kwarg)
+        result_full = torch.aminmax(dt)
+        expected_full = torch.aminmax(t)
+        self.assertEqual(result_full.min.shape, expected_full.min.shape)
+        self.assertEqual(result_full.min.full_tensor(), expected_full.min)
+
+        # Second call: partial reduction with dim=1 kwarg
+        # This should NOT reuse the cached result from the first call
+        result_dim1 = torch.aminmax(dt, dim=1)
+        expected_dim1 = torch.aminmax(t, dim=1)
+        self.assertTrue(torch.equal(result_dim1.min.full_tensor(), expected_dim1.min))
+        self.assertTrue(torch.equal(result_dim1.max.full_tensor(), expected_dim1.max))
 
 
 if __name__ == "__main__":
