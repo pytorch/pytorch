@@ -306,7 +306,7 @@ static inline void launch_vectorized_kernel(
   const uint16_t max_vec_size = memory::can_vectorize_up_to<func_t>(data);
   uint16_t vec_size = 16 / static_cast<uint16_t>(sizeof(cpp_type));
   vec_size = std::min<uint16_t>(vec_size, max_vec_size);
-  // due to exessive binary size the `vectorized_elementwise_kernel` of
+  // due to excessive binary size the `vectorized_elementwise_kernel` of
   // the size 8 is compiled for sm_90 and sm_10x only.
   // TODO: Lift this limitation when CUDA 12.x support is fully dropped
   cudaDeviceProp* p = at::cuda::getDeviceProperties(stream.device().index());
