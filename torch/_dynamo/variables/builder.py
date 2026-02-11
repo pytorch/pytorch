@@ -146,6 +146,7 @@ from ..utils import (
     clone_input,
     common_constant_types,
     dict_keys,
+    fiddle_buildable_getattr,
     get_fake_value,
     get_items_from_dict,
     get_locals_to_steal,
@@ -213,6 +214,7 @@ from .functions import (
     CollectiveFunctionRewriteVariable,
     CreateTMADescriptorExperimentalVariable,
     CreateTMADescriptorStableVariable,
+    FiddleBuildableGetAttrVariable,
     FunctoolsPartialVariable,
     FunctoolsWrapsVariable,
     SysFunctionVariable,
@@ -1363,6 +1365,11 @@ class VariableBuilder:
             return CreateTMADescriptorStableVariable()
         elif value is set_allocator:
             return TritonSetAllocatorSkipVariable(value)
+        elif value is fiddle_buildable_getattr:
+            assert fiddle_buildable_getattr is not None
+            return FiddleBuildableGetAttrVariable(
+                fiddle_buildable_getattr, source=self.source
+            )
         elif isinstance(value, torch.amp.autocast_mode.autocast):
             self.install_guards(GuardBuilder.ID_MATCH)
             return AutocastModeVariable(

@@ -167,6 +167,16 @@ unpatched_nn_module_getattr = torch.nn.Module.__getattr__
 unpatched_nn_module_call = torch.nn.Module.__call__
 unpatched_nn_module_call_impl = torch.nn.Module._call_impl
 
+if importlib.util.find_spec("fiddle"):
+    from fiddle._src.config import (  # pyrefly: ignore[missing-import]
+        Buildable as _FiddleBuildable,
+    )
+
+    fiddle_buildable_getattr = _FiddleBuildable.__getattr__
+else:
+    _FiddleBuildable = None
+    fiddle_buildable_getattr = None
+
 counters: collections.defaultdict[str, Counter[str]] = collections.defaultdict(
     collections.Counter
 )

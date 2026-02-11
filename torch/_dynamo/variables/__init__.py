@@ -59,6 +59,7 @@ from .functions import (
     CollectionsNamedTupleFunction,
     CreateTMADescriptorExperimentalVariable,
     CreateTMADescriptorStableVariable,
+    FiddleBuildableGetAttrVariable,
     FunctionDecoratedByContextlibContextManagerVariable,
     FunctoolsPartialVariable,
     FunctoolsWrapsVariable,
