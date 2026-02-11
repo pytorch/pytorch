@@ -114,18 +114,14 @@ ncclDataType_t to_nccl_data_type(c10::ScalarType type) {
       return ncclDataType_t::ncclUint8;
     case at::kBool:
       return ncclDataType_t::ncclUint8;
-#if defined(USE_ROCM)
     case at::kFloat8_e4m3fnuz:
       return ncclDataType_t::ncclUint8;
     case at::kFloat8_e5m2fnuz:
       return ncclDataType_t::ncclUint8;
-#else
     case at::kFloat8_e4m3fn:
       return ncclDataType_t::ncclUint8;
     case at::kFloat8_e5m2:
       return ncclDataType_t::ncclUint8;
-#endif
-
 #if HAS_NCCL_BF16_DATATYPE
     case at::kBFloat16:
       return ncclDataType_t::ncclBfloat16;
@@ -146,7 +142,7 @@ ncclDataType_t to_nccl_data_type(const at::Tensor& t) {
 }
 
 ncclRedOp_t to_nccl_red_op(int var) {
-  return (ncclRedOp_t)(var);
+  return (ncclRedOp_t)var;
 }
 
 namespace torch::cuda::nccl {
@@ -837,6 +833,8 @@ void all2all_single_equal_split(
   // operations issued as a part of the collective (e.g. alltoall) vs those
   // inside traditional p2p operations.
   NCCL_CHECK(ncclAllToAll(sendbuff, recvbuff, count, type, comm, stream));
+#elif NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 0)
+  NCCL_CHECK(ncclAlltoAll(sendbuff, recvbuff, count, type, comm, stream));
 #else
   int numranks = 0;
   NCCL_CHECK(ncclCommCount(comm, &numranks));

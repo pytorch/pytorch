@@ -343,7 +343,7 @@ class NNModuleVariable(VariableTracker):
             )
 
         options = {"source": AttrSource(obj_source, "__getattr__")}
-        # pyrefly: ignore[bad-argument-type]
+
         return variables.UserMethodVariable(getattr_fn, self, **options).call_function(
             tx, [variables.ConstantVariable.create(name)], {}
         )
@@ -439,7 +439,6 @@ class NNModuleVariable(VariableTracker):
                 )
             elif istype(subobj, staticmethod):
                 return variables.UserFunctionVariable(
-                    # pyrefly: ignore[bad-argument-type]
                     subobj.__get__(base),
                     source=source,
                 )
@@ -533,11 +532,6 @@ class NNModuleVariable(VariableTracker):
                 tx.output.is_root_tracer()
                 and mod.__module__.startswith(("torch.nn.", "torch.ao."))
                 and mod.__module__ != "torch.nn.utils.parametrize"
-                # this basically means we are using the new strict export tracer which wraps the
-                # user callable, so we shouldn't directly proxy in the fx graph
-                and not isinstance(
-                    mod, torch.ao.quantization.pt2e.export_utils._WrapperModule
-                )
             ):
                 if nnmodule_has_hooks(
                     mod, check_forward_hooks=True, check_backward_hooks=True
@@ -572,7 +566,6 @@ class NNModuleVariable(VariableTracker):
                 else:
                     assert istype(fn, types.FunctionType)
                 return tx.inline_user_function_return(
-                    # pyrefly: ignore[bad-argument-type]
                     variables.UserFunctionVariable(fn, source=fn_source),
                     args,
                     kwargs,
@@ -689,9 +682,9 @@ class NNModuleVariable(VariableTracker):
         def wrap_values(
             items: Iterable[tuple[Any, Any]],
         ) -> "variables.ListIteratorVariable":
-            result = []
+            named_children: list[VariableTracker] = []
             for name, submod in items:
-                result.append(
+                named_children.append(
                     tx.output.register_attr_or_module(
                         submod,
                         key,
@@ -861,7 +854,7 @@ class NNModuleVariable(VariableTracker):
             # pyrefly: ignore[missing-attribute]
             if type(module).__getitem__ not in builtin_supported:
                 if not (
-                    isinstance(args[0], variables.ConstantVariable)
+                    args[0].is_python_constant()
                     and isinstance(args[0].as_python_constant(), (str, int))
                 ):
                     unimplemented(
@@ -965,10 +958,7 @@ class NNModuleVariable(VariableTracker):
         elif (
             name in module.__class__.__dict__
             and callable(module.__class__.__dict__[name])
-            and all(
-                isinstance(x, variables.TensorVariable)
-                for x in itertools.chain(args, kwargs.values())
-            )
+            and all(x.is_tensor() for x in itertools.chain(args, kwargs.values()))
         ):
             return generic_call_method_helper(name)
         else:
@@ -1108,7 +1098,13 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                     self.var_getattr(tx, "_backward_hooks").realize().len()  # type: ignore[attr-defined]
                     or self.var_getattr(tx, "_backward_pre_hooks").realize().len()  # type: ignore[attr-defined]
                     or self.var_getattr(tx, "_forward_hooks").realize().len()  # type: ignore[attr-defined]
+                    or self.var_getattr(tx, "_forward_hooks_with_kwargs")  # type: ignore[attr-defined]
+                    .realize()
+                    .len()
                     or self.var_getattr(tx, "_forward_pre_hooks").realize().len()  # type: ignore[attr-defined]
+                    or self.var_getattr(tx, "_forward_pre_hooks_with_kwargs")  # type: ignore[attr-defined]
+                    .realize()
+                    .len()
                     or globals_vt.var_getattr(tx, "_global_backward_pre_hooks").len()  # type: ignore[attr-defined]
                     or globals_vt.var_getattr(tx, "_global_backward_hooks").len()  # type: ignore[attr-defined]
                     or globals_vt.var_getattr(tx, "_global_forward_hooks").len()  # type: ignore[attr-defined]
@@ -1119,7 +1115,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                     or globals_vt.var_getattr(tx, "_global_forward_pre_hooks").len()  # type: ignore[attr-defined]
                 ):
                     name = "forward"
-                    fn = self.value_type.forward
+                    fn = self.value_type.forward  # type: ignore[attr-defined]
 
         if self.source:
             source = self.get_source_by_walking_mro(name)
@@ -1210,8 +1206,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 # This is reverse engineered by looking at nn module __setattr__
                 # logic.
                 if (
-                    isinstance(value, variables.TensorVariable)
-                    and value.python_type() is torch.nn.Parameter
+                    value.is_tensor() and value.python_type() is torch.nn.Parameter
                 ) or attr_name in self.value.__dict__["_parameters"]:
                     # Handle parameters
                     self.is_state_mutated = True
@@ -1255,7 +1250,9 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         if name in (
             "_backward_hooks",
             "_backward_pre_hooks",
+            "_forward_hooks_with_kwargs",
             "_forward_hooks",
+            "_forward_pre_hooks_with_kwargs",
             "_forward_pre_hooks",
         ):
             # For empty hooks, make an EMPTY_NN_MODULE_HOOKS_DICT. This allows us to control the installation of empty
@@ -1281,7 +1278,9 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             self.source
             and name
             in (
+                "_forward_pre_hooks_with_kwargs",
                 "_forward_pre_hooks",
+                "_forward_hooks_with_kwargs",
                 "_forward_hooks",
             )
             and not tx.output.side_effects.has_pending_mutation_of_attr(self, name)
@@ -1322,7 +1321,9 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         directly look into the underlying datastructures. This saves a lot of
         compilation time.
         """
-        name_vt = variables.ConstantVariable(name)
+        from .builder import SourcelessBuilder
+
+        name_vt = SourcelessBuilder.create(tx, name)
         out = self.getattr_helper(tx, "_parameters", name_vt)
         if out is None:
             out = self.getattr_helper(tx, "_modules", name_vt)

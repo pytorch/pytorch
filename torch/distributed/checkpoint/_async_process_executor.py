@@ -1,11 +1,12 @@
 # pyre-strict
 # mypy: allow-untyped-defs
+import gc
 import logging
 import os
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Optional, Union
+from typing import Any
 from uuid import uuid4
 
 import torch.distributed as dist
@@ -31,10 +32,10 @@ class _CheckpointSaveProcessControlOpts(Enum):
 
 @dataclass(init=False, unsafe_hash=True)
 class _CheckpointRequestIdentifier:
-    checkpoint_id: Union[str, os.PathLike, None]
+    checkpoint_id: str | os.PathLike | None
     uuid: str
 
-    def __init__(self, checkpoint_id: Union[str, os.PathLike, None]):
+    def __init__(self, checkpoint_id: str | os.PathLike | None):
         self.checkpoint_id = checkpoint_id
         self.uuid = str(uuid4())
 
@@ -43,8 +44,8 @@ class _CheckpointRequestIdentifier:
 class _AsyncCheckpointRequest:
     staged_state_dict: STATE_DICT_TYPE
     checkpoint_request_id: _CheckpointRequestIdentifier
-    storage_writer: Optional[StorageWriter] = None
-    planner: Optional[SavePlanner] = None
+    storage_writer: StorageWriter | None = None
+    planner: SavePlanner | None = None
     no_dist: bool = False
     use_collectives: bool = True
 
@@ -57,12 +58,18 @@ class _ProcessGroupInitInfo:
     tcp_store_master_addr: str
     tcp_store_master_port: int
     use_prefix_store: bool
+    disable_automatic_gc: bool
+    disable_manual_gc: bool
 
-    def __init__(self, process_group: Optional[dist.ProcessGroup] = None):
+    def __init__(self, process_group: dist.ProcessGroup | None = None):
         self.local_rank = dist.get_node_local_rank(fallback_rank=0)
         self.global_rank = dist.get_rank(process_group)
         self.world_size = dist.get_world_size(process_group)
         self.use_prefix_store = os.environ.get("DCP_USE_PREFIX_STORE", "0") == "1"
+        self.disable_automatic_gc = (
+            os.environ.get("DCP_DISABLE_AUTOMATIC_GC", "0") == "1"
+        )
+        self.disable_manual_gc = os.environ.get("DCP_DISABLE_MANUAL_GC", "0") == "1"
 
         # Let coordinator rank find a port on the localhost.
         # Broadcast the (master_addr, port) to all ranks; each rank in the
@@ -144,7 +151,7 @@ class _AsyncCheckpointProcess:
     def _send(self, data: Any) -> None:
         self._process_pipe.send(data)
 
-    def _wait_for_response(self, timeout: Optional[float] = None) -> Any:
+    def _wait_for_response(self, timeout: float | None = None) -> Any:
         if not self._save_process.is_alive():
             logger.info("Checkpoint background process is dead calling join()...")
             self._save_process.join()
@@ -173,9 +180,9 @@ class _AsyncCheckpointProcess:
         self,
         staged_state_dict: STATE_DICT_TYPE,
         *,
-        checkpoint_id: Union[str, os.PathLike, None] = None,
-        storage_writer: Optional[StorageWriter] = None,
-        planner: Optional[SavePlanner] = None,
+        checkpoint_id: str | os.PathLike | None = None,
+        storage_writer: StorageWriter | None = None,
+        planner: SavePlanner | None = None,
         no_dist: bool = False,
         use_collectives: bool = True,
     ) -> Metadata:
@@ -201,8 +208,8 @@ class _AsyncCheckpointProcess:
         state_dict: STATE_DICT_TYPE,
         *,
         checkpoint_request_id: _CheckpointRequestIdentifier,
-        storage_writer: Optional[StorageWriter] = None,
-        planner: Optional[SavePlanner] = None,
+        storage_writer: StorageWriter | None = None,
+        planner: SavePlanner | None = None,
         no_dist: bool = False,
         use_collectives: bool = True,
     ) -> Metadata:
@@ -264,6 +271,12 @@ class _AsyncCheckpointProcess:
 
             logger.info("Checkpoint background process is running...")
             parent_conn.send(_CheckpointSaveProcessControlOpts.INIT_COMPLETE)
+
+            if pg_init_info.disable_automatic_gc:
+                # Disable automatic garbage collection
+                # GC can optionally be called manually after each checkpoint
+                gc.disable()
+                logger.info("Disabled automatic garbage collection")
         except BaseException as e:  # noqa: B036
             logger.error(
                 f"Checkpoint background process failed during initialization: {e}"  # noqa: G004
@@ -273,6 +286,7 @@ class _AsyncCheckpointProcess:
 
         # Phase 2: Serving Loop
         try:
+            first_request = True
             while True:
                 logger.info("Waiting for checkpoint save request...")
                 obj = parent_conn.recv()
@@ -303,6 +317,28 @@ class _AsyncCheckpointProcess:
                     logger.info(
                         f"Completed checkpoint save request for checkpoint_id={obj.checkpoint_request_id}"  # noqa: G004
                     )
+
+                    # in theory this manual gc should not be needed as we shouldn't be leaking anything from checkpointing process
+                    if (
+                        pg_init_info.disable_automatic_gc
+                        and not pg_init_info.disable_manual_gc
+                    ):
+                        del obj
+
+                        collected_objects = gc.collect()
+
+                        logger.info(
+                            f"Manual garbage collection completed - collected {collected_objects} objects."  # noqa: G004
+                        )
+                        if first_request:
+                            # Freeze GC to not check GC for large checkpoint save plans
+                            # After freezing, subsequent gc.collect() calls will only scan
+                            # NEW objects created after this point, not the frozen save plan
+                            logger.info(
+                                "First checkpoint request completed - freezing gc"
+                            )
+                            gc.freeze()
+                    first_request = False
                 except BaseException as e:  # noqa: B036
                     logger.error(
                         f"Checkpoint save failed for checkpoint_id={obj.checkpoint_request_id.checkpoint_id}: {e}"  # noqa: G004
@@ -315,7 +351,7 @@ class _AsyncCheckpointProcess:
             parent_conn.close()
 
 
-_CHECKPOINT_PROCESS: Optional[_AsyncCheckpointProcess] = None
+_CHECKPOINT_PROCESS: _AsyncCheckpointProcess | None = None
 
 
 class _ProcessBasedAsyncCheckpointExecutor(_AsyncCheckpointExecutor):
@@ -325,12 +361,12 @@ class _ProcessBasedAsyncCheckpointExecutor(_AsyncCheckpointExecutor):
     @staticmethod
     def _execute_save_impl(
         *,
-        pg_init_info: Optional[_ProcessGroupInitInfo],
-        staging_future_or_state_dict: Union[Future[STATE_DICT_TYPE], STATE_DICT_TYPE],
-        checkpoint_id: Union[str, os.PathLike, None] = None,
-        storage_writer: Optional[StorageWriter] = None,
-        planner: Optional[SavePlanner] = None,
-        process_group: Optional[dist.ProcessGroup] = None,
+        pg_init_info: _ProcessGroupInitInfo | None,
+        staging_future_or_state_dict: Future[STATE_DICT_TYPE] | STATE_DICT_TYPE,
+        checkpoint_id: str | os.PathLike | None = None,
+        storage_writer: StorageWriter | None = None,
+        planner: SavePlanner | None = None,
+        process_group: dist.ProcessGroup | None = None,
         no_dist: bool = False,
         use_collectives: bool = True,
     ) -> Metadata:
@@ -373,12 +409,12 @@ class _ProcessBasedAsyncCheckpointExecutor(_AsyncCheckpointExecutor):
 
     def execute_save(
         self,
-        staging_future_or_state_dict: Union[Future[STATE_DICT_TYPE], STATE_DICT_TYPE],
+        staging_future_or_state_dict: Future[STATE_DICT_TYPE] | STATE_DICT_TYPE,
         *,
-        checkpoint_id: Union[str, os.PathLike, None] = None,
-        storage_writer: Optional[StorageWriter] = None,
-        planner: Optional[SavePlanner] = None,
-        process_group: Optional[dist.ProcessGroup] = None,
+        checkpoint_id: str | os.PathLike | None = None,
+        storage_writer: StorageWriter | None = None,
+        planner: SavePlanner | None = None,
+        process_group: dist.ProcessGroup | None = None,
         no_dist: bool = False,
         use_collectives: bool = True,
     ) -> Future:
@@ -398,7 +434,7 @@ class _ProcessBasedAsyncCheckpointExecutor(_AsyncCheckpointExecutor):
         """
 
         global _CHECKPOINT_PROCESS
-        pg_init_info: Optional[_ProcessGroupInitInfo] = None
+        pg_init_info: _ProcessGroupInitInfo | None = None
         if _CHECKPOINT_PROCESS is None:
             # Find a port on coordinator rank and broadcast
             # to all ranks.

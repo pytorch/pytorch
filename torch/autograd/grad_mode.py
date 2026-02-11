@@ -311,20 +311,26 @@ def _exit_inference_mode(mode):
 
 
 class set_multithreading_enabled(_DecoratorContextManager):
-    r"""Context-manager that sets multithreaded backwards on or off.
+    r"""Context-manager that enables or disables multithreaded backward.
 
-    ``set_multithreading_enabled`` will enable or disable multithreaded backwards based on its argument :attr:`mode`.
-    It can be used as a context-manager or as a function.
+    Ordinarily, when :ref:`accelerator<accelerators>` devices are in use,
+    the backward pass runs on device-specific worker threads. The engine
+    creates these threads based on the number of available devices and
+    reuses them across iterations.
 
-    This context manager is thread local; it will not affect computation
-    in other threads.
+    When ``mode=False``, the backward pass runs on the calling thread
+    instead. ``mode=True`` restores the default behavior.
+
+    This can be used as a context-manager or as a function. It is
+    thread-local and will not affect computation in other threads.
 
     Args:
-        mode (bool): Flag whether to enable multithreaded backwards (``True``), or disable
-                     (``False``).
+        mode (bool): Whether to enable multithreaded backward (``True``,
+                    default) or disable (``False``).
 
     .. note::
-        This API does not apply to :ref:`forward-mode AD <forward-mode-ad>`.
+        This API does not apply to :ref:`forward-mode AD <forward-mode-ad>`,
+        which never uses multithreading.
 
     """
 

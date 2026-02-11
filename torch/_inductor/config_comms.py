@@ -16,7 +16,6 @@ runtime_estimations_align_across_all_distributed_ranks: bool = False
 reorder_iterative_debug_memory_recompute: bool = False
 reorder_iterative_debug_limit_to_reorder: Optional[int] = (
     None
-    # pyrefly: ignore[unbound-name]
     if (env_str := os.getenv("PYTORCH_REORDER_COLLECTIVES_LIMIT")) is None
     else int(env_str)
 )
@@ -66,6 +65,8 @@ sink_waits_iterative_unsafe_collectives_reorder: bool = True
 # Allow group and move other collectives during reordering
 reorder_iterative_group_with_collectives: bool = False
 sink_waits_iterative_swap_with_collectives: bool = False
+
+reorder_sink_verbose_logging: bool = False
 
 # adds patch, save_config, etc
 install_config_module(sys.modules[__name__])

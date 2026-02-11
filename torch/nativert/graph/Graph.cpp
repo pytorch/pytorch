@@ -3,7 +3,6 @@
 #include <fmt/ostream.h>
 #include <fmt/ranges.h>
 #include <limits>
-#include <queue>
 
 #include <c10/util/Enumerate.h>
 #include <c10/util/FbcodeMaps.h>

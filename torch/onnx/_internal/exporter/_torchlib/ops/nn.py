@@ -15,7 +15,7 @@ from onnxscript.onnx_opset import (  # type: ignore[attr-defined]
 )
 
 import torch
-from torch.onnx._internal._lazy_import import onnxscript_ir as ir
+from torch.onnx._internal._lazy_import import onnx_ir as ir
 from torch.onnx._internal.exporter._torchlib._tensor_typing import TFloat, TReal
 from torch.onnx._internal.exporter._torchlib._torchlib_registry import onnx_impl
 
@@ -31,7 +31,7 @@ def aten_gelu_opset20(
     self: TReal,
     approximate: str = "none",
 ) -> TReal:
-    """gelu(Tensor self, *, bool approximate=False) -> Tensor"""
+    """gelu(Tensor self, *, str approximate="none") -> Tensor"""
     return op20.Gelu(self, approximate=approximate)
 
 
@@ -125,26 +125,25 @@ def aten_scaled_dot_product_attention_23(
     where Q, K, V are the query, key, and value tensors, respectively.
     L is the target sequence length, S is the source sequence length, and E is the embedding size.
     """
-    assert (not is_causal) or (is_causal and attn_mask is None), (
-        "is_causal and attn_mask cannot be set at the same time"
-    )
-    assert len(query.shape) == 4 and len(key.shape) == 4 and len(value.shape) == 4, (
-        "only 4D query, key, and value are supported"
-    )
+    if is_causal and attn_mask is not None:
+        raise AssertionError("is_causal and attn_mask cannot be set at the same time")
+    if not (len(query.shape) == 4 and len(key.shape) == 4 and len(value.shape) == 4):
+        raise AssertionError("only 4D query, key, and value are supported")
 
     # Attention onnx op can only handle non-training scenarios where dropout is disabled.
     if dropout_p == 0:
         if enable_gqa:
-            assert (
+            if not (
                 query.shape[1] > key.shape[1] == value.shape[1]
                 and query.shape[1] % key.shape[1] == 0
-            ), (
-                "SDPA (GQA or MQA) requires q_num_heads > kv_num_heads & q_num_heads % kv_num_heads == 0"
-            )
+            ):
+                raise AssertionError(
+                    "SDPA (GQA or MQA) requires q_num_heads > kv_num_heads & "
+                    "q_num_heads % kv_num_heads == 0"
+                )
         else:
-            assert query.shape[1] == key.shape[1] == value.shape[1], (
-                "SDPA (MHA) requires q_num_heads = kv_num_heads"
-            )
+            if not (query.shape[1] == key.shape[1] == value.shape[1]):
+                raise AssertionError("SDPA (MHA) requires q_num_heads = kv_num_heads")
 
         # NOTE: num_heads attributes (q_num_heads/kv_num_heads) should not be specified for 4D.
         # They are not populated with 4D inputs because this information directly comes from input shapes:
@@ -198,15 +197,17 @@ def _attention_repeat_kv_for_group_query(
     Returns:
         Tuple of (expanded_key, expanded_value) where:
             - expanded_key: Tensor of shape [B, q_num_heads, kv_S, E]
-            - expanded_value: Tensor of shape [B, q_num_heads, kv_S, E
+            - expanded_value: Tensor of shape [B, q_num_heads, kv_S, E]
     """
 
-    assert (
+    if not (
         query.shape[1] > key.shape[1] == value.shape[1]
         and query.shape[1] % key.shape[1] == 0
-    ), (
-        "SDPA (GQA or MQA) requires q_num_heads > kv_num_heads & q_num_heads % kv_num_heads == 0"
-    )
+    ):
+        raise AssertionError(
+            "SDPA (GQA or MQA) requires q_num_heads > kv_num_heads & "
+            "q_num_heads % kv_num_heads == 0"
+        )
 
     # NOTE: QKV are expected to be 4D tensors
 

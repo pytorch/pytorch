@@ -23,7 +23,7 @@ jobs:
     name: inductor-build
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-jammy-py3.9-gcc11
+      build-environment: linux-jammy-py3.10-gcc11
       docker-image-name: ci-image:pytorch-linux-jammy-py3-gcc11-inductor-benchmarks
       # Use metal host for benchmark jobs
       test-matrix: |

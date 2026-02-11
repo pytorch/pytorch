@@ -240,7 +240,8 @@ class TestPybindTypeCasters(common.TestCase):
         """
         # Verify that all functions have the same return type.
         union_type = {self.expected_return_type(f) for f in funcs}
-        assert len(union_type) == 1
+        if len(union_type) != 1:
+            raise AssertionError(f"expected 1 union type, got {len(union_type)}")
         union_type = union_type.pop()
         self.assertIs(Union, get_origin(union_type))
         # SymInt is inconvenient to test, so don't require it

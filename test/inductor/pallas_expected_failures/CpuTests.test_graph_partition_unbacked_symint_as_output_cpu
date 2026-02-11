@@ -1,5 +1,0 @@
-ERROR
-  File "/tmp/tmpctyeas50/2x/c2xhizfu4udantqpq2h7bccqugq24k3gqvwtya6sh6ugcnh7wed6.py", line 10, in pallas_fused_arange_1a61432f_kernel
-    tmp0 = x0
-           ^^
-NameError: name 'x0' is not defined

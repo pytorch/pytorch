@@ -55,6 +55,10 @@ class TensorMeta {
     return sizes_.size();
   }
 
+  bool hasSymbolicShape() const {
+    return hasSymbolicShape_;
+  }
+
   int64_t numel() const {
     TORCH_CHECK(!hasSymbolicShape_, "TensorMeta has symbolic shape");
     return numel_;

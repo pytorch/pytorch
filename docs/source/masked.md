@@ -52,10 +52,10 @@ allows the user to systematically ignore any elements they'd like during computa
 
 There are already a number of existing tutorials that we've written to help users onboard, such as:
 
-- [Overview – the place to start for new users, discusses how to use MaskedTensors and why they're useful](https://pytorch.org/tutorials/prototype/maskedtensor_overview)
-- [Sparsity – MaskedTensor supports sparse COO and CSR data and mask Tensors](https://pytorch.org/tutorials/prototype/maskedtensor_sparsity)
-- [Adagrad sparse semantics – a practical example of how MaskedTensor can simplify sparse semantics and implementations](https://pytorch.org/tutorials/prototype/maskedtensor_adagrad)
-- [Advanced semantics – discussion on why certain decisions were made (e.g. requiring masks to match for binary/reduction operations), differences with NumPy's MaskedArray, and reduction semantics](https://pytorch.org/tutorials/prototype/maskedtensor_advanced_semantics)
+- [Overview – the place to start for new users, discusses how to use MaskedTensors and why they're useful](https://docs.pytorch.org/tutorials/unstable/maskedtensor_overview)
+- [Sparsity – MaskedTensor supports sparse COO and CSR data and mask Tensors](https://docs.pytorch.org/tutorials/unstable/maskedtensor_sparsity)
+- [Adagrad sparse semantics – a practical example of how MaskedTensor can simplify sparse semantics and implementations](https://docs.pytorch.org/tutorials/unstable/maskedtensor_adagrad)
+- [Advanced semantics – discussion on why certain decisions were made (e.g. requiring masks to match for binary/reduction operations), differences with NumPy's MaskedArray, and reduction semantics](https://docs.pytorch.org/tutorials/unstable/maskedtensor_advanced_semantics)
 
 ## Supported Operators
 
@@ -220,9 +220,9 @@ The available inplace binary operators are all of the above **except**:
 ### Reductions
 
 The following reductions are available (with autograd support). For more information, the
-[Overview](https://pytorch.org/tutorials/prototype/maskedtensor_overview.html) tutorial
+[Overview](https://pytorch.org/tutorials/unstable/maskedtensor_overview.html) tutorial
 details some examples of reductions, while the
-[Advanced semantics](https://pytorch.org/tutorials/prototype/maskedtensor_advanced_semantics.html) tutorial
+[Advanced semantics](https://pytorch.org/tutorials/unstable/maskedtensor_advanced_semantics.html) tutorial
 has some further in-depth discussions about how we decided on certain reduction semantics.
 
 ```{eval-rst}
