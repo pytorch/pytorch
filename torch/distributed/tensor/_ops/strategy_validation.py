@@ -371,29 +371,29 @@ def _create_partial_input(
     """
     reduce_op = placement.reduce_op
 
-    if reduce_op == "sum":
+    if reduce_op in ("sum", "avg"):
         base_ratio = 0.6 + 0.1 * (tensor_idx % 3)
-        local_tensors: dict[int, torch.Tensor] = {}
+
+        # Add a sign-varying offset so local values have mixed signs.
+        # Pure proportional splits (tensor * ratio) preserve sign patterns,
+        # causing non-linear ops like abs to falsely validate P(sum)->P(sum).
+        flat = tensor.flatten()
+        offset_mag = flat.abs() + 1.0
+        signs = torch.ones_like(flat)
+        signs[
+            (torch.arange(flat.numel(), device=tensor.device) + tensor_idx) % 2 == 0
+        ] = -1.0
+        offset = (offset_mag * signs).reshape(tensor.shape)
+
+        scale = world_size if reduce_op == "avg" else 1
+        local_tensors = {}
         for r in range(world_size):
             if r == 0:
-                local_tensors[r] = tensor.clone() * base_ratio
+                local_tensors[r] = tensor.clone() * base_ratio * scale + offset
             else:
                 local_tensors[r] = tensor.clone() * (
                     (1 - base_ratio) / (world_size - 1)
-                )
-        # pyrefly: ignore [bad-argument-type, bad-argument-count]
-        return LocalTensor(local_tensors)
-
-    elif reduce_op == "avg":
-        base_ratio = 0.6 + 0.1 * (tensor_idx % 3)
-        local_tensors: dict[int, torch.Tensor] = {}
-        for r in range(world_size):
-            if r == 0:
-                local_tensors[r] = tensor.clone() * base_ratio * world_size
-            else:
-                local_tensors[r] = (
-                    tensor.clone() * ((1 - base_ratio) / (world_size - 1)) * world_size
-                )
+                ) * scale - offset / (world_size - 1)
         # pyrefly: ignore [bad-argument-type, bad-argument-count]
         return LocalTensor(local_tensors)
 
@@ -432,9 +432,7 @@ def _create_partial_input(
         return LocalTensor(local_tensors)
 
     else:
-        local_tensors: dict[int, torch.Tensor] = {
-            r: tensor.clone() for r in range(world_size)
-        }
+        local_tensors = {r: tensor.clone() for r in range(world_size)}
         # pyrefly: ignore [bad-argument-type, bad-argument-count]
         return LocalTensor(local_tensors)
 
@@ -474,12 +472,6 @@ def validate_combination(
             device = tensors[0][1].device.type if tensors else "cpu"
             mesh = init_device_mesh(device, (world_size,))
 
-        # All-zero ground truth makes validation uninformative: zeros are
-        # invariant under all reduce operations, so every placement trivially
-        # matches and we can't distinguish valid from invalid rules.
-        if ground_truth.numel() > 0 and (ground_truth == 0).all():
-            return False, "all-zero ground truth"
-
         local_tensors = []
         for tensor_idx, ((name, tensor), placement) in enumerate(
             zip(tensors, combination.input_placements)
@@ -490,21 +482,16 @@ def validate_combination(
                 )
                 local_tensors.append(local_tensor)
             elif isinstance(placement, Replicate):
-                _tmp_local_tensors: dict[int, torch.Tensor] = {
-                    r: tensor.clone() for r in range(world_size)
-                }
+                _tmp = {r: tensor.clone() for r in range(world_size)}
                 # pyrefly: ignore [bad-argument-type, bad-argument-count]
-                local_tensors.append(LocalTensor(_tmp_local_tensors))
+                local_tensors.append(LocalTensor(_tmp))
             elif isinstance(placement, Shard):
                 # Create sharded LocalTensor directly to work in LocalTensorMode
                 shard_dim = placement.dim
                 chunks = tensor.tensor_split(world_size, dim=shard_dim)
-                _tmp_local_tensors: dict[int, torch.Tensor] = {
-                    r: chunks[r].clone().contiguous() for r in range(world_size)
-                }
-
+                _tmp = {r: chunks[r].clone().contiguous() for r in range(world_size)}
                 # pyrefly: ignore [bad-argument-type, bad-argument-count]
-                local_tensors.append(LocalTensor(_tmp_local_tensors))
+                local_tensors.append(LocalTensor(_tmp))
             else:
                 # Fallback for other placement types
                 dt = distribute_tensor(tensor.clone(), mesh, (placement,))
@@ -808,6 +795,13 @@ def compare_operator(
                     ground_truth = op(*sample.input, *sample.args, **sample.kwargs)
 
                 if not isinstance(ground_truth, torch.Tensor):
+                    continue
+
+                # Skip samples with all-zero output: zeros are invariant under
+                # all reduce ops (sum, max, min), making every placement trivially
+                # match. This produces hundreds of false positive "valid" rules.
+                if ground_truth.numel() > 0 and (ground_truth == 0).all():
+                    total_samples -= 1
                     continue
             except Exception:
                 continue
