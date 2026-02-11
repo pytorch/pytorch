@@ -709,6 +709,7 @@ static Tensor make_tensor_for_subclass_helper(
       at::DataPtr{nullptr, options.device()},
       /*allocator=*/c10::GetAllocator(c10::kMeta),
       /*resizable=*/true};
+  storage.unsafeGetStorageImpl()->set_throw_on_mutable_data_ptr();
 
   auto keys = c10::DispatchKeySet({options.computeDispatchKey()});
   if (extra_dispatch_keys.has_value()) {
