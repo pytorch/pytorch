@@ -177,7 +177,6 @@ dtensor_fails = {
     xfail("nn.functional.dropout"),
     xfail("nn.functional.fractional_max_pool2d"),
     xfail("nn.functional.fractional_max_pool3d"),
-    xfail("nn.functional.huber_loss"),
     xfail("nn.functional.interpolate", "area"),
     xfail("nn.functional.interpolate", "nearest"),
     xfail("nn.functional.interpolate", "nearest-exact"),
