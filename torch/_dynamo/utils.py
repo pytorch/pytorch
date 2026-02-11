@@ -614,6 +614,25 @@ class CompileEventLogger:
         )
 
     @staticmethod
+    def add_record_function_data(event_name: str, **metadata: object) -> None:
+        """
+        Add record function data to the profiler event.
+
+        This emits profiler event data so compilation events show up in stack profilers
+        like the PyTorch profiler.
+
+        Args:
+            event_name: Name of the event to record
+            **metadata: Additional metadata to attach to the record function
+        """
+        if torch.autograd.profiler._is_profiler_enabled and metadata:
+            metadata_str = ", ".join(f"{k}={v}" for k, v in metadata.items())
+            with torch.autograd.profiler.record_function(
+                f"{event_name}_data: {metadata_str}"
+            ):
+                pass
+
+    @staticmethod
     def compilation_metric(overwrite: bool = False, **metadata: object) -> None:
         """
         Add <metadata> to the CompilationMetrics context. Also logs to PT2 Compile Events
@@ -1802,6 +1821,8 @@ def get_compilation_metrics() -> list[CompilationMetrics]:
 class ChromiumEventLogger:
     """Logs chromium events to structured logs. tlparse will concatenate these into a perfetto UI link.
 
+    Also emits RecordFunction calls to torch.profiler when enabled.
+
     See https://docs.google.com/document/d/1CvAClvFfyA5R-PhYUmn5OOQtYMH4h6I0nSsKchNAySU/preview#heading=h.yr4qxyxotyw for
     a specification of the Chromium Event JSON format.
     """
@@ -1840,6 +1861,11 @@ class ChromiumEventLogger:
         if not hasattr(self.tls, "event_data"):
             self.tls.event_data = {}
         return self.tls.event_data
+
+    def get_record_functions(self) -> dict[str, AbstractContextManager[None]]:
+        if not hasattr(self.tls, "record_functions"):
+            self.tls.record_functions = {}
+        return self.tls.record_functions
 
     def __init__(self) -> None:
         self.tls = threading.local()
@@ -1954,6 +1980,16 @@ class ChromiumEventLogger:
         if log_pt2_compile_event:
             self.get_pt2_compile_substack().append(event_name)
 
+        # Emit profiler event so compilation events show up in stock PyTorch profiler
+        if torch.autograd.profiler._is_profiler_enabled:
+            rf = torch._C._profiler._RecordFunctionFast(event_name)
+            rf.__enter__()
+            self.get_record_functions()[event_name] = rf
+
+            # Add metadata to the profiler event if present
+            if metadata:
+                CompileEventLogger.add_record_function_data(event_name, **metadata)
+
     def reset(self) -> None:
         # We this on every compile in case a compile crashes or restarts and we haven't
         # cleared the stack.
@@ -1963,6 +1999,12 @@ class ChromiumEventLogger:
         substack.clear()
         event_data = self.get_event_data()
         event_data.clear()
+        # Clean up any lingering record functions (shouldn't happen in normal operation)
+        record_functions = self.get_record_functions()
+        if record_functions:
+            for rf in record_functions.values():
+                rf.__exit__(None, None, None)
+            record_functions.clear()
 
     def log_event_end(
         self,
@@ -2036,6 +2078,12 @@ class ChromiumEventLogger:
 
         # Finally pop the actual event off the stack
         event_stack.pop()
+
+        # End profiler event so compilation events show up in stock PyTorch profiler
+        record_functions = self.get_record_functions()
+        if event_name in record_functions:
+            rf = record_functions.pop(event_name)
+            rf.__exit__(None, None, None)
 
     def _log_timed_event(
         self,
@@ -3552,6 +3600,18 @@ def _wrap_graph_break_with_torch_runtime_err(gb_fn: Callable[[], NoReturn]) -> N
 
 
 def get_fake_value(
+    node: torch.fx.Node,
+    tx: InstructionTranslatorBase,
+    allow_non_graph_fake: bool = False,
+) -> Any:
+    _t0 = time.time_ns()
+    try:
+        return _get_fake_value_impl(node, tx, allow_non_graph_fake)
+    finally:
+        tx.output.bytecode_tracing_timings.get_fake_value_ns += time.time_ns() - _t0
+
+
+def _get_fake_value_impl(
     node: torch.fx.Node,
     tx: InstructionTranslatorBase,
     allow_non_graph_fake: bool = False,
