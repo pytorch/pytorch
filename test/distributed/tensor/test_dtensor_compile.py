@@ -494,6 +494,34 @@ def forward(self, b_parametrizations_buffer_original0, x):
         res = opt_fn(x, y)
         self.assertEqual(res, ref)
 
+    def test_dtensor_dynamic_embedding(self):
+        # Regression test: DTensor RowwiseParallel embedding with dynamic
+        # shapes used to crash with IndexError during compilation because
+        # metadata-inference probe ops leaked into the FX graph.
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        model = nn.Embedding(128, 16).to(self.device_type)
+        parallelize_module(
+            model,
+            mesh,
+            RowwiseParallel(
+                input_layouts=Replicate(),
+                output_layouts=Shard(1),
+                use_local_output=False,
+            ),
+        )
+
+        tokens = torch.zeros(1, 64, dtype=torch.int32, device=self.device_type)
+        torch._dynamo.mark_dynamic(tokens, 1)
+
+        opt_fn = torch.compile(model, backend="aot_eager", fullgraph=True)
+        res = opt_fn(tokens)
+
+        # Verify compilation produced a valid DTensor with correct structure
+        self.assertIsInstance(res, DTensor)
+        self.assertEqual(res.placements, (Shard(1),))
+        self.assertEqual(res.shape, (1, 64, 16))
+
     def test_dtensor_dynamic_recompiles(self):
         cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))

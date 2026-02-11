@@ -333,9 +333,15 @@ class ShardingPropagator:
             return None
 
         # NOTE: We must call the tracing in fake tensor mode so that it avoids
-        # materializing memory.
+        # materializing memory. We also disable proxy tracing to prevent these
+        # metadata-inference ops from leaking into the FX graph. The
+        # _build_proxy_for_sym_expr fallback will reconstruct proxies for any
+        # SymInts (e.g. DTensor outer strides) computed during this region
+        # when they are later used with proxy tracing active.
+        from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing
+
         fake_mode = detect_fake_mode() or FakeTensorMode()
-        with fake_mode:
+        with fake_mode, disable_proxy_modes_tracing():
             fake_args = op_schema.gen_fake_args()
             fake_kwargs = op_schema.gen_fake_kwargs()
             fake_out = op_schema.op(*fake_args, **fake_kwargs)
