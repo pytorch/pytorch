@@ -317,31 +317,12 @@ for ease of understanding the data flow:
 import dataclasses
 
 
-# TODO: the is_* predicates are a little suspicious because (1) they're not
-# used by anything and (2) they always report False even when a parameter got
-# swizzled into a view base or deduped with a non-parameter.  It is pretty
-# difficult to exercise these cases but it's not clear if you will write code
-# that works correctly in those cases.
-
-
 @dataclasses.dataclass(frozen=True)
 class AOTInput:
     """Describes where an input from an AOTAutograd produced FX graph comes from"""
 
     def expr(self) -> str:
         raise NotImplementedError("Subclasses must implement expr()")
-
-    def is_param(self) -> bool:
-        """True if this input is a parameter or derived from a parameter (e.g., subclass attr)"""
-        return False
-
-    def is_buffer(self) -> bool:
-        """True if this input is a buffer or derived from a buffer (e.g., subclass attr)"""
-        return False
-
-    def is_tangent(self) -> bool:
-        """True if this input is a tangent or derived from a tangent (e.g., subclass attr)"""
-        return False
 
 
 # Note: Currently, our typing discipline for differentiable versus not is not
@@ -360,10 +341,6 @@ class AOTOutput:
 
     def expr(self) -> str:
         raise NotImplementedError("Subclasses must implement expr()")
-
-    def is_grad(self) -> bool:
-        """True if this output is a grad or derived from a grad (e.g., subclass attr)"""
-        return False
 
 
 @dataclasses.dataclass(frozen=True)
@@ -387,12 +364,6 @@ class ParamAOTInput(DifferentiableAOTInput):
     def expr(self) -> str:
         return f"self.get_parameter({self.target!r})"
 
-    def is_param(self) -> bool:
-        return True
-
-    def is_buffer(self) -> bool:
-        return False
-
 
 @dataclasses.dataclass(frozen=True)
 class BufferAOTInput(DifferentiableAOTInput):
@@ -402,12 +373,6 @@ class BufferAOTInput(DifferentiableAOTInput):
 
     def expr(self) -> str:
         return f"self.get_buffer({self.target!r})"
-
-    def is_param(self) -> bool:
-        return False
-
-    def is_buffer(self) -> bool:
-        return True
 
 
 @dataclasses.dataclass(frozen=True)
@@ -452,15 +417,6 @@ class SubclassGetAttrAOTInput(AOTInput):
 
     def expr(self) -> str:
         return f"{self.base.expr()}.{self.attr}"
-
-    def is_param(self) -> bool:
-        return self.base.is_param()
-
-    def is_buffer(self) -> bool:
-        return self.base.is_buffer()
-
-    def is_tangent(self) -> bool:
-        return self.base.is_tangent()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -586,9 +542,6 @@ class TangentAOTInput(DifferentiableAOTInput):
     def expr(self) -> str:
         return f"__output_tangent({self.output.expr()})"
 
-    def is_tangent(self) -> bool:
-        return True
-
 
 # ------------
 
@@ -656,9 +609,6 @@ class GradAOTOutput(DifferentiableAOTOutput):
     def expr(self) -> str:
         return f"__grad({self.grad_of.expr()})"
 
-    def is_grad(self) -> bool:
-        return True
-
 
 @dataclasses.dataclass(frozen=True)
 class PhiloxUpdatedForwardOffsetAOTOutput(AOTOutput):
@@ -709,9 +659,6 @@ class SubclassGetAttrAOTOutput(AOTOutput):
 
     def expr(self) -> str:
         return f"{self.base.expr()}.{self.attr}"
-
-    def is_grad(self) -> bool:
-        return self.base.is_grad()
 
 
 @dataclasses.dataclass(frozen=True)

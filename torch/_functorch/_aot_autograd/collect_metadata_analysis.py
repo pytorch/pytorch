@@ -168,7 +168,6 @@ def run_functionalized_fw_and_collect_metadata(
     *,
     flat_args_descs: list[AOTInput],
     keep_input_mutations: bool,
-    # TODO: refactor to kill this flag
     is_train: bool = False,
     # Note: this is guaranteed to be set when running under dynamo
     static_input_indices: Optional[list[int]] = None,
@@ -797,11 +796,10 @@ from a multi-output view call"
             f_input_tangents_descs + f_output_tangents_descs + intermediate_bases_descs
         )
 
-        # TODO: I'm pretty sure you don't need a tree_map here
-        traced_tangents = pytree.tree_map(from_fun, f_tangents)
-        traced_tangents = pytree.tree_map(
-            view_avoid_dupes_with_primals, traced_tangents
-        )
+        traced_tangents = [from_fun(t) for t in f_tangents]
+        traced_tangents = [
+            view_avoid_dupes_with_primals(t) for t in traced_tangents
+        ]
         traced_tangents = [
             coerce_tangent_and_suggest_memory_format(tt)[0]
             for i, tt in enumerate(traced_tangents)
@@ -832,12 +830,10 @@ from a multi-output view call"
         f_metadata_mutated_inputs = [
             inp for inp, info in zip(flat_f_args, input_info) if info.mutates_metadata
         ]
-        # This logic (annoyingly) re-figures out exactly what the outputs to the compiled fw graph will be.
+        # Re-figures out exactly what the outputs to the compiled fw graph will be.
         # When handling subclasses, we need info about **all** outputs of compiled forward graph,
-        # so we know precisely which graph outputs to wrap back into tensor subclasses
-        # Ideally we would refactor this so not have an is_train flag, and have the separate
-        # inference and training paths decide which inputs/output to ask for subclass info on.
-        # However, we currently stash indexing information on each SubclassMeta about its order
+        # so we know precisely which graph outputs to wrap back into tensor subclasses.
+        # Indexing information is stashed on each SubclassMeta about its order
         # in the graph outputs list.
         f_fw_graph_outs = list(flat_f_outs)
         if is_train or not keep_input_mutations:

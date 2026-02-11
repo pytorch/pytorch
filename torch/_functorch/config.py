@@ -86,17 +86,7 @@ autograd_cache_normalize_inputs = not is_fbcode()
 # check_custom_op_aliasing: Controls whether to run the custom op aliasing check at all.
 #   - When True: The check runs on first invocation of compiled functions.
 #   - When False: The check is skipped entirely.
-#
-# error_on_custom_op_aliasing: Controls behavior when a violation is detected.
-#   Only has effect when check_custom_op_aliasing is True.
-#   - When True: Raises RuntimeError on aliasing violations.
-#   - When False: Emits UserWarning on aliasing violations.
-#
-# Deprecated: Custom ops returning aliased outputs is deprecated and will
-# become an error in PyTorch 2.12. Currently error_on_custom_op_aliasing
-# is True only in CI.
 check_custom_op_aliasing = True
-error_on_custom_op_aliasing = bool(os.getenv("CI"))
 
 
 def remote_autograd_cache_default() -> Optional[bool]:
@@ -120,13 +110,6 @@ enable_remote_autograd_cache = remote_autograd_cache_default()
 # (2) If you are doing training, AsStridedBackward is quite slow,
 #     and the individual view op backward formulas will likely be faster.
 # (3) Some backends like XLA do not support as_strided
-
-# Temporary hack: disable this flag for internal
-# (needed to fix an internal issue while avoiding bumping XLA pin)
-# eventually: either default this config to false completely
-# once XLA pin update works,
-# or default config to true and fix relevant bugs
-
 
 # View replay is currently not compatible with AOTAutogradCache, since
 # FunctionalTensors are not serializable. We'll need to make them
@@ -350,13 +333,10 @@ generate_fake_kernels_from_real_mismatches = False
 fake_tensor_prefer_device_type: Optional[str] = None
 
 # CUDAGraph save run_with_rng functionalization.
-# TODO: turn on by default
 graphsafe_rng_functionalization = True
 
-# Whether or not to eagerly compile the backward
-# used by AOT compile and other settings
-# TODO: once AOT compile calls aot autograd directly instead of
-# through compile_fx, we can remove this
+# Whether or not to eagerly compile the backward.
+# Used by AOT compile and other settings.
 force_non_lazy_backward_lowering = False
 
 # only for testing, used to turn functionalization off in AOTDispatcher
@@ -391,18 +371,16 @@ strict_autograd_cache = False
 unsafe_allow_optimization_of_collectives = False
 
 # See Note [AOTAutograd Tangent Subclassness for mutated inputs]
-# TODO(ivankobzarev): Remove this config, being able to deduce it compile time.
 disable_guess_zero_tangent_for_mutated_input_subclass = False
 
 # See Note [Tangents memory format]
 # By default tangents strideness is guessed to be contiguous,
 # At runtime non contiguous tangents will be coerced to be contiguous.
 # This config changes this guess for tangents strides to be the same as outputs.
-# TODO(ivankobzarev): Remove this config once extra memory usage is investigated.
 guess_tangent_strides_as_outputs = False
 
-# This is a temporary config to ensure all ranks take the same decision in the partitioner
-# it will untimately be removed once we share size_hints across ranks through compiler collectives
+# Ensures all ranks take the same decision in the partitioner by
+# syncing saved_values across ranks through compiler collectives.
 _sync_decision_cross_ranks = False
 
 # By default apply inlined saved_tensors_hooks only for "donated" buffers.

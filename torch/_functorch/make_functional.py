@@ -298,7 +298,6 @@ class FunctionalModuleWithBuffers(nn.Module):
     def _create_from(
         model: nn.Module, disable_autograd_tracking: bool = False
     ) -> tuple[FunctionalModuleWithBuffers, tuple[Tensor, ...], tuple[Tensor, ...]]:
-        # TODO: We don't need to copy the model to create a stateless copy
         model_copy = copy.deepcopy(model)
         params, param_names, param_names_map = extract_weights(model_copy)
         buffers, buffer_names, buffer_names_map = extract_buffers(model_copy)
@@ -353,7 +352,6 @@ class FunctionalModule(nn.Module):
     def _create_from(
         model: nn.Module, disable_autograd_tracking: bool = False
     ) -> tuple[FunctionalModule, tuple[Tensor, ...]]:
-        # TODO: We don't need to copy the model to create a stateless copy
         model_copy = copy.deepcopy(model)
         params, param_names, names_map = extract_weights(model_copy)
         if disable_autograd_tracking:

@@ -6,7 +6,6 @@ import copy
 import dataclasses
 import logging
 import operator
-import warnings
 from collections.abc import Callable, Sequence
 from contextlib import nullcontext
 from functools import partial, wraps
@@ -134,18 +133,13 @@ def call_func_at_runtime_with_args(
 
     context = torch._C._DisableAutocast if disable_amp else nullcontext
     with context():
-        if getattr(f, "_boxed_call", False):
-            out = normalize_as_list(f(args))
-        else:
-            # TODO: Please remove soon
-            # https://github.com/pytorch/pytorch/pull/83137#issuecomment-1211320670
-            warnings.warn(
+        if not getattr(f, "_boxed_call", False):
+            raise RuntimeError(
                 "Your compiler for AOTAutograd is returning a function that doesn't take boxed arguments. "
                 "Please wrap it with functorch.compile.make_boxed_func or handle the boxed arguments yourself. "
-                "See https://github.com/pytorch/pytorch/pull/83137#issuecomment-1211320670 for rationale.",
-                stacklevel=2,
+                "See https://github.com/pytorch/pytorch/pull/83137#issuecomment-1211320670 for rationale."
             )
-            out = normalize_as_list(f(*args))
+        out = normalize_as_list(f(args))
     return out
 
 

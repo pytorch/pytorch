@@ -410,7 +410,8 @@ class ViewAndMutationMeta:
     # pass once, and reuse the output throughout AOTAutograd
     traced_tangents: list[Any]
 
-    # TODO doc
+    # Descriptors for each traced tangent, describing which output or
+    # mutated input each tangent corresponds to.
     traced_tangents_descs: list[AOTInput]
 
     # Each of these is a list telling us about subclasses for the inputs/outputs/grad_outs
@@ -436,7 +437,9 @@ class ViewAndMutationMeta:
     subclass_fw_graph_out_meta: list[Union[PlainTensorMeta, SubclassCreationMeta]]
     # length = # backward graph inputs
     subclass_tangent_meta: list[Union[PlainTensorMeta, SubclassCreationMeta]]
-    # TODO: we should kill this
+    # Whether the metadata was collected for a training graph (autograd-enabled).
+    # Controls whether mutated inputs and intermediate bases are included as
+    # graph outputs.
     # (need to default it to not break internal)
     is_train: bool = False
 
@@ -1108,19 +1111,24 @@ class AOTConfig:
                 raise AssertionError("Can only have pre_dispatch IR for export.")
 
 
-# TODO: types here
-# plain_tensor_trace_fn, when it is joint, has tuple structure on the trace
-# info too!
-# TODO: this needs to be generic, parameterized on AOTDescriptor
-SubclassTracingInfo = collections.namedtuple(
-    "SubclassTracingInfo",
+class PlainTensorTraceInfo(collections.namedtuple(
+    "PlainTensorTraceInfo",
     [
         "plain_tensor_trace_fn",
         "plain_tensor_args",
         "plain_tensor_args_descs",
         "maybe_subclass_meta",
     ],
-)
+)):
+    """Result of unwrapping subclass tensors to plain tensors for tracing.
+
+    plain_tensor_trace_fn: the function to trace, operating on plain tensors
+    plain_tensor_args: the unwrapped plain tensor arguments (or joint primals/tangents)
+    plain_tensor_args_descs: AOTInput descriptors for the unwrapped args
+    maybe_subclass_meta: SubclassMeta if subclass dispatch was needed, None otherwise
+    """
+
+SubclassTracingInfo = PlainTensorTraceInfo
 
 
 @dataclass
@@ -1367,7 +1375,6 @@ class AOTDispatchCompiler(Protocol):
     ) -> Any: ...
 
 
-# TODO: bikeshed on this name
 class SerializableAOTDispatchCompiler(AOTDispatchCompiler):
     """
     Represents an AOTDispatchCompiler that returns an OutputCode, and is

@@ -13710,7 +13710,6 @@ fn
             compiled_fn = torch.compile(fn, fullgraph=True, backend="inductor")
             with torch._functorch.config.patch(
                 check_custom_op_aliasing=True,
-                error_on_custom_op_aliasing=True,
             ):
                 with self.assertRaisesRegex(
                     RuntimeError,
@@ -13727,8 +13726,8 @@ fn
                 ):
                     _ = compiled_fn(x)
 
-    def test_debugmode_warns_outside_ci(self):
-        # Test that DebugMode emits warnings (not errors) when error_on_custom_op_aliasing=False
+    def test_debugmode_always_errors_on_aliasing(self):
+        # Custom op aliasing always raises RuntimeError
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             lib.define("alias_op2(Tensor x) -> (Tensor, Tensor)")
             lib.impl(
@@ -13744,31 +13743,14 @@ fn
 
             x = torch.randn(10, 10)
             compiled_fn = torch.compile(fn, fullgraph=True, backend="inductor")
-            # Use error_on_custom_op_aliasing=False to emit warnings instead of errors
-            with (
-                torch._functorch.config.patch(
-                    check_custom_op_aliasing=True, error_on_custom_op_aliasing=False
-                ),
-                warnings.catch_warnings(record=True) as w,
+            with torch._functorch.config.patch(
+                check_custom_op_aliasing=True,
             ):
-                warnings.simplefilter("always")
-                _ = compiled_fn(x)
-                aliasing_warnings = [
-                    x for x in w if "may not alias any inputs" in str(x.message)
-                ]
-                self.assertEqual(len(aliasing_warnings), 1)
-                msg = str(aliasing_warnings[0].message)
-                self.assertEqual(
-                    msg,
-                    "mylib::alias_op2 (with implementation in ???): "
-                    "The output of this custom operator (1) must not also be an input "
-                    "to this custom operator and (2) may not alias any inputs to this "
-                    "custom operator or other returns. The most common way to trigger "
-                    "this error is if we have y = custom_op(x) and y and x are the same "
-                    "Tensor. Please instead return a clone of the offending output "
-                    "tensor(s) (e.g. return x.clone()) or refactor the custom operator "
-                    "to not return y. This is deprecated and will become an error in PyTorch 2.12.",
-                )
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "The output of this custom operator \(1\) must not also be an input",
+                ):
+                    _ = compiled_fn(x)
 
 
 class MiscTestsPyTree(torch._inductor.test_case.TestCase):

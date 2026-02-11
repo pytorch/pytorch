@@ -15,7 +15,6 @@ import itertools
 import logging
 import pprint
 import typing
-import warnings
 from collections.abc import Callable, Generator, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
@@ -338,22 +337,14 @@ def _check_custom_op_aliasing(
 ) -> None:
     """
     Check if custom op outputs alias inputs or other outputs.
-    If config.error_on_custom_op_aliasing is True, raises RuntimeError.
-    Otherwise, emits a warning.
+    Raises RuntimeError if aliasing constraints are violated.
     """
-    try:
-        torch._library.utils._c_check_aliasing_constraint(
-            name,
-            args,
-            kwargs,
-            result,
-        )
-    except RuntimeError as e:
-        if config.error_on_custom_op_aliasing:
-            raise
-        else:
-            msg = f"{e} This is deprecated and will become an error in PyTorch 2.12."
-            warnings.warn(msg, UserWarning, stacklevel=3)
+    torch._library.utils._c_check_aliasing_constraint(
+        name,
+        args,
+        kwargs,
+        result,
+    )
 
 
 @functools.lru_cache(None)
@@ -375,8 +366,7 @@ def _is_fsdp_all_gather_copy_in(func: Any) -> bool:
 class _AnalyzeCustomOpInputOutputMode(TorchDispatchMode):
     """
     Checks if inp/out of custom ops alias each other.
-    If config.error_on_custom_op_aliasing is True, violations raise errors.
-    Otherwise, violations emit warnings.
+    Violations raise RuntimeError.
     """
 
     def __init__(self) -> None:
