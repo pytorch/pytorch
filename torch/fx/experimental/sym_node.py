@@ -905,13 +905,7 @@ def _optimized_add(
     def make_optimized(ordered_args):
         if ordered_args is None:
             raise AssertionError("ordered_args is None")
-        # Use _from_args directly to bypass _exec_constructor_postprocessors
-        # which iterates over all args. This is safe because args are only
-        # symbols or constants, which don't register postprocessors.
-        # Pass is_commutative=True to avoid fuzzy_and check over all args.
-        if not isinstance(ordered_args, tuple):
-            ordered_args = tuple(ordered_args)
-        result = sympy.Add._from_args(ordered_args, is_commutative=True)
+        result = sympy.Add(*ordered_args, evaluate=False)
         return (True, result)
 
     from torch.utils._sympy.functions import _is_symbols_binary_summation
@@ -1424,12 +1418,21 @@ def _make_node_magic(method, func):
             elif method in ("eq", "ne", "ge", "gt", "le", "lt"):
                 import sympy
 
-                # Optimization: when one side is optimized summation or single symbol
-                # and other is constant, use evaluate=False to skip expensive relational evaluation
-                lhs_is_simple = self._optimized_summation or self.expr.is_symbol
-                rhs_is_simple = other._optimized_summation or other.expr.is_symbol
-                if (lhs_is_simple and other.expr.is_number) or (
-                    rhs_is_simple and self.expr.is_number
+                from torch.utils._sympy.symbol import symbol_is_type, SymT
+
+                # Optimization: when one side is a single unbacked symbol
+                # and other is constant, use evaluate=False to skip expensive
+                # relational evaluation. We only do this for unbacked symbols
+                # because they have no assumptions (like positive=True) that
+                # sympy would use during evaluation.
+                lhs_is_unbacked = self.expr.is_symbol and symbol_is_type(
+                    self.expr, SymT.UNBACKED_INT
+                )
+                rhs_is_unbacked = other.expr.is_symbol and symbol_is_type(
+                    other.expr, SymT.UNBACKED_INT
+                )
+                if (lhs_is_unbacked and other.expr.is_number) or (
+                    rhs_is_unbacked and self.expr.is_number
                 ):
                     rel_class = {
                         "eq": sympy.Eq,
