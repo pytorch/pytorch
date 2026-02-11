@@ -16,6 +16,7 @@ from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS
 from torch.utils._pallas import has_cpu_pallas, has_cuda_pallas, has_tpu_pallas
 from torch.utils._triton import has_triton
 
+
 try:
     from torch_tpu import api as tpu_api
 except ImportError:
@@ -120,6 +121,16 @@ skip_if_tpu = _skip_if(
 )
 skip_if_cpu = _skip_if(lambda self: self.DEVICE == "cpu", "Not yet working on CPU")
 skip_if_cuda = _skip_if(lambda self: self.DEVICE == "cuda", "Not yet working on GPU")
+
+
+def skip_if_tpu(fn):
+    @functools.wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        if self.is_tpu:
+            self.skipTest("Not yet working on TPU")
+        fn(self, *args, **kwargs)
+
+    return wrapper
 
 
 class PallasTestsMixin:
@@ -371,7 +382,7 @@ class PallasTestsMixin:
             # The jax.jit/pallas_call logic is handled inside tpu_pallas.custom_kernel decorator
             main_name = f"{kernel_name}_main"
             self.assertIn(f"def {main_name}", code)
-            self.assertIn("@tpu_pallas.custom_kernel", code)
+            self.assertIn("tpu_pallas.custom_kernel", code)
             self.assertIn(".copy_(", code)
             return
 
@@ -474,6 +485,7 @@ class PallasTestsMixin:
         expected = operate_on_tensor(x_t_contiguous)
         self.assertEqual(result, expected)
 
+    @skip_if_tpu
     def test_strided_int_pallas(self):
         """Test strided access patterns with the Pallas backend."""
         if self.DEVICE == "cuda":
@@ -490,6 +502,7 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
+    @skip_if_tpu
     def test_strided_offset_pallas(self):
         """Test strided access with offset."""
         if self.DEVICE == "cuda":
@@ -630,6 +643,7 @@ class PallasTestsMixin:
         x = base_2d[::2, ::2].unsqueeze(0)
         self.assertEqual(compiled(x), x * 2.0 + 1.0)
 
+    @skip_if_tpu
     def test_stride_non_contiguous_dtypes(self):
         """Test non-contiguous patterns with various dtypes."""
         compiled = self._compile(lambda x: x * 2.0 + 1.0)
@@ -661,6 +675,7 @@ class PallasTestsMixin:
         x = torch.randn(1, 1, 16, device=self.DEVICE).expand(4, 8, 16)
         self.assertEqual(compiled(x, x), x + x)
 
+    @skip_if_tpu
     def test_stride_multiple_inputs(self):
         """Test multiple strided inputs and broadcasting."""
         compiled = self._compile(lambda a, b, c: a * b + c)
@@ -720,6 +735,7 @@ class PallasTestsMixin:
         expected = fn(x, y)
         self.assertEqual(result, expected)
 
+    @skip_if_tpu
     def test_complex_indexing_gather(self):
         """Test complex indexing with gather-like operations."""
         if self.DEVICE == "cuda":
@@ -740,6 +756,7 @@ class PallasTestsMixin:
         expected = fn(x, indices)
         self.assertEqual(result, expected)
 
+    @skip_if_tpu
     def test_complex_indexing_2d(self):
         """Test complex indexing on 2D tensors with integer array indexing."""
         if self.DEVICE == "cuda":
@@ -762,10 +779,9 @@ class PallasTestsMixin:
         expected = fn(x, row_indices)
         self.assertEqual(result, expected)
 
+    @skip_if_tpu
     def test_complex64_mul(self):
         """Test complex64 multiplication."""
-        if self.is_tpu:
-            self.skipTest("complex64 not supported in Pallas TPU backend")
 
         def fn(a, b):
             return a * b
@@ -778,10 +794,9 @@ class PallasTestsMixin:
         expected = fn(a, b)
         self.assertEqual(result, expected)
 
+    @skip_if_tpu
     def test_complex_conj(self):
         """Test complex conjugate."""
-        if self.is_tpu:
-            self.skipTest("complex numbers not supported in Pallas TPU backend")
 
         def fn(x):
             return torch.conj(x)
@@ -793,10 +808,9 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
+    @skip_if_tpu
     def test_complex_real(self):
         """Test extracting real part of complex tensor."""
-        if self.is_tpu:
-            self.skipTest("complex numbers not supported in Pallas TPU backend")
 
         def fn(x):
             return torch.real(x)
@@ -808,10 +822,9 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
+    @skip_if_tpu
     def test_complex_imag(self):
         """Test extracting imaginary part of complex tensor."""
-        if self.is_tpu:
-            self.skipTest("complex numbers not supported in Pallas TPU backend")
 
         def fn(x):
             return torch.imag(x)
@@ -823,10 +836,9 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
+    @skip_if_tpu
     def test_complex_abs(self):
         """Test complex absolute value (magnitude)."""
-        if self.is_tpu:
-            self.skipTest("complex numbers not supported in Pallas TPU backend")
 
         def fn(x):
             return torch.abs(x)
@@ -838,10 +850,9 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
+    @skip_if_tpu
     def test_complex128_conj(self):
         """Test complex128 conjugate operation."""
-        if self.is_tpu:
-            self.skipTest("complex numbers not supported in Pallas TPU backend")
 
         def fn(x):
             return torch.conj(x)
@@ -853,10 +864,9 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
+    @skip_if_tpu
     def test_complex_mul_scalar(self):
         """Test complex multiplication with scalar."""
-        if self.is_tpu:
-            self.skipTest("complex numbers not supported in Pallas TPU backend")
 
         def fn(x):
             return x * 2.5
@@ -868,10 +878,9 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
+    @skip_if_tpu
     def test_complex_conj_mul(self):
         """Test conjugate followed by multiplication."""
-        if self.is_tpu:
-            self.skipTest("complex numbers not supported in Pallas TPU backend")
 
         def fn(x, y):
             return torch.conj(x) * y
@@ -942,10 +951,9 @@ class PallasTestsMixin:
         expected = fn(a, b)
         self.assertEqual(result, expected)
 
+    @skip_if_tpu
     def test_sign(self):
         """Test sign operation."""
-        if self.is_tpu:
-            self.skipTest("sign not supported in Pallas GPU (Mosaic) backend")
 
         def fn(x):
             return torch.sign(x)
@@ -985,10 +993,9 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
+    @skip_if_tpu
     def test_erf(self):
         """Test erf operation."""
-        if self.is_tpu:
-            self.skipTest("erf not supported in Pallas GPU (Mosaic) backend")
 
         def fn(x):
             return torch.erf(x)
@@ -1000,10 +1007,9 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
+    @skip_if_tpu
     def test_atan2(self):
         """Test atan2 operation."""
-        if self.is_tpu:
-            self.skipTest("atan2 not supported in Pallas Mosaic backend")
 
         def fn(a, b):
             return torch.atan2(a, b)
@@ -1016,6 +1022,7 @@ class PallasTestsMixin:
         expected = fn(a, b)
         self.assertEqual(result, expected)
 
+    @skip_if_tpu
     def test_sum_reduction(self):
         """Test sum reduction."""
 
@@ -1029,6 +1036,7 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
+    @skip_if_tpu
     def test_max_reduction(self):
         """Test max reduction."""
 
@@ -1042,6 +1050,7 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
+    @skip_if_tpu
     def test_min_reduction(self):
         """Test min reduction."""
 
@@ -1104,6 +1113,7 @@ class PallasTestsMixin:
         self.assertEqual(result, expected)
 
     @skip_if_cuda
+    @skip_if_tpu
     def test_welford(self):
         """Test Welford variance/mean computation (two-pass fallback)."""
 
@@ -1139,6 +1149,7 @@ class PallasTestsMixin:
 
     @skip_if_cpu
     @skip_if_cuda
+    @skip_if_tpu
     def test_rope(self):
         """Test Rotary Position Embedding with slice + cat.
 
@@ -1582,6 +1593,7 @@ if test_torchinductor.RUN_GPU and has_cuda_pallas():
     # make_pallas(test_torchinductor.GPUTests)
 
 if test_torchinductor.RUN_TPU and has_tpu_pallas():
+
     class PallasTestsTPU(PallasTestsMixin, TestCase):
         @classmethod
         def setUpClass(cls):

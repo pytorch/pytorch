@@ -1535,10 +1535,10 @@ class PallasKernel(SIMDKernel):
             # Optimization: If index is just a loop variable (identity map), skip gather
             is_identity_gather = False
             if self.range_tree_nodes:
-                iter_vars = {str(k) for k in self.range_tree_nodes.keys()}
+                iter_vars = OrderedSet([str(k) for k in self.range_tree_nodes.keys()])
                 if all(part in iter_vars for part in index_str.split()):
                     is_identity_gather = True
-            
+
             if is_identity_gather:
                 return f"{buf}[...].flatten()"
 
@@ -2492,7 +2492,7 @@ class PallasKernel(SIMDKernel):
                 # 4. Reshape output with 1s in reduced dims for proper broadcasting
                 reduction_op = reduction_ops[reduction_type]
                 # Use a helper to find reduction axes by product matching
-                reduction_expr = f"pallas_partial_reduce({reduction_op}, {value}, {pointwise_numel}, {reduction_numel})"
+                reduction_expr = f"torch._inductor.runtime.runtime_utils.pallas_partial_reduce({reduction_op}, {value}, {pointwise_numel}, {reduction_numel})"
             elif is_symbolic_partial:
                 # Symbolic sizes: use axis-based reduction (axis=0 for outer reduction)
                 reduction_expr = f"{reduction_ops[reduction_type]}({value}, axis=0)"
@@ -2538,22 +2538,22 @@ class PallasKernel(SIMDKernel):
             str: Complete Python source code for the Pallas kernel
         """
         # --- DEBUG PRINT START ---
-        print("\n" + "="*40 + " INDUCTOR KERNEL IR STATE " + "="*40)
+        print("\n" + "=" * 40 + " INDUCTOR KERNEL IR STATE " + "=" * 40)
         print(f"Kernel Name: {name or 'Pending...'}")
-        
+
         print("\n[1] Range Tree Nodes (Iteration Space):")
-        if hasattr(self, 'range_tree_nodes') and self.range_tree_nodes:
+        if hasattr(self, "range_tree_nodes") and self.range_tree_nodes:
             for var, entry in self.range_tree_nodes.items():
                 print(f"  {var}: {entry}")
         else:
             print("  (None or Empty)")
 
         print("\n[2] Compute Buffer (IR Operations):")
-        if hasattr(self, 'compute'):
+        if hasattr(self, "compute"):
             print(str(self.compute))
         else:
             print("  (None)")
-            
+
         print("\n[3] Input/Output Args:")
         try:
             arg_defs, _, _, _ = self.args.python_argdefs()
@@ -2561,8 +2561,8 @@ class PallasKernel(SIMDKernel):
                 print(f"  {arg.name}: {arg}")
         except Exception as e:
             print(f"  (Error inspecting args: {e})")
-            
-        print("="*106 + "\n")
+
+        print("=" * 106 + "\n")
         # --- DEBUG PRINT END ---
         code = IndentedBuffer()
 
@@ -2596,6 +2596,7 @@ import math
 import torch
 import jax
 import jax.numpy as jnp
+from torch._inductor.runtime.runtime_utils import pallas_partial_reduce
 try:
     import torch_tpu
     from torch_tpu._internal.compile import tpu_torch_compile
@@ -2637,7 +2638,10 @@ from torch._inductor.runtime.runtime_utils import pallas_partial_reduce, torch_d
         )
         # On CPU (interpret=True), we need to copy back even aliased outputs
         # because pallas_call returns a new array (doesn't mutate in-place)
-        if interpret_is_cpu or is_tpu:
+        # For outputs that need read access (scatter), we enable aliasing to read
+        # current values, but still need to copy back the result
+        if interpret_is_cpu or self.is_tpu:
+            # Copy back all outputs on CPU
             copy_output_indices = list(range(len(output_params)))
         else:
             copy_output_indices = [
@@ -2973,15 +2977,17 @@ from torch._inductor.runtime.runtime_utils import (
         if self.is_tpu:
             # We need to capture all non-output params (including scalars/sizevars)
             # Separate scalars and tensors. Put scalars at the START to support positional partial application.
-            tensor_input_params = [p for p in kernel_input_params if p not in size_var_names]
-            scalar_params = size_var_params
-            
-            sig_template_refs = [
-                f"template_{p}" for p in output_params
+            tensor_input_params = [
+                p for p in kernel_input_params if p not in size_var_names
             ]
+            scalar_params = size_var_params
+
+            sig_template_refs = [f"template_{p}" for p in output_params]
 
             # Construct signature: scalars + tensors + templates + outputs
-            full_sig = scalar_params + tensor_input_params + sig_template_refs + output_params
+            full_sig = (
+                scalar_params + tensor_input_params + sig_template_refs + output_params
+            )
             kernel_signature = f"def {kernel_name}_kernel_impl({', '.join(full_sig)}):"
         else:
             kernel_signature = (
@@ -3040,10 +3046,16 @@ from torch._inductor.runtime.runtime_utils import (
 
                 if scalar_args:
                     # Bind scalars positionally at the start
-                    code.writeline(f"kernel_fn = functools.partial({kernel_name}_kernel_impl, {', '.join(scalar_args)})")
-                    code.writeline(f"decorated_kernel = tpu_pallas.custom_kernel(propagate={propagate_lambda})(kernel_fn)")
+                    code.writeline(
+                        f"kernel_fn = functools.partial({kernel_name}_kernel_impl, {', '.join(scalar_args)})"
+                    )
+                    code.writeline(
+                        f"decorated_kernel = tpu_pallas.custom_kernel(propagate={propagate_lambda})(kernel_fn)"
+                    )
                 else:
-                    code.writeline(f"decorated_kernel = tpu_pallas.custom_kernel(propagate={propagate_lambda})({kernel_name}_kernel_impl)")
+                    code.writeline(
+                        f"decorated_kernel = tpu_pallas.custom_kernel(propagate={propagate_lambda})({kernel_name}_kernel_impl)"
+                    )
 
                 # Call with tensor arguments only (inputs + outputs)
                 code.writeline(f"res = decorated_kernel({', '.join(tensor_args)})")
@@ -3463,7 +3475,7 @@ class PallasScheduling(SIMDScheduling):
         print("=" * 40 + " INDUCTOR IR NODES " + "=" * 40)
         for node in node_schedule:
             print(f"Node: {node}")
-            if hasattr(node, 'node'): # Access the underlying IRNode if available
+            if hasattr(node, "node"):  # Access the underlying IRNode if available
                 print(f"  IRNode: {node.node}")
         print("=" * 105)
         wrapper = V.graph.wrapper_code
