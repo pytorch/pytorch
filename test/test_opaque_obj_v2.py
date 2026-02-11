@@ -1998,13 +1998,13 @@ def forward(self, L_x_ : torch.Tensor, G_Color_GREEN : {_illegal_char_regex.sub(
         backend = EagerAndRecordGraphs()
         _ = torch.compile(f, fullgraph=True, backend=backend)(x)
         graph = backend.graphs[0]
-        assert "double" not in str(graph)
+        self.assertNotIn("double", str(graph))
 
         # backend = "aot_eager"
         backend = AotEagerAndRecordGraphs()
         _ = torch.compile(f, fullgraph=True, backend=backend)(x)
         graph = backend.graphs[0]
-        assert "double" not in str(graph)
+        self.assertNotIn("double", str(graph))
 
         # backend = "inductor"
         y = torch.compile(f, fullgraph=True)(x)
