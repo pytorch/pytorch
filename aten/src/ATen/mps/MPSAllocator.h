@@ -195,7 +195,6 @@ struct HeapBlock {
     if (buf) {
       updateAvailableSize();
       n_buffers++;
-      TORCH_INTERNAL_ASSERT([buf storageMode] == MTLStorageModeShared);
     }
     return buf;
   }

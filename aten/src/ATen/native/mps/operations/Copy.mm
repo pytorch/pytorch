@@ -123,16 +123,15 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
     // 4 bytes alignment required on macos for blits.
     TORCH_INTERNAL_ASSERT(destOffset % 4 == 0, "Unaligned copy request");
 
+    // Both src and dst tensors have MTLBuffer backing in shared storage
+    // we can memcpy directly between their contents pointers and avoid encoding
+    // a Metal blit.
     id<MTLBuffer> destBuffer = [device newBufferWithBytesNoCopy:alignedPtr
                                                          length:alignedLength
                                                         options:options
                                                     deallocator:nil];
-
-    // Both src and dst tensors have MTLBuffer backing in shared storage
-    // we can memcpy directly between their contents pointers and avoid encoding
-    // a Metal blit.
-
     TORCH_INTERNAL_ASSERT(sourceBuffer.storageMode == MTLStorageModeShared);
+    TORCH_INTERNAL_ASSERT(destBuffer.storageMode == MTLStorageModeShared);
 
     // Ensure any GPU work that produced `sourceBuffer` is finished and
     // the contents are visible to the CPU.
@@ -207,16 +206,16 @@ static void copy_to_mps_stride_contig(at::Tensor& dst, const at::Tensor& src, bo
     // 4 bytes alignment required on macos for blits.
     TORCH_INTERNAL_ASSERT(sourceOffset % 4 == 0, "Unaligned copy request");
 
+    // Both src and dst tensors have MTLBuffer backing in shared storage
+    // we can memcpy directly between their contents pointers and avoid encoding
+    // a Metal blit.
     id<MTLBuffer> sourceBuffer = [device newBufferWithBytesNoCopy:alignedPtr
                                                            length:alignedLength
                                                           options:options
                                                       deallocator:nil];
 
-    // Both src and dst tensors have MTLBuffer backing in shared storage
-    // we can memcpy directly between their contents pointers and avoid encoding
-    // a Metal blit.
-
     TORCH_INTERNAL_ASSERT(destBuffer.storageMode == MTLStorageModeShared);
+    TORCH_INTERNAL_ASSERT(sourceBuffer.storageMode == MTLStorageModeShared);
 
     // Both buffers are shared; copy CPU-visible memory directly.
     const void* src_ptr = static_cast<const char*>((void*)[sourceBuffer contents]) + sourceOffset;
