@@ -430,9 +430,6 @@ CROSS_REF_EXCLUDE_SET = {
         None,
         "bernoulli",
     ),  # bernoulli is a function of randomness, so couldn't do cross-reference.
-    # CompositeImplicitAutograd; py_impl(CIA) decomposition only runs with python dispatcher
-    (None, None, "quantile"),
-    (None, None, "nanquantile"),
 }
 
 CROSS_REF_BACKWARD_EXCLUDE_SET = {

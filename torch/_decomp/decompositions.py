@@ -5556,13 +5556,11 @@ def _quantile_impl(self, q, dim, keepdim, interpolation, ignore_nan):
 
 
 @aten.quantile.default.py_impl(DispatchKey.CompositeImplicitAutograd)
-@register_decomposition(aten.quantile.default)
 def quantile(self, q, dim=None, keepdim=False, *, interpolation="linear"):
     return _quantile_impl(self, q, dim, keepdim, interpolation, ignore_nan=False)
 
 
 @aten.quantile.scalar.py_impl(DispatchKey.CompositeImplicitAutograd)
-@register_decomposition(aten.quantile.scalar)
 def quantile_scalar(self, q: float, dim=None, keepdim=False, *, interpolation="linear"):
     torch._check(0 <= q <= 1, lambda: "quantile() q values must be in the range [0, 1]")
     q_tensor = torch.scalar_tensor(q, dtype=self.dtype, device=self.device)
@@ -5575,14 +5573,12 @@ def _copy_to_out(result, out):
 
 
 @aten.quantile.out.py_impl(DispatchKey.CompositeImplicitAutograd)
-@register_decomposition(aten.quantile.out, unsafe=True)
 def quantile_out(self, q, dim=None, keepdim=False, *, interpolation="linear", out=None):
     result = quantile(self, q, dim, keepdim, interpolation=interpolation)
     return _copy_to_out(result, out)
 
 
 @aten.quantile.scalar_out.py_impl(DispatchKey.CompositeImplicitAutograd)
-@register_decomposition(aten.quantile.scalar_out, unsafe=True)
 def quantile_scalar_out(
     self, q: float, dim=None, keepdim=False, *, interpolation="linear", out=None
 ):
@@ -5591,13 +5587,11 @@ def quantile_scalar_out(
 
 
 @aten.nanquantile.default.py_impl(DispatchKey.CompositeImplicitAutograd)
-@register_decomposition(aten.nanquantile.default)
 def nanquantile(self, q, dim=None, keepdim=False, *, interpolation="linear"):
     return _quantile_impl(self, q, dim, keepdim, interpolation, ignore_nan=True)
 
 
 @aten.nanquantile.scalar.py_impl(DispatchKey.CompositeImplicitAutograd)
-@register_decomposition(aten.nanquantile.scalar)
 def nanquantile_scalar(
     self, q: float, dim=None, keepdim=False, *, interpolation="linear"
 ):
@@ -5607,7 +5601,6 @@ def nanquantile_scalar(
 
 
 @aten.nanquantile.out.py_impl(DispatchKey.CompositeImplicitAutograd)
-@register_decomposition(aten.nanquantile.out, unsafe=True)
 def nanquantile_out(
     self, q, dim=None, keepdim=False, *, interpolation="linear", out=None
 ):
@@ -5616,7 +5609,6 @@ def nanquantile_out(
 
 
 @aten.nanquantile.scalar_out.py_impl(DispatchKey.CompositeImplicitAutograd)
-@register_decomposition(aten.nanquantile.scalar_out, unsafe=True)
 def nanquantile_scalar_out(
     self, q: float, dim=None, keepdim=False, *, interpolation="linear", out=None
 ):
