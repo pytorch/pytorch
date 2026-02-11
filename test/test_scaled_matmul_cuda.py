@@ -1,6 +1,7 @@
 # Owner(s): ["module: linear algebra"]
 
 import contextlib
+import importlib
 import json
 import math
 import re
@@ -74,6 +75,7 @@ f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+ and XPU devices"
 f8_grouped_msg = "FP8 grouped is only supported on SM90 and MI300/MI350 devices"
 mx_skip_msg = "MX gemm is only supported on CUDA capability 10.0+"
 mxfp8_grouped_mm_skip_msg = "MXFP8 grouped GEMM is only supported when PyTorch is built with USE_MSLK=1 on SM100+"
+cutedsl_skip_msg = "CuTeDSL runtime requires nvidia-cutlass-dsl and cuda-python"
 
 # avoid division by zero when calculating scale
 EPS = 1e-12
@@ -81,6 +83,16 @@ EPS = 1e-12
 def _device_supports_scaled_mm_fp8(device):
     if device not in ['cpu', 'xpu'] and (torch.cuda.is_available() and not PLATFORM_SUPPORTS_FP8):
         return False
+    return True
+
+
+def _has_cutedsl_runtime() -> bool:
+    deps = ("cutlass", "cuda.bindings.driver")
+    for mod in deps:
+        try:
+            importlib.import_module(mod)
+        except Exception:
+            return False
     return True
 
 
@@ -778,6 +790,9 @@ class TestFP8Matmul(TestCase):
     @parametrize("K", [4096])
     @parametrize("format", ["mxfp8"] + (["nvfp4", "mxfp4"] if torch.version.cuda else []))
     def test_mxfp8_scaled_grouped_mm_2d_3d(self, G, M, N, K, format):
+        if format == "mxfp8" and not _has_cutedsl_runtime():
+            raise unittest.SkipTest(cutedsl_skip_msg)
+
         torch.manual_seed(42)
 
         if format == "mxfp4" and SM120OrLater:

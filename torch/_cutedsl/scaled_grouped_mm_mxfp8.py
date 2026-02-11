@@ -1,4 +1,5 @@
 import functools
+import importlib
 from collections.abc import Sequence
 from typing import NamedTuple, Optional
 
@@ -14,6 +15,34 @@ from torch.nn.functional import ScalingType, SwizzleType
 class _KernelConfig(NamedTuple):
     mma_tile_mn: tuple[int, int]
     cluster_shape_mn: tuple[int, int]
+
+
+@functools.cache
+def _cutedsl_unavailable_reason() -> Optional[str]:
+    deps = [
+        ("nvidia-cutlass-dsl", "cutlass"),
+        ("cuda-bindings", "cuda.bindings.driver"),
+    ]
+    for package_name, module_name in deps:
+        try:
+            importlib.import_module(module_name)
+        except Exception as exc:
+            return (
+                f"missing optional dependency `{package_name}` "
+                f"(import `{module_name}` failed: {exc})"
+            )
+    return None
+
+
+def assert_cutedsl_runtime_available() -> None:
+    reason = _cutedsl_unavailable_reason()
+    if reason is None:
+        return
+    raise RuntimeError(
+        "scaled_grouped_mm CuTeDSL path requires optional Python packages "
+        "`nvidia-cutlass-dsl` and `cuda-bindings` (from NVIDIA cuda-python); "
+        f"{reason}"
+    )
 
 
 def _select_kernel_config(M: int, N: int, K: int) -> _KernelConfig:
@@ -293,8 +322,11 @@ def scaled_grouped_mm_mxfp8(
     if mat_a.size(-1) % 32 != 0:
         raise ValueError("K dimension must be divisible by 32 for MXFP8 block scaling")
 
+    assert_cutedsl_runtime_available()
+
     if mat_a.device.type != "cuda":
         raise ValueError("scaled grouped MM is only supported on CUDA")
+
     if bias is not None:
         raise ValueError("bias is not supported for scaled grouped MM")
     if offs is None:

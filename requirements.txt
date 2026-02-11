@@ -12,7 +12,6 @@ hypothesis
 jinja2
 lintrunner ; platform_machine != "s390x"
 networkx>=2.5.1
-nvidia-cutlass-dsl
 optree>=0.13.0
 psutil
 spin
