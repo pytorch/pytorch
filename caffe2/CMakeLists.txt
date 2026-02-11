@@ -954,6 +954,10 @@ if(USE_ROCM)
     target_compile_definitions(torch_hip PRIVATE USE_NCCL)
   endif()
 
+  if(CAFFE2_USE_HIPSPARSELT)
+    target_compile_definitions(torch_hip PRIVATE USE_CUSPARSELT)
+  endif()
+
   if(USE_PRECOMPILED_HEADERS)
     target_precompile_headers(torch_hip PRIVATE
         "$<$<COMPILE_LANGUAGE:CXX>:ATen/core/ATen_pch.h>")
