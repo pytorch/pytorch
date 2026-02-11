@@ -2730,6 +2730,17 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         exp = torch.arange(1, 101, device="cuda", dtype=torch.float32)
         self.common(fn, [exp])
 
+    @config.patch("eager_numerics.division_rounding", True)
+    def test_div_precision_rounding(self):
+        # Test that division matches eager when division_rounding is enabled.
+        # This uses div_rn (round-to-nearest) instead of reciprocal multiplication.
+        def fn(a, b):
+            return a / b
+
+        a = torch.randn(1000, device="cuda", dtype=torch.float32)
+        b = torch.randn(1000, device="cuda", dtype=torch.float32) + 0.1
+        self.common(fn, [a, b])
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
