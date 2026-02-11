@@ -56,7 +56,9 @@ from torch.testing._internal.common_utils import (
     TEST_HPU,
     TEST_PRIVATEUSE1,
     TEST_XPU,
+    TestCase,
 )
+from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.utils._pytree import tree_flatten, tree_unflatten, TreeSpec
 
 
@@ -354,6 +356,57 @@ def skip_unless_torch_gpu(method: T) -> T:
     """
     # The builtin @skip_if_no_gpu relies on os.environ['WORLD_SIZE'] being set.
     return cast(T, skip_if_lt_x_gpu(NUM_DEVICES)(method))
+
+
+class DTensorFakePGTestBase(TestCase):
+    """Single-process test base class using a fake process group backend.
+
+    Runs as rank 0 only with no real process group — suitable for testing
+    sharding strategy logic, op schemas, and DTensor metadata propagation.
+
+    When combined with ``LocalTensorMode``, collectives are simulated with
+    mathematically equivalent local operations, so results are numerically
+    correct. However, single-process tests will not catch process-group-level
+    issues (hangs, init/destroy lifecycle bugs, backend-specific kernel bugs),
+    and only the Python code path for the configured rank is exercised. Use
+    real multi-process tests (DTensorTestBase) when full cross-rank coverage
+    or real collective behavior matters.
+
+    Derived classes can override ``world_size`` to change the simulated world
+    size::
+
+        class MyTest(DTensorFakePGTestBase):
+            world_size = 8
+
+    To additionally simulate SPMD execution across all ranks in a single
+    process, combine with ``LocalTensorMode``. LocalTensor is a Tensor subclass
+    that stores one shard per rank and dispatches every op independently to each
+    shard, so collective-like operations are replaced with their mathematical
+    equivalents on the local dict of tensors::
+
+        from torch.distributed._local_tensor import LocalTensorMode
+
+
+        class MyTest(DTensorFakePGTestBase):
+            def test_spmd(self):
+                with LocalTensorMode(frozenset(range(self.world_size))):
+                    mesh = DeviceMesh("cpu", torch.arange(self.world_size))
+                    dt = distribute_tensor(torch.randn(8, 8), mesh, [Shard(0)])
+                    # dt._local_tensor is a LocalTensor holding per-rank shards
+    """
+
+    world_size: int = 4
+
+    def setUp(self):
+        super().setUp()
+        store = FakeStore()
+        dist.init_process_group(
+            backend="fake", rank=0, world_size=self.world_size, store=store
+        )
+
+    def tearDown(self):
+        super().tearDown()
+        dist.destroy_process_group()
 
 
 class DTensorContinuousTestBase(MultiProcContinuousTest):
