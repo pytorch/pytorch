@@ -2761,7 +2761,11 @@ from torch._inductor.runtime.runtime_utils import (
         kernel_body.writeline("# Define iteration variables as JAX arrays")
 
         # Find reshape target: N-D shape whose numel matches an iteration
-        # var. Try output first (repeat/upsample), then inputs (reductions).
+        # var. Try inputs first, then outputs.  Inputs represent the natural
+        # computational shape; outputs may carry extra size-1 dims from
+        # unsqueeze/stack that would cause broadcasting mismatches.  When
+        # only the output has a matching numel (repeat/upsample), we still
+        # find it because inputs simply won't match.
         iter_lengths = OrderedSet(
             [
                 int(e.length)
@@ -2781,12 +2785,11 @@ from torch._inductor.runtime.runtime_utils import (
             numel = math.prod(shape)
             return (shape, numel) if numel in iter_lengths else (None, None)
 
-        candidate_buf_names = []
+        candidate_buf_names = list(self.args.input_buffers)
         if ctx.output_params:
             buf_name = ctx.output_buffer_lookup.get(ctx.output_params[0])
             if buf_name:
                 candidate_buf_names.append(buf_name)
-        candidate_buf_names.extend(self.args.input_buffers)
 
         reshape_target_shape, reshape_target_numel = None, None
         for buf_name in candidate_buf_names:
