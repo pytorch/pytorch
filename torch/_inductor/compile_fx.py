@@ -2921,7 +2921,6 @@ def _check_triton_bf16_support(graph: GraphLowering) -> None:
         from torch._dynamo.exc import SkipFrame
 
         assert device is not None
-
         device_interface = get_interface_for_device(device.type)
         device_props = device_interface.get_device_properties(device)
         warnings.warn(
@@ -2939,8 +2938,6 @@ def _check_triton_bf16_support(graph: GraphLowering) -> None:
             or node.get_dtype() != torch.bfloat16
         ):
             continue
-        # Print warning and skip frame if attempting to compile for bfloat16
-        # on device without hardware support for dtype
         device_interface = get_interface_for_device(device_type)
         if device_interface.is_bf16_supported(including_emulation=False):
             return

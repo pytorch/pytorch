@@ -113,8 +113,5 @@
         dk=dk_out_transposed,
         dv=dv_out_transposed,
         block_sparse_tensors=block_sparse_tensors,
-        deterministic=torch.are_deterministic_algorithms_enabled(),
-        {% if DQ_WRITE_ORDER_SPT is not none %}
-        spt={{DQ_WRITE_ORDER_SPT}},
-        {% endif %}
+        deterministic=torch.are_deterministic_algorithms_enabled()
     )
