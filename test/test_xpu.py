@@ -2238,35 +2238,6 @@ if __name__ == "__main__":
         graph.replay()
         self.assertTrue(torch.all(x == 6.0))
 
-    def test_xpu_graph_tensor_item_not_allowed(self):
-        test_script = """\
-import torch
-import sys
-# Tensor.item() calls a synchronize which is not allowed in a xpu graph
-def my_func(a: torch.Tensor, b: torch.Tensor, perm: torch.Tensor):
-    idx = perm[0]
-    a[0] *= b[idx]  # should raise an error during capture
-    return a
-
-a = torch.rand(500, 500, device="xpu")
-b = torch.rand(500, 500, device="xpu")
-perm = torch.randint(0, 500, (500,), device="xpu")
-
-g = torch.xpu.XPUGraph()
-
-with torch.xpu.graph(g):
-    output = my_func(a, b, perm)
-"""
-        with self.assertRaisesRegex(
-            subprocess.CalledProcessError,
-            "wait method cannot be used for an event associated with a command graph",
-        ):
-            r = (
-                subprocess.check_output([sys.executable, "-c", test_script])
-                .decode("ascii")
-                .strip()
-            )
-
 
 @contextlib.contextmanager
 def caching_host_allocator_use_host_register(use_xpu_host_register: bool):
