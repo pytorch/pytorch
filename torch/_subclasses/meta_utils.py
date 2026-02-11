@@ -374,12 +374,21 @@ class MetaTensorDescriber:
                 raise AssertionError(
                     "Traceable wrapper subclass must have __tensor_flatten__ method"
                 )
-            raw_attrs, ctx = t.__tensor_flatten__()
-            attrs = {
-                attr: self.describe_tensor(getattr(t, attr), trace=trace)
-                for attr in raw_attrs
-            }
-            type_v = type(t)
+            try:
+                raw_attrs, ctx = t.__tensor_flatten__()
+                attrs = {
+                    attr: self.describe_tensor(getattr(t, attr), trace=trace)
+                    for attr in raw_attrs
+                }
+                type_v = type(t)
+            except AttributeError:
+                # Tensor subclass is not fully initialized (e.g., in __init__ before attributes are set).
+                # Can't create a fake tensor for this, so raise UnsupportedFakeTensorException.
+                from torch._subclasses.fake_tensor import UnsupportedFakeTensorException
+                raise UnsupportedFakeTensorException(
+                    f"Cannot create fake tensor for {type(t).__name__}: __tensor_flatten__() failed "
+                    "because the subclass is not fully initialized (likely being called during __init__)"
+                )
 
         from torch.nested._internal.nested_tensor import _tensor_symint_registry
 
