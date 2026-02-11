@@ -150,6 +150,7 @@ html_theme_options = {
         },
     ],
     "show_version_warning_banner": True,
+    "llm_disabled": False,
     "icon_links": [
         {
             "name": "X",
