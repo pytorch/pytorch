@@ -364,11 +364,12 @@ class OverlapScheduler:
         max_memory_increase_gb: float | None = 1.0,
         max_memory_increase_ratio: float | None = 0.05,
         log_final_collectives_estimations: bool = False,
-        bucket_exposed_first: Literal["True", "False", "auto"] = "auto",
+        bucket_exposed_first: bool | None = None,
         enable_fusion_regions: bool = False,
         bucket_only_fsdp_groups: bool = True,
         bucket_mode: BucketMode = "custom_ops_multidtype",
         max_off_bucket_gb: float | None = 0.5,
+        prioritize_bucketing_during_scheduling: bool = True,
     ):
         self.gm = gm
         self.graph = gm.graph
@@ -386,6 +387,9 @@ class OverlapScheduler:
         self.bucket_mode = bucket_mode
         self.max_off_bucket_bytes: int | None = (
             gb_to_bytes(max_off_bucket_gb) if max_off_bucket_gb is not None else None
+        )
+        self.prioritize_bucketing_during_scheduling = (
+            prioritize_bucketing_during_scheduling
         )
 
         # Make all to(device) non_blocking=False,
@@ -1240,30 +1244,31 @@ class OverlapScheduler:
             ),
         )
 
-        # group candidates by bucket key first so same-bucket
-        # collectives are scheduled together, maximizing bucketing opportunities
-        bucket_groups: dict[object, list[fx.Node]] = defaultdict(list)
-        for coll in candidates:
-            key = get_full_bucket_key(coll, self.bucket_mode)
-            bucket_groups[key].append(coll)
+        if self.prioritize_bucketing_during_scheduling:
+            # group candidates by bucket key first so same-bucket
+            # collectives are scheduled together, maximizing bucketing opportunities
+            bucket_groups: dict[object, list[fx.Node]] = defaultdict(list)
+            for coll in candidates:
+                key = get_full_bucket_key(coll, self.bucket_mode)
+                bucket_groups[key].append(coll)
 
-        # Sort bucket groups by minimum domination index, larger groups first as tiebreaker
-        sorted_bucket_keys = sorted(
-            bucket_groups.keys(),
-            key=lambda k: (
-                min(self.compute_index_domination[c] for c in bucket_groups[k]),
-                -len(bucket_groups[k]),
-            ),
-        )
-
-        # Flatten back to ordered candidate list
-        candidates = []
-        for b_key in sorted_bucket_keys:
-            group = bucket_groups[b_key]
-            group.sort(
-                key=lambda n: (self.compute_index_domination[n], self.node_idx[n])
+            # Sort bucket groups by minimum domination index, larger groups first as tiebreaker
+            sorted_bucket_keys = sorted(
+                bucket_groups.keys(),
+                key=lambda k: (
+                    min(self.compute_index_domination[c] for c in bucket_groups[k]),
+                    -len(bucket_groups[k]),
+                ),
             )
-            candidates.extend(group)
+
+            # Flatten back to ordered candidate list
+            candidates = []
+            for b_key in sorted_bucket_keys:
+                group = bucket_groups[b_key]
+                group.sort(
+                    key=lambda n: (self.compute_index_domination[n], self.node_idx[n])
+                )
+                candidates.extend(group)
 
         for collective in candidates:
             pg_name = get_group_name(collective)
@@ -1563,9 +1568,10 @@ def schedule_overlap_bucketing(
     max_memory_increase_gb: float | None = 1.0,
     max_memory_increase_ratio: float | None = 0.05,
     log_final_collectives_estimations: bool = False,
-    bucket_exposed_first: Literal["True", "False", "auto"] = "auto",
+    bucket_exposed_first: bool | None = None,
     enable_fusion_regions: bool = False,
     bucket_only_fsdp_groups=True,
+    prioritize_bucketing_during_scheduling: bool = True,
 ) -> torch.fx.GraphModule:
     """Schedule nodes to maximize compute-collective overlap.
 
@@ -1617,6 +1623,7 @@ def schedule_overlap_bucketing(
         bucket_exposed_first=bucket_exposed_first,
         enable_fusion_regions=enable_fusion_regions,
         bucket_only_fsdp_groups=bucket_only_fsdp_groups,
+        prioritize_bucketing_during_scheduling=prioritize_bucketing_during_scheduling,
     ).run()
     trace_structured(
         "artifact",
@@ -1659,7 +1666,9 @@ def schedule_overlap_bucketing_from_inductor_configs(
         "max_coll_distance",
         "log_final_collectives_estimations",
         "bucket_exposed_first",
+        "bucket_only_fsdp_groups",
         "enable_fusion_regions",
+        "prioritize_bucketing_during_scheduling",
     )
     for key in config_keys:
         if (val := getattr(dist_opts, key, None)) is not None:

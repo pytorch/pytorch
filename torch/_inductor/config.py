@@ -1060,13 +1060,19 @@ class aten_distributed_optimizations:
     max_coll_distance: Optional[int] = None
     log_final_collectives_estimations: bool = False
 
-    # Bucket exposed collectives first
-    bucket_exposed_first: Literal["True", "False", "auto"] = "auto"
+    # Bucket exposed collectives first (None means auto)
+    bucket_exposed_first: bool | None = None
+
+    # Only bucket collectives in FSDP process groups
+    bucket_only_fsdp_groups: bool = True
 
     # Enable fusion region detection for overlap scheduling cost estimation.
     # When enabled, groups of fusible ops (pointwise, reduction, etc.) are treated
     # as atomic units with memory-bound runtime estimates.
     enable_fusion_regions: Optional[bool] = None
+
+    # Prioritize bucketing during overlap scheduling by grouping candidates by bucket key
+    prioritize_bucketing_during_scheduling: bool = True
 
 
 def parallel_compile_enabled_internally() -> bool:
