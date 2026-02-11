@@ -15625,6 +15625,8 @@ graph():
             "torch.testing._internal.two_tensor.TwoTensor", 2, exactly=True
         ).run(gm_torch_ir.code)
 
+    @testing.expectedFailureSerDerNonStrict  # local subclass can't be pickled
+    @testing.expectedFailureSerDer  # local subclass can't be pickled
     def test_nonstrict_subclass_attr_access_in_torch_function(self):
         class DummyTensor(torch.Tensor):
             @staticmethod
