@@ -173,6 +173,7 @@ jobs:
       id-token: write
       contents: read
     steps:
+      !{{ common.checkout(deep_clone=False) }} #Cloning for diskspace-cleanup of teardown-rocm
       !{{ common.checkout(deep_clone=False, directory="pytorch") }}
       - name: Setup ROCm
         uses: ./pytorch/.github/actions/setup-rocm
@@ -209,7 +210,6 @@ jobs:
         uses: ./pytorch/.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
-      !{{ common.checkout(deep_clone=False) }} #Cloning for diskspace-cleanup of teardown-rocm
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
         env:

@@ -428,6 +428,16 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
           path: pytorch
           show-progress: false
       - name: Clean PyTorch checkout
@@ -470,16 +480,6 @@ jobs:
         uses: ./pytorch/.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
         env:
@@ -556,6 +556,16 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
           path: pytorch
           show-progress: false
       - name: Clean PyTorch checkout
@@ -598,16 +608,6 @@ jobs:
         uses: ./pytorch/.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
         env:
@@ -1119,6 +1119,16 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
           path: pytorch
           show-progress: false
       - name: Clean PyTorch checkout
@@ -1161,16 +1171,6 @@ jobs:
         uses: ./pytorch/.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
         env:
@@ -1247,6 +1247,16 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
           path: pytorch
           show-progress: false
       - name: Clean PyTorch checkout
@@ -1289,16 +1299,6 @@ jobs:
         uses: ./pytorch/.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
         env:
@@ -1810,6 +1810,16 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
           path: pytorch
           show-progress: false
       - name: Clean PyTorch checkout
@@ -1852,16 +1862,6 @@ jobs:
         uses: ./pytorch/.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
         env:
@@ -1938,6 +1938,16 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
           path: pytorch
           show-progress: false
       - name: Clean PyTorch checkout
@@ -1980,16 +1990,6 @@ jobs:
         uses: ./pytorch/.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
         env:
@@ -2501,6 +2501,16 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
           path: pytorch
           show-progress: false
       - name: Clean PyTorch checkout
@@ -2543,16 +2553,6 @@ jobs:
         uses: ./pytorch/.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
         env:
@@ -2629,6 +2629,16 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
           path: pytorch
           show-progress: false
       - name: Clean PyTorch checkout
@@ -2671,16 +2681,6 @@ jobs:
         uses: ./pytorch/.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
         env:
@@ -3192,6 +3192,16 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
           path: pytorch
           show-progress: false
       - name: Clean PyTorch checkout
@@ -3234,16 +3244,6 @@ jobs:
         uses: ./pytorch/.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
         env:
@@ -3320,6 +3320,16 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
           path: pytorch
           show-progress: false
       - name: Clean PyTorch checkout
@@ -3362,16 +3372,6 @@ jobs:
         uses: ./pytorch/.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
         env:
@@ -3883,6 +3883,16 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
           path: pytorch
           show-progress: false
       - name: Clean PyTorch checkout
@@ -3925,16 +3935,6 @@ jobs:
         uses: ./pytorch/.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
         env:
@@ -4011,6 +4011,16 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
           path: pytorch
           show-progress: false
       - name: Clean PyTorch checkout
@@ -4053,16 +4063,6 @@ jobs:
         uses: ./pytorch/.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
         env:
@@ -4574,6 +4574,16 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
           path: pytorch
           show-progress: false
       - name: Clean PyTorch checkout
@@ -4616,16 +4626,6 @@ jobs:
         uses: ./pytorch/.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
         env:
@@ -4702,6 +4702,16 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
           path: pytorch
           show-progress: false
       - name: Clean PyTorch checkout
@@ -4744,16 +4754,6 @@ jobs:
         uses: ./pytorch/.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
         env:
