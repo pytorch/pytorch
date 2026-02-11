@@ -291,6 +291,7 @@ from .torch_function import (
 )
 from .user_defined import (
     FrozenDataClassVariable,
+    InspectVariable,
     IntWrapperVariable,
     KeyedJaggedTensorVariable,
     MutableMappingVariable,
@@ -596,10 +597,8 @@ class VariableBuilder:
         ]
 
         if trace_numpy and np:
-            # pyrefly: ignore [bad-argument-type]
             entries.append((np.ndarray, cls.wrap_numpy_ndarray))
 
-        # pyrefly: ignore [implicit-any]
         result = {}
         for ts, fn in entries:
             for t in ts if isinstance(ts, tuple) else (ts,):
@@ -692,7 +691,6 @@ class VariableBuilder:
             (torch.__version__, lambda self, value: TorchVersionVariable()),
         ]
 
-        # pyrefly: ignore [implicit-any]
         result = {}
         for ts, fn in entries:
             for t in ts if isinstance(ts, (tuple, list)) else (ts,):
@@ -1809,7 +1807,10 @@ class VariableBuilder:
 
     def wrap_user_defined(self, value: Any) -> VariableTracker:
         self.install_guards(GuardBuilder.TYPE_MATCH)
-        result = UserDefinedObjectVariable(value, source=self.source)
+        if InspectVariable.is_matching_object(value):
+            result = InspectVariable(value, source=self.source)
+        else:
+            result = UserDefinedObjectVariable(value, source=self.source)
         if not SideEffects.cls_supports_mutation_side_effects(type(value)):
             # don't allow STORE_ATTR mutation with custom __setattr__
             return result
@@ -2969,7 +2970,6 @@ def _dataclasses_fields_lambda(obj: VariableTracker) -> TupleVariable:
             base_src = AttrSource(obj.source, "__dataclass_fields__")
             source = DictGetItemSource(base_src, field.name)
         items.append(UserDefinedObjectVariable(field, source=source))
-    # pyrefly: ignore [bad-argument-type]
     return TupleVariable(items)
 
 
@@ -3618,12 +3618,9 @@ def record_automatic_dynamic(
         candidates = {}
         for i_stride, neg_i in pending:
             i = -neg_i
-            # pyrefly: ignore [unsupported-operation]
             stride[i] = candidates.get(i_stride, i_stride)
-            # pyrefly: ignore [no-matching-overload]
             candidates.setdefault(i_stride * ex_size[i], InferStride(i))
     else:
-        # pyrefly: ignore [implicit-any]
         stride = []
 
     return process_automatic_dynamic(
@@ -3767,7 +3764,6 @@ def _automatic_dynamic(
     # TODO: index export_constraints ahead of time so we don't have to
     # do a linear scan every time here
     t_id = id(e)
-    # pyrefly: ignore [implicit-any]
     dim2constraint = {}
 
     def update_dim2constraint(
@@ -3837,9 +3833,7 @@ def _automatic_dynamic(
             # into the mutable state
             log.debug("automatic dynamic %s marked dynamic", name)
             mark_size = [auto_unset] * e.dim()
-            # pyrefly: ignore [unsupported-operation]
             mark_size[i] = auto_dynamic
-            # pyrefly: ignore [bad-argument-type]
             frame_state_entry |= FrameStateSizeEntry.make_size(size=mark_size)
 
         # NB: both static and dynamic have precedence over
@@ -3944,7 +3938,6 @@ def _automatic_dynamic(
         dynamic_sizes=dynamic_sizes,
         dynamic_strides=dynamic_strides,
         constraint_sizes=constraint_sizes,
-        # pyrefly: ignore [bad-argument-type]
         constraint_strides=constraint_strides,
         specialize_on=specialize_on,
         view_base_context=view_base_context,
