@@ -356,6 +356,8 @@ class FSDPState(_State):
     def _register_pre_backward_hook(self, output: Any) -> Any:
         if not torch.is_grad_enabled():
             return output
+        # output is the forward return value — pass directly without wrapping
+        # (unlike _register_post_backward_hook which wraps (args, kwargs))
         tensors = collect_grad_tensors(output)
         for t in tensors:
             t.register_hook(self._pre_backward)

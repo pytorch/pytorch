@@ -42,6 +42,9 @@ if TYPE_CHECKING:
     from ._flat_param import FlatParamHandle
 
 
+_MAX_TRAVERSE_DEPTH = 128
+
+
 def _is_namedtuple(obj: Any) -> bool:
     return (
         isinstance(obj, tuple)
@@ -63,8 +66,15 @@ def collect_grad_tensors(output: Any) -> tuple[torch.Tensor, ...]:
     return tuple(tensors_list)
 
 
-def _collect_grad_tensors(output: Any, out: list[torch.Tensor]) -> None:
+def _collect_grad_tensors(
+    output: Any, out: list[torch.Tensor], _depth: int = 0
+) -> None:
     """Collect grad-requiring tensors in the same order as _replace_grad_tensors."""
+    if _depth > _MAX_TRAVERSE_DEPTH:
+        raise RuntimeError(
+            f"collect_grad_tensors exceeded max depth ({_MAX_TRAVERSE_DEPTH}), "
+            "likely due to a circular reference in the output structure"
+        )
     # Branch order must mirror _replace_grad_tensors exactly.
     # Only dict, list, tuple, NamedTuple, and dataclass are traversed;
     # set and other iterables are intentionally skipped (matching tree_flatten).
@@ -73,16 +83,16 @@ def _collect_grad_tensors(output: Any, out: list[torch.Tensor]) -> None:
     elif _is_namedtuple(output):
         # NamedTuple before dataclass to match _replace_grad_tensors ordering.
         for item in output:
-            _collect_grad_tensors(item, out)
+            _collect_grad_tensors(item, out, _depth + 1)
     elif dataclasses.is_dataclass(output) and not isinstance(output, type):
         for field in dataclasses.fields(output):
-            _collect_grad_tensors(getattr(output, field.name), out)
+            _collect_grad_tensors(getattr(output, field.name), out, _depth + 1)
     elif isinstance(output, dict):
         for v in output.values():
-            _collect_grad_tensors(v, out)
+            _collect_grad_tensors(v, out, _depth + 1)
     elif isinstance(output, (list, tuple)):
         for item in output:
-            _collect_grad_tensors(item, out)
+            _collect_grad_tensors(item, out, _depth + 1)
 
 
 def replace_grad_tensors(output: Any, tensor_iter: Iterator[torch.Tensor]) -> Any:
@@ -110,8 +120,15 @@ def replace_grad_tensors(output: Any, tensor_iter: Iterator[torch.Tensor]) -> An
     return result
 
 
-def _replace_grad_tensors(output: Any, tensor_iter: Iterator[torch.Tensor]) -> Any:
+def _replace_grad_tensors(
+    output: Any, tensor_iter: Iterator[torch.Tensor], _depth: int = 0
+) -> Any:
     # Branch order must mirror _collect_grad_tensors exactly.
+    if _depth > _MAX_TRAVERSE_DEPTH:
+        raise RuntimeError(
+            f"replace_grad_tensors exceeded max depth ({_MAX_TRAVERSE_DEPTH}), "
+            "likely due to a circular reference in the output structure"
+        )
     if torch.is_tensor(output) and output.requires_grad:
         return next(tensor_iter)
     elif _is_namedtuple(output):
@@ -120,7 +137,7 @@ def _replace_grad_tensors(output: Any, tensor_iter: Iterator[torch.Tensor]) -> A
         new_items = []
         any_changed = False
         for item in output:
-            new_item = _replace_grad_tensors(item, tensor_iter)
+            new_item = _replace_grad_tensors(item, tensor_iter, _depth + 1)
             new_items.append(new_item)
             if new_item is not item:
                 any_changed = True
@@ -131,7 +148,7 @@ def _replace_grad_tensors(output: Any, tensor_iter: Iterator[torch.Tensor]) -> A
         changes = {}
         for field in dataclasses.fields(output):
             old_val = getattr(output, field.name)
-            new_val = _replace_grad_tensors(old_val, tensor_iter)
+            new_val = _replace_grad_tensors(old_val, tensor_iter, _depth + 1)
             if new_val is not old_val:
                 changes[field.name] = new_val
         if changes:
@@ -141,7 +158,7 @@ def _replace_grad_tensors(output: Any, tensor_iter: Iterator[torch.Tensor]) -> A
         new_dict = {}
         any_changed = False
         for k, v in output.items():
-            new_v = _replace_grad_tensors(v, tensor_iter)
+            new_v = _replace_grad_tensors(v, tensor_iter, _depth + 1)
             new_dict[k] = new_v
             if new_v is not v:
                 any_changed = True
@@ -152,7 +169,7 @@ def _replace_grad_tensors(output: Any, tensor_iter: Iterator[torch.Tensor]) -> A
         new_items = []
         any_changed = False
         for item in output:
-            new_item = _replace_grad_tensors(item, tensor_iter)
+            new_item = _replace_grad_tensors(item, tensor_iter, _depth + 1)
             new_items.append(new_item)
             if new_item is not item:
                 any_changed = True
