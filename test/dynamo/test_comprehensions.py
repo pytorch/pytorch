@@ -1940,22 +1940,22 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
                 b = y + 2
                 nonlocal cell
                 cell = cell + (b - y).sum()
-                [torch._dynamo.graph_break() or i for i in range(2)]
-                cell += 1
-                return x + a
+                [torch._dynamo.graph_break() or y.sum() * i for i in range(2)]
+                cell = cell + 1 + y.sum()
+                return x + a + y
 
             result = f2(x)
-            self.assertEqual(cell, 10)
+            self.assertEqual(cell, 14)
             return result
 
         backend = torch._dynamo.testing.EagerAndRecordGraphs()
         compiled = torch.compile(f1, backend=backend)
-        x = torch.randn(4)
+        x = torch.ones(4)
 
         self.assertEqual(compiled(x), f1(x))
         self.assertEqual(len(backend.graphs), 2)
         self.assertEqual(count_op(backend.graphs[0], operator.add), 3)
-        self.assertEqual(count_op(backend.graphs[1], operator.add), 1)
+        self.assertEqual(count_op(backend.graphs[1], operator.add), 4)
 
     @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_nested_comprehension_nonlocal_tensor_different_varnames(self):
