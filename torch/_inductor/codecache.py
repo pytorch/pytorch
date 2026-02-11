@@ -4267,15 +4267,9 @@ class XPUCodeCache(CUTLASSCodeCache):
     def _source_code_extra(cls) -> str:
         extra = repr(
             [
-                # nvcc and cuda hash
                 xpu_compile_utils._sycl_compiler(),
-                # cutlass flags and gcc hash
                 xpu_compile_utils._sycl_compiler_options(),
-                # flags
-                xpu_compile_utils._sycl_host_compiler_options(),
-                # cutlass key
                 cutlass_key(),
-                # hack to deal with AOTI .o compilation
             ]
         )
         return extra
