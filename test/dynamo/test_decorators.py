@@ -3424,6 +3424,8 @@ class GraphModule(torch.nn.Module):
                 return (x,)
 
     def test_leaf_function_no_return_value(self):
+        printed = []
+
         @leaf_function
         def fn_no_return(x):
             print("processing")
@@ -3447,9 +3449,11 @@ class GraphModule(torch.nn.Module):
         def loss_fn(out):
             return out[0].sum()
 
-        eager_graph, fw_graph, bw_graph = self._test_leaf_function_helper(
-            Mod, args_fn, loss_fn
-        )
+        with patch("builtins.print", lambda *args, **kwargs: printed.append(args)):
+            eager_graph, fw_graph, bw_graph = self._test_leaf_function_helper(
+                Mod, args_fn, loss_fn
+            )
+        self.assertTrue(any("processing" in p for p in printed))
         self.assertExpectedInline(
             eager_graph,
             """\
@@ -3461,7 +3465,7 @@ class GraphModule(torch.nn.Module):
 
         real_fn : torch.utils._pytree.TreeSpec = self.real_fn
         fake_fn : torch.utils._pytree.TreeSpec = self.fake_fn
-        invoke_leaf_function = torch.ops.higher_order.invoke_leaf_function(real_fn, fake_fn, l_x_);  real_fn = fake_fn = invoke_leaf_function = None
+        invoke_leaf_function = torch.ops.higher_order.invoke_leaf_function(real_fn, fake_fn, 0, l_x_);  real_fn = fake_fn = invoke_leaf_function = None
 
         linear: "f32[3, 3]" = torch._C._nn.linear(l_x_, l_self_modules_linear_parameters_weight_, l_self_modules_linear_parameters_bias_);  l_x_ = l_self_modules_linear_parameters_weight_ = l_self_modules_linear_parameters_bias_ = None
         return (linear,)
@@ -3474,7 +3478,8 @@ class GraphModule(torch.nn.Module):
     def forward(self, primals_1: "f32[0]", primals_2: "f32[3, 3]", primals_3: "f32[3, 3]", primals_4: "f32[3]"):
         _tree_spec_constant0 = self._tree_spec_constant0
         _tree_spec_constant1 = self._tree_spec_constant1
-        with_effects = torch.ops.higher_order.with_effects(primals_1, torch.ops.higher_order.invoke_leaf_function, _tree_spec_constant0, _tree_spec_constant1, primals_2);  primals_1 = _tree_spec_constant0 = _tree_spec_constant1 = None
+        with_effects = torch.ops.higher_order.with_effects(primals_1, torch.ops.higher_order.invoke_leaf_function, _tree_spec_constant0, _tree_spec_constant1, 0, primals_2);  primals_1 = _tree_spec_constant0 = _tree_spec_constant1 = None
+
         getitem: "f32[0]" = with_effects[0];  with_effects = None
 
         t: "f32[3, 3]" = torch.ops.aten.t.default(primals_3)
