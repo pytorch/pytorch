@@ -2319,9 +2319,12 @@ def make_fallback(op, layout_constraint=None, warn=True, override_decomp=False):
         aten._foreach_addcmul.Scalar,
         aten._foreach_addcdiv.Scalar,
     }
-    assert op not in decompositions or override_decomp or skip_decomp_for_precision or skip_lerp_decomp, (
-        f"both a fallback and a decomp for same op: {op}"
-    )
+    assert (
+        op not in decompositions
+        or override_decomp
+        or skip_decomp_for_precision
+        or skip_lerp_decomp
+    ), f"both a fallback and a decomp for same op: {op}"
     if (
         warn
         and bool(os.getenv("CI"))
