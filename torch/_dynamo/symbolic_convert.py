@@ -4635,11 +4635,7 @@ class InstructionTranslatorBase(
         """
         assert sys.version_info >= (3, 12)
 
-        from .bytecode_transformation import create_instruction
-        from .codegen import PyCodegen
-        from .source import LocalSource
-        from .variables.misc import UnknownVariable
-        from .variables.tensor import SymNodeVariable, TensorVariable
+        from .variables.tensor import TensorVariable
 
         analysis = self._analyze_comprehension()
 
@@ -4947,8 +4943,6 @@ class InstructionTranslatorBase(
         calls it via codegen_call_resume, then chains into the resume
         function for the post-comprehension code.
         """
-        from .variables.misc import UnknownVariable
-
         assert config.nested_graph_breaks
         meta = all_stack_locals_metadata[0]
         cg = PyCodegen(self.output.root_tx)
