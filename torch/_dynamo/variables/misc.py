@@ -634,7 +634,7 @@ class ExceptionVariable(VariableTracker):
                 ),
             ):
                 self.__cause__ = val
-                self.__suppress_context__ = variables.ConstantVariable(True)
+                self.__suppress_context__ = variables.CONSTANT_VARIABLE_TRUE
             else:
                 raise_error("exception cause must be None or derive from BaseException")
         elif name == "__suppress_context__":
@@ -1384,7 +1384,7 @@ class GetAttrVariable(VariableTracker):
             obj = self.obj
             key = args[0].as_python_constant()
             if obj.has_key_in_generic_dict(tx, key):
-                return variables.ConstantVariable(True)
+                return variables.CONSTANT_VARIABLE_TRUE
             else:
                 return variables.ConstantVariable(False)
 

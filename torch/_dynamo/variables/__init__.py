@@ -18,7 +18,12 @@ allows Dynamo to accurately trace and optimize Python code while preserving its 
 
 from .base import VariableTracker
 from .builtin import BuiltinVariable
-from .constant import CONSTANT_VARIABLE_NONE, ConstantVariable, EnumVariable
+from .constant import (
+    CONSTANT_VARIABLE_NONE,
+    CONSTANT_VARIABLE_TRUE,
+    ConstantVariable,
+    EnumVariable,
+)
 from .ctx_manager import (
     CatchWarningsCtxManagerVariable,
     ContextWrappingVariable,
@@ -171,6 +176,7 @@ __all__ = [
     "BuiltinVariable",
     "CatchWarningsCtxManagerVariable",
     "CONSTANT_VARIABLE_NONE",
+    "CONSTANT_VARIABLE_TRUE",
     "ConstantVariable",
     "ConstDictVariable",
     "ContextWrappingVariable",

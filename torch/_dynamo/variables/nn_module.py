@@ -580,6 +580,7 @@ class NNModuleVariable(VariableTracker):
         constant: bool = False,
     ) -> VariableTracker:
         from . import ConstantVariable, ListIteratorVariable, TupleVariable
+        from .constant import CONSTANT_VARIABLE_TRUE
 
         key = self.module_key
         module = tx.output.get_submodule(key)
@@ -626,7 +627,7 @@ class NNModuleVariable(VariableTracker):
         if name == "_check_input_dim" and trace_rules.is_torch_inline_allowed(
             inspect.getfile(module.__class__._check_input_dim)  # type: ignore[union-attr]
         ):
-            return ConstantVariable.create(True)
+            return CONSTANT_VARIABLE_TRUE
 
         if name == "_get_item_by_idx":
             if not args[1].is_python_constant():

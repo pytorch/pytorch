@@ -370,6 +370,7 @@ its type to `common_constant_types`.
 
 
 CONSTANT_VARIABLE_NONE = ConstantVariable(None)
+CONSTANT_VARIABLE_TRUE = ConstantVariable(True)
 
 
 class EnumVariable(VariableTracker):

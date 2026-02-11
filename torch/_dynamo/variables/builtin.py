@@ -2076,7 +2076,7 @@ class BuiltinVariable(VariableTracker):
                 NNModuleVariable,
             ),
         ):
-            return variables.ConstantVariable.create(True)
+            return variables.CONSTANT_VARIABLE_TRUE
         elif isinstance(arg, UserDefinedVariable):
             return variables.ConstantVariable.create(callable(arg.value))
         elif isinstance(

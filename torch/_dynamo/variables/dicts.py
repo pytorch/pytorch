@@ -42,7 +42,7 @@ from ..utils import (
     specialize_symnode,
 )
 from .base import ValueMutationNew, VariableTracker
-from .constant import CONSTANT_VARIABLE_NONE, ConstantVariable
+from .constant import CONSTANT_VARIABLE_NONE, CONSTANT_VARIABLE_TRUE, ConstantVariable
 
 
 if TYPE_CHECKING:
@@ -826,7 +826,7 @@ class ConstDictVariable(VariableTracker):
             for t in (dict, collections.OrderedDict, collections.defaultdict)
         ):
             if hasattr(self.user_cls, name):
-                return ConstantVariable.create(True)
+                return CONSTANT_VARIABLE_TRUE
             if self.user_cls is dict:
                 return ConstantVariable.create(False)
 
@@ -1619,7 +1619,7 @@ class DictViewVariable(VariableTracker):
     ) -> ConstantVariable:
         assert self.kv is not None
         if name in self.python_type().__dict__:
-            return ConstantVariable.create(True)
+            return CONSTANT_VARIABLE_TRUE
         return ConstantVariable.create(False)
 
     def call_method(
