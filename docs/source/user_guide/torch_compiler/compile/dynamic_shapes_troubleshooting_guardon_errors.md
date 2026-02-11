@@ -84,7 +84,8 @@ provides a detailed C++ backtrace with Python, CPython, and C10/ATen/libtorch
 frames interspersed. Look for symbols in the `at::` or `c10::` namespace that
 resemble kernel-specific code, likely related to the kernel executed per the Python
 backtrace. If using a non-debug build of PyTorch, inlining may cause missing
-frames, requiring source code investigation to locate the issue. For example, see https://github.com/pytorch/pytorch/pull/118579.
+frames, requiring source code investigation to locate the issue.
+For example, see https://github.com/pytorch/pytorch/pull/118579.
 
 Here is an example C++ backtrace from a debugging session:
 
@@ -148,15 +149,15 @@ else:
     return x + 3
 ```
 
-Can you rewrite the logic to work without the branch? If the branch exists only for optimization or edge-case handling, consider using a single general path that handles all cases.
+Can you rewrite the logic to work without the branch? If the branch exists only for optimization or edge-case handling, consider designating a general path that handles all shapes.
 
 #### Useful Utilities for Mindful Branching
 
-PyTorch provides several utilities to express branching in a more compilation-friendly manner:
+PyTorch provides several utilities to express branching in a more dynamic shapes friendly manner:
 
-**`statically_known_true(expr)`**: The most friendly API for compilation and data dependency. It:
+**`statically_known_true(expr)`**: It:
 - Never adds a new guard (no recompilation risk)
-- Never fails on data dependency
+- Never fails on data dependency.
 
 The API tries to evaluate the expression without adding guards. If it cannot, it returns `False`. Use this for short circuits that don't affect performance or optimizations that don't warrant recompilation.
 
@@ -172,7 +173,7 @@ else:
     ...
 ```
 
-**`guard_or_false(expr)` / `guard_or_true(expr)`**: These may add guards but will never fail with data-dependent errors. If evaluation fails due to data dependency, they return `False` or `True` instead of hard failing. Use for performance optimizations that warrant recompilation:
+**`guard_or_false(expr)` / `guard_or_true(expr)`**: These may add guards (if symbols are backed) but will never fail with data-dependent errors. If evaluation fails due to data dependency, they return `False` or `True` instead of hard failing. Use for performance optimizations that warrant recompilation:
 
 ```python
 from torch.fx.experimental.symbolic_shapes import guard_or_false
@@ -185,7 +186,7 @@ else:
     return compute(x)
 ```
 
-**`hint_int(expr, fallback=None)`**: Extracts a hint from a symbolic size and uses it in a branch. You can use it to evaluate the expression using the traced program's input shapes without guarding. Unlike `statically_known_true`, it picks the path that works for the input example instead of returning `False`. The optional `fallback` argument substitutes for unbacked symbols; if not provided and the symbol is unbacked, it will raise a data-dependent error.
+**`hint_int(expr, fallback=None)`**: Extracts a hint from a symbolic size and uses it in a branch. You can use it to evaluate the expression using the traced program's input shapes without guarding. Unlike `statically_known_true`, it picks the path that works for the input example instead of returning `False`. The optional `fallback` argument substitutes unbacked symbols; if not provided and the symbol is unbacked, it will raise an error.
 
 ```python
 from torch.fx.experimental.symbolic_shapes import hint_int
@@ -268,9 +269,9 @@ You can also use `torch._check` to assert constraints and refine value ranges. F
 When unbacked symbols are passed to factory functions like `torch.empty`, they are automatically recognized as representing sizes.
 ### Step 3: Is it unfixable?
 
-If both branches are genuinely needed at runtime (i.e., sometimes `i > 4` and sometimes `i <= 4`), then no `torch._check` can help—it is impossible to trace as is. In such cases, you may need to consider alternative approaches, such as using `torch.cond`.
+If both branches are genuinely needed at runtime (i.e., sometimes `i > 4` and sometimes `i <= 4`), then no `torch._check` can help—it is impossible to trace as is. In such cases, you may need to consider alternative approaches, such as using `torch.cond` or padding.
 
-Another common unfixable pattern involves indexing with a data-dependent value:
+Another common unfixable pattern involves indexing a python list with a data-dependent value:
 
 ```python
 return self.mlps[x.item()]
