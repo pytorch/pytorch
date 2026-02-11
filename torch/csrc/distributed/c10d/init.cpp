@@ -835,7 +835,7 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           R"(Create a PREMUL_SUM ReduceOp with the given factor.
 
 Args:
-    factor: A scalar (float/int) or a single-element Tensor to multiply
+    factor: A scalar (float, int, torch.Tensor) or a single-element Tensor to multiply
             inputs by before reduction.
 
 Returns:
