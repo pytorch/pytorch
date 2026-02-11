@@ -492,12 +492,21 @@ def _sympy_handlers() -> dict[type[sympy.Expr], Callable[..., Any]]:
     (i.e. `sympy.Mul` -> `operator.mul`)
     """
     import torch.utils._sympy.interp
+    from torch.utils._sympy.functions import Max, Min
 
     handlers = {}
     for k, v in torch.utils._sympy.interp.handlers().items():
         op = getattr(operator, v, None)
         if op is not None:
             handlers[k] = op
+
+    # Some sympy functions map to torch sym functions rather than operator.*
+    import sympy
+
+    handlers[Max] = torch.sym_max
+    handlers[sympy.Max] = torch.sym_max
+    handlers[Min] = torch.sym_min
+    handlers[sympy.Min] = torch.sym_min
     return handlers
 
 
