@@ -8588,7 +8588,6 @@ class TestNNDeviceType(NNTestCase):
 
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
-    @expectedFailureMPS  # Unsupported Border padding mode https://github.com/pytorch/pytorch/issues/125098
     @tf32_on_and_off()
     @reduced_f32_on_and_off()
     def test_affine_2d_rotate0(self, device):
@@ -8630,7 +8629,6 @@ class TestNNDeviceType(NNTestCase):
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
     @skipIfRocmArch(MI300_ARCH)
-    @expectedFailureMPS  # Unsupported Border padding mode https://github.com/pytorch/pytorch/issues/125098
     @tf32_on_and_off(0.001)
     @reduced_f32_on_and_off(0.001)
     def test_affine_2d_rotate90(self, device):
@@ -8680,7 +8678,6 @@ class TestNNDeviceType(NNTestCase):
 
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
-    @expectedFailureMPS  # Unsupported Border padding mode https://github.com/pytorch/pytorch/issues/125098
     @tf32_on_and_off(0.005)
     @reduced_f32_on_and_off(0.005)
     def test_affine_2d_rotate45(self, device):
@@ -8803,7 +8800,6 @@ class TestNNDeviceType(NNTestCase):
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
     @skipIfRocmArch(MI300_ARCH)
-    @expectedFailureMPS  # Unsupported Border padding mode https://github.com/pytorch/pytorch/issues/125098
     @tf32_on_and_off(0.005)
     @reduced_f32_on_and_off(0.005)
     def test_affine_2d_rotateRandom(self, device):
@@ -12049,8 +12045,8 @@ class TestNNDeviceType(NNTestCase):
                 self._test_batchnorm_simple_average(device, dtype, torch.float)
 
     @onlyNativeDeviceTypes
-    @expectedFailureMPS  # Unsupported Border padding mode
     @dtypes(torch.float, torch.double)
+    @dtypesIfMPS(torch.float, torch.half, torch.bfloat16)
     def test_grid_sample_nan_inf(self, device, dtype):
         input = torch.zeros([1, 1, 3, 3], device=device, dtype=dtype)
         grid = torch.tensor([[[[nan, 0], [0, inf]]]], device=device, dtype=dtype)

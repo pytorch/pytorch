@@ -12100,6 +12100,20 @@ op_db: list[OpInfo] = [
                                     dtypes=(torch.cdouble, torch.cfloat, torch.chalf)),
                        DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_symbolic_meta_inplace_all_strides',
                                     dtypes=(torch.cdouble, torch.cfloat, torch.chalf)),
+                       # ValueError: Expected 2D tensor but got tensor with dimension: 1.
+                       DecorateInfo(
+                           unittest.expectedFailure, 'TestSparseCSR', 'test_sparse_csr_unary_inplace',
+                           device_type='cpu', dtypes=(torch.complex64,)
+                       ),
+                       DecorateInfo(
+                           unittest.expectedFailure, 'TestSparseCSR', 'test_sparse_csr_unary_out',
+                           device_type='cpu', dtypes=(torch.complex64,)
+                       ),
+                       # AssertionError: Tensor-likes are not close!
+                       DecorateInfo(
+                           unittest.expectedFailure, 'TestOutputConsistencyFullGraph', 'test_complex_output_match_opinfo_',
+                           device_type='cpu', dtypes=(torch.complex64,)
+                       ),
                    ),
                    supports_fwgrad_bwgrad=True,
                    assert_autodiffed=True,
@@ -19058,12 +19072,12 @@ op_db: list[OpInfo] = [
                    promotes_int_to_float=True,
                    skips=(
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
-                                    dtypes=(torch.cfloat, torch.cdouble)),
+                                    dtypes=(torch.cfloat, torch.cdouble), device_type='cuda'),
                        # AssertionError: Tensor-likes are not close!
                        # Greatest absolute difference: nan at index (700,) (up to 0.01 allowed)
                        # Greatest relative difference: nan at index (700,) (up to 0.001 allowed)
                        DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_reference_numerics_large',
-                                    dtypes=(torch.chalf,)),
+                                    dtypes=(torch.chalf,), device_type='cuda'),
                    )),
     UnaryUfuncInfo('sqrt',
                    ref=np.sqrt,
@@ -21165,7 +21179,6 @@ op_db: list[OpInfo] = [
            autodiff_nonfusible_nodes=[],  # aliases inputs, shouldn't be fused
            sample_inputs_func=sample_unsqueeze,
            skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestDTensorOps', 'test_dtensor_op_db'),
                DecorateInfo(
                    unittest.expectedFailure,
                    'TestJit',
@@ -22346,9 +22359,8 @@ op_db: list[OpInfo] = [
         skips=(
             DecorateInfo(slowTest, 'TestDecomp', 'test_comprehensive', dtypes=(torch.float32, torch.float64),
                          active_if=IS_WINDOWS),
-            # Error: MPS: Unsupported Bicubic interpolation
+            # Exception: The operator 'aten::grid_sampler_2d_backward' is not currently implemented for the MPS device
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-            # Error: The operator 'aten::grid_sampler_2d_backward' is not currently implemented for the MPS device
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager', device_type='mps'),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='mps'),
         ),),
@@ -24394,13 +24406,13 @@ python_ref_db = [
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
                          'test_reference_numerics_extremal',
-                         dtypes=(torch.cfloat, torch.cdouble)),
+                         dtypes=(torch.cfloat, torch.cdouble), device_type='cuda'),
             # AssertionError: Tensor-likes are not close!
             # Greatest absolute difference: nan at index (700,) (up to 0.01 allowed)
             # Greatest relative difference: nan at index (700,) (up to 0.001 allowed)
             DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs',
                          'test_reference_numerics_large',
-                         dtypes=(torch.chalf,)),
+                         dtypes=(torch.chalf,), device_type='cuda'),
         ),
     ),
     ElementwiseUnaryPythonRefInfo(
