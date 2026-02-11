@@ -124,7 +124,7 @@ def check_out_variant(
             f"We did not find an out variant for {functional_op}. Some common mistakes include:\n"
             "  1. The out variant is missing the torch.Tag.out_variant tag.\n"
             "  2. The out variant is not an overload of the original op (e.g., 'op.out' or 'op.overload_out') \n"
-            "  3. The out variant's input arguments does not match the functional op's signature (excluding the mutable kwargs).\n"
+            "  3. The out variant's input arguments does not match the functional op's signature (excluding the mutable args).\n"
             "  4. The original operator is not functional.\n"
             f"Overloads tagged with out_variant:\n"
             f"{tagged_info or '  (none)'}"
