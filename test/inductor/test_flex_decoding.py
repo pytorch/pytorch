@@ -1282,8 +1282,19 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @common_utils.parametrize("dtype", test_dtypes_fast)
     @common_utils.serialTest()
     def test_non_pow_2_headdim(self, device, dtype, head_dim):
+        # Use Q_S=1 (decode path) by not passing Q_S parameter - it defaults to 1
+        # This tests the flex_decode kernel with non-power-of-2 head dimensions
         self.run_test(
-            _rel_bias, dtype, B, Hq, S, head_dim, B, Hkv, S, head_dim, device=device
+            _rel_bias,
+            dtype,
+            Q_B=B,
+            Q_H=Hq,
+            Q_D=head_dim,
+            KV_B=B,
+            KV_H=Hkv,
+            KV_S=S,
+            V_D=head_dim,
+            device=device,
         )
 
     @supported_platform
