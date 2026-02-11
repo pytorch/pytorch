@@ -75,7 +75,8 @@ else:
 
 
 # Protects against includes accidentally setting the default dtype
-assert torch.get_default_dtype() is torch.float32
+if torch.get_default_dtype() is not torch.float32:
+    raise AssertionError(f"default dtype should be float32, got {torch.get_default_dtype()}")
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -1983,7 +1984,8 @@ class TestTorchDeviceType(TestCase):
             res = torch.gather(src, dim, idx)
             weight = torch.rand_like(res, device=device) * 10 ** 6
             res.backward(weight)
-            assert src.grad is not None
+            if src.grad is None:
+                raise AssertionError("expected src.grad to be not None")
             grad = src.grad.detach().clone()
 
             if torch.device(device).type == 'cuda' or torch.device(device).type == 'mtia':
@@ -2633,7 +2635,8 @@ class TestTorchDeviceType(TestCase):
             d.backward(dist_grad)
             # Check that the backward pass does not contain invalid
             # values such as nan or inf
-            assert torch.isfinite(x.grad).all()
+            if not torch.isfinite(x.grad).all():
+                raise AssertionError("expected x.grad to be finite")
 
     @skipIfMPS
     def test_cumsum(self, device):
@@ -5101,7 +5104,8 @@ class TestTorchDeviceType(TestCase):
                     prob_dist = torch.zeros(new_shape, device=device, dtype=dtype).uniform_()
                 prob_dist = prob_dist.transpose(1, 4)
                 prob_dist = prob_dist[1, :, 5, 0, :, 0, 4]
-                assert not prob_dist.is_contiguous()  # sanity check
+                if prob_dist.is_contiguous():
+                    raise AssertionError("expected prob_dist to be non-contiguous")
                 return prob_dist
 
         for is_contiguous in (True, False):
@@ -5215,7 +5219,8 @@ class TestTorchDeviceType(TestCase):
     def _test_memory_format_transformations(self, device, input_generator_fn, transformation_fn,
                                             memory_format, compare_data=True, default_is_preserve=False):
 
-        assert memory_format == torch.channels_last or memory_format == torch.channels_last_3d
+        if memory_format not in (torch.channels_last, torch.channels_last_3d):
+            raise AssertionError(f"unexpected memory_format: {memory_format}")
 
         # xc is a channels last tensor
         xc = input_generator_fn(device)
@@ -5591,7 +5596,8 @@ class TestTorchDeviceType(TestCase):
         s = torch.sparse_coo_tensor(i, v, torch.Size([2, 3]), device=device, dtype=dtype)
 
         p = s.clone()
-        assert p.is_sparse
+        if not p.is_sparse:
+            raise AssertionError("expected p to be sparse")
         opt = torch.optim.SGD([p], lr=1.)
 
         p.grad = s.clone()
@@ -5613,7 +5619,8 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(found_inf, 1.0)
 
         p = s.clone().half()
-        assert p.is_sparse
+        if not p.is_sparse:
+            raise AssertionError("expected p to be sparse")
         opt = torch.optim.SGD([p], lr=1.)
 
         p.grad = s.clone().half()
@@ -5810,7 +5817,8 @@ class TestTorchDeviceType(TestCase):
         scaler.scale(l).backward()
         scaler.step(optimizer)
         scaler.update()
-        assert scaler._scale != float("inf") and scaler._scale != float("nan")
+        if scaler._scale == float("inf") or scaler._scale != scaler._scale:
+            raise AssertionError(f"scaler._scale should not be inf or nan, got {scaler._scale}")
 
     @onlyNativeDeviceTypes
     def test_grad_scaling_clipping(self, device):
@@ -6051,7 +6059,8 @@ class TestTorchDeviceType(TestCase):
                     prob_dist = torch.zeros(new_shape, device=device, dtype=dtype).uniform_()
                 prob_dist = prob_dist.transpose(1, 4)
                 prob_dist = prob_dist[1, :, 5, 0, :, 0, 4]
-                assert not prob_dist.is_contiguous()  # sanity check
+                if prob_dist.is_contiguous():
+                    raise AssertionError("expected prob_dist to be non-contiguous")
                 return prob_dist
 
     # FIXME: move to elementwise ternary test suite
@@ -6233,15 +6242,19 @@ class TestTorchDeviceType(TestCase):
         t_non_contig = t.transpose(0, 1)
         t_contig = t_non_contig.contiguous()
 
-        assert t_contig.is_contiguous()
-        assert not t_non_contig.is_contiguous()
+        if not t_contig.is_contiguous():
+            raise AssertionError("expected t_contig to be contiguous")
+        if t_non_contig.is_contiguous():
+            raise AssertionError("expected t_non_contig to be non-contiguous")
 
         mask = torch.tensor([[False, True], [False, True], [False, False], [True, True], [True, True]], device=device)
         mask_non_contig = mask.transpose(0, 1)
         mask_contig = mask_non_contig.contiguous()
 
-        assert mask_contig.is_contiguous()
-        assert not mask_non_contig.is_contiguous()
+        if not mask_contig.is_contiguous():
+            raise AssertionError("expected mask_contig to be contiguous")
+        if mask_non_contig.is_contiguous():
+            raise AssertionError("expected mask_non_contig to be non-contiguous")
 
         # source is always converted to contiguous by the op.
         source = torch.tensor([[1, 2, 3, 4, 5], [6, 7, 8, 9, 9]], device=device)
@@ -6265,7 +6278,8 @@ class TestTorchDeviceType(TestCase):
         def f(x):
             result = x.tolist()
             for l, r in zip(result, [1.0, 2.0, 3.0]):
-                assert l == r
+                if l != r:
+                    raise AssertionError(f"expected {l} == {r}")
             return sum(x)
 
         x = torch.tensor([1.0, 2.0, 3.0], requires_grad=True, device=device)
@@ -9448,7 +9462,8 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         original_qe = torch.backends.quantized.engine
         for qe in qengines:
             torch.backends.quantized.engine = qe
-            assert torch.backends.quantized.engine == qe, 'qengine not set successfully'
+            if torch.backends.quantized.engine != qe:
+                raise AssertionError(f"qengine not set successfully: expected {qe}, got {torch.backends.quantized.engine}")
         torch.backends.quantized.engine = original_qe
 
     def test_terminate_handler_on_crash(self):
@@ -10746,7 +10761,8 @@ DIM_ARG: None = None
 def make_neg_dim_test(name, tensor_arg, arg_constr, types, extra_dim=0):
     def neg_dim_test(self):
         if isinstance(tensor_arg, list):
-            assert METHOD not in types and INPLACE_METHOD not in types
+            if METHOD in types or INPLACE_METHOD in types:
+                raise AssertionError("METHOD and INPLACE_METHOD should not be in types for list tensor_arg")
             x = [torch.randn(arg) for arg in tensor_arg]
             ndim = len(tensor_arg[-1])
         else:
@@ -10838,7 +10854,8 @@ def add_neg_dim_tests():
 
         test_name = 'test_' + name + '_neg_dim'
 
-        assert not hasattr(TestTorch, test_name), "Duplicated test name: " + test_name
+        if hasattr(TestTorch, test_name):
+            raise AssertionError("Duplicated test name: " + test_name)
         setattr(TestTorch, test_name, make_neg_dim_test(name, tensor_arg, arg_constr, types, extra_dim))
 
 # TODO: these empty classes are temporarily instantiated for XLA compatibility
