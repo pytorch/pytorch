@@ -454,16 +454,16 @@ all_partial_preserving_unary_ops = [
 # Monotone binary ops: maps op -> which partial to preserve (max, min, or None)
 monotone_binary_ops: dict[torch._ops.OpOverload, str | None] = {
     aten.fmax.default: "max",
+    aten.fmax.out: "max",
     aten.fmin.default: "min",
+    aten.fmin.out: "min",
     aten.logaddexp.default: None,
+    aten.logaddexp.out: None,
     aten.logaddexp2.default: None,
+    aten.logaddexp2.out: None,
     aten.maximum.default: "max",
-    aten.minimum.default: "min",
-}
-
-# .out variants stay on old path until PR2 adds out-variant infrastructure
-partial_preserving_ops: dict[torch._ops.OpOverload, str] = {
     aten.maximum.out: "max",
+    aten.minimum.default: "min",
     aten.minimum.out: "min",
 }
 
@@ -582,12 +582,6 @@ def pointwise_strategy(
         followed_strategy_index,
         preserve_partial=preserve_partial,
     )
-
-
-def partial_preserving_pointwise_strategy(op_schema: OpSchema) -> StrategyType:
-    """Strategy for pointwise ops that preserve specific Partial types."""
-    preserve_partial = partial_preserving_ops.get(op_schema.op)
-    return pointwise_strategy(op_schema, preserve_partial=preserve_partial)
 
 
 def common_pointwise_strategy(
@@ -866,17 +860,11 @@ register_single_dim_strategy(
     )
 )
 
-# Keep .out variants on old register_op_strategy path until PR2
-for op in partial_preserving_ops:
-    register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
-        partial_preserving_pointwise_strategy
-    )
-
-# Keep pointwise_ops on old path (single-dim registrations above take precedence)
+# Generic pointwise ops: just Shard + Replicate strategies
 for op in pointwise_ops:
-    register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
-        pointwise_strategy
-    )
+    register_single_dim_strategy(
+        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
+    )(_make_partial_strategy())
 
 # TODO: add all for_each ops
 for_each_ops = [
