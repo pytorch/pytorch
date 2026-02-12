@@ -1535,7 +1535,7 @@ class PallasKernel(SIMDKernel):
             # Optimization: If index is just a loop variable (identity map), skip gather
             is_identity_gather = False
             if self.range_tree_nodes:
-                iter_vars = OrderedSet([str(k) for k in self.range_tree_nodes.keys()])
+                iter_vars = OrderedSet([str(k) for k in self.range_tree_nodes])
                 if all(part in iter_vars for part in index_str.split()):
                     is_identity_gather = True
 
