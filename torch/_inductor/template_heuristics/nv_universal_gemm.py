@@ -258,10 +258,6 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         Get kernel configurations recommended by nvMatmulHeuristics.
 
         Uses validity callback to filter to cutlass_api-compatible configs.
-
-        For scaled GEMM (FP8), uses the 5-letter precision format
-        {A}{B}{C}{compute}{D} (e.g. QQTST = E4M3×E4M3, BF16 C/D, FP32 compute).
-        For regular GEMM, uses the 3-letter format {A}{compute}{A}.
         """
         import nvMatmulHeuristics
 
@@ -274,14 +270,17 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
             torch.float8_e5m2: "R",
         }
         a_char = dtype_to_cublas.get(dtype_a, "H")
+        b_char = dtype_to_cublas.get(dtype_b or dtype_a, a_char)
+        out_char = dtype_to_cublas.get(out_dtype or dtype_a, a_char)
         acc_char = dtype_to_cublas.get(accumulator_type, "S")
 
-        if out_dtype is not None and out_dtype != dtype_a:
-            b_char = dtype_to_cublas.get(dtype_b or dtype_a, a_char)
-            out_char = dtype_to_cublas.get(out_dtype, a_char)
+        # 3-letter {input}{compute}{output}: used when A=B (standard GEMM).
+        # 5-letter {A}{B}{C}{compute}{D}: used when A≠B or for FP8/FP4
+        # (nvMatmulHeuristics discovery sets only have 5-letter entries for these).
+        if a_char != b_char or a_char in ("Q", "R", "O"):
             precision = f"{a_char}{b_char}{out_char}{acc_char}{out_char}"
         else:
-            precision = f"{a_char}{acc_char}{a_char}"
+            precision = f"{a_char}{acc_char}{out_char}"
 
         # NvMatmulHeuristicsInterfaceEx configuration:
         # - backend=CUTLASS3: Use CUTLASS 3.x kernel database for Hopper+ GPUs
