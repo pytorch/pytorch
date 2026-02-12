@@ -2227,6 +2227,7 @@ def joint_fwd_bwd(fn: Callable[..., Any], args: Sequence[Any]) -> torch.fx.Graph
     with torch._guards.tracing(None):
         aot_function(
             fn,
+            # pyrefly: ignore[bad-argument-type]
             lambda gm, example_inputs: make_boxed_func(gm),
             partition_fn=record_joint_graph,
             decompositions=select_decomp_table(),
@@ -2297,11 +2298,11 @@ def init_once_fakemode(fn: Callable[..., Any]) -> Callable[[], Any]:
 
     @functools.cache
     @functools.wraps(fn)
-    def lazy_init() -> Any:
+    def lazy_init(input_device: Optional[torch.device] = None) -> Any:
         counters_ref = counters[backend].copy()
 
         with torch._guards.tracing(None), unset_fake_temporarily(), FakeTensorMode():
-            result = fn()
+            result = fn(input_device)
 
         # clear view matches encountered during tracing
         counters[backend] = counters_ref
