@@ -1529,7 +1529,7 @@ def _linalg_svd_meta(
     batch_dims = list(A.shape[:-2])
     m = A.shape[-2]
     n = A.shape[-1]
-    k = min(m, n)
+    k = torch.sym_min(m, n)
 
     if compute_uv:
         U_shape = batch_dims + [m, m if full_matrices else k]
