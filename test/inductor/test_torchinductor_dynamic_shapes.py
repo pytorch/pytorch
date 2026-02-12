@@ -648,16 +648,12 @@ class TestInductorDynamic(TestCase):
         size_hints = {"x": 600_000_000}
         x = 64
         num_warps = _num_warps(8)
-        warp_size = torch.cuda.get_device_properties(
-            torch.cuda.current_device()
-        ).warp_size
 
-        result_x, result_num_blocks = _check_max_grid_x(
-            size_hints, x, num_warps, warp_size
-        )
+        result_x, result_num_blocks = _check_max_grid_x(size_hints, x, num_warps)
 
         max_grid_x = 2147483647
         if torch.version.hip:
+            warp_size = 64  # TODO: query warp size once #129663 is merged
             # ROCm limits total threads (num_blocks * num_warps * warp_size)
             self.assertLessEqual(
                 result_num_blocks * num_warps * warp_size,
