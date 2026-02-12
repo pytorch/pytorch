@@ -7186,8 +7186,12 @@ class ShapeEnv:
             )
 
             hint = self.backed_var_to_val.get(x)
-            if hint is None:
-                # NB: size_hint is int, not sympy.Expr, do not use int_oo here
+            if hint is None or isinstance(hint, SingletonInt):
+                # NB: size_hint is int, not sympy.Expr, do not use int_oo here.
+                # SingletonInt is used to represent jagged/nested tensor dimensions
+                # (e.g. the irregular ragged dimension). It cannot be converted to
+                # int, so we treat it the same as an unknown size. This matches the
+                # behavior of size_hint(), which returns None for SingletonInt.
                 size = sys.maxsize
             elif symbol_is_type(x, SymT.SIZE):
                 size = int(hint)
@@ -7773,22 +7777,11 @@ class ShapeEnv:
 
             expr = orig_expr
 
-            # Fast path: try to quickly evaluate trivially true/false comparisons
+            # Try to quickly evaluate trivially true/false comparisons
             # using var_to_range, before calling expensive _maybe_evaluate_static.
             fast_result = self._maybe_fast_eval_comparison(expr)
             if fast_result is not None:
                 return fast_result
-
-            # Aggressive guard-free semantics: skip expensive static evaluation
-            # when we have a fallback value and no hint. This is safe because the fallback
-            # represents a valid code path that could be taken anyway.
-            if (
-                hint is None
-                and torch.fx.experimental._config.aggressive_guard_free_semantics
-                and fallback_value is not None
-            ):
-                self._log_suppressed_dde(orig_expr, fallback_value)
-                return fallback_value
 
             static_expr = self._maybe_evaluate_static(
                 expr, size_oblivious=size_oblivious
@@ -7980,47 +7973,24 @@ class ShapeEnv:
         expr = orig_expr
 
         # TODO: split conjunctions and evaluate them separately
-
-        # Fast path: check for trivially true comparisons like 0 <= sum_of_nonneg_symbols
-        # This avoids expensive _maybe_evaluate_static for this common pattern.
+        # Try to quickly evaluate trivially true/false comparisons
+        # using var_to_range, before calling expensive _maybe_evaluate_static.
         fast_result = self._maybe_fast_eval_comparison(expr)
         if fast_result is not None:
             return bool(fast_result)
 
-        # Skip _maybe_evaluate_static for single unbacked symbol >= 0 (or 0 <= symbol)
-        # when the symbol has unknown range [-int_oo, int_oo].
-        # This pattern is common during tracing and doesn't benefit from static evaluation
-        # since the symbol has no constraints.
-        # Note that the first time this is called value range will be updated and next time
-        # it's called (if any) we would call _maybe_evaluate_static and it would return True.
-        skip_static_eval = False
-        unbacked_sym = None
-        if isinstance(expr, sympy.GreaterThan) and expr.rhs == 0:
-            unbacked_sym = expr.lhs
-        elif isinstance(expr, sympy.LessThan) and expr.lhs == 0:
-            unbacked_sym = expr.rhs
-        if isinstance(unbacked_sym, sympy.Symbol) and symbol_is_type(
-            unbacked_sym, SymT.UNBACKED_INT
-        ):
-            vr = self.var_to_range[unbacked_sym]
-            if vr.lower == -int_oo and vr.upper == int_oo:
-                skip_static_eval = True
+        static_expr = self._maybe_evaluate_static(expr)
+        if static_expr is not None:
+            self.log.debug(
+                "runtime_assert %s == %s [statically known]", orig_expr, static_expr
+            )
+            # TODO: assert bool(static_expr)
+            return bool(static_expr)
 
-        if skip_static_eval:
-            new_expr = expr
-        else:
-            static_expr = self._maybe_evaluate_static(expr)
-            if static_expr is not None:
-                self.log.debug(
-                    "runtime_assert %s == %s [statically known]", orig_expr, static_expr
-                )
-                # TODO: assert bool(static_expr)
-                return bool(static_expr)
-
-            # Attempt to eliminate the unbacked SymInt
-            new_expr = self._maybe_evaluate_static(expr, unbacked_only=True)
-            if new_expr is None:
-                raise AssertionError("new_expr must not be None")
+        # Attempt to eliminate the unbacked SymInt
+        new_expr = self._maybe_evaluate_static(expr, unbacked_only=True)
+        if new_expr is None:
+            raise AssertionError("new_expr must not be None")
         if (
             not self.prefer_deferred_runtime_asserts_over_guards
             and new_expr.free_symbols <= self.backed_var_to_val.keys()

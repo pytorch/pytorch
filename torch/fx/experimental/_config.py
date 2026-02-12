@@ -115,13 +115,5 @@ enrich_profiler_metadata: bool = Config(  # type: ignore[var-annotated]
 # code.
 soft_pending_unbacked_not_found_error = False
 
-# When True, aggressively return fallback values in guard_or opting into
-# guard-free semantics. This optimizes tracing time when symbolic reasoning
-# is expensive. Since guard_or_X already have a general path to take, we
-# can skip expensive static evaluation and just return the fallback value directly.
-# This is usually safe because the fallback represents a valid code path that
-# could be taken anyway.
-aggressive_guard_free_semantics = False
-
 
 install_config_module(sys.modules[__name__])
