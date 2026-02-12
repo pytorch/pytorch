@@ -1,4 +1,8 @@
-{% if HAS_BLOCK_MASK %}
+{% if HAS_BLOCK_MASK and HAS_DQ_WRITE_ORDER and HAS_DQ_WRITE_ORDER_FULL %}
+{{def_kernel("Q", "K", "V", "OUT", "D_OUT", "LSE", "DK", "DV", "Q_NUM_BLKS", "Q_IDX", "FULL_Q_NUM_BLKS", "FULL_Q_IDX", "DQ_WRITE_ORDER", "DQ_WRITE_ORDER_FULL")}}
+{% elif HAS_BLOCK_MASK and HAS_DQ_WRITE_ORDER %}
+{{def_kernel("Q", "K", "V", "OUT", "D_OUT", "LSE", "DK", "DV", "Q_NUM_BLKS", "Q_IDX", "FULL_Q_NUM_BLKS", "FULL_Q_IDX", "DQ_WRITE_ORDER")}}
+{% elif HAS_BLOCK_MASK %}
 {{def_kernel("Q", "K", "V", "OUT", "D_OUT", "LSE", "DK", "DV", "Q_NUM_BLKS", "Q_IDX", "FULL_Q_NUM_BLKS", "FULL_Q_IDX")}}
 {% else %}
 {{def_kernel("Q", "K", "V", "OUT", "D_OUT", "LSE", "DK", "DV")}}
@@ -70,7 +74,16 @@
         ) | indent_except_first(2) }}
         return mask_mod_output
     {{ set_cute_hash("mask_mod", "mask") }}
-    block_sparse_tensors = BlockSparseTensorsTorch(Q_NUM_BLKS, Q_IDX, FULL_Q_NUM_BLKS, FULL_Q_IDX, block_size=({{SPARSE_Q_BLOCK_SIZE}}, {{SPARSE_KV_BLOCK_SIZE}}))
+    block_sparse_tensors = BlockSparseTensorsTorch(
+        Q_NUM_BLKS, Q_IDX, FULL_Q_NUM_BLKS, FULL_Q_IDX,
+        block_size=({{SPARSE_Q_BLOCK_SIZE}}, {{SPARSE_KV_BLOCK_SIZE}}),
+        {% if HAS_DQ_WRITE_ORDER %}
+        dq_write_order=DQ_WRITE_ORDER,
+        {% endif %}
+        {% if HAS_DQ_WRITE_ORDER_FULL %}
+        dq_write_order_full=DQ_WRITE_ORDER_FULL,
+        {% endif %}
+    )
     {% else %}
     mask_mod = None
     block_sparse_tensors = None
