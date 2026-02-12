@@ -185,6 +185,23 @@ def bind_args_cached(
     kwargs: dict[str, Any],
 ) -> dict[str, VariableTracker]:
     spec = _get_spec(func)
+
+    # Fast path: simple positional-only, no defaults, no varargs/varkw
+    # This is the common case for small utility functions called repeatedly.
+    if (
+        len(args) == spec.arg_count
+        and not func.__defaults__
+        and not kwargs
+        and not spec.varargs_name
+        and not spec.varkw_name
+        and not spec.kwonly_names
+    ):
+        return {
+            name: wrap_bound_arg(tx, args[i])
+            for i, name in enumerate(spec.all_pos_names)
+        }
+
+    # Full path with all features
     spec.update_defaults(func)
     ba = {}
     rem_kw = dict(kwargs)
@@ -815,6 +832,42 @@ class UserFunctionVariable(BaseUserFunctionVariable):
 
     def is_python_equal(self, other: object) -> bool:
         return isinstance(other, variables.UserFunctionVariable) and self.fn is other.fn
+
+
+class InspectSignatureVariable(UserFunctionVariable):
+    """
+    Variable tracker for inspect.signature with caching support.
+
+    inspect.Signature is expensive to trace. When inspect.signature is called
+    repeatedly on the same function during tracing, we cache the result to avoid
+    retracing the signature construction each time. Although this is different
+    from CPython behavior, it is safe to do so because inspect.signature does
+    not change across different calls to the same function.
+    """
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # Fast path: cache results for repeated calls on the same function
+        if len(args) == 1 and not kwargs:
+            target_arg = args[0]
+            cache_key = None
+
+            if isinstance(target_arg, (UserFunctionVariable, UserMethodVariable)):
+                cache_key = target_arg.get_function()
+
+            if cache_key is not None:
+                if cache_key in tx.output.signature_cache:
+                    return tx.output.signature_cache[cache_key]
+
+                result = super().call_function(tx, args, kwargs)
+                tx.output.signature_cache[cache_key] = result
+                return result
+
+        return super().call_function(tx, args, kwargs)
 
 
 class TreeMapOnlyFunctionVariable(BaseUserFunctionVariable):
@@ -3188,4 +3241,33 @@ class SparseTensorCreationSkipVariable(SkipFunctionVariable):
                 "Sparse tensors require specialized handling that is not yet implemented in the compiler."
             ),
             hints=[*graph_break_hints.SPARSE_TENSOR],
+        )
+
+
+class TritonSetAllocatorSkipVariable(SkipFunctionVariable):
+    """
+    Skip variable for triton.set_allocator with a clear message to move it outside the compiled region.
+    """
+
+    def __init__(self, value: Any, **kwargs: Any) -> None:
+        reason = "triton.set_allocator is not supported inside torch.compile"
+        super().__init__(value, reason=reason, **kwargs)
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        unimplemented(
+            gb_type="triton.set_allocator not supported",
+            context="triton.set_allocator called inside compiled region",
+            explanation=(
+                "triton.set_allocator is not supported inside torch.compile. "
+                "It modifies global Triton allocator state and cannot be traced."
+            ),
+            hints=[
+                "Move triton.set_allocator() outside of the torch.compile region "
+                "(call it before the compiled function)."
+            ],
         )

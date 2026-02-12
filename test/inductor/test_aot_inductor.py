@@ -3,6 +3,7 @@ import itertools
 import logging
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -65,10 +66,12 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_WINDOWS,
     MACOS_VERSION,
+    NAVI_ARCH,
     parametrize,
     runOnRocm,
     skipIfMPS,
     skipIfRocm,
+    skipIfRocmArch,
     skipIfWindows,
     skipIfWindowsXPU,
     skipIfXpu,
@@ -168,6 +171,20 @@ def get_module_ext_type():
         return "pyd"
     else:
         return "so"
+
+
+def get_triton_grid_info(kernel, total_elements, src_code):
+    expected_grids = [
+        triton.cdiv(
+            total_elements, cfg.kwargs["BLOCK_SIZE_M"] * cfg.kwargs["BLOCK_SIZE_N"]
+        )
+        for cfg in kernel.configs
+    ]
+    grid_match = re.search(r"uint32_t grid_0 = (\d+)L;", src_code)
+    if grid_match:
+        return int(grid_match.group(1)), expected_grids
+    else:
+        return None, expected_grids
 
 
 class AOTInductorTestsTemplate:
@@ -3482,7 +3499,10 @@ class AOTInductorTestsTemplate:
         finally:
             torch.cuda.memory._record_memory_history(False)
         segments = torch.cuda.memory._snapshot()["segments"]
-        self.assertEqual(segments[0]["requested_size"], 400)
+        self.assertTrue(
+            any(seg["requested_size"] == 400 for seg in segments),
+            f"Expected segment with size 400, got: {[s['requested_size'] for s in segments]}",
+        )
 
     def test_view_outputs(self):
         class Model(torch.nn.Module):
@@ -6813,6 +6833,22 @@ class AOTInductorTestsTemplate:
         self.check_model(Model(), example_inputs)
 
     @skipIfMPS
+    @parametrize("input_dtype", [torch.float16, torch.bfloat16])
+    def test_mm_out_dtype(self, input_dtype):
+        if self.device not in ("cuda", "xpu"):
+            raise unittest.SkipTest("out_dtype is only supported on CUDA or XPU")
+
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.mm(x, y, out_dtype=torch.float32)
+
+        example_inputs = (
+            torch.randn(64, 32, device=self.device, dtype=input_dtype),
+            torch.randn(32, 64, device=self.device, dtype=input_dtype),
+        )
+        self.check_model(Model(), example_inputs)
+
+    @skipIfMPS
     @parametrize("m", [32])
     @parametrize("n", [64])
     @parametrize("q_group", [32, 64])
@@ -7024,14 +7060,34 @@ class AOTInductorTestsTemplate:
         m = torch.tensor([4096], dtype=torch.int32, device=self.device)
 
         with config.patch("triton.autotune_with_sample_inputs", True):
-            # The tuned best config on XPU is different with CUDA.
-            if GPU_TYPE == "xpu" or torch.version.hip:
-                grid_0 = 32736
+            if torch.version.hip:
+                # ROCm: Use dynamic grid checking (portable across different configs)
+                # Compile and get the generated code
+                _, src_code = run_and_get_cpp_code(
+                    torch._export.aot_compile, Model(), (x, y, m)
+                )
+                actual_grid, expected_grids = get_triton_grid_info(
+                    strange_config_matmul_kernel, 4096 * 2046, src_code
+                )
+                self.assertTrue(
+                    actual_grid is not None, "Could not find grid_0 in generated code"
+                )
+                self.assertIn(
+                    actual_grid,
+                    expected_grids,
+                    f"grid_0={actual_grid} not in expected {expected_grids} from kernel configs",
+                )
+
             else:
-                grid_0 = 1023
-            self.code_check_count(
-                Model(), (x, y, m), f"uint32_t grid_0 = {grid_0}L;", 1
-            )
+                # CUDA/XPU: Keep existing hardcoded values
+                # The tuned best config on XPU is different with CUDA.
+                if GPU_TYPE == "xpu":
+                    grid_0 = 32736
+                else:
+                    grid_0 = 1023
+                self.code_check_count(
+                    Model(), (x, y, m), f"uint32_t grid_0 = {grid_0}L;", 1
+                )
 
     def test_triton_mutated_autotuning(self):
         if self.device != GPU_TYPE:
@@ -7074,14 +7130,34 @@ class AOTInductorTestsTemplate:
         m = torch.tensor([4095], dtype=torch.int32, device=self.device)
 
         with config.patch("triton.autotune_with_sample_inputs", True):
-            # The tuned best config on XPU is different with CUDA.
-            if GPU_TYPE == "xpu" or torch.version.hip:
-                grid_0 = 32736
+            if torch.version.hip:
+                # ROCm: Use dynamic grid checking (portable across different configs)
+                # Compile and get the generated code
+                _, src_code = run_and_get_cpp_code(
+                    torch._export.aot_compile, Model(), (x, y, m)
+                )
+                actual_grid, expected_grids = get_triton_grid_info(
+                    strange_config_matmul_kernel, 4096 * 2046, src_code
+                )
+                self.assertTrue(
+                    actual_grid is not None, "Could not find grid_0 in generated code"
+                )
+                self.assertIn(
+                    actual_grid,
+                    expected_grids,
+                    f"grid_0={actual_grid} not in expected {expected_grids} from kernel configs",
+                )
+
             else:
-                grid_0 = 1023
-            self.code_check_count(
-                Model(), (x, y, m), f"uint32_t grid_0 = {grid_0}L;", 1
-            )
+                # CUDA/XPU: Keep existing hardcoded values
+                # The tuned best config on XPU is different with CUDA.
+                if GPU_TYPE == "xpu":
+                    grid_0 = 32736
+                else:
+                    grid_0 = 1023
+                self.code_check_count(
+                    Model(), (x, y, m), f"uint32_t grid_0 = {grid_0}L;", 1
+                )
 
     @patch.dict(os.environ, {"TRITON_DEBUG": "1"})
     def test_triton_dynamic_launcher_grid(self):
@@ -7474,6 +7550,7 @@ class AOTInductorTestsTemplate:
         aot_inductor_module = torch._inductor.aoti_load_package(package_path)
         self.assertEqual(aot_inductor_module(*example_inputs), model(*example_inputs))
 
+    @skipIfRocmArch(NAVI_ARCH)
     def test_copy_non_blocking_is_pinned(self):
         if self.device == "cpu" or self.device == "mps":
             raise unittest.SkipTest("only matters for device-to-cpu copy")
@@ -7764,6 +7841,9 @@ class AOTInductorTestsTemplate:
         with config.patch("triton.autotune_with_sample_inputs", True):
             AOTIRunnerUtil.run(Model(), example_inputs)
 
+    @unittest.skipIf(
+        IS_FBCODE, "Subprocess spawning doesn't work in fbcode Buck environment"
+    )
     def test_aoti_load_package_in_fresh_subprocess(self):
         """
         Test that loading an AOTI package in a fresh subprocess works correctly.

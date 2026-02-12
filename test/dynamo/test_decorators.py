@@ -1040,6 +1040,89 @@ class DecoratorTests(PytreeRegisteringTestCase):
 
         self.assertEqual(torch.compile(fn, backend="eager")(inp), inp - 1)
 
+    def test_fullgraph_eval_frame_override(self):
+        # NOTE it is NOT enough to just call a torch.compile'd function in a compiled
+        # function returned by the backend - this is because we apply disable(recursive=True)
+        # to compiled functions and if we call a directly torch.compile'd function, that
+        # "overrides" the disable(recursive=True) - i.e. this behavior is intentional.
+
+        # Instead, we will patch symbolic_convert.InstructionTranslator.codegen_return_with_pops to
+        # append a bunch of additional bytecode that will run a function that is not disabled.
+        global inner
+
+        y = torch.ones(3)
+
+        def inner():
+            nonlocal y
+            y += 1
+
+        from torch._dynamo.bytecode_transformation import (
+            create_call_function,
+            create_instruction,
+            Instruction,
+        )
+        from torch._dynamo.symbolic_convert import InstructionTranslatorBase
+
+        old_codegen_return = InstructionTranslatorBase.codegen_return_with_pops
+
+        def codegen_return_with_pops(self, *args) -> list[Instruction]:
+            insts = old_codegen_return(*args)
+            assert insts[-1].opname.startswith("RETURN")
+            # to prevent infinite recursion
+            if self.f_code.co_name != "inner":
+                insts[-1:-1] = [
+                    create_instruction("LOAD_GLOBAL", argval="inner"),
+                    *create_call_function(0, True),
+                    create_instruction("POP_TOP"),
+                ]
+            return insts
+
+        def fn(x):
+            return x + 1
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        with mock.patch(
+            "torch._dynamo.symbolic_convert.InstructionTranslatorBase.codegen_return_with_pops",
+            codegen_return_with_pops,
+        ):
+            # fullgraph=False will result in inner being traced!
+            opt_fn_1 = torch.compile(fn, backend=cnts, fullgraph=False)
+
+            # inner compiled
+            opt_fn_1(torch.ones(3))
+            self.assertEqual(cnts.frame_count, 2)
+            self.assertEqual(y, torch.ones(3) + 1)
+
+            torch._dynamo.eval_frame.reset_code(inner.__code__)
+            cnts.clear()
+            # NOTE do not fully reset dynamo - to ensure eval frame override is applied for cache hits
+            opt_fn_2 = torch.compile(fn, backend=cnts, fullgraph=True)
+
+            with torch._dynamo.config.patch(
+                error_on_dynamo_callback_in_fullgraph_compiled_code=False
+            ):
+                # fullgraph=True will result in inner being skipped!
+                opt_fn_2(torch.ones(3))
+                self.assertEqual(cnts.frame_count, 0)
+                self.assertEqual(y, torch.ones(3) + 2)
+
+            with torch._dynamo.config.patch(
+                error_on_dynamo_callback_in_fullgraph_compiled_code=True
+            ):
+                # fullgraph=True will result in error when attempting to compile inner
+                with self.assertRaisesRegex(
+                    RuntimeError, "Dynamo: expected not to compile nested code"
+                ):
+                    opt_fn_2(torch.ones(3))
+
+            torch._dynamo.eval_frame.reset_code(inner.__code__)
+            cnts.clear()
+            # if we run fullgraph=False again, inner is compiled again (because we reset_code)
+            opt_fn_1(torch.ones(3))
+            self.assertEqual(cnts.frame_count, 1)
+            self.assertEqual(y, torch.ones(3) + 3)
+
     def test_substitute_in_graph(self):
         counters.clear()
 
@@ -1364,6 +1447,20 @@ class DecoratorTests(PytreeRegisteringTestCase):
         x = torch.tensor(1)
 
         self.assertEqual(fn(x, y), torch.compile(fn)(x, y))
+
+    def test_justknobs_check(self):
+        def fn(x, y):
+            if torch._utils_internal.justknobs_check("test", True):
+                return x + y
+            else:
+                return x - y
+
+        x = torch.randn(2, 2, device="cpu")
+        y = torch.randn(2, 2, device="cpu")
+        eager_out = fn(x, y)
+        compiled_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        compiled_out = compiled_fn(x, y)
+        self.assertEqual(eager_out, compiled_out)
 
     def test_set_stance_aot_eager_then_compile(self):
         cnts = torch._dynamo.testing.CompileCounter()
@@ -2183,6 +2280,62 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
             # check the model is compilable
             torch.compile(model)
             torch.compile(other_model)
+
+    def test_disable_class_and_instance_method(self):
+        # Test that decorating a method at class definition time and then
+        # re-decorating the instance method works correctly. This tests the
+        # fix in innermost_fn that stops unwrapping when hitting a bound method.
+        from torch._dynamo.eval_frame import innermost_fn
+
+        class Foo:
+            def run(self, a, b, c):
+                return self.work(a, b, c)
+
+            @torch._dynamo.disable
+            def work(self, a, b, c):
+                return a + b - c
+
+        foo = Foo()
+        # Re-decorate the instance method
+        foo.work = torch._dynamo.disable(foo.work)
+
+        a = torch.randint(0, 10, (10,))
+        b = torch.randint(0, 10, (10,))
+        c = torch.randint(0, 10, (10,))
+
+        # Should work without error - self should be correctly bound
+        result = foo.run(a, b, c)
+        self.assertEqual(result, a + b - c)
+
+        # Also test nested disable on instance methods
+        foo2 = Foo()
+        foo2.work = torch._dynamo.disable(torch._dynamo.disable(foo2.work))
+        result2 = foo2.run(a, b, c)
+        self.assertEqual(result2, a + b - c)
+
+        # Test innermost_fn shortcut behavior for unbound methods
+        # disable(disable(Foo.method)) should unwrap to the original function
+        class Bar:
+            def method(self, x):
+                return x + 1
+
+        bar = Bar()
+        bound_method = bar.method
+
+        original_method = Bar.method
+        disabled_once = torch._dynamo.disable(Bar.method)
+        disabled_twice = torch._dynamo.disable(disabled_once)
+        # innermost_fn should find the original unbound method
+        self.assertIs(innermost_fn(disabled_twice), original_method)
+        self.assertIs(innermost_fn(disabled_once), original_method)
+
+        # Test innermost_fn shortcut behavior for bound methods
+        # disable(disable(obj.method)) should stop at the bound method
+        # innermost_fn should return the bound method itself, not unwrap it
+        self.assertIs(innermost_fn(bound_method), bound_method)
+        # Wrapping a bound method should also preserve the binding
+        disabled_bound = torch._dynamo.disable(bound_method)
+        self.assertIs(innermost_fn(disabled_bound), bound_method)
 
     def test_dynamo_disable_annotations(self):
         class SimpleModel(torch.nn.Module):
