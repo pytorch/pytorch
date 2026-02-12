@@ -813,12 +813,12 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
             zeros_matched = torch.zeros_like(rnd)
             return x + rnd, rnd, zeros, zeros_matched
 
-        torch.set_default_device(device_type)
+        torch.set_default_device("cuda")
         (result, rnd, zeros, zeros_matched) = random_func(torch.randn(()))
 
-        # Verify tensors are on the current accelerator
-        self.assertEqual(rnd.device.type, device_type)
-        self.assertEqual(result.device.type, device_type)
+        # Verify tensors are on CUDA
+        self.assertEqual(rnd.device.type, "cuda")
+        self.assertEqual(result.device.type, "cuda")
         self.assertEqual(zeros.device.type, "cpu")
         self.assertEqual(zeros_matched.device.type, rnd.device.type)
 
@@ -835,7 +835,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
 
     @requires_gpu
     def test_default_device_factory_functions_priority(self):
-        torch.set_default_device(device_type)
+        torch.set_default_device("cuda")
 
         @torch.compile(fullgraph=True)
         def with_explicit_device(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -846,7 +846,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
 
         (result, rnd) = with_explicit_device(torch.randn(()))
         self.assertEqual(rnd.device.type, "cpu")
-        self.assertEqual(result.device.type, device_type)
+        self.assertEqual(result.device.type, "cuda")
 
 
 class InvokeSubgraphBackendTests(torch._dynamo.test_case.TestCase):
