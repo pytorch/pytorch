@@ -9178,6 +9178,57 @@ def forward(self, x):
         ep = export(Simple(), example_inputs)
         self.assertEqual(ep.module()(*example_inputs), Simple()(*example_inputs))
 
+    def test_while_loop_with_unbacked_symints(self):
+        # When a carried input to while_loop has an unbacked SymInt dimension
+        # (from data-dependent indexing like x[mask]), the internal
+        # torch.compile creates a fresh ShapeEnv. Cross-ShapeEnv wrapping
+        # must handle unbacked SymInts that have no hint.
+        class LoopModule(torch.nn.Module):
+            def forward(self, x):
+                _, x = torch.while_loop(
+                    lambda idx, x: idx < 5,
+                    lambda idx, x: (idx + 1, 2 * x),
+                    (0, x),
+                )
+                return x
+
+        class LoopModuleExt(LoopModule):
+            def forward(self, x, mask):
+                x[mask] = super().forward(x[mask])
+                return x
+
+        bs = Dim("batch_size", min=1)
+        example_inputs = (
+            torch.rand(3, 4),
+            torch.randint(0, 2, (3,), dtype=torch.bool),
+        )
+        ep = export(
+            LoopModuleExt(),
+            example_inputs,
+            dynamic_shapes={"x": {0: bs}, "mask": {0: bs}},
+        )
+        self.assertEqual(
+            ep.module()(*example_inputs), LoopModuleExt()(*example_inputs)
+        )
+        ep = ep.run_decompositions()
+        self.assertExpectedInline(
+            str(ep.graph).strip(),
+            """\
+graph():
+    %x : [num_users=2] = placeholder[target=x]
+    %mask : [num_users=2] = placeholder[target=mask]
+    %index : [num_users=2] = call_function[target=torch.ops.aten.index.Tensor](args = (%x, [%mask]), kwargs = {})
+    %sym_size_int_5 : [num_users=1] = call_function[target=torch.ops.aten.sym_size.int](args = (%index, 0), kwargs = {})
+    %ge_4 : [num_users=1] = call_function[target=operator.ge](args = (%sym_size_int_5, 0), kwargs = {})
+    %_assert_scalar_default : [num_users=0] = call_function[target=torch.ops.aten._assert_scalar.default](args = (%ge_4, Runtime assertion failed for expression u0 >= 0 on node 'ge_4'), kwargs = {})
+    %while_loop_cond_graph_0 : [num_users=1] = get_attr[target=while_loop_cond_graph_0]
+    %while_loop_body_graph_0 : [num_users=1] = get_attr[target=while_loop_body_graph_0]
+    %while_loop : [num_users=1] = call_function[target=torch.ops.higher_order.while_loop](args = (%while_loop_cond_graph_0, %while_loop_body_graph_0, (0, %index), ()), kwargs = {})
+    %getitem_1 : [num_users=1] = call_function[target=operator.getitem](args = (%while_loop, 1), kwargs = {})
+    %index_put : [num_users=1] = call_function[target=torch.ops.aten.index_put.default](args = (%x, [%mask], %getitem_1), kwargs = {})
+    return (index_put, index_put)""",  # noqa: B950
+        )
+
     def test_constrain_size_with_various_cases(self):
         class Module1(torch.nn.Module):
             def forward(self, x, y):
