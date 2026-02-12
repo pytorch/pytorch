@@ -133,7 +133,6 @@ from ..source import (
     NumpyTensorSource,
     OptimizerSource,
     RandomValueSource,
-    SkipGuardSource,
     Source,
     SubclassAttrListSource,
     TupleIteratorGetItemSource,
@@ -1822,11 +1821,7 @@ class VariableBuilder:
     def wrap_user_defined(self, value: Any) -> VariableTracker:
         self.install_guards(GuardBuilder.TYPE_MATCH)
         if InspectVariable.is_matching_object(value):
-            # Skip guards on inspect related variable trackers because they are
-            # not important for recompiles (something else will also change to
-            # cause recompiles) and can cause a large number of OBJECT_ALIASING
-            # guards.
-            result = InspectVariable(value, source=SkipGuardSource(self.source))
+            result = InspectVariable(value, source=self.source)
         else:
             result = UserDefinedObjectVariable(value, source=self.source)
         if not SideEffects.cls_supports_mutation_side_effects(type(value)):
