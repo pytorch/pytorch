@@ -579,9 +579,9 @@ class FxGraphCachePickler(pickle.Pickler):
         values = t.tolist()
         elapsed = time() - start
         if elapsed > 1.0:
-            warnings.warn(
+            warnings.warn(  # noqa: B028
                 f"FX graph cache copying of a large constant took {elapsed:.1}s. "
-                "Please file an issue."
+                "Please file an issue.",
             )
 
         return (_ident, (TensorMetadataAndValues(metadata, values),))

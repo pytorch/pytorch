@@ -2209,8 +2209,8 @@ def fallback_handler(kernel, add_to_fallback_set=True):
 
 @functools.cache
 def _warn_complex_not_supported():
-    warnings.warn(
-        "Torchinductor does not support code generation for complex operators. Performance may be worse than eager."
+    warnings.warn(  # noqa: B028
+        "Torchinductor does not support code generation for complex operators. Performance may be worse than eager.",
     )
 
 
@@ -7841,7 +7841,8 @@ def prepare_softmax_online(x, dim):
             important use case and you want to speed it up with online
             softmax.
             """
-            )
+            ),
+            stacklevel=2,
         )
         amax = reduce_amax(x, dim, keepdims=True)
         exp = lowerings[aten.exp](sub(x, amax))

@@ -40,7 +40,7 @@ def ambiguity_warn(dispatcher, ambiguities):
         Dispatcher.add
         warning_text
     """
-    warn(warning_text(dispatcher.name, ambiguities), AmbiguityWarning)
+    warn(warning_text(dispatcher.name, ambiguities), AmbiguityWarning, stacklevel=2)
 
 
 @deprecated(
