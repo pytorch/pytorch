@@ -1,18 +1,14 @@
 # mypy: allow-untyped-defs
 import io
 from collections.abc import Callable
-from dataclasses import dataclass
-from typing import Any, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import Any, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
 from torch._higher_order_ops.invoke_subgraph import NestedCompileRegionOptions
 
 from . import config
-
-
-if TYPE_CHECKING:
-    from ._cache import CacheInfo
+from ._cache import CacheInfo
 
 
 __all__ = [
@@ -265,7 +261,7 @@ def set_stance(
     stance: str = "default",
     *,
     skip_guard_eval_unsafe: bool = False,
-    force_backend: Union[str, Callable[..., Any], None] = None,
+    force_backend: str | Callable[..., Any] | None = None,
 ):
     """
     Set the current stance of the compiler.
@@ -497,7 +493,7 @@ def is_exporting() -> bool:
     return _is_exporting_flag
 
 
-def save_cache_artifacts() -> Optional[tuple[bytes, "CacheInfo"]]:
+def save_cache_artifacts() -> tuple[bytes, CacheInfo] | None:
     """
     Serializes all the cache artifacts that were created during the compilation
 
@@ -516,7 +512,7 @@ def save_cache_artifacts() -> Optional[tuple[bytes, "CacheInfo"]]:
     return CacheArtifactManager.serialize()
 
 
-def load_cache_artifacts(serialized_artifacts: bytes) -> Optional["CacheInfo"]:
+def load_cache_artifacts(serialized_artifacts: bytes) -> CacheInfo | None:
     """
     Hot loads cache artifacts that were previously serialized via
     save_cache_artifacts
@@ -662,9 +658,7 @@ def skip_all_guards_unsafe(guard_entries):
     return [False for entry in guard_entries]
 
 
-def nested_compile_region(
-    fn=None, options: Optional[NestedCompileRegionOptions] = None
-):
+def nested_compile_region(fn=None, options: NestedCompileRegionOptions | None = None):
     """
     Tells **``torch.compile``** that the marked set of operations forms a nested
     compile region (which is often repeated in the full model) whose code can be
