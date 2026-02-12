@@ -1535,10 +1535,10 @@ class PallasKernel(SIMDKernel):
             # Optimization: If index is just a loop variable (identity map), skip gather
             is_identity_gather = False
             if self.range_tree_nodes:
-                iter_vars = {str(k) for k in self.range_tree_nodes.keys()}
+                iter_vars = OrderedSet([str(k) for k in self.range_tree_nodes.keys()])
                 if all(part in iter_vars for part in index_str.split()):
                     is_identity_gather = True
-            
+
             if is_identity_gather:
                 return f"{buf}[...].flatten()"
 
@@ -2762,10 +2762,10 @@ from torch._inductor.runtime.runtime_utils import (
     torch_dtype_to_jax_runtime,
 )
 """ + (
-            "\nfrom jax.experimental.pallas import mosaic_gpu as plgpu"
-            if not ctx.interpret_is_cpu
-            else ""
-        )
+                "\nfrom jax.experimental.pallas import mosaic_gpu as plgpu"
+                if not ctx.interpret_is_cpu
+                else ""
+            )
         ctx.code.splice(imports, strip=True)
 
     def _codegen_iteration_vars(
@@ -2914,7 +2914,7 @@ from torch._inductor.runtime.runtime_utils import (
         output_params = ctx.output_params
         size_var_params = ctx.size_var_params
         kernel_input_params = ctx.kernel_input_params
-        
+
         main_name = f"{kernel_name}_main"
         code.writeline(
             f"def {main_name}({', '.join(full_kernel_params)}, stream=None):"
@@ -2933,9 +2933,7 @@ from torch._inductor.runtime.runtime_utils import (
 
             # Logic for propagate lambda (needs to match wrapper's *args)
             if len(output_params) == 1:
-                propagate_lambda = (
-                    f"lambda *args: tpu_torch_compile.placeholder_like({output_params[0]})"
-                )
+                propagate_lambda = f"lambda *args: tpu_torch_compile.placeholder_like({output_params[0]})"
             else:
                 out_list = ", ".join(output_params)
                 propagate_lambda = (
@@ -2976,79 +2974,6 @@ from torch._inductor.runtime.runtime_utils import (
         code.writeline("from jax import lax")
         code.writeline("_tile_size = 128  # Warpgroup size")
         code.writeline("_orig_out_shapes = out_shapes")
-
-        jit_wrapper_name = f"{kernel_name}_jit_wrapper"
-        donate_indices = []
-        # Offset by 2 for (out_shapes, out_dtypes), plus size_var_params count
-        base_offset = 2 + len(size_var_params)
-        for idx, name in enumerate(kernel_input_params):
-            if (name in alias_params) or name.startswith("in_out_ptr"):
-                donate_indices.append(idx + base_offset)
-        if donate_indices:
-            donate_literal = "(" + ", ".join(str(x) for x in donate_indices) + ",)"
-        else:
-            donate_literal = "()"
-        # Size variables are static args (after out_shapes and out_dtypes)
-        static_argnums = list(range(2 + len(size_var_params)))
-        static_argnums_literal = "(" + ", ".join(str(x) for x in static_argnums) + ",)"
-        code.writeline(
-            "@functools.partial("
-            f"jax.jit, static_argnums={static_argnums_literal}, donate_argnums="
-            f"{donate_literal})"
-        )
-        # Include size_var_params in wrapper signature
-        wrapper_params = (
-            ["out_shapes", "out_dtypes"] + size_var_params + kernel_input_params
-        )
-        code.writeline(f"def {jit_wrapper_name}({', '.join(wrapper_params)}):")
-        with code.indent():
-            code.writeline("out_shapes_pallas = tuple(")
-            code.writeline("    jax.ShapeDtypeStruct(shape, dtype)")
-            code.writeline("    for shape, dtype in zip(out_shapes, out_dtypes)")
-            code.writeline(")")
-            code.writeline("indexer = lambda n: lambda i: [i] * n")
-            code.writeline("out_specs_pallas = tuple(")
-            code.writeline("    pl.BlockSpec(shape, indexer(len(shape)))")
-            code.writeline("    for shape, dtype in zip(out_shapes, out_dtypes)")
-            code.writeline(")")
-            code.writeline("in_specs_pallas = tuple(")
-            code.writeline("    pl.BlockSpec(i.shape, indexer(len(i.shape)))")
-            code.writeline("    for i in [" + ", ".join(kernel_input_params) + "]")
-            code.writeline(")")
-
-            alias_pairs: list[tuple[int, int]] = []
-            for out_idx, name in enumerate(output_params):
-                if name.startswith("out_ptr"):
-                    if aliasable_flags.get(name, False):
-                        alias_name = f"{name}_alias"
-                        input_idx = kernel_input_params.index(alias_name)
-                        alias_pairs.append((input_idx, out_idx))
-                else:
-                    input_idx = kernel_input_params.index(name)
-                    alias_pairs.append((input_idx, out_idx))
-            alias_map_literal = ", ".join(f"{i}: {o}" for (i, o) in alias_pairs)
-
-            # Wrap kernel with functools.partial to pass scalar arguments (size variables)
-            partial_args = []
-            for sv_param in size_var_params:
-                partial_args.append(f"{sv_param}={sv_param}")
-
-            if partial_args:
-                kernel_arg = f"functools.partial({kernel_name}_kernel, {', '.join(partial_args)}),"
-            else:
-                kernel_arg = f"{kernel_name}_kernel,"
-
-            # Use plgpu.kernel for GPU (Mosaic), pl.pallas_call for CPU/TPU
-            # TMA approach requires: no reductions, all inputs contiguous, same sizes
-            use_tma = (
-                self.is_gpu and self.use_emit_pipeline and self._can_use_tma_approach()
-            )
-            if use_tma:
-                # TMA automatically handles out-of-bounds accesses
-                code.writeline("# Use lax.fori_loop with TMA for automatic OOB masking")
-                code.writeline("from jax import lax")
-                code.writeline("_tile_size = 128  # Warpgroup size")
-                code.writeline("_orig_out_shapes = out_shapes")
 
         code.writeline("_max_numel = 0")
         for param in kernel_input_params:
@@ -3276,9 +3201,7 @@ from torch._inductor.runtime.runtime_utils import (
             if ctx.alias_params:
                 code.writeline("# Convert Torch -> JAX for donated outputs")
                 for alias_name in ctx.alias_params:
-                    self._emit_torch_to_jax(
-                        code, alias_name, contiguous=False
-                    )
+                    self._emit_torch_to_jax(code, alias_name, contiguous=False)
             code.writeline("# Convert Torch -> JAX for in-place tensors")
             for ptr in ctx.pointer_tail:
                 if ptr.startswith("in_out_ptr"):
@@ -3324,17 +3247,15 @@ from torch._inductor.runtime.runtime_utils import (
                 for idx in ctx.copy_output_indices:
                     out_name = ctx.output_params[idx]
                     code.writeline(
-                            f"{out_name}.copy_(torch.from_dlpack(result_values[{idx}]))"
-                        )
+                        f"{out_name}.copy_(torch.from_dlpack(result_values[{idx}]))"
+                    )
 
     @staticmethod
     def _emit_torch_to_jax(
         code: IndentedBuffer, var_name: str, *, contiguous: bool
     ) -> None:
         suffix = ".detach().contiguous()" if contiguous else ".detach()"
-        code.writeline(
-            f"{var_name}_jax = jax.dlpack.from_dlpack({var_name}{suffix})"
-        )
+        code.writeline(f"{var_name}_jax = jax.dlpack.from_dlpack({var_name}{suffix})")
 
     def call_kernel(self, name: str, node: Optional[IRNode] = None) -> None:  # type: ignore[override]
         """Generate the Python code that calls this Pallas kernel."""
