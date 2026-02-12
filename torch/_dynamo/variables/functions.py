@@ -704,53 +704,28 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             tree_map_args = args
             tree_map_kwargs = kwargs
 
-        is_tree_map = (
+        if not (
             isinstance(tree_map_fn, UserFunctionVariable)
             and tree_map_fn._is_tree_map_function()
-        )
-        is_tree_map_with_path = (
-            isinstance(tree_map_fn, UserFunctionVariable)
-            and tree_map_fn._is_tree_map_with_path_function()
-        )
-
-        if not (is_tree_map or is_tree_map_with_path):
-            return None
-        if {*tree_map_kwargs} - _SUPPORTED_TREE_MAP_KWARGS:
-            return None
-        if len(tree_map_args) < 2:
+            and not ({*tree_map_kwargs} - _SUPPORTED_TREE_MAP_KWARGS)
+            and len(tree_map_args) >= 2
+        ):
             return None
 
         map_fn = tree_map_args[0]
         first_tree = tree_map_args[1]
         rest = tree_map_args[2:]
-
-        if is_tree_map_with_path:
-            return first_tree.call_tree_map_with_path(
-                tx,
-                tree_map_fn,
-                map_fn,
-                rest,
-                tree_map_kwargs,
-                keypath=(),
-            )
-        else:
-            return first_tree.call_tree_map(
-                tx,
-                tree_map_fn,
-                map_fn,
-                rest,
-                tree_map_kwargs,
-            )
+        return first_tree.call_tree_map(
+            tx,
+            tree_map_fn,
+            map_fn,
+            rest,
+            tree_map_kwargs,
+        )
 
     def _is_tree_map_function(self) -> bool:
         return (
             getattr(self.fn, "__name__", None) == "tree_map"
-            and getattr(self.fn, "__module__", None) in self._TREE_MAP_MODULES
-        )
-
-    def _is_tree_map_with_path_function(self) -> bool:
-        return (
-            getattr(self.fn, "__name__", None) == "tree_map_with_path"
             and getattr(self.fn, "__module__", None) in self._TREE_MAP_MODULES
         )
 
@@ -3267,69 +3242,3 @@ class SparseTensorCreationSkipVariable(SkipFunctionVariable):
             ),
             hints=[*graph_break_hints.SPARSE_TENSOR],
         )
-
-
-class TritonSetAllocatorSkipVariable(SkipFunctionVariable):
-    """
-    Skip variable for triton.set_allocator with a clear message to move it outside the compiled region.
-    """
-
-    def __init__(self, value: Any, **kwargs: Any) -> None:
-        reason = "triton.set_allocator is not supported inside torch.compile"
-        super().__init__(value, reason=reason, **kwargs)
-
-    def call_function(
-        self,
-        tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        unimplemented(
-            gb_type="triton.set_allocator not supported",
-            context="triton.set_allocator called inside compiled region",
-            explanation=(
-                "triton.set_allocator is not supported inside torch.compile. "
-                "It modifies global Triton allocator state and cannot be traced."
-            ),
-            hints=[
-                "Move triton.set_allocator() outside of the torch.compile region "
-                "(call it before the compiled function)."
-            ],
-        )
-
-
-class FiddleBuildableGetAttrVariable(UserFunctionVariable):
-    """
-    Specialized variable for fiddle Buildable.__getattr__. Resolves the
-    attribute directly on the real object instead of tracing through fiddle's
-    __getattr__ internals. This is fine because Buildable __getattr__ does not
-    have any side effects and is a config-only object. Doing this improves
-    Dynamo tracing time.
-    """
-
-    def call_function(
-        self,
-        tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        from .user_defined import UserDefinedObjectVariable
-
-        # args = [self_var, name_var] (self is explicit)
-        if (
-            len(args) == 2
-            and isinstance(args[0], UserDefinedObjectVariable)
-            and args[0].source
-            and not tx.output.side_effects.has_pending_mutation(args[0])
-            and isinstance(args[1], variables.ConstantVariable)
-        ):
-            obj_var = args[0]
-            name = args[1].as_python_constant()
-            try:
-                attr_value = self.fn(obj_var.value, name)
-            except Exception:
-                return super().call_function(tx, args, kwargs)
-            assert obj_var.source is not None
-            attr_source = AttrSource(obj_var.source, name)
-            return VariableTracker.build(tx, attr_value, attr_source)
-        return super().call_function(tx, args, kwargs)

@@ -1130,17 +1130,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # This is to avoid getattr_static calls to look up the subobj from the self.value.__class__
         self._subobj_from_class: dict[str, object] = {}
 
-        # Cache fiddle Buildable.__getattr__ to avoid sys.modules lookup on hot path
-        _fiddle_mod = sys.modules.get("fiddle._src.config")
-        if (
-            _fiddle_mod is not None
-            and isinstance(value, _fiddle_mod.Buildable)
-            and type(value).__getattr__ is _fiddle_mod.Buildable.__getattr__
-        ):
-            self._fiddle_buildable_getattr = _fiddle_mod.Buildable.__getattr__
-        else:
-            self._fiddle_buildable_getattr = None
-
         import torch.utils._pytree as pytree
 
         self.is_pytree_constant_class = pytree.is_constant_class(self.value_type)
@@ -1683,27 +1672,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 ):
                     # Manually trace out the nn module __getattr__ to avoid large compilation latency.
                     out = self.manually_trace_nn_module_getattr(tx, name)
-                elif self._fiddle_buildable_getattr is not None and self.source:
-                    # Route through VariableTracker.build so the builder wraps
-                    # Buildable.__getattr__ as FiddleBuildableGetAttrVariable.
-                    # FiddleBuildableGetAttrVariable short circuits the getattr
-                    # access and saves on compile time.
-                    new_source = AttrSource(
-                        AttrSource(self.source, "__getattr__"), "__func__"
-                    )
-                    fn_vt = VariableTracker.build(
-                        tx, self._fiddle_buildable_getattr, source=new_source, realize=True
-                    )
-                    out = fn_vt.call_function(
-                        tx,
-                        [self, ConstantVariable.create(name)],
-                        {},
-                    )
                 else:
                     new_source = None
                     if self.source:
                         new_source = AttrSource(self.source, "__getattr__")
-                    # TODO (yidiwu): We should use VariableTracker.build here
                     out = variables.UserMethodVariable(
                         getattr_fn, self, source=new_source
                     ).call_function(tx, [ConstantVariable.create(name)], {})
@@ -2076,84 +2048,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             map_fn,
             rest,
             tree_map_kwargs,
-        )
-
-    def call_tree_map_with_path_branch(
-        self,
-        tx: "InstructionTranslator",
-        tree_map_fn: "variables.functions.UserFunctionVariable",
-        map_fn: "VariableTracker",
-        rest: "collections.abc.Sequence[VariableTracker]",
-        tree_map_kwargs: "dict[str, VariableTracker]",
-        keypath: "tuple[Any, ...]",
-    ) -> "VariableTracker":
-        """Emulate tree_map_with_path behavior for user-defined objects.
-
-        Same logic as call_tree_map_branch but passes keypath to the map function.
-        """
-        tree_map_module = getattr(getattr(tree_map_fn, "fn", None), "__module__", "")
-        is_optree = tree_map_module.startswith("optree")
-
-        if is_optree:
-            try:
-                import optree
-                from optree.registry import _NODETYPE_REGISTRY
-
-                is_registered = (
-                    self.value_type in _NODETYPE_REGISTRY
-                    or optree.is_namedtuple_class(self.value_type)
-                    or optree.is_structseq_class(self.value_type)
-                )
-
-                if not is_registered:
-                    namespace_var = tree_map_kwargs.get("namespace")
-                    if namespace_var is not None:
-                        try:
-                            namespace = namespace_var.as_python_constant()
-                            is_registered = (
-                                namespace,
-                                self.value_type,
-                            ) in _NODETYPE_REGISTRY
-                        except NotImplementedError:
-                            return self._tree_map_with_path_fallback(
-                                tx,
-                                tree_map_fn,
-                                map_fn,
-                                rest,
-                                tree_map_kwargs,
-                                keypath,
-                            )
-            except ImportError:
-                return self._tree_map_with_path_fallback(
-                    tx,
-                    tree_map_fn,
-                    map_fn,
-                    rest,
-                    tree_map_kwargs,
-                    keypath,
-                )
-        else:
-            import torch.utils._pytree as pytree
-
-            is_registered = (
-                self.value_type in pytree.SUPPORTED_NODES
-                or pytree.is_namedtuple_class(self.value_type)
-                or pytree.is_structseq_class(self.value_type)
-            )
-
-        if not is_registered:
-            keypath_var = variables.TupleVariable(
-                [VariableTracker.build(tx, k) for k in keypath]
-            )
-            return map_fn.call_function(tx, [keypath_var, self, *rest], {})
-
-        return self._tree_map_with_path_fallback(
-            tx,
-            tree_map_fn,
-            map_fn,
-            rest,
-            tree_map_kwargs,
-            keypath,
         )
 
 
@@ -2845,6 +2739,44 @@ class MutableMappingVariable(UserDefinedObjectVariable):
     def __init__(self, value: object, **kwargs: Any) -> None:
         super().__init__(value, **kwargs)
         self.generic_dict_vt = ConstDictVariable({})
+
+    def method_setattr_standard(
+        self,
+        tx: "InstructionTranslator",
+        name: VariableTracker,
+        value: VariableTracker,
+        directly_update_dict: bool = False,
+    ) -> VariableTracker:
+        """Override to handle property setters on MutableMapping subclasses.
+
+        This is needed because property.__set__ is a slot wrapper (C function),
+        not a Python function, so the base class's try_get_descritor_and_setter_py_func
+        returns None for properties. But property.fset IS a Python function we can trace.
+
+        Without this, property setters on newly created MutableMapping objects fail
+        when accessing nested objects (which haven't been initialized yet on the
+        example value). By tracing the fset, we capture the setter logic in the graph
+        instead of running it on uninitialized example objects.
+
+        TODO(compiler): This fix is scoped to MutableMapping only because tracing
+        property setters on ALL UserDefinedObjectVariable can cause failures when
+        the fset calls untraceable C++ functions (e.g., pybind functions). Ideally,
+        this should be extended to all user-defined classes with a graceful fallback
+        when tracing the fset hits an untraceable function.
+        See: https://github.com/pytorch/pytorch/issues/172000
+        """
+        if isinstance(name, variables.ConstantVariable) and isinstance(name.value, str):
+            name_str = name.value
+            descriptor = inspect.getattr_static(type(self.value), name_str, None)
+            if isinstance(descriptor, property) and descriptor.fset is not None:
+                fset_source = None
+                if self.cls_source:
+                    desc_source = self.get_source_by_walking_mro(name_str)
+                    fset_source = AttrSource(desc_source, "fset")
+                fset_vt = VariableTracker.build(tx, descriptor.fset, fset_source)
+                return fset_vt.call_function(tx, [self, value], {})
+
+        return super().method_setattr_standard(tx, name, value, directly_update_dict)
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         # A common pattern in the init code of MutableMapping objects is to

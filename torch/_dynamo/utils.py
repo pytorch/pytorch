@@ -1153,7 +1153,7 @@ def is_typing(value: Any) -> bool:
     if sys.version_info >= (3, 12) and isinstance(value, _builtin_final_typing_classes):
         return True
     return (
-        isinstance(value, typing._Final)  # type: ignore[attr-defined]
+        isinstance(value, (types.UnionType, typing._Final))  # type: ignore[attr-defined]
         or value is typing.Generic
         or value is typing.Union
     )
@@ -2618,10 +2618,6 @@ common_constant_types: set[type] = {
     torch.iinfo,
     torch.nn.attention.SDPBackend,
     torch.cuda._CudaDeviceProperties,
-    # Pytree key types (frozen dataclasses used in tree_map_with_path)
-    torch.utils._pytree.SequenceKey,
-    torch.utils._pytree.MappingKey,
-    torch.utils._pytree.GetAttrKey,
 }
 
 if has_triton_package():
