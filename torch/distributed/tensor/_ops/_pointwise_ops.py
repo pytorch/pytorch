@@ -997,21 +997,16 @@ def list_pointwise_strategy(
     return TupleStrategy(list_strategy)
 
 
-def list_linear_pointwise_strategy(op_schema: OpSchema) -> StrategyType:
-    """
-    for each list op stratgy that supports linearity
-    """
-    return list_pointwise_strategy(op_schema, linearity=True)
-
-
+# Foreach ops: use register_single_dim_strategy (auto-detected by expanded_foreach_strategy)
 for op in for_each_ops:
-    register_op_strategy(op, schema_info=RuntimeSchemaInfo(needs_pytree=True))(
-        list_pointwise_strategy
+    register_single_dim_strategy(op, schema_info=RuntimeSchemaInfo(needs_pytree=True))(
+        _make_partial_strategy()
     )
 
+# Foreach ops with linearity (add/sub with scalars)
 for op in for_each_linearity_ops:
-    register_op_strategy(op, schema_info=RuntimeSchemaInfo(needs_pytree=True))(
-        list_linear_pointwise_strategy
+    register_single_dim_strategy(op, schema_info=RuntimeSchemaInfo(needs_pytree=True))(
+        _make_partial_strategy(extra_rules=_UNARY_LINEAR_RULES)
     )
 
 fused_ops = [
