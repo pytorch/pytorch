@@ -42,6 +42,7 @@ from torch.testing._internal.common_utils import (
     getRocmVersion,
     isRocmArchAnyOf,
     parametrize,
+    random_matrix_with_scaled_reduction_dim,
     run_tests,
     runOnRocmArch,
     serialTest,
@@ -61,7 +62,8 @@ if TEST_CUDA:
     _IS_SM8X = torch.cuda.get_device_capability(0)[0] == 8
 
 # Protects against includes accidentally setting the default dtype
-assert torch.get_default_dtype() is torch.float32
+if torch.get_default_dtype() is not torch.float32:
+    raise AssertionError("default dtype should be float32")
 
 def xfailIfSM100OrLaterNonRTXAndCondition(condition_fn):
     """
@@ -134,13 +136,13 @@ class TestMatmulCuda(InductorTestCase):
         torch.backends.cuda.matmul.allow_fp16_accumulation = fp16_accumulate
         # Make random tensors on CPU (seed set on common_utils.py import)
         # (Not using numpy because it does not support bfloat16)
-        make_arg = partial(make_tensor, dtype=dtype, device="cpu")
+        make_arg = partial(random_matrix_with_scaled_reduction_dim, dtype=dtype, device="cpu")
 
         bias_shape_modifier = (lambda shape: shape) if bias_shape_modifier is None else bias_shape_modifier
-        m_input = make_arg(bias_shape_modifier((m, n)))
-        m_1 = make_arg((m, k))
-        m_2 = make_arg((k, n))
-        m_beta = make_arg(1)
+        m_input = torch.randn(bias_shape_modifier((m, n)), dtype=dtype, device="cpu")
+        m_1 = make_arg(m, k, reduction_dim=-1)
+        m_2 = make_arg(k, n, reduction_dim=-2)
+        m_beta = torch.randn(1, dtype=dtype, device="cpu")
         # scale to abate overflows in fp16 accum
         if fp16_accumulate:
             m_1 = m_1 / 100
@@ -181,10 +183,32 @@ class TestMatmulCuda(InductorTestCase):
         torch.backends.cuda.matmul.allow_fp16_accumulation = orig_fp16_accumulate
 
     @onlyCUDA
+    @dtypes(torch.cfloat, torch.cdouble)
+    @parametrize("backend", ["cublas", "cublaslt"])
+    def test_mm_with_mH_args(self, dtype, backend):
+        # Testing mm with mH-transformed arguments.
+        # The root cause of:
+        # https://github.com/pytorch/pytorch/issues/174382
+        val = 3 + 4j
+        x = torch.zeros(2, 3, dtype=dtype, device="cuda")
+        x.diagonal().fill_(val)
+
+        ref_corrcoef = torch.empty(2, 2, dtype=dtype, device="cuda")
+        ref_corrcoef.fill_(-0.5)
+        ref_corrcoef.diagonal().fill_(1.0)
+
+        with blas_library_context(backend):
+            for a in (x, x.mH):
+                norm_squared = (a @ a.mH).sum().item()
+                self.assertEqual(norm_squared, 50 + 0j)
+
+            self.assertEqual(torch.corrcoef(x), ref_corrcoef)
+
+    @onlyCUDA
     # imported 'tol' as 'xtol' to avoid aliasing in code above
-    @toleranceOverride({torch.float16: xtol(atol=1e-1, rtol=1e-1),
-                        torch.bfloat16: xtol(atol=1e-1, rtol=1e-1),
-                        torch.float32: xtol(atol=1e-1, rtol=1e-1)})
+    @toleranceOverride({torch.float16: xtol(atol=1e-4, rtol=1e-4),
+                        torch.bfloat16: xtol(atol=1e-4, rtol=1e-4),
+                        torch.float32: xtol(atol=1e-4, rtol=1e-4)})
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
     @parametrize("size", [100, 1000, 10000])
     @parametrize("backend", ["cublas", "cublaslt"])
@@ -196,10 +220,9 @@ class TestMatmulCuda(InductorTestCase):
             self.cublas_addmm(size, dtype, False)
 
     @onlyCUDA
-    @xfailIfSM100OrLaterNonRTXAndCondition(lambda params: params.get('dtype') == torch.bfloat16 and params.get('size') == 10000)
     # imported 'tol' as 'xtol' to avoid aliasing in code above
-    @toleranceOverride({torch.float16: xtol(atol=7e-1, rtol=2e-1),
-                        torch.bfloat16: xtol(atol=1e1, rtol=2e-1)})
+    @toleranceOverride({torch.float16: xtol(atol=2e-3, rtol=2e-3),
+                        torch.bfloat16: xtol(atol=2e-3, rtol=2e-3)})
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("size", [100, 1000, 10000])
     @parametrize("backend", ["cublas", "cublaslt"])
@@ -210,9 +233,9 @@ class TestMatmulCuda(InductorTestCase):
 
     @onlyCUDA
     # imported 'tol' as 'xtol' to avoid aliasing in code above
-    @toleranceOverride({torch.float16: xtol(atol=1e-3, rtol=1e-4),
-                        torch.bfloat16: xtol(atol=1e-3, rtol=1e-4),
-                        torch.float32: xtol(atol=1e-3, rtol=1e-4)})
+    @toleranceOverride({torch.float16: xtol(atol=1e-4, rtol=1e-4),
+                        torch.bfloat16: xtol(atol=1e-4, rtol=1e-4),
+                        torch.float32: xtol(atol=1e-4, rtol=1e-4)})
     @dtypes(torch.bfloat16, torch.float16, torch.float32)
     @parametrize("size", [128])
     @parametrize("backend", ["cublas", "cublaslt"])
@@ -248,8 +271,8 @@ class TestMatmulCuda(InductorTestCase):
 
     @onlyCUDA
     # imported 'tol' as 'xtol' to avoid aliasing in code above
-    @toleranceOverride({torch.float16: xtol(atol=7e-1, rtol=2e-1),
-                        torch.bfloat16: xtol(atol=1e1, rtol=2e-1)})
+    @toleranceOverride({torch.float16: xtol(atol=1e-4, rtol=1e-4),
+                        torch.bfloat16: xtol(atol=1e-4, rtol=1e-4)})
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("size", [100, 1000, 10000])
     @parametrize("backend", ["cublas", "cublaslt"])

@@ -11,7 +11,7 @@ import threading
 import traceback
 from collections.abc import Callable
 from functools import lru_cache
-from typing import Any, Optional
+from typing import Any, NewType, Optional
 
 import torch
 import torch._C
@@ -19,6 +19,13 @@ from torch._utils import _dummy_type, _LazySeedTracker
 from torch.types import Device
 
 from ._utils import _get_device_index
+from .graphs import (
+    graph,
+    graph_pool_handle,
+    is_current_stream_capturing,
+    make_graphed_callables,
+    XPUGraph,
+)
 from .streams import Event, Stream
 
 
@@ -528,9 +535,11 @@ from .memory import (
     memory_snapshot,
     memory_stats,
     memory_stats_as_nested_dict,
+    MemPool,
     reset_accumulated_memory_stats,
     reset_peak_memory_stats,
     set_per_process_memory_fraction,
+    use_mem_pool,
     XPUPluggableAllocator,
 )
 from .random import (
@@ -546,11 +555,13 @@ from .random import (
 )
 
 
+_POOL_HANDLE = NewType("_POOL_HANDLE", tuple[int, int])
 __all__ = [
     "Event",
     "Stream",
     "StreamContext",
     "XPUPluggableAllocator",
+    "XPUGraph",
     "can_device_access_peer",
     "change_current_allocator",
     "current_device",
@@ -569,12 +580,16 @@ __all__ = [
     "get_rng_state",
     "get_rng_state_all",
     "get_stream_from_external",
+    "graph",
+    "graph_pool_handle",
     "init",
     "initial_seed",
     "is_available",
     "is_bf16_supported",
+    "is_current_stream_capturing",
     "is_initialized",
     "is_tf32_supported",
+    "make_graphed_callables",
     "manual_seed",
     "manual_seed_all",
     "max_memory_allocated",
@@ -585,6 +600,8 @@ __all__ = [
     "memory_snapshot",
     "memory_stats",
     "memory_stats_as_nested_dict",
+    "MemPool",
+    "use_mem_pool",
     "reset_accumulated_memory_stats",
     "reset_peak_memory_stats",
     "seed",
