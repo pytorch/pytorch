@@ -5135,6 +5135,71 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         )
         compiled(pool_out, indices)
 
+    def test_unbacked_batch_group_instance_norm_no_dde(self):
+        F = torch.nn.functional
+
+        # batch_norm (eval mode)
+        x = torch.randn(2, 3, 4, 4)
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+        rm, rv = torch.zeros(3), torch.ones(3)
+        torch._dynamo.reset()
+        compiled = torch.compile(
+            lambda x: F.batch_norm(x, rm, rv, training=False),
+            fullgraph=True,
+            backend="eager",
+        )
+        compiled(x)
+
+        # group_norm
+        x = torch.randn(2, 6, 4, 4)
+        for dim in range(x.ndim):
+            torch._dynamo.decorators.mark_unbacked(x, dim)
+        torch._dynamo.reset()
+        compiled = torch.compile(
+            lambda x: F.group_norm(x, 2),
+            fullgraph=True,
+            backend="eager",
+        )
+        compiled(x)
+
+        # instance_norm
+        x = torch.randn(2, 3, 4, 4)
+        for dim in range(x.ndim):
+            torch._dynamo.decorators.mark_unbacked(x, dim)
+        torch._dynamo.reset()
+        compiled = torch.compile(
+            lambda x: F.instance_norm(x),
+            fullgraph=True,
+            backend="eager",
+        )
+        compiled(x)
+
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_unbacked_copy_and_ceil_mode_pool_no_dde(self):
+        # copy_ with unbacked symints
+        x = torch.randn(2, 3)
+        for dim in range(x.ndim):
+            torch._dynamo.decorators.mark_unbacked(x, dim)
+        torch._dynamo.reset()
+        compiled = torch.compile(
+            lambda x: torch.empty_like(x).copy_(x),
+            fullgraph=True,
+            backend="eager",
+        )
+        compiled(x)
+
+        # ceil_mode pooling (exercises sym_min path in pooling_output_shape_pad_lr)
+        x = torch.randn(2, 3, 7)
+        for dim in range(x.ndim):
+            torch._dynamo.decorators.mark_unbacked(x, dim)
+        torch._dynamo.reset()
+        compiled = torch.compile(
+            lambda x: torch.nn.functional.avg_pool1d(x, 2, ceil_mode=True),
+            fullgraph=True,
+            backend="eager",
+        )
+        compiled(x)
+
 
 instantiate_parametrized_tests(TestUnbacked)
 
