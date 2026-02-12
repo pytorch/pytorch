@@ -421,6 +421,7 @@ AOT_DISPATCH_TESTS = [
 FUNCTORCH_TESTS = [test for test in TESTS if test.startswith("functorch")]
 DYNAMO_CORE_TESTS = [test for test in TESTS if test.startswith("dynamo")]
 <<<<<<< HEAD
+<<<<<<< HEAD
 CPYTHON_TESTS = [test for test in TESTS if "cpython" in test]
 =======
 CPYTHON_TESTS = [
@@ -429,6 +430,8 @@ CPYTHON_TESTS = [
     if test.startswith(f"cpython/v{sys.version_info.major}_{sys.version_info.minor}")
 ]
 >>>>>>> e6de1122609 (Updated run_tests to include only current cpython version)
+=======
+>>>>>>> 204eaca3b37 (Revert "Updated run_tests to include only current cpython version")
 ONNX_TESTS = [test for test in TESTS if test.startswith("onnx")]
 QUANTIZATION_TESTS = [test for test in TESTS if test.startswith("test_quantization")]
 
@@ -1683,10 +1686,7 @@ def get_selected_tests(options) -> list[str]:
     # Filter to only run dynamo tests when --include-dynamo-core-tests option is specified
     if options.include_dynamo_core_tests:
         selected_tests = list(
-            filter(
-                lambda test_name: test_name in DYNAMO_CORE_TESTS + CPYTHON_TESTS,
-                selected_tests,
-            )
+            filter(lambda test_name: test_name in DYNAMO_CORE_TESTS, selected_tests)
         )
 
     # Filter to only run dynamo tests when --include-inductor-core-tests option is specified
@@ -1792,6 +1792,13 @@ def get_selected_tests(options) -> list[str]:
                 "functorch/test_memory_efficient_fusion",
                 "torch_np/numpy_tests/core/test_multiarray",
             ]
+        )
+
+    if sys.version_info[:2] < (3, 13) or sys.version_info[:2] >= (3, 14):
+        # Skip tests for older Python versions as they may use syntax or features
+        # not supported in those versions
+        options.exclude.extend(
+            [test for test in selected_tests if test.startswith("cpython/v3_13/")]
         )
 
     selected_tests = exclude_tests(options.exclude, selected_tests)
