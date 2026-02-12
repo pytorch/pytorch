@@ -710,7 +710,7 @@ class FSDPParamGroup:
     ) -> tuple[tuple[Any, ...], dict[str, Any]]:
         # Traceable FSDP2 relies on `root_post_backward_callback` to call each
         # `FSDPParamGroup.post_backward`
-        if (not torch._dynamo.config.skip_fsdp_hooks) or compiled_autograd_enabled():
+        if compiled_autograd_enabled():
             return args, kwargs
         if not torch.is_grad_enabled():
             return args, kwargs
