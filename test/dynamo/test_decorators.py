@@ -1446,7 +1446,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
         y = torch.tensor([1])
         x = torch.tensor(1)
 
-        self.assertEqual(fn(x, y), torch.compile(fn)(x, y))
+        self.assertEqual(fn(x, y), torch.compile(fn, backend="eager")(x, y))
 
     def test_justknobs_check(self):
         def fn(x, y):
@@ -1707,7 +1707,7 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
             g(torch.ones(3))
 
     def test_set_stance_force_backend(self):
-        @torch.compile
+        @torch.compile(backend="eager")
         def a(x):
             return x + 1
 
@@ -2278,8 +2278,8 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
             )
 
             # check the model is compilable
-            torch.compile(model)
-            torch.compile(other_model)
+            torch.compile(model, backend="eager")
+            torch.compile(other_model, backend="eager")
 
     def test_disable_class_and_instance_method(self):
         # Test that decorating a method at class definition time and then

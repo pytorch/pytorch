@@ -1913,7 +1913,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             f(x)
 
     def test_assert(self):
-        @torch.compile
+        @torch.compile(backend="eager")
         def fn1(x):
             assert x.shape != x.shape
 
@@ -3301,7 +3301,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
     def test_numpy_gt(self):
         x = np.arange(10)
 
-        @torch.compile
+        @torch.compile(backend="eager")
         def fn(y):
             return y >= 3
 
@@ -3312,7 +3312,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
     def test_numpy_min(self):
         x = np.arange(10)
 
-        @torch.compile
+        @torch.compile(backend="eager")
         def fn(y):
             return min(y, 3), min(y, y - 1)
 
@@ -3516,7 +3516,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
     # NB this may involve a graph break
     @torch._dynamo.config.patch(use_numpy_random_stream=True)
     def test_numpy_random_config_to_numpy(self):
-        @torch.compile
+        @torch.compile(backend="eager")
         def fn():
             return np.random.uniform(size=13)
 
@@ -4676,7 +4676,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             # Calling `inner` so Dynamo won't skip this frame.
             return inner(), inner
 
-        @torch.compile
+        @torch.compile(backend="eager")
         def root():
             return get_inner()
 
@@ -9500,14 +9500,14 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         def _result_type_dict(dtype):
             return {bool: torch.float32}[dtype]
 
-        @torch.compile
+        @torch.compile(backend="eager")
         def f():
             return torch.ones(3, dtype=_result_type_dict(bool))
 
         self.assertEqual(f(), torch.ones(3, dtype=torch.float32))
 
     def test_inline_dict_function_passed_as_arg(self):
-        @torch.compile
+        @torch.compile(backend="eager")
         def fn(d, x, y):
             if d[x] is torch.float32:
                 return y.cos()
@@ -10612,7 +10612,7 @@ def ___make_guard_fn():
 
             return inner
 
-        @torch.compile
+        @torch.compile(backend="eager")
         def start():
             # Obtain the `inner` function, which holds reference to `x`.
             inner = fn()
@@ -11801,7 +11801,7 @@ ShapeEnv not equal: field values don't match:
         )
 
     def test_default_dtype_change(self):
-        @torch.compile
+        @torch.compile(backend="eager")
         def foo():
             def inner(a, b, res_dtype):
                 print(a, b, res_dtype)
@@ -11840,7 +11840,7 @@ ShapeEnv not equal: field values don't match:
 
     @wrapDeterministicFlagAPITest
     def test_backward_deterministic_mode_mismatch_warning(self):
-        @torch.compile
+        @torch.compile(backend="aot_eager")
         def func(a, b):
             return a + b
 
