@@ -2748,8 +2748,10 @@ def _max_unpoolnd(
     # equal. If this condition is not satisfied, the operation is
     # non-deterministic as one of the different values in `self` 'wins'.
     utils.alert_not_deterministic(f"max_unpooling{dim}d_forward_out")
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
     output_shape = list(self.shape[:-dim]) + list(output_size)
-    if any(s == 0 for s in output_shape):
+    if any(guard_or_false(s == 0) for s in output_shape):
         return self.new_zeros(output_shape)
     nc = reduce(operator.mul, self.shape[:-dim])
     hw = reduce(operator.mul, output_size)
@@ -2791,8 +2793,11 @@ def max_unpool2d(
             f"but got a tensor with {self.ndim} dimensions."
         ),
     )
+    from torch.fx.experimental.symbolic_shapes import guard_or_true
+
     torch._check(
-        self.shape == indices.shape,
+        self.ndim == indices.ndim
+        and all(guard_or_true(a == b) for a, b in zip(self.shape, indices.shape)),
         lambda: (
             f"Expected shape of indices to be same as that of the input tensor ({self.shape}) "
             f"but got indices tensor with shape: {indices.shape}"
@@ -2843,8 +2848,11 @@ def max_unpool3d(
         len(padding) == 3,
         lambda: f"There should be exactly three elements (depth, height, width) in padding, but got: {len(padding)} elements.",
     )
+    from torch.fx.experimental.symbolic_shapes import guard_or_true
+
     torch._check(
-        input.shape == indices.shape,
+        input.ndim == indices.ndim
+        and all(guard_or_true(a == b) for a, b in zip(input.shape, indices.shape)),
         lambda: (
             f"Expected shape of indices to be same as that of the input tensor ({input.shape}) "
             f"but got indices tensor with shape: {indices.shape}"

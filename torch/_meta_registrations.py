@@ -4593,13 +4593,10 @@ def meta_bmm_dtype(self, mat2, out_dtype):
 
 
 def div_rtn(x, y):
-    q = x // y
-    r = x % y
-    # WARNING: explicit bool conversion here is necessary;
-    # would be fixed by SymBool
-    if r != 0 and (bool(r < 0) != bool(y < 0)):
-        q -= 1
-    return q
+    # Python's // is already floor division (rounds toward negative infinity),
+    # so no adjustment needed. The original C++ correction was only necessary
+    # for C++'s truncation-toward-zero integer division.
+    return x // y
 
 
 def pooling_output_shape_pad_lr(
@@ -4624,8 +4621,9 @@ def pooling_output_shape_pad_lr(
         + 1
     )
     if ceil_mode:
-        if (outputSize - 1) * stride >= inputSize + pad_l:
-            outputSize -= 1
+        # Ensure last pooling window starts inside the input.
+        # Use sym_min to avoid a data-dependent guard on unbacked symints.
+        outputSize = torch.sym_min(outputSize, (inputSize + pad_l - 1) // stride + 1)
     return outputSize
 
 
@@ -4677,18 +4675,20 @@ def pool2d_shape_check(
         lambda: f"dilation should be greater than zero, but got dilationH: {dilationH}, dilationW: {dilationW}",
     )
 
-    valid_dims = input.size(1) != 0 and input.size(2) != 0
+    from torch.fx.experimental.symbolic_shapes import guard_or_true
+
+    valid_dims = guard_or_true(input.size(1) != 0) and guard_or_true(input.size(2) != 0)
 
     if memory_format == torch.channels_last:
         torch._check(
-            ndim == 4 and valid_dims and input.size(3) != 0,
+            ndim == 4 and valid_dims and guard_or_true(input.size(3) != 0),
             lambda: "Expected 4D (batch mode) tensor expected for input with channels_last layout"
             f" with optional 0 dim batch size for input, but got: {input.size()}",
         )
     else:
         torch._check(
-            (ndim == 3 and input.size(0) != 0 and valid_dims)
-            or (ndim == 4 and valid_dims and input.size(3) != 0),
+            (ndim == 3 and guard_or_true(input.size(0) != 0) and valid_dims)
+            or (ndim == 4 and valid_dims and guard_or_true(input.size(3) != 0)),
             lambda: f"Expected 3D or 4D (batch mode) tensor with optional 0 dim batch size for input, but got: {input.size()}",
         )
 
@@ -4699,7 +4699,7 @@ def pool2d_shape_check(
     )
 
     torch._check(
-        outputWidth >= 1 and outputHeight >= 1,
+        guard_or_true(outputWidth >= 1) and guard_or_true(outputHeight >= 1),
         lambda: f"Given input size: ({nInputPlane}x{inputHeight}x{inputWidth}). "
         f"Calculated output size: ({nOutputPlane}x{outputHeight}x{outputWidth}). "
         "Output size is too small",
@@ -4730,6 +4730,8 @@ def pool3d_shape_check(
     fn_name: str,
     check_input_size: bool = False,
 ):
+    from torch.fx.experimental.symbolic_shapes import guard_or_true
+
     ndim = input.ndim
 
     torch._check(
@@ -4773,7 +4775,9 @@ def pool3d_shape_check(
 
     if check_input_size:  # AveragePool3d
         torch._check(
-            itime >= kT and iheight >= kH and iwidth >= kW,
+            guard_or_true(itime >= kT)
+            and guard_or_true(iheight >= kH)
+            and guard_or_true(iwidth >= kW),
             lambda: (
                 f"input image (T: {itime} H: {iheight} W: {iwidth}) smaller than "
                 f"kernel size (kT: {kT} kH: {kH} kW: {kW})"
@@ -4789,7 +4793,9 @@ def pool3d_shape_check(
     )
 
     torch._check(
-        otime >= 1 and owidth >= 1 and oheight >= 1,
+        guard_or_true(otime >= 1)
+        and guard_or_true(owidth >= 1)
+        and guard_or_true(oheight >= 1),
         lambda: (
             f"Given input size: ({nslices}x{itime}x{iheight}x{iwidth}). "
             f"Calculated output size: ({nslices}x{otime}x{oheight}x{owidth}). "
