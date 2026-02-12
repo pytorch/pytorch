@@ -7718,7 +7718,9 @@ class TestLearnableBiases(InductorTestCase):
                             self.assertEqual(choice["Hkv"], expected_Hkv)
                             self.assertEqual(choice["seq_len_q"], expected_seq_len_q)
                             self.assertEqual(choice["seq_len_kv"], expected_seq_len_kv)
-                            self.assertEqual(choice["qk_head_dim"], expected_qk_head_dim)
+                            self.assertEqual(
+                                choice["qk_head_dim"], expected_qk_head_dim
+                            )
                             self.assertEqual(choice["v_head_dim"], expected_v_head_dim)
 
                             if kernel_type == "forward":
