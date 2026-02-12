@@ -120,11 +120,13 @@ void magmaCholeskySolveBatched(
     magma_uplo_t uplo, magma_int_t n, magma_int_t nrhs, scalar_t** dA_array, magma_int_t ldda,
     scalar_t** dB_array, magma_int_t lddb, magma_int_t& info, magma_int_t batchsize, const MAGMAQueue& magma_queue);
 
+#if defined(USE_ROCM)
 template<class scalar_t>
 void magmaTriangularSolveBatched(
     magma_side_t side, magma_uplo_t uplo, magma_trans_t trans, magma_diag_t diag, magma_int_t m, magma_int_t n,
     scalar_t** dA_array, magma_int_t ldda, scalar_t** dB_array, magma_int_t lddb, magma_int_t batchsize,
     const MAGMAQueue& magma_queue);
+#endif // defined(USE_ROCM)
 
 template<class scalar_t>
 inline magma_int_t magmaGeqrfOptimalBlocksize(magma_int_t m, magma_int_t n);
@@ -434,6 +436,7 @@ void magmaCholeskySolveBatched<c10::complex<float>>(
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
+#if defined(USE_ROCM)
 template<>
 void magmaTriangularSolveBatched<double>(
     magma_side_t side, magma_uplo_t uplo, magma_trans_t trans, magma_diag_t diag, magma_int_t m, magma_int_t n,
@@ -475,6 +478,7 @@ void magmaTriangularSolveBatched<c10::complex<float>>(
     reinterpret_cast<magmaFloatComplex**>(dB_array), lddb, batchsize, magma_queue.get_queue());
   AT_CUDA_CHECK(cudaGetLastError());
 }
+#endif // defined(USE_ROCM)
 
 template<>
 inline magma_int_t magmaGeqrfOptimalBlocksize<double>(magma_int_t m, magma_int_t n) {
@@ -1338,6 +1342,7 @@ REGISTER_CUDA_DISPATCH(lu_factor_stub, &lu_factor)
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triangular_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+#if defined(USE_ROCM)
 template <typename scalar_t>
 static void apply_triangular_solve_batched_magma(const Tensor& A, const Tensor& b, bool left, bool upper, TransposeType transpose, bool unitriangular) {
 #if !AT_MAGMA_ENABLED()
@@ -1409,13 +1414,14 @@ void triangular_solve_batched_magma(const Tensor& A, const Tensor& B, bool left,
     apply_triangular_solve_batched_magma<scalar_t>(A, B, left, upper, transpose, unitriangular);
   });
 }
+#endif // defined(USE_ROCM)
 
 void triangular_solve_kernel(const Tensor& A, const Tensor& B, bool left, bool upper, TransposeType transpose, bool unitriangular) {
   // For batches smaller than 8 and matrix sizes larger than 64x64 cuBLAS forloop is faster than batched version
   if (batchCount(A) <= 8 && A.size(-1) >= 64) {
     triangular_solve_cublas(A, B, left, upper, transpose, unitriangular);
   } else {
-#if !AT_MAGMA_ENABLED()
+#if !AT_MAGMA_ENABLED() || !defined(USE_ROCM)
     triangular_solve_batched_cublas(A, B, left, upper, transpose, unitriangular);
 #else
     // cuBLAS batched is faster than MAGMA batched up until 512x512, after that MAGMA is faster
@@ -1424,7 +1430,7 @@ void triangular_solve_kernel(const Tensor& A, const Tensor& B, bool left, bool u
     } else {
       triangular_solve_batched_magma(A, B, left, upper, transpose, unitriangular);
     }
-#endif // AT_MAGMA_ENABLED()
+#endif // AT_MAGMA_ENABLED() || !defined(USE_ROCM)
   }
 }
 
