@@ -285,7 +285,7 @@ class ActivationCheckpointingViaTagsTests(
                         _log_export_usage=False,
                     )
                     # NOTE: this is necessary for rng to be added to the exported graph
-                    return torch.compile(gm, fullgraph=False)(*runtime_args)
+                    return torch.compile(gm, fullgraph=False, backend="eager")(*runtime_args)
 
                 return runtime_wrapper
 
@@ -1714,7 +1714,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
             torch.manual_seed(0)
             ref = gn(*args)
 
-            opt_gn = torch.compile(gn)
+            opt_gn = torch.compile(gn, backend="eager")
             torch.manual_seed(0)
             res = opt_gn(*args)
             self.assertEqual(ref, res)
@@ -1737,7 +1737,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
             return torch.utils.checkpoint.checkpoint(mod, x, use_reentrant=True)
 
         x = torch.randn(4, 4).to(device)
-        opt_fn = torch.compile(fn, fullgraph=True)
+        opt_fn = torch.compile(fn, fullgraph=True, backend="eager")
         with self.assertRaisesRegex(
             torch._dynamo.exc.Unsupported, "User-inserted graph break"
         ):
@@ -2122,7 +2122,7 @@ class GraphModule(torch.nn.Module):
                 x=input_eager.x.detach().clone().requires_grad_(True)
             )
             torch.manual_seed(0)
-            compiled_fn = torch.compile(checkpointed_forward, fullgraph=True)
+            compiled_fn = torch.compile(checkpointed_forward, fullgraph=True, backend="eager")
             output_compiled = compiled_fn(input_compiled)
             output_compiled.y.sum().backward()
 

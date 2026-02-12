@@ -20,7 +20,7 @@ class TestBuffersOverride(torch._dynamo.test_case.TestCase):
                 return self.A * torch.zeros(1, 1)
 
         model = SomeModel().to(torch.device("cpu"))
-        compiled_model = torch.compile(model)
+        compiled_model = torch.compile(model, backend="eager")
         self.assertEqual(compiled_model.A, torch.ones(3, 3))
         compiled_model()
 
@@ -38,7 +38,7 @@ class TestBuffersOverride(torch._dynamo.test_case.TestCase):
                 return self.B * torch.zeros(1, 1)
 
         model = SomeModel().to(torch.device("cpu"))
-        compiled_model = torch.compile(model)
+        compiled_model = torch.compile(model, backend="eager")
         self.assertEqual(compiled_model.B, torch.ones(3, 3))
         compiled_model()
 
