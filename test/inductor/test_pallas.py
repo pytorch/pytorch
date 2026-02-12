@@ -104,34 +104,24 @@ def make_pallas(cls, _debug_cpu_to_tpu_pallas=False):
     return test_class
 
 
-def skip_if_tpu(fn):
-    @functools.wraps(fn)
-    def wrapper(self, *args, **kwargs):
-        if config._debug_cpu_to_tpu_pallas:
-            self.skipTest("Not yet working on TPU")
-        fn(self, *args, **kwargs)
+def _skip_if(condition_fn, reason):
+    def decorator(fn):
+        @functools.wraps(fn)
+        def wrapper(self, *args, **kwargs):
+            if condition_fn(self):
+                self.skipTest(reason)
+            fn(self, *args, **kwargs)
 
-    return wrapper
+        return wrapper
 
-
-def skip_if_cpu(fn):
-    @functools.wraps(fn)
-    def wrapper(self, *args, **kwargs):
-        if self.DEVICE == "cpu":
-            self.skipTest("Not yet working on CPU")
-        fn(self, *args, **kwargs)
-
-    return wrapper
+    return decorator
 
 
-def skip_if_cuda(fn):
-    @functools.wraps(fn)
-    def wrapper(self, *args, **kwargs):
-        if self.DEVICE == "cuda":
-            self.skipTest("Not yet working on GPU")
-        fn(self, *args, **kwargs)
-
-    return wrapper
+skip_if_tpu = _skip_if(
+    lambda self: config._debug_cpu_to_tpu_pallas, "Not yet working on TPU"
+)
+skip_if_cpu = _skip_if(lambda self: self.DEVICE == "cpu", "Not yet working on CPU")
+skip_if_cuda = _skip_if(lambda self: self.DEVICE == "cuda", "Not yet working on GPU")
 
 
 class PallasTestsMixin:
@@ -1037,7 +1027,6 @@ class PallasTestsMixin:
         self.assertEqual(result, expected)
 
     @skip_if_tpu
-    @skip_if_tpu
     def test_prod_reduction(self):
         """Test prod reduction."""
         if self.DEVICE == "cuda":
@@ -1119,7 +1108,6 @@ class PallasTestsMixin:
         expected = fn(x, weight, bias)
         self.assertEqual(result, expected)
 
-    @skip_if_cpu
     @skip_if_cuda
     @skip_if_tpu
     def test_rope(self):
@@ -1142,6 +1130,50 @@ class PallasTestsMixin:
         sin = torch.randn(32, 32, device=self.DEVICE)
         result = compiled(x, cos, sin)
         expected = fn(x, cos, sin)
+        self.assertEqual(result, expected)
+
+    @skip_if_cuda
+    @skip_if_tpu
+    def test_rope_interleaved(self):
+        """Test Rotary Position Embedding with interleaved halves.
+
+        Uses even/odd stride-2 slicing instead of contiguous halves, then
+        reassembles via stack + reshape. Exercises strided input access.
+        """
+
+        def fn(x, cos, sin):
+            x1 = x[..., 0::2]
+            x2 = x[..., 1::2]
+            o1 = x1 * cos - x2 * sin
+            o2 = x2 * cos + x1 * sin
+            return torch.stack([o1, o2], dim=-1).reshape_as(x)
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(32, 64, device=self.DEVICE)
+        cos = torch.randn(32, 32, device=self.DEVICE)
+        sin = torch.randn(32, 32, device=self.DEVICE)
+        result = compiled(x, cos, sin)
+        expected = fn(x, cos, sin)
+        self.assertEqual(result, expected)
+
+    @skip_if_cuda
+    @skip_if_tpu
+    def test_chained_stride_slice(self):
+        """Test that chained stride slices compose into a single strided access.
+
+        x[:, 1::2][:, 2::3][:, 3::4] should compose to x[:, 23::24].
+        """
+
+        def fn(x):
+            return x[:, 1::2][:, 2::3][:, 3::4] + 1
+
+        compiled = self._compile(fn)
+
+        # last dim = 480 which is divisible by 24
+        x = torch.randn(4, 480, device=self.DEVICE)
+        result = compiled(x)
+        expected = fn(x)
         self.assertEqual(result, expected)
 
     @skip_if_tpu
