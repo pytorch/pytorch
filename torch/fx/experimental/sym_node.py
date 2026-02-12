@@ -48,6 +48,13 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 sym_node_log = torch._logging.getArtifactLogger(__name__, "sym_node")
 
+# Sentinel value to indicate "don't compute hint" vs actual None
+# When passed as hint to SymNode, it means we already know hint is unavailable
+# and should not waste time calling compute_hint()
+_NO_HINT: object = object()
+# Type alias for hint values (including the sentinel)
+HintType = bool | float | int | None
+
 
 __all__ = ["SymNode", "method_to_operator", "magic_methods", "DynamicInt"]
 
@@ -140,18 +147,21 @@ class SymNode:
                 hint = self.pytype(hint) if not isinstance(hint, SymTypes) else hint
             return hint
 
-        if hint is not None:
-            assert type(hint) is pytype or type(hint) is _to_symtype(pytype), (
-                "Cannot create SymNode of type "
-                f"{pytype} with incompatible hint of type {type(hint)}"
-            )
+        if hint is _NO_HINT:
+            # Caller explicitly indicates hint is unavailable, don't compute
+            hint = None
+        elif hint is not None:
+            if not (type(hint) is pytype or type(hint) is _to_symtype(pytype)):
+                raise AssertionError(
+                    "Cannot create SymNode of type "
+                    f"{pytype} with incompatible hint of type {type(hint)}"
+                )
             if self.shape_env and self.shape_env._translation_validation_enabled:
                 # This is technically not TV, but this assert is expensive so
                 # let's only do it when we're already doing expensive things
                 computed_hint = compute_hint()
-                assert hint == computed_hint, (
-                    f"{hint} != {computed_hint} (for {self.expr})"
-                )
+                if hint != computed_hint:
+                    raise AssertionError(f"{hint} != {computed_hint} (for {self.expr})")
         else:
             hint = compute_hint()
         self._hint = hint
@@ -264,7 +274,8 @@ class SymNode:
         )
 
     def wrap_int(self, num):
-        assert type(num) is int
+        if type(num) is not int:
+            raise AssertionError(f"Expected int, got {type(num)}")
         import sympy
 
         return SymNode(
@@ -272,7 +283,8 @@ class SymNode:
         )
 
     def wrap_float(self, num):
-        assert type(num) is float
+        if type(num) is not float:
+            raise AssertionError(f"Expected float, got {type(num)}")
         import sympy
 
         return SymNode(
@@ -280,7 +292,8 @@ class SymNode:
         )
 
     def wrap_bool(self, num):
-        assert type(num) is bool
+        if type(num) is not bool:
+            raise AssertionError(f"Expected bool, got {type(num)}")
         import sympy
 
         return SymNode(
@@ -568,7 +581,8 @@ class SymNode:
     def statically_known_true(self, file, line):
         from torch.fx.experimental.symbolic_shapes import statically_known_true
 
-        assert self.is_bool()
+        if not self.is_bool():
+            raise AssertionError("Expected bool type")
         return statically_known_true(SymBool(self))
 
     def guard_size_oblivious(self, file, line):
@@ -594,13 +608,15 @@ class SymNode:
     def guard_or_false(self, file, line):
         from torch.fx.experimental.symbolic_shapes import guard_or_false
 
-        assert self.is_bool()
+        if not self.is_bool():
+            raise AssertionError("Expected bool type")
         return guard_or_false(SymBool(self))
 
     def guard_or_true(self, file, line):
         from torch.fx.experimental.symbolic_shapes import guard_or_true
 
-        assert self.is_bool()
+        if not self.is_bool():
+            raise AssertionError("Expected bool type")
         return guard_or_true(SymBool(self))
 
     def bool_(self):
@@ -636,7 +652,8 @@ class DynamicInt(_DynamicScalar, int):
     """
 
     def __new__(cls, val):
-        assert isinstance(val, int)
+        if not isinstance(val, int):
+            raise AssertionError(f"Expected int, got {type(val)}")
         obj = super().__new__(cls, int(val))
         return obj
 
@@ -896,7 +913,8 @@ def _optimized_add(
     from sympy.core.basic import _args_sortkey as sortkey
 
     def make_optimized(ordered_args):
-        assert ordered_args is not None
+        if ordered_args is None:
+            raise AssertionError("ordered_args is None")
         result = sympy.Add(*ordered_args, evaluate=False)
         return (True, result)
 
@@ -1371,7 +1389,7 @@ def _make_node_magic(method, func):
 
         op = method_to_operator(method)
 
-        out_hint = None
+        out_hint: object = _NO_HINT
         if self.hint is not None and other.hint is not None:
             out_hint = op(self.hint, other.hint)
 
@@ -1379,7 +1397,8 @@ def _make_node_magic(method, func):
             return to_node(
                 self, handle_sym_dispatch(op, (wrap_node(self), wrap_node(other)), {})
             )
-        assert isinstance(other, SymNode)
+        if not isinstance(other, SymNode):
+            raise AssertionError(f"Expected SymNode, got {type(other)}")
         optimized_summation = False
         try:
             if method == "mod":
@@ -1432,10 +1451,11 @@ def _make_node_magic(method, func):
 
         if (
             pytype is not None
+            and out_hint is not _NO_HINT
             and out_hint is not None
             and not isinstance(out_hint, SymTypes)
         ):
-            out_hint = pytype(out_hint)
+            out_hint = pytype(out_hint)  # type: ignore[arg-type]
 
         # Create a FX node that corresponds to the operation being applied to
         # this node.
@@ -1474,7 +1494,7 @@ def _make_node_magic(method, func):
             log.warning("failed to eval %s(%s)", method, expr)
             raise
         sym_node_log.debug("%s %s -> %s", func, expr, out)
-        out_hint = None
+        out_hint: object = _NO_HINT
         if self.hint is not None:
             out_hint = op(self.hint)
         pytype: type
@@ -1488,7 +1508,7 @@ def _make_node_magic(method, func):
             pytype = self.pytype
 
         fx_node, _ = self.shape_env._create_fx_call_function(op, (self.fx_node,))
-        return SymNode(out, self.shape_env, pytype, out_hint, fx_node=fx_node)
+        return SymNode(out, self.shape_env, pytype, out_hint, fx_node=fx_node)  # type: ignore[arg-type]
 
     if method in unary_methods:
         setattr(SymNode, f"_{method_attr}", unary_magic_impl)
@@ -1854,11 +1874,14 @@ def _make_user_magic(method, user_type):
             else_node = to_node(pred_node, else_val)
             if then_node is NotImplemented or else_node is NotImplemented:
                 return NotImplemented
-            assert (
+            if not (
                 isinstance(then_node, SymNode)
                 and isinstance(else_node, SymNode)
                 and then_node.pytype == else_node.pytype
-            )
+            ):
+                raise AssertionError(
+                    "then_node and else_node must be SymNodes with same pytype"
+                )
             ret = wrap_node(getattr(pred.node, method_attr)(then_node, else_node))
             return get_constant(ret) if ret.node.is_constant() else ret
 

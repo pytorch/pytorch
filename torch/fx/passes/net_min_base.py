@@ -115,7 +115,8 @@ class _MinimizerBase:
         ] = None,
         exclusion_fn: Optional[Callable[[NodeList, int, int], None]] = None,
     ):
-        assert isinstance(module, torch.fx.GraphModule)
+        if not isinstance(module, torch.fx.GraphModule):
+            raise AssertionError(f"Expected GraphModule, got {type(module)}")
 
         self.module = module
         self.sample_input = sample_input
@@ -149,7 +150,11 @@ class _MinimizerBase:
         placeholders = [
             node.name for node in self.module.graph.nodes if node.op == "placeholder"
         ]
-        assert len(placeholders) == len(self.sample_input)
+        if len(placeholders) != len(self.sample_input):
+            raise AssertionError(
+                f"Placeholder count ({len(placeholders)}) does not match "
+                f"sample_input count ({len(self.sample_input)})"
+            )
 
         # Store sample_input
         for i, name in enumerate(placeholders):
@@ -775,9 +780,8 @@ class _MinimizerBase:
             node_name = node.name
             if node_name is not None and isinstance(node_name, tuple):
                 node_name = node_name[0]
-            assert node_name is not None and isinstance(node_name, str), (
-                f"minimize: node_name: {node_name}"
-            )
+            if node_name is None or not isinstance(node_name, str):
+                raise AssertionError(f"minimize: node_name: {node_name}")
 
             report.append(f"Add node: {node_name}")
 

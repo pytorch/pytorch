@@ -1,5 +1,5 @@
 diff --git a/test/dynamo/cpython/3_13/test_userdict.py b/test/dynamo/cpython/3_13/test_userdict.py
-index 61e79f553e8..75b789633ed 100644
+index 61e79f553e8..5b6074af2f0 100644
 --- a/test/dynamo/cpython/3_13/test_userdict.py
 +++ b/test/dynamo/cpython/3_13/test_userdict.py
 @@ -1,3 +1,57 @@
@@ -60,7 +60,19 @@ index 61e79f553e8..75b789633ed 100644
  # Check every path through every method of UserDict
  
  from test import mapping_tests, support
-@@ -215,10 +269,10 @@ class UserDictTest(mapping_tests.TestHashMappingProtocol):
+@@ -152,8 +206,9 @@ class UserDictTest(mapping_tests.TestHashMappingProtocol):
+         self.assertEqual(list(collections.UserDict(dict={'a': 42}).items()),
+                          [('dict', {'a': 42})])
+         self.assertRaises(TypeError, collections.UserDict, 42)
+-        self.assertRaises(TypeError, collections.UserDict, (), ())
+-        self.assertRaises(TypeError, collections.UserDict.__init__)
++        with torch._dynamo.error_on_graph_break(False):
++            self.assertRaises(TypeError, collections.UserDict, (), ())
++            self.assertRaises(TypeError, collections.UserDict.__init__)
+ 
+     def test_update(self):
+         for kw in 'self', 'dict', 'other', 'iterable':
+@@ -215,10 +270,10 @@ class UserDictTest(mapping_tests.TestHashMappingProtocol):
  
      # Decorate existing test with recursion limit, because
      # the test is for C structure, but `UserDict` is a Python structure.

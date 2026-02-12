@@ -504,6 +504,7 @@ libtorch_distributed_base_sources = [
     "torch/csrc/distributed/c10d/Functional.cpp",
     "torch/csrc/distributed/c10d/GlooDeviceFactory.cpp",
     "torch/csrc/distributed/c10d/GroupRegistry.cpp",
+    "torch/csrc/distributed/c10d/NanCheck.cpp",
     "torch/csrc/distributed/c10d/Ops.cpp",
     "torch/csrc/distributed/c10d/ParamCommsUtils.cpp",
     "torch/csrc/distributed/c10d/PrefixStore.cpp",
@@ -886,6 +887,7 @@ libtorch_python_xpu_sources = [
     "torch/csrc/xpu/XPUPluggableAllocator.cpp",
     "torch/csrc/xpu/memory_snapshot.cpp",
     "torch/csrc/xpu/MemPool.cpp",
+    "torch/csrc/xpu/Graph.cpp",
     "torch/csrc/inductor/aoti_runner/model_container_runner_xpu.cpp",
     "torch/csrc/inductor/aoti_torch/shim_xpu.cpp",
 ]
@@ -956,6 +958,7 @@ libtorch_python_core_sources = [
     "torch/csrc/inductor/aoti_eager/kernel_meta_info.cpp",
     "torch/csrc/inductor/resize_storage_bytes.cpp",
     "torch/csrc/inductor/static_launcher/cuda.cpp",
+    "torch/csrc/inductor/static_launcher/xpu.cpp",
     "torch/csrc/jit/backends/backend_init.cpp",
     "torch/csrc/jit/python/init.cpp",
     "torch/csrc/jit/passes/onnx.cpp",

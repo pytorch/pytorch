@@ -271,6 +271,27 @@ CUDAStream CUDAStreamForId(DeviceIndex device_index, StreamId stream_id) {
 
 } // anonymous namespace
 
+bool CUDAStream::query() const {
+  DeviceGuard guard{stream_.device()};
+  cudaError_t err = C10_CUDA_ERROR_HANDLED(cudaStreamQuery(stream()));
+
+  if (err == cudaSuccess) {
+    return true;
+  } else if (err != cudaErrorNotReady) {
+    C10_CUDA_CHECK(err);
+  } else {
+    // ignore and clear the error if not ready
+    (void)cudaGetLastError();
+  }
+
+  return false;
+}
+
+void CUDAStream::synchronize() const {
+  DeviceGuard guard{stream_.device()};
+  c10::cuda::stream_synchronize(stream());
+}
+
 // See Note [StreamId assignment]
 cudaStream_t CUDAStream::stream() const {
   c10::DeviceIndex device_index = stream_.device_index();
