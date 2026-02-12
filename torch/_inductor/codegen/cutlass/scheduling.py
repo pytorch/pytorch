@@ -36,13 +36,13 @@ class WhyNoFuseNames(WhyNoFuse):
         self.name2 = name2
 
 
-class CUDACPPScheduling(BaseScheduling):
+class CUTLASSScheduling(BaseScheduling):
     """
-    Partial Scheduling implementation for CUDA C++ Kernels.
+    Partial Scheduling implementation for cutlass C++ Kernels.
     This class is intended to be used in combination with TritonScheduling,
     and delegated to by CUDACombinedScheduling.
 
-    It handles fusion decisions and CUDA C++ specific template code generation.
+    It handles fusion decisions and cutlass C++ specific template code generation.
     """
 
     @classmethod
@@ -53,25 +53,25 @@ class CUDACPPScheduling(BaseScheduling):
         return tuple(V.graph.sizevars.simplify(sympy_product(s)) for s in sizes)
 
     @staticmethod
-    def is_cuda_cpp_template(node: BaseSchedulerNode) -> bool:
+    def is_cutlass_template(node: BaseSchedulerNode) -> bool:
         return isinstance(node, SchedulerNode) and isinstance(
             node.node, CUTLASSTemplateBuffer
         )
 
-    def is_cuda_cpp_fused_template(self, node: BaseSchedulerNode) -> bool:
-        return isinstance(node, FusedSchedulerNode) and self.is_cuda_cpp_template(node)
+    def is_cutlass_fused_template(self, node: BaseSchedulerNode) -> bool:
+        return isinstance(node, FusedSchedulerNode) and self.is_cutlass_template(node)
 
     def can_fuse_vertical(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
-        if self.is_cuda_cpp_template(node1) and isinstance(node2, BaseSchedulerNode):
+        if self.is_cutlass_template(node1) and isinstance(node2, BaseSchedulerNode):
             assert node1.node, "node1.node should not be None"
             return self._can_fuse_epilogue_impl(
                 cast(CUTLASSTemplateBuffer, node1.node),
                 [],
                 node2,  # type: ignore[arg-type]
             )
-        elif self.is_cuda_cpp_fused_template(node1) and isinstance(
+        elif self.is_cutlass_fused_template(node1) and isinstance(
             node2, BaseSchedulerNode
         ):
             assert node1.node, "node1.node should not be None"
@@ -130,11 +130,11 @@ class CUDACPPScheduling(BaseScheduling):
         prologue_nodes: Sequence[BaseSchedulerNode],
     ):
         """
-        Codegen a CUDA template, possibly with fused epilogues
+        Codegen a cutlass template, possibly with fused epilogues
         """
-        counters["inductor"]["cuda_epilogue_fusion_counter"] += len(epilogue_nodes)
-        assert self.is_cuda_cpp_template(template_node), (
-            "Template node passed to CUDAScheduler.codegen_template must be a SchedulerNode that wraps a CUTLASSTemplateBuffer"
+        counters["inductor"]["cutlass_epilogue_fusion_counter"] += len(epilogue_nodes)
+        assert self.is_cutlass_template(template_node), (
+            "Template node passed to CUTLASSScheduling.codegen_template must be a SchedulerNode that wraps a CUTLASSTemplateBuffer"
         )
         template_node = cast(SchedulerNode, template_node)
         _, (_numel, rnumel) = template_node.group
@@ -197,7 +197,7 @@ class CUDACPPScheduling(BaseScheduling):
 
     def _can_fuse_epilogue_impl(
         self,
-        cuda_template_buffer: CUTLASSTemplateBuffer,
+        cutlass_template_buffer: CUTLASSTemplateBuffer,
         existing_epilogue_nodes: list[BaseSchedulerNode],
         node_to_fuse: BaseSchedulerNode,
     ) -> bool:
@@ -206,18 +206,20 @@ class CUDACPPScheduling(BaseScheduling):
         support fusion with Pointwise operations, wrapped in (named) ComputedBuffer nodes.
 
         Args:
-            cuda_template_buffer : A CUTLASSTemplateBuffer object representing the CUDA template and it's result buffer
+            cutlass_template_buffer : A CUTLASSTemplateBuffer object representing the CUTLASS template and it's result buffer
             existing_epilogue_nodes : List[SchedulerNode]: The list of already fused epilogue nodes.
             node_to_fuse: The SchedulerNode node to be checked if it can be fused with the epilogue.
         Returns:
         - bool: True if the given node can be fused with the epilogue, False otherwise.
 
         """
-        why = WhyNoFuseNames(cuda_template_buffer.get_name(), node_to_fuse.get_name())
+        why = WhyNoFuseNames(
+            cutlass_template_buffer.get_name(), node_to_fuse.get_name()
+        )
 
         scheduler_nodes_to_fuse = node_to_fuse.get_nodes()
 
-        assert isinstance(cuda_template_buffer, CUTLASSTemplateBuffer)
+        assert isinstance(cutlass_template_buffer, CUTLASSTemplateBuffer)
 
         # Checks on constituent nodes
         for s_node in scheduler_nodes_to_fuse:
@@ -235,18 +237,18 @@ class CUDACPPScheduling(BaseScheduling):
 
             name = node.get_computed_buffer_name()  # type: ignore[attr-defined]
             # dtype can differ, and strides can differ as long as they are broadcastable
-            if node.get_size() != cuda_template_buffer.get_size():
+            if node.get_size() != cutlass_template_buffer.get_size():
                 why(
-                    f"{name}'s size: {node.get_size()} differs from {cuda_template_buffer.get_name()}'s \
-size: {cuda_template_buffer.get_size()}"
+                    f"{name}'s size: {node.get_size()} differs from {cutlass_template_buffer.get_name()}'s \
+size: {cutlass_template_buffer.get_size()}"
                 )
                 return False
 
         assert len(
             existing_epilogue_nodes
-        ) or cuda_template_buffer.get_name() in OrderedSet(
+        ) or cutlass_template_buffer.get_name() in OrderedSet(
             [rd.name for rd in node_to_fuse.read_writes.reads]
-        ), "First epilogue node must read from cuda template buffer"
+        ), "First epilogue node must read from cutlass template buffer"
 
         if node_to_fuse.has_aliasing_or_mutation():
             why(f"{node_to_fuse.get_name()} has aliasing or mutation")
@@ -262,7 +264,7 @@ size: {cuda_template_buffer.get_size()}"
         ):
             why("cutlass epilogue fusion is not enabled")
             return False
-        elif not cuda_template_buffer.supports_epilogue_fusion:
+        elif not cutlass_template_buffer.supports_epilogue_fusion:
             why("epilogue fusion is only supported for TMA-enabled gemm ops")
             return False
 
@@ -270,7 +272,7 @@ size: {cuda_template_buffer.get_size()}"
             from torch._inductor.codegen.cutlass.python_evt import CutlassEVTCodegen
 
             CutlassEVTCodegen.ir_to_evt_python_code(
-                cuda_template_buffer.get_name(),
+                cutlass_template_buffer.get_name(),
                 existing_epilogue_nodes + list(node_to_fuse.get_nodes()),
                 OrderedSet(),
             )
@@ -280,13 +282,13 @@ size: {cuda_template_buffer.get_size()}"
             if not_implemented_op.startswith("_op_"):
                 not_implemented_op = not_implemented_op[4:]
                 why(
-                    f"Cannot fuse epilogue node {node_to_fuse} into {cuda_template_buffer.name}, \
+                    f"Cannot fuse epilogue node {node_to_fuse} into {cutlass_template_buffer.name}, \
 likely due to unsupported operation: {not_implemented_op}"  # noqa: G004, B950
                 )
                 return False
             else:  # Likely due to unsupported dtype.
                 why(
-                    f"Cannot fuse epilogue node {node_to_fuse} into {cuda_template_buffer.name}. \
+                    f"Cannot fuse epilogue node {node_to_fuse} into {cutlass_template_buffer.name}. \
 Reason: {not_implemented_op}"  # noqa: G004, B950
                 )
                 return False
