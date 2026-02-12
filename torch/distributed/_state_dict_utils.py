@@ -419,7 +419,7 @@ def _create_cpu_state_dict(
         # sometimes, a tensor might have non-zero size and 0 numel. In this case, pinning memory will fail
         # so we take a best guess at how to replicate the tensor below to maintain symmetry in the returned
         # state dict.
-        if obj.numel() == 0 or obj.data_ptr() == 0:
+        if obj.numel() == 0 or obj.const_data_ptr() == 0:
             t = torch.zeros_like(obj, device="cpu")
             if share_memory:
                 t = t.share_memory_()

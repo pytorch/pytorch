@@ -203,6 +203,18 @@ static PyObject * THPVariable_data_ptr(PyObject* self_, PyObject* args)
 }
 
 // implemented on the python object to avoid dispatch overhead
+static PyObject * THPVariable_const_data_ptr(PyObject* self_, PyObject* args)
+{
+  HANDLE_TH_ERRORS
+  if (check_has_torch_function(self_)) {
+    return handle_torch_function(self_, "const_data_ptr", args);
+  }
+  auto& self = THPVariable_Unpack(self_);
+  return wrap(const_cast<void*>(self.const_data_ptr()));
+  END_HANDLE_TH_ERRORS
+}
+
+// implemented on the python object to avoid dispatch overhead
 static PyObject * THPVariable_storage_offset(PyObject* self_, PyObject* args)
 {
   HANDLE_TH_ERRORS
@@ -1298,6 +1310,7 @@ PyMethodDef variable_methods[] = {
   {"xpu", castPyCFunctionWithKeywords(THPVariable_xpu), METH_VARARGS | METH_KEYWORDS, nullptr},
   {"ipu", castPyCFunctionWithKeywords(THPVariable_ipu), METH_VARARGS | METH_KEYWORDS, nullptr},
   {"data_ptr", THPVariable_data_ptr, METH_NOARGS, nullptr},
+  {"const_data_ptr", THPVariable_const_data_ptr, METH_NOARGS, nullptr},
   {"dim", THPVariable_dim, METH_NOARGS, nullptr},
   {"has_names", THPVariable_has_names, METH_NOARGS, nullptr},
   {"double", castPyCFunctionWithKeywords(THPVariable_double), METH_VARARGS | METH_KEYWORDS, nullptr},
