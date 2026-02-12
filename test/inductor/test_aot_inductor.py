@@ -53,6 +53,7 @@ from torch.testing._internal.common_device_type import (
     _has_sufficient_memory,
     e4m3_type,
     e5m2_type,
+    skipCUDAIf,
 )
 from torch.testing._internal.common_quantization import (
     _group_quantize_tensor,
@@ -2894,6 +2895,31 @@ class AOTInductorTestsTemplate:
             torch.randint(1, size=[38], dtype=torch.int64, device=GPU_TYPE),
         )
         torch._export.aot_compile(Model(), example_inputs)
+
+    @skipCUDAIf(True, "Test for x86 backend")
+    @unittest.skipIf(sys.platform == "darwin", "Skip MacOS")
+    @unittest.skipIf(IS_FBCODE, "Need newer ideep")
+    def test_buffer_mutation_and_force_mmap_weights(self):
+        """
+        This issue occurs when weight zero point is int64 and aot_inductor.force_mmap_weights is ON.
+        The lowering path of qlinear will create a new constant buffer of int32 type for weight zero point,
+        and the CodeCache computes the constant buffer size wrong.
+        Original PR: https://github.com/pytorch/pytorch/pull/139054
+        """
+        from torch.testing._internal.common_quantization import (
+            _static_reference_quantized_linear_module,
+        )
+
+        example_inputs = (torch.randn(32, 16),)
+        model = _static_reference_quantized_linear_module(
+            N=15, K=16, bias=True, example_input=example_inputs[0]
+        )
+        model = torch.export.export(model, example_inputs, strict=True).module()
+        with (
+            config.patch({"freezing": True, "aot_inductor.force_mmap_weights": True}),
+            torch.no_grad(),
+        ):
+            self.check_model(model, example_inputs)
 
     @skipIfMPS
     def test_fallback_mem_leak_fix(self):
