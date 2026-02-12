@@ -121,7 +121,7 @@ Tensor& addmm_out(
     binary = binary.dim() == 1 ? binary.unsqueeze(0) : binary;
     bool inplace = binary.is_same(result);
     if (inplace) {
-      attr.append_post_eltwise(.f, alpha_, 0.f, attr.kind_with_linear);
+      attr.append_post_eltwise(1.f, alpha_, 0.f, attr.kind_with_linear);
       attr.append_post_sum(beta_);
     } else {
       if (at::native::onednn::is_broadcast(binary)) {
