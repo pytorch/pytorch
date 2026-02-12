@@ -175,6 +175,7 @@ manual_torch_name_rule_map: dict[
     "torch.distributed.distributed_c10d._get_group_tag": TorchInGraphFunctionVariable,
     "torch.distributed.distributed_c10d.get_process_group_ranks": TorchInGraphFunctionVariable,
     "torch._utils.is_compiling": TorchInGraphFunctionVariable,
+    "torch._utils._chunk_or_narrow_cat": UserFunctionVariable,
     "torch.fx._symbolic_trace.is_fx_tracing": TorchInGraphFunctionVariable,
     "torch.fx._symbolic_trace.is_fx_symbolic_tracing": TorchInGraphFunctionVariable,
     "torch._dynamo.external_utils.is_compiling": TorchInGraphFunctionVariable,
