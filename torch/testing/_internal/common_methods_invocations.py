@@ -15534,13 +15534,15 @@ op_db: list[OpInfo] = [
                 "TestCompositeCompliance", "test_cow_input",
                 device_type="cuda",
                 active_if=TEST_WITH_ROCM),
-            # RuntimeError: LLD failed to link hsaco source...
+            # RuntimeError: LLD failed to link hsaco source... while
+            # compiling
+            # triton_per_fused__log_softmax_nll_loss_forward_prepare_softmax_online_sub_0
             DecorateInfo(
                 unittest.skip("link failure"),
                 "TestInductorOpInfo", "test_comprehensive",
                 device_type="cuda",
                 active_if=TEST_WITH_ROCM),
-        )[:-2]  # TODO: remove last item if possible
+        )
     ),
     OpInfo('nn.functional.normalize',
            dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
