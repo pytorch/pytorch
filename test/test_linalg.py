@@ -606,8 +606,8 @@ class TestLinalg(TestCase):
                 torch.linalg.lstsq(a, b, driver='fictitious_driver')
 
         # cuSOLVER path supports underdetermined systems
-        version = torch.testing._internal.common_cuda._get_torch_cuda_version()
-        cusolver_not_available = (version < (10, 1))
+        cuda_version = torch.testing._internal.common_cuda._get_torch_cuda_version()
+        cusolver_not_available = (not has_hipsolver()) and (cuda_version < (10, 1))
 
         if device != 'cpu' and cusolver_not_available:
             a = torch.rand(2, 3, dtype=dtype, device=device)
