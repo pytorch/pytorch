@@ -679,7 +679,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
                 elif isinstance(attr, property):
                     getter_source = AttrSource(attr_source, "fget")
                     getter = attr.fget
-                    getter_var = VariableTracker.build(tx, getter, source=getter_source, realize=True)
+                    getter_var = VariableTracker.build(tx, getter, source=getter_source)
                     return getter_var.call_function(tx, [self], {})
 
                 elif isinstance(attr, classmethod):
