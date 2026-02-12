@@ -15,7 +15,6 @@
 #include <regex>
 
 #ifdef _WIN32
-#include <unistd.h>
 #include <Windows.h>
 #endif
 
