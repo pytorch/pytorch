@@ -19,6 +19,7 @@ uint64_t get_template_any_data_ptr(Tensor t, torch::headeronly::ScalarType dtype
     DEFINE_CASE(uint16_t, UInt16)
     DEFINE_CASE(uint32_t, UInt32)
     DEFINE_CASE(uint64_t, UInt64)
+    AT_FORALL_QINT_TYPES(DEFINE_CASE)
   default:
       return 0;
   }

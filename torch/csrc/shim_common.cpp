@@ -651,6 +651,11 @@ torch_set_requires_grad(AtenTensorHandle tensor, bool requires_grad) {
 
 TORCH_DTYPE_IMPL(float8_e8m0fnu, Float8_e8m0fnu)
 TORCH_DTYPE_IMPL(float4_e2m1fn_x2, Float4_e2m1fn_x2)
+TORCH_DTYPE_IMPL(qint8, QInt8)
+TORCH_DTYPE_IMPL(quint8, QUInt8)
+TORCH_DTYPE_IMPL(qint32, QInt32)
+TORCH_DTYPE_IMPL(quint4x2, QUInt4x2)
+TORCH_DTYPE_IMPL(quint2x4, QUInt2x4)
 
 #undef TORCH_DTYPE_IMPL
 
