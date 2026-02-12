@@ -1595,9 +1595,7 @@ def _checkpoint_without_reentrant_generator(
         metadata_fn
     )
 
-    if not torch.is_grad_enabled() or not any(
-        isinstance(arg, torch.Tensor) and arg.requires_grad for arg in args
-    ):
+    if not torch.is_grad_enabled():
         yield
         return
 
