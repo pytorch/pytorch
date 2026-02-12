@@ -918,7 +918,7 @@ include_patterns = [
 exclude_patterns = [
     'test/run_test.py',
     '**/fb/**',
-    'test/cpython/v3_13/**',
+    'test/cpython/**',
     'test/quantization/**',  # should be run through test/test_quantization.py
     'test/jit/**',  # should be run through test/test_jit.py
     'test/ao/sparsity/**',  # should be run through test/test_ao_sparsity.py
