@@ -1055,7 +1055,7 @@ class AsyncCollectiveTensor(torch.Tensor):
         if func is torch.ops.aten.view.default:
             # Fast handle aten.view as a lot of view related op goes to aten.view
             # eventually, this avoids pytree slowdown
-            # pyrefly: ignore [index-error]
+
             res = func(args[0].elem, args[1])
             wrapper_res = AsyncCollectiveTensor(res)
             return wrapper_res
@@ -1151,7 +1151,6 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> tuple[str, list[int], int
             raise AssertionError(
                 "Only 1D mesh is supported, pass in (DeviceMesh, int) together if mesh > 1D"
             )
-        # TODO: it should run collective in the whole mesh instead of dim 0
         pg = group.get_group()
         rankset = dist.get_process_group_ranks(pg)
         group_size = len(rankset)
@@ -1384,7 +1383,7 @@ def _broadcast_meta(self, *args):
 
 
 def _all_reduce_meta(self, *args):
-    return torch.empty_like(self)
+    return torch.empty_like(self, memory_format=torch.contiguous_format)
 
 
 def _wait_tensor_meta(self, *args):
@@ -1679,17 +1678,17 @@ def all_gather_inplace(
     for t in tensor_list:
         is_scalar = t.dim() == 0
         t_offset = 1 if is_scalar else t.size(0)
-        # pyrefly: ignore [unsupported-operation]
+
         out = output[offset] if is_scalar else output[offset : offset + t_offset]
         output_splits.append(out)
-        # pyrefly: ignore [unsupported-operation]
+
         offset += t_offset
     for dst, src in zip(tensor_list, output_splits):
         dst.copy_(src)
     return tensor_list
 
 
-from torch.distributed.distributed_c10d import (  # pyrefly: ignore  # deprecated; pyrefly: ignore [deprecated]
+from torch.distributed.distributed_c10d import (
     _all_gather_base as legacy_all_gather_base,
     _reduce_scatter_base as legacy_reduce_scatter_base,
     all_gather as legacy_all_gather,

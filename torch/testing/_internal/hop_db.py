@@ -105,6 +105,7 @@ FIXME_hop_that_doesnt_have_opinfo_test_allowlist = [
     "aoti_call_delegate",
     "print",
     "inductor_compiled_code",  # Tested separately in test_inductor_wrap_inductor_compile_regions
+    "invoke_leaf_function",  # Needs torch.compile, tested separately in test_leaf_function*
 ]
 
 torch.library.define(
@@ -118,19 +119,26 @@ torch.library.define(
 def foo_impl_cpu(x, z):
     x.add_(5)
     z.add_(5)
-    return x, z, x + z
+    return x.clone(), z.clone(), x + z
 
 
 @torch.library.impl("testlib::mutating_custom_op", "cuda")
 def foo_impl_cuda(x, z):
     x.add_(5)
     z.add_(5)
-    return x, z, x + z
+    return x.clone(), z.clone(), x + z
+
+
+@torch.library.impl("testlib::mutating_custom_op", "xpu")
+def foo_impl_xpu(x, z):
+    x.add_(5)
+    z.add_(5)
+    return x.clone(), z.clone(), x + z
 
 
 @torch.library.register_fake("testlib::mutating_custom_op")
 def foo_impl_abstract(x, z):
-    return x, z, x + z
+    return x.clone(), z.clone(), x + z
 
 
 def sample_inputs_cond(opinfo, device, dtype, requires_grad, **kwargs):
@@ -235,7 +243,8 @@ def simple_local_map_hop(inp1, inp2):
 
     gm = torch.fx.symbolic_trace(body_gm)
 
-    assert torch.distributed.is_available()
+    if not torch.distributed.is_available():
+        raise AssertionError("Expected torch.distributed to be available")
     from torch.distributed.tensor.placement_types import Replicate
 
     gm.meta["local_map_kwargs"] = {

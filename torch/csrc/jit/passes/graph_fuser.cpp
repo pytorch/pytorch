@@ -359,10 +359,9 @@ struct GraphFuser {
           // the scalar is constant. In those cases we inline the constants
           // directly in the body of the fused group.
           AT_ASSERT(input->node()->kind() == prim::Constant);
-          Node* in_const =
-              subgraph.createClone(input->node(), [](Value*) -> Value* {
-                throw std::runtime_error("unexpected input");
-              });
+          Node* in_const = subgraph.createClone(
+              input->node(),
+              [](Value*) -> Value* { TORCH_CHECK(false, "unexpected input"); });
           subgraph.insertNode(in_const);
           inputs_map[input] = in_const->output();
         }

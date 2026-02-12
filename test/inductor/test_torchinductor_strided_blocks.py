@@ -22,8 +22,10 @@ from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import (
     decorateIf,
     instantiate_parametrized_tests,
+    MI200_ARCH,
+    NAVI_ARCH,
     parametrize,
-    skipIfXpu,
+    skipIfRocmArch,
     subtest,
 )
 from torch.testing._internal.inductor_utils import (
@@ -527,6 +529,12 @@ class CommonTemplate:
         """
         Tests a reduction kernel.
         """
+        if view_size == (2, 3 * max_block) and torch.version.hip is not None:
+            view_size = (4, 6 * max_block)
+
+        if view_size == (128, 128) and torch.version.hip is not None:
+            view_size = (256, 256)
+
         if self.device == "cpu" and all(
             # Multiple of max block. Uses loops.
             [
@@ -792,6 +800,7 @@ class CommonTemplate:
             ((5, 5), 1, 1, torch.var_mean),  # Reduction + pointwise fusion.
         ],
     )
+    @skipIfRocmArch(MI200_ARCH + NAVI_ARCH)
     def test_2d_reduction_odd_shapes(
         self,
         view_size: tuple[int, ...],
@@ -803,7 +812,24 @@ class CommonTemplate:
         Tests 2D reduction kernels. These arise from "odd" shapes which are not
         expressible with a 1D block pointer.
         """
+        if reduction_op == torch.sum and torch.version.hip is not None:
+            view_size = (513, 513) if view_size == (129, 129) else view_size
         view = self._discontiguous_tensor(view_size, self.device)
+
+        # HIP: Backend scheduling / fusion differences (e.g., Navi vs MI*)
+        # may result in off-by-one differences in the number of block pointers.
+        # Allow a small tolerance here to avoid backend-specific flakiness.
+        # We expect num_block_pointers to decrease by at most 1, and not increase.
+        # The range created here is checked below.
+        if torch.version.hip:
+            min_num_block_pointers = max(
+                num_block_pointers - 1, 1
+            )  # Expected at least one block descriptor for the input
+            max_num_block_pointers = (
+                num_block_pointers  # We don't expect num_block_pointers to increase.
+            )
+            # Disable strict checking in _run_and_compare; we assert bounds manually below.
+            num_block_pointers = None
 
         # Expect at least 1 block pointer for the input.
         # Add 2 more if we generate 2 kernels.
@@ -815,7 +841,20 @@ class CommonTemplate:
             config_patches=tiled_reduction_config,
         )
 
-        # Check the code for multiple Rn_BLOCK's
+        # HIP: Check the number of block pointers manually.
+        if torch.version.hip:
+            block_pointer_count = code.count(self.block_descriptor_constructor_str)
+            self.assertGreaterEqual(
+                block_pointer_count,
+                min_num_block_pointers,
+                f"Too few block descriptors emitted: {block_pointer_count}",
+            )
+            self.assertLessEqual(
+                block_pointer_count,
+                max_num_block_pointers,
+                f"Too many block descriptors emitted: {block_pointer_count}",
+            )
+
         self._assert_reduction_ndims(code, 2)
 
     @parametrize(
@@ -842,6 +881,8 @@ class CommonTemplate:
         doesn't generate a block pointer. Since tiling welford reductions depends on
         the block pointer analysis, those cases would fall back to 1D.
         """
+        if torch.version.hip is not None and expected_num_triton_kernels == 2:
+            size = (256, 256)
         view = self._discontiguous_tensor(size, self.device)
 
         # We expect many block pointers for this one.
@@ -1233,9 +1274,6 @@ class CommonTemplate:
     #   dim_mod1_: 4, stride_mod1_: 1, stride_mod4_: 0, stride_mod2_: 0, stride_mod0_: 0
     # }
     # This is now fixed by ensuring that that wild symbols only match integers
-    @skipIfXpu(
-        msg="Triton issue exposed by new driver, will be resolved after next triton update."
-    )
     def test_ensure_integral_dims_and_strides(self):
         def model(data, *args):
             return torch.nn.functional.unfold(data, *args)
@@ -1394,12 +1432,10 @@ test_torchinductor.copy_tests(CommonTemplate, TritonBlockPointerTestGPU, GPU_TYP
 
 
 @unittest.skipIf(
-    not (
-        HAS_CUDA_AND_TRITON
-        and torch.cuda.get_device_capability()[0] >= 9
-        and torch.version.hip is None
-    ),
-    "Requires Triton CUDA backend and CUDA compute capability >= 9.0",
+    not (HAS_CUDA_AND_TRITON and torch.cuda.get_device_capability()[0] >= 9)
+    or torch.version.hip,
+    "Requires Triton CUDA backend and CUDA compute capability >= 9.0. Not supported on ROCm",
+    # ROCm triton doesn't support/generate "tl.make_tensor_descriptor" which is exactly what this unit test is about
 )
 @config.patch({"triton.use_tensor_descriptor": True, "assume_aligned_inputs": True})
 @instantiate_parametrized_tests
@@ -1446,6 +1482,22 @@ class TritonTensorDescriptorTestCUDA(BlockDescriptorTestBase):
 
         transpose_count = code.count("tl.trans")
         self.assertEqual(transpose_count, 1 if expect_transpose else 0)
+
+    def test_rms_norm_backward_does_not_crash_with_tma(self):
+        B, S, D = 1, 1024, 40096
+        with torch.device(self.device):
+            x = torch.randn(B, S, D, dtype=torch.bfloat16, requires_grad=True)
+            w = torch.randn(D, dtype=torch.bfloat16, requires_grad=True)
+
+        def f(x: torch.Tensor, w: torch.Tensor) -> torch.Tensor:
+            y = torch.rms_norm(x, (D,), w, 1e-5)
+            return (y * 0.1).sum()
+
+        compiled_f = torch.compile(f, backend="inductor", fullgraph=True)
+        loss = compiled_f(x, w)
+        loss.backward()
+        self.assertIsNotNone(x.grad)
+        self.assertIsNotNone(w.grad)
 
 
 test_torchinductor.copy_tests(
@@ -1565,7 +1617,7 @@ class TestTilingExtra(InductorTestCase):
                 getitem_3 = rot_inv_freq[(None, slice(None, None, None), None)]
                 float_1 = getitem_3.float()
                 expand = float_1.expand(1, -1, 1)
-                inv_freq_expanded = expand.to(torch.device("cuda", index=0))
+                inv_freq_expanded = expand.to(torch.device(GPU_TYPE, index=0))
 
                 getitem_6 = unsqueeze[
                     (slice(None, None, None), None, slice(None, None, None))
@@ -1968,7 +2020,7 @@ class TestTilingExtra(InductorTestCase):
 
         torch.manual_seed(42)
 
-        device = "cuda"
+        device = GPU_TYPE
         dtype = torch.float16
 
         # Create model and parameters

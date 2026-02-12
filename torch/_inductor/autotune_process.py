@@ -394,18 +394,9 @@ class TensorMeta:
         return TensorMeta(
             device=device,
             dtype=dtype,
-            sizes=V.graph.sizevars.size_hints(
-                node.get_size(),
-                fallback=config.unbacked_symint_fallback,
-            ),
-            strides=V.graph.sizevars.size_hints(
-                node.get_stride(),
-                fallback=config.unbacked_symint_fallback,
-            ),
-            offset=V.graph.sizevars.size_hint(
-                node.get_layout().offset,
-                fallback=config.unbacked_symint_fallback,
-            ),
+            sizes=V.graph.sizevars.optimization_hints(node.get_size()),
+            strides=V.graph.sizevars.optimization_hints(node.get_stride()),
+            offset=V.graph.sizevars.optimization_hint(node.get_layout().offset),
             name=node.get_name(),
         )
 
@@ -601,8 +592,13 @@ class CPUDeviceBenchmarkMixin:
 
 
 class TritonBenchmarkRequest(BenchmarkRequest):
-    # Important: Instances of this class have to be serializable
-    # across process boundaries. Do not put CUDA Tensors in here!
+    """
+    Represents a standalone benchmark request for a Triton Template.
+
+    Important: Instances of this class have to be serializable
+    across process boundaries. Do not put CUDA Tensors in here!
+    """
+
     def __init__(
         self,
         kernel_name: str,
@@ -618,6 +614,8 @@ class TritonBenchmarkRequest(BenchmarkRequest):
         matrix_instr_nonkdim: int = 0,  # only used for hip to choose the shape of mfma instruction.
         waves_per_eu: int = 0,  # only used for hip to schedule waves per execution unit
         kpack: int = 0,  # ROCm specific gemm parameter
+        workspace_size: Optional[int] = None,  # size of workspace buffer in bytes
+        workspace_zero_fill: bool = False,  # whether to zero-fill workspace
     ) -> None:
         super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, extra_args)
         self.module_path = module_path
@@ -629,6 +627,8 @@ class TritonBenchmarkRequest(BenchmarkRequest):
         self.matrix_instr_nonkdim = matrix_instr_nonkdim
         self.waves_per_eu = waves_per_eu
         self.kpack = kpack
+        self.workspace_size = workspace_size
+        self.workspace_zero_fill = workspace_zero_fill
 
     def make_run_fn(
         self, *input_tensors: torch.Tensor, out: torch.Tensor
@@ -642,6 +642,23 @@ class TritonBenchmarkRequest(BenchmarkRequest):
 
         run_method = getattr(mod, self.kernel_name).run
         extra_args = list(self.extra_args)
+
+        # Recreate workspace tensor if needed (for TMA templates)
+        # The workspace tensor couldn't be pickled, so we recreate it here
+        # It should be inserted before the grid values (last 3 elements)
+        if self.workspace_size is not None:
+            from torch._inductor.select_algorithm import WORKSPACE_ARG_PLACEHOLDER
+
+            workspace_tensor = torch.empty(
+                (self.workspace_size,),
+                dtype=torch.uint8,
+                device=out.device,
+            )
+            if self.workspace_zero_fill:
+                workspace_tensor.zero_()
+            workspace_index = extra_args.index(WORKSPACE_ARG_PLACEHOLDER)
+            extra_args[workspace_index] = workspace_tensor
+
         run_method.__self__.with_bandwidth_info = False
 
         # Newer version of triton add warmup argument to JITFunction.run.
@@ -1109,7 +1126,10 @@ class AutotuneProcessPool:
             with self._lock:
                 if self._warmup_future is None:
                     self._warmup_start_time = time.perf_counter()
-                    self._warmup_future = self.pool.submit(_warmup_autotune_subprocess)
+                    self._warmup_future = self.pool.submit(
+                        _init_autotune_subprocess,
+                        allow_tf32=torch.backends.cuda.matmul.allow_tf32,
+                    )
                     self._warmup_future.add_done_callback(self._on_warmup_complete)
                     autotuning_log.info("Warmup job submitted")
         # pyrefly: ignore[bad-return]
@@ -1155,7 +1175,7 @@ class AutotuneProcessPool:
                     cls._instance = None
 
 
-def _warmup_autotune_subprocess() -> bool:
+def _init_autotune_subprocess(allow_tf32: bool) -> bool:
     """
     Warmup function run in the autotune subprocess.
     """
@@ -1164,6 +1184,8 @@ def _warmup_autotune_subprocess() -> bool:
     # Initialize dummy tensor for CUDA context
     if torch.cuda.is_available():
         torch.zeros(1, device="cuda")
+
+    torch.backends.cuda.matmul.allow_tf32 = allow_tf32
 
     return True
 

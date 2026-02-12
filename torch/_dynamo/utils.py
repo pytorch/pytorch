@@ -55,6 +55,7 @@ from typing import (
     ClassVar,
     Generic,
     Literal,
+    NoReturn,
     Optional,
     overload,
     TypeAlias,
@@ -89,6 +90,7 @@ from torch._utils_internal import (
 from torch.fx._utils import _format_graph_code, lazy_format_graph_code
 from torch.monitor import _WaitCounter
 from torch.nn.modules.lazy import LazyModuleMixin
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils._triton import has_triton, has_triton_package
 from torch.utils.hooks import RemovableHandle
@@ -110,6 +112,7 @@ if typing.TYPE_CHECKING:
         ValuesView,
     )
 
+    from torch._dynamo.bytecode_transformation import Instruction
     from torch._dynamo.replay_record import ExecutionRecord
     from torch._dynamo.symbolic_convert import (
         InstructionTranslator,
@@ -169,10 +172,8 @@ counters: collections.defaultdict[str, Counter[str]] = collections.defaultdict(
     collections.Counter
 )
 optimus_scuba_log: dict[str, Any] = {}
-troubleshooting_url = (
-    "https://pytorch.org/docs/main/compile/programming_model.recompilation.html"
-)
-nnmodule_doc_url = "https://pytorch.org/docs/main/torch.compiler_nn_module.html"
+troubleshooting_url = "https://docs.pytorch.org/docs/main/user_guide/torch_compiler/compile/programming_model.recompilation.html"
+nnmodule_doc_url = "https://docs.pytorch.org/docs/main/user_guide/torch_compiler/torch.compiler_nn_module.html"
 nnmodule_doc_url_msg = f"See {nnmodule_doc_url} for more information and limitations."
 log = logging.getLogger(__name__)
 
@@ -207,7 +208,7 @@ class ReinplaceCounters:
     @classmethod
     def add_missed_opportunities(cls, trigger: ReInplaceTrigger, count: int) -> None:
         if count != 0:
-            cls._values[f"missed_tensors_{trigger}"] += count
+            cls._values[f"missed_tensors_{trigger.name}"] += count
 
     @classmethod
     def clear(cls) -> None:
@@ -217,7 +218,7 @@ class ReinplaceCounters:
     def get_total_missed(cls) -> int:
         sum = 0
         for trigger in ReInplaceTrigger:
-            sum += cls._values.get(f"missed_tensors_{trigger}", 0)
+            sum += cls._values.get(f"missed_tensors_{trigger.name}", 0)
         return sum
 
     @classmethod
@@ -614,6 +615,25 @@ class CompileEventLogger:
         )
 
     @staticmethod
+    def add_record_function_data(event_name: str, **metadata: object) -> None:
+        """
+        Add record function data to the profiler event.
+
+        This emits profiler event data so compilation events show up in stack profilers
+        like the PyTorch profiler.
+
+        Args:
+            event_name: Name of the event to record
+            **metadata: Additional metadata to attach to the record function
+        """
+        if torch.autograd.profiler._is_profiler_enabled and metadata:
+            metadata_str = ", ".join(f"{k}={v}" for k, v in metadata.items())
+            with torch.autograd.profiler.record_function(
+                f"{event_name}_data: {metadata_str}"
+            ):
+                pass
+
+    @staticmethod
     def compilation_metric(overwrite: bool = False, **metadata: object) -> None:
         """
         Add <metadata> to the CompilationMetrics context. Also logs to PT2 Compile Events
@@ -955,7 +975,7 @@ ANSI_ESCAPE_PATTERN = re.compile(
 class StripAnsiFormatter(logging.Formatter):
     """Logging formatter that strips ANSI escape codes."""
 
-    def format(self, record):
+    def format(self, record: logging.LogRecord) -> str:
         msg = super().format(record)
         return ANSI_ESCAPE_PATTERN.sub("", msg)
 
@@ -1086,6 +1106,7 @@ def istype(obj: object, allowed_types: Any) -> bool:
     return type(obj) is allowed_types
 
 
+_builtin_final_typing_classes: tuple[Any, ...] = tuple()
 if sys.version_info >= (3, 12):
     # Some typing classes moved to C in 3.12,
     # which no longer have the _Final mixin.
@@ -1099,6 +1120,21 @@ if sys.version_info >= (3, 12):
         typing.TypeVarTuple,
         typing.TypeAliasType,
     )
+
+
+def get_inputs_devices(
+    inputs: collections.abc.Sequence[object],
+    model: torch.fx.GraphModule,
+) -> list[Optional[torch.device]]:
+    all_inputs = pytree.tree_flatten(inputs)[0] + [
+        node.meta["val"] for node in list(model.graph.nodes) if "val" in node.meta
+    ]
+    devices: list[Optional[torch.device]] = list(
+        OrderedSet([i.device for i in all_inputs if hasattr(i, "device")])
+    )
+    return [
+        i for i in devices if (isinstance(i, torch.device) and i.type != "meta")
+    ] + [None]
 
 
 if sys.version_info >= (3, 14):
@@ -1117,7 +1153,7 @@ def is_typing(value: Any) -> bool:
     if sys.version_info >= (3, 12) and isinstance(value, _builtin_final_typing_classes):
         return True
     return (
-        isinstance(value, typing._Final)  # type: ignore[attr-defined]
+        isinstance(value, (types.UnionType, typing._Final))  # type: ignore[attr-defined]
         or value is typing.Generic
         or value is typing.Union
     )
@@ -1407,11 +1443,17 @@ class CompilationMetrics:
     log_format_version: int = LOG_FORMAT_VERSION
     inductor_config: Optional[str] = None
     remote_cache_version: Optional[int] = None
-    inductor_fx_remote_cache_hit_count: Optional[int] = None
-    inductor_fx_remote_cache_miss_count: Optional[int] = None
+    inductor_fx_remote_cache_hit_count: Optional[int] = 0
+    inductor_fx_remote_cache_miss_count: Optional[int] = 0
     inductor_fx_remote_cache_backend_type: Optional[str] = None
     inductor_fx_remote_cache_hit_keys: Optional[str] = None
     inductor_fx_remote_cache_miss_keys: Optional[str] = None
+    inductor_fx_local_cache_hit_count: Optional[int] = 0
+    inductor_fx_local_cache_miss_count: Optional[int] = 0
+    aotautograd_remote_cache_hit_count: Optional[int] = 0
+    aotautograd_remote_cache_miss_count: Optional[int] = 0
+    aotautograd_local_cache_hit_count: Optional[int] = 0
+    aotautograd_local_cache_miss_count: Optional[int] = 0
     cuda_version: Optional[str] = None
     triton_version: Optional[str] = None
     feature_usage: Optional[dict[str, bool]] = None
@@ -1795,6 +1837,8 @@ def get_compilation_metrics() -> list[CompilationMetrics]:
 class ChromiumEventLogger:
     """Logs chromium events to structured logs. tlparse will concatenate these into a perfetto UI link.
 
+    Also emits RecordFunction calls to torch.profiler when enabled.
+
     See https://docs.google.com/document/d/1CvAClvFfyA5R-PhYUmn5OOQtYMH4h6I0nSsKchNAySU/preview#heading=h.yr4qxyxotyw for
     a specification of the Chromium Event JSON format.
     """
@@ -1833,6 +1877,11 @@ class ChromiumEventLogger:
         if not hasattr(self.tls, "event_data"):
             self.tls.event_data = {}
         return self.tls.event_data
+
+    def get_record_functions(self) -> dict[str, AbstractContextManager[None]]:
+        if not hasattr(self.tls, "record_functions"):
+            self.tls.record_functions = {}
+        return self.tls.record_functions
 
     def __init__(self) -> None:
         self.tls = threading.local()
@@ -1947,6 +1996,16 @@ class ChromiumEventLogger:
         if log_pt2_compile_event:
             self.get_pt2_compile_substack().append(event_name)
 
+        # Emit profiler event so compilation events show up in stock PyTorch profiler
+        if torch.autograd.profiler._is_profiler_enabled:
+            rf = torch._C._profiler._RecordFunctionFast(event_name)
+            rf.__enter__()
+            self.get_record_functions()[event_name] = rf
+
+            # Add metadata to the profiler event if present
+            if metadata:
+                CompileEventLogger.add_record_function_data(event_name, **metadata)
+
     def reset(self) -> None:
         # We this on every compile in case a compile crashes or restarts and we haven't
         # cleared the stack.
@@ -1956,6 +2015,12 @@ class ChromiumEventLogger:
         substack.clear()
         event_data = self.get_event_data()
         event_data.clear()
+        # Clean up any lingering record functions (shouldn't happen in normal operation)
+        record_functions = self.get_record_functions()
+        if record_functions:
+            for rf in record_functions.values():
+                rf.__exit__(None, None, None)
+            record_functions.clear()
 
     def log_event_end(
         self,
@@ -2029,6 +2094,12 @@ class ChromiumEventLogger:
 
         # Finally pop the actual event off the stack
         event_stack.pop()
+
+        # End profiler event so compilation events show up in stock PyTorch profiler
+        record_functions = self.get_record_functions()
+        if event_name in record_functions:
+            rf = record_functions.pop(event_name)
+            rf.__exit__(None, None, None)
 
     def _log_timed_event(
         self,
@@ -2192,6 +2263,29 @@ def clone_tensor(x: torch.Tensor) -> torch.Tensor:
     return y
 
 
+def _copy_dynamo_attr(src: torch.Tensor, dst: torch.Tensor, attr: str) -> None:
+    """Copy a single dynamo attribute from src to dst, or remove it from dst if src doesn't have it."""
+    if hasattr(src, attr):
+        setattr(dst, attr, getattr(src, attr).copy())
+    elif hasattr(dst, attr):
+        delattr(dst, attr)
+
+
+def copy_dynamo_tensor_attributes(src: torch.Tensor, dst: torch.Tensor) -> None:
+    """
+    Copy dynamo-specific tensor attributes from src to dst.
+    These attributes are used for dynamic shape marking and must be preserved
+    when cloning or casting tensors. If src doesn't have an attribute but dst does,
+    the attribute is removed from dst.
+    """
+    _copy_dynamo_attr(src, dst, "_dynamo_dynamic_indices")
+    _copy_dynamo_attr(src, dst, "_dynamo_unbacked_indices")
+    _copy_dynamo_attr(src, dst, "_dynamo_hint_overrides")
+    _copy_dynamo_attr(src, dst, "_dynamo_shape_ids")
+    _copy_dynamo_attr(src, dst, "_dynamo_strict_unbacked_indices")
+    _copy_dynamo_attr(src, dst, "_dynamo_weak_dynamic_indices")
+
+
 def clone_input(
     x: torch.Tensor, *, dtype: Optional[torch.dtype] = None
 ) -> torch.Tensor:
@@ -2207,8 +2301,7 @@ def clone_input(
             y.requires_grad_(x.requires_grad)
         if x.is_leaf and x.grad is not None:
             y.grad = clone_input(x.grad, dtype=dtype)
-        if hasattr(x, "_dynamo_dynamic_indices"):
-            y._dynamo_dynamic_indices = x._dynamo_dynamic_indices.copy()  # type: ignore[attr-defined]
+        copy_dynamo_tensor_attributes(x, y)
         return y
 
     with torch.no_grad():
@@ -2267,8 +2360,7 @@ def clone_input(
             # tensor refers to a single memory location. Please clone() the tensor before
             # performing the operation.
             return torch_clone(x)
-        if hasattr(x, "_dynamo_dynamic_indices"):
-            result._dynamo_dynamic_indices = x._dynamo_dynamic_indices.copy()  # type: ignore[attr-defined]
+        copy_dynamo_tensor_attributes(x, result)
         return result
 
 
@@ -2305,16 +2397,19 @@ def skip_frame_if_in_functorch_mode(val: torch.Tensor) -> None:
     try:
         val.data_ptr()  # will throw for functorch tensors
     except RuntimeError as e:
-        from .exc import format_skip_frame_message, SkipFrame
+        from .exc import unimplemented
 
         # This will be GradTrackingTensor/BatchedTensor/etc
         functorch_subclass_name = re.sub(r"\(.*", "", repr(val))
-        raise SkipFrame(
-            format_skip_frame_message(
-                None,
-                f"torch.compile cannot be run in context: {functorch_subclass_name}",
-            )
-        ) from e
+
+        unimplemented(
+            gb_type="skip frame due to being in functorh mode",
+            context="",
+            explanation=f"torch.compile cannot be run in context: {functorch_subclass_name}. Skipping frame.",
+            hints=[],
+            from_exc=e,
+            skip_frame=True,
+        )
 
 
 @contextmanager
@@ -2326,6 +2421,8 @@ def preserve_rng_state() -> Generator[None, None, None]:
         skip_frame_if_in_functorch_mode(rng_state)
         if torch.cuda.is_available():
             cuda_rng_state = torch.clone(torch.cuda.get_rng_state())
+        if torch.xpu.is_available():
+            xpu_rng_state = torch.clone(torch.xpu.get_rng_state())
     try:
         yield
     finally:
@@ -2333,6 +2430,8 @@ def preserve_rng_state() -> Generator[None, None, None]:
             torch.random.set_rng_state(rng_state)
             if torch.cuda.is_available():
                 torch.cuda.set_rng_state(cuda_rng_state)  # type: ignore[possibly-undefined]
+            if torch.xpu.is_available():
+                torch.xpu.set_rng_state(xpu_rng_state)  # type: ignore[possibly-undefined]
 
 
 def is_jit_model(
@@ -2702,6 +2801,11 @@ list_getitem = list.__getitem__
 
 str_methods = {method for method in str.__dict__.values() if callable(method)}
 
+# EnumType is the metaclass for Enum classes
+enum_type_methods = {
+    method for method in type(enum.Enum).__dict__.values() if callable(method)
+}
+
 K = TypeVar("K")
 V = TypeVar("V")
 
@@ -2862,7 +2966,7 @@ def iter_contains(
     tx: InstructionTranslator,
     check_tensor_identity: bool = False,
 ) -> Any:
-    from .variables import BuiltinVariable, ConstantVariable
+    from .variables import ConstantVariable
 
     if search.is_python_constant():
         found_const = any(
@@ -2885,11 +2989,15 @@ def iter_contains(
                 if search is _get_fake_tensor(x):  # Object equivalence
                     return ConstantVariable.create(True)
         else:
-            check = BuiltinVariable(operator.eq).call_function(tx, [x, search], {})
+            from torch._dynamo.variables.builder import SourcelessBuilder
+
+            check = SourcelessBuilder.create(tx, operator.eq).call_function(
+                tx, [x, search], {}
+            )
             if found is None:
                 found = check
             else:
-                found = BuiltinVariable(operator.or_).call_function(
+                found = SourcelessBuilder.create(tx, operator.or_).call_function(
                     tx, [check, found], {}
                 )
     if found is None:
@@ -3040,6 +3148,8 @@ def same(
     log_error: Callable[..., None] = log.error,
     use_larger_multiplier_for_smaller_tensor: bool = False,
     force_max_multiplier: bool = False,
+    use_iou_for_bool: bool = False,
+    iou_threshold: float = 0.99,
 ) -> bool:
     """Check correctness to see if ref and res match"""
     if fp64_ref is None:
@@ -3067,6 +3177,8 @@ def same(
                 log_error=log_error,
                 use_larger_multiplier_for_smaller_tensor=use_larger_multiplier_for_smaller_tensor,
                 force_max_multiplier=force_max_multiplier,
+                use_iou_for_bool=use_iou_for_bool,
+                iou_threshold=iou_threshold,
             )
             for ai, bi, fp64_refi in zip(ref, res, fp64_ref)
         )
@@ -3087,6 +3199,8 @@ def same(
             log_error=log_error,
             use_larger_multiplier_for_smaller_tensor=use_larger_multiplier_for_smaller_tensor,
             force_max_multiplier=force_max_multiplier,
+            use_iou_for_bool=use_iou_for_bool,
+            iou_threshold=iou_threshold,
         )
     elif isinstance(ref, dict):
         assert isinstance(res, dict)
@@ -3108,6 +3222,8 @@ def same(
                     log_error=log_error,
                     use_larger_multiplier_for_smaller_tensor=use_larger_multiplier_for_smaller_tensor,
                     force_max_multiplier=force_max_multiplier,
+                    use_iou_for_bool=use_iou_for_bool,
+                    iou_threshold=iou_threshold,
                 )
             ):
                 log_error("Accuracy failed for key name %s", k)
@@ -3137,6 +3253,29 @@ def same(
                 return False
             if ref.dtype == torch.bool:
                 if ignore_non_fp:
+                    return True
+                if use_iou_for_bool:
+                    # Use IoU (Intersection over Union) metric for boolean mask comparison.
+                    # This is useful for segmentation models where small floating-point
+                    # differences get thresholded into boolean masks.
+                    intersection = (ref & res).sum().float()
+                    union = (ref | res).sum().float()
+                    if union == 0:
+                        # Both masks are empty
+                        return bool(intersection == 0)
+                    iou = (intersection / union).item()
+                    if iou < iou_threshold:
+                        log_error(
+                            "IoU accuracy failed: %.4f < %.2f (intersection=%d, union=%d, ref_sum=%d, res_sum=%d, shape=%s)",
+                            iou,
+                            iou_threshold,
+                            int(intersection.item()),
+                            int(union.item()),
+                            int(ref.sum().item()),
+                            int(res.sum().item()),
+                            list(ref.shape),
+                        )
+                        return False
                     return True
                 # triton stores bool as int8, so add this for more accurate checking
                 r = torch.allclose(
@@ -3449,12 +3588,12 @@ def get_concrete_sizes_from_symints(
     pattern = r"\(s(\d+)\)"
     assert fake_mode.shape_env is not None
     shape_env = fake_mode.shape_env
-    var_to_val = shape_env.var_to_val
+    backed_var_to_val = shape_env.backed_var_to_val
 
-    def replace_sym(match):
+    def replace_sym(match: Any) -> str:
         sym_name = f"s{match.group(1)}"
         val = next(
-            (v for k, v in var_to_val.items() if k.name == sym_name),
+            (v for k, v in backed_var_to_val.items() if k.name == sym_name),
             None,
         )
         if isinstance(val, (int, Integer)):
@@ -3465,7 +3604,30 @@ def get_concrete_sizes_from_symints(
     return msg
 
 
+def _wrap_graph_break_with_torch_runtime_err(gb_fn: Callable[[], NoReturn]) -> NoReturn:
+    from .exc import TorchRuntimeError, Unsupported
+
+    try:
+        gb_fn()
+    except Unsupported as e:
+        exc = TorchRuntimeError(str(e), getattr(e, "real_stack", None))
+        raise exc.with_traceback(e.__traceback__) from None
+    raise AssertionError("should be unreachable")
+
+
 def get_fake_value(
+    node: torch.fx.Node,
+    tx: InstructionTranslatorBase,
+    allow_non_graph_fake: bool = False,
+) -> Any:
+    _t0 = time.time_ns()
+    try:
+        return _get_fake_value_impl(node, tx, allow_non_graph_fake)
+    finally:
+        tx.output.bytecode_tracing_timings.get_fake_value_ns += time.time_ns() - _t0
+
+
+def _get_fake_value_impl(
     node: torch.fx.Node,
     tx: InstructionTranslatorBase,
     allow_non_graph_fake: bool = False,
@@ -3480,13 +3642,8 @@ def get_fake_value(
     """
     from torch.utils._sympy.value_ranges import ValueRangeError
 
-    from .exc import (
-        TorchRuntimeError,
-        unimplemented,
-        Unsupported,
-        UserError,
-        UserErrorType,
-    )
+    from . import graph_break_hints
+    from .exc import unimplemented, Unsupported, UserError, UserErrorType
 
     op = node.op
 
@@ -3582,6 +3739,7 @@ def get_fake_value(
                 explanation=f"Operator `{cause.func}` has a non-Tensor output "
                 "whose value is dependent on the data of Tensor inputs.",
                 hints=hints,
+                from_exc=cause,
             )
         elif isinstance(
             cause, torch._subclasses.fake_tensor.DynamicOutputShapeException
@@ -3595,6 +3753,7 @@ def get_fake_value(
                         "Enable tracing of dynamic shape operators with "
                         "`torch._dynamo.config.capture_dynamic_output_shape_ops = True`",
                     ],
+                    from_exc=cause,
                 )
             else:
                 unimplemented(
@@ -3604,6 +3763,7 @@ def get_fake_value(
                     hints=[
                         "Please report an issue to PyTorch",
                     ],
+                    from_exc=cause,
                 )
         elif isinstance(
             cause, torch._subclasses.fake_tensor.UnsupportedOperatorException
@@ -3630,6 +3790,7 @@ def get_fake_value(
                     "https://docs.google.com/document/d/1GgvOe7C8_NVOMLOCwDaYV1mXXyHMXY7ExoewHqooxrs/edit#heading=h.64r4npvq0w0"
                     " for how to fix",
                 ],
+                from_exc=cause,
             )
         elif isinstance(
             cause, torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
@@ -3646,10 +3807,20 @@ def get_fake_value(
                 gb_type="TypeError when making fake tensor call",
                 context=f"TypeError {node.target}: {cause}",
                 explanation="",
-                hints=[],
+                hints=[*graph_break_hints.USER_ERROR],
+                from_exc=cause,
             )
         msg = get_concrete_sizes_from_symints(str(e), fake_mode)
-        raise TorchRuntimeError(msg).with_traceback(e.__traceback__) from None
+        _wrap_graph_break_with_torch_runtime_err(
+            lambda: unimplemented(
+                gb_type="RuntimeError when making fake tensor call",
+                context="",
+                explanation=msg,
+                hints=[*graph_break_hints.USER_ERROR],
+                from_exc=cause,
+            )
+        )
+        raise AssertionError("should not reachable") from None
 
     if not allow_non_graph_fake:
         _ = pytree.tree_map_only(
@@ -3720,13 +3891,14 @@ def run_node(
                 return node.target(*args, **kwargs)  # type: ignore[operator]
             elif op == "call_method":
                 if not hasattr(args[0], node.target):  # type: ignore[arg-type]
+                    from . import graph_break_hints
                     from .exc import unimplemented
 
                     unimplemented(
                         gb_type="Missing attribute when running call_method node",
                         context="",
                         explanation=make_error_message("attribute not defined"),
-                        hints=[],
+                        hints=[*graph_break_hints.USER_ERROR],
                     )
                 return getattr(args[0], node.target)(*args[1:], **kwargs)  # type: ignore[arg-type]
             elif op == "call_module":
@@ -3740,11 +3912,14 @@ def run_node(
 
         except (NotImplementedError, UnsupportedFakeTensorException) as e:
             # NB: mimic how wrap_fake_exception does it
+            from . import graph_break_hints
             from .exc import unimplemented
 
-            hints = []
+            hints = [*graph_break_hints.USER_ERROR]
             if isinstance(e, NotImplementedError):
-                hints = [
+                hints += [
+                    "If the op is a custom op, did you implement a fake tensor implementation? "
+                    "(e.g. with `@my_custom_op.register_fake`)",
                     "If the op is a PyTorch op, please file an issue to PyTorch.",
                 ]
 
@@ -3770,7 +3945,8 @@ def get_real_value(node: torch.fx.Node, tracer: Any) -> Any:
     Run the actual computation represented by `node` and return the result.
     This will execute any dependent nodes in the graph as well.
     """
-    from .exc import TorchRuntimeError
+    from . import graph_break_hints
+    from .exc import unimplemented
 
     cache = tracer.real_value_cache
     if node in cache:
@@ -3800,11 +3976,21 @@ def get_real_value(node: torch.fx.Node, tracer: Any) -> Any:
         real_value = run_node(tracer, node, args, kwargs, nn_module)
         cache[node] = real_value
     except RuntimeError as e:
-        raise TorchRuntimeError(str(e)).with_traceback(e.__traceback__) from None
+        exn = e  # to make typing happy for the lambda
+        _wrap_graph_break_with_torch_runtime_err(
+            lambda: unimplemented(
+                gb_type="RuntimeError when trying to get real value from fx.Node",
+                context="",
+                explanation="",
+                hints=[*graph_break_hints.USER_ERROR],
+                from_exc=exn,
+            )
+        )
+        raise AssertionError("should not be reachable") from None
     return real_value
 
 
-def assert_no_fake_params_or_buffers(gm: torch.fx.GraphModule) -> None:
+def assert_no_fake_params_or_buffers(gm: torch.nn.Module) -> None:
     from torch._subclasses.fake_tensor import FakeTensorConfig, is_fake
 
     def stack_or_hint(t: Any) -> str:
@@ -3960,7 +4146,12 @@ def format_bytecode(
     return f"{prefix} {name} {filename} line {line_no} \n{dis.Bytecode(code).dis()}\n"
 
 
-forward_hook_names = ["_forward_pre_hooks", "_forward_hooks"]
+forward_hook_names = [
+    "_forward_pre_hooks",
+    "_forward_pre_hooks_with_kwargs",
+    "_forward_hooks_with_kwargs",
+    "_forward_hooks",
+]
 backward_hook_names = ["_backward_pre_hooks", "_backward_hooks"]
 state_dict_hook_names = [
     "_state_dict_pre_hooks",
@@ -4251,6 +4442,7 @@ def _extract_anchors_from_expr(segment: str) -> Optional[_Anchors]:
 
     import ast
 
+    tree: Any | None = None
     try:
         # Without brackets, `segment` is parsed as a statement.
         # We expect an expression, so wrap `segment` in
@@ -4258,6 +4450,7 @@ def _extract_anchors_from_expr(segment: str) -> Optional[_Anchors]:
         tree = ast.parse("(\n" + segment + "\n)")
     except SyntaxError:
         return None
+    assert tree is not None
 
     if len(tree.body) != 1:
         return None
@@ -4365,7 +4558,7 @@ def _extract_anchors_from_expr(segment: str) -> Optional[_Anchors]:
     return None
 
 
-def get_instruction_source_311(code: types.CodeType, inst: dis.Instruction) -> str:
+def get_instruction_source_311(code: types.CodeType, inst: Instruction) -> str:
     """
     Python 3.11+ only. Returns lines of source code (from code object `code`)
     corresponding to `inst`'s location data, and underlines relevant code to `inst`.
@@ -4404,7 +4597,7 @@ def get_instruction_source_311(code: types.CodeType, inst: dis.Instruction) -> s
         result = textwrap.indent(textwrap.dedent(result), indent)
         return result
 
-    assert inst.positions is not None
+    assert hasattr(inst, "positions") and inst.positions is not None
     if inst.positions.lineno is None:
         return ""
     # The rstrip + "\n" pattern is used throughout this function to handle
