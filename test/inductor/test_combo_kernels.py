@@ -537,6 +537,46 @@ class ComboKernelTests(TestCase):
             self.assertEqual(grid1[1], 1)
             self.assertEqual(grid2[1], 1)
 
+    @requires_gpu_and_triton
+    def test_combo_kernels_pointwise_only(self):
+        def fn(a, b, c, d):
+            p1 = a * 2.0
+            p2 = b + 1.0
+            r1 = c.sum(dim=-1)
+            r2 = d.mean(dim=-1)
+            return p1, p2, r1, r2
+
+        inps = [
+            torch.rand(1024, device=GPU_TYPE),
+            torch.rand(1024, device=GPU_TYPE),
+            torch.rand(32, 1024, device=GPU_TYPE),
+            torch.rand(32, 1024, device=GPU_TYPE),
+        ]
+
+        out_eager = fn(*inps)
+
+        # Test with combo_kernels_pointwise_only=False
+        # Both pointwise and reductions can be combined
+        torch._inductor.metrics.reset()
+        with torch._inductor.config.patch("combo_kernels_pointwise_only", False):
+            fn_c = torch.compile(fn)
+            out_compiled, _ = run_and_get_code(fn_c, *inps)
+            self.assertEqual(out_eager, out_compiled)
+            kernel_count_default = torch._inductor.metrics.generated_kernel_count
+
+        # Test with combo_kernels_pointwise_only=True
+        # Only pointwise should be combined, reductions should be separate
+        torch._inductor.metrics.reset()
+        with torch._inductor.config.patch("combo_kernels_pointwise_only", True):
+            fn_c = torch.compile(fn)
+            out_compiled, _ = run_and_get_code(fn_c, *inps)
+            self.assertEqual(out_eager, out_compiled)
+            kernel_count_pointwise_only = torch._inductor.metrics.generated_kernel_count
+
+        # With pointwise_only=True, we expect more kernels because reductions are not combined with pointwise ops
+        self.assertEqual(kernel_count_default, 2)
+        self.assertEqual(kernel_count_pointwise_only, 3)
+
 
 class ComboKernelBenchmarkTests(TestCase):
     check_model_gpu = check_model_gpu
