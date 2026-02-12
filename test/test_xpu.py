@@ -1,6 +1,8 @@
 # Owner(s): ["module: intel"]
+# ruff: noqa: F841
 
 import collections
+import contextlib
 import ctypes
 import gc
 import json
@@ -12,6 +14,8 @@ import tempfile
 import threading
 import time
 import unittest
+import warnings
+from copy import deepcopy
 
 import torch
 import torch.xpu._gpu_trace as gpu_trace
@@ -25,11 +29,14 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_methods_invocations import ops_and_refs
 from torch.testing._internal.common_utils import (
     find_library_location,
+    instantiate_parametrized_tests,
     IS_LINUX,
     IS_WINDOWS,
     IS_X86,
+    parametrize,
     run_tests,
     serialTest,
+    subtest,
     suppress_warnings,
     TEST_XPU,
     TestCase,
@@ -339,7 +346,7 @@ if __name__ == "__main__":
         self.assertTrue(issubclass(type(xpu_event), torch.Event))
         self.assertTrue(torch.Event in type(xpu_event).mro())
 
-    def test_stream_compatibility(self):
+    def test_stream_event_compatibility(self):
         s1 = torch.xpu.Stream()
         s2 = torch.xpu.Stream()
         torch.accelerator.set_stream(s1)
@@ -360,6 +367,42 @@ if __name__ == "__main__":
         )
         with self.assertRaisesRegex(RuntimeError, "The device index is out of range"):
             torch.accelerator.current_stream(torch.accelerator.device_count())
+        e1 = torch.xpu.Event(enable_timing=True)
+        e2 = torch.xpu.Event(enable_timing=True)
+        e3 = torch.Event(enable_timing=True)
+        s3 = torch.Stream()
+        with s3:
+            self.assertEqual(torch.accelerator.current_stream(), s3)
+            e1.record(s3)
+            a = torch.randn(1000)
+            a_xpu = a.to("xpu")
+            del a_xpu
+            e2.record(s3)
+            e2.synchronize()
+            self.assertGreater(e1.elapsed_time(e2), 0)
+            e3.record(s3)
+        with self.assertRaisesRegex(
+            RuntimeError, "expected other to be a torch.xpu.Event object"
+        ):
+            e1.elapsed_time(e3)
+        with self.assertRaisesRegex(
+            RuntimeError, "expected other to be a torch.Event object"
+        ):
+            e3.elapsed_time(e1)
+        with self.assertRaisesRegex(
+            RuntimeError, "expected event to be a torch.Event object"
+        ):
+            s3.record_event(e1)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "expected stream to be a torch.Stream or torch.xpu.Stream object",
+        ):
+            e2.record(e2)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "expected stream to be a torch.Stream or torch.xpu.Stream object",
+        ):
+            e2.wait(e2)
 
     def test_device_context_manager(self):
         prev_device = torch.xpu.current_device()
@@ -1164,6 +1207,1184 @@ if __name__ == "__main__":
             z[0] = z[0] + 1.0
             self.assertEqual(z, x)
 
+    def test_graph_is_current_stream_capturing(self):
+        self.assertFalse(torch.xpu.is_current_stream_capturing())
+        s = torch.xpu.Stream()
+        with torch.xpu.stream(s):
+            g = torch.xpu.XPUGraph()
+            self.assertFalse(torch.xpu.is_current_stream_capturing())
+            g.capture_begin()
+            self.assertTrue(torch.xpu.is_current_stream_capturing())
+            g.capture_end()
+
+    def test_graph_capture_simple(self):
+        s = torch.xpu.Stream()
+
+        with torch.xpu.stream(s):
+            a = torch.full((1000,), 1, device="xpu")
+            g = torch.xpu.XPUGraph()
+            torch.xpu.empty_cache()
+            g.capture_begin()
+            b = a
+            for _ in range(10):
+                b = b + 1
+            g.capture_end()
+        torch.xpu.current_stream().wait_stream(s)
+
+        g.replay()
+
+        self.assertEqual(b.sum().item(), 11000.0)
+
+    def test_graphsafe_set_get_rng_state(self):
+        # Define a function to create generator states, with optional graph registration
+        def create_states(generator):
+            """Initializes generator states and registers them with a XPU graph if provided."""
+            # Ensure the XPU generator is initialized
+            torch.rand(1, device="xpu")
+            generator.manual_seed(0)
+
+            # Save the current state of the generator
+            old_state = generator.graphsafe_get_state()
+            # Create and save a cloned state of the generator
+            new_state = generator.clone_state()
+            # Return the original generator and its two states
+            return generator, old_state, new_state
+
+        def register_states_to_graph(generator_state, graph):
+            _, old_state, new_state = generator_state
+            graph.register_generator_state(old_state)
+            graph.register_generator_state(new_state)
+
+        # Define a function to perform specific RNG actions using the generator's states
+        def perform_random_generation_steps(generator_state):
+            generator, old_state, new_state = generator_state
+            random_values = []
+
+            # Generate random numbers with the new generator state
+            generator.graphsafe_set_state(new_state)
+            random_values.append(torch.rand(5, device="xpu", generator=generator))
+
+            # Generate random numbers twice with the old generator state
+            generator.graphsafe_set_state(old_state)
+            random_values.extend(
+                [torch.rand(5, device="xpu", generator=generator) for _ in range(2)]
+            )
+
+            return random_values
+
+        # Define a function to retrieve the final offsets of the original and new generator states
+        def get_final_offsets_of_states(generator_state):
+            _, old_state, new_state = generator_state
+            old_state_offset = old_state.get_offset()
+            new_state_offset = new_state.get_offset()
+            return old_state_offset, new_state_offset
+
+        # Set up and test a new XPU generator
+        generator = torch.Generator(device="xpu")
+        generator_state = create_states(generator)
+
+        # Set up and test the default XPU generator with a XPU Graph
+        g = torch.xpu.XPUGraph()
+        s = torch.xpu.Stream()
+        default_generator = torch.xpu.default_generators[0]
+        default_generator_state = create_states(default_generator)
+        register_states_to_graph(default_generator_state, g)
+
+        # Perform random number generation within a XPU graph
+        with torch.xpu.stream(s):
+            g.capture_begin()
+            graphed_random_values = perform_random_generation_steps(
+                default_generator_state
+            )
+            g.capture_end()
+
+        # Synchronize the streams and replay the graph
+        torch.xpu.current_stream().wait_stream(s)
+        for _ in range(3):
+            random_values = perform_random_generation_steps(generator_state)
+            g.replay()
+            offset = get_final_offsets_of_states(generator_state)
+            graph_offset = get_final_offsets_of_states(default_generator_state)
+
+            # Compare the final offsets of states for both generators to ensure consistency
+            self.assertEqual(offset, graph_offset)
+            # Compare the states generated outside and inside the graph
+            self.assertEqual(random_values, graphed_random_values)
+
+    def test_graph_capture_reset_recapture(self):
+        s = torch.xpu.Stream()
+
+        with torch.xpu.stream(s):
+            a = torch.full((1000,), 1, device="xpu")
+            g = torch.xpu.XPUGraph()
+            torch.xpu.empty_cache()
+            g.capture_begin()
+            b = a
+            for _ in range(10):
+                b = b + 1
+            g.capture_end()
+        torch.xpu.current_stream().wait_stream(s)
+
+        g.replay()
+
+        self.assertEqual(b.sum().item(), 11000.0)
+
+        g.reset()
+
+        with torch.xpu.stream(s):
+            g.capture_begin()
+            b.fill_(2.0)
+            for _ in range(10):
+                b = b + 2
+            g.capture_end()
+        torch.xpu.current_stream().wait_stream(s)
+
+        g.replay()
+        self.assertEqual(b.sum().item(), 22000.0)
+
+        g.reset()
+        del g
+
+    def test_graph_warn_if_has_zero_nodes(self):
+        with warnings.catch_warnings(record=True) as caught:
+            g = torch.xpu.XPUGraph()
+            s = torch.xpu.Stream()
+            with torch.xpu.stream(s):
+                g.capture_begin()
+                g.capture_end()
+        self.assertTrue(any("The XPU Graph is empty" in str(w.message) for w in caught))
+
+    def test_graph_capture_oom(self):
+        oom_regex = "out of memory"
+        with self.assertRaisesRegex(RuntimeError, oom_regex):
+            with torch.xpu.graph(torch.xpu.XPUGraph()):
+                torch.zeros(2**40, device="xpu")
+
+    def test_repeat_graph_capture_oneDNN_memory(self):
+        if self.expandable_segments:
+            self.skipTest("oneDNN does not support expandable_segments memory")
+        (x, y, z) = 1024, 512, 64
+        a = torch.rand((x, y), device="xpu")
+        b = torch.rand((y, z), device="xpu")
+
+        # warmup
+        torch.mm(a, b)
+
+        free_bytes_before, total_bytes = torch.xpu.mem_get_info()
+        used_gb_before = (total_bytes - free_bytes_before) / 1e9
+
+        for _ in range(100):
+            torch_graph = torch.xpu.XPUGraph()
+            with torch.xpu.graph(torch_graph):
+                torch.mm(a, b)
+            torch_graph.replay()
+
+        free_bytes_after, _ = torch.xpu.mem_get_info()
+        used_gb_after = (total_bytes - free_bytes_after) / 1e9
+
+        self.assertFalse(used_gb_before + 0.1 < used_gb_after)
+
+    def test_graph_rng_functional(self):
+        ops_with_kwargs = (
+            (torch.nn.functional.dropout, {"p": 0.1}),
+            (torch.nn.functional.rrelu, {"training": True}),
+        )
+        size = 10000
+
+        def run(op, kwargs):
+            a = torch.randn((size,), device="xpu", dtype=torch.float)
+
+            # Control
+            torch.xpu.manual_seed(5)
+            eager_out = a
+            for _ in range(6):
+                eager_out = op(eager_out, **kwargs)
+
+            graph_in = a.clone()
+            stream = torch.xpu.Stream()
+            stream.wait_stream(torch.xpu.current_stream())
+            with torch.xpu.stream(stream):
+                torch.xpu.manual_seed(5)
+
+                g = torch.xpu.XPUGraph()
+                torch.xpu.empty_cache()
+                g.capture_begin()
+                graph_out = graph_in
+                for _ in range(2):
+                    graph_out = op(graph_out, **kwargs)
+                g.capture_end()
+            torch.xpu.current_stream().wait_stream(stream)
+
+            # Runs a graphed->eager->graphed sequence of RNG ops.
+            # replay() plays 2 invocations of the op, so the sequence has 6
+            # invocations total, matching Control.
+            # replay() reads from graph_in and writes to graph_out.
+            g.replay()
+            out = op(graph_out, **kwargs)
+            out = op(out, **kwargs)
+            graph_in.copy_(out)
+            g.replay()
+
+            # If replay() updated RNG state correctly, graph_out
+            # should now hold data equal to eager_out.
+            try:
+                self.assertEqual(eager_out, graph_out)
+            except Exception as e:
+                raise RuntimeError("Failed on ", op) from e
+
+            # Do the same operations varying seeds
+            seeds = [6, 128, 9999]
+
+            for seed in seeds:
+                torch.xpu.manual_seed(seed)
+                graph_in.copy_(a)
+                for _ in range(3):
+                    g.replay()
+
+                # If the random seed was not updated then the graph would
+                # generate the same output as in previous check.
+                try:
+                    self.assertNotEqual(eager_out, graph_out)
+                except Exception as e:
+                    raise RuntimeError("Failed on ", op) from e
+
+                # Now repeat the same operations in non-graphed mode.
+                torch.xpu.manual_seed(seed)
+                for _ in range(3):
+                    eager_out.copy_(a)
+                    eager_out = op(eager_out, **kwargs)
+                    eager_out = op(eager_out, **kwargs)
+
+                # In the end, graph_out and eager_out must be equal
+                # as they went under the same set of operations.
+                try:
+                    self.assertEqual(eager_out, graph_out)
+                except Exception as e:
+                    raise RuntimeError("Failed on ", op) from e
+
+            # We hold references to all tensors used across streams up til this sync,
+            # so no need to call record_stream on those tensors.
+            torch.xpu.synchronize()
+
+        for op, kwargs in ops_with_kwargs:
+            run(op, kwargs)
+
+    def test_graph_rng_distributions(self):
+        size = 10000
+        input = torch.rand((size,), device="xpu", dtype=torch.float)
+        alloc = torch.empty((size,), device="xpu", dtype=torch.float)
+
+        # Torch ops to test with sample args (tuple) and kwargs (dict)
+        torch_with_args = (
+            ("bernoulli", (input.clone(),), {}),
+            ("normal", (input.clone() + 1, 1.0), {}),
+            ("poisson", (input.clone(),), {}),
+            ("rand", (size,), {"device": "xpu", "dtype": torch.float}),
+            ("randint", (0, 3, (size,)), {"device": "xpu", "dtype": torch.float}),
+            ("randn", (size,), {"device": "xpu", "dtype": torch.float}),
+        )
+
+        # Tensor methods to test with sample args (tuple)
+        tensor_with_args = (
+            ("bernoulli_", (input.clone(),)),
+            ("cauchy_", ()),
+            ("exponential_", ()),
+            ("geometric_", (0.3,)),
+            ("log_normal_", ()),
+            ("normal_", ()),
+            ("random_", ()),
+            ("uniform_", ()),
+        )
+
+        def run(module, op, args, kwargs):
+            torch.xpu.manual_seed(5)
+
+            # Each path runs a dummy op to increment the state a bit before creating controls.
+            if module == "torch":
+                dummy = getattr(torch, op)(*args, **kwargs)
+                control1 = getattr(torch, op)(*args, **kwargs)
+                control2 = getattr(torch, op)(*args, **kwargs)
+            else:
+                dummy = alloc.clone()
+                control1 = alloc.clone()
+                control2 = alloc.clone()
+                getattr(dummy, op)(*args)
+                getattr(control1, op)(*args)
+                getattr(control2, op)(*args)
+
+            stream = torch.xpu.Stream()
+            stream.wait_stream(torch.xpu.current_stream())
+            with torch.xpu.stream(stream):
+                torch.xpu.manual_seed(5)
+
+                g = torch.xpu.XPUGraph()
+                torch.xpu.empty_cache()
+                if module == "torch":
+                    g.capture_begin()
+                    t1 = getattr(torch, op)(*args, **kwargs)
+                    t2 = getattr(torch, op)(*args, **kwargs)
+                    g.capture_end()
+                else:
+                    t1 = alloc.clone()
+                    t2 = alloc.clone()
+                    g.capture_begin()
+                    getattr(t1, op)(*args)
+                    getattr(t2, op)(*args)
+                    g.capture_end()
+            torch.xpu.current_stream().wait_stream(stream)
+
+            try:
+                self.assertNotEqual(control1, t1)
+                self.assertNotEqual(control2, t2)
+            except Exception as e:
+                raise RuntimeError("Failed on " + module + "." + op) from e
+
+            # Set a new seed to check if graph would use it
+            for seed in [6, 314, 271]:
+                torch.xpu.manual_seed(seed)
+                # Runs a dummy op prelude, as for controls, to make sure replay()
+                # picks up the dummy op's state increment.
+                if module == "torch":
+                    dummy = getattr(torch, op)(*args, **kwargs)
+                    control1 = getattr(torch, op)(*args, **kwargs)
+                    control2 = getattr(torch, op)(*args, **kwargs)
+                else:
+                    getattr(dummy, op)(*args)
+                    getattr(control1, op)(*args)
+                    getattr(control2, op)(*args)
+
+                torch.xpu.manual_seed(seed)
+                if module == "torch":
+                    dummy = getattr(torch, op)(*args, **kwargs)
+                else:
+                    getattr(dummy, op)(*args)
+
+                t1.copy_(alloc)
+                t2.copy_(alloc)
+
+                # Runs RNG ops that fill t1 and t2.
+                g.replay()
+
+                try:
+                    self.assertEqual(control1, t1)
+                    self.assertEqual(control2, t2)
+                except Exception as e:
+                    raise RuntimeError("Failed on " + module + "." + op) from e
+
+            # We hold references to all tensors used across streams up til this sync,
+            # so no need to call record_stream on those tensors.
+            torch.xpu.synchronize()
+
+        for op_with_args in torch_with_args:
+            run("torch", *op_with_args)
+
+        for meth_with_args in tensor_with_args:
+            # Adds an empty dict for kwargs, which none of the Tensor methods use
+            run("Tensor", *(meth_with_args + ({},)))
+
+    def test_graph_two_successive(self):
+        torch.xpu.empty_cache()
+
+        size = 1000
+        kSmallBuffer = 2097152
+
+        def func_with_temps(t, val):
+            x = t.clone() + val
+            y = t.clone() + val
+            return x + y
+
+        s = torch.xpu.Stream()
+
+        for share_mem in ("Don't share", "via pool()", "via graph_pool_handle()"):
+            g0 = torch.xpu.XPUGraph()
+            g1 = torch.xpu.XPUGraph()
+
+            a = torch.ones((size,), device="xpu")
+
+            s.wait_stream(torch.xpu.current_stream())
+            with torch.xpu.stream(s):
+                g0_args = (
+                    (torch.xpu.graph_pool_handle(),)
+                    if share_mem == "via graph_pool_handle()"
+                    else ()
+                )
+                g0.capture_begin(*g0_args)
+                b = a.clone()
+                for _ in range(5):
+                    b = func_with_temps(b, 1)
+                g0.capture_end()
+
+                g1_args = (g0.pool(),) if share_mem == "via pool()" else g0_args
+                g1.capture_begin(*g1_args)
+                for _ in range(5):
+                    b = func_with_temps(b, 1)
+                g1.capture_end()
+            torch.xpu.current_stream().wait_stream(s)
+
+            # mixes unrelated eager ops with replays
+            c = a.clone()
+            for _ in range(2):
+                c = func_with_temps(c, 3)
+            g0.replay()
+            for _ in range(2):
+                c = func_with_temps(c, 3)
+            g1.replay()
+            for _ in range(2):
+                c = func_with_temps(c, 3)
+
+            self.assertEqual(b.sum().item(), size * 3070)
+            self.assertEqual(c.sum().item(), size * 442)
+
+            if share_mem != "Don't share":
+                self.assertEqual(
+                    reserved_no_sharing  # noqa: F821
+                    - torch.xpu.memory_stats()["reserved_bytes.all.current"],
+                    kSmallBuffer,
+                )
+            else:
+                reserved_no_sharing = torch.xpu.memory_stats()[
+                    "reserved_bytes.all.current"
+                ]
+
+            del a, b, c, g0, g1
+            # Tensors used across streams (a and b) were held until just now, so no need to call record_stream on them.
+            torch.xpu.synchronize()
+            torch.xpu.empty_cache()
+
+    def test_graph_three_successive(self):
+        torch.xpu.empty_cache()
+
+        size = 1000
+
+        s = torch.xpu.Stream()
+
+        for share_mem in ("Don't share", "via pool()", "via graph_pool_handle()"):
+            a = torch.ones((size,), device="xpu")
+
+            g0 = torch.xpu.XPUGraph()
+            g1 = torch.xpu.XPUGraph()
+            g2 = torch.xpu.XPUGraph()
+
+            s.wait_stream(torch.xpu.current_stream())
+            with torch.xpu.stream(s):
+                g0_args = (
+                    (torch.xpu.graph_pool_handle(),)
+                    if share_mem == "via graph_pool_handle()"
+                    else ()
+                )
+                g0.capture_begin(*g0_args)
+                b = a.clone()
+                c = b + 1
+                d = b + 2
+                g0.capture_end()
+
+                args = (g0.pool(),) if share_mem == "via pool()" else g0_args
+
+                g1.capture_begin(*args)
+                e = c + 3
+                del c
+                g1.capture_end()
+
+                g2.capture_begin(*args)
+                f = d + 4
+                g2.capture_end()
+            torch.xpu.current_stream().wait_stream(s)
+
+            # Tests that replaying in capture order is valid
+            g0.replay()
+            g1.replay()
+            g2.replay()
+
+            self.assertEqual(e.sum().item(), size * 5)
+            self.assertEqual(f.sum().item(), size * 7)
+
+            # Tests that replaying as g0, g2, g1 is only valid if they don't share a pool
+            g0.replay()
+            g2.replay()
+            g1.replay()
+
+            expect_corruption = share_mem != "Don't share"
+            self.assertEqual(
+                e.sum().item(), size * (7 + 3) if expect_corruption else size * 5
+            )
+            self.assertEqual(f.sum().item(), size * 7)
+
+            del a, b, d, e, f, g0, g1, g2
+            # Tensors used across streams (a, e, f) were held until just now, so no need to call record_stream on them.
+            torch.xpu.synchronize()
+            torch.xpu.empty_cache()
+
+    def test_graph_memory_stats_and_use_result_after_destroy_graph(self):
+        kSmallSize = 1048576
+        kSmallBuffer = 2097152
+        kLargeBuffer = 20971520
+        kMinLargeAlloc = 10485760
+        kRoundLarge = 2097152
+
+        elem = 4
+
+        cases = (
+            (512 // elem, 1, kSmallBuffer, kSmallBuffer, "small_pool"),
+            (kSmallSize // elem, 2, 2 * kSmallBuffer, kSmallBuffer, "small_pool"),
+            ((kSmallSize + 512) // elem, 1, kLargeBuffer, kLargeBuffer, "large_pool"),
+            (
+                (kMinLargeAlloc - 512) // elem,
+                2,
+                2 * kLargeBuffer,
+                kLargeBuffer,
+                "large_pool",
+            ),
+            (
+                (kMinLargeAlloc + 512) // elem,
+                3,
+                3
+                * (
+                    kRoundLarge
+                    * ((kMinLargeAlloc + 512 + kRoundLarge - 1) // kRoundLarge)
+                ),
+                kRoundLarge * ((kMinLargeAlloc + 512 + kRoundLarge - 1) // kRoundLarge),
+                "large_pool",
+            ),
+        )
+
+        stats_to_check = ("segment.", "reserved_bytes.", "active.", "active_bytes.")
+
+        gc.collect()
+        torch.xpu.empty_cache()
+
+        s = torch.xpu.Stream()
+
+        for (
+            numel,
+            delta_xpuMallocs,
+            delta_xpuMalloc_bytes,
+            delta_xpuMalloc_bytes_post_del_g,
+            pool_string,
+        ) in cases:
+            if pool_string == "small_pool":
+                delta_active_blocks = 3  # one from "b" plus a sneaky two from XPUGraph's one-element rng seed and offset holders
+                delta_active_bytes = (
+                    numel * elem + 1024
+                )  # + 1024 for XPUGraph's rng seed and offset holders each
+            else:
+                delta_active_blocks = 1  # We only check the large pool, which isn't affected by rng offset holder
+                delta_active_bytes = numel * elem
+
+            g = torch.xpu.XPUGraph()
+            s.wait_stream(torch.xpu.current_stream())
+            with torch.xpu.stream(s):
+                a = torch.ones((numel,), device="xpu")
+
+                precapture_stats = torch.xpu.memory_stats()
+
+                g.capture_begin()
+                b = a.clone()
+                for _ in range(5):
+                    b = b.clone() + 1
+                g.capture_end()
+            torch.xpu.current_stream().wait_stream(s)
+
+            gc.collect()
+
+            postcapture_stats = torch.xpu.memory_stats()
+
+            expecteds = (
+                delta_xpuMallocs,
+                delta_xpuMalloc_bytes,
+                delta_active_blocks,
+                delta_active_bytes,
+            )
+            # Double checks replay and stats before and after a call to empty_cache
+            for i in range(2):
+                for stat, expected in zip(stats_to_check, expecteds):
+                    stat = stat + pool_string + ".current"
+                    current = postcapture_stats[stat] - precapture_stats[stat]
+
+                    if self.expandable_segments and "segment" in stat:
+                        expected = 0
+                    if (
+                        self.expandable_segments
+                        and "reserved" in stat
+                        and (numel == cases[3][0] or numel == cases[4][0])
+                    ):
+                        expected = 2 * kLargeBuffer
+
+                    self.assertEqual(
+                        current,
+                        expected,
+                        "Pre to post capture delta of "
+                        + stat
+                        + f" = {current}, expected = {expected}, numel = {numel}",
+                    )
+
+                g.replay()
+                self.assertEqual(b.sum().item(), 6 * numel)
+                if i == 0:
+                    torch.xpu.empty_cache()
+
+            del g
+            gc.collect()
+            torch.xpu.empty_cache()
+            postdel_stats = torch.xpu.memory_stats()
+
+            # Uses graph result b after graph has been deleted
+            self.assertEqual(b.sum().item(), 6 * numel)
+
+            # b should be the only live reference remaining from the graph's private pool
+            expecteds = (1, delta_xpuMalloc_bytes_post_del_g, 1, numel * elem)
+            for stat, expected in zip(stats_to_check, expecteds):
+                stat = stat + pool_string + ".current"
+                current = postdel_stats[stat] - precapture_stats[stat]
+
+                if self.expandable_segments and "segment" in stat:
+                    expected = 0
+                if (
+                    self.expandable_segments
+                    and "reserved" in stat
+                    and numel == cases[3][0]
+                ):
+                    expected = 2 * kLargeBuffer
+                if (
+                    self.expandable_segments
+                    and "reserved" in stat
+                    and numel == cases[4][0]
+                ):
+                    expected = kLargeBuffer
+
+                self.assertEqual(
+                    current,
+                    expected,
+                    "Pre capture to post graph delete delta of "
+                    + stat
+                    + f" = {current}, expected = {expected}, numel = {numel}",
+                )
+
+            # del a, b before the next case is essential, otherwise overwriting a and b in the next case
+            # can throw off its allocation/deallocation counts.
+            del a, b
+            # Tensors used across streams (a and b) were held until just now, so no need to call record_stream on them.
+            torch.xpu.synchronize()
+            torch.xpu.empty_cache()
+
+    @serialTest()
+    def test_graph_checkpoint_preserve_rng_state(self):
+        torch.xpu.manual_seed(42)
+
+        def fn(x):
+            return x * torch.sigmoid(torch.randn(1, device="xpu"))
+
+        fn(torch.ones(1, device="xpu"))
+
+        torch.xpu.manual_seed(42)
+        eager_in = torch.ones(1, device="xpu", requires_grad=True)
+        eager_out = torch.utils.checkpoint.checkpoint(
+            fn, eager_in, use_reentrant=False, preserve_rng_state=True
+        )
+        (eager_in_grad,) = torch.autograd.grad(eager_out, eager_in)
+
+        g = torch.xpu.XPUGraph()
+        with torch.xpu.graph(g):
+            graph_in = torch.ones(1, device="xpu", requires_grad=True)
+            graph_out = torch.utils.checkpoint.checkpoint(
+                fn, graph_in, use_reentrant=False, preserve_rng_state=True
+            )
+            (graph_in_grad,) = torch.autograd.grad(graph_out, graph_in)
+
+        torch.xpu.manual_seed(42)
+        g.replay()
+
+        self.assertEqual(eager_in_grad, graph_in_grad, rtol=0.0, atol=0.0)
+
+    @serialTest()
+    def test_graph_manual_seed_mismatch_raises(self):
+        torch.xpu.manual_seed(0)
+        g = torch.xpu.XPUGraph()
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "XPUGeneratorImpl::set_current_seed can be called during stream capture only if new seed is the same as the original seed.",  # noqa: B950
+        ):
+            with torch.xpu.graph(g):
+                torch.xpu.manual_seed(1)
+
+    @parametrize(
+        "with_amp,cache_enabled,allow_unused_input",
+        [
+            subtest((True, True, True), decorators=[unittest.expectedFailure]),
+            subtest((False, False, False), decorators=[unittest.expectedFailure]),
+        ],
+        name_fn=lambda x, y, z: "{}{}{}".format(
+            {True: "with_amp", False: "without_amp"}[x],
+            {True: "_cache_enabled", False: "_cache_disabled"}[y] if x else "",
+            {True: "_allow_unused_input", False: "_not_allow_unused_input"}[z],
+        ),
+    )
+    @serialTest()
+    def test_graph_make_graphed_callables(
+        self, with_amp, cache_enabled, allow_unused_input
+    ):
+        if self.expandable_segments:
+            self.skipTest("oneDNN does not support expandable_segments memory")
+        torch.manual_seed(5)
+        torch.xpu.manual_seed(5)
+
+        N, D_in, H, D_out = 640, 4096, 2048, 1024
+
+        class MLP1(torch.nn.Module):
+            def __init__(self, D_in: int, H: int, D_out: int):
+                super().__init__()
+                self.net_1 = torch.nn.Sequential(
+                    torch.nn.Linear(D_in, H), torch.nn.Dropout(p=0.1)
+                ).xpu()
+                self.net_2 = torch.nn.Sequential(
+                    torch.nn.Linear(H, D_out), torch.nn.Dropout(p=0.2)
+                ).xpu()
+
+            def forward(self, input_dict: dict):
+                x = input_dict["x"]
+                return self.net_2(self.net_1(x))
+
+        class MLP2(torch.nn.Module):
+            def __init__(self, D_in: int, H: int, D_out: int):
+                super().__init__()
+                self.net_1 = torch.nn.Sequential(
+                    torch.nn.Linear(D_in, H), torch.nn.Dropout(p=0.1)
+                ).xpu()
+                self.net_2 = torch.nn.Sequential(
+                    torch.nn.Linear(H, D_out), torch.nn.Dropout(p=0.2)
+                ).xpu()
+
+            def forward(self, x):
+                return self.net_2(self.net_1(x))
+
+        class ParameterlessModule(torch.nn.Module):
+            def forward(self, x):
+                idx = (
+                    torch.arange(x.size(0), device=x.device)
+                    .view(-1, 1)
+                    .repeat(1, x.size(1))
+                )
+                return {"output": torch.gather(x, 0, idx)}
+
+        models = []
+        for _ in range(2):
+            model_section1 = MLP1(D_in, H, H).xpu()
+            model_section2 = MLP2(H, H, D_out).xpu()
+            model_section3 = ParameterlessModule().xpu()
+            models.append(
+                torch.nn.Sequential(model_section1, model_section2, model_section3)
+            )
+
+        model_graphed = models[0]
+        model_control = models[1]
+
+        model_graphed.load_state_dict(model_control.state_dict())
+
+        opt_graphed = torch.optim.SGD(model_graphed.parameters(), lr=0.1)
+        opt_control = torch.optim.SGD(model_control.parameters(), lr=0.1)
+
+        x = torch.randn(N, D_in, device="xpu")
+        h = torch.randn(N, H, device="xpu", requires_grad=True)
+        h2 = torch.randn(N, D_out, device="xpu", requires_grad=True)
+        unused_input = torch.randn(N, H, device="xpu", requires_grad=True)
+        y_pred = torch.randn(N, D_out, device="xpu", requires_grad=True)
+        y = torch.randn(N, D_out, device="xpu")
+
+        loss_fn_control = torch.nn.functional.mse_loss
+        relu_control = torch.nn.functional.relu
+
+        # This is a good stress test. It graphs four callables: two Modules and two python functions.
+        with torch.amp.autocast(
+            device_type="xpu", enabled=with_amp, cache_enabled=cache_enabled
+        ):
+            (
+                model_graphed[0],
+                model_graphed[1],
+                model_graphed[2],
+                relu_graphed,
+                loss_fn_graphed,
+            ) = torch.xpu.make_graphed_callables(
+                (
+                    model_graphed[0],
+                    model_graphed[1],
+                    model_graphed[2],
+                    relu_control,
+                    loss_fn_control,
+                ),
+                (
+                    ({"x": x, "unused_input": unused_input},),
+                    (h,),
+                    (h2,),
+                    (y_pred,),
+                    (y_pred, y),
+                ),
+                allow_unused_input=allow_unused_input,
+            )
+
+        real_inputs = [torch.rand_like(x) for _ in range(10)]
+        real_targets = [torch.rand_like(y) for _ in range(10)]
+
+        for m, opt, relu, loss_fn in zip(
+            (model_graphed, model_control),
+            (opt_graphed, opt_control),
+            (relu_graphed, relu_control),
+            (loss_fn_graphed, loss_fn_control),
+        ):
+            # Resets RNC states before iterations for graphed and ungraphed models,
+            # so dropout math should be bitwise identical for both.
+            torch.manual_seed(5)
+            torch.xpu.manual_seed(5)
+            for data, target in zip(real_inputs, real_targets):
+                opt.zero_grad(set_to_none=True)
+                with torch.amp.autocast(
+                    device_type="xpu", enabled=with_amp, cache_enabled=cache_enabled
+                ):
+                    y_pred = m({"x": data, "unused_input": unused_input})["output"]
+                    y_pred = relu(y_pred)
+                    loss = loss_fn(y_pred, target)
+                    loss.backward()
+                opt.step()
+
+        for p, pc in zip(model_graphed.parameters(), model_control.parameters()):
+            self.assertEqual(p, pc)
+
+        # We graphed the models in training mode. Eval should still run ungraphed.
+        model_graphed.eval()
+        model_control.eval()
+        self.assertEqual(
+            model_graphed({"x": real_inputs[0]}), model_control({"x": real_inputs[0]})
+        )
+
+    @parametrize(
+        "with_amp,cache_enabled,allow_unused_input",
+        [
+            subtest((False, False, True)),
+            subtest((True, False, True)),
+            subtest((True, True, True)),
+            subtest((False, False, False)),
+        ],
+        name_fn=lambda x, y, z: "{}{}{}".format(
+            {True: "with_amp", False: "without_amp"}[x],
+            {True: "_cache_enabled", False: "_cache_disabled"}[y] if x else "",
+            {True: "_allow_unused_input", False: "_not_allow_unused_input"}[z],
+        ),
+    )
+    @serialTest()
+    def test_graph_make_graphed_callables_parameterless_nograd_module(
+        self, with_amp, cache_enabled, allow_unused_input
+    ):
+        torch.manual_seed(5)
+        torch.xpu.manual_seed(5)
+
+        N, D_in, H, _ = 640, 4096, 2048, 1024
+
+        class ParameterlessModule(torch.nn.Module):
+            def forward(self, input_dict: dict):
+                x = input_dict["x"]
+                idx = (
+                    torch.arange(x.size(0), device=x.device)
+                    .view(-1, 1)
+                    .repeat(1, x.size(1))
+                )
+                return {"output": torch.gather(x, 0, idx)}
+
+        models = []
+        for _ in range(2):
+            model_section1 = ParameterlessModule().xpu()
+            models.append(torch.nn.Sequential(model_section1))
+
+        model_graphed = models[0]
+        model_control = models[1]
+
+        model_graphed.load_state_dict(model_control.state_dict())
+
+        x = torch.randn(N, D_in, device="xpu", requires_grad=False)
+        unused_input = torch.randn(N, H, device="xpu", requires_grad=False)
+        y = torch.randn(N, D_in, device="xpu")
+
+        # This is a good stress test. It graphs four callables: two Modules and two python functions.
+        with torch.amp.autocast(
+            device_type="xpu", enabled=with_amp, cache_enabled=cache_enabled
+        ):
+            model_graphed[0] = torch.xpu.make_graphed_callables(
+                model_graphed[0],
+                ({"x": x, "unused_input": unused_input},),
+                allow_unused_input=allow_unused_input,
+            )
+
+        real_inputs = [torch.rand_like(x, requires_grad=True) for _ in range(10)]
+        real_targets = [torch.rand_like(y) for _ in range(10)]
+
+        for m in (model_graphed, model_control):
+            # Resets RNC states before iterations for graphed and ungraphed models,
+            # so dropout math should be bitwise identical for both.
+            torch.manual_seed(5)
+            torch.xpu.manual_seed(5)
+            for data, _ in zip(real_inputs, real_targets):
+                with torch.amp.autocast(
+                    device_type="xpu", enabled=with_amp, cache_enabled=cache_enabled
+                ):
+                    m({"x": data, "unused_input": unused_input})["output"]
+
+        # We graphed the models in training mode. Eval should still run ungraphed.
+        model_graphed.eval()
+        model_control.eval()
+        self.assertEqual(
+            model_graphed({"x": real_inputs[0]}), model_control({"x": real_inputs[0]})
+        )
+
+    def test_graph_make_graphed_callables_same_pool(self):
+        if self.expandable_segments:
+            self.skipTest("oneDNN does not support expandable_segments memory")
+        torch.manual_seed(5)
+        torch.xpu.manual_seed(5)
+        models = []
+        num_models = 3
+        for _ in range(num_models):
+            models.append(
+                torch.nn.Sequential(
+                    torch.nn.Linear(32, 128),
+                    torch.nn.ReLU(),
+                    torch.nn.Linear(128, 128),
+                ).xpu()
+            )
+        # we will reuse the same pool for all graph captures
+        mempool = torch.xpu.graph_pool_handle()
+        graphed_models = []
+        for model in models:
+            x = torch.randn([64, 32], device="xpu")
+            graphed_model = deepcopy(model)
+            graphed_model = torch.xpu.make_graphed_callables(
+                graphed_model, (x,), pool=mempool
+            )
+            graphed_models.append(graphed_model)
+
+        for model, graphed_model in zip(models, graphed_models):
+            x = torch.randn([64, 32], device="xpu")
+            y = model(x)
+            yg = graphed_model(x)
+            l = y.norm()
+            lg = yg.norm()
+            l.backward()
+            lg.backward()
+
+            self.assertEqual(y, yg)
+            self.assertEqual(l, lg)
+            for p, pg in zip(model.parameters(), graphed_model.parameters()):
+                self.assertEqual(p, pg)
+                self.assertEqual(p.grad, pg.grad)
+                self.assertNotEqual(p.data_ptr(), pg.data_ptr())
+                self.assertNotEqual(p.grad.data_ptr(), pg.grad.data_ptr())
+
+    def test_xpu_graph_error_options(self):
+        def fn():
+            x = torch.zeros([2000], device="xpu")
+            y = x + x + x
+            return y
+
+        mem = None
+
+        def raw_malloc():
+            global mem
+            mem = None
+            stream = torch.xpu.Stream()
+            try:
+                with torch.xpu.stream(stream):
+                    mem = torch.xpu.caching_allocator_alloc(1024)
+            except BaseException:  # noqa: B036
+                if mem is None:
+                    return
+            try:
+                torch.xpu.caching_allocator_delete(mem)
+                mem = None
+                return None
+            except BaseException:  # noqa: B036
+                pass
+
+        def throws_on_xpu_event():
+            graph = torch.xpu.XPUGraph()
+            torch.xpu.synchronize()
+            stream = torch.xpu.Stream()
+            stream.wait_stream(torch.xpu.current_stream())
+            with torch.xpu.stream(stream):
+                fn()
+            stream.synchronize()
+            torch.xpu.current_stream().wait_stream(stream)
+            torch.xpu.synchronize()
+            try:
+                with torch.xpu.graph(graph, stream=stream):
+                    out = fn()
+                    thread = threading.Thread(target=raw_malloc)
+                    thread.start()
+                    thread.join()
+            except Exception:
+                if mem is not None:
+                    torch.xpu.caching_allocator_delete(mem)
+                return True
+
+            return False
+
+        self.assertFalse(throws_on_xpu_event())
+
+    def test_xpu_graph_raw_graph_keep_graph_false(self):
+        graph = torch.xpu.XPUGraph(keep_graph=False)
+        x = torch.zeros([2000], device="xpu")
+        y = torch.ones([2000], device="xpu")
+        with torch.xpu.graph(graph):
+            z = x + y
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"instantiate\(\) is intended to be called by the user only when keep_graph=true",
+        ):
+            raw_pointer = graph.instantiate()
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"You cannot access the raw xpuGraph_t instance unless XPUGraph was initialized with keep_graph=true",
+        ):
+            raw_pointer = graph.raw_xpu_graph()
+
+    def test_xpu_graph_raw_graph_reset_and_recapture(self):
+        graph = torch.xpu.XPUGraph(keep_graph=True)
+        x = torch.zeros([2000], device="xpu")
+        with torch.xpu.graph(graph):
+            x += 1.0
+
+        graph.instantiate()
+        graph.replay()
+        self.assertTrue(torch.all(x == 1.0))
+        graph.instantiate()
+        graph.replay()
+        self.assertTrue(torch.all(x == 2.0))
+        graph.replay()
+        self.assertTrue(torch.all(x == 3.0))
+
+        graph.reset()
+
+        x = torch.zeros([2000], device="xpu")
+        with torch.xpu.graph(graph):
+            x += 2.0
+
+        graph.instantiate()
+        graph.replay()
+        self.assertTrue(torch.all(x == 2.0))
+        graph.instantiate()
+        graph.replay()
+        self.assertTrue(torch.all(x == 4.0))
+        graph.replay()
+        self.assertTrue(torch.all(x == 6.0))
+
+
+@contextlib.contextmanager
+def caching_host_allocator_use_host_register(use_xpu_host_register: bool):
+    if use_xpu_host_register:
+        torch._C._accelerator_setAllocatorSettings(
+            "pinned_use_xpu_host_register:True,pinned_num_register_threads:8"
+        )
+    try:
+        yield
+    finally:
+        if use_xpu_host_register:
+            torch._C._accelerator_setAllocatorSettings(
+                "pinned_use_xpu_host_register:False"
+            )
+
+
+@contextlib.contextmanager
+def caching_host_allocator_use_background_threads(use_background_threads: bool):
+    if use_background_threads:
+        torch._C._accelerator_setAllocatorSettings("pinned_use_background_threads:True")
+    try:
+        yield
+    finally:
+        if use_background_threads:
+            torch._C._accelerator_setAllocatorSettings(
+                "pinned_use_background_threads:False"
+            )
+
+
+@unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
+class TestCachingHostAllocatorXpuGraph(TestCase):
+    @parametrize("use_xpu_host_register", [True, False])
+    def test_pin_memory_no_use(self, use_xpu_host_register):
+        # A pinned host memory block cannot be reused if it is not deleted
+        with caching_host_allocator_use_host_register(use_xpu_host_register):
+            graph = torch.xpu.XPUGraph()
+            with torch.xpu.graph(graph):
+                data = torch.empty(8, pin_memory=True)
+                data2 = torch.empty(8, pin_memory=True)
+            self.assertNotEqual(data.data_ptr(), data2.data_ptr())
+            del data2
+
+    @parametrize("use_xpu_host_register", [True, False])
+    def test_pin_memory_no_use2(self, use_xpu_host_register):
+        # A pinned host memory block can be reused if it is deleted
+        # and has never been used by copy_
+        with caching_host_allocator_use_host_register(use_xpu_host_register):
+            graph = torch.xpu.XPUGraph()
+            with torch.xpu.graph(graph):
+                data = torch.randn(8).pin_memory()
+                data_ptr = data.data_ptr()
+                del data
+                data2 = torch.randn(8).pin_memory()
+                self.assertEqual(data2.data_ptr(), data_ptr)
+
+    @parametrize("use_xpu_host_register", [True, False])
+    def test_pin_memory_use(self, use_xpu_host_register):
+        # A pinned host memory block cannot be reused if it has been used by copy_
+        with caching_host_allocator_use_host_register(use_xpu_host_register):
+            graph = torch.xpu.XPUGraph()
+            with torch.xpu.graph(graph):
+                data = torch.randn(8).pin_memory()
+                data_gpu = torch.randn(8, device="xpu")
+                data_gpu.copy_(data, non_blocking=True)
+                old_data_ptr = data.data_ptr()
+                del data
+                data2 = torch.randn(8).pin_memory()
+            self.assertNotEqual(data2.data_ptr(), old_data_ptr)
+
+    @parametrize("use_xpu_host_register", [True, False])
+    @parametrize("use_background_threads", [True, False])
+    @parametrize(
+        "use_memory, delete_memory",
+        [(True, True), (True, False), (False, True), (False, False)],
+    )
+    def test_two_graphs(
+        self, use_background_threads, use_xpu_host_register, use_memory, delete_memory
+    ):
+        with (
+            caching_host_allocator_use_background_threads(use_background_threads),
+            caching_host_allocator_use_host_register(use_xpu_host_register),
+        ):
+            shared_pool = torch.xpu.graph_pool_handle()
+            graph1 = torch.xpu.XPUGraph()
+            graph2 = torch.xpu.XPUGraph()
+
+            with torch.xpu.graph(graph1, pool=shared_pool):
+                data = torch.randn(8).pin_memory()
+                if use_memory:
+                    data_gpu = torch.randn(8, device="xpu")
+                    data_gpu.copy_(data, non_blocking=True)
+
+                old_data_ptr = data.data_ptr()
+                if delete_memory:
+                    del data
+
+            with torch.xpu.graph(graph2, pool=shared_pool):
+                data2 = torch.randn(8).pin_memory()
+                if use_memory:
+                    data_gpu = torch.randn(8, device="xpu")
+                    data_gpu.copy_(data2, non_blocking=True)
+
+                new_data_ptr = data2.data_ptr()
+                if delete_memory:
+                    del data2
+
+            if delete_memory and not use_memory:
+                self.assertEqual(new_data_ptr, old_data_ptr)
+            else:
+                self.assertNotEqual(new_data_ptr, old_data_ptr)
+
 
 @unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
 class TestXpuOps(TestCase):
@@ -1448,6 +2669,9 @@ class TestMemPool(TestCase):
         self.assertTrue(after_pool_release < peak_reserved)
         self.assertTrue(after_pool_release > 0)
 
+
+instantiate_parametrized_tests(TestXpu)
+instantiate_parametrized_tests(TestCachingHostAllocatorXpuGraph)
 
 if __name__ == "__main__":
     run_tests()
