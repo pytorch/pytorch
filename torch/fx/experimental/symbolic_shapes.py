@@ -1331,7 +1331,6 @@ def _free_unbacked_symbols_with_path(
         )
         # TODO: DivideByKey needs to test divisibility at runtime!
 
-        # pyrefly: ignore [unsupported-operation]
         r[unbacked] = path + (DivideByKey(divisor),)
         if real is not None:
             if not isinstance(real, int):
@@ -1355,7 +1354,6 @@ def _free_unbacked_symbols_with_path(
         and s.rhs == 1
         and s.lhs in pending
     ):
-        # pyrefly: ignore [unsupported-operation]
         r[s.lhs] = path + (ConvertIntKey(),)
         if real is not None:
             if type(real) is not bool:
@@ -7957,6 +7955,29 @@ class ShapeEnv:
             for ra in ras:
                 ra.stack.cleanup()
 
+    def _should_skip_static_eval(self, expr: SympyBoolean) -> bool:
+        """Check if we should skip _maybe_evaluate_static for the given expression.
+
+        Skips static evaluation for single unbacked symbol >= 0 (or 0 <= symbol)
+        when the symbol has unknown range [-int_oo, int_oo].
+        This pattern is common during tracing and doesn't benefit from static evaluation
+        since the symbol has no constraints.
+        Note that the first time this is called value range will be updated and next time
+        it's called (if any) we would call _maybe_evaluate_static and it would return True.
+        """
+        unbacked_sym = None
+        if isinstance(expr, sympy.GreaterThan) and expr.rhs == 0:
+            unbacked_sym = expr.lhs
+        elif isinstance(expr, sympy.LessThan) and expr.lhs == 0:
+            unbacked_sym = expr.rhs
+        if isinstance(unbacked_sym, sympy.Symbol) and symbol_is_type(
+            unbacked_sym, SymT.UNBACKED_INT
+        ):
+            vr = self.var_to_range[unbacked_sym]
+            if vr.lower == -int_oo and vr.upper == int_oo:
+                return True
+        return False
+
     @lru_cache(256)
     @record_shapeenv_event(save_tracked_fakes=True)
     def guard_or_defer_runtime_assert(
@@ -7981,18 +8002,21 @@ class ShapeEnv:
         if fast_result is not None:
             return bool(fast_result)
 
-        static_expr = self._maybe_evaluate_static(expr)
-        if static_expr is not None:
-            self.log.debug(
-                "runtime_assert %s == %s [statically known]", orig_expr, static_expr
-            )
-            # TODO: assert bool(static_expr)
-            return bool(static_expr)
+        if self._should_skip_static_eval(expr):
+            new_expr = expr
+        else:
+            static_expr = self._maybe_evaluate_static(expr)
+            if static_expr is not None:
+                self.log.debug(
+                    "runtime_assert %s == %s [statically known]", orig_expr, static_expr
+                )
+                # TODO: assert bool(static_expr)
+                return bool(static_expr)
 
-        # Attempt to eliminate the unbacked SymInt
-        new_expr = self._maybe_evaluate_static(expr, unbacked_only=True)
-        if new_expr is None:
-            raise AssertionError("new_expr must not be None")
+            # Attempt to eliminate the unbacked SymInt
+            new_expr = self._maybe_evaluate_static(expr, unbacked_only=True)
+            if new_expr is None:
+                raise AssertionError("new_expr must not be None")
         if (
             not self.prefer_deferred_runtime_asserts_over_guards
             and new_expr.free_symbols <= self.backed_var_to_val.keys()

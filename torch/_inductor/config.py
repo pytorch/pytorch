@@ -1055,8 +1055,8 @@ class aten_distributed_optimizations:
     # Bucket exposed collectives first (None means auto)
     bucket_exposed_first: bool | None = None
 
-    # Only bucket collectives in FSDP process groups
-    bucket_only_fsdp_groups: bool = True
+    # Experimental setting to bucket only internode communications
+    bucket_only_internode_comms: bool = False
 
     # Enable fusion region detection for overlap scheduling cost estimation.
     # When enabled, groups of fusible ops (pointwise, reduction, etc.) are treated
