@@ -3560,6 +3560,10 @@ class Scheduler:
         for node in self.nodes:
             node.prune_weak_deps()
 
+    def mode_requires_synchronization(self, mode: Optional[str]) -> bool:
+        """Check if store mode requires cross-thread synchronization."""
+        return mode is not None  # Currently all non-None modes need sync
+
     def topological_sort_schedule(
         self, nodes: list[BaseSchedulerNode]
     ) -> list[BaseSchedulerNode]:
@@ -5635,6 +5639,11 @@ class Scheduler:
                 # nodes.
                 read = read.normalize()
                 write = write.normalize()
+            # Operations like index_add_, scatter_add_, etc. require global
+            # synchronization - all threads must complete writes before any reads.
+            # These cannot be safely fused into the same kernel. Atomic modes and TMA stores require synchronization barriers
+            if self.mode_requires_synchronization(write.mode):
+                return False
 
             return (
                 read.index == write.index
