@@ -260,13 +260,6 @@ def common_reduction_strategy(
                     break
 
         for p in op_spec.output_spec.placements:
-            # NormPartial(p) is compatible with NormReduction(p) of the same norm_type
-            if (
-                isinstance(p, _NormPartial)
-                and isinstance(reduction_op, NormReduction)
-                and p.norm_type == reduction_op.norm_type
-            ):
-                continue
             # when the partial reduction op matches the global reduction op,
             # we can delay redistribution (i.e max, max)
             if isinstance(p, Partial) and p.reduce_op != reduction_op:
@@ -443,7 +436,7 @@ def vector_norm_strategy(op_schema: OpSchema) -> OpStrategy:
         input_strategy,
         reduce_dims,
         keep_dim=cast(bool, keepdim),
-        reduction_linear=True,
+        reduction_linear=norm_type != 0,  # norm 0 should not propagate
         reduction_op=_get_norm_reduction_op(norm_type),
     )
 
@@ -469,7 +462,7 @@ def foreach_norm_strategy(op_schema: OpSchema) -> TupleStrategy:
         output_strategy = common_reduction_strategy(
             op_strategy,
             reduce_dims,
-            reduction_linear=True,
+            reduction_linear=norm_type != 0,  # norm 0 should not propagate
             reduction_op=_get_norm_reduction_op(norm_type),
         )
         output_tuple_strategy_children.append(output_strategy)

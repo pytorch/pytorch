@@ -914,7 +914,6 @@ class TestFullyShardShardPlacementFnMultiThread(FSDPTestMultiThread):
     def world_size(self) -> int:
         return 4
 
-    @skip_if_lt_x_gpu(1)
     def test_shard_placement_fn_contiguous_params_grads(self):
         dim = 4
         model = MLP(dim=dim)

@@ -463,6 +463,24 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         self.rsplit_size = 0
         self.saved_partial_accumulate: list[PartialAccumulate] = []
 
+    def codegen_template_override(
+        self,
+        scheduling,
+        template_node,
+        epilogue_nodes,
+        prologue_nodes,
+        buf_name_to_prologue_group,
+        prologue_preserves_zero_mask_fn,
+        render,
+        only_gen_src_code: bool,
+    ) -> str | None:
+        """Override template codegen. Return None to use default flow.
+
+        External template handlers (e.g. Helion) can override this method
+        to implement custom code generation.
+        """
+        return None
+
     def _get_store_output_subgraph_name(self, i: int) -> str:
         return f"<STORE_OUTPUT_{i}>"
 
@@ -2035,6 +2053,20 @@ class SIMDScheduling(BaseScheduling):
         # all prologue groups should have finalized with use in template
         assert len(prologue_group) == 0
 
+        # External template handlers (e.g. Helion) can override codegen
+        result = kernel.codegen_template_override(
+            self,
+            template_node,
+            epilogue_nodes,
+            prologue_nodes,
+            buf_name_to_prologue_group,
+            prologue_preserves_zero_mask,
+            render,
+            only_gen_src_code,
+        )
+        if result is not None:
+            return result
+
         with kernel:
             if not only_gen_src_code:
                 # prologue nodes can only be fused if their only use is in the template,
@@ -2098,7 +2130,7 @@ class SIMDScheduling(BaseScheduling):
                     partial_code.finalize_hook("<DEF_KERNEL>")
                 partial_code.finalize_hook("<ARGDEFS>", strict=False)
 
-            # TODO: Maybe unify CUDATemplateKernel to also use PartialRender for flexible epilogue fusion.
+            # TODO: Maybe unify CUTLASSTemplateKernel to also use PartialRender for flexible epilogue fusion.
 
             for input_name in kernel.named_input_nodes:
                 subgraph_name = f"<LOAD_INPUT_{input_name}>"

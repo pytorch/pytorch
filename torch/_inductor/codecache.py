@@ -1742,7 +1742,7 @@ class CudaKernelParamCache:
         if config.aot_inductor.emit_multi_arch_kernel:
             bin_type_to_ext = {
                 "cubin": ".fatbin",
-                "spv": f".{XPU_KERNEL_FORMAT}",
+                XPU_KERNEL_FORMAT: ".spv",
                 "hsaco": ".hsaco",
             }
             assert bin_type in bin_type_to_ext, (
@@ -3822,10 +3822,8 @@ def _cuda_compiler() -> Optional[str]:
         return os.path.join(build_paths.sdk_home, "bin", "nvcc")
     if cuda_env.nvcc_exist(os.getenv("CUDACXX")):
         return os.getenv("CUDACXX", "")
-    if os.getenv("CUDA_HOME") is not None:
-        path = os.path.realpath(os.path.join(os.getenv("CUDA_HOME", ""), "bin/nvcc"))
-        if cuda_env.nvcc_exist(path):
-            return path
+    if cuda_env.nvcc_exist(os.getenv("CUDA_HOME")):
+        return os.path.realpath(os.path.join(os.getenv("CUDA_HOME", ""), "bin/nvcc"))
     return "nvcc"
 
 
@@ -3940,6 +3938,8 @@ def _nvcc_arch_as_compile_option() -> str:
         return "100f"
     if arch == "100":
         return "100a"
+    if arch == "120":
+        return "120a"
     return arch
 
 
