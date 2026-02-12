@@ -493,6 +493,9 @@ def create_flex_flash_attention_backward_kernel(
     q_indices: Optional[TensorBox] = None,
     full_q_num_blocks: Optional[TensorBox] = None,
     full_q_indices: Optional[TensorBox] = None,
+    dq_write_order: Optional[TensorBox] = None,
+    dq_write_order_full: Optional[TensorBox] = None,
+    dq_write_order_spt: Optional[bool] = None,
 ) -> tuple[TensorBox | ShapeAsConstantBuffer, TensorBox, TensorBox, tuple]:
     """Create a CuteDSL flash attention backward kernel for the default mod path."""
     if not ensure_flash_available():
@@ -572,6 +575,12 @@ def create_flex_flash_attention_backward_kernel(
             ]
         )
 
+    has_dq_write_order = dq_write_order is not None
+    if has_dq_write_order:
+        input_nodes.append(dq_write_order)
+        if dq_write_order_full is not None:
+            input_nodes.append(dq_write_order_full)
+
     has_score_mod = fw_subgraph_buffer is not None and joint_subgraph_buffer is not None
     subgraphs = []
     if has_score_mod:
@@ -590,6 +599,9 @@ def create_flex_flash_attention_backward_kernel(
             SM_SCALE=scale,
             HAS_SCORE_MOD=has_score_mod,
             HAS_BLOCK_MASK=has_block_mask,
+            HAS_DQ_WRITE_ORDER=has_dq_write_order,
+            HAS_DQ_WRITE_ORDER_FULL=dq_write_order_full is not None,
+            DQ_WRITE_ORDER_SPT=dq_write_order_spt,
             SPARSE_Q_BLOCK_SIZE=sparse_q_block_size,
             SPARSE_KV_BLOCK_SIZE=sparse_kv_block_size,
         )
