@@ -219,6 +219,7 @@ def fully_shard(
         offload_policy,
     )
 
+    # For Dynamo
     for managed_module in managed_modules:
         managed_module._is_fsdp_managed_module = True  # type: ignore[assignment]
         managed_module._fsdp_use_orig_params = True  # type: ignore[assignment]
