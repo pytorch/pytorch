@@ -1779,7 +1779,8 @@ void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
     // DumpPipe is one per-trainer process, and its convenient to name them
     // after 'global' ranks in the system, So we assume processgroup (uid)==0 is
     // the global PG and has globally unique rank ids across trainers.
-    dumpPipe.emplace(pg_->globalRank(), pg_->debugInfoPipeFile_, pg_->traceBufferSize_);
+    dumpPipe.emplace(
+        pg_->globalRank(), pg_->debugInfoPipeFile_, pg_->traceBufferSize_);
   }
   while (true) {
     // This won't have any lock since this lock is only used here.
