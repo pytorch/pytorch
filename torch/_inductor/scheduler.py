@@ -5560,7 +5560,25 @@ class Scheduler:
             # should be true now because we checked `can_fuse_epilogue`
             assert len(node1.node.mutable_args) == 1
             if node1.node.mutable_args[0].layout != node2.node.layout:
-                why("node1 ande node2 uses different buf layouts")
+                why("node1 and node2 uses different buf layouts")
+                return False
+
+            assert len(node1.node.mutation_outputs) == 1
+            written_buffer_name = node1.node.mutation_outputs[0].name
+
+            def _is_other_node_that_references_mutation_buffer(
+                other_node: BaseSchedulerNode,
+            ):
+                return (
+                    (other_node is not node1)
+                    and (other_node is not node2)
+                    and written_buffer_name in other_node.used_buffer_names()
+                )
+
+            if any(
+                _is_other_node_that_references_mutation_buffer(node)
+                for node in self.nodes
+            ):
                 return False
 
         if (
