@@ -2221,10 +2221,17 @@ def _jit_compile(name,
     if baton.try_acquire():
         try:
             if version != old_version:
-                from .hipify import hipify_python
-                from .hipify.hipify_python import GeneratedFileCleaner
-                with GeneratedFileCleaner(keep_intermediates=keep_intermediates) as clean_ctx:
+                if IS_HIP_EXTENSION and (with_cuda or with_cudnn):
+                    from .hipify import hipify_python
+                    from .hipify.hipify_python import GeneratedFileCleaner
+                    clean_ctx_mgr = GeneratedFileCleaner(keep_intermediates=keep_intermediates)
+                else:
+                    import contextlib
+                    hipify_python = None  # type: ignore[assignment]
+                    clean_ctx_mgr = contextlib.nullcontext()
+                with clean_ctx_mgr as clean_ctx:
                     if IS_HIP_EXTENSION and (with_cuda or with_cudnn):
+                        assert hipify_python is not None  # noqa: S101
                         hipify_result = hipify_python.hipify(
                             project_directory=build_directory,
                             output_directory=build_directory,
