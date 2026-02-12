@@ -70,11 +70,9 @@ class _LinearLoss(_Loss):
         bias: bool = True,
         device=None,
         dtype=None,
-        size_average=None,
-        reduce=None,
         reduction: str = "mean",
     ) -> None:
-        super().__init__(size_average, reduce, reduction)
+        super().__init__(None, None, reduction)
         self.linear = Linear(in_features, out_features, bias, device, dtype)
 
 
@@ -86,8 +84,6 @@ class _WeightedLinearLoss(_LinearLoss):
         bias: bool = True,
         device=None,
         dtype=None,
-        size_average=None,
-        reduce=None,
         reduction: str = "mean",
         weight: Tensor | None = None,
     ) -> None:
@@ -97,8 +93,6 @@ class _WeightedLinearLoss(_LinearLoss):
             bias,
             device,
             dtype,
-            size_average,
-            reduce,
             reduction,
         )
         self.register_buffer("loss_weight", weight)
@@ -1456,12 +1450,10 @@ class LinearCrossEntropyLoss(_WeightedLinearLoss):
     Args:
         in_features (int): Size of each input sample.
         num_classes (int): Number of classes, :math:`C`.
-        loss_dims (tuple[int], optional): specifies loss
-            dimensions. Note that :attr:`loss_dims` is only applicable
-            when the target contains class probabilities.
-            Default: ``()``.
-        bias: If set to ``False``, the linear layer will not learn an
-            additive bias.  Default: ``True``
+        out_features (tuple[int], optional): specifies dimensions
+            :math:`(d_1, d_2, ..., d_K)` for K-dimensional loss. Note
+            that :attr:`out_features` is only applicable when the
+            target contains class probabilities.  Default: ``()``.
         device (:class:`torch.device`, optional): the desired device
             of linear weight and bias.  Default: ``None``.
         dtype (:class:`torch.dtype`, optional): the desired dtype of
@@ -1496,12 +1488,11 @@ class LinearCrossEntropyLoss(_WeightedLinearLoss):
     Shape:
         - Input: Shape :math:`(in_features)`, :math:`(N, in_features)`.
         - Target: If containing class indices, shape :math:`()`,
-          :math:`(N)` or :math:`(N, d_1, d_2, ..., d_K)` with :math:`K\geq 1`
-          in the case of K-dimensional loss where each value
+          :math:`(N)` or :math:`(N, *out_features)` where each value
           should be between :math:`[0, C)`. The target data type is
           required to be long when using class indices.
           If containing class probabilities, the target must have
-          shape :math:`(C)` or :math:`(N, C, d_1, d_2, ..., d_K)`, and
+          shape :math:`(C)` or :math:`(N, C, *out_features)`, and
           each value should be between :math:`[0, 1]`. This means the
           target data type is required to be float when using class
           probabilities. Note that PyTorch does not strictly enforce
@@ -1510,8 +1501,7 @@ class LinearCrossEntropyLoss(_WeightedLinearLoss):
           contains valid probability distributions (see below examples
           section for more details).
         - Output: If reduction is 'none', shape :math:`()`,
-          :math:`(N)` or :math:`(N, d_1, d_2, ..., d_K)` with :math:`K\geq 1`
-          in the case of K-dimensional loss, depending on the
+          :math:`(N)` or :math:`(N, *out_features)` depending on the
           shape of the input. Otherwise, scalar.
 
         where :math:`N` is batch size.
@@ -1520,12 +1510,12 @@ class LinearCrossEntropyLoss(_WeightedLinearLoss):
     __constants__ = [
         "num_classes",
         "reduction",
-        "loss_dims",
+        "out_features",
         "ignore_index",
         "label_smoothing",
     ]
     num_classes: int
-    loss_dims: tuple[int, ...]
+    out_features: tuple[int, ...]
     ignore_index: int
     label_smoothing: float
 
@@ -1533,8 +1523,8 @@ class LinearCrossEntropyLoss(_WeightedLinearLoss):
         self,
         in_features: int,
         num_classes: int,
-        loss_dims: tuple[int, ...] = (),
-        bias: bool = True,
+        *,
+        out_features: tuple[int, ...] = (),
         device=None,
         dtype=None,
         reduction: str = "mean",
@@ -1542,20 +1532,18 @@ class LinearCrossEntropyLoss(_WeightedLinearLoss):
         ignore_index: int = -100,
         label_smoothing: float = 0.0,
     ) -> None:
-        size_average, reduce = None, None  # legacy parameters
+        bias = False  # linear_cross_entropy does not depend on bias
         super().__init__(
             in_features,
-            num_classes * math.prod(loss_dims),
+            num_classes * math.prod(out_features),
             bias,
             device,
             dtype,
-            size_average,
-            reduce,
             reduction,
             weight,
         )
         self.num_classes = num_classes
-        self.loss_dims = loss_dims
+        self.out_features = out_features
         self.ignore_index = ignore_index
         self.label_smoothing = label_smoothing
 
@@ -1565,7 +1553,6 @@ class LinearCrossEntropyLoss(_WeightedLinearLoss):
             input,
             self.linear.weight,
             target,
-            linear_bias=self.linear.bias,
             weight=self.loss_weight,
             reduction=self.reduction,
             ignore_index=self.ignore_index,
@@ -1575,7 +1562,7 @@ class LinearCrossEntropyLoss(_WeightedLinearLoss):
     def extra_repr(self) -> str:
         return (
             f"num_classes={self.num_classes}, reduction={self.reduction}, "
-            f"loss_dims={self.loss_dims}, ignore_index={self.ignore_index}, label_smoothing={self.label_smoothing}"
+            f"out_features={self.out_features}, ignore_index={self.ignore_index}, label_smoothing={self.label_smoothing}"
         )
 
 

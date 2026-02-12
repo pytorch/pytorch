@@ -568,7 +568,8 @@ def no_batch_dim_reference_fn(m, p, *args, **kwargs):
     is_criterion = get_and_pop('is_criterion', False)
 
     if kwargs_to_batchify is not None:
-        assert isinstance(kwargs_to_batchify, dict)
+        if not isinstance(kwargs_to_batchify, dict):
+            raise AssertionError(f"Expected kwargs_to_batchify to be a dict, got {type(kwargs_to_batchify)}")
         for k, v in kwargs.items():
             if k in kwargs_to_batchify and v is not None:
                 bdim = kwargs_to_batchify[k]
@@ -1671,13 +1672,14 @@ def module_inputs_torch_nn_LinearCrossEntropyLoss(module_info, device, dtype, re
     make_loss_weight = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
 
     def make_target(is_prob, batch_size, num_classes, kwargs):
-        loss_dims = kwargs.get("loss_dims", ())
+        out_features = kwargs.get("out_features", ())
         if is_prob:
-            shape = (*batch_size, num_classes, *loss_dims)
+            shape = (*batch_size, num_classes, *out_features)
             target = make_tensor(shape, device=device, dtype=dtype, requires_grad=False).softmax(dim=min(1, len(shape) - 1))
         else:
-            assert loss_dims == (), loss_dims
-            shape = (*batch_size, *loss_dims)
+            if out_features:
+                raise AssertionError(f"Expected empty out_features, got {out_features}")
+            shape = (*batch_size, *out_features)
             target = make_tensor(shape, device=device, dtype=torch.long, requires_grad=False,
                                  low=0, high=num_classes)
             if "ignore_index" in kwargs and target.device.type != "meta" and torch.all(target == kwargs["ignore_index"]):
@@ -1689,7 +1691,6 @@ def module_inputs_torch_nn_LinearCrossEntropyLoss(module_info, device, dtype, re
     def reference_fn(m, p, i, t):
         return linear_cross_entropy_loss_reference(
             i, p[0], t,
-            linear_bias=p[1] if m.linear.bias is not None else None,
             weight=m.loss_weight,
             reduction=m.reduction, ignore_index=m.ignore_index, label_smoothing=m.label_smoothing)
 
@@ -1699,37 +1700,37 @@ def module_inputs_torch_nn_LinearCrossEntropyLoss(module_info, device, dtype, re
         ('ignore_index', {'ignore_index': 1}),
         ('label_smoothing', {'label_smoothing': 0.15}),
         ('ignore_index_label_smoothing', {'ignore_index': 1, 'label_smoothing': 0.5}),
-        ('loss_dims', {'loss_dims': (3, 2)}),
+        ('out_features', {'out_features': (3, 2)}),
     ]
 
     in_features, num_classes = 5, 4
 
     module_inputs = []
-    for is_prob, batch_size, bias, weight, reduction, (desc, constructor_kwargs) in product(
+    for is_prob, batch_size, weight, reduction, (desc, constructor_kwargs) in product(
             (False, True),
             ((), (7,)),
-            (False, True),
             (None, make_loss_weight(num_classes)),
             reductions, cases):
         if is_prob:
             if "ignore_index" in constructor_kwargs:
                 # ignore_index is not supported for floating point target
                 continue
-            if constructor_kwargs.get("loss_dims", ()) and not batch_size:
+            if constructor_kwargs.get("out_features", ()) and not batch_size:
                 # K-dimensional loss requires batched input
                 continue
         else:
-            if constructor_kwargs.get("loss_dims", ()):
+            if constructor_kwargs.get("out_features", ()):
                 # multi-target with class indices is not supported
                 continue
-        assert len(batch_size) <= 1
+
+        if len(batch_size) > 1:
+            raise AssertionError("linear_cross_entropy does not support multi-dimensional batches")
 
         target = make_target(is_prob, batch_size, num_classes, constructor_kwargs)
         module_inputs.append(
             ModuleInput(
                 constructor_input=FunctionInput(
                     in_features, num_classes, reduction=reduction,
-                    bias=bias,
                     weight=weight,
                     **constructor_kwargs),
                 forward_input=FunctionInput(make_input((*batch_size, in_features)), target),
@@ -2610,7 +2611,8 @@ def module_inputs_torch_nn_TransformerEncoderLayer(module_info, device, dtype, r
     # since the fast path requires no_grad mode, we run the fast path in .eval()
     # and no_grad() in the reference_fn and verify that against the results in train mode.
     def fast_path_reference_fn(module, parameters, *args, **kwargs):
-        assert module.training
+        if not module.training:
+            raise AssertionError("Expected module.training to be True")
         module.train(False)
         with torch.no_grad():
             output = module(*args, **kwargs)
@@ -3310,6 +3312,28 @@ rnn_gru_lstm_module_info_decorators = (
 )
 
 # Start of module error inputs functions.
+
+def module_error_inputs_torch_nn_NLLLoss(module_info, device, dtype, requires_grad, training, **kwargs):
+    """
+    Error inputs for NLLLoss that test weight dtype must match input dtype.
+    Regression test for device parity between CPU and CUDA with empty tensors.
+    """
+    input_t = torch.tensor([], device=device, dtype=dtype).reshape((0, 0))
+    weight_dtype = torch.float32 if dtype == torch.float16 else torch.float16
+    weight_t = torch.tensor([], device=device, dtype=weight_dtype)
+    target_t = torch.tensor([], device=device, dtype=torch.long)
+
+    return [
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=FunctionInput(weight=weight_t),
+                forward_input=FunctionInput(input_t, target_t),
+            ),
+            error_on=ModuleErrorEnum.FORWARD_ERROR,
+            error_type=RuntimeError,
+            error_regex=r"expected scalar type \w+ but found \w+"
+        ),
+    ]
 
 def module_error_inputs_torch_nn_RNN_GRU_Cell(module_info, device, dtype, requires_grad, training, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -4068,6 +4092,7 @@ module_db: list[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.NLLLoss,
                module_inputs_func=module_inputs_torch_nn_NLLLoss,
+               module_error_inputs_func=module_error_inputs_torch_nn_NLLLoss,
                skips=(
                    # No channels_last support for loss functions.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
@@ -4295,6 +4320,7 @@ module_db: list[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.Embedding,
                module_inputs_func=module_inputs_torch_nn_Embedding,
+               gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
                decorators=[
                    DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-4)}),
                                 'TestModule', 'test_non_contiguous_tensors',
