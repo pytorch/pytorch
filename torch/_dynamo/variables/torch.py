@@ -1111,6 +1111,11 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             *args: VariableTracker,
             **kwargs: VariableTracker,
         ) -> VariableTracker | None:
+            from torch._inductor import config as inductor_config
+
+            # Skip decomposition when precision matters - let it fall through to ATen
+            if inductor_config.emulate_precision_casts:
+                return None
             if len(args) == 3 and "value" in kwargs and len(kwargs) == 1:
                 # decompose addcdiv into constituent ops, prevents a graph break due to converting
                 # value to a scalar

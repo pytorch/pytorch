@@ -939,9 +939,12 @@ def select_decomp_table() -> dict[Any, Callable[..., Any]]:
         # For _foreach_addcdiv, we use the native CUDA kernel.
         # The decomposed version uses separate mul+add/div+add ops which don't match
         # eager's FMA rounding behavior.
+        # We also skip addcdiv_ (inplace) to use the ATen kernel.
         ops_to_skip.update(
             [
                 aten.addcmul,
+                aten.addcdiv,
+                aten.addcdiv_,
                 aten._foreach_addcmul.Scalar,
                 aten._foreach_addcdiv.Scalar,
             ]
