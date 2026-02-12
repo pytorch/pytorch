@@ -22,6 +22,7 @@ The module supports key Dynamo features including:
 import collections
 import contextlib
 import copy
+import dataclasses
 import functools
 import inspect
 import itertools
@@ -132,9 +133,11 @@ from .utils import (
     checkpoint_params,
     CleanupHook,
     clone_inputs,
+    compilation_time_metrics,
     count_calls,
     counters,
     dynamo_timed,
+    get_chromium_event_logger,
     get_instruction_source_311,
     get_locals_to_steal,
     get_static_address_type,
@@ -326,6 +329,34 @@ class WrapperBackend:
 
 
 Scope = dict[str, object]
+
+
+@dataclass
+class BytecodeTracingTimings:
+    """Accumulated wall-clock time (ns) for major components during Dynamo
+    bytecode tracing that are not related to variable trackers.  Each field
+    is an int accumulator that gets bumped via ``time.time_ns()`` in the
+    corresponding hot-path wrapper.  To add a new timer, add a field here
+    and wire up the wrapper in the relevant function."""
+
+    get_fake_value_ns: int = 0
+    create_proxy_ns: int = 0
+    wrap_to_fake_tensor_and_record_ns: int = 0
+
+    def report_and_reset(self) -> None:
+        """Flush accumulated timings to the bytecode_tracing chromium event
+        and to compilation_time_metrics, then reset all counters."""
+        chromium_log = get_chromium_event_logger()
+        event_data = {}
+        for f in dataclasses.fields(self):
+            ns_val = getattr(self, f.name)
+            if ns_val > 0:
+                key = f.name.removesuffix("_ns")
+                event_data[f"{key}_time_s"] = ns_val / 1e9
+                compilation_time_metrics.setdefault(key, []).append(ns_val / 1e9)
+                setattr(self, f.name, 0)
+        if event_data:
+            chromium_log.try_add_event_data("bytecode_tracing", **event_data)
 
 
 @dataclass
@@ -752,6 +783,8 @@ class OutputGraph(OutputGraphCommon):
 
         self.compiler_trace_stack = contextlib.ExitStack()
 
+        self.bytecode_tracing_timings = BytecodeTracingTimings()
+
         # These are the ambient, currently-global saved_tensor_hooks stashed in autograd,
         # that are set for the entire duration of the compiled region.
         # This is an invariant today because we graph break on the saved_tensor_hook
@@ -815,6 +848,7 @@ class OutputGraph(OutputGraphCommon):
             )
 
     def mark_bytecode_tracing_stop(self) -> None:
+        self.bytecode_tracing_timings.report_and_reset()
         self.compiler_trace_stack.close()
         # Record profiler timing for the root function and dump stats
         if config.dynamo_profiler and self.profiler_state is not None:
@@ -3244,6 +3278,26 @@ class SubgraphTracer(fx.Tracer):
                     node.meta["stack_trace"] = meta["stack_trace"]
 
     def create_proxy(
+        self,
+        kind: str,
+        target: Any,
+        args: Any,
+        kwargs: Any,
+        name: Optional[str] = None,
+        type_expr: Optional[Any] = None,
+        proxy_factory_fn: Optional[Callable[[fx.Node], fx.Proxy]] = None,
+    ) -> fx.Proxy:
+        _t0 = time.time_ns()
+        try:
+            return self._create_proxy(
+                kind, target, args, kwargs, name, type_expr, proxy_factory_fn
+            )
+        finally:
+            self.output_graph.bytecode_tracing_timings.create_proxy_ns += (
+                time.time_ns() - _t0
+            )
+
+    def _create_proxy(
         self,
         kind: str,
         target: Any,

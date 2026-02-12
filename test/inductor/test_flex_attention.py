@@ -1701,6 +1701,72 @@ class TestFlexAttention(InductorTestCase):
         self.run_test_with_paged_attention(all_bias, dtype, device=device)
 
     @supported_platform
+    @skip_on_cpu
+    @skip_on_xpu
+    def test_bf16_score_mod_captured_grad_dtype(self, device):
+        """
+        Tests with tensors that require gradients with bf16 dtype in the score_mod
+        """
+        if not PLATFORM_SUPPORTS_BF16:
+            self.skipTest("Platform does not support bf16")
+
+        B_local, H_local, S_local, D_local = 2, 4, 32, 64
+        dtype = torch.bfloat16
+        x = torch.randn(
+            (B_local, S_local, D_local),
+            device=device,
+            dtype=dtype,
+        )
+
+        def forward(bias_proj, x):
+            q = x.view(B_local, S_local, H_local, D_local // H_local).permute(
+                0, 2, 1, 3
+            )
+            k = x.view(B_local, S_local, H_local, D_local // H_local).permute(
+                0, 2, 1, 3
+            )
+            v = x.view(B_local, S_local, H_local, D_local // H_local).permute(
+                0, 2, 1, 3
+            )
+            attn_bias = (
+                bias_proj(x)
+                .view(B_local, S_local, H_local, S_local)
+                .permute(0, 2, 1, 3)
+            )
+
+            def bias_mod(score, b, h, q_idx, kv_idx):
+                return score + attn_bias[b, h, q_idx, kv_idx]
+
+            return flex_attention(q, k, v, score_mod=bias_mod)
+
+        def run_and_get_weight_grad(bias_proj, x, compiled):
+            bias_proj.zero_grad(set_to_none=True)
+            fn = torch.compile(forward) if compiled else forward
+            out = fn(bias_proj, x)
+            grad = torch.randn_like(out)
+            out.backward(grad)
+            return bias_proj.weight.grad
+
+        bias_proj_eager = nn.Linear(
+            D_local, H_local * S_local, device=device, dtype=dtype, bias=False
+        )
+        bias_proj_compiled = nn.Linear(
+            D_local, H_local * S_local, device=device, dtype=dtype, bias=False
+        )
+        bias_proj_compiled.load_state_dict(bias_proj_eager.state_dict())
+
+        torch.manual_seed(0)
+        eager_weight_grad = run_and_get_weight_grad(bias_proj_eager, x, compiled=False)
+        self.assertEqual(eager_weight_grad.dtype, bias_proj_eager.weight.dtype)
+
+        torch.manual_seed(0)
+        compiled_weight_grad = run_and_get_weight_grad(
+            bias_proj_compiled, x, compiled=True
+        )
+        self.assertEqual(compiled_weight_grad.dtype, bias_proj_compiled.weight.dtype)
+        self.assertEqual(eager_weight_grad, compiled_weight_grad, atol=1e-1, rtol=1e-1)
+
+    @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
@@ -4633,11 +4699,10 @@ class GraphModule(torch.nn.Module):
             """\
 class GraphModule(torch.nn.Module):
     def forward(self, primals_1: "f64[2, 2, 128, 4]", primals_2: "f64[2, 2, 128, 4]", primals_3: "f64[2, 2, 128, 4]", full: "i32[1, 1, 1]", full_default: "i32[1, 1, 1, 1]", convert_element_type: "i32[1, 1, 1]", convert_element_type_1: "i32[1, 1, 1, 1]", getitem_2: "f64[2, 2, 128, 4]", getitem_3: "f32[2, 2, 128]", tangents_1: "f64[2, 2, 128, 4]"):
-        full_default_4: "f32[2, 2, 128]" = torch.ops.aten.full.default([2, 2, 128], 0, dtype = torch.float32, layout = torch.strided, device = device(type='GPU_TYPE', index=0), pin_memory = False)
         fw_graph0 = self.fw_graph0
         joint_graph0 = self.joint_graph0
         mask_graph0 = self.mask_graph0
-        flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_1, primals_2, primals_3, getitem_2, getitem_3, tangents_1, full_default_4, fw_graph0, joint_graph0, (1, 1, full, full_default, None, None, convert_element_type, convert_element_type_1, None, None, 1073741824, 1073741824, mask_graph0), 0.5, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': True, 'OUTPUT_MAX': False}, (), ());  primals_1 = primals_2 = primals_3 = getitem_2 = getitem_3 = tangents_1 = full_default_4 = fw_graph0 = joint_graph0 = full = full_default = convert_element_type = convert_element_type_1 = mask_graph0 = None
+        flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_1, primals_2, primals_3, getitem_2, getitem_3, tangents_1, None, fw_graph0, joint_graph0, (1, 1, full, full_default, None, None, convert_element_type, convert_element_type_1, None, None, 1073741824, 1073741824, mask_graph0), 0.5, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': True, 'OUTPUT_MAX': False}, (), ());  primals_1 = primals_2 = primals_3 = getitem_2 = getitem_3 = tangents_1 = fw_graph0 = joint_graph0 = full = full_default = convert_element_type = convert_element_type_1 = mask_graph0 = None
         getitem_5: "f64[2, 2, 128, 4]" = flex_attention_backward[0]
         getitem_6: "f64[2, 2, 128, 4]" = flex_attention_backward[1]
         getitem_7: "f64[2, 2, 128, 4]" = flex_attention_backward[2];  flex_attention_backward = None
