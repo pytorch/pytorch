@@ -2622,6 +2622,16 @@
       ]
     }
   ],
+  "GB4271": [
+    {
+      "Gb_type": "__class__ assignment on user-defined object",
+      "Context": "object={self}, value={value}",
+      "Explanation": "Dynamo does not support reassigning __class__ on user-defined objects.",
+      "Hints": [
+        "Move the __class__ assignment outside of the torch.compile region."
+      ]
+    }
+  ],
   "GB0221": [
     {
       "Gb_type": "non-generator contextlib.contextmanager",
