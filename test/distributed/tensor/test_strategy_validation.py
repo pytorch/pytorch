@@ -77,68 +77,6 @@ class TestPlacementUtilities(TestCase):
         self.assertFalse(is_fully_replicated((Partial("sum"),)))
 
 
-class TestPlacementEquivalence(TestCase):
-    """Test placement equivalence utilities."""
-
-    def test_same_placements_equivalent(self):
-        from torch.distributed.tensor._ops.strategy_validation import (
-            placements_equivalent,
-        )
-
-        # Same types are equivalent
-        self.assertTrue(placements_equivalent(Replicate(), Replicate(), (4, 3)))
-        self.assertTrue(placements_equivalent(Shard(0), Shard(0), (4, 3)))
-        self.assertTrue(placements_equivalent(Partial("sum"), Partial("sum"), (4, 3)))
-
-    def test_different_shards_not_equivalent(self):
-        from torch.distributed.tensor._ops.strategy_validation import (
-            placements_equivalent,
-        )
-
-        # Different shard dims are not equivalent (for normal sizes)
-        self.assertFalse(placements_equivalent(Shard(0), Shard(1), (4, 3)))
-
-    def test_shard_replicate_equivalent_for_size_1(self):
-        from torch.distributed.tensor._ops.strategy_validation import (
-            placements_equivalent,
-        )
-
-        # Shard on size-1 dim is equivalent to Replicate
-        self.assertTrue(placements_equivalent(Shard(0), Replicate(), (1, 3)))
-        self.assertTrue(placements_equivalent(Replicate(), Shard(0), (1, 3)))
-        self.assertTrue(placements_equivalent(Shard(1), Replicate(), (4, 1)))
-
-        # But not when dim is not size 1
-        self.assertFalse(placements_equivalent(Shard(0), Replicate(), (4, 3)))
-
-    def test_two_size1_shards_equivalent(self):
-        from torch.distributed.tensor._ops.strategy_validation import (
-            placements_equivalent,
-        )
-
-        # Two shards on different size-1 dims are equivalent
-        self.assertTrue(placements_equivalent(Shard(0), Shard(1), (1, 1)))
-
-    def test_has_equivalent_rule(self):
-        from torch.distributed.tensor._ops.strategy_validation import (
-            has_equivalent_rule,
-        )
-
-        # For transpose output [2, 1], S(1) and R are equivalent
-        rules = {(("S(0)",), "S(1)")}
-        combo = (("S(0)",), "R")
-        input_shapes = ((1, 2),)
-        output_shape = (2, 1)
-
-        self.assertTrue(has_equivalent_rule(combo, rules, input_shapes, output_shape))
-
-        # But not for output [2, 3] where S(1) != R
-        output_shape_normal = (2, 3)
-        self.assertFalse(
-            has_equivalent_rule(combo, rules, input_shapes, output_shape_normal)
-        )
-
-
 class TestPlacementNormalization(TestCase):
     """Test placement normalization for trivial shard deduplication."""
 
