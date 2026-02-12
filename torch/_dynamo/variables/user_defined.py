@@ -73,12 +73,10 @@ from ..source import (
     UnspecializedParamBufferSource,
 )
 from ..utils import (
-    _FiddleBuildable,
     check_constant_args,
     cmp_name_to_op_mapping,
     dict_methods,
     enum_type_methods,
-    fiddle_buildable_getattr,
     frozenset_methods,
     get_custom_getattr,
     has_torch_function,
@@ -1132,6 +1130,17 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # This is to avoid getattr_static calls to look up the subobj from the self.value.__class__
         self._subobj_from_class: dict[str, object] = {}
 
+        # Cache fiddle Buildable.__getattr__ to avoid sys.modules lookup on hot path
+        _fiddle_mod = sys.modules.get("fiddle._src.config")
+        if (
+            _fiddle_mod is not None
+            and isinstance(value, _fiddle_mod.Buildable)
+            and type(value).__getattr__ is _fiddle_mod.Buildable.__getattr__
+        ):
+            self._fiddle_buildable_getattr = _fiddle_mod.Buildable.__getattr__
+        else:
+            self._fiddle_buildable_getattr = None
+
         import torch.utils._pytree as pytree
 
         self.is_pytree_constant_class = pytree.is_constant_class(self.value_type)
@@ -1664,18 +1673,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 ):
                     # Manually trace out the nn module __getattr__ to avoid large compilation latency.
                     out = self.manually_trace_nn_module_getattr(tx, name)
-                elif (
-                    _FiddleBuildable is not None
-                    and isinstance(self.value, _FiddleBuildable)
-                    and self.source
-                ):
+                elif self._fiddle_buildable_getattr is not None and self.source:
                     # Route through VariableTracker.build so the builder wraps
                     # Buildable.__getattr__ as FiddleBuildableGetAttrVariable.
                     # FiddleBuildableGetAttrVariable short circuits the getattr
                     # access and saves on compile time.
                     new_source = AttrSource(self.source, "__getattr__")
                     fn_vt = VariableTracker.build(
-                        tx, fiddle_buildable_getattr, source=new_source
+                        tx, self._fiddle_buildable_getattr, source=new_source
                     )
                     out = fn_vt.call_function(
                         tx,
