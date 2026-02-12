@@ -61,6 +61,7 @@ from torch._library.opaque_object import (
     is_opaque_reference_type,
     is_opaque_type,
     is_opaque_value_type,
+    should_hoist,
 )
 from torch._ops import HigherOrderOperator, OpOverload, OpOverloadPacket
 from torch._subclasses.fake_tensor import (
@@ -216,6 +217,7 @@ from .functions import (
     FunctoolsWrapsVariable,
     SysFunctionVariable,
     TritonKernelVariable,
+    TritonSetAllocatorSkipVariable,
     UserFunctionVariable,
     UserMethodVariable,
     WrapperUserFunctionVariable,
@@ -736,6 +738,9 @@ class VariableBuilder:
             def from_tensor() -> None:
                 pass
 
+        def set_allocator() -> None:
+            pass
+
         if has_triton_experimental_host_tma():
             from triton.tools.experimental_descriptor import (  # noqa: F811
                 create_1d_tma_descriptor,
@@ -743,6 +748,11 @@ class VariableBuilder:
             )
         if has_triton_tensor_descriptor_host_tma():
             from triton.tools.tensor_descriptor import TensorDescriptor  # noqa: F811
+        if has_triton():
+            import triton as triton_mod
+
+            if hasattr(triton_mod, "set_allocator"):
+                set_allocator = triton_mod.set_allocator  # noqa: F811
 
         # Handle exact type() match
         type_dispatch = self._type_dispatch().get(type(value))
@@ -1352,6 +1362,8 @@ class VariableBuilder:
             return CreateTMADescriptorExperimentalVariable(rank=2)
         elif value is TensorDescriptor.from_tensor:
             return CreateTMADescriptorStableVariable()
+        elif value is set_allocator:
+            return TritonSetAllocatorSkipVariable(value)
         elif isinstance(value, torch.amp.autocast_mode.autocast):
             self.install_guards(GuardBuilder.ID_MATCH)
             return AutocastModeVariable(
@@ -1600,7 +1612,7 @@ class VariableBuilder:
             fake_script_obj = torch._library.fake_class_registry.maybe_to_fake_obj(
                 self.tx.output.fake_mode, value
             )
-            if is_opaque_value_type(type(value)):
+            if is_opaque_value_type(type(value)) and not should_hoist(type(value)):
                 proxy = value
             else:
                 proxy = self.tx.output.root_tracer.create_graph_input(
