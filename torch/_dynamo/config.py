@@ -681,7 +681,7 @@ compiled_autograd = False
 # addcmul and foreach_addcmul which avoid item() graph breaks by decomposing
 # into their constituent ops. This flag controls whether we use these decompositions
 # This can affect numerics for non-inductor backends.
-enable_dynamo_decompositions = True
+enable_dynamo_decompositions = False
 
 
 # Checks if we should graph break when seeing nn parameter constructors
