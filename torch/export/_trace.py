@@ -87,6 +87,7 @@ from torch.export.dynamic_shapes import (
 from torch.export.exported_program import OutputKind
 from torch.fx._symbolic_trace import _ConstantAttributeType
 from torch.fx.experimental.proxy_tensor import (
+    get_proxy_mode,
     get_proxy_slot,
     make_fx,
     PreDispatchTorchFunctionMode,
@@ -1806,6 +1807,32 @@ def _export_to_aten_ir_make_fx(
                     non_strict_root, assigned_buffers
                 )
 
+            def _find_tracer():
+                """Find the active tracer, checking TorchFunctionMode stack first,
+                then falling back to the TorchDispatchMode stack.
+
+                The fallback is needed when a subclass's __torch_function__ accesses
+                inner tensor attrs (e.g. self.inner). The dispatch order for an op
+                like F.linear(x, subclass_weight) is:
+
+                  TorchFunctionMetadataMode (popped via _pop_mode_temporarily)
+                    -> PreDispatchTorchFunctionMode (popped via _pop_mode_temporarily)
+                      -> subclass.__torch_function__ runs here
+                        -> accesses self.inner, triggering custom_getattribute
+
+                At this point both TorchFunctionModes have been popped and won't be
+                restored until __torch_function__ returns, so the mode stack is empty.
+                We fall back to ProxyTorchDispatchMode which lives on the separate
+                TorchDispatchMode stack and is unaffected by _pop_mode_temporarily.
+                Both modes share the same tracer object, so either lookup is equivalent.
+                """
+                if torch._C._is_torch_function_mode_enabled():
+                    for mode in torch.overrides._get_current_function_mode_stack():
+                        if isinstance(mode, PreDispatchTorchFunctionMode):
+                            return mode.tracer
+                proxy_mode = get_proxy_mode()
+                return proxy_mode.tracer if proxy_mode is not None else None
+
             def custom_getattribute(self, attr, *, original_getattr, attrs_to_proxy):
                 """
                 The idea here is that we override subclass getattr methods to proxy
@@ -1814,32 +1841,19 @@ def _export_to_aten_ir_make_fx(
                 system.
                 """
                 out = original_getattr(self, attr)
-                if attr in attrs_to_proxy:
-                    if torch._C._is_torch_function_mode_enabled():
-                        if isinstance(out, torch.Tensor):
-                            # When we get here there is no guarantee that we will hit the
-                            # PreDispatchTorchFunctionMode, so we manually peak into the torch
-                            # function mode list and tweak the PreDispatchTorchFunctionMode.
-                            # This has side effect of proxying stuff like
-                            # proxy.node.meta["val"] = extract_val(val) because at that time, torch function
-                            # mode is still active. It seems bad to turn it off inside proxy_tensor.py, so
-                            # I guess we will just rely on DCE for now to remove extra stuff like detach
-                            torch_function_mode_stack = (
-                                torch.overrides._get_current_function_mode_stack()
-                            )
-                            for mode in torch_function_mode_stack:
-                                if isinstance(mode, PreDispatchTorchFunctionMode):
-                                    tracer = mode.tracer
-                                    proxy = get_proxy_slot(self, tracer).proxy
-                                    inner_proxy = tracer.create_proxy(
-                                        "call_function",
-                                        torch.ops.export.access_subclass_inner_tensor.default,
-                                        (proxy, attr),
-                                        {},
-                                    )
-                                    track_tensor_tree(
-                                        out, inner_proxy, constant=None, tracer=tracer
-                                    )
+                if attr in attrs_to_proxy and isinstance(out, torch.Tensor):
+                    tracer = _find_tracer()
+                    if tracer is not None:
+                        proxy = get_proxy_slot(self, tracer).proxy
+                        inner_proxy = tracer.create_proxy(
+                            "call_function",
+                            torch.ops.export.access_subclass_inner_tensor.default,
+                            (proxy, attr),
+                            {},
+                        )
+                        track_tensor_tree(
+                            out, inner_proxy, constant=None, tracer=tracer
+                        )
                 return out
 
             @contextmanager
@@ -1868,6 +1882,11 @@ def _export_to_aten_ir_make_fx(
                             instance = subclass_types_to_instances[subclass_type][0]
                             # Query subclass specific attrs
                             attrs_to_proxy = set(dir(instance)) - set(dir(torch.Tensor))
+                            # Also include inner tensor attrs from __tensor_flatten__,
+                            # which may shadow existing torch.Tensor attributes.
+                            if hasattr(instance, "__tensor_flatten__"):
+                                inner_keys, _ = instance.__tensor_flatten__()
+                                attrs_to_proxy.update(inner_keys)
                             tensor_type_to_old_getattribute[subclass_type] = (
                                 subclass_type.__getattribute__,  # type: ignore[attr-defined]
                                 attrs_to_proxy,
