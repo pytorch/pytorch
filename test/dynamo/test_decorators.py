@@ -3570,6 +3570,36 @@ class GraphModule(torch.nn.Module):
             def bad_fn2(x):
                 return (x,)
 
+    def test_leaf_function_no_return_value(self):
+        printed = []
+
+        @leaf_function
+        def fn_no_return(x):
+            print("processing")
+
+        @fn_no_return.register_fake
+        def fn_no_return_fake(x):
+            pass
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+
+            def forward(self, x):
+                fn_no_return(x)
+                return (self.linear(x),)
+
+        def args_fn():
+            return (torch.randn(3, 3, requires_grad=True),)
+
+        def loss_fn(out):
+            return out[0].sum()
+
+        with patch("builtins.print", lambda *args, **kwargs: printed.append(args)):
+            self._test_leaf_function_helper(Mod, args_fn, loss_fn)
+        self.assertTrue(any("processing" in p for p in printed))
+
 
 instantiate_parametrized_tests(DecoratorTests)
 
