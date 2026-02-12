@@ -728,7 +728,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             a.add_(w)
             return a
 
-        fn_opt = torch.compile(fn)
+        fn_opt = torch.compile(fn, backend="eager")
 
         res_exp = fn(x, wrapped)
         res_act = fn_opt(y, wrapped2)
@@ -1815,7 +1815,7 @@ s50 > 3""",
         self.assertRaisesRegex(
             torch._dynamo.exc.InternalTorchDynamoError,
             "Tensor subclass method __metadata_guard__ must take exactly two subclass metadata arguments",
-            lambda: torch.compile(lambda x: x * x)(x),
+            lambda: torch.compile(lambda x: x * x, backend="eager")(x),
         )
 
     def test_tensor_subclass_ctx_custom_guards_error_not_classmethod(self):
@@ -1829,7 +1829,7 @@ s50 > 3""",
         self.assertRaisesRegex(
             torch._dynamo.exc.InternalTorchDynamoError,
             "Tensor subclass method __metadata_guard__ must be a classmethod",
-            lambda: torch.compile(lambda x: x * x)(x),
+            lambda: torch.compile(lambda x: x * x, backend="eager")(x),
         )
 
     def test_subclass_constructor_proxying(self):
@@ -1903,7 +1903,7 @@ s50 > 3""",
                 )
                 return return_and_correct_aliasing(func, args, kwargs, out)
 
-        @torch.compile(fullgraph=True)
+        @torch.compile(fullgraph=True, backend="eager")
         def f1(x):
             meta = SubclassTensorArgs(
                 x.shape, x.device, SubclassTensorArgs(x.shape, x.device, None)
@@ -1914,7 +1914,7 @@ s50 > 3""",
         x = torch.randn(3, 3)
         f1(x)
 
-        @torch.compile(fullgraph=True)
+        @torch.compile(fullgraph=True, backend="eager")
         def f1(x):
             meta = SubclassTensorArgs2(
                 x.shape, x.device, SubclassTensorArgs2(x.shape, x.device, None)
@@ -1986,7 +1986,7 @@ s50 > 3""",
                 )
                 return output
 
-        @torch.compile(dynamic=True)
+        @torch.compile(dynamic=True, backend="eager")
         def f(x):
             return x.unflatten(-1, [2, 5])
 
@@ -3079,7 +3079,7 @@ class GraphModule(torch.nn.Module):
                     assert outer_stride is not None
                 return TT(a, b, outer_size, outer_stride)
 
-        @torch.compile(dynamic=True)
+        @torch.compile(dynamic=True, backend="eager")
         def f(x, y):
             tmp1 = x.sin()
             tmp2 = y.sin()
@@ -3690,7 +3690,7 @@ class GraphModule(torch.nn.Module):
                 values, t.offsets(), max_seqlen=t._maybe_max_seqlen
             )
 
-        opt_fn = torch.compile(fn, fullgraph=True, dynamic=True)
+        opt_fn = torch.compile(fn, fullgraph=True, dynamic=True, backend="eager")
         values = torch.randn(10, 5)
         offsets = torch.tensor([0, 2, 4, 7, 10])
         max_seqlen = 5
