@@ -4996,8 +4996,13 @@ def sample_inputs_nan_reduction(supports_multiple_dims):
     return fn
 
 def sample_inputs_reduction_quantile(op_info, device, dtype, requires_grad, **kwargs):
-    test_quantiles = (0.5, make_tensor((2,), dtype=dtype, device=device, low=0, high=1, requires_grad=requires_grad))
-    test_interpolations = ['linear', 'midpoint']
+    test_quantiles = (
+        0.5,
+        make_tensor((2,), dtype=dtype, device=device, low=0, high=1, requires_grad=requires_grad),
+        0.0,
+        1.0,
+    )
+    test_interpolations = ['linear', 'midpoint', 'lower', 'higher', 'nearest']
 
     for quantiles in test_quantiles:
         for t in _generate_reduction_inputs(device, dtype, requires_grad):
@@ -5012,6 +5017,39 @@ def sample_inputs_reduction_quantile(op_info, device, dtype, requires_grad, **kw
                     kwargs['interpolation'] = interpolation
                     input = t.clone().requires_grad_(requires_grad)
                     yield SampleInput(input, quantiles, **kwargs)
+
+
+def sample_inputs_reduction_nanquantile(op_info, device, dtype, requires_grad, **kwargs):
+    # All the standard quantile inputs
+    yield from sample_inputs_reduction_quantile(op_info, device, dtype, requires_grad, **kwargs)
+
+    # NaN-specific inputs — skip when requires_grad since NaN breaks gradients
+    if requires_grad:
+        return
+
+    nan_shapes = ((5,), (3, 4), (2, 3, 4))
+    test_interpolations = ['linear', 'midpoint', 'lower', 'higher', 'nearest']
+    q = make_tensor((3,), dtype=dtype, device=device, low=0, high=1)
+
+    for shape in nan_shapes:
+        # Sparse NaNs
+        t = make_tensor(shape, dtype=dtype, device=device)
+        mask = torch.rand(shape, device=device) < 0.2
+        t[mask] = float('nan')
+        yield SampleInput(t, q)
+        for dim in range(len(shape)):
+            for interpolation in test_interpolations:
+                t_clone = t.clone()
+                yield SampleInput(t_clone, q, dim=dim, keepdim=False, interpolation=interpolation)
+
+    # All-NaN input
+    t = torch.full((4,), float('nan'), dtype=dtype, device=device)
+    yield SampleInput(t, q)
+
+    # All-NaN slice along a dim
+    t = make_tensor((3, 4), dtype=dtype, device=device)
+    t[1, :] = float('nan')
+    yield SampleInput(t, q, dim=1, keepdim=True)
 
 def sample_inputs_reduction_count_nonzero(*args, **kwargs):
     """Sample inputs for count_nonzero"""
@@ -15038,7 +15076,7 @@ op_db: list[OpInfo] = [
            check_batched_forward_grad=False),
     OpInfo('nanquantile',
            dtypes=floating_types(),
-           sample_inputs_func=sample_inputs_reduction_quantile,
+           sample_inputs_func=sample_inputs_reduction_nanquantile,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            # See https://github.com/pytorch/pytorch/issues/66357
