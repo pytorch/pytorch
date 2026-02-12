@@ -107,8 +107,6 @@ pull_torch_tpu() {
     echo "Done."
 }
 
-sleep 28800 # Debug sleep to connect to runner to streamline
-
 # 3. Configuration
 TORCH_TPU_REPO="${TORCH_TPU_REPO:-https://github.com/google-ml-infra/torch_tpu.git}"
 TORCH_TPU_BRANCH="${TORCH_TPU_BRANCH:-main}"
@@ -182,7 +180,6 @@ echo "Building TorchTPU Wheel..."
 export TORCH_SOURCE=$(python -c "import torch; import os; print(os.path.dirname(os.path.dirname(torch.__file__)))")
 
 as_jenkins env TORCH_SOURCE="${TORCH_SOURCE}" bazel build //ci/wheel:torch_tpu_wheel --config=local --define WHEEL_VERSION=0.1.0 --define TORCH_SOURCE=local
-
 # 11. Install
 pip_install bazel-bin/ci/wheel/*.whl
 
