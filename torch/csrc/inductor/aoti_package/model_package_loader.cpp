@@ -1,7 +1,7 @@
 #if !defined(C10_MOBILE) && !defined(ANDROID)
 
-#include <c10/util/error.h>
 #include <c10/util/FileSystem.h>
+#include <c10/util/error.h>
 #include <c10/util/string_view.h>
 #include <c10/util/tempfile.h>
 #include <torch/csrc/inductor/aoti_package/model_package_loader.h>
@@ -62,12 +62,13 @@ std::string normalize_path_separator(const std::string& orig_path) {
   return normalized_path;
 }
 
-
 bool is_zip_file(const std::string& path) {
   return c10::ends_with(path, ".pt2") || c10::ends_with(path, ".zip");
 }
 
-void list_files_recursive(const std::string& root, std::vector<std::string>& out) {
+void list_files_recursive(
+    const std::string& root,
+    std::vector<std::string>& out) {
   for (auto const& e : fs::recursive_directory_iterator(root)) {
     if (!fs::is_directory(e)) {
       out.push_back(normalize_path_separator(e.path().string()));
@@ -574,41 +575,50 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
   std::vector<std::string> found_filenames;
   std::string model_directory;
 
-  if (fs::is_directory(model_package_path) && !is_zip_file(model_package_path)) {
+  if (fs::is_directory(model_package_path) &&
+      !is_zip_file(model_package_path)) {
     shared_mode_ = true;
     temp_dir_ = normalize_path_separator(model_package_path);
 
     list_files_recursive(temp_dir_, found_filenames);
-    TORCH_CHECK(!found_filenames.empty(), "Shared model directory is empty: ", temp_dir_);
+    TORCH_CHECK(
+        !found_filenames.empty(),
+        "Shared model directory is empty: ",
+        temp_dir_);
 
-    // model_directory should be relative to temp_dir_ to be consistent with zip mode
-    // and correct calculation of cubin_dir later.
+    // model_directory should be relative to temp_dir_ to be consistent with zip
+    // mode and correct calculation of cubin_dir later.
 
-    // Attempt to detect prefix (e.g. if the directory contains a subdirectory structure)
+    // Attempt to detect prefix (e.g. if the directory contains a subdirectory
+    // structure).
     // We look for "data/aotinductor/<model_name>/" in the found files.
-    std::string rel_model_path_suffix = std::string("data") + k_separator + "aotinductor" + k_separator + model_name + k_separator;
+    std::string rel_model_path_suffix = std::string("data") + k_separator +
+        "aotinductor" + k_separator + model_name + k_separator;
     for (const auto& path : found_filenames) {
-       size_t pos = path.find(rel_model_path_suffix);
-       if (pos != std::string::npos && c10::starts_with(path, temp_dir_) && pos > temp_dir_.length()) {
-           size_t prefix_start = temp_dir_.length();
-           if (prefix_start < path.length() && path[prefix_start] == '/') {
-               prefix_start++;
-           }
-           if (pos > prefix_start) {
-               file_prefix = path.substr(prefix_start, pos - prefix_start);
-           }
-           break;
-       }
+      size_t pos = path.find(rel_model_path_suffix);
+      if (pos != std::string::npos && c10::starts_with(path, temp_dir_) &&
+          pos > temp_dir_.length()) {
+        size_t prefix_start = temp_dir_.length();
+        if (prefix_start < path.length() && path[prefix_start] == '/') {
+          prefix_start++;
+        }
+        if (pos > prefix_start) {
+          file_prefix = path.substr(prefix_start, pos - prefix_start);
+        }
+        break;
+      }
     }
 
     model_directory = normalize_path_separator(
-        file_prefix + "data" + k_separator + "aotinductor" + k_separator + model_name);
+        file_prefix + "data" + k_separator + "aotinductor" + k_separator +
+        model_name);
 
     // Use absolute paths for matching
-    std::string search_model_dir = normalize_path_separator(
-        temp_dir_ + k_separator + model_directory);
+    std::string search_model_dir =
+        normalize_path_separator(temp_dir_ + k_separator + model_directory);
     std::string search_const_dir = normalize_path_separator(
-        temp_dir_ + k_separator + file_prefix + "data" + k_separator + "constants");
+        temp_dir_ + k_separator + file_prefix + "data" + k_separator +
+        "constants");
 
     for (auto const& cur_filename : found_filenames) {
       if (c10::starts_with(cur_filename, search_model_dir) ||
@@ -636,7 +646,7 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
     auto zip_filenames = zip_archive.get_filenames();
     TORCH_CHECK(!zip_filenames.empty(), "No files found in zip archive.");
     found_filenames = zip_filenames;
-  
+
     // All the paths are prepended with a tmp/ directory. We need to find the
     // prefix.
     size_t pos = found_filenames[0].find('/');
@@ -687,7 +697,8 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
               .append(filename);
         }
 
-        std::string output_file_path = normalize_path_separator(output_path_str);
+        std::string output_file_path =
+            normalize_path_separator(output_path_str);
         LOG(INFO) << "Extract file: " << zip_filename_str << " to "
                   << output_file_path;
 
@@ -710,7 +721,8 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
         // Save the file for bookkeeping
         size_t extension_idx = output_file_path.find_last_of('.');
         if (extension_idx != std::string::npos) {
-          std::string filename_extension = output_file_path.substr(extension_idx);
+          std::string filename_extension =
+              output_file_path.substr(extension_idx);
           if (filename_extension == ".cpp") {
             cpp_filename = output_file_path;
           } else if (filename_extension == object_file_ext()) {

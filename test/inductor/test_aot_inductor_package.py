@@ -284,7 +284,7 @@ class TestAOTInductorPackage(TestCase):
                 # Unzip to a temporary directory
                 temp_dir = tempfile.mkdtemp()
                 try:
-                    with zipfile.ZipFile(package_path, 'r') as zip_ref:
+                    with zipfile.ZipFile(package_path, "r") as zip_ref:
                         zip_ref.extractall(temp_dir)
 
                     # Identify prefix if any (ZipFile.extractall extracts as is)
@@ -312,6 +312,7 @@ class TestAOTInductorPackage(TestCase):
                     del loaded
                     del loaded_nested
                     import gc
+
                     gc.collect()
 
                     # In shared mode, the directory should NOT be deleted
