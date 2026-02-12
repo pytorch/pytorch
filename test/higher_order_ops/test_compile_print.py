@@ -9,6 +9,7 @@ from io import StringIO
 from typing import Optional
 
 import torch
+import torch.distributed as dist
 from functorch.compile import aot_function
 from torch._higher_order_ops.compile_print_wrapper import (
     compile_print,
@@ -17,6 +18,7 @@ from torch._higher_order_ops.compile_print_wrapper import (
 from torch._higher_order_ops.invoke_leaf_function import invoke_leaf_function
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
+from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
 def _extract_graph(fx_g, _, graph_cell):
@@ -534,6 +536,121 @@ class TestCompilePrintEagerOnly(TestCase):
         )
         self.assertIsNone(result)
         self.assertEqual(len(recorded), 1)
+
+
+@skipIfTorchDynamo("compile_print tests manage their own compilation")
+class TestCompilePrintDistributed(TestCase):
+    """Tests for rank-aware tag printing using the fake distributed backend.
+
+    Each test runs for both rank 0 and rank 1 via subTest, reinitializing
+    the fake process group between iterations.
+    """
+
+    def _init_fake_pg(self, rank):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=rank, world_size=2, store=store)
+
+    def tearDown(self):
+        super().tearDown()
+        if dist.is_initialized():
+            dist.destroy_process_group()
+
+    def test_rank_prefix_in_tag(self):
+        """Tag output includes [rank N] when distributed is initialized."""
+        for rank in range(2):
+            with self.subTest(rank=rank):
+                self._init_fake_pg(rank)
+                cp = make_compile_print(fwd_f=lambda t: None, bwd_f=lambda t: None)
+
+                x = torch.randn(3, 3, requires_grad=True)
+                buf = StringIO()
+                with redirect_stdout(buf):
+                    cp(x, tag="input")
+                    x.sum().backward()
+                output = buf.getvalue()
+                self.assertIn(f"[rank {rank}][input][fwd]", output)
+                self.assertIn(f"[rank {rank}][input][bwd]", output)
+                dist.destroy_process_group()
+
+    def test_ranks_filter_match(self):
+        """ranks=current rank allows output."""
+        for rank in range(2):
+            with self.subTest(rank=rank):
+                self._init_fake_pg(rank)
+                fwd_rec: list[torch.Size] = []
+                bwd_rec: list[torch.Size] = []
+                cp = make_compile_print(
+                    fwd_f=lambda t: fwd_rec.append(t.shape),
+                    bwd_f=lambda t: bwd_rec.append(t.shape),
+                )
+
+                x = torch.randn(3, 3, requires_grad=True)
+                buf = StringIO()
+                with redirect_stdout(buf):
+                    cp(x, tag="filtered", ranks=rank)
+                    x.sum().backward()
+                output = buf.getvalue()
+                self.assertIn(f"[rank {rank}][filtered][fwd]", output)
+                self.assertIn(f"[rank {rank}][filtered][bwd]", output)
+                self.assertEqual(len(fwd_rec), 1)
+                self.assertEqual(len(bwd_rec), 1)
+                dist.destroy_process_group()
+
+    def test_ranks_filter_no_match(self):
+        """ranks for the other rank suppresses output."""
+        for rank in range(2):
+            with self.subTest(rank=rank):
+                self._init_fake_pg(rank)
+                other_rank = 1 - rank
+                fwd_rec: list[torch.Size] = []
+                bwd_rec: list[torch.Size] = []
+                cp = make_compile_print(
+                    fwd_f=lambda t: fwd_rec.append(t.shape),
+                    bwd_f=lambda t: bwd_rec.append(t.shape),
+                )
+
+                x = torch.randn(3, 3, requires_grad=True)
+                buf = StringIO()
+                with redirect_stdout(buf):
+                    cp(x, tag="filtered", ranks=other_rank)
+                    x.sum().backward()
+                output = buf.getvalue()
+                self.assertEqual(output, "")
+                self.assertEqual(len(fwd_rec), 0)
+                self.assertEqual(len(bwd_rec), 0)
+                dist.destroy_process_group()
+
+    def test_ranks_filter_set(self):
+        """ranks={0, 1} enables current rank."""
+        for rank in range(2):
+            with self.subTest(rank=rank):
+                self._init_fake_pg(rank)
+                fwd_rec: list[torch.Size] = []
+                cp = make_compile_print(
+                    fwd_f=lambda t: fwd_rec.append(t.shape),
+                    bwd_f=lambda t: None,
+                )
+
+                x = torch.randn(3, 3)
+                cp(x, tag="both", ranks={0, 1})
+                self.assertEqual(len(fwd_rec), 1)
+                dist.destroy_process_group()
+
+    def test_no_ranks_kwarg_prints_all(self):
+        """Without ranks kwarg, all ranks execute callbacks."""
+        for rank in range(2):
+            with self.subTest(rank=rank):
+                self._init_fake_pg(rank)
+                fwd_rec: list[torch.Size] = []
+                cp = make_compile_print(
+                    fwd_f=lambda t: fwd_rec.append(t.shape),
+                    bwd_f=lambda t: None,
+                )
+
+                x = torch.randn(3, 3)
+                cp(x, tag="all")
+                self.assertEqual(len(fwd_rec), 1)
+                dist.destroy_process_group()
 
 
 if __name__ == "__main__":

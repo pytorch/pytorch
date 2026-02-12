@@ -35,7 +35,6 @@ from .external_utils import (
     get_nonrecursive_disable_wrapper,
     wrap_dunder_call_ctx_manager,
 )
-from .graph_bytecode_inputs import store_user_object_weakrefs
 from .utils import _get_error_on_graph_break, _set_error_on_graph_break, is_function
 
 
@@ -278,34 +277,32 @@ def _invoke_leaf_function_python(
     from torch._higher_order_ops.invoke_leaf_function import (
         convert_modules_to_states,
         invoke_leaf_function,
-        reconstruct_original_args,
+        store_makefx_modules,
+        wrap_impl_for_leaf_module_state,
     )
 
     captured_modules: list[torch.nn.Module] = []
-    module_to_index: dict[int, int] = {}
+    seen_module_ids: dict[int, int] = {}  # id(module) -> position in captured_modules
     for val in pytree.tree_flatten(
         (args, kwargs), is_leaf=lambda x: isinstance(x, torch.nn.Module)
     )[0]:
-        if isinstance(val, torch.nn.Module) and id(val) not in module_to_index:
-            module_to_index[id(val)] = len(captured_modules)
+        if isinstance(val, torch.nn.Module) and id(val) not in seen_module_ids:
+            seen_module_ids[id(val)] = len(captured_modules)
             captured_modules.append(val)
+
+    global_indices = store_makefx_modules(captured_modules)
+    module_to_index = {
+        mod_id: global_indices[pos] for mod_id, pos in seen_module_ids.items()
+    }
 
     processed = convert_modules_to_states((args, kwargs), module_to_index)
     flat_args, input_spec = pytree.tree_flatten(processed)
-
-    def _make_wrapper(impl: Callable[..., Any]) -> Callable[..., Any]:
-        def wrapper(*flat_args: Any) -> Any:
-            with reconstruct_original_args(input_spec, flat_args) as (
-                inner_args,
-                inner_kwargs,
-            ):
-                return impl(*inner_args, **inner_kwargs)
-
-        return wrapper
-
-    store_user_object_weakrefs(*captured_modules)
-    _, real_fn_spec = func_to_graphable(_make_wrapper(real_impl))
-    _, fake_fn_spec = func_to_graphable(_make_wrapper(fake_impl))
+    _, real_fn_spec = func_to_graphable(
+        wrap_impl_for_leaf_module_state(real_impl, input_spec)
+    )
+    _, fake_fn_spec = func_to_graphable(
+        wrap_impl_for_leaf_module_state(fake_impl, input_spec)
+    )
     return invoke_leaf_function(real_fn_spec, fake_fn_spec, *flat_args)
 
 
@@ -570,6 +567,8 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
 
     @functools.wraps(fn)
     def inner(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+        # Not using `not torch.compiler.is_dynamo_compiling()` here so eager code still go to
+        # `fn(*args, **kwargs)` directly.
         if get_proxy_mode() is not None or detect_fake_mode(args) is not None:
             # Call python wrapper to support make_fx tracing
             if inner._torchdynamo_leaf_fake_fn is None:  # type: ignore[attr-defined]

@@ -4,6 +4,28 @@ import torch
 from torch._dynamo.decorators import leaf_function
 
 
+def _rank_enabled(ranks: int | set[int] | None) -> bool:
+    """Check if the current rank should print. None means all ranks."""
+    if ranks is None:
+        return True
+    if not torch.distributed.is_initialized():
+        return True
+    rank = torch.distributed.get_rank()
+    if isinstance(ranks, int):
+        return rank == ranks
+    return rank in ranks
+
+
+def _make_prefix(tag: str) -> str:
+    """Build a prefix like '[rank 0][my_tag]' from the current rank and tag."""
+    parts = []
+    if torch.distributed.is_initialized():
+        parts.append(f"[rank {torch.distributed.get_rank()}]")
+    if tag:
+        parts.append(f"[{tag}]")
+    return "".join(parts)
+
+
 def make_compile_print(
     fwd_f: Callable[[torch.Tensor], None],
     bwd_f: Callable[[torch.Tensor], None],
@@ -37,29 +59,40 @@ def make_compile_print(
     """
 
     @leaf_function
-    def fwd_leaf_fn(*tensors: torch.Tensor, tag: str = "") -> tuple[torch.Tensor, ...]:
-        if tag:
-            print(f"[{tag}][fwd]")
-        for t in tensors:
-            if isinstance(t, torch.Tensor):
-                fwd_f(t)
+    def fwd_leaf_fn(
+        *tensors: torch.Tensor, tag: str = "", ranks: int | set[int] | None = None
+    ) -> tuple[torch.Tensor, ...]:
+        if _rank_enabled(ranks):
+            prefix = _make_prefix(tag)
+            if prefix:
+                print(f"{prefix}[fwd]")
+            for t in tensors:
+                if isinstance(t, torch.Tensor):
+                    fwd_f(t)
         return (tensors[0].new_zeros(()),)
 
     @fwd_leaf_fn.register_fake  # pyrefly: ignore[missing-attribute]
-    def fwd_fake_fn(*tensors: torch.Tensor, tag: str = "") -> tuple[torch.Tensor, ...]:
+    def fwd_fake_fn(
+        *tensors: torch.Tensor, tag: str = "", ranks: int | set[int] | None = None
+    ) -> tuple[torch.Tensor, ...]:
         return (tensors[0].new_zeros(()),)
 
-    def compile_print_impl(*args: torch.Tensor, tag: str = "") -> None:
-        fwd_leaf_fn(*args, tag=tag)
+    def compile_print_impl(
+        *args: torch.Tensor, tag: str = "", ranks: int | set[int] | None = None
+    ) -> None:
+        fwd_leaf_fn(*args, tag=tag, ranks=ranks)
 
         hook_fn = bwd_f
-        if tag:
+        if tag or ranks is not None:
 
-            def tagged_bwd_f(t: torch.Tensor) -> None:
-                print(f"[{tag}][bwd]")
-                bwd_f(t)
+            def filtered_bwd_f(t: torch.Tensor) -> None:
+                if _rank_enabled(ranks):
+                    prefix = _make_prefix(tag)
+                    if prefix:
+                        print(f"{prefix}[bwd]")
+                    bwd_f(t)
 
-            hook_fn = tagged_bwd_f
+            hook_fn = filtered_bwd_f
 
         # Backward hooks are registered on the original tensors. Since the tensors
         # are used downstream (e.g. x.sum()), gradients flow through them and the
@@ -88,6 +121,7 @@ def compile_print(
     bwd_f: Callable[[torch.Tensor], None],
     *args: torch.Tensor,
     tag: str = "",
+    ranks: int | set[int] | None = None,
 ) -> None:
     """
     Run fwd_f(tensor) on all tensor args in forward, and register bwd_f as a
@@ -118,6 +152,8 @@ def compile_print(
         bwd_f: Function to call on each gradient in backward pass. Signature: (Tensor) -> None.
         *args: Tensors to observe.
         tag: Optional tag string. When set, prints [tag][fwd] and [tag][bwd] labels.
+        ranks: Which distributed ranks should execute callbacks. None (default) means
+            all ranks. An int means only that rank. A set of ints means those ranks.
     """
     fn = make_compile_print(fwd_f, bwd_f)
-    fn(*args, tag=tag)
+    fn(*args, tag=tag, ranks=ranks)
