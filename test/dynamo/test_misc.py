@@ -11846,6 +11846,9 @@ ShapeEnv not equal: field values don't match:
 
         foo()
 
+    def test_foo(self):
+        self.assertTrue(False)
+
     # Unfortunately, we don't currently preserve the ids of
     # res_out and out correctly across the graph break
     @unittest.expectedFailure
