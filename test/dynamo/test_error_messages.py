@@ -2192,7 +2192,7 @@ Dynamo recompile limit exceeded
             )
 
     @unittest.skipIf(
-        not torch.utils._triton.has_triton_package()
+        not torch.utils._triton.has_triton()
         or not hasattr(__import__("triton"), "set_allocator"),
         "requires triton with set_allocator support",
     )
