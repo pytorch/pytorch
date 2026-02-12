@@ -3249,9 +3249,10 @@ class TestHelperModules:
             x = self.relu(self.fc(x))
             return x
 
-def _ref_quant_linear_module(N, K, bias, example_input):
+def _static_reference_quantized_linear_module(N, K, bias, example_input):
     """
     Generate a linear module with quantize-dequantize (reference quantized)
+    with static quantization parameters (no choose_qparams at runtime).
     A simulation to PT2E quantization in Torchao.
     It is used to test fusion and lowering passes in Inductor for X86 CPU.
     Input quantization limit is 0-127 to avoid overflow on old platforms.

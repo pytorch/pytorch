@@ -20,7 +20,9 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
 )
-from torch.testing._internal.common_quantization import _ref_quant_linear_module
+from torch.testing._internal.common_quantization import (
+    _static_reference_quantized_linear_module,
+)
 from torch.testing._internal.common_quantized import (
     _calculate_dynamic_per_channel_qparams,
 )
@@ -1337,11 +1339,11 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         class M(torch.nn.Module):
             def __init__(self, bias):
                 super().__init__()
-                self.linear = _ref_quant_linear_module(
+                self.linear = _static_reference_quantized_linear_module(
                     N=out_features, K=in_features, bias=bias, example_input=input
                 )
                 self.epilogue = _get_epilogue(epilogue)
-                self.linear2 = _ref_quant_linear_module(
+                self.linear2 = _static_reference_quantized_linear_module(
                     N=out_features,
                     K=out_features,
                     bias=bias,
@@ -1432,12 +1434,12 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         class M(torch.nn.Module):
             def __init__(self, bias, input_3d):
                 super().__init__()
-                self.linear = _ref_quant_linear_module(
+                self.linear = _static_reference_quantized_linear_module(
                     N=out_features, K=in_features, bias=bias, example_input=input
                 )
                 self.epilogue = _get_epilogue(epilogue)
                 example_input = self.epilogue(self.linear.linear(input) + other)
-                self.linear2 = _ref_quant_linear_module(
+                self.linear2 = _static_reference_quantized_linear_module(
                     N=out_features,
                     K=out_features,
                     bias=bias,
@@ -1459,11 +1461,11 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         class M2(torch.nn.Module):
             def __init__(self, bias):
                 super().__init__()
-                self.linear = _ref_quant_linear_module(
+                self.linear = _static_reference_quantized_linear_module(
                     N=out_features, K=in_features, bias=bias, example_input=input2
                 )
                 self.epilogue = _get_epilogue(epilogue)
-                self.linear2 = _ref_quant_linear_module(
+                self.linear2 = _static_reference_quantized_linear_module(
                     N=out_features, K=out_features, bias=bias, example_input=input3
                 )
                 self.epilogue2 = _get_epilogue(epilogue)
@@ -1539,7 +1541,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         class M(torch.nn.Module):
             def __init__(self, bias):
                 super().__init__()
-                self.linear = _ref_quant_linear_module(
+                self.linear = _static_reference_quantized_linear_module(
                     N=out_features, K=in_features, bias=bias, example_input=v
                 )
 

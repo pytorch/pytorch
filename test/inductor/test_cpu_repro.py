@@ -5725,12 +5725,14 @@ class CPUReproTests(TestCase):
         """
         Original PR: https://github.com/pytorch/pytorch/pull/141766
         """
-        from torch.testing._internal.common_quantization import _ref_quant_linear_module
+        from torch.testing._internal.common_quantization import (
+            _static_reference_quantized_linear_module,
+        )
 
         class Model(torch.nn.Module):
             def __init__(self, example_input):
                 super().__init__()
-                self.dense = _ref_quant_linear_module(
+                self.dense = _static_reference_quantized_linear_module(
                     N=768, K=768, bias=True, example_input=example_input
                 )
                 self.layernorm = torch.nn.LayerNorm(768, eps=1e-12)
