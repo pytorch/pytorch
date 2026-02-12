@@ -5,7 +5,7 @@
       "Context": "fn={fn}, args={args}, kwargs={kwargs}",
       "Explanation": "All __torch_function__ overrides for for function {fn} returned NotImplemented",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -26,7 +26,7 @@
       "Context": "str(sym_expr)",
       "Explanation": "",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -103,7 +103,7 @@
       "Context": "item: {item}, name: {name}",
       "Explanation": "",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -113,7 +113,7 @@
       "Context": "LOAD_FAST {name}",
       "Explanation": "Could not find a local variable with name `{name}`",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -124,7 +124,7 @@
       "Explanation": "Could not find an implicit local variable with name `{name}`",
       "Hints": [
         "This happens in dict/list comprehensions",
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -205,7 +205,7 @@
       "Context": "format_string_parts: {format_string_parts}, kwargs: {kwargs}, part.sym_kwargs: {part.sym_kwargs}",
       "Explanation": "Failed to build format string due to key conflict",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -215,7 +215,7 @@
       "Context": "str(part)",
       "Explanation": "Format string part type is not correct - expected constant or format string.",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -299,7 +299,7 @@
       "Context": "str(exc_instance)",
       "Explanation": "Except expects to receive an object of Exception type but received {exc_instance}.",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -523,6 +523,14 @@
       ]
     }
   ],
+  "GB5696": [
+    {
+      "Gb_type": "Comprehension graph break with extra stack values",
+      "Context": "",
+      "Explanation": "Cannot use comprehension optimization when there are extra values on the stack and variables need to be passed to the resume function.",
+      "Hints": []
+    }
+  ],
   "GB0048": [
     {
       "Gb_type": "Error getting associated real value",
@@ -545,7 +553,7 @@
       "Context": "str(expected_exc_types)",
       "Explanation": "`except ...` has unsupported type {expected_exc_types}.",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -602,7 +610,7 @@
       "Context": "str(expected_type)",
       "Explanation": "`except ...` expects a non-type: {expected_type}.",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -628,7 +636,7 @@
       "Context": "value: {value_vt}, allowed enum values: {list(cls_type)}",
       "Explanation": "Attempted to construct an Enum value that is non-constant (e.g. int, string) or is not an acceptable value for the Enum. Acceptable values for Enum `{cls_type}`: {list(cls_type)}.",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -657,7 +665,7 @@
       "Context": "str(exc)",
       "Explanation": "Attempted to raise a non-Exception type/value.",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -711,7 +719,7 @@
       "Context": "str(seq)",
       "Explanation": "{seq} cannot be unpacked into a list for the BUILD_LIST_UNPACK bytecode (`[*x, *y, ...]`).",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -732,7 +740,7 @@
       "Context": "str(seq)",
       "Explanation": "{seq} cannot be unpacked into a list for the UNPACK_EX bytecode.",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -742,7 +750,7 @@
       "Context": "str(seq)",
       "Explanation": "{seq} cannot be unpacked into a list for the UNPACK_SEQUENCE bytecode (i.e. `a, b, c = d`).",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -825,7 +833,7 @@
       "Context": "module_name: {module_name}, fromlist: {fromlist}, level={level}",
       "Explanation": "Failure when attempting to import.",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -835,7 +843,7 @@
       "Context": "call_method {self} {name} {args} {kwargs}",
       "Explanation": "Attempted to index list-like object with tensor with > 1 element.",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -891,7 +899,7 @@
       "Context": "inst.argval",
       "Explanation": "Attempted to load uninitialized local variable {inst.argval}",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -932,7 +940,7 @@
       "Context": "get_item_dyn {self} {arg}",
       "Explanation": "Attempted to index torch.Size with a tensor that is not a scalar constant.",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -947,6 +955,14 @@
     }
   ],
   "GB0081": [
+    {
+      "Gb_type": "Missing attribute when running call_method node",
+      "Context": "",
+      "Explanation": "make_error_message(\"attribute not defined\")",
+      "Hints": [
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    },
     {
       "Gb_type": "Missing attribute when running call_method node",
       "Context": "",
@@ -1019,7 +1035,7 @@
       "Context": "raised exception {curr_exc.python_type_name()}({curr_exc.args})",
       "Explanation": "observed_exn_gb_explanation",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -1051,7 +1067,7 @@
       "Context": "str(cellvar)",
       "Explanation": "Attempted to read a cell variable that has not been populated yet.",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -1273,11 +1289,19 @@
       "Context": "call_function({self.value}, {args}, {kwargs})",
       "Explanation": "msg",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
   "GB0112": [
+    {
+      "Gb_type": "TypeError when making fake tensor call",
+      "Context": "TypeError {node.target}: {cause}",
+      "Explanation": "",
+      "Hints": [
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    },
     {
       "Gb_type": "TypeError when making fake tensor call",
       "Context": "TypeError {node.target}: {cause}",
@@ -1370,7 +1394,7 @@
       "Explanation": "Attempted to trace an uninitialized nn.Module of type {typestr(value)}.",
       "Hints": [
         "Ensure your nn.Module instance has called `super().__init__()`.",
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -1518,7 +1542,7 @@
       "Context": "call_function {self} {args} {kwargs}",
       "Explanation": "Dynamo does not know how to get the function to use for itertools.accumulate. itertools.accumulate expects the `func` as the second argument or as a keyword argument.",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -1560,7 +1584,7 @@
       "Context": "var_getattr {self} {name}",
       "Explanation": "Expected attribute to be one of {','.join(fields)} but got {name}",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -1570,7 +1594,7 @@
       "Context": "var_getattr {self} {name}",
       "Explanation": "Expected attribute to be one of {','.join(fields)} but got {name}",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -1778,7 +1802,7 @@
       "Context": "call_function {self} {args} {kwargs}",
       "Explanation": "Expected kwargs: 'initial', 'func', but got {','.join(set(kwargs.keys()) - {'initial', 'func'})}",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -1788,7 +1812,7 @@
       "Context": "call_function {self} {args} {kwargs}",
       "Explanation": "Expected kwargs: 'key', but got {','.join(set(kwargs.keys()) - {'key'})}",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -1830,7 +1854,7 @@
       "Context": "next({self})",
       "Explanation": "Dynamo does not know how to trace calling `next()` on variable `{self}`.",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -1873,7 +1897,7 @@
       "Context": "func='{func.get_name()}' {func.get_filename()}:{func.get_code().co_firstlineno}; args = {[arg.python_type() for arg in args]}; kwargs = {kwargs}",
       "Explanation": "Argument mismatch when attempting to trace function {func.get_name()}.",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -1895,7 +1919,7 @@
       "Explanation": "Dynamo traced the YIELD_VALUE bytecode too many times. This could mean that we have attempted to trace an infinite generator.",
       "Hints": [
         "If you are sure that your generator is not infinite, please report a bug at {PT2_ISSUE_TRACKER_URL}.",
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -1953,6 +1977,22 @@
       "Hints": []
     }
   ],
+  "GB6276": [
+    {
+      "Gb_type": "Comprehension analysis failed: No END_FOR",
+      "Context": "",
+      "Explanation": "Could not find END_FOR instruction in comprehension bytecode.",
+      "Hints": []
+    }
+  ],
+  "GB9898": [
+    {
+      "Gb_type": "Comprehension analysis failed: No matches",
+      "Context": "pre_store_ops={pre_store_ops}, post_store_op={post_store_op}",
+      "Explanation": "Comprehension does not match any known bytecode pattern.",
+      "Hints": []
+    }
+  ],
   "GB0166": [
     {
       "Gb_type": "Unsupported torch._C._ImperativeEngine.queue_callback()",
@@ -1967,7 +2007,7 @@
       "Context": "args type: {typestr(argsvars)}, kwargs type: {typestr(kwargsvars)}",
       "Explanation": "Expected args to be a list and kwargs to be a dict",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -2151,7 +2191,7 @@
       "Context": "{op.__name__}({left}, {right})",
       "Explanation": "Dynamo was unable to broad cast the arguments {left}, {right} when attempting to trace the comparison op {op.__name__}.",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -2182,7 +2222,7 @@
       "Context": "str(arg)",
       "Explanation": "User defined object has no __str__ or __repr__ method",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -2200,7 +2240,7 @@
       "Context": "non-literal keyword: {k}",
       "Explanation": "functools.partial() expects literal/string keywords",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -2299,7 +2339,7 @@
       "Explanation": "issubclass() with non-constant arguments not supported.",
       "Hints": [
         "Make sure your arguments are types.",
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -2310,7 +2350,7 @@
       "Explanation": "msg",
       "Hints": [
         "Check if the key exists in the dictionary before accessing it.",
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -2604,6 +2644,14 @@
       ]
     }
   ],
+  "GB2669": [
+    {
+      "Gb_type": "Comprehension graph break in resume function with captured variables",
+      "Context": "str(analysis.captured_vars)",
+      "Explanation": "Cannot use comprehension optimization inside a resume function when there are captured variables. This can cause issues with deeply nested source chains.",
+      "Hints": []
+    }
+  ],
   "GB0223": [
     {
       "Gb_type": "torch.compile call with > 1 args",
@@ -2644,7 +2692,7 @@
       "Explanation": "Called `torch.nn.Parameter()` with non-Tensor argument.",
       "Hints": [
         "Ensure the argument to `torch.nn.Parameter()` is a `torch.Tensor`.",
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -2707,7 +2755,7 @@
       "Explanation": "Attempted to call `torch.numpy` but NumPy could not be imported.",
       "Hints": [
         "Check NumPy version and installation in your environment.",
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -2729,7 +2777,7 @@
       "Explanation": "Called `torch._C._pop_torch_function_stack` when torch function mode stack is empty.",
       "Hints": [
         "Do not pop from empty torch function mode stack.",
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -2740,7 +2788,7 @@
       "Explanation": "Dynamo does not support this.",
       "Hints": [
         "Ensure the Tensor argument's shape, dtype, and device are correct.",
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -2764,7 +2812,7 @@
       "Explanation": "Dynamo does not support this.",
       "Hints": [
         "Change `requires_grad` to be a bool.",
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -2852,7 +2900,7 @@
       "Explanation": "Dynamo does not support this.",
       "Hints": [
         "Change `nested_tensor` with list input.",
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -2883,7 +2931,7 @@
       "Context": "args={args}, kwargs={kwargs}",
       "Explanation": "torch.get_device_module accepts 1 optional argument `device`",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -2893,7 +2941,7 @@
       "Context": "args={args}, kwargs={kwargs}",
       "Explanation": "Expected valid string/torch.device argument ('cpu', 'cuda', etc.)",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     },
     {
@@ -2901,7 +2949,7 @@
       "Context": "args={args}, kwargs={kwargs}",
       "Explanation": "Expected valid string/torch.device argument ('cpu', 'cuda', etc.)",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     },
     {
@@ -2909,7 +2957,7 @@
       "Context": "args={args}, kwargs={kwargs}",
       "Explanation": "Expected valid string/torch.device argument ('cpu', 'cuda', etc.)",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     },
     {
@@ -2917,7 +2965,7 @@
       "Context": "args={args}, kwargs={kwargs}",
       "Explanation": "Expected valid string/torch.device argument ('cpu', 'cuda', etc.)",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -2948,7 +2996,7 @@
       "Explanation": "Could not find name `{name}` in mro {type(self.value).__mro__}",
       "Hints": [
         "Ensure the name `{name}` is defined somewhere in {self.value}'s type hierarchy.",
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -3012,7 +3060,7 @@
       "Explanation": "Detected call to collections.deque() with bad arguments.",
       "Hints": [
         "Fix the call to collections.deque().",
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -3024,7 +3072,7 @@
       "Hints": [
         "Use a simpler sequence type that Dynamo can convert to a list ",
         "(e.g. list, tuple, list iterator, etc.)",
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -3035,7 +3083,7 @@
       "Explanation": "functools.partial requires at least one argument",
       "Hints": [
         "Fix the functools.partial call.",
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -3130,7 +3178,7 @@
       "Explanation": "TorchScript object {self.value} doesn't define the method {name}.",
       "Hints": [
         "Ensure the method {name} is implemented in {self.value}.",
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -3160,7 +3208,7 @@
       "Context": "call_function {self} {args} {kwargs}",
       "Explanation": "Expected kwargs: 'repeat', but got {','.join(set(kwargs.keys()) - {'repeat'})}",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -3374,7 +3422,7 @@
       "Context": "args={args}, kwargs={kwargs}",
       "Explanation": "torch.accelerator.current_stream accepts one optional argument `device`",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -3384,7 +3432,7 @@
       "Context": "args={args}, kwargs={kwargs}",
       "Explanation": "Expected valid string/torch.device argument ('cpu', 'cuda', etc.)",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -3510,7 +3558,7 @@
       "Context": "args: {args}, kwargs: {kwargs}",
       "Explanation": "random.Random() with > 1 arg or with kwargs is not supported.",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -3541,7 +3589,7 @@
       "Context": "numpy function: {self.value}, args: {args}, kwargs: {kwargs} (corresponding torch function: {func})",
       "Explanation": "numpy function {self.value} that produces a const collection type (e.g. np.dtype, np.iinfo/np.finfo) received arguments that are not constant.",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -3567,7 +3615,7 @@
       "Context": "args: {args}, kwargs: {kwargs}",
       "Explanation": "torch.while_loop expects 4 positional arguments (got {len(args)}) and no keyword arguments (got {len(kwargs)}) Usage: while_loop(cond_fn, body_fn, operands)",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -3588,7 +3636,7 @@
       "Explanation": "`sub_kwargs` cannot be used when `set_subgraph_inputs` is not set to 'automatic'.",
       "Hints": [
         "Use `set_subgraph_inputs='automatic'` when passing `sub_kwargs`.",
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -3618,7 +3666,7 @@
       "Context": "str(cond_r)",
       "Explanation": "Expected cond_fn to return a scalar tensor or a bool but got {cond_r_meta.shape}.",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -3628,7 +3676,7 @@
       "Context": "args: {args}, kwargs: {kwargs}",
       "Explanation": "torch.cond expects 4 positional arguments (got {len(args)}) and no keyword arguments (got {len(kwargs)}) Usage: cond(pred, cond_fn, body_fn, operands)",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -3656,7 +3704,7 @@
       "Context": "str(pred)",
       "Explanation": "Expected `pred` to be a bool or a boolean tensor with a single item but got {str(type(pred))} with original python type {str(pred.python_type())}.",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -3666,7 +3714,7 @@
       "Context": "str(operands)",
       "Explanation": "Expected `operands` to be a list/tuple but got {operands.python_type()}.",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -3676,7 +3724,7 @@
       "Context": "str(operands)",
       "Explanation": "Expected `operands` to be a list/tuple of pytrees that only consists of tensor leaves.",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -3686,7 +3734,7 @@
       "Context": "true_spec: {true_spec.treespec}, false_spec: {false_spec.treespec}, same_spec: {same_spec}",
       "Explanation": "Expected branches to return the same pytree structure.",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -3696,7 +3744,27 @@
       "Context": "non-tensor outputs: {non_tensor_output}",
       "Explanation": "HigherOrderOperator body's output must consist of tensors or ints/bools only but got {out.python_type()}.",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
+  "GB4315": [
+    {
+      "Gb_type": "RuntimeError when making fake tensor call",
+      "Context": "",
+      "Explanation": "msg",
+      "Hints": [
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
+  "GB2922": [
+    {
+      "Gb_type": "RuntimeError when trying to get real value from fx.Node",
+      "Context": "",
+      "Explanation": "",
+      "Hints": [
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -3747,7 +3815,7 @@
       "Context": "str(xs_vars[0])",
       "Explanation": "associative_scan() operator doesn't support zero-sized tensors during tracing.",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -3757,7 +3825,7 @@
       "Context": "str(_combine_treespec.as_python_constant())",
       "Explanation": "combine_fn needs to produce one pytree for the output but combine_fn produces the pytree {_combine_treespec.as_python_constant()}.",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -3767,7 +3835,7 @@
       "Context": "xs: {xs_treespec.as_python_constant()}, output: {_combine_treespec.as_python_constant()}",
       "Explanation": "The tree structure of the xs and the outs of the combine_fn are are expected to be identical, but got xs: {xs_treespec.as_python_constant()} vs output: {_combine_treespec.as_python_constant()}.",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -3825,7 +3893,7 @@
       "Context": "str(xs_vars[0])",
       "Explanation": "associative_scan() operator doesn't support zero-sized tensors during tracing.",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -3835,7 +3903,7 @@
       "Context": "args: {args}, kwargs: {kwargs}",
       "Explanation": "torch.map expects no keyword arguments (got {len(kwargs)})",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -3845,7 +3913,7 @@
       "Context": "str(sample_shape)",
       "Explanation": "torch.map doesn't support scalar or non-zero sized tensors during tracing.",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -3929,7 +3997,7 @@
       "Context": "args: {args}, kwargs: {kwargs}",
       "Explanation": "hints_wrapper expects 3 positional arguments (got {len(args)}) and 1 keyword argument (got {len(kwargs)}). Usage: hints_wrapper(body_fn, args, kwargs, hints=...). args is expected to be list/tuple and kwargs is expected to be a dict.",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -3939,7 +4007,7 @@
       "Context": "args: {args}, kwargs: {kwargs}",
       "Explanation": "out_dtype expects no keyword arguments (got {len(kwargs)}).",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -3949,7 +4017,7 @@
       "Context": "args: {args}, kwargs: {kwargs}",
       "Explanation": "strict_mode higher order op expects no keyword arguments (got {len(kwargs)}).",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -3969,7 +4037,7 @@
       "Context": "str(cond_r)",
       "Explanation": "Infinite loop detected because while_loop's cond_fn always returns the same value {pred}.",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -3979,7 +4047,7 @@
       "Context": "str(ret_val)",
       "Explanation": "Expected branches to return a possibly nested pytree of tensors or constant ints.",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -3989,7 +4057,7 @@
       "Context": "args: {args}",
       "Explanation": "torch.associative_scan expects 2 positional arguments (got {len(args)}) Usage: associative_scan(combine_fn, xs)",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -4009,7 +4077,7 @@
       "Context": "str(combine_result_vars)",
       "Explanation": "Expect combine_fn to return a tuple (next_carry, y) but got {combine_result_vars}.",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -4029,7 +4097,7 @@
       "Context": "args: {args}, kwargs: {kwargs}",
       "Explanation": "strict_mode higher order op expects flat inputs (list/tuple/dict)",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -4079,7 +4147,7 @@
       "Context": "str(ret_val)",
       "Explanation": "Constants returned from branches must be ints.",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -4089,7 +4157,7 @@
       "Context": "str(sub_args)",
       "Explanation": "{description} with body that accepts non-Tensors as input. Got type {a.python_type()} at index {idx}.",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -4145,6 +4213,14 @@
       ]
     }
   ],
+  "GB7425": [
+    {
+      "Gb_type": "Comprehension with captured tensor not in local slot",
+      "Context": "",
+      "Explanation": "Cannot use comprehension optimization when a captured tensor variable is not stored in its expected local slot.",
+      "Hints": []
+    }
+  ],
   "GB0357": [
     {
       "Gb_type": "UnspecializedNNModuleVariable wrapped around ScriptModules unsupported",
@@ -4169,7 +4245,7 @@
       "Context": "name: {name}",
       "Explanation": "Unable to fetch attribute {name} from torch._C._SDPAParams.",
       "Hints": [
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
@@ -4313,7 +4389,7 @@
         "Call .detach() on the output tensor before returning it from the compiled function.",
         "For example: `return loss.detach(), grads` instead of `return loss, grads`.",
         "Or set create_graph=False in autograd.grad() if you don't need higher-order gradients.",
-        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     },
     {
