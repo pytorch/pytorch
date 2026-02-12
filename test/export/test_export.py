@@ -9229,6 +9229,54 @@ graph():
     return (index_put, index_put)""",  # noqa: B950
         )
 
+    def test_while_loop_with_unbacked_symints_range_constraints(self):
+        # Verify that range constraints on unbacked SymInts are propagated
+        # from the outer ShapeEnv to the inner ShapeEnv during cross-ShapeEnv
+        # wrapping (not just default ranges).
+        class M(torch.nn.Module):
+            def forward(self, x, mask):
+                filtered = x[mask]
+                torch._check(filtered.shape[0] >= 2)
+                torch._check(filtered.shape[0] <= 100)
+                _, result = torch.while_loop(
+                    lambda i, x: i < 3,
+                    lambda i, x: (i + 1, x * 2),
+                    (0, filtered),
+                )
+                return result
+
+        bs = Dim("batch_size", min=1)
+        example_inputs = (
+            torch.rand(3, 4),
+            torch.ones(3, dtype=torch.bool),
+        )
+        ep = export(
+            M(),
+            example_inputs,
+            dynamic_shapes={"x": {0: bs}, "mask": {0: bs}},
+        )
+
+        # Verify the unbacked symint u0 has the propagated range [2, 100]
+        u0_ranges = {
+            str(k): v
+            for k, v in ep.range_constraints.items()
+            if str(k) == "u0"
+        }
+        self.assertEqual(len(u0_ranges), 1)
+        self.assertEqual(u0_ranges["u0"].lower, 2)
+        self.assertEqual(u0_ranges["u0"].upper, 100)
+
+        # Constraint enforced at runtime
+        ep = ep.run_decompositions()
+        valid_inputs = (torch.rand(5, 4), torch.ones(5, dtype=torch.bool))
+        self.assertEqual(ep.module()(*valid_inputs), M()(*valid_inputs))
+        invalid_inputs = (
+            torch.rand(5, 4),
+            torch.tensor([True, False, False, False, False]),
+        )
+        with self.assertRaisesRegex(RuntimeError, "u0 >= 2"):
+            ep.module()(*invalid_inputs)
+
     def test_constrain_size_with_various_cases(self):
         class Module1(torch.nn.Module):
             def forward(self, x, y):
