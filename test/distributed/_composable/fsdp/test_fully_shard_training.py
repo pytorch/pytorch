@@ -4,6 +4,7 @@ import contextlib
 import copy
 import functools
 import itertools
+import random
 import unittest
 from collections import defaultdict
 from collections.abc import Callable, Iterable
@@ -1841,6 +1842,61 @@ class TestFullyShardCudaGraph(FSDPTest):
                 for graph_grad, ref_grad in zip(static_output_grads, ref_grads):
                     self.assertTrue(torch.equal(graph_grad, ref_grad))
                 model.zero_grad(set_to_none=True)
+
+
+class SomeUnusedParamModel(nn.Module):
+    def __init__(self, use_sometimes: bool):
+        super().__init__()
+        self.always_used = nn.Linear(8, 8, bias=False)
+        self.sometimes_used = nn.Linear(8, 8, bias=False)
+        self.frozen_layer = nn.Linear(8, 8, bias=False)
+        self.frozen_layer.weight.requires_grad = False
+        self.use_sometimes = use_sometimes
+
+    def forward(self, x):
+        out = self.always_used(x)
+        if self.use_sometimes:
+            out += self.sometimes_used(x)
+        out += self.frozen_layer(x)
+        return out
+
+
+class TestFSDPMissingParamGrad(FSDPTest):
+    """
+    This test makes sure that even when a layer is sometimes used during the forward of the backward computation
+    in FSDP, the fsdp_params will gather all the params with the requires_grad=True flag so the reduce-scatter
+    will receive the same input size for all ranks.
+    """
+
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @skip_if_lt_x_gpu(2)
+    def test_unused_param_has_grad(self):
+        if device_type.type == "cuda":
+            torch.cuda.set_device(self.rank)
+        device = torch.device(device_type.type, self.rank)
+        model = SomeUnusedParamModel(use_sometimes=random.choice([True, False])).to(
+            device
+        )
+        fully_shard(model)
+
+        x = torch.randn(2, 8, device=device)
+
+        loss = model(x).sum()
+        loss.backward()
+
+        for name, param in model.named_parameters():
+            if param.requires_grad:
+                self.assertIsNotNone(
+                    param.grad, f"{name} has no grad on rank {self.rank}"
+                )
+            else:
+                self.assertIsNone(
+                    param.grad,
+                    f"frozen {name} should not have grad on rank {self.rank}",
+                )
 
 
 if __name__ == "__main__":
