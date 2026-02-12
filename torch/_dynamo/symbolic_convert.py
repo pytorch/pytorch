@@ -4957,12 +4957,8 @@ class InstructionTranslatorBase(
 
         nonnull_count = sum(1 for m in stack_pops_null_mask if not m)
 
-        # Add temp names and result/walrus vars to root frame's co_varnames.
-        root_vars_needed = [f"___comp_stack_{i}" for i in range(nonnull_count)]
-        if analysis.result_var:
-            root_vars_needed.append(analysis.result_var)
-        root_vars_needed.extend(analysis.walrus_vars)
-        for var_name in root_vars_needed:
+        # Add only temp names to root frame's co_varnames.
+        for var_name in [f"___comp_stack_{i}" for i in range(nonnull_count)]:
             if var_name not in self.output.code_options["co_varnames"]:
                 self.output.code_options["co_varnames"] += (var_name,)
 
@@ -5038,53 +5034,66 @@ class InstructionTranslatorBase(
                 ]
             )
 
-        # --- Step 7: Unpack result and store ---
-        if analysis.walrus_vars:
-            cg.extend_output(
-                [
-                    create_instruction(
-                        "UNPACK_SEQUENCE",
-                        arg=1 + len(analysis.walrus_vars),
-                    ),
-                ]
-            )
-
-        if analysis.result_on_stack:
-            self.push(UnknownVariable())
-        elif analysis.result_var:
-            cg.extend_output(
-                [create_instruction("STORE_FAST", argval=analysis.result_var)]
-            )
-        else:
-            cg.extend_output([create_instruction("POP_TOP")])
-
-        if analysis.walrus_vars:
-            if analysis.result_on_stack:
-                for var_name in analysis.walrus_vars:
-                    cg.extend_output(
-                        [
-                            *create_swap(2),
-                            create_instruction("STORE_FAST", argval=var_name),
-                        ]
-                    )
-            else:
-                for var_name in analysis.walrus_vars:
-                    cg.extend_output(
-                        [create_instruction("STORE_FAST", argval=var_name)]
-                    )
-
-        # --- Step 8: Pass new vars to frame_values for resume function ---
-        vars_to_pass = (
+        # --- Step 7: Append results to frame_values[0] and handle stack ---
+        # Register vars in the order they'll be appended to frame_values[0]:
+        # walrus vars first, then result_var.
+        vars_to_pass = analysis.walrus_vars + (
             [analysis.result_var] if analysis.result_var else []
-        ) + analysis.walrus_vars
+        )
 
         for var_name in vars_to_pass:
             meta.locals_names[var_name] = len(meta.locals_names)
             self.symbolic_locals[var_name] = UnknownVariable()
 
-        if vars_to_pass:
-            frame_list_pos = len(self.stack) - len(meta.stack_null_idxes) + 1
-            self._emit_extend_frame_values(cg, frame_list_pos, vars_to_pass)
+        # fv_depth reaches [frame_values] from TOS (comp_result is on TOS)
+        fv_depth = live_stack_depth + 2
+
+        # --- Walrus vars: append to frame_values[0] from the tuple ---
+        if analysis.walrus_vars:
+            # comp_result is a tuple (result, *walrus_vars).
+            cg.extend_output(
+                [
+                    *create_copy(fv_depth),
+                    cg.create_load_const(0),
+                    cg.create_binary_subscr(),
+                ]
+            )
+            # Stack: ..., comp_tuple, fv0
+            for j in range(len(analysis.walrus_vars)):
+                cg.extend_output(
+                    [
+                        *create_copy(2),
+                        cg.create_load_const(j + 1),
+                        cg.create_binary_subscr(),
+                        create_instruction("LIST_APPEND", arg=1),
+                    ]
+                )
+            cg.extend_output([create_instruction("POP_TOP")])  # pop fv0
+            # Extract the plain result from the tuple.
+            cg.extend_output(
+                [
+                    cg.create_load_const(0),
+                    cg.create_binary_subscr(),
+                ]
+            )
+            # Stack: ..., result
+
+        # --- Result: keep on stack, append to frame_values[0], or discard ---
+        if analysis.result_on_stack:
+            self.push(UnknownVariable())
+        elif analysis.result_var:
+            cg.extend_output(
+                [
+                    *create_copy(fv_depth),
+                    cg.create_load_const(0),
+                    cg.create_binary_subscr(),
+                    *create_swap(2),
+                    create_instruction("LIST_APPEND", arg=1),
+                    create_instruction("POP_TOP"),
+                ]
+            )
+        else:
+            cg.extend_output([create_instruction("POP_TOP")])
 
         # Stack: cells, [frame_values], *(non-popped stack)
         self.output.add_output_instructions(cg.get_instructions())
