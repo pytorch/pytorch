@@ -355,6 +355,7 @@ def checkpoint(
     determinism_check: str = _DEFAULT_DETERMINISM_MODE,
     debug: bool = False,
     early_stop: bool = True,
+    device_type: Optional[str] = None,
     **kwargs
 ):
     r"""Checkpoint a model or part of the model.
@@ -503,10 +504,15 @@ def checkpoint(
                 "Passing `context_fn` or `debug` is only supported when "
                 "use_reentrant=False."
             )
+        if device_type is not None:
+            raise ValueError(
+                "Passing `device_type` is only supported when "
+                "use_reentrant=False."
+            )
         return CheckpointFunction.apply(function, preserve, *args)
     else:
         gen = _checkpoint_without_reentrant_generator(
-            function, preserve, context_fn, determinism_check, debug, early_stop, *args, **kwargs
+            function, preserve, context_fn, determinism_check, debug, early_stop, device_type, *args, **kwargs
         )
         # Runs pre-forward logic
         next(gen)
@@ -1470,6 +1476,7 @@ def _checkpoint_without_reentrant_generator(
     determinism_check: str = _DEFAULT_DETERMINISM_MODE,
     debug: bool = False,
     early_stop: bool = True,
+    device_type: Optional[str] = None,
     *args,
     **kwargs
 ):
@@ -1521,7 +1528,8 @@ def _checkpoint_without_reentrant_generator(
             f"but got {determinism_check}"
         )
 
-    device_type = _infer_device_type(*args)
+    if device_type is None:
+        device_type = _infer_device_type(*args)
     device_module = _get_device_module(device_type)
     forward_context, recompute_context = context_fn()
     if _is_compiling(fn, args, kwargs) and context_fn is not noop_context_fn:
