@@ -2128,6 +2128,14 @@ class MetaConverter(Generic[_TensorT]):
             # because that would force a detach, not desirable
             r._is_param = True
 
+        # forward the 'is_buffer' metadata if present (for nn.Buffer checks)
+        if getattr(t, "_is_buffer", False):
+            # pyrefly: ignore [missing-attribute]
+            r._is_buffer = True
+            if hasattr(t, "persistent"):
+                # pyrefly: ignore [missing-attribute]
+                r.persistent = t.persistent
+
         # TODO: return the description for later
         return r
 
