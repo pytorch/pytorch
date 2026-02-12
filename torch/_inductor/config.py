@@ -460,7 +460,7 @@ cpu_gpu_bw = 50.0
 # Triton's `do_bench`. the experimental benchmarker may produce
 # results that are not consistent with `do_bench`'s results
 use_experimental_benchmarker: bool = Config(
-    default=False,
+    default=True,
     env_name_force="TORCHINDUCTOR_USE_EXPERIMENTAL_BENCHMARKER",
     justknob="pytorch/inductor:use_experimental_benchmarker",
 )
