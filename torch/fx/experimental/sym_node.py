@@ -915,12 +915,7 @@ def _optimized_add(
     def make_optimized(ordered_args):
         if ordered_args is None:
             raise AssertionError("ordered_args is None")
-        # Use _from_args directly to bypass _exec_constructor_postprocessors
-        # which iterates over all args. This is safe because args are only
-        # symbols or constants, which don't register postprocessors.
-        if not isinstance(ordered_args, tuple):
-            ordered_args = tuple(ordered_args)
-        result = sympy.Add._from_args(ordered_args)
+        result = sympy.Add(*ordered_args, evaluate=False)
         return (True, result)
 
     from torch.utils._sympy.functions import _is_symbols_binary_summation
@@ -1430,28 +1425,6 @@ def _make_node_magic(method, func):
                     self._optimized_summation,
                     other._optimized_summation,
                 )
-            elif method in ("eq", "ne", "ge", "gt", "le", "lt"):
-                import sympy
-
-                # Optimization: when one side is optimized summation or single symbol
-                # and other is constant, use evaluate=False to skip expensive relational evaluation
-                lhs_is_simple = self._optimized_summation or self.expr.is_symbol
-                rhs_is_simple = other._optimized_summation or other.expr.is_symbol
-                if (lhs_is_simple and other.expr.is_number) or (
-                    rhs_is_simple and self.expr.is_number
-                ):
-                    rel_class = {
-                        "eq": sympy.Eq,
-                        "ne": sympy.Ne,
-                        "ge": sympy.Ge,
-                        "gt": sympy.Gt,
-                        "le": sympy.Le,
-                        "lt": sympy.Lt,
-                    }[method]
-                    out = rel_class(self.expr, other.expr, evaluate=False)
-                else:
-                    out = func(self.expr, other.expr)
-
             else:
                 # TODO: consider constant prop here
                 out = func(self.expr, other.expr)
