@@ -580,7 +580,11 @@ class ShardingPropagator:
             from torch.distributed.tensor._decompositions import DecompShardingStrategy
 
             op_strategy = None
-            if DecompShardingStrategy.has_decomp(op_schema.op):
+            has_cia = torch._C._dispatch_has_kernel_for_dispatch_key(
+                op_schema.op.name(),
+                torch._C.DispatchKey.CompositeImplicitAutograd,
+            )
+            if not has_cia and DecompShardingStrategy.has_decomp(op_schema.op):
                 # Ensure schema_info is registered for proper cache key computation
                 DecompShardingStrategy.ensure_schema_info(op_schema.op, self)
                 try:
