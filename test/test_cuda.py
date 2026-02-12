@@ -4121,6 +4121,7 @@ print(ret)
         self.assertEqual(r, "1.0")
 
     def test_bessel_y0_negative_cuda(self):
+        device = torch.device('cuda')
         from torch import special
 
         neg = torch.tensor(-1.0, device=device, dtype=torch.float64)
