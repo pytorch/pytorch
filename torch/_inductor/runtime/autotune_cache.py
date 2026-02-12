@@ -298,9 +298,7 @@ class AutotuneCache:
 
         if local_cache := self.local_cache:
             cache, key = local_cache
-            # pyrefly: ignore [bad-argument-type]
             cache.put(key, data)
-            # pyrefly: ignore [bad-argument-type]
             AutotuneCacheBundler.put(key, data)
             autotune_artifact_key = os.path.join(*key.split(os.sep)[-2:])
             CacheArtifactManager.record_artifact(
@@ -313,7 +311,6 @@ class AutotuneCache:
 
         if remote_cache := self.remote_cache:
             cache, key = remote_cache
-            # pyrefly: ignore [bad-argument-type]
             cache.put(key, data)
 
 
@@ -576,7 +573,7 @@ def _load_cached_autotuning(
             )
 
         # Create the triton_config with the appropriate arguments
-        # pyrefly: ignore [bad-argument-count, unexpected-keyword]
+        # pyrefly: ignore [bad-argument-count]
         triton_config = Config(best_config, **config_args)
         # pyrefly: ignore [missing-attribute]
         triton_config.found_by_coordesc = True
