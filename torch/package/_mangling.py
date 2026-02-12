@@ -25,7 +25,8 @@ class PackageMangler:
         self._mangle_parent = f"<torch_package_{self._mangle_index}>"
 
     def mangle(self, name) -> str:
-        assert len(name) != 0
+        if len(name) == 0:
+            raise AssertionError("name must not be empty")
         return self._mangle_parent + "." + name
 
     def demangle(self, mangled: str) -> str:

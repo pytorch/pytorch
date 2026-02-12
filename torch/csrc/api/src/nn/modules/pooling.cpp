@@ -15,10 +15,10 @@ void AvgPoolImpl<D, Derived>::reset() {}
 
 template <size_t D, typename Derived>
 void AvgPoolImpl<D, Derived>::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::AvgPool" << D << "d"
+  stream << "torch::nn::AvgPool" << D << 'd'
          << "(kernel_size=" << options.kernel_size()
          << ", stride=" << options.stride() << ", padding=" << options.padding()
-         << ")";
+         << ')';
 }
 
 Tensor AvgPool1dImpl::forward(const Tensor& input) {
@@ -68,11 +68,11 @@ void MaxPoolImpl<D, Derived>::reset() {}
 
 template <size_t D, typename Derived>
 void MaxPoolImpl<D, Derived>::pretty_print(std::ostream& stream) const {
-  stream << std::boolalpha << "torch::nn::MaxPool" << D << "d"
+  stream << std::boolalpha << "torch::nn::MaxPool" << D << 'd'
          << "(kernel_size=" << options.kernel_size()
          << ", stride=" << options.stride() << ", padding=" << options.padding()
          << ", dilation=" << options.dilation()
-         << ", ceil_mode=" << options.ceil_mode() << ")";
+         << ", ceil_mode=" << options.ceil_mode() << ')';
 }
 
 Tensor MaxPool1dImpl::forward(const Tensor& input) {
@@ -219,10 +219,10 @@ void MaxUnpoolImpl<D, Derived>::reset() {}
 
 template <size_t D, typename Derived>
 void MaxUnpoolImpl<D, Derived>::pretty_print(std::ostream& stream) const {
-  stream << std::boolalpha << "torch::nn::MaxUnpool" << D << "d"
+  stream << std::boolalpha << "torch::nn::MaxUnpool" << D << 'd'
          << "(kernel_size=" << options.kernel_size()
          << ", stride=" << options.stride() << ", padding=" << options.padding()
-         << ")";
+         << ')';
 }
 
 Tensor MaxUnpool1dImpl::forward(
@@ -401,7 +401,7 @@ void LPPoolImpl<D, Derived>::pretty_print(std::ostream& stream) const {
          << "norm_type=" << options.norm_type() << ", "
          << "kernel_size=" << options.kernel_size() << ", "
          << "stride=" << options.stride() << ", "
-         << "ceil_mode=" << options.ceil_mode() << ")";
+         << "ceil_mode=" << options.ceil_mode() << ')';
 }
 
 Tensor LPPool1dImpl::forward(const Tensor& input) {

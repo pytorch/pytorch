@@ -63,7 +63,6 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
-          # TODO: Removeme once 3.14 is out
           # .4 version is min minor for 3.10, and also no-gil version of 3.13 needs at least 3.13.3
           python-version: "3.10.4"
           freethreaded: false
@@ -96,6 +95,7 @@ jobs:
           export USE_PYTORCH_METAL_EXPORT
           export USE_COREML_DELEGATE
           export TORCH_PACKAGE_NAME
+          "${PYTORCH_ROOT}/.ci/wheel/install_libomp.sh"
           "${PYTORCH_ROOT}/.ci/wheel/build_wheel.sh"
       - uses: actions/upload-artifact@v4.4.0
         if: always()

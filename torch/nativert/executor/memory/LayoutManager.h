@@ -70,7 +70,7 @@ struct ContiguousLayoutBuffer {
   size_t size_{0};
 
   // the dataptr returned by the allocator
-  at::DataPtr data_ptr_{};
+  at::DataPtr data_ptr_;
 };
 
 struct ContiguousStorageImplBuffer {
@@ -198,7 +198,7 @@ class LayoutManager {
 #else
     auto alignment = c10::gAlignment;
 #endif
-    return ((nbytes) + alignment - 1) & (~(alignment - 1));
+    return (nbytes + alignment - 1) & (~(alignment - 1));
   }
 
   void allocate_plan(const LayoutPlan& plan);

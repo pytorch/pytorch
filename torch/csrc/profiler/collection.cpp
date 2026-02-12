@@ -768,7 +768,7 @@ void mark_finished(std::shared_ptr<Result>& r) {
 // Assumption: Total threads number will not exceed 2^16-1, and total ops will
 // not exceed 2^48 -1.
 static uint64_t getForwardThreadKey(uint64_t tid, uint64_t seqNr) {
-  return (((tid) << 48) | ((seqNr) & (((uint64_t)1 << 48) - 1)));
+  return ((tid << 48) | (seqNr & (((uint64_t)1 << 48) - 1)));
 }
 
 void generateForwardBackwardLink(
@@ -915,7 +915,7 @@ void passEventsToKineto(
       // on-demand Kineto activity handling. Enabling this path
       // for Profiler API could cause side effects as much has changed since.
       // Make a surgical fix here until we holistically assess the on-demand
-      // vs API path framentation, which has been snowballing in complexity
+      // vs API path fragmentation, which has been snowballing in complexity
       // and thus flakiness.
       if (config.global()) {
         e->kineto_activity_ = activity;

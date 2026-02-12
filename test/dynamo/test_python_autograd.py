@@ -1,10 +1,14 @@
 # Owner(s): ["module: dynamo"]
-from typing import Callable, NamedTuple, Optional
+from typing import NamedTuple, Optional, TYPE_CHECKING
 
 import torch
 import torch._dynamo
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import CompileCounter, same
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 """
@@ -82,7 +86,7 @@ def grad(L, desired_results: list[Variable]) -> list[Variable]:
     # look up dL_dentries. If a variable is never used to compute the loss,
     # we consider its gradient None, see the note below about zeros for more information.
     def gather_grad(entries: list[str]):
-        return [dL_d[entry] if entry in dL_d else None for entry in entries]
+        return [dL_d.get(entry) for entry in entries]
 
     # propagate the gradient information backward
     for entry in reversed(gradient_tape):

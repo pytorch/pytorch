@@ -39,7 +39,8 @@ def _convert_to_int(val):
 
 
 def _convert_range_to_int(range: ValueRanges):
-    assert isinstance(range, ValueRanges)
+    if not isinstance(range, ValueRanges):
+        raise AssertionError(f"expected ValueRanges, got {type(range)}")
     min_val = _convert_to_int(range.lower)
     max_val = _convert_to_int(range.upper)
     return min_val, max_val
@@ -224,7 +225,7 @@ def _get_existing_inline_assertions(
             lhs = maybe_get_symint(lhs)
             rhs = maybe_get_symint(rhs)
 
-            if compare_op == operator.ge:
+            if compare_op is operator.ge:
                 lhs, rhs = rhs, lhs
 
             if isinstance(lhs, sympy.Symbol) and isinstance(rhs, int):

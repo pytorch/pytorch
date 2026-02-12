@@ -2,8 +2,6 @@
 
 #include <torch/ordered_dict.h>
 
-#include <torch/csrc/autograd/generated/VariableType.h>
-
 #include <c10/util/Exception.h>
 
 #include <ostream>
@@ -355,11 +353,11 @@ void Module::pretty_print_recursive(
     stream << "(\n";
     const std::string next_indentation = indentation + "  ";
     for (const auto& child : children_) {
-      stream << next_indentation << "(" << child.key() << "): ";
+      stream << next_indentation << '(' << child.key() << "): ";
       child.value()->pretty_print_recursive(stream, next_indentation);
       stream << '\n';
     }
-    stream << indentation << ")";
+    stream << indentation << ')';
   }
 }
 

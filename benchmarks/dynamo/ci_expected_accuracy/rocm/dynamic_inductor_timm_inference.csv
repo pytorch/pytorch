@@ -50,7 +50,7 @@ nfnet_l0,pass,0
 
 
 
-repvgg_a2,fail_accuracy,0
+repvgg_a2,pass,0
 
 
 

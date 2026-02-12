@@ -79,9 +79,9 @@ __all__ = [
 logger = get_logger(__name__)
 
 
-JSON = dict
+JSON = dict[str, Any]
 
-_EMPTY_ERROR_DATA = {"message": "<NONE>"}
+_EMPTY_ERROR_DATA: dict[str, Any] = {"message": "<NONE>"}
 _NOT_AVAILABLE = "<N/A>"
 
 _R = TypeVar("_R")
@@ -143,6 +143,10 @@ class ProcessFailure:
                     f" received by PID {self.pid}"
                 )
             else:
+                self.error_file_data["errorTraits"] = {
+                    "category": "system_terminated_error",
+                    "retryability": "False",
+                }
                 self.message = "To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html"
 
     def _get_error_data(self, error_file_data: dict[str, Any]) -> tuple[str, int]:
@@ -308,8 +312,8 @@ class ChildFailedError(Exception):
 
 
 def record(
-    fn: Callable[_P, _R], error_handler: Optional[ErrorHandler] = None
-) -> Callable[_P, Union[_R, None]]:
+    fn: Callable[_P, _R], error_handler: ErrorHandler | None = None
+) -> Callable[_P, _R | None]:
     """
     Syntactic sugar to record errors/exceptions that happened in the decorated
     function using the provided ``error_handler``.
@@ -349,7 +353,7 @@ def record(
     if not error_handler:
         error_handler = get_error_handler()
 
-    def wrap(f: Callable[_P, _R]) -> Callable[_P, Union[_R, None]]:
+    def wrap(f: Callable[_P, _R]) -> Callable[_P, _R | None]:
         @wraps(f)
         def wrapper(*args: _P.args, **kwargs: _P.kwargs):
             assert error_handler is not None  # assertion for mypy type checker

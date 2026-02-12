@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import torch.nn.functional as F
@@ -14,7 +14,7 @@ from .expanded_weights_utils import (
 @implements_per_sample_grads(F.embedding)
 class EmbeddingPerSampleGrad(torch.autograd.Function):
     @staticmethod
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def forward(
         ctx: Any, kwarg_names: list[str], _: Any, *expanded_args_and_kwargs: Any
     ) -> torch.Tensor:
@@ -35,10 +35,10 @@ class EmbeddingPerSampleGrad(torch.autograd.Function):
         return output
 
     @staticmethod
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def backward(
         ctx: Any, grad_output: torch.Tensor
-    ) -> tuple[Optional[torch.Tensor], ...]:
+    ) -> tuple[torch.Tensor | None, ...]:
         input, weight = ctx.input, ctx.weight
         padding_idx, scale_grad_by_freq, sparse = (
             ctx.padding_idx,
@@ -61,7 +61,7 @@ class EmbeddingPerSampleGrad(torch.autograd.Function):
                 1, index, grad_output.reshape(batch_size, -1, embedding_dim)
             )
 
-        results: list[Optional[torch.Tensor]] = []
+        results: list[torch.Tensor | None] = []
         results.append(None)  # for kwarg names
         results.append(None)  # for op reference
 

@@ -17,7 +17,7 @@ from collections.abc import Callable, Sequence
 from typing import Any, TYPE_CHECKING
 
 import torch
-from torch.onnx._internal._lazy_import import onnx, onnxscript_apis, onnxscript_ir as ir
+from torch.onnx._internal._lazy_import import onnx, onnx_ir as ir, onnxscript_apis
 from torch.onnx._internal.exporter import _dynamic_shapes, _ir_passes
 from torch.utils import _pytree
 
@@ -157,8 +157,8 @@ def _to_ort_value(input: torch.Tensor | int | float | str | bool) -> ort.OrtValu
             int: np.int64,
             float: np.float32,
         }
-        # pyrefly: ignore  # no-matching-overload
-        dtype = dtype_mapping.get(type(input), None)
+        # pyrefly: ignore [no-matching-overload]
+        dtype = dtype_mapping.get(type(input))
         return ort.OrtValue.ortvalue_from_numpy(np.array(input, dtype=dtype))
 
     if input.dtype == torch.bfloat16 or input.dtype in _NP_UNSUPPORTED_DTYPES_8BIT:
@@ -211,7 +211,7 @@ class ONNXProgram:
 
     def __init__(
         self, model: ir.Model, exported_program: torch.export.ExportedProgram | None
-    ):
+    ) -> None:
         """Initialize the ONNX program with the specified model and exported program.
         Args:
             model: The ONNX model.
@@ -244,7 +244,8 @@ ONNXProgram(
         if self._inference_session is None:
             self.initialize_inference_session()
 
-        assert self._inference_session is not None
+        if self._inference_session is None:
+            raise AssertionError("_inference_session must be non-None")
 
         ort_input = {
             k.name: _to_ort_value(v)
@@ -253,7 +254,7 @@ ONNXProgram(
         run_options = ort.RunOptions()
         run_options.log_severity_level = 3  # 3: Error
         logger.debug("Running the inference session with %s arguments.", len(ort_input))
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         outputs = self._inference_session.run_with_ort_values(
             None, ort_input, run_options=run_options
         )
@@ -272,7 +273,8 @@ ONNXProgram(
             for k, v in zip(self.model.graph.inputs, flatten_args)
         }
         outputs = evaluator.run(None, ref_input)  # type: ignore[arg-type]
-        assert isinstance(outputs, Sequence)
+        if not isinstance(outputs, Sequence):
+            raise AssertionError(f"Expected Sequence, got {type(outputs)}")
         return tuple(_from_numpy_array(output) for output in outputs)
 
     def compute_values(
@@ -327,7 +329,7 @@ ONNXProgram(
         include_initializers: bool = True,
         keep_initializers_as_inputs: bool = False,
         external_data: bool | None = None,
-    ):
+    ) -> None:
         """Save the ONNX model to the specified destination.
 
         When ``external_data`` is ``True`` or the model is larger than 2GB,

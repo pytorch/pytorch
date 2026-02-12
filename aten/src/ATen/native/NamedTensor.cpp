@@ -84,8 +84,8 @@ static std::vector<int64_t> aligned_size(
     DimnameList aligned_names,
     bool is_aligning_two_tensors) {
   std::vector<int64_t> expanded_sizes(aligned_names.size(), 1);
-  ptrdiff_t dim = (ptrdiff_t)tensor_sizes.size() - 1;
-  ptrdiff_t idx = (ptrdiff_t)aligned_names.size() - 1;
+  ptrdiff_t dim = static_cast<ptrdiff_t>(tensor_sizes.size()) - 1;
+  ptrdiff_t idx = static_cast<ptrdiff_t>(aligned_names.size()) - 1;
   for (; idx >= 0 && dim >= 0; --idx) {
     if (tensor_names[dim] != aligned_names[idx]) {
       continue;

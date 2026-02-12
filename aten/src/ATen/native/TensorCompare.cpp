@@ -514,7 +514,7 @@ Tensor _functional_assert_async_msg_cpu(
 }
 
 void _print(std::string_view s) {
-  std::cout << s << "\n";
+  std::cout << s << '\n';
 }
 
 // Sorting-based algorithm for isin(); used when the number of test elements is

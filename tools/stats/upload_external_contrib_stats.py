@@ -6,11 +6,15 @@ import json
 import os
 import time
 import urllib.parse
-from typing import Any, Callable, cast
+from typing import Any, cast, TYPE_CHECKING
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from tools.stats.upload_stats_lib import upload_to_s3
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 FILTER_OUT_USERS = {
@@ -145,8 +149,12 @@ if __name__ == "__main__":
         )
         for pr_info in data:
             # sometimes users does not get added, so we check it got uploaded
-            assert "users" in pr_info
-            assert isinstance(pr_info["users"], list)
+            if "users" not in pr_info:
+                raise AssertionError("'users' key not found in pr_info")
+            if not isinstance(pr_info["users"], list):
+                raise AssertionError(
+                    f"'users' must be a list, got {type(pr_info['users'])}"
+                )
         print(f"uploading the following data: \n {data}")
         upload_to_s3(
             bucket_name="torchci-contribution-data",

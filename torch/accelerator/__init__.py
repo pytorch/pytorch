@@ -2,7 +2,8 @@ r"""
 This package introduces support for the current :ref:`accelerator<accelerators>` in python.
 """
 
-from typing import Optional
+from functools import cache
+from typing import Any
 from typing_extensions import deprecated
 
 import torch
@@ -10,6 +11,7 @@ import torch
 from ._utils import _device_t, _get_device_index
 from .memory import (
     empty_cache,
+    get_memory_info,
     max_memory_allocated,
     max_memory_reserved,
     memory_allocated,
@@ -24,10 +26,12 @@ __all__ = [
     "current_accelerator",
     "current_device_idx",  # deprecated
     "current_device_index",
+    "get_device_capability",
     "current_stream",
-    "empty_cache",
     "device_count",
     "device_index",
+    "empty_cache",
+    "get_memory_info",
     "is_available",
     "max_memory_allocated",
     "max_memory_reserved",
@@ -91,7 +95,7 @@ def is_available() -> bool:
     return mod.is_available()
 
 
-def current_accelerator(check_available: bool = False) -> Optional[torch.device]:
+def current_accelerator(check_available: bool = False) -> torch.device | None:
     r"""Return the device of the accelerator available at compilation time.
     If no accelerator were available at compilation time, returns None.
     See :ref:`accelerator<accelerators>` for details.
@@ -148,6 +152,30 @@ current_device_idx.__doc__ = r"""
         :func:`torch.accelerator.current_device_idx` is deprecated in favor of :func:`torch.accelerator.current_device_index`
         and will be removed in a future PyTorch release.
     """
+
+
+@cache
+def get_device_capability(device: _device_t = None, /) -> dict[str, Any]:
+    r"""Return the capability of the currently selected device.
+
+    Args:
+        device (:class:`torch.device`, str, int, optional): The device to query capabilities for
+            :ref:`accelerator<accelerators>` device type. If not given,
+            use :func:`torch.accelerator.current_device_index` by default.
+
+    Returns:
+        dict[str, Any]: A dictionary containing device capability information. The dictionary includes:
+            - ``supported_dtypes`` (set(torch.dtype)): Set of PyTorch data types supported by the device
+
+    Examples:
+        >>> # xdoctest: +SKIP("requires cuda")
+        >>> # Query capabilities for current device
+        >>> capabilities = torch.accelerator.get_device_capability("cuda:0")
+        >>> print("Supported dtypes:", capabilities["supported_dtypes"])
+    """
+    device_index = _get_device_index(device, optional=True)
+    # pyrefly: ignore [missing-attribute]
+    return torch._C._accelerator_getDeviceCapability(device_index)
 
 
 def set_device_index(device: _device_t, /) -> None:
@@ -259,7 +287,7 @@ class device_index:
         ...     pass
     """
 
-    def __init__(self, device: Optional[int], /) -> None:
+    def __init__(self, device: int | None, /) -> None:
         self.idx = device
         self.prev_idx = -1
 

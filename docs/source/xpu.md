@@ -62,6 +62,20 @@
     Stream
 ```
 
+## Graphs
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    is_current_stream_capturing
+    graph_pool_handle
+    XPUGraph
+    graph
+    make_graphed_callables
+```
+
 ```{eval-rst}
 .. automodule:: torch.xpu.memory
 ```
@@ -75,16 +89,22 @@
     :toctree: generated
     :nosignatures:
 
+     XPUPluggableAllocator
+     change_current_allocator
      empty_cache
+     get_per_process_memory_fraction
      max_memory_allocated
      max_memory_reserved
      mem_get_info
      memory_allocated
      memory_reserved
+     memory_snapshot
      memory_stats
      memory_stats_as_nested_dict
      reset_accumulated_memory_stats
      reset_peak_memory_stats
+     set_per_process_memory_fraction
+     MemPool
 ```
 
 ```{eval-rst}
@@ -92,4 +112,12 @@
     :hidden:
 
     xpu.aliases.md
+```
+
+```{eval-rst}
+.. currentmodule:: torch.xpu
+```
+
+```{eval-rst}
+.. autoclass:: torch.xpu.use_mem_pool
 ```

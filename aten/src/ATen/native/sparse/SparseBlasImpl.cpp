@@ -7,7 +7,7 @@
 
 // Required for checking whether Triton kernels are available
 #include <ATen/core/dispatch/Dispatcher.h>
-
+#include <c10/util/Exception.h>
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
@@ -248,10 +248,7 @@ Tensor& _compressed_row_strided_addmm_out(
         try {
           return triton_kernel.call(self, mat1, mat2, beta, alpha, result);
         } catch (std::runtime_error& e) {
-          const std::string msg = e.what();
-          if (msg != std::string("Unable to cast NotImplemented to Tensor")) {
-            throw std::runtime_error(msg);
-          }
+          TORCH_CHECK(e.what() == std::string("Unable to cast NotImplemented to Tensor"), e.what());
         } /* else triton_kernel returned NotImplemented, continue
              with the generic method below */
       }

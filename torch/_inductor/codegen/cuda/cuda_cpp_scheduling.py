@@ -4,7 +4,7 @@ import logging
 from collections.abc import Sequence
 from typing import cast
 
-from torch._inductor.codegen.cuda.cutlass_python_evt import (
+from torch._inductor.codegen.cutlass.python_evt import (
     CutlassEVTCodegen,
     MockCutlassHandler,
 )
@@ -14,7 +14,7 @@ from torch.utils._ordered_set import OrderedSet
 from ...._dynamo.utils import counters
 from ... import config
 from ...codecache import code_hash, get_path
-from ...ir import Buffer, ComputedBuffer, CUDATemplateBuffer, Pointwise
+from ...ir import Buffer, ComputedBuffer, CUTLASSTemplateBuffer, Pointwise
 from ...scheduler import (
     BaseSchedulerNode,
     BaseScheduling,
@@ -55,7 +55,7 @@ class CUDACPPScheduling(BaseScheduling):
     @staticmethod
     def is_cuda_cpp_template(node: BaseSchedulerNode) -> bool:
         return isinstance(node, SchedulerNode) and isinstance(
-            node.node, CUDATemplateBuffer
+            node.node, CUTLASSTemplateBuffer
         )
 
     def is_cuda_cpp_fused_template(self, node: BaseSchedulerNode) -> bool:
@@ -67,7 +67,7 @@ class CUDACPPScheduling(BaseScheduling):
         if self.is_cuda_cpp_template(node1) and isinstance(node2, BaseSchedulerNode):
             assert node1.node, "node1.node should not be None"
             return self._can_fuse_epilogue_impl(
-                cast(CUDATemplateBuffer, node1.node),
+                cast(CUTLASSTemplateBuffer, node1.node),
                 [],
                 node2,  # type: ignore[arg-type]
             )
@@ -134,12 +134,12 @@ class CUDACPPScheduling(BaseScheduling):
         """
         counters["inductor"]["cuda_epilogue_fusion_counter"] += len(epilogue_nodes)
         assert self.is_cuda_cpp_template(template_node), (
-            "Template node passed to CUDAScheduler.codegen_template must be a SchedulerNode that wraps a CUDATemplateBuffer"
+            "Template node passed to CUDAScheduler.codegen_template must be a SchedulerNode that wraps a CUTLASSTemplateBuffer"
         )
         template_node = cast(SchedulerNode, template_node)
         _, (_numel, rnumel) = template_node.group
         assert rnumel == 1
-        ctb: CUDATemplateBuffer = cast(CUDATemplateBuffer, template_node.node)
+        ctb: CUTLASSTemplateBuffer = cast(CUTLASSTemplateBuffer, template_node.node)
         epilogue_ir_nodes: list[Buffer] = [n.node for n in epilogue_nodes]  # type: ignore[misc]
         assert all(isinstance(n, ComputedBuffer) for n in epilogue_ir_nodes), (
             "Epilogue nodes must all be instances of ir.ComputedBuffer"
@@ -190,13 +190,14 @@ class CUDACPPScheduling(BaseScheduling):
         assert all(n.node is not None for n in nodes), (
             "All epilogue nodes should have an IRNode"
         )
+        # pyrefly: ignore [redundant-cast]
         return cast(
             list[BaseSchedulerNode], [n for n in nodes if n.node is not template_node]
         )
 
     def _can_fuse_epilogue_impl(
         self,
-        cuda_template_buffer: CUDATemplateBuffer,
+        cuda_template_buffer: CUTLASSTemplateBuffer,
         existing_epilogue_nodes: list[BaseSchedulerNode],
         node_to_fuse: BaseSchedulerNode,
     ) -> bool:
@@ -205,7 +206,7 @@ class CUDACPPScheduling(BaseScheduling):
         support fusion with Pointwise operations, wrapped in (named) ComputedBuffer nodes.
 
         Args:
-            cuda_template_buffer : A CUDATemplateBuffer object representing the CUDA template and it's result buffer
+            cuda_template_buffer : A CUTLASSTemplateBuffer object representing the CUDA template and it's result buffer
             existing_epilogue_nodes : List[SchedulerNode]: The list of already fused epilogue nodes.
             node_to_fuse: The SchedulerNode node to be checked if it can be fused with the epilogue.
         Returns:
@@ -216,7 +217,7 @@ class CUDACPPScheduling(BaseScheduling):
 
         scheduler_nodes_to_fuse = node_to_fuse.get_nodes()
 
-        assert isinstance(cuda_template_buffer, CUDATemplateBuffer)
+        assert isinstance(cuda_template_buffer, CUTLASSTemplateBuffer)
 
         # Checks on constituent nodes
         for s_node in scheduler_nodes_to_fuse:
@@ -256,7 +257,7 @@ size: {cuda_template_buffer.get_size()}"
             )
             return False
         elif (
-            not config.cuda.cutlass_epilogue_fusion_enabled
+            not config.cutlass.cutlass_epilogue_fusion_enabled
             or not config.epilogue_fusion
         ):
             why("cutlass epilogue fusion is not enabled")
@@ -266,9 +267,7 @@ size: {cuda_template_buffer.get_size()}"
             return False
 
         try:
-            from torch._inductor.codegen.cuda.cutlass_python_evt import (
-                CutlassEVTCodegen,
-            )
+            from torch._inductor.codegen.cutlass.python_evt import CutlassEVTCodegen
 
             CutlassEVTCodegen.ir_to_evt_python_code(
                 cuda_template_buffer.get_name(),

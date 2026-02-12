@@ -120,8 +120,10 @@ def generate_cct_and_mode(autograd_view_consistency=True):
 
         @staticmethod
         def __new__(cls, elem, mode, *args, **kwargs):
-            assert type(elem) is not cls, \
-                "Wrapping a CompositeCompliantTensor in a CompositeCompliantTensor is not supported"
+            if type(elem) is cls:
+                raise AssertionError(
+                    "Wrapping a CompositeCompliantTensor in a CompositeCompliantTensor is not supported"
+                )
 
             # The storage of CompositeCompliantTensor should never be used directly
             # by a Composite operation; if the Composite
@@ -155,7 +157,8 @@ def generate_cct_and_mode(autograd_view_consistency=True):
             else:
                 r.elem = elem
 
-            assert r.stride() == r.elem.stride()
+            if r.stride() != r.elem.stride():
+                raise AssertionError(f"Expected r.stride() == r.elem.stride(), got {r.stride()} != {r.elem.stride()}")
 
             # Propagate conjugate bits to the wrapper tensor
             # Ref: https://github.com/albanD/subclass_zoo/issues/24
@@ -186,7 +189,7 @@ def generate_cct_and_mode(autograd_view_consistency=True):
             def wrap(e):
                 return CompositeCompliantTensor(e, self) if isinstance(e, torch.Tensor) else e
 
-            if func == torch.ops.aten._local_scalar_dense.default:
+            if func is torch.ops.aten._local_scalar_dense.default:
                 raise RuntimeError(
                     ".item() is not allowed to be called inside of composite "
                     "functions in the PyTorch library because not all backends "
@@ -234,7 +237,7 @@ def generate_cct_and_mode(autograd_view_consistency=True):
                     #    tensor results to be that of the tensors that alias the input
                     result = func(*args, **kwargs)
                     if isinstance(result, (tuple, list)):
-                        for a, b in zip(rs, result):
+                        for a, b in zip(rs, result, strict=True):
                             a.set_(b)
                     else:
                         rs.set_(result)
@@ -303,7 +306,7 @@ def generate_subclass_choices(flat_args, CCT, cct_mode):
     for which_args_are_wrapped in itertools.product(*subclass_options):
 
         result = [maybe_map(partial(wrap, CCT=CCT, cct_mode=cct_mode), should_wrap_arg, arg)
-                  for should_wrap_arg, arg in zip(which_args_are_wrapped, flat_args)]
+                  for should_wrap_arg, arg in zip(which_args_are_wrapped, flat_args, strict=True)]
         yield result, which_args_are_wrapped
 
 
@@ -436,11 +439,13 @@ def compute_expected_grads(op, args, kwargs, output_process_fn_grad=None, gradch
     flat_results = pytree.tree_leaves(results)
     flat_results = [r for r in flat_results if isinstance(r, torch.Tensor)]
     flat_diff_results = [r for r in flat_results if r.requires_grad]
-    assert len(flat_diff_results) > 0
+    if len(flat_diff_results) <= 0:
+        raise AssertionError("Expected len(flat_diff_results) > 0")
 
     grads = [torch.ones(r.shape, device=r.device, dtype=r.dtype) for r in flat_diff_results]
     leaf_tensors = gather_leaf_tensors(args, kwargs)
-    assert len(leaf_tensors) > 0
+    if len(leaf_tensors) <= 0:
+        raise AssertionError("Expected len(leaf_tensors) > 0")
     return torch.autograd.grad(flat_diff_results, leaf_tensors,
                                grads, allow_unused=True, retain_graph=True)
 
@@ -462,7 +467,8 @@ def check_backward_formula(op: Callable, args, kwargs,
     for choice in generate_subclass_choices_args_kwargs(args, kwargs, CCT, cct_mode):
         new_args, new_kwargs, which_args_are_wrapped, which_kwargs_are_wrapped = choice
         leaf_tensors = gather_leaf_tensors(new_args, new_kwargs)
-        assert len(leaf_tensors) > 0
+        if len(leaf_tensors) <= 0:
+            raise AssertionError("Expected len(leaf_tensors) > 0")
 
         try:
             if gradcheck_wrapper is None:
@@ -482,7 +488,8 @@ def check_backward_formula(op: Callable, args, kwargs,
         flat_results = pytree.tree_leaves(results)
         flat_results = [r for r in flat_results if isinstance(r, torch.Tensor)]
         flat_diff_results = [r for r in flat_results if r.requires_grad]
-        assert len(flat_diff_results) > 0
+        if len(flat_diff_results) <= 0:
+            raise AssertionError("Expected len(flat_diff_results) > 0")
 
         # NB: ones, not ones_like, so we get a regular Tensor here
         grads = [torch.ones(r.shape, device=r.device, dtype=r.dtype)
@@ -516,7 +523,8 @@ def check_forward_ad_formula(op: Callable, args, kwargs, gradcheck_wrapper=None,
     CCT, cct_mode = generate_cct_and_mode(autograd_view_consistency=False)
 
     def maybe_tangent(t):
-        assert type(t) is not CCT
+        if type(t) is CCT:
+            raise AssertionError("Expected type(t) is not CCT")
         # Generate `tangent` tensor
         # if given object is a Tensor and requires grad is set.
         if isinstance(t, torch.Tensor) and t.requires_grad:
@@ -539,11 +547,11 @@ def check_forward_ad_formula(op: Callable, args, kwargs, gradcheck_wrapper=None,
                 return fwAD.make_dual(primal.detach(), tangent)
             elif is_tensorlist(primal):
                 return tuple(fwAD.make_dual(pri.detach(), tang) if tang is not None else pri
-                             for pri, tang in zip(primal, tangent))
+                             for pri, tang in zip(primal, tangent, strict=True))
             return primal
 
         def compute_expected_grad(args, tangent_args, kwargs, tangent_kwargs):
-            op_args = tuple(map(maybe_make_dual, zip(args, tangent_args)))
+            op_args = tuple(map(maybe_make_dual, zip(args, tangent_args, strict=True)))
             op_kwargs = {k: maybe_make_dual((v, tangent_kwargs[k])) for k, v in kwargs.items()}
 
             if gradcheck_wrapper is None:
@@ -572,7 +580,7 @@ def check_forward_ad_formula(op: Callable, args, kwargs, gradcheck_wrapper=None,
                 new_tang_args, new_tang_kwargs, \
                     which_tang_args_are_wrapped, which_tang_kwargs_are_wrapped = tang_choice
 
-                op_args = tuple(map(maybe_make_dual, zip(new_args, new_tang_args)))
+                op_args = tuple(map(maybe_make_dual, zip(new_args, new_tang_args, strict=True)))
                 op_kwargs = {k: maybe_make_dual((v, new_tang_kwargs[k])) for k, v in new_kwargs.items()}
 
                 try:

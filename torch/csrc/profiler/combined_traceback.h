@@ -3,6 +3,10 @@
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/profiler/unwind/unwind.h>
 
+#include <optional>
+#include <string>
+#include <vector>
+
 namespace torch {
 
 // struct that holds the result of symbolizing multiple tracebacks
@@ -36,6 +40,9 @@ struct TORCH_API CapturedTraceback : public c10::GatheredContext {
   using visitproc = int (*)(void* self, void* arg);
 
   struct Python {
+    // Check if it's safe to gather Python frames from the current thread.
+    // Returns false for pure C++ threads that cannot acquire the GIL.
+    virtual bool canGather() = 0;
     virtual std::vector<PyFrame> gather() = 0;
     virtual void release(std::vector<PyFrame>& frames) = 0;
     virtual void appendSymbolized(
@@ -47,6 +54,12 @@ struct TORCH_API CapturedTraceback : public c10::GatheredContext {
         visitproc visit,
         void* arg) = 0;
     virtual int clear(std::vector<PyFrame>& frames) = 0;
+    // Gather forward traceback from the current autograd node's anomaly
+    // metadata. Returns a vector of strings representing the forward stack
+    // trace, or empty if not available.
+    virtual std::vector<std::string> gatherForwardTraceback() {
+      return {};
+    }
     virtual ~Python() = default;
     Python* next_ = nullptr;
   };
@@ -68,9 +81,34 @@ struct TORCH_API CapturedTraceback : public c10::GatheredContext {
   // non-owning reference to one of the immortal Python* objects
   // registered above.
   Python* python_ = nullptr;
+
+  // Optional forward traceback from anomaly mode.
+  // This is a list of Python strings representing the forward stack trace
+  // when the autograd Node was created. Used to correlate backward allocations
+  // with forward operations.
+  std::optional<std::vector<std::string>> forward_traceback_;
+
+ public:
+  // Set the forward traceback from anomaly mode metadata
+  void set_forward_traceback(std::vector<std::string> traceback) {
+    forward_traceback_ = std::move(traceback);
+  }
+
+  // Get the forward traceback if available
+  const std::optional<std::vector<std::string>>& forward_traceback() const {
+    return forward_traceback_;
+  }
 };
 
 TORCH_API SymbolizedTracebacks
 symbolize(const std::vector<CapturedTraceback*>& to_symbolize);
+
+inline CapturedTraceback* getCapturedTracebackFromContext(
+    const std::shared_ptr<c10::GatheredContext>& x) {
+  auto* traceback = dynamic_cast<CapturedTraceback*>(x.get());
+  TORCH_CHECK(
+      traceback, "attempting to gather stack context from the wrong type.");
+  return traceback;
+}
 
 } // namespace torch

@@ -1,8 +1,11 @@
 #pragma once
 
+#include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <cstdint>
 #include <string>
+
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-enum")
 
 namespace c10 {
 
@@ -48,3 +51,5 @@ inline std::string toString(QScheme qscheme) {
 }
 
 } // namespace c10
+
+C10_DIAGNOSTIC_POP()

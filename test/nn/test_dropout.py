@@ -12,7 +12,6 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfMPS,
     expectedFailureMPS,
-    expectedFailureMPSPre15,
     expectedFailureXLA,
     instantiate_device_type_tests,
 )
@@ -78,8 +77,12 @@ class TestDropoutNN(NNTestCase):
                     o_ref = torch.dropout(x_ref, p, train)
                     o.sum().backward()
                     o_ref.sum().backward()
-                    assert o.equal(o_ref)
-                    assert x.grad.equal(x_ref.grad)
+                    if not o.equal(o_ref):
+                        raise AssertionError("Expected o.equal(o_ref) to be True")
+                    if not x.grad.equal(x_ref.grad):
+                        raise AssertionError(
+                            "Expected x.grad.equal(x_ref.grad) to be True"
+                        )
 
     def test_invalid_dropout_p(self):
         v = torch.ones(1)
@@ -173,7 +176,6 @@ class TestDropoutNNDeviceType(NNTestCase):
                     else:
                         self.assertNotEqual(permuted_inp, out)
 
-    @expectedFailureMPSPre15
     def test_Dropout(self, device):
         input = torch.empty(1000)
         self._test_dropout(nn.Dropout, device, input)

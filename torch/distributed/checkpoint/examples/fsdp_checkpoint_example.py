@@ -37,15 +37,14 @@ def init_model():
 
 
 def print_params(stage, model_1, model_2, optim_1, optim_2):
-    with FSDP.summon_full_params(model_1):
-        with FSDP.summon_full_params(model_2):
-            print(
-                f"{stage} --- rank: {dist.get_rank()}\n"
-                f"model.weight: {model_1.weight}\n"
-                f"model_2.weight:{model_2.weight}\n"
-                f"model.bias: {model_1.bias}\n"
-                f"model_2.bias: {model_2.bias}\n"
-            )
+    with FSDP.summon_full_params(model_1), FSDP.summon_full_params(model_2):
+        print(
+            f"{stage} --- rank: {dist.get_rank()}\n"
+            f"model.weight: {model_1.weight}\n"
+            f"model_2.weight:{model_2.weight}\n"
+            f"model.bias: {model_1.bias}\n"
+            f"model_2.bias: {model_2.bias}\n"
+        )
 
     print(
         f"{stage} --- rank: {dist.get_rank()}\n"

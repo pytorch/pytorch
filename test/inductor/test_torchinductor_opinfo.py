@@ -231,9 +231,6 @@ inductor_skips["xpu"] = {}
 inductor_expected_failures_single_sample = defaultdict(dict)
 
 inductor_expected_failures_single_sample["cpu"] = {
-    "_softmax_backward_data": {
-        f16
-    },  # half_to_float is only valid for the CUDA implementation
     "_upsample_bilinear2d_aa": {f32, f64},
     "cholesky": {f32, f64},
     "complex": {f16},
@@ -286,26 +283,35 @@ inductor_expected_failures_single_sample["xpu"] = {
     "tan": {f16},
     "torch.ops.aten._flash_attention_forward": {f16},
     "torch.ops.aten._efficient_attention_forward": {f16, f32},
-    "to_sparse": {f32, f64},
-    "linalg.eig": {f32, f64},
+    "to_sparse": {
+        b8,
+        f16,
+        f32,
+        f64,
+        i32,
+        i64,
+    },  # align with cuda.
     ("linalg.pinv", "singular"): {f64},
     # could not create a primitive
     "addmv": {f64},
-    # could not create a primitive descriptor for
-    # a deconvolution forward propagation primitive
-    "nn.functional.conv_transpose2d": {f32, f64},
-    "nn.functional.conv_transpose3d": {f32, f64},
-    # [Begin] Incorrect XPU reference due to new driver.
-    "masked.prod": {b8, i32, i64},
-    "masked.amin": {i64},
-    "masked.amax": {i64},
-    "amax": {i64},
-    "amin": {i64},
-    "std": {f64},
-    "var": {f64},
-    "std_mean": {f64},
-    "var_mean": {f64},
-    # [End]
+    "fft.fft": {f16},
+    "fft.fft2": {f16},
+    "fft.fftn": {f16},
+    "fft.hfft": {f16},
+    "fft.hfft2": {f16},
+    "fft.hfftn": {f16},
+    "fft.rfft": {f16},
+    "fft.rfft2": {f16},
+    "fft.rfftn": {f16},
+    "fft.ifft": {f16},
+    "fft.ifft2": {f16},
+    "fft.ifftn": {f16},
+    "fft.ihfft": {f16},
+    "fft.ihfft2": {f16},
+    "fft.ihfftn": {f16},
+    "fft.irfft": {f16},
+    "fft.irfft2": {f16},
+    "fft.irfftn": {f16},
 }
 
 
@@ -447,6 +453,11 @@ inductor_override_kwargs["cuda"] = {
     ("kron", f16): {"reference_in_float": True},
     "log_normal": {"reference_in_float": True},
     ("masked.softmin", f16): {"atol": 1e-4, "rtol": 0.01},
+    ("nn.functional.adaptive_avg_pool2d", f16): {
+        "reference_in_float": True,
+        "atol": 2e-5,
+        "rtol": 0.02,
+    },
     ("nn.functional.batch_norm", f16): {"reference_in_float": True},
     ("nn.functional.batch_norm.without_cudnn", f16): {"reference_in_float": True},
     ("nn.functional.cosine_similarity", f16): {"reference_in_float": True},
@@ -822,9 +833,6 @@ inductor_one_sample["cuda"] = {
     "nn.functional.fractional_max_pool3d": {f16, f32, f64},
     "nn.functional.group_norm": {f16},
     "nn.functional.hinge_embedding_loss": {f16},
-    # Enabling all tests for this test fails randomly
-    # See https://github.com/pytorch/pytorch/issues/129238
-    "nn.functional.huber_loss": {f16},
     "nn.functional.interpolate.bicubic": {f16},
     "nn.functional.interpolate.bilinear": {f16},
     "nn.functional.interpolate.trilinear": {f16},
@@ -942,9 +950,6 @@ inductor_one_sample["xpu"] = {
     "nn.functional.fractional_max_pool3d": {f16, f32, f64},
     "nn.functional.group_norm": {f16},
     "nn.functional.hinge_embedding_loss": {f16},
-    # Enabling all tests for this test fails randomly
-    # See https://github.com/pytorch/pytorch/issues/129238
-    "nn.functional.huber_loss": {f16},
     "nn.functional.interpolate.bicubic": {f16},
     "nn.functional.interpolate.bilinear": {f16},
     "nn.functional.interpolate.trilinear": {f16},
@@ -980,6 +985,25 @@ inductor_one_sample["xpu"] = {
     "xlogy": {f16},
 }
 
+# TODO: Fix these so strides match.
+inductor_skip_exact_stride = {
+    "linalg.matrix_norm",
+    "ormqr",
+    "rot90",
+    "sum",
+    "tensordot",
+}
+
+# On XPU, Inductor may apply additional layout optimizations that can change
+# tensor strides compared to eager mode, so exact stride checks are relaxed
+# for certain ops.
+inductor_skip_exact_stride_xpu = {
+    "nn.functional.conv2d",
+    "nn.functional.conv_transpose2d",
+    "nn.functional.max_unpool2d",
+    "nn.functional.max_unpool2d.grad",
+    "nn.functional.rms_norm",
+}
 
 # Custom replacements for assertEquals, in cases where a difference in value
 # may not indicate correctness.
@@ -1220,7 +1244,7 @@ class TestInductorOpInfo(TestCase):
             # not exercised in test_ops_gradients atm.  The problem is not
             # complex32 per-se (which is supported by data movement only ops)
             # but that when we do backwards we expect other ops like add to work
-            and not dtype == torch.complex32
+            and dtype != torch.complex32
         )
         samples = op.sample_inputs(device, dtype, requires_grad=requires_grad)
 
@@ -1332,8 +1356,10 @@ class TestInductorOpInfo(TestCase):
                         # Triton
                         if has_triton():
                             adjusted_kwargs.update(
-                                copy_to_gpu=False, reference_in_float=False
+                                copy_to_gpu=False,
                             )
+                            if device_type == GPU_TYPE:
+                                adjusted_kwargs["reference_in_float"] = False
 
                         # skip checking gradient on CPU for now
                         if device_type == GPU_TYPE:
@@ -1349,12 +1375,17 @@ class TestInductorOpInfo(TestCase):
                         adjusted_kwargs.update(kwarg_overrides)
 
                         # Call the appropriate check method based on device type
+                        exact_stride = op_name not in inductor_skip_exact_stride
+                        # XPU has additional layout optimizations that change strides differently from eager mode.
+                        if exact_stride and GPU_TYPE == "xpu":
+                            exact_stride = op_name not in inductor_skip_exact_stride_xpu
                         if device_type == GPU_TYPE:
                             self.check_model_gpu(
                                 fn,
                                 args,
                                 kwargs,
                                 **adjusted_kwargs,
+                                exact_stride=exact_stride,
                             )
                         else:
                             self.check_model(
@@ -1362,6 +1393,7 @@ class TestInductorOpInfo(TestCase):
                                 args,
                                 kwargs,
                                 **adjusted_kwargs,
+                                exact_stride=exact_stride,
                             )
 
         except Exception as e:

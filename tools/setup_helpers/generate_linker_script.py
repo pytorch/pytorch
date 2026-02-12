@@ -27,11 +27,14 @@ def gen_linker_script(
     text_line_start = [
         i for i, line in enumerate(linker_script_lines) if ".text           :" in line
     ]
-    assert len(text_line_start) == 1, "The linker script has multiple text sections!"
+    if len(text_line_start) != 1:
+        raise AssertionError("The linker script has multiple text sections!")
     text_line_start = text_line_start[0]
 
     # ensure that parent directory exists before writing
+    # pyrefly: ignore [bad-assignment]
     fout = Path(fout)
+    # pyrefly: ignore [missing-attribute]
     fout.parent.mkdir(parents=True, exist_ok=True)
 
     with open(fout, "w") as f:

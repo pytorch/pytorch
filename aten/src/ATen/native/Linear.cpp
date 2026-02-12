@@ -50,18 +50,35 @@ static inline bool parseLinearFlatten3d() {
 // `_flatten_nd_linear` flattens all but the last dimension of the input tensor
 // before passing it to linear operation
 static inline Tensor _flatten_nd_linear(const Tensor& input, const Tensor& weight, const Tensor& bias) {
-    const auto input_sizes = input.sym_sizes();
-    // can't use -1 in reshape because it errors when a dimension is 0
-    c10::SymInt flattened_dim = 1;
-    for (int64_t i = 0, ndim = input_sizes.size(); i < ndim - 1; ++i) {
-      flattened_dim = flattened_dim * input_sizes[i];
+  const auto input_sizes = input.sym_sizes();
+
+  const auto result_flattened = [&]() -> Tensor {
+    const auto input_ncols = input_sizes.back();
+    const auto input_flattened_nrows = [&]() -> c10::SymInt {
+      // can't use -1 in reshape because it errors when a dimension is 0
+      auto flattened_nrows = c10::SymInt{1};
+      for (const auto& size : input_sizes.slice(0, input_sizes.size() - 1)) {
+        flattened_nrows *= size;
+      }
+      return flattened_nrows;
+    }();
+
+    const auto input_flattened = input.view_symint({input_flattened_nrows, input_ncols});
+    if (weight.layout() == c10::kStrided) {
+      return at::addmm(bias, input_flattened, weight.t());
+    } else {
+      // weight is sparse, and addmm for sparse expects matmul lhs to be sparse,
+      // so we transpose the problem.
+      // NOTE: at::matmul handles (dense @ sparse) similarly.
+      const auto bias_t = (bias.dim() >= 2) ? bias.mT() : bias.unsqueeze(-1);
+      return at::addmm(bias_t, weight, input_flattened.t()).t();
     }
-    auto inp_reshape = input.reshape_symint({flattened_dim, input_sizes.at(input_sizes.size() -1)});
-    const auto result = at::addmm(bias, inp_reshape, weight.t());
-    auto new_size = input_sizes.slice(0, input_sizes.size() - 1);
-    c10::SymDimVector sizes_vec(new_size.begin(), new_size.end());
-    sizes_vec.push_back(result.sym_size(1));
-    return result.view_symint(sizes_vec);
+  }();
+
+  // Unflatten flattened row dims
+  auto result_sizes = c10::SymDimVector{input_sizes.begin(), input_sizes.end()};
+  result_sizes.back() = result_flattened.sym_size(1);
+  return result_flattened.view_symint(result_sizes);
 }
 
 
@@ -90,15 +107,23 @@ Tensor linear(const Tensor& input, const Tensor& weight, const std::optional<Ten
     // Fused op is marginally faster.
     return at::addmm(*bias, input, weight.t());
   }
-  if (bias->defined() && !input.is_xla()) {
-    // Also hit the fused path for contiguous 3D input, if not using xla
+
+  const auto is_bias_likely_fusable = (
+      bias->defined() &&
+      // cuBLASLt: will fuse in the epilogue without copies
+      // when input/weight/bias are all strided.
+      // When weight is not strided, bias will not be fused,
+      // but we can still dispatch here to avoid at::matmul
+      // path which will probably use a very similar
+      // flattening optimization.
+      ((bias->dim() == 1 || bias->squeeze().dim() == 1) && bias->is_contiguous_or_false())
+  );
+  if (is_bias_likely_fusable && !input.is_xla()) {
+    // Also hit the fused path for contiguous nD input, if not using xla
     // backend. Reshaping/flattening has some performance implications on xla.
-    bool is_contiguous = input.is_contiguous_or_false();
-    if (is_contiguous && input_dim == 3) {
+    if (input.is_contiguous_or_false()) {
       return _flatten_nd_linear(input, weight, *bias);
-    } else if (is_contiguous && input.layout() == c10::kStrided && weight.layout() == c10::kStrided && bias->dim() == 1) {
-      return _flatten_nd_linear(input, weight, *bias);
-    } else if (parseLinearFlatten3d() && input_dim == 3) {
+    } else if (parseLinearFlatten3d()) {
       // If user forces flattening via env var
       const Tensor input_cont = input.contiguous();
       return _flatten_nd_linear(input_cont, weight, *bias);
@@ -201,7 +226,7 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
   out_size.reserve(out_num_dim);
   for (auto& d : lro) out_size.push_back(left.sym_size(d));
   for (auto& d : lo) out_size.push_back(left.sym_size(d));
-  for (auto& d : sum_dims_) { out_size.emplace_back(1); (void)(d); }; // avoid warning about not using d
+  for (auto& d : sum_dims_) { out_size.emplace_back(1); (void)d; }; // avoid warning about not using d
   for (auto& d : ro) out_size.push_back(right.sym_size(d));
 
   std::vector<int64_t> lpermutation(lro);
@@ -640,7 +665,7 @@ Tensor einsum(std::string_view equation, TensorList operands, at::OptionalIntArr
     }
   }
 
-  return ops[0];
+  return std::move(ops[0]);
 }
 
 // _trilinear computes a trilinear einstein sum with an unrolled dimension
@@ -805,7 +830,7 @@ Tensor tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, 
   std::vector<SymInt> rsizes;  // rsizes: sizes of the result
   p1.reserve(input1.dim());
   p2.reserve(input2.dim());
-  rsizes.reserve(input1.dim() + input2.dim() - (int64_t) dims1.size());
+  rsizes.reserve(input1.dim() + input2.dim() - static_cast<int64_t>(dims1.size()));
   SymInt size1 = 1; // number of non-contracted elements in input1
   SymInt size2 = 1; // number of non-contracted elements in input2
 

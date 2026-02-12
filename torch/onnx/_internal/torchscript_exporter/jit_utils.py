@@ -290,7 +290,10 @@ def _create_node(
                 node.addOutput()
 
     node_outputs = tuple(node.outputs())  # type: ignore[possibly-undefined]
-    assert len(node_outputs) == n_outputs
+    if len(node_outputs) != n_outputs:
+        raise AssertionError(
+            f"len(node_outputs)={len(node_outputs)} != n_outputs={n_outputs}"
+        )
 
     aten = domain_op.startswith("aten::")
 
@@ -298,12 +301,12 @@ def _create_node(
     for key, value in sorted(attributes.items()):
         if key in _SKIP_NODE_ATTRIBUTES:
             continue
-        # pyrefly: ignore  # unbound-name
+        # pyrefly: ignore [unbound-name]
         _add_attribute(node, key, value, aten=aten)
     if shape_inference:
-        # pyrefly: ignore  # unbound-name
+        # pyrefly: ignore [unbound-name]
         _C._jit_pass_onnx_node_shape_type_inference(node, params_dict, opset_version)
-    # pyrefly: ignore  # unbound-name
+    # pyrefly: ignore [unbound-name]
     return node
 
 
@@ -315,7 +318,8 @@ def _is_onnx_list(value):
 
 def _scalar(x: torch.Tensor):
     """Convert a scalar tensor into a Python value."""
-    assert x.numel() == 1
+    if x.numel() != 1:
+        raise AssertionError(f"Expected numel() == 1, got {x.numel()}")
     return x[0]
 
 

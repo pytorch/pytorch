@@ -24,9 +24,9 @@ import os
 import shutil
 import sys
 import textwrap
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from importlib import import_module
-from typing import Any, Callable, Optional, Union
+from typing import Any, Optional, Union
 
 import torch
 import torch.fx as fx
@@ -471,6 +471,7 @@ def repro_minify(options: Any, mod: torch.nn.Module, load_args: Any) -> None:
         compiler_fn,
         compiler_name=options.backend,  # type: ignore[call-arg]
     )
+    # pyrefly: ignore [bad-argument-type]
     opt_mod = torch._dynamo.optimize(dynamo_minifier_backend)(mod)
 
     with torch.amp.autocast("cuda", enabled=options.autocast):
@@ -478,6 +479,7 @@ def repro_minify(options: Any, mod: torch.nn.Module, load_args: Any) -> None:
 
 
 def repro_run(options: Any, mod: torch.nn.Module, load_args: Any) -> None:
+    # pyrefly: ignore [bad-argument-type]
     opt_mod = torch._dynamo.optimize(options.backend)(mod)
 
     if options.accuracy != "":

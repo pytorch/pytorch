@@ -32,7 +32,7 @@ static inline void launch_jitted_vectorized_kernel_dynamic(
 
   // Different kernels are compiled depending on what we're vectorizing up to (1, 2 or 4 elements)
   //   fn_ptr is set to the appropriate function based on the vec size and GPU used
-  // TODO: Memory use can probably be optimized by re-using kernels across GPUs with
+  // TODO: Memory use can probably be optimized by reusing kernels across GPUs with
   //   the same compute capability
 
   std::string f_inputs_type_str = at::cuda::jit::typeName(common_dtype);
@@ -42,7 +42,7 @@ static inline void launch_jitted_vectorized_kernel_dynamic(
 
   // The cache key includes all the parameters to generate_code + vec_size + dev_idx
   std::stringstream ss;
-  ss << nInputs << "_" << nOutputs << f;
+  ss << nInputs << '_' << nOutputs << f;
   ss << f_inputs_type_str << compute_type_str << result_type_str;
   ss << static_cast<int>(at::cuda::jit::BinaryFuncVariant::NoScalar);
   ss << extra_args_types;
@@ -144,7 +144,7 @@ static inline void launch_jitted_unrolled_kernel_dynamic(
 
   // The cache key includes all the parameters to generate_code + dev_idx
   std::stringstream ss;
-  ss << nInputs << "_" << nOutputs << f;
+  ss << nInputs << '_' << nOutputs << f;
   ss << f_inputs_type_str << compute_type_str << result_type_str;
   ss << contiguous << dynamic_casting;
   ss << static_cast<int>(at::cuda::jit::BinaryFuncVariant::NoScalar);

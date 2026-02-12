@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import operator
-from typing import Optional, TYPE_CHECKING, Union
+from typing import TYPE_CHECKING
 
 import torch
 from torch.export.exported_program import ConstantArgument, TensorArgument
@@ -29,8 +29,8 @@ class CollectTracepointsPass(PassBase):
         self.specs = specs
         self.sig = sig
 
-    def call(self, gm: torch.fx.GraphModule) -> Optional[PassResult]:
-        def get_arg_spec(arg) -> Union[TensorArgument, ConstantArgument]:
+    def call(self, gm: torch.fx.GraphModule) -> PassResult | None:
+        def get_arg_spec(arg) -> TensorArgument | ConstantArgument:
             if isinstance(arg, torch.fx.Node):
                 if isinstance(arg.meta.get("val"), torch.Tensor):
                     return TensorArgument(name=arg.name)
@@ -48,7 +48,7 @@ class CollectTracepointsPass(PassBase):
             for node in module.graph.nodes:
                 if node.op != "call_function":
                     continue
-                if node.target == torch.ops.higher_order._export_tracepoint:
+                if node.target is torch.ops.higher_order._export_tracepoint:
                     kind = node.kwargs["kind"]
                     if kind == "module_call_outputs":
                         nn_module_stack = node.meta["nn_module_stack"]
@@ -64,7 +64,7 @@ class CollectTracepointsPass(PassBase):
             for node in reversed(module.graph.nodes):
                 if node.op != "call_function":
                     continue
-                if node.target == torch.ops.higher_order._export_tracepoint:
+                if node.target is torch.ops.higher_order._export_tracepoint:
                     kind = node.kwargs["kind"]
                     if kind == "module_call_inputs":
                         nn_module_stack = node.meta["nn_module_stack"]
@@ -94,7 +94,7 @@ class CollectTracepointsPass(PassBase):
             for node in module.graph.nodes:
                 if node.op != "call_function":
                     continue
-                if node.target == torch.ops.higher_order._export_tracepoint:
+                if node.target is torch.ops.higher_order._export_tracepoint:
                     # There's some subtlety worth noting. Here fqn corresponds to
                     # the call name, whereas path corresponds to the module name.
                     # They are not necessarily the same! When a submodule is shared
@@ -129,16 +129,28 @@ class CollectTracepointsPass(PassBase):
                                 raise AssertionError(f"Unknown tracepoint kind: {kind}")
                         if isinstance(arg, torch.fx.Node):
                             for user in node.users:
-                                assert user.op == "call_function"
-                                assert user.target == operator.getitem
-                                assert isinstance(user.args[1], int)
+                                if user.op != "call_function":
+                                    raise AssertionError(
+                                        f"expected call_function, got {user.op}"
+                                    )
+                                if user.target is not operator.getitem:
+                                    raise AssertionError(
+                                        f"expected getitem target, got {user.target}"
+                                    )
+                                if not isinstance(user.args[1], int):
+                                    raise AssertionError(
+                                        f"expected int arg, got {type(user.args[1])}"
+                                    )
                                 if user.args[1] == i:
                                     user.replace_all_uses_with(arg)
                                     self.sig.replace_all_uses(user.name, arg.name)
                                     break
                     users = list(node.users)
                     for user in users:
-                        assert len(user.users) == 0
+                        if len(user.users) != 0:
+                            raise AssertionError(
+                                f"expected no users, got {len(user.users)}"
+                            )
                         gm.graph.erase_node(user)
                     gm.graph.erase_node(node)
             return PassResult(gm, True)

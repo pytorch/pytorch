@@ -29,6 +29,10 @@ from torch.testing._internal.common_distributed import (
     requires_accelerator_dist_backend,
 )
 from torch.testing._internal.common_fsdp import get_devtype
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
 from torch.testing._internal.inductor_utils import HAS_GPU
 
 
@@ -82,6 +86,7 @@ def create_grouped_node_for_allreduce_and_its_deps(snodes):
     torch._inductor.config.triton.native_matmul,
     "native matmul is fused with surrounding ops",
 )
+@instantiate_parametrized_tests
 class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
     """
     Run correctness checks in multi-proc runner, mark with minimum # GPUs to run under
@@ -382,7 +387,8 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
         "_pre_fusion_custom_pass",
         create_grouped_node_for_allreduce_and_its_deps,
     )
-    def test_grouped_scheduler_node(self):
+    @parametrize("combo_kernels", (False, True))
+    def test_grouped_scheduler_node(self, combo_kernels):
         def func(a, *, tag, ranks, group_size):
             add = a + a
             div = add / a
@@ -394,26 +400,29 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             mm = torch.matmul(mul, ar)
             return (mm,)
 
-        with _dynamo_dist_per_rank_init(
-            self.rank,
-            self.world_size,
-            self.backend(device_type),
-            fake_pg=not at_least_x_gpu(2),
-        ):
-            inputs = torch.ones(4, 4, dtype=torch.float, device=device_type) + self.rank
-            compiled = torch.compile(func)
-            code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
-            # Expectations:
-            # 1. `add = a + a` and `div = add / a` are still fused, which means fusion
-            #    still happens among nodes within a GroupedSchedulerNode.
-            # 2. `mul = a * a` is not fused with `add` or `div`, because the latter two are within
-            #    GroupedSchedulerNode and thus are prevented from being fused with any outside ops.
-            FileCheck().check("triton_poi_fused_add_all_reduce_div_0.").check(
-                "_c10d_functional.all_reduce_."
-            ).check("triton_poi_fused_mul_1.").run(code)
-            out = compiled(inputs, **self.get_world_trs())
-            correct = func(inputs, **self.get_world_trs())
-            self.assertTrue(same(out, correct))
+        with torch._inductor.config.patch(combo_kernels=combo_kernels):
+            with _dynamo_dist_per_rank_init(
+                self.rank,
+                self.world_size,
+                self.backend(device_type),
+                fake_pg=not at_least_x_gpu(2),
+            ):
+                inputs = (
+                    torch.ones(4, 4, dtype=torch.float, device=device_type) + self.rank
+                )
+                compiled = torch.compile(func)
+                code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
+                # Expectations:
+                # 1. `add = a + a` and `div = add / a` are still fused, which means fusion
+                #    still happens among nodes within a GroupedSchedulerNode.
+                # 2. `mul = a * a` is not fused with `add` or `div`, because the latter two are within
+                #    GroupedSchedulerNode and thus are prevented from being fused with any outside ops.
+                FileCheck().check("triton_poi_fused_add_all_reduce_div_0.").check(
+                    "_c10d_functional.all_reduce_."
+                ).check("triton_poi_fused_mul_1.").run(code)
+                out = compiled(inputs, **self.get_world_trs())
+                correct = func(inputs, **self.get_world_trs())
+                self.assertTrue(same(out, correct))
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch(force_disable_caches=True)

@@ -517,7 +517,7 @@ class ReduceAdd {
 public:
   template <typename scalar_t>
   constexpr C10_DEVICE void operator() (scalar_t* self_data_start, int64_t index, int64_t numel, const scalar_t * src_data) const {
-#if (defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__) || defined(__gfx950__))
+#if (defined(__gfx942__) || defined(__gfx950__))
     opportunistic_fastAtomicAdd(self_data_start, index, numel, *src_data);
 #else
     fastAtomicAdd(self_data_start, index, numel, *src_data, true);
@@ -1611,7 +1611,7 @@ void index_select_out_cuda_impl(
 
   // SmallIndexKernel is more performant when the number of indices is small, and pre-loading
   // the index reduces memory accesses. When the number of indices is large, we avoid that
-  // and increase parallellism by calling gather_out which is a generalization of index_select
+  // and increase parallelism by calling gather_out which is a generalization of index_select
   if (cuda::detail::canUse32BitIndexMath(out) &&
       cuda::detail::canUse32BitIndexMath(self) &&
       cuda::detail::canUse32BitIndexMath(index) &&

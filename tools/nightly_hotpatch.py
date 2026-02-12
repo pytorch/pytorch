@@ -7,7 +7,7 @@ import subprocess
 import sys
 import tempfile
 import urllib.request
-from typing import cast, NoReturn, Optional
+from typing import cast, NoReturn
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -118,6 +118,7 @@ def download_patch(pr_number: int, repo_url: str, download_dir: str) -> str:
             urllib.request.urlopen(patch_url) as response,
             open(patch_file, "wb") as out_file,
         ):
+            # pyrefly: ignore [bad-specialization]
             shutil.copyfileobj(response, out_file)
         if not os.path.isfile(patch_file):
             print(f"Failed to download patch for PR #{pr_number}")
@@ -132,7 +133,7 @@ def download_patch(pr_number: int, repo_url: str, download_dir: str) -> str:
         sys.exit(1)
 
 
-def apply_patch(patch_file: str, target_dir: Optional[str], strip_count: int) -> None:
+def apply_patch(patch_file: str, target_dir: str | None, strip_count: int) -> None:
     """
     Applies the downloaded patch to the specified directory using the given strip count.
 

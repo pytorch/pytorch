@@ -52,17 +52,15 @@ FP16_REDUCED_PRECISION = {"atol": 1e-5, "rtol": 1e-4}
 
 
 def rosenbrock(tensor):
-    assert tensor.size() == torch.Size([2]), (
-        f"Requires tensor with 2 scalars but got {tensor.size()}"
-    )
+    if tensor.size() != torch.Size([2]):
+        raise AssertionError(f"Requires tensor with 2 scalars but got {tensor.size()}")
     x, y = tensor
     return (1 - x) ** 2 + 100 * (y - x**2) ** 2
 
 
 def drosenbrock(tensor):
-    assert tensor.size() == torch.Size([2]), (
-        f"Requires tensor with 2 scalars but got {tensor.size()}"
-    )
+    if tensor.size() != torch.Size([2]):
+        raise AssertionError(f"Requires tensor with 2 scalars but got {tensor.size()}")
     x, y = tensor
     return torch.stack((-400 * x * (y - x**2) - 2 * (1 - x), 200 * (y - x**2)))
 
@@ -791,7 +789,8 @@ class TestOptimRenewed(TestCase):
         and updated parameters between when the flag is set to True and False
         for provided optimizer configurations.
         """
-        assert flag in ("foreach", "fused")
+        if flag not in ("foreach", "fused"):
+            raise AssertionError(f"flag must be 'foreach' or 'fused', got {flag!r}")
         assert_eq_kwargs = {} if not reduced_precision else FP16_REDUCED_PRECISION
 
         optim_inputs = optim_info.optim_inputs_func(device=device, dtype=dtype)
@@ -860,7 +859,8 @@ class TestOptimRenewed(TestCase):
         CPU and GPU) because fused adam only works on GPUs. (Thus we only run the tests
         that call into this helper when TEST_MULTIGPU.)
         """
-        assert impl in ("foreach", "fused")
+        if impl not in ("foreach", "fused"):
+            raise AssertionError(f"impl must be 'foreach' or 'fused', got {impl!r}")
         if impl == "foreach" and "foreach" not in optim_info.supported_impls:
             return unittest.skip(
                 f"foreach not supported for {optim_info.optim_cls.__name__}"
@@ -1993,7 +1993,7 @@ class TestOptimRenewed(TestCase):
 
     @optims(optim_db, dtypes=[torch.float32])
     def test_step_post_hook(self, device, dtype, optim_info):
-        def post_hook(opt: Optimizer, args: tuple[Any], kwargs: dict[Any, Any]):
+        def post_hook(opt: Optimizer, args: tuple[Any, ...], kwargs: dict[Any, Any]):
             nonlocal data
             data += 2
 
@@ -2025,7 +2025,7 @@ class TestOptimRenewed(TestCase):
 
     @optims(optim_db, dtypes=[torch.float32])
     def test_step_pre_hook(self, device, dtype, optim_info):
-        def pre_hook(opt: Optimizer, args: tuple[Any], kwargs: dict[Any, Any]):
+        def pre_hook(opt: Optimizer, args: tuple[Any, ...], kwargs: dict[Any, Any]):
             nonlocal data
             data += 2
 
@@ -2058,19 +2058,27 @@ class TestOptimRenewed(TestCase):
 
     @optims(optim_db, dtypes=[torch.float32])
     def test_step_all_hooks(self, device, dtype, optim_info):
-        def global_pre_hook(opt: Optimizer, args: tuple[Any], kwargs: dict[Any, Any]):
+        def global_pre_hook(
+            opt: Optimizer, args: tuple[Any, ...], kwargs: dict[Any, Any]
+        ):
             nonlocal data
             data.append(0)
 
-        def global_post_hook(opt: Optimizer, args: tuple[Any], kwargs: dict[Any, Any]):
+        def global_post_hook(
+            opt: Optimizer, args: tuple[Any, ...], kwargs: dict[Any, Any]
+        ):
             nonlocal data
             data.append(5)
 
-        def local_pre_hook(opt: Optimizer, args: tuple[Any], kwargs: dict[Any, Any]):
+        def local_pre_hook(
+            opt: Optimizer, args: tuple[Any, ...], kwargs: dict[Any, Any]
+        ):
             nonlocal data
             data.append(1)
 
-        def local_post_hook(opt: Optimizer, args: tuple[Any], kwargs: dict[Any, Any]):
+        def local_post_hook(
+            opt: Optimizer, args: tuple[Any, ...], kwargs: dict[Any, Any]
+        ):
             nonlocal data
             data.append(2)
 

@@ -1,6 +1,6 @@
 from collections import OrderedDict
 from collections.abc import Iterator, Sequence
-from typing import cast, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import cast, TYPE_CHECKING, TypeVar
 from typing_extensions import TypeIs
 
 import torch
@@ -49,7 +49,7 @@ def _is_jit_enabled() -> "EnabledProxy":
 #
 # currently a module cannot be replicated properly if the descendants of
 # any ScriptModule contains python module (type 1 above)
-def _replicatable_module(module: Module, memo: Optional[set[Module]] = None) -> bool:
+def _replicatable_module(module: Module, memo: set[Module] | None = None) -> bool:
     # module.modules() contains module itself as the first element
     def descendant_modules(module: Module) -> Iterator[Module]:
         gen = module.modules()
@@ -82,23 +82,34 @@ def _replicatable_module(module: Module, memo: Optional[set[Module]] = None) -> 
 
 def _broadcast_coalesced_reshape(
     tensors: Sequence[torch.Tensor],
-    devices: Sequence[Union[int, torch.device]],
+    devices: Sequence[int | torch.device],
     detach: bool = False,
 ) -> list[list[torch.Tensor]]:
     from torch.nn.parallel._functions import Broadcast
 
+    if len(tensors) == 0:
+        return []
+
     if detach:
-        return comm.broadcast_coalesced(tensors, devices)
+        complex_mask = [
+            not isinstance(t, torch.nn.UninitializedParameter) and t.is_complex()
+            for t in tensors
+        ]
+
+        outputs = comm.broadcast_coalesced(tensors, devices)
+
+        for device_outputs in outputs:
+            for i, is_complex in enumerate(complex_mask):
+                if is_complex:
+                    device_outputs[i] = torch.view_as_complex(device_outputs[i])
+
+        return outputs
     else:
-        # Use the autograd function to broadcast if not detach
-        if len(tensors) > 0:
-            tensor_copies = Broadcast.apply(devices, *tensors)
-            return [
-                tensor_copies[i : i + len(tensors)]
-                for i in range(0, len(tensor_copies), len(tensors))
-            ]
-        else:
-            return []
+        tensor_copies = Broadcast.apply(devices, *tensors)
+        return [
+            list(tensor_copies[i : i + len(tensors)])
+            for i in range(0, len(tensor_copies), len(tensors))
+        ]
 
 
 T = TypeVar("T", bound=Module)
@@ -106,7 +117,7 @@ T = TypeVar("T", bound=Module)
 
 def replicate(
     network: T,
-    devices: Sequence[Union[int, torch.device]],
+    devices: Sequence[int | torch.device],
     detach: bool = False,
 ) -> list[T]:
     if not _replicatable_module(network):

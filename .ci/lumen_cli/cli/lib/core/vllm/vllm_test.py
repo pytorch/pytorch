@@ -82,9 +82,7 @@ class VllmTestRunner(BaseRunner):
 
         # Match the structure of the artifacts.zip from vllm external build
         self.VLLM_TEST_WHLS_REGEX = [
-            "xformers/*.whl",
             "vllm/vllm*.whl",
-            "flashinfer-python/flashinfer*.whl",
         ]
 
     def prepare(self):
@@ -175,7 +173,7 @@ class VllmTestRunner(BaseRunner):
             "-o test.txt "
             "--index-strategy unsafe-best-match "
             "--constraint snapshot_constraint.txt "
-            "--torch-backend cu128"
+            "--torch-backend cu129"
         )
         pip_install_packages(requirements="test.txt", prefer_uv=True)
         logger.info("Done. installed requirements for test dependencies")
@@ -215,6 +213,12 @@ class VllmTestRunner(BaseRunner):
             raise ValueError(
                 "missing required TORCH_CUDA_ARCH_LIST, please set TORCH_CUDA_ARCH_LIST env var"
             )
+        # HF_HOME is absolutely needed on CI to avoid rate limit to HF, so explicitly fail
+        # vLLM jobs when it's not set so that we know when it's missing
+        if get_env("CI") and not get_env("HF_HOME"):
+            raise ValueError(
+                "missing required HF_HOME when running on CI, please set HF_HOME env var"
+            )
 
 
 def preprocess_test_in(
@@ -223,15 +227,13 @@ def preprocess_test_in(
     """
     This modifies the target_file file in place in vllm work directory.
     It removes torch and unwanted packages in target_file and replace with local torch whls
-    package  with format "$WHEEL_PACKAGE_NAME @ file://<LOCAL_PATH>"
+    package with format "$WHEEL_PACKAGE_NAME @ file://<LOCAL_PATH>"
     """
     additional_package_to_move = list(additional_packages or ())
     pkgs_to_remove = [
         "torch",
         "torchvision",
         "torchaudio",
-        "xformers",
-        "mamba_ssm",
     ] + additional_package_to_move
     # Read current requirements
     target_path = Path(target_file)
@@ -274,7 +276,7 @@ def check_versions():
     check installed packages version
     """
     logger.info("Double check installed packages")
-    patterns = ["torch", "xformers", "torchvision", "torchaudio", "vllm"]
+    patterns = ["torch", "torchvision", "torchaudio", "vllm"]
     for pkg in patterns:
         pkg_exists(pkg)
     logger.info("Done. checked installed packages")

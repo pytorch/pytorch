@@ -7,5 +7,5 @@ from typing_extensions import deprecated as _deprecated
     "as `DataLoader` automatically applies sharding in every worker",
     category=FutureWarning,
 )
-def worker_init_fn(worker_id):
+def worker_init_fn(worker_id) -> None:
     pass

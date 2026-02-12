@@ -2,6 +2,7 @@
 
 import json
 import os
+import sys
 import tempfile
 import unittest
 from typing import Any
@@ -32,6 +33,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfHpu,
     skipIfTorchDynamo,
+    TemporaryFileName,
     TEST_HPU,
     TEST_XPU,
     TestCase,
@@ -43,7 +45,7 @@ from torch.utils._triton import has_triton
 # This causes an issue in the multithreading test because we check all events
 # in that test with their tids. The events that correspond to these lingering
 # threads all have TID of (uint64_t)(-1) which is invalid.
-# The work around is turnning off monitoring thread when tqdm is loaded.
+# The work around is turning off monitoring thread when tqdm is loaded.
 # Since these are unit tests, it is safe to turn off monitor thread.
 try:
     import tqdm
@@ -100,7 +102,8 @@ class TestExecutionTrace(TestCase):
             else open(output_file_name)
         ) as f:
             et_graph = json.load(f)
-            assert "nodes" in et_graph
+            if "nodes" not in et_graph:
+                raise AssertionError(f"Expected 'nodes' in execution trace: {et_graph}")
             nodes = et_graph["nodes"]
         return nodes
 
@@ -147,23 +150,25 @@ class TestExecutionTrace(TestCase):
             or torch.profiler.ProfilerActivity.HPU in supported_activities()
         )
         # Create a temp file to save execution trace and kineto data.
-        fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
-        fp.close()
-        kt = tempfile.NamedTemporaryFile(
-            mode="w+t", suffix=".kineto.json", delete=False
-        )
-        kt.close()
 
-        with profile(
-            activities=supported_activities(),
-            schedule=torch.profiler.schedule(
-                skip_first=3, wait=1, warmup=1, active=2, repeat=1
-            ),
-            on_trace_ready=trace_handler,
-            execution_trace_observer=(
-                ExecutionTraceObserver().register_callback(fp.name)
-            ),
-        ) as p:
+        with (
+            tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False) as fp,
+            tempfile.NamedTemporaryFile(
+                mode="w+t", suffix=".kineto.json", delete=False
+            ) as kt,
+            profile(
+                activities=supported_activities(),
+                schedule=torch.profiler.schedule(
+                    skip_first=3, wait=1, warmup=1, active=2, repeat=1
+                ),
+                on_trace_ready=trace_handler,
+                execution_trace_observer=(
+                    ExecutionTraceObserver().register_callback(fp.name)
+                ),
+            ) as p,
+        ):
+            trace_name = fp.name
+            kt_name = kt.name
             for idx in range(10):
                 with record_function(f"## LOOP {idx} ##"):
                     self.payload(device, use_device=use_device)
@@ -174,14 +179,16 @@ class TestExecutionTrace(TestCase):
         # print("Output kineto = ", kt.name)
         # print("Output ET = ", fp.name)
 
-        p.export_chrome_trace(kt.name)
+        p.export_chrome_trace(kt_name)
         self.assertEqual(trace_called_num, 1)
 
-        nodes = self.get_execution_trace_root(fp.name)
+        nodes = self.get_execution_trace_root(trace_name)
+        os.remove(trace_name)
         loop_count = 0
         found_root_node = False
         for n in nodes:
-            assert "name" in n
+            if "name" not in n:
+                raise AssertionError(f"Expected node to have 'name': {n}")
             if "[pytorch|profiler|execution_trace|process]" in n["name"]:
                 found_root_node = True
             if n["name"].startswith("## LOOP "):
@@ -194,9 +201,10 @@ class TestExecutionTrace(TestCase):
         # in terms of record func ID (rf_id) and External IDs
         # both of these should match for the same trace window.
 
-        with open(kt.name) as f:
+        with open(kt_name) as f:
             kineto = json.load(f)
             events = kineto["traceEvents"]
+        os.remove(kt_name)
 
         # Look up rf_ids in both Execution and Kineto trace as two lists.
         rf_ids_et = self.get_execution_trace_rf_ids(nodes)
@@ -231,18 +239,20 @@ class TestExecutionTrace(TestCase):
             or torch.profiler.ProfilerActivity.HPU in supported_activities()
         )
         # Create a temp file to save kineto data.
-        kt = tempfile.NamedTemporaryFile(
-            mode="w+t", suffix=".kineto.json", delete=False
-        )
-        kt.close()
 
-        with profile(
-            activities=supported_activities(),
-            schedule=torch.profiler.schedule(
-                skip_first=3, wait=1, warmup=1, active=2, repeat=1
-            ),
-            on_trace_ready=trace_handler,
-        ) as p:
+        with (
+            tempfile.NamedTemporaryFile(
+                mode="w+t", suffix=".kineto.json", delete=False
+            ) as kt,
+            profile(
+                activities=supported_activities(),
+                schedule=torch.profiler.schedule(
+                    skip_first=3, wait=1, warmup=1, active=2, repeat=1
+                ),
+                on_trace_ready=trace_handler,
+            ) as p,
+        ):
+            kt_name = kt.name
             for idx in range(10):
                 with record_function(f"## LOOP {idx} ##"):
                     self.payload(device, use_device=use_device)
@@ -252,7 +262,8 @@ class TestExecutionTrace(TestCase):
         # print("Output kineto = ", kt.name)
         # print("Output ET = ", fp.name)
 
-        p.export_chrome_trace(kt.name)
+        p.export_chrome_trace(kt_name)
+
         self.assertEqual(trace_called_num, 1)
         et_path = p.execution_trace_observer.get_output_file_path()
         et_res_path = p.execution_trace_observer.get_resources_dir(et_path)
@@ -267,7 +278,8 @@ class TestExecutionTrace(TestCase):
         loop_count = 0
         found_root_node = False
         for n in nodes:
-            assert "name" in n
+            if "name" not in n:
+                raise AssertionError(f"Expected node to have 'name': {n}")
             if "[pytorch|profiler|execution_trace|process]" in n["name"]:
                 found_root_node = True
             if n["name"].startswith("## LOOP "):
@@ -280,9 +292,10 @@ class TestExecutionTrace(TestCase):
         # in terms of record func ID (rf_id) and External IDs
         # both of these should match for the same trace window.
 
-        with open(kt.name) as f:
+        with open(kt_name) as f:
             kineto = json.load(f)
             events = kineto["traceEvents"]
+        os.remove(kt_name)
 
         # Look up rf_ids in both Execution and Kineto trace as two lists.
         rf_ids_et = self.get_execution_trace_rf_ids(nodes)
@@ -305,11 +318,11 @@ class TestExecutionTrace(TestCase):
         )
         # Create a temp file to save execution trace data.
         # Use a gzip file to test compression codepath
-        fp = tempfile.NamedTemporaryFile("w", suffix=".et.json.gz", delete=False)
-        fp.close()
+        with tempfile.NamedTemporaryFile("w", suffix=".et.json.gz", delete=False) as fp:
+            filename = fp.name
         expected_loop_events = 0
 
-        et = ExecutionTraceObserver().register_callback(fp.name)
+        et = ExecutionTraceObserver().register_callback(filename)
 
         et.start()
         for idx in range(5):
@@ -318,25 +331,38 @@ class TestExecutionTrace(TestCase):
                 self.payload(device, use_device=use_device)
         et.stop()
 
-        assert fp.name == et.get_output_file_path()
+        if filename != et.get_output_file_path():
+            raise AssertionError(
+                f"Expected output file path {filename}, got {et.get_output_file_path()}"
+            )
         et.unregister_callback()
-        nodes = self.get_execution_trace_root(fp.name)
+        nodes = self.get_execution_trace_root(filename)
+        os.remove(filename)
         loop_count = 0
         # Expected tensor object tuple size, in th form of:
         # [tensor_id, storage_id, offset, numel, itemsize, device_str]
         tensor_tuple_size = 6
         found_root_node = False
         for n in nodes:
-            assert "name" in n
+            if "name" not in n:
+                raise AssertionError(f"Expected node to have 'name': {n}")
             if "[pytorch|profiler|execution_trace|process]" in n["name"]:
                 found_root_node = True
             if n["name"].startswith("## LOOP "):
                 loop_count += 1
             # Check if tensor tuple representation size is correct.
             if n["name"] == "## TEST 2 ##":
-                assert len(n["inputs"]["values"][3][0]) == tensor_tuple_size
-        assert found_root_node
-        assert loop_count == expected_loop_events
+                if len(n["inputs"]["values"][3][0]) != tensor_tuple_size:
+                    raise AssertionError(
+                        f"Expected tensor tuple size {tensor_tuple_size}, got "
+                        f"{len(n['inputs']['values'][3][0])}"
+                    )
+        if not found_root_node:
+            raise AssertionError("Expected to find root node")
+        if loop_count != expected_loop_events:
+            raise AssertionError(
+                f"Expected {expected_loop_events} loop events, got {loop_count}"
+            )
 
     def test_execution_trace_env_disabled(self, device):
         import os
@@ -365,7 +391,10 @@ class TestExecutionTrace(TestCase):
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile does not support WINDOWS")
     @unittest.skipIf(
-        (not has_triton()) or (not TEST_CUDA and not TEST_XPU),
+        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+    )
+    @unittest.skipIf(
+        not (has_triton() and (TEST_CUDA or TEST_XPU)),
         "need triton and device(CUDA or XPU) availability to run",
     )
     @skipCPUIf(True, "skip CPU device for testing profiling triton")
@@ -383,10 +412,10 @@ class TestExecutionTrace(TestCase):
             fn(*inputs)
 
         # Create a temp file to save execution trace data.
-        fp = tempfile.NamedTemporaryFile("w+t", suffix="_et.json", delete=False)
-        fp.close()
+        with tempfile.NamedTemporaryFile("w+t", suffix="_et.json", delete=False) as fp:
+            filename = fp.name
         et = ExecutionTraceObserver()
-        et.register_callback(fp.name)
+        et.register_callback(filename)
         et.set_extra_resource_collection(True)
 
         with profile(
@@ -402,31 +431,44 @@ class TestExecutionTrace(TestCase):
                     fn(*inputs)
                 p.step()
 
-        nodes = self.get_execution_trace_root(fp.name)
+        nodes = self.get_execution_trace_root(filename)
+        os.remove(filename)
         found_captured_triton_kernel_node = False
         found_call_compiled_fx_graph = False
         for n in nodes:
-            assert "name" in n
+            if "name" not in n:
+                raise AssertionError(f"Expected node to have 'name': {n}")
             if "triton_" in n["name"]:
                 for attr in n["attrs"]:
                     if attr["name"] == "kernel_file" and attr["value"] != "":
                         found_captured_triton_kernel_node = True
-                        assert len(n["inputs"]["values"]) > 0
-                        assert len(n["outputs"]["values"]) == 0
+                        if len(n["inputs"]["values"]) <= 0:
+                            raise AssertionError(
+                                "Expected triton node to have input values"
+                            )
+                        if len(n["outputs"]["values"]) != 0:
+                            raise AssertionError(
+                                "Expected triton node to have no output values"
+                            )
             elif "Call CompiledFxGraph" in n["name"]:
                 found_call_compiled_fx_graph = True
-        assert found_captured_triton_kernel_node
-        assert found_call_compiled_fx_graph
+        if not found_captured_triton_kernel_node:
+            raise AssertionError("Expected captured triton kernel node")
+        if not found_call_compiled_fx_graph:
+            raise AssertionError("Expected Call CompiledFxGraph node")
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile does not support WINDOWS")
     @unittest.skipIf(
-        (not has_triton()) or (not TEST_CUDA and not TEST_XPU),
+        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+    )
+    @unittest.skipIf(
+        not (has_triton() and (TEST_CUDA or TEST_XPU)),
         "need triton and device(CUDA or XPU) availability to run",
     )
     @skipCPUIf(True, "skip CPU device for testing profiling triton")
     def test_execution_trace_env_enabled_with_pt2(self, device):
         # clean up the local cache for triton kernel
-        from torch._inductor.codecache import PyCodeCache as PyCodeCache
+        from torch._inductor.codecache import PyCodeCache
 
         PyCodeCache.cache_clear(purge=True)
 
@@ -471,28 +513,34 @@ class TestExecutionTrace(TestCase):
         nodes = self.get_execution_trace_root(et_path)
         found_captured_triton_kernel_node = False
         for n in nodes:
-            assert "name" in n
+            if "name" not in n:
+                raise AssertionError(f"Expected node to have 'name': {n}")
             if "triton_" in n["name"]:
                 for attr in n["attrs"]:
                     if attr["name"] == "kernel_file" and attr["value"] != "":
                         found_captured_triton_kernel_node = True
-                        assert len(n["inputs"]["values"]) > 0
-                        assert len(n["outputs"]["values"]) == 0
-        assert found_captured_triton_kernel_node
+                        if len(n["inputs"]["values"]) <= 0:
+                            raise AssertionError(
+                                "Expected triton node to have input values"
+                            )
+                        if len(n["outputs"]["values"]) != 0:
+                            raise AssertionError(
+                                "Expected triton node to have no output values"
+                            )
+        if not found_captured_triton_kernel_node:
+            raise AssertionError("Expected captured triton kernel node")
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile does not support WINDOWS")
     @unittest.skipIf(
-        (not has_triton()) or (not TEST_CUDA and not TEST_XPU),
+        not (has_triton() and (TEST_CUDA or TEST_XPU)),
         "need triton and device(CUDA or XPU) availability to run",
     )
     @skipCPUIf(True, "skip CPU device for testing profiling triton")
     def test_triton_fx_graph_with_et(self, device):
         # clean up the local cache for triton kernel
-        from torch._inductor.codecache import PyCodeCache as PyCodeCache
+        from torch._inductor.codecache import PyCodeCache
 
         PyCodeCache.cache_clear(purge=True)
-
-        import os
 
         @torchdynamo.optimize("inductor")
         def fn(a, b, c):
@@ -502,20 +550,20 @@ class TestExecutionTrace(TestCase):
             return x.cos()
 
         a, b, c = (
-            torch.randn(4, 4, requires_grad=False).to(torch.device("cuda:0"))
+            torch.randn(4, 4, requires_grad=False).to(torch.device(device))
             for _ in range(3)
         )
 
-        inputs = [a, b, c]
         with torch._inductor.config.patch(
             compile_threads=1, fx_graph_cache=False, fx_graph_remote_cache=False
         ):
-            fn(*inputs)
+            fn(a, b, c)
 
-        fp = tempfile.NamedTemporaryFile("w+t", suffix="fx_graph_et.json", delete=False)
-        fp.close()
         et = ExecutionTraceObserver()
-        et.register_callback(fp.name)
+        with tempfile.NamedTemporaryFile(
+            "w+t", suffix="fx_graph_et.json", delete=False
+        ) as fp:
+            et.register_callback(fp.name)
         et.set_extra_resource_collection(True)
         with profile(
             activities=torch.profiler.supported_activities(),
@@ -527,7 +575,7 @@ class TestExecutionTrace(TestCase):
         ) as p:
             for idx in range(10):
                 with record_function(f"## LOOP {idx} ##"):
-                    fn(*inputs)
+                    fn(a, b, c)
                 p.step()
 
         et_path = p.execution_trace_observer.get_output_file_path()
@@ -555,35 +603,27 @@ class TestExecutionTrace(TestCase):
                             fx_graph_found = False
 
                     if len(fx_graph) > 0:
-                        assert (
-                            fx_graph[0]
-                            == '#   %mm : Tensor "f32[4, 4][4, 1]cuda:0" = PlaceHolder[target=mm]'
-                        )
-                        assert (
-                            fx_graph[1]
-                            == '#   %arg2_1 : Tensor "f32[4, 4][4, 1]cuda:0" = PlaceHolder[target=arg2_1]'
-                        )
-                        assert (
-                            fx_graph[2]
-                            == '#   %sin : Tensor "f32[4, 4][4, 1]cuda:0"[num_users=1] = call_function[target=torch.ops.aten.sin.default](args = (%mm,), kwargs = {})'  # noqa: B950
-                        )
-                        assert (
-                            fx_graph[3]
-                            == '#   %permute_1 : Tensor "f32[4, 4][1, 4]cuda:0"[num_users=1] = call_function[target=torch.ops.aten.permute.default](args = (%sin, [1, 0]), kwargs = {})'  # noqa: B950
-                        )
-                        assert (
-                            fx_graph[4]
-                            == '#   %mul : Tensor "f32[4, 4][4, 1]cuda:0"[num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%arg2_1, 1111), kwargs = {})'  # noqa: B950
-                        )
-                        assert (
-                            fx_graph[5]
-                            == '#   %add : Tensor "f32[4, 4][1, 4]cuda:0"[num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%permute_1, %mul), kwargs = {})'  # noqa: B950
-                        )
-                        assert (
-                            fx_graph[6]
-                            == '#   %cos : Tensor "f32[4, 4][1, 4]cuda:0"[num_users=1] = call_function[target=torch.ops.aten.cos.default](args = (%add,), kwargs = {})'  # noqa: B950
-                        )
-                        assert fx_graph[7] == "#   return %cos"
+                        expected_graph = [
+                            f'#   %mm : Tensor "f32[4, 4][4, 1]{device}" = PlaceHolder[target=mm]',
+                            f'#   %arg2_1 : Tensor "f32[4, 4][4, 1]{device}" = PlaceHolder[target=arg2_1]',
+                            f'#   %sin : Tensor "f32[4, 4][4, 1]{device}"[num_users=1] = call_function[target=torch.ops.aten.sin.default](args = (%mm,), kwargs = {{}})',  # noqa: B950
+                            f'#   %permute_1 : Tensor "f32[4, 4][1, 4]{device}"[num_users=1] = call_function[target=torch.ops.aten.permute.default](args = (%sin, [1, 0]), kwargs = {{}})',  # noqa: B950
+                            f'#   %mul : Tensor "f32[4, 4][4, 1]{device}"[num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%arg2_1, 1111), kwargs = {{}})',  # noqa: B950
+                            f'#   %add : Tensor "f32[4, 4][1, 4]{device}"[num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%permute_1, %mul), kwargs = {{}})',  # noqa: B950
+                            f'#   %cos : Tensor "f32[4, 4][1, 4]{device}"[num_users=1] = call_function[target=torch.ops.aten.cos.default](args = (%add,), kwargs = {{}})',  # noqa: B950
+                            "#   return %cos",
+                        ]
+                        if len(fx_graph) < len(expected_graph):
+                            raise AssertionError(
+                                f"Expected at least {len(expected_graph)} fx_graph lines, "
+                                f"got {len(fx_graph)}"
+                            )
+                        for idx, expected in enumerate(expected_graph):
+                            if fx_graph[idx] != expected:
+                                raise AssertionError(
+                                    f"Expected fx_graph[{idx}] to be {expected}, got {fx_graph[idx]}"
+                                )
+                os.remove(file_path)
 
     def test_execution_trace_start_stop(self, device):
         use_device = (
@@ -592,10 +632,10 @@ class TestExecutionTrace(TestCase):
             or torch.profiler.ProfilerActivity.HPU in supported_activities()
         )
         # Create a temp file to save execution trace data.
-        fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
-        fp.close()
+        with tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False) as fp:
+            filename = fp.name
         expected_loop_events = 0
-        et = ExecutionTraceObserver().register_callback(fp.name)
+        et = ExecutionTraceObserver().register_callback(filename)
         for idx in range(10):
             if idx == 3:
                 et.start()
@@ -610,19 +650,28 @@ class TestExecutionTrace(TestCase):
             with record_function(f"## LOOP {idx} ##"):
                 self.payload(device, use_device=use_device)
 
-        assert fp.name == et.get_output_file_path()
+        if filename != et.get_output_file_path():
+            raise AssertionError(
+                f"Expected output file path {filename}, got {et.get_output_file_path()}"
+            )
         et.unregister_callback()
-        nodes = self.get_execution_trace_root(fp.name)
+        nodes = self.get_execution_trace_root(filename)
+        os.remove(filename)
         loop_count = 0
         found_root_node = False
         for n in nodes:
-            assert "name" in n
+            if "name" not in n:
+                raise AssertionError(f"Expected node to have 'name': {n}")
             if "[pytorch|profiler|execution_trace|process]" in n["name"]:
                 found_root_node = True
             if n["name"].startswith("## LOOP "):
                 loop_count += 1
-        assert found_root_node
-        assert loop_count == expected_loop_events
+        if not found_root_node:
+            raise AssertionError("Expected to find root node")
+        if loop_count != expected_loop_events:
+            raise AssertionError(
+                f"Expected {expected_loop_events} loop events, got {loop_count}"
+            )
 
     def test_execution_trace_repeat_in_loop(self, device):
         use_device = (
@@ -636,10 +685,11 @@ class TestExecutionTrace(TestCase):
         for idx in range(10):
             if idx in iter_list:
                 # Create a temp file to save execution trace data.
-                fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
-                fp.close()
-                output_files.append(fp.name)
-                et = ExecutionTraceObserver().register_callback(fp.name)
+                with tempfile.NamedTemporaryFile(
+                    "w+t", suffix=".et.json", delete=False
+                ) as fp:
+                    output_files.append(fp.name)
+                    et = ExecutionTraceObserver().register_callback(fp.name)
                 et.start()
             with record_function(f"## LOOP {idx} ##"):
                 self.payload(device, use_device=use_device)
@@ -652,39 +702,48 @@ class TestExecutionTrace(TestCase):
             nodes = self.get_execution_trace_root(et_file)
             found_root_node = False
             for n in nodes:
-                assert "name" in n
+                if "name" not in n:
+                    raise AssertionError(f"Expected node to have 'name': {n}")
                 if "[pytorch|profiler|execution_trace|process]" in n["name"]:
-                    assert n["id"] == 1
+                    if n["id"] != 1:
+                        raise AssertionError(f"Expected root node id 1, got {n['id']}")
                     found_root_node = True
                 if n["name"].startswith("## LOOP "):
                     event_count += 1
-            assert found_root_node
-        assert event_count == expected_loop_events
+            if not found_root_node:
+                raise AssertionError("Expected to find root node")
+        if event_count != expected_loop_events:
+            raise AssertionError(
+                f"Expected {expected_loop_events} loop events, got {event_count}"
+            )
 
     def test_execution_trace_no_capture(self):
-        fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
-        fp.close()
-        et = ExecutionTraceObserver().register_callback(fp.name)
+        with TemporaryFileName("w+t", suffix=".et.json") as file_name:
+            et = ExecutionTraceObserver().register_callback(file_name)
 
-        assert fp.name == et.get_output_file_path()
-        et.unregister_callback()
-        nodes = self.get_execution_trace_root(fp.name)
-        for n in nodes:
-            assert "name" in n
-            if "[pytorch|profiler|execution_trace|process]" in n["name"]:
-                found_root_node = True
-        assert found_root_node
+            if file_name != et.get_output_file_path():
+                raise AssertionError(
+                    f"Expected output file path {file_name}, got {et.get_output_file_path()}"
+                )
+            et.unregister_callback()
+            nodes = self.get_execution_trace_root(file_name)
+            found_root_node = False
+            for n in nodes:
+                if "name" not in n:
+                    raise AssertionError(f"Expected node to have 'name': {n}")
+                if "[pytorch|profiler|execution_trace|process]" in n["name"]:
+                    found_root_node = True
+            if not found_root_node:
+                raise AssertionError("Expected to find root node")
 
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/124500")
     def test_execution_trace_nested_tensor(self):
-        fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
-        fp.close()
-
-        observer = ExecutionTraceObserver().register_callback(fp.name)
-
         def fn(nt):
             return nt.sin().cos()
 
+        with tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False) as fp:
+            observer = ExecutionTraceObserver().register_callback(fp.name)
+            filename = fp.name
         with torch.profiler.profile(execution_trace_observer=observer):
             for i in range(3):
                 values = torch.rand((8 + i, 4 + i))
@@ -692,45 +751,55 @@ class TestExecutionTrace(TestCase):
                 nt = torch.nested.nested_tensor_from_jagged(values, offsets)
                 fn(nt)
 
-        nodes = self.get_execution_trace_root(fp.name)
+        nodes = self.get_execution_trace_root(filename)
+        os.remove(filename)
         found_cos = False
         for n in nodes:
-            assert "name" in n
+            if "name" not in n:
+                raise AssertionError(f"Expected node to have 'name': {n}")
             if "cos" in n["name"]:
                 found_cos = True
-        assert found_cos
+        if not found_cos:
+            raise AssertionError("Expected to find cos node")
 
     @unittest.skipIf(
         not TEST_CUDA,
         "need CUDA device availability to run",
     )
     def test_execution_trace_record_integral_tensor_range(self):
-        fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
-        fp.close()
-
         os.environ["ENABLE_PYTORCH_EXECUTION_TRACE_SAVE_INTEGRAL_TENSOR_RANGE"] = "1"
         t1 = torch.tensor([[1, 2], [3, 4]]).cuda()
         t2 = torch.tensor([[0, 0], [1, 0]]).cuda()
-        with profile(
-            activities=supported_activities(),
-            schedule=torch.profiler.schedule(
-                skip_first=0, wait=0, warmup=0, active=1, repeat=1
-            ),
-            record_shapes=True,
-            execution_trace_observer=(
-                ExecutionTraceObserver().register_callback(fp.name)
-            ),
-        ) as p:
+        with (
+            tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False) as fp,
+            profile(
+                activities=supported_activities(),
+                schedule=torch.profiler.schedule(
+                    skip_first=0, wait=0, warmup=0, active=1, repeat=1
+                ),
+                record_shapes=True,
+                execution_trace_observer=(
+                    ExecutionTraceObserver().register_callback(fp.name)
+                ),
+            ) as p,
+        ):
+            filename = fp.name
             torch.gather(t1, 1, t2)
             p.step()
 
-        nodes = self.get_execution_trace_root(fp.name)
+        nodes = self.get_execution_trace_root(filename)
+        os.remove(filename)
         for n in nodes:
-            assert "name" in n
+            if "name" not in n:
+                raise AssertionError(f"Expected node to have 'name': {n}")
             if "aten::gather" in n["name"]:
                 for attr in n["attrs"]:
                     if attr["name"] == "tensor_range":
-                        assert attr["value"] == '{"0":[1,4],"1":[0,1]}'
+                        if attr["value"] != '{"0":[1,4],"1":[0,1]}':
+                            raise AssertionError(
+                                "Expected tensor_range value to match "
+                                '{"0":[1,4],"1":[0,1]}'
+                            )
 
     @unittest.skipIf(
         not TEST_CUDA,
@@ -761,13 +830,17 @@ class TestExecutionTrace(TestCase):
                 p.step()
 
             resourceDir = fp_name.replace(".json", "_resources")
-            assert os.path.exists(resourceDir + "/nid_4_tid_0.dat")
-            assert os.path.exists(resourceDir + "/nid_4_tid_1.dat")
+            if not os.path.exists(resourceDir + "/nid_4_tid_0.dat"):
+                raise AssertionError("Expected nid_4_tid_0.dat to exist")
+            if not os.path.exists(resourceDir + "/nid_4_tid_1.dat"):
+                raise AssertionError("Expected nid_4_tid_1.dat to exist")
 
             t1 = np.fromfile(resourceDir + "/nid_4_tid_0.dat", dtype=np.int64)
             t2 = np.fromfile(resourceDir + "/nid_4_tid_1.dat", dtype=np.int64)
-            assert (t1 == np.array([1, 2, 3, 4])).all()
-            assert (t2 == np.array([0, 0, 1, 0])).all()
+            if not (t1 == np.array([1, 2, 3, 4])).all():
+                raise AssertionError("Expected t1 contents to match [1, 2, 3, 4]")
+            if not (t2 == np.array([0, 0, 1, 0])).all():
+                raise AssertionError("Expected t2 contents to match [0, 0, 1, 0]")
 
 
 devices = ["cpu", "cuda"]

@@ -79,7 +79,7 @@ std::ostream& _str(std::ostream& ss, const std::wstring& wString) {
 } // namespace detail
 
 std::ostream& operator<<(std::ostream& out, const SourceLocation& loc) {
-  out << loc.function << " at " << loc.file << ":" << loc.line;
+  out << loc.function << " at " << loc.file << ':' << loc.line;
   return out;
 }
 

@@ -230,6 +230,12 @@ def _coerce_to_tensor(obj, dtype=None, copy=False, ndmin=0):
     if ndim_extra > 0:
         tensor = tensor.view((1,) * ndim_extra + tensor.shape)
 
+    # special handling for np._CopyMode
+    try:
+        copy = bool(copy)
+    except ValueError:
+        # TODO handle _CopyMode.IF_NEEDED correctly
+        copy = False
     # copy if requested
     if copy:
         tensor = tensor.clone()
@@ -256,5 +262,8 @@ def ndarrays_to_tensors(*inputs):
         else:
             return input_
     else:
-        assert isinstance(inputs, tuple)  # sanity check
+        if not isinstance(inputs, tuple):
+            raise AssertionError(
+                f"Expected inputs to be a tuple, got {type(inputs).__name__}"
+            )
         return ndarrays_to_tensors(inputs)

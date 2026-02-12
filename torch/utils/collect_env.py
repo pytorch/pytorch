@@ -11,7 +11,7 @@ import re
 import subprocess
 import sys
 from collections import namedtuple
-from typing import cast as _cast
+from typing import cast as _cast, Dict as _Dict
 
 
 try:
@@ -654,11 +654,19 @@ def get_pip_packages(run_lambda, patterns=None):
     return pip_version, filtered_out
 
 
-def get_cachingallocator_config():
-    ca_config = os.environ.get("PYTORCH_CUDA_ALLOC_CONF", "")
-    if not ca_config:
-        ca_config = os.environ.get("PYTORCH_HIP_ALLOC_CONF", "")
-    return ca_config
+def get_cachingallocator_config() -> _Dict[str, str]:
+    """Return the caching allocator configuration from environment variables.
+    """
+    # pyrefly: ignore [bad-return]
+    return {
+        var: os.environ.get(var)
+        for var in (
+            "PYTORCH_CUDA_ALLOC_CONF",
+            "PYTORCH_HIP_ALLOC_CONF",
+            "PYTORCH_ALLOC_CONF",
+        )
+        if os.environ.get(var)
+    }
 
 
 def get_cuda_module_loading_config():
@@ -791,6 +799,7 @@ Is XPU available: {is_xpu_available}
 HIP runtime version: {hip_runtime_version}
 MIOpen runtime version: {miopen_runtime_version}
 Is XNNPACK available: {is_xnnpack_available}
+Caching allocator config: {caching_allocator_config}
 
 CPU:
 {cpu_info}
@@ -803,14 +812,14 @@ Versions of relevant libraries:
 
 def pretty_str(envinfo):
     def replace_nones(dct, replacement="Could not collect"):
-        for key in dct.keys():
+        for key in dct:
             if dct[key] is not None:
                 continue
             dct[key] = replacement
         return dct
 
     def replace_bools(dct, true="Yes", false="No"):
-        for key in dct.keys():
+        for key in dct:
             if dct[key] is True:
                 dct[key] = true
             elif dct[key] is False:
@@ -881,6 +890,9 @@ def pretty_str(envinfo):
             mutable_dict["conda_packages"], "[conda] "
         )
     mutable_dict["cpu_info"] = envinfo.cpu_info
+    mutable_dict["caching_allocator_config"] = envinfo.caching_allocator_config
+    if not envinfo.caching_allocator_config:
+        mutable_dict["caching_allocator_config"] = "N/A"
     return env_info_fmt.format(**mutable_dict)
 
 
@@ -899,7 +911,7 @@ def get_pretty_env_info():
     return pretty_str(get_env_info())
 
 
-def main():
+def main() -> None:
     print("Collecting environment information...")
     output = get_pretty_env_info()
     print(output)

@@ -124,7 +124,7 @@ device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else 
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
-load_tests = load_tests
+load_tests = load_tests  # noqa: PLW0127
 
 TEST_NUMPY = True
 try:
@@ -1808,8 +1808,16 @@ class TestDistributions(DistributionsTestCase):
             probs=torch.tensor(0.5).to(device_type),
         ).sample(torch.Size((10000,)))
         # vals should be roughly half zeroes, half ones
-        assert (vals == 0.0).sum() > 4000
-        assert (vals == 1.0).sum() > 4000
+        zeros_count = (vals == 0.0).sum()
+        ones_count = (vals == 1.0).sum()
+        if zeros_count <= 4000:
+            raise AssertionError(
+                f"Expected (vals == 0.0).sum() > 4000, got {zeros_count}"
+            )
+        if ones_count <= 4000:
+            raise AssertionError(
+                f"Expected (vals == 1.0).sum() > 4000, got {ones_count}"
+            )
 
     def test_torch_binomial_dtype_errors(self):
         dtypes = [torch.int, torch.long, torch.short]
@@ -2506,7 +2514,9 @@ class TestDistributions(DistributionsTestCase):
         # TODO: Once _check_log_prob works with multidimensional distributions,
         #       add proper testing of the log probabilities.
         dist = LogisticNormal(mean, std)
-        assert dist.log_prob(dist.sample()).detach().cpu().numpy().shape == (5,)
+        shape = dist.log_prob(dist.sample()).detach().cpu().numpy().shape
+        if shape != (5,):
+            raise AssertionError(f"Expected log_prob shape (5,), got {shape}")
 
     def _get_logistic_normal_ref_sampler(self, base_dist):
         def _sampler(num_samples):
@@ -5722,11 +5732,11 @@ class TestKL(DistributionsTestCase):
     def test_kl_multivariate_normal(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         n = 5  # Number of tests for multivariate_normal
-        for i in range(0, n):
-            loc = [torch.randn(4) for _ in range(0, 2)]
+        for i in range(n):
+            loc = [torch.randn(4) for _ in range(2)]
             scale_tril = [
                 transform_to(constraints.lower_cholesky)(torch.randn(4, 4))
-                for _ in range(0, 2)
+                for _ in range(2)
             ]
             p = MultivariateNormal(loc=loc[0], scale_tril=scale_tril[0])
             q = MultivariateNormal(loc=loc[1], scale_tril=scale_tril[1])
@@ -5755,10 +5765,10 @@ class TestKL(DistributionsTestCase):
 
     def test_kl_multivariate_normal_batched(self):
         b = 7  # Number of batches
-        loc = [torch.randn(b, 3) for _ in range(0, 2)]
+        loc = [torch.randn(b, 3) for _ in range(2)]
         scale_tril = [
             transform_to(constraints.lower_cholesky)(torch.randn(b, 3, 3))
-            for _ in range(0, 2)
+            for _ in range(2)
         ]
         expected_kl = torch.stack(
             [
@@ -5766,7 +5776,7 @@ class TestKL(DistributionsTestCase):
                     MultivariateNormal(loc[0][i], scale_tril=scale_tril[0][i]),
                     MultivariateNormal(loc[1][i], scale_tril=scale_tril[1][i]),
                 )
-                for i in range(0, b)
+                for i in range(b)
             ]
         )
         actual_kl = kl_divergence(
@@ -5777,7 +5787,7 @@ class TestKL(DistributionsTestCase):
 
     def test_kl_multivariate_normal_batched_broadcasted(self):
         b = 7  # Number of batches
-        loc = [torch.randn(b, 3) for _ in range(0, 2)]
+        loc = [torch.randn(b, 3) for _ in range(2)]
         scale_tril = [
             transform_to(constraints.lower_cholesky)(torch.randn(b, 3, 3)),
             transform_to(constraints.lower_cholesky)(torch.randn(3, 3)),
@@ -5788,7 +5798,7 @@ class TestKL(DistributionsTestCase):
                     MultivariateNormal(loc[0][i], scale_tril=scale_tril[0][i]),
                     MultivariateNormal(loc[1][i], scale_tril=scale_tril[1]),
                 )
-                for i in range(0, b)
+                for i in range(b)
             ]
         )
         actual_kl = kl_divergence(
@@ -5800,15 +5810,15 @@ class TestKL(DistributionsTestCase):
     def test_kl_lowrank_multivariate_normal(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         n = 5  # Number of tests for lowrank_multivariate_normal
-        for i in range(0, n):
-            loc = [torch.randn(4) for _ in range(0, 2)]
-            cov_factor = [torch.randn(4, 3) for _ in range(0, 2)]
+        for i in range(n):
+            loc = [torch.randn(4) for _ in range(2)]
+            cov_factor = [torch.randn(4, 3) for _ in range(2)]
             cov_diag = [
-                transform_to(constraints.positive)(torch.randn(4)) for _ in range(0, 2)
+                transform_to(constraints.positive)(torch.randn(4)) for _ in range(2)
             ]
             covariance_matrix = [
                 cov_factor[i].matmul(cov_factor[i].t()) + cov_diag[i].diag()
-                for i in range(0, 2)
+                for i in range(2)
             ]
             p = LowRankMultivariateNormal(loc[0], cov_factor[0], cov_diag[0])
             q = LowRankMultivariateNormal(loc[1], cov_factor[1], cov_diag[1])
@@ -5861,10 +5871,10 @@ class TestKL(DistributionsTestCase):
 
     def test_kl_lowrank_multivariate_normal_batched(self):
         b = 7  # Number of batches
-        loc = [torch.randn(b, 3) for _ in range(0, 2)]
-        cov_factor = [torch.randn(b, 3, 2) for _ in range(0, 2)]
+        loc = [torch.randn(b, 3) for _ in range(2)]
+        cov_factor = [torch.randn(b, 3, 2) for _ in range(2)]
         cov_diag = [
-            transform_to(constraints.positive)(torch.randn(b, 3)) for _ in range(0, 2)
+            transform_to(constraints.positive)(torch.randn(b, 3)) for _ in range(2)
         ]
         expected_kl = torch.stack(
             [
@@ -5876,7 +5886,7 @@ class TestKL(DistributionsTestCase):
                         loc[1][i], cov_factor[1][i], cov_diag[1][i]
                     ),
                 )
-                for i in range(0, b)
+                for i in range(b)
             ]
         )
         actual_kl = kl_divergence(
@@ -6216,7 +6226,8 @@ class TestNumericalStability(DistributionsTestCase):
 
     def test_continuous_bernoulli_gradient(self):
         def expec_val(x, probs=None, logits=None):
-            assert not (probs is None and logits is None)
+            if probs is None and logits is None:
+                raise AssertionError("At least one of probs or logits must be provided")
             if logits is not None:
                 probs = 1.0 / (1.0 + math.exp(-logits))
             bern_log_lik = x * math.log(probs) + (1.0 - x) * math.log1p(-probs)
@@ -6233,7 +6244,8 @@ class TestNumericalStability(DistributionsTestCase):
             return log_lik
 
         def expec_grad(x, probs=None, logits=None):
-            assert not (probs is None and logits is None)
+            if probs is None and logits is None:
+                raise AssertionError("At least one of probs or logits must be provided")
             if logits is not None:
                 probs = 1.0 / (1.0 + math.exp(-logits))
             grad_bern_log_lik = x / probs - (1.0 - x) / (1.0 - probs)

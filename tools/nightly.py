@@ -53,6 +53,7 @@ import atexit
 import contextlib
 import functools
 import itertools
+import json
 import logging
 import os
 import re
@@ -65,10 +66,11 @@ import textwrap
 import time
 import uuid
 from ast import literal_eval
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from platform import system as platform_system
-from typing import Any, Callable, cast, NamedTuple, TYPE_CHECKING, TypeVar
+from typing import Any, cast, NamedTuple, TYPE_CHECKING, TypeVar
 
 
 if TYPE_CHECKING:
@@ -127,47 +129,19 @@ class PipSource(NamedTuple):
     accelerator: str
 
 
-PYTORCH_NIGHTLY_PIP_INDEX_URL = "https://download.pytorch.org/whl/nightly"
-PIP_SOURCES = {
-    "cpu": PipSource(
-        name="cpu",
-        index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/cpu",
-        supported_platforms={"Linux", "macOS", "Windows"},
-        accelerator="cpu",
-    ),
-    # NOTE: Sync with CUDA_ARCHES in .github/scripts/generate_binary_build_matrix.py
-    "cuda-12.6": PipSource(
-        name="cuda-12.6",
-        index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/cu126",
-        supported_platforms={"Linux", "Windows"},
-        accelerator="cuda",
-    ),
-    "cuda-12.8": PipSource(
-        name="cuda-12.8",
-        index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/cu128",
-        supported_platforms={"Linux", "Windows"},
-        accelerator="cuda",
-    ),
-    "cuda-13.0": PipSource(
-        name="cuda-13.0",
-        index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/cu130",
-        supported_platforms={"Linux", "Windows"},
-        accelerator="cuda",
-    ),
-    # NOTE: Sync with ROCM_ARCHES in .github/scripts/generate_binary_build_matrix.py
-    "rocm-6.4": PipSource(
-        name="rocm-6.4",
-        index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/rocm6.4",
-        supported_platforms={"Linux"},
-        accelerator="rocm",
-    ),
-    "rocm-7.0": PipSource(
-        name="rocm-7.0",
-        index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/rocm7.0",
-        supported_platforms={"Linux"},
-        accelerator="rocm",
-    ),
-}
+# Generate: .github/scripts/nightly_source_matrix.json
+GENERATE_MATRIX_SCRIPT = (
+    REPO_ROOT / ".github" / "scripts" / "generate_binary_build_matrix.py"
+)
+subprocess.check_call(
+    [sys.executable, str(GENERATE_MATRIX_SCRIPT)],
+    cwd=GENERATE_MATRIX_SCRIPT.parent,
+)
+
+# See: .github/scripts/nightly_source_matrix.json
+NIGHTLY_SOURCE_FILE = GENERATE_MATRIX_SCRIPT.with_name("nightly_source_matrix.json")
+NIGHTLY_SOURCE_MATRIX = json.loads(NIGHTLY_SOURCE_FILE.read_text(encoding="utf-8"))
+PIP_SOURCES = {name: PipSource(**data) for name, data in NIGHTLY_SOURCE_MATRIX.items()}
 
 
 class Formatter(logging.Formatter):
@@ -241,7 +215,7 @@ class Venv:
     AGGRESSIVE_UPDATE_PACKAGES = (
         "uv",
         "pip",
-        "setuptools",
+        "setuptools<82",
         "packaging",
         "wheel",
         "build[uv]",
@@ -283,7 +257,8 @@ class Venv:
     @property
     def bindir(self) -> Path:
         """Get the bin directory for the virtual environment."""
-        assert self.is_venv()
+        if not self.is_venv():
+            raise AssertionError("Not a virtual environment")
         if self._bindir is None:
             if WINDOWS:
                 self._bindir = self.prefix / "Scripts"
@@ -294,11 +269,14 @@ class Venv:
     @property
     def executable(self) -> Path:
         """Get the Python executable for the virtual environment."""
-        assert self.is_venv()
+        if not self.is_venv():
+            raise AssertionError("Not a virtual environment")
         if self._executable is None:
             executable = self.bindir / ("python.exe" if WINDOWS else "python")
-            assert executable.is_file() or executable.is_symlink()
-            assert os.access(executable, os.X_OK), f"{executable} is not executable"
+            if not (executable.is_file() or executable.is_symlink()):
+                raise AssertionError(f"{executable} is not a file or symlink")
+            if not os.access(executable, os.X_OK):
+                raise AssertionError(f"{executable} is not executable")
             self._executable = executable
         return self._executable
 
@@ -310,6 +288,7 @@ class Venv:
             python=python,
             capture_output=True,
         ).stdout
+        # pyrefly: ignore [no-matching-overload]
         candidates = list(map(Path, filter(None, map(str.strip, output.splitlines()))))
         candidates = [p for p in candidates if p.is_dir() and p.name == "site-packages"]
         if not candidates:
@@ -408,7 +387,8 @@ class Venv:
 
         print(f"Creating venv (Python {self.base_python_version()}): {self.prefix}")
         self.base_python("-m", "venv", str(self.prefix))
-        assert self.is_venv(), "Failed to create virtual environment."
+        if not self.is_venv():
+            raise AssertionError("Failed to create virtual environment.")
         (self.prefix / ".gitignore").write_text("*\n", encoding="utf-8")
 
         if LINUX:
@@ -479,6 +459,7 @@ class Venv:
         cmd = [str(python), *args]
         env = popen_kwargs.pop("env", None) or {}
         check = popen_kwargs.pop("check", True)
+        # pyrefly: ignore [no-matching-overload]
         return subprocess.run(
             cmd,
             check=check,
@@ -530,6 +511,7 @@ class Venv:
         cmd = [str(self.bindir / "uv"), *args]
         env = popen_kwargs.pop("env", None) or {}
         check = popen_kwargs.pop("check", True)
+        # pyrefly: ignore [no-matching-overload]
         return subprocess.run(
             cmd,
             check=check,
@@ -645,7 +627,8 @@ class Venv:
         """Unpack a wheel into a directory."""
         wheel = Path(wheel).absolute()
         dest = Path(dest).absolute()
-        assert wheel.is_file() and wheel.suffix.lower() == ".whl"
+        if not (wheel.is_file() and wheel.suffix.lower() == ".whl"):
+            raise AssertionError(f"{wheel} is not a valid wheel file")
         return self.wheel("unpack", f"--dest={dest}", str(wheel), **popen_kwargs)
 
     @contextlib.contextmanager
@@ -937,6 +920,7 @@ def _move_single(
 
 def _copy_files(listing: list[Path], source_dir: Path, target_dir: Path) -> None:
     for src in listing:
+        # pyrefly: ignore [bad-argument-type]
         _move_single(src, source_dir, target_dir, shutil.copy2, "Copying")
 
 

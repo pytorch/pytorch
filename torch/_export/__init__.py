@@ -79,7 +79,7 @@ def aot_compile_warning():
 
 def aot_compile(
     f: Callable,
-    args: tuple[Any],
+    args: tuple[Any, ...],
     kwargs: Optional[dict[str, Any]] = None,
     *,
     dynamic_shapes: Optional[dict[str, Any]] = None,
@@ -150,7 +150,8 @@ def aot_compile(
     with torch.no_grad():
         so_path = torch._inductor.aot_compile(gm, args, kwargs, options=options)  # type: ignore[arg-type]
 
-    assert isinstance(so_path, (str, list))
+    if not isinstance(so_path, (str, list)):
+        raise AssertionError(f"expected str or list, got {type(so_path)}")
     return so_path
 
 def aot_load(so_path: str, device: str) -> Callable:

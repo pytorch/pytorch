@@ -76,14 +76,25 @@ bool priority_order_init_ = false;
 // TODO(eqy): more benchmarking to determine whether this should include sm86/89
 // Needs to be kept in-sync with test_fused_chocie in test_transformers.py
 bool check_prefer_cudnn_attention() {
-  static const bool prefer_cudnn = c10::utils::check_env("TORCH_CUDNN_SDPA_PREFERRED") != false;
+  static const bool prefer_cudnn = c10::utils::check_env("TORCH_CUDNN_SDPA_DEPRIORITIZED") != true;
   if (!prefer_cudnn) {
     return false;
   }
-#if (defined(CUDNN_VERSION) && (CUDNN_VERSION >= 90900))
-  auto dprops = at::cuda::getCurrentDeviceProperties();
-  auto major = dprops->major;
-  return (major == 9 || major == 10) && !dprops->minor;
+// cuDNN 9.15.1 required for seq_len not divisible by 128 fix, CUDA <= 12.9 wheels
+// ship with older cuDNN see #169849
+#if defined(CUDNN_VERSION)
+  static long cudnn_version = at::detail::getCUDAHooks().versionRuntimeCuDNN();
+  try {
+    auto dprops = at::cuda::getCurrentDeviceProperties();
+    auto major = dprops->major;
+    auto minor = dprops->minor;
+    return cudnn_version > 91500 && (major == 9 || major == 10) && (!minor || minor == 3);
+  } catch ([[maybe_unused]] c10::Error const& e) {
+#ifdef DEBUG
+    TORCH_WARN("check_prefer_cudnn_attention() caught exception ", e.what());
+#endif
+    return false;
+  }
 #else
   return false;
 #endif
@@ -135,6 +146,9 @@ int64_t minimum_gemm_alignment(sdp_params const& params) {
 template<bool caller_is_meff = false>
 bool check_head_dim_size_flash(sdp_params const& params, bool debug) {
 #if USE_ROCM_ATTENTION
+  if (at::cuda::device_count() == 0) {
+    return false;
+  }
   // AOTriton 0.9+ supports head_dim up to 512
   const static auto max_hdim = []() {
 #if AOTRITON_VERSION_CURRENT == AOTRITON_VERSION_INT(0, 11)
@@ -344,6 +358,9 @@ bool check_mem_efficient_hardware_support(sdp_params const& params, bool debug) 
   using sm121 = SMVersion<12, 1>;
 #if USE_ROCM
 #if USE_ROCM_ATTENTION
+  if (at::cuda::device_count() == 0) {
+    return false;
+  }
   if(at::globalContext().getROCmFAPreferredBackend() == at::ROCmFABackend::Ck) {
     // User explicitly set CK as the flash attention backend. Return true for now
     // TODO: Flesh out sanity checks
@@ -471,7 +488,7 @@ bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
   const auto s_k = params.key.sym_size(2);
   const auto d_qk = params.query.sym_size(3);
   const auto d_v = params.value.sym_size(3);
-  long cudnn_version = at::detail::getCUDAHooks().versionCuDNN();
+  long cudnn_version = at::detail::getCUDAHooks().versionRuntimeCuDNN();
   if (cudnn_version < 8903) {
     if (debug) {
       TORCH_WARN("SDPA fprop requires cudnn 8.9.3 or higher");
@@ -485,10 +502,19 @@ bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
     return false;
   }
   auto head_dim_limit = 128;
+  // Hopper: head_dim<=256 support with cuDNN >= 9.10.0
   if (cudnn_version >= 91000) {
     auto dprops = at::cuda::getCurrentDeviceProperties();
     if (dprops->major == 9 && !dprops->minor) {
       head_dim_limit = 256;
+    }
+  }
+  // Blackwell GPUs: B200, GB200 (SM 10.0), B300, GB300 (SM 10.3)
+  // Special case allowed by cuDNN frontend to support DeepSeek dimensions
+  if (cudnn_version >= 91100) {
+    auto dprops = at::cuda::getCurrentDeviceProperties();
+    if (dprops->major == 10 && d_qk == 192 && d_v == 128) {
+      head_dim_limit = 192;
     }
   }
   if (d_qk > head_dim_limit || d_v > head_dim_limit) {
@@ -661,6 +687,17 @@ bool check_dtypes_low_precision(sdp_params const& params, bool debug) {
   }
 }
 
+bool check_dtypes_flash_attention(sdp_params const& params, bool debug) {
+  auto dprop = at::cuda::getCurrentDeviceProperties();
+  if (dprop->major >= 9 and at::globalContext().userEnabledFA3SDP()) {
+    constexpr auto fa3_dtypes =
+        c10::array_of<at::ScalarType>(at::kFloat8_e4m3fn, at::kHalf, at::kBFloat16);
+    return check_tensor_dtype(params, fa3_dtypes, debug);
+  } else {
+    return check_dtypes_low_precision(params, debug);
+  }
+}
+
 bool check_runtime_disabled_cudnn(sdp_params const& params, bool debug) {
   // We check the global context to see if user has explicitly turned of cudnn
   // sdp kernels
@@ -702,7 +739,7 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
   return false;
 #endif
 #if defined(CUDNN_VERSION)
-  static auto cudnn_version = cudnnGetVersion();
+  static auto cudnn_version = at::detail::getCUDAHooks().versionRuntimeCuDNN();
   if (params.dropout > 0.0 && cudnn_version > 91100 && cudnn_version < 91400) {
     if (debug) {
       TORCH_WARN(CUDNN_VERSION, " cuDNN version does not support droppout in SDPA (9.11 - 9.13).");
@@ -772,7 +809,7 @@ bool can_use_flash_attention(sdp_params const& params, bool debug) {
       check_flash_attention_hardware_support,
       check_requires_grad_and_head_dim_gt192_constraints_on_sm86_89_or_120,
       check_flash_causal_non_square_seqlens,
-      check_dtypes_low_precision);
+      check_dtypes_flash_attention);
   for (auto& constraint : general_constraints) {
     if (!constraint(params, debug)) {
       return false;

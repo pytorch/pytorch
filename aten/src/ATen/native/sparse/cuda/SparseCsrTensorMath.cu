@@ -500,7 +500,7 @@ Tensor reduce_sparse_csr_dim0_cuda_template(const Tensor& sparse, ReductionOp ro
   AT_DISPATCH_INDEX_TYPES(col_indices.scalar_type(), "reduce_sparse_csr_dim0_cuda_indices",
                           [&]() {
                             index_t* col_indices_ptr = col_indices.data_ptr<index_t>();
-                            index_t* new_col_indices_ptr = new_col_indices.data_ptr<index_t>();
+                            index_t* new_col_indices_ptr = new_col_indices.template data_ptr<index_t>();
                             reduce_sparse_csr_dim0_cuda_kernel<<<BLOCKS, THREADS, 0, stream>>>(new_values_acc_ptr,
                                                                                                new_col_indices_ptr,
                                                                                                new_nnz,

@@ -10,3 +10,4 @@
   pathFilter:
     - 'torch/csrc/inductor/aoti_torch/c/*'
     - 'torch/csrc/inductor/aoti_torch/generated/*'
+    - 'torch/csrc/stable/c/*'

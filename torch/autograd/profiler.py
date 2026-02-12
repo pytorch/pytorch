@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import logging
 import uuid
 from collections import defaultdict
 from collections.abc import Iterable
@@ -6,6 +7,9 @@ from dataclasses import dataclass
 from time import perf_counter_ns
 from typing import Any, Optional
 from warnings import warn
+
+
+log = logging.getLogger(__name__)
 
 import torch
 import torch.cuda
@@ -163,6 +167,11 @@ class profile:
 
         acc_events (bool): Enable the accumulation of FunctionEvents across multiple profiling cycles
 
+        post_processing_timeout_s (float): Optional timeout in seconds for post-processing profiler
+            results. In this context, post-processing happens after the profiling itself has finished.
+            If specified, event parsing will stop after this duration and return partial results. Useful
+            for handling large traces that may take too long to process.
+
 
     .. warning::
         Enabling memory profiling or source attribution incurs additional profiler
@@ -216,6 +225,7 @@ class profile:
         experimental_config=None,
         acc_events=False,
         custom_trace_id_callback=None,
+        post_processing_timeout_s: Optional[float] = None,
     ):
         self.enabled: bool = enabled
         if not self.enabled:
@@ -253,33 +263,37 @@ class profile:
         self.profiling_end_time_ns = 0
         self._stats = _ProfilerStats()
         self.custom_trace_id_callback = custom_trace_id_callback
+        self.post_processing_timeout_s = post_processing_timeout_s
         self.trace_id = ""
         if not self.use_cpu:
-            assert use_kineto, (
-                "Device-only events supported only with Kineto (use_kineto=True)"
-            )
+            if not use_kineto:
+                raise AssertionError(
+                    "Device-only events supported only with Kineto (use_kineto=True)"
+                )
 
         if self.use_device is not None:
             VALID_DEVICE_OPTIONS = ["cuda", "xpu", "mtia", "hpu"]
             if _get_privateuse1_backend_name() != "privateuseone":
                 VALID_DEVICE_OPTIONS.append(_get_privateuse1_backend_name())
             if self.use_device not in VALID_DEVICE_OPTIONS:
-                warn(f"The {self.use_device} is not a valid device option.")
+                warn(
+                    f"The {self.use_device} is not a valid device option.", stacklevel=2
+                )
                 self.use_device = None
 
             if self.use_device == "cuda" and not torch.cuda.is_available():
-                warn("CUDA is not available, disabling CUDA profiling")
+                warn("CUDA is not available, disabling CUDA profiling", stacklevel=2)
                 self.use_cuda = False
                 self.use_device = None
 
             if self.use_device == "xpu" and not torch.xpu.is_available():
-                warn("XPU is not available, disabling XPU profiling")
+                warn("XPU is not available, disabling XPU profiling", stacklevel=2)
                 self.use_device = None
 
             if self.use_device == "hpu" and not (
                 hasattr(torch, "hpu") and torch.hpu.is_available()
             ):
-                warn("HPU is not available, disabling HPU profiling")
+                warn("HPU is not available, disabling HPU profiling", stacklevel=2)
                 self.use_device = None
 
         self.kineto_activities = set()
@@ -289,40 +303,50 @@ class profile:
         self.profiler_kind = ProfilerState.KINETO
         if self.use_device == "cuda":
             if not use_kineto or ProfilerActivity.CUDA not in _supported_activities():
-                assert self.use_cpu, "Legacy CUDA profiling requires use_cpu=True"
+                if not self.use_cpu:
+                    raise AssertionError("Legacy CUDA profiling requires use_cpu=True")
                 self.profiler_kind = ProfilerState.KINETO_GPU_FALLBACK
             else:
                 self.kineto_activities.add(ProfilerActivity.CUDA)
         elif self.use_device == "xpu":
-            assert use_kineto and ProfilerActivity.XPU in _supported_activities(), (
-                "Legacy XPU profiling is not supported. Requires use_kineto=True on XPU devices."
-            )
+            if not (use_kineto and ProfilerActivity.XPU in _supported_activities()):
+                raise AssertionError(
+                    "Legacy XPU profiling is not supported. Requires use_kineto=True on XPU devices."
+                )
             self.kineto_activities.add(ProfilerActivity.XPU)
         elif self.use_device == "mtia":
-            assert use_kineto and ProfilerActivity.MTIA in _supported_activities(), (
-                "Legacy MTIA profiling is not supported. Requires use_kineto=True on MTIA devices."
-            )
+            if not (use_kineto and ProfilerActivity.MTIA in _supported_activities()):
+                raise AssertionError(
+                    "Legacy MTIA profiling is not supported. Requires use_kineto=True on MTIA devices."
+                )
             self.kineto_activities.add(ProfilerActivity.MTIA)
         elif self.use_device == "hpu":
-            assert use_kineto and ProfilerActivity.HPU in _supported_activities(), (
-                "Legacy HPU profiling is not supported. Requires use_kineto=True on HPU devices."
-            )
+            if not (use_kineto and ProfilerActivity.HPU in _supported_activities()):
+                raise AssertionError(
+                    "Legacy HPU profiling is not supported. Requires use_kineto=True on HPU devices."
+                )
             self.kineto_activities.add(ProfilerActivity.HPU)
         elif self.use_device is not None and self.use_device != "privateuseone":
             if (
                 not use_kineto
                 or ProfilerActivity.PrivateUse1 not in _supported_activities()
             ):
-                assert self.use_cpu, (
-                    "Legacy custombackend profiling requires use_cpu=True"
-                )
+                if not self.use_cpu:
+                    raise AssertionError(
+                        "Legacy custombackend profiling requires use_cpu=True"
+                    )
                 self.profiler_kind = ProfilerState.KINETO_PRIVATEUSE1_FALLBACK
             else:
                 self.kineto_activities.add(ProfilerActivity.PrivateUse1)
 
-        assert len(self.kineto_activities) > 0, (
-            "No activities specified for the profiler"
-        )
+        if len(self.kineto_activities) == 0:
+            raise AssertionError("No activities specified for the profiler")
+
+        if (
+            self.post_processing_timeout_s is not None
+            and self.post_processing_timeout_s < 0
+        ):
+            raise ValueError("post_processing_timeout_s must be non-negative")
 
     def default_trace_id(self):
         # Generate a UUID
@@ -431,7 +455,9 @@ class profile:
         t0 = perf_counter_ns()
         parsed_results = []
         if self.kineto_results:
-            parsed_results = self._parse_kineto_results(self.kineto_results)
+            parsed_results = self._parse_kineto_results(
+                self.kineto_results, timeout_s=self.post_processing_timeout_s
+            )
         t1 = perf_counter_ns()
         self._stats.parse_kineto_call_duration_us = int((t1 - t0) / 1000)
 
@@ -472,7 +498,8 @@ class profile:
         top_level_events_only=False,
     ):
         self._ensure_function_events()
-        assert self._function_events is not None
+        if self._function_events is None:
+            raise AssertionError("Expected profiling results")
         return self._function_events.table(
             sort_by=sort_by,
             row_limit=row_limit,
@@ -500,8 +527,10 @@ class profile:
 
     def export_stacks(self, path: str, metric: str = "self_cpu_time_total"):
         self._ensure_function_events()
-        assert self._function_events is not None, "Expected profiling results"
-        assert self.with_stack, "export_stacks() requires with_stack=True"
+        if self._function_events is None:
+            raise AssertionError("Expected profiling results")
+        if not self.with_stack:
+            raise AssertionError("export_stacks() requires with_stack=True")
         return self._function_events.export_stacks(path, metric)
 
     def toggle_collection_dynamic(
@@ -519,7 +548,8 @@ class profile:
         group_by_overload_name=False,
     ):
         self._ensure_function_events()
-        assert self._function_events is not None, "Expected profiling results"
+        if self._function_events is None:
+            raise AssertionError("Expected profiling results")
         return self._function_events.key_averages(
             group_by_input_shape, group_by_stack_n, group_by_overload_name
         )
@@ -528,7 +558,8 @@ class profile:
 
     def total_average(self):
         self._ensure_function_events()
-        assert self._function_events is not None, "Expected profiling results"
+        if self._function_events is None:
+            raise AssertionError("Expected profiling results")
         return self._function_events.total_average()
 
     total_average.__doc__ = EventList.total_average.__doc__
@@ -540,11 +571,29 @@ class profile:
         The total time is a sum of all self times across all the events.
         """
         self._ensure_function_events()
-        assert self._function_events is not None
+        if self._function_events is None:
+            raise AssertionError("Expected profiling results")
         return self._function_events.self_cpu_time_total
 
-    def _parse_kineto_results(self, result: _ProfilerResult):
+    def _parse_kineto_results(
+        self, result: _ProfilerResult, timeout_s: Optional[float] = None
+    ):
         # result.events() has most of the events - PyTorch op-level and device-level events
+
+        timeout_ns = int(timeout_s * 1e9) if timeout_s is not None else None
+        if timeout_ns is not None and timeout_ns < 0:
+            raise ValueError("timeout_s must be non-negative")
+        start_time_ns = perf_counter_ns()
+        timed_out = False
+
+        def _check_timeout() -> bool:
+            """Check if timeout has been exceeded. Returns True if timed out."""
+            nonlocal timed_out
+            if timeout_ns is not None and not timed_out:
+                elapsed_ns = perf_counter_ns() - start_time_ns
+                if elapsed_ns >= timeout_ns:
+                    timed_out = True
+            return timed_out
 
         trace_start_ns = result.trace_start_ns()
         mem_records = [
@@ -586,6 +635,9 @@ class profile:
         device_corr_map: dict[int, list[FunctionEvent]] = {}
         max_evt_id = 0
         for kineto_event in result.events():
+            if _check_timeout():
+                break
+
             if (
                 _filter_name(kineto_event.name())
                 or getattr(kineto_event, "is_hidden_event", lambda: False)()
@@ -600,7 +652,7 @@ class profile:
             if kineto_event.device_type() == DeviceType.CPU:
                 # find the corresponding memory allocation events
                 for mem_record in mem_records_acc.in_interval(
-                    kineto_event.start_ns() / 1000, abs_end_ns / 1000
+                    kineto_event.start_ns(), abs_end_ns
                 ):
                     cpu_memory_usage += _cpu_memory_usage(mem_record[0])
                     device_memory_usage += _device_memory_usage(mem_record[0])
@@ -674,10 +726,11 @@ class profile:
                 and fe.id in device_corr_map
             ):
                 for f_evt in device_corr_map[fe.id]:
-                    if (
-                        f_evt.device_type == DeviceType.CUDA
-                        or f_evt.device_type == DeviceType.PrivateUse1
-                    ):
+                    if f_evt.device_type in [
+                        DeviceType.CUDA,
+                        DeviceType.PrivateUse1,
+                        DeviceType.XPU,
+                    ]:
                         fe.append_kernel(
                             f_evt.name,
                             f_evt.device_index,
@@ -715,15 +768,29 @@ class profile:
 
         # output top-level memory events
         for mem_record in mem_records:
+            if _check_timeout():
+                break
+
             if not mem_record[1]:
                 max_evt_id += 1
                 fe = createFunctionEventForMemoryEvents(mem_record[0])
                 all_function_events.append(fe)
 
         for oom_record in oom_records:
+            if _check_timeout():
+                break
+
             max_evt_id += 1
             fe = createFunctionEventForMemoryEvents(oom_record)
             all_function_events.append(fe)
+
+        if timed_out:
+            log.warning(
+                "Profiler _parse_kineto_results timed out after %.3f seconds, "
+                "returning partial results with %d events",
+                timeout_s,
+                len(all_function_events),
+            )
 
         all_function_events.sort(
             key=lambda evt: [evt.time_range.start, -evt.time_range.end]
@@ -731,7 +798,7 @@ class profile:
         return all_function_events
 
 
-# pyrefly: ignore  # invalid-inheritance
+# pyrefly: ignore [invalid-inheritance]
 class record_function(_ContextDecorator):
     """Context manager/function decorator that adds a label to a code block/function when running autograd profiler.
     Label will only appear if CPU activity tracing is enabled.
@@ -779,7 +846,7 @@ class record_function(_ContextDecorator):
         # TODO: TorchScript ignores standard type annotation here
         # self.record: Optional["torch.classes.profiler._RecordFunction"] = None
         self.record = torch.jit.annotate(
-            # pyrefly: ignore  # not-a-type
+            # pyrefly: ignore [not-a-type]
             Optional["torch.classes.profiler._RecordFunction"],
             None,
         )
@@ -796,7 +863,8 @@ class record_function(_ContextDecorator):
 
         # Local variable is needed by TorchScript to refine Optional[T] to T
         record = self.record
-        assert record is not None
+        if record is None:
+            raise AssertionError("Expected record to be set")
 
         # TODO: Too slow with __torch_function__ handling enabled
         # See https://github.com/pytorch/pytorch/issues/76410
@@ -833,7 +901,8 @@ class record_function(_ContextDecorator):
 
         # Local variable is needed by TorchScript to refine Optional[T] to T
         record = self.record
-        assert record is not None
+        if record is None:
+            raise AssertionError("Expected record to be set")
 
         # TODO: Too slow with __torch_function__ handling enabled
         # See https://github.com/pytorch/pytorch/issues/76410
@@ -1124,7 +1193,8 @@ def parse_nvprof_trace(path):
     for row in conn.execute(kernel_query):
         unique.see(row["marker_id"], row["runtime_id"])
         # 211 is cudaKernelLaunch for cuda >= 9.2
-        assert row["cbid"] == 211
+        if row["cbid"] != 211:
+            raise AssertionError(f"Expected cbid to be 211, but got {row['cbid']}")
         evt = functions_map[row["marker_id"]]
         evt.append_kernel(
             row["kernel_name"], 0, row["kernel_end"] - row["kernel_start"]
@@ -1210,9 +1280,10 @@ class KinetoStepTracker:
             if delta > 1:
                 warn(
                     "Profiler step count has increased more than 1 - "
-                    f"current_step = {cls._current_step} step dict =  {cls._step_dict}"
+                    f"current_step = {cls._current_step} step dict =  {cls._step_dict}",
+                    stacklevel=2,
                 )
-            for _ in range(0, delta):
+            for _ in range(delta):
                 _kineto_step()
             cls._current_step = new_step
         return cls._current_step

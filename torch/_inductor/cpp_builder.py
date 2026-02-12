@@ -881,23 +881,34 @@ def _get_optimization_cflags(
     cflags: list[str] = []
     ldflags: list[str] = []
 
-    b_debug_build = (
+    should_use_optimized_flags = not (
         config.aot_inductor.debug_compile
+        or os.environ.get("TORCHINDUCTOR_DEBUG_COMPILE", "0") == "1"
+    )
+    should_add_debug_symbol_flags = (
+        config.aot_inductor.debug_compile
+        or config.aot_inductor.debug_symbols
+        or os.environ.get("TORCHINDUCTOR_DEBUG_COMPILE", "0") == "1"
         or os.environ.get("TORCHINDUCTOR_DEBUG_SYMBOL", "0") == "1"
     )
-    wrapper_opt_level = config.aot_inductor.compile_wrapper_opt_level
-
-    if b_debug_build:
-        cflags, ldflags = _get_inductor_debug_symbol_cflags()
+    if should_use_optimized_flags:
+        if _IS_WINDOWS:
+            cflags += ["O1" if min_optimize else "O2"]
+        else:
+            cflags += [
+                config.aot_inductor.compile_wrapper_opt_level if min_optimize else "O3",
+                "DNDEBUG",
+            ]
+    else:
         if _IS_WINDOWS:
             cflags += ["Od", "Ob0", "Oy-"]
         else:
-            cflags.append("O0")
-    else:
-        if _IS_WINDOWS:
-            cflags = ["O1" if min_optimize else "O2"]
-        else:
-            cflags = [wrapper_opt_level if min_optimize else "O3", "DNDEBUG"]
+            cflags += ["O0"]
+
+    if should_add_debug_symbol_flags:
+        debug_cflags, debug_ldflags = _get_inductor_debug_symbol_cflags()
+        cflags += debug_cflags
+        ldflags += debug_ldflags
 
     cflags += _get_ffast_math_flags()
 
@@ -913,6 +924,10 @@ def _get_optimization_cflags(
             if not config.is_fbcode():
                 if platform.machine() == "ppc64le":
                     cflags.append("mcpu=native")
+                elif platform.machine() == "riscv64":
+                    cflags.append("march=rv64gc")
+                elif platform.machine() == "riscv32":
+                    cflags.append("march=rv32gc")
                 else:
                     cflags.append("march=native")
 
@@ -1147,10 +1162,16 @@ def _get_torch_related_args(
     else:
         libraries_dirs = []
         if config.aot_inductor.cross_target_platform == "windows":
-            assert config.aot_inductor.aoti_shim_library, (
+            aoti_shim_library = config.aot_inductor.aoti_shim_library
+
+            assert aoti_shim_library, (
                 "'config.aot_inductor.aoti_shim_library' must be set when 'cross_target_platform' is 'windows'."
             )
-            libraries.append(config.aot_inductor.aoti_shim_library)
+            if isinstance(aoti_shim_library, str):
+                libraries.append(aoti_shim_library)
+            else:
+                assert isinstance(aoti_shim_library, list)
+                libraries.extend(aoti_shim_library)
 
     if config.aot_inductor.cross_target_platform == "windows":
         assert config.aot_inductor.aoti_shim_library_path, (
@@ -1662,8 +1683,6 @@ def get_cpp_torch_device_options(
         torch_include_dirs=link_libtorch,
         cross_target_platform=config.aot_inductor.cross_target_platform,
     )
-    if not config.is_fbcode() and link_libtorch:
-        libraries += ["c10"]
     if device_type == "cuda":
         definitions.append(" USE_ROCM" if torch.version.hip else " USE_CUDA")
 
@@ -1671,13 +1690,13 @@ def get_cpp_torch_device_options(
             if config.is_fbcode() or not link_libtorch:
                 libraries += ["amdhip64"]
             else:
-                libraries += ["c10_hip", "torch_hip"]
+                libraries += ["torch_hip"]
             definitions.append(" __HIP_PLATFORM_AMD__")
         else:
             if config.is_fbcode() or not link_libtorch:
                 libraries += ["cuda"]
             else:
-                libraries += ["c10_cuda", "cuda", "torch_cuda"]
+                libraries += ["cuda", "torch_cuda"]
             if config.aot_inductor.cross_target_platform == "windows":
                 libraries += ["cudart"]
             _transform_cuda_paths(libraries_dirs)
@@ -1702,7 +1721,7 @@ def get_cpp_torch_device_options(
 
         libraries += ["ze_loader", "sycl"]
         if link_libtorch:
-            libraries += ["c10_xpu", "torch_xpu"]
+            libraries += ["torch_xpu"]
 
     if device_type == "mps":
         definitions.append(" USE_MPS")
@@ -2254,6 +2273,52 @@ class CppBuilder:
                     # --- Add to a list for linking later ---
                     set(KERNEL_TARGETS ${{KERNEL_TARGETS}} build_kernel_object_${{KERNEL_NAME}} PARENT_SCOPE)
                     set(KERNEL_OBJECT_FILES ${{KERNEL_OBJECT_FILES}} ${{OBJECT_FILE}} PARENT_SCOPE)
+                endfunction()
+
+                """
+            )
+        elif device_type == "xpu":
+            contents += textwrap.dedent(
+                """
+                find_program(OBJCOPY_EXECUTABLE objcopy)
+                if(NOT OBJCOPY_EXECUTABLE)
+                    message(FATAL_ERROR "objcopy not found. Cannot embed spv as object file")
+                endif()
+
+                set(KERNEL_TARGETS "")
+                set(KERNEL_OBJECT_FILES "")
+                # Function to embed a single kernel
+                function(embed_gpu_kernel KERNEL_NAME SPV_FILE)
+                    set(OBJECT_BASENAME ${KERNEL_NAME}.spv.o)
+                    set(OBJECT_FILE ${CMAKE_CURRENT_BINARY_DIR}/${OBJECT_BASENAME})
+
+                    # --- Define UNIQUE C symbol names ---
+                    set(SYMBOL_START __${KERNEL_NAME}_start)
+                    set(SYMBOL_END __${KERNEL_NAME}_end)
+                    set(SYMBOL_SIZE __${KERNEL_NAME}_size)
+                    string(REGEX REPLACE "[^a-zA-Z0-9]" "_" MANGLED_BASENAME ${SPV_FILE})
+                    set(OBJCOPY_START_SYM _binary_${MANGLED_BASENAME}_start)
+                    set(OBJCOPY_END_SYM _binary_${MANGLED_BASENAME}_end)
+                    set(OBJCOPY_SIZE_SYM _binary_${MANGLED_BASENAME}_size)
+
+                    # --- SPV_FILE to Object File (.o) Command ---
+                    add_custom_command(
+                        OUTPUT ${OBJECT_FILE}
+                        COMMAND ${CMAKE_LINKER} -r -b binary -z noexecstack -o ${OBJECT_FILE} ${SPV_FILE}
+                        COMMAND ${OBJCOPY_EXECUTABLE} --rename-section .data=.rodata,alloc,load,readonly,data,contents
+                                ${OBJECT_FILE}
+                        COMMAND ${OBJCOPY_EXECUTABLE}
+                                --redefine-sym ${OBJCOPY_START_SYM}=${SYMBOL_START}
+                                --redefine-sym ${OBJCOPY_END_SYM}=${SYMBOL_END}
+                                --redefine-sym ${OBJCOPY_SIZE_SYM}=${SYMBOL_SIZE}
+                                ${OBJECT_FILE}
+                        DEPENDS ${SPV_FILE}
+                    )
+                    add_custom_target(build_kernel_object_${KERNEL_NAME} DEPENDS ${OBJECT_FILE})
+
+                    # --- Add to a list for linking later ---
+                    set(KERNEL_TARGETS ${KERNEL_TARGETS} build_kernel_object_${KERNEL_NAME} PARENT_SCOPE)
+                    set(KERNEL_OBJECT_FILES ${KERNEL_OBJECT_FILES} ${OBJECT_FILE} PARENT_SCOPE)
                 endfunction()
 
                 """

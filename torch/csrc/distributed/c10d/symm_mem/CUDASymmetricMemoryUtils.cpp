@@ -1,5 +1,4 @@
 #include <sys/socket.h>
-#include <sys/syscall.h>
 #include <sys/un.h>
 #include <unistd.h>
 
@@ -12,7 +11,6 @@
 #include <hip/hip_runtime_api.h>
 #endif
 
-#include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>
 
@@ -85,7 +83,7 @@ void IpcChannel::send_fd(int dst_pid, int fd) {
   // Prepare data to send
   // Data being sent is "fd", the value of fd will be sent as auxiliary data
   // (control message)
-  struct iovec io = {.iov_base = (void*)("fd"), .iov_len = 2};
+  struct iovec io = {.iov_base = (void*)"fd", .iov_len = 2};
 
   // Prepare control message data buffer and zero it out
   // NOLINTNEXTLINE(*array*)
@@ -178,7 +176,7 @@ std::vector<int> IpcChannel::all_gather_fds(
     int rank,
     const std::vector<int>& pids,
     int fd) {
-  int world_size = (int)pids.size();
+  int world_size = static_cast<int>(pids.size());
   std::vector<int> fds(pids.size());
   fds[rank] = fd;
 
@@ -197,7 +195,7 @@ int IpcChannel::broadcast_fds(
     int src_rank,
     const std::vector<int>& pids,
     int fd) {
-  int world_size = (int)pids.size();
+  int world_size = static_cast<int>(pids.size());
 
   if (rank == src_rank) {
     for (int dst_rank = 0; dst_rank < world_size; ++dst_rank) {
@@ -246,14 +244,14 @@ void map_block(
   desc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
   C10_CUDA_DRIVER_CHECK(driver_api->cuMemSetAccess_(*dev_ptr, size, &desc, 1));
 #elif defined(USE_ROCM)
-  C10_HIP_CHECK(hipMemAddressReserve(ptr, size, 0ULL, 0, 0ULL));
-  C10_HIP_CHECK(hipMemMap(
+  C10_CUDA_CHECK(hipMemAddressReserve(ptr, size, 0ULL, 0, 0ULL));
+  C10_CUDA_CHECK(hipMemMap(
       *ptr,
       size,
       0,
       reinterpret_cast<hipMemGenericAllocationHandle_t>(handle),
       0ULL));
-  C10_HIP_CHECK(hipMemMap(
+  C10_CUDA_CHECK(hipMemMap(
       *ptr,
       size,
       0,
@@ -265,7 +263,7 @@ void map_block(
   // NOLINTNEXTLINE(bugprone-signed-char-misuse)
   desc.location.id = static_cast<int>(device_idx);
   desc.flags = hipMemAccessFlagsProtReadWrite;
-  C10_HIP_CHECK(hipMemSetAccess(*ptr, size, &desc, 1));
+  C10_CUDA_CHECK(hipMemSetAccess(*ptr, size, &desc, 1));
 #else
   TORCH_CHECK(
       false, "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");

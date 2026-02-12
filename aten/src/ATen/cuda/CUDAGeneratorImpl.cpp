@@ -138,6 +138,11 @@ void CUDAGeneratorState::register_graph(cuda::CUDAGraph* graph) {
   // and offset on the GPU.
   if (registered_graphs_.empty()) {
     auto options = at::TensorOptions().device(at::kCUDA).dtype(at::kLong);
+    // Create these tensors outside of inference mode to ensure they can be
+    // modified in-place later. If we create them as inference tensors,
+    // subsequent fill_() calls outside inference mode
+    // will fail with "Inplace update to inference tensor outside InferenceMode".
+    c10::InferenceMode guard(false);
     seed_extragraph_ = at::empty({1}, options);
     offset_extragraph_ = at::empty({1}, options);
   }
@@ -194,8 +199,8 @@ void CUDAGeneratorState::unregister_graph(cuda::CUDAGraph* graph) {
 void CUDAGeneratorState::capture_prologue() {
   capturing_ = true;
   offset_intragraph_ = 0;
-  seed_extragraph_.fill_(int64_t(seed_));
-  offset_extragraph_.fill_(int64_t(0));
+  seed_extragraph_.fill_(static_cast<int64_t>(seed_));
+  offset_extragraph_.fill_(0);
 }
 
 /**
@@ -216,8 +221,8 @@ void CUDAGeneratorState::replay_prologue(uint64_t wholegraph_increment) {
   at::cuda::assertNotCapturing(
       "Cannot prepare for replay during capturing stage.");
   if (wholegraph_increment) {
-      seed_extragraph_.fill_(int64_t(seed_));
-      offset_extragraph_.fill_(int64_t(philox_offset_per_thread_));
+      seed_extragraph_.fill_(static_cast<int64_t>(seed_));
+      offset_extragraph_.fill_(static_cast<int64_t>(philox_offset_per_thread_));
       // Applies the total increment achieved during previous captures to update the
       // offset.
       increase(wholegraph_increment);
@@ -325,11 +330,11 @@ uint64_t CUDAGeneratorImpl::seed() {
  */
 c10::intrusive_ptr<c10::TensorImpl> CUDAGeneratorImpl::get_state() const {
   // The RNG state comprises the seed, and an offset used for Philox.
-  static const size_t seed_size = sizeof(uint64_t);
-  static const size_t offset_size = sizeof(int64_t);
-  static const size_t total_size = seed_size + offset_size;
+  constexpr size_t seed_size = sizeof(uint64_t);
+  constexpr size_t offset_size = sizeof(int64_t);
+  constexpr size_t total_size = seed_size + offset_size;
 
-  auto state_tensor = at::detail::empty_cpu({(int64_t)total_size}, ScalarType::Byte, std::nullopt, std::nullopt, std::nullopt, std::nullopt);
+  auto state_tensor = at::detail::empty_cpu({static_cast<int64_t>(total_size)}, ScalarType::Byte, std::nullopt, std::nullopt, std::nullopt, std::nullopt);
   auto rng_state = state_tensor.data_ptr<uint8_t>();
   auto current_seed = this->current_seed();
   auto offset = static_cast<int64_t>(this->philox_offset_per_thread()); // Note that old THCGeneratorState had offset as std::atomic<int64_t>
@@ -346,9 +351,9 @@ c10::intrusive_ptr<c10::TensorImpl> CUDAGeneratorImpl::get_state() const {
  * and size of the internal state.
  */
 void CUDAGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
-  static const size_t seed_size = sizeof(uint64_t);
-  static const size_t offset_size = sizeof(int64_t);
-  static const size_t total_size = seed_size + offset_size;
+  constexpr size_t seed_size = sizeof(uint64_t);
+  constexpr size_t offset_size = sizeof(int64_t);
+  constexpr size_t total_size = seed_size + offset_size;
 
   detail::check_rng_state(new_state);
 

@@ -17,7 +17,6 @@ from enum import auto, Enum
 from itertools import chain
 from typing import (
     Any,
-    Callable,
     cast,
     ClassVar,
     Generic,
@@ -59,11 +58,19 @@ from ..utils import (
     triton_type,
     unique,
 )
-from ..virtualized import ops, OpsHandler, OpsValue, ReductionType, StoreMode, V
+from ..virtualized import (
+    NullHandler,
+    ops,
+    OpsHandler,
+    OpsValue,
+    ReductionType,
+    StoreMode,
+    V,
+)
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, MutableMapping, Sequence
+    from collections.abc import Callable, Iterator, MutableMapping, Sequence
 
     from torch.fx import GraphModule
 
@@ -105,7 +112,7 @@ class FileBackedGraphModule:
     def __post_init__(self) -> None:
         # Write the code to a file for compatibility with debugging utilities.
         # The file is deleted upon program termination.
-        self.tempfile = tempfile.NamedTemporaryFile(
+        self.tempfile = tempfile.NamedTemporaryFile(  # noqa: SIM115
             mode="w+", suffix=".py", delete=False
         )
         atexit.register(os.remove, self.tempfile.name)
@@ -503,6 +510,7 @@ def init_backend_registration() -> None:
     from .cuda_combined_scheduling import CUDACombinedScheduling
     from .halide import HalideScheduling
     from .mps import MetalScheduling
+    from .pallas import PallasScheduling
     from .python_wrapper_mtia import PythonWrapperMtia
     from .triton import TritonScheduling
     from .wrapper import PythonWrapperCodegen
@@ -513,6 +521,7 @@ def init_backend_registration() -> None:
             "cpp": CppScheduling,
             "halide": HalideScheduling,
             "triton": TritonScheduling,
+            "pallas": PallasScheduling,
         }
         register_backend_for_device(
             "cpu",
@@ -529,6 +538,7 @@ def init_backend_registration() -> None:
         cuda_backends = {
             "triton": CUDACombinedScheduling,
             "halide": HalideScheduling,
+            "pallas": PallasScheduling,
         }
         register_backend_for_device(
             "cuda",
@@ -712,11 +722,20 @@ def check_shape(
 ) -> None:
     backend = get_current_backend()
     assert shape is not None
-    if config.test_configs.runtime_triton_dtype_assert and backend == "triton":
+    if config.test_configs.runtime_triton_shape_assert and backend == "triton":
         shape_str = (
             ", ".join(str(d) for d in shape) if len(shape) != 1 else f"{shape[0]},"
         )
         buffer.writeline(f"tl.static_assert({var}.shape == ({shape_str}))")
+
+
+def check_nan(buffer: IndentedBuffer, var: CSEVariableType) -> None:
+    backend = get_current_backend()
+    if backend == "triton":
+        msg = "NaN or Inf found"
+        buffer.writeline(
+            f"tl.device_assert(({var} == {var}) & ({var} != float('inf')) & ({var} != float('-inf')), '{msg}')"
+        )
 
 
 class DataTypePropagation:
@@ -763,7 +782,7 @@ class DataTypePropagation:
             # we can infer output node if it only have 1 arg
             return None
 
-        if node.target == operator.getitem:
+        if node.target is operator.getitem:
             node_arg = node.args[0]
             assert isinstance(node_arg, torch.fx.Node), type(node_arg)
             return self.deduce_node_dtype(node_arg)
@@ -898,6 +917,11 @@ class OpDecompositions:
         return ops.add(ops.mul(x, y), z)
 
     @staticmethod
+    def mul_rn(x: OpVarT, y: OpVarT) -> OpVarT:
+        # for backends that don't override this, just use regular mul
+        return ops.mul(x, y)
+
+    @staticmethod
     def floor_to_int(a: OpVarT, dtype: torch.dtype) -> OpVarT:
         return ops.to_dtype(ops.floor(a), dtype)
 
@@ -941,6 +965,7 @@ def _all_in_parens(string: str) -> bool:
     return True
 
 
+# pyrefly: ignore [inconsistent-inheritance]
 class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
     @staticmethod
     def paren(string: OpVarT) -> OpVarT:
@@ -950,6 +975,7 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
             or _all_in_parens(string)
         ):
             # don't put extra parens for strings that are already wrapped in parens
+
             return string
         return f"({string})"
 
@@ -1215,8 +1241,26 @@ pointwise_overrides_data: dict[str, OverridesData] = dict(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp=lambda x, y, z: f"std::fma({x}, {y}, {z})",
         cppvec=lambda x, y, z: f"fmadd({x}, {y}, {z})",
-        triton=lambda x, y, z: f"libdevice.fma({x}, {y}, {z})",
+        # NOTE: We use tl.fma instead of libdevice.fma because libdevice.fma
+        # has Flush-To-Zero (FTZ) behavior for subnormal values, which causes
+        # numerical differences compared to eager CUDA execution. tl.fma
+        # preserves subnormals and matches eager's FMA precision.
+        triton=lambda x, y, z: f"tl.fma({x}, {y}, {z})",
         name="fma",
+    ),
+    # mul_rn: Multiplication with round-to-nearest. This prevents Triton's
+    # compiler from fusing the multiplication with subsequent operations,
+    # which is needed to match eager's rounding behavior in operations like
+    # addcmul where the product must be rounded before use.
+    # Note: libdevice.mul_rn is not supported on ROCm, so we fall back to
+    # regular multiplication there.
+    mul_rn=OverridesData(
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+        cpp=lambda x, y: f"({x}) * ({y})",  # C++ doesn't need special handling
+        triton=lambda x, y: f"({x}) * ({y})"
+        if torch.version.hip
+        else f"libdevice.mul_rn({x}, {y})",
+        name="mul_rn",
     ),
     # erfinv, exp2, expit, gammaln
     igamma=OverridesData(
@@ -1555,9 +1599,11 @@ class KernelArgs:
             self.inplace_buffers[input_name] = buf
             self.inplace_buffers[output_name] = buf
 
-    def workspace(self, nbytes: sympy.Expr, zero_fill: bool) -> tuple[str, int]:
+    def workspace(
+        self, nelem: sympy.Expr, zero_fill: bool, dtype: torch.dtype = torch.uint8
+    ) -> tuple[str, str, int]:
         """
-        Allocate or extend a workspace buffer of nbytes bytes.
+        Allocate or extend a workspace buffer of nelem elements.
 
         This function manages the allocation of a workspace buffer. It either creates
         a new WorkspaceArg or extends an existing one.
@@ -1570,31 +1616,35 @@ class KernelArgs:
         - A new argument "ws_ptr" will be present in the generated code.
 
         Args:
-            nbytes (sympy.Expr): The number of bytes to allocate.
+            nelem (sympy.Expr): The number of elements to allocate.
             zero_fill (bool): Whether to initialize the buffer to zero.
+            dtype (torch.dtype): the dtype of the workspace tensor
 
         Returns:
-            Tuple[str, int]: A tuple containing:
+            Tuple[str, str, int]: A tuple containing:
                 - "ws_ptr": A string identifier for the workspace pointer.
-                - offset: An integer representing the byte offset in the workspace.
+                - "workspace_{i}": agraph level unique identifier for
+                    the workspace tensor.
+                - offset: An integer representing the item offset in the workspace.
         """
         arg = WorkspaceArg(
-            count=nbytes,
+            count=nelem,
             zero_mode=WorkspaceZeroMode.from_bool(zero_fill),
             device=V.graph.get_current_device_or_throw(),
             outer_name=WorkspaceArg.unique_name(),
+            dtype=dtype,
         )
         for i, existing_arg in enumerate(self.workspace_args):
             if WorkspaceArg.can_join(existing_arg, arg):
                 offset = existing_arg.count
                 self.workspace_args[i] = WorkspaceArg.join(existing_arg, arg)
-                return existing_arg.inner_name, offset
+                return existing_arg.inner_name, existing_arg.outer_name, offset
             assert (
                 existing_arg.inner_name != arg.inner_name
                 and existing_arg.outer_name != arg.outer_name
             ), existing_arg
         self.workspace_args.append(arg)
-        return arg.inner_name, 0
+        return arg.inner_name, arg.outer_name, 0
 
     def semaphores(self, min_size: sympy.Expr) -> str:
         """
@@ -1707,9 +1757,15 @@ class KernelArgs:
             call_args.append(self.wrap_ptr_arg(outer, dtype))
             arg_types.append(f"{cpp_dtype}*")
         for outer, inner in self.sizevars.items():
-            arg_defs.append(f"const {INDEX_TYPE} {inner}")
+            if isinstance(outer, sympy.Symbol) and symbol_is_type(
+                outer, (SymT.UNBACKED_FLOAT)
+            ):
+                arg_defs.append(f"const float {inner}")
+                arg_types.append("const float")
+            else:
+                arg_defs.append(f"const {INDEX_TYPE} {inner}")
+                arg_types.append(f"const {INDEX_TYPE}")
             call_args.append(self.wrap_size_arg(outer))
-            arg_types.append(f"const {INDEX_TYPE}")
             if V.graph.wrapper_code:
                 V.graph.wrapper_code.ensure_size_computed(outer)
         assert not self.workspace_args, "Workspace not supported on CPU "
@@ -1736,7 +1792,9 @@ class KernelArgs:
                 )
             )
         for outer, inner in chain(
-            self.input_buffers.items(), self.output_buffers.items()
+            self.input_buffers.items(),
+            # pyrefly: ignore [bad-argument-type]
+            self.output_buffers.items(),
         ):
             if outer in self.inplace_buffers or isinstance(inner, RemovedArg):
                 continue
@@ -2047,12 +2105,14 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
     ) -> None:
         super().__init__()
         if increase_kernel_count:
+            # pyrefly: ignore [bad-assignment]
             metrics.generated_kernel_count += 1
         self.args = args or KernelArgs()
         self.loads = IndentedBuffer()
         self.compute = IndentedBuffer()
         self.stores = IndentedBuffer()
 
+        self.atomic_add_found = False
         self.num_load = 0
         self.num_store = 0
         self.num_reduction = 0
@@ -2113,8 +2173,25 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
             self.compute = compute
             self.stores = stores
             self.cse = cse
+            # pyrefly: ignore [unbound-name]
             if disallow_stores:
                 assert not sb, "unexpected store inside swap_buffers"
+
+    def emit_kernel_override(
+        self,
+        wrapper,
+        src_code: str,
+        kernel_name: str,
+        node_schedule,
+        kernel_path: str,
+        get_kernel_metadata,
+    ) -> bool:
+        """Override kernel emission. Return True if overridden, False to use default.
+
+        External template handlers (e.g. Helion) can override this method
+        to implement custom kernel emission to the wrapper.
+        """
+        return False
 
     def load(self, name: str, index: sympy.Expr) -> CSEVariable:
         raise NotImplementedError
@@ -2149,6 +2226,15 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         reduction_type: ReductionType,
         value: Union[CSEVariable, tuple[CSEVariable, ...]],
     ) -> Union[CSEVariable, tuple[CSEVariable, ...]]:
+        raise NotImplementedError
+
+    def partial_accumulate(
+        self,
+        name: str,
+        reduction_type: ReductionType,
+        value: CSEVariable,
+        extra_meta: dict[str, Any],
+    ) -> None:
         raise NotImplementedError
 
     def scan(
@@ -2314,6 +2400,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
                     SymT.UNBACKED_INT,
                     SymT.SIZE,
                     SymT.PRECOMPUTED_SIZE,
+                    SymT.UNBACKED_FLOAT,
                 ),
             )
         }
@@ -2355,7 +2442,7 @@ class KernelTemplate:
     """
     Base class for defining kernel templates.
 
-    Children classes: TritonTemplate, CUDATemplate
+    Children classes: TritonTemplate, CUTLASSTemplate
     """
 
     @staticmethod
@@ -2485,7 +2572,7 @@ class KernelTemplate:
             choices.append(self.generate(**kwargs))
             return None
         except NotImplementedError as e:
-            log.info(
+            log.info(  # noqa: G200
                 "Cannot Append Choice: %s. KernelTemplate type is %s",
                 e,
                 type(self),
@@ -2594,6 +2681,9 @@ class CSEProxy(DefaultHandler):
                 assert output_shape is not None
                 check_shape(V.kernel.compute, csevar, output_shape)
 
+            if config.runtime_triton_nan_asserts:
+                check_nan(V.kernel.compute, csevar)
+
             return csevar
 
         return pytree.tree_map(do_cse, value)
@@ -2605,12 +2695,15 @@ class CSEProxy(DefaultHandler):
         """
         from ..bounds import ValueRangeAnalysis
         from ..select_algorithm import TritonTemplateKernel
-        from .cuda.cuda_kernel import CUDATemplateKernel
+        from .cutlass.kernel import CUTLASSTemplateKernel
 
         if isinstance(V.kernel, TritonTemplateKernel):
             return ValueRanges.unknown()
 
-        if isinstance(V.kernel, CUDATemplateKernel):
+        if isinstance(V.kernel, CUTLASSTemplateKernel):
+            return ValueRanges.unknown()
+
+        if isinstance(V.interpreter, NullHandler):
             return ValueRanges.unknown()
 
         fx_node = V.interpreter.current_node
@@ -2739,6 +2832,10 @@ class CSEProxy(DefaultHandler):
 
     def device_assert_async(self, cond: CSEVariable, msg: str) -> None:
         self.kernel.device_assert_async(cond, msg)
+
+    # pyrefly: ignore [bad-override]
+    def partial_accumulate(self, *args: Any) -> None:
+        self.kernel.partial_accumulate(*args)
 
     def store_reduction(self, name: str, index: sympy.Expr, value: CSEVariable) -> None:
         self.kernel.store_buffer_names.add(name)

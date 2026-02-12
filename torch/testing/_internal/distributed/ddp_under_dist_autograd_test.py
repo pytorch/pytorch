@@ -165,7 +165,11 @@ class HybridModel(nn.Module):
             RemoteEM.forward, self.remote_em_rref, input.sparse_features
         )
         # The same size of mini batch.
-        assert sparse.shape[0] == input.dense_features.shape[0]
+        if sparse.shape[0] != input.dense_features.shape[0]:
+            raise AssertionError(
+                f"Expected sparse.shape[0] == input.dense_features.shape[0], "
+                f"got {sparse.shape[0]} != {input.dense_features.shape[0]}"
+            )
         dense = self.fc1(input.dense_features)
         x = torch.cat((dense, sparse), 1)
         gLogger.debug("Concatenated feature: %s", x)
@@ -238,7 +242,9 @@ class Trainer:
             sparse_microbatch = torch.split(sparse_features, 2)
             values_microbatch = torch.split(values, 2)
             batches = []
-            for d, s, v in zip(dense_microbatch, sparse_microbatch, values_microbatch):
+            for d, s, v in zip(
+                dense_microbatch, sparse_microbatch, values_microbatch, strict=True
+            ):
                 feature_set = FeatureSet(dense_features=d, sparse_features=s, values=v)
                 batches.append(feature_set)
 
@@ -297,7 +303,10 @@ def get_training_examples():
                     idx += 1
 
     # Split the examples among NUM_TRAINERS trainers
-    assert 0 == (n % NUM_TRAINERS)
+    if n % NUM_TRAINERS != 0:
+        raise AssertionError(
+            f"Expected n % NUM_TRAINERS == 0, got {n} % {NUM_TRAINERS} = {n % NUM_TRAINERS}"
+        )
     examples_per_trainer = int(n / NUM_TRAINERS)
     return [
         FeatureSet(
@@ -463,7 +472,7 @@ class DdpUnderDistAutogradTest(RpcAgentTestFixture):
                     )
 
         # Destroy process groups
-        for idx, trainer_rref in enumerate(trainer_rrefs):
+        for trainer_rref in trainer_rrefs:
             _remote_method_async(Trainer.destroy_pg, trainer_rref).wait()
 
         # Send shutdown signals.

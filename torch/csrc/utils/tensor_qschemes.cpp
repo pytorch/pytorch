@@ -2,11 +2,9 @@
 
 #include <c10/core/QScheme.h>
 #include <c10/util/irange.h>
-#include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/QScheme.h>
 
-#include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/object_ptr.h>
 
 namespace torch::utils {

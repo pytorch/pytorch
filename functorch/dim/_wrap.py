@@ -5,7 +5,7 @@ Python implementation of function wrapping functionality for functorch.dim.
 from __future__ import annotations
 
 import functools
-from typing import Any, Callable, Optional
+from typing import Any, Optional, TYPE_CHECKING
 
 import torch
 from torch.utils._pytree import tree_map
@@ -13,6 +13,10 @@ from torch.utils._pytree import tree_map
 from ._dim_entry import DimEntry
 from ._enable_all_layers import EnableAllLayers
 from ._tensor_info import TensorInfo
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 def handle_from_tensor(tensor: torch.Tensor) -> torch.Tensor:
@@ -110,7 +114,8 @@ def patched_dim_method(wrapper: WrappedOperator, *args: Any, **kwargs: Any) -> A
             return wrapper.orig(*args, **kwargs)
 
         with EnableAllLayers(info.levels) as guard:
-            assert info.batchedtensor is not None
+            if info.batchedtensor is None:
+                raise AssertionError("Expected batchedtensor to be non-None")
             guard.inplace_update_layers(info.batchedtensor, info.levels)
             new_args = list(args)
             new_args[0] = handle_from_tensor(info.batchedtensor)
@@ -182,7 +187,8 @@ def patched_dim_method(wrapper: WrappedOperator, *args: Any, **kwargs: Any) -> A
     # Update arguments
     new_args = list(args)
     new_kwargs = kwargs.copy()
-    assert info.tensor is not None
+    if info.tensor is None:
+        raise AssertionError("Expected tensor to be non-None")
     new_args[0] = handle_from_tensor(info.tensor)
 
     # Update dimension argument

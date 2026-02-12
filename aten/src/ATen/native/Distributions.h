@@ -1,12 +1,17 @@
 #pragma once
 
+#include <array>
 #include <ATen/native/Math.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/MathConstants.h>
 
-// ROCM hcc doesn't work well with using std:: in kernel functions
+// ROCm hip compiler doesn't work well with using std:: in kernel functions
+#if defined(__CUDA_ARCH__) || defined(__HIPCC__)
 #if defined(__CUDA_ARCH__)
 #include <c10/cuda/CUDAMathCompat.h>
+#elif defined(__HIPCC__)
+#include <c10/hip/HIPMathCompat.h>
+#endif
 #define compat_exp c10::cuda::compat::exp
 #define compat_ceil c10::cuda::compat::ceil
 #define compat_floor c10::cuda::compat::floor
@@ -16,17 +21,6 @@
 #define compat_tan c10::cuda::compat::tan
 #define compat_abs c10::cuda::compat::abs
 #define compat_log1p c10::cuda::compat::log1p
-#elif defined(__HIPCC__)
-#include <c10/hip/HIPMathCompat.h>
-#define compat_exp c10::hip::compat::exp
-#define compat_ceil c10::hip::compat::ceil
-#define compat_floor c10::hip::compat::floor
-#define compat_log c10::hip::compat::log
-#define compat_pow c10::hip::compat::pow
-#define compat_sqrt c10::hip::compat::sqrt
-#define compat_tan c10::hip::compat::tan
-#define compat_abs c10::hip::compat::abs
-#define compat_log1p c10::hip::compat::log1p
 #else
 #define compat_exp std::exp
 #define compat_ceil std::ceil
@@ -127,7 +121,7 @@ C10_DEVICE scalar_t sample_gamma(scalar_t alpha, BaseSampler<accscalar_t, unifor
 
 template<typename scalar_t>
 C10_DEVICE scalar_t stirling_approx_tail(scalar_t k) {
-  const static scalar_t kTailValues[] = {
+  constexpr static scalar_t kTailValues[] = {
     0.0810614667953272,
     0.0413406959554092,
     0.0276779256849983,
@@ -139,7 +133,7 @@ C10_DEVICE scalar_t stirling_approx_tail(scalar_t k) {
     0.00925546218271273,
     0.00833056343336287
   };
-  if (k <= 9) {
+  if (k < std::size(kTailValues)) {
     return kTailValues[static_cast<size_t>(k)];
   }
   scalar_t kp1sq = (k + 1) * (k + 1);

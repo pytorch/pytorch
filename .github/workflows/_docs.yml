@@ -96,13 +96,10 @@ jobs:
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
 
-      - name: configure aws credentials
-        if : ${{ inputs.aws-role-to-assume != '' }}
-        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
+      - name: Login to ECR
+        uses: ./.github/actions/ecr-login
         with:
-          role-to-assume: ${{ inputs.aws-role-to-assume }}
-          role-session-name: gha-linux-test
-          aws-region: us-east-1
+          aws-role-to-assume: ${{ inputs.aws-role-to-assume }}
 
       - name: Calculate docker image
         id: calculate-docker-image
@@ -206,6 +203,14 @@ jobs:
           s3-bucket: doc-previews
           path: cppdocs/
           s3-prefix: pytorch/pytorch/${{ github.event.pull_request.number }}/cppdocs
+
+      - name: Upload C++ Docs Preview (nightly dry-run)
+        if: ${{ !inputs.push && github.event_name != 'pull_request' && matrix.docs_type == 'cpp' && steps.build-docs.outcome == 'success' }}
+        run: |
+          # Use aws s3 cp --recursive for fast parallel uploads instead of uploading files one by one
+          aws s3 cp cppdocs/ s3://doc-previews/pytorch/pytorch/nightly-${{ github.sha }}/cppdocs --recursive --quiet
+          echo "C++ docs preview available at:"
+          echo "https://docs-preview.pytorch.org/pytorch/pytorch/nightly-${{ github.sha }}/cppdocs/index.html"
 
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main

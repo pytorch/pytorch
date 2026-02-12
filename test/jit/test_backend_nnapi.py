@@ -17,7 +17,7 @@ from torch.testing._internal.common_utils import (
 # hacky way to skip these tests in fbcode:
 # during test execution in fbcode, test_nnapi is available during test discovery,
 # but not during test execution. So we can't try-catch here, otherwise it'll think
-# it sees tests but then fails when it tries to actuall run them.
+# it sees tests but then fails when it tries to actually run them.
 if not IS_FBCODE:
     from test_nnapi import TestNNAPI
 

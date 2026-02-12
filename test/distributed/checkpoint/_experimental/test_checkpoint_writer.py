@@ -52,6 +52,7 @@ class TestCheckpointWriterConfig(TestCase):
 
 class TestCheckpointWriter(TestCase):
     def setUp(self):
+        super().setUp()
         # Create a temporary directory for test checkpoints
         self.temp_dir = tempfile.mkdtemp()
 

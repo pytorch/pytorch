@@ -1,7 +1,6 @@
 import re
 
 import torch
-from torch.utils.hipify.hipify_python import PYTORCH_MAP, PYTORCH_TRIE
 
 
 # It is not a good idea to directly apply hipify_torch to codegen, which will be vulnerable to cases like:
@@ -13,6 +12,12 @@ from torch.utils.hipify.hipify_python import PYTORCH_MAP, PYTORCH_TRIE
 
 def maybe_hipify_code_wrapper(source_codes: str, force_hipify: bool = False) -> str:
     if torch.version.hip is None and not force_hipify:
+        return source_codes
+
+    try:
+        from torch.utils.hipify.hipify_python import PYTORCH_MAP, PYTORCH_TRIE
+    except ImportError:
+        # hipify not available for non-AMD builds
         return source_codes
 
     def c2_repl(m: re.Match[str]) -> object:

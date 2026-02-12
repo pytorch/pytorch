@@ -3,32 +3,12 @@
 #include <c10/core/Backend.h>
 #include <c10/util/Exception.h>
 
-#include <cstdint>
-#include <ostream>
+#include <torch/headeronly/core/Layout.h>
 
 namespace c10 {
-enum class Layout : int8_t {
-  Strided,
-  Sparse,
-  SparseCsr,
-  Mkldnn,
-  SparseCsc,
-  SparseBsr,
-  SparseBsc,
-  Jagged,
-  NumOptions
-};
-
-constexpr auto kStrided = Layout::Strided;
-constexpr auto kSparse = Layout::Sparse;
-constexpr auto kSparseCsr = Layout::SparseCsr;
-constexpr auto kMkldnn = Layout::Mkldnn;
-constexpr auto kSparseCsc = Layout::SparseCsc;
-constexpr auto kSparseBsr = Layout::SparseBsr;
-constexpr auto kSparseBsc = Layout::SparseBsc;
-constexpr auto kJagged = Layout::Jagged;
 
 inline Layout layout_from_backend(Backend backend) {
+  C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-enum")
   switch (backend) {
     case Backend::SparseCPU:
     case Backend::SparseCUDA:
@@ -52,6 +32,7 @@ inline Layout layout_from_backend(Backend backend) {
     default:
       return Layout::Strided;
   }
+  C10_DIAGNOSTIC_POP()
 }
 
 inline std::ostream& operator<<(std::ostream& stream, at::Layout layout) {
@@ -72,6 +53,7 @@ inline std::ostream& operator<<(std::ostream& stream, at::Layout layout) {
       return stream << "Mkldnn";
     case at::kJagged:
       return stream << "Jagged";
+    case Layout::NumOptions:
     default:
       TORCH_CHECK(false, "Unknown layout");
   }

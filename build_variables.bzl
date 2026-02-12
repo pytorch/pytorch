@@ -482,6 +482,7 @@ inductor_core_resources = [
     "torch/csrc/inductor/aoti_torch/oss_proxy_executor.cpp",
     "torch/csrc/inductor/inductor_ops.cpp",
     "torch/csrc/jit/serialization/pickle.cpp",
+    "torch/csrc/shim_common.cpp",
 ]
 
 libtorch_core_sources = sorted(
@@ -503,6 +504,7 @@ libtorch_distributed_base_sources = [
     "torch/csrc/distributed/c10d/Functional.cpp",
     "torch/csrc/distributed/c10d/GlooDeviceFactory.cpp",
     "torch/csrc/distributed/c10d/GroupRegistry.cpp",
+    "torch/csrc/distributed/c10d/NanCheck.cpp",
     "torch/csrc/distributed/c10d/Ops.cpp",
     "torch/csrc/distributed/c10d/ParamCommsUtils.cpp",
     "torch/csrc/distributed/c10d/PrefixStore.cpp",
@@ -520,6 +522,7 @@ libtorch_distributed_base_sources = [
     "torch/csrc/distributed/c10d/comm.cpp",
     "torch/csrc/distributed/c10d/control_collectives/StoreCollectives.cpp",
     "torch/csrc/distributed/c10d/control_plane/Handlers.cpp",
+    "torch/csrc/distributed/c10d/control_plane/WaitCounterHandler.cpp",
     "torch/csrc/distributed/c10d/control_plane/WorkerServer.cpp",
     "torch/csrc/distributed/c10d/cuda/StreamBlock.cpp",
     "torch/csrc/distributed/c10d/debug.cpp",
@@ -639,9 +642,14 @@ libtorch_nativert_sources = [
     "torch/nativert/graph/passes/pass_manager/PassManager.cpp",
     "torch/nativert/kernels/KernelHandlerRegistry.cpp",
     "torch/nativert/kernels/TritonKernel.cpp",
+    "torch/nativert/executor/triton/TritonKernelManager.cpp",
     "torch/nativert/executor/triton/CpuTritonKernelManager.cpp",
     "torch/nativert/executor/AOTInductorDelegateExecutor.cpp",
     "torch/nativert/kernels/ETCallDelegateKernel.cpp",
+]
+
+libtorch_nativert_mtia_sources = [
+    "torch/nativert/executor/triton/fb/MtiaTritonKernelManager.cpp",
 ]
 
 libtorch_nativert_cuda_sources = [
@@ -730,6 +738,7 @@ libtorch_cuda_core_sources = [
     "torch/csrc/cuda/comm.cpp",
     "torch/csrc/cuda/memory_snapshot.cpp",
     "torch/csrc/cuda/CUDAPluggableAllocator.cpp",
+    "torch/csrc/cuda/shim_common.cpp",
     "torch/csrc/inductor/aoti_runner/model_container_runner_cuda.cpp",
     "torch/csrc/inductor/aoti_torch/shim_cuda.cpp",
     "torch/csrc/jit/codegen/fuser/cuda/fused_kernel.cpp",
@@ -765,6 +774,7 @@ libtorch_cuda_distributed_extra_sources = [
     "torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.cpp",
     "torch/csrc/distributed/c10d/symm_mem/CudaDMAConnectivity.cpp",
     "torch/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.cu",
+    "torch/csrc/distributed/c10d/symm_mem/nccl_extension.cu",
     "torch/csrc/distributed/c10d/symm_mem/intra_node_comm.cpp",
     "torch/csrc/distributed/c10d/symm_mem/intra_node_comm.cu",
     "torch/csrc/distributed/c10d/symm_mem/cuda_mem_pool.cpp",
@@ -783,6 +793,8 @@ libtorch_cuda_distributed_sources = libtorch_cuda_distributed_base_sources + lib
 libtorch_cuda_sources = libtorch_cuda_core_sources + libtorch_cuda_distributed_sources + [
     "torch/csrc/cuda/nccl.cpp",
 ] + libtorch_nativert_cuda_sources
+
+libtorch_mtia_sources = libtorch_nativert_mtia_sources
 
 torch_cpp_srcs = [
     "torch/csrc/api/src/cuda.cpp",  # this just forwards stuff, no real CUDA
@@ -855,6 +867,7 @@ libtorch_python_cuda_core_sources = [
     "torch/csrc/cuda/Stream.cpp",
     "torch/csrc/cuda/Graph.cpp",
     "torch/csrc/cuda/MemPool.cpp",
+    "torch/csrc/cuda/GreenContext.cpp",
     "torch/csrc/cuda/shared/cudart.cpp",
     "torch/csrc/cuda/shared/nvtx.cpp",
     "torch/csrc/cuda/utils.cpp",
@@ -871,6 +884,10 @@ libtorch_python_xpu_sources = [
     "torch/csrc/xpu/Event.cpp",
     "torch/csrc/xpu/Module.cpp",
     "torch/csrc/xpu/Stream.cpp",
+    "torch/csrc/xpu/XPUPluggableAllocator.cpp",
+    "torch/csrc/xpu/memory_snapshot.cpp",
+    "torch/csrc/xpu/MemPool.cpp",
+    "torch/csrc/xpu/Graph.cpp",
     "torch/csrc/inductor/aoti_runner/model_container_runner_xpu.cpp",
     "torch/csrc/inductor/aoti_torch/shim_xpu.cpp",
 ]
@@ -915,6 +932,7 @@ libtorch_python_core_sources = [
     "torch/csrc/autograd/python_torch_functions_manual.cpp",
     "torch/csrc/autograd/python_variable.cpp",
     "torch/csrc/autograd/python_variable_indexing.cpp",
+    "torch/csrc/distributed/python_placement.cpp",
     "torch/csrc/dynamo/python_compiled_autograd.cpp",
     "torch/csrc/dynamo/cache_entry.cpp",
     "torch/csrc/dynamo/cpp_shim.cpp",
@@ -926,6 +944,7 @@ libtorch_python_core_sources = [
     "torch/csrc/dynamo/guards.cpp",
     "torch/csrc/dynamo/utils.cpp",
     "torch/csrc/dynamo/init.cpp",
+    "torch/csrc/dynamo/stackref_bridge.c",
     "torch/csrc/functorch/init.cpp",
     "torch/csrc/fx/node.cpp",
     "torch/csrc/mps/Module.cpp",
@@ -938,7 +957,8 @@ libtorch_python_core_sources = [
     "torch/csrc/inductor/aoti_eager/kernel_holder.cpp",
     "torch/csrc/inductor/aoti_eager/kernel_meta_info.cpp",
     "torch/csrc/inductor/resize_storage_bytes.cpp",
-    "torch/csrc/inductor/static_cuda_launcher.cpp",
+    "torch/csrc/inductor/static_launcher/cuda.cpp",
+    "torch/csrc/inductor/static_launcher/xpu.cpp",
     "torch/csrc/jit/backends/backend_init.cpp",
     "torch/csrc/jit/python/init.cpp",
     "torch/csrc/jit/passes/onnx.cpp",
@@ -1021,6 +1041,7 @@ libtorch_python_core_sources = [
 libtorch_python_distributed_core_sources = [
     "torch/csrc/distributed/c10d/init.cpp",
     "torch/csrc/distributed/c10d/python_comm_hook.cpp",
+    "torch/csrc/distributed/c10d/python_callback_work.cpp",
 ]
 
 libtorch_python_distributed_sources = libtorch_python_distributed_core_sources + [
@@ -1072,6 +1093,7 @@ aten_cpu_non_globed_sources = [
     "aten/src/ATen/detail/MPSHooksInterface.cpp",
     "aten/src/ATen/detail/MAIAHooksInterface.cpp",
     "aten/src/ATen/detail/PrivateUse1HooksInterface.cpp",
+    "aten/src/ATen/detail/XLAHooksInterface.cpp",
     "aten/src/ATen/detail/XPUHooksInterface.cpp",
     "aten/src/ATen/detail/MTIAHooksInterface.cpp",
     "aten/src/ATen/detail/IPUHooksInterface.cpp",
@@ -1090,6 +1112,7 @@ aten_cpu_non_globed_headers = [
     "aten/src/ATen/detail/HPUHooksInterface.h",
     "aten/src/ATen/detail/MAIAHooksInterface.h",
     "aten/src/ATen/detail/PrivateUse1HooksInterface.h",
+    "aten/src/ATen/detail/XLAHooksInterface.h",
     "aten/src/ATen/detail/XPUHooksInterface.h",
     "aten/src/ATen/detail/MTIAHooksInterface.h",
     "aten/src/ATen/detail/IPUHooksInterface.h",

@@ -5,7 +5,6 @@
  * cd ~/pytorch && python torchgen/operator_versions/gen_mobile_upgraders.py
  */
 
-#include <caffe2/serialize/versions.h>
 #include <torch/csrc/jit/mobile/upgrader_mobile.h>
 
 namespace c10 {

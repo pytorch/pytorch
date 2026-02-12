@@ -38,8 +38,8 @@ import builtins
 import dis
 import time
 import traceback
-from collections.abc import Sequence
-from typing import Any, Callable, Optional, TextIO, Union
+from collections.abc import Callable, Sequence
+from typing import Any, Optional, TextIO, Union
 
 import torch
 from torch._dynamo.symbolic_convert import InstructionTranslatorBase
@@ -47,9 +47,8 @@ from torch._dynamo.variables.base import VariableTracker
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental.symbolic_shapes import free_symbols
 
-from .exc import unimplemented_v2
+from .exc import unimplemented
 from .variables import CellVariable
-from .variables.constant import ConstantVariable
 from .variables.tensor import SymNodeVariable
 
 
@@ -143,7 +142,7 @@ class ComptimeVar:
         """
         if isinstance(self.__variable, SymNodeVariable):
             self.__variable.evaluate_expr()
-        elif isinstance(self.__variable, ConstantVariable):
+        elif self.__variable.is_python_constant():
             # TODO: Maybe complain if this isn't a int/bool/float variable
             pass
         else:
@@ -193,7 +192,7 @@ class ComptimeContext:
         """
         Manually trigger a graph break
         """
-        unimplemented_v2(
+        unimplemented(
             gb_type="ComptimeContext graph break",
             context=msg,
             explanation=f"Manually triggered ComptimeContext graph break with message {msg}.",
@@ -231,6 +230,7 @@ class ComptimeContext:
 
     def __get_tx(self, stacklevel: int) -> Any:
         tx = self.__tx
+        # pyrefly: ignore [bad-assignment]
         for _ in range(stacklevel):
             tx = tx.parent  # type: ignore[assignment]
         return tx
