@@ -2771,8 +2771,6 @@ void lstsq_kernel(const Tensor& a, Tensor& b, Tensor& /*rank*/, Tensor& /*singul
         "Please rebuild with cuSOLVER.");
 #endif
   } else { // m >= n
-#if !AT_ROCM_ENABLED()
-    // On CUDA platform we use either cuBLAS or cuSOLVER here
     // the batched vs looped dispatch is implemented based on the following performance results
     // https://github.com/pytorch/pytorch/pull/54725#issuecomment-832234456
     if (m <= 256 && batchCount(b) >= std::max<int64_t>(2, m / 16)) {
@@ -2780,11 +2778,6 @@ void lstsq_kernel(const Tensor& a, Tensor& b, Tensor& /*rank*/, Tensor& /*singul
     } else {
       gels_looped(a, b, infos);
     }
-#else
-    // On ROCm platform we can only use MAGMA here
-    // If MAGMA is not available, an error will be thrown
-    gels_magma(a, b, infos);
-#endif // !AT_ROCM_ENABLED()
   }
 }
 
