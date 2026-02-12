@@ -855,7 +855,7 @@ def forward(self):
                 return x * 2
 
         main_model = TestModel()
-        opt_model = torch.compile(main_model, mode="max-autotune", dynamic=True, backend="eager")
+        opt_model = torch.compile(main_model, mode="max-autotune", dynamic=True)
 
         x1 = torch.rand(3, 5, 4, 8)
         x2 = torch.rand(1, 5, 4, 8)
@@ -898,7 +898,7 @@ def forward(self):
                 return x * 2
 
         main_model = TestModel()
-        opt_model = torch.compile(main_model, mode="max-autotune", dynamic=True, backend="eager")
+        opt_model = torch.compile(main_model, mode="max-autotune", dynamic=True)
 
         x1 = torch.rand(3, 5, 4, 8).to(memory_format=torch.channels_last)
         x2 = torch.rand(1, 5, 4, 8).to(memory_format=torch.channels_last)
