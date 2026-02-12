@@ -1816,11 +1816,11 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         # prioritization logic in sdp_utils.cpp:check_prefer_cudnn_attention.
         dprops = torch.cuda.get_device_properties(device)
         cudnn_version = (
-            torch.backends.cudnn.version()
-            if torch.backends.cudnn.is_available()
-            else 0
+            torch.backends.cudnn.version() if torch.backends.cudnn.is_available() else 0
         )
-        prefer_cudnn = cudnn_version > 91500 and dprops.major in (9, 10) and dprops.minor in (0, 3)
+        prefer_cudnn = (
+            cudnn_version > 91500 and dprops.major in (9, 10) and dprops.minor in (0, 3)
+        )
         if prefer_cudnn:
             sdpa_op = torch.ops.aten._scaled_dot_product_cudnn_attention.default
         else:
