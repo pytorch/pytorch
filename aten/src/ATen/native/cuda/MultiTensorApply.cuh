@@ -393,12 +393,13 @@ void multi_tensor_apply_for_fused_optimizer(
   }
 }
 
-template <int depth, typename T, typename... ArgTypes>
+template <typename T, typename... ArgTypes>
 void multi_tensor_apply_dim(
     std::vector<std::vector<at::Tensor>>& tensor_lists,
     int reduce_dim, // 0 = reduce rows, 1 = reduce cols
     T callable,
     ArgTypes... args) {
+  constexpr int depth = 2; // 1 input and 1 output tensor list.
   TORCH_CHECK(
       tensor_lists.size() == depth,
       "Number of tensor lists has to match the depth.");

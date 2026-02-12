@@ -673,34 +673,34 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
               if (reduce_dim == tensors_dim - 1) { // row norm
                 reduce_dim = 1;
                 if (p == static_cast<double>(1)) {
-                  multi_tensor_apply_dim<2>(
+                  multi_tensor_apply_dim(
                       tensor_lists,
                       reduce_dim,
                       LpNormDimFunctor<scalar_t, NormType::L1, out_t, 1>());
                 } else if (p == static_cast<double>(2)) {
-                  multi_tensor_apply_dim<2>(
+                  multi_tensor_apply_dim(
                       tensor_lists,
                       reduce_dim,
                       LpNormDimFunctor<scalar_t, NormType::L2, out_t, 1>());
                 } else {
-                  multi_tensor_apply_dim<2>(
+                  multi_tensor_apply_dim(
                       tensor_lists,
                       reduce_dim,
                       LpNormDimFunctor<scalar_t, NormType::LInf, out_t, 1>());
                 }
               } else { // col norm
                 if (p == static_cast<double>(1)) {
-                  multi_tensor_apply_dim<2>(
+                  multi_tensor_apply_dim(
                       tensor_lists,
                       reduce_dim,
                       LpNormDimFunctor<scalar_t, NormType::L1, out_t, 0>());
                 } else if (p == static_cast<double>(2)) {
-                  multi_tensor_apply_dim<2>(
+                  multi_tensor_apply_dim(
                       tensor_lists,
                       reduce_dim,
                       LpNormDimFunctor<scalar_t, NormType::L2, out_t, 0>());
                 } else {
-                  multi_tensor_apply_dim<2>(
+                  multi_tensor_apply_dim(
                       tensor_lists,
                       reduce_dim,
                       LpNormDimFunctor<scalar_t, NormType::LInf, out_t, 0>());
