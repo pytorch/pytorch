@@ -37,7 +37,7 @@ CUDA_ARCHES_CUDNN_VERSION = {
     "13.0": "9",
 }
 
-ROCM_ARCHES = ["7.0", "7.1"]
+ROCM_ARCHES = ["7.1", "7.2"]
 
 XPU_ARCHES = ["xpu"]
 
@@ -54,7 +54,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "cuda-bindings==12.9.4; platform_system == 'Linux' | "
         "nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | "
-        "nvidia-nccl-cu12==2.29.3; platform_system == 'Linux' | "
+        "nvidia-nccl-cu12==2.28.9; platform_system == 'Linux' | "
         "nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'"
     ),
     "12.8": (
@@ -62,7 +62,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "cuda-bindings==12.9.4; platform_system == 'Linux' | "
         "nvidia-cudnn-cu12==9.17.1.4; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | "
-        "nvidia-nccl-cu12==2.29.3; platform_system == 'Linux' | "
+        "nvidia-nccl-cu12==2.28.9; platform_system == 'Linux' | "
         "nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'"
     ),
     "12.9": (
@@ -70,7 +70,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "cuda-bindings==12.9.4; platform_system == 'Linux' | "
         "nvidia-cudnn-cu12==9.17.1.4; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | "
-        "nvidia-nccl-cu12==2.29.3; platform_system == 'Linux' | "
+        "nvidia-nccl-cu12==2.28.9; platform_system == 'Linux' | "
         "nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'"
     ),
     "13.0": (
@@ -78,7 +78,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "cuda-bindings==13.0.3; platform_system == 'Linux' | "
         "nvidia-cudnn-cu13==9.17.1.4; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu13==0.8.0; platform_system == 'Linux' | "
-        "nvidia-nccl-cu13==2.29.3; platform_system == 'Linux' | "
+        "nvidia-nccl-cu13==2.28.9; platform_system == 'Linux' | "
         "nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
     ),
     "xpu": (

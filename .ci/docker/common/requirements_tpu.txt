@@ -1,0 +1,15 @@
+# Base dependencies (optional, un-comment if you want to include base reqs automatically)
+# -r requirements.txt
+
+# JAX & TPU v7 artifact registries
+--extra-index-url https://us-python.pkg.dev/ml-oss-artifacts-published/jax/simple/ #@lint-ignore index does not have landing page
+--find-links https://storage.googleapis.com/jax-releases/libtpu_releases.html
+--pre
+
+# Pinned Versions
+jax==0.9.0
+jaxlib==0.9.0
+jaxtyping==0.3.2
+libtpu==0.0.34
+tpu-info==0.7.1
+setuptools==80.10.2
