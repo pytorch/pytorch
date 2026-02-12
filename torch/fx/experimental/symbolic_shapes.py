@@ -1405,6 +1405,7 @@ def compute_unbacked_bindings(
     symbol_to_path = _free_unbacked_symbols_with_path(
         example_value, (), shape_env=shape_env, pending=pending, simplify=False
     )
+
     pending -= ignorable
     if not peek and pending:
         extra = (
