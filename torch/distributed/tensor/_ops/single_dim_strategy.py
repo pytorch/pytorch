@@ -2,6 +2,7 @@
 import functools
 import logging
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field
 from typing import Any, cast, Optional, TypeAlias, TypeVar, Union
 
 import torch
@@ -54,6 +55,17 @@ _SingleDimStrategyFunc: TypeAlias = Callable[
 _ExpandedSingleDimStrategyFunc: TypeAlias = Callable[
     [OpOverload, ArgsType, KwargsType], _StrategyTypeT
 ]
+
+
+@dataclass
+class _SingleDimStrategyInfo:
+    func: _SingleDimStrategyFunc
+    allow_unbacked_sharding: bool | None = field(default=None)
+
+    # Delegate to func so this can be used interchangeably with a raw
+    # _SingleDimStrategyFunc (e.g. in tests that call strategy functions directly).
+    def __call__(self, *args, **kwargs):
+        return self.func(*args, **kwargs)
 
 
 def _insert_single_dim_replication_strategy(
@@ -171,7 +183,7 @@ def _get_num_tensor_inputs(op_schema: OpSchema) -> int:
 def _expand_single_dim_strategy_to_mesh(
     mesh: DeviceMesh,
     op_schema: OpSchema,
-    single_dim_strategy: _SingleDimStrategyFunc,
+    strategy_info: _SingleDimStrategyInfo,
     output_tensor_meta: TensorMeta | Sequence[TensorMeta | None] | None,
 ) -> _ExpandedSingleDimStrategyFunc:
     """
@@ -224,7 +236,7 @@ def _expand_single_dim_strategy_to_mesh(
             # structure here.  I'm following the convention in the current DTensor sharding strategies for now.
             # Inside expanded_strategy, we need to carefully align the OpStrategies / Specs from op_schema which are _not_
             # flattened, with the flat Placement list returned from single_dim strategy.
-            strategies_over_one_mesh_dim = single_dim_strategy(
+            strategies_over_one_mesh_dim = strategy_info.func(
                 op, args_schema, kwargs_schema
             )
             strategies_over_one_mesh_dim = _insert_single_dim_replication_strategy(
@@ -236,9 +248,6 @@ def _expand_single_dim_strategy_to_mesh(
                 )
             )
 
-            # Note: does not support `allow_unbacked_sharding` which is needed by matmul rules for some compile test
-            # currently, we should probably change that test though, since it seems wrong to me to allow sharding unbacked
-            # dims
             # Detect inplace ops by checking if the base op name ends with '_'
             op_name = op.name()
             base_name = op_name.split("::")[1].split(".")[0]
@@ -251,6 +260,7 @@ def _expand_single_dim_strategy_to_mesh(
                 output_tensor_meta=output_tensor_meta,
                 inplace_op=is_inplace,
                 input_index=num_outputs,
+                allow_unbacked_sharding=strategy_info.allow_unbacked_sharding,
             )
 
         return expanded_strategy
@@ -362,6 +372,7 @@ def _expand_single_dim_strategy_to_mesh(
 def register_single_dim_strategy(
     op: Union[torch._ops.OpOverload, list[torch._ops.OpOverload]],
     schema_info: Optional[RuntimeSchemaInfo] = None,
+    allow_unbacked_sharding: bool | None = None,
 ) -> Callable[[_SingleDimStrategyFunc], _SingleDimStrategyFunc]:
     """
     Registers a single_dim_strategy function for the given op.
@@ -395,9 +406,22 @@ def register_single_dim_strategy(
     arg_names_that_require_specializing_cache_strategy = [
         "memory_format",
     ]
-    return _get_registration_wrapper(
+    registration_wrapper = _get_registration_wrapper(
         DTensor._op_dispatcher.sharding_propagator.register_single_dim_op_strategy,
         op,
         schema_info,
         arg_names_that_require_specializing_cache_strategy,
     )
+
+    # Wrap impl in _SingleDimStrategyInfo here rather than adding a generic
+    # transform hook to _get_registration_wrapper, so that single-dim-strategy
+    # concerns stay in this module and the shared registration util stays simple.
+    def wrapper(impl):
+        info = _SingleDimStrategyInfo(
+            func=impl,
+            allow_unbacked_sharding=allow_unbacked_sharding,
+        )
+        registration_wrapper(info)
+        return impl
+
+    return wrapper

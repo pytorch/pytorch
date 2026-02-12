@@ -134,6 +134,7 @@ def create_fx_from_snodes(snodes: list[BaseSchedulerNode]) -> fx.Graph:
     outputs = []
     group: Any = None
     # create call_function node for each Buffer and Kernel
+    # pyrefly: ignore [bad-assignment]
     for snode in snodes:
         if snode.is_extern():
             node_type = "extern"
