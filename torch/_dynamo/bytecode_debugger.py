@@ -205,6 +205,12 @@ class _DebugContext:
                 default=0,
             )
 
+            # Pre-populate breakpoints from BREAKPOINT_MARKER instructions
+            programmatic_breakpoints: set[int] = set()
+            for i, inst in enumerate(instructions):
+                if inst.opname == "LOAD_CONST" and inst.argval is BREAKPOINT_MARKER:
+                    programmatic_breakpoints.add(i)
+
             self._code_info[code] = CodeInfo(
                 code=code,
                 instructions=instructions,
@@ -212,6 +218,7 @@ class _DebugContext:
                 offset_to_index=offset_to_index,
                 index_width=max(1, len(str(max_index))),
                 offset_width=max(1, len(str(max_offset))),
+                breakpoints=programmatic_breakpoints,
             )
         return self._code_info[code]
 
@@ -758,13 +765,7 @@ class _DebugContext:
                 arg_str = f" {inst.argval}" if inst.arg is not None else ""
                 print(f"Running [{idx}] {inst.opname}{arg_str}", flush=True)
 
-        # Check for BREAKPOINT_MARKER (inserted by PyCodegen)
         inst = state.offset_to_inst.get(offset)
-        hit_breakpoint_marker = (
-            inst is not None
-            and inst.opname == "LOAD_CONST"
-            and inst.argval is BREAKPOINT_MARKER
-        )
 
         # Check if current instruction has a breakpoint (by index)
         current_index = state.offset_to_index.get(offset, -1)
@@ -785,22 +786,23 @@ class _DebugContext:
         if state.step_count > 0:
             state.step_count -= 1
             # But still stop for breakpoints and return targets
-            if hit_breakpoint or hit_breakpoint_marker or hit_return_target:
+            if hit_breakpoint or hit_return_target:
                 state.step_count = 0  # Cancel remaining steps
             else:
                 return  # Continue without prompting
 
-        should_stop = (
-            state.step_mode
-            or hit_breakpoint
-            or hit_breakpoint_marker
-            or hit_return_target
-        )
+        should_stop = state.step_mode or hit_breakpoint or hit_return_target
         if should_stop:
             if hit_breakpoint:
-                print(f"Breakpoint hit at instruction {current_index}")
-            elif hit_breakpoint_marker:
-                print("Breakpoint hit (programmatic)")
+                is_programmatic = (
+                    inst is not None
+                    and inst.opname == "LOAD_CONST"
+                    and inst.argval is BREAKPOINT_MARKER
+                )
+                if is_programmatic:
+                    print("Breakpoint hit (programmatic)")
+                else:
+                    print(f"Breakpoint hit at instruction {current_index}")
             elif hit_return_target:
                 print(f"About to return from {code.co_name}")
             self._interactive_prompt(state)

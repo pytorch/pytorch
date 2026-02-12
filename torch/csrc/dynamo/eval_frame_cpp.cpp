@@ -74,10 +74,6 @@ void register_breakpoint_code(py::object code) {
   breakpoint_code_objects.insert((PyCodeObject*)code.ptr());
 }
 
-void clear_breakpoint_codes() {
-  breakpoint_code_objects.clear();
-}
-
 // NullStackValue singleton for representing NULL stack values
 NullStackValue& NullStackValue::get_singleton() {
   static NullStackValue instance;
@@ -396,8 +392,10 @@ PyObject* dynamo__custom_eval_frame(
     std::optional<DebugContextGuard> debug_guard;
     if (breakpoint_code_objects.count(cached_code) &&
         bytecode_debugger_callback_obj == nullptr) {
-      debug_guard.emplace(py::module_::import("torch._dynamo.bytecode_debugger")
-                              .attr("_DebugContext")());
+      auto ctx = py::module_::import("torch._dynamo.bytecode_debugger")
+                     .attr("_DebugContext")();
+      ctx.attr("_stop_at_new_code") = false;
+      debug_guard.emplace(std::move(ctx));
     }
     // Call bytecode debugger callback if set, to allow instruction-level
     // debugging of the Dynamo-generated code

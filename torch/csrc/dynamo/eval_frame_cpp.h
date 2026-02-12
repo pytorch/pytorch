@@ -44,7 +44,6 @@ py::object get_bytecode_debugger_callback();
 
 // Breakpoint code object tracking
 void register_breakpoint_code(py::object code);
-void clear_breakpoint_codes();
 
 // NullStackValue - sentinel class for representing NULL values on Python stack
 class NullStackValue {

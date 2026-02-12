@@ -1655,6 +1655,12 @@ class OutputGraph(OutputGraphCommon):
 
         self.add_output_instructions(prefix_insts)
 
+        if self._emit_debugger_breakpoint:
+            from .bytecode_transformation import create_breakpoint
+
+            self.add_output_instructions(create_breakpoint())
+            self._emit_debugger_breakpoint = False
+
         assert not (self.pregraph_bytecode and self.export), (
             "export does not support pregraph_bytecode"
         )
@@ -1745,7 +1751,6 @@ class OutputGraph(OutputGraphCommon):
             and not self.backward_state
             and not all_stack_locals_metas[-1].stack_null_idxes
             and not all_stack_locals_metas[-1].locals_null_keys
-            and not self._emit_debugger_breakpoint
         ):
             # optimization to generate better code in a common case
 
@@ -1875,7 +1880,6 @@ class OutputGraph(OutputGraphCommon):
                 # a graph break
                 self.run_compiler_collective()
             self.add_output_instructions(output + pass2.get_instructions())
-            self._emit_debugger_breakpoint = False
 
         # store all stack and locals for each frame
         # current state of the stack:
@@ -2069,11 +2073,6 @@ class OutputGraph(OutputGraphCommon):
         cg: PyCodegen,
         log_side_effects: bool,
     ) -> None:
-        if self._emit_debugger_breakpoint:
-            from .bytecode_transformation import create_breakpoint
-
-            cg.extend_output(create_breakpoint())
-
         # NOTE: `codegen_save_tempvars` must run first to update `source` fields
         # for variables with `AttributeMutationNew`, as they don't implement
         # `reconstruct` themselves.

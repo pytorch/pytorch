@@ -606,9 +606,8 @@ Stack (TOS at end):
             return x + 1
 
         def test_logic(sess, initial):
-            # Continue - should hit the programmatic breakpoint
-            output = yield "c"
-            self.assertIn("Breakpoint hit (programmatic)", output)
+            # Auto-breakpoint skips to the breakpoint without pausing at start
+            self.assertIn("Breakpoint hit (programmatic)", initial)
 
             # Verify mylist still unchanged (side effect not yet applied)
             output = yield "mylist"
@@ -1164,11 +1163,49 @@ Stack (TOS at end):
 
         def test_logic(sess, initial):
             self.assertIn("Entering Dynamo-generated code: fn", initial)
-            # Continue — should hit the programmatic breakpoint
-            output = yield "c"
-            self.assertIn("Breakpoint hit (programmatic)", output)
+            # Breakpoint is at the first instruction, so it fires immediately
+            self.assertIn("Breakpoint hit (programmatic)", initial)
             # No graph break: should NOT see a resume function
-            self.assertNotIn(TORCH_DYNAMO_RESUME_IN_PREFIX, output)
+            self.assertNotIn(TORCH_DYNAMO_RESUME_IN_PREFIX, initial)
+            # Continue to end
+            output = yield "c"
+            self.assertIn("returned:", output)
+
+        inp = torch.randn(3)
+        sess = InteractiveDebugSession(fn, (inp,), test_logic)
+        self.assertEqual(sess.result, inp + 3)
+
+    def test_programmatic_breakpoint_listed_and_clearable(self):
+        """Test that programmatic breakpoints appear in 'b' and can be cleared with 'cl'."""
+        from torch._dynamo.bytecode_debugger import breakpoint as bdb_breakpoint
+
+        @torch.compile(backend="eager")
+        def fn(x):
+            x = x + 1
+            bdb_breakpoint()
+            return x + 2
+
+        def test_logic(sess, initial):
+            self.assertIn("Entering Dynamo-generated code: fn", initial)
+            # Breakpoint is at the first instruction, so it fires immediately
+            self.assertIn("Breakpoint hit (programmatic)", initial)
+
+            # List breakpoints — should show the programmatic breakpoint
+            output = yield "b"
+            self.assertIn("Breakpoints:", output)
+            self.assertIn("LOAD_CONST <BREAKPOINT>", output)
+
+            # Extract the instruction index and clear it
+            bp_match = re.search(r"(\d+)\s+\[.*LOAD_CONST <BREAKPOINT>", output)
+            self.assertIsNotNone(bp_match)
+            bp_index = bp_match.group(1)
+            output = yield f"cl {bp_index}"
+            self.assertIn(f"Breakpoint cleared at instruction {bp_index}", output)
+
+            # Verify it's gone
+            output = yield "b"
+            self.assertIn("(none)", output)
+
             # Continue to end
             output = yield "c"
             self.assertIn("returned:", output)
@@ -1219,9 +1256,9 @@ Stack (TOS at end):
             return x + 2
 
         def test_logic(sess, initial):
-            output = yield "c"
-            self.assertIn("Breakpoint hit (programmatic)", output)
-            output = yield "c"
+            # Auto-breakpoint runs to the breakpoint without pausing at start
+            self.assertIn("Breakpoint hit (programmatic)", initial)
+            yield "c"
 
         inp = torch.randn(3)
         sess = InteractiveDebugSession(fn, (inp,), test_logic, use_debug=False)
@@ -1230,7 +1267,6 @@ Stack (TOS at end):
     def test_breakpoint_without_debug_context_after_graph_break(self):
         """Test auto-activate only fires for the resume function, not the first graph."""
         from torch._dynamo.bytecode_debugger import breakpoint as bdb_breakpoint
-        from torch._dynamo.resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
 
         @torch.compile(backend="eager")
         def fn(x):
@@ -1240,14 +1276,11 @@ Stack (TOS at end):
             return x + 2
 
         def test_logic(sess, initial):
-            # The first prompt should be from the resume function, not fn
-            self.assertIn(
-                "Entering Dynamo-generated code: " + TORCH_DYNAMO_RESUME_IN_PREFIX,
-                initial,
-            )
-            output = yield "c"
-            self.assertIn("Breakpoint hit (programmatic)", output)
-            output = yield "c"
+            # Auto-breakpoint skips to the breakpoint without pausing at start
+            self.assertIn("Breakpoint hit (programmatic)", initial)
+            # Should not have entered fn's first graph interactively
+            self.assertNotIn("Entering Dynamo-generated code: fn", initial)
+            yield "c"
 
         inp = torch.randn(3)
         sess = InteractiveDebugSession(fn, (inp,), test_logic, use_debug=False)
