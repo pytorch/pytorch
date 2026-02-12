@@ -1478,16 +1478,16 @@ void launch_gather_topk_kernel(
 
 #if defined(USE_ROCM) && HAS_WARP_MERGE_SORT()
 #define RUN_MB(INDEX_T, DIM)                                              \
-  if (should_use_warp_topk(sliceSize, k)) {                               \
+  if (false && should_use_warp_topk(sliceSize, k)) {                               \
     RUN_K(INDEX_T, DIM, warptopk::launch);                                \
-  } else if (should_use_multiblock(numInputSlices, sliceSize)) {          \
+  } else if (false && should_use_multiblock(numInputSlices, sliceSize)) {          \
     RUN_K(INDEX_T, DIM, mbtopk::launch);                                  \
   } else {                                                                \
     RUN_K(INDEX_T, DIM, sbtopk::launch);                                  \
   }
 #else
 #define RUN_MB(INDEX_T, DIM)                                              \
-  if (should_use_multiblock(numInputSlices, sliceSize)) {                 \
+  if (false && should_use_multiblock(numInputSlices, sliceSize)) {                 \
     RUN_K(INDEX_T, DIM, mbtopk::launch);                                  \
   } else {                                                                \
     RUN_K(INDEX_T, DIM, sbtopk::launch);                                  \
