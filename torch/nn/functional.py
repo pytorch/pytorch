@@ -2807,7 +2807,9 @@ def _verify_batch_size(size: list[int]) -> None:
     size_prods = size[0]
     for i in range(len(size) - 2):
         size_prods *= size[i + 2]
-    if size_prods == 1:
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    if guard_or_false(size_prods == 1):
         raise ValueError(
             f"Expected more than 1 value per channel when training, got input size {size}"
         )
@@ -2866,7 +2868,9 @@ def _verify_spatial_size(size: list[int]) -> None:
     size_prods = 1
     for i in range(2, len(size)):
         size_prods *= size[i]
-    if size_prods == 1:
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    if guard_or_false(size_prods == 1):
         raise ValueError(
             f"Expected more than 1 spatial element when training, got input size {size}"
         )
