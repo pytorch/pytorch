@@ -4189,19 +4189,7 @@ class ComboKernelGrid(GridExpr):
         if combo_meta["min_blocks"]:
             self.x_grid = self.maximum([self.x_grid, combo_meta["min_blocks"]])
         if ynumels:
-            self.prefix.extend(
-                [
-                    self.assign_tmp(
-                        "y_grid_raw_",
-                        self.ceildiv(self.maximum(ynumels), meta.get("YBLOCK")),
-                    ),
-                    self.assign_tmp(
-                        "y_grid_div_", self.ceildiv("y_grid_raw_", get_max_y_grid())
-                    ),
-                ]
-            )
-            self.y_grid = self.ceildiv("y_grid_raw_", "y_grid_div_")
-            self.z_grid = "y_grid_div_"
+            self.y_grid = self.ceildiv(self.maximum(ynumels), meta.get("YBLOCK"))
 
     def combo_x_grid(
         self,
