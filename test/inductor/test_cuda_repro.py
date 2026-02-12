@@ -2706,6 +2706,18 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
         self.assertEqual(compile_decimal, Decimal(0))
 
+    def test_lerp_fma_precision(self):
+        # Test that lerp uses FMA to match CUDA's native lerp behavior.
+        # CUDA's lerp uses fma(weight, end-start, start) internally.
+        def fn(start, end, weight):
+            return torch.lerp(start, end, weight)
+
+        start = torch.randn(1000, device="cuda", dtype=torch.float32)
+        end = torch.randn(1000, device="cuda", dtype=torch.float32)
+        # Use weight similar to Adam's (1 - beta1) = 0.1
+        weight = 0.1
+        self.common(fn, [start, end, weight])
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

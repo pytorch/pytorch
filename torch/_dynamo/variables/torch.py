@@ -1150,15 +1150,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             *args: VariableTracker,
             **kwargs: VariableTracker,
         ) -> VariableTracker | None:
-            if not config.enable_dynamo_decompositions:
-                return None
-
-            if len(args) == 3 and not isinstance(args[2], ListVariable) and not kwargs:
-                return tx.inline_user_function_return(
-                    VariableTracker.build(tx, polyfills.foreach_lerp_inplace),
-                    args,
-                    kwargs,
-                )
+            # Always skip decomposition - inductor has a lowering that uses FMA
+            # to match eager CUDA behavior
             return None
 
         @register(torch._foreach_pow)
