@@ -29,6 +29,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     parametrize,
     serialTest,
+    skipIfRocm,
     TEST_CUDA_MEM_LEAK_CHECK,
     TEST_WITH_ASAN,
 )
@@ -630,6 +631,7 @@ class TestInductorDynamic(TestCase):
         torch.compile(fullgraph=True)(f)(x, w).sum().backward()
         self.assertEqual(orig_w, w.grad)
 
+    @skipIfRocm  # regression in ROCm 7.2, XBLOCK should remain 64 (got 256)
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
     )
