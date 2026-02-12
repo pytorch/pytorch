@@ -22,6 +22,9 @@ from torch.utils._config_module import Config, install_config_module
 _save_config_ignore = [
     # callable not serializable
     "joint_custom_pass",
+    # callable configs with uuid() for caching, or raw callables
+    "activation_memory_budget_runtime_estimator",
+    "activation_memory_budget_solver",
 ]
 
 
@@ -89,8 +92,10 @@ autograd_cache_normalize_inputs = not is_fbcode()
 #   - When True: Raises RuntimeError on aliasing violations.
 #   - When False: Emits UserWarning on aliasing violations.
 #
-# Currently both are only enabled in CI, but eventually we should enable them everywhere.
-check_custom_op_aliasing = bool(os.getenv("CI"))
+# Deprecated: Custom ops returning aliased outputs is deprecated and will
+# become an error in PyTorch 2.12. Currently error_on_custom_op_aliasing
+# is True only in CI.
+check_custom_op_aliasing = True
 error_on_custom_op_aliasing = bool(os.getenv("CI"))
 
 

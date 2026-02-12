@@ -391,6 +391,7 @@ class SuperVariable(VariableTracker):
             # `__torch_function__`, just without the first `cls` argument:
             #  * (func, types, args, kwargs)
             func = args[0]
+            # pyrefly: ignore [implicit-any]
             tf_kwargs = {}
             tf_args = args[2].items  # type: ignore[attr-defined]
             # type: ignore[attr-defined]
@@ -1174,6 +1175,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
 
         # In eager mode, multiple calls to .save_for_backward() will overwrite previous calls.
         if len(self.saved_tensors.tensors) > 0:
+            # pyrefly: ignore [implicit-any]
             self.saved_tensors.tensors = []
         for arg in args:
             self.saved_tensors.tensors.append(arg)
@@ -1478,6 +1480,35 @@ class MethodWrapperVariable(VariableTracker):
                     "Make sure your call to type.__dict__['__annotations__'] only has "
                     "one positional argument (no keyword arguments).",
                     "Make sure the argument to type.__dict__['__annotations__'] is a constant "
+                    "(i.e. type). For example, `object`, `int`, `MyCustomClass`.",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
+        elif (self_obj is type.__dict__["__mro__"] and wrapper_name == "__get__") or (
+            self_obj is type.__dict__["__dict__"] and wrapper_name == "__get__"
+        ):
+            from .builder import SourcelessBuilder
+
+            if len(args) == 1 and not kwargs:
+                try:
+                    return SourcelessBuilder.create(
+                        tx, self.method_wrapper(args[0].as_python_constant())
+                    )
+                except AsPythonConstantNotImplementedError:
+                    pass
+
+            attr_name = (
+                "__mro__" if self_obj is type.__dict__["__mro__"] else "__dict__"
+            )
+            unimplemented(
+                gb_type=f"unsupported type.__dict__['{attr_name}'].__get__ call",
+                context=f"call_function {self}, args: {args}, kwargs: {kwargs}",
+                explanation=f"`torch.compile` only supports calling type.__dict__['{attr_name}'].__get__ "
+                "on a single constant argument (i.e. a type).",
+                hints=[
+                    f"Make sure your call to type.__dict__['{attr_name}'].__get__ only has "
+                    "one positional argument (no keyword arguments).",
+                    f"Make sure the argument to type.__dict__['{attr_name}'].__get__ is a constant "
                     "(i.e. type). For example, `object`, `int`, `MyCustomClass`.",
                     *graph_break_hints.SUPPORTABLE,
                 ],
@@ -2106,6 +2137,7 @@ class ConstantLikeVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        # pyrefly: ignore [implicit-any]
         cargs, ckwargs = [], {}
         try:
             # we only support constant propagation for methods

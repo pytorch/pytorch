@@ -17,6 +17,7 @@
 #include <ATen/ops/div.h>
 #include <ATen/ops/exponential_native.h>
 #include <ATen/ops/full_like.h>
+#include <ATen/ops/geometric_native.h>
 #include <ATen/ops/log_normal_native.h>
 #include <ATen/ops/multinomial_native.h>
 #include <ATen/ops/normal_native.h>
@@ -30,6 +31,11 @@
 
 namespace at::native {
 namespace mps {
+#ifndef PYTORCH_JIT_COMPILE_SHADERS
+static auto& lib = MetalShaderLibrary::getBundledLibrary();
+#else
+#include <ATen/native/mps/Distributions_metallib.h>
+#endif
 
 struct RandomCachedGraph : public MPSCachedGraph {
   RandomCachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
@@ -439,62 +445,70 @@ Tensor& exponential_mps_(Tensor& self, double lambda, std::optional<Generator> g
                                       random_op_block);
 }
 
-Tensor& log_normal_mps_(Tensor& self, double mean, double std, std::optional<Generator> gen) {
-  TORCH_CHECK(std > 0.0, "log_normal_ expects std > 0.0, but found std=", std);
+static Tensor& distribution_kernel_mps_impl(Tensor& self,
+                                            double param1,
+                                            double param2,
+                                            const std::string& kernel_name,
+                                            int64_t randoms_per_element,
+                                            std::optional<Generator> gen) {
+  if (self.numel() == 0) {
+    return self;
+  }
 
-  mps::RandomOpBlock random_op_block = ^RandomOpFn(cachedGraph, randomTensor) {
-    MPSGraph* mpsGraph = cachedGraph->graph();
-    return [mpsGraph exponentWithTensor:randomTensor name:nil];
-  };
+  using namespace mps;
 
-  return mps::random_mps_impl<double>(self,
-                                      mean,
-                                      std,
-                                      std::nullopt,
-                                      std::nullopt,
-                                      MPSGraphRandomDistributionNormal,
-                                      gen,
-                                      "log_normal_mps_:" + std::to_string(mean) + ":" + std::to_string(std),
-                                      random_op_block);
+  auto mps_gen = get_generator_or_default<MPSGeneratorImpl>(gen, at::mps::detail::getDefaultMPSGenerator());
+  auto stream = getCurrentMPSStream();
+  const auto needs_copy = !self.is_contiguous();
+  auto output = needs_copy ? at::empty_like(self, MemoryFormat::Contiguous) : self;
+
+  @autoreleasepool {
+    auto pso = lib.getPipelineStateForFunc(kernel_name + "_" + scalarToMetalTypeString(output));
+
+    int64_t seed;
+    int64_t base_offset;
+    {
+      // See Note [Acquire lock when using random generators]
+      std::lock_guard<std::mutex> lock(mps_gen->mutex_);
+      seed = static_cast<int64_t>(mps_gen->current_seed());
+      base_offset = static_cast<int64_t>(mps_gen->get_offset());
+      mps_gen->set_offset(base_offset + randoms_per_element * output.numel());
+    }
+
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+      @autoreleasepool {
+        auto computeEncoder = stream->commandEncoder();
+        [computeEncoder setComputePipelineState:pso];
+        mtl_setArgs(computeEncoder,
+                    output,
+                    std::array<float, 2>{static_cast<float>(param1), static_cast<float>(param2)},
+                    std::array<long, 2>{seed, base_offset});
+        mtl_dispatch1DJob(computeEncoder, pso, output.numel());
+      }
+    });
+  }
+
+  if (needs_copy) {
+    self.copy_(output);
+  }
+
+  return self;
 }
 
 Tensor& cauchy_mps_(Tensor& self, double median, double sigma, std::optional<Generator> gen) {
   TORCH_CHECK(sigma > 0.0, "cauchy_ expects sigma > 0.0, but found sigma=", sigma);
+  return distribution_kernel_mps_impl(self, median, sigma, "cauchy", 1, gen);
+}
 
-  mps::RandomOpBlock random_op_block = ^RandomOpFn(cachedGraph, randomTensor) {
-    auto mpsGraph = cachedGraph->graph();
-    // cauchy distwith inverse CDF: median + sigma * tan(pi * (U - 0.5))
-    const auto halfTensor = [mpsGraph constantWithScalar:0.5 dataType:randomTensor.dataType];
-    const auto piTensor = [mpsGraph constantWithScalar:M_PI dataType:randomTensor.dataType];
-    const auto medianTensor = [mpsGraph constantWithScalar:median dataType:randomTensor.dataType];
-    const auto sigmaTensor = [mpsGraph constantWithScalar:sigma dataType:randomTensor.dataType];
+Tensor& log_normal_mps_(Tensor& self, double mean, double std, std::optional<Generator> gen) {
+  TORCH_CHECK(std > 0.0, "log_normal_ expects std > 0.0, but found std=", std);
+  return distribution_kernel_mps_impl(self, mean, std, "log_normal", 2, gen);
+}
 
-    // (U - 0.5)
-    const auto shiftedTensor = [mpsGraph subtractionWithPrimaryTensor:randomTensor secondaryTensor:halfTensor name:nil];
-    // pi * (U - 0.5)
-    const auto scaledTensor = [mpsGraph multiplicationWithPrimaryTensor:piTensor
-                                                        secondaryTensor:shiftedTensor
-                                                                   name:nil];
-    // tan(pi * (U - 0.5))
-    const auto tanTensor = [mpsGraph tanWithTensor:scaledTensor name:nil];
-
-    // sigma * tan(pi * (U - 0.5))
-    const auto multipliedTensor = [mpsGraph multiplicationWithPrimaryTensor:sigmaTensor
-                                                            secondaryTensor:tanTensor
-                                                                       name:nil];
-    // median + sigma * tan(pi * (U - 0.5))
-    return [mpsGraph additionWithPrimaryTensor:medianTensor secondaryTensor:multipliedTensor name:nil];
-  };
-  auto eps = std::numeric_limits<float>::epsilon();
-  return mps::random_mps_impl<double>(self,
-                                      eps,
-                                      1.0 - eps,
-                                      std::nullopt,
-                                      std::nullopt,
-                                      MPSGraphRandomDistributionUniform,
-                                      gen,
-                                      "cauchy_mps_:" + std::to_string(median) + ":" + std::to_string(sigma),
-                                      random_op_block);
+Tensor& geometric_mps_(Tensor& self, double p, std::optional<Generator> gen) {
+  TORCH_CHECK(p > 0.0 && p < 1.0, "geometric_ expects p to be in (0, 1), but got p=", p);
+  double log_one_minus_p = std::log1p(-p);
+  return distribution_kernel_mps_impl(self, log_one_minus_p, 0.0, "geometric", 1, gen);
 }
 
 Tensor& randperm_out_mps(int64_t n, std::optional<Generator> generator, Tensor& result) {

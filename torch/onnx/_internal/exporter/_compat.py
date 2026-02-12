@@ -54,8 +54,7 @@ def export_compat(
     input_names: Sequence[str] | None = None,
     output_names: Sequence[str] | None = None,
     opset_version: int | None = onnx_constants.ONNX_DEFAULT_OPSET,
-    custom_translation_table: dict[Callable, Callable | Sequence[Callable]]
-    | None = None,
+    custom_translation_table: dict[Callable, Callable] | None = None,
     dynamic_axes: Mapping[str, Mapping[int, str]]
     | Mapping[str, Sequence[int]]
     | None = None,
@@ -151,14 +150,13 @@ def export_compat(
         opset_version=registry_opset_version
     )
     if custom_translation_table is not None:
-        for torch_op, onnx_ops in custom_translation_table.items():
+        for torch_op, onnx_op in custom_translation_table.items():
             # TODO(justinchuby): Support complex inputs with annotations
-            if not isinstance(onnx_ops, Sequence):
-                onnx_ops = (onnx_ops,)
-            for op in reversed(onnx_ops):
-                # register_op places the op in the front of all onnx variants,
-                # so we reverse the list to maintain the order of the custom ops provided
-                registry.register_op(torch_op, op, is_complex=False)
+            if isinstance(onnx_op, Sequence):
+                raise TypeError(
+                    "The value in custom_translation_table should be a single callable, not a sequence"
+                )
+            registry.register_op(torch_op, onnx_op, is_complex=False)
 
     onnx_program = _core.export(
         model,

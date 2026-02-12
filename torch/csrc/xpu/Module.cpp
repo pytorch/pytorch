@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/xpu/XPUContext.h>
 #include <ATen/xpu/XPUGeneratorImpl.h>
+#include <ATen/xpu/XPUGraphsUtils.h>
 #include <c10/xpu/XPUCachingAllocator.h>
 #include <c10/xpu/XPUFunctions.h>
 #include <torch/csrc/Module.h>
@@ -449,8 +450,8 @@ static void initXpuMethodBindings(PyObject* module) {
     c10::xpu::XPUCachingAllocator::setMemoryFraction(fraction, device);
   });
   m.def("_xpu_memorySnapshot", [](std::optional<c10::MempoolId_t> mempool_id) {
-    using c10::xpu::XPUCachingAllocator::BlockInfo;
-    using c10::xpu::XPUCachingAllocator::SegmentInfo;
+    using c10::CachingDeviceAllocator::BlockInfo;
+    using c10::CachingDeviceAllocator::SegmentInfo;
 
     py::str device_s = "device";
     py::str address_s = "address";
@@ -499,7 +500,7 @@ static void initXpuMethodBindings(PyObject* module) {
       segmentDict[requested_size_s] = segmentInfo.requested_size;
       // To ensure Python objects can be easily pickled, we represent the stream
       // as an integer rather than as a Stream object.
-      segmentDict[stream_s] = reinterpret_cast<uint64_t>(segmentInfo.queue);
+      segmentDict[stream_s] = reinterpret_cast<uint64_t>(segmentInfo.stream);
       segmentDict[segment_type_s] = (segmentInfo.is_large ? large_s : small_s);
       segmentDict[segment_pool_id] = segmentInfo.owner_private_pool_id;
       segmentDict[is_expandable_s] = segmentInfo.is_expandable;
@@ -547,7 +548,7 @@ static void initXpuMethodBindings(PyObject* module) {
     py::str oom_s = "oom";
     py::str device_free_s = "device_free";
 
-    using namespace c10::xpu::XPUCachingAllocator;
+    using c10::CachingDeviceAllocator::TraceEntry;
 
     const std::unordered_map<TraceEntry::Action, py::str> action_str_map = {
         {TraceEntry::ALLOC, alloc_s},
@@ -581,7 +582,7 @@ static void initXpuMethodBindings(PyObject* module) {
         trace_entry[TraceEntry::OOM == te.action_ ? device_free_s : addr_s] =
             te.addr_;
         trace_entry[size_s] = te.size_;
-        trace_entry[stream_s] = reinterpret_cast<uint64_t>(te.queue_);
+        trace_entry[stream_s] = reinterpret_cast<uint64_t>(te.stream_);
         trace_entry[time_us_s] = te.time_.t_;
         trace.append(trace_entry);
       }
@@ -666,6 +667,19 @@ static PyObject* THXPModule_initExtension(PyObject* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THXPModule_isCurrentStreamCapturing_wrap(
+    PyObject* self,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  if (at::xpu::currentStreamCaptureStatus() ==
+      at::xpu::CaptureStatus::Executing) {
+    Py_RETURN_FALSE;
+  } else {
+    Py_RETURN_TRUE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
 // NOLINTNEXTLINE(*-c-arrays*, *-global-variables)
 static struct PyMethodDef _THXPModule_methods[] = {
     {"_xpu_init", THXPModule_initExtension, METH_NOARGS, nullptr},
@@ -689,6 +703,10 @@ static struct PyMethodDef _THXPModule_methods[] = {
     {"_xpu_getCurrentRawStream",
      THXPModule_getCurrentStream_raw,
      METH_O,
+     nullptr},
+    {"_xpu_isCurrentStreamCapturing",
+     THXPModule_isCurrentStreamCapturing_wrap,
+     METH_NOARGS,
      nullptr},
     {"_xpu_setStream",
      castPyCFunctionWithKeywords(THXPModule_setStream_wrap),
