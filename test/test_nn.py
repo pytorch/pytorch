@@ -149,10 +149,14 @@ class TestNN(NNTestCase):
 
     def test_requires_grad_(self):
         m = _create_basic_net()[-1]
-        assert len(list(m.buffers())) > 0, 'invalid test'
-        assert all(not b.requires_grad for b in m.buffers()) > 0, 'invalid test'
-        assert len(list(m.parameters())) > 0, 'invalid test'
-        assert all(p.requires_grad for p in m.parameters()) > 0, 'invalid test'
+        if len(list(m.buffers())) <= 0:
+            raise AssertionError('invalid test: expected buffers')
+        if not all(not b.requires_grad for b in m.buffers()):
+            raise AssertionError('invalid test: buffers should not require grad')
+        if len(list(m.parameters())) <= 0:
+            raise AssertionError('invalid test: expected parameters')
+        if not all(p.requires_grad for p in m.parameters()):
+            raise AssertionError('invalid test: parameters should require grad')
         for requires_grad in (False, True):
             self.assertIs(m.requires_grad_(requires_grad), m)
             for p in m.parameters():
@@ -505,6 +509,9 @@ class TestNN(NNTestCase):
         n = Net()
         s = nn.Sequential(n, n, n, n)
         self.assertEqual(list(s.modules()), [s, n, l])
+        # test the option to not remove duplicate module instances
+        self.assertEqual(list(s.modules(remove_duplicate=False)), [
+            s, n, l, l, n, l, l, n, l, l, n, l, l])
 
     def test_named_modules(self):
         class Net(nn.Module):
@@ -1349,8 +1356,10 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         # Unit test for set_default
         # 1. Ensure parameter is correctly inserted when
         #    the key is not present in `ParameterDict`
-        assert 'p11' not in parameter_dict
-        assert 'p11' not in parameters
+        if 'p11' in parameter_dict:
+            raise AssertionError("'p11' should not be in parameter_dict")
+        if 'p11' in parameters:
+            raise AssertionError("'p11' should not be in parameters")
         parameters['p11'] = Parameter(torch.randn(10, 10))
         p_setdefault = parameter_dict.setdefault('p11', parameters['p11'])
         self.assertIs(p_setdefault, parameters['p11'])
@@ -4343,7 +4352,11 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         inp = inp.cuda()
         # otherwise, subsequent warnings will be hidden, and further tests rely on them
         warnings.simplefilter("always")
-        self.assertEqual(m(inp)[0].cpu(), out_expected[0])
+        # Relax tolerances: non-contiguous weights cause cuDNN to use different
+        # algorithms, leading to small numerical differences vs CPU computation.
+        # Observed max: atol ~6.4e-5, rtol ~3.1e-3. Using 1.5x margin.
+        # See https://github.com/pytorch/pytorch/issues/163072
+        self.assertEqual(m(inp)[0].cpu(), out_expected[0], atol=1e-4, rtol=5e-3)
 
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     @set_default_dtype(torch.double)
@@ -5897,7 +5910,8 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         memory_format_cl = torch.channels_last if nd == 2 else torch.channels_last_3d
         grad_tensor_cl = grad_tensor.contiguous(memory_format=memory_format_cl)
 
-        assert theta.grad is None
+        if theta.grad is not None:
+            raise AssertionError("expected theta.grad to be None")
         grid.backward(grad_tensor_cl)
         theta_grad_cl = theta.grad.clone().contiguous()
 
@@ -5928,12 +5942,14 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
                     def get_grid(device='cpu', data=None):
                         if data is not None:
-                            assert list(data.shape) == grid_shape
+                            if list(data.shape) != grid_shape:
+                                raise AssertionError(f"data.shape mismatch: {list(data.shape)} != {grid_shape}")
                             data = data.permute(grid_dim_contig_order).to(device)
                         else:
                             data = torch.randn(grid_init_shape, device=device)
                         grid = data.permute(grid_fwd_permute)
-                        assert grid.permute(grid_dim_contig_order).is_contiguous()
+                        if not grid.permute(grid_dim_contig_order).is_contiguous():
+                            raise AssertionError("expected grid to be contiguous after permute")
                         return grid
 
                     input_cpu = torch.randn(C, N, IH, IW).transpose(0, 1).requires_grad_(input_requires_grad)
@@ -8139,6 +8155,18 @@ def _buildEquivalentAffineTransforms3d(device, input_size, output_size, angle_ra
 
 
 class TestNNDeviceType(NNTestCase):
+    def _get_mixed_dtypes(self, device):
+        """Get appropriate mixed dtype pair (param_dtype, input_dtype) for the device.
+        Returns lower precision for params and higher precision for input to test
+        mixed dtype handling without triggering unsupported dtype errors.
+        """
+        if self.device_type == 'mps':
+            # MPS doesn't support float64, use float16/float32 instead
+            return torch.float16, torch.float32
+        else:
+            # Other devices can handle float32 params with float64 input
+            return torch.float32, torch.float64
+
     def _test_InstanceNorm_general(self, cls, input, device, dtype=torch.float):
         # default case track_running_stats=False
         b, c = input.size(0), input.size(1)
@@ -8211,6 +8239,26 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqualTypeString(cudnn_output, input)
             self.assertEqual(cudnn_output, thnn_output, atol=1e-4, rtol=0)
             self.assertEqual(cudnn_input_grad, thnn_input_grad, atol=1e-3, rtol=0)
+
+    def test_InstanceNorm_cuda_mixed_running_stats_dtype(self, device):
+        if self.device_type != "cuda" or not TEST_CUDNN:
+            return
+
+        input = torch.empty(2, 3, 4, device=device, dtype=torch.half).random_(1, 10)
+        input.requires_grad_(True)
+
+        m = nn.InstanceNorm1d(input.size(1), affine=True, track_running_stats=True).to(
+            device, torch.half
+        )
+        m(input).sum().backward()
+
+        input.grad = None
+        m = m.float()
+        m.running_mean = m.running_mean.half()
+        m.running_var = m.running_var.half()
+        output = m(input)
+        output.sum().backward()
+        self.assertEqualTypeString(output, input)
 
     def _test_LayerNorm_general(self, device, dtype=torch.float):
         for i in range(2, 6):
@@ -8291,6 +8339,115 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(out_fp32.to(dtype=dtype), out_mix)
             self.assertEqual(x_fp32.grad.to(dtype=dtype), x_bf16.grad, atol=1e-1, rtol=1e-1)
             self.assertEqual(x_fp32.grad.to(dtype=dtype), x_mix.grad, atol=1e-1, rtol=1e-1)
+
+    def test_normalization_mixed_dtype(self, device):
+        """test InstanceNorm2d with mixed dtypes (Issue #139140)
+
+        verifies that InstanceNorm2d works correctly when input dtype differs
+        from layer parameter dtype for running_mean/running_var buffers.
+        """
+        # Get device-appropriate mixed dtypes
+        param_dtype, input_dtype = self._get_mixed_dtypes(device)
+
+        layer = torch.nn.InstanceNorm2d(
+            num_features=5,
+            track_running_stats=True,
+            affine=False,
+            dtype=param_dtype,
+            device=device
+        )
+
+        # store initial running stats
+        initial_running_mean = layer.running_mean.clone()
+        initial_running_var = layer.running_var.clone()
+
+        # create input with higher precision dtype than params
+        input_tensor = torch.randn(2, 5, 10, 10, dtype=input_dtype, device=device)
+
+        # forward pass in training mode
+        layer.train()
+        output = layer(input_tensor)
+
+        # verify output dtype
+        self.assertEqual(output.dtype, input_tensor.dtype,
+                         "Output dtype should match input dtype")
+        self.assertTrue(torch.isfinite(output).all(),
+                        "Output should not contain NaN or Inf")
+
+        # verify running stats are actually updated
+        running_mean_updated = not torch.allclose(layer.running_mean, initial_running_mean)
+        running_var_updated = not torch.allclose(layer.running_var, initial_running_var)
+
+        self.assertTrue(running_mean_updated, "Running mean should be updated")
+        self.assertTrue(running_var_updated, "Running var should be updated")
+
+        # verify running stats maintain their original dtype
+        self.assertEqual(layer.running_mean.dtype, param_dtype,
+                         f"Running mean should maintain {param_dtype} dtype")
+        self.assertEqual(layer.running_var.dtype, param_dtype,
+                         f"Running var should maintain {param_dtype} dtype")
+
+        # test eval mode uses tracked stats correctly
+        layer.eval()
+        output_eval = layer(input_tensor)
+        self.assertEqual(output_eval.dtype, input_tensor.dtype,
+                         "Output dtype should match input in eval mode")
+        self.assertTrue(torch.isfinite(output_eval).all(),
+                        "Eval mode output should not contain NaN or Inf")
+
+        # test multiple forward passes to verify stats accumulation
+        layer = torch.nn.InstanceNorm2d(5, track_running_stats=True, dtype=param_dtype, device=device)
+        layer.train()
+
+        running_means = []
+        for _ in range(3):
+            input_tensor = torch.randn(2, 5, 10, 10, dtype=input_dtype, device=device)
+            output = layer(input_tensor)
+            running_means.append(layer.running_mean.clone())
+
+        # verify running stats change across passes (exponential moving average)
+        self.assertFalse(torch.allclose(running_means[0], running_means[1]),
+                         "Running stats should change between forward passes")
+        self.assertFalse(torch.allclose(running_means[1], running_means[2]),
+                         "Running stats should continue changing across passes")
+
+    @skipIfMPS  # MPS batch_norm doesn't support mixed dtypes, crashes with LLVM error
+    def test_instancenorm_mixed_dtype_backward(self, device):
+        """test backward pass with mixed dtypes for InstanceNorm2d
+
+        verifies that gradients are computed correctly when input dtype differs
+        from layer parameter dtype.
+        """
+        # Get device-appropriate mixed dtypes
+        param_dtype, input_dtype = self._get_mixed_dtypes(device)
+
+        layer = torch.nn.InstanceNorm2d(3, affine=False, dtype=param_dtype, device=device)
+
+        # create input with higher precision dtype than params
+        input_tensor = torch.randn(2, 3, 4, 4, dtype=input_dtype, device=device, requires_grad=True)
+
+        # forward and backward pass
+        layer.train()
+        output = layer(input_tensor)
+        loss = output.sum()
+        loss.backward()
+
+        # verify input gradients
+        self.assertIsNotNone(input_tensor.grad, "Input gradient should be computed")
+        self.assertEqual(input_tensor.grad.dtype, input_dtype,
+                         "Input gradient should match input dtype")
+        self.assertTrue(torch.isfinite(input_tensor.grad).all(),
+                        "Input gradient should not contain NaN or Inf")
+
+        # test that affine=True with mixed dtype errors out (from batch_norm checks)
+        layer = torch.nn.InstanceNorm2d(3, affine=True, dtype=param_dtype, device=device)
+        input_tensor = torch.randn(2, 3, 4, 4, dtype=input_dtype, device=device)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "(mixed dtype|does not match|Expected weight to have type|Expected tensor for argument #1 'input')",
+        ):
+            output = layer(input_tensor)
 
     def _test_GroupNorm_general(self, device, dtype=torch.float):
         good_shape_g = {
@@ -8393,7 +8550,8 @@ class TestNNDeviceType(NNTestCase):
                 atol = 1e-2
                 rtol = 1.2e-1
             else:
-                assert dtype == torch.half
+                if dtype != torch.half:
+                    raise AssertionError(f"expected dtype torch.half, got {dtype}")
                 atol = 5e-3
                 rtol = 1.5e-2
             self.assertEqual(m_bf.weight.grad, m_f.weight.grad.to(dtype=dtype), atol=atol, rtol=rtol)
@@ -10922,7 +11080,7 @@ class TestNNDeviceType(NNTestCase):
     @largeTensorTest("64GB", "cpu")
     def test_warp_softmax_64bit_indexing(self, device, dtype):
         def run_test(*shape):
-            x = torch.randn(shape, device="cuda", dtype=torch.float16, requires_grad=True)
+            x = torch.randn(shape, device=device, dtype=torch.float16, requires_grad=True)
             y = F.log_softmax(x, dim=-1, dtype=dtype)
             y.backward(y)
             with torch.no_grad():
@@ -10998,7 +11156,8 @@ class TestNNDeviceType(NNTestCase):
 
         # Get a state dict for PyTorch 1.7 LSTM. Before PyTorch 1.8, proj_size
         # didn't exist.
-        assert model.proj_size == 0
+        if model.proj_size != 0:
+            raise AssertionError(f"expected proj_size == 0, got {model.proj_size}")
         state_dict = model.__dict__
         del state_dict['proj_size']
 
@@ -11365,8 +11524,10 @@ class TestNNDeviceType(NNTestCase):
                                        create_graph=True)[0]
         loss2 = der_out2.sum()
         loss2.backward(retain_graph=True)
-        assert torch.allclose(der_out1, der_out2)
-        assert torch.allclose(x1.grad, x2.grad)
+        if not torch.allclose(der_out1, der_out2):
+            raise AssertionError("der_out1 and der_out2 should be close")
+        if not torch.allclose(x1.grad, x2.grad):
+            raise AssertionError("x1.grad and x2.grad should be close")
 
     @onlyCUDA
     def test_upsamplingNearest1d_launch_config(self, device):
@@ -12433,7 +12594,6 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(grad_long, grad_byte)
 
     @onlyCUDA
-    @skipIfRocm
     @dtypes(torch.float16, torch.float32)
     def test_cross_entropy_loss_2d_out_of_bounds_class_index(self, device, dtype):
         # Test for issue #117532
@@ -12469,7 +12629,12 @@ class TestThatContainsCUDAAssert(TestCase):
 if __name__ == '__main__':
     run_tests()
         """)
-        self.assertIn('CUDA error: device-side assert triggered', stderr)
+        # CUDA says "device-side assert triggered"
+        # ROCm says "unspecified launch failure", or HSA_STATUS_ERROR_EXCEPTION
+        has_cuda_assert = 'CUDA error: device-side assert triggered' in stderr
+        has_hip_assert = 'launch failure' in stderr or 'HSA_STATUS_ERROR_EXCEPTION' in stderr
+        self.assertTrue(has_cuda_assert or has_hip_assert,
+                        f"Expected device assert error in stderr, got: {stderr}")
 
 
 
@@ -13286,7 +13451,8 @@ if __name__ == '__main__':
                                                batch_first=batch_first, device=device, dtype=dtype)
 
             if not training:
-                assert dropout == 0
+                if dropout != 0:
+                    raise AssertionError(f"expected dropout == 0 when not training, got {dropout}")
                 model = model.eval()
 
             # set constant weights of the model
@@ -13506,7 +13672,8 @@ if __name__ == '__main__':
             model = nn.TransformerEncoderLayer(d_model, nhead, dim_feedforward, dropout,
                                                activation, batch_first=batch_first, device=device, dtype=dtype)
             if not training:
-                assert dropout == 0
+                if dropout != 0:
+                    raise AssertionError(f"expected dropout == 0 when not training, got {dropout}")
                 model = model.eval()
 
             # set constant weights of the model
