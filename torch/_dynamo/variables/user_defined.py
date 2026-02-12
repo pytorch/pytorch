@@ -1359,7 +1359,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     # use `type(...)` to ignore instance attrs.
                     func_source = AttrSource(TypeSource(desc_source), "__set__")
                 desc_var = VariableTracker.build(tx, descriptor, desc_source)
-                func_var = VariableTracker.build(tx, setter, func_source)
+                func_var = VariableTracker.build(tx, setter, func_source, realize=True)
                 args = [desc_var, self, value]
                 return func_var.call_function(tx, args, {})
             # NOTE: else we assume the descriptor (if any) has a
@@ -1475,7 +1475,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 )
             assert self.source is not None
             func_src = AttrSource(self.source, "__func__")
-            func_var = VariableTracker.build(tx, func, func_src)
+            func_var = VariableTracker.build(tx, func, func_src, realize=True)
             obj_src = AttrSource(self.source, "__self__")
             obj_var = VariableTracker.build(tx, obj, obj_src)
             return func_var.call_function(tx, [obj_var] + args, kwargs)  # type: ignore[arg-type]
@@ -1692,7 +1692,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                         AttrSource(self.source, "__getattr__"), "__func__"
                     )
                     fn_vt = VariableTracker.build(
-                        tx, self._fiddle_buildable_getattr, source=new_source
+                        tx, self._fiddle_buildable_getattr, source=new_source, realize=True
                     )
                     out = fn_vt.call_function(
                         tx,
@@ -1761,7 +1761,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if self.source:
                 # Read the class attribute to reach the property
                 source = AttrSource(self.get_source_by_walking_mro(name), "fget")
-            fget_vt = VariableTracker.build(tx, subobj.fget, source=source)
+            fget_vt = VariableTracker.build(tx, subobj.fget, source=source, realize=True)
             return fget_vt.call_function(tx, [self], {})
         elif isinstance(subobj, _collections._tuplegetter):
             # namedtuple fields are represented by _tuplegetter, and here we
