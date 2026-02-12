@@ -119,7 +119,7 @@ class BaseListVariable(VariableTracker):
 
         if isinstance(index, slice):
             if index.step == 0:
-                msg = ConstantVariable.create("slice step cannot be zero")
+                msg = VariableTracker.build(tx, "slice step cannot be zero")
                 raise_observed_exception(ValueError, tx, args=[msg])
             # Set source to None because slicing a list gives a new local
             return self.clone(
@@ -204,7 +204,7 @@ class BaseListVariable(VariableTracker):
             if args[0].is_tensor():
                 value = get_fake_value(args[0].as_proxy().node, tx)
                 if value.constant is not None and value.constant.numel() == 1:
-                    value = variables.ConstantVariable.create(value.constant.item())
+                    value = VariableTracker.build(tx, value.constant.item())
                 else:
                     unimplemented(
                         gb_type="Indexing list with non-scalar tensor",
@@ -248,12 +248,14 @@ class BaseListVariable(VariableTracker):
                 const_args = [arg.as_python_constant() for arg in args]
                 const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
                 try:
-                    return ConstantVariable.create(
-                        items.index(*const_args, **const_kwargs)
+                    return VariableTracker.build(
+                        tx, items.index(*const_args, **const_kwargs)
                     )
                 except ValueError:
                     raise_observed_exception(
-                        ValueError, tx, args=[ConstantVariable.create("tuple.index()")]
+                        ValueError,
+                        tx,
+                        args=[VariableTracker.build(tx, "tuple.index()")],
                     )
             except AsPythonConstantNotImplementedError:
                 return tx.inline_user_function_return(
@@ -286,8 +288,8 @@ class BaseListVariable(VariableTracker):
             if type(self) is not type(args[0]):
                 tp_name = self.python_type_name()
                 other = args[0].python_type_name()
-                msg_vt = ConstantVariable.create(
-                    f'can only concatenate {tp_name} (not "{other}") to {tp_name}'
+                msg_vt = VariableTracker.build(
+                    tx, f'can only concatenate {tp_name} (not "{other}") to {tp_name}'
                 )
                 raise_observed_exception(TypeError, tx, args=[msg_vt])
 
@@ -306,8 +308,9 @@ class BaseListVariable(VariableTracker):
                 )
 
             if not (args[0].is_python_constant() and args[0].python_type() is int):
-                msg_vt = ConstantVariable.create(
-                    f"can't multiply sequence by non-int type of '{args[0].python_type_name()}'"
+                msg_vt = VariableTracker.build(
+                    tx,
+                    f"can't multiply sequence by non-int type of '{args[0].python_type_name()}'",
                 )
                 raise_observed_exception(TypeError, tx, args=[msg_vt])
 
@@ -488,7 +491,7 @@ class RangeVariable(BaseListVariable):
                 args=[SourcelessBuilder.create(tx, "range object index out of range")],
             )
 
-        return variables.ConstantVariable.create(self.start() + (index * self.step()))
+        return VariableTracker.build(tx, self.start() + (index * self.step()))
 
     def apply_slice(self, slice: slice) -> "RangeVariable":
         (slice_start, slice_stop, slice_step) = self._get_slice_indices(
@@ -552,7 +555,7 @@ class RangeVariable(BaseListVariable):
         self, tx: "InstructionTranslator", name: str
     ) -> ConstantVariable:
         if self.python_type() is range:
-            return variables.ConstantVariable.create(name in range.__dict__)
+            return VariableTracker.build(tx, name in range.__dict__)
         return super().call_obj_hasattr(tx, name)
 
     def range_equals(self, other: "RangeVariable") -> bool:
@@ -610,7 +613,7 @@ class RangeVariable(BaseListVariable):
             length = self.range_length()
             if length > sys.maxsize:
                 raise_observed_exception(OverflowError, tx)
-            return ConstantVariable.create(self.range_length())
+            return VariableTracker.build(tx, self.range_length())
         elif name in ("count", "__contains__"):
             return SourcelessBuilder.create(tx, self.range_count(*args))
         elif name == "index":
@@ -618,11 +621,11 @@ class RangeVariable(BaseListVariable):
             start, stop, step = self.start(), self.stop(), self.step()
             in_range = (start <= x < stop) if step > 0 else (stop < x <= start)
             if in_range and ((x - start) % step) == 0:
-                return ConstantVariable.create((x - start) // step)
+                return VariableTracker.build(tx, (x - start) // step)
             raise_observed_exception(
                 ValueError,
                 tx,
-                args=[ConstantVariable.create(f"{x} is not in range")],
+                args=[VariableTracker.build(tx, f"{x} is not in range")],
             )
         elif name == "__getitem__":
             return self.getitem_const(tx, *args)
@@ -630,16 +633,15 @@ class RangeVariable(BaseListVariable):
             other = args[0]
             pt = other.python_type()
             if name not in ("__eq__", "__ne__"):
-                # ranges are only comparable to other ranges
                 msg = f"{name} not supported between instances of 'range' and '{pt}'"
                 raise_observed_exception(
                     TypeError,
                     tx,
-                    args=[ConstantVariable.create(msg)],
+                    args=[VariableTracker.build(tx, msg)],
                 )
 
             if pt is not range:
-                return ConstantVariable.create(NotImplemented)
+                return VariableTracker.build(tx, NotImplemented)
 
             if isinstance(other, RangeVariable):
                 cmp = self.range_equals(other)
@@ -715,7 +717,9 @@ class CommonListMethodsVariable(BaseListVariable):
                 )
 
             if not args[0].has_force_unpack_var_sequence(tx):
-                msg = ConstantVariable.create(f"{type(args[0])} object is not iterable")
+                msg = VariableTracker.build(
+                    tx, f"{type(args[0])} object is not iterable"
+                )
                 raise_observed_exception(TypeError, tx, args=[msg])
 
             (arg,) = args
@@ -750,13 +754,13 @@ class CommonListMethodsVariable(BaseListVariable):
                 )
 
             if len(self.items) == 0:
-                msg = ConstantVariable.create("pop from empty list")
+                msg = VariableTracker.build(tx, "pop from empty list")
                 raise_observed_exception(IndexError, tx, args=[msg])
 
             if len(args):
                 idx = args[0].as_python_constant()
                 if idx > len(self.items):
-                    msg = ConstantVariable.create("pop index out of range")
+                    msg = VariableTracker.build(tx, "pop index out of range")
                     raise_observed_exception(IndexError, tx, args=[msg])
             tx.output.side_effects.mutation(self)
             return self.items.pop(*[a.as_python_constant() for a in args])
@@ -836,11 +840,12 @@ class CommonListMethodsVariable(BaseListVariable):
                     raise_observed_exception(
                         type(exc),
                         tx,
-                        args=list(map(ConstantVariable.create, exc.args)),
+                        args=[VariableTracker.build(tx, a) for a in exc.args],
                     )
             else:
-                msg = ConstantVariable.create(
-                    f"list indices must be integers or slices, not {args[0].python_type_name()}"
+                msg = VariableTracker.build(
+                    tx,
+                    f"list indices must be integers or slices, not {args[0].python_type_name()}",
                 )
                 raise_observed_exception(TypeError, tx, args=[msg])
             return CONSTANT_VARIABLE_NONE
@@ -922,12 +927,12 @@ class ListVariable(CommonListMethodsVariable):
             tx.output.side_effects.mutation(self)
             if isinstance(key, SliceVariable):
                 if not value.has_force_unpack_var_sequence(tx):
-                    msg = ConstantVariable.create("can only assign an iterable")
+                    msg = VariableTracker.build(tx, "can only assign an iterable")
                     raise_observed_exception(TypeError, tx, args=[msg])
 
                 key_as_const = key.as_python_constant()
                 if key_as_const.step == 0:
-                    msg = ConstantVariable.create("slice step cannot be zero")
+                    msg = VariableTracker.build(tx, "slice step cannot be zero")
                     raise_observed_exception(ValueError, tx, args=[msg])
 
                 value_unpack = value.force_unpack_var_sequence(tx)
@@ -937,7 +942,7 @@ class ListVariable(CommonListMethodsVariable):
                     raise_observed_exception(
                         type(exc),
                         tx,
-                        args=list(map(ConstantVariable.create, exc.args)),
+                        args=[VariableTracker.build(tx, a) for a in exc.args],
                     )
             else:
                 if isinstance(key, SymNodeVariable):
@@ -950,7 +955,7 @@ class ListVariable(CommonListMethodsVariable):
                     self.items[key] = value
                 except (IndexError, TypeError) as e:
                     raise_observed_exception(
-                        type(e), tx, args=list(map(ConstantVariable.create, e.args))
+                        type(e), tx, args=[VariableTracker.build(tx, a) for a in e.args]
                     )
             return CONSTANT_VARIABLE_NONE
 
@@ -1032,7 +1037,7 @@ class ListVariable(CommonListMethodsVariable):
             if class_type is list:
                 return VariableTracker.build(tx, class_type, source=source)
             else:
-                return variables.UserDefinedClassVariable(class_type, source=source)
+                return VariableTracker.build(tx, class_type, source)
         return super().var_getattr(tx, name)
 
     def call_obj_hasattr(
@@ -1040,7 +1045,7 @@ class ListVariable(CommonListMethodsVariable):
     ) -> ConstantVariable:
         if self.python_type() is not list:
             return super().call_obj_hasattr(tx, name)
-        return variables.ConstantVariable.create(hasattr([], name))
+        return VariableTracker.build(tx, hasattr([], name))
 
     def is_python_hashable(self) -> bool:
         return False
@@ -1199,7 +1204,7 @@ class DequeVariable(CommonListMethodsVariable):
         self, tx: "InstructionTranslator", name: str
     ) -> ConstantVariable:
         if self.python_type() is collections.deque:
-            return variables.ConstantVariable.create(name in collections.deque.__dict__)
+            return VariableTracker.build(tx, name in collections.deque.__dict__)
         return super().call_obj_hasattr(tx, name)
 
 
@@ -1221,10 +1226,7 @@ class TupleVariable(BaseListVariable):
         if name == "__class__":
             source = AttrSource(self.source, name) if self.source else None
             class_type = self.python_type()
-            if class_type is tuple:
-                return VariableTracker.build(tx, class_type, source=source)
-            else:
-                return variables.UserDefinedClassVariable(class_type, source=source)
+            return VariableTracker.build(tx, class_type, source=source)
         return super().var_getattr(tx, name)
 
     def call_obj_hasattr(
@@ -1232,7 +1234,7 @@ class TupleVariable(BaseListVariable):
     ) -> ConstantVariable:
         if self.python_type() is not tuple:
             return super().call_obj_hasattr(tx, name)
-        return variables.ConstantVariable.create(hasattr((), name))
+        return VariableTracker.build(tx, hasattr((), name))
 
     def is_python_hashable(self) -> bool:
         return all(item.is_python_hashable() for item in self.items)
@@ -1343,7 +1345,7 @@ class SizeVariable(TupleVariable):
                 # Delay proxy calls  until we know it will be necessary
                 sym_sizes.append(v)
 
-        result = ConstantVariable.create(const_result)
+        result = VariableTracker.build(tx, const_result)
         if sym_sizes and const_result == 1:
             # Skip multiplying by 1
             result, *sym_sizes = sym_sizes
@@ -1416,7 +1418,7 @@ class SizeVariable(TupleVariable):
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
     ) -> ConstantVariable:
-        return variables.ConstantVariable.create(hasattr(torch.Size, name))
+        return VariableTracker.build(tx, hasattr(torch.Size, name))
 
 
 class NamedTupleVariable(UserDefinedTupleVariable):
@@ -1767,7 +1769,7 @@ class ListIteratorVariable(IteratorVariable):
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
     ) -> ConstantVariable:
-        return variables.ConstantVariable.create(hasattr(iter([]), name))
+        return VariableTracker.build(tx, hasattr(iter([]), name))
 
     def python_type(self) -> type:
         return type(iter([]))
@@ -1840,11 +1842,9 @@ class RangeIteratorVariable(IteratorVariable):
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
     ) -> ConstantVariable:
-        from .builder import SourcelessBuilder
-
         if self.python_type() is range_iterator:
             ri = iter(range(0))
-            return SourcelessBuilder.create(tx, hasattr(ri, name))
+            return VariableTracker.build(tx, hasattr(ri, name))
         return super().call_obj_hasattr(tx, name)
 
     def next_variable(self, tx: "InstructionTranslator") -> VariableTracker:
@@ -1854,7 +1854,7 @@ class RangeIteratorVariable(IteratorVariable):
         self.len -= 1
         current = self.start
         self.start += self.step
-        return ConstantVariable.create(current)
+        return VariableTracker.build(tx, current)
 
     def python_type(self) -> type:
         return range_iterator

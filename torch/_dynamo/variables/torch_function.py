@@ -57,7 +57,7 @@ from ..utils import (
     set_torch_function_mode_stack,
 )
 from .base import VariableTracker
-from .constant import CONSTANT_VARIABLE_NONE, ConstantVariable
+from .constant import CONSTANT_VARIABLE_NONE
 from .ctx_manager import GenericContextWrappingVariable
 from .functions import UserMethodVariable
 from .lazy import LazyVariableTracker
@@ -504,10 +504,9 @@ def get_torch_function_fn(
     # The underlying function could be a classmethod, staticmethod, regular
     # function or a function with C-implementation. It doesn't matter as long as
     # they satisfy the calling convention in `call_torch_function`.
-    from .builtin import BuiltinVariable
 
-    args = [vt, ConstantVariable("__torch_function__")]
-    func_vt = BuiltinVariable(getattr).call_function(tx, args, {})
+    args = [vt, VariableTracker.build(tx, "__torch_function__")]
+    func_vt = VariableTracker.build(tx, getattr).call_function(tx, args, {})
     return func_vt
 
 

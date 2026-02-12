@@ -35,7 +35,7 @@ from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource
 from ..utils import istype
 from .base import VariableTracker
-from .constant import CONSTANT_VARIABLE_NONE, ConstantVariable, EnumVariable
+from .constant import CONSTANT_VARIABLE_NONE, ConstantVariable
 
 
 if TYPE_CHECKING:
@@ -144,7 +144,7 @@ class WorldMetaClassVariable(DistributedVariable):
             assert self.source
             source = AttrSource(base=self.source, member="NON_GROUP_MEMBER")
             install_guard(source.make_guard(GuardBuilder.ID_MATCH))
-            return EnumVariable(self.value.NON_GROUP_MEMBER)
+            return VariableTracker.build(tx, self.value.NON_GROUP_MEMBER)
         return super().var_getattr(tx, name)
 
 
@@ -195,7 +195,7 @@ class PlacementVariable(DistributedVariable):
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if name == "dim":
-            return ConstantVariable.create(self.value.dim)
+            return VariableTracker.build(tx, self.value.dim)
         return super().var_getattr(tx, name)
 
     def call_method(
@@ -205,8 +205,6 @@ class PlacementVariable(DistributedVariable):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        from . import ConstantVariable
-
         # Placement types dynamo tracking only allows following methods
         # and __setattr__  is for case like `Shard(dim)` and methods.
         # Methods in the list must satisfy:
@@ -246,7 +244,7 @@ class PlacementVariable(DistributedVariable):
                 method(self.value, *args, **kwargs)
                 return self
             constant_val = method(self.value, *args, **kwargs)
-            return ConstantVariable.create(constant_val)
+            return VariableTracker.build(tx, constant_val)
 
         return super().call_method(tx, name, args, kwargs)  # type: ignore[arg-type]
 
@@ -291,9 +289,9 @@ class DeviceMeshVariable(DistributedVariable):
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if name == "ndim":
-            return ConstantVariable.create(self.value.ndim)
+            return VariableTracker.build(tx, self.value.ndim)
         if name == "device_type":
-            return ConstantVariable.create(self.value.device_type)
+            return VariableTracker.build(tx, self.value.device_type)
         if name == "mesh_dim_names":
             source = self.source
             if source:
@@ -311,16 +309,18 @@ class DeviceMeshVariable(DistributedVariable):
         if name == "size":
             const_args = [x.as_python_constant() for x in args]
             const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
-            return ConstantVariable.create(self.value.size(*const_args, **const_kwargs))
+            return VariableTracker.build(
+                tx, self.value.size(*const_args, **const_kwargs)
+            )
         if name == "get_coordinate":
-            return ConstantVariable.create(self.value.get_coordinate())
+            return VariableTracker.build(tx, self.value.get_coordinate())
         if name == "get_rank":
-            return ConstantVariable.create(self.value.get_rank())
+            return VariableTracker.build(tx, self.value.get_rank())
         if name == "get_local_rank":
             const_args = [x.as_python_constant() for x in args]
             const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
-            return ConstantVariable.create(
-                self.value.get_local_rank(*const_args, **const_kwargs)
+            return VariableTracker.build(
+                tx, self.value.get_local_rank(*const_args, **const_kwargs)
             )
         if name == "get_group":
             const_args = [x.as_python_constant() for x in args]
@@ -329,7 +329,7 @@ class DeviceMeshVariable(DistributedVariable):
                 self.value.get_group(*const_args, **const_kwargs)
             )
         if name == "_is_current_rank_part_of_mesh":
-            return ConstantVariable.create(self.value._is_current_rank_part_of_mesh())
+            return VariableTracker.build(tx, self.value._is_current_rank_part_of_mesh())
         if name == "_get_or_create_default_group":
             return ProcessGroupVariable(self.value._get_or_create_default_group())
         if name == "_flatten":
@@ -343,8 +343,8 @@ class DeviceMeshVariable(DistributedVariable):
         if name == "_sym_get_coordinate":
             const_args = [x.as_python_constant() for x in args]
             const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
-            return ConstantVariable.create(
-                self.value._sym_get_coordinate(*const_args, **const_kwargs)
+            return VariableTracker.build(
+                tx, self.value._sym_get_coordinate(*const_args, **const_kwargs)
             )
         return super().call_method(tx, name, args, kwargs)
 
@@ -379,17 +379,17 @@ class ProcessGroupVariable(DistributedVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if name == "rank":
-            return variables.ConstantVariable.create(self.value.rank())
+            return VariableTracker.build(tx, self.value.rank())
         if name == "size":
-            return variables.ConstantVariable.create(self.value.size())
+            return VariableTracker.build(tx, self.value.size())
         if name == "_get_backend_name":
-            return variables.ConstantVariable.create(self.value._get_backend_name())
+            return VariableTracker.build(tx, self.value._get_backend_name())
 
         return super().call_method(tx, name, args, kwargs)
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if name == "group_name":
-            return variables.ConstantVariable.create(self.value.group_name)
+            return VariableTracker.build(tx, self.value.group_name)
         if name in ["rank", "size"]:
             return variables.LambdaVariable(
                 lambda *args, **kwargs: self.call_method(tx, name, args, kwargs)

@@ -394,36 +394,36 @@ class TensorVariable(VariableTracker):
 
     def method_attr_ndim(self, tx: "InstructionTranslator") -> VariableTracker:
         if self.ndim is not None:
-            return ConstantVariable.create(self.ndim)
+            return VariableTracker.build(tx, self.ndim)
         else:
             return self.call_method(tx, "dim", [], {})
 
     def method_attr_dtype(self, tx: "InstructionTranslator") -> VariableTracker | None:
         if self.dtype is not None:
-            return ConstantVariable.create(self.dtype)
+            return VariableTracker.build(tx, self.dtype)
         return None
 
     def method_attr_device(self, tx: "InstructionTranslator") -> VariableTracker | None:
         if self.device is not None:
-            return ConstantVariable.create(self.device)
+            return VariableTracker.build(tx, self.device)
         return None
 
     def method_attr_layout(self, tx: "InstructionTranslator") -> VariableTracker | None:
         if self.layout is not None:
-            return ConstantVariable.create(self.layout)
+            return VariableTracker.build(tx, self.layout)
         return None
 
     def method_attr_is_cuda(
         self, tx: "InstructionTranslator"
     ) -> ConstantVariable | None:
         if self.device is not None:
-            return ConstantVariable.create(self.device.type == "cuda")
+            return VariableTracker.build(tx, self.device.type == "cuda")
         return None
 
     def method_attr_shape(self, tx: "InstructionTranslator") -> VariableTracker:
         if self.valid_size():
             sizes: list[VariableTracker] = [
-                variables.ConstantVariable.create(x) for x in self.size
+                VariableTracker.build(tx, x) for x in self.size
             ]
             return SizeVariable(sizes)
         else:
@@ -433,28 +433,28 @@ class TensorVariable(VariableTracker):
         self, tx: "InstructionTranslator"
     ) -> ConstantVariable | None:
         if self.requires_grad is not None:
-            return ConstantVariable.create(self.requires_grad)
+            return VariableTracker.build(tx, self.requires_grad)
         return None
 
     def method_attr_is_quantized(
         self, tx: "InstructionTranslator"
     ) -> ConstantVariable | None:
         if self.is_quantized is not None:
-            return ConstantVariable.create(self.is_quantized)
+            return VariableTracker.build(tx, self.is_quantized)
         return None
 
     def method_attr_is_sparse(
         self, tx: "InstructionTranslator"
     ) -> ConstantVariable | None:
         if self.is_sparse is not None:
-            return ConstantVariable.create(self.is_sparse)
+            return VariableTracker.build(tx, self.is_sparse)
         return None
 
     def method_attr_is_nested(
         self, tx: "InstructionTranslator"
     ) -> ConstantVariable | None:
         if self.is_nested is not None:
-            return ConstantVariable.create(self.is_nested)
+            return VariableTracker.build(tx, self.is_nested)
         return None
 
     def method_attr_retain_grad(self, tx: "InstructionTranslator") -> NoReturn:
@@ -494,7 +494,6 @@ class TensorVariable(VariableTracker):
         self, tx: "InstructionTranslator", name: str
     ) -> ConstantVariable:
         from . import GetAttrVariable
-        from .builtin import BuiltinVariable
 
         # TODO - This is not a good solution but solves an accuracy issue.
         # Today, var_getattr returns GetAttrVariable for both non-existent
@@ -504,8 +503,8 @@ class TensorVariable(VariableTracker):
             return CONSTANT_VARIABLE_TRUE
 
         try:
-            var = BuiltinVariable(getattr).call_function(
-                tx, [self, ConstantVariable(name)], {}
+            var = VariableTracker.build(tx, getattr).call_function(
+                tx, [self, VariableTracker.build(tx, name)], {}
             )
             # in the event that TensorVariable returns NotImplemented
             # BuiltinVariable.call_getattr returns GetAttrVariable
@@ -518,7 +517,7 @@ class TensorVariable(VariableTracker):
                 AttrSource(self.source, name).make_guard(GuardBuilder.HASATTR)
             )
 
-        return ConstantVariable(ret_val)
+        return VariableTracker.build(tx, ret_val)
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if self.is_strict_mode(tx):
@@ -538,7 +537,7 @@ class TensorVariable(VariableTracker):
                 )
 
         if name == "__class__":
-            return UserDefinedClassVariable(self.python_type())
+            return VariableTracker.build(tx, self.python_type())
 
         handler = getattr(self, f"method_attr_{name}", None)
         result = handler(tx) if handler is not None else None
@@ -646,7 +645,7 @@ class TensorVariable(VariableTracker):
 
         install_guard(self.source.make_guard(GuardBuilder.ID_MATCH))
         id_value = id(_input_associated_real_value)
-        return ConstantVariable.create(id_value)
+        return VariableTracker.build(tx, id_value)
 
     def has_unpack_var_sequence(self, tx: "InstructionTranslator") -> bool:
         return self.ndim > 0
@@ -669,7 +668,9 @@ class TensorVariable(VariableTracker):
         if self.valid_size():
             length = self.size[0]
         else:
-            dyn_length = self.call_method(tx, "size", [ConstantVariable.create(0)], {})
+            dyn_length = self.call_method(
+                tx, "size", [VariableTracker.build(tx, 0)], {}
+            )
             # SymNodeVariable for symbolic sizes, ConstantVariable for constants OR values produced through
             # symbolic_shapes, but that end up as int/sympy.Integer
             assert (
@@ -910,20 +911,20 @@ class TensorVariable(VariableTracker):
 
     def method_numel(self, tx: "InstructionTranslator") -> VariableTracker | None:
         if self.valid_size():
-            return ConstantVariable.create(product(self.size))
+            return VariableTracker.build(tx, product(self.size))
 
         # It might still be constant!  Consult the fake tensor and see
         if (fake := self.proxy.node.meta.get("example_value")) is not None:
             fake_r = fake.numel()
             if not has_free_symbols(fake_r):
-                return ConstantVariable.create(int(fake_r))
+                return VariableTracker.build(tx, int(fake_r))
         return None
 
     method_nelement = method_numel
 
     def method_dim(self, tx: "InstructionTranslator") -> VariableTracker | None:
         if self.ndim is not None:
-            return ConstantVariable.create(self.ndim)
+            return VariableTracker.build(tx, self.ndim)
         return None
 
     method_ndimension = method_dim
@@ -932,7 +933,7 @@ class TensorVariable(VariableTracker):
         self, tx: "InstructionTranslator"
     ) -> ConstantVariable | None:
         if self.dtype is not None:
-            return ConstantVariable.create(self.dtype.is_floating_point)
+            return VariableTracker.build(tx, self.dtype.is_floating_point)
         return None
 
     def method_is_inference(
@@ -949,12 +950,12 @@ class TensorVariable(VariableTracker):
                 ],
             )
         if (fake := self.proxy.node.meta.get("example_value")) is not None:
-            return ConstantVariable.create(fake.is_inference())
+            return VariableTracker.build(tx, fake.is_inference())
         return None
 
     def method_is_complex(self, tx: "InstructionTranslator") -> ConstantVariable | None:
         if self.dtype is not None:
-            return ConstantVariable.create(self.dtype.is_complex)
+            return VariableTracker.build(tx, self.dtype.is_complex)
         return None
 
     def method_is_contiguous(
@@ -967,10 +968,10 @@ class TensorVariable(VariableTracker):
         )
         if self.is_contiguous is not None:
             # pyrefly: ignore[not-iterable]
-            return ConstantVariable.create(memory_format_const in self.is_contiguous)
+            return VariableTracker.build(tx, memory_format_const in self.is_contiguous)
         elif (fake := self.proxy.node.meta.get("example_value")) is not None:
-            return ConstantVariable.create(
-                fake.is_contiguous(memory_format=memory_format_const)
+            return VariableTracker.build(
+                tx, fake.is_contiguous(memory_format=memory_format_const)
             )
         return None
 
@@ -990,10 +991,10 @@ class TensorVariable(VariableTracker):
                 k for k, v in tensortype_to_dtype.items() if self.dtype in v
             )
             if self.device.type == "cpu":
-                return ConstantVariable.create(f"torch.{tensortype.__name__}")
+                return VariableTracker.build(tx, f"torch.{tensortype.__name__}")
             else:
-                return ConstantVariable.create(
-                    f"torch.{self.device.type}.{tensortype.__name__}"
+                return VariableTracker.build(
+                    tx, f"torch.{self.device.type}.{tensortype.__name__}"
                 )
         elif (
             dtype is not None
@@ -1003,7 +1004,7 @@ class TensorVariable(VariableTracker):
             # torch.fx's tracer fails on these types, because it doesn't support arguments of torch.tensortype type.
             # So, we pass it in as a string (which is also supported, see above implementation for .type() with 0 args)
             tensor_type = dtype.as_python_constant()
-            tensor_type_const = ConstantVariable.create(fqn(tensor_type))
+            tensor_type_const = VariableTracker.build(tx, fqn(tensor_type))
 
             from .builder import wrap_fx_proxy
 
@@ -1048,11 +1049,11 @@ class TensorVariable(VariableTracker):
     def method_get_device(self, tx: "InstructionTranslator") -> VariableTracker | None:
         if isinstance(self.device, torch.device):
             index = self.device.index if self.device.type != "cpu" else -1
-            return ConstantVariable.create(index)
+            return VariableTracker.build(tx, index)
         return None
 
     def method_element_size(self, tx: "InstructionTranslator") -> VariableTracker:
-        return ConstantVariable.create(self.dtype.itemsize)
+        return VariableTracker.build(tx, self.dtype.itemsize)
 
     def method_numpy(
         self, tx: "InstructionTranslator", *, force: VariableTracker | bool = False
@@ -1308,7 +1309,7 @@ class TensorVariable(VariableTracker):
 
         grad_mode_var.exit(tx)
 
-        return VariableTracker.build(tx, None)
+        return CONSTANT_VARIABLE_NONE
 
     def method_data_ptr(
         self,
@@ -1355,7 +1356,7 @@ class TensorVariable(VariableTracker):
             fn, args = (  # type: ignore[assignment]
                 torch.select,
                 [
-                    variables.ConstantVariable.create(0),
+                    VariableTracker.build(tx, 0),
                     args[0],
                 ],
             )
@@ -1392,7 +1393,7 @@ class TensorVariable(VariableTracker):
         )
 
     def method___len__(self, tx: "InstructionTranslator") -> VariableTracker:
-        return self.call_method(tx, "size", [ConstantVariable.create(0)], {})
+        return self.call_method(tx, "size", [VariableTracker.build(tx, 0)], {})
 
     def method___iter__(self, tx: "InstructionTranslator") -> ListIteratorVariable:
         return ListIteratorVariable(
@@ -1618,8 +1619,7 @@ class TensorVariable(VariableTracker):
 
         grad_placements_vt = kwargs.get("grad_placements", CONSTANT_VARIABLE_NONE)
         if isinstance(grad_placements_vt, variables.UserDefinedObjectVariable):
-            # grad_placement is a sequence-like structure, iterate over the value
-            grad_placements_vt = variables.BuiltinVariable(tuple).call_function(
+            grad_placements_vt = VariableTracker.build(tx, tuple).call_function(
                 tx, [grad_placements_vt], {}
             )
 
@@ -1910,7 +1910,7 @@ class SymNodeVariable(VariableTracker):
 
         if isinstance(sym_num, (sympy.Integer, int, bool)):
             sym_num = int(sym_num) if isinstance(sym_num, sympy.Integer) else sym_num
-            return ConstantVariable.create(sym_num)
+            return VariableTracker.build(tx, sym_num)
 
         out = SymNodeVariable(proxy, sym_num, **options)
         if proxy.node.op != "placeholder":
@@ -2057,14 +2057,14 @@ class NumpyNdarrayVariable(TensorVariable):
         # NB: only ALWAYS specialized attributes can go here; notably,
         # size/shape not allowed!
         elif name in ("ndim", "itemsize"):
-            return ConstantVariable.create(getattr(example_ndarray, name))
+            return VariableTracker.build(tx, getattr(example_ndarray, name))
         elif name in ("shape", "stride"):
             if not has_free_symbols(r := getattr(example_ndarray, name)):
-                return ConstantVariable.create(tuple(int(r) for r in r))
+                return VariableTracker.build(tx, tuple(int(r) for r in r))
             return insert_into_graph()
         elif name == "size":
             if not has_free_symbols(r := example_ndarray.size):
-                return ConstantVariable.create(int(r))
+                return VariableTracker.build(tx, int(r))
             return insert_into_graph()
         elif name in ["base", "flags", "dtype"]:
             unimplemented(
@@ -2300,7 +2300,7 @@ class UntypedStorageVariable(VariableTracker):
             result = self.example_value.size()
             if not has_free_symbols(result):
                 # avoid creating a node in the graph
-                return ConstantVariable.create(int(result))
+                return VariableTracker.build(tx, int(result))
             else:
                 from ..external_utils import untyped_storage_size
                 from .builder import wrap_fx_proxy

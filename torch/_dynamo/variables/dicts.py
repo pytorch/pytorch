@@ -369,8 +369,8 @@ class ConstDictVariable(VariableTracker):
                     f"Debug representation of the key is {arg.debug_repr()!r}"
                 )
             except Exception:
-                error_message = ConstantVariable.create(
-                    f"Dict key lookup failed for {str(arg)}"
+                error_message = VariableTracker.build(
+                    tx, f"Dict key lookup failed for {str(arg)}"
                 )
             raise_observed_exception(KeyError, tx, args=[error_message])
         return self.items[key]
@@ -465,7 +465,7 @@ class ConstDictVariable(VariableTracker):
         # corresponding value VT. For __contains__, we add a DICT_CONTAINS
         # guard. But for all the other methods, we insert the DICT_KEYS_MATCH
         # guard to be conservative.
-        from . import BuiltinVariable, ConstantVariable
+        from . import BuiltinVariable
         from .builder import SourcelessBuilder
 
         Hashable = ConstDictVariable._HashableTracker
@@ -536,7 +536,7 @@ class ConstDictVariable(VariableTracker):
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             self.install_dict_keys_match_guard()
-            return ConstantVariable.create(len(self.items))
+            return VariableTracker.build(tx, len(self.items))
         elif name == "__setitem__" and self.is_mutable():
             arg_hashable = args and is_hashable(args[0])
             if not arg_hashable:
@@ -607,7 +607,7 @@ class ConstDictVariable(VariableTracker):
                 raise_args_mismatch(tx, name)
 
             if not self.items:
-                msg = ConstantVariable.create("popitem(): dictionary is empty")
+                msg = VariableTracker.build(tx, "popitem(): dictionary is empty")
                 raise_observed_exception(KeyError, tx, args=[msg])
 
             if self.user_cls is collections.OrderedDict and (
@@ -659,7 +659,7 @@ class ConstDictVariable(VariableTracker):
                 if has_kwargs:
                     # Handle kwargs
                     kwargs_hashable = {
-                        Hashable(ConstantVariable.create(k)): v
+                        Hashable(VariableTracker.build(tx, k)): v
                         for k, v in kwargs.items()
                     }
                     self.items.update(kwargs_hashable)
@@ -681,7 +681,7 @@ class ConstDictVariable(VariableTracker):
 
             self.install_dict_contains_guard(tx, args)
             contains = args[0] in self
-            return ConstantVariable.create(contains)
+            return VariableTracker.build(tx, contains)
         elif name == "setdefault" and self.is_mutable():
             if len(args) not in (1, 2):
                 raise_args_mismatch(
@@ -740,8 +740,9 @@ class ConstDictVariable(VariableTracker):
                 tx, [self, args[0]], {}
             )
         elif name == "__ne__":
-            return ConstantVariable.create(
-                not self.call_method(tx, "__eq__", args, kwargs).value  # type: ignore[attr-defined]
+            return VariableTracker.build(
+                tx,
+                not self.call_method(tx, "__eq__", args, kwargs).value,  # type: ignore[attr-defined]
             )
         elif name == "__or__":
             if len(args) != 1:
@@ -930,7 +931,7 @@ class MappingProxyVariable(VariableTracker):
         self, tx: "InstructionTranslator", name: str
     ) -> ConstantVariable:
         if self.python_type() is types.MappingProxyType:
-            return ConstantVariable.create(name in types.MappingProxyType.__dict__)
+            return VariableTracker.build(tx, name in types.MappingProxyType.__dict__)
         return super().call_obj_hasattr(tx, name)
 
 
@@ -1023,7 +1024,7 @@ class DefaultDictVariable(ConstDictVariable):
             if len(args) != 1:
                 raise_args_mismatch(tx, name, "1 args", f"{len(args)} args")
 
-            return variables.UserFunctionVariable(polyfills.dict___eq__).call_function(
+            return VariableTracker.build(tx, polyfills.dict___eq__).call_function(
                 tx, [self, args[0]], {}
             )
         else:
@@ -1124,7 +1125,7 @@ class SetVariable(ConstDictVariable):
             )
         except Exception as exc:
             raise_observed_exception(
-                type(exc), tx, args=list(map(ConstantVariable.create, exc.args))
+                type(exc), tx, args=[VariableTracker.build(tx, a) for a in exc.args]
             )
         # pyrefly: ignore[unbound-name]
         return VariableTracker.build(tx, res)
@@ -1186,7 +1187,7 @@ class SetVariable(ConstDictVariable):
                 result: VariableTracker = self.set_items.pop().vt  # type: ignore[assignment]
             except KeyError as e:
                 raise_observed_exception(
-                    KeyError, tx, args=list(map(ConstantVariable.create, e.args))
+                    KeyError, tx, args=[VariableTracker.build(tx, a) for a in e.args]
                 )
             # pyrefly: ignore[unbound-name]
             super().call_method(tx, name, [result], kwargs)
@@ -1320,16 +1321,18 @@ class SetVariable(ConstDictVariable):
                 "__sub__": "difference",
             }.get(name)
             if not isinstance(args[0], (SetVariable, variables.UserDefinedSetVariable)):
-                msg = ConstantVariable.create(
-                    f"unsupported operand type(s) for {name}: '{self.python_type_name()}' and '{args[0].python_type_name()}'"
+                msg = VariableTracker.build(
+                    tx,
+                    f"unsupported operand type(s) for {name}: '{self.python_type_name()}' and '{args[0].python_type_name()}'",
                 )
                 raise_observed_exception(TypeError, tx, args=[msg])
             assert m is not None
             return self.call_method(tx, m, args, kwargs)
         elif name in ("__iand__", "__ior__", "__ixor__", "__isub__"):
             if not isinstance(args[0], (SetVariable, variables.UserDefinedSetVariable)):
-                msg = ConstantVariable.create(
-                    f"unsupported operand type(s) for {name}: '{self.python_type_name()}' and '{args[0].python_type_name()}'"
+                msg = VariableTracker.build(
+                    tx,
+                    f"unsupported operand type(s) for {name}: '{self.python_type_name()}' and '{args[0].python_type_name()}'",
                 )
                 raise_observed_exception(TypeError, tx, args=[msg])
             m = {
@@ -1345,12 +1348,13 @@ class SetVariable(ConstDictVariable):
             if not isinstance(args[0], (SetVariable, variables.UserDefinedSetVariable)):
                 return CONSTANT_VARIABLE_FALSE
             r = self.call_method(tx, "symmetric_difference", args, kwargs)
-            return ConstantVariable.create(len(r.set_items) == 0)  # type: ignore[attr-defined]
+            return VariableTracker.build(tx, len(r.set_items) == 0)  # type: ignore[attr-defined]
         elif name in cmp_name_to_op_mapping:
             if not isinstance(args[0], (SetVariable, variables.UserDefinedSetVariable)):
-                return ConstantVariable.create(NotImplemented)
-            return ConstantVariable.create(
-                cmp_name_to_op_mapping[name](self.set_items, args[0].set_items)  # type: ignore[attr-defined]
+                return VariableTracker.build(tx, NotImplemented)
+            return VariableTracker.build(
+                tx,
+                cmp_name_to_op_mapping[name](self.set_items, args[0].set_items),  # type: ignore[attr-defined]
             )
         return super().call_method(tx, name, args, kwargs)
 
@@ -1643,7 +1647,7 @@ class DictViewVariable(VariableTracker):
                 self.view_items_vt, mutation_type=ValueMutationNew()
             )
         elif name == "__repr__":
-            return ConstantVariable.create(self.debug_repr())
+            return VariableTracker.build(tx, self.debug_repr())
         return super().call_method(tx, name, args, kwargs)
 
 
@@ -1697,9 +1701,10 @@ class DictKeysVariable(DictViewVariable):
             return SetVariable(r)
         if name in cmp_name_to_op_mapping:
             if not isinstance(args[0], (SetVariable, DictKeysVariable)):
-                return ConstantVariable.create(NotImplemented)
-            return ConstantVariable.create(
-                cmp_name_to_op_mapping[name](self.set_items, args[0].set_items)  # type: ignore[attr-defined]
+                return VariableTracker.build(tx, NotImplemented)
+            return VariableTracker.build(
+                tx,
+                cmp_name_to_op_mapping[name](self.set_items, args[0].set_items),  # type: ignore[attr-defined]
             )
         return super().call_method(tx, name, args, kwargs)
 
