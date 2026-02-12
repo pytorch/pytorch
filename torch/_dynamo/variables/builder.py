@@ -61,6 +61,7 @@ from torch._library.opaque_object import (
     is_opaque_reference_type,
     is_opaque_type,
     is_opaque_value_type,
+    should_hoist,
 )
 from torch._ops import HigherOrderOperator, OpOverload, OpOverloadPacket
 from torch._subclasses.fake_tensor import (
@@ -1612,7 +1613,7 @@ class VariableBuilder:
             fake_script_obj = torch._library.fake_class_registry.maybe_to_fake_obj(
                 self.tx.output.fake_mode, value
             )
-            if is_opaque_value_type(type(value)):
+            if is_opaque_value_type(type(value)) and not should_hoist(type(value)):
                 proxy = value
             else:
                 proxy = self.tx.output.root_tracer.create_graph_input(

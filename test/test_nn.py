@@ -8773,6 +8773,89 @@ class TestNNDeviceType(NNTestCase):
         # reduce memory usage
         self.assertEqual(inp.grad.sum(), inp_cpu.grad.sum())
 
+    def test_avg_pool2d_invalid_parameters(self, device):
+        """Test that avg_pool2d properly validates parameters and prevents integer overflow.
+
+        This tests the fix for issue #145077 where extremely large or negative values
+        could cause crashes or undefined behavior.
+        """
+        x = torch.randn(1, 2, 4, 4, device=device, dtype=torch.float32)
+
+        # Extremely large kernel_size (would overflow int)
+        with self.assertRaisesRegex(RuntimeError, r"integer out of range"):
+            torch.nn.functional.avg_pool2d(
+                x,
+                kernel_size=(9223372036854775807, 100),  # INT64_MAX
+                stride=1,
+                padding=0
+            )
+
+        # Negative stride (invalid)
+        with self.assertRaisesRegex(RuntimeError, r"integer out of range"):
+            torch.nn.functional.avg_pool2d(
+                x,
+                kernel_size=2,
+                stride=(-1, 2),  # Negative stride
+                padding=0
+            )
+
+        # Zero stride (invalid)
+        with self.assertRaisesRegex(RuntimeError, r"stride should not be zero"):
+            torch.nn.functional.avg_pool2d(
+                x,
+                kernel_size=2,
+                stride=0,  # Zero stride
+                padding=0
+            )
+
+        # Extremely large stride (would overflow int)
+        with self.assertRaisesRegex(RuntimeError, r"integer out of range"):
+            torch.nn.functional.avg_pool2d(
+                x,
+                kernel_size=2,
+                stride=(1, 3010182406857593769),  # Extremely large
+                padding=0
+            )
+
+        # Negative padding (invalid)
+        with self.assertRaisesRegex(RuntimeError, r"pad must be non-negative"):
+            torch.nn.functional.avg_pool2d(
+                x,
+                kernel_size=2,
+                stride=1,
+                padding=(-1, 0)  # Negative padding
+            )
+
+        # Extremely large padding (would overflow int)
+        with self.assertRaisesRegex(RuntimeError, r"integer out of range"):
+            torch.nn.functional.avg_pool2d(
+                x,
+                kernel_size=2,
+                stride=1,
+                padding=(9223372036854775807, 0)  # INT64_MAX
+            )
+
+        # Combined invalid parameters
+        with self.assertRaisesRegex(RuntimeError, r"integer out of range"):
+            torch.nn.functional.avg_pool2d(
+                x,
+                kernel_size=(9223372036854775807, 5868783964474102731),
+                stride=(-1, 3010182406857593769),
+                padding=(0,),
+                ceil_mode=True,
+                count_include_pad=True
+            )
+
+        # Valid parameters should work fine
+        result = torch.nn.functional.avg_pool2d(
+            x,
+            kernel_size=2,
+            stride=1,
+            padding=0
+        )
+        self.assertEqual(result.shape, (1, 2, 3, 3))
+
+
     @onlyCUDA
     @largeTensorTest("24GB", "cpu")
     @largeTensorTest("24GB", "cuda")
