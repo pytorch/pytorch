@@ -538,7 +538,8 @@ class ComboKernelTests(TestCase):
             self.assertEqual(grid2[1], 1)
 
     @requires_gpu_and_triton
-    def test_combo_kernels_pointwise_only(self):
+    @parametrize("pointwise_only,expected_kernel_count", [(False, 2), (True, 3)])
+    def test_combo_kernels_pointwise_only(self, pointwise_only, expected_kernel_count):
         def fn(a, b, c, d):
             p1 = a * 2.0
             p2 = b + 1.0
@@ -555,27 +556,17 @@ class ComboKernelTests(TestCase):
 
         out_eager = fn(*inps)
 
-        # Test with combo_kernels_pointwise_only=False
-        # Both pointwise and reductions can be combined
         torch._inductor.metrics.reset()
-        with torch._inductor.config.patch("combo_kernels_pointwise_only", False):
+        with torch._inductor.config.patch(
+            "combo_kernels_pointwise_only", pointwise_only
+        ):
             fn_c = torch.compile(fn)
             out_compiled, _ = run_and_get_code(fn_c, *inps)
             self.assertEqual(out_eager, out_compiled)
-            kernel_count_default = torch._inductor.metrics.generated_kernel_count
-
-        # Test with combo_kernels_pointwise_only=True
-        # Only pointwise should be combined, reductions should be separate
-        torch._inductor.metrics.reset()
-        with torch._inductor.config.patch("combo_kernels_pointwise_only", True):
-            fn_c = torch.compile(fn)
-            out_compiled, _ = run_and_get_code(fn_c, *inps)
-            self.assertEqual(out_eager, out_compiled)
-            kernel_count_pointwise_only = torch._inductor.metrics.generated_kernel_count
-
-        # With pointwise_only=True, we expect more kernels because reductions are not combined with pointwise ops
-        self.assertEqual(kernel_count_default, 2)
-        self.assertEqual(kernel_count_pointwise_only, 3)
+            # With pointwise_only=True, we expect more kernels because reductions are not combined with pointwise ops
+            self.assertEqual(
+                torch._inductor.metrics.generated_kernel_count, expected_kernel_count
+            )
 
 
 class ComboKernelBenchmarkTests(TestCase):
