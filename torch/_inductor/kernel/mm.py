@@ -1009,6 +1009,7 @@ def tuned_scaled_mm(
             choices,
             layout,
             input_nodes,
+            kernel_inputs=kernel_inputs,
         )
 
     # Early return for MX variants
