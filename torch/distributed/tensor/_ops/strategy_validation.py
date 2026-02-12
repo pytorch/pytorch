@@ -29,6 +29,9 @@ from torch.testing._internal.common_methods_invocations import SampleInput
 from torch.utils import _pytree as pytree
 
 
+# A combo key is (input_placement_strs, output_placement_str)
+ComboKey = tuple[tuple[str, ...], str]
+
 # Partial reduce ops to enumerate
 PARTIAL_REDUCE_OPS = ["sum", "avg", "min", "max"]
 
@@ -54,7 +57,7 @@ SKIP_OPS = frozenset(
 class PlacementCombination:
     """Represents a combination of input and output placements."""
 
-    input_placements: tuple[Placement]  # One placement per input tensor
+    input_placements: tuple[Placement, ...]  # One placement per input tensor
     output_placement: Placement  # Placement for the output tensor
 
     def __hash__(self):
@@ -77,14 +80,14 @@ class PlacementCombination:
 class Discrepancy:
     """Represents a discrepancy between ground truth and DTensor's rules."""
 
-    input_placements: tuple
-    output_placement: Any
+    input_placements: tuple[str, ...]
+    output_placement: str
     sample_idx: int
-    input_shapes: tuple
+    input_shapes: tuple[tuple[int, ...], ...]
     discrepancy_type: str  # "false_positive" or "false_negative"
     error_msg: str = ""
-    scalar_args: tuple = ()
-    scalar_kwargs: dict = field(default_factory=dict)
+    scalar_args: tuple[Any, ...] = ()
+    scalar_kwargs: dict[str, Any] = field(default_factory=dict)
     aten_op: Any = None
     variant: str = ""
 
@@ -95,20 +98,20 @@ class ComparisonStats:
 
     true_positives: int = 0
     true_negatives: int = 0
-    false_positives: list = field(
+    false_positives: list[Discrepancy] = field(
         default_factory=list
     )  # DTensor has rule, ground truth says invalid
-    false_negatives: list = field(
+    false_negatives: list[Discrepancy] = field(
         default_factory=list
     )  # Ground truth valid, DTensor has no rule
 
 
-def placement_tuple_to_str(placements: tuple) -> str:
+def placement_tuple_to_str(placements: tuple[Placement, ...]) -> str:
     """Convert a tuple of placements to a readable string."""
     parts: list[str] = []
     for p in placements:
         if isinstance(p, Shard):
-            parts.append(f"S{p.dim}")
+            parts.append(f"S({p.dim})")
         elif isinstance(p, Replicate):
             parts.append("R")
         elif isinstance(p, Partial):
@@ -137,21 +140,19 @@ def parse_placement(s: str) -> Placement | None:
     return None
 
 
-def is_fully_replicated(placements: tuple) -> bool:
+def is_fully_replicated(placements: tuple[Placement, ...]) -> bool:
     """Check if all placements are Replicate."""
     return all(isinstance(p, Replicate) for p in placements)
 
 
-def is_trivial_shard(p, tensor_shape: tuple[int, ...]) -> bool:
+def is_trivial_shard(p: Placement, tensor_shape: tuple[int, ...]) -> bool:
     """Check if placement is a Shard on a size-1 dimension."""
     return (
-        isinstance(p, Shard)
-        and p.dim < len(tensor_shape)
-        and tensor_shape[p.dim] == 1
+        isinstance(p, Shard) and p.dim < len(tensor_shape) and tensor_shape[p.dim] == 1
     )
 
 
-def normalize_placement(p, tensor_shape: tuple[int, ...]):
+def normalize_placement(p: Placement, tensor_shape: tuple[int, ...]) -> Placement:
     """
     Normalize a placement for a given tensor shape.
 
@@ -181,10 +182,10 @@ def normalize_placement_str(p_str: str, shape: tuple[int, ...]) -> str:
 
 
 def normalize_combo_key(
-    combo_key: tuple,
+    combo_key: ComboKey,
     input_shapes: tuple[tuple[int, ...], ...],
     output_shape: tuple[int, ...],
-) -> tuple:
+) -> ComboKey:
     """
     Normalize a combo_key by converting trivial shards to Replicate.
 
@@ -216,7 +217,7 @@ def normalize_combo_key(
 
 def get_1d_input_placements_for_tensor(
     t: torch.Tensor, include_partial: bool = False
-) -> list:
+) -> list[Placement]:
     """
     Get all possible 1-D mesh placements for an INPUT tensor.
 
@@ -233,7 +234,7 @@ def get_1d_input_placements_for_tensor(
     return placements
 
 
-def get_1d_output_placements_for_tensor(t: torch.Tensor) -> list:
+def get_1d_output_placements_for_tensor(t: torch.Tensor) -> list[Placement]:
     """
     Get all possible 1-D mesh placements for an OUTPUT tensor.
     """
@@ -247,7 +248,7 @@ def get_1d_output_placements_for_tensor(t: torch.Tensor) -> list:
     return placements
 
 
-def extract_tensors_from_sample(sample_input) -> list:
+def extract_tensors_from_sample(sample_input: Any) -> list[tuple[str, torch.Tensor]]:
     """
     Extract all tensor arguments from a SampleInput.
     Returns a list of (name, tensor) pairs.
