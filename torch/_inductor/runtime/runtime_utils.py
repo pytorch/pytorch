@@ -349,3 +349,130 @@ def pallas_gpu_unpad_results(
             orig_numel = math.prod(shape)
             unpadded.append(res[:orig_numel].reshape(shape))
     return unpadded[0] if len(unpadded) == 1 else tuple(unpadded)
+
+
+# ---------------------------------------------------------------------------
+# Pallas CPU / TPU tiling helpers
+# ---------------------------------------------------------------------------
+# TPU alignment: last dim must be full or a multiple of 128,
+#                second-to-last dim must be full or a multiple of 8.
+_TPU_ALIGN_LAST = 128
+_TPU_ALIGN_SECOND_LAST = 8
+
+
+def _pallas_tile_size(dim: int, alignment: int, max_tile: int = 1024) -> int:
+    """Pick the largest aligned tile size <= max_tile for *dim*.
+
+    If *dim* is already <= alignment the full dimension is used (no tiling
+    on this axis).
+    """
+    if dim <= alignment:
+        return dim
+    t = min(max_tile, dim)
+    t = (t // alignment) * alignment
+    return max(alignment, t)
+
+
+def pallas_compute_tiling(
+    ref_shape: tuple[int, ...],
+) -> tuple[tuple[int, ...], tuple[int, ...], dict[int, int]]:
+    """Compute tile shape, grid and axis→grid-dim mapping for CPU/TPU.
+
+    Always uses TPU-compatible alignment (last dim multiple of 128,
+    second-to-last multiple of 8) so that the same generated kernel works
+    on both CPU-interpret and real TPU.
+
+    Returns ``(tile_shape, grid, axis_to_grid)`` where *axis_to_grid*
+    maps each tiled reference-shape axis index to its position in the
+    grid tuple.
+
+    When no dimension benefits from tiling the grid is ``(1,)`` and the
+    tile covers the full tensor.
+    """
+    nd = len(ref_shape)
+    if nd == 0:
+        return (), (1,), {}
+
+    tile = list(ref_shape)
+    grid_parts: list[int] = []
+    axis_to_grid: dict[int, int] = {}  # ref axis → grid dim
+
+    # Second-to-last dim (added first so it becomes grid dim 0)
+    if nd >= 2:
+        ax = nd - 2
+        t = _pallas_tile_size(ref_shape[ax], _TPU_ALIGN_SECOND_LAST)
+        if t < ref_shape[ax]:
+            tile[ax] = t
+            axis_to_grid[ax] = len(grid_parts)
+            grid_parts.append((ref_shape[ax] + t - 1) // t)
+
+    # Last dim
+    ax = nd - 1
+    t = _pallas_tile_size(ref_shape[ax], _TPU_ALIGN_LAST)
+    if t < ref_shape[ax]:
+        tile[ax] = t
+        axis_to_grid[ax] = len(grid_parts)
+        grid_parts.append((ref_shape[ax] + t - 1) // t)
+
+    grid = tuple(grid_parts) if grid_parts else (1,)
+    return tuple(tile), grid, axis_to_grid
+
+
+def pallas_make_block_spec(
+    buf_shape: tuple[int, ...],
+    ref_shape: tuple[int, ...],
+    tile_shape: tuple[int, ...],
+    axis_to_grid: dict[int, int],
+    n_grid: int,
+) -> Any:
+    """Build a ``pl.BlockSpec`` for *buf_shape* given tiling of *ref_shape*.
+
+    Lower-ndim buffers are right-aligned with the reference shape (numpy
+    broadcast rules).  Dimensions that match a tiled reference dimension
+    are tiled; broadcast dimensions (size 1 or absent) are kept full.
+    """
+    from jax.experimental import (  # pyrefly: ignore [import-error, missing-import]
+        pallas as pl,
+    )
+
+    buf_nd = len(buf_shape)
+    ref_nd = len(ref_shape)
+
+    if buf_nd == 0:
+        # Scalar — untouched regardless of grid shape.
+        return pl.BlockSpec((), _make_index_map([], buf_nd, n_grid))
+
+    bs = list(buf_shape)
+    # (buf_axis, grid_dim) pairs for axes that are tiled in this buffer
+    tiled_pairs: list[tuple[int, int]] = []
+
+    for ref_ax, grid_dim in axis_to_grid.items():
+        buf_ax = ref_ax - (ref_nd - buf_nd)
+        if 0 <= buf_ax < buf_nd and buf_shape[buf_ax] == ref_shape[ref_ax]:
+            bs[buf_ax] = tile_shape[ref_ax]
+            tiled_pairs.append((buf_ax, grid_dim))
+
+    return pl.BlockSpec(tuple(bs), _make_index_map(tiled_pairs, buf_nd, n_grid))
+
+
+def _make_index_map(
+    tiled_pairs: list[tuple[int, int]], buf_nd: int, n_grid: int
+) -> Any:
+    """Return an index_map callable for ``pl.BlockSpec``.
+
+    *tiled_pairs* is a list of ``(buf_axis, grid_dim)`` indicating which
+    buffer axes receive a grid index.  All other axes return 0 (full block).
+    """
+    # Pre-build the mapping so the returned lambda is a plain lookup.
+    mapping = {ba: gd for ba, gd in tiled_pairs}
+
+    if n_grid == 0 or (n_grid == 1 and not mapping):
+        # grid=(1,), nothing tiled — one-arg identity returning all zeros
+        return lambda _i: (0,) * buf_nd
+
+    def index_map(*grid_args):
+        return tuple(
+            grid_args[mapping[d]] if d in mapping else 0 for d in range(buf_nd)
+        )
+
+    return index_map

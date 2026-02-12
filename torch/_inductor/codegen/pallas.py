@@ -2590,6 +2590,97 @@ class PallasKernel(SIMDKernel):
         layout = buf.get_layout()
         return layout.is_contiguous()
 
+    def _can_tile_cpu_tpu(self) -> bool:
+        """Check if this kernel can use tiling on CPU/TPU.
+
+        Tiling is safe when the kernel body only uses full-array access ([...])
+        and doesn't depend on iteration variable positions.  That means:
+        - No iteration variables are referenced in the kernel body
+        - No reductions (the kernel must see the full reduction dimension)
+        - No scatter outputs (indirect indexing complicates tile boundaries)
+        - Not running on GPU (GPU has its own TMA / padding path)
+        - All buffers have consistent dim-0 sizes (no mixed-dim mismatches)
+        """
+        if self.is_gpu:
+            return False
+        if self.used_iter_vars:
+            return False
+        reduction_numel = self._compute_reduction_numel()
+        if reduction_numel is not None and reduction_numel > 1:
+            return False
+        if self.outputs_need_read:
+            return False
+        if self.has_transposed_load:
+            return False
+
+        # Check for column-major (transposed) outputs which need jnp.transpose
+        # in the store -- incompatible with tiling.
+        if self._has_column_major_output():
+            return False
+
+        # Determine the reference output shape (highest-ndim output).
+        # We tile along dim 0 of this shape; every other buffer must either
+        # share that dim 0 or be broadcast-compatible with the tiled ref.
+        out_bufs = list(self.args.output_buffers.keys())
+        ref_shape: list[int] = []
+        for buf_name in out_bufs:
+            info = self._get_buffer_info(buf_name)
+            if info is None:
+                return False
+            _, buf_size, _, _, _ = info
+            int_size = [self._safe_int(s) for s in buf_size]
+            if any(s is None for s in int_size):
+                return False
+            if len(int_size) > len(ref_shape):
+                ref_shape = int_size  # type: ignore[assignment]
+
+        if not ref_shape or ref_shape[0] is None:
+            return False
+        tile_dim = ref_shape[0]
+        if tile_dim <= 0:
+            return False
+
+        # Check every buffer for compatibility with the tiled output ref.
+        # Tiled ref shape: (TILE_SIZE, ref_shape[1], ref_shape[2], ...)
+        # A buffer is ok if:
+        #   - 0-dim (scalar)
+        #   - same ndim with matching dim 0 (will be tiled)
+        #   - lower ndim whose shape is broadcast-compatible with the tiled ref
+        tiled_trailing = ref_shape[1:]  # dims after dim 0
+        all_bufs = list(self.args.input_buffers) + out_bufs
+        has_tileable = False
+        for buf_name in all_bufs:
+            info = self._get_buffer_info(buf_name)
+            if info is None:
+                return False
+            _, buf_size, _, _, _ = info
+            if len(buf_size) == 0:
+                continue  # scalar, always fine
+            int_size = [self._safe_int(s) for s in buf_size]
+            if any(s is None for s in int_size):
+                return False
+
+            if len(int_size) == len(ref_shape):
+                # Same ndim: dim 0 must match or be 1.
+                d0 = int_size[0]
+                if d0 == tile_dim:
+                    has_tileable = True
+                elif d0 != 1:
+                    return False
+            elif len(int_size) > len(ref_shape):
+                # Input has MORE dims than output — the kernel body will
+                # produce a higher-ndim result that can't fit the output ref.
+                return False
+            else:
+                # Fewer dims: verify numpy-style broadcastability with the
+                # tiled ref's trailing dimensions.  Iterate from the
+                # rightmost dim of both shapes; each pair must be equal or 1.
+                for a, b in zip(reversed(int_size), reversed(tiled_trailing)):
+                    if a != b and a != 1 and b != 1:
+                        return False
+
+        return has_tileable
+
     def codegen_kernel(self, name: Optional[str] = None) -> str:  # type: ignore[override]
         """
         Generate the complete Pallas kernel code as a Python string.
@@ -2705,6 +2796,10 @@ class PallasKernel(SIMDKernel):
         ctx.kernel_input_params = alias_params + ctx.pointer_tail
         ctx.full_kernel_params = alias_params + kernel_params
 
+        # Decide whether to use tiling for CPU/TPU after kernel body is fully
+        # generated (used_iter_vars is populated during load/store codegen).
+        self.tile_cpu_tpu = self._can_tile_cpu_tpu()
+
         # Emit the kernel function with the correct signature
         kernel_signature = (
             f"def {kernel_name}_kernel({', '.join(ctx.full_kernel_params)}):"
@@ -2776,17 +2871,22 @@ class PallasKernel(SIMDKernel):
                 "    for shape, dtype in zip(_pallas_out_shapes, out_dtypes)"
             )
             code.writeline(")")
-            code.writeline("indexer = lambda n: lambda i: [i] * n")
-            code.writeline("out_specs_pallas = tuple(")
-            code.writeline("    pl.BlockSpec(shape, indexer(len(shape)))")
-            code.writeline(
-                "    for shape, dtype in zip(_pallas_out_shapes, out_dtypes)"
-            )
-            code.writeline(")")
-            code.writeline("in_specs_pallas = tuple(")
-            code.writeline("    pl.BlockSpec(i.shape, indexer(len(i.shape)))")
-            code.writeline("    for i in [" + ", ".join(ctx.kernel_input_params) + "]")
-            code.writeline(")")
+            if self.tile_cpu_tpu:
+                self._codegen_tiled_specs(ctx)
+            else:
+                code.writeline("indexer = lambda n: lambda i: [i] * n")
+                code.writeline("out_specs_pallas = tuple(")
+                code.writeline("    pl.BlockSpec(shape, indexer(len(shape)))")
+                code.writeline(
+                    "    for shape, dtype in zip(_pallas_out_shapes, out_dtypes)"
+                )
+                code.writeline(")")
+                code.writeline("in_specs_pallas = tuple(")
+                code.writeline("    pl.BlockSpec(i.shape, indexer(len(i.shape)))")
+                code.writeline(
+                    "    for i in [" + ", ".join(ctx.kernel_input_params) + "]"
+                )
+                code.writeline(")")
 
             # Wrap kernel with functools.partial to pass scalar arguments (size variables)
             partial_args = []
@@ -2822,6 +2922,7 @@ import jax
 import jax.numpy as jnp
 from jax.experimental import pallas as pl
 from torch._inductor.runtime.runtime_utils import (
+    pallas_compute_tiling, pallas_make_block_spec,
     pallas_gpu_align_output_specs, pallas_gpu_pad_inputs,
     pallas_gpu_unpad_results, pallas_partial_reduce,
     torch_dtype_to_jax_runtime,
@@ -3171,6 +3272,31 @@ from torch._inductor.runtime.runtime_utils import (
             "        return pallas_gpu_unpad_results(_result, out_shapes, _is_scalar)"
         )
 
+    def _codegen_tiled_specs(self, ctx: _CodegenContext) -> None:
+        """Generate tiled BlockSpec and grid variables for CPU/TPU.
+
+        Tiles the last 1–2 dimensions of each tensor, respecting TPU
+        alignment constraints (last dim multiple of 128, second-to-last
+        multiple of 8).  Lower-ndim inputs are right-aligned with the
+        reference output shape per numpy broadcast rules.
+        """
+        code = ctx.code
+        input_list = ", ".join(ctx.kernel_input_params)
+
+        code.writeline("_tile, _grid, _ax2g = pallas_compute_tiling(out_shapes[0])")
+        code.writeline("_ng = len(_grid)")
+        code.writeline("_ref = out_shapes[0]")
+
+        code.writeline("out_specs_pallas = tuple(")
+        code.writeline("    pallas_make_block_spec(s, _ref, _tile, _ax2g, _ng)")
+        code.writeline("    for s in out_shapes")
+        code.writeline(")")
+        code.writeline("in_specs_pallas = tuple(")
+        code.writeline(
+            f"    pallas_make_block_spec(i.shape, _ref, _tile, _ax2g, _ng) for i in [{input_list}]"
+        )
+        code.writeline(")")
+
     def _codegen_jit_wrapper_cpu_tpu(
         self,
         ctx: _CodegenContext,
@@ -3179,13 +3305,14 @@ from torch._inductor.runtime.runtime_utils import (
         alias_map_literal: str,
     ) -> None:
         code = ctx.code
+        grid_expr = "_grid" if self.tile_cpu_tpu else "(1,)"
         code.writeline("_result = pl.pallas_call(")
         code.writeline("    " + kernel_arg)
         code.writeline("    out_shape=out_shapes_pallas,")
         code.writeline("    out_specs=out_specs_pallas,")
         code.writeline("    in_specs=in_specs_pallas,")
         code.writeline(f"    interpret={ctx.interpret_literal},")
-        code.writeline("    grid=(1,),")
+        code.writeline(f"    grid={grid_expr},")
         code.writeline(
             f"    input_output_aliases={{ {alias_map_literal} }},"
             if alias_pairs
