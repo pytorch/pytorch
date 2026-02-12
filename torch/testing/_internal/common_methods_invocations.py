@@ -15502,15 +15502,6 @@ op_db: list[OpInfo] = [
                 unittest.skip("Inconsistent accuracy"),
                 'TestDecomp', 'test_comprehensive',
                 dtypes=(torch.float16,)),
-            # Exception: While computing batched gradients, got:
-            # Trying to set a forward gradient that has a different
-            # size than that of the original Tensor, this is not
-            # supported. Tensor is of size [4] while the given forward
-            # gradient is of size [1, 4]
-            DecorateInfo(
-                unittest.skip("gradcheck failing when target is scalar"),
-                'TestFwdGradients', 'test_forward_mode_AD',
-                dtypes=(torch.float64,)),
             # RuntimeError: input->type()->kind() ==
             # TypeKind::OptionalType INTERNAL ASSERT FAILED at
             # "torch/csrc/jit/passes/utils/check_alias_annotation.cpp":267
@@ -15549,7 +15540,7 @@ op_db: list[OpInfo] = [
                 "TestInductorOpInfo", "test_comprehensive",
                 device_type="cuda",
                 active_if=TEST_WITH_ROCM),
-        )[:-1]  # TODO: remove last item if possible
+        )[:-2]  # TODO: remove last item if possible
     ),
     OpInfo('nn.functional.normalize',
            dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),

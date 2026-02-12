@@ -3653,10 +3653,6 @@ def linear_cross_entropy(
     reduction: str = "mean",
     ignore_index: int = -100,
     label_smoothing: float = 0.0,
-    # Optimization parameters:
-    # chunking_strategy: str = "none",
-    # vocab_chunk_size: Optional[int] = None,
-    # batch_chunk_size: Optional[int] = None
 ) -> Tensor:
     r"""Compute the cross entropy loss between inputs, transformed linearly, and target.
 
@@ -3667,9 +3663,6 @@ def linear_cross_entropy(
 
     ::
       logits = linear(input, linear_weight)
-      if target.dtype.is_floating_point:
-          # target contains class probabilities
-          logits = logits.reshape(target.shape)
       loss = cross_entropy(logits, target, **kwargs)
 
     See :class:`~torch.nn.CrossEntropyLoss` for details.
