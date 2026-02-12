@@ -15641,7 +15641,11 @@ graph():
 
             @classmethod
             def __tensor_unflatten__(
-                cls, tensor_data_dict, extra_metadata, outer_size=None, outer_stride=None
+                cls,
+                tensor_data_dict,
+                extra_metadata,
+                outer_size=None,
+                outer_stride=None,
             ):
                 return DummyTensor(tensor_data_dict["inner"])
 
