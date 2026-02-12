@@ -359,7 +359,7 @@ jobs:
       ref:    ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
     secrets: inherit
 
-  Doc-redirects-check:
+  doc-redirects-check:
     name: doc-redirects-check
     needs: get-label-type
     runs-on: [self-hosted, "${{ needs.get-label-type.outputs.label-type }}linux.large"]
