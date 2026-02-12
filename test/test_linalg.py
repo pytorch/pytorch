@@ -2482,6 +2482,7 @@ class TestLinalg(TestCase):
         self.assertEqual(a.to(v.dtype) @ v, w * v, atol=1e-3, rtol=1e-3)
 
     @onlyCUDA
+    @skipIf(TEST_WITH_ROCM and not torch.cuda.has_magma, "ROCm hipsolver backend does not currently support eig")
     @dtypes(torch.float32, torch.float64)
     def test_eig_cuda_complex_eigenvectors(self, device, dtype):
         """Test CUDA eigenvector decoding with known ground truth, including batching."""
@@ -4752,7 +4753,7 @@ class TestLinalg(TestCase):
     @slowTest
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Test fails for float64 on GPU (P100, V100) on Meta infra")
     @onlyCUDA
-    @skipCUDAIfNoMagma  # Magma needed for the PLU decomposition
+    @unittest.skipIf(TEST_WITH_ROCM and not torch.cuda.has_magma, "MAGMA required for ROCm")
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-2, torch.complex64: 1e-2,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
@@ -4812,7 +4813,7 @@ class TestLinalg(TestCase):
             A_triangular.diagonal(dim1=-2, dim2=-1).fill_(1.)
         return b, A_triangular
 
-    @skipCUDAIfNoMagma
+    @unittest.skipIf(TEST_WITH_ROCM and not torch.cuda.has_magma, "MAGMA required for ROCm")
     @skipCPUIfNoLapack
     @skipIfTorchDynamo("flaky, needs investigation")
     @dtypes(*floating_and_complex_types())
@@ -4832,7 +4833,7 @@ class TestLinalg(TestCase):
                 self.assertEqual(b, np.matmul(A.cpu(), x.cpu()))
 
     @skipCPUIfNoLapack
-    @skipCUDAIfNoMagma
+    @unittest.skipIf(TEST_WITH_ROCM and not torch.cuda.has_magma, "MAGMA required for ROCm")
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
@@ -4881,7 +4882,7 @@ class TestLinalg(TestCase):
                                                upper, unitriangular, transpose)
 
     @slowTest
-    @skipCUDAIfNoMagma
+    @unittest.skipIf(TEST_WITH_ROCM and not torch.cuda.has_magma, "MAGMA required for ROCm")
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
@@ -4911,7 +4912,7 @@ class TestLinalg(TestCase):
 
             self.assertEqual(torch.matmul(A, x), b)
 
-    @skipCUDAIfNoMagma
+    @unittest.skipIf(TEST_WITH_ROCM and not torch.cuda.has_magma, "MAGMA required for ROCm")
     @skipCPUIfNoLapack
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     @skipIfTorchDynamo("flaky, needs investigation")
@@ -4957,7 +4958,7 @@ class TestLinalg(TestCase):
         X = torch.linalg.solve_triangular(A, B, upper=False)
         self.assertEqual(A @ X, B)
 
-    @skipCUDAIfNoMagma
+    @unittest.skipIf(TEST_WITH_ROCM and not torch.cuda.has_magma, "MAGMA required for ROCm")
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_triangular_solve_out_errors_and_warnings(self, device, dtype):
@@ -7208,11 +7209,7 @@ class TestLinalg(TestCase):
     @skipCPUIfNoLapack
     @dtypes(torch.double)
     def test_lobpcg_ortho(self, device, dtype):
-        if torch.version.hip:
-            torch.backends.cuda.preferred_linalg_library('magma')
         self._test_lobpcg_method(device, dtype, 'ortho')
-        if torch.version.hip:
-            torch.backends.cuda.preferred_linalg_library('default')
 
     def _test_lobpcg_method(self, device, dtype, method):
         from torch.testing._internal.common_utils import random_symmetric_pd_matrix, random_sparse_pd_matrix

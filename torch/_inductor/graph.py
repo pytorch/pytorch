@@ -1538,6 +1538,7 @@ class GraphLowering(torch.fx.Interpreter):
                 assert torch._inductor.ir.is_storage_and_layout(r)
                 meta_strides = [
                     s.node.expr if isinstance(s, torch.SymInt) else s
+                    # pyrefly: ignore [missing-attribute]
                     for s in fx_node.meta["val"].stride()
                 ]
                 result_correct_strides.append(
