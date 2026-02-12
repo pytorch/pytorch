@@ -129,15 +129,15 @@ void CUDAGeneratorCaptureState::initialize(uint64_t seed) {
   c10::cuda::CUDAStreamCaptureModeGuard mode_guard{cudaStreamCaptureModeRelaxed};
 
   auto options = at::TensorOptions().device(at::kCUDA).dtype(at::kLong);
-  // Create tensors outside of inference mode to ensure they can be modified
-  // in-place later.
+  // Create tensor outside of inference mode to ensure it can be modified in-place later.
   c10::InferenceMode inference_guard(false);
-  seed_extragraph_ = at::empty({1}, options);
-  offset_extragraph_ = at::empty({1}, options);
+  rng_state_extragraph_ = at::empty({2}, options);
 
   offset_intragraph_ = 0;
-  seed_extragraph_.fill_(static_cast<int64_t>(seed));
-  offset_extragraph_.fill_(0);
+  // Single H2D copy: [seed, 0]
+  at::Tensor(rng_state_extragraph_).copy_(
+      at::tensor({static_cast<int64_t>(seed), 0L}, at::TensorOptions().dtype(at::kLong))
+          .to(rng_state_extragraph_.device()));
 }
 
 /**
@@ -170,8 +170,10 @@ uint64_t CUDAGeneratorCaptureState::finalize() {
 void CUDAGeneratorCaptureState::setup_for_replay(uint64_t seed, uint64_t philox_offset) {
   TORCH_INTERNAL_ASSERT(is_initialized(),
       "Capture state not initialized");
-  seed_extragraph_.fill_(static_cast<int64_t>(seed));
-  offset_extragraph_.fill_(static_cast<int64_t>(philox_offset));
+  // Single H2D copy: [seed, philox_offset]
+  at::Tensor(rng_state_extragraph_).copy_(
+      at::tensor({static_cast<int64_t>(seed), static_cast<int64_t>(philox_offset)},
+                 at::TensorOptions().dtype(at::kLong).device(rng_state_extragraph_.device())));
 }
 
 /**
@@ -189,6 +191,7 @@ c10::intrusive_ptr<CUDAGeneratorState> CUDAGeneratorState::clone() {
  * Uses double-checked locking to avoid holding mutex during CUDA operations.
  */
 CUDAGeneratorCaptureState* CUDAGeneratorState::get_capture_state(CaptureId_t capture_id, bool create_if_not_found) {
+  uint64_t seed_for_init = 0;
   {
     std::lock_guard<std::mutex> lock(capture_states_mutex_);
     auto it = capture_states_.find(capture_id);
@@ -199,6 +202,8 @@ CUDAGeneratorCaptureState* CUDAGeneratorState::get_capture_state(CaptureId_t cap
     if (!create_if_not_found) {
       return nullptr;
     }
+    // Read seed_ under lock so set_current_seed() on another thread cannot race.
+    seed_for_init = seed_;
   }
 
   // Get the graph to obtain device and mempool_id for initialize()
@@ -211,8 +216,10 @@ CUDAGeneratorCaptureState* CUDAGeneratorState::get_capture_state(CaptureId_t cap
   // routes allocations to the default pool (not the graph pool) so the RNG
   // state tensors persist across graph replays.
   auto capture_state = make_intrusive<CUDAGeneratorCaptureState>();
-  capture_state->initialize(seed_);
+  capture_state->initialize(seed_for_init);
 
+  // Safe: CUDAGeneratorState is always managed by intrusive_ptr (e.g. from
+  // CUDAGeneratorImpl::state_). reclaim_copy adds a reference for the graph.
   graph->register_generator_state(
       c10::intrusive_ptr<CUDAGeneratorState>::reclaim_copy(this));
 
@@ -294,18 +301,26 @@ void CUDAGeneratorState::replay_prologue(CaptureId_t capture_id, uint64_t wholeg
     return;
   }
 
-  std::lock_guard<std::mutex> lock(capture_states_mutex_);
+  uint64_t replay_seed;
+  uint64_t replay_offset;
+  CUDAGeneratorCaptureState* capture_state = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(capture_states_mutex_);
+    auto it = capture_states_.find(capture_id);
+    TORCH_INTERNAL_ASSERT(it != capture_states_.end(),
+        "replay_prologue called but no capture state found for this capture_id");
+    capture_state = it->second.get();
+    replay_seed = seed_;
+    replay_offset = philox_offset_per_thread_;
+  }
 
-  auto it = capture_states_.find(capture_id);
-  TORCH_INTERNAL_ASSERT(it != capture_states_.end(),
-      "replay_prologue called but no capture state found for this capture_id");
-  auto* capture_state = it->second.get();
+  // Fill tensors without holding the mutex to avoid serializing CUDA work
+  capture_state->setup_for_replay(replay_seed, replay_offset);
 
-  // Fill tensors with current seed and offset
-  capture_state->setup_for_replay(seed_, philox_offset_per_thread_);
-
-  // Update the base offset
-  philox_offset_per_thread_ += wholegraph_increment;
+  {
+    std::lock_guard<std::mutex> lock(capture_states_mutex_);
+    philox_offset_per_thread_ += wholegraph_increment;
+  }
 }
 
 /**
@@ -544,8 +559,8 @@ PhiloxCudaState CUDAGeneratorImpl::philox_cuda_state(uint64_t increment) {
     state_->increase(increment);
 
     return PhiloxCudaState(
-        capture_state->seed_extragraph_.data_ptr<int64_t>(),
-        capture_state->offset_extragraph_.data_ptr<int64_t>(),
+        capture_state->rng_state_extragraph_.data_ptr<int64_t>(),
+        capture_state->rng_state_extragraph_.data_ptr<int64_t>() + 1,
         offset);
   } else {
     uint64_t offset = state_->philox_offset_per_thread_;

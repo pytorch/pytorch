@@ -2422,9 +2422,9 @@ torch.cuda.synchronize()
             # Assert conditions after graph tasks
             num_blocks, total_size = get_memory_stats()
             expected_captured_generator_states = num_generators * num_graphs
-            expected_blocks_diff = 2 * expected_captured_generator_states
+            expected_blocks_diff = expected_captured_generator_states
             expected_size_diff = (
-                2 * 512 * expected_captured_generator_states
+                512 * expected_captured_generator_states
             )  # Each block's size is 512
 
             self.assertEqual(

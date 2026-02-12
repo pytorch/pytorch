@@ -36,6 +36,9 @@ std::optional<CaptureId_t> getCaptureId(std::optional<cudaStream_t> stream) {
   return std::nullopt;
 }
 
+// Get the CUDAGraph associated with a capture ID, if any.
+// The returned pointer must not be used after the graph's reset() or destruction;
+// the map stores raw pointers and entries are removed in reset().
 CUDAGraph* get_graph_from_capture_id(CaptureId_t capture_id) {
   std::lock_guard<std::mutex> lock(capture_id_to_graph_mutex);
   auto it = capture_id_to_graph.find(capture_id);
@@ -175,9 +178,9 @@ void CUDAGraph::capture_end() {
 
   TORCH_CHECK(graph_ != nullptr, "Invalid capture.");
 
-  for (auto& [generator_state, wholegraph_increments] :
+  for (auto& [generator_state, wholegraph_increment] :
        captured_generator_states_) {
-    wholegraph_increments = generator_state->capture_epilogue(capture_id_);
+    wholegraph_increment = generator_state->capture_epilogue(capture_id_);
   }
 
   size_t numCUDAGraphNodes = 0;
@@ -239,9 +242,9 @@ void CUDAGraph::replay() {
 
   c10::OptionalDeviceGuard device_guard{capture_stream_.device()};
 
-  for (auto& [generator_state, wholegraph_increments] :
+  for (auto& [generator_state, wholegraph_increment] :
        captured_generator_states_) {
-    generator_state->replay_prologue(capture_id_, wholegraph_increments);
+    generator_state->replay_prologue(capture_id_, wholegraph_increment);
   }
   // graph_exec_ may be replayed in any stream.
   AT_CUDA_CHECK(cudaGraphLaunch(graph_exec_, at::cuda::getCurrentCUDAStream()));

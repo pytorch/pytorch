@@ -101,14 +101,13 @@ using CaptureId_t = c10::CaptureId_t;
  */
 struct CUDAGeneratorCaptureState : public c10::intrusive_ptr_target {
   uint64_t offset_intragraph_{0};
-  // GPU tensors for seed and offset
-  at::TensorBase seed_extragraph_;
-  at::TensorBase offset_extragraph_;
+  // Single GPU tensor [seed, offset]; layout: [0]=seed, [1]=offset
+  at::TensorBase rng_state_extragraph_;
 
   CUDAGeneratorCaptureState() = default;
 
   // Check if tensors are allocated
-  bool is_initialized() const { return seed_extragraph_.defined(); }
+  bool is_initialized() const { return rng_state_extragraph_.defined(); }
 
   // Allocate tensors and initialize with seed.
   // Uses a non-capturing side stream so allocations go to the default pool.
