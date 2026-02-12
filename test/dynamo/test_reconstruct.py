@@ -40,10 +40,9 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
 
         def hook(instructions: list[dis.Instruction]):
             build_map = _filter_instructions(instructions, "BUILD_MAP")
-            self.assertEqual(len(build_map), 2)
+            self.assertEqual(len(build_map), 1)
             # reconstruct only d[40]
-            self.assertEqual(build_map[0].argval, 0)
-            self.assertEqual(build_map[1].argval, 1)
+            self.assertEqual(build_map[0].argval, 1)
 
         def f(d, t):
             d[40] = t + 1
@@ -65,10 +64,9 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
 
         def hook(instructions: list[dis.Instruction]):
             build_map = _filter_instructions(instructions, "BUILD_MAP")
-            self.assertEqual(len(build_map), 2)
+            self.assertEqual(len(build_map), 1)
             # reconstruct everything
-            self.assertEqual(build_map[0].argval, 0)
-            self.assertEqual(build_map[1].argval, 2)
+            self.assertEqual(build_map[0].argval, 2)
 
         def f(d, t):
             d.pop(2)
@@ -92,10 +90,9 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
 
         def hook(instructions: list[dis.Instruction]):
             build_map = _filter_instructions(instructions, "BUILD_MAP")
-            self.assertEqual(len(build_map), 2)
+            self.assertEqual(len(build_map), 1)
             # reconstruct everything
-            self.assertEqual(build_map[0].argval, 0)
-            self.assertEqual(build_map[1].argval, 1)
+            self.assertEqual(build_map[0].argval, 1)
 
         def f(d, t):
             d.popitem()
@@ -137,10 +134,9 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
 
         def hook(instructions: list[dis.Instruction]):
             build_map = _filter_instructions(instructions, "BUILD_MAP")
-            self.assertEqual(len(build_map), 2)
+            self.assertEqual(len(build_map), 1)
             # reconstruct everything
-            self.assertEqual(build_map[0].argval, 0)
-            self.assertEqual(build_map[1].argval, 2)
+            self.assertEqual(build_map[0].argval, 2)
 
         def f(d, t):
             del d[2]
@@ -164,9 +160,8 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
 
         def hook(instructions: list[dis.Instruction]):
             build_map = _filter_instructions(instructions, "BUILD_MAP")
-            self.assertEqual(len(build_map), 2)
-            self.assertEqual(build_map[0].argval, 0)
-            self.assertEqual(build_map[1].argval, 1)
+            self.assertEqual(len(build_map), 1)
+            self.assertEqual(build_map[0].argval, 1)
             load_const = _filter_instructions(instructions, "LOAD_CONST")
             self.assertNotIn(123, load_const)
 
@@ -191,10 +186,9 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
 
         def hook(instructions: list[dis.Instruction]):
             build_map = _filter_instructions(instructions, "BUILD_MAP")
-            self.assertEqual(len(build_map), 2)
+            self.assertEqual(len(build_map), 1)
             # reconstruct everything
-            self.assertEqual(build_map[0].argval, 0)
-            self.assertEqual(build_map[1].argval, 1)
+            self.assertEqual(build_map[0].argval, 1)
 
         def f(d, t):
             d.clear()
@@ -218,10 +212,9 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
 
         def hook(instructions: list[dis.Instruction]):
             build_map = _filter_instructions(instructions, "BUILD_MAP")
-            self.assertEqual(len(build_map), 2)
+            self.assertEqual(len(build_map), 1)
             # reconstruct everything
-            self.assertEqual(build_map[0].argval, 0)
-            self.assertEqual(build_map[1].argval, 2)
+            self.assertEqual(build_map[0].argval, 2)
 
         def f(t):
             return {1: t, 2: t + 1}
@@ -536,6 +529,35 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         self.assertIs(out[0], out)
         out = fn2(torch.ones(3), construct_defaultdict)
         self.assertIs(out[0], out)
+
+    def test_non_self_referential_list_is_not_stored(self):
+        # Non-self referential list should not be stored as a temporary variable.
+        def fn(x):
+            l = [1, 2, 3]
+            return x, l
+
+        def gn(x):
+            l = [1, 2, 3]
+            l.append(l)
+            return x, l
+
+        def hook(instructions: list[dis.Instruction]):
+            from torch._dynamo.bytecode_transformation import create_dup_top
+
+            dup_top_inst = create_dup_top().opname
+            for i, inst in enumerate(instructions):
+                if inst.opname == "BUILD_LIST" and i + 2 < len(instructions):
+                    assert not (
+                        instructions[i + 1].opname == dup_top_inst
+                        and instructions[i + 2].opname == "STORE_FAST"
+                    ), "found list stored as tmp"
+
+        with self.register_bytecode_hook(hook):
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            opt_fn(torch.ones(3))
+            with self.assertRaisesRegex(AssertionError, "found list stored as tmp"):
+                opt_gn = torch.compile(gn, backend="eager", fullgraph=True)
+                opt_gn(torch.ones(3))
 
 
 if __name__ == "__main__":
