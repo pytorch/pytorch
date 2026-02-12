@@ -5068,10 +5068,10 @@ class InstructionTranslatorBase(
                         create_instruction("LIST_APPEND", arg=1),
                     ]
                 )
-            cg.extend_output([create_instruction("POP_TOP")])  # pop fv0
-            # Extract the plain result from the tuple.
             cg.extend_output(
                 [
+                    create_instruction("POP_TOP"),  # pop fv0
+                    # Extract the plain result from the tuple.
                     cg.create_load_const(0),
                     cg.create_binary_subscr(),
                 ]
