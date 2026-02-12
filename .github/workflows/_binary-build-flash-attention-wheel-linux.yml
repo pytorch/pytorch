@@ -146,7 +146,7 @@ jobs:
         if: always()
 
   upload-wheel:
-    name: "Upload FA3 ${{ matrix.cuda_short }} ${{ matrix.arch }}"
+    name: "Upload FA3 ${{ matrix.build_cuda_short }} ${{ matrix.arch }}"
     needs: build-wheel
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch'
@@ -154,17 +154,17 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - cuda_version: "12.6.3"
-            cuda_short: "126"
+          - build_cuda_short: "126"
+            upload_subfolders: "cu126 cu128 cu129"
             arch: "x86_64"
-          - cuda_version: "13.0.2"
-            cuda_short: "130"
+          - build_cuda_short: "130"
+            upload_subfolders: "cu130"
             arch: "x86_64"
-          - cuda_version: "12.6.3"
-            cuda_short: "126"
+          - build_cuda_short: "126"
+            upload_subfolders: "cu126 cu128 cu129"
             arch: "aarch64"
-          - cuda_version: "13.0.2"
-            cuda_short: "130"
+          - build_cuda_short: "130"
+            upload_subfolders: "cu130"
             arch: "aarch64"
     permissions:
       id-token: write
@@ -184,17 +184,18 @@ jobs:
       - name: Download Build Artifacts
         uses: actions/download-artifact@65a9edc5881444af0b9093a5e628f2fe47ea3b2e # v4.1.7
         with:
-          name: flash-attn-3-wheel-cu${{ matrix.cuda_short }}-${{ matrix.arch }}
+          name: flash-attn-3-wheel-cu${{ matrix.build_cuda_short }}-${{ matrix.arch }}
           path: ${{ runner.temp }}/artifacts
 
       - name: Upload binaries to test index
         env:
           PACKAGE_TYPE: wheel
           UPLOAD_CHANNEL: test
-          UPLOAD_SUBFOLDER: cu${{ matrix.cuda_short }}
           PKG_DIR: ${{ runner.temp }}/artifacts
           DRY_RUN: disabled
         shell: bash
         run: |
           set -ex
-          bash .circleci/scripts/binary_upload.sh
+          for subfolder in ${{ matrix.upload_subfolders }}; do
+            UPLOAD_SUBFOLDER="${subfolder}" bash .circleci/scripts/binary_upload.sh
+          done
