@@ -6702,11 +6702,10 @@ class CommonTemplate:
             atol, rtol = None, None
             if self.device == "cpu":
                 FileCheck().check_not("cpp_fused").run(source_codes[0])
+            elif config.triton.native_matmul:
+                FileCheck().check("triton.jit").run(source_codes[0])
             else:
-                if config.triton.native_matmul:
-                    FileCheck().check("triton.jit").run(source_codes[0])
-                else:
-                    FileCheck().check_not("triton.jit").run(source_codes[0])
+                FileCheck().check_not("triton.jit").run(source_codes[0])
 
         # test dtype conversion
         for lowp_dtype in [torch.float16, torch.bfloat16]:
