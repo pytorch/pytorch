@@ -2714,7 +2714,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         from torch._higher_order_ops.flat_apply import func_to_graphable
         from torch._higher_order_ops.invoke_leaf_function import (
             invoke_leaf_function,
-            reconstruct_original_args,
+            wrap_impl_for_leaf_module_state,
         )
 
         from .builder import wrap_fx_proxy
@@ -2744,25 +2744,8 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             input_spec_var.as_python_constant()
         )  # pyrefly: ignore [unbound-name]
 
-        def wrap_impl_for_leaf_module_state(
-            impl: Callable[..., Any],
-        ) -> Callable[..., Any]:
-            def wrapped_impl(*flat_args: Any) -> Any:
-                # NB: The flat_args contain flattened LeafModuleState objects.
-                # We need to unflatten them with input_spec then convert back to nn.Module
-                # before calling the original impl.
-                #
-                # input_spec is captured from the outer scope
-                with reconstruct_original_args(input_spec, flat_args) as (
-                    args_with_modules,
-                    kwargs_with_modules,
-                ):
-                    return impl(*args_with_modules, **kwargs_with_modules)
-
-            return wrapped_impl
-
-        wrapped_real_impl = wrap_impl_for_leaf_module_state(real_impl)
-        wrapped_fake_impl = wrap_impl_for_leaf_module_state(fake_impl)
+        wrapped_real_impl = wrap_impl_for_leaf_module_state(real_impl, input_spec)
+        wrapped_fake_impl = wrap_impl_for_leaf_module_state(fake_impl, input_spec)
 
         _, real_impl_spec = func_to_graphable(wrapped_real_impl)
         _, fake_impl_spec = func_to_graphable(wrapped_fake_impl)
