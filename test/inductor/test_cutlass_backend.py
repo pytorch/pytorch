@@ -38,7 +38,6 @@ from torch._inductor import config
 from torch._inductor.codecache import XPUCodeCache
 from torch._inductor.codegen.cutlass.kernel import CUTLASSTemplateCaller
 from torch._inductor.codegen.cutlass.utils import _gen_ops_cached, get_max_alignment
-from torch._inductor.codegen.xpu.xpu_env import get_xpu_arch
 from torch._inductor.exc import InductorError
 from torch._inductor.ir import FixedLayout
 from torch._inductor.select_algorithm import NoValidChoicesError
@@ -58,6 +57,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     parametrize,
 )
+from torch.testing._internal.common_xpu import PLATFORM_SUPPORTS_SYCLTLA
 from torch.testing._internal.inductor_utils import (
     _quantize_rowwise,
     _quantize_tensorwise,
@@ -66,8 +66,6 @@ from torch.testing._internal.inductor_utils import (
     HAS_CUDA_AND_TRITON,
 )
 
-
-PLATFORM_SUPPORTS_SYCLTLA: bool = get_xpu_arch() == "Xe20"
 
 # We don't need triton in this test suite.
 HAS_XPU = torch.xpu.is_available()
