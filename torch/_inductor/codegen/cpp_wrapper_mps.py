@@ -42,7 +42,6 @@ class CppWrapperMps(CppWrapperGpu):
         raw_keys: Optional[tuple[Any, ...]] = None,
         raw_args: Optional[tuple[Any, ...]] = None,
         triton_meta: Optional[dict[str, Any]] = None,
-        inductor_meta: Optional[dict[str, Any]] = None,
         graph_name: str = "",
         original_fxnode_name: Optional[str] = None,
     ) -> None:
@@ -74,7 +73,6 @@ class CppWrapperMps(CppWrapperGpu):
                 raw_keys=raw_keys,
                 raw_args=raw_args,
                 triton_meta=triton_meta,
-                inductor_meta=inductor_meta,
             )
 
         assert device.type == "mps"

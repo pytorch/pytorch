@@ -2298,11 +2298,11 @@ def init_once_fakemode(fn: Callable[..., Any]) -> Callable[[], Any]:
 
     @functools.cache
     @functools.wraps(fn)
-    def lazy_init(input_device: Optional[torch.device] = None) -> Any:
+    def lazy_init() -> Any:
         counters_ref = counters[backend].copy()
 
         with torch._guards.tracing(None), unset_fake_temporarily(), FakeTensorMode():
-            result = fn(input_device)
+            result = fn()
 
         # clear view matches encountered during tracing
         counters[backend] = counters_ref
