@@ -65,7 +65,7 @@ class TestPlacementUtilities(TestCase):
         self.assertEqual(s, "(R)")
 
         s = placement_tuple_to_str((Shard(0), Replicate()))
-        self.assertEqual(s, "(S0, R)")
+        self.assertEqual(s, "(S(0), R)")
 
         s = placement_tuple_to_str((Partial("sum"),))
         self.assertEqual(s, "(P(sum))")
