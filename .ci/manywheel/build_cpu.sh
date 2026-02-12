@@ -15,6 +15,35 @@ if [[ -z "$EXTRA_CAFFE2_CMAKE_FLAGS" ]]; then
     EXTRA_CAFFE2_CMAKE_FLAGS=()
 fi
 
+# Detect architecture
+ARCH=$(uname -m)
+echo "Building CPU wheel for architecture: $ARCH"
+
+# Detect and configure OpenBLAS and ARM Compute Libraryfor CPU aarch64
+if [[ "$ARCH" == "aarch64" ]]; then
+    # Use OpenBLAS for BLAS/LAPACK on CPU aarch64 builds
+    if [[ ! -f "/opt/OpenBLAS/lib/libopenblas.so.0" ]]; then
+        echo "ERROR: OpenBLAS not found at /opt/OpenBLAS/lib/"
+        echo "OpenBLAS (BLAS/LAPACK) is required for CPU aarch64 builds"
+        exit 1
+    fi
+    echo "Using OpenBLAS for CPU aarch64"
+    export BLAS=OpenBLAS
+    export OpenBLAS_HOME=/opt/OpenBLAS
+
+    # ACL is required for aarch64 builds
+    if [[ ! -d "/acl" ]]; then
+        echo "ERROR: ARM Compute Library not found at /acl"
+        echo "ACL is required for aarch64 builds. Check Docker image setup."
+        exit 1
+    fi
+
+    export USE_MKLDNN=1
+    export USE_MKLDNN_ACL=1
+    export ACL_ROOT_DIR=/acl
+    echo "ARM Compute Library enabled for MKLDNN: ACL_ROOT_DIR=/acl"
+fi
+
 WHEELHOUSE_DIR="wheelhousecpu"
 LIBTORCH_HOUSE_DIR="libtorch_housecpu"
 if [[ -z "$PYTORCH_FINAL_PACKAGE_DIR" ]]; then
@@ -34,8 +63,10 @@ elif [[ "$OS_NAME" == *"Red Hat Enterprise Linux"* ]]; then
 elif [[ "$OS_NAME" == *"AlmaLinux"* ]]; then
     LIBGOMP_PATH="/usr/lib64/libgomp.so.1"
 elif [[ "$OS_NAME" == *"Ubuntu"* ]]; then
-    if [[ "$(uname -m)" == "s390x" ]]; then
+    if [[ "$ARCH" == "s390x" ]]; then
         LIBGOMP_PATH="/usr/lib/s390x-linux-gnu/libgomp.so.1"
+    elif [[ "$ARCH" == "aarch64" ]]; then
+        LIBGOMP_PATH="/usr/lib/aarch64-linux-gnu/libgomp.so.1"
     else
         LIBGOMP_PATH="/usr/lib/x86_64-linux-gnu/libgomp.so.1"
     fi
@@ -48,6 +79,34 @@ DEPS_LIST=(
 DEPS_SONAME=(
     "libgomp.so.1"
 )
+
+# Add ARM-specific library dependencies for CPU builds
+if [[ "$ARCH" == "aarch64" ]]; then
+    echo "Adding ARM-specific CPU library dependencies"
+
+    # ARM Compute Library (if available)
+    if [[ -d "/acl/build" ]]; then
+        echo "Adding ARM Compute Library for CPU"
+        DEPS_LIST+=(
+            "/acl/build/libarm_compute.so"
+            "/acl/build/libarm_compute_graph.so"
+        )
+        DEPS_SONAME+=(
+            "libarm_compute.so"
+            "libarm_compute_graph.so"
+        )
+    fi
+
+    # ARM system libraries
+    DEPS_LIST+=(
+        "/usr/lib64/libgfortran.so.5"
+        "/opt/OpenBLAS/lib/libopenblas.so.0"
+    )
+    DEPS_SONAME+=(
+        "libgfortran.so.5"
+        "libopenblas.so.0"
+    )
+fi
 
 rm -rf /usr/local/cuda*
 

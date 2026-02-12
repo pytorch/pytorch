@@ -36,7 +36,8 @@ def get_reduction(m):
     result = getattr(m, 'reduction', None)
     if result is None:
         result = _Reduction.legacy_get_string(getattr(m, 'sizeAverage', None), True, emit_warning=False)
-    assert result is not None
+    if result is None:
+        raise AssertionError("Expected result to not be None")
     return result
 
 
@@ -120,7 +121,9 @@ module_tests = [
         desc='no_bias',
         reference_fn=lambda i, p, _: torch.mm(i, p[0].t()),
         with_tf32=True,
-        tf32_precision=0.05 if TEST_WITH_ROCM else 0.005,
+        tf32_precision=0.005,
+        # ROCM: skipping tf32 test on gfx94 archs due to tolerance issue.
+        test_cuda=not (TEST_WITH_ROCM and "gfx94" in torch.cuda.get_device_properties(0).gcnArchName),
         default_dtype=torch.double,
     ),
     dict(
@@ -2633,7 +2636,7 @@ def get_new_module_tests():
     # add conv padding mode tests:
     for padding_mode, cpp_padding_mode in zip(
             ['reflect', 'circular', 'replicate', 'zeros'],
-            ['torch::kReflect', 'torch::kCircular', 'torch::kReplicate', 'torch::kZeros']):
+            ['torch::kReflect', 'torch::kCircular', 'torch::kReplicate', 'torch::kZeros'], strict=True):
         # conv signature:
         #     in_channels, out_channels, kernel_size, stride=1,
         #     padding=0, dilation=1, groups=1,
@@ -2735,7 +2738,8 @@ def kldivloss_reference(input, target, reduction='mean', log_target=False):
 
 def nlllossNd_reference(input, target, weight=None, ignore_index=-100,
                         reduction='mean'):
-    assert input.dim() >= 3
+    if input.dim() < 3:
+        raise AssertionError(f"Expected input.dim() >= 3, got {input.dim()}")
     N = input.size(0)
     C = input.size(1)
     out_size = (N,) + input.size()[2:]
@@ -2761,7 +2765,8 @@ def nlllossNd_reference(input, target, weight=None, ignore_index=-100,
 
 def cross_entropy_loss_prob_target_reference(input, target, weight=None, reduction='mean',
                                              label_smoothing=0.0):
-    assert input.dim() >= 2
+    if input.dim() < 2:
+        raise AssertionError(f"Expected input.dim() >= 2, got {input.dim()}")
 
     input = torch.log_softmax(input, 1)
     C = input.size(1)
@@ -2770,7 +2775,8 @@ def cross_entropy_loss_prob_target_reference(input, target, weight=None, reducti
     weight = weight.view(1, C, *(1 for _ in input.shape[2:]))
 
     if label_smoothing > 0.0:
-        assert label_smoothing <= 1.0
+        if label_smoothing > 1.0:
+            raise AssertionError(f"Expected label_smoothing <= 1.0, got {label_smoothing}")
         target = (target * (1 - label_smoothing) + label_smoothing / C)
 
     output = -(input * target * weight).sum(dim=1)
@@ -2794,7 +2800,8 @@ def cross_entropy_loss_indices_target_reference(input, target, weight=None, igno
     if label_smoothing == 0.0:
         return nllloss
 
-    assert 0.0 < label_smoothing <= 1.0
+    if not (0.0 < label_smoothing <= 1.0):
+        raise AssertionError(f"Expected 0.0 < label_smoothing <= 1.0, got {label_smoothing}")
 
     input = torch.log_softmax(input, 1)
     C = input.size(1)
@@ -2848,8 +2855,8 @@ def nllloss_reference(input, target, weight=None, ignore_index=-100,
         return (result, norm)
 
     losses_and_weights = [nll_loss_helper(i, t, weight, ignore_index)
-                          for i, t in zip(input, target)]
-    losses, weights = zip(*losses_and_weights)
+                          for i, t in zip(input, target, strict=True)]
+    losses, weights = zip(*losses_and_weights, strict=True)
     losses_tensor = input.new_tensor(losses)
     if reduction == 'mean':
         return sum(losses_tensor) / sum(weights)
@@ -2896,7 +2903,7 @@ def _multilabelmarginloss_reference(input, target):
 
     sum = 0
     for target_index in targets:
-        for i in range(0, len(input)):
+        for i in range(len(input)):
             if i not in targets:
                 sum += max(0, 1 - input[target_index] + input[i])
 
@@ -2907,14 +2914,15 @@ def multilabelmarginloss_reference(input, target, reduction='mean'):
     # make everything 2-dimensional
     input_dim = input.dim()
     if input.dim() < 2:
-        assert target.dim() < 2
+        if target.dim() >= 2:
+            raise AssertionError(f"Expected target.dim() < 2, got {target.dim()}")
         input = input.unsqueeze(0) if input.dim() == 1 else input.unsqueeze(0).unsqueeze(0)
         target = target.unsqueeze(0) if target.dim() == 1 else target.unsqueeze(0).unsqueeze(0)
 
     n = input.size(0)
     dim = input.size(1)
     output = input.new(n).zero_()
-    for i in range(0, n):
+    for i in range(n):
         output[i] = _multilabelmarginloss_reference(input[i], target[i])
 
     if reduction == 'mean':
@@ -2955,7 +2963,7 @@ def _multimarginloss_reference(input, target_idx, p, margin, weight):
         weight = input.new(len(input)).fill_(1)
 
     output = 0
-    for i in range(0, len(input)):
+    for i in range(len(input)):
         if i != target_idx:
             output += weight[target_idx] * (max(0, (margin - input[target_idx] + input[i])) ** p)
     return output
@@ -2972,7 +2980,7 @@ def multimarginloss_reference(input, target, p=1, margin=1, weight=None, reducti
     n = input.size(0)
     dim = input.size(1)
     output = input.new(n)
-    for x in range(0, n):
+    for x in range(n):
         output[x] = _multimarginloss_reference(input[x], target[x], p, margin, weight)
 
     if reduction == 'mean':
@@ -2987,7 +2995,7 @@ def multimarginloss_reference(input, target, p=1, margin=1, weight=None, reducti
 def cosineembeddingloss_reference(input1, input2, target, margin=0, reduction='mean'):
     def _cos(a, b):
         cos = a.new(a.size(0))
-        for i in range(0, a.size(0)):
+        for i in range(a.size(0)):
             cos[i] = (a[i] * b[i]).sum() / ((((a[i] * a[i]).sum() + 1e-12) * ((b[i] * b[i]).sum() + 1e-12)) ** 0.5)
         return cos
 
@@ -3268,7 +3276,7 @@ class NNTestCase(TestCase):
         for i in range(output_size):
             param, d_param = self._get_parameters(module)
             # make non grad zeros
-            d_param = [torch.zeros_like(p) if d is None else d for (p, d) in zip(param, d_param)]
+            d_param = [torch.zeros_like(p) if d is None else d for (p, d) in zip(param, d_param, strict=True)]
 
             d_out = torch.zeros_like(output)
             flat_d_out = d_out.view(-1)
@@ -3282,7 +3290,7 @@ class NNTestCase(TestCase):
             d_input = self._backward(module, input, output, d_out)
 
             if jacobian_input:
-                for jacobian_x, d_x in zip(flat_jacobian_input, _iter_tensors(d_input)):
+                for jacobian_x, d_x in zip(flat_jacobian_input, _iter_tensors(d_input), strict=True):
                     jacobian_x[:, i] = d_x.contiguous().view(-1)
             if jacobian_parameters:
                 jacobian_param[:, i] = torch.cat(self._flatten_tensors(d_param), 0)
@@ -3320,7 +3328,7 @@ class NNTestCase(TestCase):
         numerical_t = list(_iter_tensors(numerical))
 
         differences = []
-        for a, n in zip(analytical_t, numerical_t):
+        for a, n in zip(analytical_t, numerical_t, strict=True):
             if a.numel() != 0:
                 differences.append(a.add(n, alpha=-1).abs().max())
             # TODO: compare structure (ensure analytic jacobian has correct shape)
@@ -3372,7 +3380,8 @@ class TestBase:
         return self._get_arg('extra_args', True)
 
     def _get_arg(self, name, unpack):
-        assert name in self._required_arg_names
+        if name not in self._required_arg_names:
+            raise AssertionError(f"Expected name '{name}' to be in required arg names")
 
         if name not in self._arg_cache:
             fn_name = name + '_fn'
@@ -3383,8 +3392,10 @@ class TestBase:
             elif fn_name in self._extra_kwargs:
                 self._arg_cache[name] = self._extra_kwargs[fn_name]()
             else:
-                assert size_name in self._extra_kwargs, \
-                    f"Missing `{name}`, `{size_name}` or `{fn_name}` for {self.get_name()}"
+                if size_name not in self._extra_kwargs:
+                    raise AssertionError(
+                        f"Missing `{name}`, `{size_name}` or `{fn_name}` for {self.get_name()}"
+                    )
 
                 def map_tensor_sizes(sizes):
                     if isinstance(sizes, list):
@@ -3469,7 +3480,10 @@ class ModuleTest(TestBase):
                 dim = d + 1
                 break
         noncontig = torch.stack([torch.empty_like(tensor), tensor], dim).select(dim, 1).detach()
-        assert noncontig.numel() == 1 or noncontig.numel() == 0 or not noncontig.is_contiguous()
+        if not (noncontig.numel() == 1 or noncontig.numel() == 0 or not noncontig.is_contiguous()):
+            raise AssertionError(
+                f"Expected noncontig to be non-contiguous or have numel <= 1, got numel={noncontig.numel()}"
+            )
         noncontig.requires_grad = tensor.requires_grad
         return noncontig
 
@@ -3528,7 +3542,7 @@ class ModuleTest(TestBase):
             gpu_module = self.constructor(*self.constructor_args).float().cuda()
             cpu_param = test_case._get_parameters(cpu_module)
             gpu_param = test_case._get_parameters(gpu_module)
-            for cpu_p, gpu_p in zip(cpu_param[0], gpu_param[0]):
+            for cpu_p, gpu_p in zip(cpu_param[0], gpu_param[0], strict=True):
                 gpu_p.data.copy_(cpu_p)
 
             test_case._zero_grad_input(cpu_input_tuple)
@@ -3549,7 +3563,7 @@ class ModuleTest(TestBase):
                 cpu_gradInput = test_case._backward(cpu_module, cpu_input_tuple, cpu_output, cpu_gradOutput)
                 gpu_gradInput = test_case._backward(gpu_module, gpu_input_tuple, gpu_output, gpu_gradOutput)
                 test_case.assertEqual(cpu_gradInput, gpu_gradInput, atol=self.precision, rtol=0, exact_dtype=False)
-                for cpu_d_p, gpu_d_p in zip(cpu_param[1], gpu_param[1]):
+                for cpu_d_p, gpu_d_p in zip(cpu_param[1], gpu_param[1], strict=True):
                     test_case.assertEqual(cpu_d_p, gpu_d_p, atol=self.precision, rtol=0)
 
             # Run double-backwards on CPU and GPU and compare results
@@ -3575,7 +3589,7 @@ class ModuleTest(TestBase):
                     gpu_gradOutput,
                     create_graph=True)
 
-                for cpu_d_i, gpu_d_i in zip(cpu_gradInputs, gpu_gradInputs):
+                for cpu_d_i, gpu_d_i in zip(cpu_gradInputs, gpu_gradInputs, strict=True):
                     test_case.assertEqual(cpu_d_i, gpu_d_i, atol=self.precision, rtol=0, exact_dtype=False)
 
                 # We mix output into the second backwards computation so that
@@ -3598,7 +3612,7 @@ class ModuleTest(TestBase):
                     gpu_input_tuple + (gpu_gradOutput,) + tuple(gpu_module.parameters()),
                     retain_graph=True)
                 test_case.assertEqual(cpu_gradInput, gpu_gradInput, atol=self.precision, rtol=0, exact_dtype=False)
-                for cpu_d_p, gpu_d_p in zip(cpu_gg, gpu_gg):
+                for cpu_d_p, gpu_d_p in zip(cpu_gg, gpu_gg, strict=True):
                     test_case.assertEqual(cpu_d_p, gpu_d_p, atol=self.precision, rtol=0, exact_dtype=False)
 
             self.test_noncontig(test_case, gpu_module, gpu_input_tuple)
@@ -3641,7 +3655,8 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
         num_inputs = len(input_tuple)
 
         def fn_to_gradcheck(*inputs_and_params, **kwargs):
-            assert not kwargs
+            if kwargs:
+                raise AssertionError(f"Expected no kwargs, got {kwargs}")
             return test_case._forward(module, inputs_and_params[:num_inputs])
 
         # gradcheck doesn't support operators that take in dense inputs but
@@ -3649,7 +3664,8 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
         # and nn.EmbeddingBag. Instead, we call `self.check_jacobian`, which
         # is a slightly different version of gradcheck that can handle this.
         if self.has_sparse_gradients:
-            assert num_inputs == 1
+            if num_inputs != 1:
+                raise AssertionError(f"Expected num_inputs == 1, got {num_inputs}")
             test_input_jacobian = torch.is_floating_point(input_tuple[0])
             test_case.check_jacobian(module, input_tuple[0], test_input_jacobian)
         else:
@@ -3680,7 +3696,8 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
 
             # check_inplace doesn't support multiple input tensors, since we don't have any modules
             # that modify the inputs in-place and that accept more than one input
-            assert len(input_tuple) == 1
+            if len(input_tuple) != 1:
+                raise AssertionError(f"Expected len(input_tuple) == 1, got {len(input_tuple)}")
             input = input_tuple[0]
 
             module_ip = self.constructor(*self.constructor_args, inplace=True)

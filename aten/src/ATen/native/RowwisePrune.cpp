@@ -25,7 +25,7 @@ std::tuple<Tensor, Tensor> _rowwise_prune_helper(
   auto mask_contig = mask.contiguous();
   auto mask_data = mask_contig.data_ptr<bool>();
   for (const auto i : c10::irange(mask.numel())) {
-    num_non_masked_rows += (((mask_data[i] == true)) ? 1 : 0);
+    num_non_masked_rows += ((mask_data[i] == true) ? 1 : 0);
   }
   int num_cols = weights.size(1);
   auto pruned_2d_tensor = at::empty({num_non_masked_rows, num_cols},

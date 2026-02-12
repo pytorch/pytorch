@@ -44,7 +44,8 @@ class ConstantExtraMetadataTensor(torch.Tensor):
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
-        assert meta is not None
+        if meta is None:
+            raise AssertionError("Expected meta to not be None")
         elem = inner_tensors["elem"]
         out = ConstantExtraMetadataTensor(elem)
         out.constant_attribute = meta
@@ -144,7 +145,9 @@ class CustomTensorPlainOut(torch.Tensor):
             new_out = pytree.tree_unflatten(
                 (
                     CustomTensorPlainOut(tensor1, tensor2)
-                    for tensor1, tensor2 in zip(out_inner_flat_1, out_inner_flat_2)
+                    for tensor1, tensor2 in zip(
+                        out_inner_flat_1, out_inner_flat_2, strict=True
+                    )
                 ),
                 spec,
             )

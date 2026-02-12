@@ -580,7 +580,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
 
     def test_enumerate_not_break_graph(self):
         def fn(a, b):
-            for i, x in enumerate(a.shape):
+            for _, x in enumerate(a.shape):
                 b = b + x
             for i, x in enumerate(b.shape, 8):
                 b = b + x * i

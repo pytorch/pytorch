@@ -23,7 +23,13 @@ from ..ir import (
     TMADescriptorExperimental,
     TMADescriptorStable,
 )
-from ..utils import cache_on_self, get_gpu_type, GPU_ALIGN_BYTES, IndentedBuffer
+from ..utils import (
+    cache_on_self,
+    get_gpu_type,
+    GPU_ALIGN_BYTES,
+    IndentedBuffer,
+    XPU_KERNEL_FORMAT,
+)
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import get_device_op_overrides, TritonScratchWorkspace
@@ -49,6 +55,25 @@ def cpp_string_literal(s: str) -> str:
         lambda match: _cpp_string_literal_escapes[match.group(0)], s
     )
     return f'"{escaped}"'
+
+
+TRITON_SIGNATURE_TO_CPP = {
+    "i32": "int32_t",
+    "i64": "int64_t",
+    "fp32": "float",
+    "fp64": "double",
+}
+
+
+def signature_is_tma_desc(sig: Optional[str]) -> bool:
+    """Check if a Triton signature represents a TMA descriptor."""
+    if not sig:
+        return False
+    if sig == "nvTmaDesc":
+        return True
+    if sig.startswith("tensordesc<"):
+        return True
+    return False
 
 
 @dataclasses.dataclass
@@ -180,20 +205,25 @@ class DeferredTritonCallWrapper:
                     f"__{params['inductor_meta']['kernel_name']}_end"
                 )
 
-            load_kernel_args = (
-                [
+            if V.graph.aot_mode and config.aot_inductor.embed_kernel_binary:
+                load_kernel_args = [
                     *embed_kernel_args,
                     cpp_string_literal(params["mangled_name"]),
                     str(params["shared_mem"]),
                 ]
-                if V.graph.aot_mode and config.aot_inductor.embed_kernel_binary
-                else [
+                if torch.xpu.is_available():
+                    is_spv = "true" if XPU_KERNEL_FORMAT == "spv" else "false"
+                    if config.aot_inductor.emit_multi_arch_kernel:
+                        is_spv = "true"
+                    load_kernel_args.append(is_spv)
+            else:
+                load_kernel_args = [
                     cpp_string_literal(params[get_cpp_wrapper_cubin_path_name()]),
                     cpp_string_literal(params["mangled_name"]),
                     str(params["shared_mem"]),
                     "cubin_dir_",
                 ]
-            )
+
             prefix.writeline(
                 f"{kernel_var_name} = loadKernel({', '.join(load_kernel_args)}); "
             )
@@ -210,12 +240,12 @@ class DeferredTritonCallWrapper:
             self.arg_types,
             params["def_args"],
         )
-        arg_type_loookup = dict(zip(params["def_args"], self.arg_types))
+        arg_type_lookup = dict(zip(params["def_args"], self.arg_types))
         # difference between Python and C++ wrapper: C++ wrapper strips out equal_to_1 constants
         call_args = [
             name for name in params["call_args"] if name not in triton_meta["constants"]
         ]
-        arg_types = [arg_type_loookup[name] for name in call_args]
+        arg_types = [arg_type_lookup[name] for name in call_args]
         arg_signatures = [triton_meta["signature"][name] for name in call_args]
         scratch_spaces = {
             name: params[name]
@@ -278,21 +308,6 @@ class DeferredTritonCallWrapper:
                     )
 
                 # Add input info (This copies the logic from args_decl)
-                signature2dtype = {
-                    "i32": "int32_t",
-                    "i64": "int64_t",
-                    "fp32": "float",
-                }
-
-                def signature_is_tma_desc(sig):
-                    if not sig:
-                        return False
-                    if sig == "nvTmaDesc":
-                        return True
-                    if sig.startswith("tensordesc<"):
-                        return True
-                    return False
-
                 curr_arg_id = -1
                 total_args = []
                 ordered_argsname = []
@@ -307,6 +322,7 @@ class DeferredTritonCallWrapper:
                             f"RAIIC10IValueHandle RAII_{arg_name}(tmp_{arg_name});",
                         ]
                     )
+                    # pyrefly: ignore [bad-argument-type]
                     total_args.append(f"tmp_{arg_name}")
 
                 def process_args_for_input_shape(arg, arg_type, arg_signature=None):
@@ -331,11 +347,12 @@ class DeferredTritonCallWrapper:
                                 f"RAIIC10IValueHandle RAII_{arg_name}(tmp_{arg_name});",
                             ]
                         )
+                        # pyrefly: ignore [bad-argument-type]
                         total_args.append(f"tmp_{arg_name}")
                     elif (
                         isinstance(arg_type, type(SymbolicCallArg))
                         and arg_signature is not None
-                        and arg_signature in signature2dtype.keys()
+                        and arg_signature in TRITON_SIGNATURE_TO_CPP
                     ) or arg_type in (sympy.Integer, int, sympy.Float, float):
                         write_dummy_scalar_ivalue(arg_name)
                     elif arg_signature and arg_signature.startswith("tensordesc<"):
@@ -348,6 +365,7 @@ class DeferredTritonCallWrapper:
                 for arg, arg_type, arg_signature in zip_longest(
                     call_args, arg_types, arg_signatures
                 ):
+                    # pyrefly: ignore [bad-argument-type]
                     ordered_argsname.append(f'"{arg}"')
                     process_args_for_input_shape(arg, arg_type, arg_signature)
 
@@ -635,22 +653,6 @@ class CppWrapperGpu(CppWrapperCpu):
         """
         new_args: list[str] = []
 
-        # Add more cases for other types as needed
-        signature2dtype = {
-            "i32": "int32_t",
-            "i64": "int64_t",
-            "fp32": "float",
-        }
-
-        def signature_is_tma_desc(sig):
-            if not sig:
-                return False
-            if sig == "nvTmaDesc":
-                return True
-            if sig.startswith("tensordesc<"):
-                return True
-            return False
-
         def process_tma_stable_arg(arg, arg_type, arg_signature, var_name):
             # [Note: AOTI TMA Stable handling]
             # For most args, a single arg passed to the python triton interface
@@ -704,23 +706,27 @@ class CppWrapperGpu(CppWrapperCpu):
                     )
                 )
                 new_args.append(f"&{var_name}")
-            elif arg_type in (sympy.Integer, int):
-                code.writeline(f"int {var_name} = {cexpr(arg)};")
-                new_args.append(f"&{var_name}")
-            elif arg_type in (sympy.Float, float):
-                code.writeline(f"float {var_name} = {cexpr(arg)};")
-                new_args.append(f"&{var_name}")
             # For symbolic call arguments, examine the arg signatures from triton meta
             # to explicitly cast to the right type
             # Reason: `auto` can infer unexpected type against kernel input signature.
             elif (
                 isinstance(arg_type, type(SymbolicCallArg))
                 and arg_signature is not None
-                and arg_signature in signature2dtype.keys()
+                and arg_signature in TRITON_SIGNATURE_TO_CPP
             ):
                 code.writeline(
-                    f"{signature2dtype[arg_signature]} {var_name} = {cexpr(arg)};"
+                    f"{TRITON_SIGNATURE_TO_CPP[arg_signature]} {var_name} = {cexpr(arg)};"
                 )
+                new_args.append(f"&{var_name}")
+            elif arg_type in (sympy.Integer, int):
+                code.writeline(f"int {var_name} = {cexpr(arg)};")
+                new_args.append(f"&{var_name}")
+            elif arg_type in (sympy.Float, float):
+                # Use signature type if available, otherwise default to float
+                cpp_type = TRITON_SIGNATURE_TO_CPP.get(  # pyrefly: ignore[no-matching-overload]
+                    arg_signature, "float"
+                )
+                code.writeline(f"{cpp_type} {var_name} = {cexpr(arg)};")
                 new_args.append(f"&{var_name}")
             elif arg_signature and arg_signature.startswith("tensordesc<"):
                 new_args.extend(
@@ -769,6 +775,7 @@ class CppWrapperGpu(CppWrapperCpu):
         raw_keys=None,
         raw_args=None,
         triton_meta=None,
+        inductor_meta=None,
         graph_name="",
         original_fxnode_name=None,
     ):
@@ -790,6 +797,7 @@ class CppWrapperGpu(CppWrapperCpu):
                 raw_keys=raw_keys,
                 raw_args=raw_args,
                 triton_meta=triton_meta,
+                inductor_meta=inductor_meta,
             )
 
         if (
@@ -808,6 +816,7 @@ class CppWrapperGpu(CppWrapperCpu):
                 raw_keys=raw_keys,
                 raw_args=raw_args,
                 triton_meta=triton_meta,
+                inductor_meta=inductor_meta,
                 original_fxnode_name=original_fxnode_name,
             )
 
@@ -819,7 +828,9 @@ class CppWrapperGpu(CppWrapperCpu):
 
         if triton:
             call_args, arg_types = self.prepare_triton_wrapper_args(
-                call_args, arg_types
+                call_args,
+                # pyrefly: ignore [bad-argument-type]
+                arg_types,
             )
             wrapper_name = f"call_{kernel_name}"
             if wrapper_name not in self._triton_call_wrappers:
@@ -843,10 +854,12 @@ class CppWrapperGpu(CppWrapperCpu):
                 self.writeline(f"{wrapper_name}({', '.join(call_args)});")
         else:
             casted = []
+            # pyrefly: ignore [no-matching-overload]
             for arg_type, arg in zip(arg_types, call_args):
                 new_arg = arg
                 if arg_type.endswith("*") and arg != "nullptr":
                     new_arg = f"{arg}.data_ptr()"
+                # pyrefly: ignore [bad-argument-type]
                 casted.append(f"({arg_type}){cexpr(new_arg)}")
             call_args_str = ", ".join(casted)
             self.writeline(f"kernels.{kernel_name}({call_args_str}, {stream});")

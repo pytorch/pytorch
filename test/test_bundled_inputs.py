@@ -205,7 +205,7 @@ class TestBundledInputs(TestCase):
         self.assertEqual(all_info["foo"]["info"], info)
 
         # example of how to turn the 'get_inputs_function_name' into the actual list of bundled inputs
-        for func_name in all_info.keys():
+        for func_name in all_info:
             input_func_name = all_info[func_name]["get_inputs_function_name"][0]
             func_to_run = getattr(loaded, input_func_name)
             self.assertEqual(func_to_run(), samples)
@@ -360,7 +360,10 @@ class TestBundledInputs(TestCase):
 
         def condensed(t):
             ret = torch.empty_like(t).flatten()[0].clone().expand(t.shape)
-            assert ret.storage().size() == 1
+            if ret.storage().size() != 1:
+                raise AssertionError(
+                    f"storage size must be 1, got {ret.storage().size()}"
+                )
             # ret.storage()[0] = 0
             return ret
 

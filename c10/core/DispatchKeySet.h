@@ -15,6 +15,8 @@
 #include <string>
 #include <type_traits>
 
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-enum")
+
 namespace c10 {
 
 struct FunctionalityOffsetAndMask {
@@ -534,10 +536,10 @@ class DispatchKeySet final {
     using reference = value_type&;
     using pointer = value_type*;
     // final mask value should mask out the entire keyset
-    static const uint8_t end_iter_mask_val =
+    static constexpr uint8_t end_iter_mask_val =
         num_backends + num_functionality_keys;
     // final key value should be the last DispatchKey
-    static const uint8_t end_iter_key_val = num_functionality_keys;
+    static constexpr uint8_t end_iter_key_val = num_functionality_keys;
 
     // current_dispatchkey_idx_ will iterate through all functionality bits.
     // current_backendcomponent_idx_ will iterate through all backend bits.
@@ -547,11 +549,7 @@ class DispatchKeySet final {
         uint8_t next_backend = 0)
         : data_ptr_(data_ptr),
           next_functionality_(next_functionality),
-          next_backend_(next_backend),
-          // These are in an invalid state at construction time, and set by the
-          // first increment call
-          current_dispatchkey_idx_(end_iter_key_val),
-          current_backendcomponent_idx_(end_iter_key_val) {
+          next_backend_(next_backend) {
       // Go to the first key in the set
       TORCH_INTERNAL_ASSERT(
           next_functionality_ >= num_backends,
@@ -613,8 +611,10 @@ class DispatchKeySet final {
     const uint64_t* data_ptr_;
     uint8_t next_functionality_;
     uint8_t next_backend_;
-    uint8_t current_dispatchkey_idx_;
-    uint8_t current_backendcomponent_idx_;
+    // These are in an invalid state at construction time, and set by the
+    // first increment call
+    uint8_t current_dispatchkey_idx_{end_iter_key_val};
+    uint8_t current_backendcomponent_idx_{end_iter_key_val};
   };
 
  public:
@@ -966,3 +966,5 @@ using remove_DispatchKeySet_arg_from_func = guts::make_function_traits_t<
             1>,
         typename guts::infer_function_traits_t<FuncType>::parameter_types>>;
 } // namespace c10
+
+C10_DIAGNOSTIC_POP()

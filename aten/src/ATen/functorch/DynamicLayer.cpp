@@ -7,12 +7,10 @@
 #include <ATen/functorch/DynamicLayer.h>
 #include <ATen/functorch/TensorWrapper.h>
 #include <ATen/functorch/BatchedTensorImpl.h>
-#include <ATen/functorch/BatchRulesHelper.h>
 
 #include <torch/library.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <ATen/core/dispatch/Dispatcher.h>
-#include <ATen/FunctionalTensorWrapper.h>
 #include <c10/util/irange.h>
 #include <ATen/FuncTorchTLS.h>
 #include <iostream>
@@ -346,15 +344,15 @@ void foreachTensorInplaceWithFlag(std::vector<IValue>& args, int64_t begin, int6
 }
 
 std::ostream& operator<< (std::ostream& os, const DynamicLayer& layer) {
-  os << layer.layerId() << ":" << layer.key();
+  os << layer.layerId() << ':' << layer.key();
   return os;
 }
 std::ostream& operator<< (std::ostream& os, const std::vector<DynamicLayer>& dls) {
   os << "DynamicLayerStack[ ";
   for (const auto& layer : dls) {
-    os << layer << " ";
+    os << layer << ' ';
   }
-  os << "]";
+  os << ']';
   return os;
 }
 

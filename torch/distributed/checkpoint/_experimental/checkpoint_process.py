@@ -6,7 +6,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from enum import Enum
 from multiprocessing.connection import Connection
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch.multiprocessing as mp
 from torch.multiprocessing.spawn import ProcessExitedException
@@ -57,8 +57,8 @@ class WorkerRequest:
 class WorkerResponse:
     request_type: RequestType
     success: bool
-    error_msg: Optional[str] = None
-    payload: Optional[dict[str, Any]] = None
+    error_msg: str | None = None
+    payload: dict[str, Any] | None = None
 
 
 class CheckpointProcess:
@@ -83,8 +83,8 @@ class CheckpointProcess:
         self._checkpoint_writer_init_fn = checkpoint_writer_init_fn
         self._checkpoint_writer_init_args = checkpoint_writer_init_args
         self.process = None
-        self._parent_end: Optional[Connection] = None
-        self._child_end: Optional[Connection] = None
+        self._parent_end: Connection | None = None
+        self._child_end: Connection | None = None
 
         self.process_creation_future = self._executor.submit(
             self._create_subprocess,
@@ -135,7 +135,8 @@ class CheckpointProcess:
         )
 
         # wait for the timeout or a response from subprocess
-        assert self._parent_end is not None, "Parent end of pipe should be initialized"
+        if self._parent_end is None:
+            raise AssertionError("Parent end of pipe should be initialized")
         if not self._parent_end.poll(timeout=config.subprocess_init_timeout_secs):
             msg = f"Timed out after {config.subprocess_init_timeout_secs}s waiting for checkpoint subprocess to initialize"
             logger.error(msg)
@@ -161,7 +162,8 @@ class CheckpointProcess:
             os.getpid(),
         )
 
-        assert sub_rank == 0, "We need only one checkpointer per parent training"
+        if sub_rank != 0:
+            raise AssertionError("We need only one checkpointer per parent training")
         request = WorkerRequest(request_type=RequestType.PING, payload={})
 
         try:
@@ -222,13 +224,12 @@ class CheckpointProcess:
                 )
             )
             parent_pipe.close()
-            logger.error("Subprocess terminated due to exception: %s", e)
+            logger.exception("Subprocess terminated due to exception")
 
     def _send(self, request_type: RequestType, payload: dict[str, Any]) -> None:
         try:
-            assert self._parent_end is not None, (
-                "Parent end of pipe should be initialized"
-            )
+            if self._parent_end is None:
+                raise AssertionError("Parent end of pipe should be initialized")
             self._parent_end.send(
                 WorkerRequest(
                     request_type=request_type,
@@ -237,16 +238,15 @@ class CheckpointProcess:
             )
         except OSError as e:
             error_msg = "Child process terminated unexpectedly"
-            logger.error(
-                "Communication failed during %s request: %s", request_type.value, e
+            logger.exception(
+                "Communication failed during %s request", request_type.value
             )
             raise RuntimeError(error_msg) from e
 
-    def _recv(self) -> Optional[dict[str, Any]]:
+    def _recv(self) -> dict[str, Any] | None:
         try:
-            assert self._parent_end is not None, (
-                "Parent end of pipe should be initialized"
-            )
+            if self._parent_end is None:
+                raise AssertionError("Parent end of pipe should be initialized")
             response = self._parent_end.recv()
             if response.success is False:
                 error_msg = (
@@ -262,10 +262,10 @@ class CheckpointProcess:
 
     def write(
         self,
-        state_dict: Union[STATE_DICT, Future[STATE_DICT]],
+        state_dict: STATE_DICT | Future[STATE_DICT],
         path: str,
         **kwargs: Any,
-    ) -> Optional[Future[None]]:
+    ) -> Future[None] | None:
         logger.debug("Waiting for subprocess initialization to complete")
 
         # wait until the process is started
@@ -280,7 +280,7 @@ class CheckpointProcess:
 
     def _write(
         self,
-        state_dict: Union[STATE_DICT, Future[STATE_DICT]],
+        state_dict: STATE_DICT | Future[STATE_DICT],
         path: str,
         **kwargs: Any,
     ) -> None:
@@ -322,7 +322,7 @@ class CheckpointProcess:
             subprocess_pid = self.process.processes[0].pid
             # send graceful termination to sub process
             try:
-                # pyrefly: ignore  # missing-attribute
+                # pyrefly: ignore [missing-attribute]
                 self._parent_end.send(
                     WorkerRequest(
                         request_type=RequestType.TERMINATE_PROCESS,
@@ -354,10 +354,8 @@ class CheckpointProcess:
                     )
                     self.process.processes[0].kill()
                     logger.info("Subprocess killed forcefully")
-            except ProcessExitedException as e:
-                logger.error(
-                    "ProcessExitedException during subprocess termination: %s", e
-                )
+            except ProcessExitedException:
+                logger.exception("ProcessExitedException during subprocess termination")
                 raise
 
         logger.debug("CheckpointProcess closed successfully")

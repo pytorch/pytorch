@@ -1,10 +1,8 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/onnx/eval_peephole.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
-#include <torch/torch.h>
 
 #include <c10/util/irange.h>
-#include <algorithm>
 
 namespace torch::jit {
 

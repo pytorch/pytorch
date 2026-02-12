@@ -15,7 +15,9 @@ from torch.distributed.tensor.parallel.style import (
 )
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
+    create_local_tensor_test_class,
     DTensorTestBase,
+    map_local_tensor_for_rank,
     MLPModule,
     MLPStacked,
     with_comms,
@@ -53,7 +55,7 @@ class TensorParallelAPITests(DTensorTestBase):
                 (not rank0_only)
                 or (self.rank == 0)
                 or (
-                    name not in ["net2.bias"]
+                    name != "net2.bias"
                     and not skip_rowwise_bias
                     or name not in ["bias", "net2.bias"]
                 )
@@ -78,7 +80,14 @@ class TensorParallelAPITests(DTensorTestBase):
 
         # check forward correctness
         local_output = local_module(inp)
-        inp = inp.chunk(self.world_size, dim=-1)[self.rank] if rowwise else inp
+        inp = map_local_tensor_for_rank(
+            inp,
+            self.rank,
+            lambda inp, rank: inp.chunk(self.world_size, dim=-1)[rank]
+            if rowwise
+            else inp,
+        )
+        # inp = inp.chunk(self.world_size, dim=-1)[self.rank] if rowwise else inp
         dist_output = dist_module(inp)
         dist_output = (
             dist_output.redistribute(dist_output.device_mesh, [Replicate()]).to_local()
@@ -402,6 +411,15 @@ class TensorParallelAPITests(DTensorTestBase):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
         with self.assertWarns(UserWarning):
             parallelize_module(model, device_mesh)
+
+
+TensorParallelAPITestsWithLocalTensor = create_local_tensor_test_class(
+    TensorParallelAPITests,
+    skipped_tests=[
+        # Uses mesh_scatter that has local rank dependent logic
+        "test_parallelize_module_src_data_rank",
+    ],
+)
 
 
 if __name__ == "__main__":

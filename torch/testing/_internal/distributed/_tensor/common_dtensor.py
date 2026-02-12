@@ -3,6 +3,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 import contextlib
+import copy
 import functools
 import itertools
 import sys
@@ -20,6 +21,7 @@ from torch.distributed._local_tensor import (
     LocalIntNode,
     LocalTensor,
     LocalTensorMode,
+    maybe_disable_local_tensor_mode,
     maybe_run_for_local_tensor,
 )
 from torch.distributed.tensor import (
@@ -31,6 +33,8 @@ from torch.distributed.tensor import (
     Replicate,
     Shard,
 )
+from torch.distributed.tensor._dtensor_spec import ShardOrderEntry
+from torch.distributed.tensor._redistribute import redistribute_local_tensor
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,
@@ -39,6 +43,7 @@ from torch.distributed.tensor.parallel import (
     SequenceParallel,
 )
 from torch.testing._internal.common_distributed import (
+    ACCELERATOR_DIST_BACKENDS,
     MultiProcContinuousTest,
     MultiProcessTestCase,
     MultiThreadedTestCase,
@@ -133,7 +138,10 @@ class ModelArgs:
 class Attention(nn.Module):
     def __init__(self, args: ModelArgs):
         super().__init__()
-        assert args.dim % args.n_heads == 0
+        if args.dim % args.n_heads != 0:
+            raise AssertionError(
+                f"Expected args.dim % args.n_heads == 0, got {args.dim} % {args.n_heads}"
+            )
         self.head_dim = args.dim // args.n_heads
         self.n_heads = args.n_heads
         self.dropout_p = args.dropout_p
@@ -201,8 +209,10 @@ class TransformerBlock(nn.Module):
 class Transformer(nn.Module):
     def __init__(self, args: ModelArgs):
         super().__init__()
-        assert args.vocab_size is not None
-        assert args.max_seq_len is not None
+        if args.vocab_size is None:
+            raise AssertionError("Expected args.vocab_size to not be None")
+        if args.max_seq_len is None:
+            raise AssertionError("Expected args.max_seq_len to not be None")
         self.model_args = args
         self.max_seq_len = args.max_seq_len
         self.tok_embeddings = nn.Embedding(args.vocab_size, args.dim)
@@ -219,7 +229,10 @@ class Transformer(nn.Module):
 
     def forward(self, tokens):
         _bsz, seq_len = tokens.size()
-        assert seq_len <= self.max_seq_len
+        if seq_len > self.max_seq_len:
+            raise AssertionError(
+                f"Expected seq_len <= max_seq_len, got {seq_len} > {self.max_seq_len}"
+            )
         h = self.tok_embeddings(tokens)
         pos = torch.arange(0, seq_len, device=tokens.device)
         p = self.pos_embeddings(pos)  # positional embeddings of shape (seq_len, dim)
@@ -241,7 +254,8 @@ class Transformer(nn.Module):
         use_seq_parallel: bool,
         local_output_for_attn: bool = False,
     ) -> nn.Module:
-        assert isinstance(module, Transformer), f"Requires Transformer but got {module}"
+        if not isinstance(module, Transformer):
+            raise AssertionError(f"Requires Transformer but got {module}")
         # Parallelize the root submodules.
         if use_seq_parallel:
             root_plan = {
@@ -359,8 +373,21 @@ class DTensorContinuousTestBase(MultiProcContinuousTest):
         backend = dist.get_default_backend_for_device(DEVICE_TYPE)
         return backend
 
+    @classmethod
+    def _init_pg(cls, rank, world_size, rdvz_file):
+        # Set device before initializing process group to ensure
+        # each rank is bound to the correct GPU
+        if torch.accelerator.is_available():
+            torch.accelerator.set_device_index(rank)
+        # Call parent's _init_pg to do the actual process group initialization
+        super()._init_pg(rank, world_size, rdvz_file)
+
 
 class DTensorTestBase(MultiProcessTestCase):
+    @property
+    def is_local_tensor_enabled(self) -> bool:
+        return False
+
     @property
     def world_size(self) -> int:
         return NUM_DEVICES
@@ -378,20 +405,26 @@ class DTensorTestBase(MultiProcessTestCase):
 
     @property
     def backend(self) -> str:
-        backend = dist.get_default_backend_for_device(DEVICE_TYPE)
+        backend = dist.get_default_backend_for_device(self.device_type)
         return backend
+
+    def init_manual_seed_for_rank(self) -> None:
+        torch.manual_seed(self.rank)
 
     def build_device_mesh(self) -> DeviceMesh:
         return init_device_mesh(self.device_type, (self.world_size,))
 
     def init_pg(self, eager_init, backend: Optional[str] = None) -> None:
-        if "nccl" in self.backend and torch.cuda.device_count() < self.world_size:
+        if backend is None:
+            backend = self.backend
+
+        requires_gpu = any(
+            gpu_backend in backend for gpu_backend in ACCELERATOR_DIST_BACKENDS
+        )
+        if requires_gpu and torch.accelerator.device_count() < self.world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
 
         curr_backend = dist.get_default_backend_for_device(self.device_type)
-
-        if backend is None:
-            backend = self.backend
 
         if backend not in [
             "nccl",
@@ -418,7 +451,7 @@ class DTensorTestBase(MultiProcessTestCase):
 
         # For nccl backend, bind the device to the process if device_id is not None
         # so the nccl communicator is immediately formed and we can use `ncclCommSplit`
-        # for form subgroup to avoid unnecesssary overhead.
+        # for form subgroup to avoid unnecessary overhead.
         dist.init_process_group(
             backend=backend,
             world_size=self.world_size,
@@ -438,7 +471,7 @@ class DTensorTestBase(MultiProcessTestCase):
                 torch.cuda.current_device() if self.device_type == "cuda" else self.rank
             )
 
-        if self.device_type == "cpu" and torch._C._get_accelerator().type != "cpu":
+        if self.device_type == "cpu":
             # NOTE: when `device_id` is not None, barrier() will choose the accelerator
             # of the most pripority, which means if the test specifies to use CPU for
             # testing while CUDA is available on the host, the barrier() will use CUDA.
@@ -509,6 +542,12 @@ def with_comms(
             *args: tuple[object],
             **kwargs: dict[str, Any],  # type: ignore[misc]
         ) -> None:
+            # just passthrough if harness doesn't
+            # support init_pg e.g., DTensorOpTestBase
+            if not hasattr(self, "init_pg"):
+                func(self, *args, **kwargs)
+                return
+
             self.init_pg(eager_init, backend)
 
             try:
@@ -552,12 +591,14 @@ class DTensorConverter:
         mesh: DeviceMesh,
         args: tuple[object, ...],
         kwargs: dict[str, object],
+        replicate_only: bool = False,
     ) -> None:
         self.hit = 0
         self.miss = 0
         self.mesh = mesh
         self.args = args
         self.kwargs = kwargs
+        self.replicate_only = replicate_only
         flatten_args, flatten_args_spec = tree_flatten(args)
         flatten_kwargs, flatten_kwargs_spec = tree_flatten(kwargs)
 
@@ -609,6 +650,10 @@ class DTensorConverter:
         )
 
     def gen_sharding_choices_for_arg(self, arg: torch.Tensor) -> Sequence[Placement]:
+        # If replicate_only is set, only use Replicate placement
+        if self.replicate_only:
+            return [Replicate()]
+
         mesh_size = self.mesh.size()
         sharding_choices: list[Placement] = [Replicate()]
         # c10d collective does not support bool tensor
@@ -697,15 +742,25 @@ class DTensorConverter:
             raise RuntimeError(f"Trying to convert to DTensor, but got {type(t)}")
 
 
-class LocalDTensorTestBase(DTensorTestBase):
+class LocalDTensorOpTestBase(DTensorOpTestBase):
+    @property
+    def is_local_tensor_enabled(self) -> bool:
+        return True
+
+    def _handle_test_skip(self, msg: str) -> None:
+        self.skipTest(msg)
+
     def _get_local_tensor_mode(self):
-        return LocalTensorMode(frozenset(range(0, self.world_size)))
+        return LocalTensorMode(frozenset(range(self.world_size)))
 
     def setUp(self) -> None:
         super().setUp()
         torch.autograd._enable_record_function(False)
 
     def tearDown(self) -> None:
+        from torch.distributed.tensor import _random as random
+
+        random._rng_tracker = None
         super().tearDown()
         torch.autograd._enable_record_function(True)
 
@@ -724,6 +779,10 @@ class LocalDTensorTestBase(DTensorTestBase):
 
         return types.MethodType(wrapper, self)
 
+    def build_device_mesh(self) -> DeviceMesh:
+        with maybe_disable_local_tensor_mode():
+            return super().build_device_mesh()
+
     def init_pg(self, eager_init, backend: Optional[str] = None) -> None:
         dist.init_process_group("fake", rank=0, world_size=self.world_size)
         self._pg = dist.distributed_c10d._get_default_group()
@@ -734,6 +793,74 @@ class LocalDTensorTestBase(DTensorTestBase):
 
     def _spawn_processes(self) -> None:
         pass
+
+    def _spawn_threads(self) -> None:
+        pass
+
+    def run_test(self, test_name: str, parent_pipe) -> None:
+        getattr(self, test_name)()
+
+    def init_manual_seed_for_rank(self) -> None:
+        torch.manual_seed(0)
+
+
+class LocalDTensorTestBase(DTensorTestBase):
+    @property
+    def is_local_tensor_enabled(self) -> bool:
+        return True
+
+    def _handle_test_skip(self, msg: str) -> None:
+        self.skipTest(msg)
+
+    def _get_local_tensor_mode(self):
+        return LocalTensorMode(frozenset(range(self.world_size)))
+
+    def setUp(self) -> None:
+        super().setUp()
+        torch.autograd._enable_record_function(False)
+
+    def tearDown(self) -> None:
+        from torch.distributed.tensor import _random as random
+
+        random._rng_tracker = None
+        super().tearDown()
+        torch.autograd._enable_record_function(True)
+
+    @property
+    def rank(self):
+        return torch.SymInt(LocalIntNode({r: r for r in range(self.world_size)}))
+
+    @rank.setter
+    def rank(self, rank):
+        pass
+
+    def join_or_run(self, fn):
+        @wraps(fn)
+        def wrapper(self):
+            fn()
+
+        return types.MethodType(wrapper, self)
+
+    def build_device_mesh(self) -> DeviceMesh:
+        with maybe_disable_local_tensor_mode():
+            return super().build_device_mesh()
+
+    def init_pg(self, eager_init, backend: Optional[str] = None) -> None:
+        dist.init_process_group("fake", rank=0, world_size=self.world_size)
+        self._pg = dist.distributed_c10d._get_default_group()
+
+    def destroy_pg(self, device_id: Optional[int] = None) -> None:
+        dist.destroy_process_group(self._pg)
+        self._pg = None
+
+    def _spawn_processes(self) -> None:
+        pass
+
+    def run_test(self, test_name: str, parent_pipe) -> None:
+        getattr(self, test_name)()
+
+    def init_manual_seed_for_rank(self) -> None:
+        torch.manual_seed(0)
 
 
 def make_wrapped(fn, ctxs):
@@ -746,14 +873,18 @@ def make_wrapped(fn, ctxs):
                 stack.enter_context(ctx(self))
             else:
                 stack.enter_context(ctx)
-        out = fn(self)
-        stack.close()
+        try:
+            out = fn(self)
+        finally:
+            stack.close()
         return out
 
     return wrapped
 
 
-def create_local_tensor_test_class(orig_cls, skipped_tests=None):
+def create_local_tensor_test_class(
+    orig_cls, skipped_tests=None, base_class=LocalDTensorTestBase
+):
     if skipped_tests is None:
         skipped_tests = []
 
@@ -772,7 +903,7 @@ def create_local_tensor_test_class(orig_cls, skipped_tests=None):
 
     cls = type(
         orig_cls.__name__ + "WithLocalTensor",
-        (LocalDTensorTestBase,) + orig_cls.__bases__,
+        (base_class,) + orig_cls.__bases__,
         dct,
     )
     cls.__file__ = __file__
@@ -782,3 +913,184 @@ def create_local_tensor_test_class(orig_cls, skipped_tests=None):
 @maybe_run_for_local_tensor
 def map_local_tensor_for_rank(tensor, rank, func):
     return func(tensor, rank)
+
+
+@maybe_run_for_local_tensor
+def map_local_for_rank(rank, func):
+    return func(rank)
+
+
+def reduce_local_int(val, func):
+    return func(val.node._local_ints)
+
+
+def _convert_shard_order_dict_to_ShardOrder(shard_order):
+    """Convert shard_order dict to ShardOrder"""
+    return tuple(
+        ShardOrderEntry(tensor_dim=tensor_dim, mesh_dims=tuple(mesh_dims))
+        for tensor_dim, mesh_dims in shard_order.items()
+    )
+
+
+# TODO(zpcore): remove once the native redistribute supports shard_order arg
+def redistribute(
+    dtensor_input,
+    device_mesh,
+    placements,
+    shard_order,
+    use_graph_based_transform=True,
+):
+    """
+    wrapper function to support shard_order for redistribution
+    This is a simpler version of Redistribute, only considers the forward.
+    """
+    if placements is None:
+        placements = shard_order_to_placement(shard_order, device_mesh)
+    placements = tuple(placements)
+    old_spec = dtensor_input._spec
+    new_spec = copy.deepcopy(old_spec)
+    new_spec.placements = placements
+    if shard_order is not None:
+        new_spec.shard_order = shard_order
+    else:
+        new_spec.shard_order = ()
+    if old_spec == new_spec:
+        return dtensor_input
+    dtensor_input = DTensor.from_local(
+        redistribute_local_tensor(
+            dtensor_input.to_local(),
+            old_spec,
+            new_spec,
+            use_graph_based_transform=use_graph_based_transform,
+        ),
+        device_mesh,
+    )
+    dtensor_input._spec = copy.deepcopy(new_spec)
+    return dtensor_input  # returns DTensor
+
+
+# TODO(zpcore): remove once the native distribute_tensor supports
+# shard_order arg
+def patched_distribute_tensor(
+    input_tensor,
+    device_mesh,
+    placements,
+    shard_order,
+    use_graph_based_transform=True,
+    src_data_rank: int | None = 0,
+):
+    """wrapper function to support shard_order for tensor distribution"""
+    if placements is None:
+        placements = shard_order_to_placement(shard_order, device_mesh)
+    placements = tuple(placements)
+    tensor_dt = distribute_tensor(
+        input_tensor, device_mesh, placements, src_data_rank=src_data_rank
+    )
+    # fix the shard order
+    return redistribute(
+        tensor_dt, device_mesh, placements, shard_order, use_graph_based_transform
+    )
+
+
+# TODO(zpcore): remove once the native redistribute supports shard_order arg
+def make_full_tensor(dtensor_input):
+    """wrapper function to support DTensor.full_tensor"""
+    return redistribute(
+        dtensor_input, dtensor_input.device_mesh, placements=None, shard_order=()
+    ).to_local()
+
+
+def shard_order_to_placement(shard_order, mesh):
+    """convert shard_order to placement with only Replicate() and Shard()"""
+    placements: list[Any] = [Replicate() for _ in range(mesh.ndim)]
+    if shard_order is not None:
+        for entry in shard_order:
+            tensor_dim = entry.tensor_dim
+            mesh_dims = entry.mesh_dims
+            for mesh_dim in mesh_dims:
+                placements[mesh_dim] = Shard(tensor_dim)
+    return tuple(placements)
+
+
+def generate_shard_orders(mesh, tensor_rank):
+    # Generate all possible sharding placement of tensor with rank
+    # `tensor_rank` over mesh.
+    def _split_list(lst: list, N: int):
+        def compositions(n: int, k: int):
+            # yields lists of length k, positive ints summing to n
+            for cuts in itertools.combinations(range(1, n), k - 1):
+                # add 0 and n as sentinels, then take consecutive differences
+                yield [b - a for a, b in itertools.pairwise((0, *cuts, n))]
+
+        length = len(lst)
+        for comp in compositions(length, N):
+            result = []
+            start = 0
+            for size in comp:
+                result.append(lst[start : start + size])
+                start += size
+            yield result
+
+    all_mesh = list(range(mesh.ndim))
+    all_device_order = list(itertools.permutations(all_mesh))
+    for device_order in all_device_order:
+        # split on device orders, and assign each device order segment to a tensor dim
+        for num_split in range(1, mesh.ndim + 1):
+            for splitted_list in _split_list(list(range(mesh.ndim)), num_split):
+                for tensor_dims in itertools.combinations(
+                    range(tensor_rank), len(splitted_list)
+                ):
+                    shard_order = {}
+                    if len(tensor_dims) != len(splitted_list):
+                        raise AssertionError(
+                            f"Expected len(tensor_dims) == len(splitted_list), "
+                            f"got {len(tensor_dims)} != {len(splitted_list)}"
+                        )
+                    for tensor_dim, mesh_dims in zip(tensor_dims, splitted_list):
+                        shard_order[tensor_dim] = device_order[
+                            mesh_dims[0] : mesh_dims[-1] + 1
+                        ]
+                    yield _convert_shard_order_dict_to_ShardOrder(shard_order)
+
+
+def validate_sharding_rule_sample(
+    op, full_args, full_kwargs, input_placements, output_placements, device_mesh
+):
+    from torch.utils import _pytree as pytree
+
+    # Extract tensors from args in order, pair with placements
+    full_tensors = [
+        a for a in pytree.tree_leaves(full_args) if isinstance(a, torch.Tensor)
+    ]
+    full_tensors += [
+        a for a in pytree.tree_leaves(full_kwargs) if isinstance(a, torch.Tensor)
+    ]
+
+    dtensors = [
+        distribute_tensor(t, device_mesh, (p,))
+        for t, p in zip(full_tensors, input_placements)
+    ]
+
+    # Build sharded args by replacing tensors with their sharded local versions
+    dtensor_idx = 0
+
+    def _to_local_shard(a):
+        nonlocal dtensor_idx
+        if isinstance(a, torch.Tensor):
+            local = dtensors[dtensor_idx].to_local()
+            dtensor_idx += 1
+            return local
+        return a
+
+    local_args, local_kwargs = pytree.tree_map(
+        _to_local_shard, (full_args, full_kwargs)
+    )
+
+    # run and compare
+    ref_output = op(*full_args, **full_kwargs)
+    local_output = op(*local_args, **local_kwargs)
+    output_dt = DTensor.from_local(local_output, device_mesh, output_placements)
+    full_output = output_dt.redistribute(device_mesh, (Replicate(),)).to_local()
+    return ref_output.shape == full_output.shape and torch.allclose(
+        ref_output, full_output, atol=1e-5, rtol=1e-5
+    )

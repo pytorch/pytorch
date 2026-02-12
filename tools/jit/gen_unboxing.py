@@ -115,7 +115,8 @@ class ComputeCodegenUnboxedKernels:
         args_code = []
         for arg in args:
             # Using method=False faithful C++ API, so we should not see SelfArgument/TensorOptionsArgument
-            assert isinstance(arg.argument, Argument)
+            if not isinstance(arg.argument, Argument):
+                raise AssertionError(f"Expected Argument, got {type(arg.argument)}")
             if not arg.argument.default:
                 arg_cpp = "c10::IValue(::std::nullopt)"
             else:
@@ -131,12 +132,14 @@ class ComputeCodegenUnboxedKernels:
                 else:
                     arg_cpp = f"c10::IValue({arg_default})"
             args_code.append(
+                # pyrefly: ignore [bad-argument-type]
                 f"""c10::Argument("{arg.name}", nullptr, ::std::nullopt, {arg_cpp})"""
             )
 
         returns = f.func.returns
         returns_code = []
         for ret in returns:
+            # pyrefly: ignore [bad-argument-type]
             returns_code.append(f"""c10::Argument("{ret.name if ret.name else ""}")""")
         return f"""
 // aten::{schema}

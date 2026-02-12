@@ -23,9 +23,10 @@ std::string maybeRevisedStaticDispatchTarget(const Node& node) {
   auto overloadName = selectScalarOverloadName(node);
 
   if (!overloadName.empty() && !c10::ends_with(node.target(), overloadName)) {
-    const std::string& newTarget =
+    const std::string newTarget =
         std::string(node.target())
-            .replace(node.target().rfind('.'), std::string::npos, overloadName);
+            .replace(
+                node.target().rfind('.') + 1, std::string::npos, overloadName);
     LOG(INFO) << fmt::format(
         "Converting Tensor to {} for node: {} -> {}",
         overloadName,
@@ -34,6 +35,11 @@ std::string maybeRevisedStaticDispatchTarget(const Node& node) {
     return newTarget;
   }
   return std::string(node.target());
+}
+
+void updateNodeTargetIfNeeded(Node& node) {
+  auto newTarget = maybeRevisedStaticDispatchTarget(node);
+  node.setTarget(newTarget);
 }
 
 std::unique_ptr<torch::aot_inductor::ProxyExecutor> make_proxy_executor(
@@ -69,6 +75,8 @@ void register_kernel_handlers() {
                const torch::nativert::ExecutorConfig& executorConfig,
                caffe2::serialize::PyTorchStreamReader* packageReader)
                 -> std::pair<OpKernelPtr, DelegateExecutorPtr> {
+              updateNodeTargetIfNeeded(const_cast<Node&>(node));
+
               return {
                   torch::nativert::StaticallyDispatchedCPUKernelRegistry()
                       ->Create(maybeRevisedStaticDispatchTarget(node), &node),

@@ -141,17 +141,17 @@ class SymNode:
             return hint
 
         if hint is not None:
-            assert type(hint) is pytype or type(hint) is _to_symtype(pytype), (
-                "Cannot create SymNode of type "
-                f"{pytype} with incompatible hint of type {type(hint)}"
-            )
+            if not (type(hint) is pytype or type(hint) is _to_symtype(pytype)):
+                raise AssertionError(
+                    "Cannot create SymNode of type "
+                    f"{pytype} with incompatible hint of type {type(hint)}"
+                )
             if self.shape_env and self.shape_env._translation_validation_enabled:
                 # This is technically not TV, but this assert is expensive so
                 # let's only do it when we're already doing expensive things
                 computed_hint = compute_hint()
-                assert hint == computed_hint, (
-                    f"{hint} != {computed_hint} (for {self.expr})"
-                )
+                if hint != computed_hint:
+                    raise AssertionError(f"{hint} != {computed_hint} (for {self.expr})")
         else:
             hint = compute_hint()
         self._hint = hint
@@ -211,10 +211,12 @@ class SymNode:
                 # for the unbacked symints, we may need to beef it up at some point.
                 unbacked_symbols = free_unbacked_symbols(self.expr)
                 replacements = {
-                    s: 4096 if s in unbacked_symbols else self.shape_env.var_to_val[s]
+                    s: fallback
+                    if s in unbacked_symbols
+                    else self.shape_env.backed_var_to_val[s]
                     for s in self.expr.free_symbols
                 }
-                return self.expr.xreplace(replacements)
+                return int(self.expr.xreplace(replacements))
             # NB: we expect this to raise
             return self.shape_env.size_hint(self.expr)
         return self._hint
@@ -262,7 +264,8 @@ class SymNode:
         )
 
     def wrap_int(self, num):
-        assert type(num) is int
+        if type(num) is not int:
+            raise AssertionError(f"Expected int, got {type(num)}")
         import sympy
 
         return SymNode(
@@ -270,7 +273,8 @@ class SymNode:
         )
 
     def wrap_float(self, num):
-        assert type(num) is float
+        if type(num) is not float:
+            raise AssertionError(f"Expected float, got {type(num)}")
         import sympy
 
         return SymNode(
@@ -278,7 +282,8 @@ class SymNode:
         )
 
     def wrap_bool(self, num):
-        assert type(num) is bool
+        if type(num) is not bool:
+            raise AssertionError(f"Expected bool, got {type(num)}")
         import sympy
 
         return SymNode(
@@ -448,6 +453,9 @@ class SymNode:
     def bitwise_or(self, other):
         return self._bitwise_or(other)  # type: ignore[attr-defined]
 
+    def bitwise_xor(self, other):
+        return self._bitwise_xor(other)  # type: ignore[attr-defined]
+
     # There is no int_truediv available from C++
     def truediv(self, other):
         return self.float_truediv(other)
@@ -563,7 +571,8 @@ class SymNode:
     def statically_known_true(self, file, line):
         from torch.fx.experimental.symbolic_shapes import statically_known_true
 
-        assert self.is_bool()
+        if not self.is_bool():
+            raise AssertionError("Expected bool type")
         return statically_known_true(SymBool(self))
 
     def guard_size_oblivious(self, file, line):
@@ -589,13 +598,15 @@ class SymNode:
     def guard_or_false(self, file, line):
         from torch.fx.experimental.symbolic_shapes import guard_or_false
 
-        assert self.is_bool()
+        if not self.is_bool():
+            raise AssertionError("Expected bool type")
         return guard_or_false(SymBool(self))
 
     def guard_or_true(self, file, line):
         from torch.fx.experimental.symbolic_shapes import guard_or_true
 
-        assert self.is_bool()
+        if not self.is_bool():
+            raise AssertionError("Expected bool type")
         return guard_or_true(SymBool(self))
 
     def bool_(self):
@@ -631,7 +642,8 @@ class DynamicInt(_DynamicScalar, int):
     """
 
     def __new__(cls, val):
-        assert isinstance(val, int)
+        if not isinstance(val, int):
+            raise AssertionError(f"Expected int, got {type(val)}")
         obj = super().__new__(cls, int(val))
         return obj
 
@@ -669,6 +681,7 @@ METHOD_TO_OPERATOR = {
     "neg": operator.neg,
     "or": operator.or_,
     "bitwise_or": operator.or_,
+    "bitwise_xor": operator.xor,
     "float_pow": operator.pow,
     "pow_by_natural": operator.pow,
     "round": builtins.round,
@@ -748,10 +761,7 @@ only_float_magic_methods = {"is_integer", "round", "sym_int", "sym_log2"}
 
 magic_methods_on_operator_with_trailing_underscore = {"and", "or"}
 # remap necessary because an op name can have a bitwise and boolean implementation
-bitwise_ops = {
-    "bitwise_and": "and",
-    "bitwise_or": "or",
-}
+bitwise_ops = {"bitwise_and": "and", "bitwise_or": "or", "bitwise_xor": "xor"}
 
 
 always_float_magic_methods = {"int_truediv", "float_truediv", "sym_float", "float_pow"}
@@ -893,7 +903,8 @@ def _optimized_add(
     from sympy.core.basic import _args_sortkey as sortkey
 
     def make_optimized(ordered_args):
-        assert ordered_args is not None
+        if ordered_args is None:
+            raise AssertionError("ordered_args is None")
         result = sympy.Add(*ordered_args, evaluate=False)
         return (True, result)
 
@@ -951,8 +962,14 @@ def _bitwise_or(a, b):
     return BitwiseFn_bitwise_or(a, b)
 
 
+def _bitwise_xor(a, b):
+    from torch.utils._sympy.functions import BitwiseFn_bitwise_xor
+
+    return BitwiseFn_bitwise_xor(a, b)
+
+
 reflectable_magic_methods = {
-    "add": _optimized_add,
+    "add": operator.add,
     "sub": operator.sub,
     "mul": operator.mul,
     "mod": _sympy_mod,
@@ -962,6 +979,7 @@ reflectable_magic_methods = {
     "bitwise_and": _bitwise_and,
     "or": _sympy_or,
     "bitwise_or": _bitwise_or,
+    "bitwise_xor": _bitwise_xor,
     "float_truediv": _sympy_float_truediv,
     "int_truediv": _sympy_int_truediv,
     "int_floordiv": _sympy_floordiv,
@@ -1369,7 +1387,8 @@ def _make_node_magic(method, func):
             return to_node(
                 self, handle_sym_dispatch(op, (wrap_node(self), wrap_node(other)), {})
             )
-        assert isinstance(other, SymNode)
+        if not isinstance(other, SymNode):
+            raise AssertionError(f"Expected SymNode, got {type(other)}")
         optimized_summation = False
         try:
             if method == "mod":
@@ -1390,7 +1409,7 @@ def _make_node_magic(method, func):
                     out = PythonMod(self.expr, other.expr)
             elif method == "add":
                 # see Note [optimized_summation]
-                (optimized_summation, out) = func(
+                (optimized_summation, out) = _optimized_add(
                     self.expr,
                     other.expr,
                     self._optimized_summation,
@@ -1678,6 +1697,8 @@ def _make_user_magic(method, user_type):
     def get_constant(x: Union[SymInt, int, SymFloat, float, SymBool, bool]):
         if isinstance(x, (int, float, bool)):
             return x
+        if isinstance(x, SymInt):
+            return x.node.guard_int("", 0)
         if isinstance(x, SymBool):
             return x.node.guard_bool("", 0)
         raise AssertionError("expect to be called with constant SymBools")
@@ -1842,11 +1863,14 @@ def _make_user_magic(method, user_type):
             else_node = to_node(pred_node, else_val)
             if then_node is NotImplemented or else_node is NotImplemented:
                 return NotImplemented
-            assert (
+            if not (
                 isinstance(then_node, SymNode)
                 and isinstance(else_node, SymNode)
                 and then_node.pytype == else_node.pytype
-            )
+            ):
+                raise AssertionError(
+                    "then_node and else_node must be SymNodes with same pytype"
+                )
             ret = wrap_node(getattr(pred.node, method_attr)(then_node, else_node))
             return get_constant(ret) if ret.node.is_constant() else ret
 
@@ -1869,7 +1893,7 @@ def _make_user_magic(method, user_type):
             setattrs(user_type, f"__r{method_name}__", rbinary_magic_impl)
 
 
-for method, func in magic_methods.items():  # type: ignore[assignment]
+for method in magic_methods:  # type: ignore[assignment]
     if method in only_bool_magic_methods:
         _make_user_magic(method, SymBool)
         continue

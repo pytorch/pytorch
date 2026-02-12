@@ -1,20 +1,30 @@
 # Owner(s): ["module: inductor"]
 
 from unittest import skipIf
+from unittest.mock import Mock
 
 import torch
 import torch._inductor.metrics as metrics
 import torch.utils.flop_counter
 from torch._dynamo.utils import counters
+from torch._inductor.dependencies import Dep, ReadWrites
+from torch._inductor.scheduler import BaseSchedulerNode, Scheduler
 from torch._inductor.utils import fresh_inductor_cache
 from torch.testing._internal.common_cuda import SM70OrLater
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
+    onlyCUDA,
     skipCUDAIf,
 )
-from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    parametrize,
+    run_tests,
+    skipIfXpu,
+    TestCase,
+)
 from torch.testing._internal.inductor_utils import IS_BIG_GPU
+from torch.utils._ordered_set import OrderedSet
 
 
 def FlopCounterMode(*args, **kwargs):
@@ -87,6 +97,10 @@ class TestScheduler(TestCase):
             metrics.reset()
         torch._logging.set_logs()
 
+    @skipIfXpu(
+        msg="InvalidModule: Invalid SPIR-V module, "
+        "https://github.com/intel/torch-xpu-ops/issues/2329"
+    )
     @dtypes(torch.float, torch.float16)
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @parametrize(
@@ -132,8 +146,151 @@ class TestScheduler(TestCase):
             counters["inductor"]["flop_count"] = 0
         torch._logging.set_logs()
 
+    def test_fusion_prevent_too_many_reads_and_writes_prevents_fusion(self):
+        """Test that fusion is prevented when unique I/O buffers exceed threshold"""
+        # Setup: Create nodes with many unique I/O buffers
+        # node1: reads [A, B, C], writes [D]
+        # node2: reads [D, E, F], writes [G]
+        # D becomes internal (node2 reads node1's write)
+        # After fusion: unique I/O = {A, B, C, E, F, G} = 6 buffers
+        scheduler = Mock(spec=Scheduler)
+        scheduler.can_buffer_be_removed_through_fusion = Mock(return_value=False)
 
-instantiate_device_type_tests(TestScheduler, globals())
+        node1 = self._create_mock_node(
+            name="node1", reads=["A", "B", "C"], writes=["D"]
+        )
+        node2 = self._create_mock_node(
+            name="node2", reads=["D", "E", "F"], writes=["G"]
+        )
+
+        # Execute: Check with threshold of 5 (should prevent fusion since 6 > 5)
+        result = Scheduler.fusion_prevent_too_many_reads_and_writes(
+            scheduler, node1, node2, threshold=5
+        )
+
+        # Assert: Fusion should be prevented (6 unique buffers > 5 threshold)
+        self.assertTrue(result)
+
+    def test_fusion_prevent_too_many_reads_and_writes_allows_fusion(self):
+        """Test that fusion is allowed when intermediate buffers are removed"""
+        # Setup: Create nodes where node2 reads node1's output
+        # node1: reads [A, B], writes [C]
+        # node2: reads [C, D], writes [E]
+        # C becomes internal (node2 reads node1's write)
+        # After fusion: unique I/O = {A, B, D, E} = 4 buffers
+        scheduler = Mock(spec=Scheduler)
+        scheduler.can_buffer_be_removed_through_fusion = Mock(return_value=False)
+
+        node1 = self._create_mock_node(name="node1", reads=["A", "B"], writes=["C"])
+        node2 = self._create_mock_node(name="node2", reads=["C", "D"], writes=["E"])
+
+        # Execute: Check with threshold of 5 (should allow fusion since 4 <= 5)
+        result = Scheduler.fusion_prevent_too_many_reads_and_writes(
+            scheduler, node1, node2, threshold=5
+        )
+
+        # Assert: Fusion should be allowed (4 unique buffers <= 5 threshold)
+        self.assertFalse(result)
+
+    def _create_mock_node(self, name: str, reads: list[str], writes: list[str]) -> Mock:
+        """Helper method to create a mock scheduler node with specified reads/writes"""
+        node = Mock(spec=BaseSchedulerNode)
+        node.get_name = Mock(return_value=name)
+        node.get_nodes = Mock(return_value=[node])
+
+        # Create mock Dep objects for reads and writes
+        read_deps = OrderedSet()
+        for read_name in reads:
+            dep = Mock(spec=Dep)
+            dep.name = read_name
+            read_deps.add(dep)
+
+        write_deps = OrderedSet()
+        for write_name in writes:
+            dep = Mock(spec=Dep)
+            dep.name = write_name
+            write_deps.add(dep)
+
+        # Create mock ReadWrites object
+        read_writes = Mock(spec=ReadWrites)
+        read_writes.reads = read_deps
+        read_writes.writes = write_deps
+
+        node.read_writes = read_writes
+        return node
+
+    @onlyCUDA
+    def test_index_add_fusion_prevented(self):
+        """
+        Test that index_add_ (scatter with atomic_add mode) is not fused with
+        subsequent reads from the same buffer, preventing read-after-write hazards.
+
+        Regression test for: index_add_ followed by indexing was incorrectly fused,
+        causing reads to occur before atomic writes completed.
+        """
+
+        def fn(f, batch):
+            # Scatter: atomic writes to shared location
+            f_u = f**2 + 0.00987654321
+            n_batch = batch.max() + 1
+            F_u_mol = torch.zeros((n_batch, f.shape[1]), device=f.device, dtype=f.dtype)
+            F_u_mol.index_add_(0, batch, f_u)
+
+            # Gather: reads from same buffer (requires synchronization)
+            F_u_at_atom = F_u_mol[batch] + 1e-6
+            return f_u / F_u_at_atom
+
+        device = "cuda"
+        f = torch.ones(1024, 1, device=device)
+        batch = torch.zeros(1024, dtype=torch.long, device=device)
+
+        # Eager execution (ground truth)
+        eager_result = fn(f, batch)
+
+        # Compiled execution (should match eager)
+        compiled_fn = torch.compile(fn)
+        compiled_result = compiled_fn(f, batch)
+
+        # Verify results match (no fusion bug)
+        self.assertTrue(
+            torch.allclose(eager_result, compiled_result, rtol=1e-4, atol=1e-4),
+            msg=f"index_add_ fusion bug detected: "
+            f"eager={eager_result.mean().item():.6f}, "
+            f"compiled={compiled_result.mean().item():.6f}",
+        )
+
+    @onlyCUDA
+    def test_atomic_add_no_fusion_correctness(self):
+        """
+        Test that atomic_add operations produce correct results.
+        """
+
+        def fn(x, idx):
+            out = torch.zeros(10, device=x.device)
+            out.index_add_(0, idx, x)  # atomic_add: scatter to shared locations
+            return out[idx] + 1.0  # read from same buffer: requires sync
+
+        device = "cuda"
+        x = torch.ones(5, device=device)
+        idx = torch.tensor([0, 1, 0, 1, 0], device=device, dtype=torch.long)
+
+        # Eager (correct) result
+        expected = fn(x, idx)
+
+        # Compiled result: will be wrong if fusion bug exists
+        compiled_fn = torch.compile(fn)
+        torch._dynamo.reset()
+        with fresh_inductor_cache():
+            result = compiled_fn(x, idx)
+
+        # This test will FAIL without the fusion prevention fix
+        self.assertTrue(
+            torch.allclose(expected, result),
+            msg=f"Fusion bug detected! Expected {expected}, got {result}",
+        )
+
+
+instantiate_device_type_tests(TestScheduler, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()

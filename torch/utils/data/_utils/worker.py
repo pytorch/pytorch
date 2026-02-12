@@ -9,7 +9,7 @@ import os
 import queue
 import random
 from dataclasses import dataclass
-from typing import Optional, TYPE_CHECKING, Union
+from typing import Optional, TYPE_CHECKING
 
 import torch
 from torch._utils import ExceptionWrapper
@@ -49,7 +49,7 @@ if IS_WINDOWS:
 
             self.manager_dead = False
 
-        def is_alive(self):
+        def is_alive(self) -> bool:
             if not self.manager_dead:
                 # Value obtained from https://msdn.microsoft.com/en-us/library/windows/desktop/ms687032.aspx
                 self.manager_dead = (
@@ -64,7 +64,7 @@ else:
             self.manager_pid = os.getppid()
             self.manager_dead = False
 
-        def is_alive(self):
+        def is_alive(self) -> bool:
             if not self.manager_dead:
                 self.manager_dead = os.getppid() != self.manager_pid
             return not self.manager_dead
@@ -80,25 +80,25 @@ class WorkerInfo:
     dataset: "Dataset"
     __initialized = False
 
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs) -> None:
         for k, v in kwargs.items():
             setattr(self, k, v)
         self.__keys = tuple(kwargs.keys())
         self.__initialized = True
 
-    def __setattr__(self, key, val):
+    def __setattr__(self, key, val) -> None:
         if self.__initialized:
             raise RuntimeError(
                 f"Cannot assign attributes to {self.__class__.__name__} objects"
             )
         return super().__setattr__(key, val)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         items = [f"{k}={getattr(self, k)}" for k in self.__keys]
         return f"{self.__class__.__name__}({', '.join(items)})"
 
 
-def get_worker_info() -> Optional[WorkerInfo]:
+def get_worker_info() -> WorkerInfo | None:
     r"""Returns the information about the current
     :class:`~torch.utils.data.DataLoader` iterator worker process.
 
@@ -140,7 +140,7 @@ r"""Dummy class used to resume the fetching when worker reuse is enabled"""
 
 @dataclass(frozen=True)
 class _ResumeIteration:
-    seed: Optional[int] = None
+    seed: int | None = None
 
 
 # The function `_generate_state` is adapted from `numpy.random.SeedSequence`
@@ -240,7 +240,7 @@ def _worker_loop(
     num_workers,
     persistent_workers,
     shared_seed,
-):
+) -> None:
     # See NOTE [ Data Loader Multiprocessing Shutdown Logic ] for details on the
     # logic of this function.
 
@@ -349,7 +349,7 @@ def _worker_loop(
                 # processing steps.
                 continue
             idx, index = r
-            data: Union[_IterableDatasetStopIteration, ExceptionWrapper]
+            data: _IterableDatasetStopIteration | ExceptionWrapper
             if init_exception is not None:
                 data = init_exception
                 init_exception = None

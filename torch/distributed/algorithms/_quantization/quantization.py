@@ -65,7 +65,7 @@ def _dequantize_tensor(tensor, qtype, quant_loss=None):
         elif tensor.dtype == torch.float16 and quant_loss is None:
             return tensor.float()
         else:
-            # pyrefly: ignore  # unsupported-operation
+            # pyrefly: ignore [unsupported-operation]
             return tensor.float() / quant_loss
     elif qtype == DQuantType.BFP16:
         if tensor.dtype != torch.float16:
@@ -111,7 +111,7 @@ def auto_quantize(func, qtype, quant_loss=None):
         async_op = kwargs.get("async_op", False)
         if async_op is True:
             raise RuntimeError("The async_op=True mode is not supported yet.")
-        if func == dist.all_gather:
+        if func is dist.all_gather:
             tensors = args[0]
             input_tensors = _quantize_tensor(args[1], qtype)
             out_tensors = _quantize_tensor_list(tensors, qtype)
@@ -121,7 +121,7 @@ def auto_quantize(func, qtype, quant_loss=None):
             ):
                 tensors[i] = t
 
-        elif func == dist.all_to_all:
+        elif func is dist.all_to_all:
             tensors = args[0]
             input_tensors = _quantize_tensor_list(args[1], qtype)
             out_tensors = _quantize_tensor_list(tensors, qtype)
@@ -131,7 +131,7 @@ def auto_quantize(func, qtype, quant_loss=None):
             ):
                 tensors[i] = t
 
-        elif func == dist.all_to_all_single:
+        elif func is dist.all_to_all_single:
             tensors = args[0]
             out_splits = kwargs.get("out_splits")
             in_splits = kwargs.get("in_splits")

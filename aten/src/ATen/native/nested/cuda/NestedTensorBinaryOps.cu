@@ -88,7 +88,7 @@ void _nested_op_dense_esuhm_kernel(Tensor& result, const Tensor& self, const Ten
   const scalar_t* self_data_ptr = self_buffer.const_data_ptr<scalar_t>();
   const scalar_t* other_data_ptr = other.const_data_ptr<scalar_t>();
   scalar_t* result_data_ptr = result_buffer.data_ptr<scalar_t>();
-  int64_t* result_offsets_ptr = result_offsets.data_ptr<int64_t>();
+  int64_t* result_offsets_ptr = result_offsets.template data_ptr<int64_t>();
 
   nested_op_dense_kernelLauncher(
     self_data_ptr,

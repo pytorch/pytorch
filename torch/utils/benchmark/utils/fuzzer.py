@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 import itertools as it
-from typing import Any, Optional, Union
+from typing import Any
 from collections.abc import Callable
 
 import torch
@@ -25,11 +25,11 @@ class FuzzedParameter:
     def __init__(
         self,
         name: str,
-        minval: Optional[Union[int, float]] = None,
-        maxval: Optional[Union[int, float]] = None,
-        distribution: Optional[Union[str, dict[Any, float]]] = None,
+        minval: int | float | None = None,
+        maxval: int | float | None = None,
+        distribution: str | dict[Any, float] | None = None,
         strict: bool = False,
-    ):
+    ) -> None:
         """
         Args:
             name:
@@ -159,10 +159,10 @@ class ParameterAlias:
 
     Chains of alias' are allowed, but may not contain cycles.
     """
-    def __init__(self, alias_to):
+    def __init__(self, alias_to) -> None:
         self.alias_to = alias_to
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"ParameterAlias[alias_to: {self.alias_to}]"
 
 
@@ -188,18 +188,18 @@ class FuzzedTensor:
     def __init__(
         self,
         name: str,
-        size: tuple[Union[str, int], ...],
-        steps: Optional[tuple[Union[str, int], ...]] = None,
+        size: tuple[str | int, ...],
+        steps: tuple[str | int, ...] | None = None,
         probability_contiguous: float = 0.5,
-        min_elements: Optional[int] = None,
-        max_elements: Optional[int] = None,
-        max_allocation_bytes: Optional[int] = None,
-        dim_parameter: Optional[str] = None,
-        roll_parameter: Optional[str] = None,
+        min_elements: int | None = None,
+        max_elements: int | None = None,
+        max_allocation_bytes: int | None = None,
+        dim_parameter: str | None = None,
+        roll_parameter: str | None = None,
         dtype=torch.float32,
         cuda=False,
-        tensor_constructor: Optional[Callable] = None
-    ):
+        tensor_constructor: Callable | None = None
+    ) -> None:
         """
         Args:
             name:
@@ -295,7 +295,7 @@ class FuzzedTensor:
             raw_tensor = raw_tensor.permute(tuple(order)).contiguous()
             raw_tensor = raw_tensor.permute(tuple(np.argsort(order)))
 
-        slices = [slice(0, size * step, step) for size, step in zip(size, steps)]
+        slices = [slice(0, size * step, step) for size, step in zip(size, steps, strict=True)]
         tensor = raw_tensor[tuple(slices)]
 
         properties = {
@@ -326,10 +326,10 @@ class FuzzedTensor:
 
         size = resolve(self._size, dim)
         steps = resolve(self._steps or (), dim)
-        allocation_size = tuple(size_i * step_i for size_i, step_i in zip(size, steps))
+        allocation_size = tuple(size_i * step_i for size_i, step_i in zip(size, steps, strict=True))
         return size, steps, allocation_size
 
-    def satisfies_constraints(self, params):
+    def satisfies_constraints(self, params) -> bool:
         size, _, allocation_size = self._get_size_and_steps(params)
         # Product is computed in Python to avoid integer overflow.
         num_elements = prod(size)
@@ -353,11 +353,11 @@ class FuzzedTensor:
 class Fuzzer:
     def __init__(
         self,
-        parameters: list[Union[FuzzedParameter, list[FuzzedParameter]]],
-        tensors: list[Union[FuzzedTensor, list[FuzzedTensor]]],
-        constraints: Optional[list[Callable]] = None,
-        seed: Optional[int] = None
-    ):
+        parameters: list[FuzzedParameter | list[FuzzedParameter]],
+        tensors: list[FuzzedTensor | list[FuzzedTensor]],
+        constraints: list[Callable] | None = None,
+        seed: int | None = None
+    ) -> None:
         """
         Args:
             parameters:
@@ -422,9 +422,9 @@ class Fuzzer:
         return self._rejections / self._total_generated
 
     def _generate(self, state):
-        strict_params: dict[str, Union[float, int, ParameterAlias]] = {}
+        strict_params: dict[str, float | int | ParameterAlias] = {}
         for _ in range(1000):
-            candidate_params: dict[str, Union[float, int, ParameterAlias]] = {}
+            candidate_params: dict[str, float | int | ParameterAlias] = {}
             for p in self._parameters:
                 if p.strict:
                     if p.name in strict_params:

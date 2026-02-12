@@ -35,7 +35,7 @@ def _ge(lhs: Any, rhs: Any) -> bool:
 
 
 class NestedIntNode:
-    def __init__(self, t_id: int, coeff: int):
+    def __init__(self, t_id: int, coeff: int) -> None:
         self.t_id = t_id
         self.coeff = coeff
 
@@ -112,5 +112,8 @@ class NestedIntNode:
         return False
 
     def wrap_int(self, num: int) -> ConstantIntNode:
-        assert type(num) is int
+        if type(num) is not int:
+            raise AssertionError(
+                f"Expected num to be int, but got {type(num).__name__}"
+            )
         return ConstantIntNode(num)

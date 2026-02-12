@@ -22,7 +22,7 @@ from torch.sparse._semi_structured_conversions import (
 )
 
 from torch.testing import make_tensor
-from torch.testing._internal.common_cuda import _get_torch_cuda_version, PLATFORM_SUPPORTS_FP8, xfailIfSM89
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, xfailIfSM89PreCUDA13
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
@@ -220,7 +220,8 @@ class SparseSemiStructuredTensorCompileTest(torch._dynamo.test_case.TestCase):
         # assert sparse and sparse_compile have the same strides,
         # as meta registrations may return contiguous tensors when the output is transposed
         # https://github.com/pytorch/pytorch/pull/114477
-        assert sparse_result.stride() == sparse_compile_result.stride()
+        if sparse_result.stride() != sparse_compile_result.stride():
+            raise AssertionError(f"stride mismatch: {sparse_result.stride()} != {sparse_compile_result.stride()}")
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile not supported on windows")
     @unittest.skipIf("cusparselt" not in SEMI_STRUCTURED_SUPPORTED_BACKENDS, "cusparselt not supported on this machine")
@@ -247,6 +248,10 @@ class SparseSemiStructuredTensorCompileTest(torch._dynamo.test_case.TestCase):
     @unittest.skipIf(IS_WINDOWS, "torch.compile not supported on windows")
     @unittest.skipIf("cusparselt" not in SEMI_STRUCTURED_SUPPORTED_BACKENDS, "cusparselt not supported on this machine")
     @unittest.skipIf(TEST_WITH_ROCM, "Not supported on ROCm")
+    @unittest.skipIf(
+        "RelWithAssert" in torch.__config__.show(),
+        "failing in debug build, see https://github.com/pytorch/pytorch/pull/165158 for context",
+    )
     def test_sp24_compile(self) -> None:
         x = torch.randn([1024, 512], device="cuda", dtype=torch.float16, requires_grad=True)
 
@@ -277,12 +282,17 @@ class TestSparseSemiStructured(TestCase):
         A = rand_sparse_semi_structured_mask(128, 256, dtype=dtype)
         A_sparse = to_sparse_semi_structured(A)
 
-        assert A.shape == A_sparse.shape
-        assert A.device == A_sparse.device
-        assert A.dtype == A_sparse.dtype
+        if A.shape != A_sparse.shape:
+            raise AssertionError(f"shape mismatch: {A.shape} != {A_sparse.shape}")
+        if A.device != A_sparse.device:
+            raise AssertionError(f"device mismatch: {A.device} != {A_sparse.device}")
+        if A.dtype != A_sparse.dtype:
+            raise AssertionError(f"dtype mismatch: {A.dtype} != {A_sparse.dtype}")
 
-        assert isinstance(A, torch.Tensor)
-        assert isinstance(A_sparse, SparseSemiStructuredTensor)
+        if not isinstance(A, torch.Tensor):
+            raise AssertionError(f"A should be torch.Tensor, got {type(A)}")
+        if not isinstance(A_sparse, SparseSemiStructuredTensor):
+            raise AssertionError(f"A_sparse should be SparseSemiStructuredTensor, got {type(A_sparse)}")
 
     @inference_dtypes
     @parametrize_backends
@@ -326,7 +336,7 @@ class TestSparseSemiStructured(TestCase):
         B = torch.rand(dense_input_shape, device=A_sparse.device).to(dtype)
 
         # Currently we don't support int matmul on GPU, so evaluate on CPU and copy over
-        if dtype is torch.int8 and dense_input_shape in {(1, 128)}:
+        if dtype is torch.int8 and dense_input_shape == (1, 128):
             # padding with int8 throws an error because transposing B yields a contiguous output
             # and row-row 2:4 sparse @ dense with NN is not supported by cuSPARSELt or CUTLASS.
             if backend == "cutlass":
@@ -481,8 +491,10 @@ class TestSparseSemiStructured(TestCase):
             self.skipTest("CUTLASS not supported on Windows")
         A = rand_sparse_semi_structured_mask(128, 128)
         A_sparse = to_sparse_semi_structured(A)
-        assert A_sparse.values().shape == (128, 64)
-        assert (A_sparse.values() == 1).all()
+        if A_sparse.values().shape != (128, 64):
+            raise AssertionError(f"values shape should be (128, 64), got {A_sparse.values().shape}")
+        if not (A_sparse.values() == 1).all():
+            raise AssertionError("values should all be 1")
 
     @parametrize_backends
     def test_indices(self, backend):
@@ -491,7 +503,8 @@ class TestSparseSemiStructured(TestCase):
             self.skipTest("CUTLASS not supported on Windows")
         A = rand_sparse_semi_structured_mask(128, 128)
         A_sparse = to_sparse_semi_structured(A)
-        assert A_sparse.indices().shape == (128, 8)
+        if A_sparse.indices().shape != (128, 8):
+            raise AssertionError(f"indices shape should be (128, 8), got {A_sparse.indices().shape}")
 
     @inference_dtypes
     @parametrize_backends
@@ -576,6 +589,10 @@ class TestSparseSemiStructuredTraining(TestCase):
 
     @training_dtypes
     @unittest.skipIf(TEST_WITH_ROCM, "Not supported on ROCm")
+    @unittest.skipIf(
+        "RelWithAssert" in torch.__config__.show(),
+        "failing in debug build, see https://github.com/pytorch/pytorch/pull/165158 for context",
+    )
     def test_prune_dense_static_sort(self, dtype) -> None:
         # Ideally we would like to clone and compare, but that won't work because the sorting order will be different
         # instead we pass the pruned matrix to the CUDA implementation and preserve the sparsity pattern.
@@ -621,6 +638,10 @@ class TestSparseSemiStructuredTraining(TestCase):
     @training_dtypes
     @parametrize_backends
     @unittest.skipIf(TEST_WITH_ROCM, "Not supported on ROCm")
+    @unittest.skipIf(
+        "RelWithAssert" in torch.__config__.show(),
+        "failing in debug build, see https://github.com/pytorch/pytorch/pull/165158 for context",
+    )
     def test_pruning_algo_largest_abs_values_greedy(self, dtype, backend) -> None:
         inp = torch.tensor(
             [[4, 3, 2, 1], [-1, -3, 0.6, 0.5], [1, 2, 3, 4], [10, 2, -1, 5]],
@@ -631,12 +652,14 @@ class TestSparseSemiStructuredTraining(TestCase):
         sInp = SEMI_STRUCTURED_SUPPORTED_BACKENDS[backend].prune_dense_static_sort(inp, algorithm="largest_abs_values_greedy")
 
         mask = sInp.to_dense() / inp
-        assert mask[:4, :4].int().tolist() == [
+        expected = [
             [1, 1, 0, 0],
             [0, 1, 1, 0],
             [0, 0, 1, 1],
             [1, 0, 0, 1],
         ]
+        if mask[:4, :4].int().tolist() != expected:
+            raise AssertionError(f"mask[:4, :4] mismatch: {mask[:4, :4].int().tolist()} != {expected}")
 
     @training_dtypes
     def test_gemm(self, dtype) -> None:
@@ -658,12 +681,17 @@ class TestSparseSemiStructuredTraining(TestCase):
     @training_dtypes
     @parametrize_backends
     @unittest.skipIf(TEST_WITH_ROCM, "Not supported on ROCm")
+    @unittest.skipIf(
+        "RelWithAssert" in torch.__config__.show(),
+        "failing in debug build, see https://github.com/pytorch/pytorch/pull/165158 for context",
+    )
     def test_pack_both_ways_meta_correctness(self, dtype, backend) -> None:
         M, N = 128, 256
         # Construct x to make sure we always have exactly 8 elements per 4x4 tile
         a = (4 * torch.arange(8))[:, None] + torch.arange(8)[None, :]
         a = a.repeat(M // 8, N // 8)
-        assert a.shape == (M, N)
+        if a.shape != (M, N):
+            raise AssertionError(f"a.shape should be ({M}, {N}), got {a.shape}")
         a = a.cuda().to(dtype)
         b = torch.randn([a.shape[1], 128], device="cuda", dtype=dtype)
 
@@ -672,7 +700,8 @@ class TestSparseSemiStructuredTraining(TestCase):
         mask_dense = sparse24_largest_mask_2d(a).to(dtype)
 
         if backend == "cutlass":
-            assert isinstance(a_sparse, SparseSemiStructuredTensorCUTLASS)
+            if not isinstance(a_sparse, SparseSemiStructuredTensorCUTLASS):
+                raise AssertionError(f"a_sparse should be SparseSemiStructuredTensorCUTLASS, got {type(a_sparse)}")
             (packed, meta, packed_t, meta_t, bitmask) = torch._sparse_semi_structured_tile(
                 mask_dense, use_cutlass=True)
 
@@ -692,6 +721,10 @@ class TestSparseSemiStructuredTraining(TestCase):
 
     @training_dtypes
     @unittest.skipIf(TEST_WITH_ROCM, "Not supported on ROCm")
+    @unittest.skipIf(
+        "RelWithAssert" in torch.__config__.show(),
+        "failing in debug build, see https://github.com/pytorch/pytorch/pull/165158 for context",
+    )
     def test_pack_both_ways_id(self, dtype) -> None:
         N = 512
         torch.manual_seed(0)
@@ -729,6 +762,10 @@ class TestSparseSemiStructuredTraining(TestCase):
 
     @training_dtypes
     @unittest.skipIf(TEST_WITH_ROCM, "Not supported on ROCm")
+    @unittest.skipIf(
+        "RelWithAssert" in torch.__config__.show(),
+        "failing in debug build, see https://github.com/pytorch/pytorch/pull/165158 for context",
+    )
     def test_pack_both_ways_edge_case1(self, dtype) -> None:
         # In this case, the heuristic will keep 7 values out of 16
         # instead of 8. let's see how the kernel handles this
@@ -746,14 +783,22 @@ class TestSparseSemiStructuredTraining(TestCase):
         a[:4, :4] = quad
         packed, meta, packed_t, meta_t = torch._sparse_semi_structured_tile(a)[:4]
         # Check first line in A
-        assert packed[0, 0].item() == 2
-        assert packed[0, 1].item() == 0
+        if packed[0, 0].item() != 2:
+            raise AssertionError(f"packed[0, 0] should be 2, got {packed[0, 0].item()}")
+        if packed[0, 1].item() != 0:
+            raise AssertionError(f"packed[0, 1] should be 0, got {packed[0, 1].item()}")
         # And first column in A.t
-        assert packed_t[0, 0].item() == 2
-        assert packed_t[0, 1].item() == 0
+        if packed_t[0, 0].item() != 2:
+            raise AssertionError(f"packed_t[0, 0] should be 2, got {packed_t[0, 0].item()}")
+        if packed_t[0, 1].item() != 0:
+            raise AssertionError(f"packed_t[0, 1] should be 0, got {packed_t[0, 1].item()}")
 
     @training_dtypes
     @unittest.skipIf(TEST_WITH_ROCM, "Not supported on ROCm")
+    @unittest.skipIf(
+        "RelWithAssert" in torch.__config__.show(),
+        "failing in debug build, see https://github.com/pytorch/pytorch/pull/165158 for context",
+    )
     def test_sp24_apply(self, dtype) -> None:
         M, N = 256, 1024
         x = torch.randn([M, N], dtype=dtype, device="cuda")
@@ -770,6 +815,10 @@ class TestSparseSemiStructuredTraining(TestCase):
 
     @training_dtypes
     @unittest.skipIf(TEST_WITH_ROCM, "Not supported on ROCm")
+    @unittest.skipIf(
+        "RelWithAssert" in torch.__config__.show(),
+        "failing in debug build, see https://github.com/pytorch/pytorch/pull/165158 for context",
+    )
     def test_sp24_apply_dense(self, dtype) -> None:
         M, N = 256, 1024
         x = torch.randn([M, N], dtype=dtype, device="cuda")
@@ -808,6 +857,10 @@ class TestSparseSemiStructuredTraining(TestCase):
 
     @training_dtypes
     @unittest.skipIf(TEST_WITH_ROCM, "Not supported on ROCm")
+    @unittest.skipIf(
+        "RelWithAssert" in torch.__config__.show(),
+        "failing in debug build, see https://github.com/pytorch/pytorch/pull/165158 for context",
+    )
     def test_sp24_matmuls(self, dtype) -> None:
         M, N, K = 64, 256, 1024
         a = torch.randn([M, K], device="cuda", dtype=dtype)
@@ -843,6 +896,10 @@ class TestSparseSemiStructuredTraining(TestCase):
         )
 
     @unittest.skipIf(TEST_WITH_ROCM, "Not supported on ROCm")
+    @unittest.skipIf(
+        "RelWithAssert" in torch.__config__.show(),
+        "failing in debug build, see https://github.com/pytorch/pytorch/pull/165158 for context",
+    )
     def test_sp24_matmuls_mat_vec(self) -> None:
         a = torch.randn([64, 128], device="cuda", dtype=torch.float16)
         b = torch.randn([128], device="cuda", dtype=torch.float16)
@@ -853,6 +910,10 @@ class TestSparseSemiStructuredTraining(TestCase):
             torch.testing.assert_close(a_s @ b, (a * a_m) @ b, **atol_rtol_kw[a.dtype])
 
     @unittest.skipIf(TEST_WITH_ROCM, "Not supported on ROCm")
+    @unittest.skipIf(
+        "RelWithAssert" in torch.__config__.show(),
+        "failing in debug build, see https://github.com/pytorch/pytorch/pull/165158 for context",
+    )
     def test_sp24_matmuls_bmm(self) -> None:
         a = torch.randn([64, 128], device="cuda", dtype=torch.float16)
         b = torch.randn([5, 6, 128], device="cuda", dtype=torch.float16)
@@ -1073,12 +1134,11 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         not PLATFORM_SUPPORTS_FP8,
         "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
     )
-    @xfailIfSM89
+    @xfailIfSM89PreCUDA13
     @parametrize("dense_input_shape", [(256, 128)])
     def test_sparse_fp8fp8_mm(self, dense_input_shape, device):
         if torch.backends.cusparselt.version() < 602:
             self.skipTest("fp8 matmul requires cuSPARSELt v0.6.2+")
-
         A = rand_sparse_semi_structured_mask(256, 128, dtype=torch.float16)
         B = torch.rand(dense_input_shape, device=device).to(torch.float16).t()
 
@@ -1096,7 +1156,7 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         not PLATFORM_SUPPORTS_FP8,
         "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
     )
-    @xfailIfSM89
+    @xfailIfSM89PreCUDA13
     def test_sparse_semi_structured_scaled_mm_fp8(self, device) -> None:
         (k, l, m) = (32, 64, 32)
         x = rand_sparse_semi_structured_mask(k, l, dtype=torch.float8_e4m3fn, device=device)
@@ -1116,7 +1176,7 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         not PLATFORM_SUPPORTS_FP8,
         "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
     )
-    @xfailIfSM89
+    @xfailIfSM89PreCUDA13
     @parametrize("out_dtype", [torch.float16, torch.bfloat16, torch.float32])
     @parametrize("dense_input_shape", [(256, 128)])
     def test_sparse_semi_structured_scaled_mm(
@@ -1237,14 +1297,12 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         torch.testing.assert_close(sparse_result, dense_result, rtol=1e-3, atol=1e-3)
 
     def test_cusparselt_backend(self):
-        version = _get_torch_cuda_version()
-        assert torch.backends.cusparselt.is_available()
+        if not torch.backends.cusparselt.is_available():
+            raise AssertionError("cusparselt backend should be available")
 
         # PyTorch CUDA 12.4+ using cuSPARSELt v0.6.2+
-        if version >= (12, 4):
-            assert torch.backends.cusparselt.version() >= 602
-        else:
-            assert torch.backends.cusparselt.version() is None
+        if torch.backends.cusparselt.version() < 602:
+            raise AssertionError(f"cusparselt version should be >= 602, got {torch.backends.cusparselt.version()}")
 
 if len(SEMI_STRUCTURED_SUPPORTED_BACKENDS) > 0:
     instantiate_device_type_tests(TestSparseSemiStructured, globals(), only_for="cuda")

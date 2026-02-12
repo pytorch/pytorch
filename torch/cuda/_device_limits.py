@@ -53,7 +53,7 @@ class GPULimits:
         else:
             dict_key = "unknown"
 
-        if dict_key not in hardcoded_device_values.keys():
+        if dict_key not in hardcoded_device_values:
             raise RuntimeError(
                 f"No data for sm_{self.compute_capability} and {data_type}."
             )
@@ -96,7 +96,7 @@ class GPULimits:
         else:
             dict_key = "unknown"
 
-        if dict_key not in hardcoded_device_values.keys():
+        if dict_key not in hardcoded_device_values:
             raise RuntimeError(
                 f"No data for sm_{self.compute_capability} and {data_type}."
             )
@@ -125,7 +125,7 @@ class GPULimits:
         # a clock beat
         bus_bytes_per_cycle = int(2 * self.device_properties.memory_bus_width / 8)
         mem_clock_rate_Hz = self.device_properties.memory_clock_rate * 1000
-        bytes_per_second = bus_bytes_per_cycle * mem_clock_rate_Hz * 2
+        bytes_per_second = bus_bytes_per_cycle * mem_clock_rate_Hz
         return bytes_per_second
 
     def get_shared_memory_bandwidth_Bps(self) -> int:

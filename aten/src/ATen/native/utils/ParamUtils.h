@@ -17,7 +17,7 @@ inline std::vector<T> _expand_param_if_needed(
     std::ostringstream ss;
     ss << "expected " << param_name << " to be a single integer value or a "
        << "list of " << expected_dim << " values to match the convolution "
-       << "dimensions, but got " << param_name << "=" << list_param;
+       << "dimensions, but got " << param_name << '=' << list_param;
     TORCH_CHECK(false, ss.str());
   } else {
     return list_param.vec();

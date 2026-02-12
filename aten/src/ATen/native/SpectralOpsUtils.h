@@ -21,7 +21,7 @@ enum class fft_norm_mode {
 // NOTE [ Fourier Transform Conjugate Symmetry ]
 //
 // Real-to-complex Fourier transform satisfies the conjugate symmetry. That is,
-// assuming X is the transformed K-dimensionsal signal, we have
+// assuming X is the transformed K-dimensional signal, we have
 //
 //     X[i_1, ..., i_K] = X[j_i, ..., j_K]*,
 //

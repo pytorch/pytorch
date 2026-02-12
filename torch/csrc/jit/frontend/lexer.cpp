@@ -1,7 +1,5 @@
 #include <torch/csrc/jit/frontend/lexer.h>
 
-#include <c10/util/Exception.h>
-
 #include <cstring>
 #include <string>
 #include <unordered_map>
@@ -94,7 +92,7 @@ C10_EXPORT std::string kindToString(int kind) {
     TC_FORALL_TOKEN_KINDS(DEFINE_CASE)
 #undef DEFINE_CASE
     default:
-      throw std::runtime_error("Unknown kind: " + std::to_string(kind));
+      TORCH_CHECK(false, "Unknown kind: ", kind);
   }
 }
 

@@ -63,10 +63,11 @@ class AsyncClosureHandler(ClosureHandler):
                         self._closure_exception.put(e)
                         return
 
+            # pyrefly: ignore [bad-assignment]
             self._closure_event_loop = threading.Thread(
                 target=event_loop
-            )  # pyrefly: ignore  # bad-assignment
-            self._closure_event_loop.start()  # pyrefly: ignore  # missing-attribute
+            )  # pyrefly: ignore [bad-assignment]
+            self._closure_event_loop.start()  # pyrefly: ignore [missing-attribute]
 
     def run(self, closure):
         with self._closure_lock:

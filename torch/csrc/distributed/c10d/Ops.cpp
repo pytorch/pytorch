@@ -1,4 +1,3 @@
-#include <ATen/core/dispatch/Dispatcher.h>
 #include <c10/util/intrusive_ptr.h>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/Types.hpp>
@@ -60,6 +59,7 @@ TORCH_LIBRARY(c10d, m) {
       "recv_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int src, int tag) -> __torch__.torch.classes.c10d.Work");
   m.def(
       "recv_any_source_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int tag) -> __torch__.torch.classes.c10d.Work");
+  m.def("check_for_nan(Tensor tensor) -> ()");
 }
 } // namespace
 

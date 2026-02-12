@@ -189,7 +189,7 @@ static void upsample_nearest3d_out_cuda_template(
         using accscalar_t = at::acc_type<scalar_t, true>;
 
         auto idata = input.const_data_ptr<scalar_t>();
-        auto odata = output_c.mutable_data_ptr<scalar_t>();
+        auto odata = output_c.template mutable_data_ptr<scalar_t>();
 
         const float depth_scale = compute_scales_value<float>(scales_d, input_depth, output_depth);
         const float height_scale = compute_scales_value<float>(scales_h, input_height, output_height);

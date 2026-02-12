@@ -7,13 +7,17 @@ import numpy as np
 import torch
 from torch import Tensor
 from contextlib import contextmanager
-from torch.testing._internal.common_utils import TEST_WITH_TSAN, IS_PPC, IS_MACOS, IS_WINDOWS
+from torch.testing._internal.common_utils import TEST_WITH_TSAN, IS_PPC, IS_MACOS, IS_WINDOWS, IS_ARM64
 
-supported_qengines = torch.backends.quantized.supported_engines
+supported_qengines = list(torch.backends.quantized.supported_engines)
 # Note: We currently do not run QNNPACK tests on WINDOWS and MACOS as it is flaky. Issue #29326
 # QNNPACK is not supported on PPC
 if 'qnnpack' in supported_qengines and any([IS_PPC, TEST_WITH_TSAN, IS_MACOS, IS_WINDOWS]):
     supported_qengines.remove('qnnpack')
+# FBGEMM and x86 engines require x86 architecture with AVX2/AVX512 support
+# They are not supported on ARM64 architectures
+if IS_ARM64:
+    supported_qengines = [qe for qe in supported_qengines if qe not in ('fbgemm', 'x86')]
 
 def _conv_output_shape(input_size, kernel_size, padding, stride, dilation,
                        output_padding=0):
@@ -50,9 +54,15 @@ def _requantize(x, multiplier, zero_point, qmin=0, qmax=255, qtype=np.uint8):
 def _calculate_dynamic_qparams(X, dtype, reduce_range=False, qscheme=torch.per_tensor_affine):
     """Calculate the dynamic quantization parameters (scale, zero_point)
     according to the min and max element of the tensor"""
-    assert qscheme in (torch.per_tensor_affine, torch.per_tensor_symmetric)
+    if qscheme not in (torch.per_tensor_affine, torch.per_tensor_symmetric):
+        raise AssertionError(
+            f"Expected qscheme to be per_tensor_affine or per_tensor_symmetric, got {qscheme}"
+        )
     if qscheme == torch.per_tensor_symmetric:
-        assert dtype == torch.qint8
+        if dtype != torch.qint8:
+            raise AssertionError(
+                f"Expected dtype to be torch.qint8 for symmetric qscheme, got {dtype}"
+            )
     if isinstance(X, torch.Tensor):
         X = X.numpy()
     if dtype == torch.qint8:
@@ -126,7 +136,8 @@ def _snr(x, x_hat):
         signal, noise, SNR(in dB): Either floats or a nested list of floats
     """
     if isinstance(x, (list, tuple)):
-        assert len(x) == len(x_hat)
+        if len(x) != len(x_hat):
+            raise AssertionError(f"Expected len(x) == len(x_hat), got {len(x)} != {len(x_hat)}")
         res = [_snr(x[idx], x_hat[idx]) for idx in range(len(x))]
         return res
     if x_hat.is_quantized:
@@ -252,8 +263,10 @@ def _f32_to_floatx_unpacked(x: Tensor, ebits: int, mbits: int) -> Tensor:
     Background 1: last answer in https://stackoverflow.com/q/8981913
     Background 2: Computer Organization and Design, RISC-V edition, Chapter 3.5
     """
-    assert x.dtype == torch.float
-    assert 1 + ebits + mbits <= 8
+    if x.dtype != torch.float:
+        raise AssertionError(f"Expected x.dtype to be torch.float, got {x.dtype}")
+    if 1 + ebits + mbits > 8:
+        raise AssertionError(f"Expected 1 + ebits + mbits <= 8, got {1 + ebits + mbits}")
 
     # calculate constants
     exp_bias = _n_ones(ebits - 1)
@@ -363,8 +376,10 @@ def _floatx_unpacked_to_f32(x: Tensor, ebits: int, mbits: int) -> Tensor:
       fp6: bits 0-1 empty and bits 2-7 in fp6_e2m3 or fp6_e3m2 encoding
     Output: torch.Tensor of dtype fp32 with the dequantized value
     """
-    assert x.dtype == torch.uint8
-    assert 1 + ebits + mbits <= 8
+    if x.dtype != torch.uint8:
+        raise AssertionError(f"Expected x.dtype to be torch.uint8, got {x.dtype}")
+    if 1 + ebits + mbits > 8:
+        raise AssertionError(f"Expected 1 + ebits + mbits <= 8, got {1 + ebits + mbits}")
 
     sign_mask = 1 << (ebits + mbits)
     exp_bias = _n_ones(ebits - 1)
@@ -447,6 +462,56 @@ def _floatx_unpacked_to_f32(x: Tensor, ebits: int, mbits: int) -> Tensor:
 def ceil_div(a, b):
     return (a + b - 1) // b
 
+# NVIDIA Blackwell HW requires scales for MX/NV blocked formats to be in a 128x4 tile layout,
+# with a weird 32x4x4 internal layout of that tile. If we want to take swizzled scales and use them
+# for non-gemm purposes (like testing), we need to de-swizzle them, then they can be applied much
+# more naturally.
+def from_blocked(input, input_scales, blocksize) -> torch.Tensor:
+    # Matrix is in a 128x4 pattern, internally blocked as 32x4x4 nonsense.
+    # Output should be [input.size(0, input.size(1) // blocksize] scales
+    output_scales = torch.zeros(
+        (input.size(0), input.size(1) // blocksize),
+        device=input.device,
+        dtype=input_scales.dtype,
+    )
+
+    # Swizzled scales are padded to tiles of 128x4, we need to replicate how that padding
+    # happened for offset purposes.
+    # There are K//blocksize scales, padded to groups of 4.
+    num_col_tiles = ceil_div(ceil_div(input.size(1), blocksize), 4)
+
+    # (Very) slow reference implementation using horrifying loops.
+    for i in range(input.size(0)):
+        for j in range(input.size(1) // blocksize):
+            # which 128x4 tile of scaling factors am I in
+            scale_tile_h = i // 128
+            scale_tile_w = j // 4
+
+            # There are (padded) input_scales.size(1) // 4 tiles along the w dim.
+            # So offset is 512 * (h_tile * tiles_per_row + tile_in_row)
+            tile_offset = 512 * (scale_tile_h * num_col_tiles + scale_tile_w)
+
+            # indices within the tile - use nomenclature directly from cublas docs
+            outer = i % 128  # "outer" in cublas docs
+            inner = j % 4    # "inner" in cublas docs
+
+            # Note: "offset" is given in terms of bytes, in cublas docs, but our scales are e8m0,
+            #       anyway, and so 1B == 1 value => use offset directly.
+            # Formula directly from cublas docs in 3.1.4.3.2
+            offset = tile_offset + (outer % 32) * 16 + (outer // 32) * 4 + inner
+
+            output_scales[i, j] = input_scales[offset]
+
+    return output_scales
+
+def from_blocked_format(x_mxfp8, scales_unswizzled, blocksize=32):
+    # expand scales
+    scales = torch.repeat_interleave(scales_unswizzled, blocksize, dim=1)
+
+    # de-scale and convert
+    x_f32 = x_mxfp8.to(torch.float) * scales.to(torch.float)
+    return x_f32.to(torch.bfloat16)
+
 def to_blocked(input_matrix) -> torch.Tensor:
     """
     Rearrange a large matrix by breaking it into blocks and applying the rearrangement pattern.
@@ -480,19 +545,49 @@ def to_blocked(input_matrix) -> torch.Tensor:
 
     return rearranged.flatten()
 
+
+def down_size(size):
+    if size[-1] % 2 != 0:
+        raise AssertionError(f"{size} last dim not divisible by two")
+    return (*size[:-1], size[-1] // 2)
+
+
+def pack_uint4(uint8_data) -> torch.Tensor:
+    # converting to uint8 for operations
+    shape = uint8_data.shape
+    if shape[-1] % 2 != 0:
+        raise AssertionError(f"Expected shape[-1] to be divisible by 2, got {shape[-1]}")
+    uint8_data = uint8_data.contiguous().view(-1)
+    return (uint8_data[1::2] << 4 | uint8_data[::2]).view(down_size(shape))
+
+
+# exponent and mantissa bits of `torch.float4_e2m1fn_x2`
+FP4_EBITS, FP4_MBITS = 2, 1
+
+
+def _bfloat16_to_float4_e2m1fn_x2(x):
+    if x.dtype != torch.bfloat16:
+        raise AssertionError(f"Expected x.dtype to be torch.bfloat16, got {x.dtype}")
+    x = _f32_to_floatx_unpacked(x.float(), FP4_EBITS, FP4_MBITS)
+    x = pack_uint4(x)
+    x = x.view(torch.float4_e2m1fn_x2)
+    return x
+
+
 # This function is extracted from https://github.com/pytorch/ao/blob/v0.12.0/torchao/prototype/mx_formats/mx_tensor.py#L142
-def to_mxfp8(
+def to_mxfp(
     data_hp: torch.Tensor,
     block_size: int = 32,
+    format: str = "mxfp8",
 ):
-    assert data_hp.dtype in (
-        torch.bfloat16,
-        torch.float,
-    ), f"{data_hp.dtype} is not supported yet"
-    assert (
-        data_hp.shape[-1] % block_size == 0
-    ), f"the last dimension of shape {data_hp.shape} must be divisible by block_size {block_size}"
-    assert data_hp.is_contiguous(), "unsupported"
+    if data_hp.dtype not in (torch.bfloat16, torch.float):
+        raise AssertionError(f"{data_hp.dtype} is not supported yet")
+    if data_hp.shape[-1] % block_size != 0:
+        raise AssertionError(
+            f"the last dimension of shape {data_hp.shape} must be divisible by block_size {block_size}"
+        )
+    if not data_hp.is_contiguous():
+        raise AssertionError("unsupported: data_hp must be contiguous")
 
     orig_shape = data_hp.shape
     data_hp = data_hp.reshape(
@@ -504,8 +599,12 @@ def to_mxfp8(
     data_hp = data_hp.to(torch.float32)
     max_abs = max_abs.to(torch.float32)
 
-    F8E4M3_MAX = torch.finfo(torch.float8_e4m3fn).max  # 448.0
-    max_pos = F8E4M3_MAX
+    if format == "mxfp8":
+        F8E4M3_MAX = torch.finfo(torch.float8_e4m3fn).max  # 448.0
+        max_pos = F8E4M3_MAX
+    elif format == "mxfp4":
+        F4E2M1_MAX = 6.
+        max_pos = F4E2M1_MAX
 
     # RCEIL
     def _to_mx_rceil(
@@ -542,9 +641,15 @@ def to_mxfp8(
     scale_e8m0_biased, data_lp = _to_mx_rceil(data_hp, max_abs, max_pos)
 
     # cast to target dtype
-    data_lp = data_lp.to(torch.float8_e4m3fn)
-    # need to reshape at the end to help inductor fuse things
-    data_lp = data_lp.reshape(orig_shape)
+    if format == "mxfp8":
+        data_lp = data_lp.to(torch.float8_e4m3fn)
+        # need to reshape at the end to help inductor fuse things
+        data_lp = data_lp.reshape(orig_shape)
+    elif format == "mxfp4":
+        data_lp = _bfloat16_to_float4_e2m1fn_x2(data_lp.to(torch.bfloat16))
+        final_shape = list(orig_shape)
+        final_shape[-1] //= 2
+        data_lp = data_lp.reshape(final_shape)
 
     scale_e8m0_biased = scale_e8m0_biased.view(torch.float8_e8m0fnu)
     scale_e8m0_biased = scale_e8m0_biased.squeeze(-1)

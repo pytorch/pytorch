@@ -125,7 +125,7 @@ class TestObserver(QuantizationTestCase):
                 scale = torch.max(scale, eps)
                 if dtype in [torch.quint8, torch.uint8]:
                     zero_point = 128
-                if dtype in [torch.uint16]:
+                if dtype == torch.uint16:
                     zero_point = 2 ** 15
             else:
                 scale = torch.max((max_val_pos - min_val_neg) / float(quant_max - quant_min), eps)
@@ -581,7 +581,7 @@ class _ReferenceHistogramObserver(HistogramObserver):
                     norm = norm + _get_norm(delta_begin, delta_end, density, norm_type)
             return norm
 
-        assert self.histogram.size()[0] == self.bins, "bins mistmatch"
+        assert self.histogram.size()[0] == self.bins, "bins mismatch"
         bin_width = (self.max_val - self.min_val) / self.bins
 
         # cumulative sum
@@ -650,7 +650,7 @@ class TestRecordHistogramObserver(QuantizationTestCase):
                 observer_dict = {}
                 _get_observer_dict(model, observer_dict)
 
-                self.assertTrue('fc1.module.activation_post_process' in observer_dict.keys(),
+                self.assertTrue('fc1.module.activation_post_process' in observer_dict,
                                 'observer is not recorded in the dict')
                 self.assertEqual(len(observer_dict['fc1.module.activation_post_process'].get_tensor_value()),
                                  2 * len(self.calib_data))
@@ -808,7 +808,7 @@ class TestHistogramObserver(QuantizationTestCase):
     def test_histogram_observer_extreme_inputs(self):
         """
         Ensures that the HistogramObserver is able to work correctly in
-        a rare case: extreme samll max values
+        a rare case: extreme small max values
         """
         obs = HistogramObserver()
         test_input = torch.tensor(
@@ -1028,7 +1028,7 @@ class TestDistributed(QuantizationTestCase):
         for observer_type in observer_types:
             observer = observer_type()
             buffer_ids_before = _get_buffer_ids(observer)
-            for _i in range(5):
+            for _ in range(5):
                 inputs = torch.rand((4, 4, 4))
                 observer(inputs)
             buffer_ids_after = _get_buffer_ids(observer)
@@ -1046,7 +1046,7 @@ class TestDistributed(QuantizationTestCase):
         """
         model = torch.ao.quantization.FakeQuantize()
         buffer_ids_before = _get_buffer_ids(model)
-        for _i in range(5):
+        for _ in range(5):
             inputs = torch.rand((4, 4, 4))
             model(inputs)
         model.apply(torch.ao.quantization.enable_fake_quant)
@@ -1139,7 +1139,7 @@ class TestDistributed(QuantizationTestCase):
     def test_syncbn_preserves_qconfig(self):
         """
         Makes sure that if a BatchNorm is not fused and a qconfig exists,
-        convering the module to SyncBatchNorm preserves the qconfig.
+        converting the module to SyncBatchNorm preserves the qconfig.
         """
         m = nn.Sequential(
             nn.Conv2d(1, 1, 1),
@@ -1309,7 +1309,7 @@ class TestFusedObsFakeQuantModule(TestCase):
         torch.ao.quantization.enable_observer(mod_ref)
         mod_ref.to(device)
 
-        for i in range(10):
+        for _ in range(10):
             x = torch.randn(5, 5, device=device)
             out = mod(x)
             out_ref = mod_ref(x)
@@ -1445,7 +1445,7 @@ class TestFusedObsFakeQuantModule(TestCase):
 
                 count_fake_quant = 0
                 count_activation_postproc = 0
-                for name, mod in quant_model.named_modules():
+                for name, _mod in quant_model.named_modules():
                     if name.endswith('weight_fake_quant'):
                         count_fake_quant += 1
                     if name.count('activation_post_process') == 1 and 'weight_fake_quant' not in name:

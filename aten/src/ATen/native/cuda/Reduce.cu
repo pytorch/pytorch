@@ -11,7 +11,7 @@ static inline std::ostream& operator<<(std::ostream& out, dim3 dim) {
   if (dim.y == 1 && dim.z == 1) {
     out << dim.x;
   } else {
-    out << "[" << dim.x << "," << dim.y << "," << dim.z << "]";
+    out << '[' << dim.x << ',' << dim.y << ',' << dim.z << ']';
   }
   return out;
 }
@@ -27,7 +27,7 @@ std::ostream& operator<<(std::ostream& out, const ReduceConfig& config) {
   out << "input_mult=[";
   for (int i = 0; i < 3; i++) {
     if (i != 0) {
-      out << ",";
+      out << ',';
     }
     out << config.input_mult[i];
   }
@@ -35,7 +35,7 @@ std::ostream& operator<<(std::ostream& out, const ReduceConfig& config) {
   out << "output_mult=[";
   for (int i = 0; i < 2; i++) {
     if (i != 0) {
-      out << ",";
+      out << ',';
     }
     out << config.output_mult[i];
   }
@@ -49,7 +49,7 @@ std::ostream& operator<<(std::ostream& out, const ReduceConfig& config) {
   out << "block=" << config.block() << ", ";
   out << "grid=" << config.grid() << ", ";
   out << "global_memory_size=" << config.global_memory_size();
-  out << ")";
+  out << ')';
   return out;
 }
 

@@ -18,8 +18,9 @@ from __future__ import annotations
 import heapq
 import logging
 import time
-from typing import Any, Callable, Optional, TYPE_CHECKING
-from typing_extensions import Self, TypeAlias
+from collections.abc import Callable
+from typing import Any, Optional, TYPE_CHECKING, TypeAlias
+from typing_extensions import Self
 
 
 if TYPE_CHECKING:
@@ -36,7 +37,7 @@ class TopN:
     Helper to record a list of metrics, keeping only the top N "most expensive" elements.
     """
 
-    def __init__(self, at_most: int = 25):
+    def __init__(self, at_most: int = 25) -> None:
         self.at_most = at_most
         self.heap: list[tuple[int, Any]] = []
 
@@ -59,7 +60,7 @@ OnExitType: TypeAlias = Callable[
 
 
 class MetricsContext:
-    def __init__(self, on_exit: OnExitType):
+    def __init__(self, on_exit: OnExitType) -> None:
         """
         Use this class as a contextmanager to create a context under which to accumulate
         a set of metrics, e.g., metrics gathered during a compilation. On exit of the
@@ -206,7 +207,7 @@ class MetricsContext:
 
 
 class RuntimeMetricsContext:
-    def __init__(self, on_exit: OnExitType):
+    def __init__(self, on_exit: OnExitType) -> None:
         """
         Similar to MetricsContext, but used to gather the runtime metrics that are
         decoupled from compilation, where there's not a natural place to insert a

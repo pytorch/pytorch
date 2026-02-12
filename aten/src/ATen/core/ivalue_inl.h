@@ -29,6 +29,8 @@
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/irange.h>
 
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-default")
+
 namespace torch {
 namespace jit {
 struct Function;
@@ -990,7 +992,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     std::unique_lock<std::mutex> lock(mutex_);
     if (completed_) {
       // This should be rare and shouldn't cause log spew. Its important to
-      // log errors and thats why we have this log here.
+      // log errors and that's why we have this log here.
       std::string msg = c10::str(
           "Skipping setting following error on the Future since "
           "it is already marked completed (this is not necessarily "
@@ -1501,7 +1503,7 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
   // However, the CompilationUnit holds ownership of the type's graphs, so
   // inserting a constant object into a Graph would create a reference cycle if
   // that constant object held a shared_ptr to its CU. For these objects we
-  // instatiate them with non-owning references to its CU
+  // instantiate them with non-owning references to its CU
   Object(WeakOrStrongTypePtr type, size_t numSlots) : type_(std::move(type)) {
     slots_.resize(numSlots);
   }
@@ -1827,7 +1829,7 @@ c10::intrusive_ptr<T> IValue::toCustomClass() const& {
 
 template <typename T>
 T generic_to(IValue ivalue, _fake_type<T> /*unused*/) {
-  using ElemType = typename std::remove_pointer<T>::type::element_type;
+  using ElemType = typename std::remove_pointer_t<T>::element_type;
   return std::move(ivalue).template toCustomClass<ElemType>();
 }
 
@@ -1939,7 +1941,7 @@ Tuple generic_to_tuple_impl(
     const ivalue::TupleElements& t,
     std::index_sequence<INDEX...> /*unused*/) {
   return std::make_tuple(
-      t[INDEX].to<typename std::tuple_element<INDEX, Tuple>::type>()...);
+      t[INDEX].to<std::tuple_element_t<INDEX, Tuple>>()...);
 }
 } // namespace detail
 
@@ -2567,3 +2569,5 @@ TypePtr IValue::type() const {
 }
 
 } // namespace c10
+
+C10_DIAGNOSTIC_POP()

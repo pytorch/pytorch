@@ -11,6 +11,7 @@ from pathlib import Path
 import torch
 from torch.export.experimental._utils import _get_main_cpp_file, _get_make_file
 from torch.export.exported_program import _decompose_exported_program
+from torch.utils._ordered_set import OrderedSet
 
 
 _InputT = typing_extensions.ParamSpec("_InputT")
@@ -35,7 +36,11 @@ def _copy_graph_module_and_signature(
         old_phs = [node for node in old_gm.graph.nodes if node.op == "placeholder"]
         new_phs = [node for node in new_gm.graph.nodes if node.op == "placeholder"]
         # iterate over placeholders
-        assert len(old_phs) == len(new_phs)
+        if len(old_phs) != len(new_phs):
+            raise AssertionError(
+                f"Number of old placeholders ({len(old_phs)}) does not match "
+                f"new placeholders ({len(new_phs)})"
+            )
         for old_node, new_node in zip(old_phs, new_phs):
             new_node.name = old_node.name
 
@@ -50,9 +55,9 @@ def _remove_detach_pass(
             if node.op != "call_function":
                 continue
             if (
-                node.target == torch.ops.aten.detach.default
+                node.target is torch.ops.aten.detach.default
                 and len(node.users) == 1
-                and next(iter(node.users)).target == torch.ops.aten.detach.default
+                and next(iter(node.users)).target is torch.ops.aten.detach.default
             ):
                 next(iter(node.users)).replace_all_uses_with(node)
 
@@ -86,14 +91,10 @@ def _export_forward_backward(
 
 def _sticky_export(
     forward_func: typing.Callable[_InputT, _RetT],
-    dynamic_shapes_callback: typing.Optional[
-        typing.Callable[
-            _InputT,
-            typing.Union[
-                list[typing.Any], dict[str, typing.Any], tuple[typing.Any, ...]
-            ],
-        ]
-    ] = None,
+    dynamic_shapes_callback: typing.Callable[
+        _InputT, list[typing.Any] | dict[str, typing.Any] | tuple[typing.Any, ...]
+    ]
+    | None = None,
 ) -> typing.Callable[_InputT, _RetT]:
     """
     Lazily export the model on first forward call.
@@ -293,7 +294,7 @@ class _ExportPackage:
                     if isinstance(fn, torch.nn.Module):
                         dynamic_shapes = v(fn, *args, **kwargs)  # type: ignore[arg-type]
                     else:
-                        # pyrefly: ignore  # invalid-param-spec
+                        # pyrefly: ignore [invalid-param-spec]
                         dynamic_shapes = v(*args, **kwargs)
                 except AssertionError:
                     continue
@@ -332,16 +333,22 @@ class _ExportPackage:
         def _define_overload(
             overload: str, spec: typing.Callable[_InputT, typing.Any]
         ) -> typing.Any:
-            assert overload not in specs
-            assert callable(spec)
-            assert overload.isidentifier()
+            if overload in specs:
+                raise AssertionError(f"Overload '{overload}' already exists in specs")
+            if not callable(spec):
+                raise AssertionError(f"spec must be callable, but got {type(spec)}")
+            if not overload.isidentifier():
+                raise AssertionError(
+                    f"Overload '{overload}' is not a valid Python identifier"
+                )
             specs[overload] = spec
             return _exporter_context
 
-        assert not hasattr(fn, "_define_overload")
+        if hasattr(fn, "_define_overload"):
+            raise AssertionError("fn already has a '_define_overload' attribute")
         _exporter_context._define_overload = _define_overload  # type: ignore[attr-defined]
 
-        # pyrefly: ignore  # bad-return
+        # pyrefly: ignore [bad-return]
         return _exporter_context
 
     @property
@@ -368,6 +375,7 @@ class _ExportPackage:
         }
         aoti_files_map = {}
         model_names = []
+        device_type = "cpu"
         for name, ep in self._method_overloads:
             name = name.replace(":", "__")
             model_names.append(name)
@@ -378,7 +386,7 @@ class _ExportPackage:
                 kwargs=ep.example_inputs[1],
                 options=options,
             )
-            # pyrefly: ignore  # unsupported-operation
+            # pyrefly: ignore [unsupported-operation]
             aoti_files_map[name] = aoti_files
 
         from torch._inductor.package import package
@@ -391,42 +399,56 @@ class _ExportPackage:
         if not standalone:
             return
 
-        assert isinstance(pt2_path, str)
+        if not isinstance(pt2_path, str):
+            raise AssertionError(
+                f"Expected pt2_path to be a string, but got {type(pt2_path)}"
+            )
         base_directory = os.path.dirname(pt2_path)
         package_name = os.path.basename(pt2_path)[:-4]
-        with (
-            zipfile.ZipFile(pt2_path, "r") as zip_ref,
-        ):
+        with zipfile.ZipFile(pt2_path, "r") as zip_ref:
             zip_ref.extractall(base_directory)
 
-        example_inputs_map: typing.Optional[dict[str, int]] = (
+        example_inputs_map: dict[str, int] | None = (
             {} if package_example_inputs else None
         )
-        use_cuda = False
         for name, ep in self._method_overloads:
             name = name.replace(":", "__")
             # TODO: also dump kwargs
             # TODO: currently only support list of Tensors and they need to be on the same device
             if not ep.example_inputs:
                 continue
+
+            device_types: OrderedSet[str] = OrderedSet()
+
             for inp in ep.example_inputs[0]:
-                if isinstance(inp, torch.Tensor) and inp.device.type == "cuda":
-                    # TODO: more carefully determine the device type
-                    use_cuda = True
+                if isinstance(inp, torch.Tensor):
+                    device_types.add(inp.device.type)
+            device_types.discard("cpu")
+            if len(device_types) > 1:
+                raise AssertionError(
+                    "Does not support mixing {}".format("+".join(list(device_types)))
+                )
+            device_type = "cpu" if len(device_types) == 0 else device_types.pop()
+
             if package_example_inputs:
-                assert example_inputs_map is not None
+                if example_inputs_map is None:
+                    raise AssertionError(
+                        "example_inputs_map cannot be None when package_example_inputs is True"
+                    )
                 example_inputs_map[name] = len(ep.example_inputs[0])
                 for i, t in enumerate(ep.example_inputs[0]):
                     path = Path(base_directory) / f"{name}_input_{i}.pt"
                     torch.save(t, path)
 
-        cmake_file_str = _get_make_file(package_name, model_names, use_cuda)
+        cmake_file_str = _get_make_file(
+            package_name, model_names, device_type=device_type
+        )
 
         with open(Path(base_directory) / "CMakeLists.txt", "w") as file:
             file.write(cmake_file_str)
 
         main_file_str = _get_main_cpp_file(
-            package_name, model_names, use_cuda, example_inputs_map
+            package_name, model_names, example_inputs_map, device_type=device_type
         )
         with open(Path(base_directory) / "main.cpp", "w") as file:
             file.write(main_file_str)

@@ -2,7 +2,6 @@
 import logging
 from collections import defaultdict
 from threading import Lock
-from typing import Optional
 
 import torch
 import torch.distributed.autograd as dist_autograd
@@ -51,7 +50,7 @@ class _ScriptLocalOptimizer(nn.Module):
     def step(self, autograd_ctx_id: int):
         all_local_grads = dist_autograd.get_gradients(autograd_ctx_id)
         # apply functional optimizer step with a list of gradients
-        grads: list[Optional[Tensor]] = [
+        grads: list[Tensor | None] = [
             all_local_grads[p] if p in all_local_grads else None  # noqa: SIM401
             for p in self._local_params
         ]

@@ -10,7 +10,7 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import FullyShardedDataP
 from torch.distributed.fsdp.wrap import enable_wrap, wrap
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTest, SkipModel
+from torch.testing._internal.common_fsdp import FSDPTestContinuous, SkipModel
 from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
@@ -30,18 +30,20 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
-
+# NB: this iterable needs to be ordered as otherwise different ranks may run with
+# conflicting settings when e.g., @parametrize(_DISTRIBUTED_STATE_DICT_IMPLS) is
+# used to decorate tests
 _DISTRIBUTED_STATE_DICT_IMPLS = (
     StateDictType.LOCAL_STATE_DICT,
     StateDictType.SHARDED_STATE_DICT,
 )
 
 
-class TestDistributedCheckpoint(FSDPTest):
+class TestDistributedCheckpoint(FSDPTestContinuous):
     @property
     def world_size(self):
-        if torch.cuda.is_available():
-            gpu_cnt = torch.cuda.device_count()
+        if torch.accelerator.is_available():
+            gpu_cnt = torch.accelerator.device_count()
             if gpu_cnt < 2:
                 return gpu_cnt
         return 2
@@ -93,7 +95,9 @@ class TestDistributedCheckpoint(FSDPTest):
         # TODO: add resharding test case.
 
 
-devices = ("cuda", "hpu")
-instantiate_device_type_tests(TestDistributedCheckpoint, globals(), only_for=devices)
+devices = ("cuda", "hpu", "xpu")
+instantiate_device_type_tests(
+    TestDistributedCheckpoint, globals(), only_for=devices, allow_xpu=True
+)
 if __name__ == "__main__":
     run_tests()

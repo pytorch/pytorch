@@ -46,7 +46,7 @@ def _debug_iterative_memory_recompute(
     if iter_cm != new_cm:
         log = "ITERATIVE CURR MEMORY CANDIDATE DOES NOT MATCH"
         iterative_recompute_error = True
-    for i, gn in enumerate(gns):
+    for gn in gns:
         iter_gnm = iter_curr_memory[gn]
         new_gnm = est_curr_memory[gn]
         if iter_gnm != new_gnm:
@@ -65,7 +65,7 @@ def _debug_iterative_memory_recompute(
             f"\nCANDIDATE_NEW_ALLOCFREE:{snodes_allocfree[candidate]}"
         )
         peak_log = ""
-        for i, (pre, post) in enumerate(snodes_curr_memory):
+        for i, (pre, _post) in enumerate(snodes_curr_memory):
             if est_peak_memory == pre:
                 n = snodes[i]
                 peak_log = (

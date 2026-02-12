@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import functools
-from typing import Callable, TYPE_CHECKING, Union
+from typing import TYPE_CHECKING, Union
 
 import torch
 from functorch.dim import dims  # noqa: F401
@@ -16,7 +16,7 @@ from ._parsing import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
 __all__ = ["rearrange"]
 
@@ -76,7 +76,8 @@ def _create_rearrange_callable(
         if isinstance(dimension, list):
             for identifier in dimension:
                 # non-unitary anon axes are not allowed in rearrange & unitary anon axes are represented as empty lists
-                assert isinstance(identifier, str)
+                if not isinstance(identifier, str):
+                    raise AssertionError(f"Expected str, got {type(identifier)}")
                 identifier_dim_map[identifier] = (first_class_dims[dims_i],)
                 dims_i += 1
             if not dimension:

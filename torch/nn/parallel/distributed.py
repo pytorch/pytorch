@@ -87,9 +87,9 @@ class _MixedPrecision:
         would result in communication occurring in fp16.
     """
 
-    param_dtype: Optional[torch.dtype] = None
-    reduce_dtype: Optional[torch.dtype] = None
-    buffer_dtype: Optional[torch.dtype] = None
+    param_dtype: torch.dtype | None = None
+    reduce_dtype: torch.dtype | None = None
+    buffer_dtype: torch.dtype | None = None
     # TODO (rohan-varma): keep_low_precision_grads: bool = False
     # TODO (rohan-varma): APIs to allow users to run batchnorm and layernorm
     # in full precision. For DDP, this can be implemented by not performing the
@@ -241,7 +241,7 @@ class _BufferCommHook:
 # is completed.
 class _DDPSink(Function):
     @staticmethod
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def forward(ctx, ddp_weakref, *inputs):
         # set_materialize_grads(False) will ensure that None gradients stay as
         # None and are not filled with zeros.
@@ -276,11 +276,13 @@ class _DDPSink(Function):
 class _DDPJoinHook(JoinHook):
     def __init__(self, ddp, divide_by_initial_world_size):
         """Set config variables for internal usage."""
-        assert isinstance(ddp, DistributedDataParallel), (
-            "DDP join hook requires passing in a DistributedDataParallel "
-            "instance as the state"
-        )
-        assert ddp.logger is not None
+        if not isinstance(ddp, DistributedDataParallel):
+            raise AssertionError(
+                "DDP join hook requires passing in a DistributedDataParallel "
+                f"instance as the state, got {type(ddp).__name__}"
+            )
+        if ddp.logger is None:
+            raise AssertionError("ddp.logger must not be None")
         ddp.logger._set_uneven_input_join()
         self.ddp = ddp
         self.ddp._divide_by_initial_world_size = divide_by_initial_world_size
@@ -666,16 +668,17 @@ class DistributedDataParallel(Module, Joinable):
         static_graph=False,
         delay_all_reduce_named_params=None,
         param_to_hook_all_reduce=None,
-        mixed_precision: Optional[_MixedPrecision] = None,
+        mixed_precision: _MixedPrecision | None = None,
         device_mesh=None,
         skip_all_reduce_unused_params=False,
+        bucket_cap_mb_list: Optional[list[int]] = None,
     ):
         super().__init__()
         Joinable.__init__(self)
         self._use_python_reducer = (
             torch._dynamo.utils.get_optimize_ddp_mode() == "python_reducer"
         )
-        self.logger: Optional[dist.Logger] = None
+        self.logger: dist.Logger | None = None
         if bool(delay_all_reduce_named_params is not None) != bool(
             param_to_hook_all_reduce is not None
         ):
@@ -692,7 +695,7 @@ class DistributedDataParallel(Module, Joinable):
         elif process_group is None and device_mesh is None:
             self.process_group = _get_default_group()
         elif device_mesh is None:
-            # pyrefly: ignore  # bad-assignment
+            # pyrefly: ignore [bad-assignment]
             self.process_group = process_group
         else:
             if device_mesh.ndim != 1:
@@ -701,9 +704,8 @@ class DistributedDataParallel(Module, Joinable):
                 )
             self.device_mesh = device_mesh
             self.process_group = device_mesh.get_group(mesh_dim=0)
-            from torch.distributed.device_mesh import _mesh_resources
 
-            root_mesh = _mesh_resources.get_root_mesh(device_mesh)
+            root_mesh = device_mesh._get_root_mesh()
             # if a root mesh is not the same as device_mesh,
             # meaning the device_mesh is sliced out from the root mesh.
             if root_mesh != device_mesh:
@@ -775,19 +777,19 @@ class DistributedDataParallel(Module, Joinable):
                     "DistributedDataParallel device_ids and output_device arguments "
                     "only work with single-device/multiple-device GPU modules or CPU modules, "
                     f"but got device_ids {device_ids}, output_device {output_device}, "
-                    f"and module parameters { ({p.device for p in self._module_parameters}) }.",  # noqa: E201,E202
+                    f"and module parameters { ({p.device for p in self._module_parameters}) }.",
                 )
 
             self.device_ids = None
             self.output_device = None
         else:
-            # pyrefly: ignore  # bad-assignment
+            # pyrefly: ignore [bad-assignment]
             self.device_ids = [_get_device_index(x, True) for x in device_ids]
 
             if output_device is None:
                 output_device = device_ids[0]
 
-            # pyrefly: ignore  # bad-assignment
+            # pyrefly: ignore [bad-assignment]
             self.output_device = _get_device_index(output_device, True)
 
         self.static_graph = False
@@ -832,6 +834,22 @@ class DistributedDataParallel(Module, Joinable):
             self.bucket_bytes_cap_default = True
         else:
             self.bucket_bytes_cap_default = False
+
+        self.bucket_bytes_cap_list = []
+        if bucket_cap_mb_list:
+            if self._use_python_reducer:
+                raise AssertionError(
+                    "when using bucket_cap_mb_list, python reducer is not supported"
+                )
+            self.bucket_bytes_cap_list = [
+                int(bucket_cap_mb * 1024 * 1024) for bucket_cap_mb in bucket_cap_mb_list
+            ]
+            # This is not supposed to be used later when custom bucket_cap_mb_list is passed,
+            # just a safe placeholder for backward compatibility
+            self.bucket_bytes_cap_default = False
+            bucket_cap_mb = max(bucket_cap_mb_list)
+        if not bucket_cap_mb:
+            raise AssertionError("bucket_cap_mb should be set by now")
         self.bucket_bytes_cap = int(bucket_cap_mb * 1024 * 1024)
 
         # Whether to perform input tensor CPU to GPU copies on a side-stream
@@ -840,7 +858,7 @@ class DistributedDataParallel(Module, Joinable):
         )
 
         # Initialize gradient buffers and register all reduce hook
-        self._delay_grad_buffer: Optional[torch.Tensor] = None
+        self._delay_grad_buffer: torch.Tensor | None = None
         self._delay_grad_views: list[torch.Tensor] = []
         self._delay_all_reduce_all_params = False
         if len(self._delay_all_reduce_params) != 0:
@@ -937,8 +955,9 @@ class DistributedDataParallel(Module, Joinable):
         # enabled.
         self._accum_grad_hooks: list[RemovableHandle] = []
         if self._use_python_reducer:
-            # pyrefly: ignore  # bad-assignment
+            # pyrefly: ignore [bad-assignment]
             torch._inductor.config._fuse_ddp_communication = True
+            # pyrefly: ignore [bad-assignment]
             torch._inductor.config._fuse_ddp_bucket_size = bucket_cap_mb
             # Directly adding this to the trace rule will disturb the users
             # who are using DDPOptimizer.
@@ -1197,16 +1216,24 @@ class DistributedDataParallel(Module, Joinable):
         # because "bucket rebuild" bucketizes parameters based on its real execution order in backward graph.
 
         # Can remove this branching once #73732 is landed.
-        if static_graph is True or self.find_unused_parameters is False:
-            bucket_size_limits = [sys.maxsize]
+        if self.bucket_bytes_cap_list:
+            bucket_size_limits = self.bucket_bytes_cap_list
+            # When bucket_cap_mb_list is provided, use it for rebuilding buckets
+            bucket_size_limits_for_rebuilding = self.bucket_bytes_cap_list
         else:
-            if self.bucket_bytes_cap_default:
-                bucket_size_limits = [
-                    dist._DEFAULT_FIRST_BUCKET_BYTES,
-                    self.bucket_bytes_cap,
-                ]
+            if static_graph is True or self.find_unused_parameters is False:
+                bucket_size_limits = [sys.maxsize]
             else:
-                bucket_size_limits = [self.bucket_bytes_cap]
+                if self.bucket_bytes_cap_default:
+                    bucket_size_limits = [
+                        dist._DEFAULT_FIRST_BUCKET_BYTES,
+                        self.bucket_bytes_cap,
+                    ]
+                else:
+                    bucket_size_limits = [self.bucket_bytes_cap]
+            # When bucket_cap_mb_list is not provided, pass empty list
+            # to let C++ Reducer use the original logic (first_bucket_bytes_cap_ and bucket_bytes_cap_)
+            bucket_size_limits_for_rebuilding = []
         (
             bucket_indices,
             per_bucket_size_limits,
@@ -1249,6 +1276,7 @@ class DistributedDataParallel(Module, Joinable):
             ),
             self.skip_all_reduce_unused_params,
             self._use_python_reducer,
+            bucket_size_limits_for_rebuilding,
         )
 
         self.logger = dist.Logger(self.reducer)
@@ -1301,7 +1329,10 @@ class DistributedDataParallel(Module, Joinable):
         )
         if self.static_graph:
             self.reducer._set_static_graph()
-            assert self.logger is not None
+            if self.logger is None:
+                raise AssertionError(
+                    "self.logger must not be None when static_graph is True"
+                )
             self.logger._set_static_graph()
 
     def _build_params_for_reducer(self):
@@ -1530,7 +1561,8 @@ class DistributedDataParallel(Module, Joinable):
             return inputs, kwargs
 
         if torch.is_grad_enabled() and self.require_backward_grad_sync:
-            assert self.logger is not None
+            if self.logger is None:
+                raise AssertionError("self.logger must not be None")
             self.logger.set_runtime_stats_and_log()
             self.reducer.prepare_for_forward()
 
@@ -1627,7 +1659,7 @@ class DistributedDataParallel(Module, Joinable):
                 treespec,
                 output_is_rref,
             ) = _tree_flatten_with_rref(output)
-            output_placeholders: list[Optional[torch.Tensor]] = [
+            output_placeholders: list[torch.Tensor | None] = [
                 None for _ in range(len(output_tensor_list))
             ]
             # Do not touch tensors that have no grad_fn, which can cause issues
@@ -1933,7 +1965,7 @@ class DistributedDataParallel(Module, Joinable):
                             hook will run _after_ the forward pass.
 
             NOTE: To maximize performance, users can return a
-                List[torch.futures.Future] from their hook, and DDP will
+                list[torch.futures.Future] from their hook, and DDP will
                 install and await these hooks appropriately at the end of
                 the backward pass. This will ensure all buffers are
                 synchronized by the end of the backward pass. If this
@@ -1944,14 +1976,15 @@ class DistributedDataParallel(Module, Joinable):
                 ensure appropriate synchronization when manipulating GPU
                 buffers in the forward pass.
         """
-        assert callable(hook)
+        if not callable(hook):
+            raise AssertionError(f"hook must be callable, got {type(hook).__name__}")
         self.buffer_hook = _BufferCommHook(
             buffer_comm_hook=hook,
             buffer_comm_hook_state=state,
             buffer_comm_hook_location=comm_hook_location,
         )
 
-    def register_comm_hook(self, state: object, hook: Callable):
+    def register_comm_hook(self, state: object, hook: Callable) -> None:
         r"""
         Register communication hook for user-defined DDP aggregation of gradients across multiple workers.
 
@@ -2027,7 +2060,8 @@ class DistributedDataParallel(Module, Joinable):
             >>> ddp.register_comm_hook(state=None, hook=encode_and_decode)
         """
         self._check_comm_hook(hook)
-        assert self.logger is not None
+        if self.logger is None:
+            raise AssertionError("self.logger must not be None")
         self.logger._set_comm_hook_name(hook.__qualname__)
         self._comm_hooks.append((hook, state))
         dist._register_comm_hook(self.reducer, state, hook)
@@ -2055,7 +2089,8 @@ class DistributedDataParallel(Module, Joinable):
             >>> ddp._register_builtin_comm_hook(dist.BuiltinCommHookType.FP16_COMPRESS)
 
         """
-        assert self.logger is not None
+        if self.logger is None:
+            raise AssertionError("self.logger must not be None")
         self.logger._set_comm_hook_name(str(comm_hook_type))
         dist._register_builtin_comm_hook(self.reducer, comm_hook_type)
 
@@ -2332,7 +2367,8 @@ class DistributedDataParallel(Module, Joinable):
         these metrics are.
         This is a prototype interface and subject to change in the future.
         """
-        assert self.logger is not None
+        if self.logger is None:
+            raise AssertionError("self.logger must not be None")
         ddp_logging_data = self.logger._get_ddp_logging_data()
         return {**ddp_logging_data.strs_map, **ddp_logging_data.ints_map}
 
@@ -2366,13 +2402,15 @@ class DistributedDataParallel(Module, Joinable):
         # If self.static_graph has been set, no need to set it again
         if self.static_graph:
             warnings.warn(
-                "You've set static_graph to be True, no need to set it again."
+                "You've set static_graph to be True, no need to set it again.",
+                stacklevel=2,
             )
             return
         self.static_graph = True
         self._static_graph_delay_allreduce_enqueued = False
         self.reducer._set_static_graph()
-        assert self.logger is not None
+        if self.logger is None:
+            raise AssertionError("self.logger must not be None")
         self.logger._set_static_graph()
         if self.find_unused_parameters:
             warnings.warn(
@@ -2380,7 +2418,8 @@ class DistributedDataParallel(Module, Joinable):
                 "`_set_static_graph` will detect unused parameters automatically, so "
                 "you do not need to set find_unused_parameters=true, just be sure these "
                 "unused parameters will not change during training loop while calling "
-                "`_set_static_graph`."
+                "`_set_static_graph`.",
+                stacklevel=2,
             )
 
     def _remove_autograd_hooks(self):

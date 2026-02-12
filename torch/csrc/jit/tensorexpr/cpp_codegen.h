@@ -57,7 +57,7 @@ class TORCH_API CppPrinter : public IRPrinter {
   void visit(const BroadcastPtr& /*v*/) override;
 
  private:
-  int lane_;
+  int lane_{0};
   std::unordered_map<VarPtr, ExprPtr> vector_vars_;
 };
 

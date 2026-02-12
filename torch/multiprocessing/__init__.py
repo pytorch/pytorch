@@ -38,7 +38,7 @@ torch._C._multiprocessing_init()
 
 
 """Add helper function to spawn N processes and wait for completion of any of
-them. This depends `mp.get_context` which was added in Python 3.4."""
+them."""
 from .spawn import (
     ENV_VAR_PARALLEL_START,
     ProcessContext,
@@ -66,7 +66,11 @@ def set_sharing_strategy(new_strategy):
             the values returned by :func:`get_all_sharing_strategies()`.
     """
     global _sharing_strategy
-    assert new_strategy in _all_sharing_strategies
+    if new_strategy not in _all_sharing_strategies:
+        raise AssertionError(
+            f"invalid sharing strategy {new_strategy!r}, "
+            f"expected one of {_all_sharing_strategies}"
+        )
     _sharing_strategy = new_strategy
 
 

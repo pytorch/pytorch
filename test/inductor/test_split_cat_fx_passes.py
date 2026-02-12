@@ -1547,7 +1547,7 @@ class TestSplitCatFxPasses(TestCase):
         numpy_compat_normalization(fn_t.graph)
 
         for n in fn_t.graph.nodes:
-            for k in n.kwargs.keys():
+            for k in n.kwargs:
                 self.assertTrue(k not in {"x", "x1", "x2", "a", "axis", "keepdims"})
 
     @patch

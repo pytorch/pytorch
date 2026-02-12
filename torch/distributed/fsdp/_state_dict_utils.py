@@ -16,7 +16,6 @@ from torch.distributed._shard.sharded_tensor import (
     Shard,
     ShardedTensor,
 )
-from torch.distributed.device_mesh import _mesh_resources
 from torch.distributed.fsdp._common_utils import (
     _FSDPState,
     _get_module_fsdp_state_if_fully_sharded_module,
@@ -290,7 +289,7 @@ def _full_pre_state_dict_hook(
     ``nn.Module``.
     """
     if getattr(fsdp_state, "_device_mesh", False):
-        _mesh_resources.get_root_mesh(fsdp_state._device_mesh)
+        fsdp_state._device_mesh._get_root_mesh()
 
     _common_pre_state_dict_hook(module, fsdp_state)
     _common_unshard_pre_state_dict_hook(
@@ -338,7 +337,8 @@ def _full_post_state_dict_hook(
                     "This may mean that this state_dict entry could point to invalid "
                     "memory regions after returning from state_dict() call if this "
                     "parameter is managed by FSDP. Please check clone "
-                    f"implementation of {fqn}. Error: {str(e)}"
+                    f"implementation of {fqn}. Error: {str(e)}",
+                    stacklevel=2,
                 )
 
     return _common_unshard_post_state_dict_hook(
@@ -664,7 +664,7 @@ def _sharded_pre_load_state_dict_hook(
             if param.device != fsdp_state._device_mesh.device_type:
                 param = param.to(fsdp_state._device_mesh.device_type)
 
-            root_mesh = _mesh_resources.get_root_mesh(fsdp_state._device_mesh)
+            root_mesh = fsdp_state._device_mesh._get_root_mesh()
             local_tensor = _ext_all_gather_dtensor(
                 param, root_mesh, fsdp_state._fsdp_extension
             )
@@ -709,7 +709,8 @@ def _post_state_dict_hook(
         context = _replace_with_full_state_dict_type(fsdp_state)
         warnings.warn(
             "When using ``NO_SHARD`` for ``ShardingStrategy``, full_state_dict will "
-            "be returned."
+            "be returned.",
+            stacklevel=2,
         )
     else:
         context = contextlib.nullcontext()
@@ -771,7 +772,8 @@ def _pre_state_dict_hook(
         context = _replace_with_full_state_dict_type(fsdp_state)
         warnings.warn(
             "When using ``NO_SHARD`` for ``ShardingStrategy``, full_state_dict will "
-            "be returned."
+            "be returned.",
+            stacklevel=2,
         )
     else:
         _set_use_dtensor(fsdp_state)
@@ -825,7 +827,8 @@ def _pre_load_state_dict_hook(
         context = _replace_with_full_state_dict_type(fsdp_state)
         warnings.warn(
             "When using ``NO_SHARD`` for ``ShardingStrategy``, full_state_dict will"
-            "be returned."
+            "be returned.",
+            stacklevel=2,
         )
     else:
         _set_use_dtensor(fsdp_state)
@@ -862,7 +865,8 @@ def _post_load_state_dict_hook(
         context = _replace_with_full_state_dict_type(fsdp_state)
         warnings.warn(
             "When using ``NO_SHARD`` for ``ShardingStrategy``, full_state_dict will"
-            "be returned."
+            "be returned.",
+            stacklevel=2,
         )
     else:
         context = contextlib.nullcontext()

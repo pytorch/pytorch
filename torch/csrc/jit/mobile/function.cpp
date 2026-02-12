@@ -2,9 +2,7 @@
 #include <torch/csrc/jit/mobile/function.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/mobile/parse_bytecode.h>
-#include <torch/csrc/jit/mobile/parse_operators.h>
 #include <torch/csrc/jit/mobile/prim_ops_registery.h>
-#include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/runtime/operator.h>
 

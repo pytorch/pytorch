@@ -61,7 +61,7 @@ static void setSignalHandler(
       sigaction(signal, &sa, old_sa_ptr) != 0) {
     std::ostringstream oss;
     oss << "An error occurred while setting handler for " << strsignal(signal)
-        << ".";
+        << '.';
     TORCH_CHECK(false, oss.str());
   }
 }

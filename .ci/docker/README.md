@@ -34,7 +34,7 @@ See `build.sh` for valid build environments (it's the giant switch).
 ./build.sh pytorch-linux-bionic-py3.8-gcc9 -t myimage:latest
 
 # Set flags (see build.sh) and build image
-sudo bash -c 'TRITON=1 ./build.sh pytorch-linux-bionic-py3.8-gcc9 -t myimage:latest
+sudo bash -c 'TRITON=1 ./build.sh pytorch-linux-bionic-py3.8-gcc9 -t myimage:latest'
 ```
 
 ## [Guidance] Adding a New Base Docker Image

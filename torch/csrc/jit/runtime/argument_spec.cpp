@@ -127,7 +127,7 @@ void ArgumentSpecCreator::dump() const {
         break;
     }
   }
-  std::cout << "\n";
+  std::cout << '\n';
 }
 
 ArgumentSpec ArgumentSpecCreator::create(bool with_grad, const Stack& input)

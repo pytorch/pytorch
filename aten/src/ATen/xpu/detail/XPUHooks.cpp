@@ -1,8 +1,12 @@
+#include <ATen/DynamicLibrary.h>
+#include <ATen/xpu/PeerToPeerAccess.h>
 #include <ATen/xpu/PinnedMemoryAllocator.h>
 #include <ATen/xpu/XPUContext.h>
 #include <ATen/xpu/XPUDevice.h>
 #include <ATen/xpu/XPUGeneratorImpl.h>
+#include <ATen/xpu/detail/LazyLevelZero.h>
 #include <ATen/xpu/detail/XPUHooks.h>
+#include <ATen/xpu/level_zero_stub/ATenLevelZero.h>
 #include <c10/util/Logging.h>
 #include <c10/xpu/XPUCachingAllocator.h>
 
@@ -12,6 +16,7 @@ void XPUHooks::init() const {
   C10_LOG_API_USAGE_ONCE("aten.init.xpu");
   const auto device_count = c10::xpu::device_count_ensure_non_zero();
   c10::xpu::XPUCachingAllocator::init(device_count);
+  at::xpu::detail::init_p2p_access_cache(device_count);
 }
 
 bool XPUHooks::hasXPU() const {
@@ -100,6 +105,20 @@ DeviceIndex XPUHooks::deviceCount() const {
 
 DeviceIndex XPUHooks::getCurrentDevice() const {
   return at::xpu::current_device();
+}
+
+static std::pair<std::unique_ptr<at::DynamicLibrary>, at::xpu::LevelZero*>
+load_level_zero() {
+  return std::make_pair(nullptr, &at::xpu::detail::lazyLevelZero);
+}
+
+const at::xpu::LevelZero& level_zero() {
+  static auto handle = load_level_zero();
+  return *handle.second;
+}
+
+const at::xpu::LevelZero& XPUHooks::level_zero() const {
+  return at::xpu::detail::level_zero();
 }
 
 REGISTER_XPU_HOOKS(XPUHooks);

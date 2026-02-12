@@ -514,8 +514,10 @@ class TestSubgraphRewriter(JitTestCase):
         symbolic_traced: torch.fx.GraphModule = symbolic_trace(module)
         for n, m in zip(symbolic_traced.graph.nodes, graph.nodes):
             if n.op == "placeholder":
-                assert n.type is int
-                assert m.type is int
+                if n.type is not int:
+                    raise AssertionError(f"Expected n.type to be int, got {n.type}")
+                if m.type is not int:
+                    raise AssertionError(f"Expected m.type to be int, got {m.type}")
 
     def test_subgraph_rewriter_replace_consecutive_submodules(self):
         def f(x):
@@ -672,7 +674,10 @@ class TestSubgraphRewriter(JitTestCase):
 
         traced.graph.lint()
         placeholder_nodes = [n for n in traced.graph.nodes if n.op == "placeholder"]
-        assert len(placeholder_nodes) == 3
+        if len(placeholder_nodes) != 3:
+            raise AssertionError(
+                f"Expected 3 placeholder nodes, got {len(placeholder_nodes)}"
+            )
 
         ref_outs = comparison_fn(x1, x2, x3)
         test_outs = traced.forward(x1, x2, x3)
@@ -782,7 +787,7 @@ class TestSubgraphRewriter(JitTestCase):
 
         found_repalcement_node = False
         for node in traced.graph.nodes:
-            if node.target == wrapped_gemm_bias_mul:
+            if node.target is wrapped_gemm_bias_mul:
                 found_repalcement_node = True
                 break
 
@@ -847,7 +852,7 @@ class TestSubgraphRewriter(JitTestCase):
 
         repalcement_node_found = 0
         for node in traced.graph.nodes:
-            if node.target == wrapped_gemm_bias_mul_with_c:
+            if node.target is wrapped_gemm_bias_mul_with_c:
                 repalcement_node_found += 1
 
         self.assertEqual(repalcement_node_found, 2)

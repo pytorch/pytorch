@@ -247,7 +247,6 @@ class TestFullyShardPostAccGradHookMultiThread(FSDPTestMultiThread):
     def world_size(self) -> int:
         return 2
 
-    @skip_if_lt_x_gpu(1)
     def test_post_acc_grad_hook_runs(self):
         param_name_to_hook_count = collections.defaultdict(int)
 
@@ -266,7 +265,7 @@ class TestFullyShardPostAccGradHookMultiThread(FSDPTestMultiThread):
         model(inp).sum().backward()
         param_names = {param_name for param_name, _ in model.named_parameters()}
         self.assertEqual(param_names, set(param_name_to_hook_count.keys()))
-        for param_name, count in param_name_to_hook_count.items():
+        for count in param_name_to_hook_count.values():
             self.assertEqual(count, 1)
 
 

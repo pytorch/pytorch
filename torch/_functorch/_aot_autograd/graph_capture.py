@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """
 This module dispatches the graphs to either the forward-only or joint compilation
 pathways, taking into account the AOTConfig and the collected ViewAndMutationMetadata.
@@ -6,6 +5,7 @@ pathways, taking into account the AOTConfig and the collected ViewAndMutationMet
 
 import contextlib
 import dataclasses
+from collections.abc import Callable
 from typing import Any, Optional
 
 import torch
@@ -33,6 +33,13 @@ from .graph_capture_wrappers import (
     handle_effect_tokens_fn,
 )
 from .schemas import AOTConfig, FxValue, SubclassMeta, TraceFn, ViewAndMutationMeta
+from .streams import (
+    assign_backward_streams,
+    assign_epilogue_copy_streams,
+    insert_backward_syncs,
+    populate_fw_metadata_with_stream_indices,
+    sync_deallocations,
+)
 from .utils import (
     call_and_expect_output_descs,
     copy_fwd_metadata_to_bw_nodes,
@@ -48,7 +55,7 @@ aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
 
 
 def _create_graph(
-    f,
+    f: Callable[..., Any],
     args: list[torch.Tensor],
     args_descs: Optional[
         list[AOTInput]
@@ -65,9 +72,10 @@ def _create_graph(
     else:
 
         @simple_wraps(f)
-        def inner_f(*args):
+        def inner_f(*args: Any) -> Any:
             nonlocal out_descs
-            assert out_descs is None
+            if out_descs is not None:
+                raise AssertionError("out_descs must be None")
             out, out_descs = call_and_expect_output_descs(f, args)
             return out
 
@@ -90,6 +98,7 @@ def _create_graph(
             decomposition_table=aot_config.decompositions,
             record_module_stack=True,
             pre_dispatch=aot_config.pre_dispatch,
+            _disable_torch_fn_metadata_mode=aot_config._disable_torch_fn_metadata_mode,
         )(*args)
 
         if args_descs is not None:
@@ -125,11 +134,12 @@ def _create_graph(
                         n.meta["desc"] = BackwardTokenAOTInput(j)
                         j += 1
                     else:
-                        assert i < len(flat_args_descs), (
-                            (fn_wrappers(inner_f)),
-                            [n for n in fx_g.graph.nodes if n.op == "placeholder"],
-                            flat_args_descs,
-                        )
+                        if i >= len(flat_args_descs):
+                            raise AssertionError(
+                                f"i={i} >= len(flat_args_descs)={len(flat_args_descs)}: "
+                                f"fn_wrappers={fn_wrappers(inner_f)}, "
+                                f"placeholders={[n for n in fx_g.graph.nodes if n.op == 'placeholder']}"
+                            )
                         n.meta["desc"] = flat_args_descs[i]
                         i += 1
                 elif n.op == "output":
@@ -139,9 +149,10 @@ def _create_graph(
 
 
 # TODO: Refactor the following code so detach() persists item_memo
-def _detach_and_copy_item_memo(t):
+def _detach_and_copy_item_memo(t: torch.Tensor) -> torch.Tensor:
     detached_t = t.detach()
     if hasattr(t, "item_memo"):
+        # pyrefly: ignore[missing-attribute]
         detached_t.item_memo = t.item_memo
     return detached_t
 
@@ -282,11 +293,17 @@ def aot_dispatch_base_graph(
     # there should be *NO* mutating ops in the graph at this point.
     if not aot_config.disable_functionalization:
         copy_count = assert_functional_graph(fw_module.graph)
+        assign_epilogue_copy_streams(fw_module)
+        # Populate fw_metadata with stream indices from the compiled graph
+        populate_fw_metadata_with_stream_indices(fw_module, fw_metadata)
         fw_module.graph.eliminate_dead_code()
         fw_module.recompile()
         copy_count2 = assert_functional_graph(fw_module.graph)
         propagate_input_mutation_stacktraces(fw_module.graph)
-        assert copy_count == copy_count2
+        if copy_count != copy_count2:
+            raise AssertionError(
+                f"copy_count={copy_count} != copy_count2={copy_count2}"
+            )
     else:
         fw_module.graph.eliminate_dead_code()
 
@@ -311,6 +328,9 @@ def aot_dispatch_base_graph(
                 include_stride=True,
                 include_device=True,
                 colored=True,
+                # For more expanded output set this to True (but can't default
+                # to this because it affects tests):
+                expanded_def=False,
             ),
         )
 
@@ -344,9 +364,10 @@ def aot_dispatch_base_graph(
 
     # TODO: should factor this into a separate function for export that always only returns just the graph.
     if aot_config.is_export:
-        assert maybe_subclass_meta is None, (
-            "aot_export_module does not support tensor subclass inputs for now."
-        )
+        if maybe_subclass_meta is not None:
+            raise AssertionError(
+                "aot_export_module does not support tensor subclass inputs for now."
+            )
     return (
         fw_module,
         saved_updated_flat_args_subclasses_desugared,
@@ -390,6 +411,7 @@ def aot_dispatch_autograd_graph(
     joint_fn_to_trace = create_joint(
         fn_prepared_for_autograd, flat_args_descs, aot_config=aot_config
     )
+    # pyrefly: ignore[missing-attribute]
     joint_fn_handle = joint_fn_to_trace.handle
 
     if aot_config.disable_functionalization:
@@ -468,21 +490,42 @@ def aot_dispatch_autograd_graph(
     # a fake tensor. Unlikely.
     # See Note: [Fake Modules and AOTAutograd]
     torch._dynamo.utils.assert_no_fake_params_or_buffers(fx_g)
+
+    # Have to copy before eliminate_dead_code otherwise the
+    # fw node match might be erased
+    copy_fwd_metadata_to_bw_nodes(fx_g)
+
+    # After copying metadata, assign streams to gradient accumulation nodes
+    assign_backward_streams(fx_g)
+
+    assign_epilogue_copy_streams(fx_g)
+
+    # Insert syncs for newly assigned backward streams
+    insert_backward_syncs(fx_g)
+
+    # Sync deallocations for tensors where the stream w/ their last usage
+    # is distinct from their allocation stream
+    sync_deallocations(fx_g)
+
+    # Populate fw_metadata with stream indices from the compiled graph
+    # NB: This needs to be done after the above stream assignments
+    populate_fw_metadata_with_stream_indices(fx_g, fw_metadata)
+
     fx_g.graph.eliminate_dead_code()
     if not aot_config.disable_functionalization:
         # There should be *NO* mutating ops in the graph at this point.
         assert_functional_graph(fx_g.graph)
 
-    copy_fwd_metadata_to_bw_nodes(fx_g)
     fx_g.recompile()
 
     # TODO: in AOTAutograd, we create metadata like _indices_of_inps_to_detach to detect
     # when we need to manually detach() some inputs in the forward.
     # Higher order ops might eventually need to do the same.
     if aot_config.is_export:
-        assert maybe_subclass_meta is None, (
-            "aot_export_module does not support tensor subclass inputs for now."
-        )
+        if maybe_subclass_meta is not None:
+            raise AssertionError(
+                "aot_export_module does not support tensor subclass inputs for now."
+            )
     return (
         fx_g,
         saved_updated_joint_inputs,

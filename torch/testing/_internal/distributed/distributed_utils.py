@@ -9,9 +9,6 @@ import torch.distributed.distributed_c10d as c10d
 
 
 class MockProcessGroup(dist.ProcessGroup):
-    def __init__(self, rank, world):
-        super().__init__(rank, world)
-
     def getBackendName(self):
         return "mock_process_group"
 
@@ -27,7 +24,8 @@ def mock_init_dist(rank, world_size):
     # !!! WARNING !!!
     # Kids don't try this at home, this is a cute pile of hacks that
     # depends on a small mountain of c10d internals
-    assert not dist.is_initialized()
+    if dist.is_initialized():
+        raise AssertionError("Expected dist to not be initialized")
     store = dist.HashStore()
     # Trick _store_based_barrier into believing everyone else already checked-in
     # Zero is the group index

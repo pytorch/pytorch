@@ -95,6 +95,11 @@ def check_codegen(
 # xfail by default, set is_skip=True to skip
 test_failures = {
     #
+    # PDL tests are CUDA SM90+ only, skip on CPU (generates Triton, not C++ code)
+    #
+    "test_pdl_mutation_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
+    "test_pdl_template_and_delay_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
+    #
     # Failed to find dynamic for loop variable (no kernels generated)
     #
     "test_fft_real_input_dynamic_shapes": TestFailure(
@@ -110,7 +115,11 @@ test_failures = {
     #
     # Failed to find dynamic for loop variable:
     #
+    "test_complex_conv2d_conj_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
     "test_conv1d_with_permute_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
+    "test_triton_argmin_argmax_transpose_logical_index_dynamic_shapes": TestFailure(
+        ("cpu",), is_skip=True
+    ),
     # XPU always convert conv1d to conv2d and can not match the expected codegen result.
     "test_conv1d_depthwise_dynamic_shapes": TestFailure(("xpu",), is_skip=True),
     "test_arange1_dynamic_shapes": TestFailure(("cpu",)),
@@ -156,6 +165,9 @@ test_failures = {
     #
     "test_complex_fallback_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_adaptive_avg_pool2d2_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
+    "test_linalg_eig_stride_consistency_dynamic_shapes": TestFailure(
+        ("cpu", "cuda", "xpu")
+    ),
     "test_adaptive_max_pool2d2_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_argmax_to_float_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_avg_pool2d7_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
@@ -181,6 +193,12 @@ test_failures = {
     "test_empty1_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_empty2_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_empty_strided_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
+    "test_unsafe_chunk_empty_tensor_dynamic_shapes": TestFailure(
+        ("cpu", "cuda", "xpu"), is_skip=True
+    ),
+    "test_max_unpool_empty_output_dynamic_shapes": TestFailure(
+        ("cpu", "cuda", "xpu"), is_skip=True
+    ),
     "test_bucketize_nd_tiling_False_dynamic_shapes": TestFailure(("cpu",)),
     "test_bucketize_nd_tiling_True_dynamic_shapes": TestFailure(("cpu",)),
     "test_bucketize_default_kwargs_dynamic_shapes": TestFailure(("cpu",)),
@@ -274,6 +292,7 @@ test_failures = {
     "test_split_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_topk_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_unbind_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
+    "test_uniform_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_views5_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_view_detach_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_view_on_aliased_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
@@ -361,7 +380,10 @@ test_failures = {
     "test_profiler_mark_wrapper_call_dynamic_shapes": TestFailure(
         ("cpu", "cuda", "xpu"), is_skip=True
     ),
-    "test_rand_like_deterministic_dynamic_shapes": TestFailure(
+    "test_rand_like_deterministic_combo_kernels_False_dynamic_shapes": TestFailure(
+        ("cpu", "cuda", "xpu"), is_skip=True
+    ),
+    "test_rand_like_deterministic_combo_kernels_True_dynamic_shapes": TestFailure(
         ("cpu", "cuda", "xpu"), is_skip=True
     ),
     "test_repeat_interleave_2_dynamic_shapes": TestFailure(("cpu",)),
@@ -399,6 +421,12 @@ test_failures = {
     # Refinement means we don't actually generate dynamic shapes (but only on
     # cpu apparently?!)
     "test_nonzero_unbacked_refinement_dynamic_shapes": TestFailure(("cpu",)),
+    "test_bucketize_scalar_various_values_dynamic_shapes": TestFailure(
+        ("cpu", "cuda", "xpu"), is_skip=True
+    ),
+    "test_bucketize_scalar_with_options_dynamic_shapes": TestFailure(
+        ("cpu", "cuda", "xpu"), is_skip=True
+    ),
 }
 
 add_test_failures(test_failures, dynamic_shapes_test_failures)

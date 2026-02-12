@@ -124,18 +124,23 @@ c10::intrusive_ptr<c10::ivalue::Future> _call_end_callbacks_on_fut_new(
 }
 
 // Internal only, do not use directly, use Python's record_function()
-TORCH_LIBRARY_FRAGMENT(profiler, m) {
+TORCH_LIBRARY(profiler, m) {
+  // The CONSERVATIVE key marks these ops to be side-effectful and prevents
+  // these ops from being DCE'd in torch.jit.trace
   m.class_<PythonRecordFunction>("_RecordFunction");
-
-  m.def(
+  m.def(torch::schema(
       "_record_function_enter(str name, str? args=None) -> Tensor",
-      &record_function_enter_legacy);
-  m.def(
+      c10::AliasAnalysisKind::CONSERVATIVE));
+  m.def(torch::schema(
       "_record_function_enter_new(str name, str? args=None) -> "
       "__torch__.torch.classes.profiler._RecordFunction",
-      &record_function_enter_new);
-  m.def("_record_function_exit", &record_function_exit_legacy);
-  m.def("_record_function_exit._RecordFunction", &record_function_exit_new);
+      c10::AliasAnalysisKind::CONSERVATIVE));
+  m.def(torch::schema(
+      "_record_function_exit(Tensor handle) -> ()",
+      c10::AliasAnalysisKind::CONSERVATIVE));
+  m.def(torch::schema(
+      "_record_function_exit._RecordFunction(__torch__.torch.classes.profiler._RecordFunction record) -> ()",
+      c10::AliasAnalysisKind::CONSERVATIVE));
 
   torch::jit::registerOperator(torch::jit::Operator(
       "profiler::_call_end_callbacks_on_jit_fut(Tensor x, Future(t) y) -> Future(t)",
@@ -161,6 +166,13 @@ TORCH_LIBRARY_FRAGMENT(profiler, m) {
         torch::jit::push(stack, std::move(profiledFut));
       },
       c10::AliasAnalysisKind::FROM_SCHEMA));
+}
+
+TORCH_LIBRARY_IMPL(profiler, CompositeExplicitAutograd, m) {
+  m.impl("_record_function_enter", &record_function_enter_legacy);
+  m.impl("_record_function_enter_new", &record_function_enter_new);
+  m.impl("_record_function_exit", &record_function_exit_legacy);
+  m.impl("_record_function_exit._RecordFunction", &record_function_exit_new);
 }
 
 } // namespace torch::autograd::profiler
