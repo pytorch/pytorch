@@ -2758,32 +2758,44 @@ class PallasKernel(SIMDKernel):
             ["out_shapes", "out_dtypes"] + ctx.size_var_params + ctx.kernel_input_params
         )
         code.writeline(f"def {jit_wrapper_name}({', '.join(wrapper_params)}):")
+
+        alias_pairs: list[tuple[int, int]] = []
+        for out_idx, name in enumerate(ctx.output_params):
+            if name.startswith("out_ptr"):
+                if aliasable_flags.get(name, False):
+                    alias_name = f"{name}_alias"
+                    input_idx = ctx.kernel_input_params.index(alias_name)
+                    alias_pairs.append((input_idx, out_idx))
+            else:
+                input_idx = ctx.kernel_input_params.index(name)
+                alias_pairs.append((input_idx, out_idx))
+        alias_map_literal = ", ".join(f"{i}: {o}" for (i, o) in alias_pairs)
+
         with code.indent():
+            # Pallas requires >= 1-d tensors; promote 0-d to (1,)
+            code.writeline(
+                "_pallas_out_shapes = tuple("
+                "s if len(s) > 0 else (1,) for s in out_shapes)"
+            )
+            # Reshape aliased inputs to match promoted output shapes
+            for input_idx, out_idx in alias_pairs:
+                param = ctx.kernel_input_params[input_idx]
+                code.writeline(
+                    f"{param} = {param}.reshape(_pallas_out_shapes[{out_idx}])"
+                )
             code.writeline("out_shapes_pallas = tuple(")
             code.writeline("    jax.ShapeDtypeStruct(shape, dtype)")
-            code.writeline("    for shape, dtype in zip(out_shapes, out_dtypes)")
+            code.writeline("    for shape, dtype in zip(_pallas_out_shapes, out_dtypes)")
             code.writeline(")")
             code.writeline("indexer = lambda n: lambda i: [i] * n")
             code.writeline("out_specs_pallas = tuple(")
             code.writeline("    pl.BlockSpec(shape, indexer(len(shape)))")
-            code.writeline("    for shape, dtype in zip(out_shapes, out_dtypes)")
+            code.writeline("    for shape, dtype in zip(_pallas_out_shapes, out_dtypes)")
             code.writeline(")")
             code.writeline("in_specs_pallas = tuple(")
             code.writeline("    pl.BlockSpec(i.shape, indexer(len(i.shape)))")
             code.writeline("    for i in [" + ", ".join(ctx.kernel_input_params) + "]")
             code.writeline(")")
-
-            alias_pairs: list[tuple[int, int]] = []
-            for out_idx, name in enumerate(ctx.output_params):
-                if name.startswith("out_ptr"):
-                    if aliasable_flags.get(name, False):
-                        alias_name = f"{name}_alias"
-                        input_idx = ctx.kernel_input_params.index(alias_name)
-                        alias_pairs.append((input_idx, out_idx))
-                else:
-                    input_idx = ctx.kernel_input_params.index(name)
-                    alias_pairs.append((input_idx, out_idx))
-            alias_map_literal = ", ".join(f"{i}: {o}" for (i, o) in alias_pairs)
 
             # Wrap kernel with functools.partial to pass scalar arguments (size variables)
             partial_args = []
@@ -3175,7 +3187,7 @@ from torch._inductor.runtime.runtime_utils import (
         alias_map_literal: str,
     ) -> None:
         code = ctx.code
-        code.writeline("return pl.pallas_call(")
+        code.writeline("_result = pl.pallas_call(")
         code.writeline("    " + kernel_arg)
         code.writeline("    out_shape=out_shapes_pallas,")
         code.writeline("    out_specs=out_specs_pallas,")
@@ -3191,6 +3203,15 @@ from torch._inductor.runtime.runtime_utils import (
         if ctx.kernel_input_params:
             code.writeline(f"    {', '.join(ctx.kernel_input_params)},")
         code.writeline(")")
+        # Reshape results back to original shapes (restores 0-d from promoted (1,))
+        code.writeline("if isinstance(_result, tuple):")
+        code.writeline(
+            "    _result = tuple("
+            "r.reshape(s) for r, s in zip(_result, out_shapes))"
+        )
+        code.writeline("else:")
+        code.writeline("    _result = _result.reshape(out_shapes[0])")
+        code.writeline("return _result")
 
     def _codegen_main_entry(self, ctx: _CodegenContext, jit_wrapper_name: str) -> None:
         code = ctx.code

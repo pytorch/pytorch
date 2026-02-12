@@ -984,7 +984,6 @@ class PallasTestsMixin:
         expected = fn(a, b)
         self.assertEqual(result, expected)
 
-    @skip_if_tpu
     def test_sum_reduction(self):
         """Test sum reduction."""
 
@@ -998,7 +997,6 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
-    @skip_if_tpu
     def test_max_reduction(self):
         """Test max reduction."""
 
@@ -1012,7 +1010,6 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
-    @skip_if_tpu
     def test_min_reduction(self):
         """Test min reduction."""
 
@@ -1026,7 +1023,6 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
-    @skip_if_tpu
     def test_prod_reduction(self):
         """Test prod reduction."""
         if self.DEVICE == "cuda":
