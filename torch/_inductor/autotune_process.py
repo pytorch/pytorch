@@ -1126,7 +1126,10 @@ class AutotuneProcessPool:
             with self._lock:
                 if self._warmup_future is None:
                     self._warmup_start_time = time.perf_counter()
-                    self._warmup_future = self.pool.submit(_warmup_autotune_subprocess)
+                    self._warmup_future = self.pool.submit(
+                        _init_autotune_subprocess,
+                        allow_tf32=torch.backends.cuda.matmul.allow_tf32,
+                    )
                     self._warmup_future.add_done_callback(self._on_warmup_complete)
                     autotuning_log.info("Warmup job submitted")
         # pyrefly: ignore[bad-return]
@@ -1172,7 +1175,7 @@ class AutotuneProcessPool:
                     cls._instance = None
 
 
-def _warmup_autotune_subprocess() -> bool:
+def _init_autotune_subprocess(allow_tf32: bool) -> bool:
     """
     Warmup function run in the autotune subprocess.
     """
@@ -1181,6 +1184,8 @@ def _warmup_autotune_subprocess() -> bool:
     # Initialize dummy tensor for CUDA context
     if torch.cuda.is_available():
         torch.zeros(1, device="cuda")
+
+    torch.backends.cuda.matmul.allow_tf32 = allow_tf32
 
     return True
 
