@@ -18417,7 +18417,9 @@ def forward(self, x, y):
                 return a - x + kwargs["y"] - kwargs["z"]
 
         args = (torch.randn((5, 6)),)
-        kwargs = dict(x=torch.randn((5, 6)), y=torch.randn((1, 6)), z=torch.randn((1, 6)) + 10)
+        kwargs = dict(
+            x=torch.randn((5, 6)), y=torch.randn((1, 6)), z=torch.randn((1, 6)) + 10
+        )
         model = Model()
         expected = model(*args, **kwargs)
         ep = torch.export.export(

@@ -754,7 +754,9 @@ def _combine_args(f, args, kwargs, preserve_order: bool = False) -> dict[str, An
                 if p.kind == inspect.Parameter.VAR_POSITIONAL
             ]
         )
-        combined_args_traced_order = dict(zip(signature.parameters, args[:n_positional_only]))
+        combined_args_traced_order = dict(
+            zip(signature.parameters, args[:n_positional_only])
+        )
         combined_args_traced_order[var_position_parameters[0]] = tuple(
             args[n_positional_only:]
         )
