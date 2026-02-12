@@ -480,7 +480,6 @@ class FrontendServer:
 
         version = next(iter(details.values()))["version"]
 
-        # pyrefly: ignore [bad-argument-type]
         db = build_db(details, args, version)
 
         return self._render_template(

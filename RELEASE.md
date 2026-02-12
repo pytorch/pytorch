@@ -94,15 +94,15 @@ Following is the release cadence. All future dates below are tentative. For late
 | 2.5 | Sep 2024 | Oct 2024 | Nov 2024 |  Not planned |
 | 2.6 | Dec 2024 | Jan 2025 | Not planned | Not planned |
 | 2.7 | Mar 2025 | Apr 2025 | Jun 2025 | Not planned |
-| 2.8 | Jun 2025 | Jul 2025 | (Aug 2025) | (Sep 2025) |
-| 2.9 | Sept 2025 | Oct 2025 | (Nov 2025) | (Dec 2025) |
-| 2.10 | Dec 2025 | Jan 2026 | (Feb 2026) | (Mar 2026) |
-| 2.11 | 16 Feb 2026 | 18 Mar 2026 | (Apr 2026) | (May 2026) |
-| 2.12 | 13 Apr 2026 | 13 May 2026 | (Jun 2026) | (Jul 2026) |
-| 2.13 | 8 Jun 2026 | 8 Jul 2026 | (Aug 2026) | (Sept 2026) |
-| 2.14 | 3 Aug 2026 | 2 Sept 2026 | (Oct 2026) | (Nov 2026) |
-| 2.15 | 28 Sept 2026 | 28 Oct 2026 | (Nov 2026) | (Dec 2026) |
-| 2.16 | 23 Nov 2026 | 22 Dec 2026 | (Jan 2027) | (Feb 2027) |
+| 2.8 | Jun 2025 | Jul 2025 | (Aug 2025) | Not planned |
+| 2.9 | Sept 2025 | Oct 2025 | (Nov 2025) | Not planned |
+| 2.10 | Dec 2025 | Jan 2026 | (Feb 2026) | Not planned |
+| 2.11 | 16 Feb 2026 | 18 Mar 2026 | (Apr 2026) | Not planned |
+| 2.12 | 13 Apr 2026 | 13 May 2026 | (Jun 2026) | Not planned |
+| 2.13 | 8 Jun 2026 | 8 Jul 2026 | (Aug 2026) | Not planned |
+| 2.14 | 3 Aug 2026 | 2 Sept 2026 | (Oct 2026) | Not planned |
+| 2.15 | 28 Sept 2026 | 28 Oct 2026 | (Nov 2026) | Not planned |
+| 2.16 | 23 Nov 2026 | 22 Dec 2026 | (Jan 2027) | Not planned |
 
 ## General Overview
 
