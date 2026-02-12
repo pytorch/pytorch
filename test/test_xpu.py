@@ -119,6 +119,7 @@ class TestXpu(TestCase):
         self.assertTrue(device_capability["device_id"] > 0)
         self.assertTrue(device_capability["max_work_group_size"] > 0)
         self.assertTrue(device_capability["max_num_sub_groups"] > 0)
+        self.assertTrue(device_capability["local_mem_size"] > 0)
         self.assertEqual(
             device_properties.driver_version, device_capability["driver_version"]
         )
@@ -346,7 +347,7 @@ if __name__ == "__main__":
         self.assertTrue(issubclass(type(xpu_event), torch.Event))
         self.assertTrue(torch.Event in type(xpu_event).mro())
 
-    def test_stream_compatibility(self):
+    def test_stream_event_compatibility(self):
         s1 = torch.xpu.Stream()
         s2 = torch.xpu.Stream()
         torch.accelerator.set_stream(s1)
@@ -367,6 +368,42 @@ if __name__ == "__main__":
         )
         with self.assertRaisesRegex(RuntimeError, "The device index is out of range"):
             torch.accelerator.current_stream(torch.accelerator.device_count())
+        e1 = torch.xpu.Event(enable_timing=True)
+        e2 = torch.xpu.Event(enable_timing=True)
+        e3 = torch.Event(enable_timing=True)
+        s3 = torch.Stream()
+        with s3:
+            self.assertEqual(torch.accelerator.current_stream(), s3)
+            e1.record(s3)
+            a = torch.randn(1000)
+            a_xpu = a.to("xpu")
+            del a_xpu
+            e2.record(s3)
+            e2.synchronize()
+            self.assertGreater(e1.elapsed_time(e2), 0)
+            e3.record(s3)
+        with self.assertRaisesRegex(
+            RuntimeError, "expected other to be a torch.xpu.Event object"
+        ):
+            e1.elapsed_time(e3)
+        with self.assertRaisesRegex(
+            RuntimeError, "expected other to be a torch.Event object"
+        ):
+            e3.elapsed_time(e1)
+        with self.assertRaisesRegex(
+            RuntimeError, "expected event to be a torch.Event object"
+        ):
+            s3.record_event(e1)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "expected stream to be a torch.Stream or torch.xpu.Stream object",
+        ):
+            e2.record(e2)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "expected stream to be a torch.Stream or torch.xpu.Stream object",
+        ):
+            e2.wait(e2)
 
     def test_device_context_manager(self):
         prev_device = torch.xpu.current_device()

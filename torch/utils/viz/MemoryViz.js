@@ -6,6 +6,21 @@ import {scaleLinear} from "https://cdn.jsdelivr.net/npm/d3-scale@4/+esm";
 import {zoom, zoomIdentity} from "https://cdn.jsdelivr.net/npm/d3-zoom@3/+esm";
 import {brushX} from "https://cdn.jsdelivr.net/npm/d3-brush@3/+esm";
 
+// Global configuration for trace interaction mode
+// 'hover' = show trace on hover (default)
+// 'click' = show trace on click
+let traceInteractionMode = 'hover';
+
+function setTraceInteractionMode(mode) {
+  if (mode === 'click' || mode === 'hover') {
+    traceInteractionMode = mode;
+  }
+}
+
+function getTraceInteractionMode() {
+  return traceInteractionMode;
+}
+
 const schemeTableau10 = [
   '#4e79a7',
   '#f28e2c',
@@ -100,13 +115,16 @@ function EventSelector(outer, events, stack_info, memory_view) {
   return es;
 }
 
-function formatSize(num) {
+function formatSize(num, showBytes = true) {
   const orig = num;
   // https://stackoverflow.com/questions/1094841/get-human-readable-version-of-file-size
   const units = ['', 'Ki', 'Mi', 'Gi', 'Ti', 'Pi', 'Ei', 'Zi'];
   for (const unit of units) {
     if (Math.abs(num) < 1024.0) {
-      return `${num.toFixed(1)}${unit}B (${orig} bytes)`;
+      if (showBytes) {
+        return `${num.toFixed(1)}${unit}B (${orig} bytes)`;
+      }
+      return `${num.toFixed(1)}${unit}B`;
     }
     num /= 1024.0;
   }
@@ -614,23 +632,39 @@ function StackInfo(outer) {
   };
   return {
     register(dom, enter, leave = _e => {}, select = _e => {}) {
-      dom
-        .on('mouseover', function (event) {
-          selected.leave();
-          stack_trace.text(enter(d3.select(event.target)));
-        })
-        .on('mousedown', function (event) {
-          const obj = d3.select(event.target);
-          selected = {
-            enter: () => stack_trace.text(enter(obj)),
-            leave: () => leave(obj),
-          };
-          select(obj);
-        })
-        .on('mouseleave', function (event) {
-          leave(d3.select(event.target));
-          selected.enter();
-        });
+      if (getTraceInteractionMode() === 'hover') {
+        // Hover mode: show on mouseover, pin on click
+        dom
+          .on('mouseover', function (event) {
+            selected.leave();
+            stack_trace.text(enter(d3.select(event.target)));
+          })
+          .on('mousedown', function (event) {
+            const obj = d3.select(event.target);
+            selected = {
+              enter: () => stack_trace.text(enter(obj)),
+              leave: () => leave(obj),
+            };
+            select(obj);
+          })
+          .on('mouseleave', function (event) {
+            leave(d3.select(event.target));
+            selected.enter();
+          });
+      } else {
+        // Click mode: show only on click
+        dom
+          .on('click', function (event) {
+            selected.leave();
+            const obj = d3.select(event.target);
+            selected = {
+              enter: () => stack_trace.text(enter(obj)),
+              leave: () => leave(obj),
+            };
+            stack_trace.text(enter(obj));
+            select(obj);
+          });
+      }
     },
     highlight(enter, leave = () => {}) {
       selected = {enter: () => stack_trace.text(enter()), leave};
@@ -1146,7 +1180,8 @@ function MemoryPlot(
   const plot_height = height;
 
   const yscale = scaleLinear().domain([0, max_size]).range([plot_height, 0]);
-  const yaxis = axisLeft(yscale).tickFormat(d3.format('.3s'));
+  // Use formatSize with showBytes=false for clean axis labels
+  const yaxis = axisLeft(yscale).tickFormat(d => formatSize(d, false));
   const xscale = scaleLinear().domain([0, max_timestep]).range([0, plot_width]);
   const plot_coordinate_space = svg
     .append('g')
@@ -1210,16 +1245,26 @@ function MemoryPlot(
       );
     },
     set_delegate: delegate => {
-      plot
-        .on('mouseover', function (_e, _d) {
-          delegate.set_selected(d3.select(this));
-        })
-        .on('mousedown', function (_e, _d) {
-          delegate.default_selected = d3.select(this);
-        })
-        .on('mouseleave', function (_e, _d) {
-          delegate.set_selected(delegate.default_selected);
-        });
+      if (getTraceInteractionMode() === 'hover') {
+        // Hover mode: show on mouseover, pin on click
+        plot
+          .on('mouseover', function (_e, _d) {
+            delegate.set_selected(d3.select(this));
+          })
+          .on('mousedown', function (_e, _d) {
+            delegate.default_selected = d3.select(this);
+          })
+          .on('mouseleave', function (_e, _d) {
+            delegate.set_selected(delegate.default_selected);
+          });
+      } else {
+        // Click mode: show only on click
+        plot
+          .on('click', function (_e, _d) {
+            delegate.default_selected = d3.select(this);
+            delegate.set_selected(d3.select(this));
+          });
+      }
     },
   };
 }
@@ -1755,6 +1800,24 @@ for (const x in kinds) {
 }
 const gpu = controls.append('select');
 
+// Add interaction mode toggle (hover vs click)
+const interactionLabel = body.append('label')
+  .attr('style', 'margin-left: 15px; cursor: pointer;');
+const interactionCheckbox = interactionLabel.append('input')
+  .attr('type', 'checkbox')
+  .attr('id', 'interaction-mode-toggle')
+  .attr('style', 'cursor: pointer; margin-right: 5px;');
+interactionLabel.append('span').text('Require click to show trace (applies on file load)');
+
+interactionCheckbox.on('change', function() {
+  const mode = this.checked ? 'click' : 'hover';
+  setTraceInteractionMode(mode);
+  // Only refresh the view if a snapshot is already loaded
+  if (snapshot_select.node().value) {
+    selected_change();
+  }
+});
+
 function unpickle_and_annotate(data) {
   data = unpickle(data);
   console.log(data);
@@ -1911,3 +1974,6 @@ export function add_local_files(files, view_value) {
     selected_change();
   }
 }
+
+// Export configuration functions for external use
+export { setTraceInteractionMode, getTraceInteractionMode };
