@@ -5,7 +5,9 @@ import copy
 import unittest
 
 import torch
+import torch._dynamo.compiled_autograd as compiled_autograd
 import torch._dynamo.testing
+from torch._dynamo.utils import counters
 from torch.distributed.fsdp import (
     fully_shard,
     FullyShardedDataParallel as FSDP,
@@ -40,7 +42,7 @@ class TestFullyShardCompileCompute(FSDPTest):
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     def test_disable_compiling_hooks(self):
-        """Verify that dynamo never traces into FSDP hooks."""
+        """Verify that dynamo never traces into FSDP hooks in forward or backward."""
         torch._dynamo.reset()
         trace_rules_check_count = 0
         HOOKS_FILE_NAME = "torch/distributed/fsdp/_fully_shard/_fsdp_state.py"
@@ -60,10 +62,60 @@ class TestFullyShardCompileCompute(FSDPTest):
         model = MLP(4).to(device_type)
         fully_shard(model)
         model.compile()
-        model(torch.randn((4, 4), device=device_type))
+        out = model(torch.randn((4, 4), device=device_type))
+        out.sum().backward()
         torch.distributed.barrier()
         torch._dynamo.trace_rules.check = orig_trace_rules_check
         self.assertEqual(trace_rules_check_count, 0)
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
+    def test_compiled_autograd_fsdp2_backward(self):
+        """
+        Verify that compiled autograd with FSDP2 backward does not crash and
+        that FSDP hooks cause graph breaks (due to _dynamo_disable).
+
+        For MLP(4) with a single fully_shard, the compiled autograd backward
+        graph has 2 graph breaks from _dynamo_disable on FSDP hooks:
+          1. _pre_backward tensor hook (registered on FSDP module output)
+          2. post_backward (called from RegisterPostBackwardFunction.backward)
+        _root_post_backward_final_callback runs outside the compiled autograd
+        scope as a queued engine callback.
+        """
+        torch._dynamo.reset()
+        counters.clear()
+        model = MLP(4).to(device_type)
+        ref_model = copy.deepcopy(model)
+        fully_shard(model)
+        fully_shard(ref_model)
+        inp = torch.randn((4, 4), device=device_type)
+
+        # Eager reference
+        ref_out = ref_model(inp)
+        ref_out.sum().backward()
+
+        backend_count = 0
+        orig_aot_eager = torch._dynamo.lookup_backend("aot_eager")
+
+        def counting_backend(gm, example_inputs):
+            nonlocal backend_count
+            backend_count += 1
+            return orig_aot_eager(gm, example_inputs)
+
+        def compiler_fn(gm):
+            return torch.compile(gm, backend=counting_backend)
+
+        with compiled_autograd._enable(compiler_fn):
+            out = model(inp)
+            out.sum().backward()
+
+        self.assertEqual(out, ref_out)
+        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
+        # 2 graph breaks from _dynamo_disable on FSDP hooks split the
+        # compiled autograd graph into 2 sub-graphs compiled by the backend:
+        #   graph break 1: _pre_backward tensor hook
+        #   graph break 2: post_backward (from RegisterPostBackwardFunction)
+        self.assertEqual(backend_count, 2)
 
 
 @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")

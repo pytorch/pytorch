@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import functools
 import math
 import traceback
 from dataclasses import dataclass
@@ -13,27 +14,16 @@ from torch.distributed.tensor import DeviceMesh, DTensor
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 
 
-_compiled_autograd_enabled: bool = False
+def _dynamo_disable(func):
+    """Disable dynamo tracing for FSDP hooks."""
 
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        return torch._dynamo.disable(
+            func, recursive=True, reason="skipping FSDP hooks"
+        )(*args, **kwargs)
 
-def detect_compiled_autograd():
-    if torch.compiler.is_compiling():
-        raise AssertionError(
-            "`detect_compiled_autograd()` is designed to be called in eager mode"
-        )
-    global _compiled_autograd_enabled
-    import torch._dynamo.compiled_autograd as ca
-
-    _compiled_autograd_enabled = (
-        ca.compiled_autograd_enabled
-        or ca.compiled_autograd_enabled_force_eager
-        or ca.in_compiled_autograd_region
-    )
-
-
-def compiled_autograd_enabled():
-    global _compiled_autograd_enabled
-    return _compiled_autograd_enabled
+    return wrapper
 
 
 @dataclass
@@ -138,26 +128,16 @@ def _from_local_no_grad(
     This method is similar to ``DTensor.from_local()`` except that in eager mode
     it avoids some CPU overhead by avoiding default args and not being differentiable.
     """
-
-    if not compiled_autograd_enabled():
-        # pyrefly: ignore [bad-argument-type]
-        return DTensor(
-            # Use the local tensor directly instead of constructing a new tensor
-            # variable, e.g. with `view_as()`, since this is not differentiable
-            # pyrefly: ignore [bad-argument-count]
-            local_tensor,
-            sharding_spec,
-            # pyrefly: ignore [unexpected-keyword]
-            requires_grad=local_tensor.requires_grad,
-        )
-    else:
-        return DTensor.from_local(
-            local_tensor,
-            sharding_spec.mesh,
-            sharding_spec.placements,
-            shape=sharding_spec.shape,
-            stride=sharding_spec.stride,
-        )
+    # pyrefly: ignore [bad-argument-type]
+    return DTensor(
+        # Use the local tensor directly instead of constructing a new tensor
+        # variable, e.g. with `view_as()`, since this is not differentiable
+        # pyrefly: ignore [bad-argument-count]
+        local_tensor,
+        sharding_spec,
+        # pyrefly: ignore [unexpected-keyword]
+        requires_grad=local_tensor.requires_grad,
+    )
 
 
 def _to_dtype_if_needed(
