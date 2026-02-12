@@ -1546,6 +1546,17 @@
       ]
     }
   ],
+  "GB4026": [
+    {
+      "Gb_type": "triton.set_allocator not supported",
+      "Context": "triton.set_allocator called inside compiled region",
+      "Explanation": "triton.set_allocator is not supported inside torch.compile. It modifies global Triton allocator state and cannot be traced.",
+      "Hints": [
+        "Move triton.set_allocator() outside of the torch.compile region ",
+        "(call it before the compiled function)."
+      ]
+    }
+  ],
   "GB0133": [
     {
       "Gb_type": "Unsupported arguments for itertools.accumulate",
@@ -3313,6 +3324,16 @@
         "Include at least one checkpoint: (1) include at least 2 ops and (2) make sure there is some ",
         "line of code that is not in a try/with block, and has an empty Python stack.",
         "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB6604": [
+    {
+      "Gb_type": "Missing CALL_INTRINSIC_2 handler",
+      "Context": "CALL_INTRINSIC_2 operand: {inst.argval}",
+      "Explanation": "No handler implemented for CALL_INTRINSIC_2 {inst.argval} instruction.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
