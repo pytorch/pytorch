@@ -263,7 +263,9 @@ class SuperVariable(VariableTracker):
         elif isinstance(inner_fn, staticmethod) and isinstance(
             inner_fn.__func__, types.FunctionType
         ):
-            fn_vt = VariableTracker.build(tx, inner_fn.__func__, source=source, realize=True)
+            fn_vt = VariableTracker.build(
+                tx, inner_fn.__func__, source=source, realize=True
+            )
             return fn_vt.call_function(tx, args, kwargs)
         elif isinstance(inner_fn, classmethod) and isinstance(
             inner_fn.__func__, types.FunctionType
@@ -290,7 +292,10 @@ class SuperVariable(VariableTracker):
                 )
             assert source is not None
             fn_vt = VariableTracker.build(
-                tx, inner_fn.__func__, source=AttrSource(source, "__func__"), realize=True
+                tx,
+                inner_fn.__func__,
+                source=AttrSource(source, "__func__"),
+                realize=True,
             )
             return fn_vt.call_function(tx, [cls_variable, *args], kwargs)
         elif isinstance(inner_fn, types.FunctionType):
