@@ -1060,6 +1060,9 @@ class aten_distributed_optimizations:
     # as atomic units with memory-bound runtime estimates.
     enable_fusion_regions: Optional[bool] = None
 
+    # Prioritize bucketing during overlap scheduling by grouping candidates by bucket key
+    prioritize_bucketing_during_scheduling: bool = True
+
 
 def parallel_compile_enabled_internally() -> bool:
     """

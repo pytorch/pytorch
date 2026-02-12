@@ -661,6 +661,7 @@ AdvancedIndex::AdvancedIndex(const Tensor& src, TensorList indices_list) {
   this->dims_after = dims_after;
   this->src = restride_src(src, dims_before, dims_indexed, replacement_shape);
 
+  indices.reserve(dims_indexed);
   for (auto& index : indices_list) {
     if (index.defined()) {
       indices.push_back(reshape_indexer(index, dims_before, dims_after));

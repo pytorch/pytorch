@@ -2691,7 +2691,7 @@ class InstructionTranslatorBase(
                 return True
             elif isinstance(exc_instance, variables.BuiltinVariable) and issubclass(
                 exc_instance.fn,
-                # pyrefly: ignore [invalid-argument, missing-attribute]
+                # pyrefly: ignore [missing-attribute]
                 expected_type.fn,
             ):
                 return True
@@ -2786,9 +2786,9 @@ class InstructionTranslatorBase(
             )
 
         # Map to a dictionary of str -> VariableTracker
-        # pyrefly: ignore [bad-assignment, missing-attribute, unbound-name]
+        # pyrefly: ignore [unbound-name, missing-attribute]
         kwargsvars = kwargsvars.keys_as_python_constant()
-        # pyrefly: ignore [bad-argument-type, missing-attribute, unbound-name]
+        # pyrefly: ignore [unbound-name, missing-attribute]
         self.call_function(fn, argsvars.items, kwargsvars)
 
     @break_graph_if_unsupported(
@@ -4047,7 +4047,6 @@ class InstructionTranslatorBase(
         else:
             if isinstance(contents[0], NullVariable):
                 fn = contents[1]
-                # pyrefly: ignore [implicit-any]
                 args = []
             else:
                 fn = contents[0]
@@ -4063,7 +4062,6 @@ class InstructionTranslatorBase(
             assert len(kwargs) == len(kw_names)
         else:
             args = args + contents[2:]
-            # pyrefly: ignore [implicit-any]
             kwargs = {}
 
         try:
@@ -4288,7 +4286,15 @@ class InstructionTranslatorBase(
         elif flags & 0x08:
             fn.closure = attr
         elif flags & 0x04:
-            fn.annotations = attr
+            assert isinstance(attr, TupleVariable)
+            # Convert the attribute to a dictionary before assigning it
+            # https://github.com/python/cpython/blob/28fb13cb33d569720938258db68956b5f9c9eb40/Objects/funcobject.c#L574-L594
+            items = attr.items
+            ann = ConstDictVariable(
+                dict(zip(items[::2], items[1::2], strict=True)),
+                mutation_type=ValueMutationNew(),
+            )
+            fn.annotations = ann
         elif flags & 0x02:
             fn.kwdefaults = attr
         elif flags & 0x01:
@@ -5693,7 +5699,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             ):
                 assert isinstance(self, InliningGeneratorInstructionTranslator)
                 # When the generator returns None, we raise StopIteration
-                # pyrefly: ignore [implicit-any]
                 args = []
                 if not self.symbolic_result.is_constant_none():
                     args = [self.symbolic_result]
