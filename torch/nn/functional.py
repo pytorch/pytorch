@@ -961,10 +961,15 @@ def _unpool_output_size(
                 "output_size should be a sequence containing "
                 f"{len(kernel_size)} or {len(kernel_size) + 2} elements, but it has a length of '{len(output_size)}'"
             )
+        from torch.fx.experimental.symbolic_shapes import guard_or_true
+
         for d in range(len(kernel_size)):
             min_size = default_size[d] - stride[d]
             max_size = default_size[d] + stride[d]
-            if not (min_size < output_size[d] < max_size):
+            if not (
+                guard_or_true(min_size < output_size[d])
+                and guard_or_true(output_size[d] < max_size)
+            ):
                 raise ValueError(
                     f'invalid output_size "{output_size}" (dim {d} must be between {min_size} and {max_size})'
                 )
