@@ -11,15 +11,15 @@ from torch import _VF, sym_int as _sym_int, Tensor
 from torch._C import (
     _add_docstr,
     _infer_size,
-    _ScalingType as ScalingType,
-    _SwizzleType as SwizzleType,
+    _ScalingType as ScalingType,  # pyrefly: ignore [missing-module-attribute]
+    _SwizzleType as SwizzleType,  # pyrefly: ignore [missing-module-attribute]
 )
 from torch._jit_internal import (
     _overload,
     boolean_dispatch,
     BroadcastingList1,
-    BroadcastingList2,
-    BroadcastingList3,
+    BroadcastingList2,  # pyrefly: ignore [missing-module-attribute]
+    BroadcastingList3,  # pyrefly: ignore [missing-module-attribute]
 )
 from torch._torch_docs import reproducibility_notes, sparse_support_notes, tf32_notes
 from torch.nn import _reduction as _Reduction, grad  # noqa: F401
@@ -2481,7 +2481,7 @@ def embedding(
 
     Args:
         input (LongTensor): Tensor containing indices into the embedding matrix
-        weight (Tensor): The embedding matrix with number of rows equal to the maximum possible index + 1,
+        weight (Tensor): The embedding matrix (must be 2-D) with number of rows equal to the maximum possible index + 1,
             and number of columns equal to the embedding size
         padding_idx (int, optional): If specified, the entries at :attr:`padding_idx` do not contribute to the gradient;
                                      therefore, the embedding vector at :attr:`padding_idx` is not updated during training,
@@ -3648,30 +3648,21 @@ def linear_cross_entropy(
     input: Tensor,
     linear_weight: Tensor,
     target: Tensor,
-    linear_bias: Optional[Tensor] = None,
+    *,
     weight: Optional[Tensor] = None,
     reduction: str = "mean",
     ignore_index: int = -100,
     label_smoothing: float = 0.0,
-    # Optimization parameters:
-    # chunking_strategy: str = "none",
-    # vocab_chunk_size: Optional[int] = None,
-    # batch_chunk_size: Optional[int] = None
 ) -> Tensor:
     r"""Compute the cross entropy loss between inputs, transformed linearly, and target.
 
     ::
-      loss = linear_cross_entropy(
-          input, linear_weight, target, linear_bias=linear_bias, **kwargs
-      )
+      loss = linear_cross_entropy(input, linear_weight, target, **kwargs)
 
     is equivalent to
 
     ::
-      logits = linear(input, linear_weight, bias=linear_bias)
-      if target.dtype.is_floating_point:
-          # target contains class probabilities
-          logits = logits.reshape(target.shape)
+      logits = linear(input, linear_weight)
       loss = cross_entropy(logits, target, **kwargs)
 
     See :class:`~torch.nn.CrossEntropyLoss` for details.
@@ -3680,7 +3671,6 @@ def linear_cross_entropy(
         input (Tensor) : input samples.
         linear_weight (Tensor) : linear weight.
         target (Tensor) : Ground truth class indices or class probabilities;
-        linear_bias (Tensor, optional) : linear bias.
         weight (Tensor, optional): a manual rescaling weight given to each class.
         reduction (str, optional): Specifies the reduction to apply to
             the output: ``'none'`` | ``'mean'`` |
@@ -3705,7 +3695,7 @@ def linear_cross_entropy(
 
     Shape:
         - Input: :math:`(in_features)` or :math:`(N, in_features)`.
-        - Linear weight: :math:`(C * d_1 * ... * d_K, in_features)`.
+        - Linear weight: :math:`(C, d_1, ..., d_K, in_features)`.
         - Target: If containing class indices, :math:`()`,
           :math:`(N)` or :math:`(N, d_1, d_2, ..., d_K)` with :math:`K\geq 1`
           in the case of K-dimensional loss where each value
@@ -3719,7 +3709,6 @@ def linear_cross_entropy(
           probability constraints on the class probabilities and that
           it is the user's responsibility to ensure ``target``
           contains valid probability distributions.
-        - Linear bias: :math:`(C * d_1 * ... * d_K)`.
         - Weight: :math:`(C)`.
         - Output: If reduction is 'none', shape :math:`()`,
           :math:`(N)` or :math:`(N, d_1, d_2, ..., d_K)` with :math:`K\geq 1`
@@ -3728,22 +3717,32 @@ def linear_cross_entropy(
 
         where :math:`N` is batch size and :math:`C` is number of classes.
     """
-    if has_torch_function_variadic(input, linear_weight, target, linear_bias, weight):
+    if has_torch_function_variadic(input, linear_weight, target, weight):
         return handle_torch_function(
             linear_cross_entropy,
-            (input, linear_weight, target, linear_bias, weight),
+            (input, linear_weight, target, weight),
             input,
             linear_weight,
             target,
-            linear_bias=linear_bias,
             weight=weight,
             ignore_index=ignore_index,
             reduction=reduction,
             label_smoothing=label_smoothing,
         )
-    logits = linear(input, linear_weight, bias=linear_bias)
+    num_classes = linear_weight.shape[0]
+    if len(linear_weight.shape) > 2:
+        # linear supports 2-D weights only
+        linear_weight = linear_weight.reshape((-1, linear_weight.shape[-1]))
+    logits = linear(input, linear_weight)
+    # recover logits shape that corresponds to the shape of specified
+    # linear_weight:
     if target.dtype.is_floating_point:
-        logits = logits.reshape(target.shape)
+        logits_shape = target.shape
+    elif target.shape:
+        logits_shape = (target.shape[0], num_classes, *target.shape[1:])
+    else:
+        logits_shape = (num_classes,)
+    logits = logits.reshape(logits_shape)
     return cross_entropy(
         logits,
         target,
@@ -4764,7 +4763,8 @@ def interpolate(  # noqa: F811
             for out-of-boundary values, making this operation *independent* of input size
             when :attr:`scale_factor` is kept the same. This only has an effect when :attr:`mode`
             is ``'linear'``, ``'bilinear'``, ``'bicubic'`` or ``'trilinear'``.
-            Default: ``False``
+            Default: ``None``. When ``None`` and :attr:`mode` is one of the linear modes,
+            it is treated as ``False``.
         recompute_scale_factor (bool, optional): recompute the scale_factor for use in the
             interpolation calculation. If `recompute_scale_factor` is ``True``, then
             `scale_factor` must be passed in and `scale_factor` is used to compute the

@@ -13,7 +13,7 @@ using c10::Dict;
 using c10::IValue;
 using torch::jit::Pickler;
 
-using c10::cuda::CUDACachingAllocator::SegmentInfo;
+using c10::CachingDeviceAllocator::SegmentInfo;
 
 namespace {
 
@@ -201,18 +201,18 @@ void _record_memory_history(
     bool compileContext,
     bool globalRecordAnnotations,
     const std::vector<std::string>& skip_actions) {
-  c10::cuda::CUDACachingAllocator::CreateContextFn recorder = gather;
+  c10::CachingDeviceAllocator::CreateContextFn recorder = gather;
   if (enabled && record_cpp_context &&
       (trace_alloc_record_context || record_context)) {
     recorder = gather_with_cpp;
     // warm up C++ stack unwinding
     unwind::unwind();
   }
-  auto when = c10::cuda::CUDACachingAllocator::RecordContext::NEVER;
+  auto when = c10::CachingDeviceAllocator::RecordContext::NEVER;
   if (trace_alloc_record_context) {
-    when = c10::cuda::CUDACachingAllocator::RecordContext::ALLOC;
+    when = c10::CachingDeviceAllocator::RecordContext::ALLOC;
   } else if (record_context) {
-    when = c10::cuda::CUDACachingAllocator::RecordContext::STATE;
+    when = c10::CachingDeviceAllocator::RecordContext::STATE;
   }
   at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
 
@@ -258,21 +258,21 @@ void _record_memory_history(
   checkOptionIn(
       stacks, {"python", "all"}, "expected stacks to be 'python', or 'all'");
 
-  c10::cuda::CUDACachingAllocator::CreateContextFn recorder = gather;
+  c10::CachingDeviceAllocator::CreateContextFn recorder = gather;
   if (enabled && context && stacks == "all") {
     recorder = gather_with_cpp;
     // warm up C++ stack unwinding
     unwind::unwind();
   }
   max_entries = (enabled && *enabled == "all") ? max_entries : 1;
-  auto when = c10::cuda::CUDACachingAllocator::RecordContext::NEVER;
+  auto when = c10::CachingDeviceAllocator::RecordContext::NEVER;
   if (context) {
     if (context == "all") {
-      when = c10::cuda::CUDACachingAllocator::RecordContext::ALL;
+      when = c10::CachingDeviceAllocator::RecordContext::ALL;
     } else if (context == "alloc") {
-      when = c10::cuda::CUDACachingAllocator::RecordContext::ALLOC;
+      when = c10::CachingDeviceAllocator::RecordContext::ALLOC;
     } else if (context == "state") {
-      when = c10::cuda::CUDACachingAllocator::RecordContext::STATE;
+      when = c10::CachingDeviceAllocator::RecordContext::STATE;
     }
   }
   at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
@@ -309,6 +309,7 @@ std::string _memory_snapshot_pickled() {
   IValue name_s = "name";
   IValue line_s = "line";
   IValue frames_s = "frames";
+  IValue forward_frames_s = "forward_frames";
   IValue blocks_s = "blocks";
   IValue is_expandable_s = "is_expandable";
   IValue time_us_s = "time_us";
@@ -506,6 +507,17 @@ std::string _memory_snapshot_pickled() {
   auto frames = ivalue_symbolize(frame_tracebacks);
   for (auto i : c10::irange(frames.size())) {
     frame_dict.at(i).insert(frames_s, frames.at(i));
+
+    // Add forward frames if available
+    auto* tb = frame_tracebacks.at(i);
+    const auto& forward_tb = tb->forward_traceback();
+    if (forward_tb.has_value() && !forward_tb->empty()) {
+      auto forward_list = new_list();
+      for (const auto& frame_str : *forward_tb) {
+        forward_list.push_back(IValue(frame_str));
+      }
+      frame_dict.at(i).insert(forward_frames_s, forward_list);
+    }
   }
 
   return write_pickle(result);

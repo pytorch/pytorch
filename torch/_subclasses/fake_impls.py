@@ -6,7 +6,7 @@ import math
 import operator
 import sys
 from functools import reduce
-from typing import Any, TYPE_CHECKING, TypeVar, Union
+from typing import Any, cast as typing_cast, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
@@ -637,7 +637,7 @@ def _compute_stride(
 
 
 def _view_has_unbacked_input(
-    a: FakeTensor, shape: ShapeType | tuple[ShapeType]
+    a: torch.Tensor, shape: ShapeType | tuple[ShapeType]
 ) -> bool:
     from torch.fx.experimental.symbolic_shapes import has_hint
 
@@ -651,10 +651,10 @@ def _view_has_unbacked_input(
 
 
 def _view_unbacked_meta(
-    a: FakeTensor,
+    a: torch.Tensor,
     shape: ShapeType | tuple[ShapeType],
     size_oblivious_enabled: bool = True,
-) -> FakeTensor:
+) -> torch.Tensor:
     from torch._prims import view_of
     from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_eq
 
@@ -734,15 +734,14 @@ def _reshape_copy(
     shape = utils.infer_size(*shape, a.numel())
     if is_contiguous_or_false(a):
         view = _view_meta(fake_mode, func, a, *shape)
-        return view.clone(  # pyrefly: ignore[bad-return]
-            memory_format=torch.contiguous_format
+        return typing_cast(
+            FakeTensor, view.clone(memory_format=torch.contiguous_format)
         )
     else:
         return _view_meta(
             fake_mode,
             func,
-            # pyrefly: ignore[bad-argument-type]
-            a.clone(memory_format=torch.contiguous_format),
+            typing_cast(FakeTensor, a.clone(memory_format=torch.contiguous_format)),
             *shape,
         )
 
@@ -750,14 +749,19 @@ def _reshape_copy(
 @register_op_impl(aten.view.default)
 @register_op_impl(aten._unsafe_view.default)
 def _view_meta(
-    fake_mode: FakeTensorMode, func: OpOverload, a: FakeTensor, *shape: Any
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    a: FakeTensor,
+    *shape: Any,
 ) -> FakeTensor:
     if torch.fx.experimental._config.backed_size_oblivious or _view_has_unbacked_input(
         a, shape
     ):
-        return _view_unbacked_meta(a, shape)
+        return typing_cast(FakeTensor, _view_unbacked_meta(a, shape))
     else:
-        return torch._refs._reshape_view_helper(a, *shape, allow_copy=False)  # type: ignore[return-value]
+        return typing_cast(
+            FakeTensor, torch._refs._reshape_view_helper(a, *shape, allow_copy=False)
+        )
 
 
 @register_op_impl(aten.view_copy.default)
@@ -769,6 +773,7 @@ def _view_meta_copy(
     out: FakeTensor | None = None,
 ) -> FakeTensor:
     result = _view_meta(fake_mode, func, a, *shape)
+
     if out is not None:
         return result
 
