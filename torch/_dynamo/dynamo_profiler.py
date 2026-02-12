@@ -271,7 +271,7 @@ class DynamoProfilerState:
         # Ensure caller-only functions have a top-level entry.
         # gprof2dot expects every function referenced as a caller to also
         # exist as a top-level entry in the stats dict with timing data.
-        for key in list(caller_edges.keys()):
+        for key in caller_edges:
             for caller_key in caller_edges[key]:
                 if caller_key not in aggregated:
                     aggregated[caller_key] = {
