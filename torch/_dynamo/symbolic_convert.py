@@ -5094,14 +5094,17 @@ class InstructionTranslatorBase(
         if analysis.result_on_stack:
             self.push(UnknownVariable())
         elif analysis.result_var:
+            cg.extend_output(
+                [
+                    *create_copy(fv_depth),
+                    cg.create_load_const(0),
+                    cg.create_binary_subscr(),
+                    # Stack: ..., result, fv0
+                ]
+            )
             if analysis.result_var in existing_vars:
-                # Stack: ..., result
                 cg.extend_output(
                     [
-                        *create_copy(fv_depth),
-                        cg.create_load_const(0),
-                        cg.create_binary_subscr(),
-                        # Stack: ..., result, fv0
                         cg.create_load_const(existing_vars[analysis.result_var]),
                         create_instruction("STORE_SUBSCR"),
                         # fv0[idx] = result
@@ -5110,9 +5113,6 @@ class InstructionTranslatorBase(
             else:
                 cg.extend_output(
                     [
-                        *create_copy(fv_depth),
-                        cg.create_load_const(0),
-                        cg.create_binary_subscr(),
                         *create_swap(2),
                         create_instruction("LIST_APPEND", arg=1),
                         create_instruction("POP_TOP"),
