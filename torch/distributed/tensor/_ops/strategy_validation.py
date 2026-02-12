@@ -49,6 +49,7 @@ PARTIAL_REDUCE_OPS = ["sum", "avg", "min", "max"]
 
 # Ops to skip in validation because ground truth comparison is not meaningful.
 # These produce non-deterministic or uninitialized outputs.
+# TODO: can we get this list directly from opinfo tags, or something?
 SKIP_OPS = frozenset(
     [
         "bernoulli",  # Random sampling
@@ -68,8 +69,8 @@ SKIP_OPS = frozenset(
 class PlacementCombination:
     """Represents a combination of input and output placements."""
 
-    input_placements: tuple  # One placement per input tensor
-    output_placement: Any  # Placement for the output tensor
+    input_placements: tuple[Placement]  # One placement per input tensor
+    output_placement: Placement  # Placement for the output tensor
 
     def __hash__(self):
         return hash(
@@ -175,19 +176,29 @@ def is_fully_replicated(placements: tuple) -> bool:
     return all(isinstance(p, Replicate) for p in placements)
 
 
-def is_trivial_shard(p, shape: tuple[int, ...]) -> bool:
-    """Check if placement is a Shard on a size-1 dimension (equivalent to Replicate)."""
-    return isinstance(p, Shard) and p.dim < len(shape) and shape[p.dim] == 1
+def is_trivial_shard(p, tensor_shape: tuple[int, ...]) -> bool:
+    """Check if placement is a Shard on a size-1 dimension."""
+    return (
+        isinstance(p, Shard)
+        and p.dim < len(tensor_shape)
+        and tensor_shape[p.dim] == 1
+    )
 
 
-def normalize_placement(p, shape: tuple[int, ...]):
+def normalize_placement(p, tensor_shape: tuple[int, ...]):
     """
     Normalize a placement for a given tensor shape.
 
-    Converts trivial Shard (on size-1 dimension) to Replicate, since they
-    are semantically equivalent.
+    Converts Shard on a size-1 dimension to Replicate for deduplication.
+    Shard(0) on a [1, 4] tensor puts all data on rank 0 and an empty [0, 4]
+    on rank 1. Rank 1's empty computation is vacuous (contributes nothing
+    after redistribution), so the validation outcome is determined entirely
+    by rank 0, which has the full data — same as Replicate. We gain no
+    signal from testing S(0) on a size-1 dim beyond what R already provides,
+    so we normalize to R to avoid spurious "missing rule" noise when ground
+    truth and DTensor use different forms for size-1 dims.
     """
-    if is_trivial_shard(p, shape):
+    if is_trivial_shard(p, tensor_shape):
         return Replicate()
     return p
 
@@ -259,20 +270,13 @@ def get_1d_input_placements_for_tensor(
 def get_1d_output_placements_for_tensor(t: torch.Tensor) -> list:
     """
     Get all possible 1-D mesh placements for an OUTPUT tensor.
-
-    For integer outputs, only P(min) and P(max) are included since
-    P(avg) requires division (which truncates for integers) and P(sum)
-    can overflow discrete-valued outputs where summation is unexpected.
     """
     placements: list[Placement] = [Replicate()]
     for dim in range(t.ndim):
         placements.append(Shard(dim))
 
-    is_integer = not t.dtype.is_floating_point and not t.dtype.is_complex
     if t.dtype != torch.bool:
         for reduce_op in PARTIAL_REDUCE_OPS:
-            if is_integer and reduce_op in ("sum", "avg"):
-                continue
             placements.append(Partial(reduce_op))
     return placements
 
@@ -673,7 +677,9 @@ def get_opinfo_by_name(name: str):
     """Find OpInfo entries by operator name."""
     matches = [op for op in op_db if op.name == name]
     if not matches:
-        raise ValueError(f"No OpInfo found for operator: {name}")
+        raise ValueError(
+            f"No OpInfo found for operator: {name}.  OpInfo is required as it provides sample inputs for the operator"
+        )
     return matches
 
 

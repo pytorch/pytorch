@@ -245,8 +245,8 @@ class TestInputPlacements(TestCase):
     def test_get_1d_output_placements_integer(self):
         t = torch.randint(0, 10, (4, 3))
         placements = get_1d_output_placements_for_tensor(t)
-        # Should have Replicate + 2 Shard + 2 Partial (min/max only)
-        self.assertEqual(len(placements), 5)
+        # Should have Replicate + 2 Shard + 4 Partial (all types)
+        self.assertEqual(len(placements), 7)
 
     def test_get_1d_output_placements_scalar(self):
         t = torch.tensor(1.0)
@@ -260,10 +260,10 @@ class TestInputPlacements(TestCase):
     def test_get_1d_output_placements_integer_scalar(self):
         t = torch.tensor(1)
         placements = get_1d_output_placements_for_tensor(t)
-        # Integer scalars should have Replicate + 2 Partial (min, max only)
-        self.assertEqual(len(placements), 3)
+        # Integer scalars should have Replicate + 4 Partial (all types)
+        self.assertEqual(len(placements), 5)
         partial_ops = {p.reduce_op for p in placements if isinstance(p, Partial)}
-        self.assertEqual(partial_ops, {"min", "max"})
+        self.assertEqual(partial_ops, {"sum", "avg", "min", "max"})
 
     def test_get_1d_input_placements_scalar_with_partial(self):
         t = torch.tensor(1.0)
@@ -450,6 +450,26 @@ class TestValidateCombination(TestCase):
                 mesh,
             )
         self.assertTrue(is_valid, f"NaN outputs should match: {msg}")
+
+    def test_integer_output_includes_partial_sum(self):
+        """
+        P(sum) must be included in output placements for integer dtypes.
+
+        Ops like bucketize use R, S(0) -> P(sum) where the output is integer
+        (bucket indices). If P(sum) is excluded from the validator's output
+        enumeration for integer types, these rules appear as false "incorrect"
+        reports because the ground truth enumeration never discovers them.
+        """
+        for dtype in [torch.int32, torch.int64]:
+            t = torch.zeros(4, dtype=dtype)
+            placements = get_1d_output_placements_for_tensor(t)
+            partial_ops = {p.reduce_op for p in placements if isinstance(p, Partial)}
+            self.assertIn(
+                "sum",
+                partial_ops,
+                f"P(sum) must be in output placements for {dtype} "
+                f"(needed by ops like bucketize with sharded boundaries)",
+            )
 
     def test_exhaustive_binary_op_rules(self):
         """
