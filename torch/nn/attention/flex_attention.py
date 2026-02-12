@@ -369,9 +369,9 @@ _DEFAULT_SPARSE_BLOCK_SIZE = 128
 _LARGE_SPARSE_BLOCK_SIZE = 1 << 30
 
 
-def _ordered_to_dense(num_blocks_in_row: Tensor, col_indices: Tensor):
+def _ordered_to_dense(num_blocks_in_row: Tensor, col_indices: Tensor, num_cols: int):
     num_rows = col_indices.shape[-2]
-    num_cols = col_indices.shape[-1]
+    max_entries = col_indices.shape[-1]
     batch_dims = num_blocks_in_row.shape[:-1]
     device = num_blocks_in_row.device
 
@@ -381,7 +381,7 @@ def _ordered_to_dense(num_blocks_in_row: Tensor, col_indices: Tensor):
         row_indices = torch.arange(num_rows, dtype=torch.int, device=device).unsqueeze(
             -1
         )
-        col_range = torch.arange(num_cols, dtype=torch.int, device=device)
+        col_range = torch.arange(max_entries, dtype=torch.int, device=device)
         index_mask = col_range < kv_num_blocks.unsqueeze(-1)
 
         # We write to one spot "out of bounds"
@@ -410,7 +410,7 @@ def _dense_to_ordered(dense_mask) -> tuple[Tensor, Tensor]:
 
 
 def _transpose_ordered(num_blocks_in_row: Tensor, col_indices: Tensor):
-    dense = _ordered_to_dense(num_blocks_in_row, col_indices)
+    dense = _ordered_to_dense(num_blocks_in_row, col_indices, col_indices.shape[-1])
     return _dense_to_ordered(dense.transpose(-2, -1))
 
 
@@ -839,13 +839,17 @@ class BlockMask:
 
     def to_dense(self) -> Tensor:
         """Returns a dense block that is equivalent to the block mask."""
-        partial_dense = _ordered_to_dense(self.kv_num_blocks, self.kv_indices)
+        partial_dense = _ordered_to_dense(
+            self.kv_num_blocks, self.kv_indices, self.kv_indices.shape[-1]
+        )
         if self.full_kv_num_blocks is not None:
             if self.full_kv_indices is None:
                 raise AssertionError("full_kv_indices must not be None")
             # pyrefly: ignore [bad-return]
             return partial_dense | _ordered_to_dense(
-                self.full_kv_num_blocks, self.full_kv_indices
+                self.full_kv_num_blocks,
+                self.full_kv_indices,
+                self.full_kv_indices.shape[-1],
             )
         return partial_dense
 
@@ -1155,9 +1159,14 @@ def _compute_dq_write_order_from_block_mask(
 ) -> tuple[Tensor, Tensor | None]:
     """Compute dQ write-order metadata for deterministic block-sparse backward.
 
-    For each (n_block, i) in the backward iteration, computes the semaphore
-    lock value: the rank of n_block in the combined (partial + full) sorted
-    contributor list for the target m_block.
+    Algorithm (per batch/head):
+    1. Convert the partial and full `kv` block lists into a dense `m_block -> n_block`
+       contributor mask and merge them.
+    2. Prefix-sum along `n_block` to build a rank table where each present `n_block`
+       stores how many contributors come before it for that `m_block`.
+    3. Gather ranks using backward `q_indices` order to produce semaphore values used
+       by deterministic dQ accumulation.
+    4. If `spt=True`, flip the rank direction so larger `n_block` values are written first.
     """
     kv_num_blocks = block_mask.kv_num_blocks
     kv_indices = block_mask.kv_indices
@@ -1174,48 +1183,59 @@ def _compute_dq_write_order_from_block_mask(
         )
 
     device = kv_indices.device
-    B, H, num_m, max_kv_partial = kv_indices.shape
+
+    def _expand_bh(tensor: Tensor, target_b: int, target_h: int) -> Tensor:
+        return tensor.expand(target_b, target_h, *tensor.shape[2:])
+
+    broadcast_shapes = [
+        kv_indices.shape[:2],
+        q_indices.shape[:2],
+    ]
+    if full_kv_indices is not None:
+        broadcast_shapes.append(full_kv_indices.shape[:2])
+    if full_q_indices is not None:
+        broadcast_shapes.append(full_q_indices.shape[:2])
+
+    B, H = torch.broadcast_shapes(*broadcast_shapes)
+    kv_num_blocks = _expand_bh(kv_num_blocks, B, H)
+    kv_indices = _expand_bh(kv_indices, B, H)
+    if full_kv_num_blocks is not None:
+        full_kv_num_blocks = _expand_bh(full_kv_num_blocks, B, H)
+    if full_kv_indices is not None:
+        full_kv_indices = _expand_bh(full_kv_indices, B, H)
+
+    _, _, num_m, max_kv_partial = kv_indices.shape
     _, _, num_n, max_q_partial = q_indices.shape
 
     has_full = full_kv_num_blocks is not None and full_kv_indices is not None
 
-    def _ordered_to_dense(num_blks: Tensor, indices: Tensor, num_cols: int) -> Tensor:
-        B_d, H_d, num_rows, max_entries = indices.shape
-        dense = torch.zeros(
-            B_d, H_d, num_rows, num_cols + 1, dtype=torch.int32, device=device
-        )
-        col_range = torch.arange(max_entries, device=device)
-        valid = col_range[None, None, None, :] < num_blks[:, :, :, None]
-        safe_indices = torch.where(valid, indices.long(), num_cols)
-        row_idx = torch.arange(num_rows, device=device)[None, None, :, None].expand_as(
-            indices
-        )
-        b_idx = torch.arange(B_d, device=device)[:, None, None, None].expand_as(indices)
-        h_idx = torch.arange(H_d, device=device)[None, :, None, None].expand_as(indices)
-        dense[b_idx, h_idx, row_idx, safe_indices] = 1
-        return dense[:, :, :, :num_cols]
-
     dense_partial = _ordered_to_dense(kv_num_blocks, kv_indices, num_n)
     if has_full:
+        if full_kv_num_blocks is None or full_kv_indices is None:
+            raise AssertionError(
+                "full_kv_num_blocks and full_kv_indices must not be None"
+            )
         dense_full = _ordered_to_dense(full_kv_num_blocks, full_kv_indices, num_n)
+        # nb: in flash we iterate partial then full, if we flipped order there we would need to flip here
         dense = (dense_partial + dense_full).clamp(max=1)
     else:
         dense = dense_partial
 
     cumsum = dense.cumsum(dim=-1)
+    # exclusive prefix sum along n_blocks
     rank_table = (cumsum - dense).to(torch.int32)
 
     if spt:
+        # flippity floppity
         total_per_m = cumsum[:, :, :, -1:]
         rank_table = (total_per_m - 1 - rank_table).to(torch.int32)
 
     def _gather_write_order(bwd_idx: Tensor) -> Tensor:
-        b_i = torch.arange(B, device=device)[:, None, None, None].expand_as(bwd_idx)
-        h_i = torch.arange(H, device=device)[None, :, None, None].expand_as(bwd_idx)
-        n_i = torch.arange(bwd_idx.shape[2], device=device)[
-            None, None, :, None
-        ].expand_as(bwd_idx)
+        b_i = torch.arange(B, device=device)[:, None, None, None]
+        h_i = torch.arange(H, device=device)[None, :, None, None]
+        n_i = torch.arange(bwd_idx.shape[2], device=device)[None, None, :, None]
         m_vals = bwd_idx.long().clamp(0, num_m - 1)
+        # for each m_value and position N get the exclusive prefix sum from rank table and add use as semaphore val
         return rank_table[b_i, h_i, m_vals, n_i].to(torch.int32)
 
     dq_write_order = _gather_write_order(q_indices)
