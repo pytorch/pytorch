@@ -1724,9 +1724,9 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         if self.annotations:
             annotations = self.annotations.as_python_constant()
             if isinstance(annotations, tuple):
-                annotations = dict(
-                    zip(annotations[::2], annotations[1::2], strict=True)
-                )
+                from itertools import pairwise
+
+                annotations = dict(pairwise(annotations))
 
             # TypeError: __annotations__ must be set to a dict object
             assert isinstance(annotations, dict)
