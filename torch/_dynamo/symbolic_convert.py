@@ -5032,19 +5032,23 @@ class InstructionTranslatorBase(
                 ]
             )
 
-        # --- Step 6: Append comprehension outputs to frame_values[0] ---
+        # --- Step 6: Pass comprehension outputs to frame_values[0] ---
         # Walrus vars first, then result_var.
         vars_to_pass = analysis.walrus_vars + (
             [analysis.result_var] if analysis.result_var else []
         )
 
+        existing_vars: dict[str, int] = {}
         for var_name in vars_to_pass:
-            meta.locals_names[var_name] = len(meta.locals_names)
             self.symbolic_locals[var_name] = UnknownVariable()
+            if var_name in meta.locals_names:
+                existing_vars[var_name] = meta.locals_names[var_name]
+            else:
+                meta.locals_names[var_name] = len(meta.locals_names)
 
         fv_depth = live_stack_depth + 2  # comp_result + frame_values
 
-        # --- Walrus vars: extract from comp_result tuple and append to fv[0] ---
+        # --- Walrus vars: extract from comp_result tuple ---
         if analysis.walrus_vars:
             # comp_result is (result, *walrus_vars).
             cg.extend_output(
@@ -5055,39 +5059,67 @@ class InstructionTranslatorBase(
                 ]
             )
             # Stack: ..., comp_tuple, fv0
-            for j in range(len(analysis.walrus_vars)):
+            for j, walrus_var in enumerate(analysis.walrus_vars):
                 cg.extend_output(
                     [
                         *create_copy(2),
                         cg.create_load_const(j + 1),
                         cg.create_binary_subscr(),
-                        create_instruction("LIST_APPEND", arg=1),
                     ]
                 )
+                # Stack: ..., comp_tuple, fv0, walrus_value
+                if walrus_var in existing_vars:
+                    # fv0[idx] = walrus_value
+                    cg.extend_output(
+                        [
+                            *create_copy(2),  # copy fv0
+                            cg.create_load_const(existing_vars[walrus_var]),
+                            create_instruction("STORE_SUBSCR"),
+                        ]
+                    )
+                else:
+                    cg.extend_output(
+                        [create_instruction("LIST_APPEND", arg=1)]
+                    )
+                # Stack: ..., comp_tuple, fv0
             cg.extend_output(
                 [
                     create_instruction("POP_TOP"),  # pop fv0
-                    # Extract the plain result from the tuple.
+                    # Extract the result from the tuple.
                     cg.create_load_const(0),
                     cg.create_binary_subscr(),
                 ]
             )
             # Stack: ..., result
 
-        # --- Result: keep on stack, append to frame_values[0], or discard ---
+        # --- Result: keep on stack, overwrite/append to fv[0], or discard ---
         if analysis.result_on_stack:
             self.push(UnknownVariable())
         elif analysis.result_var:
-            cg.extend_output(
-                [
-                    *create_copy(fv_depth),
-                    cg.create_load_const(0),
-                    cg.create_binary_subscr(),
-                    *create_swap(2),
-                    create_instruction("LIST_APPEND", arg=1),
-                    create_instruction("POP_TOP"),
-                ]
-            )
+            if analysis.result_var in existing_vars:
+                # Stack: ..., result
+                cg.extend_output(
+                    [
+                        *create_copy(fv_depth),
+                        cg.create_load_const(0),
+                        cg.create_binary_subscr(),
+                        # Stack: ..., result, fv0
+                        cg.create_load_const(existing_vars[analysis.result_var]),
+                        create_instruction("STORE_SUBSCR"),
+                        # fv0[idx] = result
+                    ]
+                )
+            else:
+                cg.extend_output(
+                    [
+                        *create_copy(fv_depth),
+                        cg.create_load_const(0),
+                        cg.create_binary_subscr(),
+                        *create_swap(2),
+                        create_instruction("LIST_APPEND", arg=1),
+                        create_instruction("POP_TOP"),
+                    ]
+                )
         else:
             cg.extend_output([create_instruction("POP_TOP")])
 
