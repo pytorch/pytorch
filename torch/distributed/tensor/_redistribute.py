@@ -199,6 +199,55 @@ class _FlattenedTransformInfo(_TransformInfo):
             )
 
 
+def _update_shard_order_and_placements(
+    transform_info: _TransformInfo,
+    current_placements: list[Placement],
+    shard_order_dict: dict[int, list[int]],
+) -> None:
+    """
+    Update current_placements and shard_order_dict in-place to reflect the
+    effect of a single transform step.
+    """
+    src_placement, dst_placement = transform_info.src_dst_placements
+
+    if isinstance(transform_info, _FlattenedTransformInfo):
+        mesh_dims = transform_info.original_mesh_dims
+    else:
+        mesh_dims = (transform_info.mesh_dim,)
+
+    if isinstance(src_placement, Shard | _StridedShard):
+        src_dim = src_placement.dim  # type: ignore[attr-defined]
+        removed_dim = set()
+        for _ in mesh_dims:
+            if len(shard_order_dict[src_dim]) == 0:
+                raise ValueError(
+                    "Invalid shard_order update. No entries left to pop for src_dim "
+                    f"{src_dim}. transform_info={transform_info}, "
+                    f"current_placements={current_placements}, "
+                    f"shard_order={shard_order_dict}"
+                )
+            removed_dim.add(shard_order_dict[src_dim].pop())
+
+        if not set(mesh_dims) == removed_dim:
+            raise ValueError(
+                "Mismatch between expected and removed mesh dims during shard_order "
+                "update. Expected to remove "
+                f"{set(mesh_dims)}, but removed {removed_dim}. "
+                f"transform_info={transform_info}, "
+                f"current_placements={current_placements}, "
+                f"shard_order={shard_order_dict}"
+            )
+    if isinstance(dst_placement, Shard | _StridedShard):
+        dst_dim = dst_placement.dim  # type: ignore[attr-defined]
+        if dst_dim not in shard_order_dict:
+            shard_order_dict[dst_dim] = []
+        for mesh_dim in mesh_dims:
+            shard_order_dict[dst_dim].append(mesh_dim)
+
+    for mesh_dim in mesh_dims:
+        current_placements[mesh_dim] = dst_placement
+
+
 def _get_flattened_mesh_by_layout(
     mesh: DeviceMesh, mesh_dims: tuple[int, ...]
 ) -> DeviceMesh | None:
@@ -666,6 +715,7 @@ class DTensorRedistributePlanner:
         transform_infos: Sequence[_TransformInfo],
         src_placement: tuple[Placement, ...],
         src_shard_order: ShardOrder | None = None,
+        use_strided_shard_as_shard_order: bool = False,
     ) -> str:
         """
         Generate a string representation of the sequence of state transitions
@@ -679,11 +729,20 @@ class DTensorRedistributePlanner:
             src_shard_order: (Optional) The initial ShardOrder representing
                 the mapping of tensor dimensions to mesh dimensions. If None,
                 the default shard order is computed from src_placement and mesh.
+            use_strided_shard_as_shard_order: If True, normalize _StridedShard
+                placements into regular Shard placements with an explicit
+                shard_order before stringifying.
 
         Returns:
             A string showing the sequence of DistState transitions, separated by '->'.
         """
         assert len(src_placement) == mesh.ndim
+        if use_strided_shard_as_shard_order:
+            src_placement, src_shard_order = (
+                DTensorSpec._normalize_placements_into_shard_order(
+                    src_placement, mesh, use_strided_shard_as_shard_order=True
+                )
+            )
         if src_shard_order is None:
             src_shard_order = DTensorSpec.compute_default_shard_order(src_placement)
         cur_placement = list(src_placement)
@@ -700,55 +759,11 @@ class DTensorRedistributePlanner:
         is_flattened_list: list[bool] = []
 
         for transform_info in transform_infos:
-            src_dim_placement, dst_dim_placement = transform_info.src_dst_placements
+            is_flattened = isinstance(transform_info, _FlattenedTransformInfo)
 
-            # Handle flattened transforms specially - they affect multiple mesh dims
-            if isinstance(transform_info, _FlattenedTransformInfo):
-                mesh_dims_to_update = transform_info.original_mesh_dims
-                is_flattened = True
-            else:
-                mesh_dims_to_update = (transform_info.mesh_dim,)
-                is_flattened = False
-
-            # Check for both Shard and _StridedShard (which has is_shard() = False)
-            if src_dim_placement.is_shard() or isinstance(
-                src_dim_placement, _StridedShard
-            ):
-                src_dim = src_dim_placement.dim  # type: ignore[attr-defined]
-                assert (
-                    src_dim in shard_order_dict and len(shard_order_dict[src_dim]) > 0
-                )
-                # Remove mesh dims in reverse order and verify they match expected dims
-                # (shard_order_dict stores in innermost-to-outermost order)
-                removed_dims = []
-                for _ in mesh_dims_to_update:
-                    removed_dim = shard_order_dict[src_dim].pop()
-                    removed_dims.append(removed_dim)
-                # Verify the removed dims match what we expect (in reverse order)
-                removed_dims.reverse()
-                assert tuple(removed_dims) == mesh_dims_to_update, (
-                    f"Flattened transform mesh dims mismatch: "
-                    f"expected {mesh_dims_to_update}, but shard_order had {tuple(removed_dims)}"
-                )
-
-            # Check for both Shard and _StridedShard for destination
-            if dst_dim_placement.is_shard() or isinstance(
-                dst_dim_placement, _StridedShard
-            ):
-                dst_dim = dst_dim_placement.dim  # type: ignore[attr-defined]
-                if dst_dim not in shard_order_dict:
-                    shard_order_dict[dst_dim] = []
-                # Add mesh dims in order and verify they don't already exist
-                for mesh_dim in mesh_dims_to_update:
-                    assert mesh_dim not in shard_order_dict[dst_dim], (
-                        f"Mesh dim {mesh_dim} already in shard_order for tensor dim {dst_dim}: "
-                        f"existing={shard_order_dict[dst_dim]}, adding={mesh_dims_to_update}"
-                    )
-                    shard_order_dict[dst_dim].append(mesh_dim)
-
-            # Update placements for all affected mesh dims
-            for mesh_dim in mesh_dims_to_update:
-                cur_placement[mesh_dim] = dst_dim_placement
+            _update_shard_order_and_placements(
+                transform_info, cur_placement, shard_order_dict
+            )
 
             new_state = DTensorRedistributePlanner.DistState(
                 tuple(cur_placement),
@@ -803,6 +818,7 @@ class DTensorRedistributePlanner:
                 placements=state.placements,
                 tensor_meta=self.dtensor_meta,
                 shard_order=state.tensor_dim_to_mesh_dim,
+                use_strided_shard_as_shard_order=False,
             )
 
         def cost_function(src_state, dst_state):
@@ -1182,43 +1198,28 @@ class DTensorRedistributePlanner:
         dst_spec: DTensorSpec,
         full_tensor_shape: tuple[int, ...],
     ) -> list[_TransformInfo]:
-        # In case _StridedShard exists in placements, we let _StridedShard have
-        # higher priority to express shard_order.
         # TODO(zpcore): Temporary workaround for backward compatibility where
         # _StridedShard was used to encode device shard order. We should migrate
         # to explicit `shard_order` instead.
         def _try_normalize_spec(
             spec: DTensorSpec,
-        ) -> tuple[tuple[Placement, ...], ShardOrder | None]:
-            # If any _StridedShard is present, try normalize placements into
-            # explicit shard_order.
-            if any(isinstance(p, _StridedShard) for p in spec.placements):
+        ) -> tuple[tuple[Placement, ...], ShardOrder]:
+            if spec.use_strided_shard_as_shard_order:
                 new_placements, shard_order = (
                     DTensorSpec._normalize_placements_into_shard_order(
-                        spec.placements, spec.mesh
+                        spec.placements,
+                        spec.mesh,
+                        use_strided_shard_as_shard_order=True,
                     )
                 )
-            else:
-                new_placements, shard_order = spec.placements, spec.shard_order
-
-            if shard_order is not None:
                 return new_placements, shard_order
-
-            # Fallback: compute default shard_order (treat _StridedShard as
-            # normal shard for order).
-            shard_order = DTensorSpec.compute_default_shard_order(
-                spec.placements, treat_strided_shard_as_shard=True
-            )
-            return spec.placements, shard_order
+            else:
+                if spec.shard_order is None:
+                    raise ValueError(f"Missing shard_order field in {spec}")
+                return spec.placements, spec.shard_order
 
         src_placements, src_shard_order = _try_normalize_spec(src_spec)
         dst_placements, dst_shard_order = _try_normalize_spec(dst_spec)
-
-        if src_shard_order is None or dst_shard_order is None:
-            raise ValueError(
-                f"Cannot compute redistribution plan from {src_spec} to {dst_spec}: "
-                "failed to derive a valid shard_order"
-            )
 
         # In case _StridedShard still exists in placements, collect possible
         # split_factor values in the target placements. Need those values to
@@ -1462,6 +1463,11 @@ def redistribute_local_tensor(
         # TODO: alltoall/permute reshuffling to change device_mesh if they are not the same
         raise NotImplementedError("Cross device mesh comm not supported yet!")
 
+    if current_spec.use_strided_shard_as_shard_order is None:
+        raise ValueError(
+            "use_strided_shard_as_shard_order should be initialized in DTensorSpec.__post_init__()"
+        )
+
     # We do not see a valid use case for mixing different partial types in the same DTensor.
     # in principle it could be supported, but since nonlinear reductions (e.g. max) exist, relative ordering
     # of different partials would become semantically critical.  Without a motivating use case, we prohibit this.
@@ -1495,23 +1501,6 @@ def redistribute_local_tensor(
 
     debug_mode = get_active_debug_mode()
 
-    # For stringify_transform_infos, we need to use the same shard_order that was
-    # used to generate the transforms. When _StridedShard is present, the planner
-    # derives shard_order from placements rather than using the spec's shard_order.
-    # This mirrors the logic in generate_graph_based_transform_infos._try_normalize_spec.
-    stringify_shard_order = current_spec.shard_order
-    if any(isinstance(p, _StridedShard) for p in current_spec.placements):
-        _, derived_shard_order = DTensorSpec._normalize_placements_into_shard_order(
-            current_spec.placements, current_spec.mesh
-        )
-        if derived_shard_order is not None:
-            stringify_shard_order = derived_shard_order
-        else:
-            # Fallback: compute default shard_order (treat _StridedShard as normal shard)
-            stringify_shard_order = DTensorSpec.compute_default_shard_order(
-                current_spec.placements, treat_strided_shard_as_shard=True
-            )
-
     redistribute_context = (
         debug_mode.record_redistribute_calls(  # type: ignore[union-attr]
             local_tensor,
@@ -1521,7 +1510,8 @@ def redistribute_local_tensor(
                 device_mesh,
                 optimized_transform_infos,
                 current_spec.placements,
-                stringify_shard_order,
+                current_spec.shard_order,
+                current_spec.use_strided_shard_as_shard_order,
             ),
             is_explicit=is_explicit,
         )
