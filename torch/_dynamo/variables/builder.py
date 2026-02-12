@@ -214,6 +214,7 @@ from .functions import (
     CollectiveFunctionRewriteVariable,
     CreateTMADescriptorExperimentalVariable,
     CreateTMADescriptorStableVariable,
+    FiddleBuildableGetAttrVariable,
     FunctoolsPartialVariable,
     FunctoolsWrapsVariable,
     SysFunctionVariable,
@@ -1365,6 +1366,10 @@ class VariableBuilder:
             return CreateTMADescriptorStableVariable()
         elif value is set_allocator:
             return TritonSetAllocatorSkipVariable(value)
+        elif (
+            _fiddle_mod := sys.modules.get("fiddle._src.config")
+        ) is not None and value is _fiddle_mod.Buildable.__getattr__:
+            return FiddleBuildableGetAttrVariable(value, source=self.source)
         elif isinstance(value, torch.amp.autocast_mode.autocast):
             self.install_guards(GuardBuilder.ID_MATCH)
             return AutocastModeVariable(

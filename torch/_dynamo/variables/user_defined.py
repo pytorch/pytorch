@@ -1130,6 +1130,17 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # This is to avoid getattr_static calls to look up the subobj from the self.value.__class__
         self._subobj_from_class: dict[str, object] = {}
 
+        # Cache fiddle Buildable.__getattr__ to avoid sys.modules lookup on hot path
+        _fiddle_mod = sys.modules.get("fiddle._src.config")
+        if (
+            _fiddle_mod is not None
+            and isinstance(value, _fiddle_mod.Buildable)
+            and type(value).__getattr__ is _fiddle_mod.Buildable.__getattr__
+        ):
+            self._fiddle_buildable_getattr = _fiddle_mod.Buildable.__getattr__
+        else:
+            self._fiddle_buildable_getattr = None
+
         import torch.utils._pytree as pytree
 
         self.is_pytree_constant_class = pytree.is_constant_class(self.value_type)
@@ -1672,10 +1683,27 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 ):
                     # Manually trace out the nn module __getattr__ to avoid large compilation latency.
                     out = self.manually_trace_nn_module_getattr(tx, name)
+                elif self._fiddle_buildable_getattr is not None and self.source:
+                    # Route through VariableTracker.build so the builder wraps
+                    # Buildable.__getattr__ as FiddleBuildableGetAttrVariable.
+                    # FiddleBuildableGetAttrVariable short circuits the getattr
+                    # access and saves on compile time.
+                    new_source = AttrSource(
+                        AttrSource(self.source, "__getattr__"), "__func__"
+                    )
+                    fn_vt = VariableTracker.build(
+                        tx, self._fiddle_buildable_getattr, source=new_source
+                    )
+                    out = fn_vt.call_function(
+                        tx,
+                        [self, ConstantVariable.create(name)],
+                        {},
+                    )
                 else:
                     new_source = None
                     if self.source:
                         new_source = AttrSource(self.source, "__getattr__")
+                    # TODO (yidiwu): We should use VariableTracker.build here
                     out = variables.UserMethodVariable(
                         getattr_fn, self, source=new_source
                     ).call_function(tx, [ConstantVariable.create(name)], {})
