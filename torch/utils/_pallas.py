@@ -97,7 +97,7 @@ def has_cuda_pallas() -> bool:
 def is_torch_tpu_available() -> bool:
     """Check if torch_tpu is installed and available."""
     try:
-        import torch_tpu  # noqa: F401
+        import torch_tpu  # noqa: F401  # type: ignore[import]
 
         # Verify hardware/runtime access
         torch_tpu.api.tpu_device()
