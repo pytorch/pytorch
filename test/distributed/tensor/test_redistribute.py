@@ -38,6 +38,7 @@ from torch.distributed.tensor._redistribute import (
     _optimize_transform_infos,
     _TransformInfo,
     disable_redistribute_transform_optimization,
+    fill_transform_infos_unsharded_shape,
     redistribute_local_tensor,
     use_min_cost_redistribution_plan,
 )
@@ -915,9 +916,7 @@ class RedistributeTest(DTensorTestBase):
         planner = get_redistribute_planner(device_mesh, tensor_meta)
         # Clear any cached state from previous tests
         planner.partial_reduce_ops_in_target.clear()
-        planner.generate_graph_based_transform_infos(
-            src_spec, dst_spec, tuple(local_tensor.size())
-        )
+        planner.generate_graph_based_transform_infos(src_spec, dst_spec)
 
         # The planner should have collected "min" as the only reduce op
         self.assertEqual(
@@ -940,9 +939,7 @@ class RedistributeTest(DTensorTestBase):
 
         planner2 = get_redistribute_planner(device_mesh, tensor_meta)
         planner2.partial_reduce_ops_in_target.clear()
-        planner2.generate_graph_based_transform_infos(
-            src_spec2, dst_spec2, tuple(local_tensor.size())
-        )
+        planner2.generate_graph_based_transform_infos(src_spec2, dst_spec2)
 
         self.assertEqual(
             planner2.partial_reduce_ops_in_target,
@@ -974,9 +971,7 @@ class RedistributeTest(DTensorTestBase):
 
         planner3 = get_redistribute_planner(mesh_2d, tensor_meta_2d)
         planner3.partial_reduce_ops_in_target.clear()
-        planner3.generate_graph_based_transform_infos(
-            src_spec3, dst_spec3, tuple(local_tensor.size())
-        )
+        planner3.generate_graph_based_transform_infos(src_spec3, dst_spec3)
 
         self.assertEqual(
             planner3.partial_reduce_ops_in_target,
@@ -1762,7 +1757,7 @@ class TransformInfoTest(TestCase):
             ((Shard(0), Shard(1)), "all_to_all"),
         ]
         for placements, expected_key in test_cases:
-            info = _TransformInfo(0, placements, [8, 8])
+            info = _TransformInfo(0, placements)
             self.assertEqual(info._comm_type_key(), expected_key)
 
         # Local ops: return None
@@ -1773,7 +1768,7 @@ class TransformInfoTest(TestCase):
             # rejects no-ops in __post_init__, so we don't test it here
         ]
         for placements in local_cases:
-            info = _TransformInfo(0, placements, [8, 8])
+            info = _TransformInfo(0, placements)
             self.assertIsNone(info._comm_type_key())
 
 
@@ -1782,6 +1777,14 @@ class OptimizeFlattenedReductionsTest(TestCase):
 
     Uses fake process group since these tests don't perform actual communications.
     """
+
+    def _fill_and_optimize(
+        self, transform_infos, mesh, src_placements, dst_placements, full_tensor_shape
+    ):
+        filled = fill_transform_infos_unsharded_shape(
+            transform_infos, mesh, full_tensor_shape, src_placements
+        )
+        return _optimize_transform_infos(filled, mesh, src_placements, dst_placements)
 
     def setUp(self):
         super().setUp()
@@ -1800,14 +1803,15 @@ class OptimizeFlattenedReductionsTest(TestCase):
             _TransformInfo(
                 mesh_dim=0,
                 src_dst_placements=(Partial("sum"), Replicate()),
-                logical_shape=[8, 8],
             ),
             _TransformInfo(
                 mesh_dim=2,
                 src_dst_placements=(Partial("sum"), Replicate()),
-                logical_shape=[8, 8],
             ),
         ]
+
+        src_placements = (Partial("sum"), Replicate(), Partial("sum"))
+        dst_placements = (Replicate(), Replicate(), Replicate())
 
         # Use a fresh warning cache to avoid global side effects
         with patch(
@@ -1817,10 +1821,8 @@ class OptimizeFlattenedReductionsTest(TestCase):
             with self.assertLogs(
                 "torch.distributed.tensor._redistribute", level=logging.WARNING
             ) as log_context:
-                src_placements = (Partial("sum"), Replicate(), Partial("sum"))
-                dst_placements = (Replicate(), Replicate(), Replicate())
-                result = _optimize_transform_infos(
-                    transform_infos, mesh, src_placements, dst_placements
+                result = self._fill_and_optimize(
+                    transform_infos, mesh, src_placements, dst_placements, (8, 8)
                 )
 
             self.assertEqual(len(result), 2)
@@ -1842,8 +1844,8 @@ class OptimizeFlattenedReductionsTest(TestCase):
             with self.assertNoLogs(
                 "torch.distributed.tensor._redistribute", level=logging.WARNING
             ):
-                _optimize_transform_infos(
-                    transform_infos, mesh, src_placements, dst_placements
+                self._fill_and_optimize(
+                    transform_infos, mesh, src_placements, dst_placements, (8, 8)
                 )
 
     def test_consecutive_reductions_flattened(self):
@@ -1851,25 +1853,21 @@ class OptimizeFlattenedReductionsTest(TestCase):
         mesh = init_device_mesh("cpu", (2, 2, 2), mesh_dim_names=("A", "B", "C"))
         mesh["A", "B"]._flatten("A_B")
 
-        # Dims 0 and 1 are consecutive
         transform_infos = [
             _TransformInfo(
                 mesh_dim=0,
                 src_dst_placements=(Partial("sum"), Replicate()),
-                logical_shape=[8, 8],
             ),
             _TransformInfo(
                 mesh_dim=1,
                 src_dst_placements=(Partial("sum"), Replicate()),
-                logical_shape=[8, 8],
             ),
         ]
 
-        result = _optimize_transform_infos(
-            transform_infos,
-            mesh,
-            (Partial("sum"), Partial("sum"), Replicate()),
-            (Replicate(), Replicate(), Replicate()),
+        src_placements = (Partial("sum"), Partial("sum"), Replicate())
+        dst_placements = (Replicate(), Replicate(), Replicate())
+        result = self._fill_and_optimize(
+            transform_infos, mesh, src_placements, dst_placements, (8, 8)
         )
 
         self.assertEqual(len(result), 1)
@@ -1885,30 +1883,25 @@ class OptimizeFlattenedReductionsTest(TestCase):
         mesh = init_device_mesh("cpu", (2, 2, 2), mesh_dim_names=("A", "B", "C"))
         mesh["A", "C"]._flatten("A_C")
 
-        # Shard on dim 1 is being transformed to Replicate
         transform_infos = [
             _TransformInfo(
                 mesh_dim=0,
                 src_dst_placements=(Partial("sum"), Replicate()),
-                logical_shape=[8, 8],
             ),
             _TransformInfo(
                 mesh_dim=1,
                 src_dst_placements=(Shard(0), Replicate()),
-                logical_shape=[8, 8],
             ),
             _TransformInfo(
                 mesh_dim=2,
                 src_dst_placements=(Partial("sum"), Replicate()),
-                logical_shape=[8, 8],
             ),
         ]
 
-        result = _optimize_transform_infos(
-            transform_infos,
-            mesh,
-            (Partial("sum"), Shard(0), Partial("sum")),
-            (Replicate(), Replicate(), Replicate()),
+        src_placements = (Partial("sum"), Shard(0), Partial("sum"))
+        dst_placements = (Replicate(), Replicate(), Replicate())
+        result = self._fill_and_optimize(
+            transform_infos, mesh, src_placements, dst_placements, (8, 8)
         )
 
         # Non-consecutive allreduces should NOT be merged (would change order)
@@ -1924,25 +1917,21 @@ class OptimizeFlattenedReductionsTest(TestCase):
             _TransformInfo(
                 mesh_dim=0,
                 src_dst_placements=(Partial("sum"), Replicate()),
-                logical_shape=[8, 8],
             ),
             _TransformInfo(
                 mesh_dim=1,
                 src_dst_placements=(Partial("sum"), Replicate()),
-                logical_shape=[8, 8],
             ),
             _TransformInfo(
                 mesh_dim=2,
                 src_dst_placements=(Partial("sum"), Replicate()),
-                logical_shape=[8, 8],
             ),
         ]
 
-        result = _optimize_transform_infos(
-            transform_infos,
-            mesh,
-            (Partial("sum"), Partial("sum"), Partial("sum")),
-            (Replicate(), Replicate(), Replicate()),
+        src_placements = (Partial("sum"), Partial("sum"), Partial("sum"))
+        dst_placements = (Replicate(), Replicate(), Replicate())
+        result = self._fill_and_optimize(
+            transform_infos, mesh, src_placements, dst_placements, (8, 8)
         )
 
         self.assertEqual(len(result), 1)
@@ -1958,15 +1947,13 @@ class OptimizeFlattenedReductionsTest(TestCase):
             _TransformInfo(
                 mesh_dim=0,
                 src_dst_placements=(Partial("sum"), Replicate()),
-                logical_shape=[8, 8],
             ),
         ]
 
-        result = _optimize_transform_infos(
-            transform_infos,
-            mesh,
-            (Partial("sum"), Replicate(), Replicate()),
-            (Replicate(), Replicate(), Replicate()),
+        src_placements = (Partial("sum"), Replicate(), Replicate())
+        dst_placements = (Replicate(), Replicate(), Replicate())
+        result = self._fill_and_optimize(
+            transform_infos, mesh, src_placements, dst_placements, (8, 8)
         )
 
         self.assertEqual(len(result), 1)
@@ -2006,7 +1993,7 @@ class OptimizeFlattenedReductionsTest(TestCase):
 
         Transforms: dims 0 and 2 are Partial->S(0), dim 1 is S(0)->S(0) (no-op)
 
-        The intervening shard on dim 1 (size 4) means logical_shape = 8/4 = 2.
+        The intervening shard on dim 1 (size 4) means mesh_dim_unsharded_shape = 8/4 = 2.
         Flattened mesh for dims 0 and 2 has size 2*1 = 2.
         2 % 2 == 0, so flattening SHOULD be allowed.
 
@@ -2014,32 +2001,28 @@ class OptimizeFlattenedReductionsTest(TestCase):
         the intervening shard (dim 1), computing 2*4*1=8 instead of 2, and
         incorrectly rejecting flattening because 2 % 8 != 0.
 
-        The intervening shard is already accounted for in logical_shape, so it
+        The intervening shard is already accounted for in mesh_dim_unsharded_shape, so it
         should NOT be double-counted in effective_shard_mesh_size.
         """
         mesh = init_device_mesh("cpu", (2, 4, 1), mesh_dim_names=("A", "B", "C"))
         mesh["A", "C"]._flatten("A_C")
 
-        # Transforms only for dims where src != dst (dim 1 is S(0)->S(0), no transform)
-        # logical_shape = [2] because tensor is already sharded on dim 1 (8/4=2)
         transform_infos = [
             _TransformInfo(
                 mesh_dim=0,
                 src_dst_placements=(Partial("sum"), Shard(0)),
-                logical_shape=[2],
             ),
             _TransformInfo(
                 mesh_dim=2,
                 src_dst_placements=(Partial("sum"), Shard(0)),
-                logical_shape=[2],
             ),
         ]
 
         src_placements = (Partial("sum"), Shard(0), Partial("sum"))
         dst_placements = (Shard(0), Shard(0), Shard(0))
 
-        result = _optimize_transform_infos(
-            transform_infos, mesh, src_placements, dst_placements
+        result = self._fill_and_optimize(
+            transform_infos, mesh, src_placements, dst_placements, (8,)
         )
 
         # effective_shard_mesh_size should only count dims being transformed (0 and 2),
@@ -2048,7 +2031,7 @@ class OptimizeFlattenedReductionsTest(TestCase):
         self.assertIsInstance(result[0], _FlattenedTransformInfo)
 
     def test_reduce_scatter_with_prior_shard_flattened(self):
-        """Reduce-scatter should be flattened when prior shard is already in logical_shape.
+        """Reduce-scatter should be flattened when prior shard is already in the shape.
 
         Scenario:
         - Tensor shape: (24,)
@@ -2058,34 +2041,28 @@ class OptimizeFlattenedReductionsTest(TestCase):
 
         Transforms: dims 1 and 2 are Partial->S(0), dim 0 is S(0)->S(0) (no-op)
 
-        The outermost transform is on mesh_dim=1, with logical_shape=[12]
-        (already reduced from global 24 by dim 0's shard).
-
         effective_shard_mesh_size should only include dims >= 1, so = 2*2 = 4.
         12 % 4 == 0, so flattening should be ALLOWED.
         """
         mesh = init_device_mesh("cpu", (2, 2, 2), mesh_dim_names=("A", "B", "C"))
         mesh["B", "C"]._flatten("B_C")
 
-        # Transforms only for dims where src != dst (dim 0 is S(0)->S(0), no transform)
         transform_infos = [
             _TransformInfo(
                 mesh_dim=1,
                 src_dst_placements=(Partial("sum"), Shard(0)),
-                logical_shape=[12],  # after dim 0's shard (24/2=12)
             ),
             _TransformInfo(
                 mesh_dim=2,
                 src_dst_placements=(Partial("sum"), Shard(0)),
-                logical_shape=[12],  # same, since dim 1 is Partial
             ),
         ]
 
         src_placements = (Shard(0), Partial("sum"), Partial("sum"))
         dst_placements = (Shard(0), Shard(0), Shard(0))
 
-        result = _optimize_transform_infos(
-            transform_infos, mesh, src_placements, dst_placements
+        result = self._fill_and_optimize(
+            transform_infos, mesh, src_placements, dst_placements, (24,)
         )
 
         # Should be flattened: 12 % 4 == 0
@@ -2112,12 +2089,10 @@ class OptimizeFlattenedReductionsTest(TestCase):
             _TransformInfo(
                 mesh_dim=0,
                 src_dst_placements=(Partial("sum"), Shard(0)),
-                logical_shape=[10],  # Not evenly divisible by 6
             ),
             _TransformInfo(
                 mesh_dim=1,
                 src_dst_placements=(Partial("sum"), Shard(0)),
-                logical_shape=[10],
             ),
         ]
 
@@ -2132,8 +2107,8 @@ class OptimizeFlattenedReductionsTest(TestCase):
             with self.assertLogs(
                 "torch.distributed.tensor._redistribute", level=logging.WARNING
             ) as log_context:
-                result = _optimize_transform_infos(
-                    transform_infos, mesh, src_placements, dst_placements
+                result = self._fill_and_optimize(
+                    transform_infos, mesh, src_placements, dst_placements, (10,)
                 )
 
             # Should NOT be flattened: 10 % 6 != 0
@@ -2172,20 +2147,19 @@ class OptimizeFlattenedReductionsTest(TestCase):
             _TransformInfo(
                 mesh_dim=1,
                 src_dst_placements=(Shard(0), Replicate()),
-                logical_shape=[8, 8],
             ),
             _TransformInfo(
                 mesh_dim=0,
                 src_dst_placements=(Shard(0), Replicate()),
-                logical_shape=[8, 8],
             ),
         ]
 
-        result = _optimize_transform_infos(
+        result = self._fill_and_optimize(
             transform_infos,
             mesh,
             (Shard(0), Shard(0), Replicate()),
             (Replicate(), Replicate(), Replicate()),
+            (8, 8),
         )
 
         self.assertEqual(len(result), 1)
@@ -2201,20 +2175,19 @@ class OptimizeFlattenedReductionsTest(TestCase):
             _TransformInfo(
                 mesh_dim=0,
                 src_dst_placements=(Partial("sum"), Replicate()),  # allreduce
-                logical_shape=[8, 8],
             ),
             _TransformInfo(
                 mesh_dim=1,
                 src_dst_placements=(Shard(0), Replicate()),  # all-gather
-                logical_shape=[8, 8],
             ),
         ]
 
-        result = _optimize_transform_infos(
+        result = self._fill_and_optimize(
             transform_infos,
             mesh,
             (Partial("sum"), Shard(0), Replicate()),
             (Replicate(), Replicate(), Replicate()),
+            (8, 8),
         )
 
         # Should remain as 2 separate transforms since collective types differ
@@ -2235,20 +2208,19 @@ class OptimizeFlattenedReductionsTest(TestCase):
             _TransformInfo(
                 mesh_dim=0,
                 src_dst_placements=(Partial("sum"), Replicate()),
-                logical_shape=[8, 8],
             ),
             _TransformInfo(
                 mesh_dim=1,
                 src_dst_placements=(Partial("avg"), Replicate()),
-                logical_shape=[8, 8],
             ),
         ]
 
-        result = _optimize_transform_infos(
+        result = self._fill_and_optimize(
             transform_infos,
             mesh,
             (Partial("sum"), Partial("avg")),
             (Replicate(), Replicate()),
+            (8, 8),
         )
 
         # Should be merged into 1 flattened transform since sum/avg can be combined
@@ -2269,20 +2241,19 @@ class OptimizeFlattenedReductionsTest(TestCase):
             _TransformInfo(
                 mesh_dim=0,
                 src_dst_placements=(Partial("sum"), Shard(0)),
-                logical_shape=[8, 8],
             ),
             _TransformInfo(
                 mesh_dim=1,
                 src_dst_placements=(Partial("avg"), Shard(0)),
-                logical_shape=[8, 8],
             ),
         ]
 
-        result = _optimize_transform_infos(
+        result = self._fill_and_optimize(
             transform_infos,
             mesh,
             (Partial("sum"), Partial("avg")),
             (Shard(0), Shard(0)),
+            (8, 8),
         )
 
         # Should be merged into 1 flattened transform since sum/avg can be combined
@@ -2311,12 +2282,10 @@ class OptimizeFlattenedReductionsTest(TestCase):
             _TransformInfo(
                 mesh_dim=1,
                 src_dst_placements=(Partial("sum"), Shard(0)),
-                logical_shape=[16],
             ),
             _TransformInfo(
                 mesh_dim=0,
                 src_dst_placements=(Partial("sum"), Shard(0)),
-                logical_shape=[4],  # After first reduce_scatter: 16/4=4
             ),
         ]
 
@@ -2328,11 +2297,12 @@ class OptimizeFlattenedReductionsTest(TestCase):
             with self.assertLogs(
                 "torch.distributed.tensor._redistribute", level=logging.WARNING
             ) as log_context:
-                result = _optimize_transform_infos(
+                result = self._fill_and_optimize(
                     transform_infos_reversed,
                     mesh,
                     (Partial("sum"), Partial("sum")),
                     (Shard(0), Shard(0)),
+                    (16,),
                 )
 
             # we do not flatten due to non-ascending order
@@ -2353,12 +2323,10 @@ class OptimizeFlattenedReductionsTest(TestCase):
             _TransformInfo(
                 mesh_dim=0,
                 src_dst_placements=(Partial("sum"), Replicate()),
-                logical_shape=[8, 8],
             ),
             _TransformInfo(
                 mesh_dim=1,
                 src_dst_placements=(Partial("sum"), Replicate()),
-                logical_shape=[8, 8],
             ),
         ]
 
@@ -2366,25 +2334,23 @@ class OptimizeFlattenedReductionsTest(TestCase):
         dst_placements = (Replicate(), Replicate(), Replicate())
 
         # Without the kill switch, transforms should be merged into one flattened op.
-        result = _optimize_transform_infos(
-            transform_infos, mesh, src_placements, dst_placements
+        result = self._fill_and_optimize(
+            transform_infos, mesh, src_placements, dst_placements, (8, 8)
         )
         self.assertEqual(len(result), 1)
         self.assertIsInstance(result[0], _FlattenedTransformInfo)
 
         # With the kill switch, the original transforms should be returned as-is.
         with disable_redistribute_transform_optimization():
-            result = _optimize_transform_infos(
-                transform_infos, mesh, src_placements, dst_placements
+            result = self._fill_and_optimize(
+                transform_infos, mesh, src_placements, dst_placements, (8, 8)
             )
         self.assertEqual(len(result), 2)
         self.assertTrue(all(isinstance(r, _TransformInfo) for r in result))
-        self.assertIs(result[0], transform_infos[0])
-        self.assertIs(result[1], transform_infos[1])
 
         # After exiting the context manager, optimization should be restored.
-        result = _optimize_transform_infos(
-            transform_infos, mesh, src_placements, dst_placements
+        result = self._fill_and_optimize(
+            transform_infos, mesh, src_placements, dst_placements, (8, 8)
         )
         self.assertEqual(len(result), 1)
         self.assertIsInstance(result[0], _FlattenedTransformInfo)
