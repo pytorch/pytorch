@@ -311,7 +311,8 @@ class autocast:
             elif self.device == "mps":
                 enabled = _is_dtype_supported(self, device_supported_dtypes)
                 # Special case for MPS bfloat16 support on macOS < 14
-                if (self.fast_dtype == torch.bfloat16
+                if (
+                    self.fast_dtype == torch.bfloat16
                     and not torch.backends.mps.is_macos_or_newer(14, 0)
                 ):
                     error_message = (
