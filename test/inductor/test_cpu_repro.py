@@ -5720,6 +5720,38 @@ class CPUReproTests(TestCase):
             code
         )
 
+    @config.patch(freezing=True)
+    def test_add_layernorm(self):
+        """
+        Original PR: https://github.com/pytorch/pytorch/pull/141766
+        """
+        from torch.testing._internal.common_quantization import (
+            _static_reference_quantized_linear_module,
+        )
+
+        class Model(torch.nn.Module):
+            def __init__(self, example_input):
+                super().__init__()
+                self.dense = _static_reference_quantized_linear_module(
+                    N=768, K=768, bias=True, example_input=example_input
+                )
+                self.layernorm = torch.nn.LayerNorm(768, eps=1e-12)
+
+            def forward(self, context_layer, hidden_states):
+                attention_output = self.dense(context_layer)
+                hidden_states = attention_output + hidden_states
+                layer_output = self.layernorm(hidden_states)
+                return layer_output
+
+        example_batch = (torch.rand(1, 197, 768), torch.rand(1, 197, 768))
+        model = Model(example_batch[0]).eval()
+        model = torch.export.export(model, example_batch, strict=True).module()
+
+        with torch.no_grad():
+            metrics.reset()
+            torch.compile(model)(*example_batch)
+            check_metrics_vec_kernel_count(3)
+
     def test_dropout(self):
         class Model(nn.Module):
             def __init__(self, dim):
