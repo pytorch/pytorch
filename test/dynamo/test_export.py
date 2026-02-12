@@ -384,7 +384,9 @@ def forward(self, x, y):
             _error_on_data_dependent_ops=True,
         )(*[x1, x2])
         ep = torch.export.export(fx_model, (x1, x2))
-        res = torch.compile(ep.module(), backend="eager", dynamic=True, fullgraph=True)(x1, x2)
+        res = torch.compile(ep.module(), backend="eager", dynamic=True, fullgraph=True)(
+            x1, x2
+        )
         self.assertTrue(torch._dynamo.utils.same(res, M()(x1, x2)))
 
     def test_dupes(self):

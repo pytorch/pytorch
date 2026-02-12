@@ -493,7 +493,9 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         def shift_right(tensor: torch.Tensor) -> torch.Tensor:
             return (tensor >> 2).to(torch.long)
 
-        opt_fn = torch.compile(shift_right, fullgraph=True, dynamic=True, backend="eager")
+        opt_fn = torch.compile(
+            shift_right, fullgraph=True, dynamic=True, backend="eager"
+        )
         sample_input = torch.tensor([4, 4, 16, 32], dtype=torch.uint8)
         opt_fn(sample_input)
 

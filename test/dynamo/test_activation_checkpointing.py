@@ -285,7 +285,9 @@ class ActivationCheckpointingViaTagsTests(
                         _log_export_usage=False,
                     )
                     # NOTE: this is necessary for rng to be added to the exported graph
-                    return torch.compile(gm, fullgraph=False, backend="eager")(*runtime_args)
+                    return torch.compile(gm, fullgraph=False, backend="eager")(
+                        *runtime_args
+                    )
 
                 return runtime_wrapper
 
@@ -2122,7 +2124,9 @@ class GraphModule(torch.nn.Module):
                 x=input_eager.x.detach().clone().requires_grad_(True)
             )
             torch.manual_seed(0)
-            compiled_fn = torch.compile(checkpointed_forward, fullgraph=True, backend="eager")
+            compiled_fn = torch.compile(
+                checkpointed_forward, fullgraph=True, backend="eager"
+            )
             output_compiled = compiled_fn(input_compiled)
             output_compiled.y.sum().backward()
 
