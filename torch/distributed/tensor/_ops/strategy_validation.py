@@ -237,93 +237,6 @@ def normalize_combo_key(
     return (normalized_inputs, normalized_output)
 
 
-def placements_equivalent(p1, p2, shape: tuple[int, ...]) -> bool:
-    """
-    Check if two placements are equivalent for a given tensor shape.
-
-    Shard(dim) is equivalent to Replicate() when shape[dim] == 1, because
-    sharding a size-1 dimension produces the same result as replicating.
-    """
-
-    # Check if both are trivial shards (equivalent to each other and to Replicate)
-    if is_trivial_shard(p1, shape) and is_trivial_shard(p2, shape):
-        return True
-
-    # Check Shard vs Replicate equivalence for size-1 dims
-    if isinstance(p1, Replicate) and is_trivial_shard(p2, shape):
-        return True
-    if isinstance(p2, Replicate) and is_trivial_shard(p1, shape):
-        return True
-
-    # Same type comparisons
-    if type(p1) is type(p2):
-        if isinstance(p1, Shard):
-            return p1.dim == p2.dim
-        if isinstance(p1, Partial):
-            return p1.reduce_op == p2.reduce_op
-        return True  # Both Replicate
-
-    return False
-
-
-def has_equivalent_rule(
-    combo_key: tuple,
-    rules: set,
-    input_shapes: tuple[tuple[int, ...], ...],
-    output_shape: tuple[int, ...],
-) -> bool:
-    """
-    Check if any rule in the set is equivalent to the given combo.
-
-    Args:
-        combo_key: (input_placements, output_placement) tuple where placements are strings
-        rules: Set of (input_placements, output_placement) tuples where placements are strings
-        input_shapes: Shapes of input tensors
-        output_shape: Shape of output tensor
-    """
-    input_placements_strs, output_placement_str = combo_key
-
-    # Parse combo placements
-    combo_input_placements = [parse_placement(s) for s in input_placements_strs]
-    combo_output_placement = parse_placement(output_placement_str)
-
-    if any(p is None for p in combo_input_placements) or combo_output_placement is None:
-        return False
-
-    for rule_key in rules:
-        rule_input_strs, rule_output_str = rule_key
-        if len(rule_input_strs) != len(input_placements_strs):
-            continue
-
-        # Parse rule placements
-        rule_input_placements = [parse_placement(s) for s in rule_input_strs]
-        rule_output_placement = parse_placement(rule_output_str)
-
-        if (
-            any(p is None for p in rule_input_placements)
-            or rule_output_placement is None
-        ):
-            continue
-
-        # Check all input placements match (considering equivalence)
-        inputs_match = all(
-            placements_equivalent(p1, p2, shape)
-            for p1, p2, shape in zip(
-                combo_input_placements, rule_input_placements, input_shapes
-            )
-        )
-        if not inputs_match:
-            continue
-
-        # Check output placement matches (considering equivalence)
-        if placements_equivalent(
-            combo_output_placement, rule_output_placement, output_shape
-        ):
-            return True
-
-    return False
-
-
 def get_1d_input_placements_for_tensor(
     t: torch.Tensor, include_partial: bool = False
 ) -> list:
@@ -1009,6 +922,15 @@ def _validate_with_mitigations(
     return is_valid
 
 
+def _assert_keys_normalized(keys, input_shapes, output_shape):
+    """Assert all combo keys have trivial shards already normalized to Replicate."""
+    for key in keys:
+        assert key == normalize_combo_key(key, input_shapes, output_shape), (
+            f"Key {key} contains un-normalized trivial shards; "
+            f"call normalize_combo_key before _compare_rules"
+        )
+
+
 def _compare_rules(
     ground_truth_valid,
     dtensor_rules,
@@ -1025,10 +947,11 @@ def _compare_rules(
     if not dtensor_rules:
         return
 
+    _assert_keys_normalized(ground_truth_valid, input_shapes, output_shape)
+    _assert_keys_normalized(dtensor_rules, input_shapes, output_shape)
+
     for combo_key in ground_truth_valid:
-        if combo_key in dtensor_rules or has_equivalent_rule(
-            combo_key, dtensor_rules, input_shapes, output_shape
-        ):
+        if combo_key in dtensor_rules:
             stats.true_positives += 1
         else:
             stats.false_negatives.append(
@@ -1046,9 +969,7 @@ def _compare_rules(
             )
 
     for combo_key in dtensor_rules:
-        if combo_key not in ground_truth_valid and not has_equivalent_rule(
-            combo_key, ground_truth_valid, input_shapes, output_shape
-        ):
+        if combo_key not in ground_truth_valid:
             stats.false_positives.append(
                 Discrepancy(
                     input_placements=combo_key[0],
