@@ -257,7 +257,7 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
 
   // Indices are limited to integer fp precision, so counts can fit in
   // int32, regardless of IndexType
-  __shared__ int smem[64];
+  __shared__ int smem[256];
   __shared__ int writeIndexStart; // index to track where to write results. This is shared by all threads in the block. Increases atomically.
 
   IndexType slice = getLinearBlockId<IndexType>();
