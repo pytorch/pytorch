@@ -967,7 +967,7 @@ class BuiltinMethodVariable(BaseUserFunctionVariable):
         method_self = self.fn.__self__
         name = self.fn.__name__
         obj_source = self.source and AttrSource(self.source, "__self__")
-        obj_vt = VariableTracker.build(tx, method_self, obj_source, realize=True)
+        obj_vt = VariableTracker.build(tx, method_self, obj_source)
         return obj_vt.call_method(tx, name, args, kwargs)
 
 
