@@ -155,6 +155,16 @@ struct FromImpl<ScalarType> {
         return torch::stable::detail::from(torch_dtype_float8_e8m0fnu());
       case ScalarType::Float4_e2m1fn_x2:
         return torch::stable::detail::from(torch_dtype_float4_e2m1fn_x2());
+      case ScalarType::QInt8:
+        return torch::stable::detail::from(torch_dtype_qint8());
+      case ScalarType::QUInt8:
+        return torch::stable::detail::from(torch_dtype_quint8());
+      case ScalarType::QInt32:
+        return torch::stable::detail::from(torch_dtype_qint32());
+      case ScalarType::QUInt4x2:
+        return torch::stable::detail::from(torch_dtype_quint4x2());
+      case ScalarType::QUInt2x4:
+        return torch::stable::detail::from(torch_dtype_quint2x4());
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_11_0
       default:
         STD_TORCH_CHECK(
@@ -539,6 +549,16 @@ struct ToImpl<ScalarType> {
       return ScalarType::Float8_e8m0fnu;
     } else if (shim_scalartype == torch_dtype_float4_e2m1fn_x2()) {
       return ScalarType::Float4_e2m1fn_x2;
+    } else if (shim_scalartype == torch_dtype_qint8()) {
+      return ScalarType::QInt8;
+    } else if (shim_scalartype == torch_dtype_quint8()) {
+      return ScalarType::QUInt8;
+    } else if (shim_scalartype == torch_dtype_qint32()) {
+      return ScalarType::QInt32;
+    } else if (shim_scalartype == torch_dtype_quint4x2()) {
+      return ScalarType::QUInt4x2;
+    } else if (shim_scalartype == torch_dtype_quint2x4()) {
+      return ScalarType::QUInt2x4;
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_11_0
     } else {
       STD_TORCH_CHECK(

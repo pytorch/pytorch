@@ -163,6 +163,11 @@ torch_set_requires_grad(AtenTensorHandle tensor, bool requires_grad);
 // torch/csrc/inductor/aoti_torch/c/shim.h
 AOTI_TORCH_EXPORT int32_t torch_dtype_float8_e8m0fnu();
 AOTI_TORCH_EXPORT int32_t torch_dtype_float4_e2m1fn_x2();
+AOTI_TORCH_EXPORT int32_t torch_dtype_qint8();
+AOTI_TORCH_EXPORT int32_t torch_dtype_quint8();
+AOTI_TORCH_EXPORT int32_t torch_dtype_qint32();
+AOTI_TORCH_EXPORT int32_t torch_dtype_quint4x2();
+AOTI_TORCH_EXPORT int32_t torch_dtype_quint2x4();
 
 // Creates a tensor from an existing data blob with an optional deleter.
 // The deleter is called with the data pointer when the tensor's storage
