@@ -2713,30 +2713,6 @@ class DeviceCachingAllocator {
     return pp->use_count;
   }
 
-  MempoolId_t getCaptureMempoolId(cudaStream_t stream) {
-    std::lock_guard<std::recursive_mutex> lock(mutex);
-    // Search captures_underway in LIFO order to find the mempool for this
-    // stream
-    for (auto it = captures_underway.rbegin(); it != captures_underway.rend();
-         ++it) {
-      if (it->second(stream)) {
-        return it->first;
-      }
-    }
-    return {0, 0}; // Not capturing
-  }
-
-  MempoolId_t getBlockMempoolId(void* ptr) {
-    std::lock_guard<std::recursive_mutex> lock(mutex);
-    // Search active_blocks for the block with this pointer
-    for (Block* block : active_blocks) {
-      if (block->ptr == ptr && block->pool != nullptr) {
-        return block->pool->owner_MempoolId();
-      }
-    }
-    return {0, 0}; // Not found or default pool
-  }
-
   void addPeerAccess(c10::DeviceIndex dev_to_access) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     if (std::find(
@@ -4395,17 +4371,6 @@ class NativeCachingAllocator : public CUDAAllocator {
       override {
     assertValidDevice(device);
     return device_allocator[device]->getPoolUseCount(std::move(mempool_id));
-  }
-
-  MempoolId_t getCaptureMempoolId(c10::DeviceIndex device, cudaStream_t stream)
-      override {
-    assertValidDevice(device);
-    return device_allocator[device]->getCaptureMempoolId(stream);
-  }
-
-  MempoolId_t getBlockMempoolId(c10::DeviceIndex device, void* ptr) override {
-    assertValidDevice(device);
-    return device_allocator[device]->getBlockMempoolId(ptr);
   }
 
   void* raw_alloc(size_t nbytes) override {

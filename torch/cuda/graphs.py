@@ -7,7 +7,7 @@ import traceback
 import typing
 import weakref
 from collections.abc import Callable
-from typing import overload, TYPE_CHECKING, TypeAlias, Union
+from typing import Any, overload, TYPE_CHECKING, TypeAlias, Union
 from typing_extensions import ParamSpec, Self, TypeVar
 
 import torch
@@ -29,6 +29,7 @@ class _TrackedTensorInfo:
         "creation_traceback_cpp",
         "deletion_traceback_py",
         "data_ptr",
+        "device_index",
     )
 
     def __init__(self, tensor: Tensor) -> None:
@@ -38,6 +39,7 @@ class _TrackedTensorInfo:
         self.creation_traceback_cpp = get_cpp_backtrace()
         self.deletion_traceback_py: str | None = None
         self.data_ptr = tensor.data_ptr()
+        self.device_index = tensor.device.index
 
         def on_release(_: weakref.ref[Tensor]) -> None:
             try:
@@ -130,14 +132,14 @@ class CUDAGraph(_CUDAGraph):
 
     _external_inputs: dict[int, _TrackedTensorInfo]
     _internal_outputs: set[int]
-    _check_input_liveness: bool
+    _memory_snapshot: Any = None
     _tracking_mode: _TensorTrackingMode | None
 
     def __new__(cls, keep_graph: bool = False) -> Self:
         instance = super().__new__(cls, keep_graph)
         instance._external_inputs = {}
         instance._internal_outputs = set()
-        instance._check_input_liveness = False
+        instance._memory_snapshot = None
         instance._tracking_mode = None
         return instance
 
@@ -157,9 +159,9 @@ class CUDAGraph(_CUDAGraph):
     def _start_input_tracking(self) -> None:
         from torch.utils._cuda_debug import _TensorTrackingMode
 
-        self._check_input_liveness = True
         self._external_inputs.clear()
         self._internal_outputs.clear()
+        self._memory_snapshot = None
         # Note that this call causes a circular reference. We use the __del__
         # method to release the ref to the tracker.
         self._tracking_mode = _TensorTrackingMode(self)
@@ -170,6 +172,13 @@ class CUDAGraph(_CUDAGraph):
             self._tracking_mode.__exit__(None, None, None)
             self._tracking_mode = None
 
+    def _get_memory_snapshot(self, capture_pool: _POOL_HANDLE) -> list[dict[str, Any]]:
+        if self._memory_snapshot is None:
+            self._memory_snapshot = torch.cuda.memory.memory_snapshot(
+                capture_pool, include_traces=False
+            )
+        return self._memory_snapshot
+
     def __del__(self) -> None:
         try:
             # Release all the input tracking state
@@ -179,8 +188,29 @@ class CUDAGraph(_CUDAGraph):
         except Exception:
             pass  # don't raise under GC
 
+    def _is_tensor_from_capture_pool(self, tensor: _TrackedTensorInfo) -> bool:
+        capture_pool = self.pool()
+        if capture_pool == (0, 0):
+            return False
+        device = tensor.device_index
+        if device is None:
+            return False
+        snapshot = self._get_memory_snapshot(capture_pool)
+        tensor_ptr = tensor.data_ptr
+        for meminfo in snapshot:
+            if meminfo["device"] != device:
+                continue
+            for block in meminfo["blocks"]:
+                if block["address"] == tensor_ptr and "active" in block["state"]:
+                    return True
+        return False
+
     def _check_external_inputs_alive(self) -> None:
-        dead = [i for i in self._external_inputs.values() if not i.is_alive()]
+        dead = [
+            i
+            for i in self._external_inputs.values()
+            if not i.is_alive() and not self._is_tensor_from_capture_pool(i)
+        ]
         if not dead:
             return
 

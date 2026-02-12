@@ -187,22 +187,6 @@ class CUDAAllocator : public DeviceAllocator {
         " does not yet support checkPoolLiveAllocations. "
         "If you need it, please file an issue describing your use case.");
   }
-
-  // Returns the mempool_id that allocations on the given stream are currently
-  // being directed to, or {0,0} if no capture is underway on that stream.
-  virtual MempoolId_t getCaptureMempoolId(
-      c10::DeviceIndex /*device*/,
-      cudaStream_t /*stream*/) {
-    return {0, 0};
-  }
-
-  // Returns the mempool_id of the pool that owns the block at the given
-  // pointer, or {0,0} if the block belongs to the default pool or is not found.
-  virtual MempoolId_t getBlockMempoolId(
-      c10::DeviceIndex /*device*/,
-      void* /*ptr*/) {
-    return {0, 0};
-  }
   virtual ShareableHandle shareIpcHandle(void* ptr) = 0;
   virtual std::shared_ptr<void> getIpcDevPtr(std::string handle) = 0;
   virtual bool isHistoryEnabled() {
@@ -453,16 +437,6 @@ inline void setNoSplit(c10::DeviceIndex device, MempoolId_t mempool_id) {
 }
 inline int getPoolUseCount(c10::DeviceIndex device, MempoolId_t mempool_id) {
   return get()->getPoolUseCount(device, mempool_id);
-}
-
-inline MempoolId_t getCaptureMempoolId(
-    c10::DeviceIndex device,
-    cudaStream_t stream) {
-  return get()->getCaptureMempoolId(device, stream);
-}
-
-inline MempoolId_t getBlockMempoolId(c10::DeviceIndex device, void* ptr) {
-  return get()->getBlockMempoolId(device, ptr);
 }
 
 // Not part of CUDA_ALLOCATOR_BACKEND_INTERFACE
