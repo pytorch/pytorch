@@ -20,6 +20,5 @@ optree==0.17.0 ; python_version >= "3.14"
 psutil==7.2.2
 spin==0.17
 sympy==1.13.3
-typing-extensions==4.12.2 ; python_version < "3.14"
-typing-extensions==4.15.0 ; python_version >= "3.14"
+typing-extensions==4.15.0
 wheel==0.45.1

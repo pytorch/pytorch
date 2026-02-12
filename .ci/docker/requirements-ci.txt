@@ -269,8 +269,7 @@ scipy==1.16.2 ; python_version >= "3.14"
 #test that import:
 
 # needed by torchgen utils
-typing-extensions==4.12.2 ; python_version < "3.14"
-typing-extensions==4.15.0 ; python_version >= "3.14"
+typing-extensions==4.15.0 
 #Description: type hints for python
 #Pinned versions:
 #test that import:
@@ -372,9 +371,9 @@ pwlf==2.2.1
 # To build PyTorch itself
 pyyaml==6.0.3
 pyzstd==0.16.2
-setuptools==78.1.1
-packaging==23.1
-six==1.16.0
+setuptools==79.0.1
+packaging==25.0
+six==1.17.0
 
 scons==4.5.2 ; platform_machine == "aarch64"
 
@@ -388,7 +387,7 @@ dataclasses_json==0.6.7
 #Pinned versions: 0.6.7
 #test that import:
 
-cmake==3.31.6
+cmake==4.0.0
 #Description: required for building
 
 tlparse==0.4.0
