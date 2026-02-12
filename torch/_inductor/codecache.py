@@ -38,6 +38,7 @@ from typing import Any, cast, Generic, NoReturn, Optional, TYPE_CHECKING, TypeVa
 from typing_extensions import override, Self
 
 import torch
+import torch._library.opaque_object as opaque_object
 import torch.distributed as dist
 from torch import SymInt, Tensor
 from torch._dynamo.device_interface import get_interface_for_device
@@ -94,6 +95,7 @@ from torch._inductor.utils import (
     is_windows,
     XPU_KERNEL_FORMAT,
 )
+from torch._library.fake_class_registry import FakeScriptObject
 from torch._logging import trace_structured
 from torch._subclasses.fake_tensor import (
     extract_tensor_metadata,
@@ -528,6 +530,7 @@ class FxGraphCachePickler(pickle.Pickler):
                 torch.fx.experimental._backward_state.BackwardState: functools.partial(
                     self._reduce_unsupported
                 ),
+                FakeScriptObject: functools.partial(self._reduce_fake_script_object),
             }
         )
         if has_user_defined_triton_kernels:
@@ -617,6 +620,22 @@ class FxGraphCachePickler(pickle.Pickler):
         code = re.sub(r"constant_args_idx = \d+", "", code)
         data["_code"] = code
         return fn, (data, imports)
+
+    def _reduce_fake_script_object(
+        self, t: FakeScriptObject
+    ) -> tuple[Callable[..., Any], tuple[Any, ...]]:
+        if t.real_obj is not None:
+            cls = type(t.real_obj)
+            # This is the only case where I'm sure it's cache safe.
+            # I have not worked out the details for everything else
+            # but I'm sure we could
+            if (
+                opaque_object.is_opaque_type(cls)
+                and opaque_object.should_hoist(cls)
+                and not opaque_object.has_members(cls)
+            ):
+                return (_ident, (t.script_class_name,))
+        return (_ident, (t.wrapped_obj, t.script_class_name, t.real_obj))
 
     def dumps(self, obj: Any) -> bytes:
         """

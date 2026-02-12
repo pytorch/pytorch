@@ -1304,6 +1304,27 @@ def clear_caches() -> None:
 
 
 @contextlib.contextmanager
+def _set_env(key: str, value: str) -> Iterator[None]:
+    """Thread-safe env var set/restore using atomic C-level lookups.
+
+    We avoid mock.patch.dict(os.environ, ...) because it internally calls
+    os.environ.copy(), which iterates all env var keys then fetches values in
+    separate steps. That approach is not atomic and can race with background threads
+    (e.g. Triton async compilation) modifying the environment, causing KeyError,
+    so we use os.environ.get() for individual keys which is an atomic C-level lookup.
+    """
+    old = os.environ.get(key)
+    try:
+        os.environ[key] = value
+        yield
+    finally:
+        if old is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = old
+
+
+@contextlib.contextmanager
 def fresh_cache(
     cache_entries: Optional[dict[str, Any]] = None,
     dir: Optional[str] = None,
@@ -1321,14 +1342,12 @@ def fresh_cache(
 
     inductor_cache_dir = normalize_path_separator(tempfile.mkdtemp(dir=dir))
     try:
-        with mock.patch.dict(
-            os.environ, {"TORCHINDUCTOR_CACHE_DIR": inductor_cache_dir}
-        ):
+        with _set_env("TORCHINDUCTOR_CACHE_DIR", inductor_cache_dir):
             log.debug("Using inductor cache dir %s", inductor_cache_dir)
             triton_cache_dir = normalize_path_separator(
                 os.path.join(inductor_cache_dir, "triton")
             )
-            with mock.patch.dict(os.environ, {"TRITON_CACHE_DIR": triton_cache_dir}):
+            with _set_env("TRITON_CACHE_DIR", triton_cache_dir):
                 yield
                 if isinstance(cache_entries, dict):
                     assert len(cache_entries) == 0, "expected empty cache_entries dict"
@@ -2829,6 +2848,7 @@ def get_gpu_shared_memory() -> int:
 def get_max_numwarps() -> int:
     if torch.cuda.is_available():
         warp_size = torch.cuda.get_device_properties().warp_size
+        # pyrefly: ignore [missing-attribute]
         max_threads_per_block = torch.cuda.get_device_properties().max_threads_per_block
     else:
         # Defaults
@@ -3239,8 +3259,10 @@ def dump_node_schedule(node_schedule: Sequence[BaseSchedulerNode]) -> None:
     print(f"Node schedule with {len(node_schedule)} nodes")
     for idx, node in enumerate(node_schedule):
         print(f" {idx:3}:")
+        # pyrefly: ignore [unnecessary-comparison]
         if node is EnableReduction:
             print("enable reduction")
+        # pyrefly: ignore [unnecessary-comparison]
         elif node is DisableReduction:
             print("disable reduction")
         elif isinstance(node, SchedulerNode):
