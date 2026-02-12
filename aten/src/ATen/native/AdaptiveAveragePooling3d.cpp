@@ -129,7 +129,7 @@ void adaptive_avg_pool3d_out_cpu_template(
     AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
         input.scalar_type(), "adaptive_avg_pool3d_cpu", [&] {
           auto input_data = input.const_data_ptr<scalar_t>();
-          auto output_data = output.data_ptr<scalar_t>();
+          auto output_data = output.mutable_data_ptr<scalar_t>();
           adaptive_avg_pool3d_out_frame<scalar_t>(
               input_data,
               output_data,
@@ -152,7 +152,7 @@ void adaptive_avg_pool3d_out_cpu_template(
     AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
         input.scalar_type(), "adaptive_avg_pool3d_cpu", [&] {
           auto input_data = input.const_data_ptr<scalar_t>();
-          auto output_data = output.data_ptr<scalar_t>();
+          auto output_data = output.mutable_data_ptr<scalar_t>();
           at::parallel_for(0, n, 1, [&](int64_t start, int64_t end) {
             for (const auto b : c10::irange(start, end)) {
               adaptive_avg_pool3d_out_frame<scalar_t>(
@@ -252,7 +252,7 @@ Tensor& adaptive_avg_pool3d_backward_out_cpu_template(
     AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
         input.scalar_type(), "adaptive_avg_pool3d_backward_cpu", [&] {
           /* get raw pointers */
-          scalar_t* gradInput_data = gradInput.data_ptr<scalar_t>();
+          scalar_t* gradInput_data = gradInput.mutable_data_ptr<scalar_t>();
           const scalar_t* gradOutput_data = gradOutput.const_data_ptr<scalar_t>();
 
           adaptive_avg_pool3d_backward_out_frame<scalar_t>(
@@ -272,7 +272,7 @@ Tensor& adaptive_avg_pool3d_backward_out_cpu_template(
     AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
         input.scalar_type(), "adaptive_avg_pool3d_backward_cpu", [&] {
           /* get raw pointers */
-          scalar_t* gradInput_data = gradInput.data_ptr<scalar_t>();
+          scalar_t* gradInput_data = gradInput.mutable_data_ptr<scalar_t>();
           const scalar_t* gradOutput_data = gradOutput.const_data_ptr<scalar_t>();
           at::parallel_for(0, n, 1, [&](int64_t start, int64_t end) {
             for (const auto b : c10::irange(start, end)) {

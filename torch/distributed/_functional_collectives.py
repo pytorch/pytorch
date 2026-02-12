@@ -99,6 +99,9 @@ RANK_TYPES = Union[
 ]
 
 
+from torch._utils import _chunk_or_narrow_cat  # noqa: F401
+
+
 """
 User facing APIs for functional collectives
 -------------------------------------------
@@ -277,8 +280,7 @@ def reduce_scatter_tensor(
             f"input dimension 0 ({self.size(0)} must be a multiple of group_size {group_size})"
         )
     if scatter_dim != 0:
-        tensor_list = torch.chunk(self, group_size, dim=scatter_dim)
-        self = torch.cat(tensor_list)
+        self = _chunk_or_narrow_cat(self, group_size, narrow_dim=scatter_dim, cat_dim=0)
 
     tensor = torch.ops._c10d_functional.reduce_scatter_tensor(
         self,
@@ -317,8 +319,7 @@ def reduce_scatter_tensor_autograd(
             f"input dimension 0 ({self.size(0)} must be a multiple of group_size {group_size}"
         )
     if scatter_dim != 0:
-        tensor_list = torch.chunk(self, group_size, dim=scatter_dim)
-        self = torch.cat(tensor_list)
+        self = _chunk_or_narrow_cat(self, group_size, narrow_dim=scatter_dim, cat_dim=0)
 
     tensor = torch.ops._c10d_functional_autograd.reduce_scatter_tensor(
         self,
@@ -1151,7 +1152,6 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> tuple[str, list[int], int
             raise AssertionError(
                 "Only 1D mesh is supported, pass in (DeviceMesh, int) together if mesh > 1D"
             )
-        # TODO: it should run collective in the whole mesh instead of dim 0
         pg = group.get_group()
         rankset = dist.get_process_group_ranks(pg)
         group_size = len(rankset)
@@ -1384,7 +1384,7 @@ def _broadcast_meta(self, *args):
 
 
 def _all_reduce_meta(self, *args):
-    return torch.empty_like(self)
+    return torch.empty_like(self, memory_format=torch.contiguous_format)
 
 
 def _wait_tensor_meta(self, *args):
