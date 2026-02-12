@@ -586,6 +586,33 @@ class DistMatrixOpsTest(DTensorTestBase):
 
     @with_comms
     @skip_unless_torch_gpu
+    def test_mm_partial_inputs_non_single_dim(self):
+        # When inputs have only Partial placements (no Shard), the single-dim
+        # strategy should still consider Shard as a redistribution target.
+        # Partial -> Shard (reduce-scatter) is cheaper than Partial -> Replicate
+        # (all-reduce).
+        device_mesh = self.build_device_mesh()
+        dt1 = DTensor.from_local(torch.randn(16, 12, device=self.device_type), device_mesh, [Partial()], run_check=False)
+        dt2 = DTensor.from_local(torch.randn(12, 20, device=self.device_type), device_mesh, [Partial()], run_check=False)
+        dist_res = torch.mm(dt1, dt2)
+        self.assertEqual(dist_res.placements, (Partial(),))
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_mm_partial_inputs_single_dim(self):
+        # When inputs have only Partial placements (no Shard), the single-dim
+        # strategy should still consider Shard as a redistribution target.
+        # Partial -> Shard (reduce-scatter) is cheaper than Partial -> Replicate
+        # (all-reduce).
+        register_single_dim_strategy(torch.ops.aten.mm.default)(mm_single_dim_strategy)
+        device_mesh = self.build_device_mesh()
+        dt1 = DTensor.from_local(torch.randn(16, 12, device=self.device_type), device_mesh, [Partial()], run_check=False)
+        dt2 = DTensor.from_local(torch.randn(12, 20, device=self.device_type), device_mesh, [Partial()], run_check=False)
+        dist_res = torch.mm(dt1, dt2)
+        self.assertEqual(dist_res.placements, (Partial(),))
+
+    @with_comms
+    @skip_unless_torch_gpu
     def test_scaled_dot_product_attention(self):
         device_mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
