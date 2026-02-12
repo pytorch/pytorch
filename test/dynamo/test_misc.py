@@ -6011,7 +6011,9 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             foo_v2_compile = Foo()
             foo_v2_eager = Foo()
             inp = torch.randn(4, 4)
-            res = torch.compile(foo_v2_compile, fullgraph=True, backend="eager")(torch.randn(4, 4))
+            res = torch.compile(foo_v2_compile, fullgraph=True, backend="eager")(
+                torch.randn(4, 4)
+            )
             self.assertEqual(foo_v2_compile.tensor, None)
             self.assertEqual(foo_v2_compile.const, 4)
             self.assertEqual(foo_v2_compile.bar.const, 4)
@@ -13454,7 +13456,11 @@ fn
         def guard_filter_fn(entries):
             return [entry.guard_type != "ID_MATCH" for entry in entries]
 
-        @torch.compile(fullgraph=True, options={"guard_filter_fn": guard_filter_fn}, backend="eager")
+        @torch.compile(
+            fullgraph=True,
+            options={"guard_filter_fn": guard_filter_fn},
+            backend="eager",
+        )
         def fn(x):
             return id(x)
 
@@ -13471,7 +13477,11 @@ fn
 
         global GLOBAL_INT
 
-        @torch.compile(fullgraph=True, options={"guard_filter_fn": guard_filter_fn}, backend="eager")
+        @torch.compile(
+            fullgraph=True,
+            options={"guard_filter_fn": guard_filter_fn},
+            backend="eager",
+        )
         def fn(x):
             return x + GLOBAL_INT
 
@@ -13489,7 +13499,11 @@ fn
                 not (entry.name == "y" and entry.value is None) for entry in entries
             ]
 
-        @torch.compile(fullgraph=True, options={"guard_filter_fn": guard_filter_fn}, backend="eager")
+        @torch.compile(
+            fullgraph=True,
+            options={"guard_filter_fn": guard_filter_fn},
+            backend="eager",
+        )
         def fn(x, y):
             if y is not None:
                 x += y
@@ -14559,7 +14573,9 @@ class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
         sentinel = torch.tensor(2.0, requires_grad=True, device="cuda")
         eager_result_true = symbool_mul_fn(x_true, sentinel)
         eager_result_false = symbool_mul_fn(x_false, sentinel)
-        compiled_fn = torch.compile(symbool_mul_fn, fullgraph=True, dynamic=True, backend="eager")
+        compiled_fn = torch.compile(
+            symbool_mul_fn, fullgraph=True, dynamic=True, backend="eager"
+        )
         compiled_result_true = compiled_fn(x_true, sentinel)
         compiled_result_false = compiled_fn(x_false, sentinel)
         self.assertEqual(eager_result_true, compiled_result_true)
@@ -14636,7 +14652,9 @@ class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
 
             return (img_h_new, img_w_new), image_metanet
 
-        _random_resize_compiled = torch.compile(fullgraph=True, backend="eager")(_random_resize)
+        _random_resize_compiled = torch.compile(fullgraph=True, backend="eager")(
+            _random_resize
+        )
 
         # Test the function
         input_tensor = torch.rand(1, 3, 224, 224)

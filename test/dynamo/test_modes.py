@@ -764,7 +764,9 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         )
 
         with torch.device(GPU_TYPE):
-            flex_attention = torch.compile(flex_attention_eager, dynamic=False, backend="eager")
+            flex_attention = torch.compile(
+                flex_attention_eager, dynamic=False, backend="eager"
+            )
 
             with self.assertRaisesRegex(
                 torch._dynamo.exc.Unsupported,
