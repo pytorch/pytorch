@@ -1040,6 +1040,25 @@ class DistBucketizeTest(LocalDTensorTestBase):
                 self.assertTrue(result.placements[0].is_shard(shard_dim))
                 self.assertEqual(result.full_tensor(), expected)
 
+    @with_comms
+    def test_bucketize_sharded_boundaries(self):
+        # When boundaries are sharded on dim 0, each rank counts how many of
+        # its local boundary values each input exceeds. The sum across ranks
+        # (Partial("sum")) gives the correct global bucket index.
+        with LocalTensorMode(ranks=self.world_size):
+            mesh = self.build_device_mesh()
+            boundaries = torch.tensor([1.0, 3.0, 5.0, 7.0], device=self.device_type)
+            input_tensor = torch.tensor(
+                [[2.0, 4.0, 6.0, 8.0], [0.0, 1.0, 5.0, 9.0]],
+                device=self.device_type,
+            )
+            expected = torch.bucketize(input_tensor, boundaries)
+
+            dist_input = distribute_tensor(input_tensor, mesh, [Replicate()])
+            dist_boundaries = distribute_tensor(boundaries, mesh, [Shard(0)])
+            result = torch.bucketize(dist_input, dist_boundaries)
+            self.assertEqual(result.full_tensor(), expected)
+
 
 class DistArgMaxArgMinTest(DTensorTestBase):
     _ops = [torch.argmax, torch.argmin]
@@ -1073,6 +1092,22 @@ class DistArgMaxArgMinTest(DTensorTestBase):
                 full_dresult = d_result.full_tensor()
                 local_result = op(local_tensor, dim=1)
                 self.assertEqual(full_dresult, local_result)
+
+    @with_comms
+    def test_argmax_argmin_sharded_reduction_dim(self):
+        """Unlike max/min which use reduction_linear=True and produce
+        Partial("max")/Partial("min") outputs, argmax/argmin return indices
+        that can't be combined across shards with an element-wise max/min.
+        The strategy sets reduction_linear=False, which forces the input to
+        be redistributed to Replicate on the sharded reduction dim before
+        the op runs. No Partial placement appears in the output."""
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+        tensor = torch.tensor(self.sample, device=self.device_type, dtype=torch.float)
+        dtensor = distribute_tensor(tensor, mesh, [Shard(0)])
+
+        for op in self._ops:
+            self.assertEqual(op(dtensor, dim=0).full_tensor(), op(tensor, dim=0))
+            self.assertEqual(op(dtensor).full_tensor(), op(tensor))
 
     def build_device_mesh(self):
         return init_device_mesh(self.device_type, (2, 2))
