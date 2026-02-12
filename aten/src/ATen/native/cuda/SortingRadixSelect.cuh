@@ -457,11 +457,11 @@ __device__ __forceinline__ void countRadixAggregateCounts(
   constexpr uint MAX_WARPS = 1024/32; // maximum number of warps in a block
   const int buffer_offset = buffer_index * MAX_WARPS * RadixSize; // offset of the buffer in smem.
   const uint WARP_BITS = __builtin_ctz(warpSize);
-  
+
   const uint num_warps = blockDim.x >> WARP_BITS;  // Actual number of warps in this block
   const uint warp_id = threadIdx.x >> WARP_BITS; // = threadIdx.x / warpSize
   const int lane_id = at::cuda::getLaneId(); // = threadIdx.x % warpSize
-    
+
   // Stage 1: Each warp's lane 0 stores its counts in smem.
   // Layout after Stage 1: [warp0: all radix bins], [warp1: all radix bins], ...
   // this layout starts from index buffer_offset.
@@ -470,14 +470,14 @@ __device__ __forceinline__ void countRadixAggregateCounts(
     for (uint32_t i = 0; i < RadixSize; ++i) {
       smem[
             buffer_offset
-          + warp_id * RadixSize 
+          + warp_id * RadixSize
           + i
           ] = counts[i];
     }
   }
-    
+
   __syncthreads(); // wait for all warps to finish storing their counts to smem.
-    
+
   // Stage 2: Warp0 performs reduction for all bins.
   // Layout after Stage 2: [final radix0 sum], [final radix1 sum], ..., [final radix(RadixSize-1) sum]
   // this layout starts from index buffer_offset.
@@ -487,15 +487,15 @@ __device__ __forceinline__ void countRadixAggregateCounts(
     for (int w = 0; w < num_warps; ++w) {
       sum += smem[
                     buffer_offset
-                  + w * RadixSize 
+                  + w * RadixSize
                   + lane_id
                   ];
     }
     smem[buffer_offset + lane_id] = sum;
   }
-    
+
   __syncthreads(); // Wait for warp 0 to finish reduction.
-  
+
   // Stage 3: Each thread reads the final counts from smem.
 #pragma unroll
   for (uint32_t i = 0; i < RadixSize; ++i) {
