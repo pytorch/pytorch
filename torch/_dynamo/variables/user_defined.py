@@ -1165,6 +1165,24 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return self.value
             # TODO else try reconstructing the object by, e.g., leveraging side
             # effects and `as_python_constant`.
+
+        # Special case for _MaskModWrapper during legacy export: Dynamo creates
+        # objects via __new__ without calling __init__, so self.value.fn is unset.
+        # Reconstruct from the tracked side-effect attribute instead.
+        from torch.nn.attention.flex_attention import _MaskModWrapper
+
+        if isinstance(self.value, _MaskModWrapper):
+            from torch._dynamo.symbolic_convert import InstructionTranslator
+
+            tx = InstructionTranslator.current_tx()
+            if tx is not None and tx.export:
+                fn_vt = tx.output.side_effects.load_attr(self, "fn", deleted_ok=True)
+                if fn_vt is not None:
+                    # Let as_python_constant() raise the proper exception
+                    # (e.g., ClosureConversionError for non-constant closures)
+                    fn = fn_vt.as_python_constant()
+                    return _MaskModWrapper(fn)
+
         return super().as_python_constant()
 
     def guard_as_python_constant(self) -> object:
@@ -1304,6 +1322,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             "Attempted setattr on a user-defined object that does not have "
             "an AttributeMutation mutation_type"
         )
+
+        if name_str == "__class__":
+            unimplemented(
+                gb_type="__class__ assignment on user-defined object",
+                context=f"object={self}, value={value}",
+                explanation="Dynamo does not support reassigning __class__ on user-defined objects.",
+                hints=[
+                    "Move the __class__ assignment outside of the torch.compile region.",
+                ],
+            )
 
         if directly_update_dict:
             self.attrs_directly_modifed_on_dict.add(name_str)
@@ -2295,6 +2323,33 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
     @python_stack.setter
     def python_stack(self, value: traceback.StackSummary) -> None:
         self.exc_vt.python_stack = value
+
+
+class InspectVariable(UserDefinedObjectVariable):
+    """Handles inspect.Signature and inspect.Parameter objects.
+
+    Short-circuits property accesses to avoid tracing property getters,
+    redirecting them to the underlying private attributes directly.
+    """
+
+    _PROPERTY_REDIRECTS: dict[type, dict[str, str]] = {
+        inspect.Signature: {"parameters": "_parameters"},
+        inspect.Parameter: {"kind": "_kind", "name": "_name"},
+    }
+
+    @staticmethod
+    def is_matching_object(obj: object) -> bool:
+        return type(obj) in InspectVariable._PROPERTY_REDIRECTS
+
+    @staticmethod
+    def is_matching_class(obj: object) -> bool:
+        return obj in InspectVariable._PROPERTY_REDIRECTS
+
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+        redirects = self._PROPERTY_REDIRECTS.get(type(self.value), {})
+        if name in redirects:
+            return super().var_getattr(tx, redirects[name])
+        return super().var_getattr(tx, name)
 
 
 class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
