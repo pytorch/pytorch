@@ -280,7 +280,9 @@ def addmm_replace(
     )
 
 
-def is_mm_compute_bound(dtype: torch.dtype, device_type: str, M: int, K: int, N: int) -> bool:
+def is_mm_compute_bound(
+    dtype: torch.dtype, device_type: str, M: int, K: int, N: int
+) -> bool:
     denominator = M * K + N * K + M * N
     if denominator == 0:
         return False
@@ -443,7 +445,9 @@ def is_padded_faster(key: str, ori_time: float, pad_time: float) -> bool:
     return padded_is_faster
 
 
-def should_pad_mm_bf16(device_type: str, dtype: torch.dtype, M: int, N: int, K: int) -> bool:
+def should_pad_mm_bf16(
+    device_type: str, dtype: torch.dtype, M: int, N: int, K: int
+) -> bool:
     # always force pad for mm with bf16 when the following are satisfied to avoid perf regression
     large_k_threshold_to_pad = torch._inductor.config.post_grad_fusion_options[
         "pad_aten_mm_pass"
