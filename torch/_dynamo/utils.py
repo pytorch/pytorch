@@ -154,7 +154,6 @@ try:
     else:
         NP_SUPPORTED_MODULES = ()
 
-        # pyrefly: ignore [implicit-any]
         NP_TO_TNP_MODULE = {}
     from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
 except ImportError:
@@ -1154,7 +1153,7 @@ def is_typing(value: Any) -> bool:
     if sys.version_info >= (3, 12) and isinstance(value, _builtin_final_typing_classes):
         return True
     return (
-        isinstance(value, typing._Final)  # type: ignore[attr-defined]
+        isinstance(value, (types.UnionType, typing._Final))  # type: ignore[attr-defined]
         or value is typing.Generic
         or value is typing.Union
     )
@@ -2051,7 +2050,6 @@ class ChromiumEventLogger:
             event_metadata = all_event_data[event_name]
             del all_event_data[event_name]
         else:
-            # pyrefly: ignore [implicit-any]
             event_metadata = {}
         # Add the passed in metadata
         event_metadata.update(metadata)
@@ -3668,9 +3666,7 @@ def _get_fake_value_impl(
             id(arg): arg._version for arg in flat_args_kwargs if is_fake(arg)
         }
     else:
-        # pyrefly: ignore [implicit-any]
         flat_args_kwargs = []
-        # pyrefly: ignore [implicit-any]
         id_to_initial_version = {}
 
     nnmodule = None

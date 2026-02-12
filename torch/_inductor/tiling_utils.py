@@ -705,7 +705,6 @@ def analyze_memory_coalescing(
 
     for is_read, (memory_expr, buf_names) in itertools.chain(
         ((True, item) for item in reads.items()),
-        # pyrefly: ignore [bad-argument-type]
         ((False, item) for item in writes.items()),
     ):
         size = get_score(memory_expr, var_ranges, buf_names)
