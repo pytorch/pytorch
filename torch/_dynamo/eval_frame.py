@@ -489,9 +489,7 @@ class OptimizedModule(torch.nn.Module):
         if not callable(self.dynamo_ctx.callback):
             raise RuntimeError("aot compile requires a callable dynamo callback.")
 
-        backend = innermost_fn(
-            self.dynamo_ctx.callback, unaltered_fn_attr="_torchdynamo_orig_backend"
-        )
+        backend = innermost_backend(self.dynamo_ctx.callback)
         from torch._dynamo.aot_compile import aot_compile_module
 
         self.forward = aot_compile_module(model, inputs, hooks, backend)
@@ -617,9 +615,7 @@ def always_false() -> bool:
     return False
 
 
-def innermost_fn(
-    fn: Callable[..., Any], unaltered_fn_attr: str = "_torchdynamo_orig_callable"
-) -> Callable[..., Any]:
+def innermost_fn(fn: Callable[..., Any]) -> Callable[..., Any]:
     """
     In case of nesting of _TorchDynamoContext calls, find the innermost
     function. TorchDynamo caches on fn.__code__ object, so its necessary to find
@@ -627,7 +623,7 @@ def innermost_fn(
     """
     unaltered_fn = fn
     while (
-        hasattr(unaltered_fn, unaltered_fn_attr)
+        hasattr(unaltered_fn, "_torchdynamo_orig_callable")
         # Only follow the chain if _torchdynamo_wrapper_id matches id(fn).
         # This prevents following chains in two cases:
         # 1. Bound methods: id(bound_method) != id(wrapper_function), so we
@@ -637,11 +633,24 @@ def innermost_fn(
         #    _torchdynamo_wrapper_id won't match the outer wrapper's id.
         and getattr(unaltered_fn, "_torchdynamo_wrapper_id", None) == id(unaltered_fn)
     ):
-        unaltered_fn = getattr(unaltered_fn, unaltered_fn_attr)
+        unaltered_fn = unaltered_fn._torchdynamo_orig_callable
         assert callable(unaltered_fn), (
             f"A callable function is expected, but {type(unaltered_fn)} is provided."
         )
     return unaltered_fn
+
+
+def innermost_backend(fn: Callable[..., Any]) -> Callable[..., Any]:
+    """
+    Unwrap backend wrapper chain via _torchdynamo_orig_backend to find the
+    innermost backend function.
+    """
+    while hasattr(fn, "_torchdynamo_orig_backend"):
+        fn = fn._torchdynamo_orig_backend
+        assert callable(fn), (
+            f"A callable function is expected, but {type(fn)} is provided."
+        )
+    return fn
 
 
 def make_set_enable_dynamic(enable: bool) -> Any:
@@ -758,7 +767,7 @@ class _TorchDynamoContext:
         patch_fn()
 
         # Save the backends so that we can reset them during torch._dynamo.reset
-        backend = innermost_fn(callback, unaltered_fn_attr="_torchdynamo_orig_backend")  # type: ignore[arg-type]
+        backend = innermost_backend(callback)  # type: ignore[arg-type]
         cached_backends.setdefault(id(backend), backend)  # type: ignore[arg-type]
 
         if dynamic is not None:
@@ -864,9 +873,7 @@ class _TorchDynamoContext:
                 fn,
                 example_inputs,
                 hooks=self._hooks,
-                backend=innermost_fn(
-                    self.callback, unaltered_fn_attr="_torchdynamo_orig_backend"
-                ),
+                backend=innermost_backend(self.callback),
                 dynamic=self._dynamic,
             )
 

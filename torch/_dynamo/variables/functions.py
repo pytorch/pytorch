@@ -3242,3 +3242,32 @@ class SparseTensorCreationSkipVariable(SkipFunctionVariable):
             ),
             hints=[*graph_break_hints.SPARSE_TENSOR],
         )
+
+
+class TritonSetAllocatorSkipVariable(SkipFunctionVariable):
+    """
+    Skip variable for triton.set_allocator with a clear message to move it outside the compiled region.
+    """
+
+    def __init__(self, value: Any, **kwargs: Any) -> None:
+        reason = "triton.set_allocator is not supported inside torch.compile"
+        super().__init__(value, reason=reason, **kwargs)
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        unimplemented(
+            gb_type="triton.set_allocator not supported",
+            context="triton.set_allocator called inside compiled region",
+            explanation=(
+                "triton.set_allocator is not supported inside torch.compile. "
+                "It modifies global Triton allocator state and cannot be traced."
+            ),
+            hints=[
+                "Move triton.set_allocator() outside of the torch.compile region "
+                "(call it before the compiled function)."
+            ],
+        )
