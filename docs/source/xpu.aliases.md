@@ -21,6 +21,20 @@ The following are aliases to their counterparts in ``torch.xpu`` in the nested n
 ```
 
 ```{eval-rst}
+.. automodule:: torch.xpu.graphs
+.. currentmodule:: torch.xpu.graphs
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    is_current_stream_capturing
+    graph_pool_handle
+    XPUGraph
+    graph
+    make_graphed_callables
+```
+
+```{eval-rst}
 .. automodule:: torch.xpu.streams
 .. currentmodule:: torch.xpu.streams
 .. autosummary::
