@@ -2110,13 +2110,9 @@ def _get_grad_norm(
         # Reuse a tensor for zero to avoid a GPU sync
         return zero
     grads = [param.grad for param in params_with_grad]
-    grad_dtypes = {grad.dtype for grad in grads}
-    if len(grad_dtypes) != 1:
-        raise ValueError(
-            f"Requires uniform dtype across all gradients but got {grad_dtypes}"
-        )
     # Compute the gradient norm in FP32, where we treat the gradients as a
-    # single vector
+    # single vector. This naturally handles mixed-dtype gradients since we
+    # cast each gradient to FP32 during the norm computation.
     grad_norm = torch.linalg.vector_norm(
         torch.stack(
             [
