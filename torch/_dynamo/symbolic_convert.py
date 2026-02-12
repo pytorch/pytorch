@@ -5078,9 +5078,7 @@ class InstructionTranslatorBase(
                         ]
                     )
                 else:
-                    cg.extend_output(
-                        [create_instruction("LIST_APPEND", arg=1)]
-                    )
+                    cg.extend_output([create_instruction("LIST_APPEND", arg=1)])
                 # Stack: ..., comp_tuple, fv0
             cg.extend_output(
                 [
