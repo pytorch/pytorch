@@ -1243,6 +1243,7 @@ class PrecompileThreadPool:
 
     def submit(self, fn, *args, **kwargs):
         ctx = contextvars.copy_context()
+        # Need to copy context so workers have access to the correct config settings
         fn = functools.partial(ctx.run, fn)
         return self._executor.submit(fn, *args, **kwargs)
 

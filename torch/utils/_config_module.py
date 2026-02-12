@@ -46,7 +46,7 @@ class _Config(Generic[T]):
             If multiple env variables are given, the precedence order is from
             left to right.
         user_override: If a user sets a value (i.e. foo.bar=True), that
-            has precedence over everything after this.
+            has precedence over everything after this.  User overrides are thread-local.
         env_name_default: If set, this environment variable will override everything
             after this.
             If multiple env variables are given, the precedence order is from
@@ -644,7 +644,7 @@ class ConfigModule(ModuleType):
         **kwargs: dict[str, Any],
     ) -> "ContextDecorator":
         """
-        Decorator and/or context manager to make temporary changes to a config.
+        Decorator and/or context manager to make temporary changes to a config.  Note that patched settings are thread-local.
 
         As a decorator:
 

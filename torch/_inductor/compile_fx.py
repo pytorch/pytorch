@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import contextvars
 import copy
 import enum
 import functools
@@ -2747,6 +2748,8 @@ def _compile_fx_main(
                     inner_compile=inner_compile,
                 )
 
+        # Copy the context to make sure bw_compiler has access to correct config variables
+        bw_compiler = functools.partial(contextvars.copy_context().run, bw_compiler)
         bw_compiler = SerializableAOTDispatchCompiler(OutputCode, bw_compiler)
 
         fake_mode = detect_fake_mode(
