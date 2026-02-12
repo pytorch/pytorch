@@ -775,12 +775,6 @@ if torch.backends.mps.is_available():
             "linalg.matrix_rank": None,
             # Exception: Caused by `torch.arange(-8.001, -4.0, dtype=torch.uint8, device="mps")`
             "arange": [torch.uint8],
-            # before macOS 13.2 it falls back to cpu and pass the forward pass
-            "grid_sampler_2d": [
-                torch.float32,
-                torch.float16,
-                torch.bfloat16,
-            ],  # Unsupported Border padding mode
             # Failure due to precision issue for fp16
             # on both cpu and mps there are test cases that might produce inf result
             # 'nn.functional.pairwise_distance': [torch.float16],
@@ -828,10 +822,6 @@ if torch.backends.mps.is_available():
             # Unsupported
             # This doesn't work on M1, but is partially working on M2 with the exception of torch.float16
             "nn.functional.conv3d": None,
-            # The CPU impl of grid_sampler_3d does not use opmath_t, so it has a
-            # large amount of error compared with the MPS impl for half
-            # precision types. So we have to skip these for now.
-            "grid_sampler_3d": [torch.float16, torch.bfloat16],
         }
 
         def addDecorator(op: OpInfo, d: DecorateInfo) -> None:
@@ -927,8 +917,8 @@ if torch.backends.mps.is_available():
             "scalar_tensor": [torch.float16, torch.float32],
             "cdist": None,
             "masked.scatter": [torch.float16, torch.float32],
+            "grid_sampler_2d": None,
             "grid_sampler_3d": None,
-            "index_fill": [torch.float16, torch.float32],  # missing `aten::_unique`.
             "igamma": None,  # currently not supported for any device
             "igammac": None,  # currently not supported for any device
             "linalg.solve": [torch.float16, torch.float32],  # missing `aten::lu_solve`.
@@ -1047,9 +1037,6 @@ if torch.backends.mps.is_available():
             "masked_scatter",
             # unsupported float64 dtype
             "multinomial",
-            "nn.functional.conv1d",
-            "nn.functional.conv2d",
-            "nn.functional.conv3d",
             "gather",
             "scatter",
             "scatter_add",

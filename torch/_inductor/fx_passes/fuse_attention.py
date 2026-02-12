@@ -4,6 +4,7 @@ import inspect
 import logging
 import math
 import warnings
+from typing import Optional
 
 import torch
 
@@ -815,7 +816,7 @@ def _sfdp_replacement_27(query, key, value, dropout_p):
 def _warn_tf32_disabled() -> None:
     if (
         torch.cuda.is_available()
-        and not torch.backends.cuda.matmul.allow_tf32
+        and torch.backends.cuda.matmul.fp32_precision != "tf32"
         and torch.cuda.get_device_capability() >= (8, 0)
     ):
         warnings.warn(
@@ -838,7 +839,7 @@ def _sfdp_params_check(match):
     if (
         query.device.type == "cuda"
         and query.dtype == torch.float32
-        and not torch.backends.cuda.matmul.allow_tf32
+        and torch.backends.cuda.matmul.fp32_precision != "tf32"
     ):
         _warn_tf32_disabled()
         return False
@@ -916,16 +917,19 @@ def partialize_and_update_signature(func, **kwargs):
     return wrapper
 
 
-def _get_sfdp_patterns():
+def _get_sfdp_patterns(input_device: Optional[torch.device] = None):
     from .joint_graph import patterns
 
-    if torch.cuda.is_available():
-        # workaround https://github.com/pytorch/pytorch/issues/97894
-        device = "cuda"
-    elif torch.xpu.is_available():
-        device = "xpu"
+    if input_device:
+        device = str(input_device)
     else:
-        device = "cpu"
+        if torch.cuda.is_available():
+            # workaround https://github.com/pytorch/pytorch/issues/97894
+            device = "cuda"
+        elif torch.xpu.is_available():
+            device = "xpu"
+        else:
+            device = "cpu"
 
     # sizes/values don't actually matter for initial trace
     # once we get a possible match we re-trace with the actual values and verify the match still holds
@@ -1281,6 +1285,7 @@ def _get_sfdp_patterns():
                     "pass_dicts": patterns,
                     "extra_check": extra_check,
                     "scalar_workaround": workaround,
+                    "skip_duplicates": True,
                 },
             )
 
@@ -1312,6 +1317,6 @@ def _get_sfdp_patterns():
 
 
 @functools.cache
-def _sfdp_init():
-    for key, register_replacement_kwargs in _get_sfdp_patterns():
+def _sfdp_init(input_device: Optional[torch.device] = None):
+    for key, register_replacement_kwargs in _get_sfdp_patterns(input_device):
         gen_register_replacement(key, **register_replacement_kwargs)
