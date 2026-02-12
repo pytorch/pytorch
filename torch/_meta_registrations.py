@@ -507,7 +507,10 @@ def meta_copy_(self, src, non_blocking=False):
     # which runs most of the meta checks that we care about.
     # In theory, we should make this more robust by carefully
     # auditing our C++ copy_() kernel and copying the checks here.
-    from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+    from torch.fx.experimental.symbolic_shapes import (
+        free_unbacked_symbols,
+        guard_or_false,
+    )
 
     # TODO: Ideally, we'd insert a deferred runtime assert here, but if we are
     # calling an actual copy_, you'll get that automatically
@@ -521,7 +524,9 @@ def meta_copy_(self, src, non_blocking=False):
 
     if isinstance(src, Tensor):
         intermediate = src.to(self, non_blocking)
-        if self.size() != intermediate.size():
+        if self.ndim != intermediate.ndim or any(
+            guard_or_false(a != b) for a, b in zip(self.size(), intermediate.size())
+        ):
             aten.expand_copy.default(intermediate, self.size())
     return self
 
@@ -2543,6 +2548,14 @@ def meta_miopen_batch_norm(
         save_var = input_tensor.new_empty((0,))
 
     return out, save_mean, save_var
+
+
+@register_meta(aten.native_group_norm.default)
+def meta_native_group_norm(input, weight, bias, N, C, HxW, group, eps):
+    output = input.new_empty(input.shape)
+    mean = input.new_empty((N, group))
+    rstd = input.new_empty((N, group))
+    return output, mean, rstd
 
 
 @register_meta(aten.convolution.default)

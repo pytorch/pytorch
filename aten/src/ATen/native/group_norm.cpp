@@ -34,8 +34,8 @@ static void check_group_norm_inputs(
   TORCH_CHECK(
       num_groups > 0,
       "Expected num groups to be greater than 0, got ", num_groups);
-  TORCH_CHECK(
-      C % num_groups == 0,
+  TORCH_MAYBE_SYM_CHECK(
+      c10::sym_eq(C % num_groups, T(0)),
       "Expected number of channels in input to be divisible by ",
       "num_groups, but got input of shape ",
       input.sizes(),
@@ -43,14 +43,14 @@ static void check_group_norm_inputs(
       "num_groups=",
       num_groups);
   TORCH_CHECK(
-      !weight.defined() || (weight.dim() == 1 && at::symint::numel<T>(weight) == C),
+      !weight.defined() || (weight.dim() == 1 && TORCH_GUARD_OR_TRUE(c10::sym_eq(at::symint::numel<T>(weight), C))),
       "Expected weight to be a vector of size equal to the number of ",
       "channels in input, but got weight of shape ",
       weight.sizes(),
       " and input of shape ",
       input.sizes());
   TORCH_CHECK(
-      !bias.defined() || (bias.dim() == 1 && at::symint::numel<T>(bias) == C),
+      !bias.defined() || (bias.dim() == 1 && TORCH_GUARD_OR_TRUE(c10::sym_eq(at::symint::numel<T>(bias), C))),
       "Expected bias to be a vector of size equal to the number of ",
       "channels in input, but got bias of shape ",
       weight.sizes(),
@@ -195,13 +195,20 @@ Tensor group_norm(
       c10::multiply_integers(input_shape.slice(2));
 
   const Tensor kEmpty;
-  auto memory_format = input.suggest_memory_format();
-  const auto& X = input.device().is_cpu() || input.is_privateuseone() ?
-                  input.contiguous(memory_format) : input.contiguous();
+  // suggest_memory_format() triggers stride checks (is_channels_last_strides)
+  // that guard on size comparisons, causing data-dependent errors for tensors
+  // with unbacked symbolic sizes. Skip it for symbolic tensors since the
+  // contiguous format preserves correctness.
+  auto memory_format =
+      ((input.device().is_cpu() || input.is_privateuseone()) &&
+       !input.unsafeGetTensorImpl()->has_symbolic_sizes_strides())
+      ? input.suggest_memory_format()
+      : at::MemoryFormat::Contiguous;
+  const auto X = input.contiguous(memory_format);
   const auto& gamma = weight.defined() ? weight.contiguous() : kEmpty;
   const auto& beta = bias.defined() ? bias.contiguous() : kEmpty;
-  TORCH_CHECK(!gamma.defined() || gamma.sym_numel() == C);
-  TORCH_CHECK(!beta.defined() || beta.sym_numel() == C);
+  TORCH_CHECK(!gamma.defined() || TORCH_GUARD_OR_TRUE(gamma.sym_numel().sym_eq(C)));
+  TORCH_CHECK(!beta.defined() || TORCH_GUARD_OR_TRUE(beta.sym_numel().sym_eq(C)));
   return std::get<0>(
       at::native_group_norm_symint(X, gamma, beta, N, C, HxW, num_groups, eps));
 }

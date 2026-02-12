@@ -88,7 +88,7 @@ DEFINE_DISPATCH(renorm_scale_factor_stub);
 
 namespace {
   void check_dims_match_num_input_features(const char* arg_name, const SymInt& expected, const SymInt& actual){
-    TORCH_CHECK(actual == expected,
+    TORCH_SYM_CHECK(actual.sym_eq(expected),
              arg_name, " should contain ", expected, " elements not ", actual);
   }
 
@@ -510,12 +510,12 @@ BatchNormBackend _select_batch_norm_backend(
       && ((running_mean.defined() && running_var.defined())
         || (!running_mean.defined() && !running_var.defined() && training))
       && (input.dim() >= 3)
-      && ((input.sym_size(0) <= 880801 && training) // spatial, training
-          ||(input.sym_size(0) <= 65535 && !training)) //spatial, eval
+      && ((TORCH_GUARD_OR_FALSE(input.sym_size(0).sym_le(880801)) && training) // spatial, training
+          ||(TORCH_GUARD_OR_FALSE(input.sym_size(0).sym_le(65535)) && !training)) //spatial, eval
       && detail::getCUDAHooks().compiledWithCuDNN()
       && eps >= detail::getCUDAHooks().batchnormMinEpsilonCuDNN()
       && cudnn_enabled && detail::getCUDAHooks().versionCuDNN() >= 5110L
-      && input.sym_numel() < std::numeric_limits<std::int32_t>::max() // some cuDNN kernels have 32-bit indexing limitations
+      && TORCH_GUARD_OR_FALSE(input.sym_numel().sym_lt(std::numeric_limits<std::int32_t>::max())) // some cuDNN kernels have 32-bit indexing limitations
   ) {
     return BatchNormBackend::Cudnn;
   }
@@ -570,7 +570,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
 
   auto num_features = input.sym_sizes()[1];
 
-  if (input.sym_numel() == 0) {
+  if (TORCH_GUARD_OR_FALSE(input.sym_numel().sym_eq(0))) {
     Tensor reserve = at::empty({0}, input.options().dtype(kByte));
     auto options = input.options().dtype(
         at::toAccumulateType(input.scalar_type(), input.device().type()));
