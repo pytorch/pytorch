@@ -280,7 +280,7 @@ def addmm_replace(
     )
 
 
-def is_mm_compute_bound(M: int, K: int, N: int, dtype: torch.dtype) -> bool:
+def is_mm_compute_bound(dtype: torch.dtype, device_type: str, M: int, K: int, N: int) -> bool:
     denominator = M * K + N * K + M * N
     if denominator == 0:
         return False
@@ -291,7 +291,7 @@ def is_mm_compute_bound(M: int, K: int, N: int, dtype: torch.dtype) -> bool:
         dtype is torch.bfloat16
         and K > M
         and K > N
-        and (torch.xpu.is_available() or torch.cuda.get_device_capability() < (9, 0))
+        and (device_type == "xpu" or torch.cuda.get_device_capability() < (9, 0))
     ):  # doesn't repro on h100s:
         return True
 
@@ -443,7 +443,7 @@ def is_padded_faster(key: str, ori_time: float, pad_time: float) -> bool:
     return padded_is_faster
 
 
-def should_pad_mm_bf16(dtype: torch.dtype, M: int, N: int, K: int) -> bool:
+def should_pad_mm_bf16(device_type: str, dtype: torch.dtype, M: int, N: int, K: int) -> bool:
     # always force pad for mm with bf16 when the following are satisfied to avoid perf regression
     large_k_threshold_to_pad = torch._inductor.config.post_grad_fusion_options[
         "pad_aten_mm_pass"
@@ -454,7 +454,7 @@ def should_pad_mm_bf16(dtype: torch.dtype, M: int, N: int, K: int) -> bool:
         and K > N
         and N % 2 == 1
         and K >= large_k_threshold_to_pad
-        and (torch.xpu.is_available() or torch.cuda.get_device_capability() < (9, 0))
+        and (device_type == "xpu" or torch.cuda.get_device_capability() < (9, 0))
     ):  # doesn't repro on h100s:
         return True
     return False
@@ -526,12 +526,12 @@ def _should_pad(
         # Performance heuristic for bf16 large K scenarios
         if (
             "pad_aten_mm_pass" in torch._inductor.config.post_grad_fusion_options
-            and should_pad_mm_bf16(mat1.dtype, m, n, k)
+            and should_pad_mm_bf16(mat1.device.type, mat1.dtype, m, n, k)
         ):
             return True
 
         # Check if operation is compute bound (performance check)
-        if not is_mm_compute_bound(m, k, n, mat1.dtype):
+        if not is_mm_compute_bound(mat1.dtype, mat1.device.type, m, k, n):
             return False
 
         # We don't want to look up the cache for cases that are trivially false
