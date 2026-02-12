@@ -366,7 +366,7 @@ class OverlapScheduler:
         log_final_collectives_estimations: bool = False,
         bucket_exposed_first: bool | None = None,
         enable_fusion_regions: bool = False,
-        bucket_only_fsdp_groups: bool = True,
+        bucket_only_internode_comms: bool = False,
         bucket_mode: BucketMode = "custom_ops_multidtype",
         max_off_bucket_gb: float | None = 0.5,
         prioritize_bucketing_during_scheduling: bool = True,
@@ -383,7 +383,7 @@ class OverlapScheduler:
         self.collective_estimator = collective_estimator
         self.log_final_collectives_estimations = log_final_collectives_estimations
         self.bucket_exposed_first = bucket_exposed_first
-        self.bucket_only_fsdp_groups = bucket_only_fsdp_groups
+        self.bucket_only_internode_comms = bucket_only_internode_comms
         self.bucket_mode = bucket_mode
         self.max_off_bucket_bytes: int | None = (
             gb_to_bytes(max_off_bucket_gb) if max_off_bucket_gb is not None else None
@@ -697,15 +697,15 @@ class OverlapScheduler:
             compute_key_count += 1
 
         # Log compute estimations
-        from torch._inductor.fx_passes.node_runtime_estimation import (
-            _log_compute_estimations,
-        )
+        # from torch._inductor.fx_passes.node_runtime_estimation import (
+        #     _log_compute_estimations,
+        # )
 
-        _log_compute_estimations(
-            self.compute_nodes,
-            runtime_estimations,
-            runtime_estimations_analytical,
-        )
+        # _log_compute_estimations(
+        #     self.compute_nodes,
+        #     runtime_estimations,
+        #     runtime_estimations_analytical,
+        # )
 
         # Benchmark collectives if enabled (only CUDA events - others are deterministic)
         # Skip if custom estimation is provided for collectives
@@ -953,7 +953,7 @@ class OverlapScheduler:
             max_coll_distance=self.max_node_distance,
             region_of=self.region_of,
             bucket_exposed_first=self.bucket_exposed_first,
-            bucket_only_fsdp_groups=self.bucket_only_fsdp_groups,
+            bucket_only_internode_comms=self.bucket_only_internode_comms,
         )
 
         if self.log_final_collectives_estimations:
@@ -1513,7 +1513,7 @@ class OverlapScheduler:
             insert_overlap_deps=self.insert_overlap_deps,
             bucket_mode=self.bucket_mode,
             bucket_exposed_first=self.bucket_exposed_first,
-            bucket_only_fsdp_groups=self.bucket_only_fsdp_groups,
+            bucket_only_internode_comms=self.bucket_only_internode_comms,
         )
         bucketer.bucket_collectives()
 
@@ -1571,8 +1571,9 @@ def schedule_overlap_bucketing(
     log_final_collectives_estimations: bool = False,
     bucket_exposed_first: bool | None = None,
     enable_fusion_regions: bool = False,
-    bucket_only_fsdp_groups=True,
+    bucket_only_internode_comms=False,
     prioritize_bucketing_during_scheduling: bool = True,
+    max_off_bucket_gb: float | None = 0.5,
 ) -> torch.fx.GraphModule:
     """Schedule nodes to maximize compute-collective overlap.
 
@@ -1623,8 +1624,9 @@ def schedule_overlap_bucketing(
         log_final_collectives_estimations=log_final_collectives_estimations,
         bucket_exposed_first=bucket_exposed_first,
         enable_fusion_regions=enable_fusion_regions,
-        bucket_only_fsdp_groups=bucket_only_fsdp_groups,
+        bucket_only_internode_comms=bucket_only_internode_comms,
         prioritize_bucketing_during_scheduling=prioritize_bucketing_during_scheduling,
+        max_off_bucket_gb=max_off_bucket_gb,
     ).run()
     trace_structured(
         "artifact",
@@ -1667,7 +1669,7 @@ def schedule_overlap_bucketing_from_inductor_configs(
         "max_coll_distance",
         "log_final_collectives_estimations",
         "bucket_exposed_first",
-        "bucket_only_fsdp_groups",
+        "bucket_only_internode_comms",
         "enable_fusion_regions",
         "prioritize_bucketing_during_scheduling",
     )
