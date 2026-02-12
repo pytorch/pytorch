@@ -5043,6 +5043,59 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
         # no fusion, so 3 kernels: concat, add_kernel, relu
         self.check_code(code[0], num_kernels=3, num_allocs=2, num_deallocs=3)
 
+    @requires_cuda_and_triton
+    def test_no_fusion_for_multiple_reads_on_mutated_tensor(self):
+        @triton.jit
+        def add_kernel(in_ptr0, in_ptr1, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(0)
+            offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offs < n_elements
+            x = tl.load(in_ptr0 + offs, mask=mask)
+            y = tl.load(in_ptr1 + offs, mask=mask)
+            tl.store(out_ptr + offs, x + y, mask=mask)
+
+        def fn(a, b):
+            out = torch.empty_like(a)
+            grid = (triton.cdiv(a.numel(), 1024),)
+            add_kernel[grid](a, b, out, a.numel(), BLOCK_SIZE=1024)
+            return out.relu(), out.sigmoid()
+
+        a = torch.tensor([-0.3] * 8, dtype=torch.float32, device="cuda")
+        b = torch.tensor(
+            [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7], dtype=torch.float32, device="cuda"
+        )
+
+        out, code = run_and_get_code(torch.compile(fn), a, b)
+        self.assertEqual(out, fn(a, b), atol=0.05, rtol=0.05)
+        # two kernels: user defined `add_kernel`, and the generated one for both sigmoid and relu
+        self.check_code(code[0], num_kernels=2, num_allocs=3, num_deallocs=3)
+
+    @requires_cuda_and_triton
+    def test_no_fusion_for_atomic_store(self):
+        @triton.jit
+        def add_kernel(in_ptr0, in_ptr1, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(0)
+            offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offs < n_elements
+            x = tl.load(in_ptr0 + offs, mask=mask)
+            y = tl.load(in_ptr1 + offs, mask=mask)
+            tl.atomic_xchg(out_ptr + offs, x + y, mask=mask)
+
+        def fn(a, b):
+            out = torch.empty_like(a)
+            grid = (triton.cdiv(a.numel(), 1024),)
+            add_kernel[grid](a, b, out, a.numel(), BLOCK_SIZE=1024)
+            return out.relu()
+
+        a = torch.tensor([-0.3] * 8, dtype=torch.float32, device="cuda")
+        b = torch.tensor(
+            [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7], dtype=torch.float32, device="cuda"
+        )
+
+        out, code = run_and_get_code(torch.compile(fn), a, b)
+        self.assertEqual(out, fn(a, b), atol=0.05, rtol=0.05)
+        self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=3)
+
 
 @triton.jit
 def custom_store(ptr, val, mask):

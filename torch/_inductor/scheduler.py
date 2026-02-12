@@ -5757,13 +5757,12 @@ class Scheduler:
                         rd, cd
                     ):
                         remaining.remove(rd)  # noqa: B909
-                    elif (
-                        isinstance(cd, StarDep)
-                        and isinstance(node1.node, ir.UserDefinedTritonKernel)
-                        and node1.node.can_fuse_epilogue()
+                    elif isinstance(
+                        cd, StarDep
+                    ) and self.fusable_stardep_write_and_read_on_empty_tensor(
+                        rd, cd, node1.node
                     ):
-                        if self.fusable_stardep_write_and_read_on_empty_tensor(rd, cd):
-                            remaining.remove(rd)  # noqa: B909
+                        remaining.remove(rd)  # noqa: B909
 
         remaining_deps = OrderedSet(
             dep.name
@@ -5881,8 +5880,12 @@ class Scheduler:
     # we relax the conditions for fusion and additionally allow matching a writing StarDep with any read dep.
     # This makes use of the fact that `f(UB) = UB`.
     def fusable_stardep_write_and_read_on_empty_tensor(
-        self, read: Dep, write: StarDep
+        self, read: Dep, write: StarDep, writing_node: ir.Operation | None
     ) -> bool:
+        if not isinstance(writing_node, ir.UserDefinedTritonKernel):
+            return False
+        if not writing_node.can_fuse_epilogue():
+            return False
         read_name = self.mutation_renames.get(read.name, read.name)
         write_name = self.mutation_renames.get(write.name, write.name)
         if isinstance(write, StarDep) and read_name == write_name:
@@ -5920,27 +5923,59 @@ class Scheduler:
             score = MixOrderReduction.get_fusion_score(node1, node2)
             return _construct_return_value(score, True)
 
-        node1_deps = node1.read_writes.reads | node1.read_writes.writes
-        node2_deps = node2.read_writes.reads | node2.read_writes.writes
+        # for evaluating fusion memory scores of UserDefinedTritonKernel,
+        # we use a slightly different logic which allows matching StarDep with MemoryDep in certain scenarios.
+        # (See the checks we make in `can_fuse_epilogue()` that makes this possible)
+        if (
+            isinstance(node1.node, ir.UserDefinedTritonKernel)
+            and node1.node.can_fuse_epilogue()
+        ):
+            node1_deps = node1.read_writes.reads | node1.read_writes.writes
+            node2_deps = node2.read_writes.reads | node2.read_writes.writes
 
-        def _match(dep1: Dep, dep2: Dep):
-            if dep1 == dep2:
-                return True
-            if (isinstance(dep1, StarDep) and isinstance(dep2, MemoryDep)) or (
-                isinstance(dep1, StarDep) and isinstance(dep2, MemoryDep)
-            ):
-                return dep1.name == dep2.name
-            return False
+            def _match(dep1: Dep, dep2: Dep):
+                if dep1 == dep2:
+                    return True
+                if (isinstance(dep1, StarDep) and isinstance(dep2, MemoryDep)) or (
+                    isinstance(dep1, StarDep) and isinstance(dep2, MemoryDep)
+                ):
+                    return dep1.name == dep2.name
+                return False
 
-        score = 0
-        for node1_dep in node1_deps:
-            for node2_dep in node2_deps:
-                if _match(node1_dep, node2_dep):
-                    score += max(
-                        self.dep_size_hint(node1_dep), self.dep_size_hint(node2_dep)
-                    )
+            score = 0
+            for node1_dep in node1_deps:
+                for node2_dep in node2_deps:
+                    if _match(node1_dep, node2_dep):
+                        score += max(
+                            self.dep_size_hint(node1_dep), self.dep_size_hint(node2_dep)
+                        )
 
-        return _construct_return_value(score, False)
+            return _construct_return_value(score, False)
+
+        node1_dep_len = len(node1.read_writes.reads) + len(node1.read_writes.writes)
+        node2_dep_len = len(node2.read_writes.reads) + len(node2.read_writes.writes)
+
+        # optimization: iter over smaller set
+        if min(node1_dep_len, node2_dep_len) * 4 < max(node1_dep_len, node2_dep_len):
+            if node1_dep_len > node2_dep_len:
+                node1, node2 = node2, node1
+
+            deps = [
+                dep
+                for dep in node1.read_writes.reads | node1.read_writes.writes
+                if dep in node2.read_writes.reads or dep in node2.read_writes.writes
+            ]
+
+            return _construct_return_value(
+                sum(self.dep_size_hint(dep, count_bytes) for dep in deps), False
+            )
+
+        common_memory_deps = (node1.read_writes.reads | node1.read_writes.writes) & (
+            node2.read_writes.reads | node2.read_writes.writes
+        )
+        return _construct_return_value(
+            sum(self.dep_size_hint(dep) for dep in common_memory_deps), False
+        )
 
     def get_possible_fusions_with_highest_priority(
         self, possible_fusions: list[tuple[BaseSchedulerNode, BaseSchedulerNode]]
