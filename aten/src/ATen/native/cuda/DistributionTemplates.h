@@ -83,7 +83,6 @@ __global__ void distribution_elementwise_grid_stride_kernel(int64_t numel,
         transform_func(li, static_cast<accscalar_t>((&rand.x)[ii]));
       }
     }
-    __syncthreads();
   }
 }
 
