@@ -43,7 +43,7 @@ def move_cutlass_compiled_cache() -> None:
 
     try:
         import cutlass_cppgen  # type: ignore[import-not-found]
-    except ImportError as e:
+    except ImportError:
         return
 
     # Check if the CACHE_FILE attribute exists in cutlass_cppgen and if the file exists
