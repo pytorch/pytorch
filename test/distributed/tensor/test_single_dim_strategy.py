@@ -24,7 +24,8 @@ from torch.distributed.tensor._op_schema import (
 )
 from torch.distributed.tensor._ops._matrix_ops import mm_single_dim_strategy
 from torch.distributed.tensor._ops._pointwise_ops import (
-    single_mesh_dim_linear_pointwise_strategy,
+    _BINARY_ADDITIVE_RULES,
+    _make_partial_strategy,
 )
 from torch.distributed.tensor._ops._tensor_ops import cat_single_dim_strategy
 from torch.distributed.tensor._ops.single_dim_strategy import (
@@ -95,7 +96,7 @@ class TestExpandPlaceholder(TestCase):
     def test_foreach_ops_variants(self):
         mesh = DeviceMesh("cpu", mesh=torch.arange(8).reshape(2, 2, 2))
 
-        def _test_op(op, *args, linearity=None, inplace=None):
+        def _test_op(op, *args, extra_rules=None, inplace=None):
             # Auto-detect inplace ops by checking for "_." in the op name (e.g., _foreach_add_.List)
             if inplace is None:
                 inplace = "_." in str(op)
@@ -125,8 +126,8 @@ class TestExpandPlaceholder(TestCase):
             output_meta = [spec.tensor_meta for spec in out_spec.children]
 
             op_schema = OpSchema(op=op, args_schema=tuple(specs), kwargs_schema={})
-            strategy_fn = single_mesh_dim_linear_pointwise_strategy(
-                linearity=linearity or -1
+            strategy_fn = _make_partial_strategy(
+                extra_rules=extra_rules
             )
             expanded = _expand_single_dim_strategy_to_mesh(
                 mesh, op_schema, strategy_fn, output_meta
@@ -142,10 +143,10 @@ class TestExpandPlaceholder(TestCase):
                 # For inplace ops, the self argument cannot be redistributed,
                 # so there should be exactly 1 strategy (the input placement)
                 self.assertEqual(len(strategy.children[0].strategies), 1)
-            elif linearity == 1:
+            elif extra_rules is not None:
                 self.assertEqual(
-                    len(strategy.children[0].strategies), 125
-                )  # len([S(0), S(1), S(2), R, P]) ** 3 = 125
+                    len(strategy.children[0].strategies), 216
+                )  # len([S(0), S(1), S(2), R, Psum, Pavg]) ** 3 = 216
             else:
                 self.assertGreaterAlmostEqual(
                     len(strategy.children[0].strategies), 64
@@ -173,7 +174,7 @@ class TestExpandPlaceholder(TestCase):
                 op,
                 [(shard0, t), (shard1, t)],
                 [(shard1, t), (shard0, t)],
-                linearity=(1 if "add" in str(op) else -1),
+                extra_rules=(_BINARY_ADDITIVE_RULES if "add" in str(op) else None),
             )
 
         # .Scalar variants
@@ -208,7 +209,7 @@ class TestExpandPlaceholder(TestCase):
             torch.ops.aten._foreach_add_.List,
             [(shard0, t)],
             [(shard0, t)],
-            linearity=1,
+            extra_rules=_BINARY_ADDITIVE_RULES,
         )
 
     def test_expand_foreach_add_to_3d_mesh(self):
@@ -246,7 +247,7 @@ class TestExpandPlaceholder(TestCase):
             expanded_strategy_fn = _expand_single_dim_strategy_to_mesh(
                 mesh,
                 op_schema,
-                single_mesh_dim_linear_pointwise_strategy(linearity=1),
+                _make_partial_strategy(extra_rules=_BINARY_ADDITIVE_RULES),
                 output_tensor_meta,
             )
             strategy = expanded_strategy_fn(
@@ -258,8 +259,9 @@ class TestExpandPlaceholder(TestCase):
             return strategy
 
         # Note: using sizes that are multiples of mesh sizes so every sharding option is valid,
-        # (S0, S1, R, Psum, Pavg) ** 3 = 125
-        expected_num_strategies = (125, 8)
+        # child 0: (S0, S1, S2, R, Psum, Pavg) ** 3 = 216 (has Shard inputs)
+        # child 1: (R, Psum, Pavg) ** 3 = 27 (no Shard inputs, so ShardingPlaceholders dropped)
+        expected_num_strategies = (216, 27)
         # Test Replicate + Shard gives Shard
         inputs_a = [torch.empty((8, 8, 8))] * 2
         placements_a = [
