@@ -55,7 +55,8 @@ class RegularFuncWrapper:
 
     def __call__(self, inputs, scalars=None, **kwargs):
         if scalars is not None:
-            assert len(inputs) == 3
+            if len(inputs) != 3:
+                raise AssertionError(f"expected len(inputs) == 3, got {len(inputs)}")
             # We need to distribute each scalar to the regular func and it needs
             # special consideration as it is a keyword only argument to the
             # regular func. (Strangely, it is not a keyword only argument to the
@@ -97,13 +98,15 @@ class ForeachFuncWrapper:
             keys = tuple([e.key for e in p.key_averages()])
             mta_called = any("multi_tensor_apply_kernel" in k for k in keys)
 
-            assert mta_called == (expect_fastpath and (not zero_size)), (
-                f"{mta_called=}, {expect_fastpath=}, {zero_size=}, {self.func.__name__=}, {keys=}"
-            )
+            if mta_called != (expect_fastpath and (not zero_size)):
+                raise AssertionError(
+                    f"{mta_called=}, {expect_fastpath=}, {zero_size=}, {self.func.__name__=}, {keys=}"
+                )
         else:
             actual = self.func(*inputs, **kwargs)
         if self.is_inplace:
-            assert id(inputs[0]) == id(actual)
+            if id(inputs[0]) != id(actual):
+                raise AssertionError("expected inputs[0] is actual")
         return actual
 
 
@@ -371,8 +374,14 @@ class TestForeach(TestCase):
             noncontiguous=not is_fastpath,
             allow_higher_dtype_scalars=True,
         ):
-            assert isinstance(sample.args, tuple)
-            assert len(sample.args) == 2
+            if not isinstance(sample.args, tuple):
+                raise AssertionError(
+                    f"expected sample.args to be tuple, got {type(sample.args)}"
+                )
+            if len(sample.args) != 2:
+                raise AssertionError(
+                    f"expected len(sample.args) == 2, got {len(sample.args)}"
+                )
             inputs = [sample.input, *sample.args]
             kwargs = sample.kwargs.copy()
             disable_fastpath = sample.disable_fastpath and is_fastpath
@@ -1127,6 +1136,37 @@ class TestForeach(TestCase):
                 inputs, self.is_cuda, not disable_fastpath, zero_size=False, **kwargs
             ),
         )
+
+    @ops(
+        [o for o in foreach_reduce_op_db if o.name == "_foreach_norm"],
+    )
+    def test_foreach_norm_empty_tensor_inf_error(self, device, dtype, op):
+        """Test that _foreach_norm errors on empty tensors with ord=infinity"""
+        import math
+
+        # Test with single empty tensor
+        empty_tensor = torch.empty(0, dtype=dtype, device=device)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "_foreach_norm cannot compute the infinity norm on an empty tensor because the operation does not have an identity",
+        ):
+            torch._foreach_norm([empty_tensor], ord=math.inf)
+
+        # Test with mixed empty and non-empty tensors
+        non_empty_tensor = make_tensor((4,), dtype=dtype, device=device)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "_foreach_norm cannot compute the infinity norm on an empty tensor because the operation does not have an identity",
+        ):
+            torch._foreach_norm([empty_tensor, non_empty_tensor], ord=math.inf)
+
+        # Test that L1 and L2 norms work with empty tensors (should return 0)
+        # Note: This only works for floating types, int/complex may error or go to slow path
+        if dtype.is_floating_point:
+            result_l1 = torch._foreach_norm([empty_tensor], ord=1)
+            result_l2 = torch._foreach_norm([empty_tensor], ord=2)
+            self.assertEqual(result_l1[0].item(), 0.0)
+            self.assertEqual(result_l2[0].item(), 0.0)
 
     @onlyCUDA
     @ops(

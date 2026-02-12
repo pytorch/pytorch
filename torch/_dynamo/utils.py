@@ -55,6 +55,7 @@ from typing import (
     ClassVar,
     Generic,
     Literal,
+    NoReturn,
     Optional,
     overload,
     TypeAlias,
@@ -206,7 +207,7 @@ class ReinplaceCounters:
     @classmethod
     def add_missed_opportunities(cls, trigger: ReInplaceTrigger, count: int) -> None:
         if count != 0:
-            cls._values[f"missed_tensors_{trigger}"] += count
+            cls._values[f"missed_tensors_{trigger.name}"] += count
 
     @classmethod
     def clear(cls) -> None:
@@ -216,7 +217,7 @@ class ReinplaceCounters:
     def get_total_missed(cls) -> int:
         sum = 0
         for trigger in ReInplaceTrigger:
-            sum += cls._values.get(f"missed_tensors_{trigger}", 0)
+            sum += cls._values.get(f"missed_tensors_{trigger.name}", 0)
         return sum
 
     @classmethod
@@ -611,6 +612,25 @@ class CompileEventLogger:
         CompileEventLogger.add_data(
             event_name, CompileEventLogLevel.PT2_COMPILE, overwrite=False, **metadata
         )
+
+    @staticmethod
+    def add_record_function_data(event_name: str, **metadata: object) -> None:
+        """
+        Add record function data to the profiler event.
+
+        This emits profiler event data so compilation events show up in stack profilers
+        like the PyTorch profiler.
+
+        Args:
+            event_name: Name of the event to record
+            **metadata: Additional metadata to attach to the record function
+        """
+        if torch.autograd.profiler._is_profiler_enabled and metadata:
+            metadata_str = ", ".join(f"{k}={v}" for k, v in metadata.items())
+            with torch.autograd.profiler.record_function(
+                f"{event_name}_data: {metadata_str}"
+            ):
+                pass
 
     @staticmethod
     def compilation_metric(overwrite: bool = False, **metadata: object) -> None:
@@ -1801,6 +1821,8 @@ def get_compilation_metrics() -> list[CompilationMetrics]:
 class ChromiumEventLogger:
     """Logs chromium events to structured logs. tlparse will concatenate these into a perfetto UI link.
 
+    Also emits RecordFunction calls to torch.profiler when enabled.
+
     See https://docs.google.com/document/d/1CvAClvFfyA5R-PhYUmn5OOQtYMH4h6I0nSsKchNAySU/preview#heading=h.yr4qxyxotyw for
     a specification of the Chromium Event JSON format.
     """
@@ -1839,6 +1861,11 @@ class ChromiumEventLogger:
         if not hasattr(self.tls, "event_data"):
             self.tls.event_data = {}
         return self.tls.event_data
+
+    def get_record_functions(self) -> dict[str, AbstractContextManager[None]]:
+        if not hasattr(self.tls, "record_functions"):
+            self.tls.record_functions = {}
+        return self.tls.record_functions
 
     def __init__(self) -> None:
         self.tls = threading.local()
@@ -1953,6 +1980,16 @@ class ChromiumEventLogger:
         if log_pt2_compile_event:
             self.get_pt2_compile_substack().append(event_name)
 
+        # Emit profiler event so compilation events show up in stock PyTorch profiler
+        if torch.autograd.profiler._is_profiler_enabled:
+            rf = torch._C._profiler._RecordFunctionFast(event_name)
+            rf.__enter__()
+            self.get_record_functions()[event_name] = rf
+
+            # Add metadata to the profiler event if present
+            if metadata:
+                CompileEventLogger.add_record_function_data(event_name, **metadata)
+
     def reset(self) -> None:
         # We this on every compile in case a compile crashes or restarts and we haven't
         # cleared the stack.
@@ -1962,6 +1999,12 @@ class ChromiumEventLogger:
         substack.clear()
         event_data = self.get_event_data()
         event_data.clear()
+        # Clean up any lingering record functions (shouldn't happen in normal operation)
+        record_functions = self.get_record_functions()
+        if record_functions:
+            for rf in record_functions.values():
+                rf.__exit__(None, None, None)
+            record_functions.clear()
 
     def log_event_end(
         self,
@@ -2035,6 +2078,12 @@ class ChromiumEventLogger:
 
         # Finally pop the actual event off the stack
         event_stack.pop()
+
+        # End profiler event so compilation events show up in stock PyTorch profiler
+        record_functions = self.get_record_functions()
+        if event_name in record_functions:
+            rf = record_functions.pop(event_name)
+            rf.__exit__(None, None, None)
 
     def _log_timed_event(
         self,
@@ -2198,24 +2247,27 @@ def clone_tensor(x: torch.Tensor) -> torch.Tensor:
     return y
 
 
+def _copy_dynamo_attr(src: torch.Tensor, dst: torch.Tensor, attr: str) -> None:
+    """Copy a single dynamo attribute from src to dst, or remove it from dst if src doesn't have it."""
+    if hasattr(src, attr):
+        setattr(dst, attr, getattr(src, attr).copy())
+    elif hasattr(dst, attr):
+        delattr(dst, attr)
+
+
 def copy_dynamo_tensor_attributes(src: torch.Tensor, dst: torch.Tensor) -> None:
     """
     Copy dynamo-specific tensor attributes from src to dst.
     These attributes are used for dynamic shape marking and must be preserved
-    when cloning or casting tensors.
+    when cloning or casting tensors. If src doesn't have an attribute but dst does,
+    the attribute is removed from dst.
     """
-    if hasattr(src, "_dynamo_dynamic_indices"):
-        dst._dynamo_dynamic_indices = src._dynamo_dynamic_indices.copy()  # type: ignore[attr-defined]
-    if hasattr(src, "_dynamo_unbacked_indices"):
-        dst._dynamo_unbacked_indices = src._dynamo_unbacked_indices.copy()  # type: ignore[attr-defined]
-    if hasattr(src, "_dynamo_hint_overrides"):
-        dst._dynamo_hint_overrides = src._dynamo_hint_overrides.copy()  # type: ignore[attr-defined]
-    if hasattr(src, "_dynamo_shape_ids"):
-        dst._dynamo_shape_ids = src._dynamo_shape_ids.copy()  # type: ignore[attr-defined]
-    if hasattr(src, "_dynamo_strict_unbacked_indices"):
-        dst._dynamo_strict_unbacked_indices = src._dynamo_strict_unbacked_indices.copy()  # type: ignore[attr-defined]
-    if hasattr(src, "_dynamo_weak_dynamic_indices"):
-        dst._dynamo_weak_dynamic_indices = src._dynamo_weak_dynamic_indices.copy()  # type: ignore[attr-defined]
+    _copy_dynamo_attr(src, dst, "_dynamo_dynamic_indices")
+    _copy_dynamo_attr(src, dst, "_dynamo_unbacked_indices")
+    _copy_dynamo_attr(src, dst, "_dynamo_hint_overrides")
+    _copy_dynamo_attr(src, dst, "_dynamo_shape_ids")
+    _copy_dynamo_attr(src, dst, "_dynamo_strict_unbacked_indices")
+    _copy_dynamo_attr(src, dst, "_dynamo_weak_dynamic_indices")
 
 
 def clone_input(
@@ -2898,7 +2950,7 @@ def iter_contains(
     tx: InstructionTranslator,
     check_tensor_identity: bool = False,
 ) -> Any:
-    from .variables import BuiltinVariable, ConstantVariable
+    from .variables import ConstantVariable
 
     if search.is_python_constant():
         found_const = any(
@@ -2921,11 +2973,15 @@ def iter_contains(
                 if search is _get_fake_tensor(x):  # Object equivalence
                     return ConstantVariable.create(True)
         else:
-            check = BuiltinVariable(operator.eq).call_function(tx, [x, search], {})
+            from torch._dynamo.variables.builder import SourcelessBuilder
+
+            check = SourcelessBuilder.create(tx, operator.eq).call_function(
+                tx, [x, search], {}
+            )
             if found is None:
                 found = check
             else:
-                found = BuiltinVariable(operator.or_).call_function(
+                found = SourcelessBuilder.create(tx, operator.or_).call_function(
                     tx, [check, found], {}
                 )
     if found is None:
@@ -3532,7 +3588,30 @@ def get_concrete_sizes_from_symints(
     return msg
 
 
+def _wrap_graph_break_with_torch_runtime_err(gb_fn: Callable[[], NoReturn]) -> NoReturn:
+    from .exc import TorchRuntimeError, Unsupported
+
+    try:
+        gb_fn()
+    except Unsupported as e:
+        exc = TorchRuntimeError(str(e), getattr(e, "real_stack", None))
+        raise exc.with_traceback(e.__traceback__) from None
+    raise AssertionError("should be unreachable")
+
+
 def get_fake_value(
+    node: torch.fx.Node,
+    tx: InstructionTranslatorBase,
+    allow_non_graph_fake: bool = False,
+) -> Any:
+    _t0 = time.time_ns()
+    try:
+        return _get_fake_value_impl(node, tx, allow_non_graph_fake)
+    finally:
+        tx.output.bytecode_tracing_timings.get_fake_value_ns += time.time_ns() - _t0
+
+
+def _get_fake_value_impl(
     node: torch.fx.Node,
     tx: InstructionTranslatorBase,
     allow_non_graph_fake: bool = False,
@@ -3547,13 +3626,8 @@ def get_fake_value(
     """
     from torch.utils._sympy.value_ranges import ValueRangeError
 
-    from .exc import (
-        TorchRuntimeError,
-        unimplemented,
-        Unsupported,
-        UserError,
-        UserErrorType,
-    )
+    from . import graph_break_hints
+    from .exc import unimplemented, Unsupported, UserError, UserErrorType
 
     op = node.op
 
@@ -3649,6 +3723,7 @@ def get_fake_value(
                 explanation=f"Operator `{cause.func}` has a non-Tensor output "
                 "whose value is dependent on the data of Tensor inputs.",
                 hints=hints,
+                from_exc=cause,
             )
         elif isinstance(
             cause, torch._subclasses.fake_tensor.DynamicOutputShapeException
@@ -3662,6 +3737,7 @@ def get_fake_value(
                         "Enable tracing of dynamic shape operators with "
                         "`torch._dynamo.config.capture_dynamic_output_shape_ops = True`",
                     ],
+                    from_exc=cause,
                 )
             else:
                 unimplemented(
@@ -3671,6 +3747,7 @@ def get_fake_value(
                     hints=[
                         "Please report an issue to PyTorch",
                     ],
+                    from_exc=cause,
                 )
         elif isinstance(
             cause, torch._subclasses.fake_tensor.UnsupportedOperatorException
@@ -3697,6 +3774,7 @@ def get_fake_value(
                     "https://docs.google.com/document/d/1GgvOe7C8_NVOMLOCwDaYV1mXXyHMXY7ExoewHqooxrs/edit#heading=h.64r4npvq0w0"
                     " for how to fix",
                 ],
+                from_exc=cause,
             )
         elif isinstance(
             cause, torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
@@ -3713,10 +3791,20 @@ def get_fake_value(
                 gb_type="TypeError when making fake tensor call",
                 context=f"TypeError {node.target}: {cause}",
                 explanation="",
-                hints=[],
+                hints=[*graph_break_hints.USER_ERROR],
+                from_exc=cause,
             )
         msg = get_concrete_sizes_from_symints(str(e), fake_mode)
-        raise TorchRuntimeError(msg).with_traceback(e.__traceback__) from None
+        _wrap_graph_break_with_torch_runtime_err(
+            lambda: unimplemented(
+                gb_type="RuntimeError when making fake tensor call",
+                context="",
+                explanation=msg,
+                hints=[*graph_break_hints.USER_ERROR],
+                from_exc=cause,
+            )
+        )
+        raise AssertionError("should not reachable") from None
 
     if not allow_non_graph_fake:
         _ = pytree.tree_map_only(
@@ -3787,13 +3875,14 @@ def run_node(
                 return node.target(*args, **kwargs)  # type: ignore[operator]
             elif op == "call_method":
                 if not hasattr(args[0], node.target):  # type: ignore[arg-type]
+                    from . import graph_break_hints
                     from .exc import unimplemented
 
                     unimplemented(
                         gb_type="Missing attribute when running call_method node",
                         context="",
                         explanation=make_error_message("attribute not defined"),
-                        hints=[],
+                        hints=[*graph_break_hints.USER_ERROR],
                     )
                 return getattr(args[0], node.target)(*args[1:], **kwargs)  # type: ignore[arg-type]
             elif op == "call_module":
@@ -3807,11 +3896,14 @@ def run_node(
 
         except (NotImplementedError, UnsupportedFakeTensorException) as e:
             # NB: mimic how wrap_fake_exception does it
+            from . import graph_break_hints
             from .exc import unimplemented
 
-            hints = []
+            hints = [*graph_break_hints.USER_ERROR]
             if isinstance(e, NotImplementedError):
-                hints = [
+                hints += [
+                    "If the op is a custom op, did you implement a fake tensor implementation? "
+                    "(e.g. with `@my_custom_op.register_fake`)",
                     "If the op is a PyTorch op, please file an issue to PyTorch.",
                 ]
 
@@ -3837,7 +3929,8 @@ def get_real_value(node: torch.fx.Node, tracer: Any) -> Any:
     Run the actual computation represented by `node` and return the result.
     This will execute any dependent nodes in the graph as well.
     """
-    from .exc import TorchRuntimeError
+    from . import graph_break_hints
+    from .exc import unimplemented
 
     cache = tracer.real_value_cache
     if node in cache:
@@ -3867,7 +3960,17 @@ def get_real_value(node: torch.fx.Node, tracer: Any) -> Any:
         real_value = run_node(tracer, node, args, kwargs, nn_module)
         cache[node] = real_value
     except RuntimeError as e:
-        raise TorchRuntimeError(str(e)).with_traceback(e.__traceback__) from None
+        exn = e  # to make typing happy for the lambda
+        _wrap_graph_break_with_torch_runtime_err(
+            lambda: unimplemented(
+                gb_type="RuntimeError when trying to get real value from fx.Node",
+                context="",
+                explanation="",
+                hints=[*graph_break_hints.USER_ERROR],
+                from_exc=exn,
+            )
+        )
+        raise AssertionError("should not be reachable") from None
     return real_value
 
 
