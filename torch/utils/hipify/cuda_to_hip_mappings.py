@@ -3413,6 +3413,7 @@ C10_MAPPINGS = collections.OrderedDict([
     ("c10/cuda/CUDAMathCompat.h", "c10/hip/HIPMathCompat.h"),
     ("c10/cuda/CUDAMiscFunctions.h", "c10/hip/HIPMiscFunctions.h"),
     ("c10/cuda/CUDAStream.h", "c10/hip/HIPStream.h"),
+    ("c10/cuda/PeerToPeerAccess.h", "c10/hip/PeerToPeerAccess.h"),
     ("c10/cuda/CUDAEvent.h", "c10/hip/HIPEvent.h"),
     ("c10/cuda/impl/CUDAGuardImpl.h", "c10/hip/impl/HIPGuardImpl.h"),
     ("c10/cuda/impl/CUDATest.h", "c10/hip/impl/HIPTest.h"),
