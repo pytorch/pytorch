@@ -212,8 +212,6 @@ jobs:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
-        env:
-          PYTORCH_ROOT: ""
     {%- endif %}
 
 {%- if branches == "nightly" %}
