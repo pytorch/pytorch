@@ -367,8 +367,9 @@ static void registerXpuDeviceProperties(PyObject* module) {
                           reinterpret_cast<const char*>(prop.uuid.data()))
                    << ", driver_version='" << prop.driver_version
                    << "', total_memory="
-                   << prop.global_mem_size / (1024ull * 1024) << "MB"
-                   << ", max_compute_units=" << prop.max_compute_units
+                   << prop.global_mem_size / (1024ull * 1024)
+                   << "MB, local_mem_size=" << prop.local_mem_size / 1024ull
+                   << "KB, max_compute_units=" << prop.max_compute_units
                    << ", gpu_eu_count=" << prop.gpu_eu_count
                    << ", gpu_subslice_count=" << gpu_subslice_count(prop)
                    << ", max_work_group_size=" << prop.max_work_group_size
