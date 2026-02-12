@@ -1111,6 +1111,11 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             *args: VariableTracker,
             **kwargs: VariableTracker,
         ) -> VariableTracker | None:
+            from torch._inductor import config as inductor_config
+
+            # Skip decomposition when precision matters - let it fall through to ATen
+            if inductor_config.emulate_precision_casts:
+                return None
             if len(args) == 3 and "value" in kwargs and len(kwargs) == 1:
                 # decompose addcdiv into constituent ops, prevents a graph break due to converting
                 # value to a scalar
@@ -1150,15 +1155,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             *args: VariableTracker,
             **kwargs: VariableTracker,
         ) -> VariableTracker | None:
-            if not config.enable_dynamo_decompositions:
-                return None
-
-            if len(args) == 3 and not isinstance(args[2], ListVariable) and not kwargs:
-                return tx.inline_user_function_return(
-                    VariableTracker.build(tx, polyfills.foreach_lerp_inplace),
-                    args,
-                    kwargs,
-                )
+            # Always skip decomposition - inductor has a lowering that uses FMA
+            # to match eager CUDA behavior
             return None
 
         @register(torch._foreach_pow)
