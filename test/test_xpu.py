@@ -2639,6 +2639,7 @@ class TestXpuOptims(TestCase):
             self.assertEqual(scaler._scale, scale)
             self.assertEqual(scaler._growth_tracker, growth_tracker)
 
+
 @unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
 class TestXpuOps(TestCase):
     @suppress_warnings
