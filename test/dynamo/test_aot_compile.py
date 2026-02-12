@@ -148,7 +148,7 @@ class MultiHeadSelfAttention(nn.Module):
 
         # Also compile create_block_mask
         if MultiHeadSelfAttention._create_block_mask_fn is None:
-                MultiHeadSelfAttention._create_block_mask_fn = torch.compile(
+            MultiHeadSelfAttention._create_block_mask_fn = torch.compile(
                 create_block_mask, dynamic=False, fullgraph=True
             )
 
@@ -427,9 +427,9 @@ def _subprocess_grad_mode_after_prior_compile():
         torch._dynamo.reset()
 
         with torch.no_grad():
-            compiled_fn = torch.compile(target_fn, fullgraph=True, backend="eager").aot_compile(
-                ((torch.randn(3, 4), torch.randn(3, 4)), {})
-            )
+            compiled_fn = torch.compile(
+                target_fn, fullgraph=True, backend="eager"
+            ).aot_compile(((torch.randn(3, 4), torch.randn(3, 4)), {}))
 
         inputs = (torch.randn(3, 4), torch.randn(3, 4))
         with torch.no_grad():
@@ -1021,9 +1021,9 @@ from user code:
 
     def test_aot_compile_with_super_call(self):
         fn = TestVLLMModel()
-        compiled_fn = torch.compile(fn.forward, fullgraph=True, backend="eager").aot_compile(
-            ((torch.randn(3, 4),), {})
-        )
+        compiled_fn = torch.compile(
+            fn.forward, fullgraph=True, backend="eager"
+        ).aot_compile(((torch.randn(3, 4),), {}))
         self.assertEqual(fn.forward.__code__.co_freevars, ("__class__",))
         inputs = (torch.randn(3, 4),)
         expected = fn(*inputs)
@@ -1042,7 +1042,9 @@ from user code:
         def make_inputs():
             return (torch.randn(3, 4), torch.randn(3, 4))
 
-        compiled_fn = torch.compile(fn, fullgraph=True, backend="eager").aot_compile((make_inputs(), {}))
+        compiled_fn = torch.compile(fn, fullgraph=True, backend="eager").aot_compile(
+            (make_inputs(), {})
+        )
 
         test_inputs = make_inputs()
         self.assertEqual(compiled_fn(*test_inputs), fn(*test_inputs))
@@ -1297,7 +1299,9 @@ from user code:
         def make_inputs():
             return (torch.randn(3, 4), torch.randn(3, 4))
 
-        compiled_fn = torch.compile(fn, fullgraph=True, backend="eager").aot_compile((make_inputs(), {}))
+        compiled_fn = torch.compile(fn, fullgraph=True, backend="eager").aot_compile(
+            (make_inputs(), {})
+        )
         test_inputs = make_inputs()
         expected = fn(*test_inputs)
         actual = compiled_fn(*test_inputs)
