@@ -55,12 +55,10 @@ def _canonicalize(fx_g: fx.GraphModule) -> fx.GraphModule:
 
 @contextmanager
 def _disable_jit_autocast() -> Generator[None, None, None]:
-    # pyrefly: ignore [missing-attribute]
     old_jit_autocast_flag = torch._C._jit_set_autocast_mode(False)
     try:
         yield
     finally:
-        # pyrefly: ignore [missing-attribute]
         torch._C._jit_set_autocast_mode(old_jit_autocast_flag)
 
 
@@ -102,7 +100,6 @@ def ts_compile(fx_g: fx.GraphModule, inps: Sequence[Any]) -> torch.jit.ScriptMod
 
         f = torch.jit.script(fx_g)
 
-        # pyrefly: ignore [missing-attribute]
         torch._C._jit_pass_remove_mutation(f.graph)
 
         f = torch.jit.freeze(f.eval())
