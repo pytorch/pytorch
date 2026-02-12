@@ -1762,7 +1762,9 @@ class TestGuardSerialization(TestGuardSerializationBase):
 
         with torch.no_grad():
             compiled_fn = torch.compile(
-                foo, backend="eager", options={"guard_filter_fn": torch.compiler.skip_all_guards_unsafe}
+                foo,
+                backend="eager",
+                options={"guard_filter_fn": torch.compiler.skip_all_guards_unsafe},
             )
             compiled_fn(x)
 
@@ -1778,7 +1780,9 @@ class TestGuardSerialization(TestGuardSerializationBase):
 
         with GlobalTorchFunctionMode():
             compiled_fn = torch.compile(
-                foo, backend="eager", options={"guard_filter_fn": torch.compiler.skip_all_guards_unsafe}
+                foo,
+                backend="eager",
+                options={"guard_filter_fn": torch.compiler.skip_all_guards_unsafe},
             )
             compiled_fn(x)
 

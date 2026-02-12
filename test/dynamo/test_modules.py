@@ -3503,7 +3503,9 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         model_to_compile.linear.register_forward_pre_hook(pre_forward_rename_hook)
         model_to_compile.linear.register_forward_hook(post_forward_restore_hook)
 
-        compiled_model = torch.compile(model_to_compile, fullgraph=True, backend="eager")
+        compiled_model = torch.compile(
+            model_to_compile, fullgraph=True, backend="eager"
+        )
         compiled_output = compiled_model(input_tensor)
         assert hasattr(model.linear, "weight")
         assert not hasattr(compiled_model.linear, "_tmp_weight")
@@ -3545,7 +3547,9 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             layer.linear.register_forward_hook(noop_hook, with_kwargs=True)
 
         for i, layer in model.layers.named_children():
-            model.layers.register_module(i, torch.compile(layer, fullgraph=True, backend="eager"))
+            model.layers.register_module(
+                i, torch.compile(layer, fullgraph=True, backend="eager")
+            )
 
         output = model(inp)
         self.assertEqual(output_eager, output)
@@ -3600,7 +3604,9 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(eager_call_count, 7)
 
         for i, layer in model.layers.named_children():
-            model.layers.register_module(i, torch.compile(layer, fullgraph=True, backend="eager"))
+            model.layers.register_module(
+                i, torch.compile(layer, fullgraph=True, backend="eager")
+            )
 
         call_count[0] = 0
         output = model(inp)

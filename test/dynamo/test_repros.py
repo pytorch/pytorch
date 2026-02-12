@@ -4376,7 +4376,10 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             return x
 
         self.assertTrue(
-            same(torch.compile(forward, backend="eager")(torch.tensor([1.0])), torch.tensor([1.0]))
+            same(
+                torch.compile(forward, backend="eager")(torch.tensor([1.0])),
+                torch.tensor([1.0]),
+            )
         )
 
     def test_user_defined_object_callable(self):
