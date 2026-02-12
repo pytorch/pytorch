@@ -17,7 +17,6 @@
 #include <ATen/native/Sorting.h>
 #include <ATen/native/SortingUtils.h>
 #include <ATen/native/ReduceOpsUtils.h>
-#include <ATen/native/cuda/Sort.h>
 #include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -70,12 +69,8 @@ TORCH_META_FUNC(topk)
     topKSize[dim] = k;
   }
 
-  const auto indices_dtype = maybe_get_output(1).defined()
-      ? maybe_get_output(1).scalar_type()
-      : at::kLong; // for down-up cast if functional op is used.
-
   set_output_raw_strided(0, topKSize, {}, self.options());
-  set_output_raw_strided(1, topKSize, {}, self.options().dtype(indices_dtype));
+  set_output_raw_strided(1, topKSize, {}, self.options().dtype(at::kLong));
 }
 
 TORCH_META_FUNC2(sort, stable)
@@ -966,7 +961,7 @@ TORCH_IMPL_FUNC(sort_stable_out)
     auto tocast_dtype = at::kLong; // kLong is used as default, if functional op is used.
 
     const auto sort_size = self.dim() > 0 ? self.size(dim) : 1;
-    if (should_use_small_sort(self, dim)) { // SortInplace in cuda: no benefits of down-upcast
+    if (sort_size <= 4096) { // SortInplace in cuda: no benefits of down-upcast
       tocast_dtype = at::kLong;  // use existing logic
     } else if (sort_size - 1 <= std::numeric_limits<uint16_t>::max()) {
       tocast_dtype = at::kUInt16;
