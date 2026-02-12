@@ -554,11 +554,19 @@ def forward(self, b_parametrizations_buffer_original0, x):
 
             # full-graph capture
             torch._dynamo.reset()
-            fn = torch.compile(torch.mm, backend="aot_eager", fullgraph=True)
+            cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+            fn = torch.compile(torch.mm, backend=cnt, fullgraph=True)
             out = fn(x_dt, y_dt)
 
             # check output placements
             self.assertEqual(out.placements, out_placements)
+
+            # test on uneven shardings
+            dx = d_randn(20, 17, device_mesh=device_mesh, placements=x_placements)
+            dy = d_randn(17, 5, device_mesh=device_mesh, placements=y_placements)
+            out, eager_out = fn(dx, dy), torch.mm(dx, dy)
+            self.assertEqual(cnt.frame_count, 1)
+            self.assertEqual(out.shape, eager_out.shape)
 
         test_placements(
             (Replicate(), Replicate()),
@@ -570,6 +578,24 @@ def forward(self, b_parametrizations_buffer_original0, x):
         )
         test_placements(
             (Replicate(), Shard(0)), (Replicate(), Replicate()), (Replicate(), Shard(0))
+        )
+
+        # note: the expected output placements below are chosen via unbacked cost hinting,
+        # so it's reasonable for them to change along with hinting/strategy selection.
+        test_placements(
+            (Partial(), Partial()), (Partial(), Partial()), (Partial(), Partial())
+        )
+        test_placements(
+            (Partial(), Partial()), (Shard(0), Replicate()), (Partial(), Partial())
+        )
+        test_placements(
+            (Replicate(), Shard(0)), (Replicate(), Shard(0)), (Replicate(), Partial())
+        )
+        test_placements(
+            (Shard(0), Shard(1)), (Shard(1), Shard(0)), (Shard(0), Partial())
+        )
+        test_placements(
+            (Partial(), Replicate()), (Shard(0), Shard(0)), (Partial(), Partial())
         )
 
     @unittest.skipIf(not HAS_GPU, "requires GPU for RNG support")
@@ -602,6 +628,54 @@ def forward(self, b_parametrizations_buffer_original0, x):
             self.assertEqual(tuple(c_out.shape), (m, 1))
             self.assertEqual(cnt.frame_count, 1)
             self.assertEqual(c_out.shape, eager_out.shape)
+
+    def test_dtensor_matmul_cost_hint_or_upper_bound(self):
+        dist.destroy_process_group()
+        dist.init_process_group("fake", store=FakeStore(), rank=0, world_size=4)
+        device_mesh = init_device_mesh(self.device_type, (4,))
+
+        x_dt = DTensor.from_local(
+            torch.randn(8, 8),
+            device_mesh=device_mesh,
+            placements=[Shard(0)],
+        )
+        y_dt = DTensor.from_local(
+            torch.randn(8, 8),
+            device_mesh=device_mesh,
+            placements=[Shard(1)],
+        )
+        torch._dynamo.decorators.mark_unbacked(x_dt, 0)
+        torch._dynamo.decorators.mark_unbacked(y_dt, 1)
+
+        # large k dim tells compiler it's cheaper to all-gather on x
+        def f1(x, y):
+            torch._check(x.size(0) <= 32)
+            torch._check(y.size(1) <= 16384)
+            return x @ y
+
+        out = torch.compile(f1, backend="aot_eager", fullgraph=True)(x_dt, y_dt)
+        self.assertEqual(out.placements, (Shard(1),))
+
+        # for the reverse, all-gather on y
+        def f2(x, y):
+            torch._check(x.size(0) <= 16384)
+            torch._check(y.size(1) <= 32)
+            return x @ y
+
+        out = torch.compile(f2, backend="aot_eager", fullgraph=True)(x_dt, y_dt)
+        self.assertEqual(out.placements, (Shard(0),))
+
+        # specifying hint_override also determines the strategy
+        def f3(x, y):
+            return x @ y
+
+        x_dt = x_dt + 1
+        y_dt = y_dt + 1
+        torch._dynamo.decorators.mark_unbacked(x_dt, 0, hint_override=16)
+        torch._dynamo.decorators.mark_unbacked(x_dt, 1, hint_override=1024)
+
+        out = torch.compile(f3, backend="aot_eager", fullgraph=True)(x_dt, y_dt)
+        self.assertEqual(out.placements, (Shard(1),))
 
     def test_dtensor_requires_grad_recompile(self):
         cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
@@ -980,6 +1054,39 @@ def forward(self, b_parametrizations_buffer_original0, x):
 
         def fn(x):
             return dt.to_local(grad_placements=[Shard(0)]) + 2
+
+        fn_opt = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        x = torch.ones(4)
+        dt = DTensor.from_local(x, mesh, [Replicate()], run_check=False)
+
+        out_ref = fn(dt)
+        out_test = fn_opt(dt)
+        self.assertEqual(out_ref, out_test)
+
+    def test_dynamo_to_local_custom_partial_placement(self):
+        """Test that to_local works with custom Partial subclasses in grad_placements.
+
+        This tests the fix for custom placement objects like _ScaledPartial that
+        cannot be converted to Python constants via as_python_constant().
+        """
+
+        # Define a custom Partial subclass similar to _ScaledPartial in torchtitan
+        class ScaledPartial(Partial):
+            def __init__(self, reduction_divide_factor: float):
+                self.reduction_divide_factor = reduction_divide_factor
+                super().__init__(reduce_op="sum")
+
+            def _reduce_value(
+                self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
+            ) -> torch.Tensor:
+                tensor.div_(self.reduction_divide_factor)
+                return super()._reduce_value(tensor, mesh, mesh_dim)
+
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        scaled_partial = ScaledPartial(reduction_divide_factor=2.0)
+
+        def fn(x):
+            return x.to_local(grad_placements=[scaled_partial]) + 2
 
         fn_opt = torch.compile(fn, backend="aot_eager", fullgraph=True)
         x = torch.ones(4)
