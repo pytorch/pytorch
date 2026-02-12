@@ -263,7 +263,7 @@ class SuperVariable(VariableTracker):
         elif isinstance(inner_fn, staticmethod) and isinstance(
             inner_fn.__func__, types.FunctionType
         ):
-            fn_vt = VariableTracker.build(tx, inner_fn.__func__, source=source)
+            fn_vt = VariableTracker.build(tx, inner_fn.__func__, source=source, realize=True)
             return fn_vt.call_function(tx, args, kwargs)
         elif isinstance(inner_fn, classmethod) and isinstance(
             inner_fn.__func__, types.FunctionType
@@ -290,11 +290,11 @@ class SuperVariable(VariableTracker):
                 )
             assert source is not None
             fn_vt = VariableTracker.build(
-                tx, inner_fn.__func__, source=AttrSource(source, "__func__")
+                tx, inner_fn.__func__, source=AttrSource(source, "__func__"), realize=True
             )
             return fn_vt.call_function(tx, [cls_variable, *args], kwargs)
         elif isinstance(inner_fn, types.FunctionType):
-            fn_vt = VariableTracker.build(tx, inner_fn, source=source)
+            fn_vt = VariableTracker.build(tx, inner_fn, source=source, realize=True)
             return fn_vt.call_function(tx, [self.objvar] + args, kwargs)
         elif isinstance(inner_fn, types.MethodType):
             return variables.UserMethodVariable(
@@ -412,7 +412,7 @@ class SuperVariable(VariableTracker):
         ):
             # FunctionType but implementation is in C, we support some of these,
             # e.g., tensor ops like `torch.Tensor.to`.
-            fn_var = VariableTracker.build(tx, inner_fn, source)
+            fn_var = VariableTracker.build(tx, inner_fn, source, realize=True)
             return fn_var.call_function(tx, [self.objvar] + args, kwargs)
 
         unimplemented(
@@ -947,7 +947,7 @@ class AutogradFunctionVariable(VariableTracker):
             sig = inspect.signature(fn)
             if len(args) - 1 == len(sig.parameters):
                 args = args[1:]  # Don't use context
-            fn_vt = VariableTracker.build(tx, fn, source=source)
+            fn_vt = VariableTracker.build(tx, fn, source=source, realize=True)
             return fn_vt.call_function(tx, args, kwargs)
         elif isinstance(fn, types.MethodType):
             return variables.UserMethodVariable(
@@ -980,7 +980,7 @@ class AutogradFunctionVariable(VariableTracker):
         assert isinstance(fn, types.FunctionType)
         assert self.source is not None
         fn_source = AttrSource(self.source, "backward")
-        fn_vt = VariableTracker.build(tx, fn, source=fn_source)
+        fn_vt = VariableTracker.build(tx, fn, source=fn_source, realize=True)
         return fn_vt.call_function(tx, args, kwargs)
 
     def call_function(
@@ -1612,6 +1612,10 @@ class TypingVariable(VariableTracker):
         if name == "__getitem__" and len(args) == 1:
             new_typing = self.value[args[0].as_python_constant()]
             return TypingVariable(new_typing)
+        elif name == "__eq__":
+            if len(args) == 1 and not kwargs:
+                result = istype(args[0], TypingVariable) and self.value == args[0].value
+                return variables.ConstantVariable.create(result)
         unimplemented(
             gb_type="unsupported method call on `typing` variable",
             context=f"typing variable: {self.value}, method name: {name}, args: {args}, kwargs: {kwargs}",

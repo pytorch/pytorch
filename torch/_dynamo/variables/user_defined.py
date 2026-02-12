@@ -1130,17 +1130,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # This is to avoid getattr_static calls to look up the subobj from the self.value.__class__
         self._subobj_from_class: dict[str, object] = {}
 
-        # Cache fiddle Buildable.__getattr__ to avoid sys.modules lookup on hot path
-        _fiddle_mod = sys.modules.get("fiddle._src.config")
-        if (
-            _fiddle_mod is not None
-            and isinstance(value, _fiddle_mod.Buildable)
-            and type(value).__getattr__ is _fiddle_mod.Buildable.__getattr__
-        ):
-            self._fiddle_buildable_getattr = _fiddle_mod.Buildable.__getattr__
-        else:
-            self._fiddle_buildable_getattr = None
-
         import torch.utils._pytree as pytree
 
         self.is_pytree_constant_class = pytree.is_constant_class(self.value_type)
@@ -1359,7 +1348,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     # use `type(...)` to ignore instance attrs.
                     func_source = AttrSource(TypeSource(desc_source), "__set__")
                 desc_var = VariableTracker.build(tx, descriptor, desc_source)
-                func_var = VariableTracker.build(tx, setter, func_source)
+                func_var = VariableTracker.build(tx, setter, func_source, realize=True)
                 args = [desc_var, self, value]
                 return func_var.call_function(tx, args, {})
             # NOTE: else we assume the descriptor (if any) has a
@@ -1475,7 +1464,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 )
             assert self.source is not None
             func_src = AttrSource(self.source, "__func__")
-            func_var = VariableTracker.build(tx, func, func_src)
+            func_var = VariableTracker.build(tx, func, func_src, realize=True)
             obj_src = AttrSource(self.source, "__self__")
             obj_var = VariableTracker.build(tx, obj, obj_src)
             return func_var.call_function(tx, [obj_var] + args, kwargs)  # type: ignore[arg-type]
@@ -1683,27 +1672,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 ):
                     # Manually trace out the nn module __getattr__ to avoid large compilation latency.
                     out = self.manually_trace_nn_module_getattr(tx, name)
-                elif self._fiddle_buildable_getattr is not None and self.source:
-                    # Route through VariableTracker.build so the builder wraps
-                    # Buildable.__getattr__ as FiddleBuildableGetAttrVariable.
-                    # FiddleBuildableGetAttrVariable short circuits the getattr
-                    # access and saves on compile time.
-                    new_source = AttrSource(
-                        AttrSource(self.source, "__getattr__"), "__func__"
-                    )
-                    fn_vt = VariableTracker.build(
-                        tx, self._fiddle_buildable_getattr, source=new_source
-                    )
-                    out = fn_vt.call_function(
-                        tx,
-                        [self, ConstantVariable.create(name)],
-                        {},
-                    )
                 else:
                     new_source = None
                     if self.source:
                         new_source = AttrSource(self.source, "__getattr__")
-                    # TODO (yidiwu): We should use VariableTracker.build here
                     out = variables.UserMethodVariable(
                         getattr_fn, self, source=new_source
                     ).call_function(tx, [ConstantVariable.create(name)], {})
@@ -1761,7 +1733,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if self.source:
                 # Read the class attribute to reach the property
                 source = AttrSource(self.get_source_by_walking_mro(name), "fget")
-            fget_vt = VariableTracker.build(tx, subobj.fget, source=source)
+            fget_vt = VariableTracker.build(tx, subobj.fget, source=source, realize=True)
             return fget_vt.call_function(tx, [self], {})
         elif isinstance(subobj, _collections._tuplegetter):
             # namedtuple fields are represented by _tuplegetter, and here we
@@ -2845,6 +2817,44 @@ class MutableMappingVariable(UserDefinedObjectVariable):
     def __init__(self, value: object, **kwargs: Any) -> None:
         super().__init__(value, **kwargs)
         self.generic_dict_vt = ConstDictVariable({})
+
+    def method_setattr_standard(
+        self,
+        tx: "InstructionTranslator",
+        name: VariableTracker,
+        value: VariableTracker,
+        directly_update_dict: bool = False,
+    ) -> VariableTracker:
+        """Override to handle property setters on MutableMapping subclasses.
+
+        This is needed because property.__set__ is a slot wrapper (C function),
+        not a Python function, so the base class's try_get_descritor_and_setter_py_func
+        returns None for properties. But property.fset IS a Python function we can trace.
+
+        Without this, property setters on newly created MutableMapping objects fail
+        when accessing nested objects (which haven't been initialized yet on the
+        example value). By tracing the fset, we capture the setter logic in the graph
+        instead of running it on uninitialized example objects.
+
+        TODO(compiler): This fix is scoped to MutableMapping only because tracing
+        property setters on ALL UserDefinedObjectVariable can cause failures when
+        the fset calls untraceable C++ functions (e.g., pybind functions). Ideally,
+        this should be extended to all user-defined classes with a graceful fallback
+        when tracing the fset hits an untraceable function.
+        See: https://github.com/pytorch/pytorch/issues/172000
+        """
+        if isinstance(name, variables.ConstantVariable) and isinstance(name.value, str):
+            name_str = name.value
+            descriptor = inspect.getattr_static(type(self.value), name_str, None)
+            if isinstance(descriptor, property) and descriptor.fset is not None:
+                fset_source = None
+                if self.cls_source:
+                    desc_source = self.get_source_by_walking_mro(name_str)
+                    fset_source = AttrSource(desc_source, "fset")
+                fset_vt = VariableTracker.build(tx, descriptor.fset, fset_source)
+                return fset_vt.call_function(tx, [self, value], {})
+
+        return super().method_setattr_standard(tx, name, value, directly_update_dict)
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         # A common pattern in the init code of MutableMapping objects is to

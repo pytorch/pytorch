@@ -1546,17 +1546,6 @@
       ]
     }
   ],
-  "GB4026": [
-    {
-      "Gb_type": "triton.set_allocator not supported",
-      "Context": "triton.set_allocator called inside compiled region",
-      "Explanation": "triton.set_allocator is not supported inside torch.compile. It modifies global Triton allocator state and cannot be traced.",
-      "Hints": [
-        "Move triton.set_allocator() outside of the torch.compile region ",
-        "(call it before the compiled function)."
-      ]
-    }
-  ],
   "GB0133": [
     {
       "Gb_type": "Unsupported arguments for itertools.accumulate",
