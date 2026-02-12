@@ -36,11 +36,11 @@ def _shard_dim_alltoall_meta(input, gather_dim, shard_dim, group_name):
     group = _resolve_process_group(group_name)
     group_rank = get_group_rank(group, get_rank())
 
-    return (
-        torch.cat(stacked_list, dim=gather_dim)
-        .chunk(group_size, dim=shard_dim)[group_rank]
-        .contiguous()
-    )
+    cat_tensor = torch.cat(stacked_list, dim=gather_dim)
+    # pyrefly: ignore [unsupported-operation]
+    chunk_size = cat_tensor.size(shard_dim) // group_size
+    chunk = torch.narrow(cat_tensor, shard_dim, group_rank * chunk_size, chunk_size)
+    return chunk.contiguous()
 
 
 def shard_dim_alltoall(input, gather_dim, shard_dim, mesh, mesh_dim):
@@ -54,7 +54,9 @@ def shard_dim_alltoall(input, gather_dim, shard_dim, mesh, mesh_dim):
         if isinstance(out, funcol.AsyncCollectiveTensor):
             # stick to the same behavior for the alltoall case, remove this once we enable alltoall async
             out = out.wait()
-        out = torch.chunk(out, mesh.size(mesh_dim), dim=shard_dim)[
+        from torch.distributed.tensor.placement_types import Shard
+
+        out = Shard._custom_chunk(out, mesh.size(mesh_dim), dim=shard_dim)[
             mesh.get_local_rank(mesh_dim)
         ]
         return out.contiguous()
@@ -173,7 +175,9 @@ def mesh_broadcast(
 
 @maybe_run_for_local_tensor
 def pad_tensor(tensor: torch.Tensor, pad_dim: int, pad_size: int) -> torch.Tensor:
-    if pad_size == 0:
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    if guard_or_false(pad_size == 0):
         return tensor
     pad = [0, 0] * (tensor.ndim - pad_dim)
     pad[-1] = pad_size
@@ -182,7 +186,9 @@ def pad_tensor(tensor: torch.Tensor, pad_dim: int, pad_size: int) -> torch.Tenso
 
 @maybe_run_for_local_tensor
 def unpad_tensor(tensor: torch.Tensor, pad_dim: int, pad_size: int) -> torch.Tensor:
-    if pad_size == 0:
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    if guard_or_false(pad_size == 0):
         return tensor
     return tensor.narrow(
         pad_dim,

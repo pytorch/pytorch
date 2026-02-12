@@ -25,19 +25,39 @@ TORCH_PRECOMPUTE_META_FUNC(avg_pool2d)
   // #20866, #22032: Guarantee this for the official C++ API?
   TORCH_CHECK(kernel_size.size() == 1 || kernel_size.size() == 2,
     "avg_pool2d: kernel_size must either be a single int, or a tuple of two ints");
-  const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
-  const int kW = kernel_size.size() == 1 ? kH : safe_downcast<int, int64_t>(kernel_size[1]);
+  const int64_t kH_val = kernel_size[0];
+  const int64_t kW_val = kernel_size.size() == 1 ? kH_val : kernel_size[1];
+  TORCH_CHECK(kH_val > 0 && kH_val <= std::numeric_limits<int>::max() &&
+              kW_val > 0 && kW_val <= std::numeric_limits<int>::max(),
+    "integer out of range");
+  const int kH = static_cast<int>(kH_val);
+  const int kW = static_cast<int>(kW_val);
 
   TORCH_CHECK(stride.empty() || stride.size() == 1 || stride.size() == 2,
     "avg_pool2d: stride must either be omitted, a single int, or a tuple of two ints");
-  const int dH = stride.empty() ? kH : safe_downcast<int, int64_t>(stride[0]);
-  const int dW = stride.empty() ? kW :
-                 stride.size() == 1 ? dH : safe_downcast<int, int64_t>(stride[1]);
+  const int64_t dH_val = stride.empty() ? kH_val : stride[0];
+  const int64_t dW_val = stride.empty() ? kW_val : (stride.size() == 1 ? dH_val : stride[1]);
+  if (!stride.empty()) {
+    // Check for negative values (invalid) and overflow (values > INT_MAX)
+    // Zero stride is validated later in pooling_output_shape with proper error message
+    if (dH_val < 0 || dH_val > std::numeric_limits<int>::max() ||
+        dW_val < 0 || dW_val > std::numeric_limits<int>::max()) {
+      TORCH_CHECK(false, "integer out of range");
+    }
+  }
+  const int dH = static_cast<int>(dH_val);
+  const int dW = static_cast<int>(dW_val);
 
   TORCH_CHECK(padding.size() == 1 || padding.size() == 2,
     "avg_pool2d: padding must either be a single int, or a tuple of two ints");
-  const int padH = safe_downcast<int, int64_t>(padding[0]);
-  const int padW = padding.size() == 1 ? padH : safe_downcast<int, int64_t>(padding[1]);
+  const int64_t padH_val = padding[0];
+  const int64_t padW_val = padding.size() == 1 ? padH_val : padding[1];
+  // note: negative padding is checked later in pool2d_shape_check with "pad must be non-negative" error
+  TORCH_CHECK(padH_val <= std::numeric_limits<int>::max() &&
+              padW_val <= std::numeric_limits<int>::max(),
+    "integer out of range");
+  const int padH = static_cast<int>(padH_val);
+  const int padW = static_cast<int>(padW_val);
 
   TORCH_CHECK(!divisor_override.has_value() || divisor_override.value() != 0,
     "divisor must be not zero");
@@ -107,19 +127,39 @@ TORCH_META_FUNC(avg_pool2d_backward) (
   // #20866, #22032: Guarantee this for the official C++ API?
   TORCH_CHECK(kernel_size.size() == 1 || kernel_size.size() == 2,
     "avg_pool2d: kernel_size must either be a single int, or a tuple of two ints");
-  const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
-  const int kW = kernel_size.size() == 1 ? kH : safe_downcast<int, int64_t>(kernel_size[1]);
+  const int64_t kH_val = kernel_size[0];
+  const int64_t kW_val = kernel_size.size() == 1 ? kH_val : kernel_size[1];
+  TORCH_CHECK(kH_val > 0 && kH_val <= std::numeric_limits<int>::max() &&
+              kW_val > 0 && kW_val <= std::numeric_limits<int>::max(),
+    "integer out of range");
+  const int kH = static_cast<int>(kH_val);
+  const int kW = static_cast<int>(kW_val);
 
   TORCH_CHECK(stride.empty() || stride.size() == 1 || stride.size() == 2,
     "avg_pool2d: stride must either be omitted, a single int, or a tuple of two ints");
-  const int dH = stride.empty() ? kH : safe_downcast<int, int64_t>(stride[0]);
-  const int dW = stride.empty() ? kW :
-                 stride.size() == 1 ? dH : safe_downcast<int, int64_t>(stride[1]);
+  const int64_t dH_val = stride.empty() ? kH_val : stride[0];
+  const int64_t dW_val = stride.empty() ? kW_val : (stride.size() == 1 ? dH_val : stride[1]);
+  if (!stride.empty()) {
+    // Check for negative values (invalid) and overflow (values > INT_MAX)
+    // Zero stride is validated later in pooling_output_shape with proper error message
+    if (dH_val < 0 || dH_val > std::numeric_limits<int>::max() ||
+        dW_val < 0 || dW_val > std::numeric_limits<int>::max()) {
+      TORCH_CHECK(false, "integer out of range");
+    }
+  }
+  const int dH = static_cast<int>(dH_val);
+  const int dW = static_cast<int>(dW_val);
 
   TORCH_CHECK(padding.size() == 1 || padding.size() == 2,
     "avg_pool2d: padding must either be a single int, or a tuple of two ints");
-  const int padH = safe_downcast<int, int64_t>(padding[0]);
-  const int padW = padding.size() == 1 ? padH : safe_downcast<int, int64_t>(padding[1]);
+  const int64_t padH_val = padding[0];
+  const int64_t padW_val = padding.size() == 1 ? padH_val : padding[1];
+  // note: negative padding is checked later in avg_pool2d_backward_shape_check with "pad must be non-negative" error
+  TORCH_CHECK(padH_val <= std::numeric_limits<int>::max() &&
+              padW_val <= std::numeric_limits<int>::max(),
+    "integer out of range");
+  const int padH = static_cast<int>(padH_val);
+  const int padW = static_cast<int>(padW_val);
 
   TORCH_CHECK(!divisor_override.has_value() || divisor_override.value() != 0, "divisor must be not zero");
 
