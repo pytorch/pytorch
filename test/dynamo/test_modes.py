@@ -221,7 +221,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         m1 = BaseTorchFunctionMode()
         with m, m1:
 
-            @torch.compile(fullgraph=True)
+            @torch.compile(fullgraph=True, backend="eager")
             def fn(x):
                 torch.set_default_device("cpu")
                 _pop_torch_function_stack()
@@ -236,7 +236,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
             self.assertIs(stack[2], m1)
 
     def test_stack_state_clear_default_device(self):
-        @torch.compile(fullgraph=True)
+        @torch.compile(fullgraph=True, backend="eager")
         def fn(x):
             torch.set_default_device(None)
             return x + 1
@@ -251,7 +251,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         # Stack populated, add device
         with m, m1:
 
-            @torch.compile(fullgraph=True)
+            @torch.compile(fullgraph=True, backend="eager")
             def fn(x):
                 torch.set_default_device("cpu")
                 torch.set_default_device(None)
@@ -268,7 +268,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         torch.set_default_device("cpu")
         with m, m1:
 
-            @torch.compile(fullgraph=True)
+            @torch.compile(fullgraph=True, backend="eager")
             def fn(x):
                 torch.set_default_device(None)
                 return x + 1
@@ -278,7 +278,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
             self.assertIs(stack[0], m)
             self.assertIs(stack[1], m1)
 
-        @torch.compile(fullgraph=True)
+        @torch.compile(fullgraph=True, backend="eager")
         def fn(x):
             torch.set_default_device("cpu")
             torch.set_default_device("cpu")
@@ -293,7 +293,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         m = BaseTorchFunctionMode()
         with m:
 
-            @torch.compile(fullgraph=True)
+            @torch.compile(fullgraph=True, backend="eager")
             def fn(x):
                 _pop_torch_function_stack()
                 return x + 1
@@ -307,7 +307,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(_len_torch_function_stack(), 0)
 
     def test_is_torch_function_all_disabled(self):
-        @torch.compile(fullgraph=True)
+        @torch.compile(fullgraph=True, backend="eager")
         def fn(x):
             return (
                 torch._C._is_torch_function_all_disabled(),
@@ -319,7 +319,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         self.assertFalse(res)
 
     def test_error_empty_stack_pop_torch_function_mode(self):
-        @torch.compile(fullgraph=True)
+        @torch.compile(fullgraph=True, backend="eager")
         def fn(x):
             _pop_torch_function_stack()
             return x + 1
@@ -334,7 +334,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         m = BaseTorchFunctionMode()
         with m:
 
-            @torch.compile(fullgraph=True)
+            @torch.compile(fullgraph=True, backend="eager")
             def fn(x, m):
                 _push_on_torch_function_stack(m)
                 return x + 1
@@ -351,7 +351,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         m = BaseTorchFunctionMode()
         with m:
 
-            @torch.compile(fullgraph=True)
+            @torch.compile(fullgraph=True, backend="eager")
             def fn(x):
                 z = _len_torch_function_stack()
                 return x + z
@@ -365,7 +365,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
             def __init__(self, x):
                 self.x = x
 
-        @torch.compile(fullgraph=True)
+        @torch.compile(fullgraph=True, backend="eager")
         def fn(x):
             z = TestMode(2)
             z.y = 2
@@ -437,7 +437,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         inp = torch.ones(2, 2) + 1
 
         for fn_i in [fn, fn_2]:
-            fn_opt = torch.compile(fn_i, fullgraph=True)
+            fn_opt = torch.compile(fn_i, fullgraph=True, backend="eager")
             with TestMode1(), TestMode2():
                 expected = fn_i(inp), mode_1_called, mode_2_called
                 reset_state()
@@ -471,7 +471,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
 
         inp = (torch.ones(2, 2) + 1).as_subclass(TestSubclass)
 
-        fn_opt = torch.compile(fn, fullgraph=True)
+        fn_opt = torch.compile(fn, fullgraph=True, backend="eager")
         with TestMode():
             with torch._C.DisableTorchFunctionSubclass():
                 expected = fn(inp)
@@ -500,7 +500,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
 
         inp = (torch.ones(2, 2) + 1).as_subclass(TestSubclass)
 
-        fn_opt = torch.compile(fn, fullgraph=True)
+        fn_opt = torch.compile(fn, fullgraph=True, backend="eager")
         with TestMode():
             expected = fn(inp)
             actual = fn_opt(inp)
@@ -515,7 +515,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
             return torch.add(o, y)
 
         inp = (torch.ones(2, 2) + 1, torch.ones(2, 2) + 2)
-        fn_opt = torch.compile(fn, fullgraph=True)
+        fn_opt = torch.compile(fn, fullgraph=True, backend="eager")
 
         expected = fn(*inp)
         actual = fn_opt(*inp)
@@ -549,7 +549,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
             return torch.add(o, y)
 
         inp = (torch.ones(2, 2) + 1, torch.ones(2, 2) + 2)
-        fn_opt = torch.compile(fn)
+        fn_opt = torch.compile(fn, backend="eager")
 
         expected = fn(*inp)
         actual = fn_opt(*inp)
@@ -561,7 +561,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         def err():
             raise RuntimeError("test")
 
-        @torch.compile()
+        @torch.compile(backend="eager")
         def fn(x):
             with TestMode():
                 x += 1
@@ -588,7 +588,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
             return torch.add(o, y)
 
         inp = (torch.ones(2, 2) + 1, torch.ones(2, 2) + 2)
-        fn_opt = torch.compile(fn)
+        fn_opt = torch.compile(fn, backend="eager")
 
         expected = fn(*inp)
         actual = fn_opt(*inp)
@@ -628,23 +628,23 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         inp0_int = torch.ones(1, 1, dtype=torch.int32)
         inp1_int = torch.ones(1, 1, dtype=torch.int32)
 
-        @torch.compile(fullgraph=True)
+        @torch.compile(fullgraph=True, backend="eager")
         def fn_un(op, inp):
             return op(inp)
 
-        @torch.compile(fullgraph=True)
+        @torch.compile(fullgraph=True, backend="eager")
         def fn_un_int(op, inp):
             return op(inp)
 
-        @torch.compile(fullgraph=True)
+        @torch.compile(fullgraph=True, backend="eager")
         def fn_bin(op, inp0, inp1):
             return op(inp0, inp1)
 
-        @torch.compile(fullgraph=True)
+        @torch.compile(fullgraph=True, backend="eager")
         def fn_bin_int(op, inp0, inp1):
             return op(inp0, inp1)
 
-        @torch.compile(fullgraph=True)
+        @torch.compile(fullgraph=True, backend="eager")
         def fn_tensor_and_int(op, inp0, inp1):
             return op(inp0, inp1)
 
@@ -703,7 +703,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         # https://github.com/pytorch/pytorch/issues/141232
         with torch.device("cpu"):
 
-            @torch.compile(fullgraph=True)
+            @torch.compile(fullgraph=True, backend="eager")
             def func(a):
                 d = TransformedDistribution(
                     Normal(a, 1),
@@ -721,7 +721,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
 
         torch.set_default_device(device_type)
 
-        flex_attention = torch.compile(flex_attention, dynamic=False)
+        flex_attention = torch.compile(flex_attention, dynamic=False, backend="eager")
 
         prefix_lengths = torch.arange(8)
 
@@ -752,7 +752,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         x = torch.ones(4, requires_grad=True)
 
         with torch.device("cpu"):
-            torch.compile(mod, fullgraph=True)(x)
+            torch.compile(mod, fullgraph=True, backend="eager")(x)
 
     @requires_gpu
     @skipIfXpu(msg="XPU does not support flex attention")
@@ -764,7 +764,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         )
 
         with torch.device(GPU_TYPE):
-            flex_attention = torch.compile(flex_attention_eager, dynamic=False)
+            flex_attention = torch.compile(flex_attention_eager, dynamic=False, backend="eager")
 
             with self.assertRaisesRegex(
                 torch._dynamo.exc.Unsupported,
@@ -803,7 +803,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
     def test_default_device_factory_functions(self):
         """Test that factory functions respect default device in compiled code"""
 
-        @torch.compile(fullgraph=True)
+        @torch.compile(fullgraph=True, backend="eager")
         def random_func(
             x: torch.Tensor,
         ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -837,7 +837,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
     def test_default_device_factory_functions_priority(self):
         torch.set_default_device("cuda")
 
-        @torch.compile(fullgraph=True)
+        @torch.compile(fullgraph=True, backend="eager")
         def with_explicit_device(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
             rnd = torch.randint(
                 0, 2**32, size=x.shape, dtype=torch.uint32, device="cpu"

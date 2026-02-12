@@ -3187,7 +3187,7 @@ def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytre
                 torch.compile(fn, backend="eager")(pred, pytree_in)
 
     def test_cond_with_empty_operands(self):
-        @torch.compile(fullgraph=True)
+        @torch.compile(fullgraph=True, backend="eager")
         def fn(x, y, z):
             def true_fn():
                 return y + 2
@@ -6110,7 +6110,7 @@ class GraphModule(torch.nn.Module):
 
     def test_vmap_call_compiled_backward_fn(self):
         # See PyTorch issue #138422
-        @torch.compile
+        @torch.compile(backend="aot_eager")
         def f(x):
             return x**2
 
@@ -6128,7 +6128,7 @@ class GraphModule(torch.nn.Module):
 
     def test_vjp_call_compiled_backward_fn(self):
         # See PyTorch issue #138422
-        @torch.compile
+        @torch.compile(backend="aot_eager")
         def f(x):
             return x**2
 
@@ -6146,7 +6146,7 @@ class GraphModule(torch.nn.Module):
 
     def test_grad_call_compiled_backward_fn(self):
         # See PyTorch issue #138422
-        @torch.compile
+        @torch.compile(backend="aot_eager")
         def f(x):
             return x**2
 
