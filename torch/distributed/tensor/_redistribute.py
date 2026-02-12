@@ -22,7 +22,10 @@ from torch.distributed.tensor._dtensor_spec import (
     ShardOrderEntry,
     TensorMeta,
 )
-from torch.distributed.tensor._utils import assert_no_mixed_partial_types
+from torch.distributed.tensor._utils import (
+    assert_no_mixed_partial_types,
+    get_mesh_dim_unsharded_shape,
+)
 from torch.distributed.tensor.device_mesh import DeviceMesh
 from torch.distributed.tensor.placement_types import (
     _StridedShard,
@@ -143,8 +146,11 @@ def disable_redistribute_transform_optimization(disabled: bool = True):
 class _TransformInfo:
     mesh_dim: int
     src_dst_placements: tuple[Placement, Placement]
-    # logical_shape on this mesh dimension
-    logical_shape: list[int]
+    # the tensor shape as if this mesh dim's sharding is removed (filled by
+    # fill_transform_infos_unsharded_shape before use)
+    mesh_dim_unsharded_shape: list[int] | None = dataclasses.field(
+        default=None, kw_only=True
+    )
 
     def __post_init__(self):
         assert self.mesh_dim >= 0
@@ -370,7 +376,7 @@ def _optimize_transform_infos(
     - A flattened mesh covering the relevant dimensions must exist
     - For reduce_scatter, tensor dim must be evenly divisible by flattened mesh size
 
-    For nested sharding, the merged operation uses the logical_shape from the
+    For nested sharding, the merged operation uses the mesh_dim_unsharded_shape from the
     outermost mesh dimension (smallest mesh_dim index) which represents the
     global tensor shape needed for correct padding/unpadding.
 
@@ -468,20 +474,33 @@ def _optimize_transform_infos(
         if flattened_mesh is None:
             return None, "no_flattened_mesh"
 
-        # For nested sharding, each transform has a different logical_shape.
-        # We need the outermost transform's logical_shape, which represents the
-        # tensor shape before any of the transforms in this group are applied.
-        # The outermost transform has the largest logical_shape on the affected
-        # tensor dimension (least divided by prior shards).
+        # For nested sharding, each transform has a different mesh_dim_unsharded_shape.
+        # We need the outermost transform's shape, which represents the tensor shape
+        # before any of the transforms in this group are applied.
+        # The outermost transform has the largest shape on the affected tensor
+        # dimension (least divided by prior shards).
+        if not all(info.mesh_dim_unsharded_shape is not None for info in infos):
+            raise RuntimeError(
+                "mesh_dim_unsharded_shape must be set on all transform infos "
+                "before optimization. Call fill_transform_infos_unsharded_shape first."
+            )
         src, dst = first_placements
         if comm_type == "all_gather":
             # S->R (all_gather): affected dim is the source shard dim
             affected_dim = cast(Shard, src).dim
-            outermost_info = max(infos, key=lambda x: x.logical_shape[affected_dim])
+            outermost_info = max(
+                infos, key=lambda x: x.mesh_dim_unsharded_shape[affected_dim]
+            )
         elif comm_type == "reduce_scatter":
             affected_dim = cast(Shard, dst).dim
-            outermost_info = max(infos, key=lambda x: x.logical_shape[affected_dim])
-            tensor_dim_size = outermost_info.logical_shape[affected_dim]
+            outermost_info = max(
+                infos, key=lambda x: x.mesh_dim_unsharded_shape[affected_dim]
+            )
+            if outermost_info.mesh_dim_unsharded_shape is None:
+                raise RuntimeError(
+                    "mesh_dim_unsharded_shape must be set before optimization."
+                )
+            tensor_dim_size = outermost_info.mesh_dim_unsharded_shape[affected_dim]
             effective_shard_mesh_size = math.prod(
                 device_mesh.size(info.mesh_dim) for info in infos
             )
@@ -489,7 +508,7 @@ def _optimize_transform_infos(
             # dimension is not evenly divisible by the flattened mesh size.
             # The effective size is the product of mesh sizes for dims being transformed
             # (not all dims with matching placement - intervening shards are already
-            # accounted for in logical_shape).
+            # accounted for in mesh_dim_unsharded_shape).
             if tensor_dim_size % effective_shard_mesh_size != 0:
                 return None, "uneven_tensor_shape"
         elif comm_type == "all_reduce":
@@ -519,7 +538,7 @@ def _optimize_transform_infos(
             _FlattenedTransformInfo(
                 mesh_dim=0,
                 src_dst_placements=merged_placements,
-                logical_shape=outermost_info.logical_shape,
+                mesh_dim_unsharded_shape=outermost_info.mesh_dim_unsharded_shape,
                 mesh=flattened_mesh,
                 original_mesh_dims=sorted_mesh_dims,
                 avg_scale=avg_scale,
@@ -585,6 +604,69 @@ def _optimize_transform_infos(
     logger.debug(
         "_optimize_transform_infos original: %s, optimized: %s", transform_infos, result
     )
+
+    return result
+
+
+def fill_transform_infos_unsharded_shape(
+    transform_infos: Sequence[_TransformInfo],
+    mesh: DeviceMesh,
+    full_tensor_shape: tuple[int, ...],
+    src_placements: tuple[Placement, ...],
+    src_shard_order: ShardOrder | None = None,
+    use_strided_shard_as_shard_order: bool = False,
+) -> list[_TransformInfo]:
+    """
+    Fill in the mesh_dim_unsharded_shape for each _TransformInfo in the
+    sequence, accounting for the cumulative effect of preceding transformations
+    on the tensor shape.
+
+    When use_strided_shard_as_shard_order is True, _StridedShard placements are
+    normalized into regular Shard placements with an explicit shard_order before
+    computing shapes.
+    """
+    if not transform_infos:
+        return []
+
+    result: list[_TransformInfo] = []
+
+    if use_strided_shard_as_shard_order:
+        src_placements, src_shard_order = (
+            DTensorSpec._normalize_placements_into_shard_order(
+                src_placements, mesh, use_strided_shard_as_shard_order=True
+            )
+        )
+    if src_shard_order is None:
+        src_shard_order = DTensorSpec.compute_default_shard_order(src_placements)
+
+    current_placements = list(src_placements)
+    current_shard_order_dict = DTensorRedistributePlanner._ShardOrder_to_dict(
+        src_shard_order
+    )
+
+    for info in transform_infos:
+        cur_shard_order = DTensorRedistributePlanner._dict_to_ShardOrder(
+            current_shard_order_dict
+        )
+        mesh_dim_unsharded_shape = get_mesh_dim_unsharded_shape(
+            tuple(current_placements),
+            cur_shard_order,
+            mesh,
+            full_tensor_shape,
+            info.mesh_dim,
+        )
+
+        result.append(
+            _TransformInfo(
+                mesh_dim=info.mesh_dim,
+                src_dst_placements=info.src_dst_placements,
+                mesh_dim_unsharded_shape=mesh_dim_unsharded_shape,
+            )
+        )
+
+        _update_shard_order_and_placements(
+            info, current_placements, current_shard_order_dict
+        )
 
     return result
 
@@ -1160,43 +1242,10 @@ class DTensorRedistributePlanner:
             f"No path found from src_state {src_state} to dst_state {dst_state}"
         )
 
-    def get_logical_shape(
-        self,
-        src_state: "DTensorRedistributePlanner.DistState",
-        mesh_dim: int,
-        full_tensor_shape: tuple[int, ...],
-    ) -> list[int]:
-        new_logical_shape = list(full_tensor_shape)
-        for entry in src_state.tensor_dim_to_mesh_dim:
-            tensor_dim = entry.tensor_dim
-            mesh_dims = entry.mesh_dims
-            assert len(mesh_dims) > 0
-            for mdim in mesh_dims:
-                if mdim == mesh_dim:
-                    continue
-                placement = src_state.placements[mdim]
-                if isinstance(placement, Shard):
-                    new_size, _ = placement.local_shard_size_and_offset(
-                        new_logical_shape[tensor_dim],
-                        self.device_mesh.size(mesh_dim=mdim),
-                        self.device_mesh._sym_get_coordinate(mdim),
-                    )
-                elif isinstance(placement, _StridedShard):
-                    new_size, _ = placement.local_shard_size_and_offset(
-                        new_logical_shape[tensor_dim],
-                        self.device_mesh.size(mesh_dim=mdim),
-                        self.device_mesh._sym_get_coordinate(mdim),
-                    )
-                else:
-                    raise ValueError(f"Unsupported placement type: {placement}")
-                new_logical_shape[tensor_dim] = new_size
-        return new_logical_shape
-
     def generate_graph_based_transform_infos(
         self,
         src_spec: DTensorSpec,
         dst_spec: DTensorSpec,
-        full_tensor_shape: tuple[int, ...],
     ) -> list[_TransformInfo]:
         # TODO(zpcore): Temporary workaround for backward compatibility where
         # _StridedShard was used to encode device shard order. We should migrate
@@ -1252,14 +1301,10 @@ class DTensorRedistributePlanner:
                                 "Multiple mesh_dims are different between cur_state and nxt_state"
                             )
                         update_mesh_dim = mesh_dim
-                        logical_shape = self.get_logical_shape(
-                            cur_state, mesh_dim, full_tensor_shape
-                        )
                         transform_infos.append(
                             _TransformInfo(
                                 mesh_dim=update_mesh_dim,
                                 src_dst_placements=(cur_placement, nxt_placement),
-                                logical_shape=logical_shape,
                             )
                         )
 
@@ -1281,10 +1326,6 @@ class DTensorRedistributePlanner:
         the former is a nested-sharding of a tensor already already sharded dimension 0, whereas
         the latter is the first sharding on tensor dimension 0.
         """
-        # logical shape records the logic tensor shape on the mesh dimension
-        # this is useful to ensure uneven sharding gets correct output shape
-        initial_logical_shape = list(src_spec.shape)
-        mesh_dims_to_logical_shape = [initial_logical_shape]
         transform_infos: list[_TransformInfo] = []
         if self.device_mesh.ndim == 1:
             # if device_mesh is 1D, redistribute is a simple direct
@@ -1297,30 +1338,9 @@ class DTensorRedistributePlanner:
                             src_spec.placements[0],
                             dst_spec.placements[0],
                         ),
-                        logical_shape=initial_logical_shape,
                     )
                 )
             return transform_infos
-
-        # Handle multi-dim device mesh placement redistribution First, we need
-        # to build the logical shape for each mesh dim for correct allgather
-        # uneven shards on each mesh dim (with dynamic padding)
-        for i, src in enumerate(src_spec.placements):
-            current_logical_shape = mesh_dims_to_logical_shape[i]
-            if isinstance(src, Shard):
-                if i < self.device_mesh.ndim - 1:
-                    # calculate and save the logical shape for this sharding
-                    mesh_dim_size = self.device_mesh.size(mesh_dim=i)
-                    local_shard_size, _ = src._local_shard_size_and_offset(
-                        current_logical_shape[src.dim],
-                        mesh_dim_size,
-                        self.device_mesh._sym_get_coordinate(i),
-                    )
-                    new_logical_shape = list(current_logical_shape)
-                    new_logical_shape[src.dim] = local_shard_size
-                    mesh_dims_to_logical_shape.append(new_logical_shape)
-            else:
-                mesh_dims_to_logical_shape.append(current_logical_shape)
 
         # Next, we need to derive the transform infos from src to dst
         # placements, here we use a greedy search with step by step state
@@ -1366,7 +1386,6 @@ class DTensorRedistributePlanner:
                         _TransformInfo(
                             mesh_dim=mesh_dim,
                             src_dst_placements=(current, target),
-                            logical_shape=mesh_dims_to_logical_shape[mesh_dim],
                         )
                     )
                     current_placements[mesh_dim] = target
@@ -1382,7 +1401,6 @@ class DTensorRedistributePlanner:
                     _TransformInfo(
                         mesh_dim=mesh_dim,
                         src_dst_placements=(current, target),
-                        logical_shape=mesh_dims_to_logical_shape[mesh_dim],
                     )
                 )
                 current_placements[mesh_dim] = target
@@ -1424,9 +1442,7 @@ def _gen_transform_infos_non_cached(
         src_spec.tensor_meta,
     )
     if use_graph_based_transform:
-        transform_infos = drp.generate_graph_based_transform_infos(
-            src_spec, dst_spec, src_spec.shape
-        )
+        transform_infos = drp.generate_graph_based_transform_infos(src_spec, dst_spec)
     else:
         transform_infos = drp.generate_greedy_transform_infos(src_spec, dst_spec)
     return transform_infos
@@ -1491,6 +1507,16 @@ def redistribute_local_tensor(
             current_spec, target_spec, use_graph_based_transform
         )
 
+    # Fill in mesh_dim_unsharded_shape for each transform info
+    transform_infos = fill_transform_infos_unsharded_shape(
+        transform_infos,
+        device_mesh,
+        current_spec.shape,
+        current_spec.placements,
+        current_spec.shard_order,
+        current_spec.use_strided_shard_as_shard_order,
+    )
+
     # Optimize by grouping same-type collectives into flattened operations
     optimized_transform_infos = _optimize_transform_infos(
         transform_infos,
@@ -1529,6 +1555,11 @@ def redistribute_local_tensor(
             i = transform_info.mesh_dim
             current, target = transform_info.src_dst_placements
             num_chunks = mesh_to_use.size(mesh_dim=i)
+            if transform_info.mesh_dim_unsharded_shape is None:
+                raise RuntimeError(
+                    "mesh_dim_unsharded_shape must be set before redistribution. "
+                    "Call fill_transform_infos_unsharded_shape first."
+                )
 
             if current == target:
                 # short cut, just use the original local tensor
@@ -1557,11 +1588,17 @@ def redistribute_local_tensor(
                 elif current.is_shard():
                     current_placement = cast(Shard, current)
                     new_local_tensor = current_placement._to_replicate_tensor(
-                        local_tensor, mesh_to_use, i, transform_info.logical_shape
+                        local_tensor,
+                        mesh_to_use,
+                        i,
+                        transform_info.mesh_dim_unsharded_shape,
                     )
                 elif isinstance(current, _StridedShard):
                     new_local_tensor = current._to_replicate_tensor(
-                        local_tensor, device_mesh, i, transform_info.logical_shape
+                        local_tensor,
+                        device_mesh,
+                        i,
+                        transform_info.mesh_dim_unsharded_shape,
                     )
                 else:
                     raise RuntimeError(
@@ -1594,7 +1631,7 @@ def redistribute_local_tensor(
                             local_tensor,
                             mesh_to_use,
                             i,
-                            transform_info.logical_shape,
+                            transform_info.mesh_dim_unsharded_shape,
                             target_placement.dim,
                         )
                 elif isinstance(current, _StridedShard):
@@ -1642,7 +1679,10 @@ def redistribute_local_tensor(
                     # _StridedShard -> _StridedShard: go through Replicate
                     # First convert to Replicate, then to _StridedShard
                     replicated = current._to_replicate_tensor(
-                        local_tensor, device_mesh, i, transform_info.logical_shape
+                        local_tensor,
+                        device_mesh,
+                        i,
+                        transform_info.mesh_dim_unsharded_shape,
                     )
                     new_local_tensor = target._replicate_to_strided_shard(
                         replicated, device_mesh, i, device_mesh._sym_get_coordinate(i)
