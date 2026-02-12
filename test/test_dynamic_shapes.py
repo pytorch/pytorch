@@ -5093,6 +5093,48 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
             compiled = torch.compile(fn, fullgraph=True, backend="eager")
             compiled(*args)
 
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_unbacked_pooling_no_dde(self):
+        x3d = torch.randn(2, 3, 8)
+        x4d = torch.randn(2, 3, 8, 8)
+        x5d = torch.randn(2, 3, 4, 4, 4)
+        for dim in range(x3d.ndim):
+            torch._dynamo.decorators.mark_unbacked(x3d, dim)
+        for dim in range(x4d.ndim):
+            torch._dynamo.decorators.mark_unbacked(x4d, dim)
+        for dim in range(x5d.ndim):
+            torch._dynamo.decorators.mark_unbacked(x5d, dim)
+
+        cases = [
+            (lambda x: torch.nn.functional.avg_pool1d(x, 2), x3d),
+            (lambda x: torch.nn.functional.avg_pool2d(x, 2), x4d),
+            (lambda x: torch.nn.functional.avg_pool3d(x, 2), x5d),
+            (lambda x: torch.nn.functional.max_pool2d(x, 2), x4d),
+            (lambda x: torch.nn.functional.max_pool3d(x, 2), x5d),
+        ]
+        for fn, inp in cases:
+            torch._dynamo.reset()
+            compiled = torch.compile(fn, fullgraph=True, backend="eager")
+            compiled(inp)
+
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_unbacked_unpool_no_dde(self):
+        F = torch.nn.functional
+
+        x4d = torch.randn(2, 3, 8, 8)
+        pool_out, indices = F.max_pool2d(x4d, 2, return_indices=True)
+        for dim in range(pool_out.ndim):
+            torch._dynamo.decorators.mark_unbacked(pool_out, dim)
+            torch._dynamo.decorators.mark_unbacked(indices, dim)
+
+        torch._dynamo.reset()
+        compiled = torch.compile(
+            lambda x, idx: F.max_unpool2d(x, idx, 2),
+            fullgraph=True,
+            backend="eager",
+        )
+        compiled(pool_out, indices)
+
 
 instantiate_parametrized_tests(TestUnbacked)
 
