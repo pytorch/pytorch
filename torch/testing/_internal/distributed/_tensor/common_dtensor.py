@@ -644,10 +644,16 @@ class DTensorContinuousTestBase(MultiProcContinuousTest):
 
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file):
+        
         # Set device before initializing process group to ensure
-        # each rank is bound to the correct GPU
+        # each rank is bound to the correct GPU. However, if world_size > device_count,
+        # we skip the test.
         if torch.accelerator.is_available():
-            torch.accelerator.set_device_index(rank)
+            if world_size > torch.accelerator.device_count():
+                sys.exit(TEST_SKIPS[f"multi-gpu-{world_size}"].exit_code)
+            else:
+                torch.accelerator.set_device_index(rank)
+ 
         # Call parent's _init_pg to do the actual process group initialization
         super()._init_pg(rank, world_size, rdvz_file)
 
