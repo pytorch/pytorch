@@ -2,6 +2,12 @@ name: Build Flash Attention 3 wheels (Windows)
 
 on:
   workflow_dispatch:
+    inputs:
+      test:
+        description: 'Build test wheels with date suffix in version'
+        required: false
+        default: true
+        type: boolean
   schedule:
     - cron: '0 0 1,15 * *'
   pull_request:
@@ -73,15 +79,7 @@ jobs:
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           no-sudo: true
-          submodules: false
-
-      - name: Checkout Flash-Attention
-        uses: actions/checkout@v4
-        with:
-          repository: Dao-AILab/flash-attention
-          ref: bc0e4ac01484ffb61ddc694724826bec4d9cf1c2
-          submodules: recursive
-          path: flash-attention
+          submodules: true
 
       - name: Set CUDA environment
         run: |
@@ -105,15 +103,12 @@ jobs:
 
       - name: Apply Flash Attention patches for Windows
         run: |
-          cd flash-attention/hopper
+          cd third_party/flash-attention/hopper
           sed -i 's/bare_metal_version != Version("12.8")/& and not is_offline_build()/' setup.py
           sed -i '/flags.append(f'"'"'ldflags = /i\    ldflags.remove("/LTCG")' setup.py
 
           sed -i "s/python_requires=\">=3.8\"/python_requires=\">=${PYTHON_VERSION}\"/" setup.py
           sed -i "s/\"torch\",/\"torch>=${PYTORCH_MIN_VERSION}\",/" setup.py
-
-          BUILD_DATE=$(date +%Y%m%d)
-          sed -i "s/version=\"3.0.0.b1\"/version=\"3.0.0b1+cu${CUDA_VERSION}.${BUILD_DATE}\"/" setup.py
 
       - name: Build Flash Attention 3 wheel
         env:
@@ -130,7 +125,11 @@ jobs:
           nvcc --version
           python -m pip install torch==${PYTORCH_VERSION} --index-url "https://download.pytorch.org/whl/cu${CUDA_VERSION}"
           python -m pip install einops==${EINOPS_VERSION} ninja==${NINJA_VERSION} numpy==${NUMPY_VERSION}
-          cd flash-attention/hopper
+          if [[ "${{ inputs.test }}" == "true" ]]; then
+            BUILD_DATE=$(date +%Y%m%d)
+            export FLASH_ATTN_LOCAL_VERSION="${BUILD_DATE}.cu${CUDA_VERSION}"
+          fi
+          cd third_party/flash-attention/hopper
           python setup.py bdist_wheel -d "${FA_FINAL_PACKAGE_DIR}" -k --plat-name win_amd64
           echo "Wheel built:"
           ls -la "${FA_FINAL_PACKAGE_DIR}"/*.whl
