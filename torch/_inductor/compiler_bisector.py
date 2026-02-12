@@ -514,7 +514,9 @@ class CompilerBisector:
             bisection_enabled_orig = cls.bisection_enabled
             cls.delete_bisect_status()
             cls.bisection_enabled = True
-            cls.in_process_cache = tempfile.mkdtemp()
+            # Only create temp dir if not already set (CLI run mode pre-sets it)
+            if not cls.in_process_cache:
+                cls.in_process_cache = tempfile.mkdtemp()
 
             def cleanup() -> None:
                 cls.bisection_enabled = bisection_enabled_orig
@@ -719,21 +721,17 @@ def command_line_usage() -> None:
                 if run_state == "test_disable":
                     # -1 means always disable (counter > -1 is always True)
                     env["TORCH_BISECT_MAX"] = "-1"
-                elif run_state == "find_max_bounds":
-                    # Subprocess can't report count back, so we estimate upper bound
-                    # Run without disabling, then set a reasonable upper bound
-                    bisection_manager.update_bisect_range(backend, subsystem, 0, 1000)
-                    # Don't set TORCH_BISECT_MAX - let it run normally
-                elif run_state == "bisect":
-                    low, high = bisection_manager.get_bisect_range(backend, subsystem)
-                    midpoint = (low + high) // 2
-                    env["TORCH_BISECT_MAX"] = str(midpoint)
+                # For find_max_bounds and bisect, let the subprocess use file-based
+                # mechanisms. The subprocess reads run_state and bisect_range from
+                # files, and writes the actual count during find_max_bounds.
 
             result = subprocess.run(run_cmd, env=env)
             return result.returncode == 0
 
         bisection_manager.delete_bisect_status()
         bisection_manager.bisection_enabled = True
+        # Use shared cache_dir instead of temp dir so subprocesses can access files
+        CompilerBisector.in_process_cache = cache_dir()
         result = bisection_manager.do_bisect(test_function, cli_interface=False)
         if result:
             print(f"\nBisection complete: {result}")

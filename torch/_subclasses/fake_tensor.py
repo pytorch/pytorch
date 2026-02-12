@@ -65,6 +65,7 @@ if TYPE_CHECKING:
     from types import TracebackType
 
     from torch._guards import Source
+    from torch._library.opaque_object import OpaqueType
     from torch._ops import OpOverload
     from torch.fx.experimental.symbolic_shapes import ShapeEnv, SymbolicContext
 
@@ -177,8 +178,8 @@ def disable_fake_tensor_cache(fake_mode: FakeTensorMode) -> Generator[None, None
 
 
 def get_plain_tensors(
-    subclass: Tensor, *, out: list[Union[Tensor, int, SymInt]]
-) -> list[Union[Tensor, int, SymInt]]:
+    subclass: Tensor, *, out: list[Tensor | int | SymInt | OpaqueType]
+) -> list[Tensor | int | SymInt | OpaqueType]:
     # This function is used in Runtime, do not add redundant asserts
     todo = [subclass]
     while todo:
@@ -2228,8 +2229,8 @@ class FakeTensorMode(TorchDispatchMode):
                     )
                 if (
                     not fake.node.expr.free_symbols
-                    - self.shape_env.var_to_val.keys()
-                    - self.shape_env.unbacked_var_to_val.keys()
+                    - self.shape_env.backed_var_to_val.keys()
+                    - self.shape_env.real_tensor_prop_unbacked_vals.keys()
                 ):
                     if (
                         self.shape_env._maybe_evaluate_static(
@@ -2519,12 +2520,18 @@ class FakeTensorMode(TorchDispatchMode):
         # We will rely on functionalization for use of fake tensors constants as persistent
         # objects on an FX Graph.
 
-        # We dispatch size/stride/numel on the FakeTensor not its constant, so bail on inplace_view
         all_constant = all(e.constant is not None for e in flat_arg_fake_tensors)
         if (
             isinstance(func, torch._ops.OpOverload)
             and torch.Tag.nondeterministic_seeded not in func.tags
-            and torch.Tag.inplace_view not in func.tags
+            # We dispatch size/stride/numel on the FakeTensor not its constant, so bail on inplace_view.
+            # Example: fake_a.transpose_(0,1) would mutate fake_a.constant in-place, changing its
+            # shape from (2,3) to (3,2), while fake_a.shape still reports (2,3) → divergence.
+            # However, detach_ is safe: it only mutates requires_grad (not shape/stride/data),
+            # and constants are used purely for their values, not autograd.
+            and (
+                torch.Tag.inplace_view not in func.tags or func is aten.detach_.default
+            )
             and all_constant
             and len(flat_arg_fake_tensors) != 0
             and not has_symbolic_sizes
@@ -2588,8 +2595,8 @@ class FakeTensorMode(TorchDispatchMode):
                         "self.shape_env must not be None for symbolic types"
                     )
                 return t.node.pytype(
-                    t.node.expr.xreplace(self.shape_env.var_to_val).xreplace(
-                        self.shape_env.unbacked_var_to_val
+                    t.node.expr.xreplace(self.shape_env.backed_var_to_val).xreplace(
+                        self.shape_env.real_tensor_prop_unbacked_vals
                     )
                 )
             elif isinstance(t, FakeScriptObject):
@@ -2613,7 +2620,10 @@ class FakeTensorMode(TorchDispatchMode):
                     isinstance(a, py_sym_types)
                     and (syms := free_unbacked_symbols(a))
                     and self.shape_env is not None
-                    and any(s not in self.shape_env.unbacked_var_to_val for s in syms)
+                    and any(
+                        s not in self.shape_env.real_tensor_prop_unbacked_vals
+                        for s in syms
+                    )
                 )
                 for a in flat_args
             )
@@ -2656,7 +2666,9 @@ class FakeTensorMode(TorchDispatchMode):
                 func,
                 flat_arg_fake_tensors,
                 flat_args,
-                self.shape_env.unbacked_var_to_val if self.shape_env else None,
+                self.shape_env.real_tensor_prop_unbacked_vals
+                if self.shape_env
+                else None,
             )
 
         def maybe_propagate_real_tensors(fake_out: T) -> T:
@@ -2682,7 +2694,9 @@ class FakeTensorMode(TorchDispatchMode):
                             raise AssertionError(
                                 "self.shape_env must not be None for symbolic Symbol"
                             )
-                        self.shape_env.set_unbacked_var_to_val(t.node.expr, real_t)
+                        self.shape_env.set_real_tensor_prop_unbacked_vals(
+                            t.node.expr, real_t
+                        )
                     elif (
                         isinstance(s := t.node.expr, sympy.Eq)
                         and isinstance(s.lhs, sympy.Symbol)
@@ -2693,7 +2707,9 @@ class FakeTensorMode(TorchDispatchMode):
                                 "self.shape_env must not be None for symbolic Eq"
                             )
 
-                        self.shape_env.set_unbacked_var_to_val(s, int(real_t))
+                        self.shape_env.set_real_tensor_prop_unbacked_vals(
+                            s, int(real_t)
+                        )
 
             if real_out is not nil:
                 # cross check fake/real outputs, and optionally override fake kernel mismatches
@@ -2715,7 +2731,7 @@ class FakeTensorMode(TorchDispatchMode):
                         real_out,
                     )
 
-                # populate unbacked_var_to_val
+                # populate real_tensor_prop_unbacked_vals
                 if (
                     not isinstance(fake_out, Tensor)
                     and not isinstance(real_out, Tensor)
