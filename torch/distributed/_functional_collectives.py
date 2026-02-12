@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import contextlib
-import math
 import sys
 import warnings
 from typing import Any, cast, TYPE_CHECKING, Union
@@ -204,16 +203,13 @@ def all_gather_tensor(
         self, group_size, group_name
     )
     res = _maybe_wrap_tensor(tensor)
+    # TODO this should be done inside AsyncCollectiveTensor to delay the wait() call
     if gather_dim != 0:
-        # Check if _maybe_view_chunk_cat can use the view optimization.
-        # If not, it will use torch.cat which needs the data anyway, so
-        # wait early to avoid AsyncCollectiveTensor dispatch overhead.
+        # torch.cat access the data so we already need to wait here, first do wait
+        # and then chunk + cat avoid us going through ACT dispatching logic again
         if isinstance(res, AsyncCollectiveTensor):
-            shape = list(res.shape)
-            numel_between = math.prod(shape[1:gather_dim]) if gather_dim > 1 else 1
-            can_use_view = shape[0] == group_size and numel_between == 1
-            if not can_use_view:
-                res = res.wait()
+            res = res.wait()  # type: ignore[attr-defined]
+
         res = _maybe_view_chunk_cat(res, group_size, gather_dim)
     return res
 
@@ -241,17 +237,13 @@ def all_gather_tensor_autograd(
         self, group_size, group_name
     )
     res = _FromTorchTensor.apply(tensor)
+    # TODO this should be done inside AsyncCollectiveTensor to delay the wait() call
     if gather_dim != 0:
-        # Check if _maybe_view_chunk_cat can use the view optimization.
-        # If not, it will use torch.cat which needs the data anyway, so
-        # wait early to avoid AsyncCollectiveTensor dispatch overhead.
+        # torch.cat access the data so we already need to wait here, first do wait
+        # and then chunk + cat avoid us going through ACT dispatching logic again
         if isinstance(res, AsyncCollectiveTensor):
-            shape = list(res.shape)
-            numel_between = math.prod(shape[1:gather_dim]) if gather_dim > 1 else 1
-            can_use_view = shape[0] == group_size and numel_between == 1
-            if not can_use_view:
-                res = res.wait()
-        res = _maybe_view_chunk_cat(res, group_size, gather_dim)
+            res = res.wait()  # type: ignore[attr-defined]
+        res = torch.cat(torch.chunk(res, group_size, dim=0), dim=gather_dim)
     return res
 
 
@@ -1159,7 +1151,6 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> tuple[str, list[int], int
             raise AssertionError(
                 "Only 1D mesh is supported, pass in (DeviceMesh, int) together if mesh > 1D"
             )
-        # TODO: it should run collective in the whole mesh instead of dim 0
         pg = group.get_group()
         rankset = dist.get_process_group_ranks(pg)
         group_size = len(rankset)

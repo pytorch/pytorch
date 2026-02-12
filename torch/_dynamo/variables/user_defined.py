@@ -426,6 +426,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        from .builder import SourcelessBuilder
+
         if (
             name == "__subclasses__"
             and len(args) == 0
@@ -452,10 +454,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.ConstantVariable(self.value != args[0].value)
         elif issubclass(self.value, dict) and name != "__new__":
             # __new__ is handled below
-            return variables.BuiltinVariable(dict).call_method(tx, name, args, kwargs)
+            return SourcelessBuilder.create(tx, dict).call_method(
+                tx, name, args, kwargs
+            )
         elif issubclass(self.value, (set, frozenset)) and name != "__new__":
             # __new__ is handled below
-            return variables.BuiltinVariable(set).call_method(tx, name, args, kwargs)
+            return SourcelessBuilder.create(tx, set).call_method(tx, name, args, kwargs)
         elif (
             name == "__new__"
             and self.value is collections.OrderedDict
@@ -502,7 +506,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         from ..side_effects import SideEffects
-        from .builder import wrap_fx_proxy
+        from .builder import SourcelessBuilder, wrap_fx_proxy
         from .ctx_manager import GenericContextWrappingVariable
 
         constant_args = check_constant_args(args, kwargs)
@@ -531,6 +535,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
         elif self.value is collections.defaultdict:
             if len(args) == 0:
                 default_factory = variables.ConstantVariable.create(None)
+            elif len(args) == 1:
+                # In the case the argument is a builtin, then we can take the callable as the factory method.
+                # Otherwise, it must be a ConstantVariable holding None.
+                if not DefaultDictVariable.is_supported_arg(args[0]):
+                    raise_observed_exception(TypeError, tx, args=[args[0]])
+                default_factory = args[0]
+                args = []
             else:
                 default_factory, *args = args
             dict_vt = variables.BuiltinVariable.call_custom_dict(
@@ -553,7 +564,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                         *graph_break_hints.SUPPORTABLE,
                     ],
                 )
-            return variables.BuiltinVariable(dict).call_dict(tx, *args, **kwargs)
+            return SourcelessBuilder.create(tx, dict).call_dict(tx, *args, **kwargs)
         elif self.value is collections.deque:
             maxlen = variables.ConstantVariable.create(None)
 
@@ -735,7 +746,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 ] + args[1:]
 
             cm_obj = tx.output.side_effects.track_new_user_defined_object(
-                variables.BuiltinVariable(object),
+                SourcelessBuilder.create(tx, object),
                 self,
                 arg_new,  # type: ignore[arg-type]
             )
@@ -791,7 +802,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             # This simulates `THPSize_pynew`, the C impl for `Size.__new__`.
             from .lists import SizeVariable
 
-            tup = variables.BuiltinVariable(tuple).call_function(tx, args, kwargs)
+            tup = SourcelessBuilder.create(tx, tuple).call_function(tx, args, kwargs)
             return SizeVariable(tup.items)  # type: ignore[missing-attribute]
         elif is_frozen_dataclass(self.value) and self.is_standard_new():
             fields = dataclasses.fields(self.value)  # type: ignore[arg-type]
@@ -831,7 +842,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             kwargs.update(default_kwargs)
 
             var = tx.output.side_effects.track_new_user_defined_object(
-                variables.BuiltinVariable(object),
+                SourcelessBuilder.create(tx, object),
                 self,
                 args,  # type: ignore[arg-type]
             )
@@ -1119,6 +1130,17 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # This is to avoid getattr_static calls to look up the subobj from the self.value.__class__
         self._subobj_from_class: dict[str, object] = {}
 
+        # Cache fiddle Buildable.__getattr__ to avoid sys.modules lookup on hot path
+        _fiddle_mod = sys.modules.get("fiddle._src.config")
+        if (
+            _fiddle_mod is not None
+            and isinstance(value, _fiddle_mod.Buildable)
+            and type(value).__getattr__ is _fiddle_mod.Buildable.__getattr__
+        ):
+            self._fiddle_buildable_getattr = _fiddle_mod.Buildable.__getattr__
+        else:
+            self._fiddle_buildable_getattr = None
+
         import torch.utils._pytree as pytree
 
         self.is_pytree_constant_class = pytree.is_constant_class(self.value_type)
@@ -1154,6 +1176,24 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return self.value
             # TODO else try reconstructing the object by, e.g., leveraging side
             # effects and `as_python_constant`.
+
+        # Special case for _MaskModWrapper during legacy export: Dynamo creates
+        # objects via __new__ without calling __init__, so self.value.fn is unset.
+        # Reconstruct from the tracked side-effect attribute instead.
+        from torch.nn.attention.flex_attention import _MaskModWrapper
+
+        if isinstance(self.value, _MaskModWrapper):
+            from torch._dynamo.symbolic_convert import InstructionTranslator
+
+            tx = InstructionTranslator.current_tx()
+            if tx is not None and tx.export:
+                fn_vt = tx.output.side_effects.load_attr(self, "fn", deleted_ok=True)
+                if fn_vt is not None:
+                    # Let as_python_constant() raise the proper exception
+                    # (e.g., ClosureConversionError for non-constant closures)
+                    fn = fn_vt.as_python_constant()
+                    return _MaskModWrapper(fn)
+
         return super().as_python_constant()
 
     def guard_as_python_constant(self) -> object:
@@ -1294,6 +1334,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             "an AttributeMutation mutation_type"
         )
 
+        if name_str == "__class__":
+            unimplemented(
+                gb_type="__class__ assignment on user-defined object",
+                context=f"object={self}, value={value}",
+                explanation="Dynamo does not support reassigning __class__ on user-defined objects.",
+                hints=[
+                    "Move the __class__ assignment outside of the torch.compile region.",
+                ],
+            )
+
         if directly_update_dict:
             self.attrs_directly_modifed_on_dict.add(name_str)
         else:
@@ -1342,8 +1392,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         return super().unpack_var_sequence(tx)
 
     def has_force_unpack_var_sequence(self, tx: "InstructionTranslator") -> bool:
+        from .builder import SourcelessBuilder
+
         try:
-            variables.BuiltinVariable(iter).call_function(tx, [self], {})
+            SourcelessBuilder.create(tx, iter).call_function(tx, [self], {})
             return True
         except ObservedTypeError:
             handle_observed_exception(tx)
@@ -1352,8 +1404,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def force_unpack_var_sequence(
         self, tx: "InstructionTranslator"
     ) -> list[VariableTracker]:
+        from .builder import SourcelessBuilder
+
         result = []
-        iter_ = variables.BuiltinVariable(iter).call_function(tx, [self], {})
+        iter_ = SourcelessBuilder.create(tx, iter).call_function(tx, [self], {})
 
         while True:
             try:
@@ -1629,10 +1683,27 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 ):
                     # Manually trace out the nn module __getattr__ to avoid large compilation latency.
                     out = self.manually_trace_nn_module_getattr(tx, name)
+                elif self._fiddle_buildable_getattr is not None and self.source:
+                    # Route through VariableTracker.build so the builder wraps
+                    # Buildable.__getattr__ as FiddleBuildableGetAttrVariable.
+                    # FiddleBuildableGetAttrVariable short circuits the getattr
+                    # access and saves on compile time.
+                    new_source = AttrSource(
+                        AttrSource(self.source, "__getattr__"), "__func__"
+                    )
+                    fn_vt = VariableTracker.build(
+                        tx, self._fiddle_buildable_getattr, source=new_source
+                    )
+                    out = fn_vt.call_function(
+                        tx,
+                        [self, ConstantVariable.create(name)],
+                        {},
+                    )
                 else:
                     new_source = None
                     if self.source:
                         new_source = AttrSource(self.source, "__getattr__")
+                    # TODO (yidiwu): We should use VariableTracker.build here
                     out = variables.UserMethodVariable(
                         getattr_fn, self, source=new_source
                     ).call_function(tx, [ConstantVariable.create(name)], {})
@@ -2360,6 +2431,33 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
         self.exc_vt.python_stack = value
 
 
+class InspectVariable(UserDefinedObjectVariable):
+    """Handles inspect.Signature and inspect.Parameter objects.
+
+    Short-circuits property accesses to avoid tracing property getters,
+    redirecting them to the underlying private attributes directly.
+    """
+
+    _PROPERTY_REDIRECTS: dict[type, dict[str, str]] = {
+        inspect.Signature: {"parameters": "_parameters"},
+        inspect.Parameter: {"kind": "_kind", "name": "_name"},
+    }
+
+    @staticmethod
+    def is_matching_object(obj: object) -> bool:
+        return type(obj) in InspectVariable._PROPERTY_REDIRECTS
+
+    @staticmethod
+    def is_matching_class(obj: object) -> bool:
+        return obj in InspectVariable._PROPERTY_REDIRECTS
+
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+        redirects = self._PROPERTY_REDIRECTS.get(type(self.value), {})
+        if name in redirects:
+            return super().var_getattr(tx, redirects[name])
+        return super().var_getattr(tx, name)
+
+
 class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
     @staticmethod
     def is_matching_object(obj: object) -> bool:
@@ -2536,6 +2634,8 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
     def __init__(
         self, value: object, set_vt: SetVariable | None = None, **kwargs: Any
     ) -> None:
+        from .builder import SourcelessBuilder
+
         tx = kwargs.pop("tx", None)
         super().__init__(value, **kwargs)
 
@@ -2556,7 +2656,7 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
                 init_args = kwargs.get("init_args", {})
                 if tx is None:
                     tx = torch._dynamo.symbolic_convert.InstructionTranslator.current_tx()
-                self._set_vt = variables.BuiltinVariable(python_type).call_function(  # type: ignore[assignment]
+                self._set_vt = SourcelessBuilder.create(tx, python_type).call_function(  # type: ignore[assignment]
                     tx, init_args, {}
                 )
         else:

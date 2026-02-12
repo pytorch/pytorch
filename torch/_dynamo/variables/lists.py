@@ -238,6 +238,8 @@ class BaseListVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        from .builder import SourcelessBuilder
+
         if name == "__getitem__":
             if kwargs or len(args) != 1:
                 raise_args_mismatch(
@@ -265,7 +267,9 @@ class BaseListVariable(VariableTracker):
 
             if value.python_type() not in (int, slice):
                 msg = f"indices must be integers or slices, not {value.python_type()}"
-                raise_observed_exception(TypeError, tx, args=[ConstantVariable(msg)])
+                raise_observed_exception(
+                    TypeError, tx, args=[SourcelessBuilder.create(tx, msg)]
+                )
 
             return self.getitem_const(tx, value)
         elif name == "__contains__":
@@ -381,11 +385,11 @@ class BaseListVariable(VariableTracker):
                 right, BaseListVariable
             ):
                 if name == "__eq__":
-                    return variables.BuiltinVariable(operator.is_).call_function(
+                    return SourcelessBuilder.create(tx, operator.is_).call_function(
                         tx, (left, right), {}
                     )
                 elif name == "__ne__":
-                    return variables.BuiltinVariable(operator.is_not).call_function(
+                    return SourcelessBuilder.create(tx, operator.is_not).call_function(
                         tx, (left, right), {}
                     )
                 else:
@@ -395,9 +399,13 @@ class BaseListVariable(VariableTracker):
                     msg = f"{op_str} not supported between instances of '{left_ty}' and '{right_ty}'"
                     raise_observed_exception(TypeError, tx, args=[msg])
 
-            return variables.UserFunctionVariable(polyfills.list_cmp).call_function(
+            return SourcelessBuilder.create(tx, polyfills.list_cmp).call_function(
                 tx,
-                [variables.BuiltinVariable(cmp_name_to_op_mapping[name]), left, right],
+                [
+                    SourcelessBuilder.create(tx, cmp_name_to_op_mapping[name]),
+                    left,
+                    right,
+                ],
                 {},
             )
         elif name == "__iter__":
@@ -515,6 +523,8 @@ class RangeVariable(BaseListVariable):
         return [start, stop, step]
 
     def apply_index(self, tx: "InstructionTranslator", index: int) -> VariableTracker:
+        from .builder import SourcelessBuilder
+
         length = self.range_length()
         if index < 0:
             index = length + index
@@ -523,7 +533,7 @@ class RangeVariable(BaseListVariable):
             raise_observed_exception(
                 IndexError,
                 tx,
-                args=[ConstantVariable("range object index out of range")],
+                args=[SourcelessBuilder.create(tx, "range object index out of range")],
             )
 
         return variables.ConstantVariable.create(self.start() + (index * self.step()))
@@ -555,6 +565,8 @@ class RangeVariable(BaseListVariable):
     def getitem_const(
         self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker:
+        from .builder import SourcelessBuilder
+
         # implementations mimics https://github.com/python/cpython/blob/main/Objects/rangeobject.c
         index = arg.as_python_constant()
 
@@ -563,7 +575,9 @@ class RangeVariable(BaseListVariable):
         elif isinstance(index, int):
             return self.apply_index(tx, index)
         else:
-            msg = ConstantVariable("range indices must be integers or slices")
+            msg = SourcelessBuilder.create(
+                tx, "range indices must be integers or slices"
+            )
             raise_observed_exception(TypeError, tx, args=[msg])
 
     def as_proxy(self) -> range:
@@ -629,6 +643,8 @@ class RangeVariable(BaseListVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        from .builder import SourcelessBuilder
+
         if name == "__iter__":
             if not all(var.is_python_constant() for var in self.items):
                 # Can't represent a `range_iterator` without well defined bounds
@@ -644,7 +660,18 @@ class RangeVariable(BaseListVariable):
                 raise_observed_exception(OverflowError, tx)
             return ConstantVariable.create(self.range_length())
         elif name in ("count", "__contains__"):
-            return ConstantVariable(self.range_count(*args))
+            return SourcelessBuilder.create(tx, self.range_count(*args))
+        elif name == "index":
+            x = args[0].as_python_constant()
+            start, stop, step = self.start(), self.stop(), self.step()
+            in_range = (start <= x < stop) if step > 0 else (stop < x <= start)
+            if in_range and ((x - start) % step) == 0:
+                return ConstantVariable.create((x - start) // step)
+            raise_observed_exception(
+                ValueError,
+                tx,
+                args=[ConstantVariable.create(f"{x} is not in range")],
+            )
         elif name == "__getitem__":
             return self.getitem_const(tx, *args)
         elif name in cmp_name_to_op_mapping:
@@ -669,9 +696,9 @@ class RangeVariable(BaseListVariable):
 
             # Two ranges are equal if they produce the same sequence of values
             if name == "__eq__":
-                return ConstantVariable(cmp)
+                return SourcelessBuilder.create(tx, cmp)
             else:
-                return ConstantVariable(not cmp)
+                return SourcelessBuilder.create(tx, not cmp)
         return super().call_method(tx, name, args, kwargs)
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
@@ -1051,7 +1078,7 @@ class ListVariable(CommonListMethodsVariable):
             source = AttrSource(self.source, name) if self.source else None
             class_type = self.python_type()
             if class_type is list:
-                return variables.BuiltinVariable(class_type, source=source)
+                return VariableTracker.build(tx, class_type, source=source)
             else:
                 return variables.UserDefinedClassVariable(class_type, source=source)
         return super().var_getattr(tx, name)
@@ -1243,7 +1270,7 @@ class TupleVariable(BaseListVariable):
             source = AttrSource(self.source, name) if self.source else None
             class_type = self.python_type()
             if class_type is tuple:
-                return variables.BuiltinVariable(class_type, source=source)
+                return VariableTracker.build(tx, class_type, source=source)
             else:
                 return variables.UserDefinedClassVariable(class_type, source=source)
         return super().var_getattr(tx, name)
@@ -1350,7 +1377,7 @@ class SizeVariable(TupleVariable):
         return list(self.items)
 
     def numel(self, tx: "InstructionTranslator") -> VariableTracker:
-        from .builtin import BuiltinVariable
+        from .builder import SourcelessBuilder
         from .tensor import SymNodeVariable
 
         const_result = 1
@@ -1372,7 +1399,7 @@ class SizeVariable(TupleVariable):
         if not sym_sizes or const_result == 0:
             return result
 
-        mul = BuiltinVariable(operator.mul)
+        mul = SourcelessBuilder.create(tx, operator.mul)
         for v in sym_sizes:
             result = mul.call_function(tx, [result, v], {})
         return result
@@ -1535,9 +1562,9 @@ class NamedTupleVariable(UserDefinedTupleVariable):
             try:
                 leaf_decision = pred_result.as_python_constant()
             except NotImplementedError:
-                # For namedtuples, they're always pytree containers, so is_leaf
-                # should return False. Assume False and proceed with fast path.
-                leaf_decision = False
+                return self._tree_map_fallback(
+                    tx, tree_map_fn, map_fn, rest, tree_map_kwargs
+                )
             if leaf_decision:
                 return map_fn.call_function(tx, [self, *rest], {})
 
@@ -1937,9 +1964,11 @@ class RangeIteratorVariable(IteratorVariable):
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
     ) -> ConstantVariable:
+        from .builder import SourcelessBuilder
+
         if self.python_type() is range_iterator:
             ri = iter(range(0))
-            return ConstantVariable(hasattr(ri, name))
+            return SourcelessBuilder.create(tx, hasattr(ri, name))
         return super().call_obj_hasattr(tx, name)
 
     def next_variable(self, tx: "InstructionTranslator") -> VariableTracker:
