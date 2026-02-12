@@ -38,7 +38,7 @@ XW_DTYPES: OrderedSet[torch.dtype] = OrderedSet(
 @atexit.register
 def move_cutlass_compiled_cache() -> None:
     """Move CUTLASS compiled cache file to the cache directory if it exists."""
-    if not try_import_cutlass.cache_info().currsize > 0:
+    if try_import_cutlass.cache_info().currsize == 0 or not try_import_cutlass():
         return
 
     import cutlass_cppgen  # type: ignore[import-not-found]
