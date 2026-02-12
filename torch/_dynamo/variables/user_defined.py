@@ -1733,7 +1733,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if self.source:
                 # Read the class attribute to reach the property
                 source = AttrSource(self.get_source_by_walking_mro(name), "fget")
-            fget_vt = VariableTracker.build(tx, subobj.fget, source=source, realize=True)
+            fget_vt = VariableTracker.build(
+                tx, subobj.fget, source=source, realize=True
+            )
             return fget_vt.call_function(tx, [self], {})
         elif isinstance(subobj, _collections._tuplegetter):
             # namedtuple fields are represented by _tuplegetter, and here we
