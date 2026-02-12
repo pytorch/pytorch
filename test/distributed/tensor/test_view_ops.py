@@ -21,6 +21,7 @@ from torch.distributed.tensor._ops._view_ops import (
     dim_maps,
     Flatten,
     InputDim,
+    propagate_shape_and_sharding,
     Repeat,
     Singleton,
     Split,
@@ -759,12 +760,194 @@ class TestViewOps(DTensorTestBase):
         expected = tensor[2:, :]
         self.assertEqual(sliced_dtensor.full_tensor(), expected)
 
+    def test_view_groups_unbacked_symint(self):
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+
+        def fresh_sym():
+            return shape_env.create_unbacked_symint()
+
+        # Same symbol forwards correctly
+        u0 = fresh_sym()
+        self.assertEqual(
+            view_groups([4, u0, 3], [4, u0, 3]),
+            (InputDim(0), InputDim(1), InputDim(2)),
+        )
+
+        # Same symbol with concrete split
+        u1 = fresh_sym()
+        self.assertEqual(
+            view_groups([u1, 12], [u1, 3, 4]),
+            (
+                InputDim(0),
+                Split(InputDim(1), (3, 4), 0),
+                Split(InputDim(1), (3, 4), 1),
+            ),
+        )
+
+        # Same symbol with concrete flatten
+        u2 = fresh_sym()
+        self.assertEqual(
+            view_groups([u2, 3, 4], [u2, 12]),
+            (InputDim(0), Flatten((InputDim(1), InputDim(2)))),
+        )
+
+        # Concrete split with trailing symbol
+        u3 = fresh_sym()
+        self.assertEqual(
+            view_groups([6, u3], [2, 3, u3]),
+            (
+                Split(InputDim(0), (2, 3), 0),
+                Split(InputDim(0), (2, 3), 1),
+                InputDim(1),
+            ),
+        )
+
+        # Singletons with symbolic dims
+        u4 = fresh_sym()
+        self.assertEqual(
+            view_groups([1, 1, u4, 3], [u4, 3]),
+            (InputDim(2), InputDim(3)),
+        )
+
+        # Flatten symbolic dims using same product expression
+        u5 = fresh_sym()
+        u6 = fresh_sym()
+        self.assertEqual(
+            view_groups([u5, u6], [u5 * u6]),
+            (Flatten((InputDim(0), InputDim(1))),),
+        )
+
+        # Partial fallback: concrete prefix resolves, symbolic suffix falls back
+        u7 = fresh_sym()
+        u8 = fresh_sym()
+        result = view_groups([4, u7, u8], [4, u7 * u8])
+        # dim 0 resolves as InputDim(0), dims 1-2 flatten
+        self.assertEqual(
+            result,
+            (InputDim(0), Flatten((InputDim(1), InputDim(2)))),
+        )
+
+        # Different unbacked symbols (1-to-1): fallback simplifies to InputDim
+        u9 = fresh_sym()
+        u10 = fresh_sym()
+        result = view_groups([4, u9], [4, u10])
+        self.assertEqual(result, (InputDim(0), InputDim(1)))
+
+        # Multi-dim fallback with concrete prefix
+        u11 = fresh_sym()
+        u12 = fresh_sym()
+        u13 = fresh_sym()
+        u14 = fresh_sym()
+        result = view_groups([4, u11, u12], [4, u13, u14])
+        self.assertEqual(result[0], InputDim(0))
+        # remaining dims fall back to flatten-split
+        self.assertIsInstance(result[1], Split)
+        self.assertIsInstance(result[2], Split)
+        self.assertIsInstance(result[1].input_dim, Flatten)
+
+        # Multi-dim fallback
+        u15 = fresh_sym()
+        u16 = fresh_sym()
+        u17 = fresh_sym()
+        result = view_groups([u15, u16, u17], [u17, u16, u15])
+        for x in result:
+            self.assertIsInstance(x, Split)
+            self.assertIsInstance(x.input_dim, Flatten)
+            self.assertEqual(len(x.input_dim.input_dims), 3)
+
+    def test_view_groups_unbacked_sharding_propagation(self):
+        """Test that sharding is correctly propagated through view_groups with symbolic shapes."""
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+
+        def fresh_sym():
+            return shape_env.create_unbacked_symint()
+
+        mesh_sizes = (2, 3)
+
+        # InputDim forwarding: Shard(1) on symbolic dim should propagate
+        u0 = fresh_sym()
+        from_shape = (4, u0, 6)
+        to_shape = (4, u0, 6)
+        rule = view_groups(from_shape, to_shape)
+        input_placements = [Shard(1), Replicate()]
+        inp_tgt, out_plc = propagate_shape_and_sharding(
+            input_placements, from_shape, rule, mesh_sizes
+        )
+        self.assertEqual(out_plc, [Shard(1), Replicate()])
+
+        # Same symbol with concrete split: Shard(0) on symbolic dim should forward
+        u1 = fresh_sym()
+        from_shape = (u1, 12)
+        to_shape = (u1, 3, 4)
+        rule = view_groups(from_shape, to_shape)
+        input_placements = [Shard(0), Replicate()]
+        inp_tgt, out_plc = propagate_shape_and_sharding(
+            input_placements, from_shape, rule, mesh_sizes
+        )
+        self.assertEqual(out_plc, [Shard(0), Replicate()])
+
+        # Shard on concrete dim that gets split: should propagate to split_id=0
+        u2 = fresh_sym()
+        from_shape = (6, u2)
+        to_shape = (2, 3, u2)
+        rule = view_groups(from_shape, to_shape)
+        input_placements = [Shard(0), Replicate()]
+        inp_tgt, out_plc = propagate_shape_and_sharding(
+            input_placements, from_shape, rule, mesh_sizes
+        )
+        self.assertEqual(out_plc, [Shard(0), Replicate()])
+
+        # Flatten [u, 16] -> [u*16] with Shard(0) on unbacked dim (leftmost)
+        u3 = fresh_sym()
+        for ms in mesh_sizes:  # needed for sharding
+            torch._check(u3 % ms == 0)
+        from_shape = (u3, 16)
+        to_shape = (u3 * 16,)
+        rule = view_groups(from_shape, to_shape)
+        input_placements = [Shard(0), Replicate()]
+        inp_tgt, out_plc = propagate_shape_and_sharding(
+            input_placements, from_shape, rule, mesh_sizes
+        )
+        self.assertEqual(out_plc, [Shard(0), Replicate()])
+
+        # Flatten [16, u] -> [16*u] with Shard(1) on unbacked dim (non-leftmost):
+        # should force replicate since non-leftmost dims can't propagate through flatten
+        u4 = fresh_sym()
+        from_shape = (16, u4)
+        to_shape = (16 * u4,)
+        rule = view_groups(from_shape, to_shape)
+        input_placements = [Shard(1), Replicate()]
+        inp_tgt, out_plc = propagate_shape_and_sharding(
+            input_placements, from_shape, rule, mesh_sizes
+        )
+        self.assertEqual(out_plc, [Replicate(), Replicate()])
+
+        # Unflatten [u*16] -> [u, 16] with Shard(0) on the fused dim:
+        u5 = fresh_sym()
+        for ms in mesh_sizes:  # needed for sharding
+            torch._check(u5 % ms == 0)
+        from_shape = (u5 * 16,)
+        to_shape = (u5, 16)
+        rule = view_groups(from_shape, to_shape)
+        input_placements = [Shard(0), Replicate()]
+        inp_tgt, out_plc = propagate_shape_and_sharding(
+            input_placements, from_shape, rule, mesh_sizes
+        )
+        self.assertEqual(out_plc, [Shard(0), Replicate()])
+
 
 TestViewOpsWithLocalTensor = create_local_tensor_test_class(
     TestViewOps,
     skipped_tests=[
         # Comparing data pointers is not supported for local tensor
         "test_dtensor_view_op_uneven",
+        # These tests use ShapeEnv directly, not local tensor tests
+        "test_view_groups_unbacked_symint",
+        "test_view_groups_unbacked_sharding_propagation",
     ],
 )
 
