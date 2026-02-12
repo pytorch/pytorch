@@ -82,7 +82,12 @@ from ..utils import (
     tensortype_to_dtype,
 )
 from .base import AsPythonConstantNotImplementedError, ValueMutationNew, VariableTracker
-from .constant import CONSTANT_VARIABLE_FALSE, CONSTANT_VARIABLE_NONE, ConstantVariable, EnumVariable
+from .constant import (
+    CONSTANT_VARIABLE_FALSE,
+    CONSTANT_VARIABLE_NONE,
+    ConstantVariable,
+    EnumVariable,
+)
 from .dicts import (
     ConstDictVariable,
     DefaultDictVariable,
