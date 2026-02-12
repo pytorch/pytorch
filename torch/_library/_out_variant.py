@@ -59,6 +59,23 @@ def get_out_arg_names(out_op: torch._ops.OpOverload) -> list[str]:
     return [arg.name for arg in schema.arguments if arg.is_out]
 
 
+def _is_tensor_list_return(schema: torch._C.FunctionSchema) -> bool:
+    """
+    Check if the schema returns Tensor[] (a single list-of-tensor return).
+
+    Tensor[] has len(schema.returns) == 1 with a ListType element type of
+    TensorType, but the .out variant may have N out args for the N tensors
+    in the list. This helper lets to_out_variant() skip the strict count
+    check for list returns.
+    """
+    if len(schema.returns) != 1:
+        return False
+    ret_type = schema.returns[0].type
+    return isinstance(ret_type, torch.ListType) and ret_type.getElementType().isSubtypeOf(
+        torch.TensorType.get()
+    )
+
+
 def to_out_variant(op: torch._ops.OpOverload) -> torch._ops.OpOverload | None:
     """
     Given a functional operator overload, return its corresponding out variant.
@@ -88,7 +105,12 @@ def to_out_variant(op: torch._ops.OpOverload) -> torch._ops.OpOverload | None:
             continue
 
         out_args = [arg for arg in candidate_schema.arguments if arg.is_out]
-        if len(out_args) != len(schema.returns):
+        # For Tensor[] return type, schema.returns has length 1 (a single
+        # list-of-tensor return) but the .out variant has N out args for
+        # the N tensors in the list. Skip the count check in that case.
+        if not _is_tensor_list_return(schema) and len(out_args) != len(
+            schema.returns
+        ):
             continue
 
         return candidate
