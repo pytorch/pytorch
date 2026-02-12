@@ -118,7 +118,9 @@ def _skip_if(condition_fn, reason):
 
         return wrapper
 
-skip_if_tpu = _skip_if(lambda self: self.DEVICE == self.is_tpu(), "Not yet working on TPU")
+    return decorator
+
+skip_if_tpu = _skip_if(lambda self: self.is_tpu, "Not yet working on TPU")
 skip_if_cpu = _skip_if(lambda self: self.DEVICE == "cpu", "Not yet working on CPU")
 skip_if_cuda = _skip_if(lambda self: self.DEVICE == "cuda", "Not yet working on GPU")
 

@@ -2590,7 +2590,7 @@ class PallasKernel(SIMDKernel):
         ctx = _CodegenContext(
             code=code,
             kernel_name=kernel_name,
-            is_tpu=is_tpu,
+            is_tpu=self.is_tpu,
             interpret_is_cpu=interpret_is_cpu,
             interpret_literal=interpret_literal,
             kernel_params=kernel_params,
@@ -2653,6 +2653,10 @@ class PallasKernel(SIMDKernel):
                     code.writeline(store_line)
 
         code.writeline("")
+        if self.is_tpu:
+            self._codegen_jit_wrapper_tpu(ctx)
+            return
+
         jit_wrapper_name = f"{kernel_name}_jit_wrapper"
         donate_indices = []
         base_offset = 2 + len(ctx.size_var_params)
@@ -2719,7 +2723,7 @@ class PallasKernel(SIMDKernel):
             elif self.is_gpu:
                 self._codegen_jit_wrapper_legacy_gpu(ctx, kernel_arg)
             else:
-                self._codegen_jit_wrapper_cpu_tpu(
+                self._codegen_jit_wrapper_cpu(
                     ctx, kernel_arg, alias_pairs, alias_map_literal
                 )
 
@@ -2899,6 +2903,60 @@ from torch._inductor.runtime.runtime_utils import (
             return broadcast_idx
         return num_broadcast_dims - 1 - broadcast_idx
 
+    def _codegen_jit_wrapper_tpu(self, ctx: _CodegenContext) -> str:
+        code = ctx.code
+        kernel_name = ctx.kernel_name
+        full_kernel_params = ctx.full_kernel_params
+        output_params = ctx.output_params
+        size_var_params = ctx.size_var_params
+
+        main_name = f"{kernel_name}_main"
+        code.writeline(
+            f"def {main_name}({', '.join(full_kernel_params)}, stream=None):"
+        )
+        with code.indent():
+            code.writeline("jax.clear_caches()")
+            code.writeline("if torch_tpu is None:")
+            code.writeline("    raise RuntimeError('torch_tpu not installed')")
+
+            code.writeline("# Separate scalar args for partial application")
+
+            scalar_args = [p for p in full_kernel_params if p in size_var_params]
+            tensor_args = [p for p in full_kernel_params if p not in size_var_params]
+
+            if len(output_params) == 1:
+                propagate_lambda = (
+                    "lambda *args: tpu_torch_compile.placeholder_like(args[-1])"
+                )
+            else:
+                propagate_lambda = (
+                    f"lambda *args: tuple(tpu_torch_compile.placeholder_like(a) "
+                    f"for a in args[-{len(output_params)}:])"
+                )
+
+            if scalar_args:
+                kw_args = ", ".join([f"{s}={s}" for s in scalar_args])
+                code.writeline(
+                    f"kernel_fn = functools.partial({kernel_name}_kernel, {kw_args})"
+                )
+                code.writeline(
+                    f"decorated_kernel = tpu_pallas.custom_kernel(propagate={propagate_lambda})(kernel_fn)"
+                )
+            else:
+                code.writeline(
+                    f"decorated_kernel = tpu_pallas.custom_kernel(propagate={propagate_lambda})({kernel_name}_kernel)"
+                )
+
+            code.writeline(f"res = decorated_kernel({', '.join(tensor_args)})")
+
+            if len(output_params) == 1:
+                code.writeline(f"{output_params[0]}.copy_(res)")
+            else:
+                for i, out_name in enumerate(output_params):
+                    code.writeline(f"{out_name}.copy_(res[{i}])")
+
+        return code.getvalue()
+
     def _codegen_jit_wrapper_tma(self, ctx: _CodegenContext, kernel_arg: str) -> None:
         code = ctx.code
         kernel_input_params = ctx.kernel_input_params
@@ -2909,88 +2967,6 @@ from torch._inductor.runtime.runtime_utils import (
         code.writeline("from jax import lax")
         code.writeline("_tile_size = 128  # Warpgroup size")
         code.writeline("_orig_out_shapes = out_shapes")
-
-        # Now emit the kernel function with the correct signature
-        if self.is_tpu:
-            # We need to capture all non-output params (including scalars/sizevars)
-            # Separate scalars and tensors. Put scalars at the START to support positional partial application.
-            tensor_input_params = [
-                p for p in kernel_input_params if p not in size_var_names
-            ]
-            scalar_params = size_var_params
-
-            sig_template_refs = [f"template_{p}" for p in output_params]
-
-            # Construct signature: scalars + tensors + templates + outputs
-            full_sig = (
-                scalar_params + tensor_input_params + sig_template_refs + output_params
-            )
-            kernel_signature = f"def {kernel_name}_kernel_impl({', '.join(full_sig)}):"
-        else:
-            kernel_signature = (
-                f"def {kernel_name}_kernel({', '.join(full_kernel_params)}):"
-            )
-        code.writeline(kernel_signature)
-
-        with code.indent():
-            code.writeline(store_line)
-
-        code.writeline("")
-
-        if self.is_tpu:
-            main_name = f"{kernel_name}_main"
-            code.writeline(
-                f"def {main_name}({', '.join(full_kernel_params)}, stream=None):"
-            )
-            with code.indent():
-                code.writeline("jax.clear_caches()")
-                code.writeline("if torch_tpu is None:")
-                code.writeline("    raise RuntimeError('torch_tpu not installed')")
-
-                # Separate runtime arguments into tensors and scalars
-                code.writeline("# Separate scalar args for partial application")
-
-                # We need to reconstruct which runtime args correspond to scalars/tensors
-                # full_kernel_params contains everything.
-                scalar_args = [p for p in full_kernel_params if p in size_var_names]
-                tensor_args = [p for p in full_kernel_params if p not in size_var_names]
-
-                # Logic for propagate lambda (needs to match wrapper's *args)
-                # Wrapper is called with (tensor_inputs..., outputs...)
-                # So args[-len(output_params):] correctly identifies outputs.
-                if len(output_params) == 1:
-                    propagate_lambda = (
-                        "lambda *args: tpu_torch_compile.placeholder_like(args[-1])"
-                    )
-                else:
-                    propagate_lambda = (
-                        f"lambda *args: tuple(tpu_torch_compile.placeholder_like(a) "
-                        f"for a in args[-{len(output_params)}:])"
-                    )
-
-                if scalar_args:
-                    # Bind scalars positionally at the start
-                    code.writeline(
-                        f"kernel_fn = functools.partial({kernel_name}_kernel_impl, {', '.join(scalar_args)})"
-                    )
-                    code.writeline(
-                        f"decorated_kernel = tpu_pallas.custom_kernel(propagate={propagate_lambda})(kernel_fn)"
-                    )
-                else:
-                    code.writeline(
-                        f"decorated_kernel = tpu_pallas.custom_kernel(propagate={propagate_lambda})({kernel_name}_kernel_impl)"
-                    )
-
-                # Call with tensor arguments only (inputs + outputs)
-                code.writeline(f"res = decorated_kernel({', '.join(tensor_args)})")
-
-                if len(output_params) == 1:
-                    code.writeline(f"{output_params[0]}.copy_(res)")
-                else:
-                    for i, out_name in enumerate(output_params):
-                        code.writeline(f"{out_name}.copy_(res[{i}])")
-
-            return code.getvalue()
 
         jit_wrapper_name = f"{kernel_name}_jit_wrapper"
         donate_indices = []
@@ -3252,7 +3228,7 @@ from torch._inductor.runtime.runtime_utils import (
             "        return pallas_gpu_unpad_results(_result, out_shapes, _is_scalar)"
         )
 
-    def _codegen_jit_wrapper_cpu_tpu(
+    def _codegen_jit_wrapper_cpu(
         self,
         ctx: _CodegenContext,
         kernel_arg: str,
