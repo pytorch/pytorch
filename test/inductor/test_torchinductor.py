@@ -13344,7 +13344,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 _, mul_buf, _ = nodes
                 self.assertTrue(
                     all(
-                        V.graph.sizevars.size_hints(buf.get_stride()) == (1, 2)
+                        V.graph.sizevars.optimization_hints(buf.get_stride()) == (1, 2)
                         for buf in nodes
                     )
                 )
