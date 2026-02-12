@@ -1052,11 +1052,8 @@ class aten_distributed_optimizations:
     max_coll_distance: Optional[int] = None
     log_final_collectives_estimations: bool = False
 
-    # Bucket exposed collectives first (None means auto)
-    bucket_exposed_first: bool | None = None
-
-    # Only bucket collectives in FSDP process groups
-    bucket_only_fsdp_groups: bool = True
+    # Bucket exposed collectives first
+    bucket_exposed_first: bool = True
 
     # Enable fusion region detection for overlap scheduling cost estimation.
     # When enabled, groups of fusible ops (pointwise, reduction, etc.) are treated

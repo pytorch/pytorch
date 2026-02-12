@@ -28,7 +28,7 @@ from torch.utils._python_dispatch import _disable_current_modes
 
 log = logging.getLogger(__name__)
 
-from torch._inductor.pattern_matcher import stable_topological_sort
+from ..pattern_matcher import stable_topological_sort
 
 
 def make_all_device_put_sync(gm: torch.fx.GraphModule) -> int:
@@ -364,11 +364,9 @@ class OverlapScheduler:
         max_memory_increase_gb: float | None = 1.0,
         max_memory_increase_ratio: float | None = 0.05,
         log_final_collectives_estimations: bool = False,
-        bucket_exposed_first: bool | None = None,
+        bucket_exposed_first: bool = True,
         enable_fusion_regions: bool = False,
-        bucket_only_fsdp_groups: bool = True,
         bucket_mode: BucketMode = "custom_ops_multidtype",
-        max_off_bucket_gb: float | None = 0.5,
         prioritize_bucketing_during_scheduling: bool = True,
     ):
         self.gm = gm
@@ -383,11 +381,7 @@ class OverlapScheduler:
         self.collective_estimator = collective_estimator
         self.log_final_collectives_estimations = log_final_collectives_estimations
         self.bucket_exposed_first = bucket_exposed_first
-        self.bucket_only_fsdp_groups = bucket_only_fsdp_groups
         self.bucket_mode = bucket_mode
-        self.max_off_bucket_bytes: int | None = (
-            gb_to_bytes(max_off_bucket_gb) if max_off_bucket_gb is not None else None
-        )
         self.prioritize_bucketing_during_scheduling = (
             prioritize_bucketing_during_scheduling
         )
@@ -493,8 +487,6 @@ class OverlapScheduler:
         # Two separate queues: on-path (domination-based) and off-path (node_idx-based)
         self.on_path_ready: list[tuple[object, fx.Node]] = []
         self.off_path_ready: list[tuple[object, fx.Node]] = []
-        # Track potential bucket sizes for off-path collectives (for batch scheduling)
-        self.off_path_ready_potential_buckets: dict[object, int] = defaultdict(int)
 
         for node in self.nodes:
             if self.in_degree[node] == 0:
@@ -511,11 +503,6 @@ class OverlapScheduler:
         if self.off_compute_path(node):
             score = self._compute_off_path_score(node)
             heapq.heappush(self.off_path_ready, (score, node))
-            # Track potential bucket sizes for off-path ready collectives
-            if node in self.collective_info:
-                bucket_key = get_full_bucket_key(node, self.bucket_mode)
-                node_bytes = self.collective_info[node].size_bytes
-                self.off_path_ready_potential_buckets[bucket_key] += node_bytes
         else:
             score = self._compute_on_path_score(node)
             heapq.heappush(self.on_path_ready, (score, node))
@@ -816,14 +803,8 @@ class OverlapScheduler:
 
         log.info("Overlap scheduling: Runtime estimations aligned")
 
-    def _get_next_nodes(self) -> list[fx.Node]:
-        """
-        Get next node(s) to schedule.
-
-        When max_off_bucket_bytes is set, off-path collectives of the same type
-        (same bucket_key) are batched together to enable bucketing them in
-        overlap_preserving_bucketer. Bucket size is limited by max_off_bucket_bytes.
-        """
+    def _get_next_node(self) -> fx.Node:
+        """Get next node: off-path nodes scheduled near original position, exposed waits deferred."""
         if self.off_path_ready:
             _, node = self.off_path_ready[0]
 
@@ -838,63 +819,15 @@ class OverlapScheduler:
                     > self.allowed_peak_memory_bytes
                 )
                 should_schedule = not info.is_exposed or over_budget
-            elif self.max_off_bucket_bytes is not None and node in self.collective_info:
-                # Batch off-path collectives: schedule when bucket threshold is reached
-                bucket_key = get_full_bucket_key(node, self.bucket_mode)
-                bucket_size = self.off_path_ready_potential_buckets[bucket_key]
-                should_schedule = bucket_size >= self.max_off_bucket_bytes
             elif self.dominates_reduce_scatter(node):
                 # Only schedule off-path nodes that dominate reduce_scatters after original position
                 should_schedule = self.node_idx[node] <= self.last_on_path_node_idx
 
             if should_schedule:
                 heapq.heappop(self.off_path_ready)
+                return node
 
-                # If batching enabled and this is a collective, gather same-type collectives
-                if (
-                    self.max_off_bucket_bytes is not None
-                    and node in self.collective_info
-                ):
-                    node_key = get_full_bucket_key(node, self.bucket_mode)
-                    if node_key is not None:
-                        same_type_nodes = [node]
-                        total_bytes = self.collective_info[node].size_bytes
-                        indices_to_remove = []
-
-                        # Scan the off_path_ready queue for same-key collectives
-                        for i, (_, candidate) in enumerate(self.off_path_ready):
-                            if candidate in self.scheduled:
-                                continue
-                            if candidate not in self.collective_info:
-                                continue
-                            candidate_key = get_full_bucket_key(
-                                candidate, self.bucket_mode
-                            )
-                            if candidate_key == node_key:
-                                candidate_bytes = self.collective_info[
-                                    candidate
-                                ].size_bytes
-                                # Check bucket size limit before adding
-                                if (
-                                    total_bytes + candidate_bytes
-                                    > self.max_off_bucket_bytes
-                                ):
-                                    continue  # Skip but keep looking for smaller ones
-                                same_type_nodes.append(candidate)
-                                total_bytes += candidate_bytes
-                                indices_to_remove.append(i)
-
-                        # Remove collected nodes from heap (reverse order to preserve indices)
-                        for i in reversed(indices_to_remove):
-                            self.off_path_ready.pop(i)
-                        if indices_to_remove:
-                            heapq.heapify(self.off_path_ready)
-
-                        return same_type_nodes
-
-                return [node]
-
-        return [heapq.heappop(self.on_path_ready)[1]]
+        return heapq.heappop(self.on_path_ready)[1]
 
     def run(self) -> torch.fx.GraphModule:
         """Run the scheduling algorithm."""
@@ -908,33 +841,26 @@ class OverlapScheduler:
                 self._force_oldest_wait()
                 continue
 
-            nodes = self._get_next_nodes()
+            node = self._get_next_node()
 
-            for node in nodes:
-                # we don't always remove nodes from the heap when we schedule them
-                if node in self.scheduled:
-                    continue
+            # we don't always remove nodes from the heap when we schedule them
+            if node in self.scheduled:
+                continue
 
-                if node.op == "placeholder":
-                    self._schedule(node)
-                elif node in self.collective_info:
-                    self._handle_collective_start(node)
-                elif _schedulable_wait_node(node):
-                    self._handle_wait(node)
-                else:
-                    self._handle_compute_or_other(node)
+            if node.op == "placeholder":
+                self._schedule(node)
+            elif node in self.collective_info:
+                self._handle_collective_start(node)
+            elif _schedulable_wait_node(node):
+                self._handle_wait(node)
+            else:
+                self._handle_compute_or_other(node)
 
-                # Track progress for off-path scheduling - only for nodes from main queue
-                if not self.off_compute_path(node):
-                    self.last_on_path_node_idx = max(
-                        self.last_on_path_node_idx, self.node_idx[node]
-                    )
-                else:
-                    # Decrement off-path bucket bytes when scheduling
-                    if node in self.collective_info:
-                        bucket_key = get_full_bucket_key(node, self.bucket_mode)
-                        node_bytes = self.collective_info[node].size_bytes
-                        self.off_path_ready_potential_buckets[bucket_key] -= node_bytes
+            # Track progress for off-path scheduling - only for nodes from main queue
+            if not self.off_compute_path(node):
+                self.last_on_path_node_idx = max(
+                    self.last_on_path_node_idx, self.node_idx[node]
+                )
 
         self._reorder_graph()
 
@@ -953,7 +879,6 @@ class OverlapScheduler:
             max_coll_distance=self.max_node_distance,
             region_of=self.region_of,
             bucket_exposed_first=self.bucket_exposed_first,
-            bucket_only_fsdp_groups=self.bucket_only_fsdp_groups,
         )
 
         if self.log_final_collectives_estimations:
@@ -1511,9 +1436,8 @@ class OverlapScheduler:
             max_bucket_memory_gb=2.0,  # Could make this configurable
             max_coll_distance=self.max_node_distance,
             insert_overlap_deps=self.insert_overlap_deps,
-            bucket_mode=self.bucket_mode,
             bucket_exposed_first=self.bucket_exposed_first,
-            bucket_only_fsdp_groups=self.bucket_only_fsdp_groups,
+            bucket_mode=self.bucket_mode,
         )
         bucketer.bucket_collectives()
 
@@ -1569,9 +1493,8 @@ def schedule_overlap_bucketing(
     max_memory_increase_gb: float | None = 1.0,
     max_memory_increase_ratio: float | None = 0.05,
     log_final_collectives_estimations: bool = False,
-    bucket_exposed_first: bool | None = None,
+    bucket_exposed_first: bool = True,
     enable_fusion_regions: bool = False,
-    bucket_only_fsdp_groups=True,
     prioritize_bucketing_during_scheduling: bool = True,
 ) -> torch.fx.GraphModule:
     """Schedule nodes to maximize compute-collective overlap.
@@ -1623,7 +1546,6 @@ def schedule_overlap_bucketing(
         log_final_collectives_estimations=log_final_collectives_estimations,
         bucket_exposed_first=bucket_exposed_first,
         enable_fusion_regions=enable_fusion_regions,
-        bucket_only_fsdp_groups=bucket_only_fsdp_groups,
         prioritize_bucketing_during_scheduling=prioritize_bucketing_during_scheduling,
     ).run()
     trace_structured(
@@ -1667,7 +1589,6 @@ def schedule_overlap_bucketing_from_inductor_configs(
         "max_coll_distance",
         "log_final_collectives_estimations",
         "bucket_exposed_first",
-        "bucket_only_fsdp_groups",
         "enable_fusion_regions",
         "prioritize_bucketing_during_scheduling",
     )
