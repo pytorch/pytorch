@@ -449,13 +449,6 @@ class Optimizer:
 
     # Currently needed by Adam and AdamW
     def _accelerator_graph_capture_health_check(self) -> None:
-        # Determine available accelerator device
-        accelerator = None
-        if torch.backends.cuda.is_built() and torch.cuda.is_available():
-            accelerator = (torch.cuda, "CUDA")
-        elif hasattr(torch, "xpu") and torch.xpu.is_available():
-            accelerator = (torch.xpu, "XPU")
-
         # Note [torch.compile x capturable]
         # If we are compiling, we try to take the capturable path automatically by
         # setting the flag to True during tracing. Due to this, we skip all the checks
@@ -466,7 +459,17 @@ class Optimizer:
         # https://github.com/pytorch/pytorch/blob/d3ba8901d8640eb16f88b2bfef9df7fa383d4b47/torch/_inductor/compile_fx.py#L390.
         # Thus, when compiling, inductor will determine if cudagraphs
         # can be enabled based on whether there is input mutation or CPU tensors.
-        if not torch.compiler.is_compiling() and accelerator:
+        if torch.compiler.is_compiling():
+            return
+
+        # Determine available accelerator device
+        accelerator = None
+        if torch.cuda.is_available():
+            accelerator = (torch.cuda, "CUDA")
+        elif torch.xpu.is_available():
+            accelerator = (torch.xpu, "XPU")
+
+        if accelerator:
             device_module, device_name = accelerator
             capturing = device_module.is_current_stream_capturing()
 
