@@ -4881,7 +4881,9 @@ class InstructionTranslatorBase(
             # Push stack_pops items onto operand stack so the comprehension
             # bytecode finds them where it expects (iterator + saved vars).
             # NULL positions get PUSH_NULL, non-null get LOAD_FAST.
-            nonnull_i = 0
+            # Items were appended to frame_values[0] in TOS-first order,
+            # so load in reverse to reconstruct the original stack layout.
+            nonnull_i = nonnull_count - 1
             for i in range(stack_pops):
                 if stack_pops_null_mask[i]:
                     prefix.append(create_instruction("PUSH_NULL"))
@@ -4889,7 +4891,7 @@ class InstructionTranslatorBase(
                     prefix.append(
                         create_instruction("LOAD_FAST", argval=f"___stack{nonnull_i}")
                     )
-                    nonnull_i += 1
+                    nonnull_i -= 1
 
             comp_insts = self._copy_comprehension_bytecode(start_ip, analysis.end_ip)
 
@@ -4948,42 +4950,38 @@ class InstructionTranslatorBase(
         cg = PyCodegen(self.output.root_tx)
 
         # Runtime stack after compile_subgraph:
-        #   cells, [frame_values], *(frame N stack)
-        # frame_values[0] = [frame N locals] (no stack items)
-        # Frame N stack = non-popped items + stack_pops items (may include NULLs)
-        #
-        # NULLs cannot be stored in lists, so we pop them from the runtime stack
-        # and append only non-null stack_pops items to frame_values[0].
+        #   cells, [frame_values], *(non-popped items), *(stack_pops items w/ NULLs)
+        # frame_values[0] = [frame N locals] (no stack items yet)
 
         nonnull_count = sum(1 for m in stack_pops_null_mask if not m)
 
-        # Add only temp names to root frame's co_varnames.
-        for var_name in [f"___comp_stack_{i}" for i in range(nonnull_count)]:
-            if var_name not in self.output.code_options["co_varnames"]:
-                self.output.code_options["co_varnames"] += (var_name,)
+        # live_stack_depth: stack items above cells/frame_values excluding NULLs
+        # that compile_subgraph didn't codegen (tracked in stack_null_idxes).
+        live_stack_depth = len(self.stack) - len(meta.stack_null_idxes)
 
-        # --- Step 1: Pop stack_pops items from runtime stack ---
-        # Process from TOS down. Store non-null items to temp vars.
-        temp_names: list[str] = []
+        # --- Step 1: Pop stack_pops items and append non-nulls to frame_values[0] ---
+        # SWAP each item to TOS then LIST_APPEND or pop_null; fv_list stays at
+        # TOS throughout. Items append in TOS-first (reversed) order;
+        # _build_comprehension_fn compensates by loading in reverse.
+        cg.extend_output(
+            [
+                # frame_values[0] to TOS
+                *create_copy(live_stack_depth + stack_pops + 1),
+                cg.create_load_const(0),
+                cg.create_binary_subscr(),
+            ]
+        )
         for i in reversed(range(stack_pops)):
+            cg.extend_output(create_swap(2))
             if stack_pops_null_mask[i]:
                 cg.extend_output(cg.pop_null())
             else:
-                temp_name = f"___comp_stack_{len(temp_names)}"
-                temp_names.append(temp_name)
-                cg.extend_output([create_instruction("STORE_FAST", argval=temp_name)])
-        temp_names.reverse()
+                cg.extend_output([create_instruction("LIST_APPEND", arg=1)])
+        cg.extend_output([create_instruction("POP_TOP")])
 
-        # Stack is now: cells, [frame_values], *(non-popped stack items)
+        # Stack: cells, [frame_values], *(non-popped items)
 
-        # --- Step 2: Append non-null stack_pops items to frame_values[0] ---
-        # Number of stack items above [cells], [frame_values] that are real
-        # values (not NULL placeholders tracked in stack_null_idxes).
-        live_stack_depth = len(self.stack) - len(meta.stack_null_idxes)
-        if temp_names:
-            self._emit_extend_frame_values(cg, live_stack_depth + 1, temp_names)
-
-        # --- Step 3: Build comprehension function ---
+        # --- Step 2: Build comprehension function ---
         new_code, fn_name = self._build_comprehension_fn(
             analysis,
             start_ip,
@@ -4993,7 +4991,7 @@ class InstructionTranslatorBase(
             meta,
         )
 
-        # --- Step 4: Extract [cells[0]] and [frame_values[0]] ---
+        # --- Step 3: Extract [cells[0]] and [frame_values[0]] for codegen_call_resume ---
         cg.extend_output(
             [
                 *create_copy(live_stack_depth + 2),
@@ -5007,14 +5005,14 @@ class InstructionTranslatorBase(
             ]
         )
 
-        # Stack: cells, [frame_values], *(non-popped), [cells[0]], [frame_values[0]]
+        # Stack: ..., *(non-popped), [cells[0]], [frame_values[0]]
 
-        # --- Step 5: Call comprehension function via codegen_call_resume ---
+        # --- Step 4: Call comprehension function via codegen_call_resume ---
         self.codegen_call_resume([new_code], [fn_name], cg)
 
-        # Stack: cells, [frame_values], *(non-popped), comp_result
+        # Stack: ..., *(non-popped), comp_result
 
-        # --- Step 6: Remove appended stack_pops items from frame_values[0] ---
+        # --- Step 5: Remove appended stack_pops items from frame_values[0] ---
         if nonnull_count > 0:
             frame_values_pos = live_stack_depth + 1 + 1  # +1 result, +1 frame_values
             cg.extend_output(
@@ -5034,9 +5032,8 @@ class InstructionTranslatorBase(
                 ]
             )
 
-        # --- Step 7: Append results to frame_values[0] and handle stack ---
-        # Register vars in the order they'll be appended to frame_values[0]:
-        # walrus vars first, then result_var.
+        # --- Step 6: Append comprehension outputs to frame_values[0] ---
+        # Walrus vars first, then result_var.
         vars_to_pass = analysis.walrus_vars + (
             [analysis.result_var] if analysis.result_var else []
         )
@@ -5045,12 +5042,11 @@ class InstructionTranslatorBase(
             meta.locals_names[var_name] = len(meta.locals_names)
             self.symbolic_locals[var_name] = UnknownVariable()
 
-        # fv_depth reaches [frame_values] from TOS (comp_result is on TOS)
-        fv_depth = live_stack_depth + 2
+        fv_depth = live_stack_depth + 2  # comp_result + frame_values
 
-        # --- Walrus vars: append to frame_values[0] from the tuple ---
+        # --- Walrus vars: extract from comp_result tuple and append to fv[0] ---
         if analysis.walrus_vars:
-            # comp_result is a tuple (result, *walrus_vars).
+            # comp_result is (result, *walrus_vars).
             cg.extend_output(
                 [
                     *create_copy(fv_depth),
@@ -5098,7 +5094,7 @@ class InstructionTranslatorBase(
         # Stack: cells, [frame_values], *(non-popped stack)
         self.output.add_output_instructions(cg.get_instructions())
 
-        # --- Step 9: Create resume function chain ---
+        # --- Step 7: Create resume function chain ---
         resume_inst = self.instructions[analysis.end_ip]
         self.output.add_output_instructions(
             self.create_call_resume_at(resume_inst, all_stack_locals_metadata)
