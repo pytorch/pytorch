@@ -3403,6 +3403,8 @@ if torch.distributed.is_available():
         # the forward_hook won't be ignored.
         "torch.distributed._composable.replicate",
     }
+    if not config.skip_fsdp_hooks:
+        LEGACY_MOD_INLINELIST.add("torch.distributed.fsdp._fully_shard")
 
 # Force inline functions under these modules, even they are in *_SKIPLIST.
 # We are using python module name instead of file or directory object to avoid circular dependency.
@@ -3470,6 +3472,8 @@ MOD_INLINELIST = set(MOD_INLINELIST)
 
 if torch.distributed.is_available():
     MOD_INLINELIST.add("torch.distributed")
+    if not config.skip_fsdp_hooks:
+        MOD_INLINELIST.add("torch.distributed.fsdp._fully_shard")
 
 
 # By default, all functions under these modules are skipped.
