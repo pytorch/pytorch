@@ -73,7 +73,6 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     run_tests,
     skipIfTorchDynamo,
-    TEST_WITH_ROCM,
 )
 from torch.testing._internal.jit_utils import JitTestCase
 
@@ -5308,29 +5307,10 @@ class TestFunctionalTracing(JitTestCase):
 
     @classmethod
     def generate_tests(cls):
-        # Skip these tests on Python 3.12 + ROCm due to proxy iteration errors
-        SKIP_ON_PY312_ROCM = [
-            "adaptive_max_pool1d",
-            "adaptive_max_pool2d",
-            "adaptive_max_pool3d",
-            "fractional_max_pool2d",
-            "fractional_max_pool3d",
-            "max_pool1d",
-            "max_pool2d",
-            "max_pool3d",
-        ]
-
         functional_list = cls._get_functional()
         for func_name, fn in functional_list:
             test_name = "test_nn_functional_" + func_name
             functional_test = cls.generate_test_func(func_name, fn)
-
-            # Apply skip decorator for specific tests on Python 3.12 + ROCm
-            if func_name in SKIP_ON_PY312_ROCM and sys.version_info >= (3, 12) and TEST_WITH_ROCM:
-                functional_test = unittest.skip(
-                    f"Skipping {func_name} on Python 3.12 + ROCm due to proxy iteration errors"
-                )(functional_test)
-
             setattr(cls, test_name, functional_test)
 
     @classmethod
