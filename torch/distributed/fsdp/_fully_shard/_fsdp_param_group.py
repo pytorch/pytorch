@@ -512,6 +512,30 @@ class FSDPParamGroup:
             # access the unsharded parameters when their data is present
             fsdp_params_with_grad: list[FSDPParam] = []
             unsharded_grads: list[torch.Tensor] = []
+
+            # Models like the Qwen3 with mixture of experts will trigger different experts in different ranks.
+            # This leads to different sets of missing parameters in different ranks,
+            # and thus leading `unsharded_grads` to be different across ranks.
+            # Need a way to account for the "missing" grads that are not in `unsharded_grads` to ensure
+            # reduce-scatter has the same input sizes across ranks.
+
+            # compute total numel of missing grads
+            total_missing_numel = 0
+            grad_dtype = None
+            for fp in self.fsdp_params:
+                if grad_dtype is None and fp.sharded_param.requires_grad:
+                    grad_dtype = fp.param_dtype or fp.orig_dtype
+                if (hasattr(fp, "_unsharded_param")
+                and fp.sharded_param.requires_grad
+                and fp.unsharded_param.grad is None
+                and fp.unsharded_accumulated_grad is None
+                ):
+                    total_missing_numel += fp.unsharded_param.data.numel()
+            
+            if total_missing_numel > 0:
+                zero_buf = torch.zeros(total_missing_numel, dtype=grad_dtype, device=self.device)
+                zero_offset = 0
+            
             for fsdp_param in self.fsdp_params:
                 if not hasattr(fsdp_param, "_unsharded_param"):
                     continue
@@ -525,6 +549,13 @@ class FSDPParamGroup:
                     fsdp_params_with_grad.append(fsdp_param)
                     unsharded_grads.append(fsdp_param.unsharded_grad_data)
                     fsdp_param.unsharded_param.grad = None
+                elif fsdp_param.sharded_param.requires_grad:
+                    numel = fsdp_param.unsharded_param.data.numel()
+                    zero_grad = zero_buf[zero_offset:zero_offset + numel]
+                    zero_offset += numel
+                    fsdp_params_with_grad.append(fsdp_param)
+                    unsharded_grads.append(zero_grad)
+                
             if self.reshard_after_backward:
                 self.reshard()
         if len(fsdp_params_with_grad) == 0:
