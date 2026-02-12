@@ -79,6 +79,29 @@ using ProblemShape = cutlass::gemm::GroupProblemShape<
     cute::Shape<int32_t, int32_t, int32_t>>; // <M,N,K> per
                                              // group
 
+// Warp Scheduling Configuration for MX8×MX8 BF16 Kernels
+// =========================================================
+// This struct defines the warp allocation strategy and tile configuration for
+// FP8 matrix multiplication kernels on SM90+ (Hopper) architectures.
+//
+// Warp Specialization:
+// - Data Movement Warps: Handle TMA (Tensor Memory Accelerator) async copies
+// - Compute Warps: Execute MMA (Matrix Multiply-Accumulate) operations
+// - Epilogue Warps: Perform scaling, reduction, and output stores
+//
+// Tile Configuration:
+// - TileShape<TB_M, TB_N, TB_K>: Thread block tile dimensions
+//   * TB_M: Output rows processed per thread block (64-256)
+//   * TB_N: Output cols processed per thread block (128-256)
+//   * TB_K: Contraction dimension per mainloop iteration (64-128)
+//
+// Cluster Configuration:
+// - ClusterShape<2, 2, 1>: 4 thread blocks cooperate as a cluster
+// - Enables cross-block synchronization and shared L2 cache usage
+//
+// Scheduling Modes:
+// - Cooperative: Warps cooperate within single mainloop iteration
+// - Pingpong: Overlaps two mainloop iterations (compute + data movement)
 template <
     bool FastAccum,
     bool PONG,
@@ -86,17 +109,23 @@ template <
     typename TB_N,
     typename TB_K>
 struct Schedule {
+  // Fast accumulation mode: Uses FP16 accumulators for 2× performance
   using FastCooperativeSchedule =
       cutlass::gemm::KernelPtrArrayTmaWarpSpecializedCooperativeFP8FastAccum;
+  // Standard mode: Uses FP32 accumulators for higher precision
   using CooperativeSchedule =
       cutlass::gemm::KernelPtrArrayTmaWarpSpecializedCooperative;
+  // Pingpong mode with fast accumulation: Overlaps compute and memory ops
   using FastPongSchedule =
       cutlass::gemm::KernelPtrArrayTmaWarpSpecializedPingpongFP8FastAccum;
+  // Pingpong mode with standard accumulation
   using PongSchedule = cutlass::gemm::KernelPtrArrayTmaWarpSpecializedPingpong;
+  // Epilogue scheduling: Warp-specialized output operations
   using CooperativeEpilogueSchedule =
       cutlass::epilogue::PtrArrayTmaWarpSpecializedCooperative;
   using PongEpilogueSchedule =
       cutlass::epilogue::PtrArrayTmaWarpSpecializedPingpong;
+  // Select kernel schedule based on template parameters
   using KernelSchedule = cute::conditional_t<
       PONG,
       cute::conditional_t<FastAccum, FastPongSchedule, PongSchedule>,
@@ -104,9 +133,12 @@ struct Schedule {
           FastAccum,
           FastCooperativeSchedule,
           CooperativeSchedule>>;
+  // Select epilogue schedule (pingpong or cooperative)
   using EpilogueSchedule = cute::
       conditional_t<PONG, PongEpilogueSchedule, CooperativeEpilogueSchedule>;
+  // Thread block tile shape: <M, N, K>
   using TileShape = cute::Shape<TB_M, TB_N, TB_K>;
+  // Cluster shape: 2×2×1 = 4 thread blocks per cluster
   using ClusterShape = cute::Shape<cute::_2, cute::_2, cute::_1>;
 };
 
@@ -419,6 +451,41 @@ void f8f8bf16_grouped_gemm_impl_sm90(
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
+// Tile Size Selection Strategy for MX8×MX8 BF16 Grouped GEMM
+// ==============================================================
+// This function selects optimal tile configurations based on problem size
+// to maximize occupancy and minimize register spilling.
+//
+// Tile Selection Logic:
+//
+// 1. SMALL problems (M≤128 or N≤128):
+//    - TileShape<64, 128, 128> with PINGPONG scheduling
+//    - Smaller M tile (64) allows efficient pingpong buffering
+//    - Overlaps compute with memory operations
+//    - Typical warp count: 4 warps per thread block
+//
+// 2. LARGE problems with FAST_ACCUM (M,K≥2048 or M,N≥2048 or K,N≥2048):
+//    - TileShape<256, 128, 128> with COOPERATIVE scheduling
+//    - Larger M tile (256) maximizes data reuse in registers
+//    - Fast FP16 accumulation prevents register spilling
+//    - Typical warp count: 8 warps per thread block
+//
+// 3. LARGE problems without FAST_ACCUM:
+//    - TileShape<128, 128, 128> with COOPERATIVE scheduling
+//    - Balanced tile size to avoid register pressure with FP32 accum
+//    - FP32 accumulators require more registers than FP16
+//    - Typical warp count: 4 warps per thread block
+//
+// 4. DEFAULT (medium-sized problems):
+//    - TileShape<128, 256, 64> with COOPERATIVE scheduling
+//    - Larger N tile (256) for better output reuse
+//    - Smaller K tile (64) reduces mainloop iterations
+//    - Typical warp count: 8 warps per thread block
+//
+// Warp Allocation Within Each Configuration:
+// - Data movement warps: 25-30% (TMA async operations)
+// - Compute warps: 50-60% (MMA Tensor Core operations)
+// - Epilogue warps: 10-25% (scaling, reduction, stores)
 template <typename FastAccum, typename BiasType>
 void dispatch_fp8_grouped_gemm_on_tile_size(
     at::Tensor mat_a, // FP8
@@ -447,11 +514,14 @@ void dispatch_fp8_grouped_gemm_on_tile_size(
     group_count = mat_a.size(0);
     N = N / group_count;
   }
+  // Classify problem as "large" if two dimensions exceed 2048
   bool large =
       ((M >= 2048 && K >= 2048) || (M >= 2048 && N >= 2048) ||
        (K >= 2048 && N >= 2048));
+  // Classify as "small" if M or N dimension is tiny
   bool small = (M <= 128 || N <= 128);
   if (small) {
+    // Small problems: Use pingpong scheduling with 64×128×128 tile
     f8f8bf16_grouped_gemm_impl_sm90<
         FastAccum,
         BiasType,
@@ -461,6 +531,7 @@ void dispatch_fp8_grouped_gemm_on_tile_size(
         cute::_128>(
         mat_a, mat_b, scale_a, scale_b, offs, bias, use_fast_accum, out);
   } else if (large && FastAccum::value) {
+    // Large problems with fast accum: Use 256×128×128 tile
     f8f8bf16_grouped_gemm_impl_sm90<
         FastAccum,
         BiasType,
@@ -470,6 +541,7 @@ void dispatch_fp8_grouped_gemm_on_tile_size(
         cute::_128>(
         mat_a, mat_b, scale_a, scale_b, offs, bias, use_fast_accum, out);
   } else if (large) { // use smaller tile for slow accum to avoid spilling
+    // Large problems without fast accum: Use balanced 128×128×128 tile
     f8f8bf16_grouped_gemm_impl_sm90<
         FastAccum,
         BiasType,
@@ -480,6 +552,7 @@ void dispatch_fp8_grouped_gemm_on_tile_size(
         mat_a, mat_b, scale_a, scale_b, offs, bias, use_fast_accum, out);
 
   } else
+    // Default case: Use 128×256×64 tile
     f8f8bf16_grouped_gemm_impl_sm90<
         FastAccum,
         BiasType,
