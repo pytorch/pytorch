@@ -130,13 +130,18 @@ void histogramdd_cpu_contiguous(Tensor& hist, const TensorList& bin_edges,
     thread_hist_sizes[0] = num_threads;
     std::copy(hist_sizes.begin(), hist_sizes.end(),
               thread_hist_sizes.begin() + 1);
-    Tensor thread_histograms = at::zeros(thread_hist_sizes, hist.dtype());
+    // Use float32 for accumulation to avoid precision issues with float16
+    Tensor thread_histograms = (hist.dtype() == at::kHalf) ? 
+        at::zeros(thread_hist_sizes, at::kFloat) : 
+        at::zeros(thread_hist_sizes, hist.dtype());
     TORCH_INTERNAL_ASSERT(thread_histograms.is_contiguous());
 
     at::parallel_for(0, N, GRAIN_SIZE, [&](int64_t start, int64_t end) {
         const auto tid = at::get_thread_num();
         auto hist_strides = thread_histograms.strides();
-        input_t *hist_local_data = thread_histograms.data_ptr<input_t>();
+        // Use accumulation type for local data pointer
+        using accumulation_t = typename std::conditional<std::is_same<input_t, at::Half>::value, float, input_t>::type;
+        accumulation_t *hist_local_data = thread_histograms.data_ptr<accumulation_t>();
 
         // View only this thread's local results
         hist_local_data += hist_strides[0] * tid;
@@ -194,14 +199,20 @@ void histogramdd_cpu_contiguous(Tensor& hist, const TensorList& bin_edges,
 
             if (!skip_elt) {
                 // In the unweighted case, the default weight is 1
-                input_t wt = accessor_wt.has_value() ? accessor_wt.value()[i] : static_cast<input_t>(1);
+                accumulation_t wt = accessor_wt.has_value() ? static_cast<accumulation_t>(accessor_wt.value()[i]) : static_cast<accumulation_t>(1);
 
                 hist_local_data[hist_index] += wt;
             }
         }
     });
 
-    at::sum_out(hist, thread_histograms, /*dim=*/{0});
+    // Sum in higher precision, then convert to target dtype if needed
+    if (hist.dtype() == at::kHalf) {
+        auto temp_hist = at::sum(thread_histograms, /*dim=*/0);
+        hist.copy_(temp_hist.to(at::kHalf));
+    } else {
+        at::sum_out(hist, thread_histograms, /*dim=*/{0});
+    }
 }
 
 /* Some pre- and post- processing steps for the main algorithm.
