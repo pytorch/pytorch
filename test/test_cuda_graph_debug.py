@@ -262,6 +262,7 @@ class TestCUDAGraphDebugInputs(TestCase):
 
         with torch.cuda.graph(g1, pool=pool):
             y = x + 1
+            w = torch.randn(100, device="cuda")
 
         external_input = torch.randn(100, device="cuda")
         g2 = torch.cuda.CUDAGraph()
@@ -270,13 +271,17 @@ class TestCUDAGraphDebugInputs(TestCase):
 
         with torch.cuda.graph(g2, pool=pool, check_input_liveness=True):
             z = y * 2 + external_input
-
-        self.assertIn(external_input.data_ptr(), g2._external_inputs)
-        self.assertNotIn(y.data_ptr(), g2._external_inputs)
+            p = w + 1
 
         del y
         _sync_and_gc_collect()
 
+        g1.replay()
+        g2.replay()
+        torch.cuda.synchronize()
+        self.assertEqual(z, (x + 1) * 2 + external_input)
+
+        del w
         g1.replay()
         g2.replay()
         torch.cuda.synchronize()
