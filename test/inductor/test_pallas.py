@@ -118,6 +118,9 @@ def _skip_if(condition_fn, reason):
 
         return wrapper
 
+skip_if_tpu = _skip_if(lambda self: self.DEVICE == self.is_tpu(), "Not yet working on TPU")
+skip_if_cpu = _skip_if(lambda self: self.DEVICE == "cpu", "Not yet working on CPU")
+skip_if_cuda = _skip_if(lambda self: self.DEVICE == "cuda", "Not yet working on GPU")
 
 class PallasTestsMixin:
     """Basic tests for Pallas backend functionality (parameterized by DEVICE). Mixin only, not collected.
@@ -364,8 +367,6 @@ class PallasTestsMixin:
         wrapper_name = f"{kernel_name}_jit_wrapper"
 
         if self.is_tpu:
-            # TPU backend generates a main function that calls the kernel directly
-            # The jax.jit/pallas_call logic is handled inside tpu_pallas.custom_kernel decorator
             main_name = f"{kernel_name}_main"
             self.assertIn(f"def {main_name}", code)
             self.assertIn("tpu_pallas.custom_kernel", code)

@@ -2562,39 +2562,6 @@ class PallasKernel(SIMDKernel):
         interpret_is_cpu = V.graph.get_current_device_or_throw().type == "cpu"
         interpret_literal = "True" if interpret_is_cpu else "False"
 
-        if self.is_tpu:
-            imports = """
-import functools
-import math
-import torch
-import jax
-import jax.numpy as jnp
-from torch._inductor.runtime.runtime_utils import pallas_partial_reduce
-try:
-    import torch_tpu
-    from torch_tpu._internal.compile import tpu_torch_compile
-    from torch_tpu._internal import pallas as tpu_pallas
-except ImportError:
-    torch_tpu = None
-"""
-        else:
-            # For GPU (Mosaic backend), import plgpu for TMA operations
-            # Import math for symbolic expressions (e.g., math.floor, math.log2)
-            imports = """
-import functools
-import math
-import torch
-import jax
-import jax.numpy as jnp
-from jax.experimental import pallas as pl
-from torch._inductor.runtime.runtime_utils import pallas_partial_reduce, torch_dtype_to_jax_runtime
-""" + (
-                "\nfrom jax.experimental.pallas import mosaic_gpu as plgpu"
-                if not interpret_is_cpu
-                else ""
-            )
-        code.splice(imports, strip=True)
-
         aliasable_flags: dict[str, bool] = {}
         for param in pure_out_params:
             aliasable_flags[param] = True
@@ -2611,10 +2578,7 @@ from torch._inductor.runtime.runtime_utils import pallas_partial_reduce, torch_d
         )
         # On CPU (interpret=True), we need to copy back even aliased outputs
         # because pallas_call returns a new array (doesn't mutate in-place)
-        # For outputs that need read access (scatter), we enable aliasing to read
-        # current values, but still need to copy back the result
-        if interpret_is_cpu or self.is_tpu:
-            # Copy back all outputs on CPU
+        if interpret_is_cpu:
             copy_output_indices = list(range(len(output_params)))
         else:
             copy_output_indices = [
@@ -2667,7 +2631,6 @@ from torch._inductor.runtime.runtime_utils import pallas_partial_reduce, torch_d
         ctx.pointer_tail = [
             p for p in kernel_params if p.startswith(("in_out_ptr", "in_ptr"))
         ]
-
         ctx.kernel_input_params = alias_params + ctx.pointer_tail
         ctx.full_kernel_params = alias_params + kernel_params
 
@@ -2770,6 +2733,20 @@ import math
 import torch
 import jax
 import jax.numpy as jnp
+"""
+
+        if self.is_tpu:
+            imports += """
+from torch._inductor.runtime.runtime_utils import pallas_partial_reduce
+try:
+    import torch_tpu
+    from torch_tpu._internal.compile import tpu_torch_compile
+    from torch_tpu._internal import pallas as tpu_pallas
+except ImportError:
+    torch_tpu = None
+"""
+        else:
+            imports += """
 from jax.experimental import pallas as pl
 from torch._inductor.runtime.runtime_utils import (
     pallas_gpu_align_output_specs, pallas_gpu_pad_inputs,
@@ -2879,28 +2856,28 @@ from torch._inductor.runtime.runtime_utils import (
                 kernel_body.writeline(f"{var_name} = jnp.arange({length_str})")
                 continue
 
-                if (
-                    reshape_target_shape
-                    and len(reshape_target_shape) > 1
-                    and length_val == reshape_target_numel
-                ):
-                    shape_str = ", ".join(str(s) for s in reshape_target_shape)
-                    arange = f"jnp.arange({length_str})"
-                    kernel_body.writeline(f"{var_name} = {arange}.reshape({shape_str})")
-                elif num_broadcast_dims > 1 and idx != total_var_idx:
-                    broadcast_idx = next(
-                        i for i, (vidx, _, _, _) in enumerate(broadcast_vars) if vidx == idx
-                    )
-                    axis_idx = self._broadcast_axis_idx(
-                        broadcast_vars, broadcast_idx, num_broadcast_dims
-                    )
-                    shape_parts = ["1"] * num_broadcast_dims
-                    shape_parts[axis_idx] = length_str
-                    shape_str = ", ".join(shape_parts)
-                    arange = f"jnp.arange({length_str})"
-                    kernel_body.writeline(f"{var_name} = {arange}.reshape({shape_str})")
-                else:
-                    kernel_body.writeline(f"{var_name} = jnp.arange({length_str})")
+            if (
+                reshape_target_shape
+                and len(reshape_target_shape) > 1
+                and length_val == reshape_target_numel
+            ):
+                shape_str = ", ".join(str(s) for s in reshape_target_shape)
+                arange = f"jnp.arange({length_str})"
+                kernel_body.writeline(f"{var_name} = {arange}.reshape({shape_str})")
+            elif num_broadcast_dims > 1 and idx != total_var_idx:
+                broadcast_idx = next(
+                    i for i, (vidx, _, _, _) in enumerate(broadcast_vars) if vidx == idx
+                )
+                axis_idx = self._broadcast_axis_idx(
+                    broadcast_vars, broadcast_idx, num_broadcast_dims
+                )
+                shape_parts = ["1"] * num_broadcast_dims
+                shape_parts[axis_idx] = length_str
+                shape_str = ", ".join(shape_parts)
+                arange = f"jnp.arange({length_str})"
+                kernel_body.writeline(f"{var_name} = {arange}.reshape({shape_str})")
+            else:
+                kernel_body.writeline(f"{var_name} = jnp.arange({length_str})")
 
     @staticmethod
     def _broadcast_axis_idx(
@@ -2927,25 +2904,11 @@ from torch._inductor.runtime.runtime_utils import (
         kernel_input_params = ctx.kernel_input_params
         output_params = ctx.output_params
 
-        # Now emit the kernel function with the correct signature
-        kernel_signature = f"def {kernel_name}_kernel({', '.join(full_kernel_params)}):"
-        code.writeline(kernel_signature)
-
-        with code.indent():
-            for line in kernel_body._lines:
-                if isinstance(line, str):
-                    # Remove any existing indentation and re-add with code's indentation
-                    code.writeline(line.lstrip())
-                else:
-                    code._lines.append(line)
-
-            # Add store lines (using recomputed full_kernel_params)
-            # Filter stores to only emit those for outputs that are in kernel params.
-            # This handles cases where an intermediate value was stored but the buffer
-            # was later optimized away (not passed to the kernel).
-            for out_ptr, store_line in self.store_with_output:
-                if out_ptr in full_kernel_params:
-                    code.writeline(store_line)
+        # TMA automatically handles out-of-bounds accesses
+        code.writeline("# Use lax.fori_loop with TMA for automatic OOB masking")
+        code.writeline("from jax import lax")
+        code.writeline("_tile_size = 128  # Warpgroup size")
+        code.writeline("_orig_out_shapes = out_shapes")
 
         # Now emit the kernel function with the correct signature
         if self.is_tpu:
@@ -2970,20 +2933,7 @@ from torch._inductor.runtime.runtime_utils import (
         code.writeline(kernel_signature)
 
         with code.indent():
-            for line in kernel_body._lines:
-                if isinstance(line, str):
-                    # Remove any existing indentation and re-add with code's indentation
-                    code.writeline(line.lstrip())
-                else:
-                    code._lines.append(line)
-
-            # Add store lines (using recomputed full_kernel_params)
-            # Filter stores to only emit those for outputs that are in kernel params.
-            # This handles cases where an intermediate value was stored but the buffer
-            # was later optimized away (not passed to the kernel).
-            for out_ptr, store_line in self.store_with_output:
-                if out_ptr in full_kernel_params:
-                    code.writeline(store_line)
+            code.writeline(store_line)
 
         code.writeline("")
 
@@ -3342,16 +3292,16 @@ from torch._inductor.runtime.runtime_utils import (
                 code.writeline("# Convert Torch -> JAX for donated outputs")
                 for alias_name in ctx.alias_params:
                     self._emit_torch_to_jax(
-                        code, alias_name, ctx.is_tpu, contiguous=False
+                        code, alias_name, contiguous=False
                     )
             code.writeline("# Convert Torch -> JAX for in-place tensors")
             for ptr in ctx.pointer_tail:
                 if ptr.startswith("in_out_ptr"):
-                    self._emit_torch_to_jax(code, ptr, ctx.is_tpu, contiguous=False)
+                    self._emit_torch_to_jax(code, ptr, contiguous=False)
             code.writeline("# Convert Torch -> JAX for inputs")
             for ptr in ctx.pointer_tail:
                 if ptr.startswith("in_ptr"):
-                    self._emit_torch_to_jax(code, ptr, ctx.is_tpu, contiguous=True)
+                    self._emit_torch_to_jax(code, ptr, contiguous=True)
 
             code.writeline("# Prepare output metadata from PyTorch tensor")
             code.writeline(
@@ -3394,20 +3344,12 @@ from torch._inductor.runtime.runtime_utils import (
 
     @staticmethod
     def _emit_torch_to_jax(
-        code: IndentedBuffer, var_name: str, is_tpu: bool, *, contiguous: bool
+        code: IndentedBuffer, var_name: str, *, contiguous: bool
     ) -> None:
-        # TODO: The jax.device_put path is a temporary workaround for a Mosaic
-        # compiler bug with DLPack. Revert to from_dlpack once TorchTPU provides
-        # a direct method for placing a torch.Tensor on a TPU device.
-        if is_tpu:
-            code.writeline(
-                f"{var_name}_jax = jax.device_put({var_name}.cpu().numpy(), device=jax.devices('tpu')[0])"
-            )
-        else:
-            suffix = ".detach().contiguous()" if contiguous else ".detach()"
-            code.writeline(
-                f"{var_name}_jax = jax.dlpack.from_dlpack({var_name}{suffix})"
-            )
+        suffix = ".detach().contiguous()" if contiguous else ".detach()"
+        code.writeline(
+            f"{var_name}_jax = jax.dlpack.from_dlpack({var_name}{suffix})"
+        )
 
     def call_kernel(self, name: str, node: Optional[IRNode] = None) -> None:  # type: ignore[override]
         """Generate the Python code that calls this Pallas kernel."""
