@@ -357,7 +357,6 @@ def expand_to_full_mesh_op_strategy(
     output_tensor_meta: TensorMeta | Sequence[TensorMeta | None] | None = None,
     input_index: int = 1,
     inplace_op: bool = False,
-    allow_unbacked_sharding: bool | None = None,
     is_valid_strategy_cb: Callable[
         [list[DTensorSpec], DTensorSpec | tuple[DTensorSpec | None, ...]], bool
     ]
@@ -484,9 +483,7 @@ def expand_to_full_mesh_op_strategy(
 
         # check all inputs are shardable
         if not all(
-            is_tensor_shardable(
-                inp.shape, s, allow_unbacked_sharding=allow_unbacked_sharding
-            )
+            is_tensor_shardable(inp.shape, s)
             for inp, s in zip(input_args_strategy, input_specs)
         ):
             continue

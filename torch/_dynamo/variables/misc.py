@@ -391,7 +391,6 @@ class SuperVariable(VariableTracker):
             # `__torch_function__`, just without the first `cls` argument:
             #  * (func, types, args, kwargs)
             func = args[0]
-            # pyrefly: ignore [implicit-any]
             tf_kwargs = {}
             tf_args = args[2].items  # type: ignore[attr-defined]
             # type: ignore[attr-defined]
@@ -1175,7 +1174,6 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
 
         # In eager mode, multiple calls to .save_for_backward() will overwrite previous calls.
         if len(self.saved_tensors.tensors) > 0:
-            # pyrefly: ignore [implicit-any]
             self.saved_tensors.tensors = []
         for arg in args:
             self.saved_tensors.tensors.append(arg)
@@ -1614,6 +1612,10 @@ class TypingVariable(VariableTracker):
         if name == "__getitem__" and len(args) == 1:
             new_typing = self.value[args[0].as_python_constant()]
             return TypingVariable(new_typing)
+        elif name == "__eq__":
+            if len(args) == 1 and not kwargs:
+                result = istype(args[0], TypingVariable) and self.value == args[0].value
+                return variables.ConstantVariable.create(result)
         unimplemented(
             gb_type="unsupported method call on `typing` variable",
             context=f"typing variable: {self.value}, method name: {name}, args: {args}, kwargs: {kwargs}",
@@ -2137,7 +2139,6 @@ class ConstantLikeVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        # pyrefly: ignore [implicit-any]
         cargs, ckwargs = [], {}
         try:
             # we only support constant propagation for methods
