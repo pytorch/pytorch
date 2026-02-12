@@ -1678,7 +1678,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     # Buildable.__getattr__ as FiddleBuildableGetAttrVariable.
                     # FiddleBuildableGetAttrVariable short circuits the getattr
                     # access and saves on compile time.
-                    new_source = AttrSource(self.source, "__getattr__")
+                    new_source = AttrSource(
+                        AttrSource(self.source, "__getattr__"), "__func__"
+                    )
                     fn_vt = VariableTracker.build(
                         tx, self._fiddle_buildable_getattr, source=new_source
                     )
