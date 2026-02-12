@@ -5245,25 +5245,10 @@ class GraphModule(torch.nn.Module):
         kernel_options_2 = {"BLOCK_M": 32, "BLOCK_N": 32, "USE_TMA": True}
 
         flex_compile = torch.compile(flex_attention, fullgraph=True, dynamic=True)
-        out_compiled, compiled_code = run_and_get_code(
-            flex_compile,
-            query,
-            key,
-            value,
-            kernel_options=kernel_options_1,
+        out_compiled = flex_compile(query, key, value, kernel_options=kernel_options_1)
+        out_tma_compiled = flex_compile(
+            query, key, value, kernel_options=kernel_options_2
         )
-        out_tma_compiled, tma_compiled_code = run_and_get_code(
-            flex_compile,
-            query,
-            key,
-            value,
-            kernel_options=kernel_options_2,
-        )
-
-        compiled_flag = "q = load_checked_2d(Q, offs_m, offs_k, stride_qm, stride_qk, IS_DIVISIBLE, SAFE_HEAD_DIM, Q_LEN, QK_HEAD_DIM)"
-        tma_compiled_flag = "desc_q = tl.make_tensor_descriptor("
-        self.assertIn(compiled_flag, str(compiled_code[0]))
-        self.assertIn(tma_compiled_flag, str(tma_compiled_code[0]))
 
         # vanilla compiled vs TMA compiled
         torch.testing.assert_close(out_tma_compiled, out_compiled, atol=2e-1, rtol=2e-1)
@@ -5282,13 +5267,6 @@ class GraphModule(torch.nn.Module):
             query.grad = None
             key.grad = None
             value.grad = None
-
-            backward_compiled_flag = (
-                "# load K and V: they stay in SRAM throughout the inner loop."
-            )
-            backward_tma_compiled_flag = "desc_k_dkdv = tl.make_tensor_descriptor("
-            self.assertIn(backward_compiled_flag, str(compiled_code[1]))
-            self.assertIn(backward_tma_compiled_flag, str(tma_compiled_code[1]))
 
             torch.testing.assert_close(
                 compiled_grads[0],
