@@ -2491,8 +2491,12 @@ class PallasKernel(SIMDKernel):
                 # 3. Reshape to (pointwise_numel, reduction_numel) and reduce over last axis
                 # 4. Reshape output with 1s in reduced dims for proper broadcasting
                 reduction_op = reduction_ops[reduction_type]
-                # Use a helper to find reduction axes by product matching
-                reduction_expr = f"pallas_partial_reduce({reduction_op}, {value}, {pointwise_numel}, {reduction_numel})"
+                if self.is_tpu:
+                    # TPU specific inline reduction. Use keepdims=True to preserve rank for broadcasting.
+                    reduction_expr = f"{reduction_op}({value}.reshape({pointwise_numel}, {reduction_numel}), axis=1, keepdims=True)"
+                else:
+                    # Use a helper to find reduction axes by product matching
+                    reduction_expr = f"pallas_partial_reduce({reduction_op}, {value}, {pointwise_numel}, {reduction_numel})"
             elif is_symbolic_partial:
                 # Symbolic sizes: use axis-based reduction (axis=0 for outer reduction)
                 reduction_expr = f"{reduction_ops[reduction_type]}({value}, axis=0)"
@@ -2655,7 +2659,7 @@ class PallasKernel(SIMDKernel):
         code.writeline("")
         if self.is_tpu:
             self._codegen_jit_wrapper_tpu(ctx)
-            return
+            return code.getvalue()
 
         jit_wrapper_name = f"{kernel_name}_jit_wrapper"
         donate_indices = []
@@ -2903,13 +2907,14 @@ from torch._inductor.runtime.runtime_utils import (
             return broadcast_idx
         return num_broadcast_dims - 1 - broadcast_idx
 
-    def _codegen_jit_wrapper_tpu(self, ctx: _CodegenContext) -> str:
+    def _codegen_jit_wrapper_tpu(self, ctx: _CodegenContext) -> None:
         code = ctx.code
         kernel_name = ctx.kernel_name
         full_kernel_params = ctx.full_kernel_params
         output_params = ctx.output_params
         size_var_params = ctx.size_var_params
-
+        kernel_input_params = ctx.kernel_input_params
+        
         main_name = f"{kernel_name}_main"
         code.writeline(
             f"def {main_name}({', '.join(full_kernel_params)}, stream=None):"
@@ -2921,23 +2926,28 @@ from torch._inductor.runtime.runtime_utils import (
 
             code.writeline("# Separate scalar args for partial application")
 
+            # We need to reconstruct which runtime args correspond to scalars/tensors
+            # full_kernel_params contains everything.
             scalar_args = [p for p in full_kernel_params if p in size_var_params]
-            tensor_args = [p for p in full_kernel_params if p not in size_var_params]
+            tensor_args = kernel_input_params
 
+            # Logic for propagate lambda (needs to match wrapper's *args)
             if len(output_params) == 1:
                 propagate_lambda = (
-                    "lambda *args: tpu_torch_compile.placeholder_like(args[-1])"
+                    f"lambda *args: tpu_torch_compile.placeholder_like({output_params[0]})"
                 )
             else:
+                out_list = ", ".join(output_params)
                 propagate_lambda = (
                     f"lambda *args: tuple(tpu_torch_compile.placeholder_like(a) "
-                    f"for a in args[-{len(output_params)}:])"
+                    f"for a in [{out_list}])"
                 )
 
             if scalar_args:
-                kw_args = ", ".join([f"{s}={s}" for s in scalar_args])
+                # Bind scalars positionally at the start
+                partial_args = [f"{s}={s}" for s in scalar_args]
                 code.writeline(
-                    f"kernel_fn = functools.partial({kernel_name}_kernel, {kw_args})"
+                    f"kernel_fn = functools.partial({kernel_name}_kernel, {', '.join(partial_args)})"
                 )
                 code.writeline(
                     f"decorated_kernel = tpu_pallas.custom_kernel(propagate={propagate_lambda})(kernel_fn)"
@@ -2947,6 +2957,7 @@ from torch._inductor.runtime.runtime_utils import (
                     f"decorated_kernel = tpu_pallas.custom_kernel(propagate={propagate_lambda})({kernel_name}_kernel)"
                 )
 
+            # Call with tensor arguments only (inputs + outputs)
             code.writeline(f"res = decorated_kernel({', '.join(tensor_args)})")
 
             if len(output_params) == 1:
@@ -2954,8 +2965,6 @@ from torch._inductor.runtime.runtime_utils import (
             else:
                 for i, out_name in enumerate(output_params):
                     code.writeline(f"{out_name}.copy_(res[{i}])")
-
-        return code.getvalue()
 
     def _codegen_jit_wrapper_tma(self, ctx: _CodegenContext, kernel_arg: str) -> None:
         code = ctx.code
