@@ -2,6 +2,8 @@
 
 import itertools
 
+import pandas
+
 import torch
 from torch.onnx import InputObserver
 from torch.onnx._internal.exporter._input_observer import _infer_dynamic_dimensions
@@ -130,11 +132,12 @@ class TestInputObserver(common_utils.TestCase):
 
         cst = torch.export.Dim.DYNAMIC
         self.assertEqual(
-            dict(x={0: cst, 1: cst}, y={1: cst}), observer.infer_dynamic_shapes()
+            dict(x={0: cst, 1: cst}, y={1: cst}, add=None),
+            observer.infer_dynamic_shapes(),
         )
         args = observer.infer_arguments()
         self.assertIsInstance(args, dict)
-        self.assertEqual(2, len(args))
+        self.assertEqual(3, len(args))
 
     def test_io_captured_args_kwargs(self):
         class Model(torch.nn.Module):
@@ -212,6 +215,41 @@ class TestInputObserver(common_utils.TestCase):
 
         cst = torch.export.Dim.DYNAMIC
         self.assertEqual(({0: cst, 1: cst}, {1: cst}), observer.infer_dynamic_shapes())
+
+    def test_infer_arguments_optional(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y=None):
+                if y is None:
+                    return x
+                return x - y
+
+        inputs = [
+            (torch.randn((5, 6)),),
+            (torch.randn((6, 7)), torch.randn((1, 7))),
+            (torch.randn((7, 8)), torch.randn((1, 8))),
+            (torch.randn((8, 9)), torch.randn((1, 9))),
+        ]
+
+        model = Model()
+        expected = [model(*args) for args in inputs]
+        observer = InputObserver()
+        with observer(model):
+            for args in inputs:
+                model(*args)
+        self.assertEqual(len(observer.info), 3)
+        for i in range(3):
+            self.assertEqual(len(observer.info.flat_outputs[i]), 1)
+            torch.testing.assert_close(expected[i], observer.info.flat_outputs[i][0])
+
+        cst = torch.export.Dim.DYNAMIC
+        self.assertEqual(({0: cst, 1: cst}, {1: cst}), observer.infer_dynamic_shapes())
+        infer_args = observer.infer_arguments(0)
+        self.assertIsInstance(infer_args, tuple)
+        self.assertEqual(len(infer_args), 2)
+        self.assertIsInstance(infer_args[0], torch.Tensor)
+        self.assertIsInstance(infer_args[1], torch.Tensor)
+        self.assertEqual(infer_args[0].shape, (5, 6))
+        self.assertEqual(infer_args[1].shape, (1, 0))
 
     def test_io_captured_optional_kwargs(self):
         class Model(torch.nn.Module):
@@ -606,6 +644,233 @@ class TestInputObserver(common_utils.TestCase):
             dict(x={0: cst, 1: cst}, y={1: cst}, z={0: cst, 1: cst}, w={1: cst}),
             observer.infer_dynamic_shapes(set_batch_dimension_for={"x", "z"}),
         )
+
+    def test_io_captured_different_order(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y, z=None, w=None):
+                r = x + y
+                if z is not None:
+                    r += z
+                if w is not None:
+                    r += w
+                return r
+
+        inputs = [
+            (
+                (torch.randn((5, 6)), torch.randn((1, 6))),
+                dict(w=torch.randn((1, 6)), z=torch.randn((5, 6))),
+            ),
+            (
+                (torch.randn((5, 7)), torch.randn((1, 7))),
+                dict(z=torch.randn((5, 7)), w=torch.randn((1, 7))),
+            ),
+            (
+                (torch.randn((5, 8)), torch.randn((1, 8))),
+                dict(w=torch.randn((1, 8)), z=torch.randn((5, 8))),
+            ),
+            (
+                (torch.randn((5, 9)), torch.randn((1, 9))),
+                dict(z=torch.randn((5, 9)), w=torch.randn((1, 9))),
+            ),
+        ]
+
+        model = Model()
+        expected = [model(*args, **kwargs) for args, kwargs in inputs]
+        observer = InputObserver()
+        with observer(model):
+            for args, kwargs in inputs:
+                model(*args, **kwargs)
+        self.assertEqual(len(observer.info), 3)
+        for i in range(3):
+            self.assertEqual(len(observer.info.flat_outputs[i]), 1)
+            torch.testing.assert_close(expected[i], observer.info.flat_outputs[i][0])
+
+        cst = torch.export.Dim.DYNAMIC
+        self.assertEqual(
+            dict(x={0: cst, 1: cst}, y={1: cst}, z={0: cst, 1: cst}, w={1: cst}),
+            observer.infer_dynamic_shapes(set_batch_dimension_for={0, "z"}),
+        )
+        self.assertEqual(
+            dict(x={0: cst, 1: cst}, y={1: cst}, z={0: cst, 1: cst}, w={1: cst}),
+            observer.infer_dynamic_shapes(set_batch_dimension_for={"x", "z"}),
+        )
+        epo = torch.onnx.export(
+            model,
+            (),
+            kwargs=observer.infer_arguments(),
+            dynamic_shapes=observer.infer_dynamic_shapes(set_batch_dimension_for=True),
+        )
+        data = observer.check_discrepancies(epo, progress_bar=False)
+        df = pandas.DataFrame(data)
+        self.assertLess(df["abs"].max(), 1e-5)
+
+    def test_io_check_discrepancies(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        inputs = [
+            (torch.randn((5, 6)), torch.randn((1, 6))),
+            (torch.randn((7, 7)), torch.randn((1, 7))),
+            (torch.randn((7, 8)), torch.randn((1, 8))),
+            (torch.randn((7, 9)), torch.randn((1, 9))),
+        ]
+
+        model = Model()
+        observer = InputObserver()
+        with observer(model):
+            for args in inputs:
+                model(*args)
+
+        epo = torch.onnx.export(
+            model,
+            observer.infer_arguments(),
+            dynamic_shapes=observer.infer_dynamic_shapes(set_batch_dimension_for=True),
+        )
+        data = observer.check_discrepancies(epo, progress_bar=False)
+        self.assertEqual(len(data), 3)
+        self.assertIsInstance(data[0], dict)
+        self.assertLess(max(obs["abs"] for obs in data), 1e-5)
+        df = pandas.DataFrame(data)
+        self.assertLess(df["abs"].max(), 1e-5)
+
+    def test_io_infer_arguments(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y, z=None, w=None):
+                r = x + y
+                if z is not None:
+                    r += z
+                if w is not None:
+                    r += w
+                return r
+
+        inputs = [
+            (
+                (torch.randn((5, 6)), torch.randn((1, 6))),
+                dict(w=torch.randn((1, 6)), z=torch.randn((5, 6))),
+            ),
+            (
+                (torch.randn((5, 7)), torch.randn((1, 7))),
+                dict(z=torch.randn((5, 7)), w=torch.randn((1, 7))),
+            ),
+            (
+                (torch.randn((5, 8)), torch.randn((1, 8))),
+                dict(w=torch.randn((1, 8)), z=torch.randn((5, 8))),
+            ),
+            (
+                (torch.randn((5, 9)), torch.randn((1, 9))),
+                dict(z=torch.randn((5, 9)), w=torch.randn((1, 9))),
+            ),
+        ]
+
+        model = Model()
+        observer = InputObserver()
+        with observer(model):
+            for args, kwargs in inputs:
+                model(*args, **kwargs)
+        iargs = observer.infer_arguments(
+            dict(w=torch.randn((1, 6)), z=torch.randn((5, 6)))
+        )
+        self.assertEqual(len(iargs), 4)
+        self.assertEqual(iargs["x"].shape, (5, 0))
+        self.assertEqual(iargs["y"].shape, (1, 0))
+        self.assertEqual(iargs["w"].shape, (1, 6))
+        self.assertEqual(iargs["z"].shape, (5, 6))
+
+        iargs = observer.infer_arguments((torch.randn((5, 6)), torch.randn((1, 6))))
+        self.assertEqual(len(iargs), 4)
+        self.assertEqual(iargs["x"].shape, (5, 6))
+        self.assertEqual(iargs["y"].shape, (1, 6))
+        self.assertEqual(iargs["w"].shape, (1, 0))
+        self.assertEqual(iargs["z"].shape, (5, 0))
+
+    def test_io_mixed_args_kwargs_as_dict_1(self):
+        class Model(torch.nn.Module):
+            def forward(self, x=None, y=None):
+                if y is None:
+                    return x
+                return x + y
+
+        inputs = [
+            ((torch.randn((5, 6)),), dict()),
+            ((), dict(x=torch.randn((5, 7)), y=torch.randn((5, 7)))),
+            ((torch.randn((5, 8)),), dict()),
+            ((), dict(x=torch.randn((5, 9)), y=torch.randn((5, 9)))),
+        ]
+
+        model = Model()
+        observer = InputObserver()
+        with observer(model, store_n_calls=4):
+            for args, kwargs in inputs:
+                model(*args, **kwargs)
+        self.assertEqual(len(observer.info), 4)
+        observer.infer_dynamic_shapes()
+        for cand in observer.info.inputs:
+            cand.str_obs()
+            self.assertEqual(
+                len(cand.flat_list),
+                len([t for t in cand.aligned_flat_list if t is not None]),
+            )
+
+        cst = torch.export.Dim.DYNAMIC
+        dynamic_shapes = observer.infer_dynamic_shapes()
+        self.assertEqual({"x": {1: cst}, "y": {1: cst}}, dynamic_shapes)
+        args = observer.infer_arguments()
+        self.assertIsInstance(args, dict)
+        self.assertEqual(2, len(args))
+        self.assertEqual(len([v for v in args.values() if v is not None]), 2)
+
+    def test_io_int_kwargs(self):
+        class Model(torch.nn.Module):
+            def forward(self, x=None, y=None, option=1):
+                if option == 1:
+                    return x + y
+                return x - y
+
+        inputs = [
+            dict(x=torch.randn((5, 7)), y=torch.randn((5, 7)), option=0),
+            dict(x=torch.randn((5, 9)), y=torch.randn((5, 9)), option=0),
+        ]
+
+        model = Model()
+        observer = InputObserver()
+        with observer(model, store_n_calls=4):
+            for kwargs in inputs:
+                model(**kwargs)
+        kwargs = observer.infer_arguments()
+        self.assertIn("option", kwargs)
+        self.assertEqual(kwargs["option"], 0)
+        shapes = observer.infer_dynamic_shapes()
+        self.assertIn("option", shapes)
+        self.assertEqual(shapes["option"], None)
+        ep = torch.export.export(model, (), kwargs=kwargs, dynamic_shapes=shapes)
+        torch.testing.assert_close(model(**kwargs), ep.module()(**kwargs))
+        epo = torch.onnx.export(model, (), kwargs=kwargs, dynamic_shapes=shapes)
+        proto = epo.model_proto
+        self.assertEqual(["x", "y"], [i.name for i in proto.graph.input])
+
+    def test_io_mixed_args_kwargs_as_dict_2(self):
+        class Model(torch.nn.Module):
+            def forward(self, x=None, y=None):
+                if x is None:
+                    return y
+                return x + y
+
+        inputs = [
+            ((), dict(y=torch.randn((5, 6)))),
+            ((torch.randn((5, 7)), torch.randn((5, 7))), dict()),
+            ((), dict(y=torch.randn((5, 8)))),
+            ((torch.randn((5, 9)), torch.randn((5, 9))), dict()),
+        ]
+
+        model = Model()
+        observer = InputObserver()
+        with observer(model, store_n_calls=4):
+            for args, kwargs in inputs:
+                model(*args, **kwargs)
+        self.assertEqual(len(observer.info), 4)
+        with self.assertRaises(RuntimeError):
+            observer.infer_dynamic_shapes()
 
 
 if __name__ == "__main__":
