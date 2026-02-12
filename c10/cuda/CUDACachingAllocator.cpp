@@ -17,12 +17,14 @@
 #include <c10/util/llvmMathExtras.h>
 #include <c10/util/static_tracepoint.h>
 
+#if defined(PYTORCH_C10_DRIVER_API_SUPPORTED) || defined(USE_ROCM)
 #if defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 #include <c10/cuda/driver_api.h>
 #endif
 #include <sys/syscall.h>
 #include <sys/types.h>
 #include <unistd.h>
+#endif
 
 #include <c10/util/Exception.h>
 #include <cuda_runtime_api.h>
