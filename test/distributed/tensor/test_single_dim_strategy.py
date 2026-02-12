@@ -5,7 +5,6 @@ from itertools import permutations
 from unittest.mock import patch
 
 import torch
-import torch.distributed as dist
 from torch.distributed.tensor import (
     DeviceMesh,
     distribute_tensor,
@@ -39,8 +38,10 @@ from torch.distributed.tensor._ops.single_dim_strategy import (
 from torch.distributed.tensor._ops.utils import expand_to_full_mesh_op_strategy
 from torch.distributed.tensor._sharding_prop import _select_min_cost_strategy
 from torch.distributed.tensor.placement_types import _StridedShard, Placement
-from torch.testing._internal.common_utils import run_tests, TestCase
-from torch.testing._internal.distributed.fake_pg import FakeStore
+from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.distributed._tensor.common_dtensor import (
+    DTensorFakePGTestBase,
+)
 
 
 def _get_mm_metas(M=64, K=32, N=64) -> tuple[TensorMeta, TensorMeta]:
@@ -79,18 +80,8 @@ def _get_mm_specs(
     return left_spec, right_spec
 
 
-class TestExpandPlaceholder(TestCase):
-    def setUp(self):
-        super().setUp()
-        self.world_size = 8
-        store = FakeStore()
-        dist.init_process_group(
-            backend="fake", rank=0, world_size=self.world_size, store=store
-        )
-
-    def tearDown(self):
-        super().tearDown()
-        dist.destroy_process_group()
+class TestExpandPlaceholder(DTensorFakePGTestBase):
+    world_size = 8
 
     def test_foreach_ops_variants(self):
         mesh = DeviceMesh("cpu", mesh=torch.arange(8).reshape(2, 2, 2))
@@ -993,19 +984,7 @@ def _dummy_check_fake(x):
     return None
 
 
-class TestSingleDimStrategyRegistration(TestCase):
-    def setUp(self):
-        super().setUp()
-        self.world_size = 4
-        store = FakeStore()
-        torch.distributed.init_process_group(
-            backend="fake", rank=0, world_size=self.world_size, store=store
-        )
-
-    def tearDown(self):
-        super().tearDown()
-        torch.distributed.destroy_process_group()
-
+class TestSingleDimStrategyRegistration(DTensorFakePGTestBase):
     @patch(
         "torch.distributed.tensor._api.DTensor._op_dispatcher.sharding_propagator.op_single_dim_strategy_funcs",
         {},
