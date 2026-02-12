@@ -482,6 +482,15 @@ class VariableBuilder:
         self.allow_lazy_constant = allow_lazy_constant
 
     def __call__(self, value: object) -> VariableTracker:
+        _t0 = time.time_ns()
+        try:
+            return self._call_impl(value)
+        finally:
+            self.tx.output.bytecode_tracing_timings.variable_builder_call_ns += (
+                time.time_ns() - _t0
+            )
+
+    def _call_impl(self, value: object) -> VariableTracker:
         if value in self.tx.output.side_effects:
             side_effect_result = self.tx.output.side_effects[value]
             dup_guard = make_dupe_guard(self.source, side_effect_result.source)
