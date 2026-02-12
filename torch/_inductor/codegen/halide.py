@@ -662,32 +662,11 @@ class DimensionInfo:
 
 
 def eq(left, right):
-    if V.graph.sizevars.statically_known_equals(left, right):
-        return True
-    try:
-        a = V.graph.sizevars.guarding_hint_or_throw(left)
-        b = V.graph.sizevars.guarding_hint_or_throw(right)
-    except TypeError:  # unbacked symints
-        return False
-    if a == b:
-        V.graph.sizevars.check_equals(left, right)
-    return a == b
+    return V.graph.sizevars.guard_or_false(sympy.Eq(left, right))
 
 
 def lt(left, right):
-    if V.graph.sizevars.statically_known_lt(left, right):
-        return True
-    try:
-        a = V.graph.sizevars.guarding_hint_or_throw(left)
-        b = V.graph.sizevars.guarding_hint_or_throw(right)
-    except TypeError:  # unbacked symints
-        gcd = sympy.gcd(left, right)
-        if gcd == left:
-            return left != right
-        return False
-    if a < b:
-        V.graph.sizevars.check_lt(left, right)
-    return a < b
+    return V.graph.sizevars.guard_or_false(sympy.Lt(left, right))
 
 
 class HalideKernel(SIMDKernel):

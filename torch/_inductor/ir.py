@@ -1574,8 +1574,7 @@ class Reduction(Loops):
             )
 
         if (
-            isinstance(reduction_numel, Integer)
-            and V.graph.sizevars.guarding_hint_or_throw(reduction_numel)
+            V.graph.sizevars.optimization_hint(reduction_numel)
             < config.unroll_reductions_threshold
             and (sympy_product(ranges) != 1 or is_gpu(device.type))
             and reduction_type != "dot"
