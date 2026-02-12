@@ -1,20 +1,23 @@
 #!/usr/bin/env python3
 """
-PreToolUse hook to validate labels during triage.
+PreToolUse hook to validate and sanitize labels during triage.
 
-This hook intercepts mcp__github__update_issue calls and blocks any attempt
-to add labels that are:
-1. Reserved for CI/infrastructure use (forbidden patterns)
-2. Not in the labels.json allowlist (non-existent labels)
+This hook intercepts mcp__github__update_issue calls and:
+1. Strips forbidden labels (CI/infrastructure/severity)
+2. Strips non-existent labels (not in labels.json)
+3. Strips redundant labels (e.g. module: nn when module: rnn is present)
+4. Fetches existing labels on the issue and merges with valid new labels
+5. Rewrites the tool input via updatedInput so the MCP SET preserves existing labels
 
 Exit codes:
-  0 - Allow the tool call
+  0 - Allow the tool call (with possible input rewrite via stdout JSON)
   2 - Block the tool call (feedback sent to Claude)
 """
 
 import json
 import os
 import re
+import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -24,9 +27,26 @@ DEBUG_LOG = os.environ.get("TRIAGE_HOOK_DEBUG_LOG", "/tmp/triage_hooks.log")
 SCRIPT_DIR = Path(__file__).parent
 LABELS_FILE = SCRIPT_DIR.parent / "labels.json"
 
+FORBIDDEN_PATTERNS = [
+    r"^ciflow/",
+    r"^test-config/",
+    r"^release notes:",
+    r"^ci-",
+    r"^ci:",
+    r"^sev",
+    r"deprecated",
+]
+
+FORBIDDEN_EXACT = [
+    "merge blocking",
+]
+
+REDUNDANT_PAIRS = [
+    ("module: rnn", "module: nn"),
+]
+
 
 def debug_log(msg: str, to_stderr: bool = False):
-    """Append a debug message to the log file and optionally stderr."""
     timestamp = datetime.now().isoformat()
     formatted = f"[{timestamp}] [PreToolUse] {msg}"
     try:
@@ -38,46 +58,15 @@ def debug_log(msg: str, to_stderr: bool = False):
         print(f"[DEBUG] {formatted}", file=sys.stderr)
 
 
-# Patterns that match forbidden label prefixes (case-insensitive)
-FORBIDDEN_PATTERNS = [
-    r"^ciflow/",  # CI job triggers for PRs only
-    r"^test-config/",  # Test suite selectors for PRs only
-    r"^release notes:",  # Auto-assigned for release notes
-    r"^ci-",  # CI infrastructure controls
-    r"^ci:",  # CI infrastructure controls (includes ci: sev)
-    r"^sev",  # Severity labels require human decision
-    r"deprecated",  # Obsolete labels (anywhere in name)
-]
-
-# Exact label names that are forbidden (case-insensitive)
-FORBIDDEN_EXACT = [
-    "merge blocking",
-]
-
-# Redundant label pairs: if the specific label is present, the general label should be stripped
-# Format: (specific_label, general_label_to_remove)
-REDUNDANT_PAIRS = [
-    ("module: rnn", "module: nn"),
-]
-
-
 def is_forbidden(label: str) -> bool:
-    """Check if a label matches any forbidden pattern or exact name."""
     label_lower = label.lower()
-
     for pattern in FORBIDDEN_PATTERNS:
         if re.search(pattern, label_lower):
             return True
-
     return label_lower in [f.lower() for f in FORBIDDEN_EXACT]
 
 
 def load_valid_labels() -> set[str]:
-    """Load the set of valid label names from labels.json.
-
-    Raises RuntimeError if labels.json cannot be loaded, as this indicates
-    a configuration problem that must be fixed.
-    """
     try:
         with open(LABELS_FILE) as f:
             data = json.load(f)
@@ -95,19 +84,55 @@ def load_valid_labels() -> set[str]:
         raise RuntimeError(f"labels.json has malformed entries: {e}") from None
 
 
-def find_nonexistent_labels(labels: list[str], valid_labels: set[str]) -> list[str]:
-    """Return labels that don't exist in the valid labels set."""
-    return [label for label in labels if label not in valid_labels]
-
-
-def find_redundant_labels(labels: list[str]) -> list[tuple[str, str]]:
-    """Return list of (specific, general) pairs where both are present."""
+def strip_redundant(labels: list[str]) -> tuple[list[str], list[str]]:
     labels_set = set(labels)
-    return [
-        (specific, general)
-        for specific, general in REDUNDANT_PAIRS
-        if specific in labels_set and general in labels_set
-    ]
+    to_remove = set()
+    for specific, general in REDUNDANT_PAIRS:
+        if specific in labels_set and general in labels_set:
+            to_remove.add(general)
+    return [l for l in labels if l not in to_remove], sorted(to_remove)
+
+
+def fetch_existing_labels(owner: str, repo: str, issue_number: int) -> list[str]:
+    result = subprocess.run(
+        [
+            "gh",
+            "issue",
+            "view",
+            str(issue_number),
+            "--repo",
+            f"{owner}/{repo}",
+            "--json",
+            "labels",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=15,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"Cannot fetch existing labels (gh exit {result.returncode}): "
+            f"{result.stderr.strip()}"
+        )
+    data = json.loads(result.stdout)
+    return [label["name"] for label in data.get("labels", [])]
+
+
+def allow_with_updated_input(tool_input: dict, merged_labels: list[str]) -> None:
+    updated = dict(tool_input)
+    updated["labels"] = merged_labels
+    json.dump(
+        {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "allow",
+                "updatedInput": updated,
+            }
+        },
+        sys.stdout,
+    )
+    sys.exit(0)
 
 
 def main():
@@ -116,71 +141,68 @@ def main():
         debug_log(f"Hook invoked with data: {json.dumps(data, indent=2)}")
         tool_input = data.get("tool_input", {})
 
-        labels = tool_input.get("labels", []) or []
-        debug_log(f"Labels to validate: {labels}")
+        requested_labels = tool_input.get("labels", []) or []
+        debug_log(f"Labels requested: {requested_labels}")
 
-        if not labels:
+        if not requested_labels:
             debug_log("No labels provided, allowing")
             sys.exit(0)
 
-        forbidden = [label for label in labels if is_forbidden(label)]
-        if forbidden:
-            debug_log(f"BLOCKING - forbidden labels: {forbidden}")
-            print(f"BLOCKED: Cannot add forbidden labels: {forbidden}", file=sys.stderr)
-            print(
-                "These labels are reserved for CI/infrastructure use only.",
-                file=sys.stderr,
-            )
-            print(file=sys.stderr)
-            print(
-                "ACTION REQUIRED: Add ONLY the 'triage review' label instead.",
-                file=sys.stderr,
-            )
-            print(
-                "Do NOT add any other labels. A human will review this issue.",
-                file=sys.stderr,
-            )
-            sys.exit(2)
+        owner = tool_input.get("owner", "pytorch")
+        repo = tool_input.get("repo", "pytorch")
+        issue_number = tool_input.get("issue_number")
+        if not issue_number:
+            raise RuntimeError("tool_input missing issue_number")
 
-        redundant = find_redundant_labels(labels)
-        if redundant:
-            debug_log(f"BLOCKING - redundant labels: {redundant}")
-            for specific, general in redundant:
-                print(
-                    f"BLOCKED: Redundant labels detected: '{general}' is redundant when '{specific}' is present.",
-                    file=sys.stderr,
-                )
-            print(file=sys.stderr)
+        forbidden = [l for l in requested_labels if is_forbidden(l)]
+        clean_labels = [l for l in requested_labels if not is_forbidden(l)]
+
+        if forbidden:
+            debug_log(f"Stripped forbidden labels: {forbidden}")
+            if not clean_labels:
+                clean_labels = ["triage review"]
+            elif "triage review" not in clean_labels:
+                clean_labels.append("triage review")
             print(
-                "ACTION REQUIRED: Remove the general label(s) and keep only the specific one(s).",
+                f"Stripped forbidden labels (require human decision): {forbidden}. "
+                f"Added 'triage review' for human attention.",
                 file=sys.stderr,
             )
-            generals_to_remove = [general for _, general in redundant]
-            print(f"Remove: {generals_to_remove}", file=sys.stderr)
-            sys.exit(2)
 
         valid_labels = load_valid_labels()
-        nonexistent = find_nonexistent_labels(labels, valid_labels)
+        nonexistent = [l for l in clean_labels if l not in valid_labels]
+        clean_labels = [l for l in clean_labels if l in valid_labels]
+
         if nonexistent:
-            debug_log(f"BLOCKING - non-existent labels: {nonexistent}")
-            print(f"BLOCKED: These labels do not exist: {nonexistent}", file=sys.stderr)
+            debug_log(f"Stripped non-existent labels: {nonexistent}")
             print(
-                "Labels must exist in labels.json before they can be applied.",
+                f"Stripped non-existent labels: {nonexistent}",
                 file=sys.stderr,
             )
-            print(file=sys.stderr)
+
+        clean_labels, removed_redundant = strip_redundant(clean_labels)
+        if removed_redundant:
+            debug_log(f"Stripped redundant labels: {removed_redundant}")
             print(
-                "ACTION REQUIRED: Remove the non-existent labels and retry with only valid labels.",
+                f"Stripped redundant labels: {removed_redundant}",
                 file=sys.stderr,
             )
+
+        if not clean_labels:
+            debug_log("No valid labels remain after filtering, blocking")
             print(
-                "See labels.json for the full list of available labels.",
+                "All requested labels were invalid. No labels to apply.",
                 file=sys.stderr,
             )
             sys.exit(2)
 
-        debug_log(f"All labels allowed: {labels}")
-        sys.exit(0)
+        existing_labels = fetch_existing_labels(owner, repo, issue_number)
+        debug_log(f"Existing labels on issue: {existing_labels}")
+
+        merged = sorted(set(existing_labels) | set(clean_labels))
+        debug_log(f"Merged labels (existing + new): {merged}")
+
+        allow_with_updated_input(tool_input, merged)
 
     except json.JSONDecodeError as e:
         debug_log(f"JSON decode error: {e}")
