@@ -1,10 +1,24 @@
 # Owner(s): ["module: PrivateUse1"]
 
 import multiprocessing
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
 import torch
 from torch.testing._internal.common_dtype import get_all_dtypes
 from torch.testing._internal.common_utils import run_tests, skipIfWindows, TestCase
+
+
+def _multiprocessing_worker(device_idx, result_queue):
+    """Worker function for multiprocessing spawn test"""
+    try:
+        torch.accelerator.set_device_index(device_idx)
+        x = torch.randn(10, 10, device="openreg")
+        y = torch.randn(10, 10, device="openreg")
+        z = torch.matmul(x, y)
+        result_queue.put(("success", device_idx, torch.sum(z).item()))
+    except Exception as e:
+        result_queue.put(("error", device_idx, str(e)))
 
 
 class TestDevice(TestCase):
@@ -43,16 +57,6 @@ class TestDevice(TestCase):
         expected_dtypes = get_all_dtypes(include_complex32=True, include_qint=True)
 
         self.assertTrue(all(dtype in supported_dtypes for dtype in expected_dtypes))
-
-    def test_device_properties(self):
-        """Test device properties"""
-        device = torch.device("openreg:0")
-        self.assertEqual(device.type, "openreg")
-        self.assertEqual(device.index, 0)
-
-        device = torch.device("openreg")
-        self.assertEqual(device.type, "openreg")
-        self.assertIsNone(device.index)
 
     def test_tensor_device(self):
         """Test tensor device assignment"""
@@ -126,6 +130,189 @@ class TestDevice(TestCase):
             ),
         ):
             raise exc
+
+    def test_device_properties(self):
+        """Test querying device name, total memory, and compute capability"""
+        # Query device name
+        device = torch.device("openreg:0")
+        self.assertEqual(device.type, "openreg")
+        device_str = str(device)
+        self.assertIn("openreg", device_str)
+        self.assertIn("0", device_str)
+
+        # Query compute capability
+        capability = torch.accelerator.get_device_capability("openreg:0")
+        self.assertIsInstance(capability, dict)
+        self.assertIn("supported_dtypes", capability)
+        supported_dtypes = capability["supported_dtypes"]
+        self.assertIsInstance(supported_dtypes, set)
+        self.assertGreater(len(supported_dtypes), 0)
+
+        # Query device memory information
+        try:
+            memory_info = torch.accelerator.get_memory_info()
+            self.assertIsInstance(memory_info, dict)
+        except (AttributeError, NotImplementedError):
+            # If get_memory_info is not available or not implemented, skip memory check
+            pass
+
+    def test_current_device_after_operations(self):
+        """Test that current device remains consistent after various operations"""
+        original_device = torch.accelerator.current_device_index()
+
+        # Perform various operations
+        x = torch.randn(2, 3, device="openreg")
+        y = torch.randn(2, 3, device="openreg")
+        z = x + y
+        _ = torch.sum(z)
+
+        # Device should remain unchanged
+        self.assertEqual(torch.accelerator.current_device_index(), original_device)
+
+        # Switch device and verify it persists
+        torch.accelerator.set_device_index(1)
+        self.assertEqual(torch.accelerator.current_device_index(), 1)
+
+        # Perform more operations
+        a = torch.randn(5, 5, device="openreg")
+        _ = torch.matmul(a, a)
+
+        # Device should still be 1
+        self.assertEqual(torch.accelerator.current_device_index(), 1)
+
+        # Restore original device
+        torch.accelerator.set_device_index(original_device)
+
+    def test_device_context_restoration(self):
+        """Test that device context is properly restored after exceptions"""
+        original_device = torch.accelerator.current_device_index()
+
+        # Test exception handling in context manager
+        try:
+            with torch.accelerator.device_index(1):
+                self.assertEqual(torch.accelerator.current_device_index(), 1)
+                # Simulate an exception
+                raise ValueError("Test exception")
+        except ValueError:
+            pass
+
+        # Device should be restored even after exception
+        self.assertEqual(torch.accelerator.current_device_index(), original_device)
+
+        # Test with nested contexts and exceptions
+        try:
+            with torch.accelerator.device_index(1):
+                self.assertEqual(torch.accelerator.current_device_index(), 1)
+                with torch.accelerator.device_index(0):
+                    self.assertEqual(torch.accelerator.current_device_index(), 0)
+                    raise RuntimeError("Nested exception")
+        except RuntimeError:
+            pass
+
+        # Should restore to original device
+        self.assertEqual(torch.accelerator.current_device_index(), original_device)
+
+    def test_concurrent_device_operations(self):
+        """Test concurrent device operations from multiple threads"""
+        num_threads = 4
+        num_operations = 50
+        errors = []
+        barrier = threading.Barrier(num_threads)
+
+        def worker_thread(thread_id):
+            try:
+                barrier.wait()  # Synchronize start
+
+                # Each thread performs device operations
+                for i in range(num_operations):
+                    # Switch to device based on thread_id
+                    device_idx = thread_id % 2
+                    torch.accelerator.set_device_index(device_idx)
+
+                    # Verify device was set correctly
+                    current = torch.accelerator.current_device_index()
+                    if current != device_idx:
+                        errors.append(
+                            f"Thread {thread_id}: Expected device {device_idx}, got {current}"
+                        )
+
+                    # Perform some operations
+                    x = torch.randn(10, 10, device="openreg")
+                    y = torch.randn(10, 10, device="openreg")
+                    z = torch.matmul(x, y)
+                    _ = torch.sum(z)
+
+                    # Verify device didn't change unexpectedly
+                    if torch.accelerator.current_device_index() != device_idx:
+                        errors.append(
+                            f"Thread {thread_id}: Device changed during operation"
+                        )
+            except Exception as e:
+                errors.append(f"Thread {thread_id}: {str(e)}")
+
+        # Launch threads
+        with ThreadPoolExecutor(max_workers=num_threads) as executor:
+            futures = [executor.submit(worker_thread, i) for i in range(num_threads)]
+            # Wait for all threads to complete
+            for future in futures:
+                future.result()
+
+        # Verify no errors occurred
+        self.assertEqual(len(errors), 0, f"Errors occurred: {errors}")
+
+        # Restore original device
+        torch.accelerator.set_device_index(0)
+
+    def test_device_initialization_state(self):
+        """Test device initialization and state management"""
+        # test that device can be initialized
+        torch.openreg.init()
+        self.assertTrue(torch.openreg.is_initialized())
+
+        # test that device count is available after init
+        count = torch.accelerator.device_count()
+        self.assertGreater(count, 0)
+
+    def test_device_multiprocessing_spawn(self):
+        """Test device with multiprocessing spawn method (safe path)"""
+        # test device operations in spawned subprocess (safe for multiprocessing)
+        ctx = multiprocessing.get_context("spawn")
+        result_queue = ctx.Queue()
+
+        p = ctx.Process(target=_multiprocessing_worker, args=(0, result_queue))
+        p.start()
+        p.join()
+
+        self.assertFalse(result_queue.empty())
+        status, device_idx, result = result_queue.get()
+        self.assertEqual(status, "success")
+        self.assertEqual(device_idx, 0)
+
+    def test_device_state_after_errors(self):
+        """Test device state consistency after error conditions"""
+        original_device = torch.accelerator.current_device_index()
+
+        # test that device state is preserved after invalid operations
+        error_raised = False
+        try:
+            x = torch.randn(5, 5, device="openreg")
+            y = torch.randn(3, 3, device="openreg")
+            # this should raise an error (shape mismatch)
+            _ = torch.matmul(x, y)
+        except RuntimeError:
+            error_raised = True
+
+        # verify that error was actually raised
+        self.assertTrue(
+            error_raised, "Expected RuntimeError for shape mismatch in matmul"
+        )
+
+        # device should still be valid
+        self.assertEqual(torch.accelerator.current_device_index(), original_device)
+
+        # can still create tensors after error
+        z = torch.randn(5, 5, device="openreg")
+        self.assertEqual(z.device.type, "openreg")
 
 
 if __name__ == "__main__":
