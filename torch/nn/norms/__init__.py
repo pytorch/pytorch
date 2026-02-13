@@ -4,9 +4,15 @@ Usage::
 
     import torch.nn.norms
 
-    torch.nn.norms.list_norm_impls()          # ['cutedsl_rmsnorm']
+    torch.nn.norms.list_norm_impls()
+    # ['cutedsl_layernorm', 'cutedsl_rmsnorm']
+
     torch.nn.norms.activate_norm_impl("cutedsl_rmsnorm")
     # F.rms_norm / nn.RMSNorm now uses CuteDSL kernels on CUDA
+
+    torch.nn.norms.activate_norm_impl("cutedsl_layernorm")
+    # F.layer_norm / nn.LayerNorm now uses CuteDSL kernels on CUDA
+
     torch.nn.norms.restore_norm_impl()        # back to default
 """
 
@@ -26,4 +32,4 @@ current_norm_impl.__module__ = __name__
 restore_norm_impl.__module__ = __name__
 
 # Import built-in implementations to trigger self-registration
-from . import _cutedsl_rmsnorm  # noqa: F401
+from . import _cutedsl_layernorm, _cutedsl_rmsnorm  # noqa: F401
