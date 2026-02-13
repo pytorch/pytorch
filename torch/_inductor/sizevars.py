@@ -647,6 +647,9 @@ class SizeVarAllocator:
             optimization_hint: For cases where fallback/heuristic values are acceptable
                 for unbacked symbols.
         """
+        expr = self.simplify(expr)
+        if isinstance(expr, sympy.Expr):
+            expr = expr.expand(identity=True)
 
         # Replace backed symbols with their hints, leaving unbacked symbols alone.
         expr = self.replace_backed_symbols_with_hints(expr)
@@ -655,7 +658,7 @@ class SizeVarAllocator:
             raise GuardOnDataDependentSymNode(expr)
 
         result = self._maybe_realize_expr(expr, None)
-        assert result is not None, result
+        assert result is not None, expr
         return result
 
     def _maybe_realize_expr(
@@ -714,9 +717,20 @@ class SizeVarAllocator:
         if fallback is None:
             fallback = config.unbacked_symint_fallback
         assert fallback is not None
+
         original = expr
+        result = self._maybe_realize_expr(expr, fallback)
+        if result is not None:
+            return result
+
+        if isinstance(expr, sympy.Expr):
+            expr = expr.expand(identity=True)
 
         expr = self.replace_backed_symbols_with_hints(expr)
+
+        result = self._maybe_realize_expr(expr, fallback)
+        if result is not None:
+            return result
 
         # replace unbacked with optimizations hints if exists.
         expr = sympy_subs(expr, self.var_to_hint_override)
