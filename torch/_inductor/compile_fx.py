@@ -44,6 +44,7 @@ from torch._dynamo.utils import (
     detect_fake_mode,
     dynamo_timed,
     flatten_graph_inputs,
+    get_inputs_devices,
     get_metrics_context,
     lazy_format_graph_code,
     set_feature_use,
@@ -526,11 +527,15 @@ def _recursive_pre_grad_passes(
 
 
 def _recursive_joint_graph_passes(
-    gm: GraphModule, skip_invoke_subgraph: bool = False
+    gm: GraphModule,
+    skip_invoke_subgraph: bool = False,
+    input_device: Optional[torch.device] = None,
 ) -> GraphModule:
     def _run_on_sub_graph_module(subgraph_name: str) -> None:
         subgraph = getattr(gm, subgraph_name)
-        new_subgraph = _recursive_joint_graph_passes(subgraph, skip_invoke_subgraph)
+        new_subgraph = _recursive_joint_graph_passes(
+            subgraph, skip_invoke_subgraph, input_device
+        )
         setattr(gm, subgraph_name, new_subgraph)
 
     with dynamo_timed(
@@ -551,7 +556,7 @@ def _recursive_joint_graph_passes(
         for subgraph_name in old_subgraph_names:
             _run_on_sub_graph_module(subgraph_name)
 
-        out_gm = joint_graph_passes(gm)
+        out_gm = joint_graph_passes(gm, input_device)
 
         # Some joint graph passes may create new sub graph module. Run one round
         # for the newly created graph modules.
@@ -2069,7 +2074,10 @@ def fw_compiler_freezing(
     from torch._inductor.freezing import convert_conv_weights_to_channels_last, freeze
 
     # partition_fn won't be called
-    aot_autograd_model = _recursive_joint_graph_passes(aot_autograd_model)
+    inputs_devices = get_inputs_devices(aot_example_inputs, aot_autograd_model)
+    aot_autograd_model = _recursive_joint_graph_passes(
+        aot_autograd_model, input_device=next(iter(inputs_devices))
+    )
 
     layout_opt = GraphLowering.decide_layout_opt(aot_autograd_model, is_inference=True)
     if layout_opt:
@@ -2205,7 +2213,10 @@ def partition_fn(
         # We can skip the invoke_subgraph because the
         # entire_partition_fn is called recursively for invoke_subgraph
         # in partitioning.
-        gm = _recursive_joint_graph_passes(gm, skip_invoke_subgraph=True)
+        inputs_devices = get_inputs_devices(joint_inputs, gm)
+        gm = _recursive_joint_graph_passes(
+            gm, skip_invoke_subgraph=True, input_device=next(iter(inputs_devices))
+        )
 
     static_lifetime_input_indices: Optional[list[int]] = kwargs.pop(  # type: ignore[assignment]
         "static_lifetime_input_indices", None
@@ -2309,7 +2320,8 @@ def compile_fx_forward(
             ),
         )
 
-        gm = _recursive_joint_graph_passes(gm)
+        inputs_devices = get_inputs_devices(example_inputs, gm)
+        gm = _recursive_joint_graph_passes(gm, input_device=next(iter(inputs_devices)))
 
         trace_structured(
             "artifact",
