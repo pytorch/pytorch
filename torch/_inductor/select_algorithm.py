@@ -1549,10 +1549,11 @@ class TritonTemplateKernel(TritonKernel):
             wrapper.generate_workspace_deallocation(self.workspace_arg)
 
     def kernel_benchmark_extra_args(self) -> list[str]:
+        # Grid args are only used for benchmarking, not correctness
         return [
             str(x)
             for x in self.grid_fn(
-                *V.graph.sizevars.size_hints(self.call_sizes), self.meta
+                *V.graph.sizevars.optimization_hints(self.call_sizes), self.meta
             )
         ]
 
@@ -3638,7 +3639,9 @@ class AlgorithmSelectorCache(PersistentCache):
 
         # Also check the output tensor for storage size
         out_base = out if out._base is None else out._base
-        out_offset = V.graph.sizevars.size_hint(layout.offset)
+        # Only used for benchmarking tensor setup, not correctness.
+        # Offset is almost always 0; use that as fallback.
+        out_offset = V.graph.sizevars.optimization_hint(layout.offset, fallback=0)
         needed_out_size = torch._prims_common.compute_required_storage_length(
             out.size(), out.stride(), out_offset
         )
