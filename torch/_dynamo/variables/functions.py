@@ -2086,6 +2086,7 @@ class SkipFunctionVariable(VariableTracker):
                     "is created inside the parent function that is getting "
                     "compiled. This is not supported for now."
                 )
+                # pyrefly: ignore [implicit-any]
                 hints = []
             reason = self.reason if self.reason else "<missing reason>"
             unimplemented(
