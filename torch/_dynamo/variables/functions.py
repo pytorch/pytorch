@@ -62,12 +62,11 @@ from ..source import (
     AttrSource,
     CellContentsSource,
     ClosureSource,
-    CollectionsSource,
     ConstantSource,
     DefaultsSource,
     GetItemSource,
+    ImportSource,
     SkipGuardSource,
-    TorchSource,
     TypeSource,
 )
 from ..utils import (
@@ -134,7 +133,8 @@ class ClosureConversionError(NotImplementedError):
 @functools.lru_cache
 def get_pytree_SUPPORTED_NODES_source() -> AttrSource:
     return AttrSource(
-        AttrSource(AttrSource(TorchSource(), "utils"), "_pytree"), "SUPPORTED_NODES"
+        AttrSource(AttrSource(ImportSource("torch"), "utils"), "_pytree"),
+        "SUPPORTED_NODES",
     )
 
 
@@ -185,6 +185,23 @@ def bind_args_cached(
     kwargs: dict[str, Any],
 ) -> dict[str, VariableTracker]:
     spec = _get_spec(func)
+
+    # Fast path: simple positional-only, no defaults, no varargs/varkw
+    # This is the common case for small utility functions called repeatedly.
+    if (
+        len(args) == spec.arg_count
+        and not func.__defaults__
+        and not kwargs
+        and not spec.varargs_name
+        and not spec.varkw_name
+        and not spec.kwonly_names
+    ):
+        return {
+            name: wrap_bound_arg(tx, args[i])
+            for i, name in enumerate(spec.all_pos_names)
+        }
+
+    # Full path with all features
     spec.update_defaults(func)
     ba = {}
     rem_kw = dict(kwargs)
@@ -632,7 +649,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                 )
 
             fn = fn_var.fn
-            return variables.TorchInGraphFunctionVariable(fn, nonstrict_traceable=True)
+            return variables.TorchInGraphFunctionVariable(
+                fn, kind=variables.torch.AllowInGraphKind.NONSTRICT_TRACE
+            )
 
         if self.is_constant:
             return invoke_and_store_as_constant(
@@ -815,6 +834,42 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         return isinstance(other, variables.UserFunctionVariable) and self.fn is other.fn
 
 
+class InspectSignatureVariable(UserFunctionVariable):
+    """
+    Variable tracker for inspect.signature with caching support.
+
+    inspect.Signature is expensive to trace. When inspect.signature is called
+    repeatedly on the same function during tracing, we cache the result to avoid
+    retracing the signature construction each time. Although this is different
+    from CPython behavior, it is safe to do so because inspect.signature does
+    not change across different calls to the same function.
+    """
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # Fast path: cache results for repeated calls on the same function
+        if len(args) == 1 and not kwargs:
+            target_arg = args[0]
+            cache_key = None
+
+            if isinstance(target_arg, (UserFunctionVariable, UserMethodVariable)):
+                cache_key = target_arg.get_function()
+
+            if cache_key is not None:
+                if cache_key in tx.output.signature_cache:
+                    return tx.output.signature_cache[cache_key]
+
+                result = super().call_function(tx, args, kwargs)
+                tx.output.signature_cache[cache_key] = result
+                return result
+
+        return super().call_function(tx, args, kwargs)
+
+
 class TreeMapOnlyFunctionVariable(BaseUserFunctionVariable):
     _nonvar_fields = {
         "allowed_types",
@@ -887,7 +942,7 @@ class BuiltinMethodVariable(BaseUserFunctionVariable):
         method_self = self.fn.__self__
         name = self.fn.__name__
         obj_source = self.source and AttrSource(self.source, "__self__")
-        obj_vt = VariableTracker.build(tx, method_self, obj_source)
+        obj_vt = VariableTracker.build(tx, method_self, obj_source, realize=True)
         return obj_vt.call_method(tx, name, args, kwargs)
 
 
@@ -1400,12 +1455,19 @@ class UserMethodVariable(UserFunctionVariable):
         #
         # We might be able to simplify this away by canonicalizing the
         # function/method wrapping code paths.
-        from ..trace_rules import is_nonstrict_trace_callable
+        from ..trace_rules import is_leaf_function, is_nonstrict_trace_callable
 
         if is_nonstrict_trace_callable(self.fn):
             call_args = [*self.self_args(), *args]
             var = variables.TorchInGraphFunctionVariable(
-                self.fn, nonstrict_traceable=True
+                self.fn, kind=variables.torch.AllowInGraphKind.NONSTRICT_TRACE
+            )
+            return var.call_function(tx, call_args, kwargs)
+
+        if is_leaf_function(self.fn):
+            call_args = [*self.self_args(), *args]
+            var = variables.TorchInGraphFunctionVariable(
+                self.fn, kind=variables.torch.AllowInGraphKind.LEAF_FUNCTION
             )
             return var.call_function(tx, call_args, kwargs)
 
@@ -2024,6 +2086,7 @@ class SkipFunctionVariable(VariableTracker):
                     "is created inside the parent function that is getting "
                     "compiled. This is not supported for now."
                 )
+                # pyrefly: ignore [implicit-any]
                 hints = []
             reason = self.reason if self.reason else "<missing reason>"
             unimplemented(
@@ -3093,7 +3156,7 @@ class PyTreeGetNodeTypeFunctionVariable(UserFunctionVariable):
             type_source = TypeSource(args[0].source)
         python_type = args[0].python_type()
         if is_namedtuple_class(python_type):
-            type_source = AttrSource(CollectionsSource(), "namedtuple")
+            type_source = AttrSource(ImportSource("collections"), "namedtuple")
             return VariableTracker.build(tx, namedtuple, type_source)
         return VariableTracker.build(tx, python_type, source=type_source)
 
@@ -3179,4 +3242,33 @@ class SparseTensorCreationSkipVariable(SkipFunctionVariable):
                 "Sparse tensors require specialized handling that is not yet implemented in the compiler."
             ),
             hints=[*graph_break_hints.SPARSE_TENSOR],
+        )
+
+
+class TritonSetAllocatorSkipVariable(SkipFunctionVariable):
+    """
+    Skip variable for triton.set_allocator with a clear message to move it outside the compiled region.
+    """
+
+    def __init__(self, value: Any, **kwargs: Any) -> None:
+        reason = "triton.set_allocator is not supported inside torch.compile"
+        super().__init__(value, reason=reason, **kwargs)
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        unimplemented(
+            gb_type="triton.set_allocator not supported",
+            context="triton.set_allocator called inside compiled region",
+            explanation=(
+                "triton.set_allocator is not supported inside torch.compile. "
+                "It modifies global Triton allocator state and cannot be traced."
+            ),
+            hints=[
+                "Move triton.set_allocator() outside of the torch.compile region "
+                "(call it before the compiled function)."
+            ],
         )

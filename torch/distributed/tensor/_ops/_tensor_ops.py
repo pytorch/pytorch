@@ -271,7 +271,11 @@ def new_factory_strategy(op_schema: OpSchema) -> StrategyType:
 
 @register_op_strategy(aten.bucketize.Tensor)
 def gen_bucketize_strategy(op_schema: OpSchema) -> StrategyType:
-    """Just propagate input sharding, but expect replicated for boundaries input."""
+    """
+    Propagate input sharding to output, but expect replicated for boundaries input.
+    For Partial inputs, convert to Replicate since bucketize returns indices
+    which cannot be meaningfully combined with sum/avg reductions.
+    """
     mesh = op_schema.get_mesh_from_args()
     input_strategy, boundaries_strategy = op_schema.args_schema
     bucketize_strategy = OpStrategy([])
@@ -280,9 +284,15 @@ def gen_bucketize_strategy(op_schema: OpSchema) -> StrategyType:
     if not isinstance(boundaries_strategy, OpStrategy):
         raise AssertionError(f"Expected OpStrategy, got {type(boundaries_strategy)}")
     for arg_strategy in input_strategy.strategies:
+        # Convert Partial placements to Replicate - bucketize returns indices
+        # which cannot be combined with sum/avg reductions
+        placements = tuple(
+            Replicate() if isinstance(p, Partial) else p
+            for p in arg_strategy.output_spec.placements
+        )
         arg_spec = DTensorSpec(
             mesh,
-            arg_strategy.output_spec.placements,
+            placements,
             arg_strategy.output_spec.tensor_meta,
         )
         replica_spec = DTensorSpec(
@@ -851,7 +861,9 @@ def cat_single_dim_strategy(
     for i in range(common_ndim):
         if i != cat_dim:
             single_dim_strategies.append([_ShardingPlaceholder(i)] * (1 + num_inputs))
+    # pyrefly: ignore [bad-argument-type]
     single_dim_strategies.append([Partial("sum")] * (1 + num_inputs))
+    # pyrefly: ignore [bad-return]
     return single_dim_strategies
 
 
@@ -1307,3 +1319,28 @@ def gen_unbind_strategy(op_schema: OpSchema) -> StrategyType:
             )
         )
     return unbind_strategy
+
+
+@register_op_strategy(aten.eye.m_out)
+def eye_out_strategy(op_schema: OpSchema) -> OpStrategy:
+    """
+    Strategy for torch.eye with out= parameter.
+    The sharding is determined by the out tensor's placement.
+    """
+    # eye.m_out has signature: eye(int n, int m, *, Tensor(a!) out) -> Tensor(a!)
+    # The out kwarg is a DTensor that determines the sharding
+    out_spec = op_schema.kwargs_schema["out"]
+    assert isinstance(out_spec, OpStrategy), (
+        f"Expected OpStrategy for out, got {type(out_spec)}"
+    )
+
+    return OpStrategy(
+        [
+            OpSpec(
+                output_specs=strategy.output_spec,
+                input_specs=[strategy.output_spec],  # out is both input and output
+                redistribute_cost=[[0.0]],
+            )
+            for strategy in out_spec.strategies
+        ]
+    )
