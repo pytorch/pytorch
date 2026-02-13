@@ -467,7 +467,8 @@ def significant_strides_equal(
         if V.graph.sizevars.statically_known_leq(dim, 1):
             continue
 
-        return V.graph.sizevars.guard_or_false(sympy.Eq(s1, s2))
+        if not V.graph.sizevars.guard_or_false(sympy.Eq(s1, s2)):
+            return False
     return True
 
 
@@ -3240,20 +3241,24 @@ class View(GenericView):
         ) -> IRNode:
             """
             Handle the case where view is not possible with current strides.
-            For unbacked symbols, make contiguous; otherwise use dynamic_reshape_indexer.
+            Try dynamic_reshape_indexer first; if it fails with unbacked
+            symbols (guard_or_false can't resolve comparisons), fall back
+            to making the tensor contiguous.
             """
             nonlocal old_size, new_size, unbacked_symbols_in_sizes
-            if unbacked_symbols_in_sizes:
-                # For unbacked symbols, we must require contiguous
+            try:
+                reindex = cls.dynamic_reshape_indexer(old_size, new_size)
+                return cls(data=x, size=list(new_size), reindex=reindex)
+            except (AssertionError, IndexError):
+                if not unbacked_symbols_in_sizes:
+                    raise
                 # dynamic_reshape_indexer cannot handle unbacked SymInts
+                # fallback to unbacked semantics.
                 # https://github.com/pytorch/pytorch/issues/145561
                 x = ExternKernel.require_contiguous(x)
                 return create_reinterpret_view(
                     x, new_size, FlexibleLayout.contiguous_strides(new_size)
                 )
-            # For backed symbols, fall back to dynamic_reshape_indexer
-            reindex = cls.dynamic_reshape_indexer(old_size, new_size)
-            return cls(data=x, size=list(new_size), reindex=reindex)
 
         if 0 in new_size:
 
