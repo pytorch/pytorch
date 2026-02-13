@@ -656,7 +656,9 @@ class SizeVarAllocator:
         assert result is not None, result
         return result
 
-    def _maybe_realize_expr(self, expr: Expr, fallback: Optional[int]) -> Optional[int]:
+    def _maybe_realize_expr(
+        self, expr: Expr, nan_fallback: Optional[int]
+    ) -> Optional[int]:
         """
         Handle special sympy values in optimization hints.
 
@@ -680,8 +682,8 @@ class SizeVarAllocator:
                 return sys.maxsize
             if expr in (-int_oo, -sympy.oo):
                 return -sys.maxsize
-            if fallback is not None and expr is sympy.nan or expr.has(sympy.nan):
-                return fallback
+            if nan_fallback is not None and expr is sympy.nan or expr.has(sympy.nan):
+                return nan_fallback
 
         return None
 
@@ -711,10 +713,11 @@ class SizeVarAllocator:
         original = expr
 
         expr = self.replace_backed_symbols_with_hints(expr)
+
         # replace unbacked with optimizations hints if exists.
         expr = sympy_subs(expr, self.var_to_hint_override)
 
-        result = self._maybe_realize_expr(expr, fallback)
+        result = self._maybe_realize_expr(sympy.expand(expr), fallback)
 
         if result is not None:
             return result
@@ -1075,7 +1078,6 @@ class SizeVarAllocator:
             sub_cnt += 1
 
         log.warning("Substitution limit (%d) reached w/ %s", sub_cnt_limit, expr)
-
         expr = sympy_subs(expr, self.backed_var_to_val)
         expr = sympy_subs(expr, self.var_to_hint_override)
         return expr
