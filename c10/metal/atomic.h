@@ -9,12 +9,38 @@ struct AtomicType {};
 template <typename T>
 using AtomicType_t = typename AtomicType<T>::type;
 
+template <typename AT, typename T>
+static inline void atomic_binary_op_helper(
+    device ::metal::atomic<AT>* data,
+    long offset,
+    T value,
+    T (*op)(T, T)) {
+  auto ptr = data + offset;
+  auto old = ::metal::atomic_load_explicit(ptr, ::metal::memory_order_relaxed);
+  T val;
+  do {
+    val = op(old, value);
+  } while (!::metal::atomic_compare_exchange_weak_explicit(
+      ptr,
+      &old,
+      val,
+      ::metal::memory_order_relaxed,
+      ::metal::memory_order_relaxed));
+}
+
 template <>
 struct AtomicType<float> {
   using type = ::metal::atomic<float>;
   static inline void atomic_add(device type* data, long offset, float value) {
     ::metal::atomic_fetch_add_explicit(
         data + offset, value, ::metal::memory_order_relaxed);
+  }
+  static inline void atomic_binary_op(
+      device type* data,
+      long offset,
+      float value,
+      float (*op)(float, float)) {
+    atomic_binary_op_helper(data, offset, value, op);
   }
 };
 
@@ -24,6 +50,13 @@ struct AtomicType<int> {
   static inline void atomic_add(device type* data, long offset, int value) {
     ::metal::atomic_fetch_add_explicit(
         data + offset, value, ::metal::memory_order_relaxed);
+  }
+  static inline void atomic_binary_op(
+      device type* data,
+      long offset,
+      int value,
+      int (*op)(int, int)) {
+    atomic_binary_op_helper(data, offset, value, op);
   }
 };
 
@@ -53,11 +86,43 @@ static inline void atomic_add_helper(
       ::metal::memory_order_relaxed));
 }
 
+template <typename T>
+static inline void atomic_binary_op_helper(
+    device ::metal::atomic<uint>* data,
+    long offset,
+    T value,
+    T (*Op)(T, T)) {
+  constexpr auto elem_per_enum = sizeof(uint) / sizeof(T);
+  auto ptr = data + (offset / elem_per_enum);
+  auto old = ::metal::atomic_load_explicit(ptr, ::metal::memory_order_relaxed);
+  union {
+    uint i;
+    T t[elem_per_enum];
+  } val;
+  do {
+    val.i = old;
+    val.t[offset & (elem_per_enum - 1)] =
+        Op(val.t[offset & (elem_per_enum - 1)], value);
+  } while (!::metal::atomic_compare_exchange_weak_explicit(
+      ptr,
+      &old,
+      val.i,
+      ::metal::memory_order_relaxed,
+      ::metal::memory_order_relaxed));
+}
+
 template <>
 struct AtomicType<half> {
   using type = ::metal::atomic<uint>;
   static inline void atomic_add(device type* data, long offset, half value) {
     atomic_add_helper(data, offset, value);
+  }
+  static inline void atomic_binary_op(
+      device type* data,
+      long offset,
+      half value,
+      half (*op)(half, half)) {
+    atomic_binary_op_helper(data, offset, value, op);
   }
 };
 
@@ -67,6 +132,13 @@ struct AtomicType<short> {
   static inline void atomic_add(device type* data, long offset, short value) {
     atomic_add_helper(data, offset, value);
   }
+  static inline void atomic_binary_op(
+      device type* data,
+      long offset,
+      short value,
+      short (*op)(short, short)) {
+    atomic_binary_op_helper(data, offset, value, op);
+  }
 };
 
 template <>
@@ -74,6 +146,13 @@ struct AtomicType<char> {
   using type = ::metal::atomic<uint>;
   static inline void atomic_add(device type* data, long offset, char value) {
     atomic_add_helper(data, offset, value);
+  }
+  static inline void atomic_binary_op(
+      device type* data,
+      long offset,
+      char value,
+      char (*op)(char, char)) {
+    atomic_binary_op_helper(data, offset, value, op);
   }
 };
 
@@ -83,6 +162,13 @@ struct AtomicType<uchar> {
   static inline void atomic_add(device type* data, long offset, char value) {
     atomic_add_helper(data, offset, value);
   }
+  static inline void atomic_binary_op(
+      device type* data,
+      long offset,
+      uchar value,
+      uchar (*op)(uchar, uchar)) {
+    atomic_binary_op_helper(data, offset, value, op);
+  }
 };
 
 template <>
@@ -90,6 +176,13 @@ struct AtomicType<bfloat> {
   using type = ::metal::atomic<uint>;
   static inline void atomic_add(device type* data, long offset, bfloat value) {
     atomic_add_helper<bfloat>(data, offset, value);
+  }
+  static inline void atomic_binary_op(
+      device type* data,
+      long offset,
+      bfloat value,
+      bfloat (*op)(bfloat, bfloat)) {
+    atomic_binary_op_helper(data, offset, value, op);
   }
 };
 

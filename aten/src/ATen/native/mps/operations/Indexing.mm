@@ -3,6 +3,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Dispatch_v2.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/native/mps/kernels/Indexing.h>
 
 #include <ATen/AccumulateType.h>
 #include <ATen/ExpandUtils.h>
@@ -34,12 +35,14 @@
 #include <ATen/ops/index_copy_native.h>
 #include <ATen/ops/index_fill_native.h>
 #include <ATen/ops/index_put.h>
+#include <ATen/ops/index_reduce_native.h>
 #include <ATen/ops/index_select_native.h>
 #include <ATen/ops/masked_fill_native.h>
 #include <ATen/ops/masked_scatter_native.h>
 #include <ATen/ops/masked_select_native.h>
 #include <ATen/ops/nonzero.h>
 #include <ATen/ops/nonzero_native.h>
+#include <ATen/ops/ones_like.h>
 #include <ATen/ops/view_as_real.h>
 #endif
 
@@ -700,6 +703,109 @@ Tensor& index_select_out_mps(const Tensor& self, int64_t dim, const Tensor& inde
   }
 
   return output;
+}
+
+static inline ReductionType index_reduce_type(const std::string_view& reduce) {
+  if (reduce == "prod") {
+    return ReductionType::PROD;
+  } else if (reduce == "mean") {
+    return ReductionType::MEAN;
+  } else if (reduce == "amax") {
+    return ReductionType::MAX;
+  } else if (reduce == "amin") {
+    return ReductionType::MIN;
+  } else {
+    TORCH_CHECK(false, "reduce argument must be either prod, mean, amax or amin, got ", reduce, ".");
+  }
+}
+
+TORCH_IMPL_FUNC(index_reduce_mps_out)
+(const Tensor& self,
+ int64_t dim,
+ const Tensor& index,
+ const Tensor& source,
+ const std::string_view reduce,
+ bool include_self,
+ const Tensor& result) {
+  TORCH_WARN_ONCE("index_reduce() is in beta and the API may change at any time.");
+
+  TORCH_CHECK(self.scalar_type() != c10::kLong, "index_reduce for MPS does not support torch.long dtype");
+  TORCH_CHECK(self.scalar_type() != c10::kComplexFloat, "index_reduce for MPS does not support torch.cfloat dtype");
+
+  auto reduction_type = index_reduce_type(reduce);
+
+  if (!result.is_same(self))
+    result.copy_(self);
+
+  if (!include_self) {
+    AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half,
+                               at::ScalarType::BFloat16,
+                               result.scalar_type(),
+                               "index_reduce_func_mps_exclude_input_init",
+                               [&] {
+                                 scalar_t init_val;
+                                 switch (reduction_type) {
+                                   case ReductionType::PROD:
+                                     init_val = (scalar_t)1;
+                                     break;
+                                   case ReductionType::MAX:
+                                     init_val = std::numeric_limits<scalar_t>::has_infinity
+                                         ? -std::numeric_limits<scalar_t>::infinity()
+                                         : std::numeric_limits<scalar_t>::lowest();
+                                     break;
+                                   case ReductionType::MIN:
+                                     init_val = std::numeric_limits<scalar_t>::has_infinity
+                                         ? std::numeric_limits<scalar_t>::infinity()
+                                         : std::numeric_limits<scalar_t>::max();
+                                     break;
+                                   default:
+                                     init_val = (scalar_t)0;
+                                     break;
+                                 }
+                                 // index_fill_ requires index to be a LongTensor
+                                 result.index_fill_(dim, index.to(at::ScalarType::Long), init_val);
+                               });
+  }
+
+  IndexReduceParams params;
+  params.index_stride = index.stride(0);
+  params.reduce_dim = dim;
+  params.ndim = result.dim();
+
+  for (const auto dim : c10::irange(result.dim())) {
+    params.self_strides[dim] = result.stride(dim);
+    params.self_sizes[dim] = result.size(dim);
+    params.source_strides[dim] = source.stride(dim);
+    params.source_sizes[dim] = source.size(dim);
+  }
+
+  MPSStream* stream = getCurrentMPSStream();
+
+  auto num_threads = source.numel();
+
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      id<MTLComputeCommandEncoder> compute_encoder = stream->commandEncoder();
+      auto pipeline_state = mps::lib.getPipelineStateForFunc(fmt::format(
+          "index_reduce_{}_{}_{}", reduce, mps::scalarToMetalTypeString(result), mps::scalarToMetalTypeString(index)));
+      getMPSProfiler().beginProfileKernel(pipeline_state, "index_reduce", {result, index, source});
+      [compute_encoder setComputePipelineState:pipeline_state];
+      mps::mtl_setArgs(compute_encoder, result, index, source, params);
+      mps::mtl_dispatch1DJob(compute_encoder, pipeline_state, num_threads);
+      getMPSProfiler().endProfileKernel(pipeline_state);
+    }
+  });
+
+  if (reduction_type == ReductionType::MEAN) {
+    auto counts = include_self ? at::ones_like(result) : at::zeros_like(result);
+    counts.index_add_(dim, index, at::ones_like(source));
+    counts.masked_fill_(counts.eq(0), 1);
+    if (result.is_floating_point() || result.is_complex()) {
+      result.div_(counts);
+    } else {
+      result.div_(counts, "floor");
+    }
+  }
 }
 
 Tensor& masked_fill__mps(Tensor& self, const Tensor& mask, const Scalar& value) {
