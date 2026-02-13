@@ -751,11 +751,21 @@ bool Context::isXNNPACKAvailable() {
 #endif
 }
 
-void Context::setCheckSparseTensorInvariants(bool e) {
+void Context::setCheckSparseTensorInvariants(std::optional<bool> e = std::nullopt) {
   enable_sparse_tensor_invariant_checks = e;
 }
 
-bool Context::checkSparseTensorInvariants() const {
+std::optional<bool> Context::checkSparseTensorInvariants(bool warn_when_uninitialized) const {
+  if (warn_when_uninitialized && !enable_sparse_tensor_invariant_checks.has_value()) {
+    TORCH_WARN_ONCE(
+        "Sparse invariant checks are implicitly disabled. "
+        "Memory errors (e.g. SEGFAULT) will occur when "
+        "operating on a sparse tensor which violates the "
+        "invariants, but checks incur performance overhead. "
+        "To silence this warning, explicitly opt in or out. "
+        "See `torch.sparse.check_sparse_tensor_invariants.__doc__` "
+        "for guidance. ");
+  }
   return enable_sparse_tensor_invariant_checks;
 }
 
