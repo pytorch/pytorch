@@ -1070,6 +1070,13 @@ class MetaConverter(Generic[_TensorT]):
                     f"Expected SubclassSymbolicContext or None, got {type(symbolic_context)}"
                 )
 
+            # Use a weak reference to self (MetaConverter) to avoid keeping it
+            # alive via closure. Without this, compiled code that retains a
+            # reference to _empty_create_subclass keeps the MetaConverter (and
+            # its describer's WeakIdRef entries) alive, blocking swap_tensors.
+            # See https://github.com/pytorch/pytorch/issues/170770
+            _self_ref = weakref.ref(self)
+
             def _empty_create_subclass(
                 t: MetaTensorDesc[Any],
                 outer_size: Optional[tuple[int, ...]],
@@ -1083,7 +1090,9 @@ class MetaConverter(Generic[_TensorT]):
                 # We are hitting plain meta_desc tensor so actually
                 # create a tensor here.
                 if t.attrs is None:
-                    return self.meta_tensor(
+                    _self = _self_ref()
+                    assert _self is not None
+                    return _self.meta_tensor(
                         t,
                         shape_env,
                         callback,
