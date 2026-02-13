@@ -1611,7 +1611,7 @@ class TestCutlassBackend(TestCase):
             suffix = ".cpp" if GPU_TYPE == "xpu" else ".cu"
             cu_file = NamedTemporaryFile("w", suffix=suffix, delete=False)  # noqa: SIM115
             cu_file.close()
-            exe_file = NamedTemporaryFile("w", suffix=suffix, delete=False)  # noqa: SIM115
+            exe_file = NamedTemporaryFile("w", suffix="", delete=False)  # noqa: SIM115
             exe_file.close()
 
             # Save the generated code into the .cu file.
