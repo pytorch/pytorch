@@ -46,7 +46,10 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   std::optional<Device> uncheckedGetDevice() const noexcept {
     DeviceIndex device{-1};
     const auto err = C10_CUDA_ERROR_HANDLED(c10::cuda::GetDevice(&device));
-    C10_CUDA_CHECK_WARN(err);
+    // Don't warn about expected cudaErrorInvalidContext when no context is current
+    if (err != cudaSuccess && err != cudaErrorInvalidContext) {
+      C10_CUDA_CHECK_WARN(err);
+    }
     if (err != cudaSuccess) {
       return std::nullopt;
     }

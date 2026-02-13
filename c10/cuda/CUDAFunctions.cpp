@@ -249,8 +249,13 @@ cudaError_t SetDevice(DeviceIndex device, const bool force) {
     return cudaSetDevice(device);
   }
   int cur_device = -1;
-  C10_CUDA_CHECK(cudaGetDevice(&cur_device));
-  if (device == cur_device) {
+  auto err = C10_CUDA_ERROR_HANDLED(cudaGetDevice(&cur_device));
+  // cudaGetDevice can fail with cudaErrorInvalidContext when there's no
+  // current context, which is expected. In this case, just set the device.
+  if (err != cudaSuccess && err != cudaErrorInvalidContext) {
+    C10_CUDA_CHECK(err);
+  }
+  if (err == cudaSuccess && device == cur_device) {
     return cudaSuccess;
   }
   return cudaSetDevice(device);
@@ -271,11 +276,22 @@ DeviceIndex ExchangeDevice(DeviceIndex to_device) {
   targetDeviceIndex = -1;
   if (cur_device < 0) {
     int tmp_device = -1;
-    C10_CUDA_CHECK(cudaGetDevice(&tmp_device));
-    cur_device = static_cast<DeviceIndex>(tmp_device);
-    if (to_device == cur_device) {
-      return cur_device;
+    auto err = C10_CUDA_ERROR_HANDLED(cudaGetDevice(&tmp_device));
+    // cudaGetDevice can fail with cudaErrorInvalidContext when there's no
+    // current context, which is expected. In this case we proceed with setting
+    // the new device. The returned cur_device will be initialized to -1 or the
+    // previously targeted device.
+    if (err == cudaSuccess) {
+      cur_device = static_cast<DeviceIndex>(tmp_device);
+      if (to_device == cur_device) {
+        return cur_device;
+      }
+    } else if (err != cudaErrorInvalidContext) {
+      C10_CUDA_CHECK(err);
     }
+    // If CUDA_ERROR_INVALID_CONTEXT: no context exists, cur_device stays as
+    // initialized (-1 or previous targetDeviceIndex). This is safe because
+    // the following cudaSetDevice will set to_device regardless.
   }
   C10_CUDA_CHECK(cudaSetDevice(to_device));
   return cur_device;
@@ -285,14 +301,23 @@ DeviceIndex ExchangeDevice(DeviceIndex to_device) {
 // on to_device if it does not already exist
 DeviceIndex MaybeExchangeDevice(DeviceIndex to_device) {
   int tmp_cur_device = -1;
-  C10_CUDA_CHECK(cudaGetDevice(&tmp_cur_device));
-  TORCH_INTERNAL_ASSERT(
-      tmp_cur_device >= 0 &&
-          tmp_cur_device <= std::numeric_limits<DeviceIndex>::max(),
-      "cudaGetDevice returns invalid device ",
-      tmp_cur_device);
-  auto cur_device = static_cast<DeviceIndex>(tmp_cur_device);
-  if (to_device == tmp_cur_device) {
+  auto err = C10_CUDA_ERROR_HANDLED(cudaGetDevice(&tmp_cur_device));
+  DeviceIndex cur_device = -1;
+  // cudaGetDevice can fail with cudaErrorInvalidContext when there's no
+  // current context, which is expected and not an error condition.
+  if (err == cudaSuccess) {
+    TORCH_INTERNAL_ASSERT(
+        tmp_cur_device >= 0 &&
+            tmp_cur_device <= std::numeric_limits<DeviceIndex>::max(),
+        "cudaGetDevice returns invalid device ",
+        tmp_cur_device);
+    cur_device = static_cast<DeviceIndex>(tmp_cur_device);
+  } else if (err != cudaErrorInvalidContext) {
+    C10_CUDA_CHECK(err);
+  }
+  // Note: If CUDA_ERROR_INVALID_CONTEXT, cur_device stays as -1, indicating
+  // no context was current. Callers should handle this appropriately.
+  if (to_device == cur_device) {
     return cur_device;
   }
   if (hasPrimaryContext(to_device)) {
@@ -330,8 +355,13 @@ cudaError_t SetDevice(DeviceIndex device, const bool force) {
     return cudaSetDevice(device);
   }
   int cur_device = -1;
-  C10_CUDA_CHECK(cudaGetDevice(&cur_device));
-  if (device == cur_device) {
+  auto err = C10_CUDA_ERROR_HANDLED(cudaGetDevice(&cur_device));
+  // cudaGetDevice can fail with cudaErrorInvalidContext when there's no
+  // current context, which is expected. In this case, just set the device.
+  if (err != cudaSuccess && err != cudaErrorInvalidContext) {
+    C10_CUDA_CHECK(err);
+  }
+  if (err == cudaSuccess && device == cur_device) {
     return cudaSuccess;
   }
   return cudaSetDevice(device);
@@ -343,7 +373,14 @@ cudaError_t MaybeSetDevice(DeviceIndex device) {
 
 DeviceIndex ExchangeDevice(DeviceIndex to_device) {
   DeviceIndex cur_device = -1;
-  C10_CUDA_CHECK(c10::cuda::GetDevice(&cur_device));
+  auto err = C10_CUDA_ERROR_HANDLED(c10::cuda::GetDevice(&cur_device));
+  // cudaGetDevice can fail with cudaErrorInvalidContext when there's no
+  // current context, which is expected and not an error condition.
+  if (err != cudaSuccess && err != cudaErrorInvalidContext) {
+    C10_CUDA_CHECK(err);
+  }
+  // Note: If CUDA_ERROR_INVALID_CONTEXT, cur_device stays as -1, indicating
+  // no context was current. The following cudaSetDevice will set to_device.
   if (to_device == cur_device) {
     return cur_device;
   }
