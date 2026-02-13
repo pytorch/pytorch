@@ -23,6 +23,7 @@ const std::set<libkineto::ActivityType> kCpuTypes{
     libkineto::ActivityType::USER_ANNOTATION,
     libkineto::ActivityType::EXTERNAL_CORRELATION,
     libkineto::ActivityType::XPU_RUNTIME,
+    libkineto::ActivityType::XPU_DRIVER,
     libkineto::ActivityType::CUDA_RUNTIME,
     libkineto::ActivityType::CUDA_DRIVER,
     libkineto::ActivityType::PYTHON_FUNCTION,
@@ -35,7 +36,7 @@ const std::set<libkineto::ActivityType> kCudaTypes = {
     libkineto::ActivityType::GPU_MEMSET,
     libkineto::ActivityType::GPU_USER_ANNOTATION,
     libkineto::ActivityType::CONCURRENT_KERNEL,
-    // CUDA_RUNTIME appears in both kCpuTypes and kCudaTypes.
+    // CUDA_RUNTIME and CUDA_DRIVER appear in both kCpuTypes and kCudaTypes.
     libkineto::ActivityType::CUDA_RUNTIME,
     libkineto::ActivityType::CUDA_DRIVER,
     libkineto::ActivityType::OVERHEAD,
@@ -44,8 +45,9 @@ const std::set<libkineto::ActivityType> kXpuTypes = {
     libkineto::ActivityType::GPU_MEMCPY,
     libkineto::ActivityType::GPU_MEMSET,
     libkineto::ActivityType::CONCURRENT_KERNEL,
-    // XPU_RUNTIME appears in both kCpuTypes and kXpuTypes.
+    // XPU_RUNTIME and XPU_DRIVER appear in both kCpuTypes and kXpuTypes.
     libkineto::ActivityType::XPU_RUNTIME,
+    libkineto::ActivityType::XPU_DRIVER,
 };
 const std::set<libkineto::ActivityType> kMtiaTypes = {
     libkineto::ActivityType::MTIA_CCP_EVENTS,
@@ -442,6 +444,7 @@ c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type) {
     case libkineto::ActivityType::EXTERNAL_CORRELATION:
     case libkineto::ActivityType::CUDA_RUNTIME:
     case libkineto::ActivityType::XPU_RUNTIME:
+    case libkineto::ActivityType::XPU_DRIVER:
     case libkineto::ActivityType::CPU_INSTANT_EVENT:
     case libkineto::ActivityType::GLOW_RUNTIME:
     case libkineto::ActivityType::MTIA_RUNTIME:

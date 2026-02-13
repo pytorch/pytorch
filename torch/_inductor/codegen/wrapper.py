@@ -2252,6 +2252,8 @@ class PythonWrapperCodegen(CodeGen):
         self.writeline(f"{node.get_name()} = None")
 
     def benchmark_compiled_module(self, output):
+        """Write out codegen for benchmarking the output code"""
+
         def add_fake_input(name, shape, stride, device, dtype):
             output.writeline(
                 f"{name} = rand_strided("
@@ -2277,14 +2279,12 @@ class PythonWrapperCodegen(CodeGen):
                     f'raise TypeError("Failed to pickle opaque type {type(value)} for variable {name}: {str(e)}")'
                 )
 
-        output.writelines(
-            ["", "", "def benchmark_compiled_module(times=10, repeat=10):"]
-        )
+        # Generate get_args() to create input tensors separately from benchmarking
+        output.writelines(["", "", "def get_args():"])
         with output.indent():
             output.splice(
                 """
                 from torch._dynamo.testing import rand_strided
-                from torch._inductor.utils import print_performance
                 """,
                 strip=True,
             )
@@ -2349,9 +2349,21 @@ class PythonWrapperCodegen(CodeGen):
                         value.get_dtype(),
                     )
 
-            call_str = f"call([{', '.join(V.graph.graph_inputs.keys())}])"
-            output.writeline(f"fn = lambda: {call_str}")
-            output.writeline("return print_performance(fn, times=times, repeat=repeat)")
+            output.writeline(f"return [{', '.join(V.graph.graph_inputs.keys())}]")
+
+        # Generate benchmark_compiled_module() that takes args as parameter
+        output.writelines(
+            ["", "", "def benchmark_compiled_module(args, times=10, repeat=10):"]
+        )
+        with output.indent():
+            output.splice(
+                """
+                from torch._inductor.utils import print_performance
+                fn = lambda: call(list(args))
+                return print_performance(fn, times=times, repeat=repeat)
+                """,
+                strip=True,
+            )
 
     def add_benchmark_harness(self, output):
         """
@@ -2367,7 +2379,11 @@ class PythonWrapperCodegen(CodeGen):
             output.writelines(
                 [
                     "from torch._inductor.wrapper_benchmark import compiled_module_main",
-                    f"compiled_module_main('{get_benchmark_name()}', benchmark_compiled_module)",
+                    "args = get_args()",
+                    (
+                        f"compiled_module_main('{get_benchmark_name()}', "
+                        "lambda times, repeat: benchmark_compiled_module(args, times=times, repeat=repeat))"
+                    ),
                 ]
             )
 
@@ -3137,6 +3153,8 @@ class PythonWrapperCodegen(CodeGen):
                     self.kernel_autotune_example_args[arg] = (arg_str, kernel_name)
                 else:
                     arg_str = self.generate_example_arg_value(arg, arg_type, raw_arg)
+                if isinstance(arg, str) and should_unwrap_unspec_arg(arg):
+                    arg_str += ".item()"
                 all_args.append(arg_str if key is None else f"{key}={arg_str}")
 
             # Make sure kernel launch under a device guard because models don't always run on device 0
