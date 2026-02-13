@@ -9178,6 +9178,110 @@ def forward(self, x):
         ep = export(Simple(), example_inputs)
         self.assertEqual(ep.module()(*example_inputs), Simple()(*example_inputs))
 
+    def test_while_loop_with_unbacked_symints(self):
+        # When a carried input to while_loop has an unbacked SymInt dimension
+        # (from data-dependent indexing like x[mask]), the internal
+        # torch.compile creates a fresh ShapeEnv. Cross-ShapeEnv wrapping
+        # must handle unbacked SymInts that have no hint.
+        class LoopModule(torch.nn.Module):
+            def forward(self, x):
+                _, x = torch.while_loop(
+                    lambda idx, x: idx < 5,
+                    lambda idx, x: (idx + 1, 2 * x),
+                    (0, x),
+                )
+                return x
+
+        class LoopModuleExt(LoopModule):
+            def forward(self, x, mask):
+                x[mask] = super().forward(x[mask])
+                return x
+
+        bs = Dim("batch_size", min=1)
+        example_inputs = (
+            torch.rand(3, 4),
+            torch.randint(0, 2, (3,), dtype=torch.bool),
+        )
+        ep = export(
+            LoopModuleExt(),
+            example_inputs,
+            dynamic_shapes={"x": {0: bs}, "mask": {0: bs}},
+        )
+        self.assertEqual(
+            ep.module()(*example_inputs), LoopModuleExt()(*example_inputs)
+        )
+        ep = ep.run_decompositions()
+        # Normalize node numbering and tuple/list repr since serdes
+        # roundtrip may renumber nodes and converts tuples to lists.
+        graph_str = re.sub(r"_int_\d+", "_int_x", str(ep.graph).strip())
+        graph_str = graph_str.replace("[0, %index]", "(0, %index)")
+        graph_str = graph_str.replace(", [])", ", ())")
+        self.assertExpectedInline(
+            graph_str,
+            """\
+graph():
+    %x : [num_users=2] = placeholder[target=x]
+    %mask : [num_users=2] = placeholder[target=mask]
+    %index : [num_users=2] = call_function[target=torch.ops.aten.index.Tensor](args = (%x, [%mask]), kwargs = {})
+    %sym_size_int_x : [num_users=1] = call_function[target=torch.ops.aten.sym_size.int](args = (%index, 0), kwargs = {})
+    %ge_4 : [num_users=1] = call_function[target=operator.ge](args = (%sym_size_int_x, 0), kwargs = {})
+    %_assert_scalar_default : [num_users=0] = call_function[target=torch.ops.aten._assert_scalar.default](args = (%ge_4, Runtime assertion failed for expression u0 >= 0 on node 'ge_4'), kwargs = {})
+    %while_loop_cond_graph_0 : [num_users=1] = get_attr[target=while_loop_cond_graph_0]
+    %while_loop_body_graph_0 : [num_users=1] = get_attr[target=while_loop_body_graph_0]
+    %while_loop : [num_users=1] = call_function[target=torch.ops.higher_order.while_loop](args = (%while_loop_cond_graph_0, %while_loop_body_graph_0, (0, %index), ()), kwargs = {})
+    %getitem_1 : [num_users=1] = call_function[target=operator.getitem](args = (%while_loop, 1), kwargs = {})
+    %index_put : [num_users=1] = call_function[target=torch.ops.aten.index_put.default](args = (%x, [%mask], %getitem_1), kwargs = {})
+    return (index_put, index_put)""",  # noqa: B950
+        )
+
+    def test_while_loop_with_unbacked_symints_range_constraints(self):
+        # Verify that range constraints on unbacked SymInts are propagated
+        # from the outer ShapeEnv to the inner ShapeEnv during cross-ShapeEnv
+        # wrapping (not just default ranges).
+        class M(torch.nn.Module):
+            def forward(self, x, mask):
+                filtered = x[mask]
+                torch._check(filtered.shape[0] >= 2)
+                torch._check(filtered.shape[0] <= 100)
+                _, result = torch.while_loop(
+                    lambda i, x: i < 3,
+                    lambda i, x: (i + 1, x * 2),
+                    (0, filtered),
+                )
+                return result
+
+        bs = Dim("batch_size", min=1)
+        example_inputs = (
+            torch.rand(3, 4),
+            torch.ones(3, dtype=torch.bool),
+        )
+        ep = export(
+            M(),
+            example_inputs,
+            dynamic_shapes={"x": {0: bs}, "mask": {0: bs}},
+        )
+
+        # Verify the unbacked symint u0 has the propagated range [2, 100]
+        u0_ranges = {
+            str(k): v
+            for k, v in ep.range_constraints.items()
+            if str(k) == "u0"
+        }
+        self.assertEqual(len(u0_ranges), 1)
+        self.assertEqual(u0_ranges["u0"].lower, 2)
+        self.assertEqual(u0_ranges["u0"].upper, 100)
+
+        # Constraint enforced at runtime
+        ep = ep.run_decompositions()
+        valid_inputs = (torch.rand(5, 4), torch.ones(5, dtype=torch.bool))
+        self.assertEqual(ep.module()(*valid_inputs), M()(*valid_inputs))
+        invalid_inputs = (
+            torch.rand(5, 4),
+            torch.tensor([True, False, False, False, False]),
+        )
+        with self.assertRaisesRegex(RuntimeError, "u0 >= 2"):
+            ep.module()(*invalid_inputs)
+
     def test_constrain_size_with_various_cases(self):
         class Module1(torch.nn.Module):
             def forward(self, x, y):
