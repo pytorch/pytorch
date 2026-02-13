@@ -2504,16 +2504,6 @@ class eager_numerics:
         os.environ.get("TORCHINDUCTOR_EMULATE_DIVISION_ROUNDING", "0") == "1"
     )
 
-    # pow(base, exp) with tensor exponents in Triton uses libdevice.pow
-    # which computes exp(exp * log(base)), introducing small precision errors.
-    # PyTorch eager uses repeated multiplication for small integer exponents
-    # which is more accurate. When enabled, pow with tensor exponents falls
-    # back to ATen to match eager semantics. This breaks kernel fusion, so
-    # only enable when bitwise reproducibility with eager is required.
-    pow_precision: bool = (
-        os.environ.get("TORCHINDUCTOR_EMULATE_POW_PRECISION", "0") == "1"
-    )
-
     disable_ftz: bool = False
 
 
