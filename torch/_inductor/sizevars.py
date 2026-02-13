@@ -742,7 +742,7 @@ class SizeVarAllocator:
         original = expr
 
         # remove precomputed_replacements
-        expr = self.remove_precomputed_replacements(result)
+        expr = self.remove_precomputed_replacements(expr)
 
         # replace all backed symbols with their backed hints,
         # unbacked with optimizations hints if exists.
