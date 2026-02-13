@@ -297,116 +297,6 @@ class TritonBenchmarker(Benchmarker):
         return self.triton_do_bench(_callable, **kwargs, return_mode="median")
 
 
-class TorchProfilerBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
-    """Benchmarker that uses torch.profiler for GPU kernel benchmarking."""
-
-    @time_and_count
-    def benchmark_gpu(  # type: ignore[override]
-        self: Self,
-        _callable: Callable[[], Any],
-        warmup: int = 25,
-        rep: int = 100,
-        return_mode: str = "mean",
-        grad_to_none: Optional[list[torch.Tensor]] = None,
-        **kwargs: Any,
-    ) -> float:
-        """Benchmark a GPU callable using torch.profiler.
-
-        Arguments:
-        - _callable: The callable to benchmark.
-
-        Keyword Arguments:
-        - warmup: Optionally, the number of warmup iterations to run before benchmarking.
-        - rep: Optionally, the number of iterations to run during benchmarking.
-        - return_mode: Return mode for benchmark results. Options are "min", "mean" (default),
-        or "max".
-        - grad_to_none: Optionally, a list of tensors whose gradients should be cleared
-        before each benchmark iteration.
-        - **kwargs: Additional kwargs that may be passed to the fallback.
-
-        Returns:
-        - The runtime of `_callable` in milliseconds, computed according to return_mode.
-        """
-        # we don't want any outside errors propagating into benchmarking
-        torch.cuda.synchronize()
-
-        # warmup `_callable` (and catches any failures in the process)
-        _callable()
-        torch.cuda.synchronize()
-
-        # create cache flush buffer: 256 MB = 256 * 1024 * 1024 bytes
-        # NOTE: This is the same buffer size as Triton's do_bench
-        # For AMD, there are better outcomes on short duration kernels (<20 us)
-        # when buffer size is set to the Infinity cache (LLC) instead of L2.
-        # LLC cache size is not a supported field in PyTorchdevice properties.
-        # see https://github.com/triton-lang/triton/pull/840 for why `dtype=torch.int`
-        buffer_size_bytes = 256 * 1024 * 1024
-        buffer = torch.empty(buffer_size_bytes // 4, dtype=torch.int, device="cuda")
-        buffer.zero_()
-
-        # additional warmup with cache flushing
-        for _ in range(warmup):
-            # Clear gradients before timing (matches triton.testing.do_bench)
-            if grad_to_none is not None:
-                for x in grad_to_none:
-                    x.grad = None
-            buffer.zero_()
-            _callable()
-        torch.cuda.synchronize()
-
-        # benchmark with profiler
-        with torch.profiler.profile(
-            activities=[torch.profiler.ProfilerActivity.CUDA],
-            record_shapes=False,
-        ) as prof:
-            for _ in range(rep):
-                # Clear gradients before timing (matches triton.testing.do_bench)
-                if grad_to_none is not None:
-                    for x in grad_to_none:
-                        x.grad = None
-                buffer.zero_()
-                _callable()
-        torch.cuda.synchronize()
-
-        # Extract CUDA kernel time from profiler events
-        # First, try to find Triton kernels (kernel names starting with "triton_")
-        triton_kernel_time_us = sum(
-            event.device_time_total
-            for event in prof.key_averages()
-            if event.device_type == torch.profiler.DeviceType.CUDA
-            and event.key.startswith("triton_")
-        )
-
-        # If no Triton kernels found, fall back to GEMM kernels from other backends
-        # - "Cijk" prefix: rocBLAS/hipBLASLt GEMM kernels (rocBLAS/Tensile)
-        # - Contains "gemm": CK GEMM kernels
-        # NOTE: This fallback path is not well tested at this time and may need refinement
-        if triton_kernel_time_us == 0:
-            triton_kernel_time_us = sum(
-                event.device_time_total
-                for event in prof.key_averages()
-                if event.device_type == torch.profiler.DeviceType.CUDA
-                and (event.key.startswith("Cijk") or "gemm" in event.key.lower())
-            )
-
-        # Convert to milliseconds and compute the average time per iteration
-        avg_time_ms = (triton_kernel_time_us / rep) / 1000.0
-
-        # explicitly delete the buffer, sometimes helps memory
-        # footprint metrics in OSS Inductor performance benchmarks
-        del buffer
-
-        # Return based on the requested mode
-        # Note: For profiler-based benchmarking, we return the mean time per iteration
-        # min/max modes are kept for API compatibility but return the mean
-        if return_mode in ("min", "mean", "max"):
-            return avg_time_ms
-        else:
-            raise ValueError(
-                f"Unsupported return_mode: {return_mode}. Use 'min', 'mean', or 'max'."
-            )
-
-
 class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
     @cached_property
     def L2_cache_size(self: Self) -> int:
@@ -553,6 +443,138 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
         else:
             raise ValueError(
                 f"Unsupported return_mode: {return_mode}. Use 'min' or 'all'."
+            )
+
+
+class TorchProfilerBenchmarker(InductorBenchmarker):  # noqa: docstring_linter
+    """Benchmarker that uses torch.profiler for GPU kernel benchmarking."""
+
+    @time_and_count
+    def benchmark_gpu(  # type: ignore[override]
+        self: Self,
+        _callable: Callable[[], Any],
+        estimation_iters: int = 5,
+        memory_warmup_iters: int = 100,
+        benchmark_iters: int = 100,
+        max_benchmark_duration: int = 25,
+        return_mode: str = "mean",
+        grad_to_none: Optional[list[torch.Tensor]] = None,
+        **kwargs: Any,
+    ) -> float:
+        """Benchmark a GPU callable using torch.profiler.
+
+        Arguments:
+        - _callable: The callable to benchmark.
+
+        Keyword Arguments:
+        - estimation_iters: Optionally, the number of iterations to run `_callable`
+        during runtime estimation.
+        - memory_warmup_iters: Optionally, the number of iterations to flush the L2
+        cache before starting benchmarking.
+        - benchmark_iters: Optionally, the number of iterations to run `_callable`
+        during the benchmarking.
+        - max_benchmark_duration: Optionally, the maximum duration of the benchmarking,
+        in milliseconds.
+        - return_mode: Return mode for benchmark results. Options are "min", "mean" (default),
+        or "max".
+        - grad_to_none: Optionally, a list of tensors whose gradients should be cleared
+        before each benchmark iteration.
+        - **kwargs: Additional kwargs that may be passed to the fallback.
+
+        Returns:
+        - The runtime of `_callable` in milliseconds, computed according to return_mode.
+        """
+        # we don't want any outside errors propagating into benchmarking
+        torch.cuda.synchronize()
+
+        # warmup `_callable` (and catches any failures in the process)
+        _callable()
+        torch.cuda.synchronize()
+
+        # create cache flush buffer: 256 MB = 256 * 1024 * 1024 bytes
+        # NOTE: This is the same buffer size as Triton's do_bench
+        # For AMD, there are better outcomes on short duration kernels (<20 us)
+        # when buffer size is set to the Infinity cache (LLC) instead of L2.
+        # LLC cache size is not a supported field in PyTorchdevice properties.
+        # see https://github.com/triton-lang/triton/pull/840 for why `dtype=torch.int`
+        if torch.version.hip:
+            buffer_size_bytes = 256 * 1024 * 1024
+        else:
+            buffer_size_bytes = self.L2_cache_size
+        buffer = torch.empty(buffer_size_bytes // 4, dtype=torch.int, device="cuda")
+        buffer.zero_()
+
+        # estimate the runtime of `_callable`
+        event_pairs = self.get_event_pairs(estimation_iters)
+        for start_event, end_event in event_pairs:
+            if grad_to_none is not None:
+                for x in grad_to_none:
+                    x.grad = None
+            buffer.zero_()
+            start_event.record()
+            _callable()
+            end_event.record()
+        torch.cuda.synchronize()
+        estimated_timing = self.get_event_pairs_min_timing(event_pairs)
+
+        # adjust `benchmark_iters` to fit in the maximum benchmarking duration
+        benchmark_iters = max(
+            min(benchmark_iters, int(max_benchmark_duration // estimated_timing)), 1
+        )
+
+        # do the memory warmup
+        for _ in range(memory_warmup_iters):
+            buffer.zero_()
+
+        # benchmark with profiler
+        with torch.profiler.profile(
+            activities=[torch.profiler.ProfilerActivity.CUDA],
+            record_shapes=False,
+        ) as prof:
+            for _ in range(benchmark_iters):
+                if grad_to_none is not None:
+                    for x in grad_to_none:
+                        x.grad = None
+                buffer.zero_()
+                _callable()
+        torch.cuda.synchronize()
+
+        # Extract CUDA kernel time from profiler events
+        # First, try to find Triton kernels (kernel names starting with "triton_")
+        triton_kernel_time_us = sum(
+            event.device_time_total
+            for event in prof.key_averages()
+            if event.device_type == torch.profiler.DeviceType.CUDA
+            and event.key.startswith("triton_")
+        )
+
+        # If no Triton kernels found, fall back to GEMM kernels from other backends
+        # - "Cijk" prefix: rocBLAS/hipBLASLt GEMM kernels (rocBLAS/Tensile)
+        # - Contains "gemm": CK GEMM kernels
+        # NOTE: This fallback path is not well tested at this time and may need refinement
+        if triton_kernel_time_us == 0:
+            triton_kernel_time_us = sum(
+                event.device_time_total
+                for event in prof.key_averages()
+                if event.device_type == torch.profiler.DeviceType.CUDA
+                and (event.key.startswith("Cijk") or "gemm" in event.key.lower())
+            )
+
+        # Convert to milliseconds and compute the average time per iteration
+        avg_time_ms = (triton_kernel_time_us / benchmark_iters) / 1000.0
+
+        # explicitly delete the buffer, sometimes helps memory
+        # footprint metrics in OSS Inductor performance benchmarks
+        del buffer
+
+        # Return based on the requested mode
+        # Note: For profiler-based benchmarking, we return the mean time per iteration
+        # min/max modes are kept for API compatibility but return the mean
+        if return_mode in ("min", "mean", "max"):
+            return avg_time_ms
+        else:
+            raise ValueError(
+                f"Unsupported return_mode: {return_mode}. Use 'min', 'mean', or 'max'."
             )
 
 
