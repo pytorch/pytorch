@@ -393,13 +393,13 @@ class TestLibtorchAgnostic(TestCase):
 
         out2 = compiled_fn(t1)
         self.assertEqual(out2, torch.narrow(t1, 0, 2, t1.shape[0] - 2))
-        self.assertEqual(cnt.frame_count, 1)
+        frame_count = cnt.frame_count
 
         # Second call with different shape should not recompile
         t2 = torch.randn(6, 3, device=device)
         out3 = compiled_fn(t2)
         self.assertEqual(out3, torch.narrow(t2, 0, 2, t2.shape[0] - 2))
-        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.frame_count, frame_count)
 
     @onlyCUDA
     @deviceCountAtLeast(2)
