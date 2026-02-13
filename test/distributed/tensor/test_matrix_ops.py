@@ -588,30 +588,65 @@ class DistMatrixOpsTest(DTensorTestBase):
     @skip_unless_torch_gpu
     def test_mm_partial_inputs(self):
         # mm with Partial inputs should produce Partial output via per-input
-        # linearity, for both the default and single-dim strategy paths.
-        device_mesh = self.build_device_mesh()
+        # linearity, for both the default and single-dim strategy paths,
+        # across various mesh dimensionalities.
+        mesh_shapes = [
+            (self.world_size,),
+            (self.world_size // 2, 2),
+            (self.world_size // 2, 2, 1),
+            (1, self.world_size // 2, 2, 1),
+            (1, 1, self.world_size // 2, 2, 1),
+        ]
 
-        def _run_mm():
+        def _run_mm(device_mesh):
+            placements = [Partial()] * device_mesh.ndim
+            a_local = torch.randn(16, 12, device=self.device_type)
+            b_local = torch.randn(12, 20, device=self.device_type)
             dt1 = DTensor.from_local(
-                torch.randn(16, 12, device=self.device_type),
+                a_local,
                 device_mesh,
-                [Partial()],
+                placements,
                 run_check=False,
             )
             dt2 = DTensor.from_local(
-                torch.randn(12, 20, device=self.device_type),
+                b_local,
                 device_mesh,
-                [Partial()],
+                placements,
                 run_check=False,
             )
             dist_res = torch.mm(dt1, dt2)
-            self.assertEqual(dist_res.placements, (Partial(),))
+            expected_placements = tuple(Partial() for _ in range(device_mesh.ndim))
+            self.assertEqual(dist_res.placements, expected_placements)
+            # Numeric check: redistribute to Replicate to materialize the full
+            # result, then compare against the ground truth computed from the
+            # full (all-reduced) inputs.
+            full_res = dist_res.full_tensor()
+            full_a = dt1.full_tensor()
+            full_b = dt2.full_tensor()
+            expected_val = torch.mm(full_a, full_b)
+            self.assertEqual(full_res, expected_val)
 
-        # Default (non-single-dim) strategy path
-        _run_mm()
-        # Single-dim strategy path
-        register_single_dim_strategy(torch.ops.aten.mm.default)(mm_single_dim_strategy)
-        _run_mm()
+        propagator = DTensor._op_dispatcher.sharding_propagator
+        saved = propagator.op_single_dim_strategy_funcs.copy()
+        try:
+            # Non-single-dim strategy path (1D mesh only; gen_einsum_strategies
+            # lacks per-input linearity so multi-dim meshes won't preserve
+            # all-Partial).
+            propagator.op_single_dim_strategy_funcs.pop(torch.ops.aten.mm.default, None)
+            propagator.propagate_op_sharding.cache_clear()
+            device_mesh = init_device_mesh(self.device_type, (self.world_size,))
+            _run_mm(device_mesh)
+            # Single-dim strategy path across all mesh shapes
+            register_single_dim_strategy(torch.ops.aten.mm.default)(
+                mm_single_dim_strategy
+            )
+            for mesh_shape in mesh_shapes:
+                device_mesh = init_device_mesh(self.device_type, mesh_shape)
+                propagator.propagate_op_sharding.cache_clear()
+                _run_mm(device_mesh)
+        finally:
+            propagator.op_single_dim_strategy_funcs = saved
+            propagator.propagate_op_sharding.cache_clear()
 
     @with_comms
     @skip_unless_torch_gpu
