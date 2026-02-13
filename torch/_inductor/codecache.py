@@ -932,6 +932,18 @@ class FxGraphHashDetails:
             config.custom_partitioner_fn
         )
 
+        # Include hint overrides in the cache key because _reduce_symint
+        # only hashes symbol names, not hint values.
+        self.var_to_hint_override: dict[str, int] = {}
+        shape_env = FxGraphCache._get_shape_env()
+        if shape_env is not None and shape_env.var_to_hint_override:
+            self.var_to_hint_override = {
+                str(sym): val
+                for sym, val in sorted(
+                    shape_env.var_to_hint_override.items(), key=lambda x: str(x[0])
+                )
+            }
+
     # This is mainly added to handle these two inductor configs, which are (unfortunately)
     # sometimes cache safe:
     # - _pre_fusion_custom_pass
