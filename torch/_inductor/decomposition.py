@@ -860,12 +860,8 @@ def _foreach_lerp_scalar(
     end_tensors: list[torch.Tensor],
     weight: torch.types.Number,
 ) -> list[torch.Tensor]:
-    return aten._foreach_add.List(
-        start_tensors,
-        aten._foreach_mul.Scalar(
-            aten._foreach_sub.List(end_tensors, start_tensors), weight
-        ),
-    )
+    # Use inductor lowering which uses FMA to match eager CUDA behavior
+    return NotImplemented
 
 
 @register_decomposition(aten._foreach_lerp.ScalarList)
@@ -874,12 +870,8 @@ def _foreach_lerp_scalarlist(
     end_tensors: list[torch.Tensor],
     scalars: list[torch.types.Number],
 ) -> list[torch.Tensor]:
-    return aten._foreach_add.List(
-        start_tensors,
-        aten._foreach_mul.ScalarList(
-            aten._foreach_sub.List(end_tensors, start_tensors), scalars
-        ),
-    )
+    # Use inductor lowering which uses FMA to match eager CUDA behavior
+    return NotImplemented
 
 
 @aten.miopen_batch_norm.default.py_impl(torch._C.DispatchKey.Autograd)
@@ -930,14 +922,24 @@ def select_decomp_table() -> dict[Any, Callable[..., Any]]:
         decompositions.pop(torch.ops.quantized.embedding_bag_byte_unpack.default, None)
         return decompositions
     result = fast_random_decomps()
+
+    # Always skip lerp decompositions - we have a lowering that uses FMA to match
+    # eager CUDA behavior
+    ops_to_skip = OrderedSet(
+        [
+            aten.lerp,
+            aten._foreach_lerp.Scalar,
+            aten._foreach_lerp.ScalarList,
+        ]
+    )
+
     if config.emulate_precision_casts:
-        # When emulating precision casts, skip decomposition of addcmul ops
+        # When emulating precision casts, also skip decomposition of addcmul ops
         # so that we use the inductor lowering which preserves FMA semantics.
         # For _foreach_addcdiv, we use the native CUDA kernel.
         # The decomposed version uses separate mul+add/div+add ops which don't match
         # eager's FMA rounding behavior.
-        # Note: We check against OpOverloadPacket to match all overloads (default, out, etc.)
-        ops_to_skip = OrderedSet(
+        ops_to_skip.update(
             [
                 aten.addcmul,
                 aten._foreach_addcmul.Scalar,
@@ -945,16 +947,16 @@ def select_decomp_table() -> dict[Any, Callable[..., Any]]:
             ]
         )
 
-        def should_skip(op: Any) -> bool:
-            # Check if op is directly in the skip set
-            if op in ops_to_skip:
-                return True
-            # For OpOverload, also check if its OpOverloadPacket is in the skip set
-            if hasattr(op, "overloadpacket"):
-                return op.overloadpacket in ops_to_skip
-            return False
+    def should_skip(op: Any) -> bool:
+        # Check if op is directly in the skip set
+        if op in ops_to_skip:
+            return True
+        # For OpOverload, also check if its OpOverloadPacket is in the skip set
+        if hasattr(op, "overloadpacket"):
+            return op.overloadpacket in ops_to_skip
+        return False
 
-        result = {k: v for k, v in result.items() if not should_skip(k)}
+    result = {k: v for k, v in result.items() if not should_skip(k)}
     return result
 
 
