@@ -46,6 +46,7 @@ from torch._library.opaque_object import is_opaque_type
 from torch._prims_common import (
     compute_required_storage_length,
     is_boolean_dtype,
+    is_contiguous_for_memory_format_or_false,
     is_float_dtype,
     make_channels_last_strides_for,
     StrideType,
@@ -6260,11 +6261,13 @@ class ExternKernel(InputsKernel):
             and isinstance(x_unwrap_view, (ReinterpretView, Buffer, MutableBox))
             and isinstance(x_unwrap_view.layout, FlexibleLayout)
             and (
-                x_unwrap_view_fx_node.meta["val"].is_contiguous(
-                    memory_format=torch.channels_last
+                is_contiguous_for_memory_format_or_false(
+                    x_unwrap_view_fx_node.meta["val"],
+                    memory_format=torch.channels_last,
                 )
-                or x_unwrap_view_fx_node.meta["val"].is_contiguous(
-                    memory_format=torch.channels_last_3d
+                or is_contiguous_for_memory_format_or_false(
+                    x_unwrap_view_fx_node.meta["val"],
+                    memory_format=torch.channels_last_3d,
                 )
             )
         ):
