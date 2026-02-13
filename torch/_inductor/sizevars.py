@@ -664,7 +664,7 @@ class SizeVarAllocator:
                 for unbacked symbols.
         """
         simplified = self.simplify(expr)
-        result = self._maybe_realize_expr(simplified, fallback=None)
+        result = self._maybe_realize_expr(simplified, nan_fallback=None)
 
         if result is not None:
             return result
@@ -680,7 +680,9 @@ class SizeVarAllocator:
         assert result is not None, result
         return result
 
-    def _maybe_realize_expr(self, expr: Expr, fallback: Optional[int]) -> Optional[int]:
+    def _maybe_realize_expr(
+        self, expr: Expr, nan_fallback: Optional[int]
+    ) -> Optional[int]:
         """
         Handle special sympy values in optimization hints.
 
@@ -704,8 +706,8 @@ class SizeVarAllocator:
                 return sys.maxsize
             if expr in (-int_oo, -sympy.oo):
                 return -sys.maxsize
-            if fallback is not None and expr is sympy.nan or expr.has(sympy.nan):
-                return fallback
+            if nan_fallback is not None and expr is sympy.nan or expr.has(sympy.nan):
+                return nan_fallback
 
         return None
 
@@ -732,21 +734,22 @@ class SizeVarAllocator:
         if fallback is None:
             fallback = config.unbacked_symint_fallback
         assert fallback is not None
-        simplified = self.simplify(expr)
-        result = self._maybe_realize_expr(simplified, fallback)
+
+        result = self._maybe_realize_expr(self.simplify(expr), fallback)
         if result is not None:
             return result
 
-        # remove precomputed_replacements
-        expr = self.remove_precomputed_replacements(simplified)
         original = expr
+
+        # remove precomputed_replacements
+        expr = self.remove_precomputed_replacements(result)
 
         # replace all backed symbols with their backed hints,
         # unbacked with optimizations hints if exists.
         expr = sympy_subs(expr, self.backed_var_to_val)
         expr = sympy_subs(expr, self.var_to_hint_override)
 
-        result = self._maybe_realize_expr(expr, fallback)
+        result = self._maybe_realize_expr(sympy.expand(expr), fallback)
         if result is not None:
             return result
 
@@ -758,9 +761,6 @@ class SizeVarAllocator:
         # e.g. 10*(s0 + u0) instead of 10*s0 + 10*u0
         # TODO optimize _sub_unbacked_exprs
         expr = self._sub_unbacked_exprs(sympy.factor(original))
-
-        expr = sympy_subs(expr, self.backed_var_to_val)
-        expr = sympy_subs(expr, self.var_to_hint_override)
 
         # For multiple expressions that depend on an unbacked symint,
         # we want to compute them consistently for a size hint we have chosen.
@@ -1117,6 +1117,8 @@ class SizeVarAllocator:
             sub_cnt += 1
 
         log.warning("Substitution limit (%d) reached w/ %s", sub_cnt_limit, expr)
+        expr = sympy_subs(expr, self.backed_var_to_val)
+        expr = sympy_subs(expr, self.var_to_hint_override)
         return expr
 
     def offset_var(self, index: Expr, vars: Sequence[sympy.Symbol]) -> Expr:
