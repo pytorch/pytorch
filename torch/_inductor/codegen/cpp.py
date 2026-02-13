@@ -3936,7 +3936,7 @@ class TilingSelect:
                         continue
                     if has_free_symbols(call_ranges):
                         call_range = V.graph.sizevars.optimization_hint(
-                            call_ranges[tiling_indice]
+                            call_ranges[tiling_indice], fallback=0
                         )
                         if call_range < factor_lowp:
                             V.graph.sizevars.check_lt(call_range, factor_lowp)  # type: ignore[arg-type]

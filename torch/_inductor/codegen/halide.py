@@ -662,32 +662,11 @@ class DimensionInfo:
 
 
 def eq(left, right):
-    if V.graph.sizevars.statically_known_equals(left, right):
-        return True
-    try:
-        a = V.graph.sizevars.guarding_hint_or_throw(left)
-        b = V.graph.sizevars.guarding_hint_or_throw(right)
-    except TypeError:  # unbacked symints
-        return False
-    if a == b:
-        V.graph.sizevars.check_equals(left, right)
-    return a == b
+    return V.graph.sizevars.guard_or_false(sympy.Eq(left, right))
 
 
 def lt(left, right):
-    if V.graph.sizevars.statically_known_lt(left, right):
-        return True
-    try:
-        a = V.graph.sizevars.guarding_hint_or_throw(left)
-        b = V.graph.sizevars.guarding_hint_or_throw(right)
-    except TypeError:  # unbacked symints
-        gcd = sympy.gcd(left, right)
-        if gcd == left:
-            return left != right
-        return False
-    if a < b:
-        V.graph.sizevars.check_lt(left, right)
-    return a < b
+    return V.graph.sizevars.guard_or_false(sympy.Lt(left, right))
 
 
 class HalideKernel(SIMDKernel):
@@ -1589,14 +1568,14 @@ class HalideKernel(SIMDKernel):
             # This causes crashes if our estimate is greater than the vector length
             # https://github.com/halide/Halide/issues/3103
             if isinstance(arg, SizeArg):
-                hint = V.graph.sizevars.optimization_hint(arg.expr)
+                hint = V.graph.sizevars.optimization_hint(arg.expr, fallback=1)
                 code.writeline(f"{arg.name}.set_estimate({hint})")
             else:
                 dims = self.buffer_dimensions[arg.name]
                 range_hints = []
                 for i, dim in enumerate(dims):
                     hint = self._autoscheduler_workarounds(
-                        V.graph.sizevars.optimization_hint(dim.size), dims
+                        V.graph.sizevars.optimization_hint(dim.size, fallback=1), dims
                     )
                     # pyrefly: ignore [bad-argument-type]
                     range_hints.append(f"hl.Range(0, {hint})")

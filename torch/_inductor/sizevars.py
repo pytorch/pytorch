@@ -509,28 +509,13 @@ class SizeVarAllocator:
             left = sympy_subs(left, self.inv_precomputed_replacements)  # type: ignore[arg-type]
         if isinstance(right, Expr):
             right = sympy_subs(right, self.inv_precomputed_replacements)  # type: ignore[arg-type]
-        try:
-            lv = self.guarding_hint_or_throw(left)
-            rv = self.guarding_hint_or_throw(right)
-        except TypeError:  # unbacked symints
-            if left == right or self.statically_known_leq(left, right):
-                return left
-            if self.statically_known_leq(right, left):
-                return right
-            gcd = sympy.gcd(left, right)
-            if left == gcd:  # handle `min(10*u0, u0)` etc
-                return left
-            if right == gcd:
-                return right
-            raise TypeError(
-                f"evaluate_min({left}, {right}) with unbacked symints"
-            ) from None
-        if lv <= rv:
-            self.check_leq(left, right)
+        if self.guard_or_false(sympy.Le(left, right)):
             return left
-        else:
-            self.check_leq(right, left)
+        if self.guard_or_false(sympy.Le(right, left)):
             return right
+        raise TypeError(
+            f"evaluate_min({left}, {right}) with unbacked symints"
+        ) from None
 
     def evaluate_max(self, left: Expr, right: Expr) -> Expr:
         """return the larger of left and right, and guard on that choice"""
@@ -572,8 +557,8 @@ class SizeVarAllocator:
 
         This function substitutes backed symbolic variables with their known concrete
         values from the shape environment, while leaving unbacked symbols (data-dependent
-        values) untouched.this was added for backward compatibility with existing usages
-        that do not handle unabcked this is not reocmmended to be used.
+        values) untouched. Not recommended to be used except as last resort!
+        was added for existing usages compatibility.
         """
         if isinstance(expr, int):
             return expr
@@ -622,6 +607,7 @@ class SizeVarAllocator:
         """Convert a sequence of sympy expressions to SymInts, or return ints as is."""
         return [self.to_symint_or_int(e) for e in exprs]
 
+    # TODO this will be deprecated.
     def size_hint(self, expr: Union[Expr, int]) -> int:
         if isinstance(expr, SymInt):
             raise TypeError(
@@ -659,17 +645,13 @@ class SizeVarAllocator:
             optimization_hint: For cases where fallback/heuristic values are acceptable
                 for unbacked symbols.
         """
-        simplified = self.simplify(expr)
-        result = self._maybe_realize_expr(simplified, fallback=None)
 
-        if result is not None:
-            return result
-
-        # Replace backed symbols with their hints, leaving unbacked symbols alone
+        # Replace backed symbols with their hints, leaving unbacked symbols alone.
         expr = self.replace_backed_symbols_with_hints(expr)
 
         if has_free_unbacked_symbols(expr):
             raise GuardOnDataDependentSymNode(expr)
+
         result = self._maybe_realize_expr(expr, None)
         assert result is not None, result
         return result
@@ -691,7 +673,7 @@ class SizeVarAllocator:
         if isinstance(expr, Expr):
             if expr.has(sympy.I):
                 raise ValueError(
-                    f"optimization_hint received a complex expression: {expr}. "
+                    f"_maybe_realize_expr received a complex expression: {expr}. "
                     "Tensor dimensions cannot be complex numbers."
                 )
             if expr in (int_oo, sympy.oo):
@@ -726,21 +708,14 @@ class SizeVarAllocator:
         if fallback is None:
             fallback = config.unbacked_symint_fallback
         assert fallback is not None
-        simplified = self.simplify(expr)
-        result = self._maybe_realize_expr(simplified, fallback)
-        if result is not None:
-            return result
-
-        # remove precomputed_replacements
-        expr = self.remove_precomputed_replacements(simplified)
         original = expr
 
-        # replace all backed symbols with their backed hints,
-        # unbacked with optimizations hints if exists.
-        expr = sympy_subs(expr, self.backed_var_to_val)
+        expr = self.replace_backed_symbols_with_hints(expr)
+        # replace unbacked with optimizations hints if exists.
         expr = sympy_subs(expr, self.var_to_hint_override)
 
         result = self._maybe_realize_expr(expr, fallback)
+
         if result is not None:
             return result
 
@@ -752,9 +727,6 @@ class SizeVarAllocator:
         # e.g. 10*(s0 + u0) instead of 10*s0 + 10*u0
         # TODO optimize _sub_unbacked_exprs
         expr = self._sub_unbacked_exprs(sympy.factor(original))
-
-        expr = sympy_subs(expr, self.backed_var_to_val)
-        expr = sympy_subs(expr, self.var_to_hint_override)
 
         # For multiple expressions that depend on an unbacked symint,
         # we want to compute them consistently for a size hint we have chosen.
@@ -781,7 +753,7 @@ class SizeVarAllocator:
         final_result = self._maybe_realize_expr(final_result, fallback)
         assert final_result is not None, final_result
 
-        return int(final_result)
+        return final_result
 
     def optimization_hints(
         self,
@@ -1103,6 +1075,9 @@ class SizeVarAllocator:
             sub_cnt += 1
 
         log.warning("Substitution limit (%d) reached w/ %s", sub_cnt_limit, expr)
+
+        expr = sympy_subs(expr, self.backed_var_to_val)
+        expr = sympy_subs(expr, self.var_to_hint_override)
         return expr
 
     def offset_var(self, index: Expr, vars: Sequence[sympy.Symbol]) -> Expr:
@@ -1110,6 +1085,8 @@ class SizeVarAllocator:
         index = self.simplify(index)
         return sympy_subs(index, {v: sympy.S.Zero for v in vars if v != 0})
 
+    # Return stride optimizaitons hints,
+    # only used for optimizations.
     def stride_hints(
         self,
         index: Expr,

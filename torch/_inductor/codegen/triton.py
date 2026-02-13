@@ -5551,6 +5551,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index,union-attr]
 
         self.triton_meta = triton_meta
+        self.inductor_meta = inductor_meta
 
         self.codegen_prologue(self.body)
         self.codegen_body()
@@ -5737,6 +5738,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             triton=True,
             arg_types=arg_types,
             triton_meta=self.triton_meta,
+            inductor_meta=self.inductor_meta,
         )
 
         if deallocate_ws:
@@ -5824,6 +5826,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         return pid
 
     def needs_yz_grid_overflow(self, entry: IterationRangesRoot) -> bool:
+        # Combo kernels use flattened dispatch where y_pid_offset is computed
+        # from the flattened pid, so YZ overflow is not needed
+        if self.is_combo_kernel and config.combo_kernel_per_subkernel_blocks:
+            return False
         return (
             entry.grid_dim == 1
             and not entry.has_zdim

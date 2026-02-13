@@ -460,13 +460,7 @@ def significant_strides_equal(
         if V.graph.sizevars.statically_known_leq(dim, 1):
             continue
 
-        if not V.graph.sizevars.statically_known_equals(
-            s1, s2
-        ) and V.graph.sizevars.replace_backed_symbols_with_hints(
-            s1
-        ) != V.graph.sizevars.replace_backed_symbols_with_hints(s2):
-            return False
-
+        return V.graph.sizevars.guard_or_false(sympy.Eq(s1, s2))
     return True
 
 
@@ -1300,6 +1294,7 @@ class Reduction(Loops):
         reduction_numel: Expr,
         input_node: Optional[IRNode] = None,
     ) -> tuple[ReductionHint, _IntLike]:
+        # TODO Laith support unbacked!
         reduction_numel_hint = V.graph.sizevars.replace_backed_symbols_with_hints(
             reduction_numel
         )
@@ -1583,8 +1578,7 @@ class Reduction(Loops):
 
         if (
             isinstance(reduction_numel, Integer)
-            and V.graph.sizevars.guarding_hint_or_throw(reduction_numel)
-            < config.unroll_reductions_threshold
+            and int(reduction_numel) < config.unroll_reductions_threshold
             and (sympy_product(ranges) != 1 or is_gpu(device.type))
             and reduction_type != "dot"
         ):
@@ -5274,7 +5268,7 @@ class ChoiceCaller:
     During autotuning, self.benchmark() is first called to get benchmark result,
     and if this choice is selected, self.output_node() is called to get the output_node.
 
-    Children classes: TritonTemplateCaller, CUDATemplateCaller.
+    Children classes: TritonTemplateCaller, CUTLASSTemplateCaller.
     """
 
     def __init__(
@@ -5438,7 +5432,7 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         self.make_kernel_render = self._make_kernel_renders[None]
 
 
-class CUDATemplateBuffer(TemplateBuffer):
+class CUTLASSTemplateBuffer(TemplateBuffer):
     def __init__(
         self,
         layout: Layout,
@@ -7187,6 +7181,7 @@ class UserDefinedTritonKernel(ExternKernel):
         (
             new_name,
             triton_meta,
+            inductor_meta,
             extra_launch_args,
         ) = wrapper.define_user_defined_triton_kernel(
             kernel,
@@ -7253,6 +7248,7 @@ class UserDefinedTritonKernel(ExternKernel):
             raw_args=raw_args_filtered,
             raw_keys=raw_keys_filtered,
             triton_meta=triton_meta,
+            inductor_meta=inductor_meta,
             triton=True,
             device=self.get_device(),
             original_fxnode_name=self.fx_node.name,
