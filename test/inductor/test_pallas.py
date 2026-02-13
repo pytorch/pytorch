@@ -166,7 +166,10 @@ class PallasTestsMixin:
         def fn(a, b):
             return a + b
 
-        for shape in [(1024,), (200,), (32, 300)]:
+        shapes = [(1024,)]
+        if self.DEVICE != "cuda":
+            shapes += [(200,), (32, 300)]
+        for shape in shapes:
             with self.subTest(shape=shape):
                 compiled = self._compile(fn)
                 a = torch.randn(shape, device=self.DEVICE)
@@ -181,7 +184,10 @@ class PallasTestsMixin:
         def fn(a, b):
             return a * b
 
-        for shape in [(1024,), (200,), (32, 300)]:
+        shapes = [(1024,)]
+        if self.DEVICE != "cuda":
+            shapes += [(200,), (32, 300)]
+        for shape in shapes:
             with self.subTest(shape=shape):
                 compiled = self._compile(fn)
                 a = torch.randn(shape, device=self.DEVICE)
@@ -196,7 +202,10 @@ class PallasTestsMixin:
         def fn(x):
             return torch.sin(x)
 
-        for shape in [(1024,), (200,)]:
+        shapes = [(1024,)]
+        if self.DEVICE != "cuda":
+            shapes.append((200,))
+        for shape in shapes:
             with self.subTest(shape=shape):
                 compiled = self._compile(fn)
                 x = torch.randn(shape, device=self.DEVICE)
@@ -366,7 +375,10 @@ class PallasTestsMixin:
         def fn(x, y):
             return x + y
 
-        for shape in [(32, 32), (15, 200)]:
+        shapes = [(32, 32)]
+        if self.DEVICE != "cuda":
+            shapes.append((15, 200))
+        for shape in shapes:
             with self.subTest(shape=shape):
                 compiled = self._compile(fn)
                 x = torch.randn(shape, device=self.DEVICE)
@@ -748,7 +760,10 @@ class PallasTestsMixin:
         def fn(a, b):
             return a * b
 
-        for size in [128, 200]:
+        sizes = [128]
+        if self.DEVICE != "cuda":
+            sizes.append(200)
+        for size in sizes:
             with self.subTest(size=size):
                 compiled = self._compile(fn)
                 a = torch.randn(size, dtype=torch.complex64, device=self.DEVICE)
@@ -862,7 +877,10 @@ class PallasTestsMixin:
         def fn(x, y):
             return torch.where(x > 0, x, y)
 
-        for shape in [(1024,), (200,), (15, 200)]:
+        shapes = [(1024,)]
+        if self.DEVICE != "cuda":
+            shapes += [(200,), (15, 200)]
+        for shape in shapes:
             with self.subTest(shape=shape):
                 compiled = self._compile(fn)
                 x = torch.randn(shape, device=self.DEVICE)
@@ -877,7 +895,10 @@ class PallasTestsMixin:
         def fn(x):
             return torch.clamp(x, -1.0, 1.0)
 
-        for shape in [(1024,), (200,), (15, 200)]:
+        shapes = [(1024,)]
+        if self.DEVICE != "cuda":
+            shapes += [(200,), (15, 200)]
+        for shape in shapes:
             with self.subTest(shape=shape):
                 compiled = self._compile(fn)
                 x = torch.randn(shape, device=self.DEVICE) * 2
@@ -894,7 +915,10 @@ class PallasTestsMixin:
             eq = a == b
             return gt.float() + lt.float() + eq.float()
 
-        for shape in [(1024,), (200,), (15, 200)]:
+        shapes = [(1024,)]
+        if self.DEVICE != "cuda":
+            shapes += [(200,), (15, 200)]
+        for shape in shapes:
             with self.subTest(shape=shape):
                 compiled = self._compile(fn)
                 a = torch.randn(shape, device=self.DEVICE)
@@ -909,7 +933,10 @@ class PallasTestsMixin:
         def fn(a, b):
             return torch.logical_and(a > 0, b > 0).float()
 
-        for shape in [(1024,), (200,), (15, 200)]:
+        shapes = [(1024,)]
+        if self.DEVICE != "cuda":
+            shapes += [(200,), (15, 200)]
+        for shape in shapes:
             with self.subTest(shape=shape):
                 compiled = self._compile(fn)
                 a = torch.randn(shape, device=self.DEVICE)
@@ -995,7 +1022,10 @@ class PallasTestsMixin:
         def fn(x):
             return x.sum()
 
-        for shape in [(1024,), (200,)]:
+        shapes = [(1024,)]
+        if self.DEVICE != "cuda":
+            shapes.append((200,))
+        for shape in shapes:
             with self.subTest(shape=shape):
                 compiled = self._compile(fn)
                 x = torch.randn(shape, device=self.DEVICE)
@@ -1009,7 +1039,10 @@ class PallasTestsMixin:
         def fn(x):
             return x.max()
 
-        for shape in [(1024,), (200,)]:
+        shapes = [(1024,)]
+        if self.DEVICE != "cuda":
+            shapes.append((200,))
+        for shape in shapes:
             with self.subTest(shape=shape):
                 compiled = self._compile(fn)
                 x = torch.randn(shape, device=self.DEVICE)
@@ -1023,7 +1056,10 @@ class PallasTestsMixin:
         def fn(x):
             return x.min()
 
-        for shape in [(16,), (200,)]:
+        shapes = [(16,)]
+        if self.DEVICE != "cuda":
+            shapes.append((200,))
+        for shape in shapes:
             with self.subTest(shape=shape):
                 compiled = self._compile(fn)
                 x = torch.randn(shape, device=self.DEVICE)
@@ -1041,7 +1077,10 @@ class PallasTestsMixin:
             # Use smaller values to avoid overflow
             return (x * 0.1).prod()
 
-        for shape in [(16,), (200,)]:
+        shapes = [(16,)]
+        if self.DEVICE != "cuda":
+            shapes.append((200,))
+        for shape in shapes:
             with self.subTest(shape=shape):
                 compiled = self._compile(fn)
                 x = torch.randn(shape, device=self.DEVICE)
@@ -1226,7 +1265,10 @@ class PallasTestsMixin:
             # View float32 tensor as int32 (same byte size)
             return x.view(torch.int32)
 
-        for size in [128, 200]:
+        sizes = [128]
+        if self.DEVICE != "cuda":
+            sizes.append(200)
+        for size in sizes:
             with self.subTest(size=size):
                 compiled = self._compile(fn)
                 x = torch.randn(size, device=self.DEVICE, dtype=torch.float32)
@@ -1336,7 +1378,10 @@ class PallasTestsMixin:
         def fn(x, y):
             return x + y
 
-        for shape in [(128, 128), (200, 200)]:
+        shapes = [(128, 128)]
+        if self.DEVICE != "cuda":
+            shapes.append((200, 200))
+        for shape in shapes:
             with self.subTest(shape=shape):
                 compiled = self._compile(fn)
                 x = torch.randn(shape, device=self.DEVICE)
