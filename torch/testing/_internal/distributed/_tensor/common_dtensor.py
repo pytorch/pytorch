@@ -79,7 +79,7 @@ else:
     PG_BACKEND = "gloo"
 
 if TEST_WITH_ROCM:
-    NUM_DEVICES = min(4, max(2, DEVICE_COUNT))
+    NUM_DEVICES = min(4, max(2, torch.cuda.device_count()))
 else:
     NUM_DEVICES = 4
 
