@@ -413,11 +413,14 @@ def gen_single_dim_einsum_strategies(
 
     # Per-input linearity: einsum is linear in each input individually.
     # For each input, keep it Partial while replicating others → output Partial.
-    for i in range(len(input_dims)):
-        placement_list = [Partial()]
-        for j in range(len(input_dims)):
-            placement_list.append(Partial() if j == i else Replicate())
-        strategies_over_one_mesh_dim.append(_maybe_add_bias(placement_list))
+    for reduce_op in Partial.LINEAR_REDUCE_OPS:
+        for i in range(len(input_dims)):
+            placement_list: list[Placement | _ShardingPlaceholder] = [
+                Partial(reduce_op)
+            ]
+            for j in range(len(input_dims)):
+                placement_list.append(Partial(reduce_op) if j == i else Replicate())
+            strategies_over_one_mesh_dim.append(_maybe_add_bias(placement_list))
 
     return strategies_over_one_mesh_dim
 

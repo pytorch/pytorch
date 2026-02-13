@@ -23,7 +23,7 @@ from torch.distributed.tensor._ops._matrix_ops import (
 from torch.distributed.tensor._ops.single_dim_strategy import (
     register_single_dim_strategy,
 )
-from torch.distributed.tensor.debug import CommDebugMode
+from torch.distributed.tensor.debug import _clear_sharding_prop_cache, CommDebugMode
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM90OrLater
 from torch.testing._internal.common_device_type import E4M3_MAX_POS, e4m3_type
 from torch.testing._internal.common_utils import (
@@ -589,7 +589,7 @@ class DistMatrixOpsTest(DTensorTestBase):
     def test_mm_partial_inputs(self):
         # mm with Partial inputs should produce Partial output via per-input
         # linearity, for both the default and single-dim strategy paths,
-        # across various mesh dimensionalities.
+        # across various mesh dimensionalities and reduce ops (sum, avg).
         mesh_shapes = [
             (self.world_size,),
             (self.world_size // 2, 2),
@@ -598,8 +598,8 @@ class DistMatrixOpsTest(DTensorTestBase):
             (1, 1, self.world_size // 2, 2, 1),
         ]
 
-        def _run_mm(device_mesh):
-            placements = [Partial()] * device_mesh.ndim
+        def _run_mm(device_mesh, reduce_op="sum"):
+            placements = [Partial(reduce_op)] * device_mesh.ndim
             a_local = torch.randn(16, 12, device=self.device_type)
             b_local = torch.randn(12, 20, device=self.device_type)
             dt1 = DTensor.from_local(
@@ -615,7 +615,9 @@ class DistMatrixOpsTest(DTensorTestBase):
                 run_check=False,
             )
             dist_res = torch.mm(dt1, dt2)
-            expected_placements = tuple(Partial() for _ in range(device_mesh.ndim))
+            expected_placements = tuple(
+                Partial(reduce_op) for _ in range(device_mesh.ndim)
+            )
             self.assertEqual(dist_res.placements, expected_placements)
             # Numeric check: redistribute to Replicate to materialize the full
             # result, then compare against the ground truth computed from the
@@ -635,18 +637,53 @@ class DistMatrixOpsTest(DTensorTestBase):
             propagator.op_single_dim_strategy_funcs.pop(torch.ops.aten.mm.default, None)
             propagator.propagate_op_sharding.cache_clear()
             device_mesh = init_device_mesh(self.device_type, (self.world_size,))
-            _run_mm(device_mesh)
+            # P(sum) coincidentally works because the contracting dim strategy
+            # produces P(sum). Other reduce_ops fail.
+            _run_mm(device_mesh, "sum")
+            for reduce_op in Partial.LINEAR_REDUCE_OPS:
+                if reduce_op != "sum":
+                    with self.assertRaises(AssertionError):
+                        _run_mm(device_mesh, reduce_op)
             # Single-dim strategy path across all mesh shapes
             register_single_dim_strategy(torch.ops.aten.mm.default)(
                 mm_single_dim_strategy
             )
+            # Must clear both Python and C++ caches after changing strategy funcs
+            _clear_sharding_prop_cache()
             for mesh_shape in mesh_shapes:
                 device_mesh = init_device_mesh(self.device_type, mesh_shape)
                 propagator.propagate_op_sharding.cache_clear()
-                _run_mm(device_mesh)
+                for reduce_op in Partial.LINEAR_REDUCE_OPS:
+                    _run_mm(device_mesh, reduce_op)
         finally:
             propagator.op_single_dim_strategy_funcs = saved
-            propagator.propagate_op_sharding.cache_clear()
+            _clear_sharding_prop_cache()
+
+    def test_mm_partial_partial_is_incorrect(self):
+        # P(sum),P(sum) -> P(sum) is invalid for mm because mm is bilinear,
+        # not element-wise. Per-rank mm computes A_i @ B_i but the correct
+        # result requires all cross-terms: sum_i sum_j (A_i @ B_j).
+        #
+        # Counter example:
+        #   A = [[2]], B = [[3]], A @ B = [[6]]
+        #   Rank 0: A0 = [[1.2]], B0 = [[2.1]] -> C0 = [[2.52]]
+        #   Rank 1: A1 = [[0.8]], B1 = [[0.9]] -> C1 = [[0.72]]
+        #   sum(C_i) = [[3.24]] != [[6]]
+        #
+        # The valid rules are P,R -> P and R,P -> P (linearity in each
+        # argument individually). Verify that mm strategies never produce
+        # P,P -> P.
+        strategies = gen_single_dim_einsum_strategies("mk,kn->mn")
+        for strategy in strategies:
+            # strategy layout: [output, input0, input1]
+            input_placements = strategy[1:]
+            num_partial = sum(isinstance(p, Partial) for p in input_placements)
+            self.assertLessEqual(
+                num_partial,
+                1,
+                f"mm must not have Partial on both inputs (bilinear, not "
+                f"element-wise), but got strategy: {strategy}",
+            )
 
     @with_comms
     @skip_unless_torch_gpu
