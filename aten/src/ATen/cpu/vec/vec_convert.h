@@ -27,6 +27,9 @@ struct VecConvert {
   }
 };
 
+// Specialized for float-to-int vector conversion.
+// It ensures the result staying within the destination
+// type's limits without any undefined behavior.
 template <
     typename dst_t,
     int dst_n,
