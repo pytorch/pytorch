@@ -861,7 +861,9 @@ def cat_single_dim_strategy(
     for i in range(common_ndim):
         if i != cat_dim:
             single_dim_strategies.append([_ShardingPlaceholder(i)] * (1 + num_inputs))
+    # pyrefly: ignore [bad-argument-type]
     single_dim_strategies.append([Partial("sum")] * (1 + num_inputs))
+    # pyrefly: ignore [bad-return]
     return single_dim_strategies
 
 
