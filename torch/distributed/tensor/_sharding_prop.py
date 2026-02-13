@@ -138,7 +138,23 @@ class LocalLRUCache(threading.local):
 def _select_min_cost_strategy(
     strategy: OpStrategy, op_schema: OpSchema | None = None
 ) -> OpSpec:
+    from torch.distributed.tensor._utils import ExplicitRedistributionContext
     from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    if ExplicitRedistributionContext.is_force_mode() and op_schema is not None:
+        for op_spec in strategy.strategies:
+            if op_spec.input_specs is None:
+                continue
+            if all(
+                input_spec.placements == op_spec.input_specs[idx].placements
+                for idx, input_spec in enumerate(op_schema.args_spec)
+            ):
+                return op_spec
+        input_placements = [tuple(spec.placements) for spec in op_schema.args_spec]
+        raise RuntimeError(
+            f"ExplicitRedistributionContext force mode: no strategy found for "
+            f"{op_schema.op} with input placements {input_placements}"
+        )
 
     if len(strategy.strategies) == 1:
         # short cut with only one possible OpSpec
