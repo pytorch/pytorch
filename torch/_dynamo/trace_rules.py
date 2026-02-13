@@ -3800,6 +3800,17 @@ we don't want to inline the lower level function call (e.g, f3) by default.
 _force_inline_flag = False
 
 
+def _module_has_hooks(module: Any) -> bool:
+    """Check if a module has forward hooks registered."""
+    for hooks_dict in (
+        getattr(module, "_forward_pre_hooks", {}),
+        getattr(module, "_forward_hooks", {}),
+    ):
+        if hooks_dict:
+            return True
+    return False
+
+
 @contextlib.contextmanager
 def _force_inline() -> Iterator[None]:
     """
@@ -3821,69 +3832,32 @@ def _force_inline() -> Iterator[None]:
         _force_inline_flag = old_val
 
 
-def _module_has_disabled_hooks(module: Any) -> bool:
-    """Check if a module has hooks decorated with @torch._dynamo.disable."""
-    for hooks_dict in (
-        getattr(module, "_forward_pre_hooks", {}),
-        getattr(module, "_forward_hooks", {}),
-    ):
-        for hook in hooks_dict.values():
-            if getattr(hook, "_torchdynamo_disable", False):
-                return True
-    return False
-
-
-def _should_trace_inbuilt_forward(code: types.CodeType) -> bool:
-    """
-    Check if an inbuilt nn.Module.forward should be traced despite being in skipfiles.
-
-    This enables Dynamo to capture operations after a graph break caused by
-    @torch._dynamo.disable hooks in _call_impl.
-
-    Returns True if:
-    - The code is an inbuilt nn.Module.forward
-    - We're not currently compiling (i.e., in eager fallback)
-    - The caller is _call_impl with a module that has disabled hooks
-    """
-    if not is_inbuilt_nn_module_forward(code):
-        return False
-    if torch.compiler.is_compiling():
-        return False
-
-    # Walk up the stack to find _call_impl (uses sys._getframe since the
-    # Dynamo _PyInterpreterFrame doesn't have the full frame chain)
-    import sys
-
-    frame: types.FrameType | None = sys._getframe(1)
-    for _ in range(10):
-        if frame is None:
-            break
-        if frame.f_code.co_name == "_call_impl":
-            module = frame.f_locals.get("self")
-            return module is not None and _module_has_disabled_hooks(module)
-        frame = frame.f_back
-    return False
-
-
-def check_verbose(obj: Any, is_inlined_call: bool = False) -> SkipResult:
+def check_verbose(
+    obj: Any, is_inlined_call: bool = False, frame: Optional[Any] = None
+) -> SkipResult:
     if _force_inline_flag:
         return SkipResult(
             False,
             "don't skip because we're inside _force_inline() context",
         )
 
-    # For eval frame callback (not inlined calls), allow tracing nn.Module.forward
-    # methods even if they're in skipfiles. This enables Dynamo to capture
-    # operations after a frame skip caused by @torch._dynamo.disable hooks.
+    # For eval frame callback (not inlined calls), allow tracing inbuilt
+    # nn.Module.forward methods when the module has hooks. Any hook can cause
+    # a graph break (via @torch._dynamo.disable, print, unsupported ops, etc.),
+    # which skips the entire _call_impl frame. By allowing forward to be traced,
+    # Dynamo can capture the module's operations in a new graph after the break.
     if (
         not is_inlined_call
+        and frame is not None
         and isinstance(obj, types.CodeType)
-        and _should_trace_inbuilt_forward(obj)
+        and is_inbuilt_nn_module_forward(obj)
     ):
-        return SkipResult(
-            False,
-            "inbuilt nn.Module.forward allowed after disabled hook graph break",
-        )
+        module = frame.f_locals.get("self")
+        if module is not None and _module_has_hooks(module):
+            return SkipResult(
+                False,
+                "inbuilt nn.Module.forward allowed - module has hooks",
+            )
 
     if isinstance(
         obj,
@@ -3945,8 +3919,8 @@ def check_verbose(obj: Any, is_inlined_call: bool = False) -> SkipResult:
         )
 
 
-def check(obj: Any, is_inlined_call: bool = False) -> bool:
-    return check_verbose(obj, is_inlined_call).skipped
+def check(obj: Any, is_inlined_call: bool = False, frame: Optional[Any] = None) -> bool:
+    return check_verbose(obj, is_inlined_call, frame).skipped
 
 
 @functools.cache
