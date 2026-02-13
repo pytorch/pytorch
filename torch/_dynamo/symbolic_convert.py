@@ -511,7 +511,12 @@ def get_assert_bytecode_sequence(with_msg: bool) -> list[str]:
     insts = [inst.opname for inst in dis.get_instructions(fn)]
 
     # expect to find POP_JUMP_[FORWARD_]IF_TRUE
-    begin_idx = next(i for i, inst in enumerate(insts) if inst.startswith("POP_JUMP"))
+    begin_idx = next(
+        (i for i, inst in enumerate(insts) if inst.startswith("POP_JUMP")), None
+    )
+    if begin_idx is None or "RAISE_VARARGS" not in insts:
+        return ["<assert pattern unsupported>"]
+
     end_idx = insts.index("RAISE_VARARGS")
 
     return insts[begin_idx + 1 : end_idx + 1]
