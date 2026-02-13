@@ -709,6 +709,7 @@ class MixOrderReductionTest(TestBase):
 
         def f(x):
             return x.sum(dim=1), x.sum(dim=0)
+
         x0 = torch.randn(2048, 1024, device=GPU_TYPE)
         torch._dynamo.mark_dynamic(x0, (0,))
         opt_f = torch.compile(f)
@@ -724,6 +725,7 @@ class MixOrderReductionTest(TestBase):
 
         compile_metrics = torch._dynamo.utils._compilation_metrics
         self.assertEqual(len(compile_metrics), 1, "Don't recompile")
+
 
 @inductor_config.patch(
     "triton.mix_order_reduction", not inductor_config.triton.mix_order_reduction

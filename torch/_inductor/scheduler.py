@@ -377,8 +377,7 @@ class MixOrderReduction:
     @classmethod
     def is_contiguous_node(cls, node: BaseSchedulerNode) -> bool:
         if not all(
-            cls.is_contiguous_load(dep.name, node)
-            for dep in node.read_writes.reads
+            cls.is_contiguous_load(dep.name, node) for dep in node.read_writes.reads
         ):
             return False
         return True
