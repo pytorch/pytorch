@@ -399,6 +399,7 @@ class OptimizedModule(torch.nn.Module):
         "_orig_mod",
         "dynamo_ctx",
         "_torchdynamo_orig_callable",
+        "_torchdynamo_wrapper_id",
         "get_compiler_config",
         "forward",
         "_forward",
