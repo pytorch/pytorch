@@ -9211,15 +9211,20 @@ def forward(self, x):
             ep.module()(*example_inputs), LoopModuleExt()(*example_inputs)
         )
         ep = ep.run_decompositions()
+        # Normalize node numbering and tuple/list repr since serdes
+        # roundtrip may renumber nodes and converts tuples to lists.
+        graph_str = re.sub(r"_int_\d+", "_int_x", str(ep.graph).strip())
+        graph_str = graph_str.replace("[0, %index]", "(0, %index)")
+        graph_str = graph_str.replace(", [])", ", ())")
         self.assertExpectedInline(
-            str(ep.graph).strip(),
+            graph_str,
             """\
 graph():
     %x : [num_users=2] = placeholder[target=x]
     %mask : [num_users=2] = placeholder[target=mask]
     %index : [num_users=2] = call_function[target=torch.ops.aten.index.Tensor](args = (%x, [%mask]), kwargs = {})
-    %sym_size_int_5 : [num_users=1] = call_function[target=torch.ops.aten.sym_size.int](args = (%index, 0), kwargs = {})
-    %ge_4 : [num_users=1] = call_function[target=operator.ge](args = (%sym_size_int_5, 0), kwargs = {})
+    %sym_size_int_x : [num_users=1] = call_function[target=torch.ops.aten.sym_size.int](args = (%index, 0), kwargs = {})
+    %ge_4 : [num_users=1] = call_function[target=operator.ge](args = (%sym_size_int_x, 0), kwargs = {})
     %_assert_scalar_default : [num_users=0] = call_function[target=torch.ops.aten._assert_scalar.default](args = (%ge_4, Runtime assertion failed for expression u0 >= 0 on node 'ge_4'), kwargs = {})
     %while_loop_cond_graph_0 : [num_users=1] = get_attr[target=while_loop_cond_graph_0]
     %while_loop_body_graph_0 : [num_users=1] = get_attr[target=while_loop_body_graph_0]

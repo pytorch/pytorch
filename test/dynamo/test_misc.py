@@ -9732,6 +9732,27 @@ def ___make_guard_fn():
             loss = torch.compile(model, backend="aot_eager")(inp).sum()
             loss.backward()
 
+    def test_compile_with_unbacked_fake_tensors(self):
+        # When FakeTensors with unbacked SymInt dimensions (from
+        # data-dependent ops) are passed to torch.compile, the inner
+        # Dynamo creates a fresh ShapeEnv. Cross-ShapeEnv wrapping must
+        # handle unbacked SymInts that have no hint.
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        fake_mode = FakeTensorMode(
+            shape_env=torch.fx.experimental.symbolic_shapes.ShapeEnv()
+        )
+        with fake_mode:
+            x = torch.randn(3, 4)
+            mask = torch.randn(3) > 0
+            filtered = x[mask]  # shape [u0, 4], unbacked
+
+        def fn(x):
+            return x * 2
+
+        result = torch.compile(fn, backend="eager")(filtered)
+        self.assertEqual(result.shape, filtered.shape)
+
     def test_scalar_tensor_is_equivalent_to_symint_argument(self):
         class GumbelTopKSampler(torch.nn.Module):
             def __init__(self, T, k):

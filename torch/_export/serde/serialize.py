@@ -1518,8 +1518,11 @@ class GraphModuleSerializer(metaclass=Final):
                 # list of int tuples
                 return Argument.create(as_int_lists=[list(t) for t in arg])
             else:
-                raise SerializeError(
-                    f"Unsupported list/tuple argument type: {[type(a) for a in arg]}"
+                # Mixed-type tuple/list (e.g., while_loop carried inputs
+                # with both int and tensor args). Serialize each element
+                # individually as a recursive Argument.
+                return Argument.create(
+                    as_arguments=[self.serialize_input(a) for a in arg]
                 )
         elif isinstance(arg, torch.dtype):
             return Argument.create(as_scalar_type=_TORCH_TO_SERIALIZE_DTYPE[arg])
@@ -3077,6 +3080,8 @@ class GraphModuleDeserializer(metaclass=Final):
                 ]
             elif typ_ in ("as_sym_ints", "as_sym_bools", "as_sym_floats"):
                 return [self.deserialize_sym_argument(arg) for arg in value]
+            elif typ_ == "as_arguments":
+                return [self.deserialize_input(arg) for arg in value]
             elif typ_ == "as_optional_tensors":
 
                 def deserialize_optional_tensor_args(a):
@@ -3760,6 +3765,8 @@ def _canonicalize_graph(
             return None
         elif a.type == "as_nested_tensors":
             return a.as_nested_tensors
+        elif a.type == "as_arguments":
+            return [_get_argument(arg) for arg in a.as_arguments]
         else:
             raise AssertionError(f"Unknown input type to the ExportedProgram: {a}")
 
