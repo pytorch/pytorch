@@ -1553,7 +1553,8 @@ MICROGEMM_EPILOGUE_DECL_ARGS
     constexpr int block_k = {{block_k}};
     if constexpr (do_epilogue) {
         if(C_pre != nullptr && Y != nullptr) {
-            int inject_period = (m_end * {{num_columns}} + (last_k_offset / block_k) - 1) / (last_k_offset / block_k);
+            int num_k_blocks = last_k_offset / block_k;
+            int inject_period = (num_k_blocks > 0) ? ((m_end * {{num_columns}} + num_k_blocks - 1) / num_k_blocks) : 1;
             int inject = 0;
             if C10_LIKELY (Nr == 16 || Nr == 32) {
                 {{kernel.unroll_pragma(num_rows)}}
@@ -1667,12 +1668,12 @@ MICROGEMM_EPILOGUE_AMX_INJECT_TAIL
                     arg_name = kernel.args.input(input_name)
                     arg = V.graph.get_buffer(input_name)
                     if len(arg.get_size()) == 1:
-                        res.writeline(f"{arg_name}_pre = {arg_name} + {arg.get_stride()[0]} * n,")
+                        res.writeline(f"{arg_name}_pre = {arg_name} + {arg.get_stride()[0]} * n;")
                     else:
                         arg = ir.TensorBox.create(arg)
                         arg = view(arg, [-1, arg.get_size()[-1]])
                         assert len(arg.get_size()) == 2
-                        res.writeline(f"{arg_name}_pre = {arg_name}+ {arg.get_stride()[0]} * m + {arg.get_stride()[1]} * n,")
+                        res.writeline(f"{arg_name}_pre = {arg_name}+ {arg.get_stride()[0]} * m + {arg.get_stride()[1]} * n;")
 
                 return res.getvalue().rstrip("\n")
 
@@ -1684,12 +1685,12 @@ MICROGEMM_EPILOGUE_AMX_INJECT_TAIL
                     arg_name = kernel.args.input(input_name)
                     arg = V.graph.get_buffer(input_name)
                     if len(arg.get_size()) == 1:
-                        res.writeline(f"{arg_name}_pre = {arg_name} + {arg.get_stride()[0]} * n,")
+                        res.writeline(f"{arg_name}_pre = {arg_name} + {arg.get_stride()[0]} * n;")
                     else:
                         arg = ir.TensorBox.create(arg)
                         arg = view(arg, [-1, arg.get_size()[-1]])
                         assert len(arg.get_size()) == 2
-                        res.writeline(f"{arg_name}_pre = {arg_name}+ {arg.get_stride()[0]} * m_tail + {arg.get_stride()[1]} * n,")
+                        res.writeline(f"{arg_name}_pre = {arg_name}+ {arg.get_stride()[0]} * m_tail + {arg.get_stride()[1]} * n;")
 
                 return res.getvalue().rstrip("\n")
 
