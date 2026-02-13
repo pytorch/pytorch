@@ -289,6 +289,7 @@ def bucketize_single_dim_strategy(
        result as bucketizing the reduced input values.
     """
     input_meta, _boundaries_meta = args_schema
+    assert isinstance(input_meta, TensorMeta)
     strategies: list[list[Placement | _ShardingPlaceholder]] = []
     for dim in range(len(input_meta.shape)):
         strategies.append(
