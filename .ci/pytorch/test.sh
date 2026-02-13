@@ -888,11 +888,9 @@ test_inductor_halide() {
 }
 
 test_inductor_pallas() {
-  # Set TPU target for TPU tests
   if [[ "${TEST_CONFIG}" == *inductor-pallas-tpu* ]]; then
-    export PALLAS_TARGET_TPU=1
-    # Check if TPU backend is available
-    python -c "import jax; devices = jax.devices('tpu'); print(f'Found {len(devices)} TPU device(s)'); assert len(devices) > 0, 'No TPU devices found'"
+    export PYTORCH_TESTING_DEVICE_ONLY_FOR="tpu"
+    python -c "from torch.utils._pallas import has_tpu_pallas; assert has_tpu_pallas(), 'torch_tpu and pallas are required for TPU tests'"
   fi
   python test/run_test.py --include inductor/test_pallas.py --verbose
   assert_git_not_dirty
