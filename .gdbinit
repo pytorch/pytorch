@@ -1,4 +1,4 @@
-# automatically load the pytoch-gdb extension.
+# automatically load the pytorch-gdb extension.
 #
 # gdb automatically tries to load this file whenever it is executed from the
 # root of the pytorch repo, but by default it is not allowed to do so due to
