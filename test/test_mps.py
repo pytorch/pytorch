@@ -12737,7 +12737,7 @@ class TestConsistency(TestCaseMPS):
 
             opt_dtype = None
             # CPU implementation is less precise than MPS one so compare MPS to full fp32
-            if dtype in [torch.float16, torch.bfloat16] and op.name == "grid_sampler_3d":
+            if dtype in [torch.float16, torch.bfloat16] and op.name in ["grid_sampler_2d", "grid_sampler_3d"]:
                 opt_dtype = torch.float32
             mps_out, cpu_out, cpu_sample = self._run_op(op, mps_sample, opt_dtype)
 

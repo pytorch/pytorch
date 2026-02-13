@@ -1190,6 +1190,24 @@ class TestFlexFlash(InductorTestCase):
 
         flash_vs_triton(q, k, v, block_mask=block_mask)
 
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_flash_backend_raises_on_grad_logsumexp(self, device, dtype):
+        from torch._dynamo.exc import BackendCompilerFailed
+
+        q, k, v = create_test_tensors(dtype=dtype, device=device, requires_grad=True)
+        lse_mask = torch.randn(2, 4, 512, device=device)
+
+        compiled_flex = torch.compile(flex_attention)
+        out, lse = compiled_flex(
+            q, k, v, return_lse=True, kernel_options={"BACKEND": "FLASH"}
+        )
+        loss = out.mean() + (lse * lse_mask).sum()
+        with self.assertRaisesRegex(
+            BackendCompilerFailed,
+            "FLASH backend backward does not support differentiating through logsumexp",
+        ):
+            loss.backward()
+
 
 instantiate_device_type_tests(TestFlexFlash, globals(), only_for="cuda")
 
