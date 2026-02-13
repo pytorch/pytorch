@@ -1284,5 +1284,64 @@ DistTensorOpsTestWithLocalTensor = create_local_tensor_test_class(
     DistTensorOpsTest,
 )
 
+
+@torch.library.custom_op("testlib::modified_cat_op", mutates_args=())
+def modified_cat_op(a: list[torch.Tensor], b: list[torch.Tensor]) -> torch.Tensor:
+    return torch.cat(a, dim=0)
+
+
+@modified_cat_op.register_fake
+def _modified_cat_op_fake(a, b):
+    total_rows = sum(t.shape[0] for t in a)
+    return torch.empty(
+        total_rows, *a[0].shape[1:], dtype=a[0].dtype, device=a[0].device
+    )
+
+
+class DistTensorCppPyTree(DTensorTestBase):
+    @with_comms
+    def test_cpp_cat(self):
+        mesh = self.build_device_mesh()
+        cases = [
+            ((8, 8), (8, 8), 0, [Shard(1)], (Shard(1),)),
+            ((4, 8), (6, 8), 0, [Replicate()], (Replicate(),)),
+            ((8, 8), (8, 8), 0, [Shard(0)], (Replicate(),)),
+        ]
+        for shape_a, shape_b, cat_dim, placements, expected_placements in cases:
+            global_a = torch.randn(shape_a)
+            global_b = torch.randn(shape_b)
+            dt_a = distribute_tensor(global_a, mesh, placements)
+            dt_b = distribute_tensor(global_b, mesh, placements)
+            # run twice to test cache hit
+            for _ in range(2):
+                result = torch.cat([dt_a, dt_b], dim=cat_dim)
+                self.assertEqual(result.placements, expected_placements)
+                self.assertEqual(
+                    result.full_tensor(), torch.cat([global_a, global_b], dim=cat_dim)
+                )
+
+    @with_comms
+    def test_two_list_op_cache_collision(self):
+        from test_op_strategy import op_strategy_context
+
+        from torch.distributed.tensor._op_schema import RuntimeSchemaInfo
+        from torch.distributed.tensor._ops.utils import replicate_op_strategy
+
+        mesh = self.build_device_mesh()
+        op = torch.ops.testlib.modified_cat_op
+
+        with op_strategy_context(
+            op.default,
+            replicate_op_strategy,
+            schema_info=RuntimeSchemaInfo(needs_pytree=True),
+        ):
+            a = distribute_tensor(torch.randn(4, 8), mesh, [Replicate()])
+            b = distribute_tensor(torch.randn(4, 8), mesh, [Replicate()])
+
+            op([a], [b])  # cache miss, populates cache
+            result = op([a, b], [])  # should still miss
+            self.assertEqual(result.shape, torch.Size([8, 8]))
+
+
 if __name__ == "__main__":
     run_tests()

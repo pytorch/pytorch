@@ -2361,9 +2361,10 @@ create_native_op_schema(
       case TensorFlavor::NON_TENSOR: {
         // Check if this is a list/tuple that might contain DTensors (e.g.,
         // torch.cat)
-        bool handled_list = false;
         if (arg.isList()) {
           const auto list = arg.toList();
+          comparison_key_hash = hash_combine(comparison_key_hash, list.size());
+          comparison_key.emplace_back(static_cast<int64_t>(list.size()));
           // pytree unflattening
           for (const auto& item : list) {
             const auto [item_flavor, item_py_tensor] =
@@ -2374,12 +2375,10 @@ create_native_op_schema(
               if (is_symint) {
                 return std::nullopt;
               }
-              handled_list = true;
             } else if (
                 item_flavor == TensorFlavor::EXACTLY_TENSOR ||
                 item_flavor == TensorFlavor::NON_DTENSOR_TENSOR_SUBCLASS) {
               handle_exactly_tensor(item_py_tensor);
-              handled_list = true;
             } else { // non-tensor
               c10::IValue arg = item;
               if (arg.isTensor() && !arg.toTensor().defined()) {
@@ -2392,8 +2391,7 @@ create_native_op_schema(
               comparison_key.emplace_back(std::move(arg));
             }
           }
-        }
-        if (!handled_list) {
+        } else {
           // non DTensor/Tensor args (i.e. int/float/bool), just add to
           // local_args
           handle_non_dtensor_arg(idx, arg);
@@ -2458,6 +2456,9 @@ create_native_op_schema(
           bool handled_list = false;
           if (argument_it->isList()) {
             const auto list = argument_it->toList();
+            comparison_key_hash =
+                hash_combine(comparison_key_hash, list.size());
+            comparison_key.emplace_back(static_cast<int64_t>(list.size()));
             for (const auto& item : list) {
               const auto [item_flavor, item_py_tensor] =
                   check_for_dtensor_or_tensor(item);
