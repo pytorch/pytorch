@@ -68,7 +68,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
     "12.9": (
         "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.9.1; platform_system == 'Linux' | "  # noqa: B950
         "cuda-bindings==12.9.4; platform_system == 'Linux' | "
-        "nvidia-cudnn-cu12==9.19.0.56; platform_system == 'Linux' | "
+        "nvidia-cudnn-cu12==9.17.1.4; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | "
         "nvidia-nccl-cu12==2.28.9; platform_system == 'Linux' | "
         "nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'"
