@@ -942,7 +942,7 @@ class BuiltinMethodVariable(BaseUserFunctionVariable):
         method_self = self.fn.__self__
         name = self.fn.__name__
         obj_source = self.source and AttrSource(self.source, "__self__")
-        obj_vt = VariableTracker.build(tx, method_self, obj_source)
+        obj_vt = VariableTracker.build(tx, method_self, obj_source, realize=True)
         return obj_vt.call_method(tx, name, args, kwargs)
 
 
@@ -2086,6 +2086,7 @@ class SkipFunctionVariable(VariableTracker):
                     "is created inside the parent function that is getting "
                     "compiled. This is not supported for now."
                 )
+                # pyrefly: ignore [implicit-any]
                 hints = []
             reason = self.reason if self.reason else "<missing reason>"
             unimplemented(
@@ -3241,4 +3242,33 @@ class SparseTensorCreationSkipVariable(SkipFunctionVariable):
                 "Sparse tensors require specialized handling that is not yet implemented in the compiler."
             ),
             hints=[*graph_break_hints.SPARSE_TENSOR],
+        )
+
+
+class TritonSetAllocatorSkipVariable(SkipFunctionVariable):
+    """
+    Skip variable for triton.set_allocator with a clear message to move it outside the compiled region.
+    """
+
+    def __init__(self, value: Any, **kwargs: Any) -> None:
+        reason = "triton.set_allocator is not supported inside torch.compile"
+        super().__init__(value, reason=reason, **kwargs)
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        unimplemented(
+            gb_type="triton.set_allocator not supported",
+            context="triton.set_allocator called inside compiled region",
+            explanation=(
+                "triton.set_allocator is not supported inside torch.compile. "
+                "It modifies global Triton allocator state and cannot be traced."
+            ),
+            hints=[
+                "Move triton.set_allocator() outside of the torch.compile region "
+                "(call it before the compiled function)."
+            ],
         )

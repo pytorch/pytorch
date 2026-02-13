@@ -4052,9 +4052,11 @@ def sample_inputs_conv1d(op_info, device, dtype, requires_grad, **kwargs):
 
 
 def error_inputs_conv1d(opinfo, device, **kwargs):
-    make_arg = partial(make_tensor, device=device, dtype=torch.float64)
+    dtype = torch.float64 if device != 'mps:0' else torch.float32
+    cdtype = torch.complex128 if device != 'mps:0' else torch.complex64
+    make_arg = partial(make_tensor, device=device, dtype=dtype)
     make_int_arg = partial(make_tensor, device=device, dtype=torch.int64)
-    make_complex_arg = partial(make_tensor, device=device, dtype=torch.complex128)
+    make_complex_arg = partial(make_tensor, device=device, dtype=cdtype)
 
     # error inputs for different dtypes of input tensor and bias
     yield ErrorInput(
@@ -4112,9 +4114,11 @@ def error_inputs_conv1d(opinfo, device, **kwargs):
 
 
 def error_inputs_conv2d(opinfo, device, **kwargs):
-    make_arg = partial(make_tensor, device=device, dtype=torch.float64)
+    dtype = torch.float64 if device != 'mps:0' else torch.float32
+    cdtype = torch.complex128 if device != 'mps:0' else torch.complex64
+    make_arg = partial(make_tensor, device=device, dtype=dtype)
     make_int_arg = partial(make_tensor, device=device, dtype=torch.int64)
-    make_complex_arg = partial(make_tensor, device=device, dtype=torch.complex128)
+    make_complex_arg = partial(make_tensor, device=device, dtype=cdtype)
 
     # error inputs for different dtypes of input tensor and bias
     yield ErrorInput(
@@ -4249,9 +4253,11 @@ def sample_inputs_conv3d(opinfo, device, dtype, requires_grad, **kwargs):
 
 
 def error_inputs_conv3d(opinfo, device, **kwargs):
-    make_arg = partial(make_tensor, device=device, dtype=torch.float64)
+    dtype = torch.float64 if device != 'mps:0' else torch.float32
+    cdtype = torch.complex128 if device != 'mps:0' else torch.complex64
+    make_arg = partial(make_tensor, device=device, dtype=dtype)
     make_int_arg = partial(make_tensor, device=device, dtype=torch.int64)
-    make_complex_arg = partial(make_tensor, device=device, dtype=torch.complex128)
+    make_complex_arg = partial(make_tensor, device=device, dtype=cdtype)
 
     # error inputs for different dtypes of input tensor and bias
     yield ErrorInput(
@@ -4996,8 +5002,13 @@ def sample_inputs_nan_reduction(supports_multiple_dims):
     return fn
 
 def sample_inputs_reduction_quantile(op_info, device, dtype, requires_grad, **kwargs):
-    test_quantiles = (0.5, make_tensor((2,), dtype=dtype, device=device, low=0, high=1, requires_grad=requires_grad))
-    test_interpolations = ['linear', 'midpoint']
+    test_quantiles = (
+        0.5,
+        make_tensor((2,), dtype=dtype, device=device, low=0, high=1, requires_grad=requires_grad),
+        0.0,
+        1.0,
+    )
+    test_interpolations = ['linear', 'midpoint', 'lower', 'higher', 'nearest']
 
     for quantiles in test_quantiles:
         for t in _generate_reduction_inputs(device, dtype, requires_grad):
@@ -5012,6 +5023,39 @@ def sample_inputs_reduction_quantile(op_info, device, dtype, requires_grad, **kw
                     kwargs['interpolation'] = interpolation
                     input = t.clone().requires_grad_(requires_grad)
                     yield SampleInput(input, quantiles, **kwargs)
+
+
+def sample_inputs_reduction_nanquantile(op_info, device, dtype, requires_grad, **kwargs):
+    # All the standard quantile inputs
+    yield from sample_inputs_reduction_quantile(op_info, device, dtype, requires_grad, **kwargs)
+
+    # NaN-specific inputs — skip when requires_grad since NaN breaks gradients
+    if requires_grad:
+        return
+
+    nan_shapes = ((5,), (3, 4), (2, 3, 4))
+    test_interpolations = ['linear', 'midpoint', 'lower', 'higher', 'nearest']
+    q = make_tensor((3,), dtype=dtype, device=device, low=0, high=1)
+
+    for shape in nan_shapes:
+        # Sparse NaNs
+        t = make_tensor(shape, dtype=dtype, device=device)
+        mask = torch.rand(shape, device=device) < 0.2
+        t[mask] = float('nan')
+        yield SampleInput(t, q)
+        for dim in range(len(shape)):
+            for interpolation in test_interpolations:
+                t_clone = t.clone()
+                yield SampleInput(t_clone, q, dim=dim, keepdim=False, interpolation=interpolation)
+
+    # All-NaN input
+    t = torch.full((4,), float('nan'), dtype=dtype, device=device)
+    yield SampleInput(t, q)
+
+    # All-NaN slice along a dim
+    t = make_tensor((3, 4), dtype=dtype, device=device)
+    t[1, :] = float('nan')
+    yield SampleInput(t, q, dim=1, keepdim=True)
 
 def sample_inputs_reduction_count_nonzero(*args, **kwargs):
     """Sample inputs for count_nonzero"""
@@ -15038,7 +15082,7 @@ op_db: list[OpInfo] = [
            check_batched_forward_grad=False),
     OpInfo('nanquantile',
            dtypes=floating_types(),
-           sample_inputs_func=sample_inputs_reduction_quantile,
+           sample_inputs_func=sample_inputs_reduction_nanquantile,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            # See https://github.com/pytorch/pytorch/issues/66357
@@ -16110,8 +16154,6 @@ op_db: list[OpInfo] = [
                             'test_nnc_correctness', dtypes=(torch.complex64, torch.complex128)),
                # The following dtypes did not work in forward but are listed by the OpInfo: {torch.int64}.
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-               # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_errors', device_type='mps'),
                # RuntimeError: Convolution is supported only for Floating types
                DecorateInfo(
                    unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
@@ -16158,9 +16200,6 @@ op_db: list[OpInfo] = [
                             'test_nnc_correctness', dtypes=(torch.complex64, torch.complex128)),
                # RuntimeError: Convolution is supported only for Floating types
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-               # TypeError: Cannot convert a MPS Tensor to float64 dtype as the
-               # MPS framework doesn't support float64
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_errors', device_type='mps'),
                # AssertionError: Tensor-likes are not close!
                DecorateInfo(
                    unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
@@ -16221,9 +16260,6 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_compare_cpu'),
                # RuntimeError: Convolution is supported only for Floating types
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-               # TypeError: Cannot convert a MPS Tensor to float64 dtype as the
-               # MPS framework doesn't support float64
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_errors', device_type='mps'),
                # RuntimeError: Convolution is supported only for Floating types
                DecorateInfo(
                    unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
