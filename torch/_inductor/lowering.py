@@ -578,7 +578,7 @@ def promote_constants(inputs, override_return_dtype=None, type_promotion_kind=No
     def round_pyfloat_to_dtype(value, dtype):
         # To match eager semantics, Python float literals should be first rounded to
         # dtype before pointwise computation. Low-precision dtypes compute in higher
-        # precision via opmath. This ensures the scalar is the widened low-precision
+        # precision via op math. This ensures the scalar is the widened low-precision
         # value.
         if isinstance(value, float) and dtype in (torch.float16, torch.bfloat16):
             return torch.tensor(value, dtype=dtype).item()
