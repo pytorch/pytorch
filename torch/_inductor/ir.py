@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import copy
 import dataclasses
 import functools
 import itertools
@@ -4057,6 +4058,15 @@ class FlexibleLayout(Layout):
     """
 
     allow_indexing = False
+
+    def get_fixed_layout_without_freezing(self) -> FixedLayout:
+        """
+        Compute what the strides would be if this layout were frozen,
+        without actually modifying the layout. This is used for speculative
+        stride computation during Triton template code generation.
+        """
+        # Create a temporary copy and use as_fixed to keep freezing path in sync
+        return copy.deepcopy(self).as_fixed()
 
     # WARNING!  This doesn't handle zero size tensors correctly
     @staticmethod
