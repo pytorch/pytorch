@@ -342,7 +342,6 @@ class BytecodeTracingTimings:
     get_fake_value_ns: int = 0
     create_proxy_ns: int = 0
     wrap_to_fake_tensor_and_record_ns: int = 0
-    variable_builder_call_ns: int = 0
 
     def report_and_reset(self) -> None:
         """Flush accumulated timings to the bytecode_tracing chromium event
