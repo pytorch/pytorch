@@ -515,7 +515,8 @@ class InputObserverInfo:
                         **dict(zip(pos_names, flat_dynamic_shapes[:n_args])),
                         **dict(
                             zip(
-                                list(self._best_candidate.kwargs), flat_dynamic_shapes[n_args:]
+                                list(self._best_candidate.kwargs),
+                                flat_dynamic_shapes[n_args:],
                             )
                         ),
                         **dict.fromkeys(self._best_candidate.cst_kwargs, None),
@@ -523,7 +524,9 @@ class InputObserverInfo:
                 )
             # positional arguments needs to be moved to the named arguments
             n_args = min(len(self._best_candidate.args), self.args_name_and_position[1])
-            i_kwargs = max(len(self._best_candidate.args), self.args_name_and_position[1])
+            i_kwargs = max(
+                len(self._best_candidate.args), self.args_name_and_position[1]
+            )
             var_pos = self.args_name_and_position[0]
             pos_names = self.signature_names[:n_args]
             return self._post_process_for_kwargs(
@@ -969,9 +972,7 @@ class InputObserver:
                 self.info._captured_inputs,
                 self.info.signature_names,
             )
-        return self.info.infer_arguments(
-            flat=flat, as_args_kwargs=as_args_kwargs
-        )
+        return self.info.infer_arguments(flat=flat, as_args_kwargs=as_args_kwargs)
 
     def check_discrepancies(
         self,
@@ -1044,7 +1045,9 @@ class InputObserver:
 
             duration = time.perf_counter() - begin
             if error:
-                diff: dict[str, str | int | float | bool] = dict(error=error, SUCCESS=False)
+                diff: dict[str, str | int | float | bool] = dict(
+                    error=error, SUCCESS=False
+                )
             elif ort_outputs is None or len(outputs) != len(ort_outputs):
                 diff = dict(SUCCESS=False, error="not the same number of outputs")
             else:
