@@ -50,6 +50,7 @@ from .dicts import (
     FrozensetVariable,
     MappingProxyVariable,
     NNModuleHooksDictVariable,
+    OrderedSetClassVariable,
     OrderedSetVariable,
     SetVariable,
 )
@@ -62,6 +63,7 @@ from .functions import (
     FunctionDecoratedByContextlibContextManagerVariable,
     FunctoolsPartialVariable,
     FunctoolsWrapsVariable,
+    InspectSignatureVariable,
     LocalGeneratorFunctionVariable,
     LocalGeneratorObjectVariable,
     NestedUserFunctionVariable,
@@ -72,6 +74,7 @@ from .functions import (
     SparseTensorCreationSkipVariable,
     TMADescriptorExperimentalVariable,
     TMADescriptorStableVariable,
+    TritonSetAllocatorSkipVariable,
     UserFunctionVariable,
     UserMethodVariable,
     WrapperUserFunctionVariable,
@@ -148,6 +151,7 @@ from .tensor import (
 from .torch import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
 from .user_defined import (
     FrozenDataClassVariable,
+    InspectVariable,
     MutableMappingVariable,
     RemovableHandleVariable,
     UserDefinedClassVariable,
@@ -184,6 +188,8 @@ __all__ = [
     "FakeItemVariable",
     "GetAttrVariable",
     "GradModeVariable",
+    "InspectSignatureVariable",
+    "InspectVariable",
     "IteratorVariable",
     "ItertoolsVariable",
     "LambdaVariable",

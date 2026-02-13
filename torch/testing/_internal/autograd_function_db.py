@@ -331,8 +331,10 @@ class NumpyTake(torch.autograd.Function):
 
     @staticmethod
     def jvp(ctx, x_tangent, ind_tangent, ind_inv_tangent, _):
-        assert ind_tangent is None
-        assert ind_inv_tangent is None
+        if ind_tangent is not None:
+            raise AssertionError("Expected ind_tangent to be None")
+        if ind_inv_tangent is not None:
+            raise AssertionError("Expected ind_inv_tangent to be None")
         ind, ind_inv = ctx.saved_tensors
         return NumpyTake.apply(x_tangent, ind, ind_inv, ctx.dim)
 
