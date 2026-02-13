@@ -11,6 +11,7 @@ from typing import Optional
 import torch
 import torch.distributed as dist
 from functorch.compile import aot_function
+from torch._dynamo.testing import AotEagerAndRecordGraphs, normalize_gm
 from torch._higher_order_ops.compile_print_wrapper import (
     compile_print,
     make_compile_print,
@@ -177,6 +178,7 @@ class TestCompilePrint(TestCase):
 
         aot = run_aot_function(make_fn, inputs)
         self.assertTrue(aot.fwd_count >= 1)
+        self.assertTrue(aot.bwd_count >= 1)
         self.assertEqual(eager.grads[0], aot.grads[0])
 
     def test_multiple_tensors(self):
@@ -208,6 +210,7 @@ class TestCompilePrint(TestCase):
 
         aot = run_aot_function(make_fn, inputs)
         self.assertTrue(aot.fwd_count >= 2)
+        self.assertTrue(aot.bwd_count >= 2)
         self.assertEqual(eager.grads[0], aot.grads[0])
         self.assertEqual(eager.grads[1], aot.grads[1])
 
@@ -285,6 +288,76 @@ class TestCompilePrint(TestCase):
         aot = run_aot_function(make_fn, inputs)
 
         self.assertTrue(_has_invoke_leaf_function_node(aot.fw_graph))
+        self.assertTrue(_has_invoke_leaf_function_node(aot.bw_graph))
+        self.assertExpectedInline(
+            normalize_gm(aot.fw_graph.print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_1: "f32[3, 3]"):
+        _tree_spec_constant0 = self._tree_spec_constant0
+        _tree_spec_constant1 = self._tree_spec_constant1
+        invoke_leaf_function = torch.ops.higher_order.invoke_leaf_function(_tree_spec_constant0, _tree_spec_constant1, primals_1, '', None);  _tree_spec_constant0 = _tree_spec_constant1 = invoke_leaf_function = None
+        sum_1: "f32[]" = torch.ops.aten.sum.default(primals_1);  primals_1 = None
+        return (sum_1,)
+""",  # noqa: B950
+        )
+        self.assertExpectedInline(
+            normalize_gm(aot.bw_graph.print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, tangents_1: "f32[]"):
+        expand: "f32[3, 3]" = torch.ops.aten.expand.default(tangents_1, [3, 3]);  tangents_1 = None
+        _tree_spec_constant2 = self._tree_spec_constant2
+        _tree_spec_constant3 = self._tree_spec_constant3
+        invoke_leaf_function_1 = torch.ops.higher_order.invoke_leaf_function(_tree_spec_constant2, _tree_spec_constant3, expand, '', None);  _tree_spec_constant2 = _tree_spec_constant3 = invoke_leaf_function_1 = None
+        return (expand,)
+""",  # noqa: B950
+        )
+
+    def test_compile_graph_has_opaque_node(self):
+        cp = make_compile_print(
+            fwd_f=lambda t: None,
+            bwd_f=lambda t: None,
+        )
+
+        def f(x):
+            cp(x)
+            return x.sum()
+
+        backend = AotEagerAndRecordGraphs()
+        compiled_f = torch.compile(f, backend=backend, fullgraph=True)
+        x = torch.randn(3, 3, requires_grad=True)
+        out = compiled_f(x)
+        out.backward()
+
+        self.assertEqual(len(backend.fw_graphs), 1)
+        self.assertEqual(len(backend.bw_graphs), 1)
+        self.assertTrue(_has_invoke_leaf_function_node(backend.fw_graphs[0]))
+        self.assertExpectedInline(
+            normalize_gm(backend.fw_graphs[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_1: "f32[3, 3]"):
+        _tree_spec_constant0 = self._tree_spec_constant0
+        _tree_spec_constant1 = self._tree_spec_constant1
+        invoke_leaf_function = torch.ops.higher_order.invoke_leaf_function(_tree_spec_constant0, _tree_spec_constant1, primals_1, '', None);  _tree_spec_constant0 = _tree_spec_constant1 = invoke_leaf_function = None
+
+        sum_1: "f32[]" = torch.ops.aten.sum.default(primals_1);  primals_1 = None
+        return (sum_1,)
+""",  # noqa: B950
+        )
+        # The backward hook runs through autograd at runtime, not inside
+        # the compiled backward graph, so invoke_leaf_function doesn't
+        # appear in bw_graph (unlike aot_function where it does).
+        self.assertExpectedInline(
+            normalize_gm(backend.bw_graphs[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, tangents_1: "f32[]"):
+        expand: "f32[3, 3]" = torch.ops.aten.expand.default(tangents_1, [3, 3]);  tangents_1 = None
+        return (expand,)
+""",
+        )
 
     def test_gradients_unchanged(self):
         """cp should not affect gradient values."""
@@ -350,9 +423,7 @@ class TestCompilePrint(TestCase):
         self.assertIn("bwd", output)
         self.assertGreaterEqual(output.count("tensor("), 2)
 
-        # aot_function mode — backward hooks don't fire here because
-        # only the leaf function body runs at runtime, not compile_print_impl
-        # which registers the hooks. Forward print still exercises the fix.
+        # aot_function mode
         inputs = [torch.randn(3, 3, requires_grad=True)]
         cp = make_compile_print(
             fwd_f=lambda t: print("fwd", t),
@@ -363,7 +434,8 @@ class TestCompilePrint(TestCase):
             run_aot_function(lambda _cp: make_fn(cp), inputs)
         output = buf.getvalue()
         self.assertIn("fwd", output)
-        self.assertIn("tensor(", output)
+        self.assertIn("bwd", output)
+        self.assertGreaterEqual(output.count("tensor("), 2)
 
     def test_multiple_compile_prints(self):
         """Two separate make_compile_print instances in the same function."""
@@ -445,6 +517,8 @@ class TestCompilePrint(TestCase):
         self.assertTrue(len(fwd1) >= 1)
         self.assertTrue(len(fwd2) >= 1)
         out.backward()
+        self.assertTrue(len(bwd1) >= 1)
+        self.assertTrue(len(bwd2) >= 1)
         self.assertEqual(eager_grads[0], cloned[0].grad)
         self.assertEqual(eager_grads[1], cloned[1].grad)
 

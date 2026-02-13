@@ -56,6 +56,12 @@ def make_compile_print(
 
     Returns:
         A side-effect-only function that takes tensors and returns None.
+
+    Note:
+        Backward function bwd_f is called in both torch.compile and aot_function, but
+        through different mechanisms. With aot_function, bwd_f appears as an
+        explicit invoke_leaf_function graph node in the backward graph. With
+        torch.compile, bwd_f runs as a runtime hook on the tensor.
     """
 
     @leaf_function
@@ -77,41 +83,44 @@ def make_compile_print(
     ) -> tuple[torch.Tensor, ...]:
         return (tensors[0].new_zeros(()),)
 
+    # Backward callback is also a leaf function so it's opaque to tracing.
+    # When register_hook fires during aot_autograd's backward trace, this
+    # creates an invoke_leaf_function node in the backward graph.
+    @leaf_function
+    def bwd_leaf_fn(
+        grad: torch.Tensor, tag: str = "", ranks: int | set[int] | None = None
+    ) -> tuple[torch.Tensor, ...]:
+        if _rank_enabled(ranks):
+            prefix = _make_prefix(tag)
+            if prefix:
+                print(f"{prefix}[bwd]")
+            bwd_f(grad)
+        return (grad.new_zeros(()),)
+
+    @bwd_leaf_fn.register_fake  # pyrefly: ignore[missing-attribute]
+    def bwd_fake_fn(
+        grad: torch.Tensor, tag: str = "", ranks: int | set[int] | None = None
+    ) -> tuple[torch.Tensor, ...]:
+        return (grad.new_zeros(()),)
+
     def compile_print_impl(
         *args: torch.Tensor, tag: str = "", ranks: int | set[int] | None = None
     ) -> None:
         fwd_leaf_fn(*args, tag=tag, ranks=ranks)
 
-        hook_fn = bwd_f
-        if tag or ranks is not None:
+        for t in args:
+            if isinstance(t, torch.Tensor) and t.requires_grad:
+                # The hook calls bwd_leaf_fn (a leaf function). During aot tracing,
+                # register_hook fires in the backward trace, and bwd_leaf_fn creates
+                # an invoke_leaf_function node in the backward graph. At runtime,
+                # that node executes the real bwd_leaf_fn.
+                def _make_hook(_tag, _ranks):
+                    def hook(grad):
+                        bwd_leaf_fn(grad, tag=_tag, ranks=_ranks)
 
-            def filtered_bwd_f(t: torch.Tensor) -> None:
-                if _rank_enabled(ranks):
-                    prefix = _make_prefix(tag)
-                    if prefix:
-                        print(f"{prefix}[bwd]")
-                    bwd_f(t)
+                    return hook
 
-            hook_fn = filtered_bwd_f
-
-        # Backward hooks are registered on the original tensors. Since the tensors
-        # are used downstream (e.g. x.sum()), gradients flow through them and the
-        # hooks fire during backward.
-        # Inside torch.compile, Dynamo traces through this function and handles
-        # register_hook. Outside Dynamo, skip hooks during make_fx/aot_function
-        # tracing where tensors are proxies or fakes.
-        if torch.compiler.is_compiling():
-            for t in args:
-                if isinstance(t, torch.Tensor) and t.requires_grad:
-                    t.register_hook(hook_fn)
-        else:
-            from torch._guards import detect_fake_mode
-            from torch.fx.experimental.proxy_tensor import get_proxy_mode
-
-            if get_proxy_mode() is None and detect_fake_mode(args) is None:
-                for t in args:
-                    if isinstance(t, torch.Tensor) and t.requires_grad:
-                        t.register_hook(hook_fn)
+                t.register_hook(_make_hook(tag, ranks))
 
     return compile_print_impl
 
