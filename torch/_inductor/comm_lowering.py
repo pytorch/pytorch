@@ -518,7 +518,7 @@ def register_symm_mem_lowerings():
             out_op=symm_mem.one_shot_all_reduce_copy_out.default,
             tensor_inputs=[symm_buffer, local_input],
             constant_args=[reduce_op, group_name],
-            output_like=local_input,
+            output_like=symm_buffer,
         )
 
     @register_lowering(symm_mem.one_shot_all_reduce_copy_out)
