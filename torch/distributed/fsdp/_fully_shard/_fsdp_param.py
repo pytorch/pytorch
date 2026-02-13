@@ -559,10 +559,8 @@ class FSDPParam:
                 torch.no_grad(),
                 torch.autograd._unsafe_preserve_version_counter(self._unsharded_param),
             ):
-                # NOTE: Under compile, if an unsharded param goes through
-                # resize_(full) -> copy_ -> resize_(0) pattern, we will remove those
-                # resize_ and copy_ ops in a compiler graph pass
-                # `remove_fsdp2_unsharded_param_graph_input_usage` to recover performance.
+                # NOTE: resize_(full) -> copy_ -> resize_(0) pattern for
+                # the unsharded param storage.
                 self._unsharded_param.untyped_storage().resize_(
                     self._unsharded_param.numel() * self._unsharded_param.itemsize
                 )
