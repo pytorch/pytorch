@@ -309,19 +309,18 @@ static inline void launch_vectorized_kernel(
   const uint16_t max_vec_size = memory::can_vectorize_up_to<func_t>(data);
   uint16_t vec_size = 16 / static_cast<uint16_t>(sizeof(cpp_type));
   vec_size = std::min<uint16_t>(vec_size, max_vec_size);
-  // due to excessive binary size the `vectorized_elementwise_kernel` of
-  // the size 8 is compiled for sm_90 and sm_10x only.
-  // TODO: Lift this limitation when CUDA 12.x support is fully dropped
+  // Vec8 for 1-byte data was disabled due to an NVCC bug causing numerical
+  // mismatches with uint8 on sm80 and sm90. Fixed in CUDA 12.8.
   cudaDeviceProp* p = at::cuda::getDeviceProperties(stream.device().index());
-  if (p->major != 9 && p->major != 10) {
+  const int computeCapability = p->major * 10 + p->minor;
+  if (computeCapability != 90 && computeCapability != 100) {
     vec_size = std::min<uint16_t>(vec_size, 4);
   }
-  // Here we purposely omit vec8 for 1-byte data because of a bug in NVCC
-  // that causes some numerical mismatches with uint8 on sm80 and sm90.
-  // TODO: Revisit this after CUDA 12.8 update.
+#if !defined(CUDA_VERSION) || CUDA_VERSION < 12080
   if constexpr (sizeof(cpp_type) < 2) {
     vec_size = std::min<uint16_t>(vec_size, 4);
   }
+#endif
   int tws = elems_per_thread<io_size>();
 #endif
   int bws = tws * num_threads();
