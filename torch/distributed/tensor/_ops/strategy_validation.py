@@ -419,22 +419,22 @@ def validate_combination(
                 local_tensor = _create_partial_input(
                     tensor, placement, world_size, tensor_idx
                 )
-                local_tensors.append(local_tensor)
             elif isinstance(placement, Replicate):
                 _tmp = {r: tensor.clone() for r in range(world_size)}
                 # pyrefly: ignore [bad-argument-type, bad-argument-count]
-                local_tensors.append(LocalTensor(_tmp))
+                local_tensor = LocalTensor(_tmp)
             elif isinstance(placement, Shard):
                 # Create sharded LocalTensor directly to work in LocalTensorMode
                 shard_dim = placement.dim
                 chunks = tensor.tensor_split(world_size, dim=shard_dim)
                 _tmp = {r: chunks[r].clone().contiguous() for r in range(world_size)}
                 # pyrefly: ignore [bad-argument-type, bad-argument-count]
-                local_tensors.append(LocalTensor(_tmp))
+                local_tensor = LocalTensor(_tmp)
             else:
                 # Fallback for other placement types
                 dt = distribute_tensor(tensor.clone(), mesh, (placement,))
-                local_tensors.append(dt.to_local())
+                local_tensor = dt.to_local()
+            local_tensors.append(local_tensor)
 
         local_idx = 0
 
