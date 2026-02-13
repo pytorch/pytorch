@@ -1940,19 +1940,18 @@ elif [[ "${TEST_CONFIG}" == *huggingface* ]]; then
   test_dynamo_benchmark huggingface "$id"
 elif [[ "${TEST_CONFIG}" == *timm* ]]; then
   install_torchvision
-  # TODO: Download TIMM models to a writable local cache. The shared HF_CACHE
-  # mount is read-only, so we always use /tmp for now.
-  TIMM_PIN="$(< .ci/docker/ci_commit_pins/timm.txt)"
-  LOCAL_TIMM_CACHE="/tmp/timm_cache_${TIMM_PIN}"
-  mkdir -p "${LOCAL_TIMM_CACHE}"
-  export HF_HOME="${LOCAL_TIMM_CACHE}"
-  if [[ ! -f "${LOCAL_TIMM_CACHE}/.timm_cache_complete" ]]; then
-    export TRANSFORMERS_OFFLINE=0
-    export HF_DATASETS_OFFLINE=0
-    python benchmarks/dynamo/timm_models.py --download-only \
-      && touch "${LOCAL_TIMM_CACHE}/.timm_cache_complete"
-    export TRANSFORMERS_OFFLINE=1
-    export HF_DATASETS_OFFLINE=1
+  # Use a pin-specific cache directory so different TIMM versions don't
+  # share or corrupt each other's cached models.
+  if [[ -n "${HF_HOME:-}" ]]; then
+    TIMM_PIN="$(< .ci/docker/ci_commit_pins/timm.txt)"
+    export HF_HOME="${HF_HOME}/timm_${TIMM_PIN}"
+    mkdir -p "${HF_HOME}"
+    if [[ ! -f "${HF_HOME}/.timm_cache_complete" ]]; then
+      export TRANSFORMERS_OFFLINE=0
+      export HF_DATASETS_OFFLINE=0
+      python benchmarks/dynamo/timm_models.py --download-only \
+        && touch "${HF_HOME}/.timm_cache_complete"
+    fi
   fi
   id=$((SHARD_NUMBER-1))
   test_dynamo_benchmark timm_models "$id"
