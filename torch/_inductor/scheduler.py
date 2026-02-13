@@ -34,6 +34,7 @@ import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters, dynamo_timed
+from torch._inductor.autotune_process import use_pipelined_autotuning
 from torch._inductor.codecache import LambdaFuture, PyCodeCache
 from torch._inductor.ir import TritonTemplateCallerBase
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
@@ -2485,6 +2486,17 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                 template_nodes,
             )
         filtered_nodes = [x for x in filtered_nodes if x not in template_nodes]
+
+        # Filter out reduction nodes if combo_kernels_pointwise_only is enabled
+        if config.combo_kernels_pointwise_only:
+            reduction_nodes = [x for x in filtered_nodes if x.is_reduction()]
+            if reduction_nodes:
+                log.debug(
+                    "ComboKernels: %d reduction nodes are filtered (pointwise_only mode)",
+                    len(reduction_nodes),
+                )
+            filtered_nodes = [x for x in filtered_nodes if not x.is_reduction()]
+
         return filtered_nodes
 
     @staticmethod
@@ -2970,7 +2982,7 @@ class Scheduler:
         self.finalize_multi_template_buffers()
         if (
             config.max_autotune_gemm or config.max_autotune
-        ) and config.pipeline_max_autotune_gemm:
+        ) and use_pipelined_autotuning():
             torch._inductor.select_algorithm.PrecompileThreadPool.shutdown_instance()
 
         if config.combo_kernels:
@@ -3779,6 +3791,44 @@ class Scheduler:
         with dynamo_timed("benchmark_codegened_module"):
             return backend.benchmark_codegened_module(module)
 
+    def _has_layout_conflict_for_template(
+        self, multi_node: ir.MultiTemplateBuffer
+    ) -> bool:
+        """
+        Check if selecting a Triton template would cause layout conflicts.
+        Returns True if there's a conflict and we should fall back to ATen.
+        """
+        constraints = V.graph.buffer_layout_constraints
+        if not constraints:
+            return False
+
+        log.debug("Node %s has constraints %s", multi_node, constraints)
+        for inp in multi_node.inputs:
+            # pyrefly: ignore [missing-attribute]
+            inp_name = inp.get_name()
+            if not getattr(inp, "layout", None) or inp_name not in constraints:
+                continue
+
+            layout = inp.layout
+            expected_layout = constraints[inp_name]
+            if isinstance(layout, ir.FlexibleLayout):
+                # Freeze to the expected layout to avoid conflicts
+                # pyrefly: ignore [missing-attribute]
+                inp.freeze_layout_with_exact_strides(expected_layout.stride)
+                layout = inp.layout
+
+            if isinstance(layout, ir.FixedLayout) and expected_layout != layout:
+                # Layout already frozen to a different layout - conflict
+                log.warning(
+                    "Layout conflict detected for %s: template expects %s but layout is frozen to %s",
+                    inp_name,
+                    expected_layout,
+                    layout,
+                )
+                return True
+
+        return False
+
     def finalize_multi_template_buffers(self) -> None:
         """
         Finalize a backing choice for MultiTemplateBuffers which did not already have a
@@ -3812,10 +3862,33 @@ class Scheduler:
                     min_node_unfused,
                     torch._inductor.ir.TritonTemplateCallerBase,
                 ):
+                    # Check for layout conflicts before committing to Triton template
+                    if self._has_layout_conflict_for_template(multi_node):
+                        # Fall back to first ExternKernelCaller (ATen)
+                        for choice in multi_node.choice_timings():
+                            if isinstance(
+                                choice,
+                                torch._inductor.select_algorithm.ExternKernelCaller,
+                            ):
+                                min_node_unfused = choice
+                                break
+
+                        assert isinstance(
+                            choice, torch._inductor.select_algorithm.ExternKernelCaller
+                        ), (
+                            "No extern kernel detected to fallback to when layout constraints fail for Triton templates"
+                        )
+
+                if isinstance(
+                    min_node_unfused,
+                    torch._inductor.ir.TritonTemplateCallerBase,
+                ):
+                    # pyrefly: ignore [unbound-name]
                     if config.multi_kernel_hints:
                         callers: dict[Optional[int], TritonTemplateCallerBase] = {}
                         callers[None] = min_node_unfused
 
+                        # pyrefly: ignore [unbound-name]
                         for hint in config.multi_kernel_hints:
                             timings = multi_node.choice_timings(hint_override=hint)
                             triton_timings = {
@@ -3986,6 +4059,9 @@ class Scheduler:
                 else node2.get_template_node()
             )
             assert isinstance(multi_node, ir.MultiTemplateBuffer)
+            # Check for layout conflicts before committing to Triton template
+            if self._has_layout_conflict_for_template(multi_node):
+                return FusionResult.fuse(False)
 
             hint_override_best_fusion_choice: dict[
                 Optional[int], TritonTemplateCallerBase
@@ -4041,7 +4117,7 @@ class Scheduler:
             )
             # Track if the choice timings can be retrieved async after compilation
             get_choice_timings_async = (
-                config.pipeline_max_autotune_gemm
+                use_pipelined_autotuning()
                 and not bench_epilogue
                 and num_triton_callers <= config.max_epilogue_benchmarked_choices
             )
@@ -6099,7 +6175,7 @@ class Scheduler:
         candidate_symbols: OrderedSet[sympy.Symbol] = OrderedSet().union(
             *(get_scheduler_node_symbol_uses(node) for node in partition)
         )
-        candidate_symbols.union(
+        candidate_symbols.update(
             *(get_input_node_symbols(node) for _, node in input_nodes.items())
         )
 

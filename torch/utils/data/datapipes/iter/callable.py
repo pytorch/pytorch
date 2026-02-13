@@ -133,6 +133,7 @@ class MapperIterDataPipe(IterDataPipe[_T_co]):
             yield self._apply_fn(data)
 
     def __len__(self) -> int:
+        # pyrefly: ignore [unsafe-overlap]
         if isinstance(self.datapipe, Sized):
             return len(self.datapipe)
         raise TypeError(f"{type(self).__name__} instance doesn't have valid length")

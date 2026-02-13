@@ -3,13 +3,13 @@ import math
 import traceback
 from dataclasses import dataclass
 from enum import auto, Enum
-from typing import Any
+from typing import Any, Optional
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._composable.contract import _get_registry
-from torch.distributed.tensor import DeviceMesh, DTensor
+from torch.distributed.tensor import DeviceMesh, DTensor, Shard
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 
 
@@ -180,3 +180,39 @@ def _cast_fp_tensor(dtype: torch.dtype, x: torch.Tensor) -> torch.Tensor:
 
 def is_bw() -> bool:
     return torch._C._current_graph_task_id() != -1
+
+
+@dataclass
+class ShardPlacementResult:
+    placement: Optional[Shard]
+    mesh_info: FSDPMeshInfo
+
+
+ShardPlacementFnResult = Shard | ShardPlacementResult | None
+
+
+def resolve_shard_placement(
+    result: ShardPlacementFnResult,
+    default_mesh_info: FSDPMeshInfo,
+) -> ShardPlacementResult:
+    """Resolve the shard_placement_fn result to a ShardPlacementResult.
+
+    Handles different input types and applies defaults:
+    - None: Use default sharding (Shard(0)) on default mesh
+    - Shard: Use specified shard dimension on default mesh
+    - ShardPlacementResult: Use as-is
+
+    Args:
+        result: The return value from shard_placement_fn, or None if no fn provided.
+        default_mesh_info: The default FSDPMeshInfo to use if not specified.
+
+    Returns:
+        A ShardPlacementResult with placement and mesh_info.
+    """
+    if result is None:
+        return ShardPlacementResult(placement=None, mesh_info=default_mesh_info)
+    if isinstance(result, Shard):
+        return ShardPlacementResult(placement=result, mesh_info=default_mesh_info)
+    if isinstance(result, ShardPlacementResult):
+        return result
+    raise ValueError(f"Invalid shard_placement_fn result: {result}")
