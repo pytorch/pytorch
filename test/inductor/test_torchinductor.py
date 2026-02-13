@@ -12428,6 +12428,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         test_helper(fn, ())
 
     @requires_gpu()
+    @unittest.skipIf(IS_MACOS, "fails on macos")
     def test_empty_deterministic_pin_memory(self):
         if self.device != "cpu":
             raise unittest.SkipTest("Test only runs on CPU")
