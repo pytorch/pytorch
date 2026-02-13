@@ -276,6 +276,7 @@ def _get_or_create_constant(
 
     if isinstance(arg, list):
         # Make the arg hashable
+        # pyrefly: ignore [bad-argument-type]
         arg = tuple(arg)
 
     constant_value = constant_farm.get((arg, dtype))  # type: ignore[arg-type]

@@ -28,6 +28,35 @@ logger.setLevel(logging.INFO)
 
 overlap_log = torch._logging.getArtifactLogger(__name__, "overlap")
 
+
+def _should_use_pgalloc(
+    collective_type: str,
+    size_bytes: int,
+    group_name: str | None = None,
+) -> bool:
+    """
+    Heuristic for selective pgalloc usage based on collective characteristics.
+
+    Based on profiling analysis:
+    - all_reduce: consistent benefit from pgalloc
+    - reduce_scatter/all_gather: only medium-sized collectives benefit
+      - Small (<1MB): fast NVLINK, pgalloc overhead hurts
+      - Medium (1MB-100MB): pgalloc helps
+      - Large (>100MB): pgalloc overhead negligible vs comm time
+    """
+    if not torch._inductor.config.bucket_ops_use_pg_alloc:
+        return False
+
+    # all_reduce consistently benefits from pgalloc
+    if collective_type == "all_reduce":
+        return True
+
+    # For reduce_scatter/all_gather, use size-based heuristic
+    min_size = 1_000_000  # 1MB
+    max_size = 100_000_000  # 100MB
+    return min_size < size_bytes < max_size
+
+
 BucketMode: TypeAlias = Literal["default", "custom_ops", "custom_ops_multidtype"]
 
 
@@ -562,9 +591,10 @@ def _pre_bucket_reduce_scatter(
     group_name: str,
 ) -> torch.Tensor:
     rs_ins_flattened = [x.view(group_size, -1) for x in rs_ins]
-    if torch._inductor.config.bucket_ops_use_pg_alloc:
-        x = rs_ins[0]
-        size = sum(t.numel() for t in rs_ins)
+    x = rs_ins[0]
+    size = sum(t.numel() for t in rs_ins)
+    size_bytes = size * x.dtype.itemsize
+    if _should_use_pgalloc("reduce_scatter", size_bytes, group_name):
         dtype = x.dtype
         device = x.device
         pg = _resolve_process_group(group_name)  # type: ignore[arg-type]
@@ -605,7 +635,8 @@ def reduce_scatter_merge_fn_to_trace_custom_ops(
 
     # TODO - either use torch.cat or make sure inductor foreach codegen
     # fires more reliably
-    if torch._inductor.config.bucket_ops_use_pg_alloc:
+    size_bytes = new_rs_in.numel() * new_rs_in.dtype.itemsize
+    if _should_use_pgalloc("reduce_scatter", size_bytes, group_name):
         pg = _resolve_process_group(group_name)  # type: ignore[arg-type]
         backend = pg._get_backend(new_rs_in.device)
         size = list(new_rs_in.shape)
@@ -720,8 +751,9 @@ def _pre_bucket_all_gather(
     ]
     ag_input_numel = sum(ins_split_sizes)
     device = ag_ins[0].device
+    total_size_bytes = sum(ins_split_sizes_bytes) * group_size
 
-    if torch._inductor.config.bucket_ops_use_pg_alloc:
+    if _should_use_pgalloc("all_gather", total_size_bytes, group_name):
         pg = _resolve_process_group(group_name)  # type: ignore[arg-type]
         backend = pg._get_backend(device)
         size = ag_input_numel * group_size

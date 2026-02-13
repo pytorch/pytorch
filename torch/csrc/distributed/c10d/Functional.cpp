@@ -38,6 +38,20 @@ bool usePgAllocator() {
   return enabled;
 }
 
+// Size thresholds for selective pgalloc usage (in bytes)
+// Based on profiling: small collectives (<1MB) hurt from pgalloc overhead,
+// large collectives (>100MB) don't benefit significantly
+constexpr int64_t kPgAllocMinSizeBytes = 1000000;   // 1MB
+constexpr int64_t kPgAllocMaxSizeBytes = 100000000; // 100MB
+
+bool shouldUsePgAllocator(int64_t size_bytes) {
+  if (!usePgAllocator()) {
+    return false;
+  }
+  // Only use pgalloc for medium-sized collectives
+  return size_bytes > kPgAllocMinSizeBytes && size_bytes < kPgAllocMaxSizeBytes;
+}
+
 at::Tensor allocate_all_gather_output(
     const at::Tensor& input,
     int64_t group_size,
@@ -52,16 +66,19 @@ at::Tensor allocate_all_gather_output(
   auto options =
       at::TensorOptions().dtype(input.dtype()).device(input.device());
 
-  // Use comm-optimized allocator if enabled and available
-  if (usePgAllocator() && group != nullptr) {
+  // Compute output size in bytes for heuristic
+  int64_t total_elements = 1;
+  for (auto dim : output_size) {
+    total_elements *= dim;
+  }
+  int64_t size_bytes = total_elements * input.dtype().itemsize();
+
+  // Use comm-optimized allocator if heuristic allows and backend available
+  if (shouldUsePgAllocator(size_bytes) && group != nullptr) {
     auto backend = group->getBackend(input.device().type());
     if (backend->supportsTensorAlloc(input.device().index()) &&
         backend->isInitialized()) {
-      long total_size = 1;
-      for (auto dim : output_size) {
-        total_size *= dim;
-      }
-      return backend->allocateTensor(total_size, options).view(output_size);
+      return backend->allocateTensor(total_elements, options).view(output_size);
     }
   }
 
@@ -83,16 +100,19 @@ at::Tensor allocate_reduce_scatter_output(
   auto options =
       at::TensorOptions().dtype(input.dtype()).device(input.device());
 
-  // Use comm-optimized allocator if enabled and available
-  if (usePgAllocator() && group != nullptr) {
+  // Compute output size in bytes for heuristic
+  int64_t total_elements = 1;
+  for (auto dim : output_size) {
+    total_elements *= dim;
+  }
+  int64_t size_bytes = total_elements * input.dtype().itemsize();
+
+  // Use comm-optimized allocator if heuristic allows and backend available
+  if (shouldUsePgAllocator(size_bytes) && group != nullptr) {
     auto backend = group->getBackend(input.device().type());
     if (backend->supportsTensorAlloc(input.device().index()) &&
         backend->isInitialized()) {
-      long total_size = 1;
-      for (auto dim : output_size) {
-        total_size *= dim;
-      }
-      return backend->allocateTensor(total_size, options).view(output_size);
+      return backend->allocateTensor(total_elements, options).view(output_size);
     }
   }
 
