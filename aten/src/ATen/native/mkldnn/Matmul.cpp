@@ -3,6 +3,7 @@
 #include <ATen/Context.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/native/mkldnn/Matmul.h>
+#include <ATen/native/mkldnn/DNNLMatmulHelper.h>
 
 #if !AT_MKLDNN_ENABLED()
 
@@ -79,6 +80,13 @@ bool use_mkldnn_matmul(
 }
 
 void mkldnn_matmul_i8i8i32(
+    const Tensor &mat1,
+    const Tensor &mat2,
+    const Tensor &result) {
+  TORCH_INTERNAL_ASSERT(false, __func__, ": ATen not compiled with MKLDNN support");
+}
+
+void mkldnn_matmul_i8i8f32(
     const Tensor &mat1,
     const Tensor &mat2,
     const Tensor &result) {
@@ -622,6 +630,26 @@ void mkldnn_matmul_i8i8i32(
   } else {
     _mkldnn_matmul_i8i8i32_with_primitive(mat1, mat2, result);
   }
+}
+
+void mkldnn_matmul_i8i8f32(
+    const Tensor &mat1,
+    const Tensor &mat2,
+    const Tensor &result) {
+
+  const int64_t M = mat1.size(0);
+  const int64_t K = mat1.size(1);
+  const int64_t N = mat2.size(1);
+
+  DNNLPrimitiveHelper::gemm_s8s8_dnnl<float>(
+  mat1.data_ptr<int8_t>(),
+  mat2.data_ptr<int8_t>(),
+  result.data_ptr<float>(),
+  M, N, K,
+  mat1.stride(0),
+  mat1.stride(1),
+  mat2.stride(0),
+  mat2.stride(1));
 }
 
 } // namespace at
