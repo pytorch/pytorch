@@ -11,11 +11,15 @@ This module provides utilities to validate DTensor's sharding strategies by:
 
 Run as a module to compare DTensor rules against ground truth:
     python -m torch.distributed.tensor._ops.strategy_validation --op add
+    python -m torch.distributed.tensor._ops.strategy_validation --op relu,mul,add
+    python -m torch.distributed.tensor._ops.strategy_validation --op "nn.functional.*"
     python -m torch.distributed.tensor._ops.strategy_validation --all-registered
     python -m torch.distributed.tensor._ops.strategy_validation --op div --incorrect-only
+    python -m torch.distributed.tensor._ops.strategy_validation --op add --show-repro
 """
 
 import argparse
+import fnmatch
 import itertools
 import re
 import time
@@ -51,22 +55,18 @@ ComboKey = tuple[tuple[str, ...], str]
 # Partial reduce ops to enumerate
 PARTIAL_REDUCE_OPS = ["sum", "avg", "min", "max"]
 
-# Ops to skip in validation because ground truth comparison is not meaningful.
-# These produce non-deterministic or uninitialized outputs.
-# TODO: can we get this list directly from opinfo tags, or something?
-SKIP_OPS = frozenset(
-    [
-        "bernoulli",  # Random sampling
-        "empty_like",  # Uninitialized memory
-        "new_empty",  # Uninitialized memory
-        "new_empty_strided",  # Uninitialized memory
-        "normal",  # Random sampling
-        "rand_like",  # Random sampling
-        "randint_like",  # Random sampling
-        "randn_like",  # Random sampling
-        "uniform",  # Random sampling
-    ]
-)
+SKIP_OPS: dict[str, str] = {
+    "bernoulli": "non-deterministic (random sampling)",
+    "empty_like": "uninitialized memory",
+    "new_empty": "uninitialized memory",
+    "new_empty_strided": "uninitialized memory",
+    "nn.functional.dropout": "non-deterministic (random masking)",
+    "normal": "non-deterministic (random sampling)",
+    "rand_like": "non-deterministic (random sampling)",
+    "randint_like": "non-deterministic (random sampling)",
+    "randn_like": "non-deterministic (random sampling)",
+    "uniform": "non-deterministic (random sampling)",
+}
 
 
 @dataclass
@@ -106,6 +106,7 @@ class Discrepancy:
     scalar_kwargs: dict[str, Any] = field(default_factory=dict)
     aten_op: OpOverload | None = None
     variant: str = ""
+    sample: SampleInput | None = None
 
 
 @dataclass
@@ -120,6 +121,9 @@ class ComparisonStats:
     false_negatives: list[Discrepancy] = field(
         default_factory=list
     )  # Ground truth valid, DTensor has no rule
+    total_samples: int = 0
+    total_combinations: int = 0
+    skip_reasons: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -719,13 +723,87 @@ def query_single_dim_strategy(
 
 
 def get_opinfo_by_name(name: str) -> list[opinfo_core.OpInfo]:
-    """Find OpInfo entries by operator name."""
+    """Find OpInfo entries by exact operator name."""
     matches = [op for op in op_db if op.name == name]
-    if not matches:
-        raise ValueError(
-            f"No OpInfo found for operator: {name}.  OpInfo is required as it provides sample inputs for the operator"
-        )
-    return matches
+    if matches:
+        return matches
+
+    # Suggest alternatives
+    candidates = _find_opinfo_candidates(name)
+    if candidates:
+        suggestions = ", ".join(f'"{c}"' for c in candidates)
+        raise ValueError(f'No OpInfo found for "{name}", did you mean: {suggestions}?')
+    raise ValueError(
+        f'No OpInfo found for "{name}". OpInfo is required as it provides '
+        f"sample inputs for the operator."
+    )
+
+
+def _find_opinfo_candidates(name: str) -> list[str]:
+    """Find OpInfo names that plausibly match a short/incorrect name."""
+    candidates: list[str] = []
+    seen: set[str] = set()
+    # Match on aten_name (e.g., "relu" -> OpInfo with aten_name="relu")
+    for op in op_db:
+        if op.aten_name == name and op.name not in seen:
+            candidates.append(op.name)
+            seen.add(op.name)
+    # Suffix match: "relu" matches "nn.functional.relu"
+    suffix = "." + name
+    for op in op_db:
+        if op.name.endswith(suffix) and op.name not in seen:
+            candidates.append(op.name)
+            seen.add(op.name)
+    return candidates
+
+
+def resolve_op_names(patterns: list[str]) -> list[str]:
+    """Resolve user-provided op patterns to exact OpInfo names.
+
+    Supports exact names, comma separation, and glob patterns (e.g.,
+    "nn.functional.*"). Short names like "relu" are resolved unambiguously
+    or an error is raised with suggestions.
+    """
+    all_opinfo_names = sorted({op.name for op in op_db})
+    resolved: list[str] = []
+    seen: set[str] = set()
+
+    for pattern in patterns:
+        # Glob pattern
+        if "*" in pattern or "?" in pattern:
+            matches = fnmatch.filter(all_opinfo_names, pattern)
+            if not matches:
+                raise ValueError(f'No OpInfo names match pattern "{pattern}".')
+            for m in matches:
+                if m not in seen:
+                    resolved.append(m)
+                    seen.add(m)
+            continue
+
+        # Exact match
+        if pattern in {op.name for op in op_db}:
+            if pattern not in seen:
+                resolved.append(pattern)
+                seen.add(pattern)
+            continue
+
+        # Try to resolve shorthand
+        candidates = _find_opinfo_candidates(pattern)
+        if len(candidates) == 1:
+            name = candidates[0]
+            if name not in seen:
+                resolved.append(name)
+                seen.add(name)
+        elif len(candidates) > 1:
+            suggestions = ", ".join(f'"{c}"' for c in candidates)
+            raise ValueError(
+                f'"{pattern}" is ambiguous, matching: {suggestions}. '
+                f"Use the fully qualified name."
+            )
+        else:
+            raise ValueError(f'No OpInfo found for "{pattern}".')
+
+    return resolved
 
 
 def _prepare_false_positive_mitigations(
@@ -1001,6 +1079,7 @@ def _compare_rules(
     aten_op: OpOverload | None,
     variant: str,
     stats: ComparisonStats,
+    sample: SampleInput | None = None,
 ) -> None:
     """Compare ground truth valid rules against DTensor claimed rules, updating stats."""
     if not dtensor_rules:
@@ -1024,6 +1103,7 @@ def _compare_rules(
                     scalar_kwargs=scalar_kwargs,
                     aten_op=aten_op,
                     variant=variant,
+                    sample=sample,
                 )
             )
 
@@ -1040,15 +1120,51 @@ def _compare_rules(
                     scalar_kwargs=scalar_kwargs,
                     aten_op=aten_op,
                     variant=variant,
+                    sample=sample,
                 )
             )
 
 
-def _print_discrepancy_section(title: str, discrepancies: list[Discrepancy]) -> None:
+def _format_op_name(opinfo_name: str) -> str:
+    """Format an OpInfo name for display, adding aten. prefix for simple names."""
+    if "." not in opinfo_name:
+        return f"aten.{opinfo_name}"
+    return opinfo_name
+
+
+def _format_sample_repro(sample: SampleInput, aten_op: OpOverload | None = None) -> str:
+    """Format a SampleInput's values for repro output, using schema arg names."""
+    # Get argument names from the aten op schema if available.
+    # Schema args are ordered: the first is the input, then positional args,
+    # then keyword-only args (which appear in sample.kwargs).
+    arg_names: list[str] = []
+    if aten_op is not None:
+        try:
+            arg_names = [a.name for a in aten_op._schema.arguments]
+        except Exception:
+            pass
+
+    parts = []
+    # input is the first positional arg
+    name = arg_names[0] if arg_names else "input"
+    parts.append(f"{name}={sample.input!r}")
+    # remaining positional args
+    for i, arg in enumerate(sample.args):
+        name = arg_names[1 + i] if 1 + i < len(arg_names) else f"args[{i}]"
+        parts.append(f"{name}={arg!r}")
+    # kwargs — use their actual key names (already named)
+    for k, v in sample.kwargs.items():
+        parts.append(f"{k}={v!r}")
+    return ", ".join(parts)
+
+
+def _print_discrepancy_section(
+    title: str, discrepancies: list[Discrepancy], show_repro: int = 0
+) -> None:
     """Print grouped discrepancies for a section (incorrect or missing)."""
     if not discrepancies:
         return
-    print(f"\n--- {title} ---")
+    print(f"\n{title}")
     by_op: dict[str, dict[ComboKey, list[Discrepancy]]] = defaultdict(
         lambda: defaultdict(list)
     )
@@ -1064,62 +1180,31 @@ def _print_discrepancy_section(title: str, discrepancies: list[Discrepancy]) -> 
         ):
             inp_str = ", ".join(inp)
             print(f"    {inp_str} -> {out}")
-            for d in discs[:3]:
-                shapes_str = ", ".join(str(list(s)) for s in d.input_shapes)
-                extra = ""
-                if d.scalar_kwargs:
-                    extra = f", {d.scalar_kwargs}"
-                print(f"      Sample {d.sample_idx}: [{shapes_str}]{extra}")
-            if len(discs) > 3:
-                print(f"      ... and {len(discs) - 3} more")
+            if show_repro:
+                limit = len(discs) if show_repro < 0 else show_repro
+                for d in discs[:limit]:
+                    if d.sample is not None:
+                        print(
+                            f"      Repro: {_format_sample_repro(d.sample, d.aten_op)}"
+                        )
+                if len(discs) > limit:
+                    print(f"      ... and {len(discs) - limit} more")
 
 
 def _print_comparison_summary(
     stats: ComparisonStats,
-    total_samples: int,
-    total_combinations: int,
-    elapsed_time: float,
-    strategy_query_time: float,
-    ground_truth_time: float,
+    show_repro: int = 0,
 ) -> None:
-    """Print the comparison summary report."""
-    print("\n" + "=" * 70)
-    print("COMPARISON SUMMARY")
-    print("=" * 70)
-    print(f"Total samples processed: {total_samples}")
-    print(f"Total combinations tested: {total_combinations}")
-    print(f"Elapsed time: {elapsed_time:.2f}s")
-    if elapsed_time > 0:
-        print(
-            f"  - Strategy query time: {strategy_query_time:.2f}s ({100 * strategy_query_time / elapsed_time:.1f}%)"
-        )
-        print(
-            f"  - Ground truth time: {ground_truth_time:.2f}s ({100 * ground_truth_time / elapsed_time:.1f}%)"
-        )
-    print()
-
-    fp_rules = {(d.input_placements, d.output_placement) for d in stats.false_positives}
-    fn_rules = {(d.input_placements, d.output_placement) for d in stats.false_negatives}
-
-    print(f"True positives (both agree valid): {stats.true_positives}")
-    if stats.false_positives:
-        print(
-            f"DTensor incorrect: {len(fp_rules)} rules over {len(stats.false_positives)} samples"
-        )
-    else:
-        print("DTensor incorrect: 0")
-    if stats.false_negatives:
-        print(
-            f"DTensor missing: {len(fn_rules)} rules over {len(stats.false_negatives)} samples"
-        )
-    else:
-        print("DTensor missing: 0")
-
+    """Print discrepancy details for an operator."""
     _print_discrepancy_section(
-        "DTENSOR INCORRECT (has rule but ground truth invalid)", stats.false_positives
+        "Incorrect (has rule but ground truth invalid)",
+        stats.false_positives,
+        show_repro,
     )
     _print_discrepancy_section(
-        "DTENSOR MISSING (ground truth valid but no rule)", stats.false_negatives
+        "Possibly missing (valid in ground truth but no DTensor rule)",
+        stats.false_negatives,
+        show_repro,
     )
 
 
@@ -1146,20 +1231,14 @@ def compare_operator(
             Skips exhaustive search for missing rules (much faster).
     """
     if op_name in SKIP_OPS:
-        print(f"Skipping '{op_name}' (non-deterministic or uninitialized output)")
         return ComparisonStats()
 
-    start_time = time.time()
-
     opinfos = get_opinfo_by_name(op_name)
-    print(f"Found {len(opinfos)} OpInfo(s) for '{op_name}'")
-    print(f"World size: {world_size}")
 
     stats = ComparisonStats()
     total_samples = 0
     total_combinations = 0
-    ground_truth_time = 0.0
-    strategy_query_time = 0.0
+    skip_reasons: dict[str, int] = defaultdict(int)
 
     for opinfo in opinfos:
         variant = opinfo.variant_test_name
@@ -1177,15 +1256,15 @@ def compare_operator(
         if max_samples:
             samples = samples[:max_samples]
 
-        print(f"    Processing {len(samples)} sample inputs...")
-
         for sample_idx, sample in enumerate(samples):
             tensors = extract_tensors_from_sample(sample)
 
             if len(tensors) == 0:
+                skip_reasons["no tensor inputs"] += 1
                 continue
 
             if any(0 in t.shape for _, t in tensors):
+                skip_reasons["zero-sized tensor"] += 1
                 continue
 
             total_samples += 1
@@ -1193,14 +1272,19 @@ def compare_operator(
             try:
                 ground_truth = _run_op_on_sample(op, sample)
                 if not isinstance(ground_truth, torch.Tensor):
+                    total_samples -= 1
+                    skip_reasons["non-tensor output"] += 1
                     continue
                 if ground_truth.numel() > 0 and (ground_truth == 0).all():
                     total_samples -= 1
+                    skip_reasons["all-zero output"] += 1
                     continue
                 if ground_truth.numel() > 0 and ground_truth.isnan().all():
                     total_samples -= 1
+                    skip_reasons["all-NaN output"] += 1
                     continue
             except Exception:
+                skip_reasons["op raised exception"] += 1
                 continue
 
             input_shapes = tuple(t.shape for _, t in tensors)
@@ -1227,7 +1311,6 @@ def compare_operator(
                 op, sample, opinfo.name
             )
 
-            strategy_start = time.time()
             dtensor_rules = _query_dtensor_rules(
                 aten_op,
                 tensors,
@@ -1238,11 +1321,9 @@ def compare_operator(
                 world_size,
                 verbose,
             )
-            strategy_query_time += time.time() - strategy_start
 
             ground_truth_valid: set[ComboKey] = set()
 
-            gt_start = time.time()
             tensor_device = tensors[0][1].device.type if tensors else "cpu"
             with LocalTensorMode(frozenset(range(world_size))):
                 mesh = init_device_mesh(tensor_device, (world_size,))
@@ -1303,7 +1384,6 @@ def compare_operator(
                             )
                         ):
                             ground_truth_valid.add(normalized_key)
-            ground_truth_time += time.time() - gt_start
 
             _compare_rules(
                 ground_truth_valid,
@@ -1316,6 +1396,7 @@ def compare_operator(
                 aten_op,
                 variant,
                 stats,
+                sample,
             )
 
             if verbose:
@@ -1323,20 +1404,19 @@ def compare_operator(
                 print(f"        Ground truth valid: {len(ground_truth_valid)}")
                 print(f"        DTensor rules: {len(dtensor_rules)}")
 
-    _print_comparison_summary(
-        stats,
-        total_samples,
-        total_combinations,
-        time.time() - start_time,
-        strategy_query_time,
-        ground_truth_time,
-    )
+    stats.total_samples = total_samples
+    stats.total_combinations = total_combinations
+    stats.skip_reasons = dict(skip_reasons)
 
     return stats
 
 
 def get_registered_op_names() -> list[str]:
-    """Get all op names that have DTensor sharding rules and also have OpInfo."""
+    """Get all op names that have DTensor sharding rules and also have OpInfo.
+
+    Returns OpInfo names (which may differ from aten base names, e.g.,
+    "nn.functional.relu" instead of "relu").
+    """
 
     propagator = DTensor._op_dispatcher.sharding_propagator
 
@@ -1352,9 +1432,24 @@ def get_registered_op_names() -> list[str]:
         if len(parts) >= 2:
             base_names.add(parts[1])
 
-    # Find which ones have OpInfo
-    opinfo_names = {op.name for op in op_db}
-    return sorted(base_names & opinfo_names)
+    # Build mappings from OpInfo: both by name and by aten_name
+    opinfo_by_name = {}
+    opinfo_by_aten_name: dict[str, list[str]] = {}
+    for op in op_db:
+        opinfo_by_name[op.name] = True
+        opinfo_by_aten_name.setdefault(op.aten_name, []).append(op.name)
+
+    result = set()
+    for base_name in base_names:
+        if base_name in opinfo_by_name:
+            # Direct match (e.g., "add" -> OpInfo named "add")
+            result.add(base_name)
+        elif base_name in opinfo_by_aten_name:
+            # Match via aten_name (e.g., "relu" -> OpInfo "nn.functional.relu"
+            # which has aten_name="relu")
+            result.update(opinfo_by_aten_name[base_name])
+
+    return sorted(result)
 
 
 if __name__ == "__main__":
@@ -1374,7 +1469,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Compare DTensor rules against ground truth"
     )
-    parser.add_argument("--op", default=None, help="Operator name to compare")
+    parser.add_argument(
+        "--op",
+        default=None,
+        help="Operator name(s) to compare (comma-separated, supports glob "
+        'patterns, e.g., "relu,add" or "nn.functional.*")',
+    )
     parser.add_argument(
         "--all-registered",
         action="store_true",
@@ -1393,7 +1493,15 @@ if __name__ == "__main__":
     parser.add_argument(
         "--max-samples", type=int, default=None, help="Max samples to test"
     )
-    parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
+    parser.add_argument(
+        "--show-repro",
+        nargs="?",
+        const=1,
+        type=int,
+        default=0,
+        metavar="N",
+        help="Show N sample repros per rule (default 1 if flag given, -1 for all)",
+    )
     args = parser.parse_args()
 
     dtype_map = {
@@ -1407,73 +1515,136 @@ if __name__ == "__main__":
     dist.init_process_group("fake", rank=0, world_size=args.world_size)
     try:
         if args.all_registered:
-            # Test all ops with registered sharding rules
             op_names = get_registered_op_names()
-            print(f"Testing {len(op_names)} ops with DTensor sharding rules")
-            if args.incorrect_only:
-                print("Mode: incorrect-only (fast)")
-            print(f"Device: {args.device}, Dtype: {dtype}")
-            print("=" * 70)
+        elif args.op:
+            patterns = [p.strip() for p in args.op.split(",")]
+            op_names = resolve_op_names(patterns)
+        else:
+            op_names = ["add"]
 
-            total_stats = ComparisonStats()
-            ops_with_errors = []
+        # Preamble
+        display_names = [_format_op_name(n) for n in op_names]
+        print(f"Testing ops: {', '.join(display_names)}")
+        if args.incorrect_only:
+            print("Mode: incorrect-only (fast)")
+        print(f"Device: {args.device}, Dtype: {dtype}, World size: {args.world_size}")
 
-            for i, op_name in enumerate(op_names):
-                if op_name in SKIP_OPS:
+        op_results: list[tuple[str, ComparisonStats, float]] = []
+
+        for i, op_name in enumerate(op_names):
+            display = _format_op_name(op_name)
+
+            if op_name in SKIP_OPS:
+                print(
+                    f"\n[{i + 1}/{len(op_names)}] {display}"
+                    f" — skipped: {SKIP_OPS[op_name]}"
+                )
+                continue
+
+            try:
+                op_start = time.time()
+                stats = compare_operator(
+                    op_name,
+                    args.device,
+                    dtype,
+                    args.world_size,
+                    args.max_samples,
+                    incorrect_only=args.incorrect_only,
+                )
+                elapsed = time.time() - op_start
+
+                if stats.total_samples == 0 and stats.skip_reasons:
+                    reasons = ", ".join(
+                        f"{r} ({n})" for r, n in stats.skip_reasons.items()
+                    )
+                    print(f"\n[{i + 1}/{len(op_names)}] {display} — skipped: {reasons}")
                     continue
 
-                print(f"\n[{i + 1}/{len(op_names)}] {op_name}")
-                try:
-                    stats = compare_operator(
-                        op_name,
-                        args.device,
-                        dtype,
-                        args.world_size,
-                        args.max_samples,
-                        args.verbose,
-                        args.incorrect_only,
-                    )
-                    total_stats.true_positives += stats.true_positives
-                    total_stats.false_positives.extend(stats.false_positives)
-                    total_stats.false_negatives.extend(stats.false_negatives)
+                op_results.append((op_name, stats, elapsed))
 
-                    if stats.false_positives:
-                        ops_with_errors.append((op_name, len(stats.false_positives)))
-                except Exception as e:
-                    print(f"  Error: {e}")
+                skipped = sum(stats.skip_reasons.values())
+                skipped_str = f" ({skipped} skipped)" if skipped else ""
+                print(
+                    f"\n[{i + 1}/{len(op_names)}] {display}"
+                    f" — Samples: {stats.total_samples}{skipped_str},"
+                    f" Combinations: {stats.total_combinations}"
+                )
+                print("-" * 70)
+                _print_comparison_summary(stats, show_repro=args.show_repro)
+            except Exception as e:
+                print(f"\n[{i + 1}/{len(op_names)}] {display} — Error: {e}")
 
-            # Final summary
+        if len(op_results) >= 1:
+            # Summary table
             print("\n" + "=" * 70)
-            print("OVERALL SUMMARY")
-            print("=" * 70)
-            print(f"Total ops tested: {len(op_names)}")
-            print(f"Total true positives: {total_stats.true_positives}")
-            print(f"Total incorrect rules: {len(total_stats.false_positives)}")
-            if not args.incorrect_only:
-                print(f"Total missing rules: {len(total_stats.false_negatives)}")
-
-            if ops_with_errors:
-                print(f"\nOps with INCORRECT rules ({len(ops_with_errors)}):")
-                for op_name, count in sorted(ops_with_errors, key=lambda x: -x[1]):
-                    print(f"  {op_name}: {count}")
-
-        else:
-            # Test a single operator
-            op_name = args.op or "add"
-            print(f"Comparing operator: {op_name}")
-            if args.incorrect_only:
-                print("Mode: incorrect-only (fast)")
-            print(f"Device: {args.device}, Dtype: {dtype}")
+            print("Summary")
             print("=" * 70)
 
-            compare_operator(
-                op_name,
-                args.device,
-                dtype,
-                args.world_size,
-                args.max_samples,
-                args.verbose,
-                args.incorrect_only,
+            formatted_results = [
+                (_format_op_name(name), stats, elapsed)
+                for name, stats, elapsed in op_results
+            ]
+
+            col_widths = {
+                "op": max(len(name) for name, _, _ in formatted_results),
+                "tp": 7,
+                "fp": 9,
+                "fn": 7,
+                "time": 6,
+            }
+            col_widths["op"] = max(col_widths["op"], 2)  # min width
+
+            header = (
+                f"{'Op':<{col_widths['op']}}  "
+                f"{'Correct':>{col_widths['tp']}}  "
+                f"{'Incorrect':>{col_widths['fp']}}  "
+                f"{'Missing':>{col_widths['fn']}}  "
+                f"{'Time':>{col_widths['time']}}"
+            )
+            print(header)
+            print("-" * len(header))
+
+            total_tp = 0
+            total_fp = 0
+            total_fn = 0
+            total_time = 0.0
+
+            for name, stats, elapsed in formatted_results:
+                fp_rules = {
+                    (d.input_placements, d.output_placement)
+                    for d in stats.false_positives
+                }
+                fn_rules = {
+                    (d.input_placements, d.output_placement)
+                    for d in stats.false_negatives
+                }
+                n_fp = len(fp_rules)
+                n_fn = len(fn_rules)
+                total_tp += stats.true_positives
+                total_fp += n_fp
+                total_fn += n_fn
+                total_time += elapsed
+
+                fp_str = str(n_fp) if n_fp else "0"
+                fn_str = str(n_fn) if n_fn else "0"
+
+                print(
+                    f"{name:<{col_widths['op']}}  "
+                    f"{stats.true_positives:>{col_widths['tp']}}  "
+                    f"{fp_str:>{col_widths['fp']}}  "
+                    f"{fn_str:>{col_widths['fn']}}  "
+                    f"{elapsed:>{col_widths['time']}.1f}s"
+                )
+
+            print("-" * len(header))
+            fp_str = str(total_fp) if total_fp else "0"
+            fn_str = str(total_fn) if total_fn else "0"
+            print(
+                f"{'Total':<{col_widths['op']}}  "
+                f"{total_tp:>{col_widths['tp']}}  "
+                f"{fp_str:>{col_widths['fp']}}  "
+                f"{fn_str:>{col_widths['fn']}}  "
+                f"{total_time:>{col_widths['time']}.1f}s"
             )
     finally:
         dist.destroy_process_group()

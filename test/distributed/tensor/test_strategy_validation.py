@@ -16,9 +16,11 @@ from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import Replicate
 from torch.distributed.tensor._ops.strategy_validation import (
     _create_partial_input,
+    _find_opinfo_candidates,
     extract_tensors_from_sample,
     get_1d_input_placements_for_tensor,
     get_1d_output_placements_for_tensor,
+    get_opinfo_by_name,
     is_fully_replicated,
     is_trivial_shard,
     normalize_combo_key,
@@ -28,6 +30,7 @@ from torch.distributed.tensor._ops.strategy_validation import (
     placement_tuple_to_str,
     PlacementCombination,
     query_single_dim_strategy,
+    resolve_op_names,
     validate_combination,
 )
 from torch.distributed.tensor.placement_types import Partial, Shard
@@ -1086,6 +1089,88 @@ class TestCompareOperatorEndToEnd(TestCase):
                 common_ops.S,
                 common_ops.XS,
             ) = orig_sizes
+
+
+class TestOpInfoLookup(TestCase):
+    """Tests for get_opinfo_by_name, _find_opinfo_candidates, and resolve_op_names."""
+
+    def test_get_opinfo_by_name_exact(self):
+        results = get_opinfo_by_name("add")
+        self.assertGreater(len(results), 0)
+        for op in results:
+            self.assertEqual(op.name, "add")
+
+    def test_get_opinfo_by_name_qualified(self):
+        results = get_opinfo_by_name("nn.functional.relu")
+        self.assertGreater(len(results), 0)
+        for op in results:
+            self.assertEqual(op.name, "nn.functional.relu")
+
+    def test_get_opinfo_by_name_not_found_with_suggestions(self):
+        with self.assertRaises(ValueError) as ctx:
+            get_opinfo_by_name("relu")
+        self.assertIn("did you mean", str(ctx.exception))
+        self.assertIn("nn.functional.relu", str(ctx.exception))
+
+    def test_get_opinfo_by_name_not_found_no_suggestions(self):
+        with self.assertRaises(ValueError) as ctx:
+            get_opinfo_by_name("this_op_does_not_exist_xyz")
+        self.assertNotIn("did you mean", str(ctx.exception))
+
+    def test_find_opinfo_candidates_aten_name(self):
+        # relu OpInfo has aten_name="relu" explicitly set
+        candidates = _find_opinfo_candidates("relu")
+        self.assertIn("nn.functional.relu", candidates)
+
+    def test_find_opinfo_candidates_suffix(self):
+        candidates = _find_opinfo_candidates("dropout")
+        self.assertIn("nn.functional.dropout", candidates)
+
+    def test_find_opinfo_candidates_no_match(self):
+        candidates = _find_opinfo_candidates("this_op_does_not_exist_xyz")
+        self.assertEqual(candidates, [])
+
+    def test_resolve_op_names_exact(self):
+        result = resolve_op_names(["add"])
+        self.assertEqual(result, ["add"])
+
+    def test_resolve_op_names_qualified(self):
+        result = resolve_op_names(["nn.functional.relu"])
+        self.assertEqual(result, ["nn.functional.relu"])
+
+    def test_resolve_op_names_multiple(self):
+        result = resolve_op_names(["add", "mul"])
+        self.assertEqual(result, ["add", "mul"])
+
+    def test_resolve_op_names_deduplicates(self):
+        result = resolve_op_names(["add", "add"])
+        self.assertEqual(result, ["add"])
+
+    def test_resolve_op_names_glob(self):
+        result = resolve_op_names(["nn.functional.relu*"])
+        self.assertIn("nn.functional.relu", result)
+
+    def test_resolve_op_names_glob_no_match(self):
+        with self.assertRaises(ValueError) as ctx:
+            resolve_op_names(["zzz_no_match_*"])
+        self.assertIn("No OpInfo names match", str(ctx.exception))
+
+    def test_resolve_op_names_unambiguous_shorthand(self):
+        # "relu" should resolve unambiguously to "nn.functional.relu"
+        result = resolve_op_names(["nn.functional.relu"])
+        self.assertIn("nn.functional.relu", result)
+
+    def test_resolve_op_names_ambiguous_shorthand(self):
+        # "dropout" matches nn.functional.dropout, nn.functional.dropout2d, etc.
+        candidates = _find_opinfo_candidates("dropout")
+        if len(candidates) > 1:
+            with self.assertRaises(ValueError) as ctx:
+                resolve_op_names(["dropout"])
+            self.assertIn("ambiguous", str(ctx.exception))
+
+    def test_resolve_op_names_not_found(self):
+        with self.assertRaises(ValueError):
+            resolve_op_names(["this_op_does_not_exist_xyz"])
 
 
 if __name__ == "__main__":
