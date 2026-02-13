@@ -1028,6 +1028,207 @@ class TypePropagationTests(torch._dynamo.test_case.TestCase):
             opt_fn(torch.randn(4, 4))
 
 
+class CustomGuardRegistrationTests(torch._dynamo.test_case.TestCase):
+    def test_custom_guard_is_installed(self):
+        from torch._dynamo.guards import CustomGuardSpec, register_custom_guard
+        try:
+            from .utils import install_guard_manager_testing_hook
+        except ImportError:
+            from utils import install_guard_manager_testing_hook
+
+        def custom_guard_producer(builder):
+            return CustomGuardSpec(
+                closure_vars={"v": 1},
+                code="v == 1",
+                name="v_equals_1",
+            )
+
+        handle = register_custom_guard(custom_guard_producer)
+        self.addCleanup(handle.remove)
+
+        def guard_manager_testing_hook(guard_wrapper, f_locals, builder):
+            guard_str = str(guard_wrapper)
+            self.assertIn("v == 1", guard_str)
+
+        def fn(x):
+            return x + 1
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with install_guard_manager_testing_hook(guard_manager_testing_hook):
+            opt_fn(torch.randn(4, 4))
+
+
+    def test_custom_guard_handle_remove(self):
+        try:
+            from .utils import install_guard_manager_testing_hook
+        except ImportError:
+            from utils import install_guard_manager_testing_hook
+
+        from torch._dynamo.guards import CustomGuardSpec, register_custom_guard
+
+        def custom_guard_producer(builder):
+            return CustomGuardSpec(
+                closure_vars={"v": 1},
+                code="v == 1",
+                name="v_equals_1",
+            )
+
+        handle = register_custom_guard(custom_guard_producer)
+        handle.remove()
+
+        def guard_manager_testing_hook(guard_wrapper, f_locals, builder):
+            guard_str = str(guard_wrapper)
+            self.assertNotIn("v == 1", guard_str)
+
+        def fn(x):
+            return x + 1
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        with install_guard_manager_testing_hook(guard_manager_testing_hook):
+            compiled_fn(torch.randn(4, 4))
+
+
+    def test_custom_guard_can_access_builder_and_closure_vars(self):
+        """
+        Test whether custom guard works properly: can access `builder` and `closure_vars`
+        in compile time and run time.
+        Test scenario is installing silly custom  guard which will be guarding on value
+        of the graph argument x[0][0] and will trigger recompilation if it changes.
+        """
+        import torch._dynamo
+        from torch._dynamo.testing import CompileCounter
+
+        try:
+            from .utils import install_guard_manager_testing_hook
+        except ImportError:
+            from utils import install_guard_manager_testing_hook
+        def guard_manager_testing_hook(guard_wrapper, f_locals, builder):
+            guard_str = str(guard_wrapper)
+            self.assertIn("L['x'][0][0] == x_0_0", guard_str)
+
+        def fn(x):
+            return x + 1
+
+        cnt = CompileCounter()
+        compiled_fn = torch.compile(fn, backend=cnt, fullgraph=False)
+
+        from torch._dynamo.guards import CustomGuardSpec, register_custom_guard
+        from torch._dynamo.source import LocalSource
+        def custom_guard_producer(builder):
+            x_0_0 = builder.get(LocalSource("x"))[0][0]  # 0, 0 element value of the arg from the compile run
+
+            # guard will be true for the compile run, and false when value of L['x'] changes later
+            return CustomGuardSpec(
+                closure_vars={"x_0_0": x_0_0},
+                code="L['x'][0][0] == x_0_0",
+                name="assert on x[0][0]",
+            )
+
+        handle = register_custom_guard(custom_guard_producer)
+        self.addCleanup(handle.remove)
+
+        with install_guard_manager_testing_hook(guard_manager_testing_hook):
+            # inputs with the same shape but different values for test
+            x1 = torch.ones((4, 4))
+            x2 = torch.zeros((4, 4))
+
+            # 1st run compiles
+            expected_compilations = 1
+            compiled_fn(x1)
+            c1 = cnt.frame_count
+            self.assertEqual(c1, expected_compilations)
+
+            # 2nd run with the same input shouldn't trigger compile
+            expected_compilations += 0
+            compiled_fn(x1)
+            c2 = cnt.frame_count
+            self.assertEqual(c2, expected_compilations)
+
+            # run with different values should recompile
+            expected_compilations += 1
+            compiled_fn(x2)
+            c3 = cnt.frame_count
+            self.assertEqual(c3, expected_compilations)
+
+            # subsequent run with the same values should not recompile
+            expected_compilations += 0
+            compiled_fn(x2)
+            c4 = cnt.frame_count
+            self.assertEqual(c4, expected_compilations)
+
+
+    def test_custom_guard_exception_during_producer_call(self):
+        """
+        Testing whether raising an exception during call to custom guard producer doesn't
+        break the compilation.
+
+        Re-used scenario from test_custom_guard_can_access_builder_and_closure_vars,
+        interrupted by some RuntimeError.
+        """
+        import torch._dynamo
+        from torch._dynamo.testing import CompileCounter
+
+        try:
+            from .utils import install_guard_manager_testing_hook
+        except ImportError:
+            from utils import install_guard_manager_testing_hook
+        def guard_manager_testing_hook(guard_wrapper, f_locals, builder):
+            guard_str = str(guard_wrapper)
+            self.assertNotIn("L['x'][0][0] == x_0_0", guard_str)
+
+        def fn(x):
+            return x + 1
+
+        cnt = CompileCounter()
+        compiled_fn = torch.compile(fn, backend=cnt, fullgraph=False)
+
+        from torch._dynamo.guards import CustomGuardSpec, register_custom_guard
+        from torch._dynamo.source import LocalSource
+        def custom_guard_producer(builder):
+            x_0_0 = builder.get(LocalSource("x"))[0][0]  # 0, 0 element value of the arg from the compile run
+            if True:
+                raise RuntimeError("Breaking installation of custom guard for testing")
+            # guard will be true for the compile run, and false when value of L['x'] changes later
+            return CustomGuardSpec(
+                closure_vars={"x_0_0": x_0_0},
+                code="L['x'][0][0] == x_0_0",
+                name="assert on x[0][0]",
+            )
+
+        handle = register_custom_guard(custom_guard_producer)
+        self.addCleanup(handle.remove)
+
+        with install_guard_manager_testing_hook(guard_manager_testing_hook):
+            # inputs with the same shape but different value for test
+            x1 = torch.ones((4, 4))
+            x2 = torch.zeros((4, 4))
+
+            # 1st run compiles
+            expected_compilations = 1
+            compiled_fn(x1)
+            c1 = cnt.frame_count
+            self.assertEqual(c1, expected_compilations)
+
+            # 2nd run with the same input shouldn't trigger compile
+            expected_compilations += 0
+            compiled_fn(x1)
+            c2 = cnt.frame_count
+            self.assertEqual(c2, expected_compilations)
+
+            # run with different value shouldn't recompile
+            expected_compilations += 0
+            compiled_fn(x2)
+            c3 = cnt.frame_count
+            self.assertEqual(c3, expected_compilations)
+
+            # subsequent run with the same value should not recompile
+            expected_compilations += 0
+            compiled_fn(x2)
+            c4 = cnt.frame_count
+            self.assertEqual(c4, expected_compilations)
+
+
 class DuplicateGuardTest(torch._dynamo.test_case.TestCase):
     def test_duplicate_guard(self):
         class Foo:

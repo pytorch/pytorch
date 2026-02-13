@@ -37,8 +37,10 @@ import warnings
 import weakref
 from contextlib import contextmanager
 from copy import deepcopy
+from dataclasses import dataclass
 from inspect import currentframe
-from typing import Any, NamedTuple, NoReturn, Optional, TYPE_CHECKING, Union
+from typing import (Any, NamedTuple, NoReturn, Optional, TYPE_CHECKING, Union, Callable,
+                    Dict, List, OrderedDict)
 from typing_extensions import LiteralString, TypeAliasType, TypeVar
 from weakref import ReferenceType
 
@@ -112,6 +114,7 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.utils import _pytree as pytree
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._traceback import format_frame, report_compile_source_on_error
+from torch.utils.hooks import RemovableHandle
 from torch.utils.weak import TensorWeakRef
 
 from . import config, convert_frame, exc
@@ -235,6 +238,46 @@ dunder_attrs_assumed_constants = (
     "__func__",
     "__mro__",
 )
+
+@dataclass
+class CustomGuardSpec:
+    """
+    Struct describing data of a custom guard.
+    """
+
+    # custom closure variables the guard function should capture
+    closure_vars: Dict[str, Any]
+
+    # a single Python expression string that returns True/False at guard time; can access
+    # closure_vars
+    code: str
+
+    # a human-readable, debug-oriented rendering of the guard logic.
+    # If not provided, `code` will be used instead.
+    verbose_code: Optional[str]
+
+    # optional name for logs
+    name: Optional[str] = None
+
+# global registry of user-provided guards to install
+_REGISTERED_CUSTOM_GUARDS: OrderedDict[int, Callable[[GuardBuilderBase], CustomGuardSpec]] = collections.OrderedDict()
+
+def register_custom_guard(custom_guard_producer_fn: Callable[[GuardBuilderBase], CustomGuardSpec]) -> RemovableHandle:
+    """
+    Register a callback that emits a single runtime Dynamo lambda guard.
+    The callback is invoked during Dynamo guard assembly and can access
+    `builder: GuardBuilderBase`, in order to construct proper guard's expression.
+    It must return object of type CustomGuardSpec.
+
+    Returns handle which can be used for hook removal.
+    """
+    handle = RemovableHandle(_REGISTERED_CUSTOM_GUARDS)
+    _REGISTERED_CUSTOM_GUARDS[handle.id] = custom_guard_producer_fn
+    return handle
+
+
+def _get_registered_custom_guards() -> List[Callable[[GuardBuilderBase], CustomGuardSpec]]:
+    return list(_REGISTERED_CUSTOM_GUARDS.values())
 
 
 def get_framelocals_idx(code: types.CodeType, var_name: str) -> int:
@@ -4352,6 +4395,32 @@ class CheckFunctionManager:
                 # Shape env guards are already added for CPP guard manager in
                 # SHAPE_ENV implementation.
                 add_code_part(code, gcl.guard, True)
+
+        # generate custom guards from user-registered specs:
+        for custom_guard_producer in _get_registered_custom_guards():
+            try:
+                custom_guard_spec = None
+                custom_guard_spec = custom_guard_producer(builder)
+                if not isinstance(custom_guard_spec, CustomGuardSpec):
+                    raise TypeError("Registered custom guard producer function should "
+                                    "return `CustomGuardSpec`!")
+
+                # append the custom guard's expression as a lambda guard
+                verbose_code = custom_guard_spec.verbose_code if custom_guard_spec.verbose_code else custom_guard_spec.code
+                builder.add_python_lambda_leaf_guard_to_root(
+                    [custom_guard_spec.code],
+                    [verbose_code],
+                    custom_guard_spec.closure_vars)
+
+                # add this custom guard to logs
+                add_code_part(custom_guard_spec.code, guard=None, log_only=True)
+
+            except Exception as e:
+                logging.getLogger(__name__).exception(
+                    "Failed to add registered custom guard '%s': %s",
+                    getattr(custom_guard_spec, "name", "--unknown custom guard--"),
+                    str(e))
+
 
         # OK, all done generating guards
         if structured_guard_fns:
