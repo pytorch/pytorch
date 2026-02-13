@@ -5856,7 +5856,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 return True
         elif not self.is_combo_kernel:
             if V.graph.sizevars.statically_known_equals(tree.numel, 1):
-                return True
+                if not (tree.is_reduction and self.persistent_reduction):
+                    return True
 
         # Masks are superfluous if numel is a multiple of BLOCK
         # (We use the fact that BLOCK is required by triton to be a power of 2)
