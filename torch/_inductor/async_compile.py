@@ -47,6 +47,7 @@ from torch._inductor.compile_worker.tracked_process_pool import (
 )
 from torch._inductor.compile_worker.utils import _async_compile_initializer
 from torch._inductor.runtime.compile_tasks import (
+    _set_triton_libdevice_path,
     _set_triton_ptxas_path,
     _worker_compile_triton,
 )
@@ -478,6 +479,7 @@ class AsyncCompile:
                 try:
                     start_ns = time_ns()
                     _set_triton_ptxas_path()
+                    _set_triton_libdevice_path()
                     kernel = load_kernel()
                     kernel.set_compile_info(compile_id, is_backward)
                     kernel.precompile(
