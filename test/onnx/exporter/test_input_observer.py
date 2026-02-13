@@ -872,6 +872,163 @@ class TestInputObserver(common_utils.TestCase):
         with self.assertRaises(RuntimeError):
             observer.infer_dynamic_shapes()
 
+    def test_infer_dynamic_shapes_missing(self):
+        class Model(torch.nn.Module):
+            def forward(
+                self,
+                input_ids=None,
+                pixel_values=None,
+                attention_mask=None,
+                position_ids=None,
+                past_key_values=None,
+                token_type_ids=None,
+                cache_position=None,
+            ):
+                return input_ids
+
+        inputs = [
+            dict(
+                input_ids=torch.ones((1, 282), dtype=torch.int64),
+                pixel_values=torch.ones((1, 3, 896, 896), dtype=torch.int64),
+                attention_mask=torch.ones((1, 282), dtype=torch.int64),
+                position_ids=torch.ones((1, 282), dtype=torch.int64),
+                token_type_ids=torch.ones((1, 282), dtype=torch.int64),
+                cache_position=torch.ones((282,), dtype=torch.int64),
+            ),
+            dict(
+                input_ids=torch.ones((1, 1), dtype=torch.int64),
+                attention_mask=torch.ones((1, 283), dtype=torch.int64),
+                position_ids=torch.ones((1, 1), dtype=torch.int64),
+                past_key_values=torch.rand((1, 1, 282, 32)),
+                token_type_ids=torch.ones((1, 1), dtype=torch.int64),
+                cache_position=torch.ones((1,), dtype=torch.int64),
+            ),
+            dict(
+                input_ids=torch.ones((1, 1), dtype=torch.int64),
+                attention_mask=torch.ones((1, 284), dtype=torch.int64),
+                position_ids=torch.ones((1, 1), dtype=torch.int64),
+                past_key_values=torch.rand((1, 1, 283, 32)),
+                token_type_ids=torch.ones((1, 1), dtype=torch.int64),
+                cache_position=torch.ones((1,), dtype=torch.int64),
+            ),
+        ]
+
+        model = Model()
+        observer = InputObserver(missing=dict(pixel_values=torch.empty((0, 3, 896, 896))))
+        with observer(model):
+            for kwargs in inputs:
+                model(**kwargs)
+
+        shapes = observer.infer_dynamic_shapes(set_batch_dimension_for=True)
+        cst = torch.export.Dim.DYNAMIC
+        expected = {
+            "input_ids": {0: cst, 1: cst},
+            "pixel_values": {0: cst},
+            "attention_mask": {0: cst, 1: cst},
+            "position_ids": {0: cst, 1: cst},
+            "past_key_values": {0: cst, 2: cst},
+            "token_type_ids": {0: cst, 1: cst},
+            "cache_position": {0: cst},
+        }
+        self.assertEqual(expected, shapes)
+
+    def test_io_captured_kwargs_kwargs(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, **kwargs):
+                return x + kwargs["y"]
+
+        inputs = [
+            dict(x=torch.randn((5, 6)), y=torch.randn((1, 6))),
+            dict(x=torch.randn((7, 7)), y=torch.randn((1, 7))),
+            dict(x=torch.randn((7, 8)), y=torch.randn((1, 8))),
+            dict(x=torch.randn((7, 9)), y=torch.randn((1, 9))),
+        ]
+
+        model = Model()
+        expected = [model(**kwargs) for kwargs in inputs]
+        observer = InputObserver()
+        with observer(model):
+            for kwargs in inputs:
+                model(**kwargs)
+        self.assertEqual(len(observer.info), 3)
+        for i in range(3):
+            self.assertEqual(len(observer.info.flat_outputs[i]), 1)
+            torch.testing.assert_close(expected[i], observer.info.flat_outputs[i][0])
+
+        cst = torch.export.Dim.DYNAMIC
+        ds = observer.infer_dynamic_shapes()
+        self.assertEqual(dict(x={0: cst, 1: cst}, kwargs=dict(y={1: cst})), ds)
+        args = observer.infer_arguments()
+        self.assertIsInstance(args, dict)
+        self.assertEqual(2, len(args))
+        self.assertEqual(["x", "y"], list(args))
+
+        dynamic_shapes = torch.export.AdditionalInputs()
+        for kwargs in inputs:
+            dynamic_shapes.add((), kwargs)
+        dss = dynamic_shapes.dynamic_shapes(model, (), inputs[0])
+        self.assertEqual({"x": (cst, cst), "kwargs": {"y": (None, cst)}}, dss)
+
+    def test_io_captured_kwargs_kwargs_with_args(self):
+        class Model(torch.nn.Module):
+            def forward(self, a, *args, **kwargs):
+                return a - args[0] * args[1] + kwargs["x"] - kwargs["y"]
+
+        inputs = [
+            (
+                (torch.randn((5, 6)), torch.randn((5, 6)), torch.randn((5, 6))),
+                dict(x=torch.randn((5, 6)), y=torch.randn((1, 6))),
+            ),
+            (
+                (torch.randn((7, 7)), torch.randn((7, 7)), torch.randn((7, 7))),
+                dict(x=torch.randn((7, 7)), y=torch.randn((1, 7))),
+            ),
+        ]
+
+        model = Model()
+        expected = [model(*args, **kwargs) for args, kwargs in inputs]
+        observer = InputObserver()
+        with observer(model):
+            for args, kwargs in inputs:
+                model(*args, **kwargs)
+        self.assertEqual(len(observer.info), 2)
+        for i in range(2):
+            self.assertEqual(len(observer.info.flat_outputs[i]), 1)
+            torch.testing.assert_close(expected[i], observer.info.flat_outputs[i][0])
+
+        cst = torch.export.Dim.DYNAMIC
+        ds = observer.infer_dynamic_shapes()
+        self.assertEqual(
+            {
+                "a": {0: cst, 1: cst},
+                "args": ({0: cst, 1: cst}, {0: cst, 1: cst}),
+                "kwargs": {"x": {0: cst, 1: cst}, "y": {1: cst}},
+            },
+            ds,
+        )
+
+        dynamic_shapes = torch.export.AdditionalInputs()
+        for args, kwargs in inputs:
+            dynamic_shapes.add(args, kwargs)
+        dss = dynamic_shapes.dynamic_shapes(model, *inputs[0])
+        self.assertEqual(
+            {
+                "a": (cst, cst),
+                "args": ((cst, cst), (cst, cst)),
+                "kwargs": {"x": (cst, cst), "y": (None, cst)},
+            },
+            dss,
+        )
+
+        with self.assertRaises(RuntimeError):
+            observer.infer_arguments()
+
+        args, kwargs = observer.infer_arguments(as_args_kwargs=True)
+        self.assertIsInstance(kwargs, dict)
+        self.assertEqual(["x", "y"], list(kwargs))
+        self.assertIsInstance(args, tuple)
+        self.assertEqual(len(args), 3)
+
 
 if __name__ == "__main__":
     common_utils.run_tests()

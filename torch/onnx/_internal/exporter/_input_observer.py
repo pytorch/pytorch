@@ -27,11 +27,11 @@ def _flatten_unflatten_for_dynamic_shapes(
 
     Args:
         obj: Object from a custom class.
-        change_function: Function to modify the tensor in the structure itself,
-            like replace them by a shape.
+        change_function: If not empty, this function is called to modify the tensors
+            in the structure itself, like replace them by a shape.
 
     Returns:
-        the serialized object
+        The flattened object.
     """
     if isinstance(obj, torch.Tensor):
         return change_function(obj) if change_function else obj
@@ -77,10 +77,10 @@ def _infer_dynamic_dimensions(
 
     Args:
         shape_list:
-            list of shapes, they must all have the same length
+            List of shapes, they must all have the same length.
         set_batch_dimension:
-            forces the first dimension to be treated as dynamic,
-            even if all shapes have the same value for that dimension
+            Forces the first dimension to be treated as dynamic,
+            even if all shapes have the same value for that dimension.
 
     Returns:
         list of dynamic dimensions
@@ -102,6 +102,7 @@ def _infer_dynamic_dimensions(
 class InputCandidate:
     """Retains one set of inputs given to the forward method or any
     other method the class :class:`InputObserver` is stealing from.
+    Any class is allowed as long as it can be flattened.
 
     Args:
         args: Positional arguments.
@@ -110,6 +111,9 @@ class InputCandidate:
             may be modified inplace, the original value must be retained.
         cst_kwargs: Any optional arguments constant over multiple calls.
             int, float, str, bool values must be stored here.
+
+    The constructor flattens the received arguments.
+    Any necessary flattening function should have been registered first.
     """
 
     def __init__(
@@ -122,6 +126,7 @@ class InputCandidate:
         self.args = args
         self.kwargs = kwargs
         self.flat_list, self.spec = torch.utils._pytree.tree_flatten((args, kwargs))
+        self.n_tensors = sum(t is not None for t in self.flat_list)
         self._position_to_args_kwargs: list[int | str] | None = None
         self._n_tensors_for_args_kwargs: dict[int | str, int] | None = None
         self.cst_kwargs = cst_kwargs.copy()
@@ -283,18 +288,36 @@ class InputObserverInfo:
             to be the same in the ordered dictionaries `add_inputs` receive.
         default_values: Default values defined by the signature of the function,
             any value equal to that is ignored to simplify the export.
+        missing: If a named argument (in kwargs) is missing,
+            a default value will be taken in this dictionary,
+            this is used when after the prefill step, an argument
+            disappears (such as `pixel_values`) and another one
+            is added (such as `past_key_values`).
+            The values are only to infer dynamic shapes and arguments,
+            not to run the model.
+        args_name_and_position: Name of parameter `*args`
+            and its position if it exists.
+        kwargs_name: Name of parameter `**kwargs` if it exists.
+
+    This is used by class :class:`InputObserver`.
     """
 
     def __init__(
         self,
         signature_names: list[str],
         default_values: dict[str, int | bool | str | float],
+        missing: dict[str, Any],
+        args_name_and_position: tuple[str, int] | None,
+        kwargs_name: str | None,
     ):
         self.default_values = default_values
+        self.missing = missing
         self.inputs: list[InputCandidate] = []
         self.outputs_specs: list[torch.utils._pytree.PyTreeSpec] = []
         self.flat_outputs: list[list[torch.Tensor | None]] = []
         self.latencies: list[float] = []
+        self.args_name_and_position = args_name_and_position
+        self.kwargs_name = kwargs_name
         self.signature_names = signature_names
         self._best_candidate: InputCandidate | None = None
         self._captured_inputs: dict[int | str, int] | None = None
@@ -316,6 +339,7 @@ class InputObserverInfo:
             if k in self.signature_names
             and isinstance(v, (int, float, bool, str))
             and v != self.default_values.get(k, None)
+            and self.default_values.get(k, None) is not None
         }
         kwargs = {
             k: v
@@ -323,7 +347,12 @@ class InputObserverInfo:
             if v is not None and not isinstance(v, (int, float, bool, str))
         }
 
-        # kwargs may come in a different order each time.
+        # adds missing attributes
+        for k, v in self.missing.items():
+            if k not in kwargs:
+                kwargs[k] = v
+
+        # kwargs may come in a different ordeer teach.
         # dictionaries are ordered and torch.export.export expects
         # dynamic shapes and kwargs to follow the same order.
 
@@ -458,27 +487,55 @@ class InputObserverInfo:
         flat_dynamic_shapes = [dict.fromkeys(dims, cst) for dims in dynamic_shapes]
         if return_flat:
             return tuple(flat_dynamic_shapes)
+
+        # Let's regroup.
         if len(flat_dynamic_shapes) == len(self._best_candidate.args) + len(
             self._best_candidate.kwargs
         ):
             # It means forward method is called with tensors only.
-            if not self._best_candidate.kwargs and not self._best_candidate.cst_kwargs:
+            if (
+                not self._best_candidate.kwargs
+                and not self._best_candidate.cst_kwargs
+                and not self.args_name_and_position
+            ):
                 # only positional arguments
                 return tuple(flat_dynamic_shapes)
             if not self._best_candidate.args:
                 # only named arguments
                 ds = dict(zip(list(self._best_candidate.kwargs), flat_dynamic_shapes))
-                return {**ds, **dict.fromkeys(self._best_candidate.cst_kwargs, None)}
+                return self._post_process_for_kwargs(
+                    {**ds, **dict.fromkeys(self._best_candidate.cst_kwargs, None)}
+                )
+            if not self.args_name_and_position:
+                # positional arguments needs to be moved to the named arguments
+                n_args = len(self._best_candidate.args)
+                pos_names = self.signature_names[:n_args]
+                return self._post_process_for_kwargs(
+                    {
+                        **dict(zip(pos_names, flat_dynamic_shapes[:n_args])),
+                        **dict(
+                            zip(
+                                list(self._best_candidate.kwargs), flat_dynamic_shapes[n_args:]
+                            )
+                        ),
+                        **dict.fromkeys(self._best_candidate.cst_kwargs, None),
+                    }
+                )
             # positional arguments needs to be moved to the named arguments
-            n_args = len(self._best_candidate.args)
+            n_args = min(len(self._best_candidate.args), self.args_name_and_position[1])
+            i_kwargs = max(len(self._best_candidate.args), self.args_name_and_position[1])
+            var_pos = self.args_name_and_position[0]
             pos_names = self.signature_names[:n_args]
-            return {
-                **dict(zip(pos_names, flat_dynamic_shapes[:n_args])),
-                **dict(
-                    zip(list(self._best_candidate.kwargs), flat_dynamic_shapes[n_args:])
-                ),
-                **dict.fromkeys(self._best_candidate.cst_kwargs, None),
-            }
+            return self._post_process_for_kwargs(
+                {
+                    **dict(zip(pos_names, flat_dynamic_shapes[:n_args])),
+                    var_pos: tuple(flat_dynamic_shapes[n_args:i_kwargs]),
+                    **dict(
+                        zip(list(self._best_candidate.kwargs), flat_dynamic_shapes[i_kwargs:])
+                    ),
+                    **dict.fromkeys(self._best_candidate.cst_kwargs, None),
+                }
+            )
 
         # nested types, here comes the fun part because the shapes cannot be unflattened,
         # custom classes must appear in their flattened shape.
@@ -518,24 +575,44 @@ class InputObserverInfo:
                 **ds_kwargs,
                 **dict.fromkeys(self._best_candidate.cst_kwargs, None),
             }
-        if not ds_kwargs:
+        if not ds_kwargs and not self.args_name_and_position:
             return tuple(ds_args)
         if not ds_args:
-            return ds_kwargs
-        pos_names = self.signature_names[: len(ds_args)]
-        return {**dict(zip(pos_names, ds_args)), **ds_kwargs}
+            return self._post_process_for_kwargs(ds_kwargs)
+
+        if not self.args_name_and_position:
+            pos_names = self.signature_names[: len(ds_args)]
+            return self._post_process_for_kwargs(
+                {**dict(zip(pos_names, ds_args)), **ds_kwargs}
+            )
+
+        n_args = min(len(ds_args), self.args_name_and_position[1])
+        pos_names = self.signature_names[:n_args]
+        return self._post_process_for_kwargs(
+            {
+                **dict(zip(pos_names, ds_args[:n_args])),
+                self.args_name_and_position[0]: tuple(ds_args[n_args:]),
+                **ds_kwargs,
+            }
+        )
 
     def infer_arguments(
         self,
         index_or_candidate: InputCandidate | int | None = None,
         /,
         flat: bool = False,
-    ) -> list[torch.Tensor | None] | tuple[torch.Tensor, ...] | dict[str, torch.Tensor]:
+        as_args_kwargs: bool = False,
+    ) -> (
+        list[torch.Tensor]
+        | tuple[torch.Tensor, ...]
+        | dict[str, torch.Tensor]
+        | tuple[list[torch.Tensor] | tuple[torch.Tensor, ...], dict[str, torch.Tensor]]
+    ):
         """Infers arguments based on the collected tensors."""
         # This is already checked by _build_inputs_completed_with_none_values
         # but this is not always well captured by tools checking types.
         self.align_inputs_none_values()
-        assert self._best_candidate is not None  # noqa: S101
+        torch._check(self._best_candidate is not None, lambda: "No input was captured.")
         candidate = None
         if index_or_candidate is None:
             for cand in self.inputs:
@@ -557,7 +634,7 @@ class InputObserverInfo:
         else:
             candidate = index_or_candidate
 
-        assert candidate is not None  # noqa: S101
+        torch._check(candidate is not None, "No input was captured.")
         if candidate.aligned_flat_list is None:
             raise RuntimeError(
                 f"Candidate {candidate} has no aligned flat list of tensors, "
@@ -622,19 +699,57 @@ class InputObserverInfo:
             # pyrefly: ignore[invalid-argument]
             kwargs = {**kwargs, **self._best_candidate.cst_kwargs}
 
-        if not kwargs:
-            return args
-        if not args:
+        if not as_args_kwargs:
+            if not kwargs:
+                return args
+            if not args:
+                return kwargs
+
+            # We need to move args to kwargs
+            if self.args_name_and_position:
+                raise RuntimeError(
+                    "Cannot return arguments "
+                    "as a single tuple or a single dictionary "
+                    "because of '*args' in the function signature. "
+                    "You need to set `as_args_kwargs=True`."
+                )
+            n_args = len(args)
+            pos_names = self.signature_names[:n_args]
+            return {**dict(zip(pos_names, args[:n_args])), **kwargs}
+
+        # Generic case.
+        return tuple(args), kwargs
+
+    def _post_process_for_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+        """:func:`torch.export.export` requires to have dynamic shapes
+        and keyword arguments wrapped into `'kwargs': { 'param':  shape or tensor }`
+        if 'param' is not part of the signature but is caught through `**kwargs`.
+        This function ensures this is the case.
+        """
+        if not self.kwargs_name:
+            # Nothing to do here.
             return kwargs
-        # We need to move args to kwargs
-        pos_names = self.signature_names[: len(args)]
-        return {**dict(zip(pos_names, args)), **kwargs}
+        to_be_moved = {k for k in kwargs if k not in self.signature_names}
+        if not to_be_moved:
+            return kwargs
+        keywords = {k: v for k, v in kwargs.items() if k in to_be_moved}
+        new_kwargs = {k: v for k, v in kwargs.items() if k not in to_be_moved}
+        return {**new_kwargs, self.kwargs_name: keywords}
 
 
 class InputObserver:
     """Steals forward method to collect inputs and outputs.
     This information is used to infer dynamic shapes and
     export arguments.
+
+    Args:
+        missing: If a named argument (in kwargs) is missing,
+            a default value will be taken in this dictionary,
+            this is used when after the prefill step, an argument
+            disappears (such as `pixel_values`) and another one
+            is added (such as `past_key_values`).
+            The values are only to infer dynamic shapes and arguments,
+            not to run the model.
 
     Examples
     --------
@@ -663,8 +778,9 @@ class InputObserver:
     .. versionadded:: 2.11.0
     """
 
-    def __init__(self):
-        self.info: InputObserverInfo | None = None
+    def __init__(self, missing: dict[str, Any] | None = None):
+        self.info: InputObserverInfo | None = None  # type: ignore[annotation-unchecked]
+        self.missing = missing or {}
 
     def _replaced_method(
         self,
@@ -716,6 +832,16 @@ class InputObserver:
         captured_method = getattr(model, method_name)
         sig = inspect.signature(captured_method)
         if self.info is None:
+            kwargs_names = [
+                p
+                for p in sig.parameters
+                if sig.parameters[p].kind == inspect.Parameter.VAR_KEYWORD
+            ]
+            args_names = [
+                (p, i)
+                for (i, p) in enumerate(sig.parameters)
+                if sig.parameters[p].kind == inspect.Parameter.VAR_POSITIONAL
+            ]
             self.info = InputObserverInfo(
                 signature_names=list(sig.parameters),
                 default_values={
@@ -724,6 +850,9 @@ class InputObserver:
                     if p.default != inspect.Parameter.empty
                     and isinstance(p.default, (int, bool, str, float))
                 },
+                missing=self.missing,
+                args_name_and_position=args_names[0] if args_names else None,
+                kwargs_name=kwargs_names[0] if kwargs_names else None,
             )
         n_already_stored = len(self.info)
         lambda_method = lambda *args, _cm=captured_method, _snc=(  # noqa: E731
@@ -777,7 +906,13 @@ class InputObserver:
         self,
         index_or_args_or_kwargs: tuple[Any] | dict[str, Any] | int | None = None,
         flat: bool = False,
-    ) -> list[torch.Tensor | None] | tuple[torch.Tensor, ...] | dict[str, torch.Tensor]:
+        as_args_kwargs: bool = False,
+    ) -> (
+        list[torch.Tensor]
+        | tuple[torch.Tensor, ...]
+        | dict[str, torch.Tensor]
+        | tuple[list[torch.Tensor] | tuple[torch.Tensor, ...], dict[str, torch.Tensor]]
+    ):
         """Infers arguments based on the collected tensors.
 
         Args:
@@ -790,7 +925,9 @@ class InputObserver:
             flat: If True, it returns a flattened list of tensors,
                 if False, it returns a tuple or a dictionary preserving
                 the nested structures.
-
+            as_args_kwargs: If True, the method always returns `(args, kwargs)`,
+                otherwise, it returns either a tuple (only args) or a dictionary
+                (only kwargs) or raises an exception if it cannot do so.
         Returns:
             Inferred arguments, every optional tensor is replaced by an empty tensor.
         """
@@ -832,7 +969,9 @@ class InputObserver:
                 self.info._captured_inputs,
                 self.info.signature_names,
             )
-        return self.info.infer_arguments(index_or_candidate, flat=flat)
+        return self.info.infer_arguments(
+            flat=flat, as_args_kwargs=as_args_kwargs
+        )
 
     def check_discrepancies(
         self,
@@ -843,25 +982,26 @@ class InputObserver:
         initializer: Callable[
             [str | bytes], ort.InferenceSession
         ] = _onnx_program._ort_session_initializer,
+        skip_none: bool = True,
     ) -> list[dict[str, str | int | float]]:
         """Computes the discrepancies between the saved inputs and outputs
         with the saved onnx model.
 
         Args:
-            onnx_program:
-                Exported Model to verify.
-            atol:
-                Absolute tolerance, recommended values, 1e-4 for float, 1e-2 for float16.
-            rtol:
-                Relative tolerance.
-            progress_bar:
-                Shows a progress bar (requires `tqdm`).
-            initializer: The function to initialize the ONNX Runtime inference
+            onnx_program: Exported Model to verify.
+            atol: Absolute tolerance, recommended values, 1e-4 for float, 1e-2 for float16.
+            rtol: Relative tolerance.
+            progress_bar: Shows a progress bar (requires `tqdm`).
+            initializer: The function called to initialize the ONNX Runtime inference
                 session with the specified model. By default, it uses the
                 `_ort_session_initializer` function.
+            skip_none: Does not check discrepancies when an output is None.
 
         Returns:
             A list of dictionaries, ready to be consumed by a dataframe.
+
+        The function catches exceptions, it shows the error in the returned
+        summary.
         """
         # For big models, we should consider taking a filename to avoid the users
         # creating the model proto twice.
@@ -904,7 +1044,7 @@ class InputObserver:
 
             duration = time.perf_counter() - begin
             if error:
-                diff: dict[str, Any] = dict(error=error, SUCCESS=False)
+                diff: dict[str, str | int | float | bool] = dict(error=error, SUCCESS=False)
             elif ort_outputs is None or len(outputs) != len(ort_outputs):
                 diff = dict(SUCCESS=False, error="not the same number of outputs")
             else:
@@ -915,7 +1055,7 @@ class InputObserver:
                 # pyrefly: ignore[no-matching-overload]
                 for torch_tensor, ort_tensor in zip(outputs, ort_outputs):
                     if torch_tensor is None or ort_tensor is None:
-                        if type(torch_tensor) is not type(ort_tensor):
+                        if type(torch_tensor) is not type(ort_tensor) and not skip_none:
                             success = False
                             error = "missing output"
                             break
