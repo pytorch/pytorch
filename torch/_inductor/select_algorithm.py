@@ -93,6 +93,7 @@ from .utils import (
     triton_type,
     triton_type_to_torch,
     unique,
+    use_aten_gemm_kernels,
 )
 from .virtualized import V
 
@@ -1062,7 +1063,13 @@ class TritonTemplateKernel(TritonKernel):
             self.ops_handler = StoreOutputSubstitution
 
             input_node = self.named_input_nodes[input_name]
-            output_index = input_node.make_indexer()(index_symbols)
+            if isinstance(input_node.layout, ir.FlexibleLayout):
+                # This will set a layout constraint on the template
+                self.get_stride_and_maybe_freeze_layout(input_node)
+                with patch.object(ir.FlexibleLayout, "allow_indexing", True):
+                    output_index = input_node.make_indexer()(index_symbols)
+            else:
+                output_index = input_node.make_indexer()(index_symbols)
 
             # in def_kernel above we define the inputs with the storage offset adjusted
             # creating the load in input_node.make_indexer() will also adjust by storage offset
@@ -1557,7 +1564,40 @@ class TritonTemplateKernel(TritonKernel):
         ]
 
     def get_stride_and_maybe_freeze_layout(self, node) -> list[int]:
-        node.data.freeze_layout()
+        """
+        Get the stride of an input node for template code generation, with deferred
+        layout freezing:
+        - If the layout is FlexibleLayout, compute speculative strides without freezing
+        - Record the expected layout (as FixedLayout) as a constraint for later validation
+        - Only freeze at finalization time after validating no conflicts exist
+
+        Scheduler falls back to aten if layout constraint violated. If no aten,
+        freeze right away.
+        """
+        # realizing for safety
+        ir.ExternKernel.realize_input(node)
+        layout = node.data.layout
+        node_name = node.get_name()
+
+        if isinstance(layout, ir.FlexibleLayout):
+            if not use_aten_gemm_kernels():
+                # No ExternKernel fallback available, freeze immediately
+                node.data.freeze_layout()
+            else:
+                # Compute what strides WOULD be if frozen, without actually freezing
+                fixed_layout_copy = layout.get_fixed_layout_without_freezing()
+                # Save to graph-level constraints instead of per-kernel
+                existing = V.graph.buffer_layout_constraints.get(node_name)
+                if existing is not None and existing != fixed_layout_copy:
+                    raise AssertionError(
+                        f"Layout constraint mismatch for {node_name}: "
+                        f"existing {existing} vs new {fixed_layout_copy}"
+                    )
+                else:
+                    V.graph.buffer_layout_constraints[node_name] = fixed_layout_copy
+
+                return list(fixed_layout_copy.stride)
+        # Already frozen or not a FlexibleLayout, just return current strides
         return node.get_stride()
 
 
