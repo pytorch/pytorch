@@ -7889,7 +7889,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         template([1, 1, 8, 8], [2, 2, 0, -1])
         template([1, 1, 8, 8], [2, 2, -1, 0])
 
-    @xfail_if_mps_unimplemented  # Unsupported Border padding mode
     def test_grid_sampler_2d(self):
         def fn(a, b):
             return (
@@ -11445,6 +11444,45 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             branching(x_small)
 
     @requires_gpu()
+    @skip_if_not_triton
+    @unittest.skipIf(
+        not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
+    )
+    def test_hint_override_cache_invalidation(self):
+        """Different hint_override values must not produce stale cache hits."""
+        from torch._inductor.utils import fresh_inductor_cache, run_and_get_code
+
+        HINT_A = 48
+        HINT_B = 99
+
+        def fn(x):
+            return x.sum(dim=0)
+
+        x = torch.randn(256, 32, device=GPU_TYPE)
+
+        with fresh_inductor_cache():
+            compiled_a = torch.compile(fn)
+            torch._dynamo.mark_dynamic(x, 0, hint_override=HINT_A)
+            _, codes_a = run_and_get_code(compiled_a, x)
+
+            compiled_b = torch.compile(fn)
+            torch._dynamo.mark_dynamic(x, 0, hint_override=HINT_B)
+            _, codes_b = run_and_get_code(compiled_b, x)
+
+        code_a = codes_a[0]
+        code_b = codes_b[0]
+
+        def has_hint(code, h):
+            return f"rand_strided(({h}," in code or f"rand_strided(({h}, " in code
+
+        self.assertTrue(has_hint(code_a, HINT_A), f"hint {HINT_A} not in first code")
+        self.assertTrue(has_hint(code_b, HINT_B), f"hint {HINT_B} not in second code")
+        self.assertFalse(
+            has_hint(code_b, HINT_A),
+            f"second compilation has hint {HINT_A}; stale cache hit",
+        )
+
+    @requires_gpu()
     def test_stride_preservation_with_stride_modifying_fx_pass(self):
         def f(x):
             return x + 1
@@ -13301,7 +13339,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 _, mul_buf, _ = nodes
                 self.assertTrue(
                     all(
-                        V.graph.sizevars.size_hints(buf.get_stride()) == (1, 2)
+                        V.graph.sizevars.optimization_hints(buf.get_stride()) == (1, 2)
                         for buf in nodes
                     )
                 )
@@ -17269,5 +17307,5 @@ def _run_and_get_stripped_kernels(
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if RUN_CPU or RUN_GPU:
+    if RUN_CPU or RUN_GPU or HAS_MPS:
         run_tests(needs="filelock")
