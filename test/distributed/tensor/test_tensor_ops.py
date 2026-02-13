@@ -993,8 +993,9 @@ class DistTensorOpsTest(DTensorTestBase):
 class DistBucketizeTest(LocalDTensorTestBase):
     @with_comms
     def test_bucketize_partial_input(self):
-        # Bucketize returns indices, which cannot be combined with sum/avg
-        # reductions. Partial inputs should be converted to Replicate.
+        # Bucketize is non-linear, so Partial("sum")/Partial("avg") inputs
+        # must be converted to Replicate. But bucketize is monotone, so
+        # Partial("max") and Partial("min") can propagate directly.
         with LocalTensorMode(ranks=self.world_size):
             mesh = self.build_device_mesh()
             boundaries = torch.tensor([1.0, 3.0, 5.0, 7.0], device=self.device_type)
@@ -1003,25 +1004,43 @@ class DistBucketizeTest(LocalDTensorTestBase):
                 device=self.device_type,
             )
 
-            for reduce_op in ("sum", "avg", "max"):
+            # Non-linear reductions: must redistribute to Replicate
+            for reduce_op in ("sum", "avg"):
                 partial_input = DTensor.from_local(
                     input_tensor, mesh, [Partial(reduce_op)]
                 )
                 dist_boundaries = distribute_tensor(boundaries, mesh, [Replicate()])
                 result = torch.bucketize(partial_input, dist_boundaries)
 
-                # Output must be Replicate, not Partial
                 self.assertTrue(
                     result.placements[0].is_replicate(),
                     f"Expected Replicate output but got {result.placements[0]} "
                     f"for Partial({reduce_op}) input",
                 )
-                # Expected is bucketize on the materialized global tensor, which
-                # differs per reduce_op (e.g. Partial("sum") allreduce-sums the
-                # local tensors across ranks).
                 global_input = partial_input.full_tensor()
                 expected = torch.bucketize(global_input, boundaries)
                 self.assertEqual(result.to_local(), expected)
+
+            # Monotone reductions: output inherits the same partial type
+            for reduce_op in ("max", "min"):
+                partial_input = DTensor.from_local(
+                    input_tensor, mesh, [Partial(reduce_op)]
+                )
+                dist_boundaries = distribute_tensor(boundaries, mesh, [Replicate()])
+                result = torch.bucketize(partial_input, dist_boundaries)
+
+                self.assertTrue(
+                    result.placements[0].is_partial(),
+                    f"Expected Partial output but got {result.placements[0]} "
+                    f"for Partial({reduce_op}) input",
+                )
+                self.assertEqual(
+                    result.placements[0].reduce_op,
+                    reduce_op,
+                    f"Expected Partial({reduce_op}) output but got {result.placements[0]}",
+                )
+                expected = torch.bucketize(input_tensor, boundaries)
+                self.assertEqual(result.full_tensor(), expected)
 
     @with_comms
     def test_bucketize_sharded_input(self):
