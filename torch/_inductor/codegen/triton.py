@@ -5023,29 +5023,32 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.post_loop_combine.clear()
         self.post_loop_store.clear()
 
-    def kernel_benchmark_extra_args(self) -> list[str]:
-        args = []
+    def _kernel_benchmark_extra_args(self) -> list[Any]:
+        args: list[Any] = []
         if self.need_numel_args():
             numel_args: list[sympy.Expr] = []
             self.add_numel_to_call_args("", numel_args, [])
             for arg in numel_args:
                 if isinstance(arg, int):
-                    args.append(str(arg))
+                    args.append(arg)
                 elif isinstance(arg, SymbolicCallArg):
                     hint = V.graph.sizevars.optimization_hint_with_override(
                         arg.inner_expr,
                         hint_override=self.hint_override,
                     )
-                    args.append(str(hint))
+                    args.append(hint)
                 elif isinstance(arg, sympy.Expr):
                     hint = V.graph.sizevars.optimization_hint_with_override(
                         arg,
                         hint_override=self.hint_override,
                     )
-                    args.append(str(hint))
+                    args.append(hint)
                 else:
                     raise ValueError(f"Unsupported numel argument type: {type(arg)}")
         return args
+
+    def kernel_benchmark_extra_args(self) -> list[str]:
+        return [str(a) for a in self._kernel_benchmark_extra_args()]
 
     def codegen_kernel_benchmark(self, num_gb: Optional[float]) -> IndentedBuffer:
         """
@@ -5167,6 +5170,46 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             )
 
         return result
+
+    def get_arg_metadata_for_benchmarking(self) -> list[Any]:
+        """
+        Get metadata for all kernel arguments that can be used to construct
+        random tensors for distributed autotuning.
+        """
+        from torch._inductor.runtime.distributed_runtime_autotune import (
+            TensorMeta,
+            WorkspaceMeta,
+        )
+
+        args: list[Any] = []
+        _, call_args, signature, _ = self.args.python_argdefs()
+        for arg_name, arg_sig in zip(call_args, signature):
+            if buf := V.graph.try_get_buffer(arg_name):
+                args.append(
+                    TensorMeta.from_irnode(
+                        buf, V.graph.sizevars, hint_override=self.hint_override
+                    )
+                )
+            elif arg_name in V.graph.constants:
+                const_tensor = V.graph.constants[arg_name]
+                args.append(TensorMeta.from_tensor(const_tensor))
+            elif isinstance(arg_sig, SizeArg):
+                symval_hint = V.graph.sizevars.size_hint(arg_sig.expr)
+                args.append(symval_hint)
+            elif isinstance(arg_sig, WorkspaceArg):
+                args.append(
+                    WorkspaceMeta.from_workspace(
+                        arg_sig, V.graph.sizevars, hint_override=self.hint_override
+                    )
+                )
+            else:
+                raise KeyError(
+                    f"Distributed autotune: Didn't find buffer or const tensor: for {arg_name}"
+                )
+
+        extra_args = self._kernel_benchmark_extra_args()
+        args.extend(extra_args)
+        return args
 
     def imports_for_benchmark_kernel(self):
         return textwrap.dedent(
@@ -6105,6 +6148,29 @@ class TritonScheduling(SIMDScheduling):
             wrapper.define_kernel(
                 kernel_name, compile_wrapper.getvalue(), metadata_comment
             )
+
+            # Register kernel for distributed runtime autotuning.
+            # TODO: Should we support more than TritonKernels, e.g., what's a ComboKernel?
+            if (
+                config.distributed_runtime_autotune
+                and isinstance(kernel, TritonKernel)
+                and kernel.features.is_reduction()
+            ):
+                from torch._inductor.runtime.distributed_runtime_autotune import (
+                    try_register_kernel_from_codegen,
+                )
+
+                # Hash the kernel body because it doesn't contain kernel name or device.
+                # include the name because we see different kernels with identical
+                # bodies. TODO: Is this sufficient? Should we include the size hints as
+                # well, for example?
+                kernel_hash = code_hash(kernel.body.getvalue(), extra=kernel_name)
+                try_register_kernel_from_codegen(
+                    kernel_name,
+                    kernel_hash,
+                    V.graph.is_backward,
+                    kernel.get_arg_metadata_for_benchmarking,
+                )
 
             # log kernel metadata for offline analysis.
             # E.g. one can find all unaligned inner reduction and check if

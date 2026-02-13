@@ -473,6 +473,29 @@ distributed_max_autotune_gemm = (
     os.environ.get("TORCHINDUCTOR_DISTRIBUTED_MAX_AUTOTUNE_GEMM") == "1"
 )
 
+# Enable distributed runtime autotuning. When enabled, runtime Triton autotuning is
+# distributed across ranks in the same process group (or optionally, same host).
+distributed_runtime_autotune = (
+    os.environ.get("TORCHINDUCTOR_DISTRIBUTED_RUNTIME_AUTOTUNE") == "1"
+)
+
+# If performing distributed runtime autotuning, further perform coordinate descent
+# tuning across the ranks.
+distributed_coordinate_descent_tuning = (
+    os.environ.get("TORCHINDUCTOR_DISTRIBUTED_COORDINATE_DESCENT_TUNING") == "1"
+)
+
+# Maximum time in seconds to wait for all ranks to signal participation in distributed
+# runtime autotuning before falling back to local autotuning. Note that this time is
+# essentially the per-frame overhead paid in the case that not all ranks compile.
+distributed_autotune_max_wait_seconds: float = 30.0
+
+# Restrict distributed runtime autotuning to ranks on the same host.
+distributed_autotune_host_only = True
+
+# Minimum number of kernels required to justify the overhead of distributing autotuning.
+distributed_autotune_min_kernels: int = 8
+
 # Pipeline autotuning for max-autotune-gemm. Overlap lowering and benchmarking on GPU
 pipeline_max_autotune_gemm = (
     os.environ.get("TORCHINDUCTOR_PIPELINE_GEMM_AUTOTUNING") == "1"
