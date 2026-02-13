@@ -2718,12 +2718,10 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         weight = 0.1
         self.common(fn, [start, end, weight])
 
-    @config.patch("eager_numerics.pow_precision", True)
     def test_pow_scalar_tensor_precision(self):
-        # Test that pow(scalar, tensor) matches eager when pow_precision is enabled.
-        # CUDA's ::pow has integer exponent detection that uses repeated multiplication,
-        # while Triton's libdevice.pow uses exp(exp*log(base)), causing 1-5 ULP differences.
-        # Example: pow(0.9, 3.0) gives 0x3f3a9fbd (eager) vs 0x3f3a9fbe (Triton).
+        # Test that pow(scalar, tensor) matches eager. This works because
+        # inductor auto-detects and uses CUDA toolkit's libdevice instead of
+        # Triton's bundled version, ensuring Triton's pow matches CUDA's powf.
         def fn(exp):
             return torch.pow(0.9, exp)
 
